@@ -1,6 +1,8 @@
 # 065: Native Web Mobile Streaming Performance
 
-Status: active first pass landed.
+Status: active; diagnostics, movement perf harness, background compile,
+deferred browser commands, budgeted worker-update drains, and stale-result
+tolerance landed.
 
 ## Purpose
 
@@ -56,6 +58,13 @@ chunk crossings in mobile-sized Chrome, showed repeated compile windows around
 - `44-56` uploaded sections after a one-chunk move
 
 On a phone, the same path plausibly becomes the reported `3-4s` stall.
+
+After the scheduler split on 2026-06-22, the same mobile movement perf lane
+still spends roughly `0.9-1.0s` in the render compiler worker, but normal frame
+progress continues while the worker runs. Movement compile windows now report
+main-loop frame gaps around `10-22ms` locally instead of the previous
+`190-460ms` gaps. The worker payload is still large, so this is a scheduling fix
+rather than a mesh-cost fix.
 
 ## Diagnosis
 
@@ -194,9 +203,49 @@ Acceptance:
 - mobile movement smoke still passes
 - new movement perf report shows lower main-loop stall/frame-gap time
 
-### 4. Reduce Per-Move Compile Scope
+### 4. Match Desktop Scheduling Shape On Web
 
-Status: next likely step after begin-request unblocking.
+Status: completed first pass; shared extraction still pending.
+
+The first fix keeps the JavaScript app loop responsive by matching the desktop
+submit/drain shape more closely:
+
+```text
+frame
+  -> apply input
+  -> submit pose/chunk-view commands without awaiting full server exchange
+  -> drain a bounded number of completed worker updates
+  -> render current cache
+  -> kick queued compiles when idle
+```
+
+Implemented pieces:
+
+1. `WebRuntime::send_gameplay_command_deferred(...)` for routine camera pose
+   commands on web-worker hosts
+2. `WebRuntime::drain_pending_runner_updates_budgeted(...)`
+3. budgeted `WebIntegratedServerRunner` update-frame drains with accurate queue
+   depth diagnostics
+4. split chunk-view begin into request/poll/compile so movement can keep
+   rendering while server updates arrive
+5. waiting responses for "not ready yet" render plans instead of page errors
+6. stale web render compile completions treated as no-op reports when all
+   submitted sections are obsolete
+7. idle RAF kicks for queued compile work so interaction-triggered compiles do
+   not get stuck behind older movement compiles
+
+Acceptance:
+
+- `pnpm native:web:movement-perf` keeps frame progress during chunk crossings
+- mobile movement compile gaps are around one frame locally
+- app/mobile smokes still pass block interaction, touch controls, and screenshots
+
+Remaining architectural work: move this policy from browser app glue into the
+shared Rust engine/render-session coordinator tracked by tactical 061.
+
+### 5. Reduce Per-Move Compile Scope
+
+Status: next likely step after scheduler-shape convergence.
 
 Investigate why one chunk-center move submits around `96` sections for radius
 `1`. Some of that may be legitimate neighbor-boundary rebuild pressure, but it
@@ -217,9 +266,11 @@ Acceptance:
 - stale/duplicate compile work remains near zero during normal walking
 - desktop/native render-section correctness tests remain green
 
-### 5. Split Or Budget Decode And GPU Upload
+### 6. Split Or Budget Decode And GPU Upload
 
-Status: optimization follow-up.
+Status: optimization follow-up; first update-drain budgeting landed, packed
+decode/report finish and GPU upload can still be split further if measured
+phone runs show spikes.
 
 If timing shows decode/apply/upload remains a large main-thread spike after
 background compile, split the apply phase.

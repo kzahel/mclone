@@ -286,6 +286,18 @@ impl WebIntegratedServerRunner {
 
     pub fn drain_decoded_updates(&mut self) -> Result<Vec<ServerUpdate>, String> {
         let frames = self.drain_update_frames();
+        self.decode_update_frames(frames)
+    }
+
+    pub fn drain_decoded_updates_budgeted(
+        &mut self,
+        max_frames: usize,
+    ) -> Result<Vec<ServerUpdate>, String> {
+        let frames = self.drain_update_frames_budgeted(max_frames);
+        self.decode_update_frames(frames)
+    }
+
+    fn decode_update_frames(&self, frames: Vec<Vec<u8>>) -> Result<Vec<ServerUpdate>, String> {
         let mut updates = Vec::with_capacity(frames.len());
         for frame in frames {
             updates.push(
@@ -602,9 +614,17 @@ impl WebIntegratedServerRunner {
     }
 
     fn drain_update_frames(&mut self) -> Vec<Vec<u8>> {
+        self.drain_update_frames_budgeted(usize::MAX)
+    }
+
+    fn drain_update_frames_budgeted(&mut self, max_frames: usize) -> Vec<Vec<u8>> {
         let mut frames = self.update_frames.borrow_mut();
-        let drained = std::mem::take(&mut *frames);
-        self.diagnostics.borrow_mut().update_queue_depth = 0;
+        let drained = if max_frames >= frames.len() {
+            std::mem::take(&mut *frames)
+        } else {
+            frames.drain(0..max_frames).collect()
+        };
+        self.diagnostics.borrow_mut().update_queue_depth = frames.len();
         drained
     }
 }

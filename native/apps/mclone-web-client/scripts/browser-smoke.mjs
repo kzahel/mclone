@@ -950,37 +950,23 @@ async function clickBlockInteraction(page, canvas, button, action, options = {})
     };
   });
   await canvas.click({ position: { x: 640, y: 360 }, button });
-  await page.waitForFunction(
-    ({ start, action, expectedSelectedHotbarSlot, expectedResultBlockStateId, expectedCarriedItemSynced }) => {
-      const state = globalThis.__mcloneWebApp?.state;
-      const interaction = state?.lastInteraction;
-      const compileReport = state?.lastCompileReport;
-      return state?.ok === true
-        && state.pendingCompileJobCount === 0
-        && (state.interactionCount ?? 0) > start.interactionCount
-        && interaction?.ok === true
-        && interaction.action === action
-        && interaction.hit === true
-        && interaction.commandSent === true
-        && interaction.changed === true
-        && (interaction.interactionUpdateCount ?? 0) > 0
-        && (interaction.commandCount ?? 0) > start.commandCount
-        && (expectedSelectedHotbarSlot === null || interaction.selectedHotbarSlot === expectedSelectedHotbarSlot)
-        && (expectedResultBlockStateId === null || interaction.resultBlockStateId === expectedResultBlockStateId)
-        && (expectedCarriedItemSynced === null || interaction.carriedItemSynced === expectedCarriedItemSynced)
-        && compileReport?.commandCount >= interaction.commandCount
-        && compileReport?.acceptedCompileSectionCount > 0
-        && compileReport?.meshBuildCount > start.meshBuildCount;
-    },
-    {
-      start,
-      action,
-      expectedSelectedHotbarSlot: options.expectedSelectedHotbarSlot ?? null,
-      expectedResultBlockStateId: options.expectedResultBlockStateId ?? null,
-      expectedCarriedItemSynced: options.expectedCarriedItemSynced ?? null,
-    },
-    { timeout: 60_000 },
-  );
+  const waitArgs = {
+    start,
+    action,
+    expectedSelectedHotbarSlot: options.expectedSelectedHotbarSlot ?? null,
+    expectedResultBlockStateId: options.expectedResultBlockStateId ?? null,
+    expectedCarriedItemSynced: options.expectedCarriedItemSynced ?? null,
+  };
+  try {
+    await page.waitForFunction(
+      blockInteractionReadyPredicate,
+      waitArgs,
+      { timeout: 60_000 },
+    );
+  } catch (error) {
+    const diagnostic = await page.evaluate(blockInteractionReadyDiagnostic, waitArgs);
+    throw new Error(`timed out waiting for ${action} interaction: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(diagnostic, null, 2)}`);
+  }
   return page.evaluate(
     ({ start, action, expectedSelectedHotbarSlot, expectedResultBlockStateId, expectedCarriedItemSynced }) => {
       const state = globalThis.__mcloneWebApp.state;
@@ -1009,14 +995,89 @@ async function clickBlockInteraction(page, canvas, button, action, options = {})
         },
       };
     },
-    {
-      start,
-      action,
-      expectedSelectedHotbarSlot: options.expectedSelectedHotbarSlot ?? null,
-      expectedResultBlockStateId: options.expectedResultBlockStateId ?? null,
-      expectedCarriedItemSynced: options.expectedCarriedItemSynced ?? null,
-    },
+    waitArgs,
   );
+}
+
+function blockInteractionReadyPredicate(args) {
+  const {
+    start,
+    action,
+    expectedSelectedHotbarSlot,
+    expectedResultBlockStateId,
+    expectedCarriedItemSynced,
+  } = args;
+  const state = globalThis.__mcloneWebApp?.state;
+  const interaction = state?.lastInteraction;
+  const compileReport = state?.lastCompileReport;
+  return state?.ok === true
+    && state.pendingCompileJobCount === 0
+    && (state.interactionCount ?? 0) > start.interactionCount
+    && interaction?.ok === true
+    && interaction.action === action
+    && interaction.hit === true
+    && interaction.commandSent === true
+    && interaction.changed === true
+    && (interaction.interactionUpdateCount ?? 0) > 0
+    && (interaction.commandCount ?? 0) > start.commandCount
+    && (expectedSelectedHotbarSlot === null || interaction.selectedHotbarSlot === expectedSelectedHotbarSlot)
+    && (expectedResultBlockStateId === null || interaction.resultBlockStateId === expectedResultBlockStateId)
+    && (expectedCarriedItemSynced === null || interaction.carriedItemSynced === expectedCarriedItemSynced)
+    && compileReport?.commandCount >= interaction.commandCount
+    && compileReport?.acceptedCompileSectionCount > 0
+    && compileReport?.meshBuildCount > start.meshBuildCount;
+}
+
+function blockInteractionReadyDiagnostic({
+  start,
+  action,
+  expectedSelectedHotbarSlot,
+  expectedResultBlockStateId,
+  expectedCarriedItemSynced,
+}) {
+  const state = globalThis.__mcloneWebApp?.state;
+  const interaction = state?.lastInteraction;
+  const compileReport = state?.lastCompileReport;
+  const checks = {
+    stateOk: state?.ok === true,
+    pendingCompileJobCountZero: state?.pendingCompileJobCount === 0,
+    interactionAdvanced: (state?.interactionCount ?? 0) > start.interactionCount,
+    interactionOk: interaction?.ok === true,
+    actionMatches: interaction?.action === action,
+    hit: interaction?.hit === true,
+    commandSent: interaction?.commandSent === true,
+    changed: interaction?.changed === true,
+    interactionUpdateCountPositive: (interaction?.interactionUpdateCount ?? 0) > 0,
+    commandCountAdvanced: (interaction?.commandCount ?? 0) > start.commandCount,
+    selectedSlotMatches: expectedSelectedHotbarSlot === null
+      || interaction?.selectedHotbarSlot === expectedSelectedHotbarSlot,
+    resultBlockMatches: expectedResultBlockStateId === null
+      || interaction?.resultBlockStateId === expectedResultBlockStateId,
+    carriedItemSyncedMatches: expectedCarriedItemSynced === null
+      || interaction?.carriedItemSynced === expectedCarriedItemSynced,
+    compileCommandCoversInteraction: compileReport?.commandCount >= interaction?.commandCount,
+    compileAcceptedSections: (compileReport?.acceptedCompileSectionCount ?? 0) > 0,
+    compileMeshBuildAdvanced: (compileReport?.meshBuildCount ?? 0) > start.meshBuildCount,
+  };
+  return {
+    ok: Object.values(checks).every(Boolean),
+    checks,
+    start,
+    state: state ? {
+      ok: state.ok,
+      status: state.status,
+      interactionCount: state.interactionCount,
+      interactionStatus: state.interactionStatus,
+      pendingCompileJobCount: state.pendingCompileJobCount,
+      compileInFlight: state.compileInFlight,
+      compileQueued: state.compileQueued,
+      commandCount: state.lastReport?.commandCount,
+      updateCount: state.lastReport?.updateCount,
+      meshBuildCount: state.lastReport?.meshBuildCount,
+    } : null,
+    interaction,
+    compileReport,
+  };
 }
 
 function buildWasm() {

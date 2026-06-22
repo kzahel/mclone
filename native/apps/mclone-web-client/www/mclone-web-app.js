@@ -185,6 +185,8 @@ class WebChunkApp {
     for (const name of [
       "advanceCameraFrame",
       "beginCameraRenderCompileRequest",
+      "requestCameraChunkView",
+      "tryBeginCameraRenderCompileRequest",
       "finishCameraRenderCompileRequest",
       "renderCameraFrame",
       "cameraFrameState",
@@ -287,6 +289,7 @@ class WebChunkApp {
     } else {
       updateDom();
     }
+    this.startQueuedCompileIfNeeded();
   }
 
   requestCameraViewCompile(trigger = "movement", options = {}) {
@@ -359,9 +362,11 @@ class WebChunkApp {
     this.currentCompilePromise = (async () => {
       try {
         const beginStart = performance.now();
-        const request = await this.withSessionAsync(() => (
-          this.session.beginCameraRenderCompileRequest(RADIUS_CHUNKS)
-        ));
+        const request = this.hasRendered
+          ? await this.beginDeferredCameraRenderCompileRequest(timing, beginStart)
+          : await this.withSessionAsync(() => (
+              this.session.beginCameraRenderCompileRequest(RADIUS_CHUNKS)
+            ));
         const beginEnd = performance.now();
         timing.beginRequestMs = beginEnd - beginStart;
         if (!request?.ok) {
@@ -462,6 +467,53 @@ class WebChunkApp {
       this.renderFrameBusy = false;
       updateDom();
     }
+  }
+
+  async beginDeferredCameraRenderCompileRequest(timing, beginStart) {
+    const viewRequest = await this.withSessionAsync(() => (
+      this.session.requestCameraChunkView(RADIUS_CHUNKS)
+    ));
+    if (!viewRequest?.ok) {
+      throw new Error(viewRequest?.reason ?? "failed to request camera chunk view");
+    }
+    const viewCenterX = Number(viewRequest.centerX);
+    const viewCenterZ = Number(viewRequest.centerZ);
+    if (Number.isFinite(viewCenterX)) {
+      timing.targetCenterX = viewCenterX;
+    }
+    if (Number.isFinite(viewCenterZ)) {
+      timing.targetCenterZ = viewCenterZ;
+    }
+    updateCompileTimingFromWait(timing, viewRequest, beginStart);
+    publishActiveCompileTiming(timing);
+    updateDom();
+
+    const deadline = performance.now() + 20_000;
+    let lastProbe = viewRequest;
+    while (performance.now() < deadline) {
+      await nextAnimationFrame();
+      const probe = await this.withSessionAsync(() => (
+        this.session.tryBeginCameraRenderCompileRequest(
+          RADIUS_CHUNKS,
+          timing.targetCenterX,
+          timing.targetCenterZ,
+        )
+      ));
+      if (!probe?.ok) {
+        throw new Error(probe?.reason ?? "failed to poll camera render compile request");
+      }
+      lastProbe = probe;
+      runtime.state.pendingCompileJobCount = probe.pendingCompileJobCount ?? 0;
+      updateCompileTimingFromWait(timing, probe, beginStart);
+      publishActiveCompileTiming(timing);
+      updateDom();
+      if (!probe.waiting) {
+        return probe;
+      }
+    }
+    throw new Error(
+      `timed out waiting for camera chunk view ${timing.targetCenterX},${timing.targetCenterZ}; last=${JSON.stringify(lastProbe)}`,
+    );
   }
 
   applyCameraState(camera) {
@@ -1338,6 +1390,9 @@ function createCompileTiming({
     workerRoundTripMs: 0,
     packedByteLength: 0,
     decodeFinishApplyMs: 0,
+    chunkViewUpdateCount: 0,
+    centerLoaded: false,
+    runnerSettled: false,
     submittedCompileSectionCount: 0,
     uploadedSectionCount: 0,
     removedSectionCount: 0,
@@ -1364,6 +1419,24 @@ function updateCompileTimingFromRequest(timing, request) {
   timing.submittedCompileSectionCount = Number(request.submittedCompileSectionCount) || 0;
 }
 
+function updateCompileTimingFromWait(timing, request, beginStart) {
+  timing.beginRequestMs = performance.now() - beginStart;
+  const centerX = Number(request.centerX);
+  const centerZ = Number(request.centerZ);
+  if (Number.isFinite(centerX)) {
+    timing.targetCenterX = centerX;
+  }
+  if (Number.isFinite(centerZ)) {
+    timing.targetCenterZ = centerZ;
+  }
+  if (Number.isFinite(Number(request.updateCountDelta))) {
+    timing.chunkViewUpdateCount = (timing.chunkViewUpdateCount || 0)
+      + Number(request.updateCountDelta);
+  }
+  timing.runnerSettled = Boolean(request.runnerSettled);
+  timing.centerLoaded = Boolean(request.centerLoaded);
+}
+
 function updateCompileTimingFromWorker(timing, report) {
   const summary = report?.summary ?? {};
   timing.workerSectionCount = Number(summary.sectionCount) || 0;
@@ -1376,6 +1449,8 @@ function updateCompileTimingFromWorker(timing, report) {
 function updateCompileTimingFromReport(timing, report) {
   timing.loadedCenterAfterX = Number(report.centerX) || 0;
   timing.loadedCenterAfterZ = Number(report.centerZ) || 0;
+  timing.centerLoaded = true;
+  timing.runnerSettled = true;
   timing.uploadedSectionCount = Number(report.uploadedSectionCount) || 0;
   timing.removedSectionCount = Number(report.removedSectionCount) || 0;
   timing.acceptedCompileSectionCount = Number(report.acceptedCompileSectionCount) || 0;
@@ -1428,6 +1503,9 @@ function publicCompileTiming(timing) {
     workerRoundTripMs: roundTiming(timing.workerRoundTripMs),
     packedByteLength: timing.packedByteLength,
     decodeFinishApplyMs: roundTiming(timing.decodeFinishApplyMs),
+    chunkViewUpdateCount: timing.chunkViewUpdateCount,
+    centerLoaded: timing.centerLoaded,
+    runnerSettled: timing.runnerSettled,
     submittedCompileSectionCount: timing.submittedCompileSectionCount,
     uploadedSectionCount: timing.uploadedSectionCount,
     removedSectionCount: timing.removedSectionCount,
@@ -1449,6 +1527,10 @@ function publicCompileTiming(timing) {
 
 function roundTiming(value) {
   return Number.isFinite(value) ? Math.round(value * 10) / 10 : 0;
+}
+
+function nextAnimationFrame() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
 function updateDom() {

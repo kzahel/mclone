@@ -47,6 +47,8 @@ const CANVAS_CONFIGURED_BIT: u32 = 1 << 2;
 const CANVAS_WIDTH_SHIFT: u32 = 8;
 const CANVAS_HEIGHT_SHIFT: u32 = 20;
 const WEB_GROUND_PROBE_DISTANCE: f64 = 0.01;
+const WEB_FRAME_UPDATE_DRAIN_BUDGET: usize = 1;
+const WEB_COMPILE_WAIT_UPDATE_DRAIN_BUDGET: usize = 1;
 
 #[wasm_bindgen]
 pub fn mclone_web_canvas_clear_bits(width: u32, height: u32) -> u32 {
@@ -1016,8 +1018,7 @@ impl WebChunkRenderSession {
         };
         self.camera
             .apply_movement_input(self.runtime.client(), input);
-        self.sync_camera_pose_to_server()
-            .await
+        self.sync_camera_pose_to_server_deferred()
             .map_err(JsValue::from)?;
         camera_state_to_js_value(&self.camera, &self.interaction).map_err(JsValue::from)
     }
@@ -1078,6 +1079,29 @@ impl WebChunkRenderSession {
         self.begin_camera_render_compile_request_for_radius(radius_chunks)
             .await
             .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = requestCameraChunkView)]
+    pub fn request_camera_chunk_view(&mut self, radius_chunks: u32) -> Result<JsValue, JsValue> {
+        self.request_camera_chunk_view_for_radius(radius_chunks)
+            .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = tryBeginCameraRenderCompileRequest)]
+    pub fn try_begin_camera_render_compile_request(
+        &mut self,
+        radius_chunks: u32,
+        center_x: i32,
+        center_z: i32,
+    ) -> Result<JsValue, JsValue> {
+        self.try_begin_camera_render_compile_request_for_center(
+            radius_chunks,
+            ChunkPos {
+                x: center_x,
+                z: center_z,
+            },
+        )
+        .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = finishCameraRenderCompileRequest)]
@@ -1277,6 +1301,44 @@ impl WebChunkRenderSession {
             .await
     }
 
+    fn request_camera_chunk_view_for_radius(
+        &mut self,
+        radius_chunks: u32,
+    ) -> Result<JsValue, String> {
+        let center = self.camera.snapshot().chunk_pos;
+        let step =
+            self.runtime
+                .request_chunk_view_deferred(center, radius_chunks, radius_chunks)?;
+        self.chunk_view_request_to_js_value(center, radius_chunks, step)
+    }
+
+    fn try_begin_camera_render_compile_request_for_center(
+        &mut self,
+        radius_chunks: u32,
+        center: ChunkPos,
+    ) -> Result<JsValue, String> {
+        let step = self
+            .runtime
+            .drain_pending_runner_updates_budgeted(WEB_COMPILE_WAIT_UPDATE_DRAIN_BUDGET)?;
+        let diagnostics = self.runtime.runner_diagnostics();
+        let center_loaded = self.runtime.client().chunk_snapshot(center).is_some();
+        if !center_loaded || !web_runner_diagnostics_settled(&diagnostics) {
+            return self.waiting_compile_request_to_js_value(
+                center,
+                radius_chunks,
+                center_loaded,
+                step,
+                diagnostics,
+            );
+        }
+        self.begin_loaded_chunk_render_compile_request_for_center(
+            center,
+            radius_chunks,
+            step,
+            diagnostics,
+        )
+    }
+
     fn finish_camera_render_compile_request_with_packed_report(
         &mut self,
         request_id: u32,
@@ -1445,6 +1507,23 @@ impl WebChunkRenderSession {
         Ok(())
     }
 
+    fn sync_camera_pose_to_server_deferred(&mut self) -> Result<(), String> {
+        self.runtime
+            .drain_pending_runner_updates_budgeted(WEB_FRAME_UPDATE_DRAIN_BUDGET)
+            .map_err(|error| format!("failed to drain browser camera updates: {error}"))?;
+        self.apply_pending_camera_position_updates_deferred()?;
+        if let Some(report) = self.camera.next_pose_sync_command() {
+            self.runtime
+                .send_gameplay_command_deferred(report.command)
+                .map_err(|error| format!("failed to queue browser camera pose: {error}"))?;
+        }
+        self.runtime
+            .drain_pending_runner_updates_budgeted(WEB_FRAME_UPDATE_DRAIN_BUDGET)
+            .map_err(|error| format!("failed to drain browser camera updates: {error}"))?;
+        self.apply_pending_camera_position_updates_deferred()?;
+        Ok(())
+    }
+
     async fn apply_pending_camera_position_updates(&mut self) -> Result<(), String> {
         let updates = self
             .runtime
@@ -1464,6 +1543,28 @@ impl WebChunkRenderSession {
                 .await
                 .map_err(|error| {
                     format!("failed to resync corrected browser camera pose: {error}")
+                })?;
+        }
+        Ok(())
+    }
+
+    fn apply_pending_camera_position_updates_deferred(&mut self) -> Result<(), String> {
+        let updates = self
+            .runtime
+            .drain_player_position_updates()
+            .collect::<Vec<_>>();
+        for update in updates {
+            let accepted = self.camera.accept_position_update(update);
+            self.camera
+                .probe_ground(self.runtime.client(), WEB_GROUND_PROBE_DISTANCE);
+            self.runtime
+                .send_gameplay_command_deferred(accepted.accept_command)
+                .map_err(|error| format!("failed to queue browser camera correction: {error}"))?;
+            let resync = self.camera.corrected_pose_sync_command();
+            self.runtime
+                .send_gameplay_command_deferred(resync.command)
+                .map_err(|error| {
+                    format!("failed to queue corrected browser camera pose: {error}")
                 })?;
         }
         Ok(())
@@ -1573,7 +1674,10 @@ impl WebChunkRenderSession {
             .engine_mut()
             .finish_compile_update(completed, request_id, &removal_chunks, &removal_sections)
             .map_err(|error| error.to_string())?;
-        if finished.accepted_sections.is_empty() && !has_removals {
+        if finished.accepted_sections.is_empty()
+            && !has_removals
+            && finished.acceptance_report.stale_section_count == 0
+        {
             return Err(format!(
                 "web render compile request {request_id} had no accepted sections ({} stale)",
                 finished.acceptance_report.stale_section_count
@@ -1620,6 +1724,30 @@ impl WebChunkRenderSession {
         radius_chunks: u32,
     ) -> Result<WebChunkRenderPlan, String> {
         let sync = self.prepare_chunk_view(center, radius_chunks).await?;
+        self.prepare_render_plan_from_sync(sync)
+    }
+
+    fn prepare_loaded_chunk_render_plan(
+        &mut self,
+        center: ChunkPos,
+    ) -> Result<RenderSectionViewSync, String> {
+        if self.runtime.client().chunk_snapshot(center).is_none() {
+            return Err(format!(
+                "web runtime did not publish generated chunk {},{}",
+                center.x, center.z
+            ));
+        }
+        let previous_loaded_chunks = self.loaded_chunk_positions.clone();
+        Ok(self
+            .runtime
+            .engine_mut()
+            .apply_current_loaded_view_sync(&previous_loaded_chunks))
+    }
+
+    fn prepare_render_plan_from_sync(
+        &mut self,
+        sync: RenderSectionViewSync,
+    ) -> Result<WebChunkRenderPlan, String> {
         let sync_update = self.runtime.engine_mut().prepare_sync_update(
             |dirty_work| {
                 sort_chunk_positions_by_coordinate(dirty_work.loaded_dirty_chunks.iter().copied())
@@ -1635,6 +1763,68 @@ impl WebChunkRenderSession {
             sync,
             sync_plan: sync_update.sync_plan,
         })
+    }
+
+    fn begin_loaded_chunk_render_compile_request_for_center(
+        &mut self,
+        center: ChunkPos,
+        radius_chunks: u32,
+        step: super::WebRuntimeStepReport,
+        diagnostics: mclone_server::ServerRunnerDiagnostics,
+    ) -> Result<JsValue, String> {
+        if self.compile_requests.pending_request_count() != 0 {
+            return Err(format!(
+                "web render compile request already pending ({} pending)",
+                self.compile_requests.pending_request_count()
+            ));
+        }
+        let sync = self.prepare_loaded_chunk_render_plan(center)?;
+        let render_plan = self.prepare_render_plan_from_sync(sync)?;
+        if render_plan
+            .sync_plan
+            .ready_plan
+            .ready_section_keys
+            .is_empty()
+        {
+            return self.waiting_compile_request_to_js_value(
+                center,
+                radius_chunks,
+                true,
+                step,
+                diagnostics,
+            );
+        }
+        let context = WebPendingCompileContext {
+            center,
+            radius_chunks,
+            sync: render_plan.sync,
+            removal_chunks: render_plan
+                .sync_plan
+                .dirty_work
+                .removal_dirty_chunks
+                .clone(),
+            removal_sections: render_plan
+                .sync_plan
+                .dirty_work
+                .removal_dirty_sections
+                .clone(),
+        };
+        let compile_requests = &mut self.compile_requests;
+        let submission = self.runtime.engine_mut().submit_prepared_sync_plan(
+            &render_plan.sync_plan,
+            Vec::new(),
+            |_sync_plan, request| {
+                Ok::<_, String>(compile_requests.begin_compile_request(context, request))
+            },
+        )?;
+        let Some(submission) = submission.submission else {
+            return Err(format!(
+                "web render compile request for {},{} radius {} had no ready sections",
+                center.x, center.z, radius_chunks
+            ));
+        };
+        let info = submission.output;
+        self.compile_request_to_js_value(info, center, radius_chunks)
     }
 
     async fn prepare_chunk_view(
@@ -1676,8 +1866,13 @@ impl WebChunkRenderSession {
         if count_mesh_build {
             self.mesh_build_count += 1;
         }
-        self.runtime
-            .drain_pending_runner_updates()
+        let drain_result = if count_mesh_build {
+            self.runtime.drain_pending_runner_updates()
+        } else {
+            self.runtime
+                .drain_pending_runner_updates_budgeted(WEB_FRAME_UPDATE_DRAIN_BUDGET)
+        };
+        drain_result
             .map_err(|error| format!("failed to drain web server worker updates: {error}"))?;
         let cached_sections = self.runtime.engine().sections();
         if cached_sections.iter().all(|section| section.is_empty()) {
@@ -1908,6 +2103,112 @@ impl WebChunkRenderSession {
         )?;
         Ok(object.into())
     }
+
+    fn chunk_view_request_to_js_value(
+        &self,
+        center: ChunkPos,
+        radius_chunks: u32,
+        step: super::WebRuntimeStepReport,
+    ) -> Result<JsValue, String> {
+        let diagnostics = self.runtime.runner_diagnostics();
+        let object = js_sys::Object::new();
+        set_bool(&object, "ok", true)?;
+        set_bool(&object, "waiting", true)?;
+        set_bool(&object, "centerLoaded", false)?;
+        set_number(&object, "centerX", f64::from(center.x))?;
+        set_number(&object, "centerZ", f64::from(center.z))?;
+        set_number(&object, "radiusChunks", f64::from(radius_chunks))?;
+        set_number(
+            &object,
+            "pendingCompileJobCount",
+            self.compile_requests.pending_request_count() as f64,
+        )?;
+        set_number(&object, "commandCountDelta", step.command_count as f64)?;
+        set_number(&object, "updateCountDelta", step.update_count as f64)?;
+        set_bool(&object, "transportDrained", step.transport_drained)?;
+        write_runner_wait_diagnostics(&object, diagnostics)?;
+        Ok(object.into())
+    }
+
+    fn waiting_compile_request_to_js_value(
+        &self,
+        center: ChunkPos,
+        radius_chunks: u32,
+        center_loaded: bool,
+        step: super::WebRuntimeStepReport,
+        diagnostics: mclone_server::ServerRunnerDiagnostics,
+    ) -> Result<JsValue, String> {
+        let object = js_sys::Object::new();
+        set_bool(&object, "ok", true)?;
+        set_bool(&object, "waiting", true)?;
+        set_bool(&object, "centerLoaded", center_loaded)?;
+        set_number(&object, "centerX", f64::from(center.x))?;
+        set_number(&object, "centerZ", f64::from(center.z))?;
+        set_number(&object, "radiusChunks", f64::from(radius_chunks))?;
+        set_number(
+            &object,
+            "pendingCompileJobCount",
+            self.compile_requests.pending_request_count() as f64,
+        )?;
+        set_number(&object, "commandCountDelta", step.command_count as f64)?;
+        set_number(&object, "updateCountDelta", step.update_count as f64)?;
+        set_number(
+            &object,
+            "loadedChunkCount",
+            self.runtime.client().loaded_chunk_count() as f64,
+        )?;
+        set_bool(&object, "transportDrained", step.transport_drained)?;
+        write_runner_wait_diagnostics(&object, diagnostics)?;
+        Ok(object.into())
+    }
+}
+
+fn web_runner_diagnostics_settled(diagnostics: &mclone_server::ServerRunnerDiagnostics) -> bool {
+    diagnostics.command_queue_depth == 0
+        && diagnostics.update_queue_depth == 0
+        && diagnostics.pending_jobs == 0
+        && diagnostics.pending_publications == 0
+        && diagnostics.worldgen_mailbox_pending_jobs == 0
+        && diagnostics.light_status_mailbox_pending_statuses == 0
+}
+
+fn write_runner_wait_diagnostics(
+    object: &js_sys::Object,
+    diagnostics: mclone_server::ServerRunnerDiagnostics,
+) -> Result<(), String> {
+    set_bool(
+        object,
+        "runnerSettled",
+        web_runner_diagnostics_settled(&diagnostics),
+    )?;
+    set_string(object, "runnerKind", diagnostics.kind.label())?;
+    set_number(
+        object,
+        "runnerCommandQueueDepth",
+        diagnostics.command_queue_depth as f64,
+    )?;
+    set_number(
+        object,
+        "runnerUpdateQueueDepth",
+        diagnostics.update_queue_depth as f64,
+    )?;
+    set_number(object, "runnerPendingJobs", diagnostics.pending_jobs as f64)?;
+    set_number(
+        object,
+        "runnerPendingPublications",
+        diagnostics.pending_publications as f64,
+    )?;
+    set_number(
+        object,
+        "worldgenMailboxPendingJobs",
+        diagnostics.worldgen_mailbox_pending_jobs as f64,
+    )?;
+    set_number(
+        object,
+        "lightStatusMailboxPendingStatuses",
+        diagnostics.light_status_mailbox_pending_statuses as f64,
+    )?;
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

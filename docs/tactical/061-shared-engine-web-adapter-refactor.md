@@ -7,7 +7,9 @@ landed; browser target preview landed; desktop no-clip/mouse-look helpers
 converged; shared camera frame-state/reporting helpers landed; desktop
 player-pose commit sequence isolated; desktop `EngineCameraController` facade
 landed; desktop window camera view uses controller snapshots; shared
-pose-sync/correction reports landed.
+pose-sync/correction reports landed; browser frame scheduling now has a first
+deferred-command / budgeted-drain pass, but the scheduler policy still needs to
+move into the shared Rust session shape.
 
 ## Purpose
 
@@ -62,6 +64,40 @@ The duplication risk is not just code size. If desktop and WASM each learn their
 own dirty-section, neighbor-readiness, compile-budget, upload-budget, and asset
 cache rules, they will diverge exactly where renderer correctness and streaming
 behavior need to be shared.
+
+## Scheduler Convergence Addendum
+
+The web performance issue made the most important remaining divergence concrete.
+Desktop already has a nonblocking scheduling shape:
+
+```text
+frame
+  -> submit chunk/server/compile work
+  -> drain any completed work without waiting for the worker
+  -> render the current cache
+```
+
+The browser path had the same worker topology in the broad sense, but not the
+same scheduling contract. It still routed ordinary frame work through async
+JavaScript session calls that could await a server exchange and then apply every
+queued update in one browser turn. That made a camera pose update or render
+frame absorb chunk publication work that desktop would have drained
+incrementally.
+
+The first native web fix split that path:
+
+- camera pose commands can be submitted deferred through the web-worker runner
+- chunk-view requests can be sent first and polled later
+- worker update queues can be drained with a small per-frame budget
+- stale web render compile completions are tolerated as no-op results
+- queued compile work gets an idle RAF kick instead of relying only on the
+  previous compile promise finishing
+
+This is still adapter-owned policy. The next high-priority refactor is to move
+the "submit, poll, drain with budget, coalesce queued compiles, ignore stale
+results" policy into a shared Rust engine/render-session coordinator consumed by
+both desktop and web. JavaScript should become input/event glue and worker
+transport plumbing, not the owner of render-streaming scheduling.
 
 ## Target Shape
 

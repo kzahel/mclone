@@ -9,6 +9,8 @@ use mclone_protocol::{
 };
 use mclone_render::RenderBackend;
 use mclone_render_session::{EngineRenderSession, EngineServerUpdateDirtyPolicy};
+#[cfg(target_arch = "wasm32")]
+use mclone_server::IntegratedServerRunner;
 use mclone_server::{IntegratedServer, ServerRunnerDiagnostics, ServerRunnerKind};
 
 #[cfg(target_arch = "wasm32")]
@@ -177,6 +179,21 @@ impl WebRuntime {
         Ok(self.apply_exchange(exchange))
     }
 
+    pub fn request_chunk_view_deferred(
+        &mut self,
+        center: ChunkPos,
+        render_distance: u32,
+        chunk_tracking_radius: u32,
+    ) -> Result<WebRuntimeStepReport, String> {
+        let command = self.engine.client_mut().set_chunk_view(ChunkView {
+            center,
+            render_distance,
+            chunk_tracking_radius,
+        });
+        let exchange = self.host.send_deferred(command)?;
+        Ok(self.apply_exchange(exchange))
+    }
+
     pub fn send_gameplay_command(
         &mut self,
         command: ClientCommand,
@@ -193,8 +210,26 @@ impl WebRuntime {
         Ok(self.apply_exchange(exchange))
     }
 
+    pub fn send_gameplay_command_deferred(
+        &mut self,
+        command: ClientCommand,
+    ) -> Result<WebRuntimeStepReport, String> {
+        let exchange = self.host.send_deferred(command)?;
+        Ok(self.apply_exchange(exchange))
+    }
+
     pub fn drain_pending_runner_updates(&mut self) -> Result<WebRuntimeStepReport, String> {
         let exchange = self.host.drain_pending_updates()?;
+        Ok(self.apply_exchange(exchange))
+    }
+
+    pub fn drain_pending_runner_updates_budgeted(
+        &mut self,
+        max_update_frames: usize,
+    ) -> Result<WebRuntimeStepReport, String> {
+        let exchange = self
+            .host
+            .drain_pending_updates_budgeted(max_update_frames)?;
         Ok(self.apply_exchange(exchange))
     }
 
@@ -293,6 +328,28 @@ impl WebRuntimeHost {
         }
     }
 
+    fn send_deferred(&mut self, command: ClientCommand) -> Result<WebExchange, String> {
+        match self {
+            Self::Inline(host) => host.exchange(command).map_err(|error| error.to_string()),
+            #[cfg(target_arch = "wasm32")]
+            Self::Worker(host) => {
+                host.send_command(command)
+                    .map_err(|error| error.to_string())?;
+                Ok(WebExchange {
+                    updates: Vec::new(),
+                    command_count: 1,
+                    update_count: 0,
+                    protocol_codec_roundtrip: true,
+                    transport_drained: false,
+                })
+            }
+            #[cfg(target_arch = "wasm32")]
+            Self::RemoteWebSocket(_) => Err(
+                "deferred commands are not implemented for remote websocket web runtime".to_owned(),
+            ),
+        }
+    }
+
     async fn exchange_async(&mut self, command: ClientCommand) -> Result<WebExchange, String> {
         match self {
             Self::Inline(host) => host.exchange(command).map_err(|error| error.to_string()),
@@ -322,6 +379,13 @@ impl WebRuntimeHost {
     }
 
     fn drain_pending_updates(&mut self) -> Result<WebExchange, String> {
+        self.drain_pending_updates_budgeted(usize::MAX)
+    }
+
+    fn drain_pending_updates_budgeted(
+        &mut self,
+        _max_update_frames: usize,
+    ) -> Result<WebExchange, String> {
         match self {
             Self::Inline(_) => Ok(WebExchange {
                 updates: Vec::new(),
@@ -332,7 +396,7 @@ impl WebRuntimeHost {
             }),
             #[cfg(target_arch = "wasm32")]
             Self::Worker(host) => {
-                let updates = host.drain_decoded_updates()?;
+                let updates = host.drain_decoded_updates_budgeted(_max_update_frames)?;
                 let diagnostics = host.diagnostics();
                 Ok(WebExchange {
                     update_count: updates.len(),
