@@ -1,4 +1,11 @@
 let wasmModulePromise = null;
+// 069 Stage 1: the worldgen worker holds a resident session across jobs (exactly
+// as the render-compiler worker holds `compilerSession`), so its
+// OverworldFeatureDependencyCache persists and each job applies only the request
+// delta to it. This worker instance only ever receives "worldgen" jobs (the
+// light-status worker is a separate instance), so the session is never created in
+// the light worker. Light-status stays stateless (its free function).
+let worldgenSession = null;
 
 const SHARED_STATUS_INDEX = 0;
 const SHARED_REQUEST_BYTES_INDEX = 1;
@@ -76,7 +83,8 @@ function handleSharedMemoryJob(module, message) {
 function computeJobFrame(module, kind, frame) {
   switch (kind) {
     case "worldgen":
-      return module.mclone_web_compute_worldgen_job_frame(frame);
+      worldgenSession ??= new module.WebWorldgenJobSession();
+      return worldgenSession.computeWorldgenJobFrame(frame);
     case "light-status":
       return module.mclone_web_compute_light_status_job_frame(frame);
     default:

@@ -7,6 +7,8 @@
 //! chunks are published to holders.
 
 use std::collections::{BTreeMap, VecDeque};
+#[cfg(target_arch = "wasm32")]
+use std::collections::BTreeSet;
 use std::fmt;
 use std::time::Duration;
 
@@ -22,7 +24,7 @@ use mclone_worldgen::levelgen::{
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
 #[cfg(target_arch = "wasm32")]
-use crate::job_codec::{decode_worldgen_response, encode_worldgen_request};
+use crate::job_codec::{decode_worldgen_response, encode_worldgen_delta_request};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_job_worker::WasmJobWorker;
 use crate::{ChunkJobId, WorkerFrameMetrics, WorldgenMailboxKind};
@@ -120,6 +122,22 @@ impl fmt::Debug for WorldgenMailbox {
 struct WorldgenMailboxBackend {
     worker: Option<WasmJobWorker>,
     completed: VecDeque<WorldgenCompletedJob>,
+    /// 069 Stage 1: main-side shadow of the dependency columns the resident web
+    /// worker mirror holds. Each job ships only the columns the worker lacks (a
+    /// delta) instead of re-serializing the whole 529-chunk dependency
+    /// neighbourhood every job — the 067 Stage 4 resident-mirror + delta pattern.
+    /// Unused on the inline (no-worker) path. Corrected authoritatively from each
+    /// response's retained set in `drain_completed`; advanced on submit by the
+    /// shipped upserts so a job enqueued before the prior job's response is drained
+    /// still ships a minimal delta.
+    worker_mirror_shadow: BTreeSet<ChunkPos>,
+    /// Mirror epoch for the worker-side desync tripwire. Bumped on each full resync
+    /// (reset). A non-reset delta carries this so the worker can reject a delta that
+    /// does not match the mirror it actually holds.
+    worker_mirror_generation: u64,
+    /// Whether the resident worker mirror has been seeded with a reset yet; the
+    /// first job (or a post-reset job) is a full resync.
+    worker_mirror_initialized: bool,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -132,6 +150,9 @@ impl WorldgenMailboxBackend {
         Self {
             worker,
             completed: VecDeque::new(),
+            worker_mirror_shadow: BTreeSet::new(),
+            worker_mirror_generation: 0,
+            worker_mirror_initialized: false,
         }
     }
 
@@ -156,12 +177,48 @@ impl WorldgenMailboxBackend {
         targets: &[ChunkPos],
         dependencies: Vec<MutableChunkBlockBuffer>,
     ) {
-        if let Some(worker) = &mut self.worker {
-            let frame = encode_worldgen_request(job_id, seed, targets, dependencies)
-                .expect("failed to encode wasm worldgen worker request");
-            worker
+        if self.worker.is_some() {
+            // 069 Stage 1: ship a delta against the worker's resident dependency
+            // mirror, not the whole seeded neighbourhood. The first job (or any job
+            // before the mirror is seeded) is a full-resync reset under a fresh
+            // generation; every later job ships only the columns the shadow says the
+            // worker lacks. Dependency buffers are deterministic in `(seed, pos)` and
+            // never feature-mutated, so the worker regenerates any column it is not
+            // sent — byte-identical output (this only changes transport).
+            let reset = !self.worker_mirror_initialized;
+            if reset {
+                self.worker_mirror_generation = self.worker_mirror_generation.wrapping_add(1).max(1);
+                self.worker_mirror_shadow.clear();
+            }
+            let generation = self.worker_mirror_generation;
+            let upserts: Vec<MutableChunkBlockBuffer> = dependencies
+                .into_iter()
+                .filter(|dependency| {
+                    reset
+                        || !self
+                            .worker_mirror_shadow
+                            .contains(&ChunkPos::new(dependency.chunk_x, dependency.chunk_z))
+                })
+                .collect();
+            let frame = encode_worldgen_delta_request(
+                job_id, seed, generation, reset, targets, &upserts,
+            )
+            .expect("failed to encode wasm worldgen worker delta request");
+            self.worker
+                .as_mut()
+                .expect("wasm worldgen worker present")
                 .post_frame(frame)
                 .expect("wasm worldgen worker stopped before receiving job");
+            // Apply-on-submit: the worker will hold these columns once it processes
+            // this job, so a job enqueued before this one's response is drained still
+            // ships a minimal delta. `drain_completed` then corrects the shadow to the
+            // worker's authoritative retained set.
+            self.worker_mirror_shadow.extend(
+                upserts
+                    .iter()
+                    .map(|dependency| ChunkPos::new(dependency.chunk_x, dependency.chunk_z)),
+            );
+            self.worker_mirror_initialized = true;
             return;
         }
 
@@ -181,21 +238,29 @@ impl WorldgenMailboxBackend {
     }
 
     fn drain_completed(&mut self) -> Vec<WorldgenCompletedJob> {
-        if let Some(worker) = &mut self.worker {
-            for frame in worker
+        let frames = match &mut self.worker {
+            Some(worker) => worker
                 .drain_frames()
-                .expect("wasm worldgen worker failed while draining jobs")
-            {
-                let decoded =
-                    decode_worldgen_response(&frame).expect("failed to decode wasm worldgen job");
-                self.completed.push_back(WorldgenCompletedJob {
-                    job_id: decoded.job_id,
-                    generated_chunks: decoded.generated_chunks,
-                    retained_dependencies: decoded.retained_dependencies,
-                    cache_report: decoded.cache_report,
-                    timing: decoded.timing,
-                });
-            }
+                .expect("wasm worldgen worker failed while draining jobs"),
+            None => Vec::new(),
+        };
+        for frame in frames {
+            let decoded =
+                decode_worldgen_response(&frame).expect("failed to decode wasm worldgen job");
+            // 069 Stage 1: correct the shadow to the worker's authoritative retained
+            // set — exactly the dependency columns its resident mirror holds after
+            // this job's own retain step. Keeps the shadow in lockstep with the
+            // worker mirror across boundary crossings (where the worker evicts the
+            // columns the new plan no longer needs).
+            self.worker_mirror_shadow =
+                decoded.retained_dependencies.keys().copied().collect();
+            self.completed.push_back(WorldgenCompletedJob {
+                job_id: decoded.job_id,
+                generated_chunks: decoded.generated_chunks,
+                retained_dependencies: decoded.retained_dependencies,
+                cache_report: decoded.cache_report,
+                timing: decoded.timing,
+            });
         }
         self.completed.drain(..).collect()
     }

@@ -1,6 +1,6 @@
 # 069: Web Worldgen Lane Payload Reduction (resident dependency mirror + delta)
 
-Status: **proposed — measured, ready to implement.** This is the highest-value web
+Status: **Stage 1 landed; Stage 2 in progress.** This is the highest-value web
 performance improvement surfaced by the
 [`068`](068-web-zero-copy-worker-lane-investigation.md) zero-copy investigation. It
 is the **stable-toolchain** alternative that 068 recommends over a shared-Wasm-
@@ -103,6 +103,77 @@ the scheduler's resident holders instead of the job's returned set. Kills the
 After both stages, a warm worldgen job should look like render after 067 Stage 4:
 small delta in, small result out, work-bound (the irreducible cold-load generation
 stays ~400 ms but ships its 36 MB once, then deltas).
+
+## Landed
+
+### Stage 1 — request-side delta (landed)
+
+The web worldgen worker now holds a **resident dependency session** across jobs and
+the request is a **delta** against it, instead of re-shipping the seeded 529-chunk
+neighbourhood every job. Web-only, behind the `WorldgenMailbox` web backend —
+desktop still moves `Vec<MutableChunkBlockBuffer>` over `mpsc` with zero
+serialization and is untouched.
+
+- **Resident session (worker).** `mclone-server` gains `WorldgenJobSession`
+  (`job_codec.rs`): one `OverworldFeatureDependencyCache` + a `mirror_generation`
+  epoch held across jobs, with `compute_delta_job_frame`. The web client wraps it
+  as `#[wasm_bindgen] WebWorldgenJobSession` (`web_server_worker.rs`), replacing the
+  stateless `mclone_web_compute_worldgen_job_frame` free function; the server-job
+  worker (`www/mclone-server-job-worker.js`) holds it resident
+  (`worldgenSession ??= new module.WebWorldgenJobSession()`) exactly as the render
+  worker holds `compilerSession`. Light-status stays stateless (separate worker
+  instance).
+- **Delta on submit (main).** The web `WorldgenMailboxBackend` keeps a
+  `BTreeSet<ChunkPos>` shadow of the dependency columns the worker mirror holds,
+  plus a mirror generation. `enqueue_features` ships only the seeded deps whose pos
+  is **not** in the shadow (`encode_worldgen_delta_request`, distinct
+  `WORLDGEN_DELTA_REQUEST_MAGIC`); the first job (uninitialised mirror) is a **reset**
+  full-resync under a fresh generation. The shadow advances **on submit** by the
+  shipped upserts (so a job enqueued before the prior job's response is drained still
+  ships a minimal delta) and is **corrected on receipt** to the response's authoritative
+  retained set.
+- **Desync tripwire.** Each delta carries the mirror generation. A `reset` clears the
+  mirror and adopts the generation; a non-reset delta whose generation does not match
+  the resident mirror's is rejected loudly (`"worldgen worker mirror desync …"`) rather
+  than generated against a partial mirror. Unit-tested
+  (`worldgen_delta_session_rejects_generation_desync`).
+
+**Divergence from desktop, and why parity is preserved.** Desktop recreates the cache
+per job and relies on the free `mpsc` move; this resident-mirror + delta is confined to
+the web mailbox transport, exactly as 067 confined render's mirror to the web compiler.
+The engine's scheduler-owned-dependency contract (tactical 019) is unchanged. **Two
+worldgen-specific simplifications over 067 Stage 4, both safe:** (1) **no eviction list** —
+`generate_features_chunks_with_dependencies` already retains the cache to each job's plan
+deps, so the worker self-bounds memory, and the shadow is resynced to the worker's
+authoritative retained set from each response; (2) **correctness is delta-independent** —
+dependency buffers are deterministic functions of `(seed, pos)` and are *never*
+feature-mutated (the cache snapshot is cloned **before** feature decoration, which mutates
+separate region clones), so any column the worker is not sent is regenerated
+byte-identically. The delta only changes transport; generation is unchanged. Proven by
+`worldgen_delta_session_matches_stateless_full_frame` and
+`worldgen_delta_session_reuses_resident_mirror_across_jobs` (a warm job ships 0 upserts,
+reuses the resident mirror for the overlap, and produces output byte-identical to a cold
+stateless generation).
+
+Measured (this device, vs the 068 baseline above):
+
+| worldgen job | metric | baseline | Stage 1 |
+|---|---|---|---|
+| **warm** (chunk-smoke job 2, `report − firstReport`) | request | **27,145,638 B** | **81 B** |
+| warm | response | 28,985,785 B | 28,985,785 B (unchanged — Stage 1 keeps full response) |
+| cold (chunk-smoke job 1, `firstReport`) | request | 232 B | 241 B (+9 B generation/reset header) |
+| movement-perf (3 boundaries, 5 jobs) | cumulative request | 107,009,128 B | **5,901,775 B** (−94.5%) |
+| movement-perf | cumulative response | 152,272,922 B | 152,272,922 B (unchanged) |
+
+The warm-job request collapses to an 81-byte header (the worker's resident mirror already
+holds the entire overlapping dependency neighbourhood, so zero upserts ship). The residual
+5.9 MB across the movement-perf traverse is the one-time mirror seed (the reset job ships
+the deps the scheduler already held at spawn) plus the genuinely-new dependency strip at
+each boundary crossing. No overflow / fallback (`sharedBufferFallbackResponseFrames` 0,
+`shared-memory` transport). The deterministic chunk-smoke canvas PNG is **byte-identical**
+to the baseline (sha256 match), and `cargo test` (incl. the three new
+`worldgen_delta_session_*` tests), `cargo check` wasm (warning-clean), `node --check`,
+`native:web:app-smoke`, `native:movement:smoke`, and `native:timedemo:smoke` are all green.
 
 ## Acceptance & validation
 

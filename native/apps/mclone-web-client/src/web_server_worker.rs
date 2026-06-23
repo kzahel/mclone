@@ -15,8 +15,8 @@ use mclone_server::{
     INITIAL_DAY_TIME, IntegratedServer, IntegratedServerRunner, LightStatusMailboxKind,
     ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind, ServerRunnerResult,
     ServerRunnerTickDiagnostics, WasmServerJobWorkerConfig, WorkerFrameMetrics,
-    WorkerFrameTransportKind, WorldgenMailboxKind, compute_light_status_job_frame,
-    compute_worldgen_job_frame,
+    WorkerFrameTransportKind, WorldgenJobSession, WorldgenMailboxKind,
+    compute_light_status_job_frame,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -673,10 +673,65 @@ impl IntegratedServerRunner for WebIntegratedServerRunner {
     }
 }
 
+/// 069 Stage 1: the server-job worker's resident worldgen session. The worker
+/// instantiates one of these on its first worldgen job and reuses it across jobs
+/// (exactly as the render worker holds a `WebRenderCompilerSession` resident), so
+/// the `OverworldFeatureDependencyCache` persists and each job applies only its
+/// request delta to it before generating. This replaces the former stateless
+/// `mclone_web_compute_worldgen_job_frame` free function, which rebuilt the cache
+/// every call and so re-decoded the whole 529-chunk dependency neighbourhood
+/// shipped in by the scheduler. Desktop keeps the stateless per-job cache (it
+/// moves the dependency `Vec` over `mpsc` for free).
 #[wasm_bindgen]
-pub fn mclone_web_compute_worldgen_job_frame(frame: Uint8Array) -> Result<Uint8Array, JsValue> {
-    let response = compute_worldgen_job_frame(&frame.to_vec()).map_err(JsValue::from)?;
-    Ok(Uint8Array::from(response.as_slice()))
+pub struct WebWorldgenJobSession {
+    session: WorldgenJobSession,
+}
+
+impl Default for WebWorldgenJobSession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[wasm_bindgen]
+impl WebWorldgenJobSession {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            session: WorldgenJobSession::new(),
+        }
+    }
+
+    /// Apply a worldgen request delta to the resident dependency mirror and
+    /// generate the job from it, returning the standard worldgen response frame
+    /// (Stage 1 keeps the full response). A generation mismatch is rejected loudly
+    /// (the 067 Stage 4 desync tripwire) rather than generated against a partial
+    /// mirror.
+    #[wasm_bindgen(js_name = computeWorldgenJobFrame)]
+    pub fn compute_worldgen_job_frame(
+        &mut self,
+        frame: Uint8Array,
+    ) -> Result<Uint8Array, JsValue> {
+        let response = self
+            .session
+            .compute_delta_job_frame(&frame.to_vec())
+            .map_err(JsValue::from)?;
+        Ok(Uint8Array::from(response.as_slice()))
+    }
+
+    /// Dependency columns currently resident in the worker mirror (bounded to the
+    /// last job's plan by the cache's own retain step). Observability for the
+    /// resident-mirror behaviour; the perf fence rides on the SAB request bytes.
+    #[wasm_bindgen(js_name = mirrorChunkCount)]
+    pub fn mirror_chunk_count(&self) -> usize {
+        self.session.mirror_chunk_count()
+    }
+
+    /// Dependency columns shipped as upserts on the most recent delta.
+    #[wasm_bindgen(js_name = lastDeltaUpsertCount)]
+    pub fn last_delta_upsert_count(&self) -> usize {
+        self.session.last_delta_upsert_count()
+    }
 }
 
 #[wasm_bindgen]
