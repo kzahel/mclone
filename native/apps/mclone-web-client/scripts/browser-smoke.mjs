@@ -1583,7 +1583,11 @@ function assertCompileTimingDiagnostics(timing, label) {
       !== Number(timing.renderCompilerRequestSnapshotInputByteLength)
     || Number(timing.renderCompilerSharedInputBufferCapacityBytes)
       < Number(timing.renderCompilerSharedInputByteLength)
-    || Number(timing.renderCompilerSnapshotInputChunkCount) <= 0
+    // 067 Stage 4: the input is a delta, so the "chunk count" is the upserts shipped this
+    // compile; a target re-dirtied by a neighbor (not its own revision) legitimately ships 0
+    // upserts because the worker mirror already holds it. The delta byte length stays > 0
+    // (asserted above via renderCompilerRequestSnapshotInputByteLength) and carries the weight.
+    || Number(timing.renderCompilerSnapshotInputChunkCount) < 0
     || timing.renderCompilerSnapshotInputCompileUsed !== true
     || timing.renderCompilerGeneratedViewFallbackUsed !== false
     || timing.renderCompilerSharedResultBufferUsed !== true

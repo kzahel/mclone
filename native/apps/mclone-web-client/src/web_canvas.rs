@@ -14,12 +14,11 @@ use mclone_client::{
 };
 #[cfg(test)]
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkRevision, ChunkStatus,
-    chunk_section_index,
+    AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkStatus, chunk_section_index,
 };
 use mclone_core::{
-    BlockHitResult, BlockPos, BlockStateId, ChunkPos, ChunkSnapshot, Direction, HitResultType,
-    Vec3d, chunk_middle_block_coord,
+    BlockHitResult, BlockPos, BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, Direction,
+    HitResultType, Vec3d, chunk_middle_block_coord,
 };
 use mclone_mesh::{
     RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
@@ -61,7 +60,14 @@ const WEB_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 // Y the overview-frame camera looks down from when streaming a deterministic chunk view;
 // only the horizontal component matters for near-camera readiness.
 const WEB_OVERVIEW_CAMERA_EYE_Y: f32 = 256.0;
-const WEB_RENDER_COMPILE_INPUT_MAGIC: &[u8; 8] = b"MCWRCI1\0";
+// 067 Stage 4: the render-compile input arena now carries a *delta* against the
+// worker's resident snapshot mirror, not the whole loaded world. Distinct magic from the
+// retired whole-world format so a stale producer/consumer is rejected loudly. Layout:
+// magic, u32 generation, u32 flags (bit 0 = reset/full-resync), u32 upsert_count followed
+// by that many length-prefixed `ServerUpdate::ChunkSnapshot` frames, then u32 evict_count
+// followed by that many `[i32 x][i32 z]` chunk positions to drop from the mirror.
+const WEB_RENDER_COMPILE_DELTA_MAGIC: &[u8; 8] = b"MCWRCD1\0";
+const WEB_RENDER_COMPILE_DELTA_FLAG_RESET: u32 = 1;
 
 // 067 Stage 2: resident render-compiler shared ring ABI. These mirror the
 // constants in `mclone-render-compiler-worker.js` (the producer) and the JS app /
@@ -223,6 +229,16 @@ pub struct WebRenderCompilerSession {
     asset_pack_byte_length: usize,
     asset_load_count: usize,
     compile_count: usize,
+    // 067 Stage 4: resident snapshot mirror. Created once with the session and persisted
+    // across compiles, so the per-frame input is a delta (upserts + evictions) instead of
+    // the whole loaded world. `compileSnapshotSectionsForTargets` applies each delta here
+    // before compiling targets from the mirror's resident columns.
+    snapshot_mirror: BTreeMap<ChunkPos, ChunkSnapshot>,
+    // The mirror epoch this session currently holds. A non-reset delta whose generation does
+    // not match is a desync (e.g. a worker that silently lost its mirror) and is rejected.
+    mirror_generation: u32,
+    last_delta_upsert_count: usize,
+    last_delta_eviction_count: usize,
 }
 
 #[wasm_bindgen]
@@ -237,6 +253,10 @@ impl WebRenderCompilerSession {
             asset_pack_byte_length,
             asset_load_count: 1,
             compile_count: 0,
+            snapshot_mirror: BTreeMap::new(),
+            mirror_generation: 0,
+            last_delta_upsert_count: 0,
+            last_delta_eviction_count: 0,
         })
     }
 
@@ -307,6 +327,11 @@ impl WebRenderCompilerSession {
         Ok(js_sys::Uint8Array::from(packed.as_slice()))
     }
 
+    /// 067 Stage 4: apply a per-frame input delta to the resident snapshot mirror, then
+    /// compile the target sections from the mirror's resident columns. The input bytes are a
+    /// `WebRenderCompileDelta` (upserts + evictions against the mirror), not the whole loaded
+    /// world. The mirror is applied *before* the compile (and before any result-buffer
+    /// overflow can be detected downstream), so the advance survives a requeue.
     #[wasm_bindgen(js_name = compileSnapshotSectionsForTargets)]
     pub fn compile_snapshot_sections_for_targets(
         &mut self,
@@ -314,10 +339,13 @@ impl WebRenderCompilerSession {
         target_sections: js_sys::Int32Array,
     ) -> Result<js_sys::Uint8Array, JsValue> {
         self.compile_count += 1;
-        let snapshots = decode_web_render_compile_input(&snapshot_input_bytes.to_vec())
+        let delta = decode_web_render_compile_delta(&snapshot_input_bytes.to_vec())
+            .map_err(|error| JsValue::from_str(&error))?;
+        self.apply_render_compile_delta(delta)
             .map_err(|error| JsValue::from_str(&error))?;
         let target_sections = render_section_keys_from_int32_array(&target_sections)
             .map_err(|error| JsValue::from_str(&error))?;
+        let snapshots = self.snapshot_mirror.values().collect::<Vec<_>>();
         let report = compile_snapshot_chunk_sections_with_catalog(
             &self.mesh_assets.catalog,
             &snapshots,
@@ -326,6 +354,54 @@ impl WebRenderCompilerSession {
         .map_err(JsValue::from)?;
         let packed = encode_textured_render_section_build_report(&report);
         Ok(js_sys::Uint8Array::from(packed.as_slice()))
+    }
+
+    /// Resident snapshot mirror size after the last applied delta — the worker's view of the
+    /// loaded world. Stays bounded to the loaded set because each delta evicts the columns the
+    /// client unloaded, so this validates the mirror does not grow unbounded over a session.
+    #[wasm_bindgen(js_name = mirrorChunkCount)]
+    pub fn mirror_chunk_count(&self) -> usize {
+        self.snapshot_mirror.len()
+    }
+
+    #[wasm_bindgen(js_name = lastDeltaUpsertCount)]
+    pub fn last_delta_upsert_count(&self) -> usize {
+        self.last_delta_upsert_count
+    }
+
+    #[wasm_bindgen(js_name = lastDeltaEvictionCount)]
+    pub fn last_delta_eviction_count(&self) -> usize {
+        self.last_delta_eviction_count
+    }
+}
+
+impl WebRenderCompilerSession {
+    /// Apply a render-compile delta to the resident mirror. A `reset` delta clears the mirror
+    /// and adopts the delta's generation (a full resync); otherwise the delta's generation must
+    /// match the mirror's, else it is a desync (a worker that lost its mirror would see a
+    /// non-reset delta against an empty mirror) and is rejected loudly rather than compiled
+    /// against a partial mirror. Upserts then overwrite/insert and evictions remove, leaving the
+    /// mirror equal to the client's currently-loaded set.
+    fn apply_render_compile_delta(&mut self, delta: WebRenderCompileDelta) -> Result<(), String> {
+        if delta.reset {
+            self.snapshot_mirror.clear();
+            self.mirror_generation = delta.generation;
+        } else if delta.generation != self.mirror_generation {
+            return Err(format!(
+                "render compile delta generation {} does not match worker mirror generation {} \
+                 (snapshot mirror desynced; a full resync is required)",
+                delta.generation, self.mirror_generation
+            ));
+        }
+        self.last_delta_upsert_count = delta.upserts.len();
+        self.last_delta_eviction_count = delta.evictions.len();
+        for pos in &delta.evictions {
+            self.snapshot_mirror.remove(pos);
+        }
+        for snapshot in delta.upserts {
+            self.snapshot_mirror.insert(snapshot.pos, snapshot);
+        }
+        Ok(())
     }
 }
 
@@ -504,58 +580,97 @@ fn compile_generated_chunk_sections_with_catalog(
     }
 }
 
-fn compile_snapshot_chunk_sections_with_catalog(
+fn compile_snapshot_chunk_sections_with_catalog<S: std::borrow::Borrow<ChunkSnapshot>>(
     catalog: &TexturedMeshCatalog,
-    snapshots: &[ChunkSnapshot],
+    snapshots: &[S],
     target_sections: &BTreeSet<RenderSectionKey>,
 ) -> Result<mclone_mesh::TexturedRenderSectionBuildReport, String> {
     build_render_sections_from_snapshots(snapshots, catalog, target_sections)
         .map_err(|error| format!("failed to compile snapshot render sections: {error:#}"))
 }
 
-fn encode_web_render_compile_input(snapshots: &[ChunkSnapshot]) -> Result<Vec<u8>, String> {
+/// A per-frame render-compile input delta against the worker's resident snapshot mirror
+/// (067 Stage 4). `reset` means the worker must clear its mirror and adopt `generation`
+/// before applying the upserts (a full resync — the natural shape of the first compile,
+/// or recovery after a desync); otherwise `generation` must match the worker's mirror.
+struct WebRenderCompileDelta {
+    generation: u32,
+    reset: bool,
+    upserts: Vec<ChunkSnapshot>,
+    evictions: Vec<ChunkPos>,
+}
+
+fn encode_web_render_compile_delta(
+    generation: u32,
+    reset: bool,
+    upserts: &[ChunkSnapshot],
+    evictions: &[ChunkPos],
+) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(WEB_RENDER_COMPILE_INPUT_MAGIC);
-    write_web_compile_input_u32(&mut bytes, snapshots.len(), "snapshot count")?;
-    for snapshot in snapshots {
+    bytes.extend_from_slice(WEB_RENDER_COMPILE_DELTA_MAGIC);
+    bytes.extend_from_slice(&generation.to_le_bytes());
+    let flags = if reset { WEB_RENDER_COMPILE_DELTA_FLAG_RESET } else { 0 };
+    bytes.extend_from_slice(&flags.to_le_bytes());
+    write_web_compile_input_u32(&mut bytes, upserts.len(), "delta upsert count")?;
+    for snapshot in upserts {
         let frame = encode_server_update(&ServerUpdate::ChunkSnapshot(snapshot.clone())).map_err(
             |error| {
                 format!(
-                    "failed to encode compile snapshot {:?}: {error}",
+                    "failed to encode compile upsert snapshot {:?}: {error}",
                     snapshot.pos
                 )
             },
         )?;
-        write_web_compile_input_u32(&mut bytes, frame.len(), "snapshot frame length")?;
+        write_web_compile_input_u32(&mut bytes, frame.len(), "delta upsert frame length")?;
         bytes.extend_from_slice(&frame);
+    }
+    write_web_compile_input_u32(&mut bytes, evictions.len(), "delta eviction count")?;
+    for pos in evictions {
+        bytes.extend_from_slice(&pos.x.to_le_bytes());
+        bytes.extend_from_slice(&pos.z.to_le_bytes());
     }
     Ok(bytes)
 }
 
-fn decode_web_render_compile_input(bytes: &[u8]) -> Result<Vec<ChunkSnapshot>, String> {
+fn decode_web_render_compile_delta(bytes: &[u8]) -> Result<WebRenderCompileDelta, String> {
     let mut reader = WebRenderCompileInputReader::new(bytes);
-    let magic = reader.read_bytes(WEB_RENDER_COMPILE_INPUT_MAGIC.len(), "magic")?;
-    if magic != WEB_RENDER_COMPILE_INPUT_MAGIC {
-        return Err("web render compile input had an invalid magic header".to_string());
+    let magic = reader.read_bytes(WEB_RENDER_COMPILE_DELTA_MAGIC.len(), "magic")?;
+    if magic != WEB_RENDER_COMPILE_DELTA_MAGIC {
+        return Err("web render compile delta had an invalid magic header".to_string());
     }
-    let snapshot_count = reader.read_u32("snapshot count")? as usize;
-    let mut snapshots = Vec::with_capacity(snapshot_count);
-    for index in 0..snapshot_count {
-        let frame_len = reader.read_u32("snapshot frame length")? as usize;
-        let frame = reader.read_bytes(frame_len, "snapshot frame")?;
+    let generation = reader.read_u32("delta generation")?;
+    let flags = reader.read_u32("delta flags")?;
+    let reset = flags & WEB_RENDER_COMPILE_DELTA_FLAG_RESET != 0;
+    let upsert_count = reader.read_u32("delta upsert count")? as usize;
+    let mut upserts = Vec::with_capacity(upsert_count);
+    for index in 0..upsert_count {
+        let frame_len = reader.read_u32("delta upsert frame length")? as usize;
+        let frame = reader.read_bytes(frame_len, "delta upsert frame")?;
         let update = decode_server_update(frame)
-            .map_err(|error| format!("failed to decode compile snapshot frame {index}: {error}"))?;
+            .map_err(|error| format!("failed to decode compile upsert frame {index}: {error}"))?;
         match update {
-            ServerUpdate::ChunkSnapshot(snapshot) => snapshots.push(snapshot),
+            ServerUpdate::ChunkSnapshot(snapshot) => upserts.push(snapshot),
             _ => {
                 return Err(format!(
-                    "compile snapshot frame {index} did not contain a chunk snapshot"
+                    "compile upsert frame {index} did not contain a chunk snapshot"
                 ));
             }
         }
     }
+    let eviction_count = reader.read_u32("delta eviction count")? as usize;
+    let mut evictions = Vec::with_capacity(eviction_count);
+    for _ in 0..eviction_count {
+        let x = reader.read_i32("delta eviction x")?;
+        let z = reader.read_i32("delta eviction z")?;
+        evictions.push(ChunkPos { x, z });
+    }
     reader.finish()?;
-    Ok(snapshots)
+    Ok(WebRenderCompileDelta {
+        generation,
+        reset,
+        upserts,
+        evictions,
+    })
 }
 
 fn write_web_compile_input_u32(
@@ -582,6 +697,13 @@ impl<'a> WebRenderCompileInputReader<'a> {
     fn read_u32(&mut self, label: &str) -> Result<u32, String> {
         let bytes = self.read_bytes(4, label)?;
         Ok(u32::from_le_bytes(bytes.try_into().map_err(|_| {
+            format!("web render compile input {label} was not 4 bytes")
+        })?))
+    }
+
+    fn read_i32(&mut self, label: &str) -> Result<i32, String> {
+        let bytes = self.read_bytes(4, label)?;
+        Ok(i32::from_le_bytes(bytes.try_into().map_err(|_| {
             format!("web render compile input {label} was not 4 bytes")
         })?))
     }
@@ -1375,15 +1497,18 @@ struct WebSharedCompileInFlight {
     section_revisions: BTreeMap<RenderSectionKey, u64>,
 }
 
-/// Web `RenderSectionCompiler` over the resident `SharedArrayBuffer` ring (067 Stage 2).
+/// Web `RenderSectionCompiler` over the resident `SharedArrayBuffer` ring (067 Stage 2),
+/// shipping a per-frame *delta* against the worker's resident snapshot mirror (067 Stage 4).
 ///
-/// `submit` serializes the request into the resident input arena and arms the result
-/// control word; JavaScript posts a tiny doorbell to the worker (JS still owns the
-/// Worker lifecycle and diagnostics). `try_recv_completed` polls the result control
-/// word from main wasm via `js_sys::Atomics` and decodes the packed report in place —
-/// no JavaScript in the result data path. A single compile is in flight at a time,
-/// matching the existing busy-flag streaming model; the whole-view budget is unchanged
-/// at this stage so the transport swap is isolated from scheduling.
+/// `submit` diffs the request's loaded snapshots against `mirror_tracking` — a cheap
+/// `(pos, revision)` shadow of what the worker mirror holds — to compute the changed
+/// columns (upserts) and unloaded columns (evictions), encodes only that delta into the
+/// resident input arena, and arms the result control word; JavaScript posts a tiny
+/// doorbell to the worker (JS still owns the Worker lifecycle and diagnostics).
+/// `try_recv_completed` polls the result control word from main wasm via `js_sys::Atomics`
+/// and decodes the packed report in place — no JavaScript in the result data path. A
+/// single compile is in flight at a time, matching the existing busy-flag streaming model,
+/// so the mirror is mutated by exactly one compile at a time and needs no locking.
 struct WebRenderSectionCompiler {
     shared: Option<WebRenderCompilerSharedArena>,
     in_flight: Option<WebSharedCompileInFlight>,
@@ -1397,10 +1522,21 @@ struct WebRenderSectionCompiler {
     last_packed_byte_length: usize,
     last_result_capacity_bytes: usize,
     last_result_overflow: bool,
-    // 067 Stage 3: number of snapshots encoded into the input arena for the in-flight
-    // request, surfaced on the doorbell so the worker/diagnostics know the input width
-    // (still whole-world input until Stage 4 makes it delta-only).
-    last_input_chunk_count: usize,
+    // 067 Stage 4: `(pos, revision)` shadow of what the worker's resident snapshot mirror
+    // holds. `submit` diffs the loaded snapshots against this to build the delta and then
+    // advances it on submit (the worker applies the same delta on receipt, so the two stay
+    // in lockstep). Cleared on a worker-reported failure to force a full resync next submit;
+    // empty means "the next submit is a full resync" (the first compile, and recovery).
+    mirror_tracking: BTreeMap<ChunkPos, ChunkRevision>,
+    // Monotonic mirror epoch bumped on every full resync. The worker rejects a non-reset
+    // delta whose generation does not match its mirror's, turning a latent desync (e.g. a
+    // restarted worker that silently lost its mirror) into a loud failure instead of a
+    // compile against a partial mirror.
+    mirror_generation: u32,
+    // Count of changed columns shipped (upserts) for the in-flight request, surfaced on the
+    // doorbell as the delta width. The worker reports the matching eviction + resident-mirror
+    // counts from its own session getters, so they are not duplicated here.
+    last_input_upsert_count: usize,
     // The request id + outcome of the most recent compile drained by
     // `try_recv_completed`, consumed by the streaming frame so JS can correlate the
     // applied result with the doorbell it posted for that request.
@@ -1437,7 +1573,9 @@ impl WebRenderSectionCompiler {
             shared_input_grow_count: 0,
             last_packed_byte_length: 0,
             last_result_overflow: false,
-            last_input_chunk_count: 0,
+            mirror_tracking: BTreeMap::new(),
+            mirror_generation: 0,
+            last_input_upsert_count: 0,
             last_completed: None,
         }
     }
@@ -1503,7 +1641,7 @@ impl WebRenderSectionCompiler {
 
     /// Build a complete worker doorbell for the in-flight compile (067 Stage 3): the
     /// request id, the budget's target section keys (so the worker compiles only those —
-    /// the per-frame increment, not a whole-view job), the snapshot input width, and the
+    /// the per-frame increment, not a whole-view job), the delta input width, and the
     /// resident shared buffers. JS posts it verbatim; the worker writes the packed result
     /// back into the same buffers `try_recv_completed` polls. Returns whether a doorbell
     /// was written (false when no compile is in flight).
@@ -1518,10 +1656,15 @@ impl WebRenderSectionCompiler {
             "submittedCompileSectionCount",
             in_flight.target_sections.len() as f64,
         )?;
+        // 067 Stage 4: the input is now a delta, so the "chunk count" reported up the existing
+        // diagnostics chain is the number of columns shipped this compile (upserts). A
+        // neighbor-dirtied target legitimately ships 0 upserts (the worker mirror already holds
+        // it), while the delta byte length stays > 0 (fixed header). The worker surfaces the
+        // matching upsert/eviction/mirror counts from its own session getters.
         set_number(
             object,
             "snapshotInputChunkCount",
-            self.last_input_chunk_count as f64,
+            self.last_input_upsert_count as f64,
         )?;
         self.write_doorbell_arenas(object)?;
         Ok(true)
@@ -1551,8 +1694,32 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
             ));
         }
         let request_id = self.allocate_request_id();
-        let input_chunk_count = request.snapshots.len();
-        let input_bytes = encode_web_render_compile_input(&request.snapshots)
+
+        // 067 Stage 4: diff the loaded snapshots against the worker-mirror shadow so only the
+        // delta crosses the SAB boundary. An empty shadow is a full resync — the first compile
+        // and post-failure recovery — which bumps the mirror epoch, ships every loaded column
+        // as an upsert, and (because the shadow is empty) carries no evictions.
+        let reset = self.mirror_tracking.is_empty();
+        if reset {
+            self.mirror_generation = self.mirror_generation.wrapping_add(1).max(1);
+        }
+        let generation = self.mirror_generation;
+        let mut upserts: Vec<ChunkSnapshot> = Vec::new();
+        let mut current_positions: BTreeSet<ChunkPos> = BTreeSet::new();
+        for snapshot in &request.snapshots {
+            current_positions.insert(snapshot.pos);
+            if self.mirror_tracking.get(&snapshot.pos) != Some(&snapshot.revision) {
+                upserts.push(snapshot.clone());
+            }
+        }
+        let evictions: Vec<ChunkPos> = self
+            .mirror_tracking
+            .keys()
+            .copied()
+            .filter(|pos| !current_positions.contains(pos))
+            .collect();
+
+        let input_bytes = encode_web_render_compile_delta(generation, reset, &upserts, &evictions)
             .map_err(|error| anyhow::anyhow!(error))?;
         let arena = self
             .shared
@@ -1564,7 +1731,20 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
         if grew {
             self.shared_input_grow_count += 1;
         }
-        self.last_input_chunk_count = input_chunk_count;
+
+        // Advance the shadow to match what the worker will hold once it applies this delta
+        // (apply-on-submit). The worker applies the same upserts/evictions on receipt — before
+        // it can fail — so a compile requeued after a result-buffer overflow still finds those
+        // columns resident and re-ships nothing. `try_recv_completed` clears the shadow on a
+        // worker failure, which forces the next submit back into a full resync.
+        for pos in &evictions {
+            self.mirror_tracking.remove(pos);
+        }
+        for snapshot in &upserts {
+            self.mirror_tracking.insert(snapshot.pos, snapshot.revision);
+        }
+
+        self.last_input_upsert_count = upserts.len();
         self.in_flight = Some(WebSharedCompileInFlight {
             request_id,
             target_sections: request.target_sections,
@@ -1637,6 +1817,10 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
                 }
                 self.shared_result_overflow_count += 1;
                 self.last_result_overflow = true;
+                // 067 Stage 4: do NOT clear the mirror shadow here. The worker applied this
+                // delta to its mirror before encoding the (oversized) result, so the mirror is
+                // correctly advanced; keeping the shadow lets the requeued compile ship a
+                // minimal delta instead of re-shipping the whole world.
                 let in_flight = self.take_in_flight().expect("in-flight compile present");
                 self.last_completed = Some(WebCompletedCompile {
                     request_id: in_flight.request_id,
@@ -1653,6 +1837,11 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
             }
             RENDER_COMPILER_SHARED_RESULT_FAILED => {
                 self.last_result_overflow = false;
+                // 067 Stage 4: a worker-reported failure (decode error, or the mirror-generation
+                // desync tripwire) leaves the worker mirror in an unknown state, so drop the
+                // shadow. The next submit then sees an empty shadow and ships a full resync,
+                // rebuilding the worker mirror from scratch.
+                self.mirror_tracking.clear();
                 let in_flight = self.take_in_flight().expect("in-flight compile present");
                 self.last_completed = Some(WebCompletedCompile {
                     request_id: in_flight.request_id,
@@ -3451,12 +3640,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn web_render_compile_input_roundtrips_snapshots() {
+    fn web_render_compile_delta_roundtrips_upserts_and_evictions() {
         let mut first_blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
         first_blocks[chunk_section_index(1, 2, 3)] = BlockStateId(42);
         let mut second_blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
         second_blocks[chunk_section_index(4, 5, 6)] = BlockStateId(7);
-        let snapshots = vec![
+        let upserts = vec![
             ChunkSnapshot::from_block_state_ids(
                 ChunkPos::new(0, 0),
                 ChunkStatus::Full,
@@ -3474,15 +3663,28 @@ mod tests {
                 &second_blocks,
             ),
         ];
+        let evictions = vec![ChunkPos::new(-3, 4), ChunkPos::new(5, -6)];
 
-        let bytes = encode_web_render_compile_input(&snapshots).unwrap();
-        assert!(bytes.len() > WEB_RENDER_COMPILE_INPUT_MAGIC.len());
-        let decoded = decode_web_render_compile_input(&bytes).unwrap();
-        assert_eq!(decoded, snapshots);
+        // Full-resync delta (reset = true) carrying upserts and evictions together.
+        let bytes = encode_web_render_compile_delta(7, true, &upserts, &evictions).unwrap();
+        assert!(bytes.len() > WEB_RENDER_COMPILE_DELTA_MAGIC.len());
+        let decoded = decode_web_render_compile_delta(&bytes).unwrap();
+        assert_eq!(decoded.generation, 7);
+        assert!(decoded.reset);
+        assert_eq!(decoded.upserts, upserts);
+        assert_eq!(decoded.evictions, evictions);
+
+        // Incremental delta (reset = false) preserves the generation and the empty-set cases.
+        let incremental = encode_web_render_compile_delta(8, false, &upserts[..1], &[]).unwrap();
+        let decoded = decode_web_render_compile_delta(&incremental).unwrap();
+        assert_eq!(decoded.generation, 8);
+        assert!(!decoded.reset);
+        assert_eq!(decoded.upserts, upserts[..1]);
+        assert!(decoded.evictions.is_empty());
 
         let mut trailing = bytes;
         trailing.push(0);
-        assert!(decode_web_render_compile_input(&trailing).is_err());
+        assert!(decode_web_render_compile_delta(&trailing).is_err());
     }
 }
 

@@ -35,14 +35,18 @@ pub fn build_client_textured_sections(
         .context("failed to build textured sections")
 }
 
-pub fn build_render_sections_from_snapshots(
-    snapshots: &[ChunkSnapshot],
+pub fn build_render_sections_from_snapshots<S: std::borrow::Borrow<ChunkSnapshot>>(
+    snapshots: &[S],
     catalog: &TexturedMeshCatalog,
     target_sections: &BTreeSet<RenderSectionKey>,
 ) -> Result<TexturedRenderSectionBuildReport> {
+    // Generic over `Borrow<ChunkSnapshot>` so a caller holding owned snapshots
+    // (`&[ChunkSnapshot]`, desktop + the web full-view helpers) and one holding borrowed
+    // snapshots (`&[&ChunkSnapshot]`, the web worker's resident mirror, 067 Stage 4) both
+    // build sections without forcing the latter to deep-clone its resident map every compile.
     let chunks = snapshots
         .iter()
-        .map(snapshot_mesh_block_state_ids)
+        .map(|snapshot| snapshot_mesh_block_state_ids(snapshot.borrow()))
         .collect::<Result<Vec<_>>>()?;
     let inputs = textured_mesh_inputs(&chunks);
     build_textured_render_sections_for_section_set_with_stats(&inputs, catalog, target_sections)

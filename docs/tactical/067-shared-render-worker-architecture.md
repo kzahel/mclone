@@ -9,8 +9,11 @@ ring), and **all of Stage 3** — the keystone (per-frame
 begin/finish/submit/poll/request compile exports + their internals, the
 `RenderViewCompileQueue`/`loaded_center`/`compile_requests`/`shared_compile`
 fields, and the non-SAB `message-transfer` fallback deleted) — are landed.
-Stage 4 (resident worker snapshot mirror; delta-only input) and Stage 5 (JS dedup
-+ single-source ABI constants) remain. Supersedes
+**Stage 4** — the render-compile worker now holds a resident snapshot mirror, so
+the per-frame SAB input is a delta (changed columns + evictions) against that
+mirror instead of the whole loaded world: input dropped from ~206 KB/compile to
+24 bytes–122 KB (header-only when the target column is already resident) — is also
+landed. Stage 5 (JS dedup + single-source ABI constants) remains. Supersedes
 [`065-native-web-mobile-streaming-performance.md`](065-native-web-mobile-streaming-performance.md)
 and [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md),
 folding their streaming-perf goals and the render-worker `SharedArrayBuffer`
@@ -481,6 +484,70 @@ asserted by `sharedTopologyStress`.
 ### Stage 4 — Resident snapshot mirror; request input becomes delta-only
 
 The biggest payload win; aligns input with the ABI input spec above.
+
+**Landed.** The render-compile worker (`WebRenderCompilerSession`) now holds a
+resident `BTreeMap<ChunkPos, ChunkSnapshot>` snapshot mirror, created once with the
+session and persisted across compiles, so the per-frame SAB input is a *delta*
+instead of the whole loaded world. Web-only and behind the `RenderSectionCompiler`
+trait — desktop still moves `Vec<ChunkSnapshot>` over `mpsc` with zero serialization
+and is untouched (`native:movement:smoke` / `native:timedemo:smoke` trivially green).
+
+- **Delta on submit (main wasm).** `WebRenderSectionCompiler` keeps a
+  `BTreeMap<ChunkPos, ChunkRevision>` shadow of what the worker mirror holds.
+  `submit` diffs the request's loaded snapshots against it: a `(pos, revision)` that
+  differs or is absent is an **upsert**; a tracked position no longer loaded is an
+  **eviction**. Only that delta is encoded into the resident input arena
+  (`encode_web_render_compile_delta`, distinct `MCWRCD1` magic). The shadow is
+  advanced **on submit** (apply-on-submit) so a compile requeued after a result
+  overflow ships a minimal delta — the worker already applied those columns. An empty
+  shadow (first compile, or post-failure recovery) is a **full resync**: every loaded
+  column ships as an upsert under a fresh mirror epoch.
+- **Mirror on receipt (worker).** `compileSnapshotSectionsForTargets` decodes the
+  delta, applies upserts + evictions to the mirror **before** compiling (so the
+  advance survives an overflow requeue), then builds the target sections from the
+  mirror's resident columns (`build_render_sections_from_snapshots` is now generic
+  over `Borrow<ChunkSnapshot>`, so the mirror compiles from `&[&ChunkSnapshot]` with
+  no deep clone). Eviction keeps the mirror bounded to the loaded view.
+- **Desync tripwire.** Each delta carries a mirror **generation**. A `reset` delta
+  clears the mirror and adopts the generation; a non-reset delta whose generation
+  does not match is a desync (e.g. a worker that silently lost its mirror) and is
+  rejected loudly rather than compiled against a partial mirror. On a worker-reported
+  failure, main wasm drops its shadow so the next submit is a full resync.
+
+Convergence vs Stage 0 (web smokes; output is the Stage 3 fence, unchanged):
+
+| Metric | Stage 0 baseline | Stage 4 |
+|---|---|---|
+| SAB input bytes / compile | ~206–215 KB (all 9 loaded chunks, every compile) | 24 B–122 KB (delta) |
+| input chunk columns / compile | 9 (whole world) | 0–5 upserts (changed only); 24 B header when 0 |
+| worker resident mirror | none (re-ships every frame) | 9 chunks, bounded across the `(0,0)→(1,0)` jump by evictions |
+| submitted sections / compile | 96 and 144 | 16 (unchanged from Stage 3) |
+| packed = shared-result bytes | 7.69 / 11.35 MB | 0.78–1.73 MB (unchanged from Stage 3) |
+| worker round-trip | 34–55 ms | 5.2–11.2 ms (unchanged from Stage 3) |
+| max frame gap | 12.3–21.1 ms | ≤10.2 ms (unchanged from Stage 3) |
+
+A steady-state re-compile of an already-resident column ships just the 24-byte delta
+header (`native:web:chunk-smoke`: center `(0,0)` 13 compiles then `(1,0)` 9 compiles,
+both settling on a 24-byte input with a 9-chunk mirror, terrain pixel-shape identical).
+Movement increments ship only the columns that crossed a boundary that frame (1 upsert
+≈ 24 KB, 3 ≈ 68 KB, a 5-column burst ≈ 122 KB), and resident columns ship nothing.
+Diagnostics keep `snapshotInputCompileUsed=true` / `generatedViewFallbackUsed=false`
+and add `snapshotInputUpsertCount` / `snapshotInputEvictionCount` /
+`snapshotMirrorChunkCount` from the worker session; the `assertCompileTimingDiagnostics`
+chunk-count lower bound was relaxed to allow a 0-upsert compile (the delta byte length,
+always > 0, carries the assertion).
+
+Green: `cargo test` (no failures), `cargo check -p mclone-web-client --target
+wasm32-unknown-unknown` (warning-clean), `node --check` on the three `www/*.js` +
+`browser-smoke.mjs`, `native:web:build`, `native:web:chunk-smoke` (+canvas inspected),
+`native:web:app-smoke`, `native:web:mobile-smoke`, `native:web:movement-perf`,
+`native:movement:smoke`, `native:timedemo:smoke`.
+
+Follow-up (not blocking): the web snapshot collector still
+`client.chunk_snapshots().cloned().collect()`s every loaded column each frame before
+`submit` diffs them — a main-thread clone, not a SAB cost. Eliminating it needs a
+web-specific collector with access to the shadow map; it is a secondary micro-opt now
+that the SAB-bytes win is banked.
 
 ### Stage 5 — JS dedup + single-source ABI constants
 

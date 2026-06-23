@@ -166,6 +166,13 @@ async function handleCompile(message) {
       sharedInputByteLength: requestSnapshotInputByteLength,
       sharedInputBufferCapacityBytes,
       snapshotInputChunkCount: Number(message.snapshotInputChunkCount) || 0,
+      // 067 Stage 4: the input is a delta against the worker's resident snapshot mirror.
+      // Report the delta width and resident mirror size straight from the persistent Rust
+      // session so the perf fence can see input shrink to upserts-only and confirm the
+      // mirror stays bounded to the loaded view (evictions track client unloads).
+      snapshotInputUpsertCount: Number(compilerSession?.lastDeltaUpsertCount?.()) || 0,
+      snapshotInputEvictionCount: Number(compilerSession?.lastDeltaEvictionCount?.()) || 0,
+      snapshotMirrorChunkCount: Number(compilerSession?.mirrorChunkCount?.()) || 0,
       snapshotInputCompileUsed: hasPersistentSnapshotCompiler,
       generatedViewFallbackUsed: !hasPersistentSnapshotCompiler,
       sharedResultBufferUsed: response.sharedResultBufferUsed,
