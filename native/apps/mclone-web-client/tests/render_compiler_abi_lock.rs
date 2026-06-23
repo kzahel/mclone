@@ -63,7 +63,10 @@ fn const_value(src: &str, name: &str, what: &str) -> i64 {
     rhs.split('*')
         .map(|term| {
             term.trim().parse::<i64>().unwrap_or_else(|_| {
-                panic!("{what}: non-integer term `{}` in `{name}` (rhs `{rhs}`)", term.trim())
+                panic!(
+                    "{what}: non-integer term `{}` in `{name}` (rhs `{rhs}`)",
+                    term.trim()
+                )
             })
         })
         .product()

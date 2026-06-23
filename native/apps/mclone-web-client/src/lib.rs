@@ -243,9 +243,10 @@ impl WebRuntime {
         // render-dirty as they arrive, so the per-frame streaming loop plans purely from
         // dirty state and no longer needs the view-sync delta to discover new/removed
         // chunks.
-        let update_report = self
-            .engine
-            .apply_server_updates_with_dirty_policy(exchange.updates, EngineServerUpdateDirtyPolicy::ALL);
+        let update_report = self.engine.apply_server_updates_with_dirty_policy(
+            exchange.updates,
+            EngineServerUpdateDirtyPolicy::ALL,
+        );
 
         WebRuntimeStepReport {
             command_count: exchange.command_count,
