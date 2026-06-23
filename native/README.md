@@ -2,7 +2,7 @@
 
 This workspace is the clean Rust track for the native-first engine. Native desktop is the current bring-up priority, web/WASM is kept alive as an early compatibility gate, and future Android XR / Quest standalone support is an explicit native target once the desktop/runtime/renderer path is mature enough. It lives inside the existing repository so it can reuse the project oracle fixtures, reference notes, asset extraction scripts, and the TypeScript engine as legacy prior art.
 
-The durable direction is documented in [`../docs/native-rewrite-roadmap.md`](../docs/native-rewrite-roadmap.md). The short version: native desktop is the primary development target now, web/WASM is an early compatibility gate, Android XR / Quest is a later native target, and the TypeScript implementation is now legacy/reference rather than the main engine direction.
+The durable direction is documented in [`../docs/native-rewrite-roadmap.md`](../docs/native-rewrite-roadmap.md), and current platform posture is documented in [`../docs/platforms.md`](../docs/platforms.md). The short version: native desktop is the primary development target, web/WASM is an early compatibility gate, flat Android is the next platform frontload target, Android XR / Quest is a later native target, and the TypeScript implementation is now legacy/reference rather than the main engine direction.
 
 Native Rust tactical docs live in [`../docs/tactical/`](../docs/tactical/README.md) and use zero-padded numeric filenames such as `000-native-render-bringup.md`. Legacy TypeScript/browser tacticals are archived under `../docs/tactical/legacy/`.
 
@@ -49,7 +49,7 @@ Applications:
 
 Future applications, not scaffolded yet:
 
-- flat Android client: expected to reuse the single-view client/render path with Android lifecycle/input adapters.
+- flat Android client: next platform target, expected to reuse the single-view client/render path with Android lifecycle/input adapters; see [`../docs/tactical/074-flat-android-build-smoke.md`](../docs/tactical/074-flat-android-build-smoke.md).
 - Android XR / Quest client: expected to own a separate XR host loop over shared client/runtime/render data because stereo views, runtime swapchains, and controller/hand input do not fit the desktop single-window loop.
 
 Useful gates:
@@ -63,4 +63,4 @@ Useful gates:
 
 Native benchmark baselines are recorded in [`../docs/performance-records.md`](../docs/performance-records.md). Use `pnpm native:worldgen:smoke`, `pnpm native:movement:smoke`, and `pnpm native:timedemo:smoke` for the standard optimized-dev smoke lanes; use the matching `:perf` scripts for release-oriented runs.
 
-Start narrow: prefer oracle-backed engine slices and small platform-boundary refactors over broad platform scaffolding. The next defensive platform work should make renderer view/projection and render-target inputs explicit before any Android or OpenXR app target is added.
+Start narrow: prefer oracle-backed engine slices and validation-backed platform work over broad scaffolding. Flat Android should start as a focused non-XR APK/screenshot smoke, borrowing Playbox's package and validation shape while keeping Android lifecycle, input, and asset paths in the platform adapter.

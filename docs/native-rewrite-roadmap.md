@@ -26,14 +26,14 @@ Reference Rust engine for native app/render/XR patterns:
 
 ## Direction
 
-Build the engine as normal Rust crates first, with desktop/native as the main development loop. Keep a thin WASM/web target compiling and booting early so browser constraints stay visible while APIs are still easy to adjust. Treat Android XR / Quest standalone as a real later native target, but do not pull Android or OpenXR app scaffolding forward before the desktop path and renderer boundaries are mature enough to validate them.
+Build the engine as normal Rust crates first, with desktop/native as the main development loop. Keep a thin WASM/web target compiling and booting early so browser constraints stay visible while APIs are still easy to adjust. Flat Android is now the next platform frontload target, limited to a non-XR single-view host with a real validation lane. Treat Android XR / Quest standalone as a real later native target, but do not pull OpenXR app scaffolding forward before the flat Android and desktop/XR boundaries are mature enough to validate them. Current platform posture lives in [`platforms.md`](platforms.md).
 
 This is not equal effort across targets:
 
 - native desktop is the first-priority bring-up and validation target
 - web is an early compatibility gate
-- flat Android is a later single-view native host, not an immediate workstream
-- Android XR / Quest standalone is a later native XR host, not a current implementation lane
+- flat Android is the next single-view native host workstream, tracked by [`tactical/074-flat-android-build-smoke.md`](tactical/074-flat-android-build-smoke.md)
+- Android XR / Quest standalone is a later native XR host, not part of the flat Android workstream
 - XR remains native-only until there is a concrete WebXR path worth supporting
 
 ## Why Native-First
@@ -88,11 +88,11 @@ apps/
   mclone_web_client
 ```
 
-Future app crates should stay out of the workspace until they have a validation lane:
+Future app crates should stay out of the workspace until they have a validation lane. Flat Android now has a proposed validation-backed tactical:
 
 ```text
 apps/
-  mclone_android_client      # future flat Android single-view host
+  mclone_android_client      # next flat Android single-view host
   mclone_android_xr_client   # future Quest/OpenXR host
 ```
 
