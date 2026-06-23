@@ -243,6 +243,38 @@ no `.ts`), `pnpm native:web:app-smoke`, `pnpm native:web:chunk-smoke` plus final
 Implementation commit: `09c3f2ffe4afdc346e5a6d1a4a65674b25855984`
 (`071: graduate touch glue through staged TS emit`).
 
+### Stage 2a — input TypeScript conversion (landed)
+
+The second slice converted only `www/mclone-web-input.js` to authored TypeScript
+(`www/mclone-web-input.ts`). Runtime imports and URLs stayed stable: `mclone-web-app.js` still
+imports `./mclone-web-input.js`, `app.html` / `index.html` still load `.js` entrypoints, and the
+new input-to-touch dependency is a type-only `import type` from `./mclone-web-touch.js` that is
+erased from the emitted runtime module. The staged root and deploy bundle both contain
+`mclone-web-input.js` and no `.ts` files.
+
+Line counts from the start of this slice were app/touch/input/HUD `962 / 352 / 297 / 291`.
+Ending source counts are app `962`, touch TS `352`, input TS `289`, HUD `291`. The emitted staged
+`mclone-web-input.js` is `232` lines.
+
+Correctness and perf fences held. Pre-slice and final `pnpm native:web:chunk-smoke` both produced
+`0ba8251f6c0dba012782e80921b8d45ead799a216decf50e9041958babcb6a4c` for
+`/tmp/mclone-native-web-canvas.png`; the desktop chunk canvas and mobile app canvas were visually
+inspected. Movement perf passed across 3 chunk boundaries, moving from center `[-1, -1]` to
+`[-1, 2]` with final `cameraZ=33.95248`, `compileTimingCount=28`, last compile `8.4` ms total /
+`6.2` ms worker round trip, `renderCount=263`, `frameCount=60`, and `maxFrameGapMs=10.215`.
+Runner transport stayed `shared-memory` with runner frames `28 / 110`, worldgen frames `5 / 5`
+(`maxRequestUs=702000`), and light-status frames `5 / 5` (`maxRequestUs=195000`).
+
+Validation (all green): `pnpm native:web:chunk-smoke` baseline, `pnpm native:web:glue`,
+`pnpm native:web:typecheck`, `node --check native/target/mclone-web-client-www/mclone-web-input.js`
+plus staged app/HUD/touch JS, `bash -n scripts/deploy-native-web.sh`,
+`cargo test --manifest-path native/Cargo.toml`, `cargo check -p mclone-web-client --target
+wasm32-unknown-unknown --manifest-path native/Cargo.toml`, `pnpm native:web:build`,
+`pnpm native:web:bundle`, explicit staged/deploy inventory checks (`mclone-web-input.js` present,
+no `.ts`), `pnpm native:web:app-smoke`, `pnpm native:web:chunk-smoke` plus final sha256,
+`pnpm native:web:mobile-smoke` with mobile canvas inspection, `pnpm native:web:movement-perf`,
+`pnpm native:movement:smoke`, and `pnpm native:timedemo:smoke`.
+
 ## Relationship to Other Tacticals
 
 - [`070-web-glue-typing-and-abi-hardening.md`](070-web-glue-typing-and-abi-hardening.md) -

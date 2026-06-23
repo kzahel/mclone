@@ -3,43 +3,47 @@
 // carry that query string, so a deploy that bumps the asset version must rely on
 // HTTP cache revalidation of this bare URL (smoke/dev leave the version unset).
 
+import type { TouchControls, TouchMovementImpulse } from "./mclone-web-touch.js";
+
 export const INPUT_KEY_NAMES = ["forward", "backward", "left", "right", "jump", "descend", "shift", "sprint"];
 
-/**
- * @typedef {import("./mclone-web-touch.js").TouchControls} TouchControls
- * @typedef {Record<string, any>} WasmReport
- */
+type InputKeyName = typeof INPUT_KEY_NAMES[number];
+type InputKeys = Record<InputKeyName, boolean>;
+type WasmReport = Record<string, any>;
 
-/**
- * @typedef {object} PointerDownState
- * @property {number} button
- * @property {boolean} enabled
- * @property {number} movement
- */
+export interface PointerDownState {
+  button: number;
+  enabled: boolean;
+  movement: number;
+}
 
-/**
- * @typedef {object} InputBindingApp
- * @property {HTMLCanvasElement} canvas
- * @property {WasmReport | null} session
- * @property {TouchControls | null} touchControls
- * @property {boolean} pointerDragging
- * @property {PointerDownState | null} pointerDown
- * @property {(camera: WasmReport) => void} applyCameraState
- * @property {(slot: number) => boolean} selectHotbarSlot
- * @property {(name: string, down: boolean) => boolean} setInputKey
- * @property {(dx: number, dy: number) => void} queueMouseDelta
- * @property {(action: string) => Promise<any>} interactBlock
- * @property {() => void} requestPointerLock
- * @property {() => void} updatePointerLockState
- * @property {() => void} syncCanvasSize
- */
+export interface InputBindingApp {
+  canvas: HTMLCanvasElement;
+  session: WasmReport | null;
+  touchControls: TouchControls | null;
+  pointerDragging: boolean;
+  pointerDown: PointerDownState | null;
+  applyCameraState(camera: WasmReport): void;
+  selectHotbarSlot(slot: number): boolean;
+  setInputKey(name: string, down: boolean): boolean;
+  queueMouseDelta(dx: number, dy: number): void;
+  interactBlock(action: string): Promise<any>;
+  requestPointerLock(): void;
+  updatePointerLockState(): void;
+  syncCanvasSize(): void;
+}
 
-/**
- * @param {InputBindingApp} app
- * @param {Record<string, any>} runtimeState
- * @param {() => void} updateDom
- */
-export function bindInput(app, runtimeState, updateDom) {
+interface InputRuntimeState extends Record<string, any> {
+  pointerLockAttempted?: boolean;
+  pointerLockFallback?: boolean;
+  selectedHotbarSlot?: number;
+}
+
+export function bindInput(
+  app: InputBindingApp,
+  runtimeState: InputRuntimeState,
+  updateDom: () => void,
+): void {
   window.addEventListener("keydown", (event) => {
     if (isPhysicalKey(event, "KeyN", "n") && !event.repeat) {
       event.preventDefault();
@@ -86,7 +90,7 @@ export function bindInput(app, runtimeState, updateDom) {
     app.pointerDragging = true;
     app.pointerDown = {
       button: event.button,
-      enabled: runtimeState.pointerLockAttempted,
+      enabled: Boolean(runtimeState.pointerLockAttempted),
       movement: 0,
     };
     app.canvas.focus();
@@ -147,8 +151,7 @@ export function bindInput(app, runtimeState, updateDom) {
   });
 }
 
-/** @param {KeyboardEvent} event */
-function inputNameForEvent(event) {
+function inputNameForEvent(event: KeyboardEvent): string | null {
   const code = keyboardCode(event);
   switch (code) {
     case "ArrowUp":
@@ -179,8 +182,7 @@ function inputNameForEvent(event) {
   }
 }
 
-/** @param {string} key */
-function inputNameForLegacyKey(key) {
+function inputNameForLegacyKey(key: string): string | null {
   switch (key) {
     case "ArrowUp":
     case "w":
@@ -215,12 +217,7 @@ function inputNameForLegacyKey(key) {
   }
 }
 
-/**
- * @param {KeyboardEvent} event
- * @param {string} code
- * @param {string} legacyKey
- */
-function isPhysicalKey(event, code, legacyKey) {
+function isPhysicalKey(event: KeyboardEvent, code: string, legacyKey: string): boolean {
   if (keyboardCode(event) === code) {
     return true;
   }
@@ -229,18 +226,17 @@ function isPhysicalKey(event, code, legacyKey) {
   );
 }
 
-/** @param {KeyboardEvent} event */
-function keyboardCode(event) {
+function keyboardCode(event: KeyboardEvent): string | null {
   return typeof event.code === "string" && event.code.length > 0 && event.code !== "Unidentified"
     ? event.code
     : null;
 }
 
-export function defaultInputKeys() {
-  return Object.fromEntries(INPUT_KEY_NAMES.map((name) => [name, false]));
+export function defaultInputKeys(): InputKeys {
+  return Object.fromEntries(INPUT_KEY_NAMES.map((name) => [name, false])) as InputKeys;
 }
 
-export function defaultMovementImpulse() {
+export function defaultMovementImpulse(): TouchMovementImpulse {
   return {
     active: false,
     left: 0,
@@ -248,8 +244,7 @@ export function defaultMovementImpulse() {
   };
 }
 
-/** @param {unknown} value */
-export function sanitizeInputImpulse(value) {
+export function sanitizeInputImpulse(value: unknown): number {
   const impulse = Number(value);
   if (!Number.isFinite(impulse)) {
     return 0;
@@ -257,11 +252,10 @@ export function sanitizeInputImpulse(value) {
   return Math.max(-1, Math.min(1, impulse));
 }
 
-/**
- * @param {Record<string, any> | null | undefined} value
- * @param {Record<string, any>} runtimeState
- */
-export function applyHotbarState(value, runtimeState) {
+export function applyHotbarState(
+  value: Record<string, any> | null | undefined,
+  runtimeState: InputRuntimeState,
+): void {
   if (!value || typeof value.selectedHotbarSlot === "undefined") {
     return;
   }
@@ -271,8 +265,7 @@ export function applyHotbarState(value, runtimeState) {
   }
 }
 
-/** @param {KeyboardEvent} event */
-function hotbarSlotForEvent(event) {
+function hotbarSlotForEvent(event: KeyboardEvent): number | null {
   const code = keyboardCode(event);
   if (code?.startsWith("Digit") || code?.startsWith("Numpad")) {
     const digit = Number(code.slice(-1));
@@ -284,8 +277,7 @@ function hotbarSlotForEvent(event) {
   return code === null ? hotbarSlotForLegacyKey(event.key) : null;
 }
 
-/** @param {string} key */
-function hotbarSlotForLegacyKey(key) {
+function hotbarSlotForLegacyKey(key: string): number | null {
   if (key.length !== 1) {
     return null;
   }
