@@ -1,6 +1,6 @@
 # 070: Web JS Glue Hardening — ABI Lock, Type-Checking, and Shrink
 
-Status: **Stages 1–3 landed (server-worker SAB ABI single-source + lock test; no-emit type-check gate over the web glue; glue-shrink — packed-frame codec + compile-timing instrumentation moved into Rust). Follow-ups remain (file split, busy-poll, optional eslint/.ts graduation).**
+Status: **Stages 1–3 landed (server-worker SAB ABI single-source + lock test; no-emit type-check gate over the web glue; glue-shrink — packed-frame codec + compile-timing instrumentation moved into Rust). First follow-up landed: `mclone-web-app.js` split into app core + touch/input/HUD modules. Follow-ups remain (busy-poll, optional eslint/.ts graduation).**
 
 The web perf/refactor work across 064–069 grew the hand-written browser JS glue.
 This is a consolidation/hardening pass over that glue. The framing matters: the
@@ -379,6 +379,64 @@ workerRoundTrip avg ~6.6 ms — within run-to-run noise, no regression, all per-
 asserted), `pnpm native:movement:smoke` + `native:timedemo:smoke` (desktop unaffected — both moves
 are wasm-only, cfg-gated out of the desktop build).
 
+### Follow-up — mclone-web-app.js module split (landed)
+
+The oversized native web entry module is now a raw-ES-module graph with the loader/app core still
+as the entry and three cohesive helper modules. Deploy behavior stays unchanged: `www/` is still
+copied verbatim, `app.html` still reaches `mclone-web-app.js` through the same entry graph, and the
+new modules are loaded by static relative `import`s. Each new module carries the same cache-bust
+caveat as the ABI single-source modules: a static import URL cannot carry `?v=<version>`, so a
+deploy asset-version bump still relies on HTTP cache revalidation of the bare helper URL.
+
+- **App core / loader stays in `mclone-web-app.js`.** URL/version constants and `versionedUrl(...)`
+  remain in the entry module (`www/mclone-web-app.js:72`, `www/mclone-web-app.js:942`), so the
+  worker/wasm asset URLs still resolve relative to `www/` exactly as before. The `runtime` singleton,
+  boot-time method installation, and `globalThis.__mcloneWebApp` smoke-harness contract stay in the
+  entry (`www/mclone-web-app.js:84`, `www/mclone-web-app.js:169`, `www/mclone-web-app.js:171`).
+  `WebChunkApp` still owns the session/render loop and wires the extracted modules from one place
+  (`www/mclone-web-app.js:199`, `www/mclone-web-app.js:300`).
+- **Touch moved to `mclone-web-touch.js`.** `TouchControls`, the joystick constants, touch-pointer
+  helpers, pointer capture guard, and `hasTouchInput()` now live together
+  (`www/mclone-web-touch.js:6`, `www/mclone-web-touch.js:23`,
+  `www/mclone-web-touch.js:316`). The app passes itself plus `runtime.state` into the constructor
+  (`www/mclone-web-app.js:302`), avoiding any app/runtime import from the touch module.
+- **Input moved to `mclone-web-input.js`.** `bindInput`, keyboard/legacy-key normalization,
+  default input state, hotbar helpers, and `INPUT_KEY_NAMES` are isolated
+  (`www/mclone-web-input.js:6`, `www/mclone-web-input.js:42`,
+  `www/mclone-web-input.js:151`, `www/mclone-web-input.js:239`,
+  `www/mclone-web-input.js:264`). The module receives `runtime.state` and an `updateDom` callback
+  from the app core (`www/mclone-web-app.js:301`), so it preserves the installed
+  `queueMouseDelta` / `setInputKey` / hotbar runtime methods without creating a cycle.
+- **HUD/menu/settings moved to `mclone-web-hud.js`.** Menu/settings binding, `localStorage`
+  look-sensitivity handling, HUD open state, DOM text updates, compile-timing formatting, target
+  formatting, and interaction-status formatting are in the HUD module
+  (`www/mclone-web-hud.js:14`, `www/mclone-web-hud.js:36`,
+  `www/mclone-web-hud.js:88`, `www/mclone-web-hud.js:170`,
+  `www/mclone-web-hud.js:200`, `www/mclone-web-hud.js:255`). HUD imports only the touch capability
+  probe (`www/mclone-web-hud.js:1`) and otherwise gets app/runtime state through parameters.
+
+**Typing / import shape.** No shared runtime module was added: the entry module remains the owner of
+the app singleton and state bag, and extracted modules depend on small app-shaped typedefs plus
+callback parameters. Cross-file JSDoc typedefs use `import("./mclone-web-touch.js").TouchControls`
+where needed (`www/mclone-web-input.js:9`, `www/mclone-web-hud.js:20`), keeping
+`pnpm native:web:typecheck` strict-clean across the split without circular imports.
+
+**Line counts.** The entry dropped from the Stage 3 baseline of 1778 lines to **962** lines. The
+new modules are `mclone-web-touch.js` **339** lines, `mclone-web-input.js` **297** lines, and
+`mclone-web-hud.js` **291** lines (`1889` total including module headers/JSDoc).
+
+**Validation (all green on each extraction commit).** The pre-split baseline chunk-smoke canvas
+sha256 was captured before edits as
+`0ba8251f6c0dba012782e80921b8d45ead799a216decf50e9041958babcb6a4c`; after the touch, input, and
+HUD commits, `pnpm native:web:chunk-smoke` reproduced the same PNG **byte-identical** every time.
+For each commit: `node --check` on touched/new `www/*.js`, `pnpm native:web:typecheck`,
+`cargo test --manifest-path native/Cargo.toml`, `cargo check -p mclone-web-client --target
+wasm32-unknown-unknown`, `pnpm native:web:build`, `pnpm native:web:app-smoke`,
+`pnpm native:web:chunk-smoke`, `pnpm native:web:mobile-smoke`, `pnpm native:web:movement-perf`,
+`pnpm native:movement:smoke`, and `pnpm native:timedemo:smoke`. Movement-perf stayed in run-to-run
+noise: touch split 16 compiles, totalMs avg 9.72 ms / workerRoundTrip avg 6.49 ms; input split
+16 compiles, 9.78 ms / 6.31 ms; HUD split 16 compiles, 10.67 ms / 6.14 ms.
+
 ## Acceptance & validation (every stage)
 
 - `cargo test --manifest-path native/Cargo.toml` green (incl. the new lock test).
@@ -392,7 +450,9 @@ are wasm-only, cfg-gated out of the desktop build).
 
 ## Follow-ups (lower priority, separate work)
 
-- **Split `mclone-web-app.js`** (1930 lines) into loader / input / touch / hud modules.
+- ~~**Split `mclone-web-app.js`** (1930 lines) into loader / input / touch / hud modules.~~
+  Landed as app core + `mclone-web-touch.js` / `mclone-web-input.js` /
+  `mclone-web-hud.js`; entry is now 962 lines.
 - **Replace `waitForSessionIdle` busy-poll** with a promise/signal from the session.
 - **Optional minimal eslint** (typescript-eslint recommended set) if `tsc` strictness
   proves insufficient — quality polish, not essential.
