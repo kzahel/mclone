@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
-import { decodeChunk, paletteBitsFor, unpackBitStorage } from "../../src/oracle/anvil/chunk.ts";
-import { NBT_TAG_COMPOUND, type NbtCompound, type NbtList } from "../../src/oracle/anvil/nbt.ts";
+import { decodeChunk, paletteBitsFor, unpackBitStorage } from "../../oracle/lib/anvil/chunk.ts";
+import { NBT_TAG_COMPOUND, type NbtCompound, type NbtList } from "../../oracle/lib/anvil/nbt.ts";
 
 function pack(entries: readonly number[], bits: number): BigInt64Array {
   if (bits <= 0 || bits > 32) {

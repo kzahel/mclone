@@ -21,7 +21,7 @@ import { FlatGrassWorldGenerator, SmallIslandWorldGenerator } from "../../src/wo
 import type { GenerationEntitySink, NaturalSpawnerOptions } from "../../src/worldgen/levelgen/natural-spawner";
 import {
   type CreatureGenerationFixture,
-} from "../../src/oracle/integration/creature-fixture";
+} from "../../oracle/lib/integration/creature-fixture";
 import type { ChunkSnapshotMessage, ClientPlayerState, EntitySnapshot, EntitySnapshotMessage, EntityUpdateMessage } from "../../src/runtime/protocol/world-messages";
 
 const creatureFixtures = [

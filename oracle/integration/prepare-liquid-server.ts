@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import { readLiquidScenario } from "../../src/oracle/integration/liquid-scenario.ts";
+import { readLiquidScenario } from "../lib/integration/liquid-scenario.ts";
 
 function usage(): never {
   process.stderr.write(

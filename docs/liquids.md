@@ -201,7 +201,7 @@ The repo now has the first live water simulation path wired through the authorit
 | `src/world/level/chunk-snapshot.ts` | snapshots already carry `blockTicks` and `liquidTicks` |
 | `src/worldgen/levelgen/feature/spring-feature.ts` | places source water and records a delay-0 liquid tick |
 | `src/worldgen/carver/underwater-cave-world-carver.ts` | records underwater liquid tick consequences |
-| `src/oracle/integration/liquid-fixture.ts` | Liquid0 bounded fixture builder, persisted `LiquidTicks` decoder, and comparison helpers |
+| `oracle/lib/integration/liquid-fixture.ts` | Liquid0 bounded fixture builder, persisted `LiquidTicks` decoder, and comparison helpers |
 | `test/fixtures/liquid/water-slope-10-ticks.json` | first committed official-server dynamic water oracle |
 | `test/runtime/generated-world-host-liquid.test.ts` | host-level hydration/execution/persistence coverage for pending liquid ticks |
 

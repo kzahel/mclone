@@ -230,7 +230,7 @@ Pieces:
 - `oracle/integration/dump-chunks.ts` — Node CLI that reads region files and emits a committable JSON fixture. `gen-fixture.sh` runs it with Node transform-types support so it can import the shared TypeScript oracle code.
 - `oracle/integration/gen-fixture.sh --seed <long> --chunks <x,z,x,z,...> --out <path>` — end-to-end orchestration: ensures the server jar exists, runs the server, and decodes the requested chunks.
 
-The reader + fixture builder live under `src/oracle/anvil/` and `src/oracle/integration/` so they get Vitest coverage (see `test/oracle/`).
+The reader + fixture builder live under `oracle/lib/anvil/` and `oracle/lib/integration/` so they get Vitest coverage (see `test/oracle/`).
 
 ### Regenerating an integration fixture
 
@@ -283,8 +283,8 @@ Then commit a selected non-empty chunk fixture:
 Pieces:
 
 - `oracle/integration/dump-creature-fixture.ts` — reads `world/entities/*.mca`, falls back to legacy/proto `Level.Entities` when needed, and emits fixture or scan JSON.
-- `src/oracle/anvil/entity-chunk.ts` — decodes vanilla entity chunk NBT (`DataVersion`, `Position`, `Entities`) and legacy chunk entity lists.
-- `src/oracle/integration/creature-fixture.ts` — normalizes stable entity facts, maps common mob categories, sorts records, and compares fixtures with readable diffs.
+- `oracle/lib/anvil/entity-chunk.ts` — decodes vanilla entity chunk NBT (`DataVersion`, `Position`, `Entities`) and legacy chunk entity lists.
+- `oracle/lib/integration/creature-fixture.ts` — normalizes stable entity facts, maps common mob categories, sorts records, and compares fixtures with readable diffs.
 
 The first committed fixture is `test/fixtures/creatures/overworld-seed-12345-chunk--7--15-entities.json`, selected from scan output because it contains generated sheep.
 
@@ -306,6 +306,6 @@ Pieces:
 - `oracle/integration/prepare-liquid-server.ts` — writes `server.properties`, `eula.txt`, and a generated datapack with load/tick functions.
 - `oracle/integration/run-liquid-server.sh` — starts the official server and waits for the datapack to `save-all flush` and `stop`.
 - `oracle/integration/dump-liquid-fixture.ts` — reads the Anvil region files and emits `module: "liquid-sim"` JSON.
-- `src/oracle/integration/liquid-fixture.ts` — property-preserving fixture builder, persisted liquid tick decoder, and diff helpers.
+- `oracle/lib/integration/liquid-fixture.ts` — property-preserving fixture builder, persisted liquid tick decoder, and diff helpers.
 
 Liquid fixtures flatten `blocks` in `y-major,z-major,x-minor` order, preserve palette entries as `{ name, properties }`, and sort pending `liquidTicks` by remaining delay, priority, target, then position. The first committed fixture is `test/fixtures/liquid/water-slope-10-ticks.json`.

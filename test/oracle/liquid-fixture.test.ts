@@ -1,15 +1,15 @@
 import { describe, expect, test } from "vitest";
 
-import type { DecodedChunk } from "../../src/oracle/anvil/chunk.ts";
-import { NBT_TAG_COMPOUND, NBT_TAG_END, type NbtCompound } from "../../src/oracle/anvil/nbt.ts";
+import type { DecodedChunk } from "../../oracle/lib/anvil/chunk.ts";
+import { NBT_TAG_COMPOUND, NBT_TAG_END, type NbtCompound } from "../../oracle/lib/anvil/nbt.ts";
 import {
   blockStateKey,
   buildLiquidRegionFixture,
   decodeChunkLiquidTicks,
   normalizeLiquidTicks,
   type ScheduledLiquidTickFixture,
-} from "../../src/oracle/integration/liquid-fixture.ts";
-import type { LiquidScenarioSpec } from "../../src/oracle/integration/liquid-scenario.ts";
+} from "../../oracle/lib/integration/liquid-fixture.ts";
+import type { LiquidScenarioSpec } from "../../oracle/lib/integration/liquid-scenario.ts";
 
 const BLOCKS_PER_SECTION = 16 * 16 * 16;
 

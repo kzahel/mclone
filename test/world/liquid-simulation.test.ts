@@ -12,8 +12,8 @@ import {
   type LiquidRegionFixture,
   type LiquidTickPriority,
   type ScheduledLiquidTickFixture,
-} from "../../src/oracle/integration/liquid-fixture.ts";
-import { normalizeLiquidScenario, type LiquidScenarioSpec } from "../../src/oracle/integration/liquid-scenario.ts";
+} from "../../oracle/lib/integration/liquid-fixture.ts";
+import { normalizeLiquidScenario, type LiquidScenarioSpec } from "../../oracle/lib/integration/liquid-scenario.ts";
 import { Heightmap } from "../../src/worldgen/levelgen/heightmap";
 import type { Biome } from "../../src/worldgen/biome/biome";
 import { getLayeredBiomeByKey } from "../../src/worldgen/biome/biome-data";

@@ -5,7 +5,7 @@ import sheepFixture from "../fixtures/creatures/overworld-seed-12345-chunk--7--1
 import {
   compareCreatureGenerationFixtures,
   type CreatureGenerationFixture,
-} from "../../src/oracle/integration/creature-fixture.ts";
+} from "../../oracle/lib/integration/creature-fixture.ts";
 
 describe("committed creature generation fixture", () => {
   test.each([

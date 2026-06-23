@@ -6,13 +6,13 @@ import {
   decodeEntityStorageChunk,
   decodeLegacyChunkEntities,
   type DecodedEntityChunk,
-} from "../../src/oracle/anvil/entity-chunk.ts";
-import { COMPRESSION_GZIP, COMPRESSION_NONE, COMPRESSION_ZLIB, listPresentChunks, RegionFile } from "../../src/oracle/anvil/region.ts";
+} from "../lib/anvil/entity-chunk.ts";
+import { COMPRESSION_GZIP, COMPRESSION_NONE, COMPRESSION_ZLIB, listPresentChunks, RegionFile } from "../lib/anvil/region.ts";
 import {
   buildCreatureGenerationFixture,
   normalizeCreatureEntities,
   type CreatureGenerationFixtureMetadata,
-} from "../../src/oracle/integration/creature-fixture.ts";
+} from "../lib/integration/creature-fixture.ts";
 
 interface ParsedArgs {
   readonly values: ReadonlyMap<string, string>;

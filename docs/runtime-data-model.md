@@ -87,7 +87,7 @@ Rules:
 - cell order is section-local `y-major,z-major,x-minor`
 - packing follows Minecraft 1.17.1 `BitStorage` semantics
 
-For 1.17.1 `BitStorage`, entries do not span 64-bit words. The existing oracle decoder in `src/oracle/anvil/chunk.ts` is the runtime behavior reference until the shared helper lands.
+For 1.17.1 `BitStorage`, entries do not span 64-bit words. The existing oracle decoder in `oracle/lib/anvil/chunk.ts` is the runtime behavior reference until the shared helper lands.
 
 The exact TypeScript wrapper can change. The logical model should not.
 

@@ -25,7 +25,7 @@ import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
 import { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
-import type { CreatureGenerationFixture } from "../../src/oracle/integration/creature-fixture";
+import type { CreatureGenerationFixture } from "../../oracle/lib/integration/creature-fixture";
 
 const TEMP_DIRECTORIES: string[] = [];
 const REMOTE_SERVERS: GeneratedWorldHttpServer[] = [];

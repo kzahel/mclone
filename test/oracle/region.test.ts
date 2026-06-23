@@ -1,13 +1,13 @@
 import { deflateSync, inflateSync } from "node:zlib";
 import { describe, expect, test } from "vitest";
 
-import { COMPRESSION_ZLIB, listPresentChunks, RegionFile } from "../../src/oracle/anvil/region.ts";
+import { COMPRESSION_ZLIB, listPresentChunks, RegionFile } from "../../oracle/lib/anvil/region.ts";
 import {
   encodeModifiedUtf8,
   NBT_TAG_BYTE,
   NBT_TAG_COMPOUND,
   NBT_TAG_INT,
-} from "../../src/oracle/anvil/nbt.ts";
+} from "../../oracle/lib/anvil/nbt.ts";
 
 const SECTOR = 4096;
 

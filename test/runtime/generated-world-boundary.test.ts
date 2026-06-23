@@ -16,7 +16,7 @@ import {
   findDecoratedOracleChunk,
   formatDecoratedChunkDiff,
   type DecoratedIntegrationOracleFixture,
-} from "../../src/oracle/integration/decorated-chunk-fixture.ts";
+} from "../../oracle/lib/integration/decorated-chunk-fixture.ts";
 
 interface SurfaceChunkOracleFixture {
   readonly chunkX: number;

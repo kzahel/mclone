@@ -1,5 +1,5 @@
 import type { NbtCompound, NbtList, NbtValue } from "./nbt.ts";
-import { paletteBitsFor, unpackBitStorage as unpackRuntimeBitStorage } from "../../util/bit-storage.ts";
+import { paletteBitsFor, unpackBitStorage as unpackRuntimeBitStorage } from "../util/bit-storage.ts";
 
 export { paletteBitsFor };
 

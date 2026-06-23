@@ -39,7 +39,7 @@ import {
   compareChunkLight,
   decodeChunkLightFixture,
   type ChunkLightFixture,
-} from "../../src/oracle/integration/light-fixture";
+} from "../../oracle/lib/integration/light-fixture";
 
 interface TerrainOnlyFixture {
   readonly chunkX: number;

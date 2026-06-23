@@ -16,7 +16,7 @@ import {
   NBT_TAG_STRING,
   type NbtCompound,
   type NbtList,
-} from "../../src/oracle/anvil/nbt.ts";
+} from "../../oracle/lib/anvil/nbt.ts";
 
 class NbtWriter {
   public readonly chunks: Uint8Array[] = [];

@@ -2,9 +2,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { gunzipSync, inflateSync } from "node:zlib";
 
-import { decodeChunk } from "../../src/oracle/anvil/chunk.ts";
-import { COMPRESSION_GZIP, COMPRESSION_NONE, COMPRESSION_ZLIB, RegionFile } from "../../src/oracle/anvil/region.ts";
-import { buildChunkFixture } from "../../src/oracle/integration/chunk-fixture.ts";
+import { decodeChunk } from "../lib/anvil/chunk.ts";
+import { COMPRESSION_GZIP, COMPRESSION_NONE, COMPRESSION_ZLIB, RegionFile } from "../lib/anvil/region.ts";
+import { buildChunkFixture } from "../lib/integration/chunk-fixture.ts";
 
 function usage(): never {
   process.stderr.write(

@@ -11,7 +11,7 @@ import {
   type CreatureEntityCategory,
   type CreatureGenerationFixture,
   type NormalizedCreatureEntity,
-} from "../../../src/oracle/integration/creature-fixture.ts";
+} from "../../../oracle/lib/integration/creature-fixture.ts";
 import { FullChunkStatus } from "../../../src/world/level/entity/full-chunk-status.ts";
 import { GeneratedRenderLevel } from "../../../src/world/level/generated-render-level.ts";
 import { registerGeneratedRenderBlocks } from "../../../src/world/level/generated-render-blocks.ts";

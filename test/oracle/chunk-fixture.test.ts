@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 
-import { buildChunkFixture } from "../../src/oracle/integration/chunk-fixture.ts";
-import { decodeChunkLightFixture } from "../../src/oracle/integration/light-fixture.ts";
-import type { DecodedChunk } from "../../src/oracle/anvil/chunk.ts";
+import { buildChunkFixture } from "../../oracle/lib/integration/chunk-fixture.ts";
+import { decodeChunkLightFixture } from "../../oracle/lib/integration/light-fixture.ts";
+import type { DecodedChunk } from "../../oracle/lib/anvil/chunk.ts";
 
 function fakeChunk(overrides: Partial<DecodedChunk> = {}): DecodedChunk {
   return {

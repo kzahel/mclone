@@ -4,7 +4,7 @@ import {
   decodeEntityStorageChunk,
   decodeLegacyChunkEntities,
   type DecodedEntityChunk,
-} from "../../src/oracle/anvil/entity-chunk.ts";
+} from "../../oracle/lib/anvil/entity-chunk.ts";
 import {
   NBT_TAG_COMPOUND,
   NBT_TAG_DOUBLE,
@@ -13,13 +13,13 @@ import {
   type NbtList,
   type NbtCompound,
   type NbtTagId,
-} from "../../src/oracle/anvil/nbt.ts";
+} from "../../oracle/lib/anvil/nbt.ts";
 import {
   buildCreatureGenerationFixture,
   categoryForEntityType,
   compareCreatureGenerationFixtures,
   normalizeCreatureEntity,
-} from "../../src/oracle/integration/creature-fixture.ts";
+} from "../../oracle/lib/integration/creature-fixture.ts";
 
 function list(type: NbtTagId, values: readonly number[]): NbtList {
   return { type, values };

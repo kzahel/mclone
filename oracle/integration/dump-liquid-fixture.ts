@@ -2,14 +2,14 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { gunzipSync, inflateSync } from "node:zlib";
 
-import { decodeChunk, type DecodedChunk } from "../../src/oracle/anvil/chunk.ts";
-import { COMPRESSION_GZIP, COMPRESSION_NONE, COMPRESSION_ZLIB, RegionFile } from "../../src/oracle/anvil/region.ts";
+import { decodeChunk, type DecodedChunk } from "../lib/anvil/chunk.ts";
+import { COMPRESSION_GZIP, COMPRESSION_NONE, COMPRESSION_ZLIB, RegionFile } from "../lib/anvil/region.ts";
 import {
   buildLiquidRegionFixture,
   decodeChunkLiquidTicks,
   type ChunkLiquidTickInput,
-} from "../../src/oracle/integration/liquid-fixture.ts";
-import { boundsMaxX, boundsMaxZ, readLiquidScenario } from "../../src/oracle/integration/liquid-scenario.ts";
+} from "../lib/integration/liquid-fixture.ts";
+import { boundsMaxX, boundsMaxZ, readLiquidScenario } from "../lib/integration/liquid-scenario.ts";
 
 function usage(): never {
   process.stderr.write(

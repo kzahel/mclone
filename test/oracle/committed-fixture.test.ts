@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import committed from "../fixtures/integration/overworld-seed-12345-chunks-0-0.json" with { type: "json" };
-import { decodeChunkLightFixture } from "../../src/oracle/integration/light-fixture.ts";
+import { decodeChunkLightFixture } from "../../oracle/lib/integration/light-fixture.ts";
 
 interface CommittedFixtureSection {
   readonly y: number;

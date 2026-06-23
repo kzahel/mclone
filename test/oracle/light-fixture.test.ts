@@ -5,7 +5,7 @@ import {
   compareChunkLight,
   lightBytesToBase64,
   type ChunkLightBytes,
-} from "../../src/oracle/integration/light-fixture.ts";
+} from "../../oracle/lib/integration/light-fixture.ts";
 
 function bytes(values: readonly number[], length = 2048): Uint8Array {
   const out = new Uint8Array(length);

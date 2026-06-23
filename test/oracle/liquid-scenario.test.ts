@@ -5,7 +5,7 @@ import {
   boundsMaxY,
   boundsMaxZ,
   normalizeLiquidScenario,
-} from "../../src/oracle/integration/liquid-scenario.ts";
+} from "../../oracle/lib/integration/liquid-scenario.ts";
 
 describe("normalizeLiquidScenario", () => {
   test("fills vanilla defaults and exposes inclusive max bounds", () => {

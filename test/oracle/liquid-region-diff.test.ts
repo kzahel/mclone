@@ -5,7 +5,7 @@ import {
   type BlockStateFixtureEntry,
   type LiquidRegionFixture,
   type ScheduledLiquidTickFixture,
-} from "../../src/oracle/integration/liquid-fixture.ts";
+} from "../../oracle/lib/integration/liquid-fixture.ts";
 
 function fixture(
   overrides: Partial<LiquidRegionFixture> = {},
