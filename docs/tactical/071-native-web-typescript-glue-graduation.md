@@ -240,7 +240,8 @@ no `.ts`), `pnpm native:web:app-smoke`, `pnpm native:web:chunk-smoke` plus final
 `pnpm native:web:mobile-smoke` with mobile canvas inspection, `pnpm native:web:movement-perf`,
 `pnpm native:movement:smoke`, and `pnpm native:timedemo:smoke`.
 
-Commit: `071: graduate touch glue through staged TS emit`.
+Implementation commit: `09c3f2ffe4afdc346e5a6d1a4a65674b25855984`
+(`071: graduate touch glue through staged TS emit`).
 
 ## Relationship to Other Tacticals
 
