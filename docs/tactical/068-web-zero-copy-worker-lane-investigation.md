@@ -304,7 +304,8 @@ of zero-copy, and out of scope here.)
    and response collapse to deltas; re-run `native:web:chunk-smoke` /
    `native:web:movement-perf` and confirm the warm worldgen bytes and round-trip
    drop, with desktop `mpsc` untouched (`native:movement:smoke` /
-   `native:timedemo:smoke` green).
+   `native:timedemo:smoke` green). **Implementation plan:**
+   [`069-web-worldgen-lane-payload-reduction.md`](069-web-worldgen-lane-payload-reduction.md).
 2. **(Optional) Light worker residency.** Port the native light worker's resident
    `RetainedInitialLightState` to the wasm light worker if light *latency* (not
    serde) is found to matter on a slower device. Attacks work, not transport.
