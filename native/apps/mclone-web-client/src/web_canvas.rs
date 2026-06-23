@@ -69,11 +69,16 @@ const WEB_OVERVIEW_CAMERA_EYE_Y: f32 = 256.0;
 const WEB_RENDER_COMPILE_DELTA_MAGIC: &[u8; 8] = b"MCWRCD1\0";
 const WEB_RENDER_COMPILE_DELTA_FLAG_RESET: u32 = 1;
 
-// 067 Stage 2: resident render-compiler shared ring ABI. These mirror the
-// constants in `mclone-render-compiler-worker.js` (the producer) and the JS app /
-// smoke glue; the worker writes the result control word + payload and main wasm
-// reads them back here via `js_sys::Atomics`. Keep all three copies in lockstep
-// until Stage 5 emits them from a single Rust source.
+// 067 Stage 2 ABI / Stage 5 lock: resident render-compiler shared ring constants.
+// The worker writes the result control word + payload and main wasm reads them back
+// here via `js_sys::Atomics`. The JS side now authors these once in
+// `www/mclone-render-compiler-abi.js` (imported by the worker producer + the app/smoke
+// consumers); this Rust block is the main-wasm reader's copy. The two authored copies
+// are kept in lockstep by the host test `tests/render_compiler_abi_lock.rs`, which parses
+// both files and fails on any drift — so a mismatched status-word index is a failing test,
+// not a silent SAB corruption. (A `build.rs`/codegen single-source was considered but
+// rejected: there is no codegen precedent in this crate, and a parse-and-assert lock has a
+// far smaller blast radius than wiring a generated, committed JS artifact.)
 const RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS: u32 = 4;
 const RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX: u32 = 0;
 const RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX: u32 = 1;

@@ -1,6 +1,9 @@
 # 067: Shared Render-Worker Architecture
 
-Status: active high-priority architecture parent. Stage 0 (baselines), Stage 1
+Status: **fully landed — all of Stages 0–5.** This doc is now historical/reference;
+the only open work is the two follow-ups recorded at the end of Stage 5 (the web
+snapshot-collector clone, and budget tuning / a small render-worker pool). Stage 0
+(baselines), Stage 1
 (resident SAB arenas), Stage 2 (web `RenderSectionCompiler` over the resident
 ring), and **all of Stage 3** — the keystone (per-frame
 `sync_render_sections_with_budget` streaming: the shared loop, web
@@ -13,7 +16,8 @@ fields, and the non-SAB `message-transfer` fallback deleted) — are landed.
 the per-frame SAB input is a delta (changed columns + evictions) against that
 mirror instead of the whole loaded world: input dropped from ~206 KB/compile to
 24 bytes–122 KB (header-only when the target column is already resident) — is also
-landed. Stage 5 (JS dedup + single-source ABI constants) remains. Supersedes
+landed. **Stage 5** — the JS dedup + single-source ABI lock — is now landed too,
+completing 067. Supersedes
 [`065-native-web-mobile-streaming-performance.md`](065-native-web-mobile-streaming-performance.md)
 and [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md),
 folding their streaming-perf goals and the render-worker `SharedArrayBuffer`
@@ -551,7 +555,87 @@ that the SAB-bytes win is banked.
 
 ### Stage 5 — JS dedup + single-source ABI constants
 
-Collapse the ~35 shared symbols into one module; emit the ABI from Rust.
+Collapse the ~30–35 shared symbols into one module; single-source the ABI.
+
+**Landed.** The render `www/*.js` glue is now ES-module-shared. Two new files own
+what the three render files used to hand-duplicate:
+
+- `www/mclone-render-compiler-abi.js` — the SAB ring ABI constants (the union of
+  what producer + consumers need), authored once and imported by all three render
+  files. The former three hand-synced JS copies (app `1:8–23`, smoke `1:11–26`,
+  worker `1:1–14`) collapse to this one.
+- `www/mclone-render-compiler-shared.js` — the residual glue: the
+  `RenderSectionWorkerCompiler` doorbell-relay class plus the ~10 SAB-arena /
+  metrics / predicate helpers. It re-exports the ABI module so consumers have a
+  single import. `mclone-web-app.js` and `mclone-web-smoke.js` each shrank from a
+  ~470-line copy-pasted block to one `import { RenderSectionWorkerCompiler,
+  fetchAssetPack }` line (app 2257→1777 lines, smoke 1196→707). The worker imports
+  the 12 constants it touches from the ABI module and the three shared predicates
+  (`byteLengthOf` / `isSharedArrayBuffer` / `renderCompilerSharedMemorySupported`)
+  from the shared module.
+
+The two formerly-divergent `RenderSectionWorkerCompiler` classes were reconciled to
+the app's (production) version; smoke's two extra methods (`pendingJobCount`,
+`terminate`) are kept as an additive superset. **URL/cache-bust policy stays
+per-caller:** the shared class takes the worker URL, bindgen URLs, and worker name as
+constructor args, so app keeps `versionedUrl(...)` (`?v=` cache-bust) and smoke keeps
+plain `new URL(...)`. `fetchAssetPack` likewise takes the asset-pack URL as an arg.
+
+**Single-source ABI mechanism — chosen: hand-authored JS + a Rust equality test (the
+handoff's option (b)), not codegen (option (a)).** The Rust main-wasm reader keeps its
+own `const` block in `web_canvas.rs` (it can't import the JS at compile time); the JS
+side authors the constants once in `mclone-render-compiler-abi.js`; and the host
+integration test `native/apps/mclone-web-client/tests/render_compiler_abi_lock.rs`
+parses the numeric `RENDER_COMPILER_*` constants out of *both* files and asserts they
+agree, so any drift is a failing `cargo test` instead of a silent SAB corruption (a
+wrong status-word index → a compile that never completes or decodes garbage). The
+test was verified non-vacuous (corrupting one JS value fails it with a precise
+message). Codegen was rejected: there is no `build.rs`/codegen precedent in this crate
+or the workspace, and a parse-and-assert lock has a far smaller blast radius than
+wiring a generated, committed JS artifact. Note: the test **must** live in `tests/`
+(a host-compiled integration crate), not as a `#[cfg(test)]` unit test inside
+`web_canvas.rs` — that module is `#[cfg(target_arch = "wasm32")]`-gated, so a unit
+test there never runs under host `cargo test`. The stale `web_canvas.rs` "keep all
+three copies in lockstep until Stage 5…" comment was updated to describe this lock.
+
+**Dead `message-transfer` branch deleted.** Stage 3 removed the non-SAB fallback from
+the live path (the app throws without cross-origin isolation), so the worker's
+transferable-`postMessage` result path was unreachable: the `else` arm in
+`handleCompile` and the non-shared early return in `writeSharedCompileResult` are gone,
+and the `RENDER_COMPILER_MESSAGE_TRANSFER_KIND` constant (defined-but-unused in app/smoke,
+referenced only by the deleted worker arm) is dropped. The `transferredResponseByteLength`
+metric field is **kept** — it now always reports `0` on the shared path, and the app/smoke
+metrics plumbing plus `browser-smoke.mjs` still assert it stays `0`. The unrelated
+server-runner `"message-transfer"` transport check (062's lane) in `mclone-web-smoke.js`
+is untouched.
+
+**Deploy hardening note (not a blocker).** A static `import "./mclone-render-compiler-shared.js"`
+cannot carry the importer's `?v=<version>` cache-bust query, so the shared/ABI modules are
+cached under their bare URLs. Smoke/dev are unaffected (`DEPLOY_ASSET_VERSION` is unset there),
+but a production deploy that bumps the asset version must rely on HTTP cache revalidation of
+those bare URLs (or have the deploy step rewrite the bare imports to versioned ones). This is
+recorded in a header comment in `mclone-render-compiler-abi.js`.
+
+Validation (all green): `cargo test` (full workspace, incl. the new ABI-lock test),
+`cargo check -p mclone-web-client --target wasm32-unknown-unknown` (warning-clean),
+`node --check` on the three render `www/*.js` + the two new modules + `browser-smoke.mjs`,
+`native:web:build`, `native:web:chunk-smoke` (+canvas inspected — terrain column identical to
+the Stage 4 reference), `native:web:app-smoke`, `native:web:mobile-smoke`,
+`native:web:movement-perf` (metrics unchanged from Stage 4: 16 sections/compile, 0.78–1.73 MB
+packed, `shared-result-buffer` transport, delta input 24 B–~71 KB),
+`native:movement:smoke`, `native:timedemo:smoke`.
+
+**067 follow-ups (out of this tactical's scope; spawned, not regressions):**
+
+1. **Stage-4 snapshot-collector clone.** The web collector still
+   `client.chunk_snapshots().cloned().collect()`s every loaded column each frame before
+   `submit` diffs them — a main-thread clone (not a SAB cost). Removing it needs a
+   web-specific collector with access to the shadow map.
+2. **Budget tuning / a 2–3-worker render pool.** At ~5–11 ms round-trips, budget-1
+   single-in-flight catches up a burst over ~0.5–1 s; raising the budget or adding a small
+   pool is a `RenderSectionCompiler` backend detail (067 "Risks").
+
+The shared-Wasm-linear-memory thread runtime remains explicitly out of scope (Non-Goals).
 
 **Least-convoluted path to "close to desktop":** Stages 1->3 alone get web onto
 desktop's topology and kill the mega-job, mostly by deleting JavaScript rather

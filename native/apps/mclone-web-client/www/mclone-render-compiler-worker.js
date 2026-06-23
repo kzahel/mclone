@@ -1,17 +1,26 @@
-const RENDER_COMPILER_TRANSPORT_KIND = "shared-result-buffer";
-const RENDER_COMPILER_MESSAGE_TRANSFER_KIND = "message-transfer";
-const RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS = 4;
-const RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX = 0;
-const RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX = 1;
-const RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX = 2;
-const RENDER_COMPILER_SHARED_RESULT_COMPLETE = 2;
-const RENDER_COMPILER_SHARED_RESULT_OVERFLOW = 3;
-const RENDER_COMPILER_SHARED_RESULT_FAILED = 4;
-const RENDER_COMPILER_SHARED_INPUT_CONTROL_WORDS = 4;
-const RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX = 0;
-const RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX = 1;
-const RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX = 2;
-const RENDER_COMPILER_SHARED_INPUT_READY = 2;
+// 067 Stage 5: the SAB ring ABI constants and the shared predicate helpers now live in
+// ./mclone-render-compiler-abi.js (the single JS source, locked to the Rust copy by a host
+// test) and ./mclone-render-compiler-shared.js. This worker is the producer; it imports the
+// constants it writes/reads plus the measurement predicates the consumers also use.
+import {
+  RENDER_COMPILER_TRANSPORT_KIND,
+  RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS,
+  RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX,
+  RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX,
+  RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX,
+  RENDER_COMPILER_SHARED_RESULT_COMPLETE,
+  RENDER_COMPILER_SHARED_RESULT_OVERFLOW,
+  RENDER_COMPILER_SHARED_RESULT_FAILED,
+  RENDER_COMPILER_SHARED_INPUT_CONTROL_WORDS,
+  RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX,
+  RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX,
+  RENDER_COMPILER_SHARED_INPUT_READY,
+} from "./mclone-render-compiler-abi.js";
+import {
+  byteLengthOf,
+  isSharedArrayBuffer,
+  renderCompilerSharedMemorySupported,
+} from "./mclone-render-compiler-shared.js";
 
 let wasmModulePromise = null;
 let compilerSession = null;
@@ -186,13 +195,11 @@ async function handleCompile(message) {
       targetedCompileUsed: hasPersistentSnapshotCompiler || hasGeneratedTargetedCompiler,
       summary,
     };
-    if (response.sharedResultBufferUsed) {
-      report.sharedResultBuffer = response.sharedResultBuffer;
-      self.postMessage(report);
-    } else {
-      report.packed = packed;
-      self.postMessage(report, [packed.buffer]);
-    }
+    // 067 Stage 3 removed the non-SAB fallback from the live path; the app requires
+    // cross-origin isolation, so the result always rides the resident shared buffer and
+    // the transferable-postMessage branch is gone (067 Stage 5).
+    report.sharedResultBuffer = response.sharedResultBuffer;
+    self.postMessage(report);
   } catch (error) {
     markSharedCompileResultFailed(message);
     self.postMessage({
@@ -272,21 +279,12 @@ function sharedInputControl(message) {
 }
 
 function writeSharedCompileResult(message, packed) {
+  // 067 Stage 5: the non-SAB transferable fallback is deleted — the live path requires
+  // cross-origin isolation, so the result always rides the resident shared buffer. The
+  // returned `transferredResponseByteLength: 0` field is kept because the app/smoke metrics
+  // and browser-smoke.mjs still read it (asserting it stays 0 on the shared path).
   const packedByteLength = byteLengthOf(packed);
-  const requestedResponseBuffer = message.sharedResultResponseBuffer;
-  if (!renderCompilerSharedMemorySupported() || !isSharedArrayBuffer(requestedResponseBuffer)) {
-    return {
-      transportKind: RENDER_COMPILER_MESSAGE_TRANSFER_KIND,
-      transferredResponseByteLength: packedByteLength,
-      sharedResultBufferUsed: false,
-      sharedResultByteLength: 0,
-      sharedResultBufferCapacityBytes: 0,
-      sharedResultOverflow: false,
-      sharedResultBuffer: null,
-    };
-  }
-
-  let sharedResultBuffer = requestedResponseBuffer;
+  let sharedResultBuffer = message.sharedResultResponseBuffer;
   let sharedResultOverflow = false;
   if (sharedResultBuffer.byteLength < packedByteLength) {
     sharedResultBuffer = new SharedArrayBuffer(packedByteLength);
@@ -336,25 +334,6 @@ function sharedResultControl(message) {
     return null;
   }
   return new Int32Array(buffer);
-}
-
-function byteLengthOf(value) {
-  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || isSharedArrayBuffer(value)) {
-    return value.byteLength;
-  }
-  return 0;
-}
-
-function renderCompilerSharedMemorySupported() {
-  return typeof SharedArrayBuffer === "function"
-    && typeof Atomics === "object"
-    && typeof Atomics.load === "function"
-    && typeof Atomics.store === "function"
-    && typeof Atomics.notify === "function";
-}
-
-function isSharedArrayBuffer(value) {
-  return typeof SharedArrayBuffer === "function" && value instanceof SharedArrayBuffer;
 }
 
 function stringifyError(error) {
