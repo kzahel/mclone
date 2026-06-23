@@ -64,6 +64,8 @@ interface AppRuntime {
   setInputKey?: (name: string, down: boolean) => boolean;
   adjustCameraSpeed?: (amount: number) => WasmReport | null;
   previewBlockTarget?: () => WasmReport | null;
+  openNativeTitleUi?: () => WasmReport | null;
+  closeNativeUi?: () => WasmReport | null;
   touchControlState?: () => any;
   setHudOpen?: (open: boolean) => void;
   setMenuOpen?: (open: boolean) => void;
@@ -136,6 +138,9 @@ const runtime: AppRuntime = {
     compileTimings: [],
     compileTimingCount: 0,
     renderCount: 0,
+    guiCommandCount: 0,
+    uiActive: false,
+    uiCoversWorld: false,
     frameCount: 0,
     lastFrameGapMs: 0,
     maxFrameGapMs: 0,
@@ -179,6 +184,8 @@ async function boot(): Promise<WasmReport> {
   runtime.setInputKey = (name: string, down: boolean) => app.setInputKey(name, down);
   runtime.adjustCameraSpeed = (amount: number) => app.adjustCameraSpeed(amount);
   runtime.previewBlockTarget = () => runtime.state.currentTarget;
+  runtime.openNativeTitleUi = () => app.openNativeTitleUi();
+  runtime.closeNativeUi = () => app.closeNativeUi();
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
   runtime.setHudOpen = (open: boolean) => setHudOpen(runtime.state, Boolean(open));
   runtime.setMenuOpen = (open: boolean) => setMenuOpen(app, runtime.state, Boolean(open));
@@ -305,6 +312,9 @@ class WebChunkApp {
       "selectHotbarSlot",
       "previewBlockTarget",
       "interactBlock",
+      "openTitleUi",
+      "closeUi",
+      "uiStatus",
     ]) {
       if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
         throw new Error(`missing WebChunkRenderSession.${name} export`);
@@ -661,6 +671,9 @@ class WebChunkApp {
     runtime.state.worldgenJobFrameMetrics = report.worldgenJobFrameMetrics ?? null;
     runtime.state.lightStatusJobFrameMetrics = report.lightStatusJobFrameMetrics ?? null;
     runtime.state.renderCount = report.renderCount;
+    runtime.state.guiCommandCount = report.guiCommandCount;
+    runtime.state.uiActive = Boolean(report.uiActive);
+    runtime.state.uiCoversWorld = Boolean(report.uiCoversWorld);
     runtime.state.status = "ready";
     runtime.state.lastReport = report;
   }
@@ -734,6 +747,28 @@ class WebChunkApp {
     this.applyCameraState(camera);
     updateDom(runtime.state);
     return camera;
+  }
+
+  openNativeTitleUi(): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    if (this.sessionBusy) {
+      setTimeout(() => this.openNativeTitleUi(), 0);
+      return null;
+    }
+    return this.session.openTitleUi();
+  }
+
+  closeNativeUi(): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    if (this.sessionBusy) {
+      setTimeout(() => this.closeNativeUi(), 0);
+      return null;
+    }
+    return this.session.closeUi();
   }
 
   async withSessionAsync<T>(operation: () => T | Promise<T>): Promise<Awaited<T>> {

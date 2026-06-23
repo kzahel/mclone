@@ -32,6 +32,7 @@ use mclone_render::chunk::{
     TexturedSectionUploadReport,
 };
 use mclone_render::entity::{ActorDrawResources, ActorInstance};
+use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameTarget;
 use mclone_render_session::{
@@ -45,6 +46,9 @@ use mclone_render_session::{
     sort_dirty_section_chunks_by_distance, summarize_textured_render_section_build_report,
 };
 use mclone_server::ServerRunnerKind;
+use mclone_ui::{
+    GameFramePacingMode, GameOptionsParent, GameScreen, GameUi, GameUiRenderState, GuiScale,
+};
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
 const CANVAS_RENDERED_BIT: u32 = 1 << 1;
@@ -824,6 +828,9 @@ struct GeneratedChunkRenderReport {
     mesh_build_count: usize,
     mesh_upload_count: usize,
     render_count: usize,
+    gui_command_count: usize,
+    ui_active: bool,
+    ui_covers_world: bool,
     compile_request_id: u32,
     pending_compile_job_count: usize,
     view_dirty_chunk_count: usize,
@@ -990,6 +997,9 @@ impl GeneratedChunkRenderReport {
         set_number(&object, "meshBuildCount", self.mesh_build_count as f64)?;
         set_number(&object, "meshUploadCount", self.mesh_upload_count as f64)?;
         set_number(&object, "renderCount", self.render_count as f64)?;
+        set_number(&object, "guiCommandCount", self.gui_command_count as f64)?;
+        set_bool(&object, "uiActive", self.ui_active)?;
+        set_bool(&object, "uiCoversWorld", self.ui_covers_world)?;
         set_number(
             &object,
             "pendingCompileJobCount",
@@ -2170,6 +2180,8 @@ pub struct WebChunkRenderSession {
     mesh_assets: WebTexturedMeshAssets,
     draw: Option<TexturedSectionDrawResources>,
     actors: ActorDrawResources,
+    gui: GuiRenderer,
+    ui: GameUi,
     loaded_chunk_positions: BTreeSet<ChunkPos>,
     // 067 Stage 3: the last chunk-view center we asked the runner to stream. The
     // streaming loop only re-sends the deferred SetChunkView command when this changes,
@@ -2198,6 +2210,44 @@ impl WebChunkRenderSession {
     #[wasm_bindgen(js_name = renderCompilerSharedSupported)]
     pub fn render_compiler_shared_supported(&self) -> bool {
         self.render_compiler.shared_supported()
+    }
+
+    #[wasm_bindgen(js_name = uiStatus)]
+    pub fn ui_status(&self) -> Result<JsValue, JsValue> {
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = openTitleUi)]
+    pub fn open_title_ui(&mut self) -> Result<JsValue, JsValue> {
+        self.ui.set_screen(Some(GameScreen::Title));
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = openPauseUi)]
+    pub fn open_pause_ui(&mut self) -> Result<JsValue, JsValue> {
+        self.ui.set_screen(Some(GameScreen::Pause));
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = openOptionsUi)]
+    pub fn open_options_ui(&mut self, parent: &str) -> Result<JsValue, JsValue> {
+        let parent = match parent {
+            "title" => GameOptionsParent::Title,
+            "pause" => GameOptionsParent::Pause,
+            other => {
+                return Err(JsValue::from_str(&format!(
+                    "unknown native UI options parent {other:?}"
+                )));
+            }
+        };
+        self.ui.set_screen(Some(GameScreen::Options { parent }));
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = closeUi)]
+    pub fn close_ui(&mut self) -> Result<JsValue, JsValue> {
+        self.ui.close();
+        self.ui_status_to_js_value().map_err(JsValue::from)
     }
 
     /// 067 Stage 3 keystone: drive one frame of the shared per-frame streaming loop from
@@ -2347,6 +2397,10 @@ impl WebChunkRenderSession {
                 self.context.width,
                 self.context.height,
             );
+            self.ui.set_scale(GuiScale::from_pixels(
+                self.context.width,
+                self.context.height,
+            ));
         }
         canvas_size_to_js_value(self.context.width, self.context.height, changed)
             .map_err(JsValue::from)
@@ -2364,6 +2418,48 @@ impl WebChunkRenderSession {
 }
 
 impl WebChunkRenderSession {
+    fn ui_status_to_js_value(&self) -> Result<JsValue, String> {
+        let object = js_sys::Object::new();
+        set_bool(&object, "ok", true)?;
+        set_bool(&object, "active", self.ui.is_active())?;
+        set_bool(&object, "coversWorld", self.ui.covers_world())?;
+        set_string(
+            &object,
+            "screen",
+            match self.ui.screen() {
+                Some(GameScreen::Title) => "title",
+                Some(GameScreen::Pause) => "pause",
+                Some(GameScreen::Options { .. }) => "options",
+                None => "none",
+            },
+        )?;
+        if let Some(GameScreen::Options { parent }) = self.ui.screen() {
+            set_string(
+                &object,
+                "optionsParent",
+                match parent {
+                    GameOptionsParent::Title => "title",
+                    GameOptionsParent::Pause => "pause",
+                },
+            )?;
+        }
+        Ok(object.into())
+    }
+
+    fn ui_render_state(&self, radius_chunks: u32) -> GameUiRenderState {
+        GameUiRenderState {
+            render_distance: i32::try_from(radius_chunks).unwrap_or(i32::MAX),
+            // Web currently drives a mobile-safe radius of 1 from TS. Keep that
+            // available in the shared UI until the web action adapter owns the setting.
+            min_render_distance: 1,
+            max_render_distance: 16,
+            section_occlusion_culling: true,
+            force_fullbright: false,
+            frame_pacing_mode: GameFramePacingMode::Vsync,
+            fps_cap: 60,
+        }
+    }
+
     async fn new(canvas: HtmlCanvasElement, asset_pack_bytes: Vec<u8>) -> Result<Self, String> {
         Self::new_with_runtime(
             canvas,
@@ -2398,6 +2494,9 @@ impl WebChunkRenderSession {
             mesh_assets.actor_atlas.as_upload(),
         )
         .map_err(|error| format!("failed to upload packed actor textures: {error:#}"))?;
+        let gui = GuiRenderer::new(&context.device, context.format);
+        let mut ui = GameUi::new_ingame();
+        ui.set_scale(GuiScale::from_pixels(context.width, context.height));
 
         Ok(Self {
             context,
@@ -2410,6 +2509,8 @@ impl WebChunkRenderSession {
             mesh_assets,
             draw: None,
             actors,
+            gui,
+            ui,
             loaded_chunk_positions: BTreeSet::new(),
             interest_center: None,
             asset_pack_parse_count: 1,
@@ -2982,6 +3083,11 @@ impl WebChunkRenderSession {
         let render_options = TexturedSectionRenderOptions::default()
             .with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day));
         let actor_instances = self.interpolated_actor_instances();
+        let ui_active = self.ui.is_active();
+        let ui_covers_world = self.ui.covers_world();
+        let ui_render_state = self.ui_render_state(radius_chunks);
+        let ui_draw = self.ui.render_draw_list(ui_render_state);
+        let gui_command_count = ui_draw.commands().len();
 
         let frame = self
             .context
@@ -2995,53 +3101,76 @@ impl WebChunkRenderSession {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("mclone_web_generated_textured_chunk_encoder"),
                 });
-        self.sky.render(
-            &self.context.queue,
-            &mut encoder,
-            &view,
-            sky_clear_color,
-            render_view.sky_view_projection(),
-            time_of_day,
-            sun_angle,
-        );
-        let render_stats = if has_sections {
-            let draw = self
-                .draw
-                .as_ref()
-                .ok_or_else(|| "textured draw resources were not initialized".to_owned())?;
-            let render_target = ChunkRenderTarget::new(
-                &view,
-                &self.depth.view,
-                [self.context.width, self.context.height],
-                sky_clear_color,
-            )
-            .with_loaded_color();
-            draw.render_with_options(
-                &self.context.queue,
-                &mut encoder,
-                render_target,
-                render_view,
-                render_options,
-            )
-            .map_err(|error| format!("failed to render generated section meshes: {error:#}"))?
-        } else {
+        let mut actor_stats = mclone_render::entity::ActorRenderStats::default();
+        let render_stats = if ui_covers_world {
             TexturedSectionRenderStats::default()
-        };
-        let frame_target =
-            RenderFrameTarget::color(&view, [self.context.width, self.context.height])
-                .with_depth(&self.depth.view);
-        let actor_stats = self
-            .actors
-            .render(
-                &self.context.device,
+        } else {
+            self.sky.render(
                 &self.context.queue,
                 &mut encoder,
-                frame_target,
-                render_view,
-                render_options,
-                &actor_instances,
-            )
-            .map_err(|error| format!("failed to render browser actor meshes: {error:#}"))?;
+                &view,
+                sky_clear_color,
+                render_view.sky_view_projection(),
+                time_of_day,
+                sun_angle,
+            );
+            let render_stats = if has_sections {
+                let draw = self
+                    .draw
+                    .as_ref()
+                    .ok_or_else(|| "textured draw resources were not initialized".to_owned())?;
+                let render_target = ChunkRenderTarget::new(
+                    &view,
+                    &self.depth.view,
+                    [self.context.width, self.context.height],
+                    sky_clear_color,
+                )
+                .with_loaded_color();
+                draw.render_with_options(
+                    &self.context.queue,
+                    &mut encoder,
+                    render_target,
+                    render_view,
+                    render_options,
+                )
+                .map_err(|error| format!("failed to render generated section meshes: {error:#}"))?
+            } else {
+                TexturedSectionRenderStats::default()
+            };
+            let frame_target =
+                RenderFrameTarget::color(&view, [self.context.width, self.context.height])
+                    .with_depth(&self.depth.view);
+            actor_stats = self
+                .actors
+                .render(
+                    &self.context.device,
+                    &self.context.queue,
+                    &mut encoder,
+                    frame_target,
+                    render_view,
+                    render_options,
+                    &actor_instances,
+                )
+                .map_err(|error| format!("failed to render browser actor meshes: {error:#}"))?;
+            render_stats
+        };
+        if ui_active {
+            self.gui
+                .render(
+                    &self.context.device,
+                    &self.context.queue,
+                    &mut encoder,
+                    RenderFrameTarget::color(&view, [self.context.width, self.context.height]),
+                    [self.ui.scale().width, self.ui.scale().height],
+                    &ui_draw,
+                    if ui_covers_world {
+                        GuiRenderOptions::clear(mclone_render::default_clear_color())
+                    } else {
+                        GuiRenderOptions::overlay()
+                    },
+                )
+                .map_err(|error| format!("failed to render browser GUI overlay: {error:#}"))?;
+        }
         self.context.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
         self.render_count += 1;
@@ -3056,7 +3185,7 @@ impl WebChunkRenderSession {
             day_time,
             time_of_day,
             sun_angle,
-            sky_rendered: true,
+            sky_rendered: !ui_covers_world,
             command_count: self.runtime.command_count(),
             update_count: self.runtime.update_count(),
             loaded_chunk_count: self.runtime.client().loaded_chunk_count(),
@@ -3084,6 +3213,9 @@ impl WebChunkRenderSession {
             mesh_build_count: self.mesh_build_count,
             mesh_upload_count: self.mesh_upload_count,
             render_count: self.render_count,
+            gui_command_count,
+            ui_active,
+            ui_covers_world,
             compile_request_id: acceptance_report.request_id,
             pending_compile_job_count: self.render_compiler.pending_job_count(),
             view_dirty_chunk_count: compile_scope.view_dirty_chunk_count,

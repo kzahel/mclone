@@ -58,6 +58,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app-canvas.png"
     : appLoop ? "/tmp/mclone-native-web-app-canvas.png" : "/tmp/mclone-native-web-canvas.png");
+const nativeUiCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_UI_CANVAS_SCREENSHOT
+  ?? "/tmp/mclone-native-web-ui-canvas.png";
 const movementPerfReportPath = process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_REPORT
   ?? "/tmp/mclone-native-web-movement-perf.json";
 const movementPerfChunkBoundaries = Math.max(
@@ -364,6 +366,7 @@ async function run() {
       }
       const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
       const canvasPixels = analyzePng(canvasPng);
+      const nativeUiProbe = await captureNativeUiProbe(page, canvas);
 
       assertAppLoopResult(
         result,
@@ -373,13 +376,16 @@ async function run() {
         targetPreviewProbe,
         blockInteractionProbe,
       );
+      assertNativeUiProbe(nativeUiProbe);
       console.log(JSON.stringify({
         url: `${baseUrl}/app.html`,
         screenshotPath,
         pageScreenshotCaptured,
         canvasScreenshotPath,
+        nativeUiCanvasScreenshotPath,
         appLoop,
         canvasPixels,
+        nativeUiProbe,
         walkingProbe,
         targetPreviewProbe,
         blockInteractionProbe,
@@ -623,6 +629,63 @@ async function waitForWebAppStreamingSettled(page, timeout = 60_000) {
     undefined,
     { timeout },
   );
+}
+
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ */
+async function captureNativeUiProbe(page, canvas) {
+  const requestedStatus = await page.evaluate(() => (
+    globalThis.__mcloneWebApp?.openNativeTitleUi?.() ?? null
+  ));
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      const report = state?.lastReport;
+      return state?.ok === true
+        && report?.uiActive === true
+        && report?.uiCoversWorld === true
+        && Number(report?.guiCommandCount) > 500;
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
+  const state = await page.evaluate(() => {
+    const runtimeState = globalThis.__mcloneWebApp.state;
+    return {
+      ok: runtimeState.ok,
+      uiActive: runtimeState.uiActive,
+      uiCoversWorld: runtimeState.uiCoversWorld,
+      guiCommandCount: runtimeState.guiCommandCount,
+      lastReport: {
+        ok: runtimeState.lastReport?.ok,
+        uiActive: runtimeState.lastReport?.uiActive,
+        uiCoversWorld: runtimeState.lastReport?.uiCoversWorld,
+        guiCommandCount: runtimeState.lastReport?.guiCommandCount,
+        skyRendered: runtimeState.lastReport?.skyRendered,
+      },
+    };
+  });
+  const canvasPng = await canvas.screenshot({
+    path: nativeUiCanvasScreenshotPath,
+    timeout: 60_000,
+  });
+  const canvasPixels = analyzePng(canvasPng);
+  await page.evaluate(() => {
+    globalThis.__mcloneWebApp?.closeNativeUi?.();
+  });
+  return {
+    ok: state.uiActive === true
+      && state.uiCoversWorld === true
+      && Number(state.guiCommandCount) > 500
+      && canvasPixels.nonClearInteriorPixelCount > 128
+      && canvasPixels.distinctInteriorColorCount > 2,
+    requestedStatus,
+    state,
+    canvasScreenshotPath: nativeUiCanvasScreenshotPath,
+    canvasPixels,
+  };
 }
 
 /**
@@ -1617,6 +1680,13 @@ function assertAppLoopResult(
   }
   if (canvasPixels.skyLikePixelCount < 64) {
     throw new Error(`app canvas screenshot did not contain visible sky pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+/** @param {any} nativeUiProbe */
+function assertNativeUiProbe(nativeUiProbe) {
+  if (!nativeUiProbe?.ok) {
+    throw new Error(`native web app did not render the shared Rust UI overlay:\n${JSON.stringify(nativeUiProbe, null, 2)}`);
   }
 }
 

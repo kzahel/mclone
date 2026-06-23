@@ -1182,6 +1182,7 @@ dependencies = [
  "mclone-render",
  "mclone-render-session",
  "mclone-server",
+ "mclone-ui",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

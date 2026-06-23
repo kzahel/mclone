@@ -1,6 +1,6 @@
 # 072: Native UI DOM Retirement
 
-Status: active high-priority parent; Slice 1 shared menu model extraction landed.
+Status: active high-priority parent; Slices 1-2 landed.
 
 ## Purpose
 
@@ -176,14 +176,14 @@ Inspect `/tmp/mclone-ui-title.png` before moving on.
 
 Goal: web can render the shared UI draw list through WebGPU even before DOM menu deletion.
 
-- [ ] Add `mclone-ui` as a direct dependency of `mclone-web-client` if needed.
-- [ ] Add `GuiRenderer` and shared UI state to `WebChunkRenderSession`.
-- [ ] Initialize GUI renderer with the web surface format.
-- [ ] Resize/update `GuiScale` with canvas backing size.
-- [ ] Render the UI overlay after actors and before present.
-- [ ] Add exported session methods for UI open/close/status if the TS adapter needs to trigger screen state.
-- [ ] Add a web smoke path that captures a visible native UI menu screenshot to `/tmp`.
-- [ ] Update this doc's status/landed section, commit, and report the next high-value step.
+- [x] Add `mclone-ui` as a direct dependency of `mclone-web-client` if needed.
+- [x] Add `GuiRenderer` and shared UI state to `WebChunkRenderSession`.
+- [x] Initialize GUI renderer with the web surface format.
+- [x] Resize/update `GuiScale` with canvas backing size.
+- [x] Render the UI overlay after actors and before present.
+- [x] Add exported session methods for UI open/close/status if the TS adapter needs to trigger screen state.
+- [x] Add a web smoke path that captures a visible native UI menu screenshot to `/tmp`.
+- [x] Update this doc's status/landed section, commit, and report the next high-value step.
 
 Validation:
 
@@ -325,6 +325,16 @@ Do not leave a completed chunk uncommitted unless the user explicitly asks not t
 - Should debug HUD formatting live entirely in `mclone-ui`, or in shared runtime presentation structs consumed by `mclone-ui`?
 
 ## Landed
+
+### 2026-06-23 - Slice 2 Web GUI Renderer Integration
+
+- Added `mclone-ui` to `native/apps/mclone-web-client` and gave `WebChunkRenderSession` a shared `GameUi` plus `mclone-render::gui::GuiRenderer`.
+- Updated web resize/render flow so the shared UI draw list uses the canvas backing size and renders after actors, before submit/present; title UI covers the world and clears through the GUI path.
+- Added wasm-facing UI status/open/close methods and TypeScript test hooks that can open the native title screen without making DOM menu behavior authoritative.
+- Extended the web app smoke to capture `/tmp/mclone-native-web-ui-canvas.png` and assert the canvas contains a visible native UI menu with GUI commands emitted.
+- Validation: `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-web-client`; `cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown`; `pnpm native:web:build`; `pnpm native:web:typecheck`; `pnpm native:web:app-smoke`.
+- Screenshot inspected: `/tmp/mclone-native-web-ui-canvas.png` showed the shared Rust title UI rendered into the web canvas; existing DOM HUD/crosshair overlays are still expected until later burn-down slices.
+- Known follow-up: Slice 3 should route browser pointer/key input into `GameUi` first, apply returned actions in the web adapter, and begin removing duplicate DOM menu controls.
 
 ### 2026-06-23 - Slice 1 Shared Menu Model Extraction
 
