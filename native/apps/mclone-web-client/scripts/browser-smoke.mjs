@@ -1362,10 +1362,8 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
       result.canvas.report,
       canvasPixels,
       result.canvas.firstReport,
-      result.canvas.firstCompileRequest,
-      result.canvas.renderCompiler,
-      result.canvas.secondCompileRequest,
-      result.canvas.secondRenderCompiler,
+      result.canvas.firstCenter,
+      result.canvas.secondCenter,
       result.canvas.renderCompilerPendingJobCount,
       result.canvas.sessionPendingCompileJobCount,
       result.canvas.shutdownReport,
@@ -1726,31 +1724,41 @@ function assertChunkRenderResult(
   report,
   canvasPixels,
   firstReport,
-  firstCompileRequest,
-  renderCompiler,
-  secondCompileRequest,
-  secondRenderCompiler,
+  firstCenter,
+  secondCenter,
   renderCompilerPendingJobCount,
   sessionPendingCompileJobCount,
   shutdownReport,
 ) {
-  assertRenderCompileRequest(firstCompileRequest, 0, 0);
-  assertRenderCompileRequest(secondCompileRequest, 1, 0);
-  assertRenderCompilerWorkerResult(renderCompiler, firstCompileRequest, 0, 0);
-  assertRenderCompilerWorkerResult(secondRenderCompiler, secondCompileRequest, 1, 0);
-  if (
-    renderCompiler.requestId !== firstCompileRequest.requestId
-    || firstReport.compileRequestId !== firstCompileRequest.requestId
-    || secondRenderCompiler.requestId !== secondCompileRequest.requestId
-    || report.compileRequestId !== secondCompileRequest.requestId
-  ) {
-    throw new Error(`worker compile results did not match the Rust-owned request ids:\n${JSON.stringify({ firstCompileRequest, renderCompiler, firstReport, secondCompileRequest, secondRenderCompiler, report }, null, 2)}`);
-  }
+  // 067 Stage 3: the deterministic smoke now pumps `syncOverviewRenderFrame` to idle for
+  // two overview centers instead of a two-render begin/finish transaction. Each center is
+  // the web analog of desktop `sync_all_render_sections`: many small per-frame compiles fill
+  // progressively until the loop idles and the server runner has drained.
+  assertOverviewCenter(firstCenter, 0, 0);
+  assertOverviewCenter(secondCenter, 1, 0);
+  assertOverviewWorkerReport(firstCenter.workerReport, firstCenter, "first overview center");
+  assertOverviewWorkerReport(secondCenter.workerReport, secondCenter, "second overview center");
   if (renderCompilerPendingJobCount !== 0) {
     throw new Error(`render compiler worker still had pending jobs after chunk smoke:\n${JSON.stringify({ renderCompilerPendingJobCount }, null, 2)}`);
   }
   if (sessionPendingCompileJobCount !== 0 || report.pendingCompileJobCount !== 0) {
     throw new Error(`web render session still had pending compile jobs after chunk smoke:\n${JSON.stringify({ sessionPendingCompileJobCount, report }, null, 2)}`);
+  }
+  if (!firstReport?.ok || firstReport.streamingIdle !== true) {
+    throw new Error(`first overview center did not settle to a streaming-idle frame:\n${JSON.stringify(firstReport, null, 2)}`);
+  }
+  if (!report?.ok || report.streamingIdle !== true) {
+    throw new Error(`second overview center did not settle to a streaming-idle frame:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (
+    firstReport.centerX !== 0
+    || firstReport.centerZ !== 0
+    || firstReport.radiusChunks !== 1
+    || report.centerX !== 1
+    || report.centerZ !== 0
+    || report.radiusChunks !== 1
+  ) {
+    throw new Error(`overview pump did not stream the expected centers:\n${JSON.stringify({ firstReport, report }, null, 2)}`);
   }
   if (!report.chunkLoaded || !report.meshBuilt) {
     throw new Error(`generated chunk did not load/build:\n${JSON.stringify(report, null, 2)}`);
@@ -1758,8 +1766,8 @@ function assertChunkRenderResult(
   if (!shutdownReport?.ok || shutdownReport.runnerKind !== "web-worker") {
     throw new Error(`generated chunk render did not shut down the integrated server worker cleanly:\n${JSON.stringify({ shutdownReport, report }, null, 2)}`);
   }
-  if (report.runnerKind !== "web-worker") {
-    throw new Error(`generated chunk render did not use the integrated server Web Worker runner:\n${JSON.stringify(report, null, 2)}`);
+  if (report.runnerKind !== "web-worker" || firstReport.runnerKind !== "web-worker") {
+    throw new Error(`generated chunk render did not use the integrated server Web Worker runner:\n${JSON.stringify({ firstReport, report }, null, 2)}`);
   }
   if (
     report.runnerCommandQueueDepth !== 0
@@ -1781,93 +1789,13 @@ function assertChunkRenderResult(
   if (report.actorAtlasWidth <= 1 || report.actorAtlasHeight <= 1) {
     throw new Error(`packed actor texture atlas did not load expected asset data:\n${JSON.stringify(report, null, 2)}`);
   }
-  if (!firstReport?.ok) {
-    throw new Error(`cached chunk session did not produce the first render report:\n${JSON.stringify(firstReport, null, 2)}`);
-  }
-  if (
-    firstReport.centerX !== 0
-    || firstReport.centerZ !== 0
-    || firstReport.radiusChunks !== 1
-    || report.centerX !== 1
-    || report.centerZ !== 0
-    || report.radiusChunks !== 1
-  ) {
-    throw new Error(`cached chunk session did not render the expected centers:\n${JSON.stringify({ firstReport, report }, null, 2)}`);
-  }
-  if (
-    firstReport.assetPackParseCount !== 1
-    || firstReport.terrainAssetLoadCount !== 1
-    || firstReport.atlasUploadCount !== 1
-    || firstReport.meshBuildCount !== 1
-    || firstReport.meshUploadCount !== 1
-    || firstReport.renderCount !== 1
-  ) {
-    throw new Error(`first cached render did not initialize exactly one asset/atlas/mesh path:\n${JSON.stringify(firstReport, null, 2)}`);
-  }
   if (
     firstReport.loadedChunkCount !== 9
-    || firstReport.residentSectionCount <= 1
-    || firstReport.uploadedSectionCount !== firstReport.residentSectionCount
-    || firstReport.removedSectionCount !== 0
-    || firstReport.drawnSectionCount <= 0
-  ) {
-    throw new Error(`first section render did not upload the initial chunk view:\n${JSON.stringify(firstReport, null, 2)}`);
-  }
-  const workerSummary = renderCompiler.summary;
-  if (
-    !firstReport.workerCompileUsed
-    || firstReport.workerPackedByteLength !== workerSummary.byteLength
-    || firstReport.workerSectionCount !== workerSummary.sectionCount
-    || firstReport.workerNonEmptySectionCount !== workerSummary.nonEmptySectionCount
-    || firstReport.workerVertexCount !== workerSummary.vertexCount
-    || firstReport.workerIndexCount !== workerSummary.indexCount
-    || firstReport.workerFaceCount !== workerSummary.faceCount
-    || firstReport.submittedCompileSectionCount !== firstCompileRequest.submittedCompileSectionCount
-    || firstReport.acceptedCompileSectionCount !== firstCompileRequest.submittedCompileSectionCount
-    || firstReport.staleCompileSectionCount !== 0
-  ) {
-    throw new Error(`first section render did not consume the worker-compiled packed payload:\n${JSON.stringify({ firstReport, renderCompiler }, null, 2)}`);
-  }
-  if (
-    report.assetPackParseCount !== 1
-    || report.terrainAssetLoadCount !== 1
-    || report.atlasUploadCount !== 1
-    || report.meshBuildCount !== 2
-    || report.meshUploadCount !== 2
-    || report.renderCount !== 2
-  ) {
-    throw new Error(`second cached render rebuilt non-mesh resources:\n${JSON.stringify(report, null, 2)}`);
-  }
-  const secondWorkerSummary = secondRenderCompiler.summary;
-  if (
-    !report.workerCompileUsed
-    || report.workerPackedByteLength !== secondWorkerSummary.byteLength
-    || report.workerSectionCount !== secondWorkerSummary.sectionCount
-    || report.workerNonEmptySectionCount !== secondWorkerSummary.nonEmptySectionCount
-    || report.workerVertexCount !== secondWorkerSummary.vertexCount
-    || report.workerIndexCount !== secondWorkerSummary.indexCount
-    || report.workerFaceCount !== secondWorkerSummary.faceCount
-    || report.submittedCompileSectionCount !== secondCompileRequest.submittedCompileSectionCount
-    || report.acceptedCompileSectionCount !== secondCompileRequest.submittedCompileSectionCount
-    || report.staleCompileSectionCount !== 0
-  ) {
-    throw new Error(`second section render did not consume the worker-compiled packed payload:\n${JSON.stringify({ report, secondRenderCompiler }, null, 2)}`);
-  }
-  if (
-    report.residentSectionCount <= 1
-    || report.drawnSectionCount <= 0
-    || report.uploadedSectionCount <= 0
-    || report.removedSectionCount <= 0
-    || report.uploadedSectionCount >= report.residentSectionCount
-  ) {
-    throw new Error(`second section render did not stream incremental section updates:\n${JSON.stringify(report, null, 2)}`);
-  }
-  if (
-    report.commandCount !== 2
-    || report.updateCount <= firstReport.updateCount
     || report.loadedChunkCount !== 9
+    || Number(firstReport.residentSectionCount) <= 1
+    || Number(report.residentSectionCount) <= 1
   ) {
-    throw new Error(`unexpected generated chunk runtime counts:\n${JSON.stringify(report, null, 2)}`);
+    throw new Error(`overview pump did not stream the expected loaded chunk view:\n${JSON.stringify({ firstReport, report }, null, 2)}`);
   }
   if (
     report.vertexCount <= 0
@@ -1878,91 +1806,76 @@ function assertChunkRenderResult(
   ) {
     throw new Error(`generated chunk mesh was empty:\n${JSON.stringify(report, null, 2)}`);
   }
+  // The second center reuses the resident worker mesh catalog + ring and the first center's
+  // resident cache, so it must incrementally add sections (run >0 per-frame compiles) for the
+  // shifted view rather than recompiling the whole world.
+  if (Number(secondCenter.compileCount) <= 0) {
+    throw new Error(`second overview center did not incrementally add streamed sections:\n${JSON.stringify(secondCenter, null, 2)}`);
+  }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
     throw new Error(`canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
 }
 
-function assertRenderCompileRequest(request, expectedCenterX, expectedCenterZ) {
+function assertOverviewCenter(center, expectedCenterX, expectedCenterZ) {
   if (
-    !request?.ok
-    || request.requestId <= 0
-    || request.centerX !== expectedCenterX
-    || request.centerZ !== expectedCenterZ
-	    || request.radiusChunks !== 1
-	    || request.submittedCompileSectionCount <= 0
-	    || request.targetSectionCount !== request.submittedCompileSectionCount
-	    || Number(request.snapshotInputByteLength) <= 0
-	    || Number(request.snapshotInputChunkCount) <= 0
-	    || request.pendingCompileJobCount <= 0
-	  ) {
-	    throw new Error(`Rust render compile request was invalid:\n${JSON.stringify(request, null, 2)}`);
-	  }
-}
-
-function assertRenderCompilerWorkerResult(renderCompiler, request, expectedCenterX, expectedCenterZ) {
-  if (!renderCompiler?.ok) {
-    throw new Error(`render compiler worker failed:\n${JSON.stringify(renderCompiler, null, 2)}`);
-  }
-  const summary = renderCompiler.summary;
-  const expectedSectionCount = Number(request?.submittedCompileSectionCount) || 0;
-  if (
-    renderCompiler.centerX !== expectedCenterX
-    || renderCompiler.centerZ !== expectedCenterZ
-    || renderCompiler.radiusChunks !== 1
-    || !renderCompiler.targetedCompileUsed
-    || renderCompiler.targetSectionCount !== expectedSectionCount
-    || renderCompiler.transportKind !== "shared-result-buffer"
-    || renderCompiler.renderCompilerMetrics?.transportKind !== "shared-result-buffer"
-    || Number(renderCompiler.workerInitCount) <= 0
-    || Number(renderCompiler.workerWasmInitCount) <= 0
-    || Number(renderCompiler.workerAssetLoadCount) <= 0
-    || Number(renderCompiler.workerAssetPackInitByteLength) <= 0
-    || Number(renderCompiler.workerAssetPackFileCount) <= 0
-    || renderCompiler.persistentAssetCatalog !== true
-    || Number(renderCompiler.compileCount) <= 0
-    || Number(renderCompiler.workerCompileCount) <= 0
-	    || Number(renderCompiler.assetPackSendCount) !== 1
-	    || Number(renderCompiler.requestAssetPackByteLength) !== 0
-	    || Number(renderCompiler.requestSnapshotInputByteLength) !== Number(request.snapshotInputByteLength)
-	    || Number(renderCompiler.requestByteLength) <= 0
-	    || Number(renderCompiler.transferredRequestByteLength) !== 0
-	    || Number(renderCompiler.renderCompilerMetrics?.transferredRequestByteCount)
-	      < Number(renderCompiler.workerAssetPackInitByteLength)
-	    || Number(renderCompiler.transferredResponseByteLength) !== 0
-	    || renderCompiler.sharedInputBufferUsed !== true
-	    || Number(renderCompiler.sharedInputByteLength) !== Number(renderCompiler.requestSnapshotInputByteLength)
-	    || Number(renderCompiler.sharedInputBufferCapacityBytes) < Number(renderCompiler.sharedInputByteLength)
-	    || Number(renderCompiler.snapshotInputChunkCount) !== Number(request.snapshotInputChunkCount)
-	    || renderCompiler.snapshotInputCompileUsed !== true
-	    || renderCompiler.generatedViewFallbackUsed !== false
-	    || renderCompiler.renderCompilerMetrics?.sharedInputBufferUsed !== true
-	    || renderCompiler.renderCompilerMetrics?.snapshotInputCompileUsed !== true
-	    || renderCompiler.renderCompilerMetrics?.generatedViewFallbackUsed !== false
-	    || renderCompiler.sharedResultBufferUsed !== true
-    || Number(renderCompiler.sharedResultByteLength) <= 0
-    || Number(renderCompiler.sharedResultBufferCapacityBytes) < Number(renderCompiler.sharedResultByteLength)
-    || Number(renderCompiler.renderCompilerMetrics?.sharedResultResponseCount) <= 0
-    || Number(renderCompiler.renderCompilerMetrics?.sharedResultByteCount) < Number(renderCompiler.sharedResultByteLength)
-    || !summary?.ok
-    || summary.byteLength <= 0
-    || summary.sectionCount !== expectedSectionCount
-    || summary.nonEmptySectionCount <= 1
-    || summary.vertexCount <= 0
-    || summary.indexCount <= 0
-    || summary.faceCount <= 0
-    || summary.visibilityGraphBuildCount !== expectedSectionCount
+    !center
+    || center.settled !== true
+    || center.centerX !== expectedCenterX
+    || center.centerZ !== expectedCenterZ
+    || Number(center.residentSectionCount) <= 1
+    || Number(center.compileCount) <= 0
+    || !center.workerReport
   ) {
-    throw new Error(`render compiler worker did not return the expected targeted section payload:\n${JSON.stringify({ request, renderCompiler }, null, 2)}`);
-  }
-  if (renderCompiler.packedByteLength !== summary.byteLength) {
-    throw new Error(`render compiler worker did not expose the packed payload length:\n${JSON.stringify(renderCompiler, null, 2)}`);
-  }
-  if (renderCompiler.sharedResultByteLength !== renderCompiler.packedByteLength) {
-    throw new Error(`render compiler worker did not report shared result bytes:\n${JSON.stringify(renderCompiler, null, 2)}`);
+    throw new Error(`overview center ${expectedCenterX},${expectedCenterZ} did not pump to a settled streamed view:\n${JSON.stringify(center, null, 2)}`);
   }
 }
 
+function assertOverviewWorkerReport(workerReport, center, label) {
+  if (!workerReport?.ok) {
+    throw new Error(`${label} render compiler worker failed:\n${JSON.stringify({ center, workerReport }, null, 2)}`);
+  }
+  const summary = workerReport.summary;
+  if (
+    workerReport.transportKind !== "shared-result-buffer"
+    || workerReport.renderCompilerMetrics?.transportKind !== "shared-result-buffer"
+    || workerReport.snapshotInputCompileUsed !== true
+    || workerReport.generatedViewFallbackUsed !== false
+    || workerReport.renderCompilerMetrics?.snapshotInputCompileUsed !== true
+    || workerReport.renderCompilerMetrics?.generatedViewFallbackUsed !== false
+    || workerReport.sharedInputBufferUsed !== true
+    || workerReport.sharedResultBufferUsed !== true
+    || workerReport.targetedCompileUsed !== true
+    || Number(workerReport.targetSectionCount) <= 0
+    || Number(workerReport.workerInitCount) <= 0
+    || Number(workerReport.workerWasmInitCount) <= 0
+    || Number(workerReport.workerAssetLoadCount) <= 0
+    || Number(workerReport.workerAssetPackInitByteLength) <= 0
+    || Number(workerReport.workerAssetPackFileCount) <= 0
+    || workerReport.persistentAssetCatalog !== true
+    || Number(workerReport.assetPackSendCount) !== 1
+    || Number(workerReport.requestAssetPackByteLength) !== 0
+    || Number(workerReport.transferredRequestByteLength) !== 0
+    || Number(workerReport.transferredResponseByteLength) !== 0
+    || Number(workerReport.sharedInputByteLength) <= 0
+    || Number(workerReport.sharedResultByteLength) <= 0
+    || Number(workerReport.packedByteLength) <= 0
+    || Number(workerReport.sharedResultByteLength) !== Number(workerReport.packedByteLength)
+  ) {
+    throw new Error(`${label} did not return the expected shared-result streaming payload:\n${JSON.stringify({ center, workerReport }, null, 2)}`);
+  }
+  if (
+    !summary?.ok
+    || Number(summary.byteLength) <= 0
+    || Number(summary.sectionCount) !== Number(workerReport.targetSectionCount)
+    || Number(summary.vertexCount) < 0
+    || Number(summary.indexCount) < 0
+    || Number(summary.faceCount) < 0
+    || Number(summary.visibilityGraphBuildCount) !== Number(workerReport.targetSectionCount)
+  ) {
+    throw new Error(`${label} render compiler worker summary was malformed:\n${JSON.stringify({ center, workerReport }, null, 2)}`);
+  }
+}
 function analyzePng(bytes) {
   const png = decodePngRgba(bytes);
   const expected = {

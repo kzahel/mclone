@@ -37,16 +37,13 @@ use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameTarget;
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
-    EngineRenderCamera, PackedRenderSectionBuildReportSummary, QueuedRenderViewCompile,
-    RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport, RenderSectionCompileRequest,
-    RenderSectionCompileRequestInfo, RenderSectionCompileRequestState, RenderSectionCompileResult,
-    RenderSectionCompiler, RenderSectionNeighborReadiness, RenderSectionPendingCompileRequest,
-    RenderSectionRemovalMode, RenderSectionSyncPlan, RenderSectionViewSync, RenderViewCompileQueue,
-    RenderViewCompileQueueDecision, build_client_textured_sections,
-    build_render_sections_from_snapshots, decode_textured_render_section_build_report,
-    encode_textured_render_section_build_report, render_section_neighbor_readiness,
-    sort_chunk_positions_by_distance, sort_dirty_section_chunks_by_distance,
-    summarize_textured_render_section_build_report,
+    EngineRenderCamera, RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport,
+    RenderSectionCompileRequest, RenderSectionCompileResult, RenderSectionCompiler,
+    RenderSectionNeighborReadiness, RenderSectionRemovalMode, RenderSectionSyncPlan,
+    RenderSectionViewSync, build_client_textured_sections, build_render_sections_from_snapshots,
+    decode_textured_render_section_build_report, encode_textured_render_section_build_report,
+    render_section_neighbor_readiness, sort_chunk_positions_by_distance,
+    sort_dirty_section_chunks_by_distance, summarize_textured_render_section_build_report,
 };
 use mclone_server::ServerRunnerKind;
 
@@ -57,7 +54,6 @@ const CANVAS_WIDTH_SHIFT: u32 = 8;
 const CANVAS_HEIGHT_SHIFT: u32 = 20;
 const WEB_GROUND_PROBE_DISTANCE: f64 = 0.01;
 const WEB_FRAME_UPDATE_DRAIN_BUDGET: usize = 1;
-const WEB_COMPILE_WAIT_UPDATE_DRAIN_BUDGET: usize = 1;
 // 067 Stage 3: web drives the shared streaming loop at the same per-frame increment as
 // desktop (`DEFAULT_RENDER_CHUNK_MESH_BUDGET`). One small job in flight per frame; the
 // resident cache stays visible while movement fills progressively.
@@ -1079,23 +1075,6 @@ struct WebSectionCompileReport {
     face_count: u32,
 }
 
-impl WebSectionCompileReport {
-    fn worker(packed_byte_length: usize, summary: PackedRenderSectionBuildReportSummary) -> Self {
-        Self {
-            worker_compile_used: true,
-            packed_byte_length,
-            section_count: summary.section_count,
-            non_empty_section_count: summary.non_empty_section_count,
-            visibility_graph_build_count: summary.visibility_graph_stats.build_count,
-            visibility_graph_total_ms: summary.visibility_graph_stats.total_ms,
-            visibility_graph_worst_ms: summary.visibility_graph_stats.worst_ms,
-            vertex_count: summary.vertex_count,
-            index_count: summary.index_count,
-            face_count: summary.face_count(),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct WebCompileScopeReport {
     view_dirty_chunk_count: usize,
@@ -1139,31 +1118,6 @@ impl WebCompileScopeReport {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct WebPendingCompileContext {
-    center: ChunkPos,
-    radius_chunks: u32,
-    sync: RenderSectionViewSync,
-    removal_chunks: BTreeSet<ChunkPos>,
-    removal_sections: BTreeSet<RenderSectionKey>,
-    scope: WebCompileScopeReport,
-}
-
-/// Per-compile context for the 067 Stage 2 shared-ring path, held by main wasm while
-/// the worker compiles. `submit*` stores it keyed by the compiler's request id; the
-/// matching `pollCameraRenderCompile` consumes it once the result control word flips
-/// to COMPLETE/FAILED. Single compile in flight, so exactly one is live at a time.
-struct WebSharedCompileContext {
-    request_id: u32,
-    center: ChunkPos,
-    radius_chunks: u32,
-    sync: RenderSectionViewSync,
-    removal_chunks: BTreeSet<ChunkPos>,
-    removal_sections: BTreeSet<RenderSectionKey>,
-    scope: WebCompileScopeReport,
-    frame_camera: WebFrameCamera,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 struct WebChunkRenderPlan {
     sync: RenderSectionViewSync,
@@ -1171,29 +1125,6 @@ struct WebChunkRenderPlan {
     scope: WebCompileScopeReport,
 }
 
-fn compile_result_from_worker_report(
-    pending: RenderSectionPendingCompileRequest<WebPendingCompileContext>,
-    section_report: TexturedRenderSectionBuildReport,
-) -> (WebPendingCompileContext, RenderSectionCompileResult) {
-    let RenderSectionPendingCompileRequest {
-        context,
-        target_sections,
-        section_revisions,
-        ..
-    } = pending;
-    let completed =
-        render_section_compile_result_from_report(target_sections, section_revisions, section_report);
-    (context, completed)
-}
-
-/// Build a [`RenderSectionCompileResult`] from a worker-produced section report.
-///
-/// The worker only emits sections it actually built, so any submitted target the
-/// report omits (e.g. an all-air section) is marked with a revision one behind the
-/// submitted revision. The shared render-session acceptance path then classifies it
-/// as stale and drops it instead of resurrecting a section that was never compiled.
-/// Shared by the legacy begin/finish worker path and the Stage-2
-/// [`WebRenderSectionCompiler`] resident-ring transport.
 fn render_section_compile_result_from_report(
     target_sections: BTreeSet<RenderSectionKey>,
     mut section_revisions: BTreeMap<RenderSectionKey, u64>,
@@ -1946,8 +1877,6 @@ pub struct WebChunkRenderSession {
     draw: Option<TexturedSectionDrawResources>,
     actors: ActorDrawResources,
     loaded_chunk_positions: BTreeSet<ChunkPos>,
-    loaded_center: Option<ChunkPos>,
-    compile_queue: RenderViewCompileQueue<String>,
     // 067 Stage 3: the last chunk-view center we asked the runner to stream. The
     // streaming loop only re-sends the deferred SetChunkView command when this changes,
     // so movement does not spam the runner with identical view requests every frame.
@@ -1958,67 +1887,14 @@ pub struct WebChunkRenderSession {
     mesh_build_count: usize,
     mesh_upload_count: usize,
     render_count: usize,
-    compile_requests: RenderSectionCompileRequestState<WebPendingCompileContext>,
     render_compiler: WebRenderSectionCompiler,
-    shared_compile: Option<WebSharedCompileContext>,
 }
 
 #[wasm_bindgen]
 impl WebChunkRenderSession {
-    #[wasm_bindgen(js_name = renderChunkReport)]
-    pub async fn render_chunk_report(
-        &mut self,
-        center_x: i32,
-        center_z: i32,
-        radius_chunks: u32,
-    ) -> Result<JsValue, JsValue> {
-        self.render_chunk_report_for_center(
-            ChunkPos {
-                x: center_x,
-                z: center_z,
-            },
-            radius_chunks,
-        )
-        .await
-        .and_then(GeneratedChunkRenderReport::to_js_value)
-        .map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = beginChunkRenderCompileRequest)]
-    pub async fn begin_chunk_render_compile_request(
-        &mut self,
-        center_x: i32,
-        center_z: i32,
-        radius_chunks: u32,
-    ) -> Result<JsValue, JsValue> {
-        self.begin_chunk_render_compile_request_for_center(
-            ChunkPos {
-                x: center_x,
-                z: center_z,
-            },
-            radius_chunks,
-        )
-        .await
-        .map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = finishChunkRenderCompileRequest)]
-    pub fn finish_chunk_render_compile_request(
-        &mut self,
-        request_id: u32,
-        packed_report: js_sys::Uint8Array,
-    ) -> Result<JsValue, JsValue> {
-        self.finish_chunk_render_compile_request_with_packed_report(
-            request_id,
-            packed_report.to_vec(),
-        )
-        .and_then(GeneratedChunkRenderReport::to_js_value)
-        .map_err(JsValue::from)
-    }
-
     #[wasm_bindgen(js_name = pendingChunkRenderCompileJobCount)]
     pub fn pending_chunk_render_compile_job_count(&self) -> usize {
-        self.compile_requests.pending_request_count() + self.render_compiler.pending_job_count()
+        self.render_compiler.pending_job_count()
     }
 
     /// Whether the resident shared-ring render-compile transport (067 Stage 2) is
@@ -2028,50 +1904,6 @@ impl WebChunkRenderSession {
     #[wasm_bindgen(js_name = renderCompilerSharedSupported)]
     pub fn render_compiler_shared_supported(&self) -> bool {
         self.render_compiler.shared_supported()
-    }
-
-    /// 067 Stage 2: submit the initial camera render compile through the resident
-    /// shared ring. Loads the camera-centered view, fills the input arena, arms the
-    /// result control word, and returns a doorbell descriptor (request id + the
-    /// resident shared buffers) for JavaScript to post to the worker.
-    #[wasm_bindgen(js_name = submitCameraRenderCompile)]
-    pub async fn submit_camera_render_compile(
-        &mut self,
-        radius_chunks: u32,
-    ) -> Result<JsValue, JsValue> {
-        self.submit_camera_render_compile_for_radius(radius_chunks)
-            .await
-            .map_err(JsValue::from)
-    }
-
-    /// 067 Stage 2: submit the deferred (movement) camera render compile through the
-    /// resident shared ring. Drains pending runner updates and returns a waiting
-    /// descriptor until the target center is loaded and the runner has settled, then
-    /// submits and returns a doorbell descriptor.
-    #[wasm_bindgen(js_name = submitDeferredCameraRenderCompile)]
-    pub fn submit_deferred_camera_render_compile(
-        &mut self,
-        radius_chunks: u32,
-        center_x: i32,
-        center_z: i32,
-    ) -> Result<JsValue, JsValue> {
-        self.submit_deferred_camera_render_compile_for_center(
-            radius_chunks,
-            ChunkPos {
-                x: center_x,
-                z: center_z,
-            },
-        )
-        .map_err(JsValue::from)
-    }
-
-    /// 067 Stage 2: poll the resident shared ring for a completed compile. Reads the
-    /// result control word via `Atomics` from main wasm; returns `{pending:true}`
-    /// while the worker is still compiling, or applies + renders the completed report
-    /// and returns the frame report once COMPLETE.
-    #[wasm_bindgen(js_name = pollCameraRenderCompile)]
-    pub fn poll_camera_render_compile(&mut self) -> Result<JsValue, JsValue> {
-        self.poll_camera_render_compile_result().map_err(JsValue::from)
     }
 
     /// 067 Stage 3 keystone: drive one frame of the shared per-frame streaming loop from
@@ -2123,26 +1955,6 @@ impl WebChunkRenderSession {
             radius_chunks,
         )
         .map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = requestCameraRenderCompile)]
-    pub fn request_camera_render_compile(
-        &mut self,
-        trigger: &str,
-        force: bool,
-        compile_busy: bool,
-    ) -> Result<JsValue, JsValue> {
-        self.request_camera_render_compile_decision(trigger, force, compile_busy)
-            .map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = takeQueuedCameraRenderCompile)]
-    pub fn take_queued_camera_render_compile(
-        &mut self,
-        compile_busy: bool,
-    ) -> Result<JsValue, JsValue> {
-        self.take_queued_camera_render_compile_decision(compile_busy)
-            .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = cameraFrameState)]
@@ -2246,60 +2058,6 @@ impl WebChunkRenderSession {
             .map_err(JsValue::from)
     }
 
-    #[wasm_bindgen(js_name = beginCameraRenderCompileRequest)]
-    pub async fn begin_camera_render_compile_request(
-        &mut self,
-        radius_chunks: u32,
-    ) -> Result<JsValue, JsValue> {
-        self.begin_camera_render_compile_request_for_radius(radius_chunks)
-            .await
-            .map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = requestCameraChunkView)]
-    pub fn request_camera_chunk_view(&mut self, radius_chunks: u32) -> Result<JsValue, JsValue> {
-        self.request_camera_chunk_view_for_radius(radius_chunks)
-            .map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = tryBeginCameraRenderCompileRequest)]
-    pub fn try_begin_camera_render_compile_request(
-        &mut self,
-        radius_chunks: u32,
-        center_x: i32,
-        center_z: i32,
-    ) -> Result<JsValue, JsValue> {
-        self.try_begin_camera_render_compile_request_for_center(
-            radius_chunks,
-            ChunkPos {
-                x: center_x,
-                z: center_z,
-            },
-        )
-        .map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = finishCameraRenderCompileRequest)]
-    pub fn finish_camera_render_compile_request(
-        &mut self,
-        request_id: u32,
-        packed_report: js_sys::Uint8Array,
-    ) -> Result<JsValue, JsValue> {
-        self.finish_camera_render_compile_request_with_packed_report(
-            request_id,
-            packed_report.to_vec(),
-        )
-        .and_then(GeneratedChunkRenderReport::to_js_value)
-        .map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = renderCameraFrame)]
-    pub fn render_camera_frame(&mut self, radius_chunks: u32) -> Result<JsValue, JsValue> {
-        self.render_camera_frame_for_radius(radius_chunks)
-            .and_then(GeneratedChunkRenderReport::to_js_value)
-            .map_err(JsValue::from)
-    }
-
     #[wasm_bindgen(js_name = shutdown)]
     pub fn shutdown(&mut self) -> Result<JsValue, JsValue> {
         self.runtime.request_shutdown();
@@ -2308,27 +2066,6 @@ impl WebChunkRenderSession {
         set_string(&object, "runnerKind", self.runtime.runner_kind().label())
             .map_err(JsValue::from)?;
         Ok(object.into())
-    }
-
-    #[wasm_bindgen(js_name = renderChunkReportFromPackedSections)]
-    pub async fn render_chunk_report_from_packed_sections(
-        &mut self,
-        center_x: i32,
-        center_z: i32,
-        radius_chunks: u32,
-        packed_report: js_sys::Uint8Array,
-    ) -> Result<JsValue, JsValue> {
-        self.render_chunk_report_for_center_from_packed_report(
-            ChunkPos {
-                x: center_x,
-                z: center_z,
-            },
-            radius_chunks,
-            packed_report.to_vec(),
-        )
-        .await
-        .and_then(GeneratedChunkRenderReport::to_js_value)
-        .map_err(JsValue::from)
     }
 }
 
@@ -2380,8 +2117,6 @@ impl WebChunkRenderSession {
             draw: None,
             actors,
             loaded_chunk_positions: BTreeSet::new(),
-            loaded_center: None,
-            compile_queue: RenderViewCompileQueue::default(),
             interest_center: None,
             asset_pack_parse_count: 1,
             terrain_asset_load_count: 1,
@@ -2389,242 +2124,8 @@ impl WebChunkRenderSession {
             mesh_build_count: 0,
             mesh_upload_count: 0,
             render_count: 0,
-            compile_requests: RenderSectionCompileRequestState::default(),
             render_compiler: WebRenderSectionCompiler::new(),
-            shared_compile: None,
         })
-    }
-
-    async fn begin_chunk_render_compile_request_for_center(
-        &mut self,
-        center: ChunkPos,
-        radius_chunks: u32,
-    ) -> Result<JsValue, String> {
-        if self.compile_requests.has_pending_requests() {
-            return Err(format!(
-                "web render compile request already pending ({} pending)",
-                self.compile_requests.pending_request_count()
-            ));
-        }
-        let render_plan = self
-            .prepare_chunk_render_plan(center, radius_chunks)
-            .await?;
-        let context = WebPendingCompileContext {
-            center,
-            radius_chunks,
-            sync: render_plan.sync,
-            removal_chunks: render_plan
-                .sync_plan
-                .dirty_work
-                .removal_dirty_chunks
-                .clone(),
-            removal_sections: render_plan
-                .sync_plan
-                .dirty_work
-                .removal_dirty_sections
-                .clone(),
-            scope: render_plan.scope,
-        };
-        let snapshots = self
-            .runtime
-            .client()
-            .chunk_snapshots()
-            .cloned()
-            .collect::<Vec<_>>();
-        let snapshot_input_chunk_count = snapshots.len();
-        let snapshot_input_bytes = encode_web_render_compile_input(&snapshots)?;
-        let compile_requests = &mut self.compile_requests;
-        let submission = self.runtime.engine_mut().submit_prepared_sync_plan(
-            &render_plan.sync_plan,
-            snapshots,
-            |_sync_plan, request| {
-                let target_sections = request.target_sections.clone();
-                let info = compile_requests.begin_compile_request(context, request);
-                Ok::<_, String>((info, target_sections))
-            },
-        )?;
-        let Some(submission) = submission.submission else {
-            return Err(format!(
-                "web render compile request for {},{} radius {} had no ready sections",
-                center.x, center.z, radius_chunks
-            ));
-        };
-        let (info, target_sections) = submission.output;
-        self.compile_request_to_js_value(
-            info,
-            center,
-            radius_chunks,
-            render_plan.scope,
-            &target_sections,
-            &snapshot_input_bytes,
-            snapshot_input_chunk_count,
-        )
-    }
-
-    fn finish_chunk_render_compile_request_with_packed_report(
-        &mut self,
-        request_id: u32,
-        packed_report: Vec<u8>,
-    ) -> Result<GeneratedChunkRenderReport, String> {
-        let pending = self
-            .compile_requests
-            .remove_pending_request(request_id)
-            .ok_or_else(|| format!("unknown web render compile request id {request_id}"))?;
-        let packed_byte_length = packed_report.len();
-        let section_report = decode_textured_render_section_build_report(&packed_report)
-            .map_err(|error| format!("failed to decode packed render section report: {error:#}"))?;
-        let summary = summarize_textured_render_section_build_report(&section_report);
-        let (context, completed) = compile_result_from_worker_report(pending, section_report);
-        self.finish_render_compile_result(
-            context.center,
-            context.radius_chunks,
-            context.sync,
-            context.removal_chunks,
-            context.removal_sections,
-            context.scope,
-            completed,
-            WebSectionCompileReport::worker(packed_byte_length, summary),
-            request_id,
-            WebFrameCamera::Overview {
-                center: context.center,
-                radius_chunks: context.radius_chunks,
-            },
-        )
-    }
-
-    async fn begin_camera_render_compile_request_for_radius(
-        &mut self,
-        radius_chunks: u32,
-    ) -> Result<JsValue, String> {
-        let center = self.camera.snapshot().chunk_pos;
-        self.begin_chunk_render_compile_request_for_center(center, radius_chunks)
-            .await
-    }
-
-    fn request_camera_render_compile_decision(
-        &mut self,
-        trigger: &str,
-        force: bool,
-        compile_busy: bool,
-    ) -> Result<JsValue, String> {
-        let center = self.camera.snapshot().chunk_pos;
-        let request = QueuedRenderViewCompile::new(center, force, trigger.to_owned());
-        let busy = self.compile_queue_busy(compile_busy);
-        let decision = self
-            .compile_queue
-            .request(request, self.loaded_center, busy);
-        self.compile_queue_decision_to_js_value(decision)
-    }
-
-    fn take_queued_camera_render_compile_decision(
-        &mut self,
-        compile_busy: bool,
-    ) -> Result<JsValue, String> {
-        let busy = self.compile_queue_busy(compile_busy);
-        let decision = self.compile_queue.take_next(self.loaded_center, busy);
-        self.compile_queue_decision_to_js_value(decision)
-    }
-
-    fn compile_queue_busy(&self, compile_busy: bool) -> bool {
-        compile_busy || self.compile_requests.has_pending_requests()
-    }
-
-    fn request_camera_chunk_view_for_radius(
-        &mut self,
-        radius_chunks: u32,
-    ) -> Result<JsValue, String> {
-        let center = self.camera.snapshot().chunk_pos;
-        let step =
-            self.runtime
-                .request_chunk_view_deferred(center, radius_chunks, radius_chunks)?;
-        self.chunk_view_request_to_js_value(center, radius_chunks, step)
-    }
-
-    fn try_begin_camera_render_compile_request_for_center(
-        &mut self,
-        radius_chunks: u32,
-        center: ChunkPos,
-    ) -> Result<JsValue, String> {
-        let step = self
-            .runtime
-            .drain_pending_runner_updates_budgeted(WEB_COMPILE_WAIT_UPDATE_DRAIN_BUDGET)?;
-        let diagnostics = self.runtime.runner_diagnostics();
-        let center_loaded = self.runtime.client().chunk_snapshot(center).is_some();
-        if !center_loaded || !web_runner_diagnostics_settled(&diagnostics) {
-            return self.waiting_compile_request_to_js_value(
-                center,
-                radius_chunks,
-                center_loaded,
-                step,
-                diagnostics,
-            );
-        }
-        self.begin_loaded_chunk_render_compile_request_for_center(
-            center,
-            radius_chunks,
-            step,
-            diagnostics,
-        )
-    }
-
-    fn finish_camera_render_compile_request_with_packed_report(
-        &mut self,
-        request_id: u32,
-        packed_report: Vec<u8>,
-    ) -> Result<GeneratedChunkRenderReport, String> {
-        let pending = self
-            .compile_requests
-            .remove_pending_request(request_id)
-            .ok_or_else(|| format!("unknown web render compile request id {request_id}"))?;
-        let packed_byte_length = packed_report.len();
-        let section_report = decode_textured_render_section_build_report(&packed_report)
-            .map_err(|error| format!("failed to decode packed render section report: {error:#}"))?;
-        let summary = summarize_textured_render_section_build_report(&section_report);
-        let (context, completed) = compile_result_from_worker_report(pending, section_report);
-        self.finish_render_compile_result(
-            context.center,
-            context.radius_chunks,
-            context.sync,
-            context.removal_chunks,
-            context.removal_sections,
-            context.scope,
-            completed,
-            WebSectionCompileReport::worker(packed_byte_length, summary),
-            request_id,
-            WebFrameCamera::Camera,
-        )
-    }
-
-    fn render_camera_frame_for_radius(
-        &mut self,
-        radius_chunks: u32,
-    ) -> Result<GeneratedChunkRenderReport, String> {
-        if self.draw.is_none() {
-            return Err(
-                "camera frame requested before initial render sections were uploaded".into(),
-            );
-        }
-        let center = self.camera.snapshot().chunk_pos;
-        let cached_sections = self.runtime.engine().sections();
-        let current_section_keys = cached_sections
-            .iter()
-            .map(|section| section.key)
-            .collect::<BTreeSet<_>>();
-        if cached_sections.iter().all(|section| section.is_empty()) {
-            return Err("camera frame has no resident textured sections".into());
-        }
-        self.render_chunk_report_with_cache_update(
-            center,
-            radius_chunks,
-            self.loaded_chunk_positions.clone(),
-            current_section_keys,
-            RenderSectionCacheUpdate::default(),
-            WebSectionCompileReport::default(),
-            WebCompileScopeReport::default(),
-            RenderSectionCompileAcceptanceReport::default(),
-            WebFrameCamera::Camera,
-            false,
-        )
     }
 
     async fn interact_block_with_kind(
@@ -2663,7 +2164,7 @@ impl WebChunkRenderSession {
                 interaction_update_count: 0,
                 total_command_count: self.runtime.command_count(),
                 total_update_count: self.runtime.update_count(),
-                pending_compile_job_count: self.compile_requests.pending_request_count(),
+                pending_compile_job_count: self.render_compiler.pending_job_count(),
             });
         };
 
@@ -2693,7 +2194,7 @@ impl WebChunkRenderSession {
             interaction_update_count: step.update_count,
             total_command_count: self.runtime.command_count(),
             total_update_count: self.runtime.update_count(),
-            pending_compile_job_count: self.compile_requests.pending_request_count(),
+            pending_compile_job_count: self.render_compiler.pending_job_count(),
         })
     }
 
@@ -2710,7 +2211,7 @@ impl WebChunkRenderSession {
             selected_hotbar_slot: self.interaction.selected_hotbar_slot(),
             total_command_count: self.runtime.command_count(),
             total_update_count: self.runtime.update_count(),
-            pending_compile_job_count: self.compile_requests.pending_request_count(),
+            pending_compile_job_count: self.render_compiler.pending_job_count(),
         }
     }
 
@@ -2929,28 +2430,6 @@ impl WebChunkRenderSession {
         )
     }
 
-    async fn render_chunk_report_for_center_from_packed_report(
-        &mut self,
-        center: ChunkPos,
-        radius_chunks: u32,
-        packed_report: Vec<u8>,
-    ) -> Result<GeneratedChunkRenderReport, String> {
-        let packed_byte_length = packed_report.len();
-        let section_report = decode_textured_render_section_build_report(&packed_report)
-            .map_err(|error| format!("failed to decode packed render section report: {error:#}"))?;
-        let summary = summarize_textured_render_section_build_report(&section_report);
-        let render_plan = self
-            .prepare_chunk_render_plan(center, radius_chunks)
-            .await?;
-        self.render_prepared_section_report(
-            center,
-            radius_chunks,
-            render_plan,
-            section_report,
-            WebSectionCompileReport::worker(packed_byte_length, summary),
-        )
-    }
-
     async fn prepare_chunk_render_plan(
         &mut self,
         center: ChunkPos,
@@ -2958,23 +2437,6 @@ impl WebChunkRenderSession {
     ) -> Result<WebChunkRenderPlan, String> {
         let sync = self.prepare_chunk_view(center, radius_chunks).await?;
         self.prepare_render_plan_from_sync(sync)
-    }
-
-    fn prepare_loaded_chunk_render_plan(
-        &mut self,
-        center: ChunkPos,
-    ) -> Result<RenderSectionViewSync, String> {
-        if self.runtime.client().chunk_snapshot(center).is_none() {
-            return Err(format!(
-                "web runtime did not publish generated chunk {},{}",
-                center.x, center.z
-            ));
-        }
-        let previous_loaded_chunks = self.loaded_chunk_positions.clone();
-        Ok(self
-            .runtime
-            .engine_mut()
-            .apply_current_loaded_view_sync(&previous_loaded_chunks))
     }
 
     fn prepare_render_plan_from_sync(
@@ -2999,315 +2461,6 @@ impl WebChunkRenderSession {
         })
     }
 
-    fn begin_loaded_chunk_render_compile_request_for_center(
-        &mut self,
-        center: ChunkPos,
-        radius_chunks: u32,
-        step: super::WebRuntimeStepReport,
-        diagnostics: mclone_server::ServerRunnerDiagnostics,
-    ) -> Result<JsValue, String> {
-        if self.compile_requests.pending_request_count() != 0 {
-            return Err(format!(
-                "web render compile request already pending ({} pending)",
-                self.compile_requests.pending_request_count()
-            ));
-        }
-        let sync = self.prepare_loaded_chunk_render_plan(center)?;
-        let render_plan = self.prepare_render_plan_from_sync(sync)?;
-        if render_plan
-            .sync_plan
-            .ready_plan
-            .ready_section_keys
-            .is_empty()
-        {
-            return self.waiting_compile_request_to_js_value(
-                center,
-                radius_chunks,
-                true,
-                step,
-                diagnostics,
-            );
-        }
-        let context = WebPendingCompileContext {
-            center,
-            radius_chunks,
-            sync: render_plan.sync,
-            removal_chunks: render_plan
-                .sync_plan
-                .dirty_work
-                .removal_dirty_chunks
-                .clone(),
-            removal_sections: render_plan
-                .sync_plan
-                .dirty_work
-                .removal_dirty_sections
-                .clone(),
-            scope: render_plan.scope,
-        };
-        let snapshots = self
-            .runtime
-            .client()
-            .chunk_snapshots()
-            .cloned()
-            .collect::<Vec<_>>();
-        let snapshot_input_chunk_count = snapshots.len();
-        let snapshot_input_bytes = encode_web_render_compile_input(&snapshots)?;
-        let compile_requests = &mut self.compile_requests;
-        let submission = self.runtime.engine_mut().submit_prepared_sync_plan(
-            &render_plan.sync_plan,
-            snapshots,
-            |_sync_plan, request| {
-                let target_sections = request.target_sections.clone();
-                let info = compile_requests.begin_compile_request(context, request);
-                Ok::<_, String>((info, target_sections))
-            },
-        )?;
-        let Some(submission) = submission.submission else {
-            return Err(format!(
-                "web render compile request for {},{} radius {} had no ready sections",
-                center.x, center.z, radius_chunks
-            ));
-        };
-        let (info, target_sections) = submission.output;
-        self.compile_request_to_js_value(
-            info,
-            center,
-            radius_chunks,
-            render_plan.scope,
-            &target_sections,
-            &snapshot_input_bytes,
-            snapshot_input_chunk_count,
-        )
-    }
-
-    // ---- 067 Stage 2: shared-ring camera render compile (submit + poll) ----
-
-    async fn submit_camera_render_compile_for_radius(
-        &mut self,
-        radius_chunks: u32,
-    ) -> Result<JsValue, String> {
-        self.ensure_shared_compile_ready()?;
-        let center = self.camera.snapshot().chunk_pos;
-        let render_plan = self.prepare_chunk_render_plan(center, radius_chunks).await?;
-        self.submit_shared_render_compile(render_plan, center, radius_chunks, WebFrameCamera::Camera)
-    }
-
-    fn submit_deferred_camera_render_compile_for_center(
-        &mut self,
-        radius_chunks: u32,
-        center: ChunkPos,
-    ) -> Result<JsValue, String> {
-        self.ensure_shared_compile_ready()?;
-        let step = self
-            .runtime
-            .drain_pending_runner_updates_budgeted(WEB_COMPILE_WAIT_UPDATE_DRAIN_BUDGET)?;
-        let diagnostics = self.runtime.runner_diagnostics();
-        let center_loaded = self.runtime.client().chunk_snapshot(center).is_some();
-        if !center_loaded || !web_runner_diagnostics_settled(&diagnostics) {
-            return self.waiting_compile_request_to_js_value(
-                center,
-                radius_chunks,
-                center_loaded,
-                step,
-                diagnostics,
-            );
-        }
-        let sync = self.prepare_loaded_chunk_render_plan(center)?;
-        let render_plan = self.prepare_render_plan_from_sync(sync)?;
-        if render_plan
-            .sync_plan
-            .ready_plan
-            .ready_section_keys
-            .is_empty()
-        {
-            return self.waiting_compile_request_to_js_value(
-                center,
-                radius_chunks,
-                true,
-                step,
-                diagnostics,
-            );
-        }
-        self.submit_shared_render_compile(render_plan, center, radius_chunks, WebFrameCamera::Camera)
-    }
-
-    fn ensure_shared_compile_ready(&self) -> Result<(), String> {
-        if !self.render_compiler.shared_supported() {
-            return Err(
-                "shared render compile transport unavailable (no SharedArrayBuffer/Atomics)".into(),
-            );
-        }
-        if self.shared_compile.is_some() {
-            return Err("web shared render compile already in flight".into());
-        }
-        Ok(())
-    }
-
-    fn submit_shared_render_compile(
-        &mut self,
-        render_plan: WebChunkRenderPlan,
-        center: ChunkPos,
-        radius_chunks: u32,
-        frame_camera: WebFrameCamera,
-    ) -> Result<JsValue, String> {
-        let WebChunkRenderPlan {
-            sync,
-            sync_plan,
-            scope,
-        } = render_plan;
-        let removal_chunks = sync_plan.dirty_work.removal_dirty_chunks.clone();
-        let removal_sections = sync_plan.dirty_work.removal_dirty_sections.clone();
-        let snapshots = self
-            .runtime
-            .client()
-            .chunk_snapshots()
-            .cloned()
-            .collect::<Vec<_>>();
-        let snapshot_input_chunk_count = snapshots.len();
-        let render_compiler = &mut self.render_compiler;
-        let submission = self.runtime.engine_mut().submit_prepared_sync_plan(
-            &sync_plan,
-            snapshots,
-            |_sync_plan, request| {
-                let target_sections = request.target_sections.clone();
-                render_compiler
-                    .submit(request)
-                    .map_err(|error| format!("{error:#}"))?;
-                Ok::<_, String>(target_sections)
-            },
-        )?;
-        let Some(submission) = submission.submission else {
-            return Err(format!(
-                "web render compile request for {},{} radius {} had no ready sections",
-                center.x, center.z, radius_chunks
-            ));
-        };
-        let target_sections = submission.output;
-        let request_id = self
-            .render_compiler
-            .in_flight_request_id()
-            .ok_or_else(|| "shared render compile submit recorded no in-flight request".to_string())?;
-        self.shared_compile = Some(WebSharedCompileContext {
-            request_id,
-            center,
-            radius_chunks,
-            sync,
-            removal_chunks,
-            removal_sections,
-            scope,
-            frame_camera,
-        });
-        self.shared_compile_request_to_js_value(
-            request_id,
-            center,
-            radius_chunks,
-            scope,
-            &target_sections,
-            snapshot_input_chunk_count,
-        )
-    }
-
-    fn shared_compile_request_to_js_value(
-        &self,
-        request_id: u32,
-        center: ChunkPos,
-        radius_chunks: u32,
-        scope: WebCompileScopeReport,
-        target_sections: &BTreeSet<RenderSectionKey>,
-        snapshot_input_chunk_count: usize,
-    ) -> Result<JsValue, String> {
-        let object = js_sys::Object::new();
-        set_bool(&object, "ok", true)?;
-        set_bool(&object, "waiting", false)?;
-        set_bool(&object, "shared", true)?;
-        set_number(&object, "requestId", f64::from(request_id))?;
-        set_number(&object, "centerX", f64::from(center.x))?;
-        set_number(&object, "centerZ", f64::from(center.z))?;
-        set_number(&object, "radiusChunks", f64::from(radius_chunks))?;
-        write_compile_scope_report(&object, scope)?;
-        write_target_sections(&object, target_sections)?;
-        set_number(
-            &object,
-            "snapshotInputChunkCount",
-            snapshot_input_chunk_count as f64,
-        )?;
-        set_number(
-            &object,
-            "submittedCompileSectionCount",
-            target_sections.len() as f64,
-        )?;
-        set_number(
-            &object,
-            "pendingCompileJobCount",
-            self.render_compiler.pending_job_count() as f64,
-        )?;
-        // Resident shared buffers + byte counts for the worker doorbell. JavaScript
-        // relays this message verbatim (plus kind + bindgen URLs); the result data
-        // path stays in main wasm.
-        self.render_compiler.write_doorbell_arenas(&object)?;
-        Ok(object.into())
-    }
-
-    fn poll_camera_render_compile_result(&mut self) -> Result<JsValue, String> {
-        let mut completed = self
-            .render_compiler
-            .try_recv_completed()
-            .map_err(|error| format!("{error:#}"))?;
-        let Some(result) = completed.pop() else {
-            return self.pending_shared_compile_to_js_value();
-        };
-        let Some(context) = self.shared_compile.take() else {
-            return Err(
-                "shared render compile poll received a result with no in-flight context".into(),
-            );
-        };
-        let compile_report = match &result.result {
-            Ok(report) => WebSectionCompileReport::worker(
-                self.render_compiler.last_packed_byte_length,
-                summarize_textured_render_section_build_report(report),
-            ),
-            Err(_) => WebSectionCompileReport::default(),
-        };
-        self.finish_render_compile_result(
-            context.center,
-            context.radius_chunks,
-            context.sync,
-            context.removal_chunks,
-            context.removal_sections,
-            context.scope,
-            result,
-            compile_report,
-            context.request_id,
-            context.frame_camera,
-        )
-        .and_then(GeneratedChunkRenderReport::to_js_value)
-    }
-
-    fn pending_shared_compile_to_js_value(&self) -> Result<JsValue, String> {
-        let object = js_sys::Object::new();
-        let in_flight = self.shared_compile.is_some();
-        set_bool(&object, "ok", true)?;
-        set_bool(&object, "pending", in_flight)?;
-        set_bool(&object, "idle", !in_flight)?;
-        if let Some(context) = self.shared_compile.as_ref() {
-            set_number(&object, "requestId", f64::from(context.request_id))?;
-            set_number(&object, "centerX", f64::from(context.center.x))?;
-            set_number(&object, "centerZ", f64::from(context.center.z))?;
-        }
-        set_number(
-            &object,
-            "pendingCompileJobCount",
-            self.render_compiler.pending_job_count() as f64,
-        )?;
-        Ok(object.into())
-    }
-
-    /// 067 Stage 3 keystone: one frame of the shared per-frame streaming loop, shared by
-    /// the live camera (`syncCameraRenderFrame`) and the deterministic overview smoke
-    /// (`syncOverviewRenderFrame`). Updates the runner interest center, drains updates,
-    /// runs the shared `sync_render_sections_with_budget` over the resident-ring compiler
-    /// at budget 1, renders the current cache, and serializes the frame report plus a
-    /// worker `doorbell` whenever a new compile was armed this frame.
     fn sync_render_streaming_frame(
         &mut self,
         frame_camera: WebFrameCamera,
@@ -3585,9 +2738,6 @@ impl WebChunkRenderSession {
         frame.present();
         self.render_count += 1;
         self.loaded_chunk_positions = current_loaded_chunks;
-        if count_mesh_build {
-            self.loaded_center = Some(center);
-        }
 
         Ok(GeneratedChunkRenderReport {
             center,
@@ -3627,7 +2777,7 @@ impl WebChunkRenderSession {
             mesh_upload_count: self.mesh_upload_count,
             render_count: self.render_count,
             compile_request_id: acceptance_report.request_id,
-            pending_compile_job_count: self.compile_requests.pending_request_count(),
+            pending_compile_job_count: self.render_compiler.pending_job_count(),
             view_dirty_chunk_count: compile_scope.view_dirty_chunk_count,
             view_removal_chunk_count: compile_scope.view_removal_chunk_count,
             loaded_dirty_chunk_count: compile_scope.loaded_dirty_chunk_count,
@@ -3729,241 +2879,6 @@ impl WebChunkRenderSession {
         )
     }
 
-    fn compile_request_to_js_value(
-        &self,
-        info: RenderSectionCompileRequestInfo,
-        center: ChunkPos,
-        radius_chunks: u32,
-        scope: WebCompileScopeReport,
-        target_sections: &BTreeSet<RenderSectionKey>,
-        snapshot_input_bytes: &[u8],
-        snapshot_input_chunk_count: usize,
-    ) -> Result<JsValue, String> {
-        let object = js_sys::Object::new();
-        set_bool(&object, "ok", true)?;
-        set_number(&object, "requestId", f64::from(info.request_id))?;
-        set_number(&object, "centerX", f64::from(center.x))?;
-        set_number(&object, "centerZ", f64::from(center.z))?;
-        set_number(&object, "radiusChunks", f64::from(radius_chunks))?;
-        write_compile_scope_report(&object, scope)?;
-        write_target_sections(&object, target_sections)?;
-        let snapshot_input = js_sys::Uint8Array::from(snapshot_input_bytes);
-        js_sys::Reflect::set(
-            &object,
-            &JsValue::from_str("snapshotInputBytes"),
-            &snapshot_input,
-        )
-        .map(|_| ())
-        .map_err(|_| "failed to set render compile request snapshot input bytes".to_string())?;
-        set_number(
-            &object,
-            "snapshotInputByteLength",
-            snapshot_input_bytes.len() as f64,
-        )?;
-        set_number(
-            &object,
-            "snapshotInputChunkCount",
-            snapshot_input_chunk_count as f64,
-        )?;
-        set_number(
-            &object,
-            "submittedCompileSectionCount",
-            info.submitted_section_count as f64,
-        )?;
-        set_number(
-            &object,
-            "pendingCompileJobCount",
-            info.pending_compile_jobs as f64,
-        )?;
-        Ok(object.into())
-    }
-
-    fn compile_queue_decision_to_js_value(
-        &self,
-        decision: RenderViewCompileQueueDecision<String>,
-    ) -> Result<JsValue, String> {
-        let object = js_sys::Object::new();
-        set_bool(&object, "ok", true)?;
-        set_number(
-            &object,
-            "pendingCompileJobCount",
-            self.compile_requests.pending_request_count() as f64,
-        )?;
-        match decision {
-            RenderViewCompileQueueDecision::Start(request) => {
-                write_compile_queue_request(&object, "start", true, request)?;
-            }
-            RenderViewCompileQueueDecision::Queued(request) => {
-                write_compile_queue_request(&object, "queued", false, request)?;
-            }
-            RenderViewCompileQueueDecision::Skipped => {
-                set_bool(&object, "startNow", false)?;
-                set_bool(&object, "queued", false)?;
-                set_bool(&object, "skipped", true)?;
-            }
-            RenderViewCompileQueueDecision::Idle => {
-                set_bool(&object, "startNow", false)?;
-                set_bool(&object, "queued", false)?;
-                set_bool(&object, "skipped", false)?;
-            }
-        }
-        if let Some(center) = self.loaded_center {
-            set_number(&object, "loadedCenterX", f64::from(center.x))?;
-            set_number(&object, "loadedCenterZ", f64::from(center.z))?;
-        }
-        Ok(object.into())
-    }
-
-    fn chunk_view_request_to_js_value(
-        &self,
-        center: ChunkPos,
-        radius_chunks: u32,
-        step: super::WebRuntimeStepReport,
-    ) -> Result<JsValue, String> {
-        let diagnostics = self.runtime.runner_diagnostics();
-        let object = js_sys::Object::new();
-        set_bool(&object, "ok", true)?;
-        set_bool(&object, "waiting", true)?;
-        set_bool(&object, "centerLoaded", false)?;
-        set_number(&object, "centerX", f64::from(center.x))?;
-        set_number(&object, "centerZ", f64::from(center.z))?;
-        set_number(&object, "radiusChunks", f64::from(radius_chunks))?;
-        set_number(
-            &object,
-            "pendingCompileJobCount",
-            self.compile_requests.pending_request_count() as f64,
-        )?;
-        set_number(&object, "commandCountDelta", step.command_count as f64)?;
-        set_number(&object, "updateCountDelta", step.update_count as f64)?;
-        set_bool(&object, "transportDrained", step.transport_drained)?;
-        write_runner_wait_diagnostics(&object, diagnostics)?;
-        Ok(object.into())
-    }
-
-    fn waiting_compile_request_to_js_value(
-        &self,
-        center: ChunkPos,
-        radius_chunks: u32,
-        center_loaded: bool,
-        step: super::WebRuntimeStepReport,
-        diagnostics: mclone_server::ServerRunnerDiagnostics,
-    ) -> Result<JsValue, String> {
-        let object = js_sys::Object::new();
-        set_bool(&object, "ok", true)?;
-        set_bool(&object, "waiting", true)?;
-        set_bool(&object, "centerLoaded", center_loaded)?;
-        set_number(&object, "centerX", f64::from(center.x))?;
-        set_number(&object, "centerZ", f64::from(center.z))?;
-        set_number(&object, "radiusChunks", f64::from(radius_chunks))?;
-        set_number(
-            &object,
-            "pendingCompileJobCount",
-            self.compile_requests.pending_request_count() as f64,
-        )?;
-        set_number(&object, "commandCountDelta", step.command_count as f64)?;
-        set_number(&object, "updateCountDelta", step.update_count as f64)?;
-        set_number(
-            &object,
-            "loadedChunkCount",
-            self.runtime.client().loaded_chunk_count() as f64,
-        )?;
-        set_bool(&object, "transportDrained", step.transport_drained)?;
-        write_runner_wait_diagnostics(&object, diagnostics)?;
-        Ok(object.into())
-    }
-}
-
-fn web_runner_diagnostics_settled(diagnostics: &mclone_server::ServerRunnerDiagnostics) -> bool {
-    diagnostics.command_queue_depth == 0
-        && diagnostics.update_queue_depth == 0
-        && diagnostics.pending_jobs == 0
-        && diagnostics.pending_publications == 0
-        && diagnostics.worldgen_mailbox_pending_jobs == 0
-        && diagnostics.light_status_mailbox_pending_statuses == 0
-}
-
-fn write_compile_queue_request(
-    object: &js_sys::Object,
-    status: &str,
-    start_now: bool,
-    request: QueuedRenderViewCompile<String>,
-) -> Result<(), String> {
-    set_bool(object, "startNow", start_now)?;
-    set_bool(object, "queued", !start_now)?;
-    set_bool(object, "skipped", false)?;
-    set_string(object, "status", status)?;
-    set_string(object, "trigger", &request.metadata)?;
-    set_bool(object, "force", request.force)?;
-    set_number(object, "centerX", f64::from(request.center.x))?;
-    set_number(object, "centerZ", f64::from(request.center.z))?;
-    Ok(())
-}
-
-fn write_compile_scope_report(
-    object: &js_sys::Object,
-    scope: WebCompileScopeReport,
-) -> Result<(), String> {
-    set_number(
-        object,
-        "viewDirtyChunkCount",
-        scope.view_dirty_chunk_count as f64,
-    )?;
-    set_number(
-        object,
-        "viewRemovalChunkCount",
-        scope.view_removal_chunk_count as f64,
-    )?;
-    set_number(
-        object,
-        "loadedDirtyChunkCount",
-        scope.loaded_dirty_chunk_count as f64,
-    )?;
-    set_number(
-        object,
-        "removalDirtyChunkCount",
-        scope.removal_dirty_chunk_count as f64,
-    )?;
-    set_number(
-        object,
-        "staleDirtyChunkCount",
-        scope.stale_dirty_chunk_count as f64,
-    )?;
-    set_number(
-        object,
-        "loadedDirtySectionCount",
-        scope.loaded_dirty_section_count as f64,
-    )?;
-    set_number(
-        object,
-        "removalDirtySectionCount",
-        scope.removal_dirty_section_count as f64,
-    )?;
-    set_number(
-        object,
-        "staleDirtySectionCount",
-        scope.stale_dirty_section_count as f64,
-    )?;
-    set_number(
-        object,
-        "readyCompileSectionCount",
-        scope.ready_compile_section_count as f64,
-    )?;
-    set_number(
-        object,
-        "deferredCompileSectionCount",
-        scope.deferred_compile_section_count as f64,
-    )?;
-    set_number(
-        object,
-        "budgetedLoadedChunkCount",
-        scope.budgeted_loaded_chunk_count as f64,
-    )?;
-    set_number(
-        object,
-        "budgetedDirtySectionChunkCount",
-        scope.budgeted_dirty_section_chunk_count as f64,
-    )?;
-    Ok(())
 }
 
 fn write_target_sections(
@@ -3977,45 +2892,6 @@ fn write_target_sections(
     let array = js_sys::Int32Array::from(flat.as_slice());
     js_sys::Reflect::set(object, &JsValue::from_str("targetSections"), array.as_ref())
         .map_err(|error| format!("failed to set targetSections: {error:?}"))?;
-    Ok(())
-}
-
-fn write_runner_wait_diagnostics(
-    object: &js_sys::Object,
-    diagnostics: mclone_server::ServerRunnerDiagnostics,
-) -> Result<(), String> {
-    set_bool(
-        object,
-        "runnerSettled",
-        web_runner_diagnostics_settled(&diagnostics),
-    )?;
-    set_string(object, "runnerKind", diagnostics.kind.label())?;
-    set_number(
-        object,
-        "runnerCommandQueueDepth",
-        diagnostics.command_queue_depth as f64,
-    )?;
-    set_number(
-        object,
-        "runnerUpdateQueueDepth",
-        diagnostics.update_queue_depth as f64,
-    )?;
-    set_number(object, "runnerPendingJobs", diagnostics.pending_jobs as f64)?;
-    set_number(
-        object,
-        "runnerPendingPublications",
-        diagnostics.pending_publications as f64,
-    )?;
-    set_number(
-        object,
-        "worldgenMailboxPendingJobs",
-        diagnostics.worldgen_mailbox_pending_jobs as f64,
-    )?;
-    set_number(
-        object,
-        "lightStatusMailboxPendingStatuses",
-        diagnostics.light_status_mailbox_pending_statuses as f64,
-    )?;
     Ok(())
 }
 

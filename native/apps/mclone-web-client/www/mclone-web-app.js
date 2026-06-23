@@ -1403,7 +1403,7 @@ class RenderSectionWorkerCompiler {
   // wasm has already filled the input arena and armed both control words; JS only
   // relays the doorbell (the worker writes the result into the same buffers main wasm
   // polls). Resolves with the worker metrics report; the section data path stays in
-  // Rust via pollCameraRenderCompile, so JS never decodes the packed bytes.
+  // Rust via the next frame's streaming poll, so JS never decodes the packed bytes.
   async compileWithDoorbell(doorbell) {
     await this.ready;
     const requestId = Number(doorbell.requestId) || 0;

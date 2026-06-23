@@ -342,8 +342,7 @@ async function renderCanvas() {
       BINDGEN_WASM_URL.href,
     );
     if (
-      typeof session.beginChunkRenderCompileRequest !== "function"
-      || typeof session.finishChunkRenderCompileRequest !== "function"
+      typeof session.syncOverviewRenderFrame !== "function"
       || typeof session.pendingChunkRenderCompileJobCount !== "function"
       || typeof session.shutdown !== "function"
     ) {
@@ -351,53 +350,39 @@ async function renderCanvas() {
         ok: false,
         supported: true,
         status: "export-missing",
-        reason: "missing WebChunkRenderSession browser compile lifecycle/shutdown export",
+        reason: "missing WebChunkRenderSession streaming/shutdown export",
       };
     }
 
     const compiler = new RenderSectionWorkerCompiler(assetPack);
     try {
-      const firstCompileRequest = await session.beginChunkRenderCompileRequest(0, 0, 1);
-      const firstCompile = await compiler.compile(firstCompileRequest);
-      const renderCompiler = firstCompile.report;
-      const firstReport = renderCompiler.ok
-        ? session.finishChunkRenderCompileRequest(firstCompileRequest.requestId, firstCompile.packed)
-        : { ok: false, reason: "render compiler worker failed before first render" };
-      const secondCompileRequest = firstReport.ok
-        ? await session.beginChunkRenderCompileRequest(1, 0, 1)
-        : { ok: false, reason: "first worker render failed before second compile request" };
-      const secondCompile = secondCompileRequest.ok
-        ? await compiler.compile(secondCompileRequest)
-        : { report: { ok: false, reason: "first worker render failed before second compile" }, packed: new Uint8Array() };
-      const secondRenderCompiler = secondCompile.report;
-      const report = secondRenderCompiler.ok
-        ? session.finishChunkRenderCompileRequest(secondCompileRequest.requestId, secondCompile.packed)
-        : { ok: false, reason: "render compiler worker failed before second render" };
+      // 067 Stage 3: pump the shared streaming loop to idle for two overview centers
+      // (the web analog of desktop `sync_all_render_sections`). Each frame may both apply
+      // the previous compile and arm the next; JS only relays the doorbell, the Rust loop
+      // owns scheduling/coalescing/acceptance. Center (1,0) reuses the resident worker mesh
+      // catalog + ring, so it incrementally streams the shifted view on top of (0,0).
+      const firstCenter = await streamOverviewToIdle(session, compiler, 0, 0, 1);
+      const secondCenter = await streamOverviewToIdle(session, compiler, 1, 0, 1);
+      const firstReport = firstCenter.report;
+      const report = secondCenter.report;
       const shutdownReport = session.shutdown();
       const sharedTopologyStress = await runSharedTopologyStress(module);
       const remoteWebSocket = await runRemoteWebSocketSmoke(module);
-      const publicFirstCompileRequest = publicCompileRequest(firstCompileRequest);
-      const publicSecondCompileRequest = publicCompileRequest(secondCompileRequest);
       return {
         ok: Boolean(
-          firstCompileRequest.ok
-          && renderCompiler.ok
-          && renderCompiler.requestId === firstCompileRequest.requestId
-          && firstReport.ok
-          && firstReport.workerCompileUsed
-          && secondCompileRequest.ok
-          && secondRenderCompiler.ok
-          && secondRenderCompiler.requestId === secondCompileRequest.requestId
-          && report.ok
-          && report.workerCompileUsed
+          firstCenter.settled
+          && secondCenter.settled
+          && Number(firstCenter.compileCount) > 0
           && report.worldgenMailboxKind === "web-worker"
           && report.lightStatusMailboxKind === "web-worker"
           && Number(report.worldgenMailboxPendingJobs) === 0
           && Number(report.lightStatusMailboxPendingStatuses) === 0
-          && frameMetricsActive(report.runnerFrameMetrics, "shared-memory")
+          // The streaming runner ships its tiny command/update frames over either
+          // shared-memory or message-transfer depending on payload size (non-deterministic
+          // run to run); the heavy worldgen/light lanes are deterministically shared-memory,
+          // and the shared-memory runner capability is asserted by sharedTopologyStress.
           && frameMetricsActive(report.worldgenJobFrameMetrics, "shared-memory")
           && frameMetricsActive(report.lightStatusJobFrameMetrics, "shared-memory")
-          && sharedBufferPoolActive(report.runnerFrameMetrics)
           && sharedBufferPoolActive(report.worldgenJobFrameMetrics)
           && sharedBufferPoolActive(report.lightStatusJobFrameMetrics)
           && report.rendered
@@ -412,10 +397,8 @@ async function renderCanvas() {
         ),
         supported: true,
         status: report.ok ? "rendered" : "failed",
-        firstCompileRequest: publicFirstCompileRequest,
-        renderCompiler,
-        secondCompileRequest: publicSecondCompileRequest,
-        secondRenderCompiler,
+        firstCenter: publicOverviewCenter(firstCenter),
+        secondCenter: publicOverviewCenter(secondCenter),
         renderCompilerPendingJobCount: compiler.pendingJobCount(),
         sessionPendingCompileJobCount: session.pendingChunkRenderCompileJobCount(),
         firstReport,
@@ -437,20 +420,111 @@ async function renderCanvas() {
   }
 }
 
-function publicCompileRequest(request) {
-  const copy = { ...(request ?? {}) };
-  const targetSections = request?.targetSections;
-  if (targetSections) {
-    copy.targetSectionCount = Math.floor(Number(targetSections.length) / 3) || 0;
-    delete copy.targetSections;
+// 067 Stage 3: drive `syncOverviewRenderFrame` to idle at a fixed chunk center, relaying
+// each frame's worker doorbell. "Settled" requires render-idle AND the server runner
+// drained (queue/job/publication counts zero) AND at least one resident section, because a
+// fast center jump can reach render-idle before the moved-to chunks have streamed (no
+// snapshots yet => no dirty work => idle, but the view is not actually loaded). A stable-
+// frame count and a wall-clock deadline keep the pump robust.
+async function streamOverviewToIdle(session, compiler, centerX, centerZ, radius) {
+  const deadline = performance.now() + 30_000;
+  let frame = null;
+  let lastWorkerReport = null;
+  let compileCount = 0;
+  let stableFrames = 0;
+  // A center change requests a new view, but the runner registers the new generation
+  // jobs asynchronously. Right after the change the runner can momentarily look drained
+  // (jobs not yet propagated, no dirty work yet) and the loop would settle prematurely
+  // with no compiles. Require having observed the runner do work for this center — busy
+  // queues/jobs/publications, or a compile armed this frame — before accepting "settled".
+  let observedRunnerWork = false;
+  while (performance.now() < deadline) {
+    frame = session.syncOverviewRenderFrame(centerX, centerZ, radius);
+    if (!frame?.ok) {
+      throw new Error(
+        `overview render frame failed at center ${centerX},${centerZ}: ${frame?.reason ?? "unknown"}`,
+      );
+    }
+    if (frame.doorbell) {
+      const compiled = await compiler.compileWithDoorbell(frame.doorbell);
+      compileCount += 1;
+      if (compiled?.report) {
+        lastWorkerReport = compiled.report;
+      }
+    }
+    if (overviewRunnerBusy(frame) || frame.doorbell) {
+      observedRunnerWork = true;
+    }
+    if (observedRunnerWork && overviewFrameSettled(frame)) {
+      stableFrames += 1;
+      if (stableFrames >= 3) {
+        break;
+      }
+    } else {
+      stableFrames = 0;
+    }
+    // Always yield to the event loop (a macrotask, not just a microtask) so the
+    // integrated server / worldgen / light workers' messages are processed between
+    // frames. Without this, no-doorbell frames (no compile to await) spin the main
+    // thread synchronously and starve the runner so it can never drain.
+    await yieldToEventLoop();
   }
-  const snapshotInputBytes = request?.snapshotInputBytes;
-  if (snapshotInputBytes) {
-    copy.snapshotInputByteLength = Number(copy.snapshotInputByteLength)
-      || byteLengthOf(snapshotInputBytes);
-    delete copy.snapshotInputBytes;
+  const settled = observedRunnerWork && overviewFrameSettled(frame);
+  if (!settled) {
+    throw new Error(
+      `overview render did not settle at center ${centerX},${centerZ} `
+        + `(observedRunnerWork=${observedRunnerWork}):\n${JSON.stringify(frame, null, 2)}`,
+    );
   }
-  return copy;
+  return {
+    centerX,
+    centerZ,
+    settled,
+    compileCount,
+    residentSectionCount: Number(frame.residentSectionCount) || 0,
+    report: frame,
+    workerReport: lastWorkerReport,
+  };
+}
+
+function yieldToEventLoop() {
+  if (typeof requestAnimationFrame === "function") {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function overviewRunnerBusy(frame) {
+  return Boolean(
+    frame
+    && (Number(frame.runnerCommandQueueDepth) > 0
+      || Number(frame.runnerUpdateQueueDepth) > 0
+      || Number(frame.runnerPendingJobs) > 0
+      || Number(frame.runnerPendingPublications) > 0),
+  );
+}
+
+function overviewFrameSettled(frame) {
+  return Boolean(
+    frame
+    && frame.streamingIdle
+    && Number(frame.runnerPendingJobs) === 0
+    && Number(frame.runnerUpdateQueueDepth) === 0
+    && Number(frame.runnerCommandQueueDepth) === 0
+    && Number(frame.runnerPendingPublications) === 0
+    && Number(frame.residentSectionCount) > 0
+  );
+}
+
+function publicOverviewCenter(center) {
+  return {
+    centerX: center.centerX,
+    centerZ: center.centerZ,
+    settled: center.settled,
+    compileCount: center.compileCount,
+    residentSectionCount: center.residentSectionCount,
+    workerReport: center.workerReport,
+  };
 }
 
 async function runRemoteWebSocketSmoke(module) {
@@ -541,11 +615,9 @@ class RenderSectionWorkerCompiler {
         : 0,
       sharedInputGrowCount: 0,
     };
-    // Resident render-compiler SAB arenas (067 Stage 1): allocate the input,
-    // result, and control buffers once per session and re-arm them on every
-    // compile instead of allocating a fresh SharedArrayBuffer per request.
-    this.sharedResultArena = createResidentRenderCompilerSharedResultBuffer();
-    this.sharedInputArena = createResidentRenderCompilerSharedInputBuffer();
+    // 067 Stage 3: the overview pump drives compiles through the Rust-owned resident SAB
+    // ring handed over on each doorbell, so this worker shim no longer owns its own SAB
+    // arenas — it is a doorbell + lifecycle relay only.
     this.ready = new Promise((resolve, reject) => {
       this.resolveReady = resolve;
       this.rejectReady = reject;
@@ -685,21 +757,52 @@ class RenderSectionWorkerCompiler {
     }
   }
 
-  async compile(request) {
+  // 067 Stage 3: post a compile against the Rust-owned resident shared ring. Main
+  // wasm has already filled the input arena and armed both control words; JS only
+  // relays the doorbell (the worker writes the result into the same buffers main wasm
+  // polls). Resolves with the worker metrics report; the section data path stays in
+  // Rust via the next frame's poll, so JS never decodes the packed bytes.
+  async compileWithDoorbell(doorbell) {
     await this.ready;
+    const requestId = Number(doorbell.requestId) || 0;
+    if (requestId <= 0) {
+      throw new Error(`invalid render compile doorbell id ${String(doorbell.requestId)}`);
+    }
+    const sharedResult = sharedResultArenaFromDoorbell(doorbell);
+    const sharedInput = sharedInputArenaFromDoorbell(doorbell);
+    return this.dispatchCompile({
+      requestId,
+      centerX: doorbell.centerX,
+      centerZ: doorbell.centerZ,
+      radiusChunks: doorbell.radiusChunks,
+      targetSections: doorbell.targetSections,
+      snapshotInputChunkCount: Number(doorbell.snapshotInputChunkCount) || 0,
+      sharedResult,
+      sharedInput,
+      requestSource: {
+        snapshotInputByteLength: Number(doorbell.sharedInputByteLength) || 0,
+        snapshotInputChunkCount: Number(doorbell.snapshotInputChunkCount) || 0,
+      },
+    });
+  }
+
+  dispatchCompile({
+    requestId,
+    centerX,
+    centerZ,
+    radiusChunks,
+    targetSections,
+    snapshotInputChunkCount,
+    sharedResult,
+    sharedInput,
+    requestSource,
+  }) {
     return new Promise((resolve, reject) => {
-      const requestId = Number(request.requestId) || 0;
-      if (requestId <= 0) {
-        reject(new Error(`invalid render compile request id ${String(request.requestId)}`));
-        return;
-      }
-      const sharedResult = this.armSharedResultArena();
-      const sharedInput = this.armSharedInputArena(request.snapshotInputBytes);
       const requestMetrics = renderCompilerRequestMetrics(
-        request.targetSections,
+        targetSections,
         sharedResult,
         sharedInput,
-        request,
+        requestSource,
       );
       this.metrics.compileCount += 1;
       this.metrics.transferredRequestByteCount += requestMetrics.transferredRequestByteLength;
@@ -721,11 +824,11 @@ class RenderSectionWorkerCompiler {
         requestId,
         bindgenJsUrl: BINDGEN_JS_URL.href,
         bindgenWasmUrl: BINDGEN_WASM_URL.href,
-        centerX: request.centerX,
-        centerZ: request.centerZ,
-        radiusChunks: request.radiusChunks,
-        targetSections: request.targetSections,
-        snapshotInputChunkCount: Number(request.snapshotInputChunkCount) || 0,
+        centerX,
+        centerZ,
+        radiusChunks,
+        targetSections,
+        snapshotInputChunkCount,
       };
       if (sharedInput !== null) {
         message.sharedInputControlBuffer = sharedInput.controlBuffer;
@@ -740,53 +843,6 @@ class RenderSectionWorkerCompiler {
       }
       this.worker.postMessage(message);
     });
-  }
-
-  armSharedResultArena() {
-    const arena = this.sharedResultArena;
-    if (arena === null) {
-      return null;
-    }
-    Atomics.store(arena.control, RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX, RENDER_COMPILER_SHARED_RESULT_PENDING);
-    Atomics.store(arena.control, RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX, 0);
-    Atomics.store(arena.control, RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX, arena.responseCapacity);
-    return arena;
-  }
-
-  armSharedInputArena(snapshotInputBytes) {
-    const arena = this.sharedInputArena;
-    if (arena === null) {
-      return null;
-    }
-    const source = snapshotInputBytes instanceof Uint8Array
-      ? snapshotInputBytes
-      : ArrayBuffer.isView(snapshotInputBytes)
-        ? new Uint8Array(
-            snapshotInputBytes.buffer,
-            snapshotInputBytes.byteOffset,
-            snapshotInputBytes.byteLength,
-          )
-        : null;
-    if (source === null || source.byteLength <= 0) {
-      return null;
-    }
-    if (source.byteLength > arena.inputCapacity) {
-      // Oversized delta: grow the resident input arena (realloc) and keep a
-      // diagnostic. Safe because compiles are single-in-flight, so no other
-      // compile is reading the old buffer when we replace it.
-      arena.inputBuffer = new SharedArrayBuffer(source.byteLength);
-      arena.inputCapacity = source.byteLength;
-      this.metrics.sharedInputGrowCount += 1;
-      console.warn(
-        `render compiler shared input arena grew to ${source.byteLength} bytes`,
-      );
-    }
-    new Uint8Array(arena.inputBuffer, 0, source.byteLength).set(source);
-    Atomics.store(arena.control, RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX, RENDER_COMPILER_SHARED_INPUT_READY);
-    Atomics.store(arena.control, RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX, source.byteLength);
-    Atomics.store(arena.control, RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX, arena.inputCapacity);
-    arena.inputByteLength = source.byteLength;
-    return arena;
   }
 
   pendingJobCount() {
@@ -807,41 +863,36 @@ class RenderSectionWorkerCompiler {
   }
 }
 
-function createResidentRenderCompilerSharedResultBuffer() {
-  if (!renderCompilerSharedMemorySupported()) {
+// 067 Stage 3: wrap the Rust-owned resident result buffers (handed over on the
+// submit doorbell) in the same arena shape the worker protocol + metrics expect.
+// JS does not arm these — main wasm already filled/armed them — it only reads byte
+// counts back for diagnostics.
+function sharedResultArenaFromDoorbell(doorbell) {
+  const controlBuffer = doorbell.sharedResultControlBuffer;
+  const responseBuffer = doorbell.sharedResultResponseBuffer;
+  if (!isSharedArrayBuffer(controlBuffer) || !isSharedArrayBuffer(responseBuffer)) {
     return null;
   }
-  const controlBuffer = new SharedArrayBuffer(
-    RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS * Int32Array.BYTES_PER_ELEMENT,
-  );
-  const control = new Int32Array(controlBuffer);
-  const responseCapacity = RENDER_COMPILER_DEFAULT_SHARED_RESULT_CAPACITY;
-  const responseBuffer = new SharedArrayBuffer(responseCapacity);
-  Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX, RENDER_COMPILER_SHARED_RESULT_PENDING);
-  Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX, 0);
-  Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX, responseCapacity);
-  return { controlBuffer, control, responseBuffer, responseCapacity };
-}
-
-function createResidentRenderCompilerSharedInputBuffer() {
-  if (!renderCompilerSharedMemorySupported()) {
-    return null;
-  }
-  const controlBuffer = new SharedArrayBuffer(
-    RENDER_COMPILER_SHARED_INPUT_CONTROL_WORDS * Int32Array.BYTES_PER_ELEMENT,
-  );
-  const control = new Int32Array(controlBuffer);
-  const inputCapacity = RENDER_COMPILER_DEFAULT_SHARED_INPUT_CAPACITY;
-  const inputBuffer = new SharedArrayBuffer(inputCapacity);
-  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX, RENDER_COMPILER_SHARED_INPUT_READY);
-  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX, 0);
-  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX, inputCapacity);
   return {
     controlBuffer,
-    control,
+    control: new Int32Array(controlBuffer),
+    responseBuffer,
+    responseCapacity: Number(doorbell.sharedResultBufferCapacityBytes) || responseBuffer.byteLength,
+  };
+}
+
+function sharedInputArenaFromDoorbell(doorbell) {
+  const controlBuffer = doorbell.sharedInputControlBuffer;
+  const inputBuffer = doorbell.sharedInputBuffer;
+  if (!isSharedArrayBuffer(controlBuffer) || !isSharedArrayBuffer(inputBuffer)) {
+    return null;
+  }
+  return {
+    controlBuffer,
+    control: new Int32Array(controlBuffer),
     inputBuffer,
-    inputByteLength: 0,
-    inputCapacity,
+    inputByteLength: Number(doorbell.sharedInputByteLength) || 0,
+    inputCapacity: Number(doorbell.sharedInputBufferCapacityBytes) || inputBuffer.byteLength,
   };
 }
 

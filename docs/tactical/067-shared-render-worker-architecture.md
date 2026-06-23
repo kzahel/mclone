@@ -2,10 +2,15 @@
 
 Status: active high-priority architecture parent. Stage 0 (baselines), Stage 1
 (resident SAB arenas), Stage 2 (web `RenderSectionCompiler` over the resident
-ring), and the Stage 3 keystone (per-frame `sync_render_sections_with_budget`
-streaming — the shared loop, web `syncCameraRenderFrame`, mega-job eliminated) are
-landed; the Stage 3 legacy-deletion tail (begin/finish exports + overview-smoke
-conversion) is in progress. Supersedes
+ring), and **all of Stage 3** — the keystone (per-frame
+`sync_render_sections_with_budget` streaming: the shared loop, web
+`syncCameraRenderFrame`, mega-job eliminated) plus the legacy-deletion tail
+(overview smoke converted to a `syncOverviewRenderFrame` pump-to-idle; the
+begin/finish/submit/poll/request compile exports + their internals, the
+`RenderViewCompileQueue`/`loaded_center`/`compile_requests`/`shared_compile`
+fields, and the non-SAB `message-transfer` fallback deleted) — are landed.
+Stage 4 (resident worker snapshot mirror; delta-only input) and Stage 5 (JS dedup
++ single-source ABI constants) remain. Supersedes
 [`065-native-web-mobile-streaming-performance.md`](065-native-web-mobile-streaming-performance.md)
 and [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md),
 folding their streaming-perf goals and the render-worker `SharedArrayBuffer`
@@ -438,13 +443,40 @@ pre-loads the server-spawn chunks before the live rAF gravity fall, so the camer
 settles at the same sub-block position every run despite per-compile frame-time
 variance (the pre-streaming app fell during uniformly fast render-only frames).
 
-**Still to delete in this stage:** the `begin/finish/take` + camera
-submit/poll/request wasm-bindgen exports and their internals, the
-`RenderViewCompileQueue`/`loaded_center`/`compile_requests`/`shared_compile`
-fields, the legacy `message-transfer` fallback, and the duplicated
-`RenderSectionWorkerCompiler.compile()` path — gated on converting the
-deterministic overview smoke (`mclone-web-smoke.js`) to a `syncOverviewRenderFrame`
-pump-to-idle (the web analog of `sync_all_render_sections`).
+**Legacy-deletion tail (landed).** The deterministic overview smoke
+(`mclone-web-smoke.js`) was converted from the `beginChunkRenderCompileRequest` ->
+`compiler.compile()` -> `finishChunkRenderCompileRequest` transaction to a
+`streamOverviewToIdle` pump over `syncOverviewRenderFrame` for centers `(0,0)` then
+`(1,0)` — the web analog of desktop `sync_all_render_sections`. The pump relays each
+frame's worker doorbell via the shared `compileWithDoorbell` shim, yields to the
+event loop every frame so the runner/worldgen/light workers' messages flow, and
+accepts "settled" only after observing the runner do work for that center (a center
+jump can momentarily look drained before its generation jobs propagate — the same
+premature-settle race the keystone hit). With that gate the smoke streams real
+incremental compiles (center `(0,0)` ~13, center `(1,0)` ~9) and renders the same
+terrain column. With the overview smoke off the begin/finish path, the dead Rust was
+deleted: the `renderChunkReport*` / `begin/finish/submit/poll/request` chunk+camera
+compile `#[wasm_bindgen]` exports and their whole internal cascade
+(`submit_shared_render_compile`, `poll_camera_render_compile_result`,
+`*_request_to_js_value`, `write_compile_queue_request`, `write_compile_scope_report`,
+`write_runner_wait_diagnostics`, `WebSharedCompileContext`, `WebPendingCompileContext`,
+…), the `RenderViewCompileQueue`/`loaded_center`/`compile_requests`/`shared_compile`
+fields, and the unused imports — `cargo check --target wasm32-unknown-unknown` is now
+warning-clean. `pendingChunkRenderCompileJobCount` simplified to
+`render_compiler.pending_job_count()`. The non-SAB `message-transfer` fallback in the
+web app stays gone (init throws without cross-origin isolation). **Kept:**
+`render_section_compile_result_from_report`, `WebRenderSectionCompiler`,
+`render_chunk_report_with_cache_update`, the `WebRenderCompilerSession` exports, and
+all `sync_*_render_frame` methods; `mclone_web_render_generated_chunk_report` is still
+a live export, so `render_chunk_report_for_center` ->
+`prepare_chunk_render_plan`/`prepare_chunk_view`/`finish_render_compile_result` stay
+(the begin/finish-era enumeration of "delete prepare_*" was superseded by what `cargo`
+actually reports unused). Note: the deterministic smoke no longer asserts the *render
+session's* runner frame-metrics transport — the streaming runner ships its tiny
+command/update frames over shared-memory **or** message-transfer depending on payload
+size (non-deterministic run to run); the heavy worldgen/light lanes stay
+deterministically shared-memory, and the shared-memory runner capability is still
+asserted by `sharedTopologyStress`.
 
 ### Stage 4 — Resident snapshot mirror; request input becomes delta-only
 
