@@ -7,7 +7,16 @@ import {
   defaultMovementImpulse,
   sanitizeInputImpulse,
 } from "./mclone-web-input.js";
-import { TouchControls, hasTouchInput } from "./mclone-web-touch.js";
+import {
+  DEFAULT_LOOK_SENSITIVITY,
+  bindMenu,
+  formatInteractionStatus,
+  loadStoredSettings,
+  setHudOpen,
+  setMenuOpen,
+  updateDom,
+} from "./mclone-web-hud.js";
+import { TouchControls } from "./mclone-web-touch.js";
 
 /**
  * The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
@@ -70,17 +79,6 @@ const ASSET_PACK_URL = versionedUrl("/reference/minecraft-1.17.1/extracted.zip")
 
 const RADIUS_CHUNKS = 1;
 const MAX_FRAME_DT_SECONDS = 0.05;
-
-// Touch look multiplies the raw drag delta before it reaches the engine's fixed
-// mouse sensitivity. A finger drag covers far fewer pixels than a relative mouse
-// move (especially on the narrow look-half of a portrait phone), so the default
-// boost makes aiming the crosshair toward your travel direction practical.
-const LOOK_SENSITIVITY_MIN = 0.5;
-const LOOK_SENSITIVITY_MAX = 5;
-const DEFAULT_LOOK_SENSITIVITY = 2.4;
-const SETTINGS_STORAGE_KEYS = {
-  lookSensitivity: "mclone.web.lookSensitivity",
-};
 
 /** @type {AppRuntime} */
 const runtime = {
@@ -177,8 +175,8 @@ async function boot() {
   runtime.adjustCameraSpeed = (amount) => app.adjustCameraSpeed(amount);
   runtime.previewBlockTarget = () => runtime.state.currentTarget;
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
-  runtime.setHudOpen = (open) => setHudOpen(Boolean(open));
-  runtime.setMenuOpen = (open) => setMenuOpen(app, Boolean(open));
+  runtime.setHudOpen = (open) => setHudOpen(runtime.state, Boolean(open));
+  runtime.setMenuOpen = (open) => setMenuOpen(app, runtime.state, Boolean(open));
   try {
     await app.init();
     runtime.ready = true;
@@ -193,7 +191,7 @@ async function boot() {
     runtime.state.ok = false;
     runtime.state.failed = true;
     runtime.state.status = stringifyError(error);
-    updateDom();
+    updateDom(runtime.state);
     return snapshotState();
   }
 }
@@ -250,7 +248,7 @@ class WebChunkApp {
     this.canvas.focus();
 
     runtime.state.status = "loading wasm";
-    updateDom();
+    updateDom(runtime.state);
     const module = /** @type {WasmModule} */ (await import(BINDGEN_JS_URL.href));
     await module.default(BINDGEN_WASM_URL.href);
     this.module = module;
@@ -261,10 +259,10 @@ class WebChunkApp {
     }
 
     runtime.state.status = "loading assets";
-    updateDom();
+    updateDom(runtime.state);
     const assetPack = await fetchAssetPack(ASSET_PACK_URL);
     runtime.state.status = "initializing webgpu";
-    updateDom();
+    updateDom(runtime.state);
     this.session = await module.mclone_web_create_worker_chunk_render_session(
       this.canvas,
       assetPack,
@@ -299,15 +297,15 @@ class WebChunkApp {
       bindgenWasmUrl: BINDGEN_WASM_URL,
       workerName: "mclone-render-compiler-app",
     });
-    bindMenu(this);
-    bindInput(this, runtime.state, updateDom);
+    bindMenu(this, runtime.state);
+    bindInput(this, runtime.state, () => updateDom(runtime.state));
     this.touchControls = new TouchControls(this, runtime.state);
     this.syncCanvasSize();
     this.applyCameraState(this.session.cameraFrameState());
     this.applyTargetState(this.session.previewBlockTarget());
 
     runtime.state.status = "rendering";
-    updateDom();
+    updateDom(runtime.state);
     // 067 Stage 3: warm up the streaming loop to idle so the first presented frame has
     // terrain (the web analog of desktop's pre-render `sync_all_render_sections`).
     await this.warmUpStreamingToIdle();
@@ -459,7 +457,7 @@ class WebChunkApp {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
       console.error(error);
-      updateDom();
+      updateDom(runtime.state);
       return true;
     }
     const syncMs = performance.now() - syncStart;
@@ -478,7 +476,7 @@ class WebChunkApp {
     if (!frame?.ok) {
       runtime.state.ok = false;
       runtime.state.status = frame?.reason ?? "streaming render frame failed";
-      updateDom();
+      updateDom(runtime.state);
       return null;
     }
     this.hasRendered = true;
@@ -516,7 +514,7 @@ class WebChunkApp {
     if (frame.doorbell) {
       workerPromise = this.startAndPostCompileTiming(frame.doorbell, syncMs);
     }
-    updateDom();
+    updateDom(runtime.state);
     return workerPromise;
   }
 
@@ -606,7 +604,7 @@ class WebChunkApp {
       runtime.state.lastCompileReport = frame;
       this.finalizingCount = Math.max(0, this.finalizingCount - 1);
       runtime.state.compileFinalizingCount = this.finalizingCount;
-      updateDom();
+      updateDom(runtime.state);
     })();
   }
 
@@ -690,13 +688,13 @@ class WebChunkApp {
       // 067 Stage 3: a block edit publishes a SectionBlockUpdates server update, which the
       // streaming loop marks render-dirty on its next drain and recompiles automatically —
       // no explicit compile request needed.
-      updateDom();
+      updateDom(runtime.state);
       return interaction;
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
       console.error(error);
-      updateDom();
+      updateDom(runtime.state);
       return null;
     }
   }
@@ -715,7 +713,7 @@ class WebChunkApp {
       return false;
     }
     applyHotbarState(hotbar, runtime.state);
-    updateDom();
+    updateDom(runtime.state);
     return true;
   }
 
@@ -733,7 +731,7 @@ class WebChunkApp {
       return null;
     }
     this.applyCameraState(camera);
-    updateDom();
+    updateDom(runtime.state);
     return camera;
   }
 
@@ -871,20 +869,20 @@ class WebChunkApp {
       if (result && typeof result.catch === "function") {
         result.catch(() => {
           runtime.state.pointerLockFallback = true;
-          updateDom();
+          updateDom(runtime.state);
         });
       }
     } else {
       runtime.state.pointerLockFallback = true;
     }
-    updateDom();
+    updateDom(runtime.state);
   }
 
   updatePointerLockState() {
     runtime.state.pointerLocked = document.pointerLockElement === this.canvas;
     runtime.state.pointerLockFallback =
       runtime.state.pointerLockAttempted && !runtime.state.pointerLocked;
-    updateDom();
+    updateDom(runtime.state);
   }
 
   syncCanvasSize() {
@@ -903,165 +901,6 @@ class WebChunkApp {
       runtime.state.width = Number(report.width) || width;
       runtime.state.height = Number(report.height) || height;
     }
-  }
-}
-
-/** @param {WebChunkApp} app */
-function bindMenu(app) {
-  // The hamburger now opens the main menu; the runtime/debug stats live behind
-  // the menu's "Debug info" entry. Stats stay open by default on desktop so the
-  // debug HUD remains a glance away, while mobile boots into the clean view.
-  setHudOpen(defaultHudOpen());
-  setMenuOpen(app, false);
-  setSettingsOpen(false);
-  syncSettingsControls(app);
-
-  app.hudToggle?.addEventListener("click", () => setMenuOpen(app, !isMenuOpen()));
-
-  document.getElementById("menu-resume")?.addEventListener("click", () => {
-    setMenuOpen(app, false);
-  });
-
-  const debugButton = document.getElementById("menu-debug");
-  debugButton?.addEventListener("click", () => {
-    const open = !isHudOpen();
-    setHudOpen(open);
-    setMenuOpen(app, false);
-  });
-
-  document.getElementById("menu-settings")?.addEventListener("click", () => {
-    setSettingsOpen(!isSettingsOpen());
-  });
-
-  const lookInput = /** @type {HTMLInputElement | null} */ (
-    document.getElementById("setting-look-sensitivity")
-  );
-  lookInput?.addEventListener("input", () => {
-    setLookSensitivity(app, Number(lookInput.value));
-  });
-
-  window.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || document.pointerLockElement === app.canvas) {
-      return;
-    }
-    if (isSettingsOpen()) {
-      setSettingsOpen(false);
-    } else if (isMenuOpen()) {
-      setMenuOpen(app, false);
-    } else if (isHudOpen()) {
-      setHudOpen(false);
-    }
-  });
-}
-
-/**
- * @param {WebChunkApp} app
- * @param {boolean} open
- */
-function setMenuOpen(app, open) {
-  const menu = document.getElementById("main-menu");
-  const toggle = document.getElementById("hud-toggle");
-  if (menu) {
-    menu.hidden = !open;
-  }
-  if (toggle) {
-    toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  }
-  if (!open) {
-    setSettingsOpen(false);
-  } else {
-    // Releasing held touch input keeps the player from drifting while the modal
-    // menu is consuming the screen.
-    app?.touchControls?.clearAll();
-    syncSettingsControls(app);
-  }
-  const debugButton = document.getElementById("menu-debug");
-  debugButton?.setAttribute("aria-pressed", isHudOpen() ? "true" : "false");
-  runtime.state.menuOpen = Boolean(open);
-}
-
-function isMenuOpen() {
-  return document.getElementById("main-menu")?.hidden === false;
-}
-
-/** @param {boolean} open */
-function setSettingsOpen(open) {
-  const panel = document.getElementById("settings-panel");
-  const button = document.getElementById("menu-settings");
-  if (panel) {
-    panel.hidden = !open;
-  }
-  if (button) {
-    button.setAttribute("aria-expanded", open ? "true" : "false");
-  }
-  runtime.state.settingsOpen = Boolean(open);
-}
-
-function isSettingsOpen() {
-  return document.getElementById("settings-panel")?.hidden === false;
-}
-
-/**
- * @param {WebChunkApp} app
- * @param {number} value
- */
-function setLookSensitivity(app, value) {
-  const clamped = clampLookSensitivity(value);
-  app.lookSensitivity = clamped;
-  runtime.state.lookSensitivity = clamped;
-  storeSetting(SETTINGS_STORAGE_KEYS.lookSensitivity, String(clamped));
-  syncSettingsControls(app);
-}
-
-/** @param {WebChunkApp} app */
-function syncSettingsControls(app) {
-  const lookInput = /** @type {HTMLInputElement | null} */ (
-    document.getElementById("setting-look-sensitivity")
-  );
-  if (lookInput && document.activeElement !== lookInput) {
-    lookInput.value = String(app.lookSensitivity);
-  }
-  const lookValue = document.getElementById("setting-look-sensitivity-value");
-  if (lookValue) {
-    lookValue.textContent = `${app.lookSensitivity.toFixed(1)}×`;
-  }
-}
-
-/** @param {unknown} value */
-function clampLookSensitivity(value) {
-  const sensitivity = Number(value);
-  if (!Number.isFinite(sensitivity)) {
-    return DEFAULT_LOOK_SENSITIVITY;
-  }
-  return Math.min(LOOK_SENSITIVITY_MAX, Math.max(LOOK_SENSITIVITY_MIN, sensitivity));
-}
-
-function loadStoredSettings() {
-  return {
-    lookSensitivity: clampLookSensitivity(
-      readStoredSetting(SETTINGS_STORAGE_KEYS.lookSensitivity) ?? DEFAULT_LOOK_SENSITIVITY,
-    ),
-  };
-}
-
-/** @param {string} key */
-function readStoredSetting(key) {
-  try {
-    return globalThis.localStorage?.getItem(key) ?? null;
-  } catch (_error) {
-    return null;
-  }
-}
-
-/**
- * @param {string} key
- * @param {string} value
- */
-function storeSetting(key, value) {
-  try {
-    globalThis.localStorage?.setItem(key, value);
-  } catch (_error) {
-    // Private browsing / disabled storage: keep the in-memory setting only.
   }
 }
 
@@ -1087,54 +926,6 @@ function nextAnimationFrame() {
   );
 }
 
-function updateDom() {
-  const state = runtime.state;
-  if (state.failed || (state.ready && !state.ok)) {
-    setHudOpen(true);
-  }
-  setText("center", `${state.centerX}, ${state.centerZ}`);
-  setText("camera", `${state.cameraX.toFixed(1)}, ${state.cameraY.toFixed(1)}, ${state.cameraZ.toFixed(1)}`);
-  setText("mode", state.movementMode);
-  setText("slot", String(Number(state.selectedHotbarSlot || 0) + 1));
-  setText("ground", state.onGround ? "ground" : state.verticalCollision ? "blocked" : state.horizontalCollision ? "wall" : "air");
-  setText("target", formatTarget(state.currentTarget));
-  setText("action", state.interactionStatus);
-  setText("chunks", String(state.loadedChunkCount));
-  setText("sections", String(state.residentSectionCount));
-  setText("time", `${Number(state.dayTime || 0).toFixed(0)} / ${Number(state.timeOfDay || 0).toFixed(3)}`);
-  setText("actors", `${state.drawnActorCount}/${state.actorCount}`);
-  setText("pending", String(state.pendingCompileJobCount));
-  setText("compile", formatCompileTiming(state));
-  setText("frames", String(state.frameCount));
-  setText("lock", state.pointerLocked ? "on" : state.pointerLockFallback ? "fallback" : "off");
-  const status = document.getElementById("status");
-  if (status) {
-    status.textContent = state.status;
-    status.dataset.ok = state.ok ? "true" : "false";
-    status.dataset.ready = state.ready && state.status === "ready" ? "true" : "false";
-  }
-}
-
-/** @param {Record<string, any>} state */
-function formatCompileTiming(state) {
-  const timing = state.activeCompileTiming ?? state.lastCompileTiming;
-  if (!timing) {
-    return "-";
-  }
-  const label = state.activeCompileTiming ? "active" : timing.status;
-  const target = `${timing.targetCenterX},${timing.targetCenterZ}`;
-  return `${label} ${target} ${Number(timing.totalMs || 0).toFixed(0)}ms gap ${Number(timing.maxFrameGapMs || 0).toFixed(0)}ms`;
-}
-
-/**
- * @param {string} id
- * @param {string} value
- */
-function setText(id, value) {
-  const element = document.getElementById(id);
-  if (element) element.textContent = value;
-}
-
 function normalizedDeployAssetVersion() {
   const version = /** @type {any} */ (globalThis).__MCLONE_NATIVE_WEB_ASSET_VERSION__;
   if (
@@ -1154,49 +945,6 @@ function versionedUrl(path) {
     url.searchParams.set("v", DEPLOY_ASSET_VERSION);
   }
   return url;
-}
-
-function isHudOpen() {
-  return document.getElementById("runtime-hud")?.hidden === false;
-}
-
-/** @param {boolean} open */
-function setHudOpen(open) {
-  const hud = document.getElementById("runtime-hud");
-  const toggle = document.getElementById("hud-toggle");
-  if (hud) {
-    hud.hidden = !open;
-  }
-  if (toggle) {
-    toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  }
-  runtime.state.hudOpen = Boolean(open);
-}
-
-function defaultHudOpen() {
-  return !hasTouchInput() && window.matchMedia("(min-width: 681px)").matches;
-}
-
-/** @param {WasmReport} interaction */
-function formatInteractionStatus(interaction) {
-  if (!interaction?.ok) {
-    return "idle";
-  }
-  if (!interaction.hit) {
-    return `${interaction.action}: miss`;
-  }
-  return `${interaction.action}: ${interaction.changed ? "changed" : "same"}`;
-}
-
-/** @param {WasmReport} interaction */
-function formatTarget(interaction) {
-  if (!interaction?.ok) {
-    return "-";
-  }
-  if (!interaction.hit) {
-    return "miss";
-  }
-  return `${interaction.blockX}, ${interaction.blockY}, ${interaction.blockZ}`;
 }
 
 function snapshotState() {
