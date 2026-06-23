@@ -25,13 +25,21 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 
 const WEB_WORKER_TICK_INTERVAL_MS: u32 = 50;
-const RUNNER_SHARED_CONTROL_SLOTS: u32 = 4;
-const RUNNER_SHARED_CONTROL_BYTES: u32 = RUNNER_SHARED_CONTROL_SLOTS * 4;
+// Server-worker SharedArrayBuffer ring ABI. This is the Rust copy of the control-word layout
+// authored once on the JS side in www/mclone-runner-shared-abi.js (imported by both the
+// integrated-server worker and the worldgen/light job worker). The host test
+// tests/runner_shared_abi_lock.rs parses both files and fails on any drift, so a mismatched
+// status code or word index is a failing test instead of a silent SAB corruption — keep them
+// in sync. CONTROL_BYTES is an integer literal (4 i32 control words × 4 bytes) rather than a
+// derived `SLOTS * 4`, because the lock test's parser evaluates integer literals/products but
+// not const references.
+const RUNNER_SHARED_CONTROL_BYTES: u32 = 16;
 const RUNNER_SHARED_STATUS_INDEX: u32 = 0;
 const RUNNER_SHARED_REQUEST_BYTES_INDEX: u32 = 1;
 const RUNNER_SHARED_RESPONSE_BYTES_INDEX: u32 = 2;
 const RUNNER_SHARED_STATUS_PENDING: i32 = 1;
 const RUNNER_SHARED_STATUS_COMPLETE: i32 = 2;
+const RUNNER_SHARED_STATUS_FAILED: i32 = -1;
 const MAX_RUNNER_SHARED_POOL_SLOTS: usize = 2;
 const MIN_RUNNER_SHARED_REQUEST_BYTES: u32 = 4 * 1024;
 const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES: u32 = 2 * 1024 * 1024;
@@ -1290,6 +1298,9 @@ fn shared_runner_response_frames(value: &JsValue) -> Result<SharedRunnerResponse
             js_error_string(&error)
         )
     })?;
+    if status == RUNNER_SHARED_STATUS_FAILED {
+        return Err("shared runner worker reported a failure status".to_owned());
+    }
     if status != RUNNER_SHARED_STATUS_COMPLETE {
         return Err(format!(
             "shared runner response completed with unexpected status {status}"

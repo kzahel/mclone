@@ -1,3 +1,15 @@
+// 070 Stage 1: the SAB ring control-word ABI is single-sourced in
+// ./mclone-runner-shared-abi.js (also imported by the worldgen/light job worker), locked to the
+// Rust copy in src/web_server_worker.rs by tests/runner_shared_abi_lock.rs.
+import {
+  RUNNER_SHARED_STATUS_INDEX,
+  RUNNER_SHARED_REQUEST_BYTES_INDEX,
+  RUNNER_SHARED_RESPONSE_BYTES_INDEX,
+  RUNNER_SHARED_CONTROL_BYTES,
+  RUNNER_SHARED_STATUS_COMPLETE,
+  RUNNER_SHARED_STATUS_FAILED,
+} from "./mclone-runner-shared-abi.js";
+
 let wasmModulePromise = null;
 let server = null;
 let tickTimer = 0;
@@ -6,12 +18,9 @@ let nextRunnerSharedBufferId = 1;
 const runnerSharedPool = [];
 const runnerSharedInflight = new Map();
 
-const RUNNER_SHARED_STATUS_INDEX = 0;
-const RUNNER_SHARED_REQUEST_BYTES_INDEX = 1;
-const RUNNER_SHARED_RESPONSE_BYTES_INDEX = 2;
-const RUNNER_SHARED_CONTROL_BYTES = 16;
-const RUNNER_SHARED_STATUS_COMPLETE = 2;
-const RUNNER_SHARED_STATUS_FAILED = -1;
+// Pool-tuning knobs are worker-local — not part of the cross-boundary control-word ABI (which
+// is imported above). The worker sizes its own response-buffer pool independently of the Rust
+// runner's pool, so these need not agree with any Rust constant.
 const MAX_RUNNER_SHARED_POOL_SLOTS = 2;
 const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES = 2 * 1024 * 1024;
 

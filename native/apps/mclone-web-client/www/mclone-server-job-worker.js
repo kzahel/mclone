@@ -1,3 +1,15 @@
+// 070 Stage 1: the SAB ring control-word ABI is single-sourced in
+// ./mclone-runner-shared-abi.js (also imported by the integrated-server worker), locked to the
+// Rust copy in src/web_server_worker.rs by tests/runner_shared_abi_lock.rs. These constants were
+// formerly hand-declared here under a divergent `SHARED_*` prefix.
+import {
+  RUNNER_SHARED_STATUS_INDEX,
+  RUNNER_SHARED_REQUEST_BYTES_INDEX,
+  RUNNER_SHARED_RESPONSE_BYTES_INDEX,
+  RUNNER_SHARED_STATUS_COMPLETE,
+  RUNNER_SHARED_STATUS_FAILED,
+} from "./mclone-runner-shared-abi.js";
+
 let wasmModulePromise = null;
 // 069 Stage 1: the worldgen worker holds a resident session across jobs (exactly
 // as the render-compiler worker holds `compilerSession`), so its
@@ -6,12 +18,6 @@ let wasmModulePromise = null;
 // light-status worker is a separate instance), so the session is never created in
 // the light worker. Light-status stays stateless (its free function).
 let worldgenSession = null;
-
-const SHARED_STATUS_INDEX = 0;
-const SHARED_REQUEST_BYTES_INDEX = 1;
-const SHARED_RESPONSE_BYTES_INDEX = 2;
-const SHARED_STATUS_COMPLETE = 2;
-const SHARED_STATUS_FAILED = -1;
 
 self.onmessage = async (event) => {
   const message = event.data ?? {};
@@ -49,7 +55,7 @@ function handleTransferredJob(module, message) {
 
 function handleSharedMemoryJob(module, message) {
   const control = sharedControlView(message.controlBuffer);
-  const requestBytes = Atomics.load(control, SHARED_REQUEST_BYTES_INDEX);
+  const requestBytes = Atomics.load(control, RUNNER_SHARED_REQUEST_BYTES_INDEX);
   const requestBuffer = sharedBuffer(message.requestBuffer, "requestBuffer");
   if (!Number.isInteger(requestBytes) || requestBytes < 0 || requestBytes > requestBuffer.byteLength) {
     throw new Error(
@@ -64,9 +70,9 @@ function handleSharedMemoryJob(module, message) {
     ? pooledResponseBuffer
     : new SharedArrayBuffer(response.byteLength);
   new Uint8Array(responseBuffer, 0, response.byteLength).set(response);
-  Atomics.store(control, SHARED_RESPONSE_BYTES_INDEX, response.byteLength);
-  Atomics.store(control, SHARED_STATUS_INDEX, SHARED_STATUS_COMPLETE);
-  Atomics.notify(control, SHARED_STATUS_INDEX, 1);
+  Atomics.store(control, RUNNER_SHARED_RESPONSE_BYTES_INDEX, response.byteLength);
+  Atomics.store(control, RUNNER_SHARED_STATUS_INDEX, RUNNER_SHARED_STATUS_COMPLETE);
+  Atomics.notify(control, RUNNER_SHARED_STATUS_INDEX, 1);
   self.postMessage({
     ok: true,
     kind: `${String(message.kind)}-result`,
@@ -104,8 +110,8 @@ function markSharedFailure(message) {
   if (message?.transportKind !== "shared-memory") return;
   try {
     const control = sharedControlView(message.controlBuffer);
-    Atomics.store(control, SHARED_STATUS_INDEX, SHARED_STATUS_FAILED);
-    Atomics.notify(control, SHARED_STATUS_INDEX, 1);
+    Atomics.store(control, RUNNER_SHARED_STATUS_INDEX, RUNNER_SHARED_STATUS_FAILED);
+    Atomics.notify(control, RUNNER_SHARED_STATUS_INDEX, 1);
   } catch {}
 }
 
