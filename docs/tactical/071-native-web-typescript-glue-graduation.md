@@ -1,6 +1,6 @@
 # 071: Native Web Glue TypeScript Graduation
 
-Status: **App/touch/input/HUD TypeScript slices landed; optional worker glue remains.**
+Status: **App/touch/input/HUD and render-compiler TypeScript slices landed; optional server/thread worker glue remains.**
 
 ## Context
 
@@ -358,6 +358,60 @@ wasm32-unknown-unknown --manifest-path native/Cargo.toml`, `pnpm native:web:buil
 
 Implementation commit: `55b68f706ef470c986dacd739dba58cf7001d833`
 (`071: graduate app glue to TypeScript`).
+
+### Stage 4a — render compiler worker TypeScript conversion (landed)
+
+The fifth slice converted only the render compiler consumer/producer glue:
+`www/mclone-render-compiler-shared.js` is now authored as
+`www/mclone-render-compiler-shared.ts`, and `www/mclone-render-compiler-worker.js` is now
+authored as `www/mclone-render-compiler-worker.ts`. The previous temporary
+`mclone-render-compiler-shared.d.ts` shim was removed because the shared module now exports real
+interfaces/types. `mclone-render-compiler-abi.js` stayed JavaScript so
+`render_compiler_abi_lock.rs` continues to parse the single source of truth directly; a small
+`mclone-render-compiler-abi.d.ts` declaration shim gives the converted TS modules typed ABI
+constants without changing the runtime module.
+
+Runtime imports and URLs stayed stable: app and smoke still import
+`./mclone-render-compiler-shared.js`; the app still constructs the render compiler worker from
+`versionedUrl("./mclone-render-compiler-worker.js")`; the smoke harness still uses
+`new URL("./mclone-render-compiler-worker.js", import.meta.url)`; the worker still imports
+`./mclone-render-compiler-abi.js` and `./mclone-render-compiler-shared.js`; and the dynamic
+wasm-bindgen import still uses the bindgen JS URL supplied by the app/smoke caller. Worker
+construction remains `type: "module"`. The staged root and deploy bundle both contain emitted
+`mclone-render-compiler-shared.js`, `mclone-render-compiler-worker.js`, and
+`mclone-render-compiler-abi.js`, with no `.ts` files shipped.
+
+Line counts from the start of this slice were render-compiler shared JS `660`, worker JS `417`,
+shared declaration shim `21`, and ABI JS `33`. Ending source counts are shared TS `644`, worker
+TS `400`, ABI declaration shim `16`, and ABI JS still `33`. The emitted staged JS is shared
+`467` lines and worker `292` lines.
+
+Correctness and perf fences held. Pre-slice and final `pnpm native:web:chunk-smoke` both produced
+`0ba8251f6c0dba012782e80921b8d45ead799a216decf50e9041958babcb6a4c` for
+`/tmp/mclone-native-web-canvas.png`; the desktop chunk canvas, mobile app canvas, and movement
+perf canvas were visually inspected. Movement perf passed across 3 chunk boundaries, moving from
+center `[-1, -1]` to `[-1, 2]`, with `compileTimingCount=29`, 16 accepted compile timings,
+`renderCount=278`, `frameCount=59`, and `maxFrameGapMs=9.33`. Accepted compile `totalMs` averaged
+`12.48` ms (min `8.1`, max `17.8`); `workerRoundTripMs` averaged `6.8` ms (min `5.8`, max `9.0`);
+packed byte length ranged `936372..1607788`. The last compile was request `29`, `9.0` ms total /
+`9.0` ms worker round trip, packed `1160484` bytes. Transport stayed `shared-result-buffer`, shared
+result buffers stayed enabled, no shared-result overflow occurred, no generated-view fallback was
+used, and compile/worker compile counts both reached `29`.
+
+Validation (all green): `pnpm native:web:chunk-smoke` baseline, `pnpm native:web:glue`,
+`pnpm native:web:typecheck`, `node --check` on emitted staged and deploy
+`mclone-render-compiler-shared.js` / `mclone-render-compiler-worker.js`,
+`bash -n scripts/deploy-native-web.sh`, `cargo test --manifest-path native/Cargo.toml`,
+`cargo check -p mclone-web-client --target wasm32-unknown-unknown --manifest-path
+native/Cargo.toml`, `pnpm native:web:build`, `pnpm native:web:bundle`, explicit staged/deploy
+inventory checks (`mclone-render-compiler-shared.js`, `mclone-render-compiler-worker.js`, and
+`mclone-render-compiler-abi.js` present, no `.ts`), `pnpm native:web:app-smoke`,
+`pnpm native:web:chunk-smoke` plus final sha256, `pnpm native:web:mobile-smoke` with mobile canvas
+inspection, `pnpm native:web:movement-perf`, `pnpm native:web:smoke`,
+`pnpm native:movement:smoke`, and `pnpm native:timedemo:smoke`.
+
+Implementation commit: `b9883a36d7cf6b1738317b94b4a40ce544fb25de`
+(`071: graduate render compiler glue to TypeScript`).
 
 ## Relationship to Other Tacticals
 
