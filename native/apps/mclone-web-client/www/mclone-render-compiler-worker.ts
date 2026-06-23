@@ -21,51 +21,57 @@ import {
   isSharedArrayBuffer,
   renderCompilerSharedMemorySupported,
 } from "./mclone-render-compiler-shared.js";
+import type { WebRenderCompilerSession } from "mclone-web-client-wasm";
 
-/**
- * The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
- * Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
- * in tsconfig.json and only ever appears in type positions.
- * @typedef {typeof import("mclone-web-client-wasm")} WasmModule
- * @typedef {import("mclone-web-client-wasm").WebRenderCompilerSession} RenderCompilerSession
- */
+// The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
+// Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
+// in tsconfig.json and only ever appears in type positions.
+type WasmModule = typeof import("mclone-web-client-wasm");
 
-/**
- * Inbound postMessage payload for the render-compile worker. `init-render-compiler` carries the
- * asset pack; `compile-render-sections` carries the compile targets plus, on the SAB path, the
- * resident input/result ring buffers (mirror of {@link RenderCompileWorkerRequest} on the
- * consumer side in mclone-render-compiler-shared.js).
- * @typedef {object} RenderCompileWorkerInbound
- * @property {string} [kind]
- * @property {number} [requestId]
- * @property {string} [bindgenJsUrl]
- * @property {string} [bindgenWasmUrl]
- * @property {Uint8Array} [assetPack]
- * @property {Int32Array | number[] | ArrayBufferView | ArrayBuffer} [targetSections]
- * @property {number} [centerX]
- * @property {number} [centerZ]
- * @property {number} [radiusChunks]
- * @property {number} [snapshotInputChunkCount]
- * @property {number} [snapshotInputClonedColumnCount]
- * @property {SharedArrayBuffer} [sharedInputBuffer]
- * @property {number} [sharedInputByteLength]
- * @property {SharedArrayBuffer} [sharedInputControlBuffer]
- * @property {SharedArrayBuffer} [sharedResultResponseBuffer]
- * @property {SharedArrayBuffer} [sharedResultControlBuffer]
- */
+// Inbound postMessage payload for the render-compile worker. `init-render-compiler` carries the
+// asset pack; `compile-render-sections` carries the compile targets plus, on the SAB path, the
+// resident input/result ring buffers (mirror of `RenderCompileWorkerRequest` on the consumer side
+// in mclone-render-compiler-shared.js).
+interface RenderCompileWorkerInbound {
+  kind?: string;
+  requestId?: number;
+  bindgenJsUrl?: string;
+  bindgenWasmUrl?: string;
+  assetPack?: Uint8Array;
+  targetSections?: Int32Array | number[] | ArrayBufferView | ArrayBuffer;
+  centerX?: number;
+  centerZ?: number;
+  radiusChunks?: number;
+  snapshotInputChunkCount?: number;
+  snapshotInputClonedColumnCount?: number;
+  sharedInputBuffer?: SharedArrayBuffer;
+  sharedInputByteLength?: number;
+  sharedInputControlBuffer?: SharedArrayBuffer;
+  sharedResultResponseBuffer?: SharedArrayBuffer;
+  sharedResultControlBuffer?: SharedArrayBuffer;
+}
 
-/** @type {Promise<WasmModule> | null} */
+interface SharedCompileResult {
+  transportKind: string;
+  transferredResponseByteLength: number;
+  sharedResultBufferUsed: boolean;
+  sharedResultByteLength: number;
+  sharedResultBufferCapacityBytes: number;
+  sharedResultOverflow: boolean;
+  sharedResultBuffer: SharedArrayBuffer;
+}
+
 let wasmModulePromise = null;
-/** @type {RenderCompilerSession | null} */
-let compilerSession = null;
+let compilerSession: WebRenderCompilerSession | null = null;
 let workerWasmInitCount = 0;
 let workerCompileCount = 0;
 let workerAssetLoadCount = 0;
 let workerAssetPackInitByteLength = 0;
 let workerAssetPackFileCount = 0;
+const workerSelf = self as unknown as DedicatedWorkerGlobalScope;
 
-self.onmessage = async (event) => {
-  const message = /** @type {RenderCompileWorkerInbound} */ (event.data ?? {});
+workerSelf.onmessage = async (event: MessageEvent) => {
+  const message = (event.data ?? {}) as RenderCompileWorkerInbound;
   if (message.kind === "init-render-compiler") {
     await handleInit(message);
     return;
@@ -75,7 +81,7 @@ self.onmessage = async (event) => {
     return;
   }
 
-  self.postMessage({
+  workerSelf.postMessage({
     ok: false,
     requestId: message.requestId,
     kind: "render-compiler-error",
@@ -83,17 +89,16 @@ self.onmessage = async (event) => {
   });
 };
 
-/** @param {RenderCompileWorkerInbound} message */
-async function handleInit(message) {
+async function handleInit(message: RenderCompileWorkerInbound): Promise<void> {
   try {
     const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
     const assetPackByteLength = byteLengthOf(message.assetPack);
-    compilerSession = new module.WebRenderCompilerSession(/** @type {Uint8Array} */ (message.assetPack));
+    compilerSession = new module.WebRenderCompilerSession(message.assetPack as Uint8Array);
     workerAssetLoadCount = Number(compilerSession.assetLoadCount?.()) || 1;
     workerAssetPackInitByteLength = Number(compilerSession.assetPackByteLength?.())
       || assetPackByteLength;
     workerAssetPackFileCount = Number(compilerSession.assetPackFileCount?.()) || 0;
-    self.postMessage({
+    workerSelf.postMessage({
       ok: true,
       kind: "render-compiler-ready",
       requestId: message.requestId,
@@ -107,7 +112,7 @@ async function handleInit(message) {
       persistentAssetCatalog: true,
     });
   } catch (error) {
-    self.postMessage({
+    workerSelf.postMessage({
       ok: false,
       kind: "render-compiler-ready",
       requestId: message.requestId,
@@ -124,8 +129,7 @@ async function handleInit(message) {
   }
 }
 
-/** @param {RenderCompileWorkerInbound} message */
-async function handleCompile(message) {
+async function handleCompile(message: RenderCompileWorkerInbound): Promise<void> {
   try {
     workerCompileCount += 1;
     const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
@@ -162,10 +166,10 @@ async function handleCompile(message) {
     // snapshot flag on `snapshotInput !== null`), but those guards live in stored booleans that
     // TS cannot use to narrow the module-level `compilerSession`. The persistent branches below
     // are only reached when the flag is set, so this non-null view is sound.
-    const session = /** @type {RenderCompilerSession} */ (compilerSession);
+    const session = compilerSession as WebRenderCompilerSession;
     const packed = hasPersistentSnapshotCompiler
       ? session.compileSnapshotSectionsForTargets(
-          /** @type {Uint8Array} */ (snapshotInput),
+          snapshotInput as Uint8Array,
           targetSections,
         )
       : hasPersistentGeneratedCompiler
@@ -179,14 +183,14 @@ async function handleCompile(message) {
           ? session.compileGeneratedChunkSections(centerX, centerZ, radiusChunks)
           : hasGeneratedTargetedCompiler
           ? module.mclone_web_compile_generated_chunk_sections_for_targets(
-              /** @type {Uint8Array} */ (message.assetPack),
+              message.assetPack as Uint8Array,
               centerX,
               centerZ,
               radiusChunks,
               targetSections,
             )
             : module.mclone_web_compile_generated_chunk_sections(
-                /** @type {Uint8Array} */ (message.assetPack),
+                message.assetPack as Uint8Array,
                 centerX,
                 centerZ,
                 radiusChunks,
@@ -244,10 +248,10 @@ async function handleCompile(message) {
       // the transferable-postMessage branch is gone (067 Stage 5).
       sharedResultBuffer: response.sharedResultBuffer,
     };
-    self.postMessage(report);
+    workerSelf.postMessage(report);
   } catch (error) {
     markSharedCompileResultFailed(message);
-    self.postMessage({
+    workerSelf.postMessage({
       ok: false,
       requestId: message.requestId,
       transportKind: RENDER_COMPILER_TRANSPORT_KIND,
@@ -263,25 +267,19 @@ async function handleCompile(message) {
   }
 }
 
-/**
- * @param {string | undefined} bindgenJsUrl
- * @param {string | undefined} bindgenWasmUrl
- * @returns {Promise<WasmModule>}
- */
-function loadWasmModule(bindgenJsUrl, bindgenWasmUrl) {
-  wasmModulePromise ??= import(/** @type {string} */ (bindgenJsUrl)).then(/** @param {any} module */ async (module) => {
-    await module.default(bindgenWasmUrl);
+function loadWasmModule(
+  bindgenJsUrl: string | undefined,
+  bindgenWasmUrl: string | undefined,
+): Promise<WasmModule> {
+  wasmModulePromise ??= import(bindgenJsUrl as string).then(async (module: WasmModule) => {
+    await module.default(bindgenWasmUrl as string);
     workerWasmInitCount += 1;
-    return /** @type {WasmModule} */ (module);
+    return module;
   });
   return wasmModulePromise;
 }
 
-/**
- * @param {unknown} value
- * @returns {Int32Array}
- */
-function normalizeTargetSections(value) {
+function normalizeTargetSections(value: unknown): Int32Array {
   if (value instanceof Int32Array) {
     return value;
   }
@@ -297,11 +295,7 @@ function normalizeTargetSections(value) {
   return new Int32Array();
 }
 
-/**
- * @param {RenderCompileWorkerInbound} message
- * @returns {Uint8Array | null}
- */
-function sharedInputBytes(message) {
+function sharedInputBytes(message: RenderCompileWorkerInbound): Uint8Array | null {
   const buffer = message.sharedInputBuffer;
   if (!renderCompilerSharedMemorySupported() || !isSharedArrayBuffer(buffer)) {
     return null;
@@ -324,11 +318,7 @@ function sharedInputBytes(message) {
   return new Uint8Array(buffer, 0, byteLength);
 }
 
-/**
- * @param {RenderCompileWorkerInbound} message
- * @returns {Int32Array | null}
- */
-function sharedInputControl(message) {
+function sharedInputControl(message: RenderCompileWorkerInbound): Int32Array | null {
   const buffer = message.sharedInputControlBuffer;
   if (
     !renderCompilerSharedMemorySupported()
@@ -340,18 +330,17 @@ function sharedInputControl(message) {
   return new Int32Array(buffer);
 }
 
-/**
- * @param {RenderCompileWorkerInbound} message
- * @param {Uint8Array} packed
- */
-function writeSharedCompileResult(message, packed) {
+function writeSharedCompileResult(
+  message: RenderCompileWorkerInbound,
+  packed: Uint8Array,
+): SharedCompileResult {
   // 067 Stage 5: the non-SAB transferable fallback is deleted — the live path requires
   // cross-origin isolation, so the result always rides the resident shared buffer. The
   // returned `transferredResponseByteLength: 0` field is kept because the app/smoke metrics
   // and browser-smoke.mjs still read it (asserting it stays 0 on the shared path).
   const packedByteLength = byteLengthOf(packed);
   // Always present on the live SAB path (the caller hands over the resident response buffer).
-  let sharedResultBuffer = /** @type {SharedArrayBuffer} */ (message.sharedResultResponseBuffer);
+  let sharedResultBuffer = message.sharedResultResponseBuffer as SharedArrayBuffer;
   let sharedResultOverflow = false;
   if (sharedResultBuffer.byteLength < packedByteLength) {
     sharedResultBuffer = new SharedArrayBuffer(packedByteLength);
@@ -382,8 +371,7 @@ function writeSharedCompileResult(message, packed) {
   };
 }
 
-/** @param {RenderCompileWorkerInbound} message */
-function markSharedCompileResultFailed(message) {
+function markSharedCompileResultFailed(message: RenderCompileWorkerInbound): void {
   const control = sharedResultControl(message);
   if (control === null) {
     return;
@@ -392,11 +380,7 @@ function markSharedCompileResultFailed(message) {
   Atomics.notify(control, RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX, 1);
 }
 
-/**
- * @param {RenderCompileWorkerInbound} message
- * @returns {Int32Array | null}
- */
-function sharedResultControl(message) {
+function sharedResultControl(message: RenderCompileWorkerInbound): Int32Array | null {
   const buffer = message.sharedResultControlBuffer;
   if (
     !renderCompilerSharedMemorySupported()
@@ -408,8 +392,7 @@ function sharedResultControl(message) {
   return new Int32Array(buffer);
 }
 
-/** @param {unknown} error */
-function stringifyError(error) {
+function stringifyError(error: unknown): string {
   if (error instanceof Error) {
     return error.stack ?? error.message;
   }
