@@ -1,6 +1,6 @@
 # Oracle Harness
 
-Small Java fixtures live here so the TypeScript port can compare against real Minecraft 1.17.1 behavior.
+Small Java fixtures live here so the native Rust parity code can compare against real Minecraft 1.17.1 behavior.
 
 ## PRNG oracle
 
@@ -16,7 +16,7 @@ Each output array is generated from a fresh `SimpleRandomSource(seed)` instance:
 - `nextLong`: signed decimal strings, to preserve full 64-bit precision
 - `nextDouble`: JSON numbers from `Double.toString(...)`
 
-The fixture metadata records the exact class and wire format so the TypeScript side can load longs as `BigInt` or another lossless representation.
+The fixture metadata records the exact class and wire format so fixture consumers can load longs as `BigInt` or another lossless representation.
 
 ## ImprovedNoise oracle
 
@@ -51,7 +51,7 @@ The `SimplexNoise` fixture stores both overloads in one file:
 - `samples2d`: `getValue(x,z)` on the dedicated `test/fixtures/noise/_samples-2d.json` grid, flattened in `x-major,z-minor` order
 - `samples3d`: `getValue(x,y,z)` on the shared `test/fixtures/noise/_samples-3d.json` grid, flattened in `x-major,y-major,z-minor` order
 
-The top-level metadata also records constructor offsets `xo`, `yo`, and `zo`, so the TS side can assert that construction consumed the PRNG identically before checking sampled values.
+The top-level metadata also records constructor offsets `xo`, `yo`, and `zo`, so consumers can assert that construction consumed the PRNG identically before checking sampled values.
 
 ## BlendedNoise oracle
 
@@ -120,7 +120,7 @@ Each sample set includes:
 - sampled density columns over `test/fixtures/noise/_samples-cell-2d.json`
 - column values flattened in `x-major,z-minor,y-minor` order
 
-This lets the TS side oracle-test biome weighting, random-density offset, blended-noise integration, and slide application before the real biome-source port lands.
+This lets consumers oracle-test biome weighting, random-density offset, blended-noise integration, and slide application before the real biome-source port lands.
 
 ## OverworldBiomeSource oracle
 
@@ -221,16 +221,16 @@ The child JVM is pinned with `-XX:ActiveProcessorCount=2` so vanilla's backgroun
 
 ## Integration oracle (server-side)
 
-A second oracle tier runs the official 1.17.1 server jar headless against a pinned seed, then decodes the generated `region/*.mca` files into committed chunk fixtures. Used by upcoming tactical docs (starting with tactical `06`) to diff real Minecraft chunks against our TS port of `NoiseBasedChunkGenerator`.
+A second oracle tier runs the official 1.17.1 server jar headless against a pinned seed, then decodes the generated `region/*.mca` files into committed chunk fixtures. These fixtures let native parity work diff real Minecraft chunks against the translated `NoiseBasedChunkGenerator` path.
 
 Pieces:
 
 - `scripts/fetch-server-jar.sh 1.17.1` — SHA1-verified download of the server jar (Mojang manifest). Idempotent. Writes to `reference/minecraft-1.17.1/server.jar`.
 - `oracle/integration/run-server.sh --seed <long>` — spawns the server with a pinned seed, waits for the `Done (` startup line, sends `stop`, and leaves the generated `world/region/*.mca` files on disk. Prints the working directory to stdout. Pass `--scheduler-pins` to use the same JVM scheduler pins as the scheduler-trace oracle.
-- `oracle/integration/dump-chunks.ts` — Node CLI that reads region files and emits a committable JSON fixture. `gen-fixture.sh` runs it with Node transform-types support so it can import the shared TypeScript oracle code.
+- `oracle/integration/dump-chunks.ts` — Node CLI that reads region files and emits a committable JSON fixture. `gen-fixture.sh` runs it with Node transform-types support so it can import the oracle-owned TypeScript helpers.
 - `oracle/integration/gen-fixture.sh --seed <long> --chunks <x,z,x,z,...> --out <path>` — end-to-end orchestration: ensures the server jar exists, runs the server, and decodes the requested chunks.
 
-The reader + fixture builder live under `oracle/lib/anvil/` and `oracle/lib/integration/` so they get Vitest coverage (see `test/oracle/`).
+The reader and fixture builder live under `oracle/lib/anvil/` and `oracle/lib/integration/`. They are oracle-owned TypeScript tooling, not part of the retired browser engine; validate them through fixture generation or direct Node loader imports.
 
 ### Regenerating an integration fixture
 
@@ -260,7 +260,7 @@ See `docs/tactical/04-integration-oracle-harness.md` for the full shape and desi
 
 ## Generation creature oracle (server-side)
 
-Creature-generation fixtures use the same official 1.17.1 server runner, but dump entity chunk storage from `world/entities/*.mca` instead of block chunk sections. The normalized fixture shape is `module: "creature-generation"` and intentionally omits UUIDs, motion, attributes, brain data, equipment, passengers, and other full-NBT fields that are not yet owned by the TypeScript runtime.
+Creature-generation fixtures use the same official 1.17.1 server runner, but dump entity chunk storage from `world/entities/*.mca` instead of block chunk sections. The normalized fixture shape is `module: "creature-generation"` and intentionally omits UUIDs, motion, attributes, brain data, equipment, passengers, and other full-NBT fields that are not yet owned by the native runtime.
 
 Use scan mode first because generation-time passive mobs are probabilistic:
 

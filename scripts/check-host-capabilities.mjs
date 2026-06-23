@@ -9,7 +9,6 @@ import { inflateSync } from "node:zlib";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
-const DEFAULT_BROWSER_TEST_PORT = "5073";
 const args = new Set(process.argv.slice(2).filter((arg) => arg !== "--"));
 
 if (args.has("-h") || args.has("--help")) {
@@ -17,7 +16,6 @@ if (args.has("-h") || args.has("--help")) {
   process.exit(0);
 }
 
-const shouldProbeDeno = args.has("--probe-deno-webgpu") || args.has("--probe-all");
 const shouldProbeBrowser = args.has("--probe-browser-webgpu") || args.has("--probe-all");
 const asJson = args.has("--json");
 
@@ -36,10 +34,6 @@ const checks = {
 
 checks.capabilities = classifyCapabilities(checks);
 
-if (shouldProbeDeno) {
-  checks.probes.denoWebGpu = runCommand("pnpm", ["--silent", "smoke:deno:webgpu"], 90_000);
-}
-
 if (shouldProbeBrowser) {
   checks.probes.browserWebGpu = await probeBrowserWebGpu();
 }
@@ -51,13 +45,13 @@ if (asJson) {
 }
 
 function printUsage() {
-  console.log(`Usage: pnpm host:check [-- --probe-deno-webgpu] [-- --probe-browser-webgpu] [-- --probe-all] [-- --json]
+  console.log(`Usage: pnpm host:check [-- --probe-browser-webgpu] [-- --probe-all] [-- --json]
 
-Reports whether the current host looks suitable for mclone's browser/WebGPU Playwright
-lanes or only for headless Node/Deno validation.
+Reports whether the current host looks suitable for mclone's native-web/browser
+WebGPU validation lanes or only for headless native/oracle validation.
 
-Default mode is cheap and does not launch browsers or download Deno through npx.
-Probe flags run the smallest relevant smoke checks.`);
+Default mode is cheap and does not launch browsers. Probe flags run the smallest
+relevant smoke checks.`);
 }
 
 function readHostFacts() {
@@ -87,7 +81,6 @@ function readHostFacts() {
     waylandSockets,
     inferredWaylandDisplay,
     suggestedWaylandBrowserEnv: createSuggestedWaylandBrowserEnv(inferredWaylandDisplay),
-    vitePort: process.env.VITE_PORT ?? "",
     driPathExists: existsSync(driPath),
     driDevices,
     likelyHeadless: process.platform === "linux" && !hasDisplay,
@@ -113,7 +106,6 @@ function createSuggestedWaylandBrowserEnv(waylandDisplay) {
     return undefined;
   }
   return {
-    VITE_PORT: DEFAULT_BROWSER_TEST_PORT,
     CI: "1",
     WAYLAND_DISPLAY: waylandDisplay,
     XDG_SESSION_TYPE: "wayland",
@@ -269,10 +261,7 @@ function classifyCapabilities(checks) {
 
   return {
     nodeUnitAndRuntimeTests: hasPnpm
-      ? "available: pnpm test, pnpm typecheck, and Node headless host tests are host-display independent"
-      : "blocked: pnpm is not available on PATH",
-    denoHeadlessWebGpu: hasPnpm
-      ? "candidate: run pnpm host:check -- --probe-deno-webgpu, or the focused pnpm smoke:deno:* lane for renderer validation"
+      ? "available: pnpm test, pnpm typecheck, and native cargo tests are host-display independent"
       : "blocked: pnpm is not available on PATH",
     playwrightChromeWebGpu: headless && hasWaylandSocket && hasChrome && hasPlaywright
       ? "candidate via headed Wayland: WAYLAND_DISPLAY is not exported, but a Wayland socket was detected; use the recommended env command below"
@@ -284,11 +273,11 @@ function classifyCapabilities(checks) {
     browserScreenshotsAndProbes: headless && hasWaylandSocket && hasChrome && hasPlaywright
       ? "candidate via headed Wayland: run Playwright with --headed and the recommended WAYLAND_DISPLAY env"
       : headless
-      ? "skip here: run pnpm test:browser, pnpm test:browser:integration, and pnpm probe:browser only on a host with a working Chrome GPU/browser path"
-      : "candidate: run the smallest relevant Playwright lane and inspect screenshots under /tmp",
+      ? "skip here: run native web browser smokes only on a host with a working Chrome GPU/browser path"
+      : "candidate: run pnpm native:web:app-smoke and inspect screenshots under /tmp",
     hardwareGpuDevices: hasDri
       ? `visible: ${checks.host.driDevices.join(", ")}`
-      : "not visible through /dev/dri; Deno may still use a software/native backend if its smoke passes",
+      : "not visible through /dev/dri; browser/native WebGPU may still use a software backend depending on the host",
   };
 }
 
@@ -673,7 +662,6 @@ function printReport(checks) {
   if (!host.displayVars.WAYLAND_DISPLAY && host.inferredWaylandDisplay) {
     console.log(`  inferred WAYLAND_DISPLAY: ${host.inferredWaylandDisplay}`);
   }
-  console.log(`  VITE_PORT: ${host.vitePort || `(unset; default ${DEFAULT_BROWSER_TEST_PORT})`}`);
   console.log(`  /dev/dri: ${host.driPathExists ? host.driDevices.join(", ") || "(empty)" : "(missing)"}`);
   console.log(`  likely headless: ${host.likelyHeadless ? "yes" : "no"}`);
   console.log("");
@@ -694,9 +682,6 @@ function printReport(checks) {
   if (Object.keys(checks.probes).length > 0) {
     console.log("");
     console.log("Probes");
-    if (checks.probes.denoWebGpu) {
-      printProbe("Deno WebGPU", checks.probes.denoWebGpu);
-    }
     if (checks.probes.browserWebGpu) {
       printProbe("Browser WebGPU", checks.probes.browserWebGpu);
     }
@@ -709,41 +694,37 @@ function printReport(checks) {
       `  run browser WebGPU on Wayland: ${
         formatEnvCommand(
           host.suggestedWaylandBrowserEnv,
-          "pnpm exec playwright test --config playwright.config.ts --headed",
+          "pnpm native:web:app-smoke",
         )
       }`,
     );
     console.log(
-      `  run browser integration on Wayland: ${
+      `  run mobile browser WebGPU on Wayland: ${
         formatEnvCommand(
           host.suggestedWaylandBrowserEnv,
-          "pnpm exec playwright test --config playwright.integration.config.ts --headed",
+          "pnpm native:web:mobile-smoke",
         )
       }`,
     );
     console.log(
-      `  run a Wayland screenshot probe: ${
+      `  run canvas/chunk browser smoke on Wayland: ${
         formatEnvCommand(
           host.suggestedWaylandBrowserEnv,
-          "pnpm exec playwright test --config playwright.probes.config.ts --headed test/browser/probes/<name>.probe.ts",
+          "pnpm native:web:chunk-smoke",
         )
       }`,
     );
-    console.log("  note: headed Wayland is the browser GPU lane validated on this host; headless Chrome may fail even when Deno WebGPU passes");
+    console.log("  note: headed Wayland is the browser GPU lane validated on this host; headless Chrome may fail even when browser WebGPU is otherwise available");
   } else if (host.likelyHeadless) {
-    console.log("  run: pnpm test, pnpm typecheck, and focused pnpm smoke:deno:* commands");
-    console.log("  skip here: pnpm test:browser, pnpm test:browser:integration, and pnpm probe:browser");
+    console.log("  run: pnpm test, pnpm typecheck, pnpm native:web:build");
+    console.log("  skip here: native web browser smokes that require a working Chrome GPU/browser path");
   } else {
-    console.log("  run: the smallest relevant pnpm test:browser / probe:browser lane for browser pixels");
-    console.log("  also run: focused pnpm smoke:deno:* commands when touching headless renderer hosts");
-  }
-  if (host.vitePort && host.vitePort !== DEFAULT_BROWSER_TEST_PORT) {
-    console.log(`  warning: VITE_PORT is currently ${host.vitePort}; set VITE_PORT=${DEFAULT_BROWSER_TEST_PORT} CI=1 for clean Playwright webServer startup`);
+    console.log("  run: pnpm native:web:app-smoke for browser pixels");
+    console.log("  also run: pnpm native:web:mobile-smoke when touching mobile controls");
   }
   if (host.platform === "darwin") {
     console.log("  macOS browser screenshots: use Chrome channel with --enable-unsafe-webgpu and --use-angle=metal; bundled headless Chromium can present WebGPU canvases as black without ANGLE Metal");
   }
-  console.log("  verify Deno WebGPU now: pnpm host:check -- --probe-deno-webgpu");
   console.log("  verify Chrome WebGPU canvas capture now: pnpm host:check -- --probe-browser-webgpu");
 }
 

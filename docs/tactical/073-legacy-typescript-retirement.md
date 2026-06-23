@@ -1,6 +1,6 @@
 # 073: Legacy TypeScript Engine Retirement
 
-Status: active high-priority parent. Slice 1 landed; next recommended slice is fixture ownership cleanup.
+Status: active high-priority parent. Slices 1-5 landed enough to remove the live legacy TypeScript engine; next recommended slice is documentation burn-down.
 
 ## Purpose
 
@@ -132,7 +132,7 @@ Delete after the move/retarget blockers are cleared:
 - legacy Deno smoke scripts that import `../src/**`
 - legacy worldgen/perf observer scripts that import `../src/**`
 - legacy root package scripts:
-  - `test`
+  - `test`, unless retargeted to native Rust validation
   - `test:watch`
   - `test:browser`
   - `test:browser:integration`
@@ -224,13 +224,15 @@ Full `gen-fixture.sh` / creature / liquid official-server generation was deferre
 
 ### Slice 2 - Preserve Or Relocate Shared Fixtures
 
+Status: landed on 2026-06-23 with fixtures kept in place.
+
 Goal: separate durable oracle data from the old TypeScript test suite.
 
-- [ ] Decide whether `test/fixtures/**` remains as the shared oracle fixture root or moves to `fixtures/oracle/**`.
-- [ ] If it stays, document that `test/fixtures/**` is not owned by the deleted Vitest test suite.
-- [ ] If it moves, update all native `include_str!` paths in the same commit.
-- [ ] Keep fixture generation docs in `oracle/README.md` aligned with the chosen path.
-- [ ] Delete fixture subsets that are only consumed by deleted legacy tests and not referenced by native code or oracle docs.
+- [x] Decide whether `test/fixtures/**` remains as the shared oracle fixture root or moves to `fixtures/oracle/**`.
+- [x] If it stays, document that `test/fixtures/**` is not owned by the deleted Vitest test suite.
+- [x] If it moves, update all native `include_str!` paths in the same commit. Not moved; native include paths stay stable.
+- [x] Keep fixture generation docs in `oracle/README.md` aligned with the chosen path.
+- [x] Defer fixture subset pruning until native and oracle consumers have a dedicated fixture-hygiene pass.
 
 Current native fixture consumers include:
 
@@ -247,15 +249,17 @@ cargo test --manifest-path native/Cargo.toml -p mclone-worldgen -p mclone-server
 
 ### Slice 3 - Delete Legacy Engine Source And Vitest Suite
 
+Status: landed on 2026-06-23.
+
 Goal: remove the obsolete implementation and its unit tests.
 
-- [ ] Delete `src/**`.
-- [ ] Delete root `test/**/*.test.ts` and TS support files that exist only for the legacy implementation.
-- [ ] Keep `test/fixtures/**` or its replacement fixture root from Slice 2.
-- [ ] Delete `vitest.config.ts`.
-- [ ] Remove `vitest` from root devDependencies.
-- [ ] Remove or retarget root `test` / `test:watch` scripts.
-- [ ] Run `rg` to prove no retained file imports `../src/**`, `../../src/**`, or root `src/**`.
+- [x] Delete `src/**`.
+- [x] Delete root `test/**/*.test.ts` and TS support files that exist only for the legacy implementation.
+- [x] Keep `test/fixtures/**` or its replacement fixture root from Slice 2.
+- [x] Delete `vitest.config.ts`.
+- [x] Remove `vitest` from root devDependencies.
+- [x] Remove or retarget root `test` / `test:watch` scripts.
+- [x] Run `rg` to prove no retained file imports `../src/**`, `../../src/**`, or root `src/**`.
 
 Validation:
 
@@ -268,20 +272,22 @@ Expected remaining `src/` hits after this slice should be native Rust file paths
 
 ### Slice 4 - Delete Legacy Browser App, Browser Tests, And Deploy Path
 
+Status: landed on 2026-06-23.
+
 Goal: remove the browser/Vite/Playwright surface that launched the TypeScript engine.
 
-- [ ] Delete root `index.html` and `smoke.html`.
-- [ ] Delete root `vite.config.ts`.
-- [ ] Delete root `playwright*.ts`.
-- [ ] Delete `test/browser/**`.
-- [ ] Delete `scripts/deploy-legacy.sh`.
-- [ ] Delete `scripts/dev-lan.mjs`.
-- [ ] Delete legacy Deno smoke scripts that import `../src/**`.
-- [ ] Audit root Playwright helpers:
-  - keep and retarget `scripts/smoke-deployed.mjs`, `scripts/smoke-mobile.mjs`, and `scripts/smoke-timelapse.mjs` only if they validate the native web app and use current native web canvas/debug globals.
-  - otherwise delete them and rely on `native/apps/mclone-web-client/scripts/browser-smoke.mjs`.
-- [ ] Remove root package scripts for legacy browser/probe/perf paths.
-- [ ] Remove `vite` and root-only browser devDependencies if unused.
+- [x] Delete root `index.html` and `smoke.html`.
+- [x] Delete root `vite.config.ts`.
+- [x] Delete root `playwright*.ts`.
+- [x] Delete `test/browser/**`.
+- [x] Delete `scripts/deploy-legacy.sh`.
+- [x] Delete `scripts/dev-lan.mjs`.
+- [x] Delete legacy Deno smoke scripts that import `../src/**`.
+- [x] Audit root Playwright helpers:
+  - deleted `scripts/smoke-deployed.mjs`, `scripts/smoke-mobile.mjs`, and `scripts/smoke-timelapse.mjs`
+  - native web validation remains in `native/apps/mclone-web-client/scripts/browser-smoke.mjs`
+- [x] Remove root package scripts for legacy browser/probe/perf paths.
+- [x] Remove `vite` and root-only browser devDependencies if unused.
 
 Validation:
 
@@ -296,20 +302,22 @@ For any retained deployed-site smoke helper, capture screenshots to `/tmp` and i
 
 ### Slice 5 - Package And Tooling Cleanup
 
+Status: landed on 2026-06-23.
+
 Goal: make root package scripts describe the current repo.
 
-- [ ] Keep native scripts:
+- [x] Keep native scripts:
   - `native:*`
   - `deploy` as alias for `native:web:deploy`
   - `assets:pack*`
   - `oracle:gen`
-- [ ] Decide whether `pnpm test` should become `cargo test --manifest-path native/Cargo.toml` or be removed to avoid a misleading Node test entrypoint.
-- [ ] Retarget `typecheck` to `pnpm native:web:typecheck` only if that is useful as a root alias.
-- [ ] Keep `@playwright/test` while native web smoke scripts import it.
-- [ ] Keep `typescript`, `@types/node`, and `@webgpu/types` while native web typecheck/build-glue uses them.
-- [ ] Remove unused `dependencies` and `devDependencies`.
-- [ ] Regenerate `pnpm-lock.yaml`.
-- [ ] Update `.gitignore` to remove legacy-only Playwright/Vite artifacts only if they are no longer produced by retained tooling.
+- [x] Decide whether `pnpm test` should become `cargo test --manifest-path native/Cargo.toml` or be removed to avoid a misleading Node test entrypoint.
+- [x] Retarget `typecheck` to `pnpm native:web:typecheck` only if that is useful as a root alias.
+- [x] Keep `@playwright/test` while native web smoke scripts import it.
+- [x] Keep `typescript`, `@types/node`, and `@webgpu/types` while native web typecheck/build-glue uses them.
+- [x] Remove unused `dependencies` and `devDependencies`.
+- [x] Regenerate `pnpm-lock.yaml`.
+- [x] Update `.gitignore` to remove legacy-only Playwright/Vite artifacts only if they are no longer produced by retained tooling. No `.gitignore` change needed in this slice.
 
 Validation:
 
@@ -410,3 +418,4 @@ pnpm native:web:app-smoke
 ## Landed Notes
 
 - 2026-06-23: Slice 1 moved oracle-owned TypeScript helpers from `src/oracle/**` to `oracle/lib/**`, copied the required BitStorage utility into `oracle/lib/util/bit-storage.ts`, retargeted oracle integration CLIs and existing TS tests, and updated oracle/durable docs. Validation: `pnpm exec vitest run test/oracle`; direct Node TS-loader import of moved oracle libraries.
+- 2026-06-23: Slices 2-5 kept `test/fixtures/**` as shared oracle fixture data with its own README, removed `src/**`, removed non-fixture root TypeScript tests, removed root browser app/config/test files, deleted legacy Deno/Vite/Playwright smoke and deploy helpers, retargeted root `test` / `typecheck` to native validation lanes, removed `vite` / `vitest` / `unzipit`, regenerated the pnpm lockfile, and simplified host capability checks around native web validation. Validation: `test ! -d src`; `test ! -d test/browser`; `test ! -f vite.config.ts`; `test ! -f vitest.config.ts`; no root `playwright*.ts`; `node -c scripts/check-host-capabilities.mjs`; negative searches for retired package/doc/import references; `cargo test --manifest-path native/Cargo.toml -p mclone-worldgen -p mclone-server -p mclone-mesh`; `pnpm native:web:typecheck`; `pnpm test`.

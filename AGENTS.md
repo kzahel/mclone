@@ -10,9 +10,9 @@ Current target posture: native desktop is the first-priority bring-up path, but 
 
 For web/WASM, keep `wasm32-unknown-unknown` as the browser target unless a tactical explicitly changes it, but do not treat that as permission for a single-threaded or reduced engine architecture. Browser CPU work should converge on the same job/worker lifecycle as desktop: desktop uses native OS threads, while browser/WASM uses Web Workers with shared Wasm memory (`SharedArrayBuffer`/atomics) once that slice is implemented. Inline synchronous WASM paths are acceptable only as temporary smoke/fallback implementations behind the same compiler/session interfaces, not as the target threading model.
 
-The TypeScript/browser implementation is legacy/reference prior art. Use it for fixtures, behavior comparison, and old orchestration context only; new engine work should go through the Rust native workspace unless the user explicitly asks for legacy TypeScript maintenance.
+The retired browser engine has been removed from the live tree. Git history is the archive for old implementation context. Retained oracle helpers under `oracle/lib/**` and shared fixture data under `test/fixtures/**` are active reference assets, not legacy engine code.
 
-Native Rust rewrite tactical docs live under `docs/tactical/` and use zero-padded numeric filenames such as `000-topic.md`, `001-next-topic.md`. Legacy TypeScript/browser tacticals live under `docs/tactical/legacy/`.
+Native Rust rewrite tactical docs live under `docs/tactical/` and use zero-padded numeric filenames such as `000-topic.md`, `001-next-topic.md`. Historical legacy tacticals, if still present during cleanup, are not implementation guidance for new work.
 
 ## Workstream routing
 
@@ -26,13 +26,9 @@ For any request about engine behavior, client/runtime behavior, renderer behavio
 - `native/crates/mclone-*`
 - `docs/tactical/README.md`
 
-Do not edit the legacy TypeScript/browser implementation under `src/**/*.ts`, `test/browser/**`, `playwright*.ts`, or legacy tacticals under `docs/tactical/legacy/` unless the user explicitly asks for legacy TypeScript/browser work.
+Do not recreate or maintain the retired TypeScript engine surface. If a request explicitly needs old behavior context, use Git history or retained oracle fixtures as reference before changing live native code.
 
-Words like "browser", "web", "WASM", "WebGPU", "mouse lock", "pointer lock", "input", "movement", "camera", "renderer", or "client" are not enough to select the legacy TypeScript engine. Route those to native Rust/native-web first. If the only obvious implementation is legacy TypeScript, stop and ask before editing.
-
-Before the first edit, identify the workstream being modified: `native Rust`, `native web/WASM`, `legacy TypeScript`, or `oracle/reference only`.
-
-Legacy TypeScript/browser workflow details live in [`docs/legacy-typescript-engine-info.md`](docs/legacy-typescript-engine-info.md). Read that file only for explicit legacy TypeScript/browser work or when using the legacy engine as reference prior art.
+Before the first edit, identify the workstream being modified: `native Rust`, `native web/WASM`, `oracle/reference only`, or `documentation cleanup`.
 
 ## Reference-porting policy
 
@@ -73,7 +69,7 @@ Use native validation lanes first:
 - `pnpm native:timedemo:smoke` for native renderer/camera paths
 - `pnpm native:web:build` and `pnpm native:web:smoke` for Rust WASM/web compatibility gates
 
-For rendered-output validation, use native headless captures where available and save debug, smoke, and probe screenshots to `/tmp` (for example `/tmp/mclone-native-debug.png`). Never write screenshots into the repo, into `test-results/`, or anywhere that risks getting committed. Browser/Playwright validation procedures for the legacy TypeScript engine are intentionally not in this file; see [`docs/legacy-typescript-engine-info.md`](docs/legacy-typescript-engine-info.md) only when doing explicit legacy TypeScript/browser work.
+For rendered-output validation, use native headless captures where available and save debug, smoke, and probe screenshots to `/tmp` (for example `/tmp/mclone-native-debug.png`). Never write screenshots into the repo, into `test-results/`, or anywhere that risks getting committed.
 
 ## Target: Minecraft Java 1.17.1 vanilla overworld
 
