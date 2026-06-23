@@ -1,4 +1,12 @@
 import { RenderSectionWorkerCompiler, fetchAssetPack } from "./mclone-render-compiler-shared.js";
+import {
+  INPUT_KEY_NAMES,
+  applyHotbarState,
+  bindInput,
+  defaultInputKeys,
+  defaultMovementImpulse,
+  sanitizeInputImpulse,
+} from "./mclone-web-input.js";
 import { TouchControls, hasTouchInput } from "./mclone-web-touch.js";
 
 /**
@@ -62,7 +70,6 @@ const ASSET_PACK_URL = versionedUrl("/reference/minecraft-1.17.1/extracted.zip")
 
 const RADIUS_CHUNKS = 1;
 const MAX_FRAME_DT_SECONDS = 0.05;
-const INPUT_KEY_NAMES = ["forward", "backward", "left", "right", "jump", "descend", "shift", "sprint"];
 
 // Touch look multiplies the raw drag delta before it reaches the engine's fixed
 // mouse sensitivity. A finger drag covers far fewer pixels than a relative mouse
@@ -293,7 +300,7 @@ class WebChunkApp {
       workerName: "mclone-render-compiler-app",
     });
     bindMenu(this);
-    bindInput(this);
+    bindInput(this, runtime.state, updateDom);
     this.touchControls = new TouchControls(this, runtime.state);
     this.syncCanvasSize();
     this.applyCameraState(this.session.cameraFrameState());
@@ -620,7 +627,7 @@ class WebChunkApp {
     runtime.state.onGround = Boolean(camera.onGround);
     runtime.state.horizontalCollision = Boolean(camera.horizontalCollision);
     runtime.state.verticalCollision = Boolean(camera.verticalCollision);
-    applyHotbarState(camera);
+    applyHotbarState(camera, runtime.state);
   }
 
   /** @param {WasmReport} report */
@@ -661,7 +668,7 @@ class WebChunkApp {
       return;
     }
     runtime.state.currentTarget = target;
-    applyHotbarState(target);
+    applyHotbarState(target, runtime.state);
   }
 
   /** @param {string} action */
@@ -679,7 +686,7 @@ class WebChunkApp {
       runtime.state.interactionCount += 1;
       runtime.state.lastInteraction = interaction;
       runtime.state.interactionStatus = formatInteractionStatus(interaction);
-      applyHotbarState(interaction);
+      applyHotbarState(interaction, runtime.state);
       // 067 Stage 3: a block edit publishes a SectionBlockUpdates server update, which the
       // streaming loop marks render-dirty on its next drain and recompiles automatically —
       // no explicit compile request needed.
@@ -707,7 +714,7 @@ class WebChunkApp {
     if (!hotbar?.ok) {
       return false;
     }
-    applyHotbarState(hotbar);
+    applyHotbarState(hotbar, runtime.state);
     updateDom();
     return true;
   }
@@ -900,115 +907,6 @@ class WebChunkApp {
 }
 
 /** @param {WebChunkApp} app */
-function bindInput(app) {
-  window.addEventListener("keydown", (event) => {
-    if (isPhysicalKey(event, "KeyN", "n") && !event.repeat) {
-      event.preventDefault();
-      const camera = app.session?.toggleMovementMode?.();
-      if (camera) app.applyCameraState(camera);
-      updateDom();
-      return;
-    }
-    const hotbarSlot = hotbarSlotForEvent(event);
-    if (hotbarSlot !== null) {
-      event.preventDefault();
-      if (!event.repeat) {
-        app.selectHotbarSlot(hotbarSlot);
-      }
-      return;
-    }
-    const key = inputNameForEvent(event);
-    if (!key) return;
-    event.preventDefault();
-    app.setInputKey(key, true);
-  });
-
-  window.addEventListener("keyup", (event) => {
-    const key = inputNameForEvent(event);
-    if (!key) return;
-    event.preventDefault();
-    app.setInputKey(key, false);
-  });
-
-  app.canvas.addEventListener("click", (event) => {
-    if (app.touchControls?.shouldIgnoreMouseEvent()) {
-      event.preventDefault();
-      return;
-    }
-    app.canvas.focus();
-    app.requestPointerLock();
-  });
-
-  app.canvas.addEventListener("mousedown", (event) => {
-    if (app.touchControls?.shouldIgnoreMouseEvent()) {
-      event.preventDefault();
-      return;
-    }
-    app.pointerDragging = true;
-    app.pointerDown = {
-      button: event.button,
-      enabled: runtime.state.pointerLockAttempted,
-      movement: 0,
-    };
-    app.canvas.focus();
-    if (event.button === 2) {
-      event.preventDefault();
-    }
-  });
-
-  window.addEventListener("mouseup", (event) => {
-    const pointerDown = app.pointerDown;
-    app.pointerDragging = false;
-    app.pointerDown = null;
-    if (!pointerDown?.enabled || pointerDown.button !== event.button || pointerDown.movement > 4) {
-      return;
-    }
-    if (event.button === 0) {
-      event.preventDefault();
-      app.interactBlock("break");
-    } else if (event.button === 2) {
-      event.preventDefault();
-      app.interactBlock("place");
-    }
-  });
-
-  app.canvas.addEventListener("contextmenu", (event) => {
-    event.preventDefault();
-  });
-
-  window.addEventListener("mousemove", (event) => {
-    if (app.touchControls?.shouldIgnoreMouseEvent()) {
-      return;
-    }
-    if (document.pointerLockElement === app.canvas) {
-      app.queueMouseDelta(event.movementX, event.movementY);
-    } else if (app.pointerDragging) {
-      app.queueMouseDelta(event.movementX, event.movementY);
-    }
-  });
-
-  app.canvas.addEventListener("wheel", (event) => {
-    event.preventDefault();
-    const amount = event.deltaMode === WheelEvent.DOM_DELTA_PIXEL
-      ? -event.deltaY * 0.001
-      : -event.deltaY * 0.12;
-    const camera = app.session?.adjustCameraSpeed?.(amount);
-    if (camera) app.applyCameraState(camera);
-    updateDom();
-  }, { passive: false });
-
-  document.addEventListener("pointerlockchange", () => app.updatePointerLockState());
-  document.addEventListener("pointerlockerror", () => {
-    runtime.state.pointerLockFallback = true;
-    updateDom();
-  });
-  window.addEventListener("resize", () => {
-    app.syncCanvasSize();
-    updateDom();
-  });
-}
-
-/** @param {WebChunkApp} app */
 function bindMenu(app) {
   // The hamburger now opens the main menu; the runtime/debug stats live behind
   // the menu's "Debug info" entry. Stats stay open by default on desktop so the
@@ -1167,95 +1065,6 @@ function storeSetting(key, value) {
   }
 }
 
-/** @param {KeyboardEvent} event */
-function inputNameForEvent(event) {
-  const code = keyboardCode(event);
-  switch (code) {
-    case "ArrowUp":
-    case "KeyW":
-      return "forward";
-    case "ArrowDown":
-    case "KeyS":
-      return "backward";
-    case "ArrowLeft":
-    case "KeyA":
-      return "left";
-    case "ArrowRight":
-    case "KeyD":
-      return "right";
-    case "Space":
-      return "jump";
-    case "KeyX":
-    case "KeyQ":
-      return "descend";
-    case "ShiftLeft":
-    case "ShiftRight":
-      return "shift";
-    case "ControlLeft":
-    case "ControlRight":
-      return "sprint";
-    default:
-      return code === null ? inputNameForLegacyKey(event.key) : null;
-  }
-}
-
-/** @param {string} key */
-function inputNameForLegacyKey(key) {
-  switch (key) {
-    case "ArrowUp":
-    case "w":
-    case "W":
-      return "forward";
-    case "ArrowDown":
-    case "s":
-    case "S":
-      return "backward";
-    case "ArrowLeft":
-    case "a":
-    case "A":
-      return "left";
-    case "ArrowRight":
-    case "d":
-    case "D":
-      return "right";
-    case " ":
-    case "Spacebar":
-      return "jump";
-    case "x":
-    case "X":
-    case "q":
-    case "Q":
-      return "descend";
-    case "Shift":
-      return "shift";
-    case "Control":
-      return "sprint";
-    default:
-      return null;
-  }
-}
-
-/**
- * @param {KeyboardEvent} event
- * @param {string} code
- * @param {string} legacyKey
- */
-function isPhysicalKey(event, code, legacyKey) {
-  if (keyboardCode(event) === code) {
-    return true;
-  }
-  return keyboardCode(event) === null && (
-    event.key === legacyKey || event.key === legacyKey.toUpperCase()
-  );
-}
-
-/** @param {KeyboardEvent} event */
-function keyboardCode(event) {
-  return typeof event.code === "string" && event.code.length > 0 && event.code !== "Unidentified"
-    ? event.code
-    : null;
-}
-
 /** @param {WebCompileTiming} timing */
 function publishActiveCompileTiming(timing) {
   runtime.state.activeCompileTiming = timing.publicSnapshot(performance.now());
@@ -1326,10 +1135,6 @@ function setText(id, value) {
   if (element) element.textContent = value;
 }
 
-function defaultInputKeys() {
-  return Object.fromEntries(INPUT_KEY_NAMES.map((name) => [name, false]));
-}
-
 function normalizedDeployAssetVersion() {
   const version = /** @type {any} */ (globalThis).__MCLONE_NATIVE_WEB_ASSET_VERSION__;
   if (
@@ -1349,23 +1154,6 @@ function versionedUrl(path) {
     url.searchParams.set("v", DEPLOY_ASSET_VERSION);
   }
   return url;
-}
-
-function defaultMovementImpulse() {
-  return {
-    active: false,
-    left: 0,
-    forward: 0,
-  };
-}
-
-/** @param {unknown} value */
-function sanitizeInputImpulse(value) {
-  const impulse = Number(value);
-  if (!Number.isFinite(impulse)) {
-    return 0;
-  }
-  return Math.max(-1, Math.min(1, impulse));
 }
 
 function isHudOpen() {
@@ -1398,42 +1186,6 @@ function formatInteractionStatus(interaction) {
     return `${interaction.action}: miss`;
   }
   return `${interaction.action}: ${interaction.changed ? "changed" : "same"}`;
-}
-
-/** @param {Record<string, any> | null | undefined} value */
-function applyHotbarState(value) {
-  if (!value || typeof value.selectedHotbarSlot === "undefined") {
-    return;
-  }
-  const slot = Number(value.selectedHotbarSlot);
-  if (Number.isInteger(slot) && slot >= 0 && slot < 9) {
-    runtime.state.selectedHotbarSlot = slot;
-  }
-}
-
-/** @param {KeyboardEvent} event */
-function hotbarSlotForEvent(event) {
-  const code = keyboardCode(event);
-  if (code?.startsWith("Digit") || code?.startsWith("Numpad")) {
-    const digit = Number(code.slice(-1));
-    if (Number.isInteger(digit) && digit >= 1 && digit <= 9) {
-      return digit - 1;
-    }
-    return null;
-  }
-  return code === null ? hotbarSlotForLegacyKey(event.key) : null;
-}
-
-/** @param {string} key */
-function hotbarSlotForLegacyKey(key) {
-  if (key.length !== 1) {
-    return null;
-  }
-  const digit = Number(key);
-  if (Number.isInteger(digit) && digit >= 1 && digit <= 9) {
-    return digit - 1;
-  }
-  return null;
 }
 
 /** @param {WasmReport} interaction */
