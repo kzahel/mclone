@@ -313,6 +313,9 @@ inventory checks (`mclone-web-hud.js` present, no `.ts`), `pnpm native:web:app-s
 inspection, `pnpm native:web:movement-perf`, `pnpm native:movement:smoke`, and
 `pnpm native:timedemo:smoke`.
 
+Implementation commit: `db0a52726aa22e493c53b884d4c39bdc5e2a68ca`
+(`071: graduate HUD glue to TypeScript`).
+
 ## Relationship to Other Tacticals
 
 - [`070-web-glue-typing-and-abi-hardening.md`](070-web-glue-typing-and-abi-hardening.md) -
