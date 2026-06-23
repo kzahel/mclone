@@ -238,10 +238,14 @@ impl WebRuntime {
         self.update_count += exchange.update_count;
         self.protocol_codec_roundtrip &= exchange.protocol_codec_roundtrip;
         self.transport_drained &= exchange.transport_drained;
-        let update_report = self.engine.apply_server_updates_with_dirty_policy(
-            exchange.updates,
-            EngineServerUpdateDirtyPolicy::SECTION_BLOCK_UPDATES_ONLY,
-        );
+        // 067 Stage 3: drive render dirty state event-driven from drained updates, exactly
+        // like desktop. Chunk snapshots/unloads (not just block edits) mark neighborhoods
+        // render-dirty as they arrive, so the per-frame streaming loop plans purely from
+        // dirty state and no longer needs the view-sync delta to discover new/removed
+        // chunks.
+        let update_report = self
+            .engine
+            .apply_server_updates_with_dirty_policy(exchange.updates, EngineServerUpdateDirtyPolicy::ALL);
 
         WebRuntimeStepReport {
             command_count: exchange.command_count,

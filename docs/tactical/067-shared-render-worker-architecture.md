@@ -1,9 +1,11 @@
 # 067: Shared Render-Worker Architecture
 
 Status: active high-priority architecture parent. Stage 0 (baselines), Stage 1
-(resident SAB arenas), and Stage 2 (web `RenderSectionCompiler` over the
-resident ring) are landed; Stage 3 (per-frame `sync_render_sections_with_budget`
-streaming — the keystone) is next and **gated on explicit sign-off**. Supersedes
+(resident SAB arenas), Stage 2 (web `RenderSectionCompiler` over the resident
+ring), and the Stage 3 keystone (per-frame `sync_render_sections_with_budget`
+streaming — the shared loop, web `syncCameraRenderFrame`, mega-job eliminated) are
+landed; the Stage 3 legacy-deletion tail (begin/finish exports + overview-smoke
+conversion) is in progress. Supersedes
 [`065-native-web-mobile-streaming-performance.md`](065-native-web-mobile-streaming-performance.md)
 and [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md),
 folding their streaming-perf goals and the render-worker `SharedArrayBuffer`
@@ -387,10 +389,62 @@ JS files, `native:web:build`, `native:web:app-smoke`, `native:web:movement-perf`
 
 ### Stage 3 — Keystone: web drives `sync_render_sections_with_budget` (budget ~1)
 
-Delete the begin/finish/take exports, the JS promise chain,
-`RenderSectionWorkerCompiler`, and (carefully) the view-center queue. This kills
-the 96-144-section jobs and is where the movement window stops being one large
-block.
+**Landed (keystone).** The desktop streaming loop is lifted into a shared
+`EngineRenderSession::sync_render_sections_with_budget<C: RenderSectionCompiler>`
+method (parametrized by compiler, budget, ordering closures, readiness, removal
+mode, and a snapshot collector) plus a shared `has_pending_render_work` idle gate.
+The distance ordering + near-camera readiness helpers
+(`render_section_neighbor_readiness`, `sort_chunk_positions_by_distance`,
+`sort_dirty_section_chunks_by_distance`, `render_section_center`) moved into
+`mclone-render-session` so both platforms run byte-identical policy. Desktop
+`scene_runtime.rs` now delegates to the shared method (its local copies deleted);
+`cargo test`, `native:movement:smoke`, and `native:timedemo:smoke` stay green.
+
+Web drives the same loop at budget 1 over the Stage-2 `WebRenderSectionCompiler`.
+A single new export, `syncCameraRenderFrame(radius)`, runs one frame: update the
+deferred interest center, drain runner updates (now `EngineServerUpdateDirtyPolicy::ALL`
+so chunk snapshots/unloads mark render-dirty event-driven like desktop — the
+web-only view-sync delta is retired), run the budget-1 shared sync over the
+resident-ring compiler (distance sort + near-camera readiness +
+`ApplyImmediately`), render the current cache (sky-only tolerated until sections
+stream), and return the frame report plus a worker `doorbell` whenever a new
+compile was armed that frame. JS is a doorbell + lifecycle relay: `tickFrame` does
+`advanceCameraFrame` -> `syncCameraRenderFrame` -> post the doorbell
+(fire-and-forget; the worker writes the packed result into the resident ring that
+the next frame's poll drains). The `compileCameraView` begin->worker->finish
+transaction, the `RenderViewCompileQueue`/`loaded_center` coalescing, the busy
+flag, and the JS-owned per-request SAB arenas are gone from the live path.
+
+Convergence vs Stage 0 (mobile `native:web:movement-perf`, no-clip traverse):
+
+| Metric | Stage 0 baseline | Stage 3 |
+|---|---|---|
+| compiles / traverse | 2 (whole-view) | 9 (per-frame) |
+| submitted sections / compile | 96 and 144 | 16 (one chunk column) |
+| packed = shared-result bytes | 7.69 / 11.35 MB | 0.78–1.73 MB |
+| worker round-trip | 34–55 ms | 6–7 ms |
+| per-compile window | 262–492 ms total | 7.5–18 ms each |
+
+The 96–144-section mega-job is gone; movement fills progressively (stale-drop +
+accept stream visible) while the resident cache stays drawn. `app-smoke`,
+`mobile-smoke`, and `movement-perf` are green; the harness now asserts many small
+per-frame compile timings (same per-compile diagnostics) and a `streamingSettled`
+gate (render-idle **and** the server runner drained, so a fast camera that outruns
+chunk generation does not settle prematurely). The web app requires cross-origin
+isolation (the streaming compiler needs the SAB ring; no non-isolated fallback).
+
+Boot determinism: the warm-up applies the server-spawn snap with ~0 dt and
+pre-loads the server-spawn chunks before the live rAF gravity fall, so the camera
+settles at the same sub-block position every run despite per-compile frame-time
+variance (the pre-streaming app fell during uniformly fast render-only frames).
+
+**Still to delete in this stage:** the `begin/finish/take` + camera
+submit/poll/request wasm-bindgen exports and their internals, the
+`RenderViewCompileQueue`/`loaded_center`/`compile_requests`/`shared_compile`
+fields, the legacy `message-transfer` fallback, and the duplicated
+`RenderSectionWorkerCompiler.compile()` path — gated on converting the
+deterministic overview smoke (`mclone-web-smoke.js`) to a `syncOverviewRenderFrame`
+pump-to-idle (the web analog of `sync_all_render_sections`).
 
 ### Stage 4 — Resident snapshot mirror; request input becomes delta-only
 

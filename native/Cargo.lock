@@ -1141,6 +1141,7 @@ name = "mclone-render-session"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "glam",
  "mclone-client",
  "mclone-core",
  "mclone-mesh",

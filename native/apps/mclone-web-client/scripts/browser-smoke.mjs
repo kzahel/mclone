@@ -244,11 +244,18 @@ async function run() {
             const state = globalThis.__mcloneWebApp?.state;
             const dx = Number(state?.cameraX) - start.cameraX;
             const dz = Number(state?.cameraZ) - start.cameraZ;
+            const moved = Math.hypot(dx, dz);
+            // 067 Stage 3: the streaming app spawns the camera deterministically at the
+            // server spawn, which here faces terrain — WALK advances until collision caps
+            // it at the block boundary (~0.2). Moving and then hitting horizontal
+            // collision still proves WALK-mode movement + collision both work.
+            const walkedFreely = moved > 0.2;
+            const walkedIntoTerrain = moved > 0.1 && state?.horizontalCollision === true;
             return state?.ok === true
               && state.movementMode === "WALK"
               && state.lastReport?.movementMode === "WALK"
               && state.lastReport?.onGround === true
-              && Math.hypot(dx, dz) > 0.2
+              && (walkedFreely || walkedIntoTerrain)
               && (state.lastReport?.commandCount ?? 0) > start.commandCount;
           },
           walkingStart,
@@ -256,7 +263,7 @@ async function run() {
         );
       } catch (error) {
         const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
-        throw new Error(`native web app did not advance walking movement after physical KeyW with Dvorak key value: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}\nlogs=${pageLogs.join("\n")}`);
+        throw new Error(`native web app did not advance walking movement after physical KeyW with Dvorak key value: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}`);
       } finally {
         await dispatchKeyboardEvent(page, "keyup", {
           code: "KeyW",
@@ -267,20 +274,25 @@ async function run() {
         const state = globalThis.__mcloneWebApp.state;
         const dx = Number(state.cameraX) - start.cameraX;
         const dz = Number(state.cameraZ) - start.cameraZ;
+        const moved = Math.hypot(dx, dz);
+        const walkedFreely = moved > 0.2;
+        const walkedIntoTerrain = moved > 0.1 && state.horizontalCollision === true;
         return {
           ok: state.movementMode === "WALK"
             && state.lastReport?.movementMode === "WALK"
             && state.lastReport?.onGround === true
-            && Math.hypot(dx, dz) > 0.2,
+            && (walkedFreely || walkedIntoTerrain),
           start,
           end: {
             cameraX: state.cameraX,
             cameraZ: state.cameraZ,
             movementMode: state.movementMode,
             onGround: state.onGround,
+            horizontalCollision: state.horizontalCollision,
             commandCount: state.lastReport?.commandCount ?? 0,
           },
-          distance: Math.hypot(dx, dz),
+          distance: moved,
+          walkedIntoTerrain,
         };
       }, walkingStart);
       const targetPreviewProbe = await captureTargetPreviewProbe(page);
@@ -436,8 +448,7 @@ async function runMovementPerfProbe(page, canvas) {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.ok === true
         && state.ready === true
-        && state.pendingCompileJobCount === 0
-        && state.compileInFlight === false
+        && state.streamingSettled === true
         && state.loadedCenterX === state.centerX
         && state.loadedCenterZ === state.centerZ
         && state.lastCompileTiming?.status === "accepted";
@@ -458,7 +469,11 @@ async function runMovementPerfProbe(page, canvas) {
       renderCount: state.renderCount,
       compileTimingCount: state.compileTimingCount,
       lastCompileSequence: state.lastCompileTiming?.sequence ?? 0,
-      initialCompileTiming: compileTimings.find((timing) => timing.trigger === "initial") ?? null,
+      // 067 Stage 3: the streaming loop tags every compile "stream"; the warm-up to idle
+      // produces the initial-load compiles, so the most recent settled timing before
+      // movement stands in for the old one-shot "initial" compile.
+      initialCompileTiming: state.lastCompileTiming
+        ?? (compileTimings.length > 0 ? compileTimings[compileTimings.length - 1] : null),
       preMovementCompileTimings: compileTimings,
     };
   });
@@ -565,8 +580,7 @@ async function waitForWebAppStreamingSettled(page, timeout = 60_000) {
     () => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.ok === true
-        && state.pendingCompileJobCount === 0
-        && state.compileInFlight === false
+        && state.streamingSettled === true
         && state.loadedCenterX === state.centerX
         && state.loadedCenterZ === state.centerZ;
     },
@@ -1390,7 +1404,7 @@ function assertAppLoopResult(
   if (result.frameCount <= 0) {
     throw new Error(`native web app requestAnimationFrame loop did not advance:\n${JSON.stringify(result, null, 2)}`);
   }
-  if (!walkingProbe?.ok || walkingProbe.distance <= 0.2) {
+  if (!walkingProbe?.ok || walkingProbe.distance <= 0.1) {
     throw new Error(`native web app did not move through the walking/collision path before no-clip streaming:\n${JSON.stringify({ walkingProbe, result }, null, 2)}`);
   }
   if (!targetPreviewProbe?.ok) {
@@ -1411,9 +1425,9 @@ function assertAppLoopResult(
   if (
     result.compileTimingCount < 2
     || !result.lastCompileTiming
-    || !result.compileTimings?.some((timing) => timing.trigger === "movement")
+    || !result.compileTimings?.some((timing) => timing.trigger === "stream")
   ) {
-    throw new Error(`native web app did not report initial and movement compile timings:\n${JSON.stringify(result, null, 2)}`);
+    throw new Error(`native web app did not report streaming compile timings:\n${JSON.stringify(result, null, 2)}`);
   }
   assertCompileTimingDiagnostics(result.lastCompileTiming, "app last compile timing");
   if (result.runnerKind !== "web-worker" || result.lastReport?.runnerKind !== "web-worker") {

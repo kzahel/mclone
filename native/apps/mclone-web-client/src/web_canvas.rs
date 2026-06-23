@@ -19,7 +19,7 @@ use mclone_core::{
 };
 use mclone_core::{
     BlockHitResult, BlockPos, BlockStateId, ChunkPos, ChunkSnapshot, Direction, HitResultType,
-    Vec3d,
+    Vec3d, chunk_middle_block_coord,
 };
 use mclone_mesh::{
     RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
@@ -29,7 +29,8 @@ use mclone_protocol::{EntityKind, ServerUpdate, decode_server_update, encode_ser
 use mclone_render::actor_assets::{ActorTextureImage, load_actor_texture_assets};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
-    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionUploadReport,
+    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderStats,
+    TexturedSectionUploadReport,
 };
 use mclone_render::entity::{ActorDrawResources, ActorInstance};
 use mclone_render::sky_render::SkyRenderer;
@@ -40,11 +41,12 @@ use mclone_render_session::{
     RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport, RenderSectionCompileRequest,
     RenderSectionCompileRequestInfo, RenderSectionCompileRequestState, RenderSectionCompileResult,
     RenderSectionCompiler, RenderSectionNeighborReadiness, RenderSectionPendingCompileRequest,
-    RenderSectionRemovalMode,
-    RenderSectionSyncPlan, RenderSectionViewSync, RenderViewCompileQueue,
+    RenderSectionRemovalMode, RenderSectionSyncPlan, RenderSectionViewSync, RenderViewCompileQueue,
     RenderViewCompileQueueDecision, build_client_textured_sections,
     build_render_sections_from_snapshots, decode_textured_render_section_build_report,
-    encode_textured_render_section_build_report, summarize_textured_render_section_build_report,
+    encode_textured_render_section_build_report, render_section_neighbor_readiness,
+    sort_chunk_positions_by_distance, sort_dirty_section_chunks_by_distance,
+    summarize_textured_render_section_build_report,
 };
 use mclone_server::ServerRunnerKind;
 
@@ -56,6 +58,13 @@ const CANVAS_HEIGHT_SHIFT: u32 = 20;
 const WEB_GROUND_PROBE_DISTANCE: f64 = 0.01;
 const WEB_FRAME_UPDATE_DRAIN_BUDGET: usize = 1;
 const WEB_COMPILE_WAIT_UPDATE_DRAIN_BUDGET: usize = 1;
+// 067 Stage 3: web drives the shared streaming loop at the same per-frame increment as
+// desktop (`DEFAULT_RENDER_CHUNK_MESH_BUDGET`). One small job in flight per frame; the
+// resident cache stays visible while movement fills progressively.
+const WEB_RENDER_CHUNK_MESH_BUDGET: usize = 1;
+// Y the overview-frame camera looks down from when streaming a deterministic chunk view;
+// only the horizontal component matters for near-camera readiness.
+const WEB_OVERVIEW_CAMERA_EYE_Y: f32 = 256.0;
 const WEB_RENDER_COMPILE_INPUT_MAGIC: &[u8; 8] = b"MCWRCI1\0";
 
 // 067 Stage 2: resident render-compiler shared ring ABI. These mirror the
@@ -1457,6 +1466,21 @@ struct WebRenderSectionCompiler {
     last_packed_byte_length: usize,
     last_result_capacity_bytes: usize,
     last_result_overflow: bool,
+    // 067 Stage 3: number of snapshots encoded into the input arena for the in-flight
+    // request, surfaced on the doorbell so the worker/diagnostics know the input width
+    // (still whole-world input until Stage 4 makes it delta-only).
+    last_input_chunk_count: usize,
+    // The request id + outcome of the most recent compile drained by
+    // `try_recv_completed`, consumed by the streaming frame so JS can correlate the
+    // applied result with the doorbell it posted for that request.
+    last_completed: Option<WebCompletedCompile>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WebCompletedCompile {
+    request_id: u32,
+    ok: bool,
+    packed_byte_length: usize,
 }
 
 impl WebRenderSectionCompiler {
@@ -1482,6 +1506,8 @@ impl WebRenderSectionCompiler {
             shared_input_grow_count: 0,
             last_packed_byte_length: 0,
             last_result_overflow: false,
+            last_input_chunk_count: 0,
+            last_completed: None,
         }
     }
 
@@ -1491,6 +1517,13 @@ impl WebRenderSectionCompiler {
 
     fn in_flight_request_id(&self) -> Option<u32> {
         self.in_flight.as_ref().map(|in_flight| in_flight.request_id)
+    }
+
+    /// Take the most recently drained compile outcome, if any. The streaming frame reads
+    /// this right after the shared sync to learn which doorbell-posted request finished
+    /// this frame (single in flight, so at most one).
+    fn take_last_completed(&mut self) -> Option<WebCompletedCompile> {
+        self.last_completed.take()
     }
 
     fn allocate_request_id(&mut self) -> u32 {
@@ -1536,6 +1569,32 @@ impl WebRenderSectionCompiler {
         )?;
         Ok(())
     }
+
+    /// Build a complete worker doorbell for the in-flight compile (067 Stage 3): the
+    /// request id, the budget's target section keys (so the worker compiles only those —
+    /// the per-frame increment, not a whole-view job), the snapshot input width, and the
+    /// resident shared buffers. JS posts it verbatim; the worker writes the packed result
+    /// back into the same buffers `try_recv_completed` polls. Returns whether a doorbell
+    /// was written (false when no compile is in flight).
+    fn write_doorbell(&self, object: &js_sys::Object) -> Result<bool, String> {
+        let Some(in_flight) = self.in_flight.as_ref() else {
+            return Ok(false);
+        };
+        set_number(object, "requestId", f64::from(in_flight.request_id))?;
+        write_target_sections(object, &in_flight.target_sections)?;
+        set_number(
+            object,
+            "submittedCompileSectionCount",
+            in_flight.target_sections.len() as f64,
+        )?;
+        set_number(
+            object,
+            "snapshotInputChunkCount",
+            self.last_input_chunk_count as f64,
+        )?;
+        self.write_doorbell_arenas(object)?;
+        Ok(true)
+    }
 }
 
 fn render_compiler_set_value(
@@ -1561,6 +1620,7 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
             ));
         }
         let request_id = self.allocate_request_id();
+        let input_chunk_count = request.snapshots.len();
         let input_bytes = encode_web_render_compile_input(&request.snapshots)
             .map_err(|error| anyhow::anyhow!(error))?;
         let arena = self
@@ -1573,6 +1633,7 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
         if grew {
             self.shared_input_grow_count += 1;
         }
+        self.last_input_chunk_count = input_chunk_count;
         self.in_flight = Some(WebSharedCompileInFlight {
             request_id,
             target_sections: request.target_sections,
@@ -1612,6 +1673,11 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
                 self.last_result_overflow = false;
                 self.shared_result_response_count += 1;
                 self.shared_result_byte_count += packed.len();
+                self.last_completed = Some(WebCompletedCompile {
+                    request_id: in_flight.request_id,
+                    ok: true,
+                    packed_byte_length: packed.len(),
+                });
                 if let Some(arena) = self.shared.as_ref() {
                     self.last_result_capacity_bytes = arena.result_capacity as usize;
                 }
@@ -1641,6 +1707,11 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
                 self.shared_result_overflow_count += 1;
                 self.last_result_overflow = true;
                 let in_flight = self.take_in_flight().expect("in-flight compile present");
+                self.last_completed = Some(WebCompletedCompile {
+                    request_id: in_flight.request_id,
+                    ok: false,
+                    packed_byte_length: 0,
+                });
                 Ok(vec![RenderSectionCompileResult {
                     target_sections: in_flight.target_sections,
                     section_revisions: in_flight.section_revisions,
@@ -1652,6 +1723,11 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
             RENDER_COMPILER_SHARED_RESULT_FAILED => {
                 self.last_result_overflow = false;
                 let in_flight = self.take_in_flight().expect("in-flight compile present");
+                self.last_completed = Some(WebCompletedCompile {
+                    request_id: in_flight.request_id,
+                    ok: false,
+                    packed_byte_length: 0,
+                });
                 Ok(vec![RenderSectionCompileResult {
                     target_sections: in_flight.target_sections,
                     section_revisions: in_flight.section_revisions,
@@ -1872,6 +1948,10 @@ pub struct WebChunkRenderSession {
     loaded_chunk_positions: BTreeSet<ChunkPos>,
     loaded_center: Option<ChunkPos>,
     compile_queue: RenderViewCompileQueue<String>,
+    // 067 Stage 3: the last chunk-view center we asked the runner to stream. The
+    // streaming loop only re-sends the deferred SetChunkView command when this changes,
+    // so movement does not spam the runner with identical view requests every frame.
+    interest_center: Option<ChunkPos>,
     asset_pack_parse_count: usize,
     terrain_asset_load_count: usize,
     atlas_upload_count: usize,
@@ -1992,6 +2072,57 @@ impl WebChunkRenderSession {
     #[wasm_bindgen(js_name = pollCameraRenderCompile)]
     pub fn poll_camera_render_compile(&mut self) -> Result<JsValue, JsValue> {
         self.poll_camera_render_compile_result().map_err(JsValue::from)
+    }
+
+    /// 067 Stage 3 keystone: drive one frame of the shared per-frame streaming loop from
+    /// the live camera. Updates the interest center, drains runner updates, runs the
+    /// shared `sync_render_sections_with_budget` over the resident-ring compiler at budget
+    /// 1, and renders the current cache. Returns the frame report plus, when a new compile
+    /// was armed this frame, a `doorbell` for JS to post to the worker — the worker writes
+    /// the packed result back into the resident ring that the next frame's poll drains.
+    #[wasm_bindgen(js_name = syncCameraRenderFrame)]
+    pub fn sync_camera_render_frame(&mut self, radius_chunks: u32) -> Result<JsValue, JsValue> {
+        let snapshot = self.camera.snapshot();
+        let camera_position = glam_vec3_from_vec3d(snapshot.eye);
+        self.sync_render_streaming_frame(
+            WebFrameCamera::Camera,
+            snapshot.chunk_pos,
+            camera_position,
+            radius_chunks,
+        )
+        .map_err(JsValue::from)
+    }
+
+    /// 067 Stage 3: drive one frame of the shared streaming loop for a deterministic
+    /// top-down overview at a fixed chunk center. The deterministic smoke pumps this to
+    /// idle (the web analog of desktop `sync_all_render_sections`), replacing the begin/
+    /// finish overview transaction while keeping the same compile topology as the app.
+    #[wasm_bindgen(js_name = syncOverviewRenderFrame)]
+    pub fn sync_overview_render_frame(
+        &mut self,
+        center_x: i32,
+        center_z: i32,
+        radius_chunks: u32,
+    ) -> Result<JsValue, JsValue> {
+        let center = ChunkPos {
+            x: center_x,
+            z: center_z,
+        };
+        let camera_position = glam::Vec3::new(
+            chunk_middle_block_coord(center.x) as f32,
+            WEB_OVERVIEW_CAMERA_EYE_Y,
+            chunk_middle_block_coord(center.z) as f32,
+        );
+        self.sync_render_streaming_frame(
+            WebFrameCamera::Overview {
+                center,
+                radius_chunks,
+            },
+            center,
+            camera_position,
+            radius_chunks,
+        )
+        .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = requestCameraRenderCompile)]
@@ -2251,6 +2382,7 @@ impl WebChunkRenderSession {
             loaded_chunk_positions: BTreeSet::new(),
             loaded_center: None,
             compile_queue: RenderViewCompileQueue::default(),
+            interest_center: None,
             asset_pack_parse_count: 1,
             terrain_asset_load_count: 1,
             atlas_upload_count: 0,
@@ -3170,6 +3302,156 @@ impl WebChunkRenderSession {
         Ok(object.into())
     }
 
+    /// 067 Stage 3 keystone: one frame of the shared per-frame streaming loop, shared by
+    /// the live camera (`syncCameraRenderFrame`) and the deterministic overview smoke
+    /// (`syncOverviewRenderFrame`). Updates the runner interest center, drains updates,
+    /// runs the shared `sync_render_sections_with_budget` over the resident-ring compiler
+    /// at budget 1, renders the current cache, and serializes the frame report plus a
+    /// worker `doorbell` whenever a new compile was armed this frame.
+    fn sync_render_streaming_frame(
+        &mut self,
+        frame_camera: WebFrameCamera,
+        center: ChunkPos,
+        camera_position: glam::Vec3,
+        radius_chunks: u32,
+    ) -> Result<JsValue, String> {
+        if !self.render_compiler.shared_supported() {
+            return Err("shared render compile transport unavailable: cross-origin isolation \
+                 (SharedArrayBuffer/Atomics) is required for the streaming render loop"
+                .into());
+        }
+
+        // 1. Keep the runner's streaming interest centered on the camera. Deferred send,
+        //    only when the center actually moved, so movement does not re-issue the view
+        //    every frame.
+        if self.interest_center != Some(center) {
+            self.runtime
+                .request_chunk_view_deferred(center, radius_chunks, radius_chunks)
+                .map_err(|error| format!("failed to request streaming chunk view: {error}"))?;
+            self.interest_center = Some(center);
+        }
+
+        // 2. Drain runner updates so freshly published snapshots are marked render-dirty
+        //    (ALL policy) before this frame's streaming plan runs.
+        self.runtime
+            .drain_pending_runner_updates_budgeted(WEB_FRAME_UPDATE_DRAIN_BUDGET)
+            .map_err(|error| format!("failed to drain web server worker updates: {error}"))?;
+
+        // 3. Shared per-frame streaming sync (budget 1) over the resident-ring compiler.
+        let prev_in_flight = self.render_compiler.in_flight_request_id();
+        let render_compiler = &mut self.render_compiler;
+        let cache_update = self
+            .runtime
+            .engine_mut()
+            .sync_render_sections_with_budget(
+                render_compiler,
+                WEB_RENDER_CHUNK_MESH_BUDGET,
+                |dirty_work| {
+                    sort_chunk_positions_by_distance(
+                        dirty_work.loaded_dirty_chunks.iter().copied(),
+                        camera_position,
+                    )
+                },
+                |dirty_work| {
+                    sort_dirty_section_chunks_by_distance(
+                        &dirty_work.loaded_dirty_sections_by_chunk,
+                        camera_position,
+                    )
+                },
+                |client, key| render_section_neighbor_readiness(client, key, camera_position),
+                RenderSectionRemovalMode::ApplyImmediately,
+                |client| client.chunk_snapshots().cloned().collect(),
+            )
+            .map_err(|error| format!("web render streaming sync failed: {error:#}"))?;
+
+        // A new compile was armed this frame whenever the in-flight request id advanced to
+        // a fresh value — including the common case where this same frame both drained the
+        // previous compile (in_flight -> None) and submitted the next one (-> Some(new)).
+        // Comparing against the pre-sync id (rather than only matching None -> Some) is what
+        // keeps the doorbell from being dropped on those apply+submit frames.
+        let new_in_flight = self.render_compiler.in_flight_request_id();
+        let armed_doorbell = new_in_flight.is_some() && new_in_flight != prev_in_flight;
+        let applied = self.render_compiler.take_last_completed();
+        let pending_compile_jobs = self.render_compiler.pending_job_count();
+        let streaming_idle = pending_compile_jobs == 0
+            && !self.runtime.engine().has_pending_render_work(0, |client, key| {
+                render_section_neighbor_readiness(client, key, camera_position)
+            });
+
+        // 4. Synthesize this frame's compile diagnostics from the streaming cache update.
+        let acceptance_report = RenderSectionCompileAcceptanceReport {
+            request_id: applied.map(|completed| completed.request_id).unwrap_or(0),
+            submitted_section_count: cache_update.submitted_compile_section_count,
+            accepted_section_count: cache_update.completed_compile_section_count,
+            stale_section_count: cache_update.stale_compile_section_count,
+        };
+        let compile_report = match applied {
+            Some(completed) if completed.ok => WebSectionCompileReport {
+                worker_compile_used: true,
+                packed_byte_length: completed.packed_byte_length,
+                ..WebSectionCompileReport::default()
+            },
+            _ => WebSectionCompileReport::default(),
+        };
+
+        let current_loaded_chunks = self
+            .runtime
+            .client()
+            .loaded_chunk_positions()
+            .collect::<BTreeSet<_>>();
+        let current_section_keys = self
+            .runtime
+            .engine()
+            .render_session()
+            .section_keys()
+            .collect::<BTreeSet<_>>();
+
+        // Count a mesh build for any frame that merged rebuilt sections (streaming drives
+        // `render_chunk_report_with_cache_update` with count_mesh_build=false to keep the
+        // budgeted drain + no loaded-center semantics, so track the build signal here).
+        if cache_update.rebuilt_section_count() > 0 {
+            self.mesh_build_count += 1;
+        }
+
+        // 5. Render the current cache (sky-only until sections stream in) and serialize.
+        let report = self.render_chunk_report_with_cache_update(
+            center,
+            radius_chunks,
+            current_loaded_chunks,
+            current_section_keys,
+            cache_update,
+            compile_report,
+            WebCompileScopeReport::default(),
+            acceptance_report,
+            frame_camera,
+            false,
+        )?;
+        let object: js_sys::Object = report.to_js_value()?.unchecked_into();
+        set_bool(&object, "shared", true)?;
+        set_bool(&object, "streamingIdle", streaming_idle)?;
+        set_number(&object, "pendingCompileJobCount", pending_compile_jobs as f64)?;
+        if let Some(completed) = applied {
+            set_number(&object, "appliedRequestId", f64::from(completed.request_id))?;
+            set_bool(&object, "appliedOk", completed.ok)?;
+            set_number(
+                &object,
+                "appliedPackedByteLength",
+                completed.packed_byte_length as f64,
+            )?;
+        }
+        if armed_doorbell {
+            let doorbell = js_sys::Object::new();
+            if self.render_compiler.write_doorbell(&doorbell)? {
+                set_number(&doorbell, "centerX", f64::from(center.x))?;
+                set_number(&doorbell, "centerZ", f64::from(center.z))?;
+                set_number(&doorbell, "radiusChunks", f64::from(radius_chunks))?;
+                js_sys::Reflect::set(&object, &JsValue::from_str("doorbell"), &doorbell)
+                    .map_err(|_| "failed to attach streaming render doorbell".to_string())?;
+            }
+        }
+        Ok(object.into())
+    }
+
     async fn prepare_chunk_view(
         &mut self,
         center: ChunkPos,
@@ -3219,13 +3501,16 @@ impl WebChunkRenderSession {
         drain_result
             .map_err(|error| format!("failed to drain web server worker updates: {error}"))?;
         let cached_sections = self.runtime.engine().sections();
-        if cached_sections.iter().all(|section| section.is_empty()) {
-            return Err(format!(
-                "generated chunk view {},{} radius {} built no resident textured sections",
-                center.x, center.z, radius_chunks
-            ));
-        }
-        let upload_report = self.upload_sections(&cache_update, &cached_sections)?;
+        // 067 Stage 3: the streaming loop renders every frame, so the cache can be empty
+        // on the first frames after a view loads (sections still compiling). Sky-only
+        // frames are expected then — the desktop window shows the same while terrain
+        // streams in. Draw the section pass only once non-empty sections exist.
+        let has_sections = !cached_sections.iter().all(|section| section.is_empty());
+        let upload_report = if has_sections {
+            self.upload_sections(&cache_update, &cached_sections)?
+        } else {
+            TexturedSectionUploadReport::default()
+        };
         let frame_camera = chunk_camera_for_frame(frame_camera, &self.camera, radius_chunks);
         let render_view = frame_camera.render_view(self.context.width, self.context.height);
         let day_time = self.runtime.client().day_time();
@@ -3249,10 +3534,6 @@ impl WebChunkRenderSession {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("mclone_web_generated_textured_chunk_encoder"),
                 });
-        let draw = self
-            .draw
-            .as_ref()
-            .ok_or_else(|| "textured draw resources were not initialized".to_owned())?;
         self.sky.render(
             &self.context.queue,
             &mut encoder,
@@ -3262,22 +3543,29 @@ impl WebChunkRenderSession {
             time_of_day,
             sun_angle,
         );
-        let render_target = ChunkRenderTarget::new(
-            &view,
-            &self.depth.view,
-            [self.context.width, self.context.height],
-            sky_clear_color,
-        )
-        .with_loaded_color();
-        let render_stats = draw
-            .render_with_options(
+        let render_stats = if has_sections {
+            let draw = self
+                .draw
+                .as_ref()
+                .ok_or_else(|| "textured draw resources were not initialized".to_owned())?;
+            let render_target = ChunkRenderTarget::new(
+                &view,
+                &self.depth.view,
+                [self.context.width, self.context.height],
+                sky_clear_color,
+            )
+            .with_loaded_color();
+            draw.render_with_options(
                 &self.context.queue,
                 &mut encoder,
                 render_target,
                 render_view,
                 render_options,
             )
-            .map_err(|error| format!("failed to render generated section meshes: {error:#}"))?;
+            .map_err(|error| format!("failed to render generated section meshes: {error:#}"))?
+        } else {
+            TexturedSectionRenderStats::default()
+        };
         let frame_target =
             RenderFrameTarget::color(&view, [self.context.width, self.context.height])
                 .with_depth(&self.depth.view);

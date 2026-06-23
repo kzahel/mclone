@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -8,8 +8,8 @@ use mclone_client::{
     block_facts::{BlockFluidKind, block_fluid_height, block_fluid_kind},
 };
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, ChunkPos, ChunkSnapshot, SECTION_HEIGHT, block_to_section_coord,
-    chunk_middle_block_coord, local_block_coord, local_section_block_coord,
+    AIR_BLOCK_STATE_ID, ChunkPos, ChunkSnapshot, block_to_section_coord, local_block_coord,
+    local_section_block_coord,
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 use mclone_protocol::{ChunkView, ClientCommand, PlayerPositionUpdate, ServerUpdate};
@@ -31,13 +31,12 @@ use crate::render_cache::{
 };
 use mclone_render_session::{
     EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompiler,
-    RenderSectionNeighborReadiness, RenderSectionRemovalMode, RenderSectionSession,
-    build_client_textured_sections, render_section_chunk_pos, render_section_keys_for_snapshot,
-    snapshot_contains_render_section,
+    RenderSectionRemovalMode, RenderSectionSession, build_client_textured_sections,
+    render_section_chunk_pos, render_section_neighbor_readiness,
+    sort_chunk_positions_by_distance, sort_dirty_section_chunks_by_distance,
 };
 
 const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
-const RENDER_NEIGHBOR_READY_DISTANCE_SQ: f32 = 24.0 * 24.0;
 
 pub(crate) fn square_count(radius: i32) -> Result<usize> {
     if radius < 0 {
@@ -554,13 +553,6 @@ impl WindowSceneRuntime {
         }
     }
 
-    fn drain_completed_render_compile_jobs(&mut self) -> Result<RenderSectionCacheUpdate> {
-        let completed_results = self.render_compile_worker.try_recv_completed()?;
-        let pending_compile_jobs = self.render_compile_worker.pending_job_count();
-        self.engine
-            .drain_completed_compile_updates(completed_results, |_| 0, pending_compile_jobs)
-    }
-
     pub(crate) fn sync_render_sections(
         &mut self,
         camera_position: Vec3,
@@ -602,16 +594,14 @@ impl WindowSceneRuntime {
         camera_position: Vec3,
         chunk_budget: usize,
     ) -> Result<RenderSectionCacheUpdate> {
-        let mut report = self.drain_completed_render_compile_jobs()?;
-
-        self.engine.mark_loaded_chunks_dirty_when_cache_empty();
-
-        if self.render_session().dirty_work_is_empty() {
-            report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
-            return Ok(report);
-        }
-
-        let sync_update = self.engine.prepare_sync_update(
+        // 067 Stage 3: desktop drives the shared streaming loop over its OS-thread
+        // `mpsc` worker. Distance ordering, near-camera readiness, and immediate removal
+        // are the shared engine/web policy; the only desktop specifics are the worker
+        // (moved by reference) and the by-clone snapshot collector for the request.
+        let render_compile_worker = &mut self.render_compile_worker;
+        self.engine.sync_render_sections_with_budget(
+            render_compile_worker,
+            chunk_budget,
             |dirty_work| {
                 sort_chunk_positions_by_distance(
                     dirty_work.loaded_dirty_chunks.iter().copied(),
@@ -624,28 +614,10 @@ impl WindowSceneRuntime {
                     camera_position,
                 )
             },
-            chunk_budget,
             |client, key| render_section_neighbor_readiness(client, key, camera_position),
             RenderSectionRemovalMode::ApplyImmediately,
-        );
-        report.merge(sync_update.cache_update);
-
-        if chunk_budget == 0 || self.render_compile_worker.pending_job_count() > 0 {
-            report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
-            return Ok(report);
-        }
-
-        let sync_plan = sync_update.sync_plan;
-        let snapshots = self.client().chunk_snapshots().cloned().collect();
-        let render_compile_worker = &mut self.render_compile_worker;
-        let submission_update = self.engine.submit_prepared_sync_plan(
-            &sync_plan,
-            snapshots,
-            |_sync_plan, request| render_compile_worker.submit(request),
-        )?;
-        report.merge(submission_update.cache_update);
-        report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
-        Ok(report)
+            |client| client.chunk_snapshots().cloned().collect(),
+        )
     }
 
     pub(crate) fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
@@ -698,8 +670,10 @@ impl WindowSceneRuntime {
     }
 
     pub(crate) fn has_pending_render_work(&self, camera_position: Vec3) -> bool {
-        self.render_compile_worker.pending_job_count() > 0
-            || self.has_ready_pending_render_work(camera_position)
+        self.engine.has_pending_render_work(
+            self.render_compile_worker.pending_job_count(),
+            |client, key| render_section_neighbor_readiness(client, key, camera_position),
+        )
     }
 
     pub(crate) fn pending_render_chunk_count(&self) -> usize {
@@ -739,51 +713,9 @@ impl WindowSceneRuntime {
     }
 
     fn has_ready_pending_render_work(&self, camera_position: Vec3) -> bool {
-        let client = self.client();
-        let render_session = self.render_session();
-        render_session
-            .dirty()
-            .dirty_chunks
-            .iter()
-            .copied()
-            .any(|pos| {
-                if render_session.contains_chunk(pos) && client.chunk_snapshot(pos).is_none() {
-                    return true;
-                }
-                let Some(snapshot) = client.chunk_snapshot(pos) else {
-                    return false;
-                };
-                render_section_keys_for_snapshot(snapshot)
-                    .into_iter()
-                    .any(|key| {
-                        !render_session.dirty().inflight_sections.contains(&key)
-                            && render_section_neighbor_readiness(client, key, camera_position)
-                                .is_ready()
-                    })
-            })
-            || self
-                .render_session()
-                .dirty()
-                .dirty_sections
-                .iter()
-                .copied()
-                .any(|key| {
-                    if render_session.dirty().inflight_sections.contains(&key) {
-                        return false;
-                    }
-                    if render_session.contains_section(key)
-                        && client
-                            .chunk_snapshot(render_section_chunk_pos(key))
-                            .is_none()
-                    {
-                        return true;
-                    }
-                    client
-                        .chunk_snapshot(render_section_chunk_pos(key))
-                        .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
-                        && render_section_neighbor_readiness(client, key, camera_position)
-                            .is_ready()
-                })
+        self.engine.has_pending_render_work(0, |client, key| {
+            render_section_neighbor_readiness(client, key, camera_position)
+        })
     }
 
     fn pending_job_count(&self) -> usize {
@@ -1071,113 +1003,6 @@ fn snapshot_block_state_at_world(
     )
 }
 
-fn render_section_neighbor_readiness(
-    client: &ClientRuntime,
-    key: RenderSectionKey,
-    camera_position: Vec3,
-) -> RenderSectionNeighborReadiness {
-    // Native currently keeps an exact client snapshot radius, unlike Java's
-    // overfetched client chunk cache. Keep this gate horizontal so flying above
-    // a loaded column does not make the boundary ring disappear.
-    if render_section_horizontal_distance_sq(key, camera_position)
-        <= RENDER_NEIGHBOR_READY_DISTANCE_SQ
-    {
-        return RenderSectionNeighborReadiness::ReadyNearCamera;
-    }
-    if has_horizontal_neighbor_snapshots(client, ChunkPos::new(key.chunk_x, key.chunk_z)) {
-        RenderSectionNeighborReadiness::ReadyWithNeighbors
-    } else {
-        RenderSectionNeighborReadiness::DeferredMissingNeighbors
-    }
-}
-
-fn render_section_distance_sq(key: RenderSectionKey, camera_position: Vec3) -> f32 {
-    let center = render_section_center(key);
-    center.distance_squared(camera_position)
-}
-
-fn render_section_horizontal_distance_sq(key: RenderSectionKey, camera_position: Vec3) -> f32 {
-    let center = render_section_center(key);
-    let dx = center.x - camera_position.x;
-    let dz = center.z - camera_position.z;
-    dx * dx + dz * dz
-}
-
-fn sort_chunk_positions_by_distance(
-    positions: impl IntoIterator<Item = ChunkPos>,
-    camera_position: Vec3,
-) -> Vec<ChunkPos> {
-    let mut positions = positions.into_iter().collect::<Vec<_>>();
-    positions.sort_by(|left, right| {
-        render_chunk_distance_sq(*left, camera_position)
-            .total_cmp(&render_chunk_distance_sq(*right, camera_position))
-            .then_with(|| left.x.cmp(&right.x))
-            .then_with(|| left.z.cmp(&right.z))
-    });
-    positions
-}
-
-fn sort_dirty_section_chunks_by_distance(
-    sections_by_chunk: &BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
-    camera_position: Vec3,
-) -> Vec<ChunkPos> {
-    let mut positions = sections_by_chunk.keys().copied().collect::<Vec<_>>();
-    positions.sort_by(|left, right| {
-        dirty_section_chunk_distance_sq(sections_by_chunk, *left, camera_position)
-            .total_cmp(&dirty_section_chunk_distance_sq(
-                sections_by_chunk,
-                *right,
-                camera_position,
-            ))
-            .then_with(|| left.x.cmp(&right.x))
-            .then_with(|| left.z.cmp(&right.z))
-    });
-    positions
-}
-
-fn dirty_section_chunk_distance_sq(
-    sections_by_chunk: &BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
-    pos: ChunkPos,
-    camera_position: Vec3,
-) -> f32 {
-    sections_by_chunk
-        .get(&pos)
-        .and_then(|keys| {
-            keys.iter()
-                .map(|key| render_section_distance_sq(*key, camera_position))
-                .min_by(f32::total_cmp)
-        })
-        .unwrap_or_else(|| render_chunk_distance_sq(pos, camera_position))
-}
-
-fn render_chunk_distance_sq(pos: ChunkPos, camera_position: Vec3) -> f32 {
-    let center = Vec3::new(
-        chunk_middle_block_coord(pos.x) as f32,
-        camera_position.y,
-        chunk_middle_block_coord(pos.z) as f32,
-    );
-    center.distance_squared(camera_position)
-}
-
-fn render_section_center(key: RenderSectionKey) -> Vec3 {
-    Vec3::new(
-        chunk_middle_block_coord(key.chunk_x) as f32,
-        (key.section_y * SECTION_HEIGHT) as f32 + SECTION_HEIGHT as f32 * 0.5,
-        chunk_middle_block_coord(key.chunk_z) as f32,
-    )
-}
-
-fn has_horizontal_neighbor_snapshots(client: &ClientRuntime, pos: ChunkPos) -> bool {
-    [
-        ChunkPos::new(pos.x - 1, pos.z),
-        ChunkPos::new(pos.x + 1, pos.z),
-        ChunkPos::new(pos.x, pos.z - 1),
-        ChunkPos::new(pos.x, pos.z + 1),
-    ]
-    .into_iter()
-    .all(|neighbor| client.chunk_snapshot(neighbor).is_some())
-}
-
 fn camera_position_inside_water_block(
     position_y: f32,
     block_y: i32,
@@ -1204,7 +1029,10 @@ mod tests {
         ChunkCamera, TexturedSectionRenderOptions,
         textured_section_visibility_stats_with_options_and_ready_sections,
     };
-    use mclone_render_session::render_dirty_section_keys_for_block_update;
+    use mclone_render_session::{
+        RenderSectionNeighborReadiness, render_dirty_section_keys_for_block_update,
+        render_section_center, render_section_keys_for_snapshot,
+    };
 
     #[test]
     fn camera_water_detection_uses_fluid_height_boundary() {

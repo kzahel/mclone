@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, bail};
+use glam::Vec3;
 use mclone_client::{
     ClientInteractionController, ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
     LocalPlayerController, LocalPlayerPose, NoClipMovementStep, PlayerInputKey,
@@ -408,6 +409,123 @@ impl RenderSectionNeighborReadiness {
     pub const fn is_near_exception(self) -> bool {
         matches!(self, Self::ReadyNearCamera)
     }
+}
+
+/// Horizontal distance (squared) below which a render section is treated as ready even
+/// without fully loaded neighbors. Native keeps an exact client snapshot radius (unlike
+/// Java's overfetched client chunk cache), so this near-camera exception keeps the
+/// boundary ring meshing while flying above an otherwise loaded column.
+const RENDER_NEIGHBOR_READY_DISTANCE_SQ: f32 = 24.0 * 24.0;
+
+/// Shared camera-distance neighbor readiness used by both the desktop and web streaming
+/// loops (067 Stage 3). Sections near the camera are always ready; farther sections wait
+/// until their four horizontal neighbors have snapshots so culling/AO/light is correct.
+pub fn render_section_neighbor_readiness(
+    client: &ClientRuntime,
+    key: RenderSectionKey,
+    camera_position: Vec3,
+) -> RenderSectionNeighborReadiness {
+    if render_section_horizontal_distance_sq(key, camera_position)
+        <= RENDER_NEIGHBOR_READY_DISTANCE_SQ
+    {
+        return RenderSectionNeighborReadiness::ReadyNearCamera;
+    }
+    if has_horizontal_neighbor_snapshots(client, ChunkPos::new(key.chunk_x, key.chunk_z)) {
+        RenderSectionNeighborReadiness::ReadyWithNeighbors
+    } else {
+        RenderSectionNeighborReadiness::DeferredMissingNeighbors
+    }
+}
+
+/// World-space center of a render section, used for distance ordering/readiness.
+pub fn render_section_center(key: RenderSectionKey) -> Vec3 {
+    Vec3::new(
+        chunk_middle_block_coord(key.chunk_x) as f32,
+        (key.section_y * SECTION_HEIGHT) as f32 + SECTION_HEIGHT as f32 * 0.5,
+        chunk_middle_block_coord(key.chunk_z) as f32,
+    )
+}
+
+fn render_section_distance_sq(key: RenderSectionKey, camera_position: Vec3) -> f32 {
+    render_section_center(key).distance_squared(camera_position)
+}
+
+fn render_section_horizontal_distance_sq(key: RenderSectionKey, camera_position: Vec3) -> f32 {
+    let center = render_section_center(key);
+    let dx = center.x - camera_position.x;
+    let dz = center.z - camera_position.z;
+    dx * dx + dz * dz
+}
+
+fn render_chunk_distance_sq(pos: ChunkPos, camera_position: Vec3) -> f32 {
+    let center = Vec3::new(
+        chunk_middle_block_coord(pos.x) as f32,
+        camera_position.y,
+        chunk_middle_block_coord(pos.z) as f32,
+    );
+    center.distance_squared(camera_position)
+}
+
+fn has_horizontal_neighbor_snapshots(client: &ClientRuntime, pos: ChunkPos) -> bool {
+    [
+        ChunkPos::new(pos.x - 1, pos.z),
+        ChunkPos::new(pos.x + 1, pos.z),
+        ChunkPos::new(pos.x, pos.z - 1),
+        ChunkPos::new(pos.x, pos.z + 1),
+    ]
+    .into_iter()
+    .all(|neighbor| client.chunk_snapshot(neighbor).is_some())
+}
+
+/// Distance-sort loaded dirty chunk positions nearest-first (camera-relative), with a
+/// stable coordinate tiebreak. Shared by the desktop and web streaming loops so both
+/// platforms compile the nearest pending chunk first.
+pub fn sort_chunk_positions_by_distance(
+    positions: impl IntoIterator<Item = ChunkPos>,
+    camera_position: Vec3,
+) -> Vec<ChunkPos> {
+    let mut positions = positions.into_iter().collect::<Vec<_>>();
+    positions.sort_by(|left, right| {
+        render_chunk_distance_sq(*left, camera_position)
+            .total_cmp(&render_chunk_distance_sq(*right, camera_position))
+            .then_with(|| left.x.cmp(&right.x))
+            .then_with(|| left.z.cmp(&right.z))
+    });
+    positions
+}
+
+/// Distance-sort dirty-section chunks by their nearest dirty section, nearest-first.
+pub fn sort_dirty_section_chunks_by_distance(
+    sections_by_chunk: &BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
+    camera_position: Vec3,
+) -> Vec<ChunkPos> {
+    let mut positions = sections_by_chunk.keys().copied().collect::<Vec<_>>();
+    positions.sort_by(|left, right| {
+        dirty_section_chunk_distance_sq(sections_by_chunk, *left, camera_position)
+            .total_cmp(&dirty_section_chunk_distance_sq(
+                sections_by_chunk,
+                *right,
+                camera_position,
+            ))
+            .then_with(|| left.x.cmp(&right.x))
+            .then_with(|| left.z.cmp(&right.z))
+    });
+    positions
+}
+
+fn dirty_section_chunk_distance_sq(
+    sections_by_chunk: &BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
+    pos: ChunkPos,
+    camera_position: Vec3,
+) -> f32 {
+    sections_by_chunk
+        .get(&pos)
+        .and_then(|keys| {
+            keys.iter()
+                .map(|key| render_section_distance_sq(*key, camera_position))
+                .min_by(f32::total_cmp)
+        })
+        .unwrap_or_else(|| render_chunk_distance_sq(pos, camera_position))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1594,6 +1712,93 @@ impl EngineRenderSession {
         )
     }
 
+    /// Drive one budgeted increment of the shared render-section streaming loop over
+    /// `compiler` (067 Stage 3). This is the single compile loop both platforms run:
+    ///
+    /// 1. drain the compiler's completed jobs and merge them into the resident cache,
+    /// 2. seed dirty work when the cache is empty (first frame after a view loads),
+    /// 3. plan a `chunk_budget`-bounded ready increment using the caller's ordering,
+    ///    readiness, and removal-mode policy, then
+    /// 4. submit that increment through `compiler` — but only when no job is already in
+    ///    flight, so exactly one compile runs at a time.
+    ///
+    /// Desktop drives it at budget 1 over an OS-thread `mpsc` worker; web drives it at
+    /// budget 1 over the resident `SharedArrayBuffer` ring. With budget 1 each job is
+    /// tiny, so the current cache stays visible and movement fills progressively instead
+    /// of stalling on a whole-view mega-job. The transport (move vs. arena) lives behind
+    /// the [`RenderSectionCompiler`] trait; this loop is identical on both platforms.
+    pub fn sync_render_sections_with_budget<C, OrderChunks, OrderSections, Ready, Snapshots>(
+        &mut self,
+        compiler: &mut C,
+        chunk_budget: usize,
+        order_loaded_dirty_chunks: OrderChunks,
+        order_dirty_section_chunks: OrderSections,
+        section_readiness: Ready,
+        removal_mode: RenderSectionRemovalMode,
+        snapshots_for_submit: Snapshots,
+    ) -> Result<RenderSectionCacheUpdate>
+    where
+        C: RenderSectionCompiler,
+        OrderChunks: FnOnce(&RenderSectionDirtyWork) -> Vec<ChunkPos>,
+        OrderSections: FnOnce(&RenderSectionDirtyWork) -> Vec<ChunkPos>,
+        Ready: FnMut(&ClientRuntime, RenderSectionKey) -> RenderSectionNeighborReadiness,
+        Snapshots: FnOnce(&ClientRuntime) -> Vec<ChunkSnapshot>,
+    {
+        let completed_results = compiler.try_recv_completed()?;
+        let pending_compile_jobs = compiler.pending_job_count();
+        let mut report =
+            self.drain_completed_compile_updates(completed_results, |_| 0, pending_compile_jobs)?;
+
+        self.mark_loaded_chunks_dirty_when_cache_empty();
+
+        if self.render_session().dirty_work_is_empty() {
+            report.pending_compile_jobs = compiler.pending_job_count();
+            return Ok(report);
+        }
+
+        let sync_update = self.prepare_sync_update(
+            order_loaded_dirty_chunks,
+            order_dirty_section_chunks,
+            chunk_budget,
+            section_readiness,
+            removal_mode,
+        );
+        report.merge(sync_update.cache_update);
+
+        if chunk_budget == 0 || compiler.pending_job_count() > 0 {
+            report.pending_compile_jobs = compiler.pending_job_count();
+            return Ok(report);
+        }
+
+        let sync_plan = sync_update.sync_plan;
+        let snapshots = snapshots_for_submit(self.client());
+        let submission_update = self.submit_prepared_sync_plan(
+            &sync_plan,
+            snapshots,
+            |_sync_plan, request| compiler.submit(request),
+        )?;
+        report.merge(submission_update.cache_update);
+        report.pending_compile_jobs = compiler.pending_job_count();
+        Ok(report)
+    }
+
+    /// True when there is render work the streaming loop could still make progress on:
+    /// a job in flight, or dirty work whose sections are ready to compile. Drives the
+    /// "pump to idle" loops (desktop `sync_all_render_sections`, the web deterministic
+    /// smoke) without re-deriving readiness in the caller.
+    pub fn has_pending_render_work(
+        &self,
+        compiler_pending_job_count: usize,
+        mut section_readiness: impl FnMut(&ClientRuntime, RenderSectionKey) -> RenderSectionNeighborReadiness,
+    ) -> bool {
+        if compiler_pending_job_count > 0 {
+            return true;
+        }
+        let client = &self.client;
+        self.render_session
+            .has_ready_pending_dirty_work(client, |key| section_readiness(client, key))
+    }
+
     pub fn sections(&self) -> Vec<TexturedRenderSectionMesh> {
         self.render_session.sections()
     }
@@ -1618,6 +1823,47 @@ impl RenderSectionSession {
 
     pub fn dirty_mut(&mut self) -> &mut RenderSectionDirtyState {
         &mut self.dirty
+    }
+
+    /// Whether any dirty chunk/section is ready to make compile progress this frame —
+    /// either a cached chunk/section that is no longer loaded (removal work) or a loaded,
+    /// not-in-flight section whose neighbors are ready. Mirrors the planning gate so the
+    /// "pump to idle" loops can stop exactly when the streaming loop would idle.
+    pub fn has_ready_pending_dirty_work(
+        &self,
+        client: &ClientRuntime,
+        mut section_readiness: impl FnMut(RenderSectionKey) -> RenderSectionNeighborReadiness,
+    ) -> bool {
+        let ready_chunk = self.dirty.dirty_chunks.iter().copied().any(|pos| {
+            if self.contains_chunk(pos) && client.chunk_snapshot(pos).is_none() {
+                return true;
+            }
+            let Some(snapshot) = client.chunk_snapshot(pos) else {
+                return false;
+            };
+            render_section_keys_for_snapshot(snapshot)
+                .into_iter()
+                .any(|key| {
+                    !self.dirty.inflight_sections.contains(&key)
+                        && section_readiness(key).is_ready()
+                })
+        });
+        if ready_chunk {
+            return true;
+        }
+        self.dirty.dirty_sections.iter().copied().any(|key| {
+            if self.dirty.inflight_sections.contains(&key) {
+                return false;
+            }
+            let pos = render_section_chunk_pos(key);
+            if self.contains_section(key) && client.chunk_snapshot(pos).is_none() {
+                return true;
+            }
+            client
+                .chunk_snapshot(pos)
+                .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
+                && section_readiness(key).is_ready()
+        })
     }
 
     pub fn mark_chunk_dirty(

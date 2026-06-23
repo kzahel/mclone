@@ -66,6 +66,9 @@ const runtime = {
     residentSectionCount: 0,
     pendingCompileJobCount: 0,
     compileInFlight: false,
+    compileInFlightCount: 0,
+    compileFinalizingCount: 0,
+    streamingSettled: false,
     compileQueued: false,
     compileTargetX: null,
     compileTargetZ: null,
@@ -151,12 +154,13 @@ class WebChunkApp {
     this.touchControls = null;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
-    this.pendingCompile = false;
-    this.currentCompilePromise = null;
     this.compileSequence = 0;
-    this.activeCompileTiming = null;
-    this.compileInFlightTarget = null;
-    this.renderFrameBusy = false;
+    // 067 Stage 3: per-compile timings keyed by request id while in flight (submitted +
+    // worker round-trip) plus a count of timings whose apply finalize is still awaiting
+    // the worker metrics. The streaming loop posts a doorbell per compile and finalizes
+    // the timing when the next frame's poll applies the result.
+    this.pendingTimings = new Map();
+    this.finalizingCount = 0;
     this.hasRendered = false;
     this.loadedCenter = null;
     this.pointerDragging = false;
@@ -199,17 +203,8 @@ class WebChunkApp {
     );
     for (const name of [
       "advanceCameraFrame",
-      "beginCameraRenderCompileRequest",
-      "requestCameraRenderCompile",
-      "takeQueuedCameraRenderCompile",
-      "requestCameraChunkView",
-      "tryBeginCameraRenderCompileRequest",
-      "finishCameraRenderCompileRequest",
       "renderCompilerSharedSupported",
-      "submitCameraRenderCompile",
-      "submitDeferredCameraRenderCompile",
-      "pollCameraRenderCompile",
-      "renderCameraFrame",
+      "syncCameraRenderFrame",
       "cameraFrameState",
       "resizeCanvas",
       "toggleMovementMode",
@@ -221,6 +216,11 @@ class WebChunkApp {
         throw new Error(`missing WebChunkRenderSession.${name} export`);
       }
     }
+    if (!this.session.renderCompilerSharedSupported()) {
+      throw new Error(
+        "cross-origin isolation (SharedArrayBuffer/Atomics) is required for the streaming render loop",
+      );
+    }
     this.compiler = new RenderSectionWorkerCompiler(assetPack);
     bindHud(this);
     bindInput(this);
@@ -231,7 +231,9 @@ class WebChunkApp {
 
     runtime.state.status = "rendering";
     updateDom();
-    await this.compileCameraView({ trigger: "initial", waitForCompletion: true });
+    // 067 Stage 3: warm up the streaming loop to idle so the first presented frame has
+    // terrain (the web analog of desktop's pre-render `sync_all_render_sections`).
+    await this.warmUpStreamingToIdle();
   }
 
   start() {
@@ -294,338 +296,208 @@ class WebChunkApp {
     this.applyCameraState(camera);
     this.applyTargetState(this.session.previewBlockTarget());
 
-    if (this.hasRendered && this.loadedCenter) {
+    // 067 Stage 3: one frame of the shared streaming loop. syncCameraRenderFrame drains
+    // updates, runs the budget-1 sync over the resident-ring compiler, and renders the
+    // current cache; JS only relays the worker doorbell it returns. No coalescing queue,
+    // no busy flag, no begin/worker/finish transaction — the loop is dirty-driven.
+    runtime.state.tickPhase = "stream";
+    await this.streamFrameOnce();
+    runtime.state.tickPhase = "idle";
+  }
+
+  // 067 Stage 3: warm up the streaming loop to idle before the live rAF loop begins, in
+  // two phases, so the boot-time camera fall is reproducible despite per-compile frame
+  // timing:
+  //   1. stream the client-spawn view to idle (no camera motion);
+  //   2. apply the server-spawn snap with ~0 dt (so the camera's horizontal position
+  //      lands deterministically without falling) and pre-load the server-spawn chunks
+  //      to idle.
+  // The live rAF gravity fall then runs on fast, fully-streamed frames and settles the
+  // camera at the same sub-block position every run — matching the pre-streaming app,
+  // whose render-only frames were uniformly fast. Feeding variable streaming frame gaps
+  // into the boot fall otherwise wedged WALK movement against spawn terrain on ~half of
+  // runs.
+  async warmUpStreamingToIdle() {
+    const deadline = performance.now() + 30_000;
+    while (performance.now() < deadline) {
+      const idle = await this.streamFrameOnce({ awaitWorker: true });
+      if (idle && this.hasRendered && Number(runtime.state.residentSectionCount) > 0) {
+        break;
+      }
+      await nextAnimationFrame();
+    }
+    let last = null;
+    let stableFrames = 0;
+    let iterations = 0;
+    while (performance.now() < deadline) {
+      const camera = await this.withSessionAsync(() => this.session.advanceCameraFrame(
+        1e-4, 0, 0, false, false, false, false, false, false, false, false, false, 0, 0,
+      ));
+      this.applyCameraState(camera);
+      const idle = await this.streamFrameOnce({ awaitWorker: true });
+      iterations += 1;
+      const x = Number(camera.cameraX);
+      const z = Number(camera.cameraZ);
+      const settled = last !== null
+        && Math.abs(x - last.x) < 1e-4
+        && Math.abs(z - last.z) < 1e-4;
+      stableFrames = settled ? stableFrames + 1 : 0;
+      last = { x, z };
       if (
-        camera.centerX !== this.loadedCenter.centerX
-        || camera.centerZ !== this.loadedCenter.centerZ
+        idle
+        && this.hasRendered
+        && Number(runtime.state.residentSectionCount) > 0
+        && iterations >= 8
+        && stableFrames >= 6
       ) {
-        runtime.state.tickPhase = "compile-requested";
-        this.requestCameraViewCompile("movement");
+        return;
       }
+      await nextAnimationFrame();
     }
-
-    if (this.hasRendered && !this.renderFrameBusy) {
-      runtime.state.tickPhase = "render";
-      this.renderCameraFrame();
-    } else {
-      updateDom();
-    }
-    this.startQueuedCompileIfNeeded();
+    throw new Error("timed out warming up the streaming render loop");
   }
 
-  requestCameraViewCompile(trigger = "movement", options = {}) {
+  // 067 Stage 3 keystone: one frame of the shared streaming loop. Rust drains updates,
+  // runs the budget-1 sync over the resident-ring compiler, and renders the current
+  // cache, returning the frame report plus an optional worker `doorbell`. JS relays the
+  // doorbell (fire-and-forget in the live loop; awaited during warm-up so the pump
+  // converges); the next frame's poll applies the result. Returns whether the loop idled.
+  async streamFrameOnce(options = {}) {
     if (!this.session || !this.compiler) {
-      return null;
+      return true;
     }
-    const force = Boolean(options.force);
-    const decision = this.session.requestCameraRenderCompile(
-      trigger,
-      force,
-      this.pendingCompile,
-    );
-    this.applyCompileQueueDecision(decision);
-    if (!decision?.startNow) {
-      updateDom();
-      return this.currentCompilePromise;
-    }
-    void this.compileCameraView({
-      trigger: decision.trigger ?? trigger,
-      force: Boolean(decision.force),
-      targetCenter: decisionCenter(decision),
-      waitForCompletion: false,
-    });
-    return this.currentCompilePromise;
-  }
-
-  async compileCameraView(options = {}) {
-    const trigger = options.trigger ?? "manual";
-    const force = Boolean(options.force);
-    const waitForCompletion = options.waitForCompletion !== false;
-    if (!this.session || !this.compiler) {
-      return null;
-    }
-    const targetCenter = options.targetCenter ?? this.currentCameraCenter();
-    if (!force && this.hasRendered && this.loadedCenter && centersEqual(targetCenter, this.loadedCenter)) {
-      return null;
-    }
-    if (this.pendingCompile) {
-      const pending = this.requestCameraViewCompile(trigger, { force });
-      return waitForCompletion ? await pending : pending;
-    }
-
-    const sequence = this.compileSequence + 1;
-    this.compileSequence = sequence;
-    const timing = createCompileTiming({
-      sequence,
-      trigger,
-      targetCenter,
-      loadedCenterBefore: this.loadedCenter,
-      frameCountBefore: runtime.state.frameCount,
-      renderCountBefore: runtime.state.renderCount,
-    });
-    this.pendingCompile = true;
-    this.activeCompileTiming = timing;
-    this.compileInFlightTarget = {
-      centerX: timing.targetCenterX,
-      centerZ: timing.targetCenterZ,
-    };
-    runtime.state.compileInFlight = true;
-    runtime.state.compileQueued = false;
-    runtime.state.compileTargetX = timing.targetCenterX;
-    runtime.state.compileTargetZ = timing.targetCenterZ;
-    runtime.state.queuedCompileTargetX = null;
-    runtime.state.queuedCompileTargetZ = null;
-    runtime.state.status = this.hasRendered ? "ready" : "compiling";
-    runtime.state.pendingCompileJobCount = this.session.pendingChunkRenderCompileJobCount();
-    publishActiveCompileTiming(timing);
-    updateDom();
-
-    this.currentCompilePromise = (async () => {
-      // 067 Stage 2: when the Rust-owned shared ring is available, submit fills the
-      // input arena + arms the result control word (main wasm), JS relays the doorbell
-      // to the worker, and the result is read back via Atomics in pollCameraRenderCompile
-      // — JS never touches the packed bytes. Otherwise fall back to the legacy
-      // begin/finish message path. Budget is unchanged either way (whole-view).
-      const useShared = this.sharedCompileSupported();
-      try {
-        const beginStart = performance.now();
-        const request = useShared
-          ? (this.hasRendered
-              ? await this.submitDeferredSharedCompile(timing, beginStart)
-              : await this.withSessionAsync(() => (
-                  this.session.submitCameraRenderCompile(RADIUS_CHUNKS)
-                )))
-          : (this.hasRendered
-              ? await this.beginDeferredCameraRenderCompileRequest(timing, beginStart)
-              : await this.withSessionAsync(() => (
-                  this.session.beginCameraRenderCompileRequest(RADIUS_CHUNKS)
-                )));
-        const beginEnd = performance.now();
-        timing.beginRequestMs = beginEnd - beginStart;
-        if (!request?.ok) {
-          throw new Error(request?.reason ?? "failed to begin camera render compile request");
-        }
-        updateCompileTimingFromRequest(timing, request);
-        this.compileInFlightTarget = {
-          centerX: timing.targetCenterX,
-          centerZ: timing.targetCenterZ,
-        };
-        runtime.state.compileTargetX = timing.targetCenterX;
-        runtime.state.compileTargetZ = timing.targetCenterZ;
-        runtime.state.pendingCompileJobCount = request.pendingCompileJobCount ?? 1;
-        publishActiveCompileTiming(timing);
-        updateDom();
-
-        const workerStart = performance.now();
-        const compiled = useShared
-          ? await this.compiler.compileWithDoorbell(request)
-          : await this.compiler.compile(request);
-        const workerEnd = performance.now();
-        timing.workerRoundTripMs = workerEnd - workerStart;
-        timing.packedByteLength = compiled.report?.packedByteLength ?? compiled.packed?.byteLength ?? 0;
-        updateCompileTimingFromWorker(timing, compiled.report);
-        publishActiveCompileTiming(timing);
-        if (!compiled.report?.ok) {
-          throw new Error(compiled.report?.reason ?? "render compiler worker failed");
-        }
-
-        const finishStart = performance.now();
-        const report = useShared
-          ? await this.pollSharedCompileToCompletion()
-          : await this.withSessionAsync(() => (
-              this.session.finishCameraRenderCompileRequest(
-                request.requestId,
-                compiled.packed,
-              )
-            ));
-        const finishEnd = performance.now();
-        timing.decodeFinishApplyMs = finishEnd - finishStart;
-        if (this.lastFrameTime > 0) {
-          timing.maxFrameGapMs = Math.max(timing.maxFrameGapMs, performance.now() - this.lastFrameTime);
-        }
-        timing.maxFrameGapMs = Math.max(timing.maxFrameGapMs, timing.decodeFinishApplyMs);
-        if (!report?.ok) {
-          throw new Error(report?.reason ?? "failed to finish camera render compile request");
-        }
-        updateCompileTimingFromReport(timing, report);
-        this.hasRendered = true;
-        this.loadedCenter = { centerX: report.centerX, centerZ: report.centerZ };
-        runtime.state.loadedCenterX = report.centerX;
-        runtime.state.loadedCenterZ = report.centerZ;
-        runtime.state.lastCompileReport = report;
-        this.applyReport(report);
-        finishCompileTiming(timing, "accepted");
-        recordCompileTiming(timing);
-        return report;
-      } catch (error) {
-        finishCompileTiming(timing, "failed", stringifyError(error));
-        recordCompileTiming(timing);
-        runtime.state.ok = false;
-        runtime.state.status = stringifyError(error);
-        throw error;
-      } finally {
-        this.pendingCompile = false;
-        this.currentCompilePromise = null;
-        this.activeCompileTiming = null;
-        this.compileInFlightTarget = null;
-        runtime.state.compileInFlight = false;
-        runtime.state.activeCompileTiming = null;
-        runtime.state.compileTargetX = null;
-        runtime.state.compileTargetZ = null;
-        runtime.state.pendingCompileJobCount = this.session?.pendingChunkRenderCompileJobCount?.() ?? 0;
-        updateDom();
-        this.startQueuedCompileIfNeeded();
-      }
-    })();
-
-    if (!waitForCompletion) {
-      this.currentCompilePromise.catch((error) => console.error(error));
-      return this.currentCompilePromise;
-    }
-    return await this.currentCompilePromise;
-  }
-
-  renderCameraFrame() {
-    if (!this.session || !this.hasRendered) {
-      return;
-    }
-    this.renderFrameBusy = true;
+    const syncStart = performance.now();
+    let frame;
     try {
-      const report = this.session.renderCameraFrame(RADIUS_CHUNKS);
-      if (!report?.ok) {
-        throw new Error(report?.reason ?? "failed to render camera frame");
-      }
-      this.applyReport(report);
+      frame = await this.withSessionAsync(() => this.session.syncCameraRenderFrame(RADIUS_CHUNKS));
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
       console.error(error);
-    } finally {
-      this.renderFrameBusy = false;
       updateDom();
+      return true;
     }
+    const syncMs = performance.now() - syncStart;
+    const workerPromise = this.handleStreamingFrame(frame, syncMs);
+    if (workerPromise && options.awaitWorker) {
+      await workerPromise.catch(() => {});
+    }
+    return runtime.state.streamingSettled === true;
   }
 
-  async beginDeferredCameraRenderCompileRequest(timing, beginStart) {
-    const viewRequest = await this.withSessionAsync(() => (
-      this.session.requestCameraChunkView(RADIUS_CHUNKS)
-    ));
-    if (!viewRequest?.ok) {
-      throw new Error(viewRequest?.reason ?? "failed to request camera chunk view");
+  handleStreamingFrame(frame, syncMs) {
+    if (!frame?.ok) {
+      runtime.state.ok = false;
+      runtime.state.status = frame?.reason ?? "streaming render frame failed";
+      updateDom();
+      return null;
     }
-    const viewCenterX = Number(viewRequest.centerX);
-    const viewCenterZ = Number(viewRequest.centerZ);
-    if (Number.isFinite(viewCenterX)) {
-      timing.targetCenterX = viewCenterX;
+    this.hasRendered = true;
+    this.applyReport(frame);
+    const pendingJobs = Number(frame.pendingCompileJobCount) || 0;
+    runtime.state.pendingCompileJobCount = pendingJobs;
+    runtime.state.compileInFlight = pendingJobs > 0;
+    runtime.state.compileInFlightCount = this.pendingTimings.size;
+    runtime.state.compileFinalizingCount = this.finalizingCount;
+    // 067 Stage 3: "settled" must mean the server runner has finished generating +
+    // publishing the view AND the render loop has nothing left to compile. Render-idle
+    // alone is reached prematurely when a fast camera outruns chunk generation (no
+    // snapshots yet => no dirty work => idle, but the view is not actually loaded). Gate
+    // loadedCenter on the runner queues draining so movement waits for the moved-to
+    // chunks to stream + compile.
+    const runnerSettled = Number(frame.runnerCommandQueueDepth) === 0
+      && Number(frame.runnerUpdateQueueDepth) === 0
+      && Number(frame.runnerPendingJobs) === 0
+      && Number(frame.runnerPendingPublications) === 0;
+    const streamingSettled = Boolean(frame.streamingIdle)
+      && runnerSettled
+      && pendingJobs === 0
+      && this.pendingTimings.size === 0
+      && this.finalizingCount === 0;
+    runtime.state.streamingSettled = streamingSettled;
+    if (streamingSettled) {
+      this.loadedCenter = { centerX: frame.centerX, centerZ: frame.centerZ };
+      runtime.state.loadedCenterX = frame.centerX;
+      runtime.state.loadedCenterZ = frame.centerZ;
     }
-    if (Number.isFinite(viewCenterZ)) {
-      timing.targetCenterZ = viewCenterZ;
+    if (Number(frame.appliedRequestId) > 0) {
+      this.finalizeCompileTiming(frame, syncMs);
     }
-    updateCompileTimingFromWait(timing, viewRequest, beginStart);
-    publishActiveCompileTiming(timing);
+    let workerPromise = null;
+    if (frame.doorbell) {
+      workerPromise = this.startAndPostCompileTiming(frame.doorbell, syncMs);
+    }
     updateDom();
-
-    const deadline = performance.now() + 20_000;
-    let lastProbe = viewRequest;
-    while (performance.now() < deadline) {
-      await nextAnimationFrame();
-      const probe = await this.withSessionAsync(() => (
-        this.session.tryBeginCameraRenderCompileRequest(
-          RADIUS_CHUNKS,
-          timing.targetCenterX,
-          timing.targetCenterZ,
-        )
-      ));
-      if (!probe?.ok) {
-        throw new Error(probe?.reason ?? "failed to poll camera render compile request");
-      }
-      lastProbe = probe;
-      runtime.state.pendingCompileJobCount = probe.pendingCompileJobCount ?? 0;
-      updateCompileTimingFromWait(timing, probe, beginStart);
-      publishActiveCompileTiming(timing);
-      updateDom();
-      if (!probe.waiting) {
-        return probe;
-      }
-    }
-    throw new Error(
-      `timed out waiting for camera chunk view ${timing.targetCenterX},${timing.targetCenterZ}; last=${JSON.stringify(lastProbe)}`,
-    );
+    return workerPromise;
   }
 
-  sharedCompileSupported() {
-    return Boolean(this.session?.renderCompilerSharedSupported?.());
-  }
-
-  // 067 Stage 2 deferred (movement) submit. Mirrors the legacy deferred wait loop but
-  // resolves to a shared doorbell descriptor: poll submitDeferredCameraRenderCompile
-  // (which drains runner updates and returns {waiting:true} until the target center is
-  // loaded) until main wasm has filled the input arena and handed back the doorbell.
-  async submitDeferredSharedCompile(timing, beginStart) {
-    const viewRequest = await this.withSessionAsync(() => (
-      this.session.requestCameraChunkView(RADIUS_CHUNKS)
-    ));
-    if (!viewRequest?.ok) {
-      throw new Error(viewRequest?.reason ?? "failed to request camera chunk view");
-    }
-    const viewCenterX = Number(viewRequest.centerX);
-    const viewCenterZ = Number(viewRequest.centerZ);
-    if (Number.isFinite(viewCenterX)) {
-      timing.targetCenterX = viewCenterX;
-    }
-    if (Number.isFinite(viewCenterZ)) {
-      timing.targetCenterZ = viewCenterZ;
-    }
-    updateCompileTimingFromWait(timing, viewRequest, beginStart);
+  // Begin a per-compile timing for the doorbell armed this frame and relay it to the
+  // worker. The worker writes the packed result into the resident ring (drained by the
+  // next frame's poll); the returned promise resolves with the worker metrics report.
+  startAndPostCompileTiming(doorbell, syncMs) {
+    const sequence = ++this.compileSequence;
+    const timing = createCompileTiming({
+      sequence,
+      trigger: "stream",
+      targetCenter: {
+        centerX: Number(doorbell.centerX) || 0,
+        centerZ: Number(doorbell.centerZ) || 0,
+      },
+      loadedCenterBefore: this.loadedCenter,
+      frameCountBefore: runtime.state.frameCount,
+      renderCountBefore: runtime.state.renderCount,
+    });
+    updateCompileTimingFromRequest(timing, doorbell);
+    timing.beginRequestMs = Number.isFinite(syncMs) ? syncMs : 0;
+    const workerStart = performance.now();
+    const workerPromise = this.compiler.compileWithDoorbell(doorbell).then((compiled) => {
+      timing.workerRoundTripMs = performance.now() - workerStart;
+      if (compiled?.report) {
+        updateCompileTimingFromWorker(timing, compiled.report);
+      }
+      timing.workerOk = Boolean(compiled?.report?.ok);
+      return compiled;
+    });
+    timing.workerPromise = workerPromise;
+    this.pendingTimings.set(Number(doorbell.requestId), timing);
+    runtime.state.compileInFlightCount = this.pendingTimings.size;
     publishActiveCompileTiming(timing);
-    updateDom();
-
-    const deadline = performance.now() + 20_000;
-    let lastProbe = viewRequest;
-    while (performance.now() < deadline) {
-      await nextAnimationFrame();
-      const probe = await this.withSessionAsync(() => (
-        this.session.submitDeferredCameraRenderCompile(
-          RADIUS_CHUNKS,
-          timing.targetCenterX,
-          timing.targetCenterZ,
-        )
-      ));
-      if (!probe?.ok) {
-        throw new Error(probe?.reason ?? "failed to submit deferred camera render compile");
-      }
-      lastProbe = probe;
-      runtime.state.pendingCompileJobCount = probe.pendingCompileJobCount ?? 0;
-      updateCompileTimingFromWait(timing, probe, beginStart);
-      publishActiveCompileTiming(timing);
-      updateDom();
-      if (!probe.waiting) {
-        return probe;
-      }
-    }
-    throw new Error(
-      `timed out submitting deferred shared compile ${timing.targetCenterX},${timing.targetCenterZ}; last=${JSON.stringify(lastProbe)}`,
-    );
+    workerPromise.catch((error) => {
+      timing.workerError = stringifyError(error);
+      console.error(error);
+    });
+    return workerPromise;
   }
 
-  // 067 Stage 2: pump pollCameraRenderCompile until main wasm reports the worker's
-  // result control word flipped to COMPLETE (read via Atomics) and the frame is
-  // applied + rendered. The worker round-trip already completed in compileWithDoorbell,
-  // so this usually resolves on the first poll; the loop yields a frame so the app
-  // keeps presenting if a poll ever lands before the control word is visible.
-  async pollSharedCompileToCompletion() {
-    const deadline = performance.now() + 20_000;
-    while (performance.now() < deadline) {
-      const result = await this.withSessionAsync(() => this.session.pollCameraRenderCompile());
-      if (!result?.ok) {
-        throw new Error(result?.reason ?? "failed to poll shared camera render compile");
-      }
-      if (!result.pending) {
-        return result;
-      }
-      await nextAnimationFrame();
+  // Finalize the timing for the compile applied this frame: await its worker metrics (so
+  // the record carries the transport/byte diagnostics), merge the Rust apply report, and
+  // publish it to runtime.state.compileTimings.
+  finalizeCompileTiming(frame, syncMs) {
+    const requestId = Number(frame.appliedRequestId);
+    const timing = this.pendingTimings.get(requestId);
+    if (!timing) {
+      return;
     }
-    throw new Error("timed out polling shared camera render compile");
+    this.pendingTimings.delete(requestId);
+    runtime.state.compileInFlightCount = this.pendingTimings.size;
+    this.finalizingCount += 1;
+    runtime.state.compileFinalizingCount = this.finalizingCount;
+    void (async () => {
+      try {
+        await timing.workerPromise;
+      } catch (_error) {
+        // worker error already recorded on the timing
+      }
+      updateCompileTimingFromReport(timing, frame);
+      timing.decodeFinishApplyMs = Number.isFinite(syncMs) ? syncMs : 0;
+      const ok = Boolean(frame.appliedOk) && !timing.workerError;
+      finishCompileTiming(timing, ok ? "accepted" : "failed", timing.workerError ?? null);
+      recordCompileTiming(timing);
+      runtime.state.lastCompileReport = frame;
+      this.finalizingCount = Math.max(0, this.finalizingCount - 1);
+      runtime.state.compileFinalizingCount = this.finalizingCount;
+      updateDom();
+    })();
   }
 
   applyCameraState(camera) {
@@ -686,22 +558,6 @@ class WebChunkApp {
     applyHotbarState(target);
   }
 
-  applyCompileQueueDecision(decision) {
-    if (!decision?.ok) {
-      return;
-    }
-    runtime.state.pendingCompileJobCount = decision.pendingCompileJobCount ?? runtime.state.pendingCompileJobCount;
-    runtime.state.compileQueued = Boolean(decision.queued);
-    if (decision.queued) {
-      const center = decisionCenter(decision);
-      runtime.state.queuedCompileTargetX = center.centerX;
-      runtime.state.queuedCompileTargetZ = center.centerZ;
-    } else {
-      runtime.state.queuedCompileTargetX = null;
-      runtime.state.queuedCompileTargetZ = null;
-    }
-  }
-
   async interactBlock(action) {
     if (!this.session) {
       return null;
@@ -716,9 +572,9 @@ class WebChunkApp {
       runtime.state.lastInteraction = interaction;
       runtime.state.interactionStatus = formatInteractionStatus(interaction);
       applyHotbarState(interaction);
-      if (interaction.changed && this.hasRendered) {
-        this.requestCameraViewCompile("interaction", { force: true });
-      }
+      // 067 Stage 3: a block edit publishes a SectionBlockUpdates server update, which the
+      // streaming loop marks render-dirty on its next drain and recompiles automatically —
+      // no explicit compile request needed.
       updateDom();
       return interaction;
     } catch (error) {
@@ -859,37 +715,11 @@ class WebChunkApp {
     }
     runtime.state.lastFrameGapMs = frameGapMs;
     runtime.state.maxFrameGapMs = Math.max(runtime.state.maxFrameGapMs, frameGapMs);
-    if (this.activeCompileTiming) {
-      this.activeCompileTiming.maxFrameGapMs = Math.max(
-        this.activeCompileTiming.maxFrameGapMs,
-        frameGapMs,
-      );
-      publishActiveCompileTiming(this.activeCompileTiming);
+    // 067 Stage 3: many compiles can be in flight across frames; charge the frame gap to
+    // every pending timing so each compile's window reflects presentation stalls.
+    for (const timing of this.pendingTimings.values()) {
+      timing.maxFrameGapMs = Math.max(timing.maxFrameGapMs, frameGapMs);
     }
-  }
-
-  startQueuedCompileIfNeeded() {
-    if (!this.session || !this.compiler || this.pendingCompile || !runtime.state.ok) {
-      return;
-    }
-    const decision = this.session.takeQueuedCameraRenderCompile(this.pendingCompile);
-    this.applyCompileQueueDecision(decision);
-    if (!this.hasRendered) {
-      updateDom();
-      return;
-    }
-    if (!decision?.startNow) {
-      updateDom();
-      return;
-    }
-    setTimeout(() => {
-      void this.compileCameraView({
-        trigger: decision.trigger ?? "follow-up",
-        force: Boolean(decision.force),
-        targetCenter: decisionCenter(decision),
-        waitForCompletion: false,
-      });
-    }, 0);
   }
 
   requestPointerLock() {
@@ -1427,11 +1257,9 @@ class RenderSectionWorkerCompiler {
         : 0,
       sharedInputGrowCount: 0,
     };
-    // Resident render-compiler SAB arenas (067 Stage 1): allocate the input,
-    // result, and control buffers once per session and re-arm them on every
-    // compile instead of allocating a fresh SharedArrayBuffer per request.
-    this.sharedResultArena = createResidentRenderCompilerSharedResultBuffer();
-    this.sharedInputArena = createResidentRenderCompilerSharedInputBuffer();
+    // 067 Stage 3: the streaming loop drives compiles through the Rust-owned resident SAB
+    // ring handed over on each doorbell, so this worker shim no longer owns its own SAB
+    // arenas — it is a doorbell + lifecycle relay only.
     this.ready = new Promise((resolve, reject) => {
       this.resolveReady = resolve;
       this.rejectReady = reject;
@@ -1571,30 +1399,6 @@ class RenderSectionWorkerCompiler {
     }
   }
 
-  // Legacy begin/finish path (067 fallback): JS arms its own resident arenas, posts
-  // the compile, and resolves with the packed report. Used when the Rust-owned shared
-  // ring is unavailable, and by the deterministic overview begin/finish smoke.
-  async compile(request) {
-    await this.ready;
-    const requestId = Number(request.requestId) || 0;
-    if (requestId <= 0) {
-      throw new Error(`invalid render compile request id ${String(request.requestId)}`);
-    }
-    const sharedResult = this.armSharedResultArena();
-    const sharedInput = this.armSharedInputArena(request.snapshotInputBytes);
-    return this.dispatchCompile({
-      requestId,
-      centerX: request.centerX,
-      centerZ: request.centerZ,
-      radiusChunks: request.radiusChunks,
-      targetSections: request.targetSections,
-      snapshotInputChunkCount: Number(request.snapshotInputChunkCount) || 0,
-      sharedResult,
-      sharedInput,
-      requestSource: request,
-    });
-  }
-
   // 067 Stage 2: post a compile against the Rust-owned resident shared ring. Main
   // wasm has already filled the input arena and armed both control words; JS only
   // relays the doorbell (the worker writes the result into the same buffers main wasm
@@ -1683,53 +1487,6 @@ class RenderSectionWorkerCompiler {
     });
   }
 
-  armSharedResultArena() {
-    const arena = this.sharedResultArena;
-    if (arena === null) {
-      return null;
-    }
-    Atomics.store(arena.control, RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX, RENDER_COMPILER_SHARED_RESULT_PENDING);
-    Atomics.store(arena.control, RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX, 0);
-    Atomics.store(arena.control, RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX, arena.responseCapacity);
-    return arena;
-  }
-
-  armSharedInputArena(snapshotInputBytes) {
-    const arena = this.sharedInputArena;
-    if (arena === null) {
-      return null;
-    }
-    const source = snapshotInputBytes instanceof Uint8Array
-      ? snapshotInputBytes
-      : ArrayBuffer.isView(snapshotInputBytes)
-        ? new Uint8Array(
-            snapshotInputBytes.buffer,
-            snapshotInputBytes.byteOffset,
-            snapshotInputBytes.byteLength,
-          )
-        : null;
-    if (source === null || source.byteLength <= 0) {
-      return null;
-    }
-    if (source.byteLength > arena.inputCapacity) {
-      // Oversized delta: grow the resident input arena (realloc) and keep a
-      // diagnostic. Safe because compiles are single-in-flight, so no other
-      // compile is reading the old buffer when we replace it.
-      arena.inputBuffer = new SharedArrayBuffer(source.byteLength);
-      arena.inputCapacity = source.byteLength;
-      this.metrics.sharedInputGrowCount += 1;
-      console.warn(
-        `render compiler shared input arena grew to ${source.byteLength} bytes`,
-      );
-    }
-    new Uint8Array(arena.inputBuffer, 0, source.byteLength).set(source);
-    Atomics.store(arena.control, RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX, RENDER_COMPILER_SHARED_INPUT_READY);
-    Atomics.store(arena.control, RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX, source.byteLength);
-    Atomics.store(arena.control, RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX, arena.inputCapacity);
-    arena.inputByteLength = source.byteLength;
-    return arena;
-  }
-
   rejectAll(error) {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
@@ -1737,44 +1494,6 @@ class RenderSectionWorkerCompiler {
     }
     this.pending.clear();
   }
-}
-
-function createResidentRenderCompilerSharedResultBuffer() {
-  if (!renderCompilerSharedMemorySupported()) {
-    return null;
-  }
-  const controlBuffer = new SharedArrayBuffer(
-    RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS * Int32Array.BYTES_PER_ELEMENT,
-  );
-  const control = new Int32Array(controlBuffer);
-  const responseCapacity = RENDER_COMPILER_DEFAULT_SHARED_RESULT_CAPACITY;
-  const responseBuffer = new SharedArrayBuffer(responseCapacity);
-  Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX, RENDER_COMPILER_SHARED_RESULT_PENDING);
-  Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX, 0);
-  Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX, responseCapacity);
-  return { controlBuffer, control, responseBuffer, responseCapacity };
-}
-
-function createResidentRenderCompilerSharedInputBuffer() {
-  if (!renderCompilerSharedMemorySupported()) {
-    return null;
-  }
-  const controlBuffer = new SharedArrayBuffer(
-    RENDER_COMPILER_SHARED_INPUT_CONTROL_WORDS * Int32Array.BYTES_PER_ELEMENT,
-  );
-  const control = new Int32Array(controlBuffer);
-  const inputCapacity = RENDER_COMPILER_DEFAULT_SHARED_INPUT_CAPACITY;
-  const inputBuffer = new SharedArrayBuffer(inputCapacity);
-  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX, RENDER_COMPILER_SHARED_INPUT_READY);
-  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX, 0);
-  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX, inputCapacity);
-  return {
-    controlBuffer,
-    control,
-    inputBuffer,
-    inputByteLength: 0,
-    inputCapacity,
-  };
 }
 
 // 067 Stage 2: wrap the Rust-owned resident result buffers (handed over on the
@@ -1976,20 +1695,6 @@ function byteLengthOfTargetSections(value) {
     return value.length * 4;
   }
   return byteLengthOf(value);
-}
-
-function centersEqual(left, right) {
-  return Number(left?.centerX) === Number(right?.centerX)
-    && Number(left?.centerZ) === Number(right?.centerZ);
-}
-
-function decisionCenter(decision) {
-  const centerX = Number(decision?.centerX);
-  const centerZ = Number(decision?.centerZ);
-  return {
-    centerX: Number.isFinite(centerX) ? centerX : 0,
-    centerZ: Number.isFinite(centerZ) ? centerZ : 0,
-  };
 }
 
 function createCompileTiming({
