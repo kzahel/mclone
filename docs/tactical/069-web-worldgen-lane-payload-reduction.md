@@ -1,6 +1,6 @@
 # 069: Web Worldgen Lane Payload Reduction (resident dependency mirror + delta)
 
-Status: **Stage 1 landed; Stage 2 in progress.** This is the highest-value web
+Status: **landed (Stages 1 + 2).** This is the highest-value web
 performance improvement surfaced by the
 [`068`](068-web-zero-copy-worker-lane-investigation.md) zero-copy investigation. It
 is the **stable-toolchain** alternative that 068 recommends over a shared-Wasm-
@@ -174,6 +174,83 @@ each boundary crossing. No overflow / fallback (`sharedBufferFallbackResponseFra
 to the baseline (sha256 match), and `cargo test` (incl. the three new
 `worldgen_delta_session_*` tests), `cargo check` wasm (warning-clean), `node --check`,
 `native:web:app-smoke`, `native:movement:smoke`, and `native:timedemo:smoke` are all green.
+
+### Stage 2 — response-side delta (landed)
+
+The worker response no longer ships the whole 529-chunk retained dependency
+neighbourhood back. It ships the generated target chunks (unchanged) plus a
+**response-dependency subset** — only the columns the main side actually consumes —
+plus a positions-only `retained_dependency_positions` list for the shadow.
+
+- **Response subset (`worldgen_response_subset_positions`, `job_codec.rs`).** A
+  retained dependency column is shipped back only if it is **new to the worker this
+  job** (a cache miss / freshly-upserted column the scheduler may not already hold —
+  needed for `mark_dependency_ready` storage) **or** within the **light-neighbour
+  ring** of a target (`provisional_sky_light_includes_chunk`, the 3×3 ring). The
+  session snapshots `cache.resident_positions()` *before* generating to know which
+  columns are new. On the stateless full-frame path (and the native `mpsc` worker)
+  `resident_before` is empty, so the subset is the whole retained set (cold/desktop
+  unchanged).
+- **Shadow correction.** The web mailbox now sets its shadow from
+  `retained_dependency_positions` (the full set, positions only ~8 B each) rather
+  than the response dependency map's keys, so the shadow stays in lockstep with the
+  worker's full mirror even though only a subset of buffers crosses.
+
+**Coupling B — light — preserved by a cleaner mechanism than the proposed
+holder-sourcing, and why.** 069 originally proposed rerouting light's `neighbor_blocks`
+to source dependency bytes from the scheduler's resident holders. **That is not
+eviction-safe:** dependency holders are scheduled (not ticketed), and
+`process_pending_unloads` runs every tick while completed-job publication is
+budget-limited to **1 target/tick** (`DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET`), so a
+target's light-ring neighbour can be unloaded from the holders *before* that target's
+light status is built — silently dropping a neighbour and changing edge sky light.
+Instead, the **worker returns the light ring in the response subset**, so light sources
+its neighbour bytes from the job's own returned set exactly as before. Concretely:
+`publish_completed_feature_job` feeds `completed.retained_dependencies` (now the subset)
+to *both* `mark_dependency_ready` and `PendingLightStatus::from_feature_publication`,
+and the latter already filters to the 3×3 ring — so **the scheduler needs no change**,
+because the subset is guaranteed to contain that ring. This is strictly more robust than
+holder-sourcing (no eviction window) and keeps the whole change confined to the web
+codec + mailbox, like Stage 1. Proven byte-for-byte by
+`worldgen_delta_session_reuses_resident_mirror_across_jobs` (asserts every light-ring
+dependency is present in the subset with identical bytes) and by the byte-identical
+chunk-smoke canvas.
+
+**Coupling A — scheduler-owned model — preserved.** The scheduler's holders now hold a
+*subset* of dependency buffers on web (the worker mirror is a superset), but the shadow
+tracks the worker's full mirror and the generation tripwire guards desync, so seeding
+stays consistent: a future job seeds only what the shadow says the worker lacks, sourcing
+bytes from whatever holders retain and **regenerating any gap deterministically**.
+Non-subset dependency holders stay Surface-scheduled without a buffer until unloaded —
+benign: they do not gate publication or settling (`pending_job_count` counts only
+queued/running feature jobs + light work, not dependency holders), do not trigger feature
+jobs (only Features-targeted chunks do), and are cleaned up by the normal unload path.
+Desktop is unaffected (it returns the full set over `mpsc`, contains the ring).
+
+Measured (this device, vs the 068 baseline above):
+
+| worldgen job | metric | baseline | Stage 1 | Stage 2 |
+|---|---|---|---|---|
+| **warm** (chunk-smoke job 2) | request | 27,145,638 B | **81 B** | 81 B |
+| **warm** | response | 28,985,785 B | 28,985,785 B | **3,217,524 B** (−88.9%) |
+| cold (chunk-smoke job 1) | response | 36,330,584 B | 36,330,584 B | 36,334,820 B (+4,236 B positions list) |
+| movement-perf (3 boundaries) | cumulative response | 152,272,922 B | 152,272,922 B | **55,106,044 B** (−63.8%) |
+
+The warm response is now the generated target chunks (~1.7 MB) plus the small subset
+(new columns + light ring, ~1.5 MB). It does not reach the ~1.6 MB "generated chunks
+only" target from the proposal because the light ring is shipped for guaranteed light
+parity rather than sourced from the eviction-prone holders — a deliberate
+correctness-over-bytes trade, still an 88.9% warm-response reduction. No overflow /
+fallback; the deterministic chunk-smoke canvas PNG stays **byte-identical** to the
+baseline (sha256 match — light *and* terrain parity through the real render).
+`cargo test` (674 passed), `cargo check` wasm (warning-clean), `node --check`,
+`native:web:app-smoke`, `native:web:movement-perf` (maxFrameGap 9.3 ms),
+`native:movement:smoke`, and `native:timedemo:smoke` all green.
+
+**Combined (Stages 1 + 2), warm worldgen job:** request **27 MB → 81 B**, response
+**29 MB → 3.2 MB**. The ~112 ms warm-job serde tax 068 measured (req decode 54 ms +
+resp decode 54 ms) is collapsed onto deltas; the cold first load still ships its 36 MB
+neighbourhood once, then deltas — render after 067 Stage 4, applied to worldgen.
 
 ## Acceptance & validation
 

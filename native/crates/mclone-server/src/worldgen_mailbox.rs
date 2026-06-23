@@ -247,13 +247,15 @@ impl WorldgenMailboxBackend {
         for frame in frames {
             let decoded =
                 decode_worldgen_response(&frame).expect("failed to decode wasm worldgen job");
-            // 069 Stage 1: correct the shadow to the worker's authoritative retained
+            // 069 Stage 1/2: correct the shadow to the worker's authoritative retained
             // set — exactly the dependency columns its resident mirror holds after
-            // this job's own retain step. Keeps the shadow in lockstep with the
-            // worker mirror across boundary crossings (where the worker evicts the
-            // columns the new plan no longer needs).
+            // this job's own retain step. Stage 2 ships only a *subset* of the
+            // dependency buffers (new-to-worker + light ring), so the full retained
+            // set comes from the positions-only `retained_dependency_positions` list.
+            // Keeps the shadow in lockstep with the worker mirror across boundary
+            // crossings (where the worker evicts the columns the new plan drops).
             self.worker_mirror_shadow =
-                decoded.retained_dependencies.keys().copied().collect();
+                decoded.retained_dependency_positions.iter().copied().collect();
             self.completed.push_back(WorldgenCompletedJob {
                 job_id: decoded.job_id,
                 generated_chunks: decoded.generated_chunks,

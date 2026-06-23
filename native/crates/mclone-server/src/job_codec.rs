@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::{ChunkPos, ChunkSnapshot, PackedLightSection};
 use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
@@ -13,6 +13,7 @@ use mclone_worldgen::levelgen::{
 
 use crate::ChunkJobId;
 use crate::level_light_bridge::LevelLightComputationTiming;
+use crate::lighting_seed::provisional_sky_light_includes_chunk;
 use crate::light_mailbox::CompletedLightStatus;
 use crate::light_status::{PendingLightStatus, PendingLightStatusBatch};
 use crate::light_world::RetainedInitialLightState;
@@ -60,11 +61,13 @@ pub(crate) fn decode_worldgen_response(bytes: &[u8]) -> Result<WorldgenJobFrame,
         let chunk = reader.read_generated_chunk()?;
         Ok((pos, chunk))
     })?;
-    let retained_dependencies = reader.read_map("retained dependencies", |reader| {
+    let retained_dependencies = reader.read_map("response dependencies", |reader| {
         let pos = reader.read_chunk_pos()?;
         let chunk = reader.read_mutable_chunk()?;
         Ok((pos, chunk))
     })?;
+    let retained_dependency_positions =
+        reader.read_vec("retained dependency positions", FrameReader::read_chunk_pos)?;
     let cache_report = reader.read_feature_cache_report()?;
     let timing = reader.read_feature_batch_timing()?;
     reader.finish()?;
@@ -72,6 +75,7 @@ pub(crate) fn decode_worldgen_response(bytes: &[u8]) -> Result<WorldgenJobFrame,
         job_id,
         generated_chunks,
         retained_dependencies,
+        retained_dependency_positions,
         cache_report,
         timing,
     })
@@ -86,10 +90,16 @@ pub fn compute_worldgen_job_frame(bytes: &[u8]) -> Result<Vec<u8>, String> {
     reader.finish()?;
 
     let mut dependency_cache = OverworldFeatureDependencyCache::new();
-    let result =
-        dependency_cache.generate_features_chunks_with_dependencies(seed, targets, dependencies);
+    let result = dependency_cache.generate_features_chunks_with_dependencies(
+        seed,
+        targets.iter().copied(),
+        dependencies,
+    );
 
-    encode_worldgen_response(job_id, result)
+    // Stateless path: the cache started empty, so every retained column is new this
+    // job and the response subset is the whole retained set (matches the legacy
+    // full response and the native `mpsc` worker's full set).
+    encode_worldgen_response(job_id, result, &BTreeSet::new(), &targets)
 }
 
 /// 069 Stage 1: encode the request as a *delta* against the web worker's resident
@@ -127,10 +137,43 @@ pub(crate) fn encode_worldgen_delta_request(
     Ok(writer.into_bytes())
 }
 
+/// 069 Stage 2: a retained dependency column is shipped back in the response only
+/// if it is **new to the worker this job** (so the scheduler can store it for
+/// future re-seeds — it was a cache miss or freshly upserted column the scheduler
+/// may not already hold) **or** within the **light-neighbour ring** of a target
+/// (so `PendingLightStatus::from_feature_publication` produces byte-identical
+/// `neighbor_blocks` straight from the response, with no dependence on the
+/// eviction-prone scheduler holders). Columns that were already resident in the
+/// worker mirror *and* outside every target's light ring are not re-shipped — the
+/// scheduler already holds them (or regenerates them deterministically). On the
+/// stateless full-frame path `resident_before` is empty, so this is the whole
+/// retained set.
+fn worldgen_response_subset_positions(
+    retained: &BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
+    resident_before: &BTreeSet<ChunkPos>,
+    targets: &[ChunkPos],
+) -> Vec<ChunkPos> {
+    retained
+        .keys()
+        .copied()
+        .filter(|pos| {
+            !resident_before.contains(pos)
+                || targets
+                    .iter()
+                    .any(|target| provisional_sky_light_includes_chunk(*target, *pos))
+        })
+        .collect()
+}
+
 fn encode_worldgen_response(
     job_id: ChunkJobId,
     result: OverworldFeatureBatchResult,
+    resident_before: &BTreeSet<ChunkPos>,
+    targets: &[ChunkPos],
 ) -> Result<Vec<u8>, String> {
+    let subset_positions =
+        worldgen_response_subset_positions(&result.retained_dependencies, resident_before, targets);
+
     let mut writer = FrameWriter::new(WORLDGEN_RESPONSE_MAGIC);
     writer.write_u64(job_id.0);
     writer.write_len("generated chunks", result.chunks.len())?;
@@ -138,10 +181,24 @@ fn encode_worldgen_response(
         writer.write_chunk_pos(*pos);
         writer.write_generated_chunk(chunk)?;
     }
-    writer.write_len("retained dependencies", result.retained_dependencies.len())?;
-    for (pos, dependency) in &result.retained_dependencies {
+    // Response-dependency subset (buffers): only the columns the main side needs to
+    // consume — new-to-worker columns for holder storage + the targets' light ring.
+    writer.write_len("response dependencies", subset_positions.len())?;
+    for pos in &subset_positions {
+        let dependency = result
+            .retained_dependencies
+            .get(pos)
+            .expect("subset position must be present in retained dependencies");
         writer.write_chunk_pos(*pos);
         writer.write_mutable_chunk(dependency)?;
+    }
+    // Full retained positions (positions only) for the main-side mirror shadow.
+    writer.write_len(
+        "retained dependency positions",
+        result.retained_dependencies.len(),
+    )?;
+    for pos in result.retained_dependencies.keys() {
+        writer.write_chunk_pos(*pos);
     }
     writer.write_feature_cache_report(result.cache_report);
     writer.write_feature_batch_timing(result.timing)?;
@@ -171,13 +228,14 @@ impl WorldgenJobSession {
     }
 
     /// Apply a [`encode_worldgen_delta_request`] frame to the resident dependency
-    /// mirror and generate the job from it, returning the standard worldgen
-    /// response frame (Stage 1 keeps the full response — `decode_worldgen_response`
-    /// is unchanged). A `reset` delta clears the mirror and adopts the delta's
-    /// generation; a non-reset delta whose generation does not match the resident
-    /// mirror's is a desync (e.g. a worker that silently lost its mirror) and is
-    /// rejected loudly rather than generated against a partial mirror — the 067
-    /// Stage 4 desync tripwire.
+    /// mirror and generate the job from it, returning the worldgen response frame.
+    /// A `reset` delta clears the mirror and adopts the delta's generation; a
+    /// non-reset delta whose generation does not match the resident mirror's is a
+    /// desync (e.g. a worker that silently lost its mirror) and is rejected loudly
+    /// rather than generated against a partial mirror — the 067 Stage 4 desync
+    /// tripwire. The response (069 Stage 2) ships only the dependency columns that
+    /// became resident this job plus the targets' light ring; the resident mirror
+    /// before this job determines that subset.
     pub fn compute_delta_job_frame(&mut self, bytes: &[u8]) -> Result<Vec<u8>, String> {
         let mut reader = FrameReader::new(bytes, WORLDGEN_DELTA_REQUEST_MAGIC)?;
         let job_id = ChunkJobId(reader.read_u64()?);
@@ -203,13 +261,18 @@ impl WorldgenJobSession {
         self.last_delta_upsert_count = upserts.len();
         self.last_delta_reset = reset;
 
+        // Snapshot what the mirror held before this job; the response ships only the
+        // columns that become resident this job (plus the light ring) — see
+        // `worldgen_response_subset_positions`.
+        let resident_before = self.cache.resident_positions();
+
         let result = self.cache.generate_features_chunks_with_dependencies(
             seed,
             targets.iter().copied(),
             upserts,
         );
 
-        encode_worldgen_response(job_id, result)
+        encode_worldgen_response(job_id, result, &resident_before, &targets)
     }
 
     /// Number of dependency columns currently resident in the worker mirror
@@ -279,7 +342,19 @@ pub fn compute_light_status_job_frame(bytes: &[u8]) -> Result<Vec<u8>, String> {
 pub(crate) struct WorldgenJobFrame {
     pub(crate) job_id: ChunkJobId,
     pub(crate) generated_chunks: BTreeMap<ChunkPos, GeneratedChunk>,
+    /// 069 Stage 2: the *response-dependency subset* the worker actually shipped —
+    /// the dependency columns new to the worker this job (for the scheduler's
+    /// holder storage) plus the targets' light-neighbour ring (so light is
+    /// byte-identical without sourcing from the eviction-prone holders). On the
+    /// stateless full-frame path (and the native `mpsc` worker) this is the whole
+    /// retained set. The scheduler feeds it to both `mark_dependency_ready` and
+    /// `from_feature_publication`; both are satisfied because it contains the ring.
     pub(crate) retained_dependencies: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
+    /// 069 Stage 2: the *full* set of dependency positions the worker mirror holds
+    /// after this job (positions only, ~8 B each). The web mailbox uses this to
+    /// correct its mirror shadow to the worker's authoritative retained set even
+    /// though the buffers above are only a subset.
+    pub(crate) retained_dependency_positions: Vec<ChunkPos>,
     pub(crate) cache_report: OverworldFeatureDependencyCacheReport,
     pub(crate) timing: OverworldFeatureBatchTiming,
 }
@@ -928,7 +1003,15 @@ mod tests {
 
         assert_eq!(decoded.job_id, ChunkJobId(1));
         assert_eq!(decoded.generated_chunks, reference.chunks);
+        // Reset job: the mirror started empty, so every retained column is new this
+        // job and the response subset is the whole retained set (matches the
+        // stateless full-frame path and the native `mpsc` worker's full set).
         assert_eq!(decoded.retained_dependencies, reference.retained_dependencies);
+        let positions: BTreeSet<_> = decoded.retained_dependency_positions.iter().copied().collect();
+        assert_eq!(
+            positions,
+            reference.retained_dependencies.keys().copied().collect::<BTreeSet<_>>()
+        );
         assert_eq!(session.mirror_generation(), Some(1));
         assert!(session.last_delta_was_reset());
         assert_eq!(session.mirror_chunk_count(), reference.retained_dependencies.len());
@@ -958,14 +1041,49 @@ mod tests {
             decode_worldgen_response(&session.compute_delta_job_frame(&req2).unwrap()).unwrap();
 
         let reference2 = stateless_reference(seed, &second_targets);
+
+        // Generation parity: the target chunks are byte-identical to a cold generation.
         assert_eq!(decoded2.generated_chunks, reference2.chunks);
-        assert_eq!(decoded2.retained_dependencies, reference2.retained_dependencies);
         assert!(
             decoded2.cache_report.cache_hits > 0,
             "warm job should reuse resident dependency columns"
         );
         assert_eq!(session.last_delta_upsert_count(), 0);
         assert!(!session.last_delta_was_reset());
+
+        // 069 Stage 2: the response ships only a *subset* of the dependency buffers
+        // (the columns new to the worker this job + the targets' light ring), so it
+        // is strictly smaller than the full retained set the warm job actually holds.
+        let full_positions: BTreeSet<_> =
+            reference2.retained_dependencies.keys().copied().collect();
+        let shadow_positions: BTreeSet<_> =
+            decoded2.retained_dependency_positions.iter().copied().collect();
+        assert_eq!(
+            shadow_positions, full_positions,
+            "retained_dependency_positions must report the full retained set for the shadow"
+        );
+        assert!(
+            decoded2.retained_dependencies.len() < full_positions.len(),
+            "warm response subset ({}) should be smaller than the full retained set ({})",
+            decoded2.retained_dependencies.len(),
+            full_positions.len()
+        );
+
+        // Coupling B: light reads only the 3x3 ring (provisional_sky_light_includes_chunk)
+        // of targets from retained_dependencies. Every retained dep in that ring must be
+        // present in the response subset (with byte-identical bytes), so
+        // PendingLightStatus::from_feature_publication produces identical neighbor_blocks.
+        for (pos, buffer) in &reference2.retained_dependencies {
+            let in_light_ring = second_targets
+                .iter()
+                .any(|target| provisional_sky_light_includes_chunk(*target, *pos));
+            if in_light_ring {
+                let shipped = decoded2.retained_dependencies.get(pos).unwrap_or_else(|| {
+                    panic!("light-ring dependency {pos:?} missing from response subset")
+                });
+                assert_eq!(shipped, buffer, "light-ring dependency {pos:?} bytes diverged");
+            }
+        }
     }
 
     #[test]

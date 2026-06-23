@@ -67,6 +67,15 @@ impl OverworldFeatureDependencyCache {
         self.chunks.len()
     }
 
+    /// Positions currently resident in the cache. Used by the web worldgen
+    /// worker's resident session (069 Stage 2) to snapshot what it held *before*
+    /// a job, so the response can ship only the dependency columns that became
+    /// resident this job (plus light's neighbour ring) instead of the whole
+    /// retained neighbourhood.
+    pub fn resident_positions(&self) -> std::collections::BTreeSet<ChunkPos> {
+        self.chunks.keys().copied().collect()
+    }
+
     pub fn clear(&mut self) {
         self.seed = None;
         self.chunks.clear();
