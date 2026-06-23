@@ -389,6 +389,19 @@ After the message-based worker topology is correct, move hot web paths to
 `SharedArrayBuffer`/Atomics queues where measurement shows transfer overhead or
 latency matters.
 
+The further "true zero-copy" frontier — a **shared Wasm linear-memory thread
+runtime** (one module + one shared `WebAssembly.Memory` across workers, data
+crossing by pointer instead of serialized into SAB job buffers) — was investigated
+and **declined for now** in
+[`068-web-zero-copy-worker-lane-investigation.md`](068-web-zero-copy-worker-lane-investigation.md).
+A byte-exact cost decomposition found the heavy lanes are work-dominated (light
+~98% work; worldgen first-load ~88% work); only the warm worldgen dependency
+bounce is serde-dominated (~77%), and that is better fixed by **payload reduction**
+(a resident worker-side dependency mirror shipping per-job deltas — the 067 Stage 4
+pattern) on the current stable toolchain than by paying the permanent
+nightly + `-Z build-std` + shared-state cost of a shared linear memory. The staged
+plan lives in 068.
+
 Acceptance:
 
 - COOP/COEP remains enforced by web smoke servers.
