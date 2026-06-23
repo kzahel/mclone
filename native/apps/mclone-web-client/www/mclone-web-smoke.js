@@ -1,5 +1,19 @@
 import { RenderSectionWorkerCompiler, fetchAssetPack } from "./mclone-render-compiler-shared.js";
 
+/**
+ * The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
+ * Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
+ * in tsconfig.json and only ever appears in type positions.
+ * @typedef {typeof import("mclone-web-client-wasm")} WasmModule
+ * @typedef {import("mclone-web-client-wasm").WebChunkRenderSession} WebChunkRenderSession
+ */
+
+/**
+ * A wasm-return per-frame overview report / diagnostic metrics bag, read coercion-guarded
+ * (`Number(...)`/`Boolean(...)`); the underlying wasm exports are typed `any` in the `.d.ts`.
+ * @typedef {Record<string, any>} RenderFrameReport
+ */
+
 const WASM_URL = new URL("./mclone_web_client.wasm", import.meta.url);
 const BINDGEN_JS_URL = new URL("./pkg/mclone_web_client.js", import.meta.url);
 const BINDGEN_WASM_URL = new URL("./pkg/mclone_web_client_bg.wasm", import.meta.url);
@@ -41,6 +55,11 @@ async function boot() {
 }
 
 async function probeThreading() {
+  /**
+   * @type {{ ok: boolean, crossOriginIsolated: boolean, sharedArrayBuffer: boolean,
+   *   wasmSharedMemory: boolean, workerConstructor: boolean, atomics: boolean,
+   *   workerRoundtrip: boolean, initialValue: number, finalValue: number, worker?: any }}
+   */
   const report = {
     ok: false,
     crossOriginIsolated: Boolean(globalThis.crossOriginIsolated),
@@ -131,6 +150,11 @@ async function probeThreading() {
   };
 }
 
+/**
+ * @param {WebAssembly.Memory} memory
+ * @param {number} addend
+ * @returns {Promise<any>}
+ */
 function runThreadWorker(memory, addend) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(THREAD_WORKER_URL.href, {
@@ -205,7 +229,12 @@ async function loadRuntimeWasm() {
   }
 }
 
+/**
+ * @param {WebAssembly.Module} module
+ * @returns {WebAssembly.Imports}
+ */
 function createWasmImports(module) {
+  /** @type {WebAssembly.Imports} */
   const imports = {};
   for (const descriptor of WebAssembly.Module.imports(module)) {
     if (descriptor.kind !== "function") {
@@ -217,6 +246,7 @@ function createWasmImports(module) {
   return imports;
 }
 
+/** @param {WebAssembly.ModuleImportDescriptor} descriptor */
 function createWasmImportStub(descriptor) {
   if (descriptor.name.includes("throw")) {
     return () => {
@@ -284,6 +314,7 @@ async function probeWebGpu() {
   };
 }
 
+/** @param {GPUAdapter & { requestAdapterInfo?: () => Promise<any>, info?: any }} adapter */
 async function readAdapterInfo(adapter) {
   try {
     if (typeof adapter.requestAdapterInfo === "function") {
@@ -306,7 +337,7 @@ async function renderCanvas() {
   }
 
   try {
-    const module = await import(BINDGEN_JS_URL.href);
+    const module = /** @type {WasmModule} */ (await import(BINDGEN_JS_URL.href));
     await module.default(BINDGEN_WASM_URL.href);
     if (typeof module.mclone_web_create_worker_chunk_render_session !== "function") {
       return {
@@ -417,9 +448,18 @@ async function renderCanvas() {
 // fast center jump can reach render-idle before the moved-to chunks have streamed (no
 // snapshots yet => no dirty work => idle, but the view is not actually loaded). A stable-
 // frame count and a wall-clock deadline keep the pump robust.
+/**
+ * @param {WebChunkRenderSession} session
+ * @param {RenderSectionWorkerCompiler} compiler
+ * @param {number} centerX
+ * @param {number} centerZ
+ * @param {number} radius
+ */
 async function streamOverviewToIdle(session, compiler, centerX, centerZ, radius) {
   const deadline = performance.now() + 30_000;
+  /** @type {RenderFrameReport | null} */
   let frame = null;
+  /** @type {any} */
   let lastWorkerReport = null;
   let compileCount = 0;
   let stableFrames = 0;
@@ -467,24 +507,31 @@ async function streamOverviewToIdle(session, compiler, centerX, centerZ, radius)
         + `(observedRunnerWork=${observedRunnerWork}):\n${JSON.stringify(frame, null, 2)}`,
     );
   }
+  // `settled` implies `overviewFrameSettled(frame)` was true, which requires a non-null frame.
+  const settledFrame = /** @type {RenderFrameReport} */ (frame);
   return {
     centerX,
     centerZ,
     settled,
     compileCount,
-    residentSectionCount: Number(frame.residentSectionCount) || 0,
-    report: frame,
+    residentSectionCount: Number(settledFrame.residentSectionCount) || 0,
+    report: settledFrame,
     workerReport: lastWorkerReport,
   };
 }
 
+/** @returns {Promise<void>} */
 function yieldToEventLoop() {
   if (typeof requestAnimationFrame === "function") {
-    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    return new Promise(
+      /** @param {(value?: void) => void} resolve */
+      (resolve) => requestAnimationFrame(() => resolve()),
+    );
   }
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/** @param {RenderFrameReport | null} frame */
 function overviewRunnerBusy(frame) {
   return Boolean(
     frame
@@ -495,6 +542,7 @@ function overviewRunnerBusy(frame) {
   );
 }
 
+/** @param {RenderFrameReport | null} frame */
 function overviewFrameSettled(frame) {
   return Boolean(
     frame
@@ -507,6 +555,10 @@ function overviewFrameSettled(frame) {
   );
 }
 
+/**
+ * @param {{ centerX: number, centerZ: number, settled: boolean, compileCount: number,
+ *   residentSectionCount: number, workerReport: any }} center
+ */
 function publicOverviewCenter(center) {
   return {
     centerX: center.centerX,
@@ -518,6 +570,7 @@ function publicOverviewCenter(center) {
   };
 }
 
+/** @param {WasmModule} module */
 async function runRemoteWebSocketSmoke(module) {
   if (!REMOTE_WS_URL) {
     return {
@@ -550,6 +603,7 @@ async function runRemoteWebSocketSmoke(module) {
   }
 }
 
+/** @param {WasmModule} module */
 async function runSharedTopologyStress(module) {
   if (typeof module.mclone_web_shared_topology_stress_report !== "function") {
     return {
@@ -574,6 +628,7 @@ async function runSharedTopologyStress(module) {
   }
 }
 
+/** @param {number} bits */
 function decodeRuntimeReport(bits) {
   return {
     bits,
@@ -591,6 +646,10 @@ function decodeRuntimeReport(bits) {
   };
 }
 
+/**
+ * @param {any} metrics
+ * @param {string} transportKind
+ */
 function frameMetricsActive(metrics, transportKind) {
   return Boolean(
     metrics
@@ -602,6 +661,7 @@ function frameMetricsActive(metrics, transportKind) {
   );
 }
 
+/** @param {any} metrics */
 function sharedBufferPoolActive(metrics) {
   return Boolean(
     metrics
@@ -615,6 +675,7 @@ function sharedBufferPoolActive(metrics) {
   );
 }
 
+/** @param {any} report */
 function sharedTopologyStressActive(report) {
   return Boolean(
     report
@@ -624,6 +685,7 @@ function sharedTopologyStressActive(report) {
   );
 }
 
+/** @param {any} report */
 function sharedRunnerStressActive(report) {
   const metrics = report?.runnerFrameMetrics;
   return Boolean(
@@ -646,6 +708,7 @@ function sharedRunnerStressActive(report) {
   );
 }
 
+/** @param {any} report */
 function fallbackRunnerStressActive(report) {
   const metrics = report?.runnerFrameMetrics;
   return Boolean(
@@ -664,6 +727,7 @@ function fallbackRunnerStressActive(report) {
   );
 }
 
+/** @param {any} report */
 function remoteWebSocketActive(report) {
   if (!REMOTE_WS_URL) {
     return Boolean(report?.ok && report.supported === false);
@@ -691,6 +755,7 @@ function remoteWebSocketActive(report) {
   );
 }
 
+/** @param {any} result */
 function renderStatus(result) {
   const status = document.getElementById("status");
   if (!status) return;
@@ -698,6 +763,7 @@ function renderStatus(result) {
   status.dataset.ok = result.ok ? "true" : "false";
 }
 
+/** @param {unknown} error */
 function stringifyError(error) {
   if (error instanceof Error) {
     return error.stack ?? error.message;

@@ -96,8 +96,13 @@ cd "$PROJECT_DIR"
 pnpm assets:pack
 cargo build --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
 ensure_wasm_bindgen
+# --typescript emits mclone_web_client.d.ts alongside the JS glue (070 Stage 2). It does not
+# change what ships — deploy copies only mclone_web_client.js and _bg.wasm out of the bindgen
+# dir below — but the .d.ts is the single source the web-glue type-check gate
+# (native:web:typecheck) checks the 103-coercion wasm-return boundary against.
 "$WASM_BINDGEN_BIN" \
   --target web \
+  --typescript \
   --out-dir "$BINDGEN_OUT_DIR" \
   --out-name mclone_web_client \
   "$WASM_PATH"

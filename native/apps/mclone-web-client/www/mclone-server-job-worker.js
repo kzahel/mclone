@@ -10,6 +10,30 @@ import {
   RUNNER_SHARED_STATUS_FAILED,
 } from "./mclone-runner-shared-abi.js";
 
+/**
+ * The wasm-bindgen module namespace (its generated `.d.ts`, emitted by `wasm-bindgen
+ * --typescript`). Loaded at runtime via a dynamic `import()` of a versioned URL, so this type
+ * only ever appears in type positions — the bare specifier is path-mapped in tsconfig.json and
+ * carries no runtime weight.
+ * @typedef {typeof import("mclone-web-client-wasm")} WasmModule
+ */
+
+/**
+ * Inbound postMessage payload for the stateless worldgen/light-status job worker. Hand-rolled
+ * and `kind`-tagged; shared-memory jobs carry the SAB ring control/request/response buffers.
+ * @typedef {object} ServerJobWorkerMessage
+ * @property {string} [kind] - job kind: `"worldgen"` or `"light-status"`.
+ * @property {number} [requestId]
+ * @property {string} [bindgenJsUrl]
+ * @property {string} [bindgenWasmUrl]
+ * @property {"shared-memory"|"message-transfer"} [transportKind]
+ * @property {Uint8Array} [frame]
+ * @property {SharedArrayBuffer} [controlBuffer]
+ * @property {SharedArrayBuffer} [requestBuffer]
+ * @property {SharedArrayBuffer} [responseBuffer]
+ */
+
+/** @type {Promise<WasmModule> | null} */
 let wasmModulePromise = null;
 // 069 Stage 1: the worldgen worker holds a resident session across jobs (exactly
 // as the render-compiler worker holds `compilerSession`), so its
@@ -20,7 +44,7 @@ let wasmModulePromise = null;
 let worldgenSession = null;
 
 self.onmessage = async (event) => {
-  const message = event.data ?? {};
+  const message = /** @type {ServerJobWorkerMessage} */ (event.data ?? {});
   try {
     const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
     if (message.transportKind === "shared-memory") {
@@ -39,6 +63,10 @@ self.onmessage = async (event) => {
   }
 };
 
+/**
+ * @param {WasmModule} module
+ * @param {ServerJobWorkerMessage} message
+ */
 function handleTransferredJob(module, message) {
   const frame = message.frame instanceof Uint8Array ? message.frame : new Uint8Array();
   const response = computeJobFrame(module, message.kind, frame);
@@ -53,6 +81,10 @@ function handleTransferredJob(module, message) {
   );
 }
 
+/**
+ * @param {WasmModule} module
+ * @param {ServerJobWorkerMessage} message
+ */
 function handleSharedMemoryJob(module, message) {
   const control = sharedControlView(message.controlBuffer);
   const requestBytes = Atomics.load(control, RUNNER_SHARED_REQUEST_BYTES_INDEX);
@@ -86,6 +118,12 @@ function handleSharedMemoryJob(module, message) {
   });
 }
 
+/**
+ * @param {WasmModule} module
+ * @param {string | undefined} kind
+ * @param {Uint8Array} frame
+ * @returns {Uint8Array}
+ */
 function computeJobFrame(module, kind, frame) {
   switch (kind) {
     case "worldgen":
@@ -98,14 +136,20 @@ function computeJobFrame(module, kind, frame) {
   }
 }
 
+/**
+ * @param {string | undefined} bindgenJsUrl
+ * @param {string | undefined} bindgenWasmUrl
+ * @returns {Promise<WasmModule>}
+ */
 function loadWasmModule(bindgenJsUrl, bindgenWasmUrl) {
-  wasmModulePromise ??= import(bindgenJsUrl).then(async (module) => {
+  wasmModulePromise ??= import(/** @type {string} */ (bindgenJsUrl)).then(/** @param {any} module */ async (module) => {
     await module.default(bindgenWasmUrl);
-    return module;
+    return /** @type {WasmModule} */ (module);
   });
   return wasmModulePromise;
 }
 
+/** @param {ServerJobWorkerMessage} message */
 function markSharedFailure(message) {
   if (message?.transportKind !== "shared-memory") return;
   try {
@@ -115,11 +159,17 @@ function markSharedFailure(message) {
   } catch {}
 }
 
+/** @param {unknown} buffer */
 function sharedControlView(buffer) {
   const shared = sharedBuffer(buffer, "controlBuffer");
   return new Int32Array(shared);
 }
 
+/**
+ * @param {unknown} buffer
+ * @param {string} name
+ * @returns {SharedArrayBuffer}
+ */
 function sharedBuffer(buffer, name) {
   if (typeof SharedArrayBuffer !== "function" || !(buffer instanceof SharedArrayBuffer)) {
     throw new Error(`shared server job ${name} was not a SharedArrayBuffer`);
@@ -127,6 +177,7 @@ function sharedBuffer(buffer, name) {
   return buffer;
 }
 
+/** @param {unknown} error */
 function stringifyError(error) {
   if (error instanceof Error) {
     return error.stack ?? error.message;

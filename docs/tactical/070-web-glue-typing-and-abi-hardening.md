@@ -1,6 +1,6 @@
 # 070: Web JS Glue Hardening — ABI Lock, Type-Checking, and Shrink
 
-Status: **Stage 1 landed (server-worker SAB ABI single-source + lock test); Stages 2–3 proposed.**
+Status: **Stages 1–2 landed (server-worker SAB ABI single-source + lock test; no-emit type-check gate over the web glue); Stage 3 proposed.**
 
 The web perf/refactor work across 064–069 grew the hand-written browser JS glue.
 This is a consolidation/hardening pass over that glue. The framing matters: the
@@ -225,6 +225,80 @@ on the new ABI module + both touched workers, `pnpm native:web:build`,
 `/tmp/mclone-native-web-canvas.png` — grass/ore/lava column renders correctly),
 `pnpm native:movement:smoke`, `pnpm native:timedemo:smoke` (desktop unaffected — the
 server-worker ABI is wasm-only, cfg-gated out of the desktop build).
+
+### Stage 2 — type-check gate over the web glue (landed)
+
+A no-emit `tsc --checkJs`/`strict` gate now covers all of the hand-written web glue — every
+`www/*.js` file plus the Node/Playwright harness `scripts/browser-smoke.mjs` — driven by a new
+`pnpm native:web:typecheck`. Nothing about what ships changed: the deploy stays a raw `cp` of
+`www/` plus the `wasm-bindgen` step, and the gate is `tsc --noEmit` only (Problem 2).
+
+- **The Rust exports are typed for free.** `wasm-bindgen` now runs with `--typescript` in both
+  invocations — `scripts/deploy-native-web.sh` and `browser-smoke.mjs`'s `buildBindgenBundle()` —
+  so it emits `mclone_web_client.d.ts` next to the JS glue. This is the doc's "single biggest win":
+  casting the dynamic `import()` of the bindgen module to `typeof import("mclone-web-client-wasm")`
+  in `mclone-web-app.js`/`mclone-web-smoke.js`/the three worker producers makes the **live wasm
+  call sites checkable against the real export signatures** — a renamed export or a wrong arg
+  count (e.g. the 14-arg `advanceCameraFrame`) is now a `tsc` error, and `this.session` is typed
+  `WebChunkRenderSession` (`mclone-web-app.js`).
+- **New `native/apps/mclone-web-client/tsconfig.json`.** `allowJs`/`checkJs`/`noEmit`/`strict`,
+  `lib: ["ES2022","DOM","DOM.Iterable","WebWorker"]`, `include` `www/**/*.js` + `scripts/*.mjs`. The
+  bindgen `.d.ts` lives in the gitignored cargo target dir (a build artifact, never committed,
+  never `cp`'d into the deploy bundle), so it is reached via a `paths` alias `mclone-web-client-wasm`
+  → `../../target/.../mclone-web-client-bindgen/mclone_web_client` rather than the runtime
+  `./pkg/...` URL (which does not exist on disk at type-check time). That bare specifier appears only
+  inside JSDoc `import(...)` type positions, so it carries no runtime weight.
+- **New `pnpm native:web:typecheck`.** `node browser-smoke.mjs --build-only && tsc --noEmit -p …`
+  — a new `--build-only` flag on the harness compiles the wasm + runs `wasm-bindgen --typescript`
+  and exits before launching a browser, so the gate cheaply materializes the path-mapped `.d.ts`
+  before `tsc`. Added to the web validation lanes (kept separate from the legacy-TS root
+  `typecheck`, which has no reason to build the wasm `.d.ts`).
+- **JSDoc `@typedef`s at both stringly-typed boundaries.** Per-worker inbound postMessage payloads
+  (`ServerJobWorkerMessage`, `IntegratedServerWorkerMessage`, `RenderCompileWorkerInbound`) and the
+  consumer-side request/report/doorbell shapes (`RenderCompileDoorbell`, the SAB
+  `RenderCompileSharedResultArena`/`…InputArena` doorbell objects, `RenderCompileWorkerRequest`) are
+  authored as typedefs and the handler params annotated against them; the dynamic-import module is a
+  shared `WasmModule` typedef in each file.
+
+**Divergences / findings.**
+
+- **`types: ["@webgpu/types", "node"]`, not just `["@webgpu/types"]`** as the doc sketched. One
+  tsconfig spans browser-DOM glue *and* a Node harness, so the harness's `process`/`Buffer`/PNG
+  decode needs the Node globals; `skipLibCheck` suppresses the benign DOM-vs-Node lib duplicate-global
+  conflicts. The only browser-side friction this introduced was `setInterval` resolving to the Node
+  overload, handled by typing the one timer field as `ReturnType<typeof setInterval>`
+  (`mclone-integrated-server-worker.js`).
+- **The wasm-return objects are typed as named permissive bags (`Record<string, any>`), not exact
+  field lists.** `wasm-bindgen` types every `WebChunkRenderSession` method return as `any` in the
+  `.d.ts` (it cannot describe the serde shape), so the doc's hoped-for "rename a field → `tsc`
+  error" is **not achievable at the field level** through this boundary — that would need typed
+  `#[wasm_bindgen]` getters (out of scope). The realized value is the *method/arg* boundary (above),
+  internal-consistency checking within app.js, and the now-typed postMessage payloads. The named
+  bags (`WasmReport`, `CompileTiming`) document the boundary and keep the `Number(...)`/`?.ok`
+  coercion sites honest.
+- **The app's global type leaks to the harness — usefully.** `globalThis.__mcloneWebApp = runtime`
+  makes checkJs treat `__mcloneWebApp` as a global of type `AppRuntime`, so `browser-smoke.mjs`'s
+  `page.evaluate` callbacks are now checked against the real runtime contract. The runtime's
+  input/menu methods are installed by `boot()` (so they are optional on `AppRuntime`); the harness
+  calls them only post-boot, so those sites use `?.()` (`mclone-web-app.js` exposes them;
+  `browser-smoke.mjs` consumes them).
+- **What the gate actually surfaced.** No live "silently falsy `?.ok`" bug (the `any` boundary
+  precludes catching those statically — see above), but it forced explicit handling of real latent
+  fragilities: DOM accesses that assumed non-null/HTML element types (`getElementById(...).value`
+  needing `HTMLInputElement`, `querySelectorAll` → `Element` lacking `.dataset`,
+  `getElementById("mclone-canvas")` possibly null), `server.address()`'s `string | AddressInfo | null`
+  union read as `.port`, an `error?.code` access on an `unknown` catch binding in the dev server, and
+  two SAB-path values (`message.sharedResultResponseBuffer`, `requestMessage.controlBuffer`) that the
+  code already validates at runtime but TS could not see. All fixes are type-only — every removed line
+  is an in-place cast/non-null-capture/annotation; no runtime logic changed (verified by diff).
+
+**Validation (all green):** `pnpm native:web:typecheck` (0 errors across all 7 glue files),
+`cargo test --manifest-path native/Cargo.toml` (full workspace, no failures, no warnings —
+Stage 2 touched no Rust), `cargo check -p mclone-web-client --target wasm32-unknown-unknown`
+(warning-clean), `node --check` on all six touched `www/*.js` + the harness,
+`pnpm native:web:build`, `pnpm native:web:app-smoke` + `native:web:chunk-smoke` +
+`native:web:mobile-smoke` (booted, streamed, `appliedOk: true`, zero fallback frames),
+`pnpm native:movement:smoke` + `native:timedemo:smoke` (desktop unaffected).
 
 ## Acceptance & validation (every stage)
 

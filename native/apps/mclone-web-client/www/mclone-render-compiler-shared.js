@@ -15,6 +15,99 @@ import {
   RENDER_COMPILER_DEFAULT_SHARED_RESULT_CAPACITY,
 } from "./mclone-render-compiler-abi.js";
 
+/**
+ * Constructor options for {@link RenderSectionWorkerCompiler}. URL/cache-bust policy is the
+ * caller's, so the worker/bindgen URLs are passed in as `URL`s rather than baked in here.
+ * @typedef {object} RenderSectionWorkerCompilerOptions
+ * @property {URL} [workerUrl]
+ * @property {URL} [bindgenJsUrl]
+ * @property {URL} [bindgenWasmUrl]
+ * @property {string} [workerName]
+ */
+
+/**
+ * The SAB "doorbell" handed from Rust main-wasm to JS when a compile is armed for a frame
+ * (see `WebChunkRenderSession.syncCameraRenderFrame`). JS relays it to the worker and reads
+ * byte counts back for diagnostics; it never decodes the packed section bytes itself.
+ * @typedef {object} RenderCompileDoorbell
+ * @property {number} [requestId]
+ * @property {number} [centerX]
+ * @property {number} [centerZ]
+ * @property {number} [radiusChunks]
+ * @property {Int32Array | number[]} [targetSections]
+ * @property {number} [snapshotInputChunkCount]
+ * @property {number} [snapshotInputClonedColumnCount]
+ * @property {number} [sharedInputByteLength]
+ * @property {number} [sharedInputBufferCapacityBytes]
+ * @property {SharedArrayBuffer} [sharedInputControlBuffer]
+ * @property {SharedArrayBuffer} [sharedInputBuffer]
+ * @property {number} [sharedResultBufferCapacityBytes]
+ * @property {SharedArrayBuffer} [sharedResultControlBuffer]
+ * @property {SharedArrayBuffer} [sharedResultResponseBuffer]
+ */
+
+/**
+ * Wrapper around the Rust-owned resident shared result buffers handed over on a doorbell.
+ * @typedef {object} RenderCompileSharedResultArena
+ * @property {SharedArrayBuffer} controlBuffer
+ * @property {Int32Array} control
+ * @property {SharedArrayBuffer} responseBuffer
+ * @property {number} responseCapacity
+ */
+
+/**
+ * Wrapper around the Rust-owned resident shared input buffers handed over on a doorbell.
+ * @typedef {object} RenderCompileSharedInputArena
+ * @property {SharedArrayBuffer} controlBuffer
+ * @property {Int32Array} control
+ * @property {SharedArrayBuffer} inputBuffer
+ * @property {number} inputByteLength
+ * @property {number} inputCapacity
+ */
+
+/**
+ * Outbound `compile-render-sections` postMessage payload posted to the render-compile worker.
+ * The `shared*` fields are attached only on the cross-origin-isolated SAB path.
+ * @typedef {object} RenderCompileWorkerRequest
+ * @property {string} kind
+ * @property {number} requestId
+ * @property {string} bindgenJsUrl
+ * @property {string} bindgenWasmUrl
+ * @property {number} [centerX]
+ * @property {number} [centerZ]
+ * @property {number} [radiusChunks]
+ * @property {Int32Array | number[]} [targetSections]
+ * @property {number} [snapshotInputChunkCount]
+ * @property {number} [snapshotInputClonedColumnCount]
+ * @property {SharedArrayBuffer} [sharedInputControlBuffer]
+ * @property {SharedArrayBuffer} [sharedInputBuffer]
+ * @property {number} [sharedInputByteLength]
+ * @property {number} [sharedInputBufferCapacityBytes]
+ * @property {SharedArrayBuffer} [sharedResultControlBuffer]
+ * @property {SharedArrayBuffer} [sharedResultResponseBuffer]
+ * @property {number} [sharedResultBufferCapacityBytes]
+ */
+
+/**
+ * The render-compile worker's `render-compiler-ready` / per-compile report payload. This is a
+ * hand-rolled metrics/diagnostics bag echoed across the worker postMessage boundary and read
+ * back coercion-guarded (`Number(...)`/`Boolean(...)`), so it is intentionally permissive; the
+ * packed section bytes ride a separate SAB and are not part of this object on the live path.
+ * @typedef {Record<string, any>} RenderCompileWorkerReport
+ */
+
+/**
+ * The per-request `pending` record the consumer holds while a compile is in flight.
+ * @typedef {object} RenderCompilePending
+ * @property {(value: any) => void} resolve
+ * @property {(reason?: any) => void} reject
+ * @property {ReturnType<typeof setTimeout>} timeout
+ * @property {Record<string, any>} requestMetrics
+ * @property {RenderCompileSharedResultArena | null} sharedResult
+ * @property {RenderCompileSharedInputArena | null} sharedInput
+ */
+
+/** @param {URL} assetPackUrl */
 export async function fetchAssetPack(assetPackUrl) {
   const response = await fetch(assetPackUrl);
   if (!response.ok) {
@@ -24,6 +117,10 @@ export async function fetchAssetPack(assetPackUrl) {
 }
 
 export class RenderSectionWorkerCompiler {
+  /**
+   * @param {Uint8Array} assetPack
+   * @param {RenderSectionWorkerCompilerOptions} [options]
+   */
   constructor(assetPack, options = {}) {
     const {
       workerUrl,
@@ -31,9 +128,11 @@ export class RenderSectionWorkerCompiler {
       bindgenWasmUrl,
       workerName = "mclone-render-compiler",
     } = options;
-    this.workerUrl = workerUrl;
-    this.bindgenJsUrl = bindgenJsUrl;
-    this.bindgenWasmUrl = bindgenWasmUrl;
+    // Required in practice — every caller (app + smoke) passes all three URLs; the worker cannot
+    // run without them, so a missing one throws at `.href` either way.
+    this.workerUrl = /** @type {URL} */ (workerUrl);
+    this.bindgenJsUrl = /** @type {URL} */ (bindgenJsUrl);
+    this.bindgenWasmUrl = /** @type {URL} */ (bindgenWasmUrl);
     this.pending = new Map();
     this.metrics = {
       transportKind: RENDER_COMPILER_TRANSPORT_KIND,
@@ -72,13 +171,13 @@ export class RenderSectionWorkerCompiler {
       name: workerName,
     });
     this.worker.onmessage = (event) => {
-      const data = event.data ?? {};
+      const data = /** @type {RenderCompileWorkerReport} */ (event.data ?? {});
       if (data.kind === "render-compiler-ready") {
         this.handleReady(data);
         return;
       }
       const requestId = Number(data.requestId) || 0;
-      const pending = this.pending.get(requestId);
+      const pending = /** @type {RenderCompilePending | undefined} */ (this.pending.get(requestId));
       if (!pending) return;
       this.pending.delete(requestId);
       clearTimeout(pending.timeout);
@@ -164,6 +263,7 @@ export class RenderSectionWorkerCompiler {
     this.initialize(assetPack);
   }
 
+  /** @param {Uint8Array} assetPack */
   initialize(assetPack) {
     const initAssetPack = assetPack.slice();
     this.metrics.assetPackSendCount += 1;
@@ -181,6 +281,7 @@ export class RenderSectionWorkerCompiler {
     );
   }
 
+  /** @param {RenderCompileWorkerReport} data */
   handleReady(data) {
     clearTimeout(this.initTimeout);
     this.metrics.workerWasmInitCount = Number(data.workerWasmInitCount)
@@ -204,6 +305,7 @@ export class RenderSectionWorkerCompiler {
   // relays the doorbell (the worker writes the result into the same buffers main wasm
   // polls). Resolves with the worker metrics report; the section data path stays in
   // Rust via the next frame's poll, so JS never decodes the packed bytes.
+  /** @param {RenderCompileDoorbell} doorbell */
   async compileWithDoorbell(doorbell) {
     await this.ready;
     const requestId = Number(doorbell.requestId) || 0;
@@ -229,6 +331,19 @@ export class RenderSectionWorkerCompiler {
     });
   }
 
+  /**
+   * @param {object} args
+   * @param {number} args.requestId
+   * @param {number} [args.centerX]
+   * @param {number} [args.centerZ]
+   * @param {number} [args.radiusChunks]
+   * @param {Int32Array | number[]} [args.targetSections]
+   * @param {number} [args.snapshotInputChunkCount]
+   * @param {number} [args.snapshotInputClonedColumnCount]
+   * @param {RenderCompileSharedResultArena | null} args.sharedResult
+   * @param {RenderCompileSharedInputArena | null} args.sharedInput
+   * @param {{ snapshotInputByteLength?: number, snapshotInputChunkCount?: number, snapshotInputBytes?: ArrayBufferView }} [args.requestSource]
+   */
   dispatchCompile({
     requestId,
     centerX,
@@ -263,6 +378,7 @@ export class RenderSectionWorkerCompiler {
         sharedResult,
         sharedInput,
       });
+      /** @type {RenderCompileWorkerRequest} */
       const message = {
         kind: "compile-render-sections",
         requestId,
@@ -299,6 +415,7 @@ export class RenderSectionWorkerCompiler {
     this.rejectAll(new Error("render compiler worker terminated"));
   }
 
+  /** @param {Error} error */
   rejectAll(error) {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
@@ -312,6 +429,10 @@ export class RenderSectionWorkerCompiler {
 // submit doorbell) in the same arena shape the worker protocol + metrics expect.
 // JS does not arm these — main wasm already filled/armed them — it only reads byte
 // counts back for diagnostics.
+/**
+ * @param {RenderCompileDoorbell} doorbell
+ * @returns {RenderCompileSharedResultArena | null}
+ */
 export function sharedResultArenaFromDoorbell(doorbell) {
   const controlBuffer = doorbell.sharedResultControlBuffer;
   const responseBuffer = doorbell.sharedResultResponseBuffer;
@@ -326,6 +447,10 @@ export function sharedResultArenaFromDoorbell(doorbell) {
   };
 }
 
+/**
+ * @param {RenderCompileDoorbell} doorbell
+ * @returns {RenderCompileSharedInputArena | null}
+ */
 export function sharedInputArenaFromDoorbell(doorbell) {
   const controlBuffer = doorbell.sharedInputControlBuffer;
   const inputBuffer = doorbell.sharedInputBuffer;
@@ -341,6 +466,10 @@ export function sharedInputArenaFromDoorbell(doorbell) {
   };
 }
 
+/**
+ * @param {RenderCompileWorkerReport} workerReport
+ * @param {RenderCompilePending | undefined} pending
+ */
 export function renderCompilerPackedResponse(workerReport, pending) {
   const sharedResult = pending?.sharedResult ?? null;
   const sharedResultBuffer = isSharedArrayBuffer(workerReport.sharedResultBuffer)
@@ -383,6 +512,12 @@ export function renderCompilerPackedResponse(workerReport, pending) {
   };
 }
 
+/**
+ * @param {Int32Array | number[] | undefined} targetSections
+ * @param {RenderCompileSharedResultArena | null} sharedResult
+ * @param {RenderCompileSharedInputArena | null} sharedInput
+ * @param {{ snapshotInputByteLength?: number, snapshotInputChunkCount?: number, snapshotInputBytes?: ArrayBufferView } | undefined} request
+ */
 export function renderCompilerRequestMetrics(targetSections, sharedResult, sharedInput, request) {
   const requestAssetPackByteLength = 0;
   const requestTargetSectionsByteLength = byteLengthOfTargetSections(targetSections);
@@ -407,6 +542,12 @@ export function renderCompilerRequestMetrics(targetSections, sharedResult, share
   };
 }
 
+/**
+ * @param {Record<string, any>} cumulativeMetrics
+ * @param {Record<string, any>} requestMetrics
+ * @param {RenderCompileWorkerReport} workerReport
+ * @param {number} packedByteLength
+ */
 export function renderCompilerMetricsForResponse(cumulativeMetrics, requestMetrics, workerReport, packedByteLength) {
   const sharedResultBufferUsed = Boolean(workerReport.sharedResultBufferUsed)
     || Boolean(requestMetrics.sharedResultBufferUsed && Number(workerReport.sharedResultByteLength) > 0);
@@ -494,10 +635,15 @@ export function renderCompilerSharedMemorySupported() {
     && typeof Atomics.notify === "function";
 }
 
+/**
+ * @param {unknown} value
+ * @returns {value is SharedArrayBuffer}
+ */
 export function isSharedArrayBuffer(value) {
   return typeof SharedArrayBuffer === "function" && value instanceof SharedArrayBuffer;
 }
 
+/** @param {unknown} value */
 export function byteLengthOf(value) {
   if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || isSharedArrayBuffer(value)) {
     return value.byteLength;
@@ -505,6 +651,7 @@ export function byteLengthOf(value) {
   return 0;
 }
 
+/** @param {unknown} value */
 export function byteLengthOfTargetSections(value) {
   if (Array.isArray(value)) {
     return value.length * 4;

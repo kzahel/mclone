@@ -7,6 +7,11 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, normalize, resolve, sep } from "node:path";
 import { inflateSync } from "node:zlib";
 
+/**
+ * @typedef {import("@playwright/test").Page} Page
+ * @typedef {import("@playwright/test").Locator} Locator
+ */
+
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const appRoot = resolve(scriptDir, "..");
 const nativeRoot = resolve(appRoot, "../..");
@@ -69,6 +74,11 @@ const requireThreading = process.argv.includes("--require-threading")
     && process.env.MCLONE_NATIVE_WEB_REQUIRE_THREADING !== "0");
 const remoteWebSocket = process.argv.includes("--remote-websocket")
   || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
+// --build-only compiles the wasm + runs wasm-bindgen (emitting mclone_web_client.d.ts via
+// --typescript) and exits before launching a browser. This is how native:web:typecheck cheaply
+// materializes the .d.ts its tsconfig path-maps, without a full smoke run.
+const buildOnly = process.argv.includes("--build-only")
+  || process.env.MCLONE_NATIVE_WEB_BUILD_ONLY === "1";
 const DIRT_BLOCK_STATE_ID = 5;
 
 run().catch((error) => {
@@ -79,11 +89,17 @@ run().catch((error) => {
 async function run() {
   buildWasm();
   buildBindgenBundle();
+  if (buildOnly) {
+    console.log(`bindgen output (with mclone_web_client.d.ts) ready in ${bindgenOutDir}`);
+    return;
+  }
   const server = await startServer();
   const remoteServer = remoteWebSocket ? await startNativeWebSocketServer() : null;
+  /** @type {import("@playwright/test").Browser | undefined} */
   let browser;
   try {
-    const port = server.address().port;
+    const address = server.address();
+    const port = address && typeof address === "object" ? address.port : 0;
     const baseUrl = `http://127.0.0.1:${port}`;
     if (serveOnly) {
       await serveUntilStopped(baseUrl, remoteServer);
@@ -105,7 +121,9 @@ async function run() {
           hasTouch: true,
         }
       : undefined);
+    /** @type {string[]} */
     const pageErrors = [];
+    /** @type {string[]} */
     const pageLogs = [];
     page.on("pageerror", (error) => pageErrors.push(String(error)));
     page.on("console", (message) => {
@@ -409,6 +427,10 @@ async function run() {
   }
 }
 
+/**
+ * @param {string} baseUrl
+ * @param {{ websocketUrl: string, stop: () => Promise<void> } | null} remoteServer
+ */
 async function serveUntilStopped(baseUrl, remoteServer) {
   const appUrl = `${baseUrl}/app.html`;
   const smokeUrl = remoteServer
@@ -428,7 +450,9 @@ async function serveUntilStopped(baseUrl, remoteServer) {
 
 function waitForStopSignal() {
   return new Promise((resolveSignal) => {
+    /** @type {NodeJS.Signals[]} */
     const signals = ["SIGINT", "SIGTERM"];
+    /** @param {NodeJS.Signals} signal */
     const stop = (signal) => {
       for (const registeredSignal of signals) {
         process.off(registeredSignal, stop);
@@ -441,6 +465,11 @@ function waitForStopSignal() {
   });
 }
 
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @returns {Promise<any>}
+ */
 async function runMovementPerfProbe(page, canvas) {
   await canvas.evaluate((element) => element.focus());
   await page.waitForFunction(
@@ -488,7 +517,7 @@ async function runMovementPerfProbe(page, canvas) {
     for (let i = 0; i < 4; i += 1) {
       globalThis.__mcloneWebApp.adjustCameraSpeed?.(4);
     }
-    globalThis.__mcloneWebApp.setInputKey("forward", true);
+    globalThis.__mcloneWebApp.setInputKey?.("forward", true);
   });
   try {
     await page.waitForFunction(
@@ -506,7 +535,7 @@ async function runMovementPerfProbe(page, canvas) {
     );
   } finally {
     await page.evaluate(() => {
-      globalThis.__mcloneWebApp.setInputKey("forward", false);
+      globalThis.__mcloneWebApp.setInputKey?.("forward", false);
     });
   }
 
@@ -515,7 +544,7 @@ async function runMovementPerfProbe(page, canvas) {
   const end = await page.evaluate((start) => {
     const state = globalThis.__mcloneWebApp.state;
     const compileTimings = state.compileTimings ?? [];
-    const movementCompileTimings = compileTimings.filter((timing) => (
+    const movementCompileTimings = compileTimings.filter((/** @type {any} */ timing) => (
       Number(timing.sequence) > start.lastCompileSequence
     ));
     return {
@@ -575,6 +604,10 @@ async function runMovementPerfProbe(page, canvas) {
   };
 }
 
+/**
+ * @param {Page} page
+ * @param {number} [timeout]
+ */
 async function waitForWebAppStreamingSettled(page, timeout = 60_000) {
   await page.waitForFunction(
     () => {
@@ -589,6 +622,10 @@ async function waitForWebAppStreamingSettled(page, timeout = 60_000) {
   );
 }
 
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ */
 async function exerciseMobileTouchControls(page, canvas) {
   const initial = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
@@ -643,7 +680,7 @@ async function exerciseMobileTouchControls(page, canvas) {
     );
     activeMovementProbe = await page.evaluate((start) => {
       const state = globalThis.__mcloneWebApp.state;
-      const impulse = globalThis.__mcloneWebApp.touchControlState()?.movementImpulse;
+      const impulse = globalThis.__mcloneWebApp.touchControlState?.()?.movementImpulse;
       const dx = Number(state.cameraX) - start.cameraX;
       const dz = Number(state.cameraZ) - start.cameraZ;
       return {
@@ -679,7 +716,7 @@ async function exerciseMobileTouchControls(page, canvas) {
         && state.touchJoystickActive === false
         && state.touchMovementLeftImpulse === 0
         && state.touchMovementForwardImpulse === 0
-        && globalThis.__mcloneWebApp.touchControlState()?.keys?.forward === false,
+        && globalThis.__mcloneWebApp.touchControlState?.()?.keys?.forward === false,
       distance: Math.hypot(dx, dz),
       active: activeMovementProbe,
       start,
@@ -688,7 +725,7 @@ async function exerciseMobileTouchControls(page, canvas) {
         cameraZ: state.cameraZ,
         commandCount: state.lastReport?.commandCount ?? 0,
       },
-      touch: globalThis.__mcloneWebApp.touchControlState(),
+      touch: globalThis.__mcloneWebApp.touchControlState?.(),
     };
   }, { start: movementStart, activeMovementProbe });
 
@@ -820,6 +857,11 @@ async function exerciseMobileTouchControls(page, canvas) {
   };
 }
 
+/**
+ * @param {Page} page
+ * @param {string} key
+ * @param {number} pointerId
+ */
 async function exerciseTouchButton(page, key, pointerId) {
   const selector = `[data-touch-key="${key}"]`;
   await dispatchPointerEventOnSelector(page, selector, "pointerdown", { pointerId, buttons: 1 });
@@ -830,9 +872,9 @@ async function exerciseTouchButton(page, key, pointerId) {
     { timeout: 10_000 },
   );
   const down = await page.evaluate((key) => ({
-    keyDown: globalThis.__mcloneWebApp.touchControlState().keys[key],
+    keyDown: globalThis.__mcloneWebApp.touchControlState?.().keys[key],
     activeCount: globalThis.__mcloneWebApp.state.touchButtonActiveCount,
-    activeAttribute: document.querySelector(`[data-touch-key="${key}"]`)?.dataset.active ?? null,
+    activeAttribute: /** @type {HTMLElement | null} */ (document.querySelector(`[data-touch-key="${key}"]`))?.dataset.active ?? null,
   }), key);
   await dispatchPointerEventOnSelector(page, selector, "pointerup", { pointerId, buttons: 0 });
   await page.waitForFunction(
@@ -842,9 +884,9 @@ async function exerciseTouchButton(page, key, pointerId) {
     { timeout: 10_000 },
   );
   const up = await page.evaluate((key) => ({
-    keyDown: globalThis.__mcloneWebApp.touchControlState().keys[key],
+    keyDown: globalThis.__mcloneWebApp.touchControlState?.().keys[key],
     activeCount: globalThis.__mcloneWebApp.state.touchButtonActiveCount,
-    activeAttribute: document.querySelector(`[data-touch-key="${key}"]`)?.dataset.active ?? null,
+    activeAttribute: /** @type {HTMLElement | null} */ (document.querySelector(`[data-touch-key="${key}"]`))?.dataset.active ?? null,
   }), key);
   return {
     ok: down.keyDown === true
@@ -858,6 +900,7 @@ async function exerciseTouchButton(page, key, pointerId) {
   };
 }
 
+/** @param {Page} page */
 async function readMenuState(page) {
   return page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
@@ -874,6 +917,11 @@ async function readMenuState(page) {
   });
 }
 
+/**
+ * @param {Page} page
+ * @param {string} type
+ * @param {{ code: string, key: string }} keyInfo
+ */
 async function dispatchKeyboardEvent(page, type, { code, key }) {
   await page.evaluate(
     ({ type, code, key }) => {
@@ -888,10 +936,15 @@ async function dispatchKeyboardEvent(page, type, { code, key }) {
   );
 }
 
+/**
+ * @param {Page} page
+ * @param {string} type
+ * @param {{ pointerId: number, xFraction: number, yFraction: number, buttons: number }} options
+ */
 async function dispatchCanvasPointerEvent(page, type, options) {
   await page.evaluate(
     ({ type, options }) => {
-      const canvas = document.getElementById("mclone-canvas");
+      const canvas = /** @type {HTMLElement} */ (document.getElementById("mclone-canvas"));
       const rect = canvas.getBoundingClientRect();
       const clientX = rect.left + rect.width * options.xFraction;
       const clientY = rect.top + rect.height * options.yFraction;
@@ -911,10 +964,16 @@ async function dispatchCanvasPointerEvent(page, type, options) {
   );
 }
 
+/**
+ * @param {Page} page
+ * @param {string} selector
+ * @param {string} type
+ * @param {{ pointerId: number, buttons: number }} options
+ */
 async function dispatchPointerEventOnSelector(page, selector, type, options) {
   await page.evaluate(
     ({ selector, type, options }) => {
-      const target = document.querySelector(selector);
+      const target = /** @type {HTMLElement} */ (document.querySelector(selector));
       const rect = target.getBoundingClientRect();
       target.dispatchEvent(new PointerEvent(type, {
         bubbles: true,
@@ -932,6 +991,7 @@ async function dispatchPointerEventOnSelector(page, selector, type, options) {
   );
 }
 
+/** @param {Page} page */
 async function captureTargetPreviewProbe(page) {
   await page.waitForFunction(
     () => {
@@ -947,8 +1007,8 @@ async function captureTargetPreviewProbe(page) {
   );
   return page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
-    const first = globalThis.__mcloneWebApp.previewBlockTarget();
-    const second = globalThis.__mcloneWebApp.previewBlockTarget();
+    const first = globalThis.__mcloneWebApp.previewBlockTarget?.();
+    const second = globalThis.__mcloneWebApp.previewBlockTarget?.();
     return {
       ok: first?.ok === true
         && second?.ok === true
@@ -963,6 +1023,10 @@ async function captureTargetPreviewProbe(page) {
   });
 }
 
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ */
 async function exerciseBlockInteraction(page, canvas) {
   const breakProbe = await clickBlockInteraction(page, canvas, "left", "break");
   await page.keyboard.press("2");
@@ -987,6 +1051,13 @@ async function exerciseBlockInteraction(page, canvas) {
   };
 }
 
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {"left" | "right" | "middle"} button
+ * @param {string} action
+ * @param {{ expectedSelectedHotbarSlot?: number, expectedResultBlockStateId?: number, expectedCarriedItemSynced?: boolean }} [options]
+ */
 async function clickBlockInteraction(page, canvas, button, action, options = {}) {
   const start = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
@@ -1046,6 +1117,16 @@ async function clickBlockInteraction(page, canvas, button, action, options = {})
   );
 }
 
+/**
+ * @typedef {object} BlockInteractionWaitArgs
+ * @property {{ commandCount: number, interactionCount: number, meshBuildCount: number }} start
+ * @property {string} action
+ * @property {number | null} expectedSelectedHotbarSlot
+ * @property {number | null} expectedResultBlockStateId
+ * @property {boolean | null} expectedCarriedItemSynced
+ */
+
+/** @param {BlockInteractionWaitArgs} args */
 function blockInteractionReadyPredicate(args) {
   const {
     start,
@@ -1075,6 +1156,7 @@ function blockInteractionReadyPredicate(args) {
     && compileReport?.meshBuildCount > start.meshBuildCount;
 }
 
+/** @param {BlockInteractionWaitArgs} args */
 function blockInteractionReadyDiagnostic({
   start,
   action,
@@ -1150,6 +1232,10 @@ function buildBindgenBundle() {
     [
       "--target",
       "web",
+      // --typescript emits mclone_web_client.d.ts next to the JS glue (070 Stage 2). It is the
+      // single source the web-glue type-check gate (native:web:typecheck) checks the wasm-return
+      // boundary against. It does not affect what the smoke harness serves.
+      "--typescript",
       "--out-dir",
       bindgenOutDir,
       "--out-name",
@@ -1206,7 +1292,8 @@ async function startServer() {
       });
       response.end(bytes);
     } catch (error) {
-      response.writeHead(error?.code === "ENOENT" ? 404 : 500, {
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+      response.writeHead(code === "ENOENT" ? 404 : 500, {
         "Content-Type": "text/plain; charset=utf-8",
         ...crossOriginIsolationHeaders(),
       });
@@ -1216,7 +1303,7 @@ async function startServer() {
 
   const requestedPort = Number.parseInt(process.env.MCLONE_NATIVE_WEB_SMOKE_PORT ?? "0", 10);
   await new Promise((resolveListen) => {
-    server.listen(Number.isFinite(requestedPort) ? requestedPort : 0, "127.0.0.1", resolveListen);
+    server.listen(Number.isFinite(requestedPort) ? requestedPort : 0, "127.0.0.1", () => resolveListen(undefined));
   });
   return server;
 }
@@ -1295,6 +1382,7 @@ function startNativeWebSocketServer() {
   });
 }
 
+/** @param {string} pathname */
 function resolveRequestPath(pathname) {
   if (pathname === "/" || pathname === "/index.html") {
     return join(wwwRoot, "index.html");
@@ -1331,6 +1419,7 @@ function resolveRequestPath(pathname) {
   return resolved;
 }
 
+/** @param {string} path */
 function contentType(path) {
   if (path.endsWith(".html")) return "text/html; charset=utf-8";
   if (path.endsWith(".js")) return "text/javascript; charset=utf-8";
@@ -1347,6 +1436,11 @@ function crossOriginIsolationHeaders() {
   };
 }
 
+/**
+ * @param {any} result
+ * @param {string[]} pageErrors
+ * @param {any} canvasPixels
+ */
 function assertSmokeResult(result, pageErrors, canvasPixels) {
   if (pageErrors.length > 0) {
     throw new Error(`browser page errors:\n${pageErrors.join("\n")}`);
@@ -1406,6 +1500,14 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
   }
 }
 
+/**
+ * @param {any} result
+ * @param {string[]} pageErrors
+ * @param {any} canvasPixels
+ * @param {any} walkingProbe
+ * @param {any} targetPreviewProbe
+ * @param {any} blockInteractionProbe
+ */
 function assertAppLoopResult(
   result,
   pageErrors,
@@ -1456,7 +1558,7 @@ function assertAppLoopResult(
   if (
     result.compileTimingCount < 2
     || !result.lastCompileTiming
-    || !result.compileTimings?.some((timing) => timing.trigger === "stream")
+    || !result.compileTimings?.some((/** @type {any} */ timing) => timing.trigger === "stream")
   ) {
     throw new Error(`native web app did not report streaming compile timings:\n${JSON.stringify(result, null, 2)}`);
   }
@@ -1511,6 +1613,12 @@ function assertAppLoopResult(
   }
 }
 
+/**
+ * @param {any} result
+ * @param {string[]} pageErrors
+ * @param {any} canvasPixels
+ * @param {any} mobileTouchProbe
+ */
 function assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouchProbe) {
   if (pageErrors.length > 0) {
     throw new Error(`browser mobile app page errors:\n${pageErrors.join("\n")}`);
@@ -1545,6 +1653,11 @@ function assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouch
   }
 }
 
+/**
+ * @param {any} report
+ * @param {string[]} pageErrors
+ * @param {any} canvasPixels
+ */
 function assertMovementPerfResult(report, pageErrors, canvasPixels) {
   if (pageErrors.length > 0) {
     throw new Error(`browser movement perf page errors:\n${pageErrors.join("\n")}`);
@@ -1570,7 +1683,7 @@ function assertMovementPerfResult(report, pageErrors, canvasPixels) {
   for (const timing of probe.movementCompileTimings) {
     assertCompileTimingDiagnostics(timing, "movement perf compile timing");
   }
-  if (!probe.movementCompileTimings.some((timing) => (
+  if (!probe.movementCompileTimings.some((/** @type {any} */ timing) => (
     Number(timing.frameCountAfter) > Number(timing.frameCountBefore)
     && Number(timing.renderCountAfter) > Number(timing.renderCountBefore)
   ))) {
@@ -1581,6 +1694,10 @@ function assertMovementPerfResult(report, pageErrors, canvasPixels) {
   }
 }
 
+/**
+ * @param {any} timing
+ * @param {string} label
+ */
 function assertCompileTimingDiagnostics(timing, label) {
   if (
     !timing
@@ -1643,6 +1760,7 @@ function assertCompileTimingDiagnostics(timing, label) {
   }
 }
 
+/** @param {any[]} timings */
 function summarizeCompileTimings(timings) {
   const values = Array.isArray(timings) ? timings : [];
   const totals = values.map((timing) => Number(timing.totalMs) || 0);
@@ -1733,6 +1851,7 @@ function summarizeCompileTimings(timings) {
   };
 }
 
+/** @param {number[]} values */
 function summarizeNumbers(values) {
   if (values.length === 0) {
     return { min: 0, max: 0, avg: 0 };
@@ -1745,6 +1864,7 @@ function summarizeNumbers(values) {
   };
 }
 
+/** @param {any} threading */
 function assertThreadingResult(threading) {
   if (!threading?.ok) {
     throw new Error(`browser threading smoke failed:\n${JSON.stringify(threading, null, 2)}`);
@@ -1762,6 +1882,16 @@ function assertThreadingResult(threading) {
   }
 }
 
+/**
+ * @param {any} report
+ * @param {any} canvasPixels
+ * @param {any} firstReport
+ * @param {any} firstCenter
+ * @param {any} secondCenter
+ * @param {number} renderCompilerPendingJobCount
+ * @param {number} sessionPendingCompileJobCount
+ * @param {any} shutdownReport
+ */
 function assertChunkRenderResult(
   report,
   canvasPixels,
@@ -1859,6 +1989,11 @@ function assertChunkRenderResult(
   }
 }
 
+/**
+ * @param {any} center
+ * @param {number} expectedCenterX
+ * @param {number} expectedCenterZ
+ */
 function assertOverviewCenter(center, expectedCenterX, expectedCenterZ) {
   if (
     !center
@@ -1873,6 +2008,11 @@ function assertOverviewCenter(center, expectedCenterX, expectedCenterZ) {
   }
 }
 
+/**
+ * @param {any} workerReport
+ * @param {any} center
+ * @param {string} label
+ */
 function assertOverviewWorkerReport(workerReport, center, label) {
   if (!workerReport?.ok) {
     throw new Error(`${label} render compiler worker failed:\n${JSON.stringify({ center, workerReport }, null, 2)}`);
@@ -1918,6 +2058,7 @@ function assertOverviewWorkerReport(workerReport, center, label) {
     throw new Error(`${label} render compiler worker summary was malformed:\n${JSON.stringify({ center, workerReport }, null, 2)}`);
   }
 }
+/** @param {Buffer} bytes */
 function analyzePng(bytes) {
   const png = decodePngRgba(bytes);
   const expected = {
@@ -1968,6 +2109,7 @@ function analyzePng(bytes) {
   };
 }
 
+/** @param {Buffer} bytes */
 function decodePngRgba(bytes) {
   if (
     bytes[0] !== 0x89
@@ -1987,6 +2129,7 @@ function decodePngRgba(bytes) {
   let height = 0;
   let colorType = 0;
   let bitDepth = 0;
+  /** @type {Buffer[]} */
   const idat = [];
   while (offset < bytes.length) {
     const length = bytes.readUInt32BE(offset);
@@ -2051,6 +2194,13 @@ function decodePngRgba(bytes) {
   return { width, height, rgba };
 }
 
+/**
+ * @param {number} filter
+ * @param {number} current
+ * @param {number} left
+ * @param {number} up
+ * @param {number} upLeft
+ */
 function unfilterByte(filter, current, left, up, upLeft) {
   switch (filter) {
     case 0:
@@ -2068,6 +2218,11 @@ function unfilterByte(filter, current, left, up, upLeft) {
   }
 }
 
+/**
+ * @param {number} left
+ * @param {number} up
+ * @param {number} upLeft
+ */
 function paethPredictor(left, up, upLeft) {
   const p = left + up - upLeft;
   const pa = Math.abs(p - left);

@@ -1,5 +1,45 @@
 import { RenderSectionWorkerCompiler, fetchAssetPack } from "./mclone-render-compiler-shared.js";
 
+/**
+ * The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
+ * Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
+ * in tsconfig.json and only ever appears in type positions. Casting the dynamic import to this type
+ * is what makes the live wasm call sites (`session.advanceCameraFrame(...)` &c.) checkable against
+ * the real export signatures — the "single biggest win" of 070 Stage 2.
+ * @typedef {typeof import("mclone-web-client-wasm")} WasmModule
+ * @typedef {import("mclone-web-client-wasm").WebChunkRenderSession} WebChunkRenderSession
+ */
+
+/**
+ * A wasm-return object — camera/frame/report/target/interaction/doorbell. The generated `.d.ts`
+ * types every `WebChunkRenderSession` method return as `any` (wasm-bindgen cannot describe the
+ * serde shape), so these are read coercion-guarded (`Number(...)`/`Boolean(...)`/`?.ok`). Naming
+ * the boundary documents intent and keeps internal field reads consistent.
+ * @typedef {Record<string, any>} WasmReport
+ */
+
+/**
+ * A per-compile timing record (`createCompileTiming` …). A hand-rolled instrumentation bag with
+ * ~90 numeric fields mutated in place across the compile lifecycle; treated as a loose record.
+ * @typedef {Record<string, any>} CompileTiming
+ */
+
+/**
+ * The global app runtime exposed on `globalThis.__mcloneWebApp` and polled by the smoke harness.
+ * `state` is the mutable status snapshot (a loose bag); the optional methods are installed by
+ * `boot()` once the {@link WebChunkApp} exists.
+ * @typedef {object} AppRuntime
+ * @property {boolean} ready
+ * @property {Record<string, any>} state
+ * @property {(dx: number, dy: number) => void} [queueMouseDelta]
+ * @property {(name: string, down: boolean) => boolean} [setInputKey]
+ * @property {(amount: number) => any} [adjustCameraSpeed]
+ * @property {() => any} [previewBlockTarget]
+ * @property {() => any} [touchControlState]
+ * @property {(open: boolean) => void} [setHudOpen]
+ * @property {(open: boolean) => void} [setMenuOpen]
+ */
+
 const DEPLOY_ASSET_VERSION = normalizedDeployAssetVersion();
 const BINDGEN_JS_URL = versionedUrl("./pkg/mclone_web_client.js");
 const BINDGEN_WASM_URL = versionedUrl("./pkg/mclone_web_client_bg.wasm");
@@ -26,6 +66,7 @@ const SETTINGS_STORAGE_KEYS = {
   lookSensitivity: "mclone.web.lookSensitivity",
 };
 
+/** @type {AppRuntime} */
 const runtime = {
   ready: false,
   state: {
@@ -143,15 +184,20 @@ async function boot() {
 
 class WebChunkApp {
   constructor() {
-    this.canvas = document.getElementById("mclone-canvas");
+    // Required for the app to run; `init()` re-validates with `instanceof HTMLCanvasElement` and
+    // throws if it is missing, so treating it as a non-null canvas here is sound for the lifecycle.
+    this.canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("mclone-canvas"));
     this.status = document.getElementById("status");
     this.hud = document.getElementById("runtime-hud");
     this.hudToggle = document.getElementById("hud-toggle");
+    /** @type {WebChunkRenderSession | null} */
     this.session = null;
+    /** @type {RenderSectionWorkerCompiler | null} */
     this.compiler = null;
     this.keys = defaultInputKeys();
     this.touchKeys = defaultInputKeys();
     this.touchMovementImpulse = defaultMovementImpulse();
+    /** @type {TouchControls | null} */
     this.touchControls = null;
     const settings = loadStoredSettings();
     this.lookSensitivity = settings.lookSensitivity;
@@ -163,11 +209,14 @@ class WebChunkApp {
     // worker round-trip) plus a count of timings whose apply finalize is still awaiting
     // the worker metrics. The streaming loop posts a doorbell per compile and finalizes
     // the timing when the next frame's poll applies the result.
+    /** @type {Map<number, CompileTiming>} */
     this.pendingTimings = new Map();
     this.finalizingCount = 0;
     this.hasRendered = false;
+    /** @type {{ centerX: number, centerZ: number } | null} */
     this.loadedCenter = null;
     this.pointerDragging = false;
+    /** @type {{ button: number, enabled: boolean, movement: number } | null} */
     this.pointerDown = null;
     this.animationFrame = 0;
     this.lastFrameTime = 0;
@@ -184,10 +233,10 @@ class WebChunkApp {
 
     runtime.state.status = "loading wasm";
     updateDom();
-    const module = await import(BINDGEN_JS_URL.href);
+    const module = /** @type {WasmModule} */ (await import(BINDGEN_JS_URL.href));
     await module.default(BINDGEN_WASM_URL.href);
     for (const name of ["mclone_web_create_worker_chunk_render_session"]) {
-      if (typeof module[name] !== "function") {
+      if (typeof (/** @type {any} */ (module))[name] !== "function") {
         throw new Error(`missing ${name} export`);
       }
     }
@@ -216,7 +265,7 @@ class WebChunkApp {
       "previewBlockTarget",
       "interactBlock",
     ]) {
-      if (typeof this.session[name] !== "function") {
+      if (typeof (/** @type {any} */ (this.session))[name] !== "function") {
         throw new Error(`missing WebChunkRenderSession.${name} export`);
       }
     }
@@ -247,7 +296,7 @@ class WebChunkApp {
 
   start() {
     this.lastFrameTime = performance.now();
-    const frame = (now) => {
+    const frame = (/** @type {number} */ now) => {
       if (!this.tickFrameBusy) {
         this.tickFrameBusy = true;
         runtime.state.tickFrameBusy = true;
@@ -262,10 +311,12 @@ class WebChunkApp {
     this.animationFrame = requestAnimationFrame(frame);
   }
 
+  /** @param {number} now */
   async tickFrame(now) {
     if (!this.session) {
       return;
     }
+    const session = this.session;
     const frameGapMs = Number.isFinite(now - this.lastFrameTime)
       ? Math.max(0, now - this.lastFrameTime)
       : 0;
@@ -285,7 +336,7 @@ class WebChunkApp {
 
     runtime.state.frameCount += 1;
     runtime.state.tickPhase = "advance";
-    const camera = await this.withSessionAsync(() => this.session.advanceCameraFrame(
+    const camera = await this.withSessionAsync(() => session.advanceCameraFrame(
       dtSeconds,
       mouseDeltaX,
       mouseDeltaY,
@@ -303,7 +354,7 @@ class WebChunkApp {
     ));
     runtime.state.tickPhase = "post-advance";
     this.applyCameraState(camera);
-    this.applyTargetState(this.session.previewBlockTarget());
+    this.applyTargetState(session.previewBlockTarget());
 
     // 067 Stage 3: one frame of the shared streaming loop. syncCameraRenderFrame drains
     // updates, runs the budget-1 sync over the resident-ring compiler, and renders the
@@ -327,6 +378,8 @@ class WebChunkApp {
   // into the boot fall otherwise wedged WALK movement against spawn terrain on ~half of
   // runs.
   async warmUpStreamingToIdle() {
+    // Called from `init()` only after `this.session` is assigned, so it is non-null here.
+    const session = /** @type {WebChunkRenderSession} */ (this.session);
     const deadline = performance.now() + 30_000;
     while (performance.now() < deadline) {
       const idle = await this.streamFrameOnce({ awaitWorker: true });
@@ -335,11 +388,12 @@ class WebChunkApp {
       }
       await nextAnimationFrame();
     }
+    /** @type {{ x: number, z: number } | null} */
     let last = null;
     let stableFrames = 0;
     let iterations = 0;
     while (performance.now() < deadline) {
-      const camera = await this.withSessionAsync(() => this.session.advanceCameraFrame(
+      const camera = await this.withSessionAsync(() => session.advanceCameraFrame(
         1e-4, 0, 0, false, false, false, false, false, false, false, false, false, 0, 0,
       ));
       this.applyCameraState(camera);
@@ -371,14 +425,17 @@ class WebChunkApp {
   // cache, returning the frame report plus an optional worker `doorbell`. JS relays the
   // doorbell (fire-and-forget in the live loop; awaited during warm-up so the pump
   // converges); the next frame's poll applies the result. Returns whether the loop idled.
+  /** @param {{ awaitWorker?: boolean }} [options] */
   async streamFrameOnce(options = {}) {
     if (!this.session || !this.compiler) {
       return true;
     }
+    const session = this.session;
     const syncStart = performance.now();
+    /** @type {WasmReport} */
     let frame;
     try {
-      frame = await this.withSessionAsync(() => this.session.syncCameraRenderFrame(RADIUS_CHUNKS));
+      frame = await this.withSessionAsync(() => session.syncCameraRenderFrame(RADIUS_CHUNKS));
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
@@ -394,6 +451,10 @@ class WebChunkApp {
     return runtime.state.streamingSettled === true;
   }
 
+  /**
+   * @param {WasmReport} frame
+   * @param {number} syncMs
+   */
   handleStreamingFrame(frame, syncMs) {
     if (!frame?.ok) {
       runtime.state.ok = false;
@@ -443,7 +504,14 @@ class WebChunkApp {
   // Begin a per-compile timing for the doorbell armed this frame and relay it to the
   // worker. The worker writes the packed result into the resident ring (drained by the
   // next frame's poll); the returned promise resolves with the worker metrics report.
+  /**
+   * @param {WasmReport} doorbell
+   * @param {number} syncMs
+   */
   startAndPostCompileTiming(doorbell, syncMs) {
+    // Reached only from `handleStreamingFrame` via `streamFrameOnce`, which already guards
+    // `this.compiler` non-null.
+    const compiler = /** @type {RenderSectionWorkerCompiler} */ (this.compiler);
     const sequence = ++this.compileSequence;
     const timing = createCompileTiming({
       sequence,
@@ -459,7 +527,7 @@ class WebChunkApp {
     updateCompileTimingFromRequest(timing, doorbell);
     timing.beginRequestMs = Number.isFinite(syncMs) ? syncMs : 0;
     const workerStart = performance.now();
-    const workerPromise = this.compiler.compileWithDoorbell(doorbell).then((compiled) => {
+    const workerPromise = compiler.compileWithDoorbell(doorbell).then((compiled) => {
       timing.workerRoundTripMs = performance.now() - workerStart;
       if (compiled?.report) {
         updateCompileTimingFromWorker(timing, compiled.report);
@@ -481,6 +549,10 @@ class WebChunkApp {
   // Finalize the timing for the compile applied this frame: await its worker metrics (so
   // the record carries the transport/byte diagnostics), merge the Rust apply report, and
   // publish it to runtime.state.compileTimings.
+  /**
+   * @param {WasmReport} frame
+   * @param {number} syncMs
+   */
   finalizeCompileTiming(frame, syncMs) {
     const requestId = Number(frame.appliedRequestId);
     const timing = this.pendingTimings.get(requestId);
@@ -509,6 +581,7 @@ class WebChunkApp {
     })();
   }
 
+  /** @param {WasmReport} camera */
   applyCameraState(camera) {
     if (!camera?.ok) {
       return;
@@ -528,6 +601,7 @@ class WebChunkApp {
     applyHotbarState(camera);
   }
 
+  /** @param {WasmReport} report */
   applyReport(report) {
     this.applyCameraState(report);
     runtime.state.ok = true;
@@ -559,6 +633,7 @@ class WebChunkApp {
     runtime.state.lastReport = report;
   }
 
+  /** @param {WasmReport} target */
   applyTargetState(target) {
     if (!target?.ok) {
       return;
@@ -567,13 +642,15 @@ class WebChunkApp {
     applyHotbarState(target);
   }
 
+  /** @param {string} action */
   async interactBlock(action) {
     if (!this.session) {
       return null;
     }
+    const session = this.session;
     try {
       await this.waitForSessionIdle();
-      const interaction = await this.withSessionAsync(() => this.session.interactBlock(action));
+      const interaction = await this.withSessionAsync(() => session.interactBlock(action));
       if (!interaction?.ok) {
         return null;
       }
@@ -595,6 +672,7 @@ class WebChunkApp {
     }
   }
 
+  /** @param {number} slot */
   selectHotbarSlot(slot) {
     if (!this.session) {
       return false;
@@ -612,6 +690,7 @@ class WebChunkApp {
     return true;
   }
 
+  /** @param {number} amount */
   adjustCameraSpeed(amount) {
     if (!this.session) {
       return null;
@@ -629,6 +708,11 @@ class WebChunkApp {
     return camera;
   }
 
+  /**
+   * @template T
+   * @param {() => T} operation
+   * @returns {Promise<Awaited<T>>}
+   */
   async withSessionAsync(operation) {
     await this.waitForSessionIdle();
     this.sessionBusy = true;
@@ -648,6 +732,10 @@ class WebChunkApp {
     }
   }
 
+  /**
+   * @param {string} name
+   * @param {boolean} down
+   */
   setInputKey(name, down) {
     if (!(name in this.keys)) {
       return false;
@@ -656,6 +744,10 @@ class WebChunkApp {
     return true;
   }
 
+  /**
+   * @param {string} name
+   * @param {boolean} down
+   */
   setTouchKey(name, down) {
     if (!(name in this.touchKeys)) {
       return false;
@@ -664,12 +756,18 @@ class WebChunkApp {
     return true;
   }
 
+  /** @param {Record<string, boolean>} keys */
   setTouchKeys(keys) {
     for (const [name, down] of Object.entries(keys)) {
       this.setTouchKey(name, down);
     }
   }
 
+  /**
+   * @param {number} left
+   * @param {number} forward
+   * @param {boolean} active
+   */
   setTouchMovementImpulse(left, forward, active) {
     this.touchMovementImpulse = {
       active: Boolean(active),
@@ -690,12 +788,17 @@ class WebChunkApp {
     return { ...this.touchMovementImpulse };
   }
 
+  /** @param {string[]} [names] */
   clearTouchKeys(names = INPUT_KEY_NAMES) {
     for (const name of names) {
       this.setTouchKey(name, false);
     }
   }
 
+  /**
+   * @param {number} dx
+   * @param {number} dy
+   */
   queueMouseDelta(dx, dy) {
     const x = Number(dx);
     const y = Number(dy);
@@ -718,6 +821,7 @@ class WebChunkApp {
     };
   }
 
+  /** @param {number} frameGapMs */
   recordFrameGap(frameGapMs) {
     if (!Number.isFinite(frameGapMs)) {
       return;
@@ -773,6 +877,7 @@ class WebChunkApp {
   }
 }
 
+/** @param {WebChunkApp} app */
 function bindInput(app) {
   window.addEventListener("keydown", (event) => {
     if (isPhysicalKey(event, "KeyN", "n") && !event.repeat) {
@@ -881,6 +986,7 @@ function bindInput(app) {
   });
 }
 
+/** @param {WebChunkApp} app */
 function bindMenu(app) {
   // The hamburger now opens the main menu; the runtime/debug stats live behind
   // the menu's "Debug info" entry. Stats stay open by default on desktop so the
@@ -907,7 +1013,9 @@ function bindMenu(app) {
     setSettingsOpen(!isSettingsOpen());
   });
 
-  const lookInput = document.getElementById("setting-look-sensitivity");
+  const lookInput = /** @type {HTMLInputElement | null} */ (
+    document.getElementById("setting-look-sensitivity")
+  );
   lookInput?.addEventListener("input", () => {
     setLookSensitivity(app, Number(lookInput.value));
   });
@@ -926,6 +1034,10 @@ function bindMenu(app) {
   });
 }
 
+/**
+ * @param {WebChunkApp} app
+ * @param {boolean} open
+ */
 function setMenuOpen(app, open) {
   const menu = document.getElementById("main-menu");
   const toggle = document.getElementById("hud-toggle");
@@ -952,6 +1064,7 @@ function isMenuOpen() {
   return document.getElementById("main-menu")?.hidden === false;
 }
 
+/** @param {boolean} open */
 function setSettingsOpen(open) {
   const panel = document.getElementById("settings-panel");
   const button = document.getElementById("menu-settings");
@@ -968,6 +1081,10 @@ function isSettingsOpen() {
   return document.getElementById("settings-panel")?.hidden === false;
 }
 
+/**
+ * @param {WebChunkApp} app
+ * @param {number} value
+ */
 function setLookSensitivity(app, value) {
   const clamped = clampLookSensitivity(value);
   app.lookSensitivity = clamped;
@@ -976,8 +1093,11 @@ function setLookSensitivity(app, value) {
   syncSettingsControls(app);
 }
 
+/** @param {WebChunkApp} app */
 function syncSettingsControls(app) {
-  const lookInput = document.getElementById("setting-look-sensitivity");
+  const lookInput = /** @type {HTMLInputElement | null} */ (
+    document.getElementById("setting-look-sensitivity")
+  );
   if (lookInput && document.activeElement !== lookInput) {
     lookInput.value = String(app.lookSensitivity);
   }
@@ -987,6 +1107,7 @@ function syncSettingsControls(app) {
   }
 }
 
+/** @param {unknown} value */
 function clampLookSensitivity(value) {
   const sensitivity = Number(value);
   if (!Number.isFinite(sensitivity)) {
@@ -1003,6 +1124,7 @@ function loadStoredSettings() {
   };
 }
 
+/** @param {string} key */
 function readStoredSetting(key) {
   try {
     return globalThis.localStorage?.getItem(key) ?? null;
@@ -1011,6 +1133,10 @@ function readStoredSetting(key) {
   }
 }
 
+/**
+ * @param {string} key
+ * @param {string} value
+ */
 function storeSetting(key, value) {
   try {
     globalThis.localStorage?.setItem(key, value);
@@ -1020,14 +1146,17 @@ function storeSetting(key, value) {
 }
 
 class TouchControls {
+  /** @param {WebChunkApp} app */
   constructor(app) {
     this.app = app;
     this.canvas = app.canvas;
     this.root = document.getElementById("touch-controls");
     this.joystick = document.getElementById("touch-joystick");
     this.thumb = document.getElementById("touch-joystick-thumb");
-    this.buttons = Array.from(document.querySelectorAll("[data-touch-key]"));
+    this.buttons = /** @type {HTMLElement[]} */ (Array.from(document.querySelectorAll("[data-touch-key]")));
+    /** @type {number | null} */
     this.movementPointerId = null;
+    /** @type {number | null} */
     this.lookPointerId = null;
     this.movementBaseX = 0;
     this.movementBaseY = 0;
@@ -1035,6 +1164,7 @@ class TouchControls {
     this.movementThumbY = 0;
     this.lookLastX = 0;
     this.lookLastY = 0;
+    /** @type {Map<number, string>} */
     this.buttonPointers = new Map();
     this.lastTouchAt = 0;
 
@@ -1061,6 +1191,7 @@ class TouchControls {
     }
   }
 
+  /** @param {PointerEvent} event */
   onCanvasPointerDown(event) {
     if (!isTouchPointer(event)) {
       return;
@@ -1078,6 +1209,7 @@ class TouchControls {
     }
   }
 
+  /** @param {PointerEvent} event */
   onCanvasPointerMove(event) {
     if (event.pointerId === this.movementPointerId) {
       this.markTouchEvent();
@@ -1090,6 +1222,7 @@ class TouchControls {
     }
   }
 
+  /** @param {PointerEvent} event */
   onCanvasPointerEnd(event) {
     if (event.pointerId === this.movementPointerId) {
       this.markTouchEvent();
@@ -1102,8 +1235,12 @@ class TouchControls {
     }
   }
 
+  /** @param {PointerEvent} event */
   onButtonPointerDown(event) {
-    const key = event.currentTarget?.dataset?.touchKey;
+    // currentTarget is the bound `[data-touch-key]` button (an HTMLElement) for the duration of
+    // its own dispatch.
+    const target = /** @type {HTMLElement} */ (event.currentTarget);
+    const key = target?.dataset?.touchKey;
     if (!key) {
       return;
     }
@@ -1111,13 +1248,14 @@ class TouchControls {
     event.preventDefault();
     event.stopPropagation();
     this.setVisible(true);
-    trySetPointerCapture(event.currentTarget, event.pointerId);
+    trySetPointerCapture(target, event.pointerId);
     this.buttonPointers.set(event.pointerId, key);
-    event.currentTarget.dataset.active = "true";
+    target.dataset.active = "true";
     this.app.setTouchKey(key, true);
     this.updateRuntimeState();
   }
 
+  /** @param {PointerEvent} event */
   onButtonPointerEnd(event) {
     const key = this.buttonPointers.get(event.pointerId);
     if (!key) {
@@ -1135,6 +1273,7 @@ class TouchControls {
     this.updateRuntimeState();
   }
 
+  /** @param {PointerEvent} event */
   startMovement(event) {
     this.movementPointerId = event.pointerId;
     this.movementBaseX = event.clientX;
@@ -1147,6 +1286,10 @@ class TouchControls {
     this.updateRuntimeState();
   }
 
+  /**
+   * @param {number} clientX
+   * @param {number} clientY
+   */
   updateMovement(clientX, clientY) {
     const dx = clientX - this.movementBaseX;
     const dy = clientY - this.movementBaseY;
@@ -1196,6 +1339,7 @@ class TouchControls {
     this.updateRuntimeState();
   }
 
+  /** @param {PointerEvent} event */
   startLook(event) {
     this.lookPointerId = event.pointerId;
     this.lookLastX = event.clientX;
@@ -1204,6 +1348,10 @@ class TouchControls {
     this.updateRuntimeState();
   }
 
+  /**
+   * @param {number} clientX
+   * @param {number} clientY
+   */
   updateLook(clientX, clientY) {
     const sensitivity = Number.isFinite(this.app.lookSensitivity) ? this.app.lookSensitivity : 1;
     this.app.queueMouseDelta(
@@ -1248,6 +1396,7 @@ class TouchControls {
     this.thumb.style.top = `${50 + (this.movementThumbY - this.movementBaseY)}px`;
   }
 
+  /** @param {boolean} visible */
   setVisible(visible) {
     if (this.root) {
       this.root.dataset.visible = visible ? "true" : "false";
@@ -1285,6 +1434,7 @@ class TouchControls {
   }
 }
 
+/** @param {KeyboardEvent} event */
 function inputNameForEvent(event) {
   const code = keyboardCode(event);
   switch (code) {
@@ -1316,6 +1466,7 @@ function inputNameForEvent(event) {
   }
 }
 
+/** @param {string} key */
 function inputNameForLegacyKey(key) {
   switch (key) {
     case "ArrowUp":
@@ -1351,6 +1502,11 @@ function inputNameForLegacyKey(key) {
   }
 }
 
+/**
+ * @param {KeyboardEvent} event
+ * @param {string} code
+ * @param {string} legacyKey
+ */
 function isPhysicalKey(event, code, legacyKey) {
   if (keyboardCode(event) === code) {
     return true;
@@ -1360,12 +1516,23 @@ function isPhysicalKey(event, code, legacyKey) {
   );
 }
 
+/** @param {KeyboardEvent} event */
 function keyboardCode(event) {
   return typeof event.code === "string" && event.code.length > 0 && event.code !== "Unidentified"
     ? event.code
     : null;
 }
 
+/**
+ * @param {object} args
+ * @param {number} args.sequence
+ * @param {string} args.trigger
+ * @param {{ centerX?: number, centerZ?: number } | null} [args.targetCenter]
+ * @param {{ centerX?: number, centerZ?: number } | null} [args.loadedCenterBefore]
+ * @param {number} args.frameCountBefore
+ * @param {number} args.renderCountBefore
+ * @returns {CompileTiming}
+ */
 function createCompileTiming({
   sequence,
   trigger,
@@ -1464,6 +1631,10 @@ function createCompileTiming({
   };
 }
 
+/**
+ * @param {CompileTiming} timing
+ * @param {WasmReport} request
+ */
 function updateCompileTimingFromRequest(timing, request) {
   timing.requestId = Number(request.requestId) || null;
   timing.targetCenterX = Number(request.centerX) || 0;
@@ -1472,6 +1643,11 @@ function updateCompileTimingFromRequest(timing, request) {
   updateCompileScopeTiming(timing, request);
 }
 
+/**
+ * @param {CompileTiming} timing
+ * @param {WasmReport} request
+ * @param {number} beginStart
+ */
 function updateCompileTimingFromWait(timing, request, beginStart) {
   timing.beginRequestMs = performance.now() - beginStart;
   const centerX = Number(request.centerX);
@@ -1490,6 +1666,10 @@ function updateCompileTimingFromWait(timing, request, beginStart) {
   timing.centerLoaded = Boolean(request.centerLoaded);
 }
 
+/**
+ * @param {CompileTiming} timing
+ * @param {any} report
+ */
 function updateCompileTimingFromWorker(timing, report) {
   const summary = report?.summary ?? {};
   const metrics = normalizeRenderCompilerMetrics(report?.renderCompilerMetrics ?? report);
@@ -1540,6 +1720,7 @@ function updateCompileTimingFromWorker(timing, report) {
   timing.workerFaceCount = Number(summary.faceCount) || 0;
 }
 
+/** @param {any} source */
 function normalizeRenderCompilerMetrics(source) {
   return {
     transportKind: String(source?.transportKind || "unknown"),
@@ -1582,6 +1763,10 @@ function normalizeRenderCompilerMetrics(source) {
   };
 }
 
+/**
+ * @param {CompileTiming} timing
+ * @param {WasmReport} report
+ */
 function updateCompileTimingFromReport(timing, report) {
   timing.loadedCenterAfterX = Number(report.centerX) || 0;
   timing.loadedCenterAfterZ = Number(report.centerZ) || 0;
@@ -1603,6 +1788,10 @@ function updateCompileTimingFromReport(timing, report) {
   updateCompileScopeTiming(timing, report);
 }
 
+/**
+ * @param {CompileTiming} timing
+ * @param {WasmReport} source
+ */
 function updateCompileScopeTiming(timing, source) {
   timing.viewDirtyChunkCount = Number(source.viewDirtyChunkCount) || 0;
   timing.viewRemovalChunkCount = Number(source.viewRemovalChunkCount) || 0;
@@ -1618,6 +1807,11 @@ function updateCompileScopeTiming(timing, source) {
   timing.budgetedDirtySectionChunkCount = Number(source.budgetedDirtySectionChunkCount) || 0;
 }
 
+/**
+ * @param {CompileTiming} timing
+ * @param {string} status
+ * @param {string | null} [reason]
+ */
 function finishCompileTiming(timing, status, reason = null) {
   timing.status = status;
   timing.reason = reason;
@@ -1629,10 +1823,12 @@ function finishCompileTiming(timing, status, reason = null) {
   publishActiveCompileTiming(timing);
 }
 
+/** @param {CompileTiming} timing */
 function publishActiveCompileTiming(timing) {
   runtime.state.activeCompileTiming = publicCompileTiming(timing);
 }
 
+/** @param {CompileTiming} timing */
 function recordCompileTiming(timing) {
   const snapshot = publicCompileTiming(timing);
   runtime.state.lastCompileTiming = snapshot;
@@ -1641,6 +1837,7 @@ function recordCompileTiming(timing) {
   runtime.state.activeCompileTiming = null;
 }
 
+/** @param {CompileTiming} timing */
 function publicCompileTiming(timing) {
   const totalMs = timing.finishedAtMs === null
     ? performance.now() - timing.startedAtMs
@@ -1732,12 +1929,17 @@ function publicCompileTiming(timing) {
   };
 }
 
+/** @param {number} value */
 function roundTiming(value) {
   return Number.isFinite(value) ? Math.round(value * 10) / 10 : 0;
 }
 
+/** @returns {Promise<void>} */
 function nextAnimationFrame() {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  return new Promise(
+    /** @param {(value?: void) => void} resolve */
+    (resolve) => requestAnimationFrame(() => resolve()),
+  );
 }
 
 function updateDom() {
@@ -1768,6 +1970,7 @@ function updateDom() {
   }
 }
 
+/** @param {Record<string, any>} state */
 function formatCompileTiming(state) {
   const timing = state.activeCompileTiming ?? state.lastCompileTiming;
   if (!timing) {
@@ -1778,6 +1981,10 @@ function formatCompileTiming(state) {
   return `${label} ${target} ${Number(timing.totalMs || 0).toFixed(0)}ms gap ${Number(timing.maxFrameGapMs || 0).toFixed(0)}ms`;
 }
 
+/**
+ * @param {string} id
+ * @param {string} value
+ */
 function setText(id, value) {
   const element = document.getElementById(id);
   if (element) element.textContent = value;
@@ -1788,7 +1995,7 @@ function defaultInputKeys() {
 }
 
 function normalizedDeployAssetVersion() {
-  const version = globalThis.__MCLONE_NATIVE_WEB_ASSET_VERSION__;
+  const version = /** @type {any} */ (globalThis).__MCLONE_NATIVE_WEB_ASSET_VERSION__;
   if (
     typeof version === "string"
     && version.length > 0
@@ -1799,6 +2006,7 @@ function normalizedDeployAssetVersion() {
   return null;
 }
 
+/** @param {string} path */
 function versionedUrl(path) {
   const url = new URL(path, import.meta.url);
   if (DEPLOY_ASSET_VERSION !== null) {
@@ -1815,6 +2023,7 @@ function defaultMovementImpulse() {
   };
 }
 
+/** @param {unknown} value */
 function sanitizeInputImpulse(value) {
   const impulse = Number(value);
   if (!Number.isFinite(impulse)) {
@@ -1827,6 +2036,7 @@ function isHudOpen() {
   return document.getElementById("runtime-hud")?.hidden === false;
 }
 
+/** @param {boolean} open */
 function setHudOpen(open) {
   const hud = document.getElementById("runtime-hud");
   const toggle = document.getElementById("hud-toggle");
@@ -1848,12 +2058,17 @@ function hasTouchInput() {
     || window.matchMedia("(pointer: coarse)").matches;
 }
 
+/** @param {PointerEvent} event */
 function isTouchPointer(event) {
   return event.pointerType === "touch" || event.pointerType === "pen";
 }
 
+/**
+ * @param {EventTarget | null} target
+ * @param {number} pointerId
+ */
 function trySetPointerCapture(target, pointerId) {
-  if (!target || typeof target.setPointerCapture !== "function") {
+  if (!target || !("setPointerCapture" in target) || typeof target.setPointerCapture !== "function") {
     return;
   }
   try {
@@ -1863,6 +2078,7 @@ function trySetPointerCapture(target, pointerId) {
   }
 }
 
+/** @param {WasmReport} interaction */
 function formatInteractionStatus(interaction) {
   if (!interaction?.ok) {
     return "idle";
@@ -1873,6 +2089,7 @@ function formatInteractionStatus(interaction) {
   return `${interaction.action}: ${interaction.changed ? "changed" : "same"}`;
 }
 
+/** @param {Record<string, any> | null | undefined} value */
 function applyHotbarState(value) {
   if (!value || typeof value.selectedHotbarSlot === "undefined") {
     return;
@@ -1883,6 +2100,7 @@ function applyHotbarState(value) {
   }
 }
 
+/** @param {KeyboardEvent} event */
 function hotbarSlotForEvent(event) {
   const code = keyboardCode(event);
   if (code?.startsWith("Digit") || code?.startsWith("Numpad")) {
@@ -1895,6 +2113,7 @@ function hotbarSlotForEvent(event) {
   return code === null ? hotbarSlotForLegacyKey(event.key) : null;
 }
 
+/** @param {string} key */
 function hotbarSlotForLegacyKey(key) {
   if (key.length !== 1) {
     return null;
@@ -1906,6 +2125,7 @@ function hotbarSlotForLegacyKey(key) {
   return null;
 }
 
+/** @param {WasmReport} interaction */
 function formatTarget(interaction) {
   if (!interaction?.ok) {
     return "-";
@@ -1920,6 +2140,7 @@ function snapshotState() {
   return JSON.parse(JSON.stringify(runtime.state));
 }
 
+/** @param {unknown} error */
 function stringifyError(error) {
   if (error instanceof Error) {
     return error.stack ?? error.message;
