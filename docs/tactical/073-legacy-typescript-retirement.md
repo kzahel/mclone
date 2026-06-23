@@ -1,6 +1,6 @@
 # 073: Legacy TypeScript Engine Retirement
 
-Status: active high-priority parent. Slices 1-5 landed enough to remove the live legacy TypeScript engine; next recommended slice is documentation burn-down.
+Status: active high-priority parent. Slices 1-6 landed enough to remove the live legacy TypeScript engine and the stale docs archive; next recommended slice is final negative search and native validation.
 
 ## Purpose
 
@@ -162,17 +162,19 @@ Delete after the move/retarget blockers are cleared:
 
 ### Slice 0 - Inventory And Baseline
 
+Status: landed on 2026-06-23.
+
 Goal: make the retirement measurable and reversible through ordinary Git history.
 
-- [ ] Confirm workstream: native Rust/docs/repo cleanup.
-- [ ] Record the current deletion candidates with `git ls-files`.
-- [ ] Record every non-legacy path that imports or links to `src/**`, `test/browser/**`, `playwright*.ts`, `docs/tactical/legacy/**`, `vite`, and `vitest`.
-- [ ] Record native fixture consumers:
+- [x] Confirm workstream: native Rust/docs/repo cleanup.
+- [x] Record the current deletion candidates with `git ls-files`.
+- [x] Record every non-legacy path that imports or links to `src/**`, `test/browser/**`, `playwright*.ts`, `docs/tactical/legacy/**`, `vite`, and `vitest`.
+- [x] Record native fixture consumers:
   - `native/crates/mclone-worldgen`
   - `native/crates/mclone-server`
   - `native/crates/mclone-mesh`
-- [ ] Run native baseline validation before deletion.
-- [ ] Save any useful command output in the commit message or tactical landed notes, not in generated repo files.
+- [x] Run native baseline validation before deletion.
+- [x] Save any useful command output in the commit message or tactical landed notes, not in generated repo files.
 
 Suggested inventory commands:
 
@@ -330,21 +332,23 @@ cargo test --manifest-path native/Cargo.toml
 
 ### Slice 6 - Documentation Burn-down
 
+Status: landed on 2026-06-23.
+
 Goal: make docs speak from the native-first state instead of warning around old code.
 
-- [ ] Update `README.md`:
+- [x] Update `README.md`:
   - remove the legacy TypeScript implementation paragraph
   - remove links to `docs/legacy-typescript-engine-info.md`
   - remove links to `docs/tactical/legacy/**`
   - replace TypeScript worldgen status links with native status or oracle fixture notes
-- [ ] Update `AGENTS.md`:
+- [x] Update `AGENTS.md`:
   - remove the legacy routing section
   - keep the explicit native default target
   - keep native web/WASM guidance
   - keep oracle/reference-tree guidance
-- [ ] Delete `docs/legacy-typescript-engine-info.md`.
-- [ ] Delete `docs/tactical/legacy/**`.
-- [ ] Audit durable docs with stale `src/**` links:
+- [x] Delete `docs/legacy-typescript-engine-info.md`.
+- [x] Delete `docs/tactical/legacy/**`.
+- [x] Audit durable docs with stale `src/**` links:
   - `docs/worldgen-status.md`
   - `docs/carver-status.md`
   - `docs/liquids.md`
@@ -357,14 +361,14 @@ Goal: make docs speak from the native-first state instead of warning around old 
   - `docs/gui.md`
   - `docs/lighting*.md`
   - `docs/worker-ownership.md`
-- [ ] Delete obsolete durable docs that only describe the legacy implementation and have no native planning value.
-- [ ] For docs that still matter, rewrite paths to native crates or oracle fixture tooling.
-- [ ] Keep links to `reference/minecraft-1.17.1/src/**`; those are not legacy TypeScript links.
+- [x] Delete obsolete durable docs that only describe the legacy implementation and have no native planning value.
+- [x] For docs that still matter, rewrite paths to native crates or oracle fixture tooling.
+- [x] Keep links to `reference/minecraft-1.17.1/src/**`; those are not legacy TypeScript links.
 
 Validation:
 
 ```bash
-rg -n "legacy TypeScript|TypeScript implementation|docs/tactical/legacy|docs/legacy-typescript-engine-info|test/browser|playwright|src/" README.md AGENTS.md docs
+rg -n "legacy TypeScript|TypeScript implementation|docs/tactical/legacy|docs/legacy-typescript-engine-info|test/browser|playwright|src/" README.md AGENTS.md docs --glob '!docs/tactical/073-legacy-typescript-retirement.md'
 ```
 
 Expected remaining `src/` hits should primarily be:
@@ -372,6 +376,7 @@ Expected remaining `src/` hits should primarily be:
 - `reference/minecraft-1.17.1/src/**`
 - native Rust paths such as `native/crates/.../src/**`
 - native web paths such as `native/apps/mclone-web-client/src/**`
+- explicit external-reference paths in research docs, if any
 
 ### Slice 7 - Final Negative Search And Native Validation
 
@@ -401,7 +406,7 @@ test ! -d src
 test ! -d docs/tactical/legacy
 test ! -d test/browser
 test -z "$(find . -maxdepth 1 -name 'playwright*.ts' -print)"
-rg -n "legacy-deploy|dev:browser|probe:browser|test:browser|perf:d5|vite build|vitest|/src/renderer/main.ts" package.json scripts docs README.md AGENTS.md
+rg -n "legacy-deploy|dev:browser|probe:browser|test:browser|perf:d5|vite build|vitest|/src/renderer/main.ts" package.json scripts docs README.md AGENTS.md --glob '!docs/tactical/073-legacy-typescript-retirement.md'
 cargo test --manifest-path native/Cargo.toml
 pnpm native:web:build
 pnpm native:web:smoke
@@ -419,3 +424,4 @@ pnpm native:web:app-smoke
 
 - 2026-06-23: Slice 1 moved oracle-owned TypeScript helpers from `src/oracle/**` to `oracle/lib/**`, copied the required BitStorage utility into `oracle/lib/util/bit-storage.ts`, retargeted oracle integration CLIs and existing TS tests, and updated oracle/durable docs. Validation: `pnpm exec vitest run test/oracle`; direct Node TS-loader import of moved oracle libraries.
 - 2026-06-23: Slices 2-5 kept `test/fixtures/**` as shared oracle fixture data with its own README, removed `src/**`, removed non-fixture root TypeScript tests, removed root browser app/config/test files, deleted legacy Deno/Vite/Playwright smoke and deploy helpers, retargeted root `test` / `typecheck` to native validation lanes, removed `vite` / `vitest` / `unzipit`, regenerated the pnpm lockfile, and simplified host capability checks around native web validation. Validation: `test ! -d src`; `test ! -d test/browser`; `test ! -f vite.config.ts`; `test ! -f vitest.config.ts`; no root `playwright*.ts`; `node -c scripts/check-host-capabilities.mjs`; negative searches for retired package/doc/import references; `cargo test --manifest-path native/Cargo.toml -p mclone-worldgen -p mclone-server -p mclone-mesh`; `pnpm native:web:typecheck`; `pnpm test`.
+- 2026-06-23: Slice 6 deleted `docs/legacy-typescript-engine-info.md`, `docs/tactical/legacy/**`, and `docs/deno-wgpu-native-spike.md`; rewrote durable docs and active tacticals to point at native crates, oracle fixtures, reference source, or Git history instead of the removed root engine tree. Intentional survivor: `docs/player-movement-netcode.md` keeps an external `/Users/kgraehl/code/tilefun/src/...` reference because it is not the retired mclone engine. Validation: negative searches for stale legacy docs, deleted root engine paths, and old legacy-TypeScript wording outside this tactical; final native/web validation remains Slice 7.

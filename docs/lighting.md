@@ -2,7 +2,7 @@
 
 Research and implementation notes for Minecraft Java 1.17.1-style lighting in `mclone`.
 
-This document is a reference for the future lighting implementation. It is not a tactical slice by itself. The solver should be a direct TypeScript port where the data/algorithm are parity-critical, while the scheduling and transport around it should fit the existing host/worker/render-world architecture.
+This document is a reference for the native lighting implementation. It is not a tactical slice by itself. The solver should remain a direct Rust port where the data/algorithm are parity-critical, while scheduling and transport fit the native host/worker/render architecture.
 
 ## Goals
 
@@ -580,7 +580,7 @@ Browser validation:
 - Save screenshots to `/tmp`.
 - Inspect daylight terrain, shadowed caves, an open skylight shaft, and a torch-lit enclosed room.
 - Verify the main thread does not run light propagation in the performance trace.
-- Run `pnpm perf:d5` after lighting/runtime scheduling changes; schema `3` gates host responsiveness, worker-side lighting command/slice duration, render-world ingest, and GPU upload behavior during chunk traversal.
+- Run native movement/frame/render performance smokes after lighting/runtime scheduling changes, especially `pnpm native:movement:smoke`, `pnpm native:timedemo:smoke`, and targeted scheduler/light tests. Native web changes should also run the smallest relevant `pnpm native:web:*smoke` lane.
 
 ## Known Risks
 

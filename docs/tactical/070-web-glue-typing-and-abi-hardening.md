@@ -39,10 +39,10 @@ is the only generated glue, from `wasm-bindgen --target web`):
 | `www/mclone-render-compiler-abi.js` | 33 | **single-source render-compile SAB ABI** (locked to Rust) |
 | `scripts/browser-smoke.mjs` | 2079 | Node-side smoke harness (not shipped) |
 
-**No type-checking covers any of it.** The root `tsconfig.json` `include` is
-`src/**`, `test/**`, oracle integration, and the vite/vitest/playwright configs —
-the legacy TypeScript engine only. The `package.json` `"typecheck": "tsc --noEmit"`
-script (line 69) exists but never sees `native/apps/mclone-web-client/www`.
+At the start of this tactical, no type-checking covered any of it. Root
+TypeScript checks were tied to the now-retired browser engine and never saw
+`native/apps/mclone-web-client/www`. The landed `native:web:typecheck` gate now
+covers the native web glue directly.
 
 ## Problem 1 (highest priority): the server-worker SAB ABI is duplicated and unguarded
 

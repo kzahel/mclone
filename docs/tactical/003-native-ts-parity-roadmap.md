@@ -31,7 +31,7 @@ Landed:
 - propagated native ticket levels, client visibility separated from server residency, scheduler-owned clean lower-status dependency buffers, block-ticking chunks promoted to live generated server chunks, feature worker seeding from scheduler-owned dependencies, aggregate scheduler metrics, native movement perf/culling counters, generated liquid tick carry-through, first scheduled fluid tick runtime plumbing, level-bearing water/lava block-state ids, Java-shaped water/lava spread helpers, cross-chunk fluid mutation, and exact water/lava slope/fall/source-conversion/source-contact liquid fixture parity
 - renderer face-pressure diagnostics, dense-section model-face culling tests, neighbor-aware chunk-boundary face culling, CPU-side render-section dirty cache, incremental GPU section updates, rebuilt/uploaded vertex/face/index counters, Java `VisGraph` / `VisibilitySet` parity fixtures, and conservative graph-aware render-section traversal
 
-Still missing compared with the TypeScript engine:
+Still missing compared with the retired browser engine's capability horizon:
 
 - no long-lived remote sessions or browser remote network transport
 - no explicit protochunk holder type, fixed release-mode movement/render perf budgets, randomized/flowing-lava interaction `FlowingFluid` parity, or persisted liquid tick parity
@@ -55,7 +55,7 @@ Still missing compared with the TypeScript engine:
 - browser client target that boots through the same runtime/protocol shape instead of a separate demo path
 - native presentation shape that does not block future desktop OpenXR, flat Android, or Android XR / Quest hosts
 
-This is a parity horizon, not a pledge to port every TypeScript tactical one-for-one. The TypeScript implementation is the oracle/scaffold/reference target; Rust should group work by durable engine boundaries.
+This is a parity horizon, not a pledge to port every retired-engine tactical one-for-one. Git history, oracle fixtures, and durable reference notes preserve useful prior art; Rust should group work by durable engine boundaries.
 
 ## Ordering Rules
 
@@ -66,7 +66,7 @@ This is a parity horizon, not a pledge to port every TypeScript tactical one-for
 - Web/WASM has two gates: an early build/boot smoke so constraints shape APIs, then a later real browser runtime once transport/render facts stabilize.
 - Validation is part of the slice: every render/runtime slice needs a headless or app smoke that exercises the new path.
 - Avoid throwaway cache/refactor work unless it removes a bypass or lands inside a real ownership boundary.
-- Prefer porting from current TypeScript and Java source where parity matters; drop TypeScript-specific browser orchestration when Rust/native gives us a cleaner runtime shape.
+- Prefer porting parity logic from Java source and committed oracle fixtures; use retired-engine Git history only as prior art where it saves time.
 
 ## Planned Tactical Sequence
 

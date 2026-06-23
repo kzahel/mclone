@@ -978,18 +978,9 @@ Primary native lighting docs:
 - [`../tactical/053-native-non-cubic-ao-render-parity.md`](../tactical/053-native-non-cubic-ao-render-parity.md)
 - [`../tactical/054-native-block-render-facts-parity.md`](../tactical/054-native-block-render-facts-parity.md)
 
-Legacy/reference-only lighting docs:
-
-- [`../tactical/legacy/L0-lighting-oracle-foundation.md`](../tactical/legacy/L0-lighting-oracle-foundation.md)
-- [`../tactical/legacy/L1-light-data-foundation.md`](../tactical/legacy/L1-light-data-foundation.md)
-- [`../tactical/legacy/L2-light-solver-foundation.md`](../tactical/legacy/L2-light-solver-foundation.md)
-- [`../tactical/legacy/L3-initial-chunk-lighting.md`](../tactical/legacy/L3-initial-chunk-lighting.md)
-- [`../tactical/legacy/L4-light-snapshot-consumption.md`](../tactical/legacy/L4-light-snapshot-consumption.md)
-- [`../tactical/legacy/L5-live-light-deltas.md`](../tactical/legacy/L5-live-light-deltas.md)
-- [`../tactical/legacy/L6-lighting-scheduler-and-status-integration.md`](../tactical/legacy/L6-lighting-scheduler-and-status-integration.md)
-
-Treat legacy docs as prior art only. New implementation work belongs in the
-native Rust crates unless an explicit legacy request says otherwise.
+Reference-only prior art from the retired browser engine now lives only in Git
+history. New implementation work belongs in the native Rust crates and should
+read the Java source plus committed oracle fixtures before porting parity logic.
 
 ## Validation Lanes
 

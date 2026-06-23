@@ -27,9 +27,9 @@ Read before implementation:
 - `reference/minecraft-1.17.1/src/net/minecraft/client/renderer/block/model/BakedQuad.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/client/renderer/block/model/FaceBakery.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/client/renderer/ItemBlockRenderTypes.java`
-- TypeScript reference: `src/renderer/model/block-model.ts`
-- TypeScript reference: `src/renderer/model/face-bakery.ts`
-- TypeScript reference: `src/renderer/model/face-info.ts`
+- Native model and baking code: `native/crates/mclone-assets/src`
+- Native textured meshing code: `native/crates/mclone-mesh/src`
+- Native render upload code: `native/crates/mclone-render/src`
 
 Relevant vanilla shape:
 
@@ -47,7 +47,7 @@ Landed:
 - `TexturedMeshCatalog` mapping current terrain MVP `BlockStateId`s to baked model faces and atlas UV rectangles
 - textured chunk mesh input that preserves full `BlockStateId`s instead of the prior temporary `u8` adapter
 - textured section mesh generation from client snapshot facts
-- cube-face vertex ordering compatible with the Java/TypeScript `FaceInfo` path
+- cube-face vertex ordering compatible with the Java `FaceInfo` path
 - Java-compatible block-face UV rotation mapping
 - neighbor occlusion based on catalog full-cube occluder facts, so no-face blocks do not hide adjacent model faces
 - basic face shade and block tint multiplication for model textures such as grass overlays

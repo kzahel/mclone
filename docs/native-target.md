@@ -2,9 +2,7 @@
 
 Historical note on preserving native host/renderer paths for `mclone`.
 
-This document has been superseded by [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). The committed direction is now native-first Rust: native desktop is the first-priority bring-up path, web/WASM is kept alive as an early compatibility gate, and Android XR / Quest standalone is a future native target once the engine is mature enough. The TypeScript implementation remains legacy/reference prior art, not the primary engine direction.
-
-For a concrete Deno/WebGPU validation path, see [`deno-wgpu-native-spike.md`](./deno-wgpu-native-spike.md).
+This document has been superseded by [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). The committed direction is now native-first Rust: native desktop is the first-priority bring-up path, web/WASM is kept alive as an early compatibility gate, flat Android is the next platform frontload target, and Android XR / Quest standalone is a future native target once the engine is mature enough.
 
 ## Current posture
 

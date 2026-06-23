@@ -6,14 +6,14 @@ Status: proposed.
 
 Add a native Rust game UI foundation for title, pause, options, loading, error, debug settings, HUD, and later inventory/chat flows.
 
-The direction is a first-party `mclone-ui` layer: Minecraft-shaped in interaction model, but not an exact visual copy of Minecraft. The legacy TypeScript GUI is useful prior art for architecture and validation, not a skin to preserve.
+The direction is a first-party `mclone-ui` layer: Minecraft-shaped in interaction model, but not an exact visual copy of Minecraft. The retired browser GUI is useful Git-history prior art for architecture and validation, not a skin to preserve.
 
 ## Context
 
-The legacy TypeScript implementation had two UI eras:
+The retired browser implementation had two UI eras:
 
 - early visible DOM shells for start/debug/loading/touch controls
-- later canvas-only WebGPU GUI screens under `src/client/gui/` and `src/renderer/gui/`
+- later canvas-only WebGPU GUI screens in the retired engine tree
 
 The later path is the useful one. It used `Screen`, `Widget`, `Button`, sliders, cycle buttons, focus/hover/input routing, a renderer-neutral GUI draw list, and a WebGPU overlay pass. It also used vanilla Minecraft assets such as `textures/gui/widgets.png` and `font/ascii.png`, which made it read as a close Minecraft visual clone.
 
@@ -74,14 +74,11 @@ Read the vanilla source for behavior shape before implementing equivalent classe
 - `reference/minecraft-1.17.1/src/net/minecraft/client/gui/screens/PauseScreen.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/client/gui/screens/OptionsScreen.java`
 
-Use the TypeScript GUI as implementation prior art:
+Use the retired GUI as Git-history implementation prior art when needed:
 
-- `src/client/gui/`
-- `src/renderer/gui/`
 - `docs/gui.md`
-- `docs/tactical/Gui0-webgpu-gui-foundation-and-dom-replacement.md`
 
-Do not port the TypeScript browser orchestration or exact visual assets as the native direction.
+Do not port the retired browser orchestration or exact visual assets as the native direction.
 
 ## Style Direction
 

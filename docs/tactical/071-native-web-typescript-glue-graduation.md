@@ -37,8 +37,7 @@ while preserving the runtime module graph and smoke/deploy behaviour.
 
 ## Non-goals / guardrails
 
-- This is **native web/WASM** glue only. Do not touch the legacy TypeScript engine under
-  `src/**`, `test/browser/**`, or `playwright*`.
+- This is **native web/WASM** glue only. Do not revive the retired browser engine.
 - Do not change Rust engine/runtime behaviour, worker protocol semantics, render output, input
   behaviour, touch behaviour, or HUD/menu behaviour.
 - Do not introduce a bundler unless a later tactical explicitly chooses one. Use `tsc` ES-module

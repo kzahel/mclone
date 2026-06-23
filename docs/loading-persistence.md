@@ -166,18 +166,17 @@ This is the main policy distinction:
 
 `mclone` has an engine-native storage boundary:
 
-- [`WorldStorage`](../src/runtime/storage/world-storage.ts)
-- [`IndexedDbWorldStorage`](../src/runtime/storage/indexeddb-world-storage.ts)
-- [`FileWorldStorage`](../src/runtime/storage/file-world-storage.ts)
-- [`MemoryWorldStorage`](../src/runtime/storage/memory-world-storage.ts)
+- `native/crates/mclone-server/src/persistence.rs` defines `ChunkSnapshotStore`, `NullChunkSnapshotStore`, and `FilesystemChunkSnapshotStore`.
+- `native/crates/mclone-server/src/scheduler.rs` owns dirty holder tracking, save-on-unload, and `save_dirty_chunks()`.
+- `native/crates/mclone-server/src/integrated.rs` exposes integrated-server save/reload behavior to native clients.
 
 The adapter contract is deliberately smaller than vanilla NBT:
 
 ```text
-open world
 load chunk snapshot
 save chunk snapshot
-record eviction
+process pending unloads
+save dirty resident chunks
 close
 ```
 

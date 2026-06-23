@@ -5,7 +5,7 @@ Status: active; mobile controls/HUD and analog movement slices landed.
 ## Purpose
 
 Make the native web/WASM app usable on phones and tablets without reviving the
-legacy TypeScript engine.
+retired browser engine.
 
 The immediate user-facing problems are:
 
@@ -13,25 +13,25 @@ The immediate user-facing problems are:
 - the runtime/debug HUD is always visible and takes too much screen space on
   small displays
 
-This tactical ports the useful interaction shape from the legacy TypeScript
-browser implementation into the native web adapter, while keeping runtime,
+This tactical ports the useful interaction shape from the retired browser
+implementation into the native web adapter, while keeping runtime,
 movement, renderer, and server ownership in the native Rust workspace.
 
 ## Reference Prior Art
 
-Use the legacy TypeScript implementation only as reference prior art:
+Use the retired browser implementation only as Git-history reference prior art:
 
-- `src/renderer/debug/debug-input.ts`
+- debug input:
   - fixed-center virtual joystick
   - right-side touch drag for look
   - touch event capture and gesture ownership
   - `JOYSTICK_MAX_DISTANCE = 50`, `JOYSTICK_DEAD_ZONE = 10`
-- `src/renderer/debug/touch-control-layout.ts`
+- touch-control layout:
   - responsive forward/back button sizing and lower-right placement
-- `src/renderer/gui/touch-joystick-hud.ts`
+- joystick HUD:
   - translucent joystick base/thumb and active button visualization
 
-Do not edit `src/**/*.ts` for this tactical. The implementation target is the
+Do not revive the retired browser engine for this tactical. The implementation target is the
 native web/WASM app under `native/apps/mclone-web-client/`.
 
 ## Starting Native Web State
@@ -240,7 +240,7 @@ Acceptance:
 
 ## Non-Goals
 
-- Do not revive or edit the legacy TypeScript browser engine.
+- Do not revive the retired browser engine.
 - Do not implement a full mobile UI or inventory screen.
 - Do not add gamepad support in this tactical, though the analog input shape
   should make that easier later.

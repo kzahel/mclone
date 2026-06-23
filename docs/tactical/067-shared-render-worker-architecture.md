@@ -702,7 +702,7 @@ shared Wasm linear memory.
 
 ## Non-Goals
 
-- No legacy TypeScript engine edits.
+- Do not revive the retired browser engine.
 - No new multi-megabyte `postMessage` transfer path unless explicitly labeled
   fallback/debug with metrics.
 - No desktop transport rewrite; desktop must not pay web serialization costs for

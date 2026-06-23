@@ -8,20 +8,18 @@ This doc is narrower than [`worldgen-status.md`](./worldgen-status.md): it only 
 
 - Target: vanilla Java `1.17.1` overworld carver parity.
 - In scope: classic overworld `GenerationStep.Carving.AIR` plus `GenerationStep.Carving.LIQUID` behavior for the default 1.17.1 overworld path, plus the biome/config/oracle plumbing needed to verify both steps.
-- Still out of scope in the current TS port: broader post-generation fluid simulation, aquifer-enabled carving, and the disabled Caves & Cliffs Part 1 cave systems called out in [`../AGENTS.md`](../AGENTS.md).
+- Still out of scope in the current native port: aquifer-enabled carving and the disabled Caves & Cliffs Part 1 cave systems called out in [`../AGENTS.md`](../AGENTS.md). Runtime fluid execution is handled by the native liquid path, not by carvers themselves.
 
 ## Current state
 
-The repo now has a real, integrated classic-overworld carver path for both live steps:
+The repo now has a real, integrated native classic-overworld carver path for both live steps:
 
-- translated [`WorldCarver`](../src/worldgen/carver/world-carver.ts), [`CaveWorldCarver`](../src/worldgen/carver/cave-world-carver.ts), and [`CanyonWorldCarver`](../src/worldgen/carver/canyon-world-carver.ts)
-- translated underwater carvers in [`underwater-cave-world-carver.ts`](../src/worldgen/carver/underwater-cave-world-carver.ts) and [`underwater-canyon-world-carver.ts`](../src/worldgen/carver/underwater-canyon-world-carver.ts)
-- translated built-in overworld configured carvers in [`overworld-configured-carvers.ts`](../src/worldgen/carver/overworld-configured-carvers.ts), including ocean `LIQUID` entries
-- chunk-generator integration in [`NoiseBasedChunkGenerator.applyCarvers(...)`](../src/worldgen/levelgen/noise-based-chunk-generator.ts), with explicit per-step application for oracle tests and AIR+LIQUID application for runtime generation
-- generated-world integration in [`GeneratedRenderLevel.generateChunk(...)`](../src/world/level/generated-render-level.ts)
-- scheduled block/liquid tick capture across [`chunk-block-buffer.ts`](../src/worldgen/chunk/chunk-block-buffer.ts), [`level-chunk.ts`](../src/world/level/chunk/level-chunk.ts), and [`chunk-snapshot.ts`](../src/world/level/chunk-snapshot.ts)
-- biome-driven AIR/LIQUID carver selection through [`BiomeGenerationSettings`](../src/worldgen/biome/biome-generation-settings.ts) and [`overworld-biome-generation-settings.ts`](../src/worldgen/biome/overworld-biome-generation-settings.ts)
-- frozen-ocean, badlands, giant-tree-taiga, shattered-savanna, and mushroom surface follow-through in [`surface-builders.ts`](../src/worldgen/surface/surface-builders.ts), plus the matching lake-path `mycelium` / ice restoration in [`lake-feature.ts`](../src/worldgen/levelgen/feature/lake-feature.ts), which finally makes the current live vanilla surface families available to the carver material/oracle matrix instead of leaving them behind tactical-07 gaps
+- `native/crates/mclone-worldgen/src/carver.rs` owns the translated `WorldCarver`, `CaveWorldCarver`, `CanyonWorldCarver`, underwater carver behavior, built-in overworld configured carvers, AIR/LIQUID step selection, and carved-stage oracle comparisons.
+- `native/crates/mclone-worldgen/src/levelgen.rs` owns `NoiseBasedChunkGenerator`-style terrain/carver/surface integration and runtime generation entry points.
+- `native/crates/mclone-worldgen/src/chunk.rs` owns mutable generation buffers and scheduled block/liquid tick capture.
+- `native/crates/mclone-core/src/chunk.rs` owns packed chunk snapshots carrying block and liquid ticks.
+- `native/crates/mclone-server/src/fluid.rs` and `native/crates/mclone-server/src/scheduler.rs` own runtime liquid tick execution after generated ticks are published.
+- Surface and feature follow-through now live in `native/crates/mclone-worldgen/src/surface.rs` / `feature.rs` / `levelgen.rs`, keeping carver oracle fixtures aligned with the native worldgen path.
 
 That is enough to truthfully say classic overworld carvers are implemented and integrated.
 
@@ -29,13 +27,13 @@ It is not enough to call the path full parity yet.
 
 ## Confirmed parity gaps
 
-These are the highest-signal gaps between the current TS port and the 1.17.1 reference behavior.
+These are the highest-signal gaps between the current native port and the 1.17.1 reference behavior.
 
 - Underwater scheduled tick consequences are now captured and oracled at generation time, but the runtime still only records them; it does not execute the later fluid/block updates that a full server tick loop would consume.
-- The replaceable-block set in [`world-carver.ts`](../src/worldgen/carver/world-carver.ts) now covers the live desert/ocean/frozen/badlands/podzol/coarse-dirt/mycelium families that the repo can currently surface-build, but it is still narrower than full vanilla `WorldCarver`. The highest-signal remaining gaps are broader block-state distinctions and later families that the current 1.17.1 target still flattens or defers.
-- The numeric chunk/oracle palette in [`chunk-block-buffer.ts`](../src/worldgen/chunk/chunk-block-buffer.ts) now includes the current live surface families plus the earlier underwater-floor outputs (`obsidian`, `magma_block`), but it still intentionally collapses some vanilla block-state distinctions that exhaustive parity work would eventually have to separate.
+- The native replaceable-block set now covers the live desert/ocean/frozen/badlands/podzol/coarse-dirt/mycelium families that the repo can currently surface-build, but it is still narrower than full vanilla `WorldCarver`. The highest-signal remaining gaps are broader block-state distinctions and later families that the current 1.17.1 target still flattens or defers.
+- The numeric chunk/oracle palette now includes the current live surface families plus the earlier underwater-floor outputs (`obsidian`, `magma_block`), but it still intentionally collapses some vanilla block-state distinctions that exhaustive parity work would eventually have to separate.
 - The current carved-stage oracle matrix is broader, but it is still targeted coverage rather than exhaustive coverage.
-- The TS path still collapses some vanilla block-state distinctions in the carved-stage numeric model, which is acceptable for narrow chunk diffs but not the final form of exhaustive parity work.
+- The native path still collapses some vanilla block-state distinctions in the carved-stage numeric model, which is acceptable for narrow chunk diffs but not the final form of exhaustive parity work.
 
 ## Current oracle coverage
 
@@ -64,8 +62,8 @@ Current carver verification is real but still intentionally narrow:
 - explicit underwater branch tests in [`underwater-carver.test.ts`](../test/worldgen/carver/underwater-carver.test.ts)
 - snapshot/tick round-trip coverage in [`chunk-snapshot.test.ts`](../test/world/chunk-snapshot.test.ts)
 - biome/carver wiring tests in [`overworld-carver-wiring.test.ts`](../test/worldgen/carver/overworld-carver-wiring.test.ts)
-- targeted ravine browser validation in [`test/browser/probes/cave-mouth.probe.ts`](../test/browser/probes/cave-mouth.probe.ts)
-- targeted frozen/badlands/podzol/coarse-dirt/mycelium surface validation in [`test/browser/probes/surface-material-matrix.probe.ts`](../test/browser/probes/surface-material-matrix.probe.ts)
+- native carver fixture tests in `native/crates/mclone-worldgen/src/carver.rs`
+- native worldgen smoke coverage through `pnpm native:worldgen:smoke`
 
 That supports “partially oracled,” not “exhaustively covered.”
 

@@ -2,7 +2,7 @@
 
 Research and implementation notes for Minecraft Java 1.17.1-style overworld creature spawning in `mclone`.
 
-This document is a reference for future creature work. It is not a tactical slice by itself. The parity-critical parts should be direct TypeScript ports of the 1.17.1 spawn tables, spawn placement checks, mob caps, despawn rules, and entity tick semantics. Runtime ownership, worker boundaries, transport, and persistence adapters should fit the existing authoritative host architecture.
+This document is a reference for creature work. It is not a tactical slice by itself. The parity-critical parts should be direct Rust ports of the 1.17.1 spawn tables, spawn placement checks, mob caps, despawn rules, and entity tick semantics. Runtime ownership, worker boundaries, transport, and persistence adapters should fit the native authoritative host architecture.
 
 ## Goals
 
@@ -345,14 +345,14 @@ Today the repo has authoritative host/session plumbing, chunk snapshots, an earl
 
 | Area | Current role |
 |---|---|
-| `src/runtime/session/player-loop.ts` | debug authoritative player-state loop, not vanilla `Player`/`Entity` |
+| `native/crates/mclone-server/src/player.rs` | debug authoritative player-state loop, not vanilla `Player`/`Entity` |
 | `docs/protocol.md` | documents current `entity_snapshot`, `entity_update`, and `entity_remove` semantics |
-| `src/runtime/protocol/world-messages.ts` | concrete protocol has session, player, chunk, unload, error, generated entity snapshot, entity update, and entity remove messages |
-| `src/runtime/host/generated-world-host.ts` | owns chunk interest, player state, chunk snapshot delivery, and generated original mob publication |
-| `src/runtime/node/generated-world-http-server.ts` | dedicated host path with the same logical ownership and per-session entity snapshot replay |
-| `src/worldgen/biome/` | biome source exists, with the first passive spawn settings needed for generation-time creatures |
-| `src/world/level/chunk-snapshot.ts` | carries blocks/biomes/ticks, not entities |
-| `src/renderer/` | renders chunks, debug camera state, and authoritative entity snapshots through vanilla-shaped entity renderers |
+| `native/crates/mclone-protocol/src/lib.rs` | concrete protocol has session, player, chunk, unload, error, generated entity snapshot, entity update, and entity remove messages |
+| `native/crates/mclone-server/src/entities.rs` | host-owned entity publication and runtime entity facts |
+| `native/crates/mclone-server/src/integrated.rs` | integrated host path with the same logical ownership and per-session entity snapshot replay |
+| `native/crates/mclone-worldgen/src/biome.rs` | biome source exists, with the first passive spawn settings needed for generation-time creatures |
+| `native/crates/mclone-core/src/chunk.rs` | carries blocks/biomes/ticks, not entities |
+| `native/crates/mclone-client/src/actor.rs` and `native/crates/mclone-render/src/entity.rs` | render chunks, debug camera state, and authoritative entity snapshots through native actor presentation/rendering |
 
 The first creature architecture should therefore add entities as authoritative world state, not as renderer-side decorations.
 
@@ -408,7 +408,7 @@ Chunk snapshots can continue to focus on block state. Entity snapshots/deltas sh
 
 ## Suggested First Scope
 
-The first tactical slice is [`tactical/Creatures0-generation-entity-oracle-foundation.md`](tactical/Creatures0-generation-entity-oracle-foundation.md): build normalized official-server entity fixtures before porting the spawning algorithm.
+The first official-server entity fixture path has already landed and is retained under `oracle/` plus `test/fixtures/creatures/`. Future creature tacticals should be added as native numeric docs under [`tactical/`](tactical/README.md).
 
 `Creatures0` now has the first fixture-support pass: entity-region decoding, legacy `Level.Entities` fallback, stable normalization, comparison helpers, a server-wrapper scan mode, and a committed non-empty seed `12345` sheep fixture at chunk `(-7,-15)`.
 
@@ -417,7 +417,7 @@ A useful first creature slice is not "all mobs." Keep it narrow:
 1. Content tables: `MobCategory`, minimal `EntityType` records, `MobSpawnSettings.SpawnerData`, and the common overworld spawn settings needed for current biomes.
 2. Done in `Entities0`: host-owned entity records keyed by id/uuid and chunk section, with tracked vs ticking visibility.
 3. Done in `Creatures1`: generation original mobs, `spawnOriginalMobs(...)`, `spawnMobsForChunkGeneration(...)` for `CREATURE` only, and passive spawn placement/collision rules enough for the committed sheep fixture.
-4. Done in [`Creatures2`](tactical/Creatures2-host-entity-publication.md): integrate the entity runtime into the generated-world host lifecycle and publish simple generated-entity snapshots as data.
+4. Done in the native server/client crates: integrate the entity runtime into the generated-world host lifecycle and publish simple generated-entity snapshots as data.
 5. Next: rendering follow-through, draw simple authoritative entity placeholders before first real models or behavior.
 
 A later slice can add live natural spawning for `CREATURE`. Another can add common `MONSTER` spawning once stored lighting and entity ticking are credible, because hostile spawn rules depend on sky/block light and despawn behavior.

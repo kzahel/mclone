@@ -582,7 +582,7 @@ New validation should include:
 
 ## Non-Goals
 
-- No legacy TypeScript engine edits.
+- Do not revive the retired browser engine.
 - No Android, Quest, or OpenXR scaffolding in this tactical.
 - No broad renderer rewrite.
 - No browser remote WebSocket/WebRTC transport before local integrated worker

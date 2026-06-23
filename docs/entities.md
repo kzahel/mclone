@@ -2,7 +2,7 @@
 
 Durable architecture notes for Minecraft Java 1.17.1-style entity runtime ownership in `mclone`.
 
-This document is about entity lifecycle, storage, ticking, host ownership, persistence, and protocol shape. Creature spawning remains covered by [`creatures.md`](./creatures.md), and the first fixture/oracle step remains [`tactical/Creatures0-generation-entity-oracle-foundation.md`](./tactical/Creatures0-generation-entity-oracle-foundation.md). The first runtime foundation slice, [`tactical/Entities0-runtime-entity-foundation.md`](./tactical/Entities0-runtime-entity-foundation.md), is landed.
+This document is about entity lifecycle, storage, ticking, host ownership, persistence, and protocol shape. Creature spawning remains covered by [`creatures.md`](./creatures.md). The original fixture/oracle and entity-runtime foundation slices are now represented by native server/client/render code plus retained oracle fixtures under `test/fixtures/creatures/`; new creature/entity implementation slices should use numeric native tacticals under [`tactical/`](tactical/README.md).
 
 ## Current Status
 

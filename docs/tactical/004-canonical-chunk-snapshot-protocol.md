@@ -14,13 +14,12 @@ Depends on:
 - [`../loading-persistence.md`](../loading-persistence.md)
 - [`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md)
 
-Reference TypeScript implementation:
+Native implementation references:
 
-- `src/world/level/packed-chunk-snapshot.ts`
-- `src/world/level/chunk-snapshot.ts`
-- `src/util/bit-storage.ts`
-- `src/runtime/protocol/world-http-protocol.ts`
-- `src/runtime/client/client-world.ts`
+- `native/crates/mclone-core/src/chunk.rs`
+- `native/crates/mclone-core/src/bit_storage.rs`
+- `native/crates/mclone-protocol/src/lib.rs`
+- `native/crates/mclone-client/src/lib.rs`
 
 Reference Minecraft source to read before implementation:
 

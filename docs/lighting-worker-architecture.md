@@ -58,27 +58,25 @@ Browser and Node hosts should use the same worker-backed interface. Command prom
 
 Solver unit tests and Java-oracle comparisons may instantiate the ported lighting classes directly below this service boundary. They should not provide a synchronous host-facing `LightingService`, because that hides accidental host-tick lighting work.
 
-## Implementation Status
+## Native Status
 
-Landed:
+The retired browser engine had a worker-backed lighting service following this
+shape. That implementation is no longer live code. The native workspace keeps
+the useful boundaries in Rust:
 
-- `src/runtime/lighting/lighting-protocol.ts` defines the host/worker message shapes, revisioned requests/results, transferable light-input sections, and bounded result polling contract.
-- `src/runtime/lighting/lighting-worker-client.ts` provides the browser module-worker client and enforces command promises as accepted/enqueued acknowledgements.
-- `src/runtime/lighting/lighting-worker.ts` owns the worker-side light-only chunk cache, `LevelLightEngine`, serialized mailbox, bounded result polling, initial-light neighbor validation, and `chunk_light_ready` result production.
-- `src/runtime/lighting/node-lighting-worker-client.ts` and `src/runtime/lighting/node-lighting-worker-thread.ts` provide the Node worker-thread shell for dedicated/headless hosts.
-- `GeneratedWorldHost` no longer constructs `LevelLightEngine`; vanilla lighting mode requires a worker-backed `LightingService`.
-- Initial chunk publication now packs light inputs, requests `chunk_light_ready`, validates chunk revisions, and publishes each snapshot as its own accepted worker light becomes ready.
-- Live block/liquid mutations now coalesce into `block_light_update_batch` requests. The worker applies the block-state changes, drains propagation, returns revisioned `chunk_light_delta` section replacements, and finishes with `block_light_update_complete` so the host can update its accepted light cache before publishing dirty snapshots.
-- Worker-side command timing and propagation-slice timing now flow through `light_performance` results, `LightingServicePerformanceCounters`, host `world_perf` snapshots, the debug runtime state, and the D5 traversal report.
-- D5 traversal schema `3` now has regression gates for host responsiveness, lighting worker command/slice budgets, render-world ingest, and main-thread GPU uploads.
+- `native/crates/mclone-light` owns the ported level/block/sky light engine data structures.
+- `native/crates/mclone-server/src/light_status.rs`, `light_mailbox.rs`, and `light_world.rs` own server-side light-status work and mailbox execution.
+- `native/crates/mclone-server/src/level_light_bridge.rs`, `block_light_bridge.rs`, and `sky_light_bridge.rs` bridge chunk facts into the light engine.
+- `native/crates/mclone-render/src/light_texture.rs` owns render-facing light texture timing.
+- native desktop and web clients expose lighting/fullbright switches and light-status diagnostics through the shared runtime path.
 
-Still pending:
+Still pending in the native shape:
 
 - Add sharper dependency tracking for accepted light when neighbor revisions change; the current host invalidates a conservative 3x3 chunk window.
 - Pipeline decoration and initial lighting so the host starts `LIGHT` status work for dependency-ready chunks before the entire publish ring has finished decoration.
 - Make the worker mailbox explicitly mirror vanilla's `PRE_UPDATE` / propagation / `POST_UPDATE` phases under browser-safe budgets, instead of treating initial-light requests as a separate service batch shape.
 - Add status-level timing around `FEATURES -> LIGHT -> FULL -> publish` so lighting cost is visible as a loading stage and not inferred from missing publish time.
-- Run and record the first post-lighting D5 baseline with the schema `3` gates after any follow-up responsiveness fixes.
+- Run and record a native post-lighting perf baseline after follow-up responsiveness fixes.
 
 ## Protocol Shape
 

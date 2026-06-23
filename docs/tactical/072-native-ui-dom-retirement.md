@@ -43,7 +43,7 @@ That split was useful for the quick mobile/HUD slice in `064`, but it is now a d
 
 ## Non-goals
 
-- Do not touch the legacy TypeScript engine under `src/**`, `test/browser/**`, `playwright*`, or legacy tacticals.
+- Do not revive the retired browser engine or its old browser tactical archive.
 - Do not introduce a web UI framework, retained DOM app, or `egui` for player-facing UI.
 - Do not add Android/OpenXR scaffolding in this tactical.
 - Do not rewrite gameplay, render streaming, workers, worldgen, lighting, or mesh logic except where a UI action needs an existing setting exposed.

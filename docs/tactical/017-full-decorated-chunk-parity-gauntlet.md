@@ -28,9 +28,9 @@ Read before implementation:
 - `reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/TreeFeature.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/BiomeDefaultFeatures.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/Features.java`
-- TypeScript reference: `src/world/level/generated-decoration-region.ts`
-- TypeScript reference: `src/world/level/generated-render-level.ts`
-- TypeScript reference: `src/runtime/host/generated-world-host.ts`
+- Native feature-region code: `native/crates/mclone-worldgen/src/feature.rs`
+- Native levelgen entry points: `native/crates/mclone-worldgen/src/levelgen.rs`
+- Native scheduler integration: `native/crates/mclone-server/src/scheduler.rs`
 
 ## Current Native Gap
 
@@ -89,7 +89,7 @@ Native now places the blocking snow with `FREEZE_TOP_LAYER`; a one-block Java pr
 - A Rust full-chunk fixture parser expands the vanilla server fixture's section palettes into a 65,536-block expected array.
 - `full_decorated_chunk_gauntlet_reports_current_native_gap` reports the current native-vs-vanilla mismatch buckets without failing the normal suite.
 - `full_decorated_chunk_zero_zero_matches_java_oracle` is an ignored exact-parity test that should be unignored when the gauntlet is expected to pass.
-- Native `FeatureRegion` mirrors the Java/TypeScript dependency/write-window shape with read radius `8`, write cutoff `1`, metrics, blocked far writes, and mutable multi-chunk access.
+- Native `FeatureRegion` mirrors the Java dependency/write-window shape with read radius `8`, write cutoff `1`, metrics, blocked far writes, and mutable multi-chunk access.
 - Native `generate_overworld_features_chunk(...)` now builds the union dependency window, runs surface plus air/liquid carvers for dependency chunks, and applies feature passes for the 3x3 centers that can write into the target chunk.
 - Native `generate_overworld_features_chunks(...)` batches multiple publish targets through one union dependency window. A 3x3 publish view now plans 25 feature-center passes over 441 dependency chunks instead of rebuilding nine separate 361-chunk windows.
 - The integrated server scheduler now batches missing `FEATURES` chunks per interest update before publishing snapshots. The `mclone-server` test suite dropped from roughly 52s to roughly 18s on this host.
@@ -134,7 +134,7 @@ Native should follow that order: first make holder/status dependency ownership e
 
 ## Required Architecture
 
-The TypeScript implementation models feature decoration with:
+The native feature-region path models feature decoration with:
 
 ```text
 FEATURES_CHUNK_DEPENDENCY_RADIUS = 8

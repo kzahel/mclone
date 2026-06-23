@@ -1,6 +1,6 @@
 # Translation strategy
 
-Current approach: native-first Rust direct translation for parity-critical engine logic, with web/WASM kept alive as an early compatibility gate. The older TypeScript implementation is now legacy/reference prior art, not the main engine direction.
+Current approach: native-first Rust direct translation for parity-critical engine logic, with web/WASM kept alive as an early compatibility gate. The retired browser engine has been removed from the live tree; Git history is the archive for that implementation.
 
 The durable native roadmap lives in [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). This document owns translation/oracle policy and the legal distinction between private direct translation and any future clean-room release.
 
@@ -13,8 +13,6 @@ For runtime boundaries that are intentionally not a 1:1 translation of Minecraft
 - **Tooling:** AI agents (Claude / Codex / etc.) with the decomp in context can do the bulk of the translation. We review each layer, preserve Java primitive semantics explicitly (`int` wrapping, `long` arithmetic, float/double behavior, truncation vs floor, JavaRandom draw counts), and stitch modules together behind oracle tests.
 - **Legal status:** this code is a derivative work of Mojang's source. **Do not distribute.** `~/code/mclone` is a private GitHub repo; it stays private for this phase.
 - **Why direct-first:** a literal translation is the shortest path to something that actually produces correct Minecraft-shaped terrain. Clean-room-first means debugging two unknowns at once ("is my reimplementation wrong, or does it just legitimately differ from MC?"). Direct-first gives us a known-working baseline and lets us oracle-test cleanly.
-
-The existing TypeScript translation remains useful as a working reference and oracle scaffold. New parity-critical engine work should prefer the Rust/native track unless explicitly called out as legacy TypeScript maintenance.
 
 ## Phase 2 — clean-room (only if we decide to distribute)
 

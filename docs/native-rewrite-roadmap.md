@@ -1,13 +1,8 @@
 # Native Rewrite Roadmap
 
-This is the durable plan for the Rust/native rewrite. It supersedes older TS-first roadmap language in [`strategy.md`](strategy.md) and the exploratory posture in [`native-target.md`](native-target.md).
+This is the durable plan for the Rust/native engine. It supersedes older TS-first roadmap language in [`strategy.md`](strategy.md) and the exploratory posture in [`native-target.md`](native-target.md).
 
-The TypeScript implementation remains valuable, but its role changes:
-
-- legacy working implementation and behavior reference
-- oracle scaffolding, fixture source, and parity target prior art
-- experimental browser/runtime prototype
-- not the primary engine implementation direction
+The retired browser engine has been removed from the live tree. Retained reference value now lives in the Java oracle harness under [`../oracle/`](../oracle/), shared oracle fixtures under [`../test/fixtures/`](../test/fixtures/), and Git history.
 
 The primary implementation direction is now:
 
@@ -166,7 +161,7 @@ render via wgpu/web
 2. **Native minimal app**
 
    Add `winit` + `wgpu`, clear screen, camera/input, and one chunk. This becomes the main development loop.
-   The native tactical sequence starts at [`tactical/000-native-render-bringup.md`](tactical/000-native-render-bringup.md); the index is [`tactical/README.md`](tactical/README.md). The parent checklist for reaching the current TypeScript capability horizon is [`tactical/003-native-ts-parity-roadmap.md`](tactical/003-native-ts-parity-roadmap.md).
+   The native tactical sequence starts at [`tactical/000-native-render-bringup.md`](tactical/000-native-render-bringup.md); the index is [`tactical/README.md`](tactical/README.md). The parent checklist for reaching the retired engine's capability horizon is [`tactical/003-native-ts-parity-roadmap.md`](tactical/003-native-ts-parity-roadmap.md).
 
 3. **Web smoke very early**
 
@@ -223,5 +218,5 @@ Only after that should renderer/lighting/meshing work compete for primary focus,
 
 - This file owns the native rewrite direction and target topology.
 - [`native/README.md`](../native/README.md) owns workspace mechanics and crate list.
-- [`worldgen-status.md`](worldgen-status.md) continues to describe the existing TypeScript worldgen implementation until a native-specific status page exists.
+- [`worldgen-status.md`](worldgen-status.md) should describe native worldgen status and oracle fixture coverage.
 - Numbered tactical docs remain useful work logs, but older TS-first tactical language should not override this roadmap.

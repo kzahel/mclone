@@ -155,7 +155,13 @@ No client fallback may synthesize canonical chunk contents from seed. If `Client
 
 Packed chunk snapshots/deltas may feed rendering, lighting, and prediction views, but no derived product should become another subsystem's source of truth. Meshes are not collision. Collision snapshots are not meshes. Client light caches are not host light authority. If sharing immutable packed buffers later becomes worthwhile, it remains a carrier optimization with explicit ownership and lifetime rules.
 
-The first code contract for this split is `src/runtime/client/client-world.ts`. It currently wraps the existing `WorldClient` and `ClientChunkCache` as a facade so the next hydration slice can move facts without renaming every caller at once. The durable contract is the ownership split: `ClientWorld` exposes render and prediction views over replica facts; the UI/render thread consumes presentation state and mesh products; prediction consumes collision/entity views plus revision facts.
+The first native code contract for this split is `native/crates/mclone-client/src/lib.rs`.
+`ClientRuntime` owns the client replica and exposes render/prediction facts over
+server-published snapshots instead of letting the renderer or UI synthesize
+authority. The durable contract is the ownership split: the client replica
+exposes render and prediction views over replica facts; the UI/render thread
+consumes presentation state and mesh products; prediction consumes
+collision/entity views plus revision facts.
 
 ## SharedArrayBuffer
 

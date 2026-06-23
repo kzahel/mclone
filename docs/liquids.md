@@ -2,7 +2,7 @@
 
 Research and implementation notes for Minecraft Java 1.17.1-style liquid simulation in `mclone`.
 
-This document is a reference for future liquid work. It is not a tactical slice by itself. The parity-critical parts should be direct TypeScript ports of the 1.17.1 fluid/block/tick logic, while scheduling, worker boundaries, transport, and persistence adapters should fit the existing authoritative host architecture.
+This document is a reference for future liquid work. It is not a tactical slice by itself. The parity-critical parts should be direct Rust ports of the 1.17.1 fluid/block/tick logic, while scheduling, worker boundaries, transport, and persistence adapters should fit the existing authoritative host architecture.
 
 ## Goals
 
@@ -183,27 +183,20 @@ Do not replace this with a simplified flood fill. The exact local rules determin
 
 ## Current Mclone Context
 
-The repo now has the first live water simulation path wired through the authoritative generated-world host:
+The repo now has the live liquid simulation path wired through the native authoritative server:
 
-| TS source | Current role |
+| Native source | Current role |
 |---|---|
-| `src/world/level/material/fluid.ts` | base fluid API for replacement, ticking, and legacy block-state writes |
-| `src/world/level/material/fluid-state.ts` | source/flowing/falling state wrapper |
-| `src/world/level/material/flowing-fluid.ts` | water-relevant direct port of vanilla `FlowingFluid` |
-| `src/world/level/material/water-fluid.ts` | water constants, source conversion, and legacy level mapping |
-| `src/world/level/material/fluids.ts` | exact `WATER` / `FLOWING_WATER` identities plus minimal lava compatibility |
-| `src/world/level/block/liquid-block.ts` | `level` cache plus vanilla liquid scheduling hooks |
-| `src/world/level/server-tick-list.ts` | vanilla-shaped due tick queue used by simulation tests |
-| `src/world/level/tick-access.ts` | shared scheduled tick interface |
-| `src/world/level/static-render-level.ts` | generation/render level records block/liquid ticks into chunks |
-| `src/runtime/host/liquid-simulation-level.ts` | live host adapter that gives fluid ticks safe loaded-chunk block access plus neighbor-update scheduling |
-| `src/runtime/host/generated-world-host.ts` | owns host game time, liquid tick queue hydration/execution, dirty chunk snapshot publication, and pending-tick persistence |
-| `src/world/level/chunk-snapshot.ts` | snapshots already carry `blockTicks` and `liquidTicks` |
-| `src/worldgen/levelgen/feature/spring-feature.ts` | places source water and records a delay-0 liquid tick |
-| `src/worldgen/carver/underwater-cave-world-carver.ts` | records underwater liquid tick consequences |
-| `oracle/lib/integration/liquid-fixture.ts` | Liquid0 bounded fixture builder, persisted `LiquidTicks` decoder, and comparison helpers |
-| `test/fixtures/liquid/water-slope-10-ticks.json` | first committed official-server dynamic water oracle |
-| `test/runtime/generated-world-host-liquid.test.ts` | host-level hydration/execution/persistence coverage for pending liquid ticks |
+| `native/crates/mclone-server/src/fluid.rs` | fluid kind, scheduled tick list, water/lava tick behavior, and fixture-backed spread/source-conversion tests |
+| `native/crates/mclone-server/src/scheduler.rs` | generated/liquid tick hydration, runtime tick eligibility, dirty chunk persistence, and publication timing |
+| `native/crates/mclone-server/src/integrated.rs` | local integrated server command/tick facade over the scheduler-owned liquid path |
+| `native/crates/mclone-server/src/timing.rs` | liquid tick counters and timing diagnostics |
+| `native/crates/mclone-worldgen/src/carver.rs` | underwater liquid carver tick seeding and liquid-carved oracle comparisons |
+| `native/crates/mclone-worldgen/src/levelgen.rs` | generation-stage preservation of scheduled liquid ticks |
+| `native/crates/mclone-core/src/chunk.rs` | chunk snapshots carry `blockTicks` and `liquidTicks` |
+| `native/crates/mclone-mesh/src/builder.rs` | visible water/lava mesh generation and liquid-height sampling |
+| `oracle/lib/integration/liquid-fixture.ts` | bounded fixture builder, persisted `LiquidTicks` decoder, and comparison helpers |
+| `test/fixtures/liquid/*.json` | committed official-server dynamic liquid oracle fixtures |
 
 Generation-created and saved `liquidTicks` are promoted into the host queue when loaded chunks are snapshotted or ticked. Live water mutations dirty the owning chunk and are currently published as replacement `chunk_snapshot` messages, matching the existing protocol surface. A future protocol slice can replace that coarse update with granular block deltas without changing the simulation ownership.
 

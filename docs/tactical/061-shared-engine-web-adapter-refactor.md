@@ -947,7 +947,7 @@ Render compiler worker payload result:
 ## Non-Goals
 
 - No Gradle, Android, or OpenXR scaffolding in this slice.
-- No legacy TypeScript engine edits.
+- Do not revive the retired browser engine.
 - No JS renderer.
 - No separate WASM-only render cache policy.
 - No broad renderer rewrite.

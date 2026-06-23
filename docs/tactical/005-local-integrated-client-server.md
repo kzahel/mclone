@@ -14,13 +14,12 @@ Depends on:
 - [`../protocol.md`](../protocol.md)
 - [`../runtime-data-model.md`](../runtime-data-model.md)
 
-Reference TypeScript implementation:
+Native implementation references:
 
-- `src/runtime/host/integrated-server.ts`
-- `src/runtime/host/generated-world-host.ts`
-- `src/runtime/client/client-runtime.ts`
-- `src/runtime/client/client-world.ts`
-- `src/runtime/transport/local-world-transport.ts`
+- `native/crates/mclone-server/src/integrated.rs`
+- `native/crates/mclone-server/src/scheduler.rs`
+- `native/crates/mclone-client/src/lib.rs`
+- `native/crates/mclone-net/src/lib.rs`
 
 Reference Minecraft source to read before implementation:
 

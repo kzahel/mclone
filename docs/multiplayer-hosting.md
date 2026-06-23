@@ -137,15 +137,15 @@ Early implementation can keep the existing `open_world` message as the client re
 For production or LAN use, the dedicated server may serve the built browser client:
 
 ```text
-pnpm build
-pnpm host:dedicated -- --config server.json
+pnpm native:web:bundle
+cargo run --manifest-path native/Cargo.toml -p mclone-dedicated-server -- --config server.json
 ```
 
 If `staticRoot` is present, the server can serve `dist/` and the asset pack alongside `/api/world/socket` and health endpoints. This is optional. Dev should still support separate ports:
 
 ```text
-pnpm host:dedicated -- --config /tmp/mclone-server.json
-pnpm dev:browser
+cargo run --manifest-path native/Cargo.toml -p mclone-dedicated-server -- --config /tmp/mclone-server.json
+pnpm native:web:serve
 ```
 
 A convenience script such as `pnpm dev:server+browser` should spawn those two processes and print a ready-to-open URL. It should not be a proxy.
@@ -184,9 +184,8 @@ Desired scripts:
 
 ```json
 {
-  "dev:browser": "vite",
-  "host:dedicated": "node ... ./src/runtime/node/generated-world-http-server.ts",
-  "host:remote": "pnpm host:dedicated",
+  "native:web:serve": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --serve --app-loop",
+  "native:dedicated:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-dedicated-server -- --multi-client-smoke",
   "dev:server+browser": "node ./scripts/dev-server-browser.mjs"
 }
 ```
@@ -194,7 +193,7 @@ Desired scripts:
 `dev:server+browser` should:
 
 - start the dedicated server on its configured port
-- start Vite on its own port
+- start the native web server on its own port
 - print a local dedicated-client URL
 - shut both children down on exit
 - avoid proxying traffic between them

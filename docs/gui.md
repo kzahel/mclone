@@ -96,48 +96,26 @@ The DOM is not allowed for visible UI:
 
 `index.html` and any debug shell should eventually be visually blank except for the canvas. CSS should only reset page sizing and make the canvas fill the viewport.
 
-## Proposed Source Layout
+## Source Layout
 
-Use a split between GUI model and WebGPU renderer:
+The live UI path is native Rust, with a split between model/input ownership and GPU drawing:
 
 ```text
-src/client/gui/
-  gui-component.ts
-  font.ts
-  gui-input.ts
-  screen-manager.ts
-  screens/
-    screen.ts
-    title-screen.ts
-    pause-screen.ts
-    options-screen.ts
-    debug-settings-screen.ts
-    loading-screen.ts
-  components/
-    widget.ts
-    gui-event-listener.ts
-    abstract-widget.ts
-    abstract-button.ts
-    button.ts
-    abstract-slider-button.ts
-    checkbox.ts
-    cycle-button.ts
-    edit-box.ts
-    selection-list.ts
+native/crates/mclone-ui/src/
+  first-party screen/widget model, draw-list facts, GUI scale, and UI actions
 
-src/renderer/gui/
-  gui-renderer.ts
-  gui-draw-list.ts
-  gui-texture-atlas.ts
-  bitmap-font-renderer.ts
-  gui-pipeline.ts
+native/crates/mclone-render/src/gui.rs
+  WebGPU draw-list renderer
+
+native/apps/mclone-native-client/src/
+  desktop input forwarding and frame composition
+
+native/apps/mclone-web-client/src/
+native/apps/mclone-web-client/www/
+  WASM/web input forwarding, native web smoke hooks, and platform glue
 ```
 
-`src/client/gui` should be mostly renderer-agnostic. It knows about GUI-scaled pixels, input events, screen lifecycle, and draw-list APIs, but not raw `GPUDevice`.
-
-`src/renderer/gui` owns WebGPU resources and turns draw-list commands into GPU work.
-
-The exact paths can move if the codebase converges on a different presentation namespace, but keep this ownership split.
+`mclone-ui` should stay renderer-agnostic. It knows about GUI-scaled pixels, input events, screen lifecycle, actions, and draw-list APIs, but not raw `wgpu` devices. `mclone-render` owns WebGPU resources and turns draw-list commands into GPU work.
 
 ## Screen Model
 
@@ -250,9 +228,7 @@ Rules:
 
 ## Loading Status
 
-The existing loading progress data is valuable and should be kept.
-
-Current sources such as `src/renderer/loading-progress.ts`, host world progress messages, and scene initialization callbacks should feed GUI screens:
+Loading progress data should feed GUI screens from native runtime/render-session facts:
 
 - `LoadingScreen`: boot/resource/world generation progress before a playable world exists
 - `ReceivingLevelScreen`: joining or reconnecting to a remote host
@@ -296,15 +272,13 @@ Remote multiplayer can reuse the same screen system later with a connection scre
 
 ## UI Replacement Targets
 
-Replace or keep retired these visible DOM surfaces:
+Replace or keep retired these visible DOM/native-web surfaces:
 
 | Current surface | Replacement |
 |---|---|
-| `index.html` start menu | WebGPU `TitleScreen` / `WorldSetupScreen` |
-| `index.html` CSS world-preview background | WebGPU title background or simple rendered world/panorama later |
-| old debug visible overlay/settings | retired; WebGPU pause/options/debug settings screens |
-| `src/renderer/debug/debug-free-cam.ts` DOM loading/error overlay | retired; WebGPU loading/progress/error screens |
-| `src/renderer/debug/debug-input.ts` DOM joystick and fly buttons | retired; WebGPU touch-control widgets or remove if not needed |
+| native-web HTML/CSS start/menu chrome | WebGPU `TitleScreen` / `WorldSetupScreen` |
+| native-web HUD/debug DOM controls | Rust/WGPU pause/options/debug settings screens |
+| temporary web touch/HUD TypeScript glue | shared Rust UI once [`tactical/072-native-ui-dom-retirement.md`](tactical/072-native-ui-dom-retirement.md) completes |
 | browser `window.confirm` for destructive world storage reset | WebGPU confirm screen |
 
 Keep machine hooks where tests need them. Visible test control must not become product UI.
@@ -316,9 +290,9 @@ GUI changes produce pixels, so validation must include screenshots.
 Minimum lanes:
 
 - unit tests for widget hit testing, focus traversal, slider/cycle state, text measurement, and draw-list geometry
-- `pnpm typecheck`
-- `pnpm test:browser` for default boot paths
-- focused `pnpm probe:browser -- test/browser/probes/<name>.probe.ts` for every visible GUI milestone
+- `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render`
+- `pnpm native:web:typecheck`
+- `pnpm native:web:app-smoke` and `pnpm native:web:mobile-smoke` for native web UI-visible paths
 - screenshots saved under `/tmp` and inspected before building the next layer
 
 First visual probes should be small:

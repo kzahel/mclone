@@ -222,11 +222,11 @@ The presentation/UI thread owns input sampling, pointer lock, UI, GPU resources,
 
 The client runtime should never call worldgen directly.
 
-The first facade layer lives under `src/runtime/client/`:
+The first facade layer lives under `native/crates/mclone-client/src/`:
 
-- `ClientRuntime` wraps the existing `WorldClient` protocol application with ownership-oriented names such as `setChunkInterest(...)`, `sendPlayerCommand(...)`, `drainTransportUpdates()`, and `publishPresentationState()`.
-- `ClientWorld` is the client-replica contract over visible chunk, light, entity, session, player, and revision facts.
-- `PredictionService` is the future command/replay/reconcile boundary over a bounded `ClientWorldPredictionView`.
+- `ClientRuntime` applies protocol updates, owns the local replica, and exposes ownership-oriented methods such as `set_chunk_view(...)`.
+- `LocalPlayerController` and related player modules build movement and interaction commands against the client replica.
+- `ActorPresentation` and interpolation state convert authoritative remote-player/entity facts into render-facing presentation data.
 
 These facades are a naming and contract step over current code. They do not make `ClientChunkCache` final, and they do not add new movement physics, NPC AI, transport semantics, or fluid prediction.
 
@@ -288,9 +288,9 @@ The dedicated server should be headless and should not depend on renderer code, 
 
 The first dedicated-host slice is now landed in that shape:
 
-- `FileWorldStorage` provides the initial file-backed persistence adapter behind `WorldStorage`
-- `src/runtime/node/headless-generated-world-host.ts` provides a local CLI/config bootstrap for the authoritative runtime
-- the browser worker and the Node host now share the same generated-world host construction path
+- `FilesystemChunkSnapshotStore` provides the initial file-backed persistence adapter behind `ChunkSnapshotStore`.
+- `native/apps/mclone-dedicated-server/src/main.rs` provides the native headless server bootstrap.
+- the native desktop integrated path, native dedicated server, and native web integrated server all use the same protocol/client/server crate boundaries.
 
 What is still missing is remote client connectivity, not a separate server runtime core.
 

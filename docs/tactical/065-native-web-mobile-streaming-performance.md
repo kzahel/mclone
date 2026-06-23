@@ -28,8 +28,8 @@ The observed user-facing behavior is:
 - the pause repeats around chunk-center crossings, so normal exploration feels
   stop-and-go
 
-This tactical is about the native web/WASM app only. Do not revive or edit the
-legacy TypeScript browser engine.
+This tactical is about the native web/WASM app only. Do not revive the retired
+browser engine.
 
 ## Current Evidence
 
@@ -162,7 +162,7 @@ of guessing.
 - Do not change worldgen correctness or chunk publication semantics.
 - Do not add Android, Gradle, or OpenXR scaffolding.
 - Do not move DOM/touch handling into Rust.
-- Do not port legacy TypeScript runtime code.
+- Do not port retired browser-engine runtime code.
 - Do not implement a full render-distance settings UI in this tactical.
 - Do not require perfect zero-stutter streaming before landing the first fix.
 

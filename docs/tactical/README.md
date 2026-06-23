@@ -1,6 +1,6 @@
 # Native Tactical Docs
 
-Native-first Rust implementation tacticals live here. Historical retired-engine tacticals, if still present during cleanup, are archive material rather than guidance for new work.
+Native-first Rust implementation tacticals live here.
 
 Use zero-padded numeric prefixes for new native tactical docs: `000-topic.md`, `001-next-topic.md`, and so on. Keep one active implementation slice per doc. Parent sequencing checklists are allowed when they keep the native workstream focused; mark them clearly as parent docs and add every new native tactical to this index.
 

@@ -1,10 +1,10 @@
 # mclone native workspace
 
-This workspace is the clean Rust track for the native-first engine. Native desktop is the current bring-up priority, web/WASM is kept alive as an early compatibility gate, and future Android XR / Quest standalone support is an explicit native target once the desktop/runtime/renderer path is mature enough. It lives inside the existing repository so it can reuse the project oracle fixtures, reference notes, asset extraction scripts, and the TypeScript engine as legacy prior art.
+This workspace is the Rust track for the native-first engine. Native desktop is the current bring-up priority, web/WASM is kept alive as an early compatibility gate, and future Android XR / Quest standalone support is an explicit native target once the desktop/runtime/renderer path is mature enough. It lives inside the existing repository so it can reuse the project oracle fixtures, reference notes, and asset extraction scripts.
 
-The durable direction is documented in [`../docs/native-rewrite-roadmap.md`](../docs/native-rewrite-roadmap.md), and current platform posture is documented in [`../docs/platforms.md`](../docs/platforms.md). The short version: native desktop is the primary development target, web/WASM is an early compatibility gate, flat Android is the next platform frontload target, Android XR / Quest is a later native target, and the TypeScript implementation is now legacy/reference rather than the main engine direction.
+The durable direction is documented in [`../docs/native-rewrite-roadmap.md`](../docs/native-rewrite-roadmap.md), and current platform posture is documented in [`../docs/platforms.md`](../docs/platforms.md). The short version: native desktop is the primary development target, web/WASM is an early compatibility gate, flat Android is the next platform frontload target, and Android XR / Quest is a later native target.
 
-Native Rust tactical docs live in [`../docs/tactical/`](../docs/tactical/README.md) and use zero-padded numeric filenames such as `000-native-render-bringup.md`. Legacy TypeScript/browser tacticals are archived under `../docs/tactical/legacy/`.
+Native Rust tactical docs live in [`../docs/tactical/`](../docs/tactical/README.md) and use zero-padded numeric filenames such as `000-native-render-bringup.md`.
 
 Use `~/code/playbox` as the reference Rust engine for native app/render/XR patterns. In particular, its `winit`/`wgpu` setup, frame pacing, headless capture, render-target, camera, diagnostics, Android NativeActivity, and OpenXR code are useful references. Do not depend on Playbox directly, and do not copy its PhysX/VaM-specific runtime shape.
 
@@ -19,10 +19,10 @@ Playbox reference entry points:
 
 This workspace intentionally keeps native `profile.dev` optimized at `opt-level = 2`, following Playbox's policy. Debug assertions and incremental rebuild behavior remain enabled, but movement/render/worldgen perf smokes should not be interpreted as fully unoptimized Rust numbers.
 
-The Rust workspace is quarantined from the TypeScript implementation:
+The Rust workspace owns live engine implementation:
 
 - Rust crates may read shared docs, fixtures, and extracted assets.
-- Rust crates should not import, execute, or depend on TypeScript runtime code.
+- Rust crates should not import, execute, or depend on retired browser-engine code from Git history.
 - Minecraft Java `1.17.1` and the existing oracle fixtures remain the correctness target.
 - The browser target should be kept alive early, but native desktop is the main development loop.
 - Android and Android XR / Quest should stay visible as future platform constraints; do not introduce their packaging/runtime scaffolding until the renderer and app boundaries are explicit enough to validate them.

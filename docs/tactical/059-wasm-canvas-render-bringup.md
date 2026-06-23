@@ -42,7 +42,7 @@ Keep browser platform ownership in `mclone-web-client` for now:
 - Shared render primitives remain in `mclone-render`.
 - The existing `RenderFrameTarget` / explicit view-target style remains the
   shape to reuse when chunks move into the web canvas path.
-- Do not introduce a JS WebGPU renderer or revive the legacy TypeScript engine.
+- Do not introduce a JS WebGPU renderer or revive the retired browser engine.
 
 The wasm-bindgen path is intentionally separate from the raw runtime smoke. The
 raw export keeps the low-level compatibility signal, while the bindgen bundle
