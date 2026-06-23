@@ -1,6 +1,6 @@
 # 070: Web JS Glue Hardening — ABI Lock, Type-Checking, and Shrink
 
-Status: **Stages 1–2 landed (server-worker SAB ABI single-source + lock test; no-emit type-check gate over the web glue); Stage 3 in progress (packed-frame codec moved into Rust; compile-timing instrumentation next).**
+Status: **Stages 1–3 landed (server-worker SAB ABI single-source + lock test; no-emit type-check gate over the web glue; glue-shrink — packed-frame codec + compile-timing instrumentation moved into Rust). Follow-ups remain (file split, busy-poll, optional eslint/.ts graduation).**
 
 The web perf/refactor work across 064–069 grew the hand-written browser JS glue.
 This is a consolidation/hardening pass over that glue. The framing matters: the
@@ -300,23 +300,23 @@ Stage 2 touched no Rust), `cargo check -p mclone-web-client --target wasm32-unkn
 `native:web:mobile-smoke` (booted, streamed, `appliedOk: true`, zero fallback frames),
 `pnpm native:movement:smoke` + `native:timedemo:smoke` (desktop unaffected).
 
-### Stage 3 — shrink the glue (in progress)
+### Stage 3 — shrink the glue (landed)
 
-Two duplicated/coercion-heavy pieces of JS glue move into the `mclone-web-client` Rust crate
-(Problem 3). These are transport/diagnostics changes, not generation, so the deterministic
-chunk-smoke canvas stays **byte-identical** (sha256 fence) and movement-perf holds.
+Two duplicated/coercion-heavy pieces of JS glue moved into the `mclone-web-client` Rust crate
+(Problem 3), in two commits. These are transport/diagnostics changes, not generation, so the
+deterministic chunk-smoke canvas stays **byte-identical** (sha256 fence) and movement-perf holds.
 
-**Packed-frame codec → Rust (landed).** The runner-update packing codec — a `writeU32Le`
-little-endian writer plus `packedUpdateByteLength` / `writePackedUpdates` — was hand-rolled in
+**Packed-frame codec → Rust.** The runner-update packing codec — a `writeU32Le` little-endian
+writer plus `packedUpdateByteLength` / `writePackedUpdates` — was hand-rolled in
 `mclone-integrated-server-worker.js` and mirrored the Rust *decode* side
 (`unpack_runner_update_frames` in `web_server_worker.rs`). The encode side now lives next to the
 decode side in Rust, exported via wasm-bindgen as `mcloneWebPackedRunnerUpdateByteLength` and
 `mcloneWebWritePackedRunnerUpdates` (`web_server_worker.rs:1343-1397`), so the SAB packing format
-has a single owner. The worker captures the resolved module in `startServer`
-(`mclone-integrated-server-worker.js`) and reaches the codec through a `requireWasmModule()`
-guard; `postSharedUpdates` now sizes the SAB from the Rust byte-length function and lets Rust
-pack the frames in, while JS still arms the doorbell (response byte count + status word). The
-three JS codec functions (~45 lines) are deleted — the worker shrinks from 376 to ~348 lines.
+has a single owner. The worker captures the resolved module in `startServer` and reaches the
+codec through a `requireWasmModule()` guard (`mclone-integrated-server-worker.js`);
+`postSharedUpdates` now sizes the SAB from the Rust byte-length function and lets Rust pack the
+frames in, while JS still arms the doorbell (response byte count + status word). The three JS
+codec functions (~45 lines) are deleted — the worker shrinks from 376 to ~348 lines.
 
 - **Scope correction vs the doc.** The doc said the codec was "copy-pasted across both server
   workers." It is not: only `mclone-integrated-server-worker.js` packs *multiple* update frames
@@ -329,18 +329,55 @@ three JS codec functions (~45 lines) are deleted — the worker shrinks from 376
   decode-side trailing-byte check (`cursor == packed.len()`) still passes because the encoder
   writes exactly `packedBytes`.
 
-**Validation (codec, all green):** baseline chunk-smoke canvas sha256
-`0ba8251f…cbcb6a4c` captured from the committed state pre-change; after the codec move,
-`pnpm native:web:chunk-smoke` reproduces it **byte-identical** (same sha256). `cargo test
---manifest-path native/Cargo.toml` (full workspace, no failures — both ABI lock tests pass),
-`cargo check -p mclone-web-client --target wasm32-unknown-unknown` (warning-clean — the new
-`#[wasm_bindgen]` fns are referenced), `pnpm native:web:typecheck` (0 errors; the `.d.ts` now
-types `mcloneWebPackedRunnerUpdateByteLength` / `mcloneWebWritePackedRunnerUpdates` and the
-worker call sites check against them), `node --check` on the worker, `pnpm native:web:build`,
-`pnpm native:web:app-smoke` (`failed: false`, zero fallback frames) + `native:web:chunk-smoke`,
-`pnpm native:web:movement-perf` (9 compiles, totalMs avg ~10.6 ms / workerRoundTrip avg ~6.4 ms,
-no regression), `pnpm native:movement:smoke` + `native:timedemo:smoke` (desktop unaffected — the
-codec is wasm-only).
+**Compile-timing instrumentation → Rust.** The per-compile timing bag — `createCompileTiming`
+(a ~90-field record), `updateCompileTimingFrom{Request,Worker,Report}` /
+`updateCompileScopeTiming` / `normalizeRenderCompilerMetrics`, `finishCompileTiming`,
+`publicCompileTiming`, and `roundTiming` — moved into a new `WebCompileTiming`
+`#[wasm_bindgen]` struct (`web_compile_timing.rs`, new module). The struct owns the bag and the
+coercion: `updateFromRequest` / `updateFromWorker` / `updateFromReport` read the three untyped
+report objects (the doorbell, the render-compile worker report, the apply frame) through typed
+accessors (`coerce_number` = `Number(x) || 0`, `coerce_number_or_null`, `coerce_bool`,
+`coerce_string`), `finish` stamps the status/after-counters, and `publicSnapshot(now_ms)`
+projects the rounded snapshot `runtime.state` / the HUD / the smoke harness read
+(`web_compile_timing.rs:423`). JS keeps only orchestration: the `pendingTimings` map (now
+`PendingCompile` entries `{ timing, workerPromise, workerError }`), the worker promise, the
+`performance.now()` measurements it passes in via `setBeginRequestMs` / `setWorkerRoundTripMs` /
+`setDecodeFinishApplyMs`, the per-frame gap fold (`observeFrameGap`), and the two thin
+`publishActiveCompileTiming` / `recordCompileTiming` wrappers
+(`mclone-web-app.js:525,572,1551`). **`mclone-web-app.js` drops from 2151 to 1778 lines (−373)
+and its `Number(...)` coercions from 104 to 36 (−68).**
+
+- **The public snapshot shape is contract.** `assertCompileTimingDiagnostics` in
+  `scripts/browser-smoke.mjs` checks ~40 of its fields with exact relationships, so this is a
+  faithful 1:1 port of the JS coercion semantics — including the two `||`-chained fallbacks for
+  `transferredResponseByteLength` / `sharedResultByteLength` and the `String(x || "unknown")`
+  transport-kind default. The nested `renderCompilerMetrics` object is **rebuilt from the stored
+  scalars** in `metrics_object()` (they are a 1:1 mirror of `normalizeRenderCompilerMetrics`,
+  only ever set together in `updateFromWorker`) and emitted **`null` until the worker reports**
+  (a `worker_reported` flag reproduces the JS "starts null, becomes an object" behaviour). The
+  `app-smoke` / `mobile-smoke` / `movement-perf` lanes all run `assertCompileTimingDiagnostics`,
+  so they are the oracle that this snapshot is byte-for-byte equivalent.
+- **Divergence — dead code dropped, not ported.** `updateCompileTimingFromWait` (defined but
+  never called) and `timing.workerOk` (set but never read; absent from the public snapshot) were
+  dropped rather than ported. `loadedCenterBefore*` are passed in from JS (read off the app's own
+  `loadedCenter`, not a Rust report); `target_center_*` start null in the constructor because
+  `updateFromRequest` — always called immediately after — sets them, before any snapshot is taken.
+
+**Validation (all green).** Baseline chunk-smoke canvas sha256
+`0ba8251f6c0dba012782e80921b8d45ead799a216decf50e9041958babcb6a4c` captured from the committed
+state before any Stage 3 change; after **both** commits, `pnpm native:web:chunk-smoke` reproduces
+it **byte-identical** (same sha256 — generation/render untouched). `cargo test --manifest-path
+native/Cargo.toml` (full workspace, no failures — both ABI lock tests pass), `cargo check
+-p mclone-web-client --target wasm32-unknown-unknown` (warning-clean), `pnpm native:web:typecheck`
+(0 errors — the `.d.ts` now types the codec exports and the `WebCompileTiming` class, and the
+app/worker call sites check against them), `node --check` on both touched `www/*.js`,
+`pnpm native:web:build`, `pnpm native:web:app-smoke` + `native:web:chunk-smoke` +
+`native:web:mobile-smoke` (booted, streamed, `failed: false`, zero fallback frames, compile-timing
+diagnostics asserted), `pnpm native:web:movement-perf` (codec commit: 9 compiles, totalMs avg
+~10.6 ms / workerRoundTrip avg ~6.4 ms; instrumentation commit: 8 compiles, totalMs avg ~11.9 ms /
+workerRoundTrip avg ~6.6 ms — within run-to-run noise, no regression, all per-timing diagnostics
+asserted), `pnpm native:movement:smoke` + `native:timedemo:smoke` (desktop unaffected — both moves
+are wasm-only, cfg-gated out of the desktop build).
 
 ## Acceptance & validation (every stage)
 

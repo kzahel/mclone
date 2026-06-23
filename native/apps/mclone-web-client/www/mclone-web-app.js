@@ -19,9 +19,20 @@ import { RenderSectionWorkerCompiler, fetchAssetPack } from "./mclone-render-com
  */
 
 /**
- * A per-compile timing record (`createCompileTiming` …). A hand-rolled instrumentation bag with
- * ~90 numeric fields mutated in place across the compile lifecycle; treated as a loose record.
- * @typedef {Record<string, any>} CompileTiming
+ * A per-compile timing record. 070 Stage 3 moved the ~90-field instrumentation bag and its
+ * coercion-heavy merge/projection logic into Rust (`WebCompileTiming` in the
+ * `mclone-web-client` crate); JS now only feeds it report objects + `performance.now()`
+ * measurements and reads back `publicSnapshot(...)`.
+ * @typedef {import("mclone-web-client-wasm").WebCompileTiming} WebCompileTiming
+ */
+
+/**
+ * An in-flight compile: the Rust timing handle plus the JS-only worker promise/error the
+ * orchestration tracks while the compile round-trips.
+ * @typedef {object} PendingCompile
+ * @property {WebCompileTiming} timing
+ * @property {Promise<any> | null} workerPromise
+ * @property {string | null} workerError
  */
 
 /**
@@ -190,6 +201,8 @@ class WebChunkApp {
     this.status = document.getElementById("status");
     this.hud = document.getElementById("runtime-hud");
     this.hudToggle = document.getElementById("hud-toggle");
+    /** @type {WasmModule | null} */
+    this.module = null;
     /** @type {WebChunkRenderSession | null} */
     this.session = null;
     /** @type {RenderSectionWorkerCompiler | null} */
@@ -209,7 +222,7 @@ class WebChunkApp {
     // worker round-trip) plus a count of timings whose apply finalize is still awaiting
     // the worker metrics. The streaming loop posts a doorbell per compile and finalizes
     // the timing when the next frame's poll applies the result.
-    /** @type {Map<number, CompileTiming>} */
+    /** @type {Map<number, PendingCompile>} */
     this.pendingTimings = new Map();
     this.finalizingCount = 0;
     this.hasRendered = false;
@@ -235,6 +248,7 @@ class WebChunkApp {
     updateDom();
     const module = /** @type {WasmModule} */ (await import(BINDGEN_JS_URL.href));
     await module.default(BINDGEN_WASM_URL.href);
+    this.module = module;
     for (const name of ["mclone_web_create_worker_chunk_render_session"]) {
       if (typeof (/** @type {any} */ (module))[name] !== "function") {
         throw new Error(`missing ${name} export`);
@@ -510,37 +524,39 @@ class WebChunkApp {
    */
   startAndPostCompileTiming(doorbell, syncMs) {
     // Reached only from `handleStreamingFrame` via `streamFrameOnce`, which already guards
-    // `this.compiler` non-null.
+    // `this.compiler` and (via boot/init) `this.module` non-null.
     const compiler = /** @type {RenderSectionWorkerCompiler} */ (this.compiler);
+    const module = /** @type {WasmModule} */ (this.module);
     const sequence = ++this.compileSequence;
-    const timing = createCompileTiming({
+    // 070 Stage 3: the timing bag + its report coercions live in Rust now; `updateFromRequest`
+    // sets the target center off the doorbell, so the constructor starts it null.
+    const timing = new module.WebCompileTiming(
       sequence,
-      trigger: "stream",
-      targetCenter: {
-        centerX: Number(doorbell.centerX) || 0,
-        centerZ: Number(doorbell.centerZ) || 0,
-      },
-      loadedCenterBefore: this.loadedCenter,
-      frameCountBefore: runtime.state.frameCount,
-      renderCountBefore: runtime.state.renderCount,
-    });
-    updateCompileTimingFromRequest(timing, doorbell);
-    timing.beginRequestMs = Number.isFinite(syncMs) ? syncMs : 0;
+      "stream",
+      this.loadedCenter?.centerX ?? null,
+      this.loadedCenter?.centerZ ?? null,
+      runtime.state.frameCount,
+      runtime.state.renderCount,
+      performance.now(),
+    );
+    timing.updateFromRequest(doorbell);
+    timing.setBeginRequestMs(syncMs);
+    /** @type {PendingCompile} */
+    const pending = { timing, workerPromise: null, workerError: null };
     const workerStart = performance.now();
     const workerPromise = compiler.compileWithDoorbell(doorbell).then((compiled) => {
-      timing.workerRoundTripMs = performance.now() - workerStart;
+      timing.setWorkerRoundTripMs(performance.now() - workerStart);
       if (compiled?.report) {
-        updateCompileTimingFromWorker(timing, compiled.report);
+        timing.updateFromWorker(compiled.report);
       }
-      timing.workerOk = Boolean(compiled?.report?.ok);
       return compiled;
     });
-    timing.workerPromise = workerPromise;
-    this.pendingTimings.set(Number(doorbell.requestId), timing);
+    pending.workerPromise = workerPromise;
+    this.pendingTimings.set(Number(doorbell.requestId), pending);
     runtime.state.compileInFlightCount = this.pendingTimings.size;
     publishActiveCompileTiming(timing);
     workerPromise.catch((error) => {
-      timing.workerError = stringifyError(error);
+      pending.workerError = stringifyError(error);
       console.error(error);
     });
     return workerPromise;
@@ -555,24 +571,32 @@ class WebChunkApp {
    */
   finalizeCompileTiming(frame, syncMs) {
     const requestId = Number(frame.appliedRequestId);
-    const timing = this.pendingTimings.get(requestId);
-    if (!timing) {
+    const pending = this.pendingTimings.get(requestId);
+    if (!pending) {
       return;
     }
     this.pendingTimings.delete(requestId);
     runtime.state.compileInFlightCount = this.pendingTimings.size;
     this.finalizingCount += 1;
     runtime.state.compileFinalizingCount = this.finalizingCount;
+    const { timing } = pending;
     void (async () => {
       try {
-        await timing.workerPromise;
+        await pending.workerPromise;
       } catch (_error) {
-        // worker error already recorded on the timing
+        // worker error already recorded on `pending.workerError`
       }
-      updateCompileTimingFromReport(timing, frame);
-      timing.decodeFinishApplyMs = Number.isFinite(syncMs) ? syncMs : 0;
-      const ok = Boolean(frame.appliedOk) && !timing.workerError;
-      finishCompileTiming(timing, ok ? "accepted" : "failed", timing.workerError ?? null);
+      timing.updateFromReport(frame);
+      timing.setDecodeFinishApplyMs(syncMs);
+      const ok = Boolean(frame.appliedOk) && !pending.workerError;
+      timing.finish(
+        ok ? "accepted" : "failed",
+        pending.workerError ?? null,
+        performance.now(),
+        runtime.state.frameCount,
+        runtime.state.renderCount,
+        runtime.state.lastFrameGapMs,
+      );
       recordCompileTiming(timing);
       runtime.state.lastCompileReport = frame;
       this.finalizingCount = Math.max(0, this.finalizingCount - 1);
@@ -830,8 +854,8 @@ class WebChunkApp {
     runtime.state.maxFrameGapMs = Math.max(runtime.state.maxFrameGapMs, frameGapMs);
     // 067 Stage 3: many compiles can be in flight across frames; charge the frame gap to
     // every pending timing so each compile's window reflects presentation stalls.
-    for (const timing of this.pendingTimings.values()) {
-      timing.maxFrameGapMs = Math.max(timing.maxFrameGapMs, frameGapMs);
+    for (const pending of this.pendingTimings.values()) {
+      pending.timing.observeFrameGap(frameGapMs);
     }
   }
 
@@ -1523,415 +1547,18 @@ function keyboardCode(event) {
     : null;
 }
 
-/**
- * @param {object} args
- * @param {number} args.sequence
- * @param {string} args.trigger
- * @param {{ centerX?: number, centerZ?: number } | null} [args.targetCenter]
- * @param {{ centerX?: number, centerZ?: number } | null} [args.loadedCenterBefore]
- * @param {number} args.frameCountBefore
- * @param {number} args.renderCountBefore
- * @returns {CompileTiming}
- */
-function createCompileTiming({
-  sequence,
-  trigger,
-  targetCenter,
-  loadedCenterBefore,
-  frameCountBefore,
-  renderCountBefore,
-}) {
-  const now = performance.now();
-  return {
-    sequence,
-    trigger,
-    status: "running",
-    requestId: null,
-    targetCenterX: targetCenter?.centerX ?? null,
-    targetCenterZ: targetCenter?.centerZ ?? null,
-    loadedCenterBeforeX: loadedCenterBefore?.centerX ?? null,
-    loadedCenterBeforeZ: loadedCenterBefore?.centerZ ?? null,
-    loadedCenterAfterX: null,
-    loadedCenterAfterZ: null,
-    startedAtMs: now,
-    finishedAtMs: null,
-    totalMs: 0,
-    beginRequestMs: 0,
-    workerRoundTripMs: 0,
-    packedByteLength: 0,
-    renderCompilerTransportKind: "unknown",
-    renderCompilerSharedMemorySupported: false,
-    renderCompilerWorkerInitCount: 0,
-    renderCompilerWorkerWasmInitCount: 0,
-    renderCompilerWorkerAssetLoadCount: 0,
-    renderCompilerWorkerAssetPackInitByteLength: 0,
-    renderCompilerWorkerAssetPackFileCount: 0,
-    renderCompilerPersistentAssetCatalog: false,
-    renderCompilerCompileCount: 0,
-    renderCompilerWorkerCompileCount: 0,
-    renderCompilerAssetPackSendCount: 0,
-    renderCompilerRequestAssetPackByteLength: 0,
-    renderCompilerRequestTargetSectionsByteLength: 0,
-    renderCompilerRequestSnapshotInputByteLength: 0,
-    renderCompilerRequestByteLength: 0,
-    renderCompilerTransferredRequestByteLength: 0,
-    renderCompilerTransferredResponseByteLength: 0,
-    renderCompilerTransferredRequestByteCount: 0,
-    renderCompilerTransferredResponseByteCount: 0,
-    renderCompilerSharedInputBufferUsed: false,
-    renderCompilerSharedInputByteLength: 0,
-    renderCompilerSharedInputBufferCapacityBytes: 0,
-    renderCompilerSnapshotInputChunkCount: 0,
-    renderCompilerSnapshotInputClonedColumnCount: 0,
-    renderCompilerSnapshotInputCompileUsed: false,
-    renderCompilerGeneratedViewFallbackUsed: false,
-    renderCompilerSharedResultBufferUsed: false,
-    renderCompilerSharedResultByteLength: 0,
-    renderCompilerSharedResultBufferCapacityBytes: 0,
-    renderCompilerSharedResultOverflow: false,
-    renderCompilerSharedResultResponseCount: 0,
-    renderCompilerSharedResultByteCount: 0,
-    renderCompilerSharedResultOverflowCount: 0,
-    renderCompilerMetrics: null,
-    decodeFinishApplyMs: 0,
-    chunkViewUpdateCount: 0,
-    centerLoaded: false,
-    runnerSettled: false,
-    viewDirtyChunkCount: 0,
-    viewRemovalChunkCount: 0,
-    loadedDirtyChunkCount: 0,
-    removalDirtyChunkCount: 0,
-    staleDirtyChunkCount: 0,
-    loadedDirtySectionCount: 0,
-    removalDirtySectionCount: 0,
-    staleDirtySectionCount: 0,
-    readyCompileSectionCount: 0,
-    deferredCompileSectionCount: 0,
-    budgetedLoadedChunkCount: 0,
-    budgetedDirtySectionChunkCount: 0,
-    submittedCompileSectionCount: 0,
-    uploadedSectionCount: 0,
-    removedSectionCount: 0,
-    acceptedCompileSectionCount: 0,
-    staleCompileSectionCount: 0,
-    workerSectionCount: 0,
-    workerNonEmptySectionCount: 0,
-    workerVisibilityGraphBuildCount: 0,
-    workerVisibilityGraphTotalMs: 0,
-    workerVisibilityGraphWorstMs: 0,
-    workerVertexCount: 0,
-    workerIndexCount: 0,
-    workerFaceCount: 0,
-    maxFrameGapMs: 0,
-    frameCountBefore,
-    frameCountAfter: null,
-    renderCountBefore,
-    renderCountAfter: null,
-    reason: null,
-  };
-}
-
-/**
- * @param {CompileTiming} timing
- * @param {WasmReport} request
- */
-function updateCompileTimingFromRequest(timing, request) {
-  timing.requestId = Number(request.requestId) || null;
-  timing.targetCenterX = Number(request.centerX) || 0;
-  timing.targetCenterZ = Number(request.centerZ) || 0;
-  timing.submittedCompileSectionCount = Number(request.submittedCompileSectionCount) || 0;
-  updateCompileScopeTiming(timing, request);
-}
-
-/**
- * @param {CompileTiming} timing
- * @param {WasmReport} request
- * @param {number} beginStart
- */
-function updateCompileTimingFromWait(timing, request, beginStart) {
-  timing.beginRequestMs = performance.now() - beginStart;
-  const centerX = Number(request.centerX);
-  const centerZ = Number(request.centerZ);
-  if (Number.isFinite(centerX)) {
-    timing.targetCenterX = centerX;
-  }
-  if (Number.isFinite(centerZ)) {
-    timing.targetCenterZ = centerZ;
-  }
-  if (Number.isFinite(Number(request.updateCountDelta))) {
-    timing.chunkViewUpdateCount = (timing.chunkViewUpdateCount || 0)
-      + Number(request.updateCountDelta);
-  }
-  timing.runnerSettled = Boolean(request.runnerSettled);
-  timing.centerLoaded = Boolean(request.centerLoaded);
-}
-
-/**
- * @param {CompileTiming} timing
- * @param {any} report
- */
-function updateCompileTimingFromWorker(timing, report) {
-  const summary = report?.summary ?? {};
-  const metrics = normalizeRenderCompilerMetrics(report?.renderCompilerMetrics ?? report);
-  timing.renderCompilerMetrics = metrics;
-  timing.renderCompilerTransportKind = metrics.transportKind;
-  timing.renderCompilerSharedMemorySupported = metrics.sharedMemorySupported;
-  timing.renderCompilerWorkerInitCount = metrics.workerInitCount;
-  timing.renderCompilerWorkerWasmInitCount = metrics.workerWasmInitCount;
-  timing.renderCompilerWorkerAssetLoadCount = metrics.workerAssetLoadCount;
-  timing.renderCompilerWorkerAssetPackInitByteLength = metrics.workerAssetPackInitByteLength;
-  timing.renderCompilerWorkerAssetPackFileCount = metrics.workerAssetPackFileCount;
-  timing.renderCompilerPersistentAssetCatalog = metrics.persistentAssetCatalog;
-  timing.renderCompilerCompileCount = metrics.compileCount;
-  timing.renderCompilerWorkerCompileCount = metrics.workerCompileCount;
-  timing.renderCompilerAssetPackSendCount = metrics.assetPackSendCount;
-  timing.renderCompilerRequestAssetPackByteLength = metrics.requestAssetPackByteLength;
-  timing.renderCompilerRequestTargetSectionsByteLength = metrics.requestTargetSectionsByteLength;
-  timing.renderCompilerRequestSnapshotInputByteLength = metrics.requestSnapshotInputByteLength;
-  timing.renderCompilerRequestByteLength = metrics.requestByteLength;
-  timing.renderCompilerTransferredRequestByteLength = metrics.transferredRequestByteLength;
-  timing.renderCompilerTransferredResponseByteLength = metrics.transferredResponseByteLength;
-  timing.renderCompilerTransferredRequestByteCount = metrics.transferredRequestByteCount;
-  timing.renderCompilerTransferredResponseByteCount = metrics.transferredResponseByteCount;
-  timing.renderCompilerSharedInputBufferUsed = metrics.sharedInputBufferUsed;
-  timing.renderCompilerSharedInputByteLength = metrics.sharedInputByteLength;
-  timing.renderCompilerSharedInputBufferCapacityBytes = metrics.sharedInputBufferCapacityBytes;
-  timing.renderCompilerSnapshotInputChunkCount = metrics.snapshotInputChunkCount;
-  timing.renderCompilerSnapshotInputClonedColumnCount = metrics.snapshotInputClonedColumnCount;
-  timing.renderCompilerSnapshotInputCompileUsed = metrics.snapshotInputCompileUsed;
-  timing.renderCompilerGeneratedViewFallbackUsed = metrics.generatedViewFallbackUsed;
-  timing.renderCompilerSharedResultBufferUsed = metrics.sharedResultBufferUsed;
-  timing.renderCompilerSharedResultByteLength = metrics.sharedResultByteLength;
-  timing.renderCompilerSharedResultBufferCapacityBytes = metrics.sharedResultBufferCapacityBytes;
-  timing.renderCompilerSharedResultOverflow = metrics.sharedResultOverflow;
-  timing.renderCompilerSharedResultResponseCount = metrics.sharedResultResponseCount;
-  timing.renderCompilerSharedResultByteCount = metrics.sharedResultByteCount;
-  timing.renderCompilerSharedResultOverflowCount = metrics.sharedResultOverflowCount;
-  timing.packedByteLength = metrics.sharedResultByteLength
-    || metrics.transferredResponseByteLength
-    || timing.packedByteLength;
-  timing.workerSectionCount = Number(summary.sectionCount) || 0;
-  timing.workerNonEmptySectionCount = Number(summary.nonEmptySectionCount) || 0;
-  timing.workerVisibilityGraphBuildCount = Number(summary.visibilityGraphBuildCount) || 0;
-  timing.workerVisibilityGraphTotalMs = Number(summary.visibilityGraphTotalMs) || 0;
-  timing.workerVisibilityGraphWorstMs = Number(summary.visibilityGraphWorstMs) || 0;
-  timing.workerVertexCount = Number(summary.vertexCount) || 0;
-  timing.workerIndexCount = Number(summary.indexCount) || 0;
-  timing.workerFaceCount = Number(summary.faceCount) || 0;
-}
-
-/** @param {any} source */
-function normalizeRenderCompilerMetrics(source) {
-  return {
-    transportKind: String(source?.transportKind || "unknown"),
-    sharedMemorySupported: Boolean(source?.sharedMemorySupported),
-    workerInitCount: Number(source?.workerInitCount) || 0,
-    workerWasmInitCount: Number(source?.workerWasmInitCount) || 0,
-    workerAssetLoadCount: Number(source?.workerAssetLoadCount) || 0,
-    workerAssetPackInitByteLength: Number(source?.workerAssetPackInitByteLength) || 0,
-    workerAssetPackFileCount: Number(source?.workerAssetPackFileCount) || 0,
-    persistentAssetCatalog: Boolean(source?.persistentAssetCatalog),
-    compileCount: Number(source?.compileCount) || 0,
-    workerCompileCount: Number(source?.workerCompileCount) || 0,
-    assetPackSendCount: Number(source?.assetPackSendCount) || 0,
-    requestAssetPackByteLength: Number(source?.requestAssetPackByteLength) || 0,
-    requestTargetSectionsByteLength: Number(source?.requestTargetSectionsByteLength) || 0,
-    requestSnapshotInputByteLength: Number(source?.requestSnapshotInputByteLength) || 0,
-    requestByteLength: Number(source?.requestByteLength) || 0,
-    transferredRequestByteLength: Number(source?.transferredRequestByteLength) || 0,
-    transferredResponseByteLength: Number(source?.transferredResponseByteLength)
-      || (source?.sharedResultBufferUsed ? 0 : Number(source?.packedByteLength))
-      || 0,
-    transferredRequestByteCount: Number(source?.transferredRequestByteCount) || 0,
-    transferredResponseByteCount: Number(source?.transferredResponseByteCount) || 0,
-    sharedInputBufferUsed: Boolean(source?.sharedInputBufferUsed),
-    sharedInputByteLength: Number(source?.sharedInputByteLength) || 0,
-    sharedInputBufferCapacityBytes: Number(source?.sharedInputBufferCapacityBytes) || 0,
-    snapshotInputChunkCount: Number(source?.snapshotInputChunkCount) || 0,
-    snapshotInputClonedColumnCount: Number(source?.snapshotInputClonedColumnCount) || 0,
-    snapshotInputCompileUsed: Boolean(source?.snapshotInputCompileUsed),
-    generatedViewFallbackUsed: Boolean(source?.generatedViewFallbackUsed),
-    sharedResultBufferUsed: Boolean(source?.sharedResultBufferUsed),
-    sharedResultByteLength: Number(source?.sharedResultByteLength)
-      || (source?.sharedResultBufferUsed ? Number(source?.packedByteLength) : 0)
-      || 0,
-    sharedResultBufferCapacityBytes: Number(source?.sharedResultBufferCapacityBytes) || 0,
-    sharedResultOverflow: Boolean(source?.sharedResultOverflow),
-    sharedResultResponseCount: Number(source?.sharedResultResponseCount) || 0,
-    sharedResultByteCount: Number(source?.sharedResultByteCount) || 0,
-    sharedResultOverflowCount: Number(source?.sharedResultOverflowCount) || 0,
-  };
-}
-
-/**
- * @param {CompileTiming} timing
- * @param {WasmReport} report
- */
-function updateCompileTimingFromReport(timing, report) {
-  timing.loadedCenterAfterX = Number(report.centerX) || 0;
-  timing.loadedCenterAfterZ = Number(report.centerZ) || 0;
-  timing.centerLoaded = true;
-  timing.runnerSettled = true;
-  timing.uploadedSectionCount = Number(report.uploadedSectionCount) || 0;
-  timing.removedSectionCount = Number(report.removedSectionCount) || 0;
-  timing.acceptedCompileSectionCount = Number(report.acceptedCompileSectionCount) || 0;
-  timing.staleCompileSectionCount = Number(report.staleCompileSectionCount) || 0;
-  timing.submittedCompileSectionCount = Number(report.submittedCompileSectionCount)
-    || timing.submittedCompileSectionCount;
-  timing.packedByteLength = Number(report.workerPackedByteLength) || timing.packedByteLength;
-  timing.workerVisibilityGraphBuildCount = Number(report.workerVisibilityGraphBuildCount)
-    || timing.workerVisibilityGraphBuildCount;
-  timing.workerVisibilityGraphTotalMs = Number(report.workerVisibilityGraphTotalMs)
-    || timing.workerVisibilityGraphTotalMs;
-  timing.workerVisibilityGraphWorstMs = Number(report.workerVisibilityGraphWorstMs)
-    || timing.workerVisibilityGraphWorstMs;
-  updateCompileScopeTiming(timing, report);
-}
-
-/**
- * @param {CompileTiming} timing
- * @param {WasmReport} source
- */
-function updateCompileScopeTiming(timing, source) {
-  timing.viewDirtyChunkCount = Number(source.viewDirtyChunkCount) || 0;
-  timing.viewRemovalChunkCount = Number(source.viewRemovalChunkCount) || 0;
-  timing.loadedDirtyChunkCount = Number(source.loadedDirtyChunkCount) || 0;
-  timing.removalDirtyChunkCount = Number(source.removalDirtyChunkCount) || 0;
-  timing.staleDirtyChunkCount = Number(source.staleDirtyChunkCount) || 0;
-  timing.loadedDirtySectionCount = Number(source.loadedDirtySectionCount) || 0;
-  timing.removalDirtySectionCount = Number(source.removalDirtySectionCount) || 0;
-  timing.staleDirtySectionCount = Number(source.staleDirtySectionCount) || 0;
-  timing.readyCompileSectionCount = Number(source.readyCompileSectionCount) || 0;
-  timing.deferredCompileSectionCount = Number(source.deferredCompileSectionCount) || 0;
-  timing.budgetedLoadedChunkCount = Number(source.budgetedLoadedChunkCount) || 0;
-  timing.budgetedDirtySectionChunkCount = Number(source.budgetedDirtySectionChunkCount) || 0;
-}
-
-/**
- * @param {CompileTiming} timing
- * @param {string} status
- * @param {string | null} [reason]
- */
-function finishCompileTiming(timing, status, reason = null) {
-  timing.status = status;
-  timing.reason = reason;
-  timing.finishedAtMs = performance.now();
-  timing.totalMs = timing.finishedAtMs - timing.startedAtMs;
-  timing.frameCountAfter = runtime.state.frameCount;
-  timing.renderCountAfter = runtime.state.renderCount;
-  timing.maxFrameGapMs = Math.max(timing.maxFrameGapMs, runtime.state.lastFrameGapMs || 0);
-  publishActiveCompileTiming(timing);
-}
-
-/** @param {CompileTiming} timing */
+/** @param {WebCompileTiming} timing */
 function publishActiveCompileTiming(timing) {
-  runtime.state.activeCompileTiming = publicCompileTiming(timing);
+  runtime.state.activeCompileTiming = timing.publicSnapshot(performance.now());
 }
 
-/** @param {CompileTiming} timing */
+/** @param {WebCompileTiming} timing */
 function recordCompileTiming(timing) {
-  const snapshot = publicCompileTiming(timing);
+  const snapshot = timing.publicSnapshot(performance.now());
   runtime.state.lastCompileTiming = snapshot;
   runtime.state.compileTimings = [...runtime.state.compileTimings, snapshot].slice(-16);
   runtime.state.compileTimingCount += 1;
   runtime.state.activeCompileTiming = null;
-}
-
-/** @param {CompileTiming} timing */
-function publicCompileTiming(timing) {
-  const totalMs = timing.finishedAtMs === null
-    ? performance.now() - timing.startedAtMs
-    : timing.totalMs;
-  return {
-    sequence: timing.sequence,
-    trigger: timing.trigger,
-    status: timing.status,
-    requestId: timing.requestId,
-    targetCenterX: timing.targetCenterX,
-    targetCenterZ: timing.targetCenterZ,
-    loadedCenterBeforeX: timing.loadedCenterBeforeX,
-    loadedCenterBeforeZ: timing.loadedCenterBeforeZ,
-    loadedCenterAfterX: timing.loadedCenterAfterX,
-    loadedCenterAfterZ: timing.loadedCenterAfterZ,
-    totalMs: roundTiming(totalMs),
-    beginRequestMs: roundTiming(timing.beginRequestMs),
-    workerRoundTripMs: roundTiming(timing.workerRoundTripMs),
-    packedByteLength: timing.packedByteLength,
-    renderCompilerTransportKind: timing.renderCompilerTransportKind,
-    renderCompilerSharedMemorySupported: timing.renderCompilerSharedMemorySupported,
-    renderCompilerWorkerInitCount: timing.renderCompilerWorkerInitCount,
-    renderCompilerWorkerWasmInitCount: timing.renderCompilerWorkerWasmInitCount,
-    renderCompilerWorkerAssetLoadCount: timing.renderCompilerWorkerAssetLoadCount,
-    renderCompilerWorkerAssetPackInitByteLength: timing.renderCompilerWorkerAssetPackInitByteLength,
-    renderCompilerWorkerAssetPackFileCount: timing.renderCompilerWorkerAssetPackFileCount,
-    renderCompilerPersistentAssetCatalog: timing.renderCompilerPersistentAssetCatalog,
-    renderCompilerCompileCount: timing.renderCompilerCompileCount,
-    renderCompilerWorkerCompileCount: timing.renderCompilerWorkerCompileCount,
-    renderCompilerAssetPackSendCount: timing.renderCompilerAssetPackSendCount,
-    renderCompilerRequestAssetPackByteLength: timing.renderCompilerRequestAssetPackByteLength,
-    renderCompilerRequestTargetSectionsByteLength: timing.renderCompilerRequestTargetSectionsByteLength,
-    renderCompilerRequestSnapshotInputByteLength: timing.renderCompilerRequestSnapshotInputByteLength,
-    renderCompilerRequestByteLength: timing.renderCompilerRequestByteLength,
-    renderCompilerTransferredRequestByteLength: timing.renderCompilerTransferredRequestByteLength,
-    renderCompilerTransferredResponseByteLength: timing.renderCompilerTransferredResponseByteLength,
-    renderCompilerTransferredRequestByteCount: timing.renderCompilerTransferredRequestByteCount,
-    renderCompilerTransferredResponseByteCount: timing.renderCompilerTransferredResponseByteCount,
-    renderCompilerSharedInputBufferUsed: timing.renderCompilerSharedInputBufferUsed,
-    renderCompilerSharedInputByteLength: timing.renderCompilerSharedInputByteLength,
-    renderCompilerSharedInputBufferCapacityBytes: timing.renderCompilerSharedInputBufferCapacityBytes,
-    renderCompilerSnapshotInputChunkCount: timing.renderCompilerSnapshotInputChunkCount,
-    renderCompilerSnapshotInputClonedColumnCount: timing.renderCompilerSnapshotInputClonedColumnCount,
-    renderCompilerSnapshotInputCompileUsed: timing.renderCompilerSnapshotInputCompileUsed,
-    renderCompilerGeneratedViewFallbackUsed: timing.renderCompilerGeneratedViewFallbackUsed,
-    renderCompilerSharedResultBufferUsed: timing.renderCompilerSharedResultBufferUsed,
-    renderCompilerSharedResultByteLength: timing.renderCompilerSharedResultByteLength,
-    renderCompilerSharedResultBufferCapacityBytes: timing.renderCompilerSharedResultBufferCapacityBytes,
-    renderCompilerSharedResultOverflow: timing.renderCompilerSharedResultOverflow,
-    renderCompilerSharedResultResponseCount: timing.renderCompilerSharedResultResponseCount,
-    renderCompilerSharedResultByteCount: timing.renderCompilerSharedResultByteCount,
-    renderCompilerSharedResultOverflowCount: timing.renderCompilerSharedResultOverflowCount,
-    renderCompilerMetrics: timing.renderCompilerMetrics,
-    decodeFinishApplyMs: roundTiming(timing.decodeFinishApplyMs),
-    chunkViewUpdateCount: timing.chunkViewUpdateCount,
-    centerLoaded: timing.centerLoaded,
-    runnerSettled: timing.runnerSettled,
-    viewDirtyChunkCount: timing.viewDirtyChunkCount,
-    viewRemovalChunkCount: timing.viewRemovalChunkCount,
-    loadedDirtyChunkCount: timing.loadedDirtyChunkCount,
-    removalDirtyChunkCount: timing.removalDirtyChunkCount,
-    staleDirtyChunkCount: timing.staleDirtyChunkCount,
-    loadedDirtySectionCount: timing.loadedDirtySectionCount,
-    removalDirtySectionCount: timing.removalDirtySectionCount,
-    staleDirtySectionCount: timing.staleDirtySectionCount,
-    readyCompileSectionCount: timing.readyCompileSectionCount,
-    deferredCompileSectionCount: timing.deferredCompileSectionCount,
-    budgetedLoadedChunkCount: timing.budgetedLoadedChunkCount,
-    budgetedDirtySectionChunkCount: timing.budgetedDirtySectionChunkCount,
-    submittedCompileSectionCount: timing.submittedCompileSectionCount,
-    uploadedSectionCount: timing.uploadedSectionCount,
-    removedSectionCount: timing.removedSectionCount,
-    acceptedCompileSectionCount: timing.acceptedCompileSectionCount,
-    staleCompileSectionCount: timing.staleCompileSectionCount,
-    workerSectionCount: timing.workerSectionCount,
-    workerNonEmptySectionCount: timing.workerNonEmptySectionCount,
-    workerVisibilityGraphBuildCount: timing.workerVisibilityGraphBuildCount,
-    workerVisibilityGraphTotalMs: roundTiming(timing.workerVisibilityGraphTotalMs),
-    workerVisibilityGraphWorstMs: roundTiming(timing.workerVisibilityGraphWorstMs),
-    workerVertexCount: timing.workerVertexCount,
-    workerIndexCount: timing.workerIndexCount,
-    workerFaceCount: timing.workerFaceCount,
-    maxFrameGapMs: roundTiming(timing.maxFrameGapMs),
-    frameCountBefore: timing.frameCountBefore,
-    frameCountAfter: timing.frameCountAfter,
-    renderCountBefore: timing.renderCountBefore,
-    renderCountAfter: timing.renderCountAfter,
-    reason: timing.reason,
-  };
-}
-
-/** @param {number} value */
-function roundTiming(value) {
-  return Number.isFinite(value) ? Math.round(value * 10) / 10 : 0;
 }
 
 /** @returns {Promise<void>} */

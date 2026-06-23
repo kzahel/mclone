@@ -16,6 +16,8 @@ use mclone_server::{IntegratedServer, ServerRunnerDiagnostics, ServerRunnerKind}
 #[cfg(target_arch = "wasm32")]
 mod web_canvas;
 #[cfg(target_arch = "wasm32")]
+mod web_compile_timing;
+#[cfg(target_arch = "wasm32")]
 mod web_remote_session;
 #[cfg(target_arch = "wasm32")]
 mod web_server_worker;
