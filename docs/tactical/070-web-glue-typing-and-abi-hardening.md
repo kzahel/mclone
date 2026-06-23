@@ -1,6 +1,6 @@
 # 070: Web JS Glue Hardening — ABI Lock, Type-Checking, and Shrink
 
-Status: **Stages 1–2 landed (server-worker SAB ABI single-source + lock test; no-emit type-check gate over the web glue); Stage 3 proposed.**
+Status: **Stages 1–2 landed (server-worker SAB ABI single-source + lock test; no-emit type-check gate over the web glue); Stage 3 in progress (packed-frame codec moved into Rust; compile-timing instrumentation next).**
 
 The web perf/refactor work across 064–069 grew the hand-written browser JS glue.
 This is a consolidation/hardening pass over that glue. The framing matters: the
@@ -299,6 +299,48 @@ Stage 2 touched no Rust), `cargo check -p mclone-web-client --target wasm32-unkn
 `pnpm native:web:build`, `pnpm native:web:app-smoke` + `native:web:chunk-smoke` +
 `native:web:mobile-smoke` (booted, streamed, `appliedOk: true`, zero fallback frames),
 `pnpm native:movement:smoke` + `native:timedemo:smoke` (desktop unaffected).
+
+### Stage 3 — shrink the glue (in progress)
+
+Two duplicated/coercion-heavy pieces of JS glue move into the `mclone-web-client` Rust crate
+(Problem 3). These are transport/diagnostics changes, not generation, so the deterministic
+chunk-smoke canvas stays **byte-identical** (sha256 fence) and movement-perf holds.
+
+**Packed-frame codec → Rust (landed).** The runner-update packing codec — a `writeU32Le`
+little-endian writer plus `packedUpdateByteLength` / `writePackedUpdates` — was hand-rolled in
+`mclone-integrated-server-worker.js` and mirrored the Rust *decode* side
+(`unpack_runner_update_frames` in `web_server_worker.rs`). The encode side now lives next to the
+decode side in Rust, exported via wasm-bindgen as `mcloneWebPackedRunnerUpdateByteLength` and
+`mcloneWebWritePackedRunnerUpdates` (`web_server_worker.rs:1343-1397`), so the SAB packing format
+has a single owner. The worker captures the resolved module in `startServer`
+(`mclone-integrated-server-worker.js`) and reaches the codec through a `requireWasmModule()`
+guard; `postSharedUpdates` now sizes the SAB from the Rust byte-length function and lets Rust
+pack the frames in, while JS still arms the doorbell (response byte count + status word). The
+three JS codec functions (~45 lines) are deleted — the worker shrinks from 376 to ~348 lines.
+
+- **Scope correction vs the doc.** The doc said the codec was "copy-pasted across both server
+  workers." It is not: only `mclone-integrated-server-worker.js` packs *multiple* update frames
+  into one SAB. `mclone-server-job-worker.js` writes a *single* response frame
+  (`new Uint8Array(responseBuffer, 0, n).set(response)`) and never had `writeU32Le` or the
+  packing helpers — verified by grep. So only the integrated-server worker changed.
+- **Faithful port.** The Rust encoder copies each `Uint8Array` frame into the SAB view in one
+  `TypedArray.set` (the same single copy the JS did), with the u32 headers written via
+  `set_index`, so it carries no extra per-frame allocation and the perf fence holds. The
+  decode-side trailing-byte check (`cursor == packed.len()`) still passes because the encoder
+  writes exactly `packedBytes`.
+
+**Validation (codec, all green):** baseline chunk-smoke canvas sha256
+`0ba8251f…cbcb6a4c` captured from the committed state pre-change; after the codec move,
+`pnpm native:web:chunk-smoke` reproduces it **byte-identical** (same sha256). `cargo test
+--manifest-path native/Cargo.toml` (full workspace, no failures — both ABI lock tests pass),
+`cargo check -p mclone-web-client --target wasm32-unknown-unknown` (warning-clean — the new
+`#[wasm_bindgen]` fns are referenced), `pnpm native:web:typecheck` (0 errors; the `.d.ts` now
+types `mcloneWebPackedRunnerUpdateByteLength` / `mcloneWebWritePackedRunnerUpdates` and the
+worker call sites check against them), `node --check` on the worker, `pnpm native:web:build`,
+`pnpm native:web:app-smoke` (`failed: false`, zero fallback frames) + `native:web:chunk-smoke`,
+`pnpm native:web:movement-perf` (9 compiles, totalMs avg ~10.6 ms / workerRoundTrip avg ~6.4 ms,
+no regression), `pnpm native:movement:smoke` + `native:timedemo:smoke` (desktop unaffected — the
+codec is wasm-only).
 
 ## Acceptance & validation (every stage)
 

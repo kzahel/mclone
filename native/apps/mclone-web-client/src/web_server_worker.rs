@@ -1333,6 +1333,69 @@ fn shared_runner_response_frames(value: &JsValue) -> Result<SharedRunnerResponse
     })
 }
 
+/// Packed runner update frame codec — encode side. Single-sourced in Rust so the
+/// `SharedArrayBuffer` packing format has one owner; the integrated-server worker
+/// calls this via wasm-bindgen instead of hand-rolling a little-endian writer
+/// (the former `writeU32Le` / `writePackedUpdates` in
+/// `mclone-integrated-server-worker.js`). The decode side is
+/// `unpack_runner_update_frames` just below. Format: a u32 LE frame count, then
+/// per frame a u32 LE byte length followed by the frame bytes.
+#[wasm_bindgen(js_name = mcloneWebPackedRunnerUpdateByteLength)]
+pub fn mclone_web_packed_runner_update_byte_length(updates: &Array) -> u32 {
+    let mut byte_length: u32 = 4; // leading u32 frame count
+    for value in updates.iter() {
+        byte_length = byte_length
+            .saturating_add(4)
+            .saturating_add(runner_update_frame_len(&value));
+    }
+    byte_length
+}
+
+/// Pack `updates` (an array of `Uint8Array` server-update frames) into `buffer` at
+/// offset 0, writing exactly `packed_bytes` bytes (as returned by
+/// `mclone_web_packed_runner_update_byte_length`). The caller arms the SAB doorbell
+/// (response byte count + status word) after this returns.
+#[wasm_bindgen(js_name = mcloneWebWritePackedRunnerUpdates)]
+pub fn mclone_web_write_packed_runner_updates(
+    updates: &Array,
+    buffer: &SharedArrayBuffer,
+    packed_bytes: u32,
+) -> Result<(), JsValue> {
+    let capacity = buffer.byte_length();
+    if packed_bytes > capacity {
+        return Err(JsValue::from_str(&format!(
+            "packed shared runner updates need {packed_bytes} bytes but buffer has {capacity}"
+        )));
+    }
+    let view = Uint8Array::new_with_byte_offset_and_length(buffer.as_ref(), 0, packed_bytes);
+    let mut offset = write_packed_runner_u32(&view, 0, updates.length());
+    for value in updates.iter() {
+        let frame_len = runner_update_frame_len(&value);
+        offset = write_packed_runner_u32(&view, offset, frame_len);
+        if frame_len > 0 {
+            // `value` is the Uint8Array frame itself; `TypedArray.set` copies it in one shot.
+            view.set(&value, offset);
+        }
+        offset = offset.saturating_add(frame_len);
+    }
+    Ok(())
+}
+
+fn runner_update_frame_len(value: &JsValue) -> u32 {
+    value
+        .dyn_ref::<Uint8Array>()
+        .map_or(0, Uint8Array::length)
+}
+
+fn write_packed_runner_u32(view: &Uint8Array, offset: u32, value: u32) -> u32 {
+    let bytes = value.to_le_bytes();
+    view.set_index(offset, bytes[0]);
+    view.set_index(offset + 1, bytes[1]);
+    view.set_index(offset + 2, bytes[2]);
+    view.set_index(offset + 3, bytes[3]);
+    offset + 4
+}
+
 fn unpack_runner_update_frames(packed: &[u8]) -> Result<Vec<Vec<u8>>, String> {
     let mut cursor = 0usize;
     let frame_count = read_le_u32(packed, &mut cursor)? as usize;

@@ -54,6 +54,14 @@ import {
 
 /** @type {Promise<WasmModule> | null} */
 let wasmModulePromise = null;
+/**
+ * The resolved wasm module, captured once {@link startServer} loads it. The packed-frame
+ * codec (070 Stage 3) lives in Rust and is reached through this handle, so the SAB packing
+ * format has a single owner. Non-null for the lifetime of any update-posting path (they run
+ * only after the server is started).
+ * @type {WasmModule | null}
+ */
+let wasmModule = null;
 /** @type {IntegratedServer | null} */
 let server = null;
 /** @type {ReturnType<typeof setInterval> | number} */
@@ -108,6 +116,7 @@ async function startServer(message) {
   }
 
   const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
+  wasmModule = module;
   server = message.jobWorkerUrl && typeof module.McloneWebIntegratedServerWorker.withJobWorkers === "function"
     ? module.McloneWebIntegratedServerWorker.withJobWorkers(
       toBigIntSeed(message.seed),
@@ -229,9 +238,13 @@ function postUpdates(message, requestMessage = null) {
  * @param {unknown[]} updates
  */
 function postSharedUpdates(message, requestMessage, updates) {
-  const packedBytes = packedUpdateByteLength(updates);
+  // 070 Stage 3: the packed-frame codec lives in Rust (decode side:
+  // unpack_runner_update_frames in src/web_server_worker.rs). Compute the size, size/select
+  // the SAB, then let Rust pack the frames in; JS still arms the doorbell below.
+  const module = requireWasmModule();
+  const packedBytes = module.mcloneWebPackedRunnerUpdateByteLength(updates);
   const shared = sharedRunnerResponseTarget(requestMessage, packedBytes);
-  writePackedUpdates(shared.updateBuffer, updates, packedBytes);
+  module.mcloneWebWritePackedRunnerUpdates(updates, shared.updateBuffer, packedBytes);
   Atomics.store(shared.control, RUNNER_SHARED_RESPONSE_BYTES_INDEX, packedBytes);
   Atomics.store(shared.control, RUNNER_SHARED_STATUS_INDEX, RUNNER_SHARED_STATUS_COMPLETE);
   Atomics.notify(shared.control, RUNNER_SHARED_STATUS_INDEX, 1);
@@ -344,55 +357,6 @@ function releaseRunnerSharedBuffer(message) {
   }
 }
 
-/**
- * @param {unknown[]} updates
- * @returns {number}
- */
-function packedUpdateByteLength(updates) {
-  let byteLength = 4;
-  for (const update of updates) {
-    const frame = update instanceof Uint8Array ? update : new Uint8Array();
-    byteLength += 4 + frame.byteLength;
-  }
-  return byteLength;
-}
-
-/**
- * @param {SharedArrayBuffer} buffer
- * @param {unknown[]} updates
- * @param {number} packedBytes
- */
-function writePackedUpdates(buffer, updates, packedBytes) {
-  if (packedBytes > buffer.byteLength) {
-    throw new Error(
-      `packed shared runner updates need ${packedBytes} bytes but buffer has ${buffer.byteLength}`,
-    );
-  }
-  const bytes = new Uint8Array(buffer, 0, packedBytes);
-  let offset = 0;
-  offset = writeU32Le(bytes, offset, updates.length);
-  for (const update of updates) {
-    const frame = update instanceof Uint8Array ? update : new Uint8Array();
-    offset = writeU32Le(bytes, offset, frame.byteLength);
-    bytes.set(frame, offset);
-    offset += frame.byteLength;
-  }
-}
-
-/**
- * @param {Uint8Array} bytes
- * @param {number} offset
- * @param {number} value
- * @returns {number}
- */
-function writeU32Le(bytes, offset, value) {
-  bytes[offset] = value & 0xff;
-  bytes[offset + 1] = (value >>> 8) & 0xff;
-  bytes[offset + 2] = (value >>> 16) & 0xff;
-  bytes[offset + 3] = (value >>> 24) & 0xff;
-  return offset + 4;
-}
-
 /** @param {number} byteLength */
 function sharedCapacityFor(byteLength) {
   let capacity = DEFAULT_RUNNER_SHARED_RESPONSE_BYTES;
@@ -436,6 +400,18 @@ function loadWasmModule(bindgenJsUrl, bindgenWasmUrl) {
     return /** @type {WasmModule} */ (module);
   });
   return wasmModulePromise;
+}
+
+/**
+ * The resolved wasm module, which owns the packed-frame codec (070 Stage 3). Update-posting
+ * paths run only after {@link startServer} has set it, so a null here is a programming error.
+ * @returns {WasmModule}
+ */
+function requireWasmModule() {
+  if (!wasmModule) {
+    throw new Error("integrated server worker wasm module is not loaded");
+  }
+  return wasmModule;
 }
 
 /** @param {any} diagnostics */
