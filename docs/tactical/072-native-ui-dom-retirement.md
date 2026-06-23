@@ -1,6 +1,6 @@
 # 072: Native UI DOM Retirement
 
-Status: proposed high-priority parent.
+Status: active high-priority parent; Slice 1 shared menu model extraction landed.
 
 ## Purpose
 
@@ -154,14 +154,14 @@ CSS should be limited to body/canvas sizing, overflow/touch-action resets, and f
 
 Goal: desktop keeps identical behavior, but the menu model no longer lives in the desktop app crate.
 
-- [ ] Confirm workstream: native Rust + native web/WASM.
-- [ ] Move `NativeScreen`, `OptionsParent`, `NativeUiAction`, and `NativeUi` concepts into `mclone-ui` with neutral names.
-- [ ] Replace `winit::keyboard::KeyCode` in shared UI with a small `GuiKey` enum.
-- [ ] Keep current draw-list output and widget IDs stable enough that native screenshots should remain visually equivalent.
-- [ ] Update desktop to translate `winit` input into `mclone-ui` input/key types.
-- [ ] Keep desktop `apply_ui_action` behavior in the app adapter.
-- [ ] Update tests currently in `native-client/src/ui.rs` or move equivalent tests into `mclone-ui`.
-- [ ] Update this doc's status/landed section, commit, and report the next high-value step.
+- [x] Confirm workstream: native Rust + native web/WASM.
+- [x] Move `NativeScreen`, `OptionsParent`, `NativeUiAction`, and `NativeUi` concepts into `mclone-ui` with neutral names.
+- [x] Replace `winit::keyboard::KeyCode` in shared UI with a small `GuiKey` enum.
+- [x] Keep current draw-list output and widget IDs stable enough that native screenshots should remain visually equivalent.
+- [x] Update desktop to translate `winit` input into `mclone-ui` input/key types.
+- [x] Keep desktop `apply_ui_action` behavior in the app adapter.
+- [x] Update tests currently in `native-client/src/ui.rs` or move equivalent tests into `mclone-ui`.
+- [x] Update this doc's status/landed section, commit, and report the next high-value step.
 
 Validation:
 
@@ -326,4 +326,12 @@ Do not leave a completed chunk uncommitted unless the user explicitly asks not t
 
 ## Landed
 
-Nothing yet.
+### 2026-06-23 - Slice 1 Shared Menu Model Extraction
+
+- Moved the reusable title/pause/options model into `native/crates/mclone-ui/src/lib.rs` as `GameUi`, `GameScreen`, `GameOptionsParent`, `GameUiAction`, `GameUiRenderState`, `GameFramePacingMode`, and `GuiKey`.
+- Kept native desktop action application in `native/apps/mclone-native-client/src/app.rs`; the app now translates `winit` keys to `GuiKey` and converts desktop render/frame-pacing facts into `GameUiRenderState`.
+- Trimmed `native/apps/mclone-native-client/src/ui.rs` to native-only debug-pane rendering and headless CLI screen mapping.
+- Moved shared menu behavior tests into `mclone-ui`; kept native debug-pane tests in the native app.
+- Validation: `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-native-client`; `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --headless-ui /tmp/mclone-ui-title.png --width 960 --height 540`.
+- Screenshot inspected: `/tmp/mclone-ui-title.png` was nonblank and showed the expected title, Start/Options/Quit buttons, and bottom-left target label.
+- Known follow-up: Slice 2 should add `GuiRenderer` and shared UI state to the native-web `WebChunkRenderSession` without deleting DOM controls yet.

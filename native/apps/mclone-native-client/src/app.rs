@@ -20,7 +20,9 @@ use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
-use mclone_ui::{GuiScale, Point};
+use mclone_ui::{
+    GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point,
+};
 use winit::application::ApplicationHandler;
 use winit::event::{
     DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent,
@@ -37,7 +39,7 @@ use crate::frame_pacing::{
 };
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
-use crate::ui::{DebugPaneStats, NativeUi, NativeUiAction};
+use crate::ui::{DebugPaneStats, render_debug_pane};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraMovementMode, EngineCameraSnapshot,
@@ -76,7 +78,6 @@ pub(crate) fn run_window(
         runtime,
         SpectatorCamera::spawn_for_scene(&scene),
         render_options,
-        scene.render_distance,
     );
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -145,8 +146,8 @@ pub(crate) fn render_full_frame(
     time_of_day: f32,
     sun_angle: f32,
     render_options: TexturedSectionRenderOptions,
-    frame_pacing: FramePacingUiState,
-    ui: &NativeUi,
+    ui_render_state: GameUiRenderState,
+    ui: &GameUi,
     debug_stats: Option<DebugPaneStats>,
     render_stats: &mut RenderStreamStats,
 ) -> Result<FullFrameRenderSummary> {
@@ -223,10 +224,10 @@ pub(crate) fn render_full_frame(
     render_stats.drawn_actor_count = actor_stats.drawn_actor_count;
     render_stats.drawn_actor_index_count = actor_stats.index_count;
 
-    let mut ui_draw = ui.render_draw_list(render_options, frame_pacing);
+    let mut ui_draw = ui.render_draw_list(ui_render_state);
     if let Some(mut stats) = debug_stats {
         stats.render = *render_stats;
-        ui.render_debug_pane(&mut ui_draw, &stats);
+        render_debug_pane(ui.scale(), &mut ui_draw, &stats);
     }
 
     let gui_command_count = ui_draw.commands().len();
@@ -236,7 +237,7 @@ pub(crate) fn render_full_frame(
             frame.queue,
             frame.encoder,
             frame.target,
-            [ui.scale.width, ui.scale.height],
+            [ui.scale().width, ui.scale().height],
             &ui_draw,
             if ui_covers_world {
                 GuiRenderOptions::clear(mclone_render::default_clear_color())
@@ -255,6 +256,37 @@ pub(crate) fn render_full_frame(
         actor_count: actor_instances.len(),
         drawn_actor_count: actor_stats.drawn_actor_count,
     })
+}
+
+pub(crate) fn game_ui_render_state(
+    render_distance: i32,
+    render_options: TexturedSectionRenderOptions,
+    frame_pacing: FramePacingUiState,
+) -> GameUiRenderState {
+    GameUiRenderState {
+        render_distance,
+        min_render_distance: MIN_RENDER_DISTANCE,
+        max_render_distance: MAX_RENDER_DISTANCE,
+        section_occlusion_culling: render_options.section_occlusion_culling,
+        force_fullbright: render_options.force_fullbright,
+        frame_pacing_mode: game_frame_pacing_mode(frame_pacing.mode),
+        fps_cap: frame_pacing.fps_cap,
+    }
+}
+
+fn game_frame_pacing_mode(mode: FramePacingMode) -> GameFramePacingMode {
+    match mode {
+        FramePacingMode::Vsync => GameFramePacingMode::Vsync,
+        FramePacingMode::Capped => GameFramePacingMode::Capped,
+        FramePacingMode::Uncapped => GameFramePacingMode::Uncapped,
+    }
+}
+
+fn gui_key_from_key_code(key_code: KeyCode) -> Option<GuiKey> {
+    match key_code {
+        KeyCode::Escape => Some(GuiKey::Escape),
+        _ => None,
+    }
 }
 
 fn clear_frame_color(
@@ -311,7 +343,7 @@ struct ChunkApp {
     interaction: ClientInteractionController,
     render_options: TexturedSectionRenderOptions,
     frame_pacing: FramePacing,
-    ui: NativeUi,
+    ui: GameUi,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
     depth: Option<ChunkDepthTarget>,
@@ -335,7 +367,6 @@ impl ChunkApp {
         runtime: WindowSceneRuntime,
         spectator: SpectatorCamera,
         render_options: TexturedSectionRenderOptions,
-        render_distance: i32,
     ) -> Self {
         let camera = engine_camera_controller_from_spectator(&spectator);
         Self {
@@ -346,7 +377,7 @@ impl ChunkApp {
             interaction: ClientInteractionController::new(),
             render_options,
             frame_pacing: FramePacing::default(),
-            ui: NativeUi::new_ingame(render_distance),
+            ui: GameUi::new_ingame(),
             window: None,
             surface: None,
             depth: None,
@@ -438,17 +469,25 @@ impl ChunkApp {
         self.gui_scale().map(|scale| scale.client_to_gui(x, y))
     }
 
+    fn current_ui_render_state(&self) -> GameUiRenderState {
+        game_ui_render_state(
+            self.runtime.render_distance as i32,
+            self.render_options,
+            self.frame_pacing.ui_state(),
+        )
+    }
+
     fn apply_ui_action(
         &mut self,
-        action: NativeUiAction,
+        action: GameUiAction,
         event_loop: &ActiveEventLoop,
         from_pointer_click: bool,
     ) {
-        let should_arm_mouse_lock = from_pointer_click
-            && matches!(action, NativeUiAction::StartWorld | NativeUiAction::Resume);
-        let preserve_pointer_state = matches!(action, NativeUiAction::SetRenderDistance(_));
+        let should_arm_mouse_lock =
+            from_pointer_click && matches!(action, GameUiAction::StartWorld | GameUiAction::Resume);
+        let preserve_pointer_state = matches!(action, GameUiAction::SetRenderDistance(_));
         match action {
-            NativeUiAction::ToggleSectionOcclusion => {
+            GameUiAction::ToggleSectionOcclusion => {
                 self.render_options.section_occlusion_culling =
                     !self.render_options.section_occlusion_culling;
                 log::info!(
@@ -460,7 +499,7 @@ impl ChunkApp {
                     }
                 );
             }
-            NativeUiAction::ToggleFullbright => {
+            GameUiAction::ToggleFullbright => {
                 self.render_options.force_fullbright = !self.render_options.force_fullbright;
                 log::info!(
                     "fullbright {}",
@@ -471,7 +510,7 @@ impl ChunkApp {
                     }
                 );
             }
-            NativeUiAction::CycleFramePacing => {
+            GameUiAction::CycleFramePacing => {
                 self.frame_pacing.cycle_mode();
                 self.next_redraw_at = None;
                 if let Some(surface) = &mut self.surface {
@@ -483,12 +522,12 @@ impl ChunkApp {
                     self.frame_pacing.fps_cap
                 );
             }
-            NativeUiAction::CycleFpsCap => {
+            GameUiAction::CycleFpsCap => {
                 self.frame_pacing.cycle_fps_cap();
                 self.next_redraw_at = None;
                 log::info!("fps cap set to {}", self.frame_pacing.fps_cap);
             }
-            NativeUiAction::SetRenderDistance(render_distance) => {
+            GameUiAction::SetRenderDistance(render_distance) => {
                 let render_distance =
                     render_distance.clamp(MIN_RENDER_DISTANCE, MAX_RENDER_DISTANCE);
                 let render_distance_chunks =
@@ -508,15 +547,15 @@ impl ChunkApp {
                     }
                 }
             }
-            NativeUiAction::Quit => {
+            GameUiAction::Quit => {
                 event_loop.exit();
                 return;
             }
-            NativeUiAction::StartWorld
-            | NativeUiAction::Resume
-            | NativeUiAction::OpenOptions(_)
-            | NativeUiAction::BackToTitle
-            | NativeUiAction::BackToPause => {}
+            GameUiAction::StartWorld
+            | GameUiAction::Resume
+            | GameUiAction::OpenOptions(_)
+            | GameUiAction::BackToTitle
+            | GameUiAction::BackToPause => {}
         }
         self.ui.apply_action(action);
         if should_arm_mouse_lock {
@@ -1171,11 +1210,13 @@ impl ApplicationHandler for ChunkApp {
                         return;
                     }
                     if event.state == ElementState::Pressed && self.ui.is_active() {
-                        let (handled, action) = self.ui.key_pressed(key_code);
-                        if let Some(action) = action {
-                            self.apply_ui_action(action, event_loop, false);
-                        } else if handled {
-                            self.schedule_next_redraw(event_loop);
+                        if let Some(gui_key) = gui_key_from_key_code(key_code) {
+                            let (handled, action) = self.ui.key_pressed(gui_key);
+                            if let Some(action) = action {
+                                self.apply_ui_action(action, event_loop, false);
+                            } else if handled {
+                                self.schedule_next_redraw(event_loop);
+                            }
                         }
                         return;
                     }
@@ -1261,7 +1302,8 @@ impl ApplicationHandler for ChunkApp {
                                     self.ui.pointer_down(point);
                                 }
                                 ElementState::Released => {
-                                    let (_handled, action) = self.ui.pointer_up(point);
+                                    let ui_state = self.current_ui_render_state();
+                                    let (_handled, action) = self.ui.pointer_up(point, ui_state);
                                     if let Some(action) = action {
                                         self.apply_ui_action(action, event_loop, true);
                                         return;
@@ -1296,7 +1338,8 @@ impl ApplicationHandler for ChunkApp {
                 if self.ui.is_active() {
                     self.last_cursor = Some(cursor);
                     if let Some(point) = self.gui_point(cursor.0, cursor.1) {
-                        let (_handled, action) = self.ui.pointer_move(point);
+                        let ui_state = self.current_ui_render_state();
+                        let (_handled, action) = self.ui.pointer_move(point, ui_state);
                         if let Some(action) = action {
                             self.apply_ui_action(action, event_loop, true);
                             return;
@@ -1369,6 +1412,11 @@ impl ApplicationHandler for ChunkApp {
                 let render_options = self.effective_render_options();
                 let underwater_overlay = self.underwater_overlay(camera_view);
                 let frame_pacing = self.frame_pacing.ui_state();
+                let ui_render_state = game_ui_render_state(
+                    self.runtime.render_distance as i32,
+                    render_options,
+                    frame_pacing,
+                );
                 let actor_instances = self.interpolated_actor_instances();
                 let debug_stats = self
                     .debug_visible
@@ -1417,7 +1465,7 @@ impl ApplicationHandler for ChunkApp {
                             time_of_day,
                             sun_angle,
                             render_options,
-                            frame_pacing,
+                            ui_render_state,
                             &self.ui,
                             debug_stats,
                             &mut render_stats,
@@ -1606,12 +1654,7 @@ mod tests {
         };
         let runtime = WindowSceneRuntime::new(&scene).unwrap();
         let spectator = SpectatorCamera::spawn_for_scene(&scene);
-        let mut app = ChunkApp::new(
-            runtime,
-            spectator,
-            TexturedSectionRenderOptions::default(),
-            scene.render_distance,
-        );
+        let mut app = ChunkApp::new(runtime, spectator, TexturedSectionRenderOptions::default());
         let target_eye = Vec3d::new(16.25, 96.0, 8.0);
         app.camera.set_eye_pose(target_eye, 0.0, 0.0);
 
@@ -1640,12 +1683,7 @@ mod tests {
         let scene = SceneOptions::default();
         let runtime = WindowSceneRuntime::new(&scene).unwrap();
         let spectator = SpectatorCamera::spawn_for_scene(&scene);
-        let mut app = ChunkApp::new(
-            runtime,
-            spectator,
-            TexturedSectionRenderOptions::default(),
-            scene.render_distance,
-        );
+        let mut app = ChunkApp::new(runtime, spectator, TexturedSectionRenderOptions::default());
         let target_eye = Vec3d::new(32.25, 80.0, -0.25);
 
         app.camera.set_eye_pose(target_eye, 0.25, -0.125);

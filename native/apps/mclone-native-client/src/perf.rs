@@ -18,11 +18,11 @@ use mclone_render::headless::{
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
-use mclone_ui::GuiScale;
+use mclone_ui::{GameUi, GuiScale};
 
 use crate::app::{
-    RenderStreamStats, actor_instances_from_presentations, record_render_section_update_stats,
-    render_full_frame,
+    RenderStreamStats, actor_instances_from_presentations, game_ui_render_state,
+    record_render_section_update_stats, render_full_frame,
 };
 use crate::camera::{
     SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED, SpectatorCamera,
@@ -37,7 +37,6 @@ use crate::scene_runtime::{
     WindowSceneRuntime, build_scene_textured_sections, chunk_tracking_radius_for_render_distance,
     poll_window_runtime_until_idle, square_count,
 };
-use crate::ui::NativeUi;
 use crate::{MAX_RENDER_DISTANCE, print_benchmark_metadata};
 
 #[derive(Clone, Debug)]
@@ -509,7 +508,7 @@ struct FrameBudgetProbeState {
     actors: ActorDrawResources,
     screen_effects: ScreenEffectsRenderer,
     gui: GuiRenderer,
-    ui: NativeUi,
+    ui: GameUi,
     render_stats: RenderStreamStats,
 }
 
@@ -1245,7 +1244,6 @@ pub(crate) fn run_frame_budget_probe(
     let mut frame_reports = Vec::with_capacity(options.frames);
     let probe_options = options.clone();
     let render_options = options.render_options;
-    let render_distance = options.scene.render_distance;
     let initial_upload = TexturedSectionUploadReport {
         uploaded_section_count: initial_update.rebuilt_section_count(),
         removed_section_count: initial_update.removed_section_count(),
@@ -1289,7 +1287,7 @@ pub(crate) fn run_frame_budget_probe(
                 ..RenderStreamStats::default()
             };
             record_render_section_update_stats(&mut render_stats, &initial_update, initial_upload);
-            let mut ui = NativeUi::new(render_distance);
+            let mut ui = GameUi::new();
             ui.set_screen(None);
             ui.set_scale(GuiScale::from_pixels(size[0], size[1]));
             Ok(FrameBudgetProbeState {
@@ -1410,7 +1408,11 @@ pub(crate) fn run_frame_budget_probe(
                 time_of_day,
                 sun_angle,
                 render_options,
-                FramePacingUiState::default(),
+                game_ui_render_state(
+                    state.runtime.render_distance as i32,
+                    render_options,
+                    FramePacingUiState::default(),
+                ),
                 &state.ui,
                 None,
                 &mut state.render_stats,

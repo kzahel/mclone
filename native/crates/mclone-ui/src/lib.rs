@@ -582,6 +582,582 @@ impl CycleButton {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GuiKey {
+    Escape,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameScreen {
+    Title,
+    Pause,
+    Options { parent: GameOptionsParent },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameOptionsParent {
+    Title,
+    Pause,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameUiAction {
+    StartWorld,
+    Resume,
+    OpenOptions(GameOptionsParent),
+    BackToTitle,
+    BackToPause,
+    ToggleSectionOcclusion,
+    ToggleFullbright,
+    CycleFramePacing,
+    CycleFpsCap,
+    SetRenderDistance(i32),
+    Quit,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameFramePacingMode {
+    #[default]
+    Vsync,
+    Capped,
+    Uncapped,
+}
+
+impl GameFramePacingMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Vsync => "VSync",
+            Self::Capped => "Max FPS",
+            Self::Uncapped => "Uncapped",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GameUiRenderState {
+    pub render_distance: i32,
+    pub min_render_distance: i32,
+    pub max_render_distance: i32,
+    pub section_occlusion_culling: bool,
+    pub force_fullbright: bool,
+    pub frame_pacing_mode: GameFramePacingMode,
+    pub fps_cap: u32,
+}
+
+impl Default for GameUiRenderState {
+    fn default() -> Self {
+        Self {
+            render_distance: 2,
+            min_render_distance: 2,
+            max_render_distance: 16,
+            section_occlusion_culling: true,
+            force_fullbright: false,
+            frame_pacing_mode: GameFramePacingMode::Vsync,
+            fps_cap: 120,
+        }
+    }
+}
+
+impl GameUiRenderState {
+    pub fn render_distance_limits(self) -> (i32, i32) {
+        (
+            self.min_render_distance.min(self.max_render_distance),
+            self.min_render_distance.max(self.max_render_distance),
+        )
+    }
+
+    pub fn clamped_render_distance(self) -> i32 {
+        let (min, max) = self.render_distance_limits();
+        self.render_distance.clamp(min, max)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct GameUi {
+    screen: Option<GameScreen>,
+    pointer: Option<Point>,
+    pressed: Option<WidgetId>,
+    font: Font,
+    scale: GuiScale,
+}
+
+const ID_TITLE_START: WidgetId = WidgetId(1);
+const ID_TITLE_OPTIONS: WidgetId = WidgetId(2);
+const ID_TITLE_QUIT: WidgetId = WidgetId(3);
+const ID_PAUSE_RESUME: WidgetId = WidgetId(4);
+const ID_PAUSE_OPTIONS: WidgetId = WidgetId(5);
+const ID_PAUSE_TITLE: WidgetId = WidgetId(6);
+const ID_OPTIONS_OCCLUSION: WidgetId = WidgetId(7);
+const ID_OPTIONS_FULLBRIGHT: WidgetId = WidgetId(8);
+const ID_OPTIONS_RADIUS: WidgetId = WidgetId(9);
+const ID_OPTIONS_BACK: WidgetId = WidgetId(10);
+const ID_OPTIONS_FRAME_PACING: WidgetId = WidgetId(11);
+const ID_OPTIONS_FPS_CAP: WidgetId = WidgetId(12);
+
+impl Default for GameUi {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GameUi {
+    pub fn new() -> Self {
+        Self {
+            screen: Some(GameScreen::Title),
+            pointer: None,
+            pressed: None,
+            font: Font::default(),
+            scale: GuiScale::from_pixels(1280, 900),
+        }
+    }
+
+    pub fn new_ingame() -> Self {
+        let mut ui = Self::new();
+        ui.set_screen(None);
+        ui
+    }
+
+    pub fn screen(&self) -> Option<GameScreen> {
+        self.screen
+    }
+
+    pub fn scale(&self) -> GuiScale {
+        self.scale
+    }
+
+    pub fn font(&self) -> &Font {
+        &self.font
+    }
+
+    pub fn set_scale(&mut self, scale: GuiScale) {
+        self.scale = scale;
+        self.pointer = self.pointer.map(|point| Point {
+            x: point.x.clamp(0.0, scale.width),
+            y: point.y.clamp(0.0, scale.height),
+        });
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.screen.is_some()
+    }
+
+    pub fn covers_world(&self) -> bool {
+        self.screen == Some(GameScreen::Title)
+    }
+
+    pub fn open_pause(&mut self) {
+        self.screen = Some(GameScreen::Pause);
+        self.pressed = None;
+    }
+
+    pub fn close(&mut self) {
+        self.screen = None;
+        self.pressed = None;
+    }
+
+    pub fn set_screen(&mut self, screen: Option<GameScreen>) {
+        self.screen = screen;
+        self.pressed = None;
+    }
+
+    pub fn clear_input(&mut self) {
+        self.pointer = None;
+        self.pressed = None;
+    }
+
+    pub fn pointer_move(
+        &mut self,
+        point: Point,
+        state: GameUiRenderState,
+    ) -> (bool, Option<GameUiAction>) {
+        if !self.is_active() {
+            return (false, None);
+        }
+        self.pointer = Some(point);
+        let action = if self.pressed == Some(ID_OPTIONS_RADIUS) {
+            Some(self.render_distance_action_at(point, state))
+        } else {
+            None
+        };
+        (true, action)
+    }
+
+    pub fn pointer_down(&mut self, point: Point) -> bool {
+        if !self.is_active() {
+            return false;
+        }
+        self.pointer = Some(point);
+        self.pressed = self.widget_at(point);
+        true
+    }
+
+    pub fn pointer_up(
+        &mut self,
+        point: Point,
+        state: GameUiRenderState,
+    ) -> (bool, Option<GameUiAction>) {
+        if !self.is_active() {
+            return (false, None);
+        }
+        self.pointer = Some(point);
+        let pressed = self.pressed.take();
+        let released = self.widget_at(point);
+        let action = match (pressed, released) {
+            (Some(ID_OPTIONS_RADIUS), Some(ID_OPTIONS_RADIUS)) => {
+                Some(self.render_distance_action_at(point, state))
+            }
+            (Some(id), Some(released)) if id == released => self.action_for(id),
+            _ => None,
+        };
+        (true, action)
+    }
+
+    pub fn key_pressed(&mut self, key: GuiKey) -> (bool, Option<GameUiAction>) {
+        let Some(screen) = self.screen else {
+            return (false, None);
+        };
+        match (screen, key) {
+            (GameScreen::Pause, GuiKey::Escape) => (true, Some(GameUiAction::Resume)),
+            (GameScreen::Options { parent }, GuiKey::Escape) => match parent {
+                GameOptionsParent::Title => (true, Some(GameUiAction::BackToTitle)),
+                GameOptionsParent::Pause => (true, Some(GameUiAction::BackToPause)),
+            },
+            (GameScreen::Title, GuiKey::Escape) => (true, None),
+        }
+    }
+
+    pub fn apply_action(&mut self, action: GameUiAction) {
+        match action {
+            GameUiAction::StartWorld | GameUiAction::Resume => self.close(),
+            GameUiAction::OpenOptions(parent) => {
+                self.screen = Some(GameScreen::Options { parent });
+                self.pressed = None;
+            }
+            GameUiAction::BackToTitle => {
+                self.screen = Some(GameScreen::Title);
+                self.pressed = None;
+            }
+            GameUiAction::BackToPause => {
+                self.screen = Some(GameScreen::Pause);
+                self.pressed = None;
+            }
+            GameUiAction::ToggleSectionOcclusion
+            | GameUiAction::ToggleFullbright
+            | GameUiAction::CycleFramePacing
+            | GameUiAction::CycleFpsCap
+            | GameUiAction::SetRenderDistance(_)
+            | GameUiAction::Quit => {}
+        }
+    }
+
+    pub fn render_draw_list(&self, state: GameUiRenderState) -> GuiDrawList {
+        let mut draw = GuiDrawList::new();
+        match self.screen {
+            Some(GameScreen::Title) => self.render_title(&mut draw),
+            Some(GameScreen::Pause) => self.render_pause(&mut draw),
+            Some(GameScreen::Options { parent }) => {
+                self.render_options_screen(&mut draw, state, parent)
+            }
+            None => {}
+        }
+        draw
+    }
+
+    fn widget_at(&self, point: Point) -> Option<WidgetId> {
+        match self.screen? {
+            GameScreen::Title => title_buttons(self.scale)
+                .into_iter()
+                .find(|button| button.contains(point))
+                .map(|button| button.id),
+            GameScreen::Pause => pause_buttons(self.scale)
+                .into_iter()
+                .find(|button| button.contains(point))
+                .map(|button| button.id),
+            GameScreen::Options { .. } => {
+                let rects = option_widgets(self.scale);
+                if rects.occlusion.contains(point) {
+                    Some(ID_OPTIONS_OCCLUSION)
+                } else if rects.fullbright.contains(point) {
+                    Some(ID_OPTIONS_FULLBRIGHT)
+                } else if rects.frame_pacing.contains(point) {
+                    Some(ID_OPTIONS_FRAME_PACING)
+                } else if rects.fps_cap.contains(point) {
+                    Some(ID_OPTIONS_FPS_CAP)
+                } else if rects.radius.contains(point) {
+                    Some(ID_OPTIONS_RADIUS)
+                } else if rects.back.contains(point) {
+                    Some(ID_OPTIONS_BACK)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn action_for(&self, id: WidgetId) -> Option<GameUiAction> {
+        match id {
+            ID_TITLE_START => Some(GameUiAction::StartWorld),
+            ID_TITLE_OPTIONS => Some(GameUiAction::OpenOptions(GameOptionsParent::Title)),
+            ID_TITLE_QUIT => Some(GameUiAction::Quit),
+            ID_PAUSE_RESUME => Some(GameUiAction::Resume),
+            ID_PAUSE_OPTIONS => Some(GameUiAction::OpenOptions(GameOptionsParent::Pause)),
+            ID_PAUSE_TITLE => Some(GameUiAction::BackToTitle),
+            ID_OPTIONS_OCCLUSION => Some(GameUiAction::ToggleSectionOcclusion),
+            ID_OPTIONS_FULLBRIGHT => Some(GameUiAction::ToggleFullbright),
+            ID_OPTIONS_FRAME_PACING => Some(GameUiAction::CycleFramePacing),
+            ID_OPTIONS_FPS_CAP => Some(GameUiAction::CycleFpsCap),
+            ID_OPTIONS_BACK => match self.screen {
+                Some(GameScreen::Options {
+                    parent: GameOptionsParent::Title,
+                }) => Some(GameUiAction::BackToTitle),
+                Some(GameScreen::Options {
+                    parent: GameOptionsParent::Pause,
+                }) => Some(GameUiAction::BackToPause),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn render_distance_action_at(&self, point: Point, state: GameUiRenderState) -> GameUiAction {
+        let slider = Slider::new(
+            ID_OPTIONS_RADIUS,
+            option_widgets(self.scale).radius,
+            "",
+            render_distance_slider_value(state),
+        );
+        GameUiAction::SetRenderDistance(render_distance_from_slider_value(
+            slider.value_from_point(point),
+            state,
+        ))
+    }
+
+    fn interaction(&self) -> Interaction {
+        Interaction {
+            pointer: self.pointer,
+            pressed: self.pressed,
+            focused: None,
+        }
+    }
+
+    fn render_title(&self, draw: &mut GuiDrawList) {
+        draw.fill_gradient(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(24, 44, 51, 255),
+            Color::rgba(7, 10, 12, 255),
+        );
+        draw.fill(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(0, 0, 0, 55),
+        );
+        self.font.draw_centered(
+            draw,
+            "MCLONE",
+            self.scale.width * 0.5,
+            34.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        self.font.draw_centered(
+            draw,
+            "NATIVE RUST CLIENT",
+            self.scale.width * 0.5,
+            48.0,
+            Color::rgba(185, 212, 198, 255),
+        );
+        for button in title_buttons(self.scale) {
+            button.render(draw, &self.font, self.interaction());
+        }
+        self.font.draw_shadow(
+            draw,
+            "MINECRAFT 1.17.1 TARGET",
+            4.0,
+            self.scale.height - 12.0,
+            Color::rgba(160, 176, 170, 255),
+        );
+    }
+
+    fn render_pause(&self, draw: &mut GuiDrawList) {
+        draw.fill(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(0, 0, 0, 135),
+        );
+        self.font.draw_centered(
+            draw,
+            "PAUSED",
+            self.scale.width * 0.5,
+            self.scale.height * 0.25,
+            Color::rgba(245, 252, 234, 255),
+        );
+        for button in pause_buttons(self.scale) {
+            button.render(draw, &self.font, self.interaction());
+        }
+    }
+
+    fn render_options_screen(
+        &self,
+        draw: &mut GuiDrawList,
+        state: GameUiRenderState,
+        parent: GameOptionsParent,
+    ) {
+        draw.fill(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(0, 0, 0, 150),
+        );
+        let panel = centered_panel(self.scale, 242.0, 190.0);
+        draw.fill_gradient(
+            panel,
+            Color::rgba(33, 45, 47, 245),
+            Color::rgba(15, 20, 22, 245),
+        );
+        draw.outline(panel, Color::rgba(130, 166, 154, 255));
+        self.font.draw_centered(
+            draw,
+            "OPTIONS",
+            panel.center_x(),
+            panel.y + 12.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        let widgets = option_widgets(self.scale);
+        Checkbox::new(
+            ID_OPTIONS_OCCLUSION,
+            widgets.occlusion,
+            "Section Occlusion",
+            state.section_occlusion_culling,
+        )
+        .render(draw, &self.font, self.interaction());
+        Checkbox::new(
+            ID_OPTIONS_FULLBRIGHT,
+            widgets.fullbright,
+            "Force Fullbright",
+            state.force_fullbright,
+        )
+        .render(draw, &self.font, self.interaction());
+        CycleButton::new(
+            ID_OPTIONS_FRAME_PACING,
+            widgets.frame_pacing,
+            "Frame Pacing",
+            state.frame_pacing_mode.label(),
+        )
+        .render(draw, &self.font, self.interaction());
+        CycleButton::new(
+            ID_OPTIONS_FPS_CAP,
+            widgets.fps_cap,
+            "FPS Cap",
+            state.fps_cap.to_string(),
+        )
+        .render(draw, &self.font, self.interaction());
+        Slider::new(
+            ID_OPTIONS_RADIUS,
+            widgets.radius,
+            render_distance_label(state),
+            render_distance_slider_value(state),
+        )
+        .render(draw, &self.font, self.interaction());
+        Button::new(
+            ID_OPTIONS_BACK,
+            widgets.back,
+            match parent {
+                GameOptionsParent::Title => "Back",
+                GameOptionsParent::Pause => "Done",
+            },
+        )
+        .render(draw, &self.font, self.interaction());
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct OptionWidgetRects {
+    occlusion: Rect,
+    fullbright: Rect,
+    frame_pacing: Rect,
+    fps_cap: Rect,
+    radius: Rect,
+    back: Rect,
+}
+
+fn title_buttons(scale: GuiScale) -> [Button; 3] {
+    let y = scale.height * 0.5 - 22.0;
+    [
+        Button::new(
+            ID_TITLE_START,
+            menu_button_rect(scale, y),
+            "Start Local World",
+        ),
+        Button::new(
+            ID_TITLE_OPTIONS,
+            menu_button_rect(scale, y + 24.0),
+            "Options",
+        ),
+        Button::new(ID_TITLE_QUIT, menu_button_rect(scale, y + 48.0), "Quit"),
+    ]
+}
+
+fn pause_buttons(scale: GuiScale) -> [Button; 3] {
+    let y = scale.height * 0.5 - 22.0;
+    [
+        Button::new(ID_PAUSE_RESUME, menu_button_rect(scale, y), "Back To Game"),
+        Button::new(
+            ID_PAUSE_OPTIONS,
+            menu_button_rect(scale, y + 24.0),
+            "Options",
+        ),
+        Button::new(
+            ID_PAUSE_TITLE,
+            menu_button_rect(scale, y + 48.0),
+            "Quit To Title",
+        ),
+    ]
+}
+
+fn option_widgets(scale: GuiScale) -> OptionWidgetRects {
+    let panel = centered_panel(scale, 242.0, 190.0);
+    OptionWidgetRects {
+        occlusion: Rect::new(panel.x + 26.0, panel.y + 38.0, 190.0, 18.0),
+        fullbright: Rect::new(panel.x + 26.0, panel.y + 60.0, 190.0, 18.0),
+        frame_pacing: Rect::new(panel.x + 25.0, panel.y + 84.0, 192.0, 20.0),
+        fps_cap: Rect::new(panel.x + 25.0, panel.y + 108.0, 192.0, 20.0),
+        radius: Rect::new(panel.x + 25.0, panel.y + 132.0, 192.0, 20.0),
+        back: Rect::new(panel.center_x() - 55.0, panel.y + 160.0, 110.0, 20.0),
+    }
+}
+
+fn render_distance_slider_value(state: GameUiRenderState) -> f32 {
+    let (min, max) = state.render_distance_limits();
+    if max <= min {
+        0.0
+    } else {
+        (state.clamped_render_distance() - min) as f32 / (max - min) as f32
+    }
+}
+
+fn render_distance_from_slider_value(value: f32, state: GameUiRenderState) -> i32 {
+    let (min, max) = state.render_distance_limits();
+    if max <= min {
+        min
+    } else {
+        min + (value.clamp(0.0, 1.0) * (max - min) as f32).round() as i32
+    }
+}
+
+fn render_distance_label(state: GameUiRenderState) -> String {
+    let radius = state.clamped_render_distance();
+    let suffix = if radius == 1 { "chunk" } else { "chunks" };
+    format!("Render Distance: {radius} {suffix}")
+}
+
+fn centered_panel(scale: GuiScale, width: f32, height: f32) -> Rect {
+    Rect::new(
+        (scale.width - width).max(0.0) * 0.5,
+        (scale.height - height).max(0.0) * 0.5,
+        width.min(scale.width),
+        height.min(scale.height),
+    )
+}
+
+fn menu_button_rect(scale: GuiScale, y: f32) -> Rect {
+    Rect::new(scale.width * 0.5 - 90.0, y, 180.0, 20.0)
+}
+
 fn normalized_rect(rect: Rect) -> Rect {
     let x0 = rect.x.min(rect.right());
     let y0 = rect.y.min(rect.bottom());
@@ -789,5 +1365,76 @@ mod tests {
         assert!(button.contains(Point { x: 12.0, y: 21.0 }));
         assert!(!button.contains(Point { x: 5.0, y: 21.0 }));
         assert!(!button.enabled(false).contains(Point { x: 12.0, y: 21.0 }));
+    }
+
+    #[test]
+    fn game_ui_has_title_and_ingame_start_modes() {
+        let title_ui = GameUi::new();
+        assert!(title_ui.is_active());
+        assert!(title_ui.covers_world());
+        assert_eq!(title_ui.screen(), Some(GameScreen::Title));
+
+        let ingame_ui = GameUi::new_ingame();
+        assert!(!ingame_ui.is_active());
+        assert!(!ingame_ui.covers_world());
+        assert_eq!(ingame_ui.screen(), None);
+    }
+
+    #[test]
+    fn game_ui_title_renders_draw_commands() {
+        let mut ui = GameUi::new();
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let draw = ui.render_draw_list(GameUiRenderState::default());
+        assert!(!draw.commands().is_empty());
+    }
+
+    #[test]
+    fn game_ui_escape_maps_to_screen_actions() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Pause));
+        assert_eq!(
+            ui.key_pressed(GuiKey::Escape),
+            (true, Some(GameUiAction::Resume))
+        );
+
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Title,
+        }));
+        assert_eq!(
+            ui.key_pressed(GuiKey::Escape),
+            (true, Some(GameUiAction::BackToTitle))
+        );
+    }
+
+    #[test]
+    fn game_ui_options_radius_slider_emits_render_distance_action() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            render_distance: 2,
+            min_render_distance: 2,
+            max_render_distance: 16,
+            ..GameUiRenderState::default()
+        };
+
+        let radius = option_widgets(ui.scale()).radius;
+        let point = Point {
+            x: radius.right() - 0.1,
+            y: radius.y + radius.height * 0.5,
+        };
+        assert!(ui.pointer_down(point));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(action, Some(GameUiAction::SetRenderDistance(16)));
+
+        let point = Point {
+            x: radius.x,
+            y: radius.y + radius.height * 0.5,
+        };
+        assert!(ui.pointer_down(point));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(action, Some(GameUiAction::SetRenderDistance(2)));
     }
 }

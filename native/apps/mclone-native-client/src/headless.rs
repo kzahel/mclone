@@ -21,18 +21,18 @@ use mclone_render::headless::{
 };
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
-use mclone_ui::GuiScale;
+use mclone_ui::{GameUi, GuiScale};
 
 use crate::app::{
-    RenderStreamStats, actor_instances_from_presentations, record_render_section_update_stats,
-    render_full_frame,
+    RenderStreamStats, actor_instances_from_presentations, game_ui_render_state,
+    record_render_section_update_stats, render_full_frame,
 };
 use crate::camera::SpectatorCamera;
 use crate::cli::{HeadlessScreenshotOptions, SceneOptions};
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState, FrameTimingStats};
 use crate::render_cache::{SceneTexturedSections, load_asset_source};
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
-use crate::ui::{DebugPaneStats, NativeUi};
+use crate::ui::DebugPaneStats;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct HeadlessScreenshotReport {
@@ -112,8 +112,8 @@ pub(crate) fn run_headless_screenshot(
         );
     }
 
-    let mut ui = NativeUi::new(options.scene.render_distance);
-    ui.set_screen(options.ui.native_screen());
+    let mut ui = GameUi::new();
+    ui.set_screen(options.ui.game_screen());
     ui.set_scale(GuiScale::from_pixels(options.width, options.height));
 
     let mut render_stats = RenderStreamStats::default();
@@ -207,7 +207,11 @@ pub(crate) fn run_headless_screenshot(
                 time_of_day,
                 sun_angle,
                 render_options,
-                FramePacingUiState::default(),
+                game_ui_render_state(
+                    runtime.render_distance as i32,
+                    render_options,
+                    FramePacingUiState::default(),
+                ),
                 &ui,
                 debug_stats,
                 &mut render_stats,
