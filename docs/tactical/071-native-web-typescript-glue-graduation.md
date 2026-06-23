@@ -278,6 +278,41 @@ no `.ts`), `pnpm native:web:app-smoke`, `pnpm native:web:chunk-smoke` plus final
 Implementation commit: `e4843ed7e41fb0978f655f85661658b109021644`
 (`071: graduate input glue to TypeScript`).
 
+### Stage 2b — HUD TypeScript conversion (landed)
+
+The third slice converted only `www/mclone-web-hud.js` to authored TypeScript
+(`www/mclone-web-hud.ts`). Runtime imports and URLs stayed stable: `mclone-web-app.js` still
+imports `./mclone-web-hud.js`, `app.html` / `index.html` still load `.js` entrypoints, and the
+HUD module still imports the live `hasTouchInput` helper from `./mclone-web-touch.js`. Its
+`TouchControls` dependency is now type-only and erased from runtime emit. The staged root and
+deploy bundle both contain `mclone-web-hud.js` and no `.ts` files.
+
+Line counts from the start of this slice were app/touch/input/HUD `962 / 352 / 289 / 291`.
+Ending source counts are app `962`, touch TS `352`, input TS `289`, HUD TS `261`. The emitted
+staged `mclone-web-hud.js` is `214` lines.
+
+Correctness and perf fences held. Pre-slice and final `pnpm native:web:chunk-smoke` both produced
+`0ba8251f6c0dba012782e80921b8d45ead799a216decf50e9041958babcb6a4c` for
+`/tmp/mclone-native-web-canvas.png`; the desktop chunk canvas and mobile app canvas were visually
+inspected. Mobile smoke covered the HUD/menu-specific surface: initial HUD closed on mobile, menu
+open, debug HUD open/close, settings/menu state, and touch controls. Movement perf passed across
+3 chunk boundaries, moving from center `[-1, -1]` to `[-1, 2]` with final `cameraZ=34.02544`,
+`compileTimingCount=31`, last compile `16.6` ms total / `6.8` ms worker round trip,
+`renderCount=270`, `frameCount=60`, and `maxFrameGapMs=10.305`. Runner transport stayed
+`shared-memory` with runner frames `29 / 111`, worldgen frames `5 / 5` (`maxRequestUs=697000`),
+and light-status frames `5 / 5` (`maxRequestUs=197000`).
+
+Validation (all green): `pnpm native:web:chunk-smoke` baseline, `pnpm native:web:glue`,
+`pnpm native:web:typecheck`, `node --check native/target/mclone-web-client-www/mclone-web-hud.js`
+plus staged app/input/touch JS, `node --check dist-native-web/mclone-web-hud.js`,
+`bash -n scripts/deploy-native-web.sh`, `cargo test --manifest-path native/Cargo.toml`,
+`cargo check -p mclone-web-client --target wasm32-unknown-unknown --manifest-path
+native/Cargo.toml`, `pnpm native:web:build`, `pnpm native:web:bundle`, explicit staged/deploy
+inventory checks (`mclone-web-hud.js` present, no `.ts`), `pnpm native:web:app-smoke`,
+`pnpm native:web:chunk-smoke` plus final sha256, `pnpm native:web:mobile-smoke` with mobile canvas
+inspection, `pnpm native:web:movement-perf`, `pnpm native:movement:smoke`, and
+`pnpm native:timedemo:smoke`.
+
 ## Relationship to Other Tacticals
 
 - [`070-web-glue-typing-and-abi-hardening.md`](070-web-glue-typing-and-abi-hardening.md) -

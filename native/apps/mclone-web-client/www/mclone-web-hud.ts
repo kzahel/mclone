@@ -1,4 +1,5 @@
 import { hasTouchInput } from "./mclone-web-touch.js";
+import type { TouchControls } from "./mclone-web-touch.js";
 
 // Native web HUD/menu/settings glue. Deploy note: mclone-web-app.js is
 // cache-busted with `?v=<version>`, but a static `import` of this module cannot
@@ -16,24 +17,30 @@ const SETTINGS_STORAGE_KEYS = {
   lookSensitivity: "mclone.web.lookSensitivity",
 };
 
-/**
- * @typedef {import("./mclone-web-touch.js").TouchControls} TouchControls
- * @typedef {Record<string, any>} WasmReport
- */
+type WasmReport = Record<string, any>;
 
-/**
- * @typedef {object} HudMenuApp
- * @property {HTMLCanvasElement} canvas
- * @property {Element | null} hudToggle
- * @property {number} lookSensitivity
- * @property {TouchControls | null} touchControls
- */
+export interface HudMenuApp {
+  canvas: HTMLCanvasElement;
+  hudToggle: Element | null;
+  lookSensitivity: number;
+  touchControls: TouchControls | null;
+}
 
-/**
- * @param {HudMenuApp} app
- * @param {Record<string, any>} runtimeState
- */
-export function bindMenu(app, runtimeState) {
+interface HudRuntimeState extends Record<string, any> {
+  failed?: boolean;
+  ready?: boolean;
+  ok?: boolean;
+  hudOpen?: boolean;
+  menuOpen?: boolean;
+  settingsOpen?: boolean;
+  lookSensitivity?: number;
+}
+
+export interface StoredHudSettings {
+  lookSensitivity: number;
+}
+
+export function bindMenu(app: HudMenuApp, runtimeState: HudRuntimeState): void {
   // The hamburger now opens the main menu; the runtime/debug stats live behind
   // the menu's "Debug info" entry. Stats stay open by default on desktop so the
   // debug HUD remains a glance away, while mobile boots into the clean view.
@@ -59,9 +66,7 @@ export function bindMenu(app, runtimeState) {
     setSettingsOpen(runtimeState, !isSettingsOpen());
   });
 
-  const lookInput = /** @type {HTMLInputElement | null} */ (
-    document.getElementById("setting-look-sensitivity")
-  );
+  const lookInput = document.getElementById("setting-look-sensitivity") as HTMLInputElement | null;
   lookInput?.addEventListener("input", () => {
     setLookSensitivity(app, runtimeState, Number(lookInput.value));
   });
@@ -80,12 +85,7 @@ export function bindMenu(app, runtimeState) {
   });
 }
 
-/**
- * @param {HudMenuApp} app
- * @param {Record<string, any>} runtimeState
- * @param {boolean} open
- */
-export function setMenuOpen(app, runtimeState, open) {
+export function setMenuOpen(app: HudMenuApp, runtimeState: HudRuntimeState, open: boolean): void {
   const menu = document.getElementById("main-menu");
   const toggle = document.getElementById("hud-toggle");
   if (menu) {
@@ -107,15 +107,11 @@ export function setMenuOpen(app, runtimeState, open) {
   runtimeState.menuOpen = Boolean(open);
 }
 
-function isMenuOpen() {
+function isMenuOpen(): boolean {
   return document.getElementById("main-menu")?.hidden === false;
 }
 
-/**
- * @param {Record<string, any>} runtimeState
- * @param {boolean} open
- */
-function setSettingsOpen(runtimeState, open) {
+function setSettingsOpen(runtimeState: HudRuntimeState, open: boolean): void {
   const panel = document.getElementById("settings-panel");
   const button = document.getElementById("menu-settings");
   if (panel) {
@@ -127,16 +123,11 @@ function setSettingsOpen(runtimeState, open) {
   runtimeState.settingsOpen = Boolean(open);
 }
 
-function isSettingsOpen() {
+function isSettingsOpen(): boolean {
   return document.getElementById("settings-panel")?.hidden === false;
 }
 
-/**
- * @param {HudMenuApp} app
- * @param {Record<string, any>} runtimeState
- * @param {number} value
- */
-function setLookSensitivity(app, runtimeState, value) {
+function setLookSensitivity(app: HudMenuApp, runtimeState: HudRuntimeState, value: number): void {
   const clamped = clampLookSensitivity(value);
   app.lookSensitivity = clamped;
   runtimeState.lookSensitivity = clamped;
@@ -144,11 +135,8 @@ function setLookSensitivity(app, runtimeState, value) {
   syncSettingsControls(app);
 }
 
-/** @param {HudMenuApp} app */
-function syncSettingsControls(app) {
-  const lookInput = /** @type {HTMLInputElement | null} */ (
-    document.getElementById("setting-look-sensitivity")
-  );
+function syncSettingsControls(app: HudMenuApp): void {
+  const lookInput = document.getElementById("setting-look-sensitivity") as HTMLInputElement | null;
   if (lookInput && document.activeElement !== lookInput) {
     lookInput.value = String(app.lookSensitivity);
   }
@@ -158,8 +146,7 @@ function syncSettingsControls(app) {
   }
 }
 
-/** @param {unknown} value */
-function clampLookSensitivity(value) {
+function clampLookSensitivity(value: unknown): number {
   const sensitivity = Number(value);
   if (!Number.isFinite(sensitivity)) {
     return DEFAULT_LOOK_SENSITIVITY;
@@ -167,7 +154,7 @@ function clampLookSensitivity(value) {
   return Math.min(LOOK_SENSITIVITY_MAX, Math.max(LOOK_SENSITIVITY_MIN, sensitivity));
 }
 
-export function loadStoredSettings() {
+export function loadStoredSettings(): StoredHudSettings {
   return {
     lookSensitivity: clampLookSensitivity(
       readStoredSetting(SETTINGS_STORAGE_KEYS.lookSensitivity) ?? DEFAULT_LOOK_SENSITIVITY,
@@ -175,8 +162,7 @@ export function loadStoredSettings() {
   };
 }
 
-/** @param {string} key */
-function readStoredSetting(key) {
+function readStoredSetting(key: string): string | null {
   try {
     return globalThis.localStorage?.getItem(key) ?? null;
   } catch (_error) {
@@ -184,11 +170,7 @@ function readStoredSetting(key) {
   }
 }
 
-/**
- * @param {string} key
- * @param {string} value
- */
-function storeSetting(key, value) {
+function storeSetting(key: string, value: string): void {
   try {
     globalThis.localStorage?.setItem(key, value);
   } catch (_error) {
@@ -196,8 +178,7 @@ function storeSetting(key, value) {
   }
 }
 
-/** @param {Record<string, any>} state */
-export function updateDom(state) {
+export function updateDom(state: HudRuntimeState): void {
   if (state.failed || (state.ready && !state.ok)) {
     setHudOpen(state, true);
   }
@@ -224,8 +205,7 @@ export function updateDom(state) {
   }
 }
 
-/** @param {Record<string, any>} state */
-function formatCompileTiming(state) {
+function formatCompileTiming(state: HudRuntimeState): string {
   const timing = state.activeCompileTiming ?? state.lastCompileTiming;
   if (!timing) {
     return "-";
@@ -235,24 +215,16 @@ function formatCompileTiming(state) {
   return `${label} ${target} ${Number(timing.totalMs || 0).toFixed(0)}ms gap ${Number(timing.maxFrameGapMs || 0).toFixed(0)}ms`;
 }
 
-/**
- * @param {string} id
- * @param {string} value
- */
-function setText(id, value) {
+function setText(id: string, value: string): void {
   const element = document.getElementById(id);
   if (element) element.textContent = value;
 }
 
-function isHudOpen() {
+function isHudOpen(): boolean {
   return document.getElementById("runtime-hud")?.hidden === false;
 }
 
-/**
- * @param {Record<string, any>} runtimeState
- * @param {boolean} open
- */
-export function setHudOpen(runtimeState, open) {
+export function setHudOpen(runtimeState: HudRuntimeState, open: boolean): void {
   const hud = document.getElementById("runtime-hud");
   const toggle = document.getElementById("hud-toggle");
   if (hud) {
@@ -264,12 +236,11 @@ export function setHudOpen(runtimeState, open) {
   runtimeState.hudOpen = Boolean(open);
 }
 
-function defaultHudOpen() {
+function defaultHudOpen(): boolean {
   return !hasTouchInput() && window.matchMedia("(min-width: 681px)").matches;
 }
 
-/** @param {WasmReport} interaction */
-export function formatInteractionStatus(interaction) {
+export function formatInteractionStatus(interaction: WasmReport | null | undefined): string {
   if (!interaction?.ok) {
     return "idle";
   }
@@ -279,8 +250,7 @@ export function formatInteractionStatus(interaction) {
   return `${interaction.action}: ${interaction.changed ? "changed" : "same"}`;
 }
 
-/** @param {WasmReport} interaction */
-function formatTarget(interaction) {
+function formatTarget(interaction: WasmReport | null | undefined): string {
   if (!interaction?.ok) {
     return "-";
   }
