@@ -17,57 +17,63 @@ import {
   updateDom,
 } from "./mclone-web-hud.js";
 import { TouchControls } from "./mclone-web-touch.js";
+import type { WebChunkRenderSession, WebCompileTiming } from "mclone-web-client-wasm";
 
-/**
- * The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
- * Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
- * in tsconfig.json and only ever appears in type positions. Casting the dynamic import to this type
- * is what makes the live wasm call sites (`session.advanceCameraFrame(...)` &c.) checkable against
- * the real export signatures — the "single biggest win" of 070 Stage 2.
- * @typedef {typeof import("mclone-web-client-wasm")} WasmModule
- * @typedef {import("mclone-web-client-wasm").WebChunkRenderSession} WebChunkRenderSession
- */
+// The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
+// Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
+// in tsconfig.json and only ever appears in type positions. Casting the dynamic import to this type
+// is what makes the live wasm call sites (`session.advanceCameraFrame(...)` &c.) checkable against
+// the real export signatures — the "single biggest win" of 070 Stage 2.
+type WasmModule = typeof import("mclone-web-client-wasm");
 
-/**
- * A wasm-return object — camera/frame/report/target/interaction/doorbell. The generated `.d.ts`
- * types every `WebChunkRenderSession` method return as `any` (wasm-bindgen cannot describe the
- * serde shape), so these are read coercion-guarded (`Number(...)`/`Boolean(...)`/`?.ok`). Naming
- * the boundary documents intent and keeps internal field reads consistent.
- * @typedef {Record<string, any>} WasmReport
- */
+// A wasm-return object — camera/frame/report/target/interaction/doorbell. The generated `.d.ts`
+// types every `WebChunkRenderSession` method return as `any` (wasm-bindgen cannot describe the
+// serde shape), so these are read coercion-guarded (`Number(...)`/`Boolean(...)`/`?.ok`). Naming
+// the boundary documents intent and keeps internal field reads consistent.
+type WasmReport = Record<string, any>;
 
-/**
- * A per-compile timing record. 070 Stage 3 moved the ~90-field instrumentation bag and its
- * coercion-heavy merge/projection logic into Rust (`WebCompileTiming` in the
- * `mclone-web-client` crate); JS now only feeds it report objects + `performance.now()`
- * measurements and reads back `publicSnapshot(...)`.
- * @typedef {import("mclone-web-client-wasm").WebCompileTiming} WebCompileTiming
- */
+type RenderCompiler = InstanceType<typeof RenderSectionWorkerCompiler>;
+type InputKeys = Record<string, boolean>;
+type TouchMovementImpulse = ReturnType<typeof defaultMovementImpulse>;
 
-/**
- * An in-flight compile: the Rust timing handle plus the JS-only worker promise/error the
- * orchestration tracks while the compile round-trips.
- * @typedef {object} PendingCompile
- * @property {WebCompileTiming} timing
- * @property {Promise<any> | null} workerPromise
- * @property {string | null} workerError
- */
+interface PendingCompile {
+  timing: WebCompileTiming;
+  workerPromise: Promise<any> | null;
+  workerError: string | null;
+}
 
-/**
- * The global app runtime exposed on `globalThis.__mcloneWebApp` and polled by the smoke harness.
- * `state` is the mutable status snapshot (a loose bag); the optional methods are installed by
- * `boot()` once the {@link WebChunkApp} exists.
- * @typedef {object} AppRuntime
- * @property {boolean} ready
- * @property {Record<string, any>} state
- * @property {(dx: number, dy: number) => void} [queueMouseDelta]
- * @property {(name: string, down: boolean) => boolean} [setInputKey]
- * @property {(amount: number) => any} [adjustCameraSpeed]
- * @property {() => any} [previewBlockTarget]
- * @property {() => any} [touchControlState]
- * @property {(open: boolean) => void} [setHudOpen]
- * @property {(open: boolean) => void} [setMenuOpen]
- */
+interface AppRuntimeState extends Record<string, any> {
+  ok: boolean;
+  ready: boolean;
+  failed: boolean;
+  status: string;
+  frameCount: number;
+  renderCount: number;
+  lastFrameGapMs: number;
+  maxFrameGapMs: number;
+  compileTimingCount: number;
+  compileTimings: WasmReport[];
+  activeCompileTiming: WasmReport | null;
+  lastCompileTiming: WasmReport | null;
+}
+
+interface AppRuntime {
+  ready: boolean;
+  state: AppRuntimeState;
+  queueMouseDelta?: (dx: number, dy: number) => void;
+  setInputKey?: (name: string, down: boolean) => boolean;
+  adjustCameraSpeed?: (amount: number) => WasmReport | null;
+  previewBlockTarget?: () => WasmReport | null;
+  touchControlState?: () => any;
+  setHudOpen?: (open: boolean) => void;
+  setMenuOpen?: (open: boolean) => void;
+}
+
+declare global {
+  var __mcloneWebApp: AppRuntime;
+  var __mcloneNativeAppReady: Promise<WasmReport>;
+  var __MCLONE_NATIVE_WEB_ASSET_VERSION__: string | undefined;
+}
 
 const DEPLOY_ASSET_VERSION = normalizedDeployAssetVersion();
 const BINDGEN_JS_URL = versionedUrl("./pkg/mclone_web_client.js");
@@ -80,8 +86,7 @@ const ASSET_PACK_URL = versionedUrl("/reference/minecraft-1.17.1/extracted.zip")
 const RADIUS_CHUNKS = 1;
 const MAX_FRAME_DT_SECONDS = 0.05;
 
-/** @type {AppRuntime} */
-const runtime = {
+const runtime: AppRuntime = {
   ready: false,
   state: {
     ok: false,
@@ -168,15 +173,15 @@ const runtime = {
 
 globalThis.__mcloneWebApp = runtime;
 
-async function boot() {
+async function boot(): Promise<WasmReport> {
   const app = new WebChunkApp();
-  runtime.queueMouseDelta = (dx, dy) => app.queueMouseDelta(dx, dy);
-  runtime.setInputKey = (name, down) => app.setInputKey(name, down);
-  runtime.adjustCameraSpeed = (amount) => app.adjustCameraSpeed(amount);
+  runtime.queueMouseDelta = (dx: number, dy: number) => app.queueMouseDelta(dx, dy);
+  runtime.setInputKey = (name: string, down: boolean) => app.setInputKey(name, down);
+  runtime.adjustCameraSpeed = (amount: number) => app.adjustCameraSpeed(amount);
   runtime.previewBlockTarget = () => runtime.state.currentTarget;
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
-  runtime.setHudOpen = (open) => setHudOpen(runtime.state, Boolean(open));
-  runtime.setMenuOpen = (open) => setMenuOpen(app, runtime.state, Boolean(open));
+  runtime.setHudOpen = (open: boolean) => setHudOpen(runtime.state, Boolean(open));
+  runtime.setMenuOpen = (open: boolean) => setMenuOpen(app, runtime.state, Boolean(open));
   try {
     await app.init();
     runtime.ready = true;
@@ -197,23 +202,45 @@ async function boot() {
 }
 
 class WebChunkApp {
+  canvas: HTMLCanvasElement;
+  status: HTMLElement | null;
+  hud: HTMLElement | null;
+  hudToggle: HTMLElement | null;
+  module: WasmModule | null;
+  session: WebChunkRenderSession | null;
+  compiler: RenderCompiler | null;
+  keys: InputKeys;
+  touchKeys: InputKeys;
+  touchMovementImpulse: TouchMovementImpulse;
+  touchControls: TouchControls | null;
+  lookSensitivity: number;
+  mouseDeltaX: number;
+  mouseDeltaY: number;
+  compileSequence: number;
+  pendingTimings: Map<number, PendingCompile>;
+  finalizingCount: number;
+  hasRendered: boolean;
+  loadedCenter: { centerX: number, centerZ: number } | null;
+  pointerDragging: boolean;
+  pointerDown: { button: number, enabled: boolean, movement: number } | null;
+  animationFrame: number;
+  lastFrameTime: number;
+  tickFrameBusy: boolean;
+  sessionBusy: boolean;
+
   constructor() {
     // Required for the app to run; `init()` re-validates with `instanceof HTMLCanvasElement` and
     // throws if it is missing, so treating it as a non-null canvas here is sound for the lifecycle.
-    this.canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("mclone-canvas"));
+    this.canvas = document.getElementById("mclone-canvas") as HTMLCanvasElement;
     this.status = document.getElementById("status");
     this.hud = document.getElementById("runtime-hud");
     this.hudToggle = document.getElementById("hud-toggle");
-    /** @type {WasmModule | null} */
     this.module = null;
-    /** @type {WebChunkRenderSession | null} */
     this.session = null;
-    /** @type {RenderSectionWorkerCompiler | null} */
     this.compiler = null;
-    this.keys = defaultInputKeys();
-    this.touchKeys = defaultInputKeys();
+    this.keys = defaultInputKeys() as InputKeys;
+    this.touchKeys = defaultInputKeys() as InputKeys;
     this.touchMovementImpulse = defaultMovementImpulse();
-    /** @type {TouchControls | null} */
     this.touchControls = null;
     const settings = loadStoredSettings();
     this.lookSensitivity = settings.lookSensitivity;
@@ -225,14 +252,11 @@ class WebChunkApp {
     // worker round-trip) plus a count of timings whose apply finalize is still awaiting
     // the worker metrics. The streaming loop posts a doorbell per compile and finalizes
     // the timing when the next frame's poll applies the result.
-    /** @type {Map<number, PendingCompile>} */
     this.pendingTimings = new Map();
     this.finalizingCount = 0;
     this.hasRendered = false;
-    /** @type {{ centerX: number, centerZ: number } | null} */
     this.loadedCenter = null;
     this.pointerDragging = false;
-    /** @type {{ button: number, enabled: boolean, movement: number } | null} */
     this.pointerDown = null;
     this.animationFrame = 0;
     this.lastFrameTime = 0;
@@ -240,7 +264,7 @@ class WebChunkApp {
     this.sessionBusy = false;
   }
 
-  async init() {
+  async init(): Promise<void> {
     if (!(this.canvas instanceof HTMLCanvasElement)) {
       throw new Error("missing canvas#mclone-canvas");
     }
@@ -249,11 +273,11 @@ class WebChunkApp {
 
     runtime.state.status = "loading wasm";
     updateDom(runtime.state);
-    const module = /** @type {WasmModule} */ (await import(BINDGEN_JS_URL.href));
+    const module = await import(BINDGEN_JS_URL.href) as WasmModule;
     await module.default(BINDGEN_WASM_URL.href);
     this.module = module;
     for (const name of ["mclone_web_create_worker_chunk_render_session"]) {
-      if (typeof (/** @type {any} */ (module))[name] !== "function") {
+      if (typeof (module as Record<string, any>)[name] !== "function") {
         throw new Error(`missing ${name} export`);
       }
     }
@@ -282,7 +306,7 @@ class WebChunkApp {
       "previewBlockTarget",
       "interactBlock",
     ]) {
-      if (typeof (/** @type {any} */ (this.session))[name] !== "function") {
+      if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
         throw new Error(`missing WebChunkRenderSession.${name} export`);
       }
     }
@@ -311,9 +335,9 @@ class WebChunkApp {
     await this.warmUpStreamingToIdle();
   }
 
-  start() {
+  start(): void {
     this.lastFrameTime = performance.now();
-    const frame = (/** @type {number} */ now) => {
+    const frame = (now: number) => {
       if (!this.tickFrameBusy) {
         this.tickFrameBusy = true;
         runtime.state.tickFrameBusy = true;
@@ -328,8 +352,7 @@ class WebChunkApp {
     this.animationFrame = requestAnimationFrame(frame);
   }
 
-  /** @param {number} now */
-  async tickFrame(now) {
+  async tickFrame(now: number): Promise<void> {
     if (!this.session) {
       return;
     }
@@ -394,9 +417,9 @@ class WebChunkApp {
   // whose render-only frames were uniformly fast. Feeding variable streaming frame gaps
   // into the boot fall otherwise wedged WALK movement against spawn terrain on ~half of
   // runs.
-  async warmUpStreamingToIdle() {
+  async warmUpStreamingToIdle(): Promise<void> {
     // Called from `init()` only after `this.session` is assigned, so it is non-null here.
-    const session = /** @type {WebChunkRenderSession} */ (this.session);
+    const session = this.session as WebChunkRenderSession;
     const deadline = performance.now() + 30_000;
     while (performance.now() < deadline) {
       const idle = await this.streamFrameOnce({ awaitWorker: true });
@@ -405,8 +428,7 @@ class WebChunkApp {
       }
       await nextAnimationFrame();
     }
-    /** @type {{ x: number, z: number } | null} */
-    let last = null;
+    let last: { x: number, z: number } | null = null;
     let stableFrames = 0;
     let iterations = 0;
     while (performance.now() < deadline) {
@@ -442,15 +464,13 @@ class WebChunkApp {
   // cache, returning the frame report plus an optional worker `doorbell`. JS relays the
   // doorbell (fire-and-forget in the live loop; awaited during warm-up so the pump
   // converges); the next frame's poll applies the result. Returns whether the loop idled.
-  /** @param {{ awaitWorker?: boolean }} [options] */
-  async streamFrameOnce(options = {}) {
+  async streamFrameOnce(options: { awaitWorker?: boolean } = {}): Promise<boolean> {
     if (!this.session || !this.compiler) {
       return true;
     }
     const session = this.session;
     const syncStart = performance.now();
-    /** @type {WasmReport} */
-    let frame;
+    let frame: WasmReport;
     try {
       frame = await this.withSessionAsync(() => session.syncCameraRenderFrame(RADIUS_CHUNKS));
     } catch (error) {
@@ -468,11 +488,7 @@ class WebChunkApp {
     return runtime.state.streamingSettled === true;
   }
 
-  /**
-   * @param {WasmReport} frame
-   * @param {number} syncMs
-   */
-  handleStreamingFrame(frame, syncMs) {
+  handleStreamingFrame(frame: WasmReport, syncMs: number): Promise<any> | null {
     if (!frame?.ok) {
       runtime.state.ok = false;
       runtime.state.status = frame?.reason ?? "streaming render frame failed";
@@ -510,7 +526,7 @@ class WebChunkApp {
     if (Number(frame.appliedRequestId) > 0) {
       this.finalizeCompileTiming(frame, syncMs);
     }
-    let workerPromise = null;
+    let workerPromise: Promise<any> | null = null;
     if (frame.doorbell) {
       workerPromise = this.startAndPostCompileTiming(frame.doorbell, syncMs);
     }
@@ -521,15 +537,11 @@ class WebChunkApp {
   // Begin a per-compile timing for the doorbell armed this frame and relay it to the
   // worker. The worker writes the packed result into the resident ring (drained by the
   // next frame's poll); the returned promise resolves with the worker metrics report.
-  /**
-   * @param {WasmReport} doorbell
-   * @param {number} syncMs
-   */
-  startAndPostCompileTiming(doorbell, syncMs) {
+  startAndPostCompileTiming(doorbell: WasmReport, syncMs: number): Promise<any> {
     // Reached only from `handleStreamingFrame` via `streamFrameOnce`, which already guards
     // `this.compiler` and (via boot/init) `this.module` non-null.
-    const compiler = /** @type {RenderSectionWorkerCompiler} */ (this.compiler);
-    const module = /** @type {WasmModule} */ (this.module);
+    const compiler = this.compiler as RenderCompiler;
+    const module = this.module as WasmModule;
     const sequence = ++this.compileSequence;
     // 070 Stage 3: the timing bag + its report coercions live in Rust now; `updateFromRequest`
     // sets the target center off the doorbell, so the constructor starts it null.
@@ -544,10 +556,9 @@ class WebChunkApp {
     );
     timing.updateFromRequest(doorbell);
     timing.setBeginRequestMs(syncMs);
-    /** @type {PendingCompile} */
-    const pending = { timing, workerPromise: null, workerError: null };
+    const pending: PendingCompile = { timing, workerPromise: null, workerError: null };
     const workerStart = performance.now();
-    const workerPromise = compiler.compileWithDoorbell(doorbell).then((compiled) => {
+    const workerPromise = compiler.compileWithDoorbell(doorbell).then((compiled: any) => {
       timing.setWorkerRoundTripMs(performance.now() - workerStart);
       if (compiled?.report) {
         timing.updateFromWorker(compiled.report);
@@ -558,7 +569,7 @@ class WebChunkApp {
     this.pendingTimings.set(Number(doorbell.requestId), pending);
     runtime.state.compileInFlightCount = this.pendingTimings.size;
     publishActiveCompileTiming(timing);
-    workerPromise.catch((error) => {
+    workerPromise.catch((error: unknown) => {
       pending.workerError = stringifyError(error);
       console.error(error);
     });
@@ -568,11 +579,7 @@ class WebChunkApp {
   // Finalize the timing for the compile applied this frame: await its worker metrics (so
   // the record carries the transport/byte diagnostics), merge the Rust apply report, and
   // publish it to runtime.state.compileTimings.
-  /**
-   * @param {WasmReport} frame
-   * @param {number} syncMs
-   */
-  finalizeCompileTiming(frame, syncMs) {
+  finalizeCompileTiming(frame: WasmReport, syncMs: number): void {
     const requestId = Number(frame.appliedRequestId);
     const pending = this.pendingTimings.get(requestId);
     if (!pending) {
@@ -608,8 +615,7 @@ class WebChunkApp {
     })();
   }
 
-  /** @param {WasmReport} camera */
-  applyCameraState(camera) {
+  applyCameraState(camera: WasmReport): void {
     if (!camera?.ok) {
       return;
     }
@@ -628,8 +634,7 @@ class WebChunkApp {
     applyHotbarState(camera, runtime.state);
   }
 
-  /** @param {WasmReport} report */
-  applyReport(report) {
+  applyReport(report: WasmReport): void {
     this.applyCameraState(report);
     runtime.state.ok = true;
     runtime.state.radiusChunks = report.radiusChunks;
@@ -660,8 +665,7 @@ class WebChunkApp {
     runtime.state.lastReport = report;
   }
 
-  /** @param {WasmReport} target */
-  applyTargetState(target) {
+  applyTargetState(target: WasmReport): void {
     if (!target?.ok) {
       return;
     }
@@ -669,8 +673,7 @@ class WebChunkApp {
     applyHotbarState(target, runtime.state);
   }
 
-  /** @param {string} action */
-  async interactBlock(action) {
+  async interactBlock(action: string): Promise<WasmReport | null> {
     if (!this.session) {
       return null;
     }
@@ -699,8 +702,7 @@ class WebChunkApp {
     }
   }
 
-  /** @param {number} slot */
-  selectHotbarSlot(slot) {
+  selectHotbarSlot(slot: number): boolean {
     if (!this.session) {
       return false;
     }
@@ -717,8 +719,7 @@ class WebChunkApp {
     return true;
   }
 
-  /** @param {number} amount */
-  adjustCameraSpeed(amount) {
+  adjustCameraSpeed(amount: number): WasmReport | null {
     if (!this.session) {
       return null;
     }
@@ -735,12 +736,7 @@ class WebChunkApp {
     return camera;
   }
 
-  /**
-   * @template T
-   * @param {() => T} operation
-   * @returns {Promise<Awaited<T>>}
-   */
-  async withSessionAsync(operation) {
+  async withSessionAsync<T>(operation: () => T | Promise<T>): Promise<Awaited<T>> {
     await this.waitForSessionIdle();
     this.sessionBusy = true;
     try {
@@ -750,20 +746,16 @@ class WebChunkApp {
     }
   }
 
-  async waitForSessionIdle() {
+  async waitForSessionIdle(): Promise<void> {
     for (let attempt = 0; this.sessionBusy && attempt < 10_000; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
     if (this.sessionBusy) {
       throw new Error("timed out waiting for WebChunkRenderSession async operation");
     }
   }
 
-  /**
-   * @param {string} name
-   * @param {boolean} down
-   */
-  setInputKey(name, down) {
+  setInputKey(name: string, down: boolean): boolean {
     if (!(name in this.keys)) {
       return false;
     }
@@ -771,11 +763,7 @@ class WebChunkApp {
     return true;
   }
 
-  /**
-   * @param {string} name
-   * @param {boolean} down
-   */
-  setTouchKey(name, down) {
+  setTouchKey(name: string, down: boolean): boolean {
     if (!(name in this.touchKeys)) {
       return false;
     }
@@ -783,19 +771,13 @@ class WebChunkApp {
     return true;
   }
 
-  /** @param {Record<string, boolean>} keys */
-  setTouchKeys(keys) {
+  setTouchKeys(keys: Record<string, boolean>): void {
     for (const [name, down] of Object.entries(keys)) {
       this.setTouchKey(name, down);
     }
   }
 
-  /**
-   * @param {number} left
-   * @param {number} forward
-   * @param {boolean} active
-   */
-  setTouchMovementImpulse(left, forward, active) {
+  setTouchMovementImpulse(left: number, forward: number, active: boolean): void {
     this.touchMovementImpulse = {
       active: Boolean(active),
       left: sanitizeInputImpulse(left),
@@ -803,30 +785,25 @@ class WebChunkApp {
     };
   }
 
-  currentInputKeys() {
-    const keys = defaultInputKeys();
+  currentInputKeys(): InputKeys {
+    const keys = defaultInputKeys() as InputKeys;
     for (const name of INPUT_KEY_NAMES) {
       keys[name] = Boolean(this.keys[name] || this.touchKeys[name]);
     }
     return keys;
   }
 
-  currentMovementImpulse() {
+  currentMovementImpulse(): TouchMovementImpulse {
     return { ...this.touchMovementImpulse };
   }
 
-  /** @param {string[]} [names] */
-  clearTouchKeys(names = INPUT_KEY_NAMES) {
+  clearTouchKeys(names: readonly string[] = INPUT_KEY_NAMES): void {
     for (const name of names) {
       this.setTouchKey(name, false);
     }
   }
 
-  /**
-   * @param {number} dx
-   * @param {number} dy
-   */
-  queueMouseDelta(dx, dy) {
+  queueMouseDelta(dx: number, dy: number): void {
     const x = Number(dx);
     const y = Number(dy);
     if (Number.isFinite(x)) {
@@ -841,15 +818,14 @@ class WebChunkApp {
     }
   }
 
-  currentCameraCenter() {
+  currentCameraCenter(): { centerX: number, centerZ: number } {
     return {
       centerX: Number(runtime.state.centerX) || 0,
       centerZ: Number(runtime.state.centerZ) || 0,
     };
   }
 
-  /** @param {number} frameGapMs */
-  recordFrameGap(frameGapMs) {
+  recordFrameGap(frameGapMs: number): void {
     if (!Number.isFinite(frameGapMs)) {
       return;
     }
@@ -862,10 +838,10 @@ class WebChunkApp {
     }
   }
 
-  requestPointerLock() {
+  requestPointerLock(): void {
     runtime.state.pointerLockAttempted = true;
     if (typeof this.canvas.requestPointerLock === "function") {
-      const result = this.canvas.requestPointerLock();
+      const result = this.canvas.requestPointerLock() as Promise<void> | undefined;
       if (result && typeof result.catch === "function") {
         result.catch(() => {
           runtime.state.pointerLockFallback = true;
@@ -878,14 +854,14 @@ class WebChunkApp {
     updateDom(runtime.state);
   }
 
-  updatePointerLockState() {
+  updatePointerLockState(): void {
     runtime.state.pointerLocked = document.pointerLockElement === this.canvas;
     runtime.state.pointerLockFallback =
       runtime.state.pointerLockAttempted && !runtime.state.pointerLocked;
     updateDom(runtime.state);
   }
 
-  syncCanvasSize() {
+  syncCanvasSize(): void {
     if (!this.session) {
       return;
     }
@@ -904,13 +880,11 @@ class WebChunkApp {
   }
 }
 
-/** @param {WebCompileTiming} timing */
-function publishActiveCompileTiming(timing) {
+function publishActiveCompileTiming(timing: WebCompileTiming): void {
   runtime.state.activeCompileTiming = timing.publicSnapshot(performance.now());
 }
 
-/** @param {WebCompileTiming} timing */
-function recordCompileTiming(timing) {
+function recordCompileTiming(timing: WebCompileTiming): void {
   const snapshot = timing.publicSnapshot(performance.now());
   runtime.state.lastCompileTiming = snapshot;
   runtime.state.compileTimings = [...runtime.state.compileTimings, snapshot].slice(-16);
@@ -918,16 +892,14 @@ function recordCompileTiming(timing) {
   runtime.state.activeCompileTiming = null;
 }
 
-/** @returns {Promise<void>} */
-function nextAnimationFrame() {
+function nextAnimationFrame(): Promise<void> {
   return new Promise(
-    /** @param {(value?: void) => void} resolve */
-    (resolve) => requestAnimationFrame(() => resolve()),
+    (resolve: (value?: void) => void) => requestAnimationFrame(() => resolve()),
   );
 }
 
-function normalizedDeployAssetVersion() {
-  const version = /** @type {any} */ (globalThis).__MCLONE_NATIVE_WEB_ASSET_VERSION__;
+function normalizedDeployAssetVersion(): string | null {
+  const version = globalThis.__MCLONE_NATIVE_WEB_ASSET_VERSION__;
   if (
     typeof version === "string"
     && version.length > 0
@@ -938,8 +910,7 @@ function normalizedDeployAssetVersion() {
   return null;
 }
 
-/** @param {string} path */
-function versionedUrl(path) {
+function versionedUrl(path: string): URL {
   const url = new URL(path, import.meta.url);
   if (DEPLOY_ASSET_VERSION !== null) {
     url.searchParams.set("v", DEPLOY_ASSET_VERSION);
@@ -947,12 +918,11 @@ function versionedUrl(path) {
   return url;
 }
 
-function snapshotState() {
+function snapshotState(): WasmReport {
   return JSON.parse(JSON.stringify(runtime.state));
 }
 
-/** @param {unknown} error */
-function stringifyError(error) {
+function stringifyError(error: unknown): string {
   if (error instanceof Error) {
     return error.stack ?? error.message;
   }
