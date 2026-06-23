@@ -30,10 +30,10 @@ use crate::render_cache::{
     load_textured_mesh_assets,
 };
 use mclone_render_session::{
-    EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompiler,
-    RenderSectionRemovalMode, RenderSectionSession, build_client_textured_sections,
-    render_section_chunk_pos, render_section_neighbor_readiness,
-    sort_chunk_positions_by_distance, sort_dirty_section_chunks_by_distance,
+    EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompiler, RenderSectionRemovalMode,
+    RenderSectionSession, build_client_textured_sections, render_section_chunk_pos,
+    render_section_neighbor_readiness, sort_chunk_positions_by_distance,
+    sort_dirty_section_chunks_by_distance,
 };
 
 const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
@@ -616,7 +616,9 @@ impl WindowSceneRuntime {
             },
             |client, key| render_section_neighbor_readiness(client, key, camera_position),
             RenderSectionRemovalMode::ApplyImmediately,
-            |client| client.chunk_snapshots().cloned().collect(),
+            // Desktop ignores the compiler argument: the owned snapshot `Vec` is moved over
+            // `mpsc` to the worker thread, so cloning every loaded column is load-bearing here.
+            |client, _compiler| client.chunk_snapshots().cloned().collect(),
         )
     }
 

@@ -627,10 +627,29 @@ packed, `shared-result-buffer` transport, delta input 24 B–~71 KB),
 
 **067 follow-ups (out of this tactical's scope; spawned, not regressions):**
 
-1. **Stage-4 snapshot-collector clone.** The web collector still
-   `client.chunk_snapshots().cloned().collect()`s every loaded column each frame before
-   `submit` diffs them — a main-thread clone (not a SAB cost). Removing it needs a
-   web-specific collector with access to the shadow map.
+1. **Stage-4 snapshot-collector clone — LANDED.** Chose the handoff's option (a) — generalize
+   the *shared* method's snapshot step — over option (b) (a parallel web-only sync method), to
+   keep 067's one-shared-loop thesis: the `sync_render_sections_with_budget` collector bound went
+   from `FnOnce(&ClientRuntime) -> Vec<ChunkSnapshot>` to `FnOnce(&ClientRuntime, &mut C)`, so the
+   web compiler diffs the *borrowed* live snapshots against its own mirror shadow and clones only
+   the changed columns (`WebRenderSectionCompiler::stage_streaming_delta`). The borrow-checker snag
+   the handoff flagged (the collector runs while `compiler` is `&mut`) is resolved by passing the
+   compiler *into* the collector (a reborrow, not a second borrow of the caller's `&mut`) and
+   *staging* the eviction/reset/generation on the compiler for the `submit` that follows in the
+   same streaming step (the changed columns ride along as `request.snapshots`; the shadow advance
+   stays in `submit` so it only fires when a ready plan is actually submitted). Desktop is
+   byte-identical: its collector ignores the `&mut C` arg and still
+   `client.chunk_snapshots().cloned().collect()`s for the load-bearing `mpsc` move. Instrument: a
+   `snapshotInputClonedColumnCount` doorbell field, counted at the clone site and threaded to the
+   per-compile timing, and `assertCompileTimingDiagnostics` now asserts `cloned ==
+   snapshotInputChunkCount` (the upserts shipped) as a regression fence against a reintroduced
+   whole-world clone (a `debug_assert_eq!` mirrors it in the dev-profile wasm). Measured
+   (`native:web:movement-perf`): steady-state recompiles now clone **0** columns (was 9 — every
+   loaded column, every frame) on a 24-byte header delta; movement frames clone only the delta
+   (1–3 columns). All SAB metrics byte-identical (16 sections/compile, 1.06–1.75 MB packed,
+   24 B–73 KB delta input, `shared-result-buffer`, 0 overflow); only the clone instrument moved.
+   Desktop `native:movement:smoke` / `native:timedemo:smoke` trivially green; full `cargo test`
+   green; `cargo check` wasm warning-clean; terrain canvas identical.
 2. **Budget tuning / a 2–3-worker render pool.** At ~5–11 ms round-trips, budget-1
    single-in-flight catches up a burst over ~0.5–1 s; raising the budget or adding a small
    pool is a `RenderSectionCompiler` backend detail (067 "Risks").

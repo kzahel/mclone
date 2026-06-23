@@ -614,7 +614,11 @@ fn encode_web_render_compile_delta(
     let mut bytes = Vec::new();
     bytes.extend_from_slice(WEB_RENDER_COMPILE_DELTA_MAGIC);
     bytes.extend_from_slice(&generation.to_le_bytes());
-    let flags = if reset { WEB_RENDER_COMPILE_DELTA_FLAG_RESET } else { 0 };
+    let flags = if reset {
+        WEB_RENDER_COMPILE_DELTA_FLAG_RESET
+    } else {
+        0
+    };
     bytes.extend_from_slice(&flags.to_le_bytes());
     write_web_compile_input_u32(&mut bytes, upserts.len(), "delta upsert count")?;
     for snapshot in upserts {
@@ -1447,12 +1451,17 @@ impl WebRenderCompilerSharedArena {
     }
 
     fn poll_result_status(&self) -> Result<i32, String> {
-        render_compiler_atomic_load(&self.result_control, RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX)
+        render_compiler_atomic_load(
+            &self.result_control,
+            RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX,
+        )
     }
 
     fn result_byte_length(&self) -> Result<u32, String> {
-        let bytes =
-            render_compiler_atomic_load(&self.result_control, RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX)?;
+        let bytes = render_compiler_atomic_load(
+            &self.result_control,
+            RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX,
+        )?;
         u32::try_from(bytes)
             .map_err(|_| format!("render compile result reported a negative byte count {bytes}"))
     }
@@ -1542,6 +1551,16 @@ struct WebRenderSectionCompiler {
     // doorbell as the delta width. The worker reports the matching eviction + resident-mirror
     // counts from its own session getters, so they are not duplicated here.
     last_input_upsert_count: usize,
+    // 067 follow-up 1: the eviction/reset/generation parts of the delta, computed by
+    // `stage_streaming_delta` against the live snapshots and consumed by the `submit` that
+    // follows it in the same streaming step. `submit` requires this to be present; the shared
+    // streaming loop always stages immediately before submitting.
+    staged_delta: Option<WebStagedSubmitDelta>,
+    // 067 follow-up 1: number of `ChunkSnapshot` clones the most recent `stage_streaming_delta`
+    // performed for submit — counted at the clone site so it stays a true clone count. It must
+    // equal the upserts shipped (`last_input_upsert_count`); a whole-world clone that ships only
+    // a delta would make it diverge, which the smoke asserts as a regression fence.
+    last_submit_cloned_column_count: usize,
     // The request id + outcome of the most recent compile drained by
     // `try_recv_completed`, consumed by the streaming frame so JS can correlate the
     // applied result with the doorbell it posted for that request.
@@ -1553,6 +1572,18 @@ struct WebCompletedCompile {
     request_id: u32,
     ok: bool,
     packed_byte_length: usize,
+}
+
+/// The non-snapshot parts of a per-frame compile delta, computed by `stage_streaming_delta`
+/// (which has the live `&ClientRuntime` borrows) and consumed by the `submit` that follows in
+/// the same streaming step. The changed columns themselves ride along as `request.snapshots`
+/// (the upserts the collector returned); only the evictions + reset/generation need staging,
+/// because the shared `RenderSectionCompileRequest` carries no eviction/generation fields.
+#[derive(Clone, Debug, Default)]
+struct WebStagedSubmitDelta {
+    evictions: Vec<ChunkPos>,
+    reset: bool,
+    generation: u32,
 }
 
 impl WebRenderSectionCompiler {
@@ -1581,6 +1612,8 @@ impl WebRenderSectionCompiler {
             mirror_tracking: BTreeMap::new(),
             mirror_generation: 0,
             last_input_upsert_count: 0,
+            staged_delta: None,
+            last_submit_cloned_column_count: 0,
             last_completed: None,
         }
     }
@@ -1590,7 +1623,9 @@ impl WebRenderSectionCompiler {
     }
 
     fn in_flight_request_id(&self) -> Option<u32> {
-        self.in_flight.as_ref().map(|in_flight| in_flight.request_id)
+        self.in_flight
+            .as_ref()
+            .map(|in_flight| in_flight.request_id)
     }
 
     /// Take the most recently drained compile outcome, if any. The streaming frame reads
@@ -1618,9 +1653,17 @@ impl WebRenderSectionCompiler {
         let Some(arena) = self.shared.as_ref() else {
             return Ok(());
         };
-        render_compiler_set_value(object, "sharedInputControlBuffer", arena.input_control_buffer.as_ref())?;
+        render_compiler_set_value(
+            object,
+            "sharedInputControlBuffer",
+            arena.input_control_buffer.as_ref(),
+        )?;
         render_compiler_set_value(object, "sharedInputBuffer", arena.input_buffer.as_ref())?;
-        set_number(object, "sharedInputByteLength", f64::from(arena.input_byte_length))?;
+        set_number(
+            object,
+            "sharedInputByteLength",
+            f64::from(arena.input_byte_length),
+        )?;
         set_number(
             object,
             "sharedInputBufferCapacityBytes",
@@ -1671,8 +1714,62 @@ impl WebRenderSectionCompiler {
             "snapshotInputChunkCount",
             self.last_input_upsert_count as f64,
         )?;
+        // 067 follow-up 1: columns actually cloned on the main thread for this submit, counted
+        // at the clone site. It must equal `snapshotInputChunkCount` (the upserts shipped); the
+        // smoke asserts the equality so a reintroduced whole-world clone (clone all, ship delta)
+        // shows up as a divergence instead of silently regressing main-thread allocation.
+        set_number(
+            object,
+            "snapshotInputClonedColumnCount",
+            self.last_submit_cloned_column_count as f64,
+        )?;
         self.write_doorbell_arenas(object)?;
         Ok(true)
+    }
+
+    /// Compute this frame's compile delta against the worker-mirror shadow from the *borrowed*
+    /// live snapshots, cloning only the changed columns (067 follow-up 1). Returns the upsert
+    /// snapshots (which become `request.snapshots` for the `submit` that follows in the same
+    /// streaming step) and stages the evictions + reset/generation on `self` for that submit.
+    ///
+    /// This does **not** mutate the mirror shadow or the generation: the streaming loop runs
+    /// this every frame the budget gate opens, but only actually submits when there is a ready
+    /// plan, so the shadow advance (and the generation bump) is deferred to `submit`, which runs
+    /// exactly when a delta is armed. A frame that stages but does not submit simply has its
+    /// staged delta overwritten by the next frame's stage before that frame's submit.
+    fn stage_streaming_delta(&mut self, client: &ClientRuntime) -> Vec<ChunkSnapshot> {
+        // An empty shadow is a full resync (the first compile, and post-failure recovery): every
+        // loaded column ships as an upsert under a freshly bumped mirror epoch, with no evictions.
+        // The generation is computed prospectively here and only committed by `submit`.
+        let reset = self.mirror_tracking.is_empty();
+        let generation = if reset {
+            self.mirror_generation.wrapping_add(1).max(1)
+        } else {
+            self.mirror_generation
+        };
+        let mut upserts: Vec<ChunkSnapshot> = Vec::new();
+        let mut cloned_columns = 0usize;
+        let mut current_positions: BTreeSet<ChunkPos> = BTreeSet::new();
+        for snapshot in client.chunk_snapshots() {
+            current_positions.insert(snapshot.pos);
+            if self.mirror_tracking.get(&snapshot.pos) != Some(&snapshot.revision) {
+                upserts.push(snapshot.clone());
+                cloned_columns += 1;
+            }
+        }
+        let evictions: Vec<ChunkPos> = self
+            .mirror_tracking
+            .keys()
+            .copied()
+            .filter(|pos| !current_positions.contains(pos))
+            .collect();
+        self.last_submit_cloned_column_count = cloned_columns;
+        self.staged_delta = Some(WebStagedSubmitDelta {
+            evictions,
+            reset,
+            generation,
+        });
+        upserts
     }
 }
 
@@ -1699,33 +1796,32 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
             ));
         }
         let request_id = self.allocate_request_id();
+        let staged_delta = self.staged_delta.take().ok_or_else(|| {
+            anyhow::anyhow!("web render compiler submit called without a staged streaming delta")
+        })?;
+        let RenderSectionCompileRequest {
+            target_sections,
+            section_revisions,
+            snapshots: upserts,
+        } = request;
 
-        // 067 Stage 4: diff the loaded snapshots against the worker-mirror shadow so only the
-        // delta crosses the SAB boundary. An empty shadow is a full resync — the first compile
-        // and post-failure recovery — which bumps the mirror epoch, ships every loaded column
-        // as an upsert, and (because the shadow is empty) carries no evictions.
-        let reset = self.mirror_tracking.is_empty();
-        if reset {
-            self.mirror_generation = self.mirror_generation.wrapping_add(1).max(1);
+        if staged_delta.reset {
+            self.mirror_generation = staged_delta.generation;
+        } else if staged_delta.generation != self.mirror_generation {
+            return Err(anyhow::anyhow!(
+                "web render compiler staged generation {} did not match mirror generation {}",
+                staged_delta.generation,
+                self.mirror_generation
+            ));
         }
-        let generation = self.mirror_generation;
-        let mut upserts: Vec<ChunkSnapshot> = Vec::new();
-        let mut current_positions: BTreeSet<ChunkPos> = BTreeSet::new();
-        for snapshot in &request.snapshots {
-            current_positions.insert(snapshot.pos);
-            if self.mirror_tracking.get(&snapshot.pos) != Some(&snapshot.revision) {
-                upserts.push(snapshot.clone());
-            }
-        }
-        let evictions: Vec<ChunkPos> = self
-            .mirror_tracking
-            .keys()
-            .copied()
-            .filter(|pos| !current_positions.contains(pos))
-            .collect();
 
-        let input_bytes = encode_web_render_compile_delta(generation, reset, &upserts, &evictions)
-            .map_err(|error| anyhow::anyhow!(error))?;
+        let input_bytes = encode_web_render_compile_delta(
+            staged_delta.generation,
+            staged_delta.reset,
+            &upserts,
+            &staged_delta.evictions,
+        )
+        .map_err(|error| anyhow::anyhow!(error))?;
         let arena = self
             .shared
             .as_mut()
@@ -1742,7 +1838,7 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
         // it can fail — so a compile requeued after a result-buffer overflow still finds those
         // columns resident and re-ships nothing. `try_recv_completed` clears the shadow on a
         // worker failure, which forces the next submit back into a full resync.
-        for pos in &evictions {
+        for pos in &staged_delta.evictions {
             self.mirror_tracking.remove(pos);
         }
         for snapshot in &upserts {
@@ -1750,10 +1846,14 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
         }
 
         self.last_input_upsert_count = upserts.len();
+        debug_assert_eq!(
+            self.last_submit_cloned_column_count, self.last_input_upsert_count,
+            "web render compiler should clone exactly the upsert columns it submits"
+        );
         self.in_flight = Some(WebSharedCompileInFlight {
             request_id,
-            target_sections: request.target_sections,
-            section_revisions: request.section_revisions,
+            target_sections,
+            section_revisions,
         });
         self.pending_jobs = 1;
         self.compile_count += 1;
@@ -1781,8 +1881,8 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
                 let in_flight = self
                     .take_in_flight()
                     .expect("in-flight compile present after status check");
-                let section_report = decode_textured_render_section_build_report(&packed)
-                    .map_err(|error| {
+                let section_report =
+                    decode_textured_render_section_build_report(&packed).map_err(|error| {
                         anyhow::anyhow!("failed to decode packed render section report: {error:#}")
                     })?;
                 self.last_packed_byte_length = packed.len();
@@ -2663,9 +2763,11 @@ impl WebChunkRenderSession {
         radius_chunks: u32,
     ) -> Result<JsValue, String> {
         if !self.render_compiler.shared_supported() {
-            return Err("shared render compile transport unavailable: cross-origin isolation \
+            return Err(
+                "shared render compile transport unavailable: cross-origin isolation \
                  (SharedArrayBuffer/Atomics) is required for the streaming render loop"
-                .into());
+                    .into(),
+            );
         }
 
         // 1. Keep the runner's streaming interest centered on the camera. Deferred send,
@@ -2707,7 +2809,12 @@ impl WebChunkRenderSession {
                 },
                 |client, key| render_section_neighbor_readiness(client, key, camera_position),
                 RenderSectionRemovalMode::ApplyImmediately,
-                |client| client.chunk_snapshots().cloned().collect(),
+                // 067 follow-up 1: instead of deep-cloning every loaded column each frame, the
+                // compiler diffs the live snapshots (borrowed) against its own mirror shadow and
+                // clones only the changed columns; the eviction/reset/generation parts of the
+                // delta are staged on the compiler for the `submit` that follows in this same
+                // streaming step. Web-only — desktop's collector still clones for the `mpsc` move.
+                |client, compiler| compiler.stage_streaming_delta(client),
             )
             .map_err(|error| format!("web render streaming sync failed: {error:#}"))?;
 
@@ -2721,9 +2828,12 @@ impl WebChunkRenderSession {
         let applied = self.render_compiler.take_last_completed();
         let pending_compile_jobs = self.render_compiler.pending_job_count();
         let streaming_idle = pending_compile_jobs == 0
-            && !self.runtime.engine().has_pending_render_work(0, |client, key| {
-                render_section_neighbor_readiness(client, key, camera_position)
-            });
+            && !self
+                .runtime
+                .engine()
+                .has_pending_render_work(0, |client, key| {
+                    render_section_neighbor_readiness(client, key, camera_position)
+                });
 
         // 4. Synthesize this frame's compile diagnostics from the streaming cache update.
         let acceptance_report = RenderSectionCompileAcceptanceReport {
@@ -2776,7 +2886,11 @@ impl WebChunkRenderSession {
         let object: js_sys::Object = report.to_js_value()?.unchecked_into();
         set_bool(&object, "shared", true)?;
         set_bool(&object, "streamingIdle", streaming_idle)?;
-        set_number(&object, "pendingCompileJobCount", pending_compile_jobs as f64)?;
+        set_number(
+            &object,
+            "pendingCompileJobCount",
+            pending_compile_jobs as f64,
+        )?;
         if let Some(completed) = applied {
             set_number(&object, "appliedRequestId", f64::from(completed.request_id))?;
             set_bool(&object, "appliedOk", completed.ok)?;
@@ -3072,7 +3186,6 @@ impl WebChunkRenderSession {
             self.runtime.client(),
         )
     }
-
 }
 
 fn write_target_sections(

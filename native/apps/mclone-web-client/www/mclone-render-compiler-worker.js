@@ -175,6 +175,10 @@ async function handleCompile(message) {
       sharedInputByteLength: requestSnapshotInputByteLength,
       sharedInputBufferCapacityBytes,
       snapshotInputChunkCount: Number(message.snapshotInputChunkCount) || 0,
+      // 067 follow-up 1: columns the main thread actually cloned for this submit (delta-only now),
+      // echoed straight from the doorbell so the perf fence can assert it equals the upserts shipped
+      // — a whole-world clone that ships only a delta would make the two diverge.
+      snapshotInputClonedColumnCount: Number(message.snapshotInputClonedColumnCount) || 0,
       // 067 Stage 4: the input is a delta against the worker's resident snapshot mirror.
       // Report the delta width and resident mirror size straight from the persistent Rust
       // session so the perf fence can see input shrink to upserts-only and confirm the

@@ -1265,6 +1265,7 @@ function createCompileTiming({
     renderCompilerSharedInputByteLength: 0,
     renderCompilerSharedInputBufferCapacityBytes: 0,
     renderCompilerSnapshotInputChunkCount: 0,
+    renderCompilerSnapshotInputClonedColumnCount: 0,
     renderCompilerSnapshotInputCompileUsed: false,
     renderCompilerGeneratedViewFallbackUsed: false,
     renderCompilerSharedResultBufferUsed: false,
@@ -1366,6 +1367,7 @@ function updateCompileTimingFromWorker(timing, report) {
   timing.renderCompilerSharedInputByteLength = metrics.sharedInputByteLength;
   timing.renderCompilerSharedInputBufferCapacityBytes = metrics.sharedInputBufferCapacityBytes;
   timing.renderCompilerSnapshotInputChunkCount = metrics.snapshotInputChunkCount;
+  timing.renderCompilerSnapshotInputClonedColumnCount = metrics.snapshotInputClonedColumnCount;
   timing.renderCompilerSnapshotInputCompileUsed = metrics.snapshotInputCompileUsed;
   timing.renderCompilerGeneratedViewFallbackUsed = metrics.generatedViewFallbackUsed;
   timing.renderCompilerSharedResultBufferUsed = metrics.sharedResultBufferUsed;
@@ -1415,6 +1417,7 @@ function normalizeRenderCompilerMetrics(source) {
     sharedInputByteLength: Number(source?.sharedInputByteLength) || 0,
     sharedInputBufferCapacityBytes: Number(source?.sharedInputBufferCapacityBytes) || 0,
     snapshotInputChunkCount: Number(source?.snapshotInputChunkCount) || 0,
+    snapshotInputClonedColumnCount: Number(source?.snapshotInputClonedColumnCount) || 0,
     snapshotInputCompileUsed: Boolean(source?.snapshotInputCompileUsed),
     generatedViewFallbackUsed: Boolean(source?.generatedViewFallbackUsed),
     sharedResultBufferUsed: Boolean(source?.sharedResultBufferUsed),
@@ -1530,6 +1533,7 @@ function publicCompileTiming(timing) {
     renderCompilerSharedInputByteLength: timing.renderCompilerSharedInputByteLength,
     renderCompilerSharedInputBufferCapacityBytes: timing.renderCompilerSharedInputBufferCapacityBytes,
     renderCompilerSnapshotInputChunkCount: timing.renderCompilerSnapshotInputChunkCount,
+    renderCompilerSnapshotInputClonedColumnCount: timing.renderCompilerSnapshotInputClonedColumnCount,
     renderCompilerSnapshotInputCompileUsed: timing.renderCompilerSnapshotInputCompileUsed,
     renderCompilerGeneratedViewFallbackUsed: timing.renderCompilerGeneratedViewFallbackUsed,
     renderCompilerSharedResultBufferUsed: timing.renderCompilerSharedResultBufferUsed,

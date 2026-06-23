@@ -1746,7 +1746,12 @@ impl EngineRenderSession {
         OrderChunks: FnOnce(&RenderSectionDirtyWork) -> Vec<ChunkPos>,
         OrderSections: FnOnce(&RenderSectionDirtyWork) -> Vec<ChunkPos>,
         Ready: FnMut(&ClientRuntime, RenderSectionKey) -> RenderSectionNeighborReadiness,
-        Snapshots: FnOnce(&ClientRuntime) -> Vec<ChunkSnapshot>,
+        // The snapshot step receives the compiler as well as the client so a platform that
+        // keeps a worker-side snapshot mirror (web) can diff the live snapshots against its
+        // own shadow and return only the changed columns, instead of deep-cloning every
+        // loaded column each frame. Desktop ignores the compiler and clones all columns (the
+        // owned `Vec` is moved over `mpsc` to the worker thread, so the clone is load-bearing).
+        Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
         let completed_results = compiler.try_recv_completed()?;
         let pending_compile_jobs = compiler.pending_job_count();
@@ -1775,12 +1780,11 @@ impl EngineRenderSession {
         }
 
         let sync_plan = sync_update.sync_plan;
-        let snapshots = snapshots_for_submit(self.client());
-        let submission_update = self.submit_prepared_sync_plan(
-            &sync_plan,
-            snapshots,
-            |_sync_plan, request| compiler.submit(request),
-        )?;
+        let snapshots = snapshots_for_submit(self.client(), compiler);
+        let submission_update =
+            self.submit_prepared_sync_plan(&sync_plan, snapshots, |_sync_plan, request| {
+                compiler.submit(request)
+            })?;
         report.merge(submission_update.cache_update);
         report.pending_compile_jobs = compiler.pending_job_count();
         Ok(report)
@@ -1793,7 +1797,10 @@ impl EngineRenderSession {
     pub fn has_pending_render_work(
         &self,
         compiler_pending_job_count: usize,
-        mut section_readiness: impl FnMut(&ClientRuntime, RenderSectionKey) -> RenderSectionNeighborReadiness,
+        mut section_readiness: impl FnMut(
+            &ClientRuntime,
+            RenderSectionKey,
+        ) -> RenderSectionNeighborReadiness,
     ) -> bool {
         if compiler_pending_job_count > 0 {
             return true;

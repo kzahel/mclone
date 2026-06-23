@@ -1588,6 +1588,11 @@ function assertCompileTimingDiagnostics(timing, label) {
     // upserts because the worker mirror already holds it. The delta byte length stays > 0
     // (asserted above via renderCompilerRequestSnapshotInputByteLength) and carries the weight.
     || Number(timing.renderCompilerSnapshotInputChunkCount) < 0
+    // 067 follow-up 1: the web submit clones only the changed (delta) columns, never the whole
+    // loaded world. The clone count is captured at the clone site, independently of the upserts
+    // shipped, so a reintroduced whole-world clone (clone all, ship a delta) makes these diverge.
+    || Number(timing.renderCompilerSnapshotInputClonedColumnCount)
+      !== Number(timing.renderCompilerSnapshotInputChunkCount)
     || timing.renderCompilerSnapshotInputCompileUsed !== true
     || timing.renderCompilerGeneratedViewFallbackUsed !== false
     || timing.renderCompilerSharedResultBufferUsed !== true

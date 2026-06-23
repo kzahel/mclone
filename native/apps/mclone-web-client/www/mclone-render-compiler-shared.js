@@ -219,6 +219,7 @@ export class RenderSectionWorkerCompiler {
       radiusChunks: doorbell.radiusChunks,
       targetSections: doorbell.targetSections,
       snapshotInputChunkCount: Number(doorbell.snapshotInputChunkCount) || 0,
+      snapshotInputClonedColumnCount: Number(doorbell.snapshotInputClonedColumnCount) || 0,
       sharedResult,
       sharedInput,
       requestSource: {
@@ -235,6 +236,7 @@ export class RenderSectionWorkerCompiler {
     radiusChunks,
     targetSections,
     snapshotInputChunkCount,
+    snapshotInputClonedColumnCount,
     sharedResult,
     sharedInput,
     requestSource,
@@ -271,6 +273,7 @@ export class RenderSectionWorkerCompiler {
         radiusChunks,
         targetSections,
         snapshotInputChunkCount,
+        snapshotInputClonedColumnCount,
       };
       if (sharedInput !== null) {
         message.sharedInputControlBuffer = sharedInput.controlBuffer;
@@ -465,6 +468,9 @@ export function renderCompilerMetricsForResponse(cumulativeMetrics, requestMetri
     snapshotInputChunkCount: Number(workerReport.snapshotInputChunkCount)
       || Number(requestMetrics.snapshotInputChunkCount)
       || 0,
+    // 067 follow-up 1: main-thread columns cloned for this submit; the worker echoes it from the
+    // doorbell. The fence asserts it equals snapshotInputChunkCount (the upserts shipped).
+    snapshotInputClonedColumnCount: Number(workerReport.snapshotInputClonedColumnCount) || 0,
     snapshotInputCompileUsed: Boolean(workerReport.snapshotInputCompileUsed),
     generatedViewFallbackUsed: Boolean(workerReport.generatedViewFallbackUsed),
     sharedResultBufferUsed,
