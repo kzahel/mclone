@@ -1,6 +1,6 @@
 # 071: Native Web Glue TypeScript Graduation
 
-Status: **Proposed - ready to implement.**
+Status: **App/touch/input/HUD TypeScript slices landed; optional worker glue remains.**
 
 ## Context
 
@@ -315,6 +315,49 @@ inspection, `pnpm native:web:movement-perf`, `pnpm native:movement:smoke`, and
 
 Implementation commit: `db0a52726aa22e493c53b884d4c39bdc5e2a68ca`
 (`071: graduate HUD glue to TypeScript`).
+
+### Stage 3 — app core TypeScript conversion (landed)
+
+The fourth slice converted only `www/mclone-web-app.js` to authored TypeScript
+(`www/mclone-web-app.ts`). Runtime URLs and import specifiers stayed stable: `app.html` /
+`index.html` still load `.js` entrypoints, the emitted app still imports
+`./mclone-render-compiler-shared.js`, `./mclone-web-input.js`, `./mclone-web-hud.js`, and
+`./mclone-web-touch.js`, and the dynamic wasm-bindgen import still goes through
+`versionedUrl("./pkg/mclone_web_client.js")`. The boot-time global contract stayed intact:
+`globalThis.__mcloneWebApp = runtime` and `globalThis.__mcloneNativeAppReady = boot()` are still
+published by the app module, with global types now declared in TypeScript. A 21-line
+`mclone-render-compiler-shared.d.ts` declaration shim types the existing JS render-compiler helper
+without converting or shipping that worker glue.
+
+The staged root and deploy bundle both contain emitted `mclone-web-app.js` and no `.ts` files.
+Source `.d.ts` declarations are excluded by the staged copy filter and are not deployed.
+
+Line counts from the start of this slice were app/touch/input/HUD `962 / 352 / 289 / 261`.
+Ending source counts are app TS `932`, touch TS `352`, input TS `289`, HUD TS `261`. The emitted
+staged app JS is `745` lines; emitted touch/input/HUD remain `273 / 232 / 214` lines.
+
+Correctness and perf fences held. Pre-slice and final `pnpm native:web:chunk-smoke` both produced
+`0ba8251f6c0dba012782e80921b8d45ead799a216decf50e9041958babcb6a4c` for
+`/tmp/mclone-native-web-canvas.png`; the desktop chunk canvas and mobile app canvas were visually
+inspected. Movement perf passed across 3 chunk boundaries, moving from center `[-1, -1]` to
+`[-1, 2]` with `frameCountDelta=54`, `renderCountDelta=54`, and 9 movement compile timings:
+`totalMs` avg `11.5` ms (min `8.2`, max `18.0`), `workerRoundTripMs` avg `6.9` ms (min `6.1`,
+max `8.8`), `decodeFinishApplyMs` avg `1.8` ms, and `maxFrameGapMs` avg `8.5` ms. Transport
+stayed `shared-result-buffer`; max packed/shared-result byte length was `1621772`; no transferred
+request/response bytes, no shared-result overflow, and no generated-view fallback.
+
+Validation (all green): `pnpm native:web:chunk-smoke` baseline, `pnpm native:web:glue`,
+`pnpm native:web:typecheck`, `pnpm native:web:bundle`, `bash -n scripts/deploy-native-web.sh`,
+`node --check` on emitted staged and deploy app/touch/input/HUD JS, explicit staged/deploy
+inventory checks (`mclone-web-app.js` and `mclone-web-touch.js` present, no `.ts`), `cargo test
+--manifest-path native/Cargo.toml`, `cargo check -p mclone-web-client --target
+wasm32-unknown-unknown --manifest-path native/Cargo.toml`, `pnpm native:web:build`,
+`pnpm native:web:app-smoke`, `pnpm native:web:chunk-smoke` plus final sha256,
+`pnpm native:web:mobile-smoke` with mobile canvas inspection, `pnpm native:web:movement-perf`,
+`pnpm native:movement:smoke`, `pnpm native:timedemo:smoke`, and `pnpm native:web:smoke`.
+
+Implementation commit: `55b68f706ef470c986dacd739dba58cf7001d833`
+(`071: graduate app glue to TypeScript`).
 
 ## Relationship to Other Tacticals
 
