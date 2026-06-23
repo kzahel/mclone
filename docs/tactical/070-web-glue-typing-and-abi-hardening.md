@@ -1,6 +1,6 @@
 # 070: Web JS Glue Hardening — ABI Lock, Type-Checking, and Shrink
 
-Status: **Stages 1–3 landed (server-worker SAB ABI single-source + lock test; no-emit type-check gate over the web glue; glue-shrink — packed-frame codec + compile-timing instrumentation moved into Rust). First follow-up landed: `mclone-web-app.js` split into app core + touch/input/HUD modules. Follow-ups remain (busy-poll, optional eslint/.ts graduation).**
+Status: **Stages 1–3 landed (server-worker SAB ABI single-source + lock test; no-emit type-check gate over the web glue; glue-shrink — packed-frame codec + compile-timing instrumentation moved into Rust). First follow-up landed: `mclone-web-app.js` split into app core + touch/input/HUD modules. Follow-ups remain (busy-poll, optional eslint); TypeScript graduation is tracked by 071.**
 
 The web perf/refactor work across 064–069 grew the hand-written browser JS glue.
 This is a consolidation/hardening pass over that glue. The framing matters: the
@@ -456,9 +456,8 @@ noise: touch split 16 compiles, totalMs avg 9.72 ms / workerRoundTrip avg 6.49 m
 - **Replace `waitForSessionIdle` busy-poll** with a promise/signal from the session.
 - **Optional minimal eslint** (typescript-eslint recommended set) if `tsc` strictness
   proves insufficient — quality polish, not essential.
-- **Optional: graduate `mclone-web-app.js` to real `.ts`** with a `tsc`/`esbuild` emit
-  step. This is the one change that touches the deploy pipeline (currently raw `cp`),
-  so it is explicitly deferred and should be taken only if JSDoc DX hurts.
+- **Graduate the native web glue to real `.ts`** with a `tsc` emit step is now tracked
+  by [`071-native-web-typescript-glue-graduation.md`](071-native-web-typescript-glue-graduation.md).
 
 ## Relationship to other tacticals
 
