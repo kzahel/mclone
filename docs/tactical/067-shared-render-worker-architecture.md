@@ -650,9 +650,26 @@ packed, `shared-result-buffer` transport, delta input 24 B–~71 KB),
    24 B–73 KB delta input, `shared-result-buffer`, 0 overflow); only the clone instrument moved.
    Desktop `native:movement:smoke` / `native:timedemo:smoke` trivially green; full `cargo test`
    green; `cargo check` wasm warning-clean; terrain canvas identical.
-2. **Budget tuning / a 2–3-worker render pool.** At ~5–11 ms round-trips, budget-1
-   single-in-flight catches up a burst over ~0.5–1 s; raising the budget or adding a small
-   pool is a `RenderSectionCompiler` backend detail (067 "Risks").
+2. **Budget tuning / a 2–3-worker render pool — MEASURED AND DECLINED.** Ran
+   `native:web:movement-perf` at the default 3-boundary traverse and a 12-boundary stress
+   (`MCLONE_NATIVE_WEB_MOVEMENT_PERF_CHUNKS=12`, a fast no-clip burst). The single-in-flight
+   budget-1 path holds frame cadence with room to spare: worst-case max frame gap **9.3 ms at both
+   3 and 12 boundaries** (under one 60 fps frame; ~one 120 Hz frame — no dropped frames), worker
+   round-trips 4.3–7.2 ms, per-compile windows 7.7–17 ms. Even the heaviest catch-up frame — a fast
+   traverse that accumulated an **8-column / 176 KB** snapshot delta into one compile — gapped only
+   8.6 ms, because budget-1 keeps the *render* work bounded (16 sections / one column per compile)
+   while the resident snapshot mirror absorbs the input delta; input-delta width and render budget
+   are decoupled. So neither knob is warranted:
+   - **Budget** stays 1: raising `WEB_RENDER_CHUNK_MESH_BUDGET` makes each compile mesh more
+     sections, which would *raise* per-frame cost and frame gap — the wrong direction — and there is
+     no throughput problem (round-trips already ~5 ms, gaps already sub-frame).
+   - **Pool** declined: a 2–3-worker pool would shorten total catch-up via concurrency, but catch-up
+     is already non-blocking with sub-frame gaps and the cache stays drawn. The pool's cost (N
+     resident SAB rings + N workers, summed `pending_job_count`, the `lib.rs:1772` single-in-flight
+     gate generalized to N, and the doorbell-relay redesign — `syncCameraRenderFrame` posts exactly
+     one doorbell per frame off a single `in_flight_request_id()` compare) buys no measurable
+     responsiveness here. Revisit only if a heavier scene (larger radius, denser meshes, or a slower
+     device) pushes the measured worst-case frame gap toward a felt stall.
 
 The shared-Wasm-linear-memory thread runtime remains explicitly out of scope (Non-Goals).
 
