@@ -275,6 +275,9 @@ no `.ts`), `pnpm native:web:app-smoke`, `pnpm native:web:chunk-smoke` plus final
 `pnpm native:web:mobile-smoke` with mobile canvas inspection, `pnpm native:web:movement-perf`,
 `pnpm native:movement:smoke`, and `pnpm native:timedemo:smoke`.
 
+Implementation commit: `e4843ed7e41fb0978f655f85661658b109021644`
+(`071: graduate input glue to TypeScript`).
+
 ## Relationship to Other Tacticals
 
 - [`070-web-glue-typing-and-abi-hardening.md`](070-web-glue-typing-and-abi-hardening.md) -
