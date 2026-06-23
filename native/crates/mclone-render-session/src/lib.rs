@@ -3254,6 +3254,46 @@ mod tests {
     }
 
     #[test]
+    fn engine_camera_walking_forward_tracks_crosshair_view_direction() {
+        // Guards the reported "in portrait I don't walk toward the crosshair":
+        // walking forward must move along the same horizontal direction the
+        // render camera / crosshair points, for every yaw. The math is
+        // orientation-independent, so a regression here would be a real vector
+        // bug rather than a touch-feel issue.
+        let client = ClientRuntime::local_integrated();
+        for yaw in [0.0_f64, 0.6, 1.5, 2.4, 3.1, -0.9, -2.2] {
+            let mut camera =
+                EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), yaw, -0.35, 32.0);
+            let before = camera.snapshot();
+
+            let render = render_camera_from_snapshot(before, 1);
+            let view_dx = f64::from(render.target[0]) - f64::from(render.eye[0]);
+            let view_dz = f64::from(render.target[2]) - f64::from(render.eye[2]);
+            let view_len = view_dx.hypot(view_dz);
+            assert!(view_len > 1.0e-9, "degenerate view direction at yaw {yaw}");
+
+            let after = camera.apply_movement_input(
+                &client,
+                EngineCameraInput {
+                    dt_seconds: 0.05,
+                    movement_impulse: Some(EngineCameraMovementImpulse::new(0.0, 1.0)),
+                    ..EngineCameraInput::default()
+                },
+            );
+            let move_dx = after.eye.x - before.eye.x;
+            let move_dz = after.eye.z - before.eye.z;
+            let move_len = move_dx.hypot(move_dz);
+            assert!(move_len > 1.0e-6, "no horizontal movement at yaw {yaw}");
+
+            let dot = (move_dx * view_dx + move_dz * view_dz) / (move_len * view_len);
+            assert!(
+                dot > 0.9999,
+                "forward walk diverged from crosshair at yaw {yaw}: dot={dot}",
+            );
+        }
+    }
+
+    #[test]
     fn engine_camera_controller_picks_block_from_player_view() {
         let target = BlockPos::new(1, 2, 4);
         let mut client = ClientRuntime::local_integrated();

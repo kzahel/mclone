@@ -15,6 +15,17 @@ const TOUCH_JOYSTICK_MAX_DISTANCE = 50;
 const TOUCH_JOYSTICK_DEAD_ZONE = 10;
 const TOUCH_AXIS_THRESHOLD = TOUCH_JOYSTICK_DEAD_ZONE / TOUCH_JOYSTICK_MAX_DISTANCE;
 
+// Touch look multiplies the raw drag delta before it reaches the engine's fixed
+// mouse sensitivity. A finger drag covers far fewer pixels than a relative mouse
+// move (especially on the narrow look-half of a portrait phone), so the default
+// boost makes aiming the crosshair toward your travel direction practical.
+const LOOK_SENSITIVITY_MIN = 0.5;
+const LOOK_SENSITIVITY_MAX = 5;
+const DEFAULT_LOOK_SENSITIVITY = 2.4;
+const SETTINGS_STORAGE_KEYS = {
+  lookSensitivity: "mclone.web.lookSensitivity",
+};
+
 const runtime = {
   ready: false,
   state: {
@@ -87,6 +98,9 @@ const runtime = {
     worldgenJobFrameMetrics: null,
     lightStatusJobFrameMetrics: null,
     hudOpen: true,
+    menuOpen: false,
+    settingsOpen: false,
+    lookSensitivity: DEFAULT_LOOK_SENSITIVITY,
     touchControlsVisible: false,
     touchJoystickActive: false,
     touchMovementLeftImpulse: 0,
@@ -107,6 +121,7 @@ async function boot() {
   runtime.previewBlockTarget = () => runtime.state.currentTarget;
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
   runtime.setHudOpen = (open) => setHudOpen(Boolean(open));
+  runtime.setMenuOpen = (open) => setMenuOpen(app, Boolean(open));
   try {
     await app.init();
     runtime.ready = true;
@@ -138,6 +153,9 @@ class WebChunkApp {
     this.touchKeys = defaultInputKeys();
     this.touchMovementImpulse = defaultMovementImpulse();
     this.touchControls = null;
+    const settings = loadStoredSettings();
+    this.lookSensitivity = settings.lookSensitivity;
+    runtime.state.lookSensitivity = this.lookSensitivity;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
     this.compileSequence = 0;
@@ -213,7 +231,7 @@ class WebChunkApp {
       bindgenWasmUrl: BINDGEN_WASM_URL,
       workerName: "mclone-render-compiler-app",
     });
-    bindHud(this);
+    bindMenu(this);
     bindInput(this);
     this.touchControls = new TouchControls(this);
     this.syncCanvasSize();
@@ -863,14 +881,142 @@ function bindInput(app) {
   });
 }
 
-function bindHud(app) {
+function bindMenu(app) {
+  // The hamburger now opens the main menu; the runtime/debug stats live behind
+  // the menu's "Debug info" entry. Stats stay open by default on desktop so the
+  // debug HUD remains a glance away, while mobile boots into the clean view.
   setHudOpen(defaultHudOpen());
-  app.hudToggle?.addEventListener("click", () => setHudOpen(!isHudOpen()));
+  setMenuOpen(app, false);
+  setSettingsOpen(false);
+  syncSettingsControls(app);
+
+  app.hudToggle?.addEventListener("click", () => setMenuOpen(app, !isMenuOpen()));
+
+  document.getElementById("menu-resume")?.addEventListener("click", () => {
+    setMenuOpen(app, false);
+  });
+
+  const debugButton = document.getElementById("menu-debug");
+  debugButton?.addEventListener("click", () => {
+    const open = !isHudOpen();
+    setHudOpen(open);
+    setMenuOpen(app, false);
+  });
+
+  document.getElementById("menu-settings")?.addEventListener("click", () => {
+    setSettingsOpen(!isSettingsOpen());
+  });
+
+  const lookInput = document.getElementById("setting-look-sensitivity");
+  lookInput?.addEventListener("input", () => {
+    setLookSensitivity(app, Number(lookInput.value));
+  });
+
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && isHudOpen() && document.pointerLockElement !== app.canvas) {
+    if (event.key !== "Escape" || document.pointerLockElement === app.canvas) {
+      return;
+    }
+    if (isSettingsOpen()) {
+      setSettingsOpen(false);
+    } else if (isMenuOpen()) {
+      setMenuOpen(app, false);
+    } else if (isHudOpen()) {
       setHudOpen(false);
     }
   });
+}
+
+function setMenuOpen(app, open) {
+  const menu = document.getElementById("main-menu");
+  const toggle = document.getElementById("hud-toggle");
+  if (menu) {
+    menu.hidden = !open;
+  }
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  if (!open) {
+    setSettingsOpen(false);
+  } else {
+    // Releasing held touch input keeps the player from drifting while the modal
+    // menu is consuming the screen.
+    app?.touchControls?.clearAll();
+    syncSettingsControls(app);
+  }
+  const debugButton = document.getElementById("menu-debug");
+  debugButton?.setAttribute("aria-pressed", isHudOpen() ? "true" : "false");
+  runtime.state.menuOpen = Boolean(open);
+}
+
+function isMenuOpen() {
+  return document.getElementById("main-menu")?.hidden === false;
+}
+
+function setSettingsOpen(open) {
+  const panel = document.getElementById("settings-panel");
+  const button = document.getElementById("menu-settings");
+  if (panel) {
+    panel.hidden = !open;
+  }
+  if (button) {
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  runtime.state.settingsOpen = Boolean(open);
+}
+
+function isSettingsOpen() {
+  return document.getElementById("settings-panel")?.hidden === false;
+}
+
+function setLookSensitivity(app, value) {
+  const clamped = clampLookSensitivity(value);
+  app.lookSensitivity = clamped;
+  runtime.state.lookSensitivity = clamped;
+  storeSetting(SETTINGS_STORAGE_KEYS.lookSensitivity, String(clamped));
+  syncSettingsControls(app);
+}
+
+function syncSettingsControls(app) {
+  const lookInput = document.getElementById("setting-look-sensitivity");
+  if (lookInput && document.activeElement !== lookInput) {
+    lookInput.value = String(app.lookSensitivity);
+  }
+  const lookValue = document.getElementById("setting-look-sensitivity-value");
+  if (lookValue) {
+    lookValue.textContent = `${app.lookSensitivity.toFixed(1)}×`;
+  }
+}
+
+function clampLookSensitivity(value) {
+  const sensitivity = Number(value);
+  if (!Number.isFinite(sensitivity)) {
+    return DEFAULT_LOOK_SENSITIVITY;
+  }
+  return Math.min(LOOK_SENSITIVITY_MAX, Math.max(LOOK_SENSITIVITY_MIN, sensitivity));
+}
+
+function loadStoredSettings() {
+  return {
+    lookSensitivity: clampLookSensitivity(
+      readStoredSetting(SETTINGS_STORAGE_KEYS.lookSensitivity) ?? DEFAULT_LOOK_SENSITIVITY,
+    ),
+  };
+}
+
+function readStoredSetting(key) {
+  try {
+    return globalThis.localStorage?.getItem(key) ?? null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function storeSetting(key, value) {
+  try {
+    globalThis.localStorage?.setItem(key, value);
+  } catch (_error) {
+    // Private browsing / disabled storage: keep the in-memory setting only.
+  }
 }
 
 class TouchControls {
@@ -1059,7 +1205,11 @@ class TouchControls {
   }
 
   updateLook(clientX, clientY) {
-    this.app.queueMouseDelta(clientX - this.lookLastX, clientY - this.lookLastY);
+    const sensitivity = Number.isFinite(this.app.lookSensitivity) ? this.app.lookSensitivity : 1;
+    this.app.queueMouseDelta(
+      (clientX - this.lookLastX) * sensitivity,
+      (clientY - this.lookLastY) * sensitivity,
+    );
     this.lookLastX = clientX;
     this.lookLastY = clientY;
     this.updateRuntimeState();

@@ -595,6 +595,7 @@ async function exerciseMobileTouchControls(page, canvas) {
     const toggle = document.getElementById("hud-toggle");
     return {
       hudOpen: state.hudOpen,
+      menuOpen: state.menuOpen,
       touchControlsVisible: state.touchControlsVisible,
       ariaExpanded: toggle?.getAttribute("aria-expanded") ?? null,
     };
@@ -755,34 +756,63 @@ async function exerciseMobileTouchControls(page, canvas) {
 
   const buttonProbe = await exerciseTouchButton(page, "jump", 41);
   await canvas.evaluate((element) => element.focus());
+
+  // The hamburger now opens the main menu; the runtime/debug stats live behind
+  // the menu's "Debug info" entry.
   await page.locator("#hud-toggle").click();
   await page.waitForFunction(
-    () => document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "true",
+    () => document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "true"
+      && globalThis.__mcloneWebApp?.state?.menuOpen === true,
     undefined,
     { timeout: 10_000 },
   );
-  const openedHud = await readHudState(page);
-  await page.locator("#hud-toggle").click();
+  const openedMenu = await readMenuState(page);
+
+  await page.locator("#menu-debug").click();
   await page.waitForFunction(
-    () => document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "false",
+    () => globalThis.__mcloneWebApp?.state?.hudOpen === true
+      && document.getElementById("runtime-hud")?.hidden === false
+      && globalThis.__mcloneWebApp?.state?.menuOpen === false,
     undefined,
     { timeout: 10_000 },
   );
-  const closedHud = await readHudState(page);
+  const openedHud = await readMenuState(page);
+
+  // Re-open the menu and toggle the stats panel back off so the run ends in the
+  // clean mobile view (menu and debug HUD both closed).
+  await page.locator("#hud-toggle").click();
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.menuOpen === true,
+    undefined,
+    { timeout: 10_000 },
+  );
+  await page.locator("#menu-debug").click();
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.hudOpen === false
+      && globalThis.__mcloneWebApp?.state?.menuOpen === false
+      && document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "false",
+    undefined,
+    { timeout: 10_000 },
+  );
+  const closedHud = await readMenuState(page);
 
   return {
     ok: initial.hudOpen === false
+      && initial.menuOpen === false
       && initial.touchControlsVisible === true
       && activeMovementProbe?.ok === true
       && movementProbe.ok
       && lookProbe.ok
       && buttonProbe.ok
+      && openedMenu.menuOpen === true
       && openedHud.hudOpen === true
-      && closedHud.hudOpen === false,
+      && closedHud.hudOpen === false
+      && closedHud.menuOpen === false,
     initial,
     movement: movementProbe,
     look: lookProbe,
     button: buttonProbe,
+    menu: { opened: openedMenu },
     hud: {
       opened: openedHud,
       closed: closedHud,
@@ -828,14 +858,17 @@ async function exerciseTouchButton(page, key, pointerId) {
   };
 }
 
-async function readHudState(page) {
+async function readMenuState(page) {
   return page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
     const hud = document.getElementById("runtime-hud");
+    const menu = document.getElementById("main-menu");
     const toggle = document.getElementById("hud-toggle");
     return {
+      menuOpen: state.menuOpen,
       hudOpen: state.hudOpen,
-      hidden: hud?.hidden ?? null,
+      hudHidden: hud?.hidden ?? null,
+      menuHidden: menu?.hidden ?? null,
       ariaExpanded: toggle?.getAttribute("aria-expanded") ?? null,
     };
   });

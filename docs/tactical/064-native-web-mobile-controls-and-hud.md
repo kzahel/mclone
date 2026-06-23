@@ -351,3 +351,63 @@ Next likely step: real-phone feel validation and interaction tuning. In
 particular, check whether sprint should remain hold-only, whether the joystick
 response curve/dead zone feels right, and whether break/place need explicit
 mobile buttons before more mobile UI work.
+
+## Real-Phone Feel Pass - 2026-06-23
+
+First on-device feedback (portrait phone) surfaced three issues; this pass
+addressed them without moving gameplay rules out of the engine.
+
+### "In portrait I don't walk toward the crosshair"
+
+Root cause is look feel, not a movement vector bug. Walking-forward uses
+`pose.y_rot_degrees`, and the render camera / crosshair use
+`yaw_radians = -y_rot_degrees`, so forward acceleration is the same horizontal
+direction the crosshair points for any yaw and any orientation. Touch look fed
+raw drag pixels into the engine's fixed `ENGINE_CAMERA_MOUSE_SENSITIVITY`
+(`0.0035 rad/px`), which over the narrow look-half of a portrait screen turns
+only ~40° per swipe — too little to aim where you want to travel.
+
+Changes (all input-intent only, in `mclone-web-app.js`):
+
+- `TouchControls.updateLook` scales the drag delta by a `lookSensitivity`
+  multiplier (default `2.4×`, range `0.5–5×`), so aiming the crosshair is
+  practical in portrait. Desktop mouse/pointer-lock look is unscaled.
+- Added a render-session regression test
+  (`engine_camera_walking_forward_tracks_crosshair_view_direction`) asserting
+  the forward-walk direction equals the render-camera horizontal view direction
+  across several yaws, locking the invariant so a future change can't silently
+  turn this into a real vector bug.
+
+### "Walking seems slower than desktop"
+
+Verified the local-player movement constants are exact vanilla 1.17.1:
+`BASE_MOVEMENT_SPEED 0.1`, `SPRINT_SPEED_MULTIPLIER 1.3`, `BLOCK_FRICTION 0.6`,
+`FRICTION_MULTIPLIER 0.91`, `GRAVITY 0.08`, `JUMP_POWER 0.42`, `20` ticks/s — so
+ground walk is ~4.317 blocks/s like Java, identical on mobile and desktop. The
+"slow" perception is walk-vs-sprint; speed left unchanged per the report. One
+mobile-only caveat remains: `MAX_FRAME_DT_SECONDS` (0.05) caps per-frame world
+time, so a phone running below 20 fps advances movement in slower-than-real
+time. That is a streaming/perf concern (tactical 065), not a movement bug.
+
+### "Hamburger only opens debug; I want a real menu"
+
+Restructured the HUD entry point:
+
+- `app.html` adds a `#main-menu` modal overlay (Resume, Debug info, Settings).
+  The hamburger now opens this menu instead of toggling the stats panel
+  directly. "Debug info" toggles the existing `#runtime-hud` stats panel;
+  "Settings" exposes the look-sensitivity slider, persisted to `localStorage`.
+- Opening the menu releases held touch input so the player doesn't drift behind
+  the modal. Escape closes settings, then menu, then the stats panel.
+- `browser-smoke.mjs` mobile lane now drives the hamburger → menu →
+  Debug-info → stats-panel flow (`state.menuOpen` / `hudOpen`) and ends in the
+  clean view.
+
+Validated with:
+
+```text
+node --check native/apps/mclone-web-client/www/mclone-web-app.js
+node --check native/apps/mclone-web-client/scripts/browser-smoke.mjs
+cargo test --manifest-path native/Cargo.toml -p mclone-client -p mclone-render-session
+pnpm native:web:mobile-smoke
+```
