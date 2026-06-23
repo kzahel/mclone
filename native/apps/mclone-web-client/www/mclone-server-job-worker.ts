@@ -9,42 +9,40 @@ import {
   RUNNER_SHARED_STATUS_COMPLETE,
   RUNNER_SHARED_STATUS_FAILED,
 } from "./mclone-runner-shared-abi.js";
+import type { WebWorldgenJobSession } from "mclone-web-client-wasm";
 
-/**
- * The wasm-bindgen module namespace (its generated `.d.ts`, emitted by `wasm-bindgen
- * --typescript`). Loaded at runtime via a dynamic `import()` of a versioned URL, so this type
- * only ever appears in type positions — the bare specifier is path-mapped in tsconfig.json and
- * carries no runtime weight.
- * @typedef {typeof import("mclone-web-client-wasm")} WasmModule
- */
+// The wasm-bindgen module namespace (its generated `.d.ts`, emitted by `wasm-bindgen
+// --typescript`). Loaded at runtime via a dynamic `import()` of a versioned URL, so this type
+// only ever appears in type positions — the bare specifier is path-mapped in tsconfig.json and
+// carries no runtime weight.
+type WasmModule = typeof import("mclone-web-client-wasm");
 
-/**
- * Inbound postMessage payload for the stateless worldgen/light-status job worker. Hand-rolled
- * and `kind`-tagged; shared-memory jobs carry the SAB ring control/request/response buffers.
- * @typedef {object} ServerJobWorkerMessage
- * @property {string} [kind] - job kind: `"worldgen"` or `"light-status"`.
- * @property {number} [requestId]
- * @property {string} [bindgenJsUrl]
- * @property {string} [bindgenWasmUrl]
- * @property {"shared-memory"|"message-transfer"} [transportKind]
- * @property {Uint8Array} [frame]
- * @property {SharedArrayBuffer} [controlBuffer]
- * @property {SharedArrayBuffer} [requestBuffer]
- * @property {SharedArrayBuffer} [responseBuffer]
- */
+// Inbound postMessage payload for the stateless worldgen/light-status job worker. Hand-rolled
+// and `kind`-tagged; shared-memory jobs carry the SAB ring control/request/response buffers.
+interface ServerJobWorkerMessage {
+  kind?: string;
+  requestId?: number;
+  bindgenJsUrl?: string;
+  bindgenWasmUrl?: string;
+  transportKind?: "shared-memory" | "message-transfer";
+  frame?: Uint8Array;
+  controlBuffer?: SharedArrayBuffer;
+  requestBuffer?: SharedArrayBuffer;
+  responseBuffer?: SharedArrayBuffer;
+}
 
-/** @type {Promise<WasmModule> | null} */
-let wasmModulePromise = null;
+let wasmModulePromise: Promise<WasmModule> | null = null;
 // 069 Stage 1: the worldgen worker holds a resident session across jobs (exactly
 // as the render-compiler worker holds `compilerSession`), so its
 // OverworldFeatureDependencyCache persists and each job applies only the request
 // delta to it. This worker instance only ever receives "worldgen" jobs (the
 // light-status worker is a separate instance), so the session is never created in
 // the light worker. Light-status stays stateless (its free function).
-let worldgenSession = null;
+let worldgenSession: WebWorldgenJobSession | null = null;
+const workerSelf = self as unknown as DedicatedWorkerGlobalScope;
 
-self.onmessage = async (event) => {
-  const message = /** @type {ServerJobWorkerMessage} */ (event.data ?? {});
+workerSelf.onmessage = async (event: MessageEvent) => {
+  const message = (event.data ?? {}) as ServerJobWorkerMessage;
   try {
     const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
     if (message.transportKind === "shared-memory") {
@@ -54,7 +52,7 @@ self.onmessage = async (event) => {
     }
   } catch (error) {
     markSharedFailure(message);
-    self.postMessage({
+    workerSelf.postMessage({
       ok: false,
       kind: "error",
       requestId: Number(message.requestId) || 0,
@@ -63,29 +61,21 @@ self.onmessage = async (event) => {
   }
 };
 
-/**
- * @param {WasmModule} module
- * @param {ServerJobWorkerMessage} message
- */
-function handleTransferredJob(module, message) {
+function handleTransferredJob(module: WasmModule, message: ServerJobWorkerMessage): void {
   const frame = message.frame instanceof Uint8Array ? message.frame : new Uint8Array();
   const response = computeJobFrame(module, message.kind, frame);
-  self.postMessage(
+  workerSelf.postMessage(
     {
       ok: true,
       kind: `${String(message.kind)}-result`,
       requestId: Number(message.requestId) || 0,
       frame: response,
     },
-    [response.buffer],
+    [response.buffer as ArrayBuffer],
   );
 }
 
-/**
- * @param {WasmModule} module
- * @param {ServerJobWorkerMessage} message
- */
-function handleSharedMemoryJob(module, message) {
+function handleSharedMemoryJob(module: WasmModule, message: ServerJobWorkerMessage): void {
   const control = sharedControlView(message.controlBuffer);
   const requestBytes = Atomics.load(control, RUNNER_SHARED_REQUEST_BYTES_INDEX);
   const requestBuffer = sharedBuffer(message.requestBuffer, "requestBuffer");
@@ -105,7 +95,7 @@ function handleSharedMemoryJob(module, message) {
   Atomics.store(control, RUNNER_SHARED_RESPONSE_BYTES_INDEX, response.byteLength);
   Atomics.store(control, RUNNER_SHARED_STATUS_INDEX, RUNNER_SHARED_STATUS_COMPLETE);
   Atomics.notify(control, RUNNER_SHARED_STATUS_INDEX, 1);
-  self.postMessage({
+  workerSelf.postMessage({
     ok: true,
     kind: `${String(message.kind)}-result`,
     requestId: Number(message.requestId) || 0,
@@ -118,13 +108,11 @@ function handleSharedMemoryJob(module, message) {
   });
 }
 
-/**
- * @param {WasmModule} module
- * @param {string | undefined} kind
- * @param {Uint8Array} frame
- * @returns {Uint8Array}
- */
-function computeJobFrame(module, kind, frame) {
+function computeJobFrame(
+  module: WasmModule,
+  kind: string | undefined,
+  frame: Uint8Array,
+): Uint8Array {
   switch (kind) {
     case "worldgen":
       worldgenSession ??= new module.WebWorldgenJobSession();
@@ -136,21 +124,18 @@ function computeJobFrame(module, kind, frame) {
   }
 }
 
-/**
- * @param {string | undefined} bindgenJsUrl
- * @param {string | undefined} bindgenWasmUrl
- * @returns {Promise<WasmModule>}
- */
-function loadWasmModule(bindgenJsUrl, bindgenWasmUrl) {
-  wasmModulePromise ??= import(/** @type {string} */ (bindgenJsUrl)).then(/** @param {any} module */ async (module) => {
+function loadWasmModule(
+  bindgenJsUrl: string | undefined,
+  bindgenWasmUrl: string | undefined,
+): Promise<WasmModule> {
+  wasmModulePromise ??= import(bindgenJsUrl as string).then(async (module: WasmModule) => {
     await module.default(bindgenWasmUrl);
-    return /** @type {WasmModule} */ (module);
+    return module;
   });
   return wasmModulePromise;
 }
 
-/** @param {ServerJobWorkerMessage} message */
-function markSharedFailure(message) {
+function markSharedFailure(message: ServerJobWorkerMessage): void {
   if (message?.transportKind !== "shared-memory") return;
   try {
     const control = sharedControlView(message.controlBuffer);
@@ -159,26 +144,19 @@ function markSharedFailure(message) {
   } catch {}
 }
 
-/** @param {unknown} buffer */
-function sharedControlView(buffer) {
+function sharedControlView(buffer: unknown): Int32Array {
   const shared = sharedBuffer(buffer, "controlBuffer");
   return new Int32Array(shared);
 }
 
-/**
- * @param {unknown} buffer
- * @param {string} name
- * @returns {SharedArrayBuffer}
- */
-function sharedBuffer(buffer, name) {
+function sharedBuffer(buffer: unknown, name: string): SharedArrayBuffer {
   if (typeof SharedArrayBuffer !== "function" || !(buffer instanceof SharedArrayBuffer)) {
     throw new Error(`shared server job ${name} was not a SharedArrayBuffer`);
   }
   return buffer;
 }
 
-/** @param {unknown} error */
-function stringifyError(error) {
+function stringifyError(error: unknown): string {
   if (error instanceof Error) {
     return error.stack ?? error.message;
   }

@@ -9,69 +9,66 @@ import {
   RUNNER_SHARED_STATUS_COMPLETE,
   RUNNER_SHARED_STATUS_FAILED,
 } from "./mclone-runner-shared-abi.js";
+import type { McloneWebIntegratedServerWorker } from "mclone-web-client-wasm";
 
-/**
- * The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
- * Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
- * in tsconfig.json and only ever appears in type positions.
- * @typedef {typeof import("mclone-web-client-wasm")} WasmModule
- * @typedef {import("mclone-web-client-wasm").McloneWebIntegratedServerWorker} IntegratedServer
- */
+// The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
+// Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
+// in tsconfig.json and only ever appears in type positions.
+type WasmModule = typeof import("mclone-web-client-wasm");
 
-/**
- * Inbound postMessage payload for the integrated-server worker. Hand-rolled and `kind`-tagged;
- * the `shared-memory` transport carries the SAB ring control/request/response buffers.
- * @typedef {object} IntegratedServerWorkerMessage
- * @property {string} [kind]
- * @property {number} [requestId]
- * @property {number | string} [seed]
- * @property {string} [jobWorkerUrl]
- * @property {string} [bindgenJsUrl]
- * @property {string} [bindgenWasmUrl]
- * @property {string} [runnerTransportKind]
- * @property {number} [tickIntervalMs]
- * @property {Uint8Array} [frame]
- * @property {"shared-memory" | "message-transfer"} [transportKind]
- * @property {SharedArrayBuffer} [controlBuffer]
- * @property {SharedArrayBuffer} [requestBuffer]
- * @property {SharedArrayBuffer} [responseBuffer]
- * @property {number} [runnerSharedBufferId]
- */
+// Inbound postMessage payload for the integrated-server worker. Hand-rolled and `kind`-tagged;
+// the `shared-memory` transport carries the SAB ring control/request/response buffers.
+interface IntegratedServerWorkerMessage {
+  kind?: string;
+  requestId?: number;
+  seed?: number | string;
+  jobWorkerUrl?: string;
+  bindgenJsUrl?: string;
+  bindgenWasmUrl?: string;
+  runnerTransportKind?: string;
+  tickIntervalMs?: number;
+  frame?: Uint8Array;
+  transportKind?: "shared-memory" | "message-transfer";
+  controlBuffer?: SharedArrayBuffer;
+  requestBuffer?: SharedArrayBuffer;
+  responseBuffer?: SharedArrayBuffer;
+  runnerSharedBufferId?: number;
+}
 
-/**
- * A pooled shared response slot (worker-local; not part of the cross-boundary control-word ABI).
- * @typedef {object} RunnerSharedSlot
- * @property {number} id
- * @property {SharedArrayBuffer} controlBuffer
- * @property {SharedArrayBuffer} updateBuffer
- */
+// A pooled shared response slot (worker-local; not part of the cross-boundary control-word ABI).
+interface RunnerSharedSlot {
+  id: number;
+  controlBuffer: SharedArrayBuffer;
+  updateBuffer: SharedArrayBuffer;
+}
 
-/**
- * Outbound update/response message posted back to the app. A hand-rolled bag read coercion-guarded
- * on the main thread; `updates` carries the packed server-update frames.
- * @typedef {Record<string, any>} RunnerOutboundMessage
- */
+interface RunnerSharedResponseTarget {
+  control: Int32Array;
+  controlBuffer: SharedArrayBuffer;
+  updateBuffer: SharedArrayBuffer;
+  pooledResponse: boolean;
+  runnerSharedBufferId: number;
+}
 
-/** @type {Promise<WasmModule> | null} */
-let wasmModulePromise = null;
-/**
- * The resolved wasm module, captured once {@link startServer} loads it. The packed-frame
- * codec (070 Stage 3) lives in Rust and is reached through this handle, so the SAB packing
- * format has a single owner. Non-null for the lifetime of any update-posting path (they run
- * only after the server is started).
- * @type {WasmModule | null}
- */
-let wasmModule = null;
-/** @type {IntegratedServer | null} */
-let server = null;
-/** @type {ReturnType<typeof setInterval> | number} */
-let tickTimer = 0;
-let runnerTransportKind = "message-transfer";
+// Outbound update/response message posted back to the app. A hand-rolled bag read coercion-guarded
+// on the main thread; `updates` carries the packed server-update frames.
+type RunnerOutboundMessage = Record<string, any> & {
+  updates?: unknown[];
+};
+
+let wasmModulePromise: Promise<WasmModule> | null = null;
+// The resolved wasm module, captured once `startServer` loads it. The packed-frame codec
+// (070 Stage 3) lives in Rust and is reached through this handle, so the SAB packing format has a
+// single owner. Non-null for the lifetime of any update-posting path (they run only after the
+// server is started).
+let wasmModule: WasmModule | null = null;
+let server: McloneWebIntegratedServerWorker | null = null;
+let tickTimer: ReturnType<typeof setInterval> | 0 = 0;
+let runnerTransportKind: "shared-memory" | "message-transfer" = "message-transfer";
 let nextRunnerSharedBufferId = 1;
-/** @type {RunnerSharedSlot[]} */
-const runnerSharedPool = [];
-/** @type {Map<number, RunnerSharedSlot>} */
-const runnerSharedInflight = new Map();
+const runnerSharedPool: RunnerSharedSlot[] = [];
+const runnerSharedInflight = new Map<number, RunnerSharedSlot>();
+const workerSelf = self as unknown as DedicatedWorkerGlobalScope;
 
 // Pool-tuning knobs are worker-local — not part of the cross-boundary control-word ABI (which
 // is imported above). The worker sizes its own response-buffer pool independently of the Rust
@@ -79,8 +76,8 @@ const runnerSharedInflight = new Map();
 const MAX_RUNNER_SHARED_POOL_SLOTS = 2;
 const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES = 2 * 1024 * 1024;
 
-self.onmessage = async (event) => {
-  const message = /** @type {IntegratedServerWorkerMessage} */ (event.data ?? {});
+workerSelf.onmessage = async (event: MessageEvent) => {
+  const message = (event.data ?? {}) as IntegratedServerWorkerMessage;
   try {
     switch (message.kind) {
       case "start":
@@ -108,8 +105,7 @@ self.onmessage = async (event) => {
   }
 };
 
-/** @param {IntegratedServerWorkerMessage} message */
-async function startServer(message) {
+async function startServer(message: IntegratedServerWorkerMessage): Promise<void> {
   if (server) {
     postFailure(message.requestId, "integrated server worker was already started");
     return;
@@ -131,7 +127,7 @@ async function startServer(message) {
   const intervalMs = Math.max(1, Number(message.tickIntervalMs) || 50);
   tickTimer = setInterval(tickServer, intervalMs);
   const diagnostics = server.diagnostics();
-  self.postMessage({
+  workerSelf.postMessage({
     ok: true,
     kind: "ready",
     requestId: Number(message.requestId) || 0,
@@ -140,8 +136,7 @@ async function startServer(message) {
   });
 }
 
-/** @param {IntegratedServerWorkerMessage} message */
-async function handleCommand(message) {
+async function handleCommand(message: IntegratedServerWorkerMessage): Promise<void> {
   if (!server) {
     postFailure(message.requestId, "integrated server worker is not started");
     return;
@@ -171,7 +166,7 @@ async function handleCommand(message) {
   }, message);
 }
 
-function tickServer() {
+function tickServer(): void {
   if (!server) return;
   try {
     const result = server.tick();
@@ -189,15 +184,14 @@ function tickServer() {
   }
 }
 
-/** @param {IntegratedServerWorkerMessage} message */
-function shutdown(message) {
+function shutdown(message: IntegratedServerWorkerMessage): void {
   if (tickTimer) {
     clearInterval(tickTimer);
     tickTimer = 0;
   }
   const result = server?.shutdown?.() ?? { updates: [], diagnostics: null };
   server = null;
-  self.postMessage({
+  workerSelf.postMessage({
     ok: true,
     kind: "shutdown-complete",
     requestId: Number(message.requestId) || 0,
@@ -206,23 +200,22 @@ function shutdown(message) {
   });
 }
 
-/**
- * @param {RunnerOutboundMessage} message
- * @param {IntegratedServerWorkerMessage | null} [requestMessage]
- */
-function postUpdates(message, requestMessage = null) {
+function postUpdates(
+  message: RunnerOutboundMessage,
+  requestMessage: IntegratedServerWorkerMessage | null = null,
+): void {
   const updates = Array.isArray(message.updates) ? message.updates : [];
   if (runnerTransportKind === "shared-memory" && sharedTransportAvailable()) {
     postSharedUpdates(message, requestMessage, updates);
     return;
   }
-  const transfers = [];
+  const transfers: Transferable[] = [];
   for (const update of updates) {
     if (update instanceof Uint8Array) {
-      transfers.push(update.buffer);
+      transfers.push(update.buffer as ArrayBuffer);
     }
   }
-  self.postMessage(
+  workerSelf.postMessage(
     {
       ...message,
       updates,
@@ -232,12 +225,11 @@ function postUpdates(message, requestMessage = null) {
   );
 }
 
-/**
- * @param {RunnerOutboundMessage} message
- * @param {IntegratedServerWorkerMessage | null} requestMessage
- * @param {unknown[]} updates
- */
-function postSharedUpdates(message, requestMessage, updates) {
+function postSharedUpdates(
+  message: RunnerOutboundMessage,
+  requestMessage: IntegratedServerWorkerMessage | null,
+  updates: unknown[],
+): void {
   // 070 Stage 3: the packed-frame codec lives in Rust (decode side:
   // unpack_runner_update_frames in src/web_server_worker.rs). Compute the size, size/select
   // the SAB, then let Rust pack the frames in; JS still arms the doorbell below.
@@ -249,8 +241,7 @@ function postSharedUpdates(message, requestMessage, updates) {
   Atomics.store(shared.control, RUNNER_SHARED_STATUS_INDEX, RUNNER_SHARED_STATUS_COMPLETE);
   Atomics.notify(shared.control, RUNNER_SHARED_STATUS_INDEX, 1);
   const { updates: _updates, ...rest } = message;
-  /** @type {Record<string, any>} */
-  const response = {
+  const response: Record<string, any> = {
     ...rest,
     transportKind: "shared-memory",
     updateCount: updates.length,
@@ -263,14 +254,10 @@ function postSharedUpdates(message, requestMessage, updates) {
   if (shared.runnerSharedBufferId > 0) {
     response.runnerSharedBufferId = shared.runnerSharedBufferId;
   }
-  self.postMessage(response);
+  workerSelf.postMessage(response);
 }
 
-/**
- * @param {IntegratedServerWorkerMessage} message
- * @returns {Uint8Array}
- */
-function commandFrame(message) {
+function commandFrame(message: IntegratedServerWorkerMessage): Uint8Array {
   if (message.transportKind !== "shared-memory") {
     return message.frame instanceof Uint8Array ? message.frame : new Uint8Array();
   }
@@ -285,12 +272,10 @@ function commandFrame(message) {
   return new Uint8Array(requestBuffer, 0, requestBytes);
 }
 
-/**
- * @param {IntegratedServerWorkerMessage | null} requestMessage
- * @param {number} packedBytes
- * @returns {{ control: Int32Array, controlBuffer: SharedArrayBuffer, updateBuffer: SharedArrayBuffer, pooledResponse: boolean, runnerSharedBufferId: number }}
- */
-function sharedRunnerResponseTarget(requestMessage, packedBytes) {
+function sharedRunnerResponseTarget(
+  requestMessage: IntegratedServerWorkerMessage | null,
+  packedBytes: number,
+): RunnerSharedResponseTarget {
   if (requestMessage?.transportKind === "shared-memory") {
     const control = sharedControlView(requestMessage.controlBuffer);
     const responseBuffer = sharedBuffer(requestMessage.responseBuffer, "responseBuffer");
@@ -298,7 +283,7 @@ function sharedRunnerResponseTarget(requestMessage, packedBytes) {
     return {
       control,
       // Validated as a SharedArrayBuffer by `sharedControlView` just above (it throws otherwise).
-      controlBuffer: /** @type {SharedArrayBuffer} */ (requestMessage.controlBuffer),
+      controlBuffer: requestMessage.controlBuffer as SharedArrayBuffer,
       updateBuffer: pooledResponse ? responseBuffer : new SharedArrayBuffer(sharedCapacityFor(packedBytes)),
       pooledResponse,
       runnerSharedBufferId: 0,
@@ -315,25 +300,22 @@ function sharedRunnerResponseTarget(requestMessage, packedBytes) {
   };
 }
 
-/**
- * @param {number} packedBytes
- * @returns {RunnerSharedSlot}
- */
-function acquireRunnerSharedResponseSlot(packedBytes) {
+function acquireRunnerSharedResponseSlot(packedBytes: number): RunnerSharedSlot {
   const capacity = sharedCapacityFor(packedBytes);
-  /** @type {RunnerSharedSlot | null} */
-  let slot = null;
+  let slot: RunnerSharedSlot | undefined;
   for (let index = runnerSharedPool.length - 1; index >= 0; index -= 1) {
     if (runnerSharedPool[index].updateBuffer.byteLength >= packedBytes) {
-      slot = runnerSharedPool.splice(index, 1)[0];
+      [slot] = runnerSharedPool.splice(index, 1);
       break;
     }
   }
-  slot ??= {
-    id: nextRunnerSharedBufferId++,
-    controlBuffer: new SharedArrayBuffer(RUNNER_SHARED_CONTROL_BYTES),
-    updateBuffer: new SharedArrayBuffer(capacity),
-  };
+  if (!slot) {
+    slot = {
+      id: nextRunnerSharedBufferId++,
+      controlBuffer: new SharedArrayBuffer(RUNNER_SHARED_CONTROL_BYTES),
+      updateBuffer: new SharedArrayBuffer(capacity),
+    };
+  }
   if (slot.updateBuffer.byteLength < packedBytes) {
     slot.updateBuffer = new SharedArrayBuffer(capacity);
   }
@@ -345,8 +327,7 @@ function acquireRunnerSharedResponseSlot(packedBytes) {
   return slot;
 }
 
-/** @param {IntegratedServerWorkerMessage} message */
-function releaseRunnerSharedBuffer(message) {
+function releaseRunnerSharedBuffer(message: IntegratedServerWorkerMessage): void {
   const bufferId = Number(message.runnerSharedBufferId) || 0;
   if (bufferId <= 0) return;
   const slot = runnerSharedInflight.get(bufferId);
@@ -357,8 +338,7 @@ function releaseRunnerSharedBuffer(message) {
   }
 }
 
-/** @param {number} byteLength */
-function sharedCapacityFor(byteLength) {
+function sharedCapacityFor(byteLength: number): number {
   let capacity = DEFAULT_RUNNER_SHARED_RESPONSE_BYTES;
   while (capacity < byteLength) {
     capacity *= 2;
@@ -366,8 +346,7 @@ function sharedCapacityFor(byteLength) {
   return capacity;
 }
 
-/** @param {IntegratedServerWorkerMessage} message */
-function markRunnerSharedFailure(message) {
+function markRunnerSharedFailure(message: IntegratedServerWorkerMessage): void {
   if (message?.transportKind !== "shared-memory") return;
   try {
     const control = sharedControlView(message.controlBuffer);
@@ -376,12 +355,8 @@ function markRunnerSharedFailure(message) {
   } catch {}
 }
 
-/**
- * @param {number | undefined} requestId
- * @param {string} reason
- */
-function postFailure(requestId, reason) {
-  self.postMessage({
+function postFailure(requestId: number | undefined, reason: string): void {
+  workerSelf.postMessage({
     ok: false,
     kind: "error",
     requestId: Number(requestId) || 0,
@@ -389,15 +364,13 @@ function postFailure(requestId, reason) {
   });
 }
 
-/**
- * @param {string | undefined} bindgenJsUrl
- * @param {string | undefined} bindgenWasmUrl
- * @returns {Promise<WasmModule>}
- */
-function loadWasmModule(bindgenJsUrl, bindgenWasmUrl) {
-  wasmModulePromise ??= import(/** @type {string} */ (bindgenJsUrl)).then(/** @param {any} module */ async (module) => {
+function loadWasmModule(
+  bindgenJsUrl: string | undefined,
+  bindgenWasmUrl: string | undefined,
+): Promise<WasmModule> {
+  wasmModulePromise ??= import(bindgenJsUrl as string).then(async (module: WasmModule) => {
     await module.default(bindgenWasmUrl);
-    return /** @type {WasmModule} */ (module);
+    return module;
   });
   return wasmModulePromise;
 }
@@ -405,17 +378,15 @@ function loadWasmModule(bindgenJsUrl, bindgenWasmUrl) {
 /**
  * The resolved wasm module, which owns the packed-frame codec (070 Stage 3). Update-posting
  * paths run only after {@link startServer} has set it, so a null here is a programming error.
- * @returns {WasmModule}
  */
-function requireWasmModule() {
+function requireWasmModule(): WasmModule {
   if (!wasmModule) {
     throw new Error("integrated server worker wasm module is not loaded");
   }
   return wasmModule;
 }
 
-/** @param {any} diagnostics */
-function hasPendingServerJobs(diagnostics) {
+function hasPendingServerJobs(diagnostics: any): boolean {
   if (!diagnostics) return false;
   return (
     Number(diagnostics.pendingJobs) > 0
@@ -425,29 +396,23 @@ function hasPendingServerJobs(diagnostics) {
   );
 }
 
-function waitForJobTurn() {
+function waitForJobTurn(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-/** @param {unknown} buffer */
-function sharedControlView(buffer) {
+function sharedControlView(buffer: unknown): Int32Array {
   const shared = sharedBuffer(buffer, "controlBuffer");
   return new Int32Array(shared);
 }
 
-/**
- * @param {unknown} buffer
- * @param {string} name
- * @returns {SharedArrayBuffer}
- */
-function sharedBuffer(buffer, name) {
+function sharedBuffer(buffer: unknown, name: string): SharedArrayBuffer {
   if (typeof SharedArrayBuffer !== "function" || !(buffer instanceof SharedArrayBuffer)) {
     throw new Error(`shared runner ${name} was not a SharedArrayBuffer`);
   }
   return buffer;
 }
 
-function sharedTransportAvailable() {
+function sharedTransportAvailable(): boolean {
   return (
     typeof SharedArrayBuffer === "function"
     && typeof Atomics === "object"
@@ -457,14 +422,12 @@ function sharedTransportAvailable() {
   );
 }
 
-/** @param {number | string | undefined} seed */
-function toBigIntSeed(seed) {
+function toBigIntSeed(seed: number | string | undefined): bigint {
   const number = Number(seed);
   return BigInt(Number.isFinite(number) ? Math.trunc(number) : 0);
 }
 
-/** @param {unknown} error */
-function stringifyError(error) {
+function stringifyError(error: unknown): string {
   if (error instanceof Error) {
     return error.stack ?? error.message;
   }
