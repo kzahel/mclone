@@ -6,6 +6,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, normalize, resolve, sep } from "node:path";
 import { inflateSync } from "node:zlib";
+import { buildWebGlue, stagedWebRoot } from "./build-web-glue.mjs";
 
 /**
  * @typedef {import("@playwright/test").Page} Page
@@ -15,7 +16,6 @@ import { inflateSync } from "node:zlib";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const appRoot = resolve(scriptDir, "..");
 const nativeRoot = resolve(appRoot, "../..");
-const wwwRoot = join(appRoot, "www");
 const repoRoot = resolve(nativeRoot, "..");
 const referenceAssetPackPath = join(repoRoot, "reference", "minecraft-1.17.1", "extracted.zip");
 const wasmBindgenVersion = "0.2.125";
@@ -74,9 +74,10 @@ const requireThreading = process.argv.includes("--require-threading")
     && process.env.MCLONE_NATIVE_WEB_REQUIRE_THREADING !== "0");
 const remoteWebSocket = process.argv.includes("--remote-websocket")
   || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
-// --build-only compiles the wasm + runs wasm-bindgen (emitting mclone_web_client.d.ts via
-// --typescript) and exits before launching a browser. This is how native:web:typecheck cheaply
-// materializes the .d.ts its tsconfig path-maps, without a full smoke run.
+// --build-only compiles the wasm, runs wasm-bindgen (emitting mclone_web_client.d.ts via
+// --typescript), stages the browser-loadable web root, and exits before launching a browser. This
+// is how native:web:typecheck cheaply materializes the .d.ts its tsconfig path-maps, without a full
+// smoke run.
 const buildOnly = process.argv.includes("--build-only")
   || process.env.MCLONE_NATIVE_WEB_BUILD_ONLY === "1";
 const DIRT_BLOCK_STATE_ID = 5;
@@ -89,11 +90,13 @@ run().catch((error) => {
 async function run() {
   buildWasm();
   buildBindgenBundle();
+  const webRoot = await buildWebGlue();
   if (buildOnly) {
     console.log(`bindgen output (with mclone_web_client.d.ts) ready in ${bindgenOutDir}`);
+    console.log(`staged native web root ready in ${webRoot}`);
     return;
   }
-  const server = await startServer();
+  const server = await startServer(webRoot);
   const remoteServer = remoteWebSocket ? await startNativeWebSocketServer() : null;
   /** @type {import("@playwright/test").Browser | undefined} */
   let browser;
@@ -1234,7 +1237,7 @@ function buildBindgenBundle() {
       "web",
       // --typescript emits mclone_web_client.d.ts next to the JS glue (070 Stage 2). It is the
       // single source the web-glue type-check gate (native:web:typecheck) checks the wasm-return
-      // boundary against. It does not affect what the smoke harness serves.
+      // boundary against. Browser glue itself is served from the 071 staged web root.
       "--typescript",
       "--out-dir",
       bindgenOutDir,
@@ -1279,11 +1282,12 @@ function ensureWasmBindgenCli() {
   }
 }
 
-async function startServer() {
+/** @param {string} webRoot */
+async function startServer(webRoot) {
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
-      const path = resolveRequestPath(url.pathname);
+      const path = resolveRequestPath(url.pathname, webRoot);
       const bytes = await readFile(path);
       response.writeHead(200, {
         "Content-Type": contentType(path),
@@ -1382,22 +1386,25 @@ function startNativeWebSocketServer() {
   });
 }
 
-/** @param {string} pathname */
-function resolveRequestPath(pathname) {
+/**
+ * @param {string} pathname
+ * @param {string} [webRoot]
+ */
+function resolveRequestPath(pathname, webRoot = stagedWebRoot) {
   if (pathname === "/" || pathname === "/index.html") {
-    return join(wwwRoot, "index.html");
+    return join(webRoot, "index.html");
   }
   if (pathname === "/mclone-web-smoke.js") {
-    return join(wwwRoot, "mclone-web-smoke.js");
+    return join(webRoot, "mclone-web-smoke.js");
   }
   if (pathname === "/mclone-render-compiler-worker.js") {
-    return join(wwwRoot, "mclone-render-compiler-worker.js");
+    return join(webRoot, "mclone-render-compiler-worker.js");
   }
   if (pathname === "/mclone-integrated-server-worker.js") {
-    return join(wwwRoot, "mclone-integrated-server-worker.js");
+    return join(webRoot, "mclone-integrated-server-worker.js");
   }
   if (pathname === "/mclone-thread-smoke-worker.js") {
-    return join(wwwRoot, "mclone-thread-smoke-worker.js");
+    return join(webRoot, "mclone-thread-smoke-worker.js");
   }
   if (pathname === "/mclone_web_client.wasm") {
     return wasmPath;
@@ -1412,8 +1419,8 @@ function resolveRequestPath(pathname) {
     return referenceAssetPackPath;
   }
 
-  const resolved = resolve(wwwRoot, `.${normalize(pathname)}`);
-  if (resolved !== wwwRoot && !resolved.startsWith(`${wwwRoot}${sep}`)) {
+  const resolved = resolve(webRoot, `.${normalize(pathname)}`);
+  if (resolved !== webRoot && !resolved.startsWith(`${webRoot}${sep}`)) {
     throw new Error(`refusing to serve path outside smoke root: ${pathname}`);
   }
   return resolved;

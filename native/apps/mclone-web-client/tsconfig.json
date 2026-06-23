@@ -1,9 +1,10 @@
 {
-  // 070 Stage 2: no-emit type-check gate over the hand-written web glue. This config is checked
-  // by `pnpm native:web:typecheck` (tsc --noEmit) only — it never emits and never changes what
-  // the raw-`cp` deploy ships. It covers the two boundaries where this glue silently breaks: the
-  // wasm-return objects (typed against the generated mclone_web_client.d.ts below) and the
-  // postMessage payloads (typed via JSDoc @typedefs in the worker glue).
+  // 070 Stage 2 / 071 Stage 1: no-emit type-check gate over the web glue. This config is checked
+  // by `pnpm native:web:typecheck` (tsc --noEmit) only; browser-loadable output is produced by
+  // tsconfig.web.json into the staged web root used by smoke/deploy. It covers the two boundaries
+  // where this glue silently breaks: the wasm-return objects (typed against the generated
+  // mclone_web_client.d.ts below) and the postMessage payloads (typed via JSDoc typedefs in the
+  // worker glue), plus authored `.ts` modules as they graduate from JSDoc.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -38,5 +39,5 @@
       ]
     }
   },
-  "include": ["www/**/*.js", "scripts/*.mjs"]
+  "include": ["www/**/*.js", "www/**/*.ts", "scripts/*.mjs"]
 }

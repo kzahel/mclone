@@ -6,8 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUCKET="${MCLONE_DEPLOY_BUCKET:-mclone}"
 DEPLOY_DIR="${MCLONE_NATIVE_WEB_DIST_DIR:-$PROJECT_DIR/dist-native-web}"
-WWW_DIR="$PROJECT_DIR/native/apps/mclone-web-client/www"
 NATIVE_ROOT="$PROJECT_DIR/native"
+WEB_GLUE_BUILD_SCRIPT="$PROJECT_DIR/native/apps/mclone-web-client/scripts/build-web-glue.mjs"
+WEB_ROOT="$NATIVE_ROOT/target/mclone-web-client-www"
 REFERENCE_DIR="$PROJECT_DIR/reference/minecraft-1.17.1"
 ASSET_PACK_ZIP="$REFERENCE_DIR/extracted.zip"
 ASSET_PACK_MANIFEST="$REFERENCE_DIR/extracted.zip.json"
@@ -108,11 +109,12 @@ ensure_wasm_bindgen
   "$WASM_PATH"
 
 echo "==> Bundling native web app"
+node "$WEB_GLUE_BUILD_SCRIPT"
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR/pkg"
-cp -R "$WWW_DIR"/. "$DEPLOY_DIR"/
-cp "$WWW_DIR/index.html" "$DEPLOY_DIR/smoke.html"
-cp "$WWW_DIR/app.html" "$DEPLOY_DIR/index.html"
+cp -R "$WEB_ROOT"/. "$DEPLOY_DIR"/
+cp "$WEB_ROOT/index.html" "$DEPLOY_DIR/smoke.html"
+cp "$WEB_ROOT/app.html" "$DEPLOY_DIR/index.html"
 perl -0pi -e "s/__MCLONE_NATIVE_WEB_ASSET_VERSION__/$DEPLOY_VERSION/g" \
   "$DEPLOY_DIR/app.html" \
   "$DEPLOY_DIR/index.html"

@@ -7,35 +7,70 @@ const TOUCH_JOYSTICK_MAX_DISTANCE = 50;
 const TOUCH_JOYSTICK_DEAD_ZONE = 10;
 const TOUCH_AXIS_THRESHOLD = TOUCH_JOYSTICK_DEAD_ZONE / TOUCH_JOYSTICK_MAX_DISTANCE;
 
-/**
- * @typedef {object} TouchControlApp
- * @property {HTMLCanvasElement} canvas
- * @property {number} lookSensitivity
- * @property {{ active: boolean, left: number, forward: number }} touchMovementImpulse
- * @property {Record<string, boolean>} touchKeys
- * @property {(name: string, down: boolean) => boolean} setTouchKey
- * @property {(keys: Record<string, boolean>) => void} setTouchKeys
- * @property {(left: number, forward: number, active: boolean) => void} setTouchMovementImpulse
- * @property {(dx: number, dy: number) => void} queueMouseDelta
- * @property {() => { active: boolean, left: number, forward: number }} currentMovementImpulse
- */
+export interface TouchMovementImpulse {
+  active: boolean;
+  left: number;
+  forward: number;
+}
+
+export interface TouchControlApp {
+  canvas: HTMLCanvasElement;
+  lookSensitivity: number;
+  touchMovementImpulse: TouchMovementImpulse;
+  touchKeys: Record<string, boolean>;
+  setTouchKey(name: string, down: boolean): boolean;
+  setTouchKeys(keys: Record<string, boolean>): void;
+  setTouchMovementImpulse(left: number, forward: number, active: boolean): void;
+  queueMouseDelta(dx: number, dy: number): void;
+  currentMovementImpulse(): TouchMovementImpulse;
+}
+
+interface TouchRuntimeState extends Record<string, any> {
+  touchControlsVisible?: boolean;
+  touchJoystickActive?: boolean;
+  touchMovementLeftImpulse?: number;
+  touchMovementForwardImpulse?: number;
+  touchLookActive?: boolean;
+  touchButtonActiveCount?: number;
+}
+
+export interface TouchControlSnapshot {
+  visible: boolean;
+  joystickActive: boolean;
+  lookActive: boolean;
+  buttonActiveCount: number;
+  keys: Record<string, boolean>;
+  movementImpulse: TouchMovementImpulse;
+}
 
 export class TouchControls {
-  /**
-   * @param {TouchControlApp} app
-   * @param {Record<string, any>} runtimeState
-   */
-  constructor(app, runtimeState) {
+  private readonly app: TouchControlApp;
+  private readonly runtimeState: TouchRuntimeState;
+  readonly canvas: HTMLCanvasElement;
+  private readonly root: HTMLElement | null;
+  private readonly joystick: HTMLElement | null;
+  private readonly thumb: HTMLElement | null;
+  private readonly buttons: HTMLElement[];
+  private movementPointerId: number | null;
+  private lookPointerId: number | null;
+  private movementBaseX: number;
+  private movementBaseY: number;
+  private movementThumbX: number;
+  private movementThumbY: number;
+  private lookLastX: number;
+  private lookLastY: number;
+  private readonly buttonPointers: Map<number, string>;
+  private lastTouchAt: number;
+
+  constructor(app: TouchControlApp, runtimeState: TouchRuntimeState) {
     this.app = app;
     this.runtimeState = runtimeState;
     this.canvas = app.canvas;
     this.root = document.getElementById("touch-controls");
     this.joystick = document.getElementById("touch-joystick");
     this.thumb = document.getElementById("touch-joystick-thumb");
-    this.buttons = /** @type {HTMLElement[]} */ (Array.from(document.querySelectorAll("[data-touch-key]")));
-    /** @type {number | null} */
+    this.buttons = Array.from(document.querySelectorAll<HTMLElement>("[data-touch-key]"));
     this.movementPointerId = null;
-    /** @type {number | null} */
     this.lookPointerId = null;
     this.movementBaseX = 0;
     this.movementBaseY = 0;
@@ -43,7 +78,6 @@ export class TouchControls {
     this.movementThumbY = 0;
     this.lookLastX = 0;
     this.lookLastY = 0;
-    /** @type {Map<number, string>} */
     this.buttonPointers = new Map();
     this.lastTouchAt = 0;
 
@@ -53,7 +87,7 @@ export class TouchControls {
     window.addEventListener("blur", () => this.clearAll());
   }
 
-  bindCanvas() {
+  private bindCanvas(): void {
     this.canvas.addEventListener("pointerdown", (event) => this.onCanvasPointerDown(event), { passive: false });
     this.canvas.addEventListener("pointermove", (event) => this.onCanvasPointerMove(event), { passive: false });
     this.canvas.addEventListener("pointerup", (event) => this.onCanvasPointerEnd(event), { passive: false });
@@ -61,7 +95,7 @@ export class TouchControls {
     this.canvas.addEventListener("lostpointercapture", (event) => this.onCanvasPointerEnd(event), { passive: false });
   }
 
-  bindButtons() {
+  private bindButtons(): void {
     for (const button of this.buttons) {
       button.addEventListener("pointerdown", (event) => this.onButtonPointerDown(event), { passive: false });
       button.addEventListener("pointerup", (event) => this.onButtonPointerEnd(event), { passive: false });
@@ -70,8 +104,7 @@ export class TouchControls {
     }
   }
 
-  /** @param {PointerEvent} event */
-  onCanvasPointerDown(event) {
+  private onCanvasPointerDown(event: PointerEvent): void {
     if (!isTouchPointer(event)) {
       return;
     }
@@ -88,8 +121,7 @@ export class TouchControls {
     }
   }
 
-  /** @param {PointerEvent} event */
-  onCanvasPointerMove(event) {
+  private onCanvasPointerMove(event: PointerEvent): void {
     if (event.pointerId === this.movementPointerId) {
       this.markTouchEvent();
       event.preventDefault();
@@ -101,8 +133,7 @@ export class TouchControls {
     }
   }
 
-  /** @param {PointerEvent} event */
-  onCanvasPointerEnd(event) {
+  private onCanvasPointerEnd(event: PointerEvent): void {
     if (event.pointerId === this.movementPointerId) {
       this.markTouchEvent();
       event.preventDefault();
@@ -114,11 +145,10 @@ export class TouchControls {
     }
   }
 
-  /** @param {PointerEvent} event */
-  onButtonPointerDown(event) {
+  private onButtonPointerDown(event: PointerEvent): void {
     // currentTarget is the bound `[data-touch-key]` button (an HTMLElement) for the duration of
     // its own dispatch.
-    const target = /** @type {HTMLElement} */ (event.currentTarget);
+    const target = event.currentTarget as HTMLElement | null;
     const key = target?.dataset?.touchKey;
     if (!key) {
       return;
@@ -134,8 +164,7 @@ export class TouchControls {
     this.updateRuntimeState();
   }
 
-  /** @param {PointerEvent} event */
-  onButtonPointerEnd(event) {
+  private onButtonPointerEnd(event: PointerEvent): void {
     const key = this.buttonPointers.get(event.pointerId);
     if (!key) {
       return;
@@ -152,8 +181,7 @@ export class TouchControls {
     this.updateRuntimeState();
   }
 
-  /** @param {PointerEvent} event */
-  startMovement(event) {
+  private startMovement(event: PointerEvent): void {
     this.movementPointerId = event.pointerId;
     this.movementBaseX = event.clientX;
     this.movementBaseY = event.clientY;
@@ -165,11 +193,7 @@ export class TouchControls {
     this.updateRuntimeState();
   }
 
-  /**
-   * @param {number} clientX
-   * @param {number} clientY
-   */
-  updateMovement(clientX, clientY) {
+  private updateMovement(clientX: number, clientY: number): void {
     const dx = clientX - this.movementBaseX;
     const dy = clientY - this.movementBaseY;
     const distance = Math.hypot(dx, dy);
@@ -203,7 +227,7 @@ export class TouchControls {
     this.updateRuntimeState();
   }
 
-  clearMovement() {
+  private clearMovement(): void {
     this.movementPointerId = null;
     this.app.setTouchMovementImpulse(0, 0, false);
     this.app.setTouchKeys({
@@ -218,8 +242,7 @@ export class TouchControls {
     this.updateRuntimeState();
   }
 
-  /** @param {PointerEvent} event */
-  startLook(event) {
+  private startLook(event: PointerEvent): void {
     this.lookPointerId = event.pointerId;
     this.lookLastX = event.clientX;
     this.lookLastY = event.clientY;
@@ -227,11 +250,7 @@ export class TouchControls {
     this.updateRuntimeState();
   }
 
-  /**
-   * @param {number} clientX
-   * @param {number} clientY
-   */
-  updateLook(clientX, clientY) {
+  private updateLook(clientX: number, clientY: number): void {
     const sensitivity = Number.isFinite(this.app.lookSensitivity) ? this.app.lookSensitivity : 1;
     this.app.queueMouseDelta(
       (clientX - this.lookLastX) * sensitivity,
@@ -242,12 +261,12 @@ export class TouchControls {
     this.updateRuntimeState();
   }
 
-  clearLook() {
+  private clearLook(): void {
     this.lookPointerId = null;
     this.updateRuntimeState();
   }
 
-  clearAll() {
+  clearAll(): void {
     this.clearMovement();
     this.clearLook();
     for (const pointerId of Array.from(this.buttonPointers.keys())) {
@@ -263,7 +282,7 @@ export class TouchControls {
     this.updateRuntimeState();
   }
 
-  updateJoystickVisual() {
+  private updateJoystickVisual(): void {
     if (!this.joystick || !this.thumb) {
       return;
     }
@@ -275,8 +294,7 @@ export class TouchControls {
     this.thumb.style.top = `${50 + (this.movementThumbY - this.movementBaseY)}px`;
   }
 
-  /** @param {boolean} visible */
-  setVisible(visible) {
+  setVisible(visible: boolean): void {
     if (this.root) {
       this.root.dataset.visible = visible ? "true" : "false";
       this.root.setAttribute("aria-hidden", visible ? "false" : "true");
@@ -284,15 +302,15 @@ export class TouchControls {
     this.runtimeState.touchControlsVisible = Boolean(visible);
   }
 
-  markTouchEvent() {
+  private markTouchEvent(): void {
     this.lastTouchAt = performance.now();
   }
 
-  shouldIgnoreMouseEvent() {
+  shouldIgnoreMouseEvent(): boolean {
     return performance.now() - this.lastTouchAt < 800;
   }
 
-  updateRuntimeState() {
+  private updateRuntimeState(): void {
     this.runtimeState.touchControlsVisible = this.root?.dataset.visible === "true";
     this.runtimeState.touchJoystickActive = this.movementPointerId !== null;
     this.runtimeState.touchMovementLeftImpulse = this.app.touchMovementImpulse.left;
@@ -301,7 +319,7 @@ export class TouchControls {
     this.runtimeState.touchButtonActiveCount = this.buttonPointers.size;
   }
 
-  snapshot() {
+  snapshot(): TouchControlSnapshot {
     return {
       visible: this.root?.dataset.visible === "true",
       joystickActive: this.movementPointerId !== null,
@@ -313,22 +331,17 @@ export class TouchControls {
   }
 }
 
-export function hasTouchInput() {
+export function hasTouchInput(): boolean {
   return (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
     || window.matchMedia("(pointer: coarse)").matches;
 }
 
-/** @param {PointerEvent} event */
-function isTouchPointer(event) {
+function isTouchPointer(event: PointerEvent): boolean {
   return event.pointerType === "touch" || event.pointerType === "pen";
 }
 
-/**
- * @param {EventTarget | null} target
- * @param {number} pointerId
- */
-function trySetPointerCapture(target, pointerId) {
-  if (!target || !("setPointerCapture" in target) || typeof target.setPointerCapture !== "function") {
+function trySetPointerCapture(target: EventTarget | null, pointerId: number): void {
+  if (!(target instanceof HTMLElement) || typeof target.setPointerCapture !== "function") {
     return;
   }
   try {

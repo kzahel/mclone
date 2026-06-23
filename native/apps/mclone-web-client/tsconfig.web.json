@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "types": ["@webgpu/types"],
+
+    "rootDir": "www",
+    "outDir": "../../target/mclone-web-client-www",
+
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noEmitOnError": true,
+    "useDefineForClassFields": false,
+    "declaration": false,
+    "sourceMap": false,
+
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "mclone-web-client-wasm": [
+        "../../target/wasm32-unknown-unknown/debug/mclone-web-client-bindgen/mclone_web_client"
+      ]
+    }
+  },
+  "include": ["www/**/*.ts"]
+}
