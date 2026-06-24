@@ -14,7 +14,7 @@ export const webEmitTsconfig = join(appRoot, "tsconfig.web.json");
 /**
  * Builds the browser-loadable native web root from authored www/ sources.
  *
- * Static assets and unconverted JS are copied as-is. Authored TypeScript is emitted to matching
+ * Static assets and residual JS are copied as-is. Authored TypeScript is emitted to matching
  * .js filenames by tsconfig.web.json so the browser URL graph stays stable.
  *
  * @param {{ log?: boolean }} [options]
