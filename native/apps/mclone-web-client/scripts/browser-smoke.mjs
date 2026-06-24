@@ -62,6 +62,8 @@ const nativeUiCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_UI_CANVAS_SCR
   ?? "/tmp/mclone-native-web-ui-canvas.png";
 const mobileNativeUiCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_UI_CANVAS_SCREENSHOT
   ?? "/tmp/mclone-native-web-mobile-ui-canvas.png";
+const mobileNativeOptionsCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_OPTIONS_CANVAS_SCREENSHOT
+  ?? "/tmp/mclone-native-web-mobile-options-canvas.png";
 const movementPerfReportPath = process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_REPORT
   ?? "/tmp/mclone-native-web-movement-perf.json";
 const movementPerfChunkBoundaries = Math.max(
@@ -928,6 +930,20 @@ async function exerciseMobileTouchControls(page, canvas) {
   });
   const nativeMenuCanvasPixels = analyzePng(nativeMenuCanvasPng);
 
+  const nativeOptionsProbe = await exerciseMobileNativeOptionsSensitivity(page, canvas);
+
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.uiActive === true
+        && state.nativeUiScreen === "pause"
+        && state.lastUiAction?.action === "backToPause";
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
+
   await page.keyboard.press("Escape");
   await page.waitForFunction(
     () => {
@@ -952,6 +968,7 @@ async function exerciseMobileTouchControls(page, canvas) {
       && buttonProbe.ok
       && openedNativeMenu.uiActive === true
       && openedNativeMenu.nativeUiScreen === "pause"
+      && nativeOptionsProbe.ok
       && (openedNativeMenu.menuHidden === true || openedNativeMenu.menuHidden === null)
       && nativeMenuCanvasPixels.nonClearInteriorPixelCount > 128
       && nativeMenuCanvasPixels.distinctInteriorColorCount > 2
@@ -967,6 +984,95 @@ async function exerciseMobileTouchControls(page, canvas) {
       nativeCanvasScreenshotPath: mobileNativeUiCanvasScreenshotPath,
       nativeCanvasPixels: nativeMenuCanvasPixels,
     },
+    options: nativeOptionsProbe,
+  };
+}
+
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ */
+async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
+  await dispatchCanvasPointerEvent(page, "pointerdown", {
+    pointerId: 51,
+    xFraction: 0.5,
+    yFraction: 0.514,
+    buttons: 1,
+  });
+  await dispatchCanvasPointerEvent(page, "pointerup", {
+    pointerId: 51,
+    xFraction: 0.5,
+    yFraction: 0.514,
+    buttons: 0,
+  });
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.uiActive === true
+        && state.nativeUiScreen === "options"
+        && state.nativeUiOptionsParent === "pause"
+        && state.lastUiAction?.action === "openOptions"
+        && state.touchLookSensitivityAvailable === true;
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
+  const openedOptions = await readNativeUiState(page);
+
+  await dispatchCanvasPointerEvent(page, "pointerdown", {
+    pointerId: 52,
+    xFraction: 0.744,
+    yFraction: 0.57,
+    buttons: 1,
+  });
+  await dispatchCanvasPointerEvent(page, "pointerup", {
+    pointerId: 52,
+    xFraction: 0.744,
+    yFraction: 0.57,
+    buttons: 0,
+  });
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.uiActive === true
+        && state.nativeUiScreen === "options"
+        && state.lastUiAction?.action === "setTouchLookSensitivity"
+        && Number(state.lookSensitivity) > 4.9
+        && Number(globalThis.localStorage?.getItem("mclone.web.lookSensitivity")) > 4.9;
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
+  const adjusted = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      lookSensitivity: state.lookSensitivity,
+      touchLookSensitivityAvailable: state.touchLookSensitivityAvailable,
+      lastUiAction: state.lastUiAction,
+      storedLookSensitivity: globalThis.localStorage?.getItem("mclone.web.lookSensitivity") ?? null,
+    };
+  });
+  const optionsCanvasPng = await canvas.screenshot({
+    path: mobileNativeOptionsCanvasScreenshotPath,
+    timeout: 60_000,
+  });
+  const optionsCanvasPixels = analyzePng(optionsCanvasPng);
+
+  return {
+    ok: openedOptions.uiActive === true
+      && openedOptions.nativeUiScreen === "options"
+      && openedOptions.nativeUiOptionsParent === "pause"
+      && adjusted.touchLookSensitivityAvailable === true
+      && Number(adjusted.lookSensitivity) > 4.9
+      && adjusted.lastUiAction?.action === "setTouchLookSensitivity"
+      && Number(adjusted.lastUiAction?.touchLookSensitivity) > 4.9
+      && Number(adjusted.storedLookSensitivity) > 4.9
+      && optionsCanvasPixels.nonClearInteriorPixelCount > 128
+      && optionsCanvasPixels.distinctInteriorColorCount > 2,
+    opened: openedOptions,
+    adjusted,
+    nativeCanvasScreenshotPath: mobileNativeOptionsCanvasScreenshotPath,
+    nativeCanvasPixels: optionsCanvasPixels,
   };
 }
 

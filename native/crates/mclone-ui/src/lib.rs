@@ -600,7 +600,7 @@ pub enum GameOptionsParent {
     Pause,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GameUiAction {
     StartWorld,
     Resume,
@@ -612,6 +612,7 @@ pub enum GameUiAction {
     CycleFramePacing,
     CycleFpsCap,
     SetRenderDistance(i32),
+    SetTouchLookSensitivity(f32),
     Quit,
 }
 
@@ -633,7 +634,39 @@ impl GameFramePacingMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GameTouchSettings {
+    pub look_sensitivity: f32,
+    pub min_look_sensitivity: f32,
+    pub max_look_sensitivity: f32,
+}
+
+impl GameTouchSettings {
+    pub fn new(
+        look_sensitivity: f32,
+        min_look_sensitivity: f32,
+        max_look_sensitivity: f32,
+    ) -> Self {
+        Self {
+            look_sensitivity,
+            min_look_sensitivity,
+            max_look_sensitivity,
+        }
+    }
+
+    pub fn look_sensitivity_limits(self) -> (f32, f32) {
+        let min = finite_or(self.min_look_sensitivity, 0.0);
+        let max = finite_or(self.max_look_sensitivity, min);
+        (min.min(max), min.max(max))
+    }
+
+    pub fn clamped_look_sensitivity(self) -> f32 {
+        let (min, max) = self.look_sensitivity_limits();
+        finite_or(self.look_sensitivity, min).clamp(min, max)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GameUiRenderState {
     pub render_distance: i32,
     pub min_render_distance: i32,
@@ -642,6 +675,7 @@ pub struct GameUiRenderState {
     pub force_fullbright: bool,
     pub frame_pacing_mode: GameFramePacingMode,
     pub fps_cap: u32,
+    pub touch_settings: Option<GameTouchSettings>,
 }
 
 impl Default for GameUiRenderState {
@@ -654,6 +688,7 @@ impl Default for GameUiRenderState {
             force_fullbright: false,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: 120,
+            touch_settings: None,
         }
     }
 }
@@ -829,6 +864,7 @@ const ID_OPTIONS_RADIUS: WidgetId = WidgetId(9);
 const ID_OPTIONS_BACK: WidgetId = WidgetId(10);
 const ID_OPTIONS_FRAME_PACING: WidgetId = WidgetId(11);
 const ID_OPTIONS_FPS_CAP: WidgetId = WidgetId(12);
+const ID_OPTIONS_TOUCH_LOOK: WidgetId = WidgetId(13);
 
 impl Default for GameUi {
     fn default() -> Self {
@@ -910,20 +946,20 @@ impl GameUi {
             return (false, None);
         }
         self.pointer = Some(point);
-        let action = if self.pressed == Some(ID_OPTIONS_RADIUS) {
-            Some(self.render_distance_action_at(point, state))
-        } else {
-            None
+        let action = match self.pressed {
+            Some(ID_OPTIONS_RADIUS) => Some(self.render_distance_action_at(point, state)),
+            Some(ID_OPTIONS_TOUCH_LOOK) => self.touch_look_action_at(point, state),
+            _ => None,
         };
         (true, action)
     }
 
-    pub fn pointer_down(&mut self, point: Point) -> bool {
+    pub fn pointer_down(&mut self, point: Point, state: GameUiRenderState) -> bool {
         if !self.is_active() {
             return false;
         }
         self.pointer = Some(point);
-        self.pressed = self.widget_at(point);
+        self.pressed = self.widget_at(point, state);
         true
     }
 
@@ -937,10 +973,13 @@ impl GameUi {
         }
         self.pointer = Some(point);
         let pressed = self.pressed.take();
-        let released = self.widget_at(point);
+        let released = self.widget_at(point, state);
         let action = match (pressed, released) {
             (Some(ID_OPTIONS_RADIUS), Some(ID_OPTIONS_RADIUS)) => {
                 Some(self.render_distance_action_at(point, state))
+            }
+            (Some(ID_OPTIONS_TOUCH_LOOK), Some(ID_OPTIONS_TOUCH_LOOK)) => {
+                self.touch_look_action_at(point, state)
             }
             (Some(id), Some(released)) if id == released => self.action_for(id),
             _ => None,
@@ -982,6 +1021,7 @@ impl GameUi {
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetRenderDistance(_)
+            | GameUiAction::SetTouchLookSensitivity(_)
             | GameUiAction::Quit => {}
         }
     }
@@ -999,7 +1039,7 @@ impl GameUi {
         draw
     }
 
-    fn widget_at(&self, point: Point) -> Option<WidgetId> {
+    fn widget_at(&self, point: Point, state: GameUiRenderState) -> Option<WidgetId> {
         match self.screen? {
             GameScreen::Title => title_buttons(self.scale)
                 .into_iter()
@@ -1010,7 +1050,7 @@ impl GameUi {
                 .find(|button| button.contains(point))
                 .map(|button| button.id),
             GameScreen::Options { .. } => {
-                let rects = option_widgets(self.scale);
+                let rects = option_widgets(self.scale, state);
                 if rects.occlusion.contains(point) {
                     Some(ID_OPTIONS_OCCLUSION)
                 } else if rects.fullbright.contains(point) {
@@ -1021,6 +1061,8 @@ impl GameUi {
                     Some(ID_OPTIONS_FPS_CAP)
                 } else if rects.radius.contains(point) {
                     Some(ID_OPTIONS_RADIUS)
+                } else if rects.touch_look.is_some_and(|rect| rect.contains(point)) {
+                    Some(ID_OPTIONS_TOUCH_LOOK)
                 } else if rects.back.contains(point) {
                     Some(ID_OPTIONS_BACK)
                 } else {
@@ -1058,13 +1100,26 @@ impl GameUi {
     fn render_distance_action_at(&self, point: Point, state: GameUiRenderState) -> GameUiAction {
         let slider = Slider::new(
             ID_OPTIONS_RADIUS,
-            option_widgets(self.scale).radius,
+            option_widgets(self.scale, state).radius,
             "",
             render_distance_slider_value(state),
         );
         GameUiAction::SetRenderDistance(render_distance_from_slider_value(
             slider.value_from_point(point),
             state,
+        ))
+    }
+
+    fn touch_look_action_at(&self, point: Point, state: GameUiRenderState) -> Option<GameUiAction> {
+        let settings = state.touch_settings?;
+        let slider = Slider::new(
+            ID_OPTIONS_TOUCH_LOOK,
+            option_widgets(self.scale, state).touch_look?,
+            "",
+            touch_look_slider_value(settings),
+        );
+        Some(GameUiAction::SetTouchLookSensitivity(
+            touch_look_from_slider_value(slider.value_from_point(point), settings),
         ))
     }
 
@@ -1139,7 +1194,7 @@ impl GameUi {
             Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
             Color::rgba(0, 0, 0, 150),
         );
-        let panel = centered_panel(self.scale, 242.0, 190.0);
+        let panel = options_panel(self.scale, state);
         draw.fill_gradient(
             panel,
             Color::rgba(33, 45, 47, 245),
@@ -1153,7 +1208,7 @@ impl GameUi {
             panel.y + 12.0,
             Color::rgba(245, 252, 234, 255),
         );
-        let widgets = option_widgets(self.scale);
+        let widgets = option_widgets(self.scale, state);
         Checkbox::new(
             ID_OPTIONS_OCCLUSION,
             widgets.occlusion,
@@ -1189,6 +1244,15 @@ impl GameUi {
             render_distance_slider_value(state),
         )
         .render(draw, &self.font, self.interaction());
+        if let (Some(settings), Some(rect)) = (state.touch_settings, widgets.touch_look) {
+            Slider::new(
+                ID_OPTIONS_TOUCH_LOOK,
+                rect,
+                touch_look_label(settings),
+                touch_look_slider_value(settings),
+            )
+            .render(draw, &self.font, self.interaction());
+        }
         Button::new(
             ID_OPTIONS_BACK,
             widgets.back,
@@ -1208,6 +1272,7 @@ struct OptionWidgetRects {
     frame_pacing: Rect,
     fps_cap: Rect,
     radius: Rect,
+    touch_look: Option<Rect>,
     back: Rect,
 }
 
@@ -1245,16 +1310,35 @@ fn pause_buttons(scale: GuiScale) -> [Button; 3] {
     ]
 }
 
-fn option_widgets(scale: GuiScale) -> OptionWidgetRects {
-    let panel = centered_panel(scale, 242.0, 190.0);
+fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRects {
+    let panel = options_panel(scale, state);
+    let show_touch = state.touch_settings.is_some();
     OptionWidgetRects {
         occlusion: Rect::new(panel.x + 26.0, panel.y + 38.0, 190.0, 18.0),
         fullbright: Rect::new(panel.x + 26.0, panel.y + 60.0, 190.0, 18.0),
         frame_pacing: Rect::new(panel.x + 25.0, panel.y + 84.0, 192.0, 20.0),
         fps_cap: Rect::new(panel.x + 25.0, panel.y + 108.0, 192.0, 20.0),
         radius: Rect::new(panel.x + 25.0, panel.y + 132.0, 192.0, 20.0),
-        back: Rect::new(panel.center_x() - 55.0, panel.y + 160.0, 110.0, 20.0),
+        touch_look: show_touch.then_some(Rect::new(panel.x + 25.0, panel.y + 156.0, 192.0, 20.0)),
+        back: Rect::new(
+            panel.center_x() - 55.0,
+            panel.y + if show_touch { 184.0 } else { 160.0 },
+            110.0,
+            20.0,
+        ),
     }
+}
+
+fn options_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
+    centered_panel(
+        scale,
+        242.0,
+        if state.touch_settings.is_some() {
+            214.0
+        } else {
+            190.0
+        },
+    )
 }
 
 fn render_distance_slider_value(state: GameUiRenderState) -> f32 {
@@ -1279,6 +1363,33 @@ fn render_distance_label(state: GameUiRenderState) -> String {
     let radius = state.clamped_render_distance();
     let suffix = if radius == 1 { "chunk" } else { "chunks" };
     format!("Render Distance: {radius} {suffix}")
+}
+
+fn touch_look_slider_value(settings: GameTouchSettings) -> f32 {
+    let (min, max) = settings.look_sensitivity_limits();
+    if max <= min {
+        0.0
+    } else {
+        (settings.clamped_look_sensitivity() - min) / (max - min)
+    }
+}
+
+fn touch_look_from_slider_value(value: f32, settings: GameTouchSettings) -> f32 {
+    let (min, max) = settings.look_sensitivity_limits();
+    if max <= min {
+        min
+    } else {
+        let raw = min + value.clamp(0.0, 1.0) * (max - min);
+        ((raw * 10.0).round() / 10.0).clamp(min, max)
+    }
+}
+
+fn touch_look_label(settings: GameTouchSettings) -> String {
+    format!("Touch Look: {:.1}x", settings.clamped_look_sensitivity())
+}
+
+fn finite_or(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() { value } else { fallback }
 }
 
 fn centered_panel(scale: GuiScale, width: f32, height: f32) -> Rect {
@@ -1587,12 +1698,12 @@ mod tests {
             ..GameUiRenderState::default()
         };
 
-        let radius = option_widgets(ui.scale()).radius;
+        let radius = option_widgets(ui.scale(), state).radius;
         let point = Point {
             x: radius.right() - 0.1,
             y: radius.y + radius.height * 0.5,
         };
-        assert!(ui.pointer_down(point));
+        assert!(ui.pointer_down(point, state));
         let (_handled, action) = ui.pointer_up(point, state);
         assert_eq!(action, Some(GameUiAction::SetRenderDistance(16)));
 
@@ -1600,8 +1711,35 @@ mod tests {
             x: radius.x,
             y: radius.y + radius.height * 0.5,
         };
-        assert!(ui.pointer_down(point));
+        assert!(ui.pointer_down(point, state));
         let (_handled, action) = ui.pointer_up(point, state);
         assert_eq!(action, Some(GameUiAction::SetRenderDistance(2)));
+    }
+
+    #[test]
+    fn game_ui_options_touch_look_slider_emits_sensitivity_action() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            touch_settings: Some(GameTouchSettings::new(2.4, 0.5, 5.0)),
+            ..GameUiRenderState::default()
+        };
+
+        let touch_look = option_widgets(ui.scale(), state)
+            .touch_look
+            .expect("touch settings should expose the touch look slider");
+        let point = Point {
+            x: touch_look.right() - 0.1,
+            y: touch_look.y + touch_look.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(action, Some(GameUiAction::SetTouchLookSensitivity(5.0)));
+
+        let state = GameUiRenderState::default();
+        assert!(option_widgets(ui.scale(), state).touch_look.is_none());
     }
 }

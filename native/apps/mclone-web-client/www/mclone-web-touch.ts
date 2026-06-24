@@ -26,6 +26,7 @@ export interface TouchControlApp {
   handleNativeUiPointerMove(clientX: number, clientY: number, pointerType?: string): Record<string, any> | null;
   handleNativeUiPointerDown(clientX: number, clientY: number, pointerType?: string): Record<string, any> | null;
   handleNativeUiPointerUp(clientX: number, clientY: number, pointerType?: string): Record<string, any> | null;
+  setNativeTouchLookSensitivity(value: number, available?: boolean, persist?: boolean): Record<string, any> | null;
 }
 
 interface TouchRuntimeState extends Record<string, any> {
@@ -327,6 +328,8 @@ export class TouchControls {
       this.root.setAttribute("aria-hidden", visible ? "false" : "true");
     }
     this.runtimeState.touchControlsVisible = Boolean(visible);
+    this.runtimeState.touchLookSensitivityAvailable = Boolean(visible);
+    this.app.setNativeTouchLookSensitivity(this.app.lookSensitivity, Boolean(visible), false);
   }
 
   private markTouchEvent(): void {

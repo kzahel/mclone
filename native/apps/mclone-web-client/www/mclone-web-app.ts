@@ -10,10 +10,12 @@ import {
 import {
   DEFAULT_LOOK_SENSITIVITY,
   bindMenu,
+  clampLookSensitivity,
   formatInteractionStatus,
   loadStoredSettings,
   setHudOpen,
   setMenuOpen,
+  storeLookSensitivity,
   updateDom,
 } from "./mclone-web-hud.js";
 import { TouchControls } from "./mclone-web-touch.js";
@@ -71,6 +73,7 @@ interface AppRuntime {
   handleNativeUiPointerMove?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
   handleNativeUiPointerDown?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
   handleNativeUiPointerUp?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
+  setNativeTouchLookSensitivity?: (value: number, available?: boolean, persist?: boolean) => WasmReport | null;
   touchControlState?: () => any;
   setHudOpen?: (open: boolean) => void;
   setMenuOpen?: (open: boolean) => void;
@@ -178,6 +181,7 @@ const runtime: AppRuntime = {
     menuOpen: false,
     settingsOpen: false,
     lookSensitivity: DEFAULT_LOOK_SENSITIVITY,
+    touchLookSensitivityAvailable: false,
     touchControlsVisible: false,
     touchJoystickActive: false,
     touchMovementLeftImpulse: 0,
@@ -208,6 +212,9 @@ async function boot(): Promise<WasmReport> {
   );
   runtime.handleNativeUiPointerUp = (clientX: number, clientY: number, pointerType?: string) => (
     app.handleNativeUiPointerUp(clientX, clientY, pointerType)
+  );
+  runtime.setNativeTouchLookSensitivity = (value: number, available?: boolean, persist?: boolean) => (
+    app.setNativeTouchLookSensitivity(value, available, persist)
   );
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
   runtime.setHudOpen = (open: boolean) => app.setNativeDebugOverlay(Boolean(open));
@@ -349,6 +356,7 @@ class WebChunkApp {
       "handleUiPointerUp",
       "setDebugOverlayVisible",
       "setStatusOverlay",
+      "setTouchLookSensitivity",
     ]) {
       if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
         throw new Error(`missing WebChunkRenderSession.${name} export`);
@@ -368,6 +376,11 @@ class WebChunkApp {
     bindMenu(this, runtime.state);
     bindInput(this, runtime.state, () => updateDom(runtime.state));
     this.touchControls = new TouchControls(this, runtime.state);
+    this.setNativeTouchLookSensitivity(
+      this.lookSensitivity,
+      this.touchControls.snapshot().visible,
+      false,
+    );
     this.syncCanvasSize();
     this.applyCameraState(this.session.cameraFrameState());
     this.applyTargetState(this.session.previewBlockTarget());
@@ -901,7 +914,7 @@ class WebChunkApp {
       setTimeout(() => this.handleNativeUiPointerDown(clientX, clientY, pointerType), 0);
       return deferredUiReport();
     }
-    const report = this.session.handleUiPointerDown(point.x, point.y);
+    const report = this.session.handleUiPointerDown(point.x, point.y, this.radiusChunks);
     this.applyNativeUiReport(report, { pointerType });
     return report;
   }
@@ -920,6 +933,30 @@ class WebChunkApp {
     return report;
   }
 
+  setNativeTouchLookSensitivity(
+    value: number,
+    available = Boolean(this.touchControls?.snapshot().visible),
+    persist = true,
+  ): WasmReport | null {
+    const clamped = clampLookSensitivity(value);
+    this.lookSensitivity = clamped;
+    runtime.state.lookSensitivity = clamped;
+    runtime.state.touchLookSensitivityAvailable = Boolean(available);
+    if (persist) {
+      storeLookSensitivity(clamped);
+    }
+    if (!this.session) {
+      return null;
+    }
+    if (this.sessionBusy) {
+      setTimeout(() => this.setNativeTouchLookSensitivity(clamped, available, persist), 0);
+      return deferredUiReport();
+    }
+    const report = this.session.setTouchLookSensitivity(clamped, Boolean(available));
+    this.applyNativeUiReport(report);
+    return report;
+  }
+
   applyNativeUiReport(report: WasmReport | null | undefined, options: { fromPointer?: boolean, pointerType?: string } = {}): void {
     if (!report?.ok) {
       return;
@@ -932,6 +969,17 @@ class WebChunkApp {
     this.forceFullbright = Boolean(report.forceFullbright);
     runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
     runtime.state.forceFullbright = this.forceFullbright;
+    if (typeof report.touchLookSensitivityAvailable !== "undefined") {
+      runtime.state.touchLookSensitivityAvailable = Boolean(report.touchLookSensitivityAvailable);
+    }
+    if (typeof report.touchLookSensitivity !== "undefined") {
+      const sensitivity = clampLookSensitivity(report.touchLookSensitivity);
+      this.lookSensitivity = sensitivity;
+      runtime.state.lookSensitivity = sensitivity;
+      if (report.action === "setTouchLookSensitivity") {
+        storeLookSensitivity(sensitivity);
+      }
+    }
     if (typeof report.renderDistance !== "undefined") {
       this.radiusChunks = clampRadiusChunks(report.renderDistance);
       runtime.state.radiusChunks = this.radiusChunks;

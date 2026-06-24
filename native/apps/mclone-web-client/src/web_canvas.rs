@@ -47,8 +47,8 @@ use mclone_render_session::{
 };
 use mclone_server::ServerRunnerKind;
 use mclone_ui::{
-    DebugOverlay, GameFramePacingMode, GameOptionsParent, GameScreen, GameUi, GameUiAction,
-    GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, render_crosshair,
+    DebugOverlay, GameFramePacingMode, GameOptionsParent, GameScreen, GameTouchSettings, GameUi,
+    GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, render_crosshair,
     render_debug_overlay_at, render_status_overlay,
 };
 
@@ -62,6 +62,9 @@ const WEB_FRAME_UPDATE_DRAIN_BUDGET: usize = 1;
 const WEB_MIN_RENDER_DISTANCE: i32 = 1;
 const WEB_MAX_RENDER_DISTANCE: i32 = 16;
 const WEB_FIXED_FPS_CAP: u32 = 60;
+const WEB_TOUCH_LOOK_SENSITIVITY_DEFAULT: f32 = 2.4;
+const WEB_TOUCH_LOOK_SENSITIVITY_MIN: f32 = 0.5;
+const WEB_TOUCH_LOOK_SENSITIVITY_MAX: f32 = 5.0;
 // 067 Stage 3: web drives the shared streaming loop at the same per-frame increment as
 // desktop (`DEFAULT_RENDER_CHUNK_MESH_BUDGET`). One small job in flight per frame; the
 // resident cache stays visible while movement fills progressively.
@@ -2209,6 +2212,8 @@ pub struct WebChunkRenderSession {
     status_overlay: StatusOverlay,
     section_occlusion_culling: bool,
     force_fullbright: bool,
+    touch_look_sensitivity: f32,
+    touch_settings_available: bool,
     loaded_chunk_positions: BTreeSet<ChunkPos>,
     // 067 Stage 3: the last chunk-view center we asked the runner to stream. The
     // streaming loop only re-sends the deferred SetChunkView command when this changes,
@@ -2266,6 +2271,17 @@ impl WebChunkRenderSession {
         } else {
             StatusOverlay::hidden()
         };
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = setTouchLookSensitivity)]
+    pub fn set_touch_look_sensitivity(
+        &mut self,
+        look_sensitivity: f32,
+        available: bool,
+    ) -> Result<JsValue, JsValue> {
+        self.touch_look_sensitivity = clamp_touch_look_sensitivity(look_sensitivity);
+        self.touch_settings_available = available;
         self.ui_status_to_js_value().map_err(JsValue::from)
     }
 
@@ -2330,9 +2346,11 @@ impl WebChunkRenderSession {
         &mut self,
         pixel_x: f64,
         pixel_y: f64,
+        radius_chunks: u32,
     ) -> Result<JsValue, JsValue> {
         let point = self.ui_point_from_canvas_pixels(pixel_x, pixel_y);
-        let handled = self.ui.pointer_down(point);
+        let state = self.ui_render_state(radius_chunks);
+        let handled = self.ui.pointer_down(point, state);
         self.apply_ui_event_result(handled, None)
             .map_err(JsValue::from)
     }
@@ -2547,6 +2565,18 @@ impl WebChunkRenderSession {
             "statusOverlayVisible",
             self.status_overlay.visible && !self.status_overlay.message.is_empty(),
         )?;
+        set_bool(
+            object,
+            "touchLookSensitivityAvailable",
+            self.touch_settings_available,
+        )?;
+        if self.touch_settings_available {
+            set_number(
+                object,
+                "touchLookSensitivity",
+                f64::from(self.touch_look_sensitivity),
+            )?;
+        }
         Ok(())
     }
 
@@ -2572,6 +2602,9 @@ impl WebChunkRenderSession {
             }
             GameUiAction::ToggleFullbright => {
                 self.force_fullbright = !self.force_fullbright;
+            }
+            GameUiAction::SetTouchLookSensitivity(look_sensitivity) => {
+                self.touch_look_sensitivity = clamp_touch_look_sensitivity(look_sensitivity);
             }
             GameUiAction::Quit => {
                 self.runtime.request_shutdown();
@@ -2605,6 +2638,13 @@ impl WebChunkRenderSession {
                 GameUiAction::SetRenderDistance(render_distance) => {
                     set_number(&object, "renderDistance", f64::from(render_distance))?;
                 }
+                GameUiAction::SetTouchLookSensitivity(look_sensitivity) => {
+                    set_number(
+                        &object,
+                        "touchLookSensitivity",
+                        f64::from(clamp_touch_look_sensitivity(look_sensitivity)),
+                    )?;
+                }
                 GameUiAction::Quit => {
                     set_bool(&object, "shutdownRequested", true)?;
                 }
@@ -2632,6 +2672,13 @@ impl WebChunkRenderSession {
             force_fullbright: self.force_fullbright,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: WEB_FIXED_FPS_CAP,
+            touch_settings: self
+                .touch_settings_available
+                .then_some(GameTouchSettings::new(
+                    self.touch_look_sensitivity,
+                    WEB_TOUCH_LOOK_SENSITIVITY_MIN,
+                    WEB_TOUCH_LOOK_SENSITIVITY_MAX,
+                )),
         }
     }
 
@@ -2690,6 +2737,8 @@ impl WebChunkRenderSession {
             status_overlay: StatusOverlay::hidden(),
             section_occlusion_culling: true,
             force_fullbright: false,
+            touch_look_sensitivity: WEB_TOUCH_LOOK_SENSITIVITY_DEFAULT,
+            touch_settings_available: false,
             loaded_chunk_positions: BTreeSet::new(),
             interest_center: None,
             asset_pack_parse_count: 1,
@@ -3905,7 +3954,19 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::CycleFramePacing => "cycleFramePacing",
         GameUiAction::CycleFpsCap => "cycleFpsCap",
         GameUiAction::SetRenderDistance(_) => "setRenderDistance",
+        GameUiAction::SetTouchLookSensitivity(_) => "setTouchLookSensitivity",
         GameUiAction::Quit => "quit",
+    }
+}
+
+fn clamp_touch_look_sensitivity(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(
+            WEB_TOUCH_LOOK_SENSITIVITY_MIN,
+            WEB_TOUCH_LOOK_SENSITIVITY_MAX,
+        )
+    } else {
+        WEB_TOUCH_LOOK_SENSITIVITY_DEFAULT
     }
 }
 

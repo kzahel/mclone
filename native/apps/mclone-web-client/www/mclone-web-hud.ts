@@ -10,8 +10,8 @@ import type { TouchControls } from "./mclone-web-touch.js";
 // mouse sensitivity. A finger drag covers far fewer pixels than a relative mouse
 // move (especially on the narrow look-half of a portrait phone), so the default
 // boost makes aiming the crosshair toward your travel direction practical.
-const LOOK_SENSITIVITY_MIN = 0.5;
-const LOOK_SENSITIVITY_MAX = 5;
+export const LOOK_SENSITIVITY_MIN = 0.5;
+export const LOOK_SENSITIVITY_MAX = 5;
 export const DEFAULT_LOOK_SENSITIVITY = 2.4;
 const SETTINGS_STORAGE_KEYS = {
   lookSensitivity: "mclone.web.lookSensitivity",
@@ -77,7 +77,7 @@ function setSettingsOpen(runtimeState: HudRuntimeState, open: boolean): void {
   runtimeState.settingsOpen = Boolean(open);
 }
 
-function clampLookSensitivity(value: unknown): number {
+export function clampLookSensitivity(value: unknown): number {
   const sensitivity = Number(value);
   if (!Number.isFinite(sensitivity)) {
     return DEFAULT_LOOK_SENSITIVITY;
@@ -93,11 +93,23 @@ export function loadStoredSettings(): StoredHudSettings {
   };
 }
 
+export function storeLookSensitivity(value: number): void {
+  storeSetting(SETTINGS_STORAGE_KEYS.lookSensitivity, String(clampLookSensitivity(value)));
+}
+
 function readStoredSetting(key: string): string | null {
   try {
     return globalThis.localStorage?.getItem(key) ?? null;
   } catch (_error) {
     return null;
+  }
+}
+
+function storeSetting(key: string, value: string): void {
+  try {
+    globalThis.localStorage?.setItem(key, value);
+  } catch (_error) {
+    // Storage can be disabled in private or embedded browser contexts.
   }
 }
 

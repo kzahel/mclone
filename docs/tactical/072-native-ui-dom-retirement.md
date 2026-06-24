@@ -1,6 +1,6 @@
 # 072: Native UI DOM Retirement
 
-Status: active high-priority parent; Slices 1-4 core menu/input/HUD path landed; touch controls and settings remain.
+Status: active high-priority parent; Slices 1-4 menu/input/HUD/settings path landed; touch controls and final DOM burn-down remain.
 
 ## Purpose
 
@@ -236,7 +236,7 @@ Goal: remove the remaining visible HUD/status DOM.
 - [x] Render debug pane through `mclone-ui` on both desktop and web.
 - [x] Render boot/ready/failure status through native UI once Rust is loaded.
 - [x] Render crosshair through native UI or renderer-owned screen overlay, not DOM.
-- [ ] Move look sensitivity into native UI state/action; persist it via a platform storage adapter instead of direct HUD DOM ownership.
+- [x] Move look sensitivity into native UI state/action; persist it via a platform storage adapter instead of direct HUD DOM ownership.
 - [x] Delete `#runtime-hud`, `#status`, `.hud`, `.status`, `.crosshair`, and associated DOM update code when replaced.
 - [x] Update this doc's status/landed section, commit, and report the next high-value step.
 
@@ -326,6 +326,17 @@ Do not leave a completed chunk uncommitted unless the user explicitly asks not t
 
 ## Landed
 
+### 2026-06-24 - Slice 4 Touch Look Sensitivity Setting
+
+- Added platform-neutral `GameTouchSettings` plus `GameUiAction::SetTouchLookSensitivity` to `mclone-ui`; the touch slider is rendered only when a platform adapter provides touch settings, so desktop options geometry stays unchanged.
+- Threaded UI render state into shared pointer-down hit testing so optional widgets are selected through the same state used for draw/move/up, and added shared UI tests for the touch-look slider action.
+- Kept native desktop application behavior unchanged by passing `touch_settings: None` and treating touch sensitivity as an adapter no-op.
+- Added web `WebChunkRenderSession::setTouchLookSensitivity`, touch-setting status fields, and web action application; TypeScript now acts as the platform storage adapter via `localStorage` instead of owning a DOM settings UI.
+- Extended mobile browser smoke to open native Options, adjust the touch-look slider to `5.0x`, verify the native action report and stored setting, and capture `/tmp/mclone-native-web-mobile-options-canvas.png`.
+- Validation: `cargo test --manifest-path native/Cargo.toml -p mclone-ui`; `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-native-client -p mclone-web-client` (rerun elevated for localhost TCP tests); `pnpm native:web:typecheck`; `pnpm native:web:build`; `pnpm native:web:mobile-smoke` (elevated for local browser server); `pnpm native:web:app-smoke` (elevated for local browser server); `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --headless-ui /tmp/mclone-ui-title.png --width 960 --height 540` (rerun elevated for wgpu adapter).
+- Screenshots inspected: `/tmp/mclone-ui-title.png`, `/tmp/mclone-native-web-ui-canvas.png`, `/tmp/mclone-native-web-mobile-ui-canvas.png`, and `/tmp/mclone-native-web-mobile-options-canvas.png`.
+- Known follow-up: Slice 5 should replace the remaining visible DOM touch joystick/buttons/hamburger affordances with native-rendered touch widgets or a native overlay while keeping browser touch capture as platform plumbing.
+
 ### 2026-06-24 - Slice 4 Native Debug HUD, Status, And Crosshair
 
 - Added shared platform-neutral `DebugOverlay`, `StatusOverlay`, crosshair rendering, and offset-capable debug overlay helpers to `mclone-ui`, with focused overlay tests.
@@ -335,7 +346,7 @@ Do not leave a completed chunk uncommitted unless the user explicitly asks not t
 - Added web backquote handling for the native debug overlay and updated browser smoke probes for removed DOM nodes.
 - Validation: `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-native-client -p mclone-web-client`; `cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown`; `pnpm native:web:build`; `pnpm native:web:typecheck`; `pnpm native:web:app-smoke`; `pnpm native:web:mobile-smoke`; `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --headless-ui /tmp/mclone-ui-title.png --width 960 --height 540`; `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-native-ui-debug.png --width 1280 --height 720 --screenshot-debug-pane true`; `git diff --check`.
 - Screenshots inspected: `/tmp/mclone-ui-title.png`, `/tmp/mclone-native-ui-debug.png`, `/tmp/mclone-native-web-app-canvas.png`, `/tmp/mclone-native-web-ui-canvas.png`, and `/tmp/mclone-native-web-mobile-ui-canvas.png`.
-- Known follow-up: move look sensitivity into native UI/settings with a platform storage adapter, then replace the still-visible DOM touch controls with native-rendered widgets in Slice 5.
+- Known follow-up: replace the still-visible DOM touch controls with native-rendered widgets in Slice 5.
 
 ### 2026-06-24 - Slice 3 Web Menu Input And Action Application
 

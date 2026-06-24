@@ -271,6 +271,7 @@ pub(crate) fn game_ui_render_state(
         force_fullbright: render_options.force_fullbright,
         frame_pacing_mode: game_frame_pacing_mode(frame_pacing.mode),
         fps_cap: frame_pacing.fps_cap,
+        touch_settings: None,
     }
 }
 
@@ -485,7 +486,10 @@ impl ChunkApp {
     ) {
         let should_arm_mouse_lock =
             from_pointer_click && matches!(action, GameUiAction::StartWorld | GameUiAction::Resume);
-        let preserve_pointer_state = matches!(action, GameUiAction::SetRenderDistance(_));
+        let preserve_pointer_state = matches!(
+            action,
+            GameUiAction::SetRenderDistance(_) | GameUiAction::SetTouchLookSensitivity(_)
+        );
         match action {
             GameUiAction::ToggleSectionOcclusion => {
                 self.render_options.section_occlusion_culling =
@@ -555,7 +559,8 @@ impl ChunkApp {
             | GameUiAction::Resume
             | GameUiAction::OpenOptions(_)
             | GameUiAction::BackToTitle
-            | GameUiAction::BackToPause => {}
+            | GameUiAction::BackToPause
+            | GameUiAction::SetTouchLookSensitivity(_) => {}
         }
         self.ui.apply_action(action);
         if should_arm_mouse_lock {
@@ -1299,7 +1304,8 @@ impl ApplicationHandler for ChunkApp {
                         {
                             match state {
                                 ElementState::Pressed => {
-                                    self.ui.pointer_down(point);
+                                    let ui_state = self.current_ui_render_state();
+                                    self.ui.pointer_down(point, ui_state);
                                 }
                                 ElementState::Released => {
                                     let ui_state = self.current_ui_render_state();
