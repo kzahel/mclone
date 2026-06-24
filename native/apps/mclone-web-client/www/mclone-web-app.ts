@@ -65,7 +65,12 @@ interface AppRuntime {
   adjustCameraSpeed?: (amount: number) => WasmReport | null;
   previewBlockTarget?: () => WasmReport | null;
   openNativeTitleUi?: () => WasmReport | null;
+  openNativePauseUi?: () => WasmReport | null;
   closeNativeUi?: () => WasmReport | null;
+  handleNativeUiKey?: (key: string) => WasmReport | null;
+  handleNativeUiPointerMove?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
+  handleNativeUiPointerDown?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
+  handleNativeUiPointerUp?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
   touchControlState?: () => any;
   setHudOpen?: (open: boolean) => void;
   setMenuOpen?: (open: boolean) => void;
@@ -85,7 +90,9 @@ const SERVER_WORKER_URL = versionedUrl("./mclone-integrated-server-worker.js");
 const SERVER_JOB_WORKER_URL = versionedUrl("./mclone-server-job-worker.js");
 const ASSET_PACK_URL = versionedUrl("/reference/minecraft-1.17.1/extracted.zip");
 
-const RADIUS_CHUNKS = 1;
+const DEFAULT_RADIUS_CHUNKS = 1;
+const MIN_RADIUS_CHUNKS = 1;
+const MAX_RADIUS_CHUNKS = 16;
 const MAX_FRAME_DT_SECONDS = 0.05;
 
 const runtime: AppRuntime = {
@@ -98,7 +105,7 @@ const runtime: AppRuntime = {
     centerZ: 0,
     loadedCenterX: null,
     loadedCenterZ: null,
-    radiusChunks: RADIUS_CHUNKS,
+    radiusChunks: DEFAULT_RADIUS_CHUNKS,
     cameraX: 0,
     cameraY: 0,
     cameraZ: 0,
@@ -141,6 +148,11 @@ const runtime: AppRuntime = {
     guiCommandCount: 0,
     uiActive: false,
     uiCoversWorld: false,
+    nativeUiScreen: "none",
+    nativeUiOptionsParent: null,
+    lastUiAction: null,
+    sectionOcclusionCulling: true,
+    forceFullbright: false,
     frameCount: 0,
     lastFrameGapMs: 0,
     maxFrameGapMs: 0,
@@ -185,7 +197,18 @@ async function boot(): Promise<WasmReport> {
   runtime.adjustCameraSpeed = (amount: number) => app.adjustCameraSpeed(amount);
   runtime.previewBlockTarget = () => runtime.state.currentTarget;
   runtime.openNativeTitleUi = () => app.openNativeTitleUi();
+  runtime.openNativePauseUi = () => app.openNativePauseUi();
   runtime.closeNativeUi = () => app.closeNativeUi();
+  runtime.handleNativeUiKey = (key: string) => app.handleNativeUiKey(key);
+  runtime.handleNativeUiPointerMove = (clientX: number, clientY: number, pointerType?: string) => (
+    app.handleNativeUiPointerMove(clientX, clientY, pointerType)
+  );
+  runtime.handleNativeUiPointerDown = (clientX: number, clientY: number, pointerType?: string) => (
+    app.handleNativeUiPointerDown(clientX, clientY, pointerType)
+  );
+  runtime.handleNativeUiPointerUp = (clientX: number, clientY: number, pointerType?: string) => (
+    app.handleNativeUiPointerUp(clientX, clientY, pointerType)
+  );
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
   runtime.setHudOpen = (open: boolean) => setHudOpen(runtime.state, Boolean(open));
   runtime.setMenuOpen = (open: boolean) => setMenuOpen(app, runtime.state, Boolean(open));
@@ -230,6 +253,9 @@ class WebChunkApp {
   loadedCenter: { centerX: number, centerZ: number } | null;
   pointerDragging: boolean;
   pointerDown: { button: number, enabled: boolean, movement: number } | null;
+  radiusChunks: number;
+  sectionOcclusionCulling: boolean;
+  forceFullbright: boolean;
   animationFrame: number;
   lastFrameTime: number;
   tickFrameBusy: boolean;
@@ -265,6 +291,9 @@ class WebChunkApp {
     this.loadedCenter = null;
     this.pointerDragging = false;
     this.pointerDown = null;
+    this.radiusChunks = DEFAULT_RADIUS_CHUNKS;
+    this.sectionOcclusionCulling = true;
+    this.forceFullbright = false;
     this.animationFrame = 0;
     this.lastFrameTime = 0;
     this.tickFrameBusy = false;
@@ -313,8 +342,13 @@ class WebChunkApp {
       "previewBlockTarget",
       "interactBlock",
       "openTitleUi",
+      "openPauseUi",
       "closeUi",
       "uiStatus",
+      "handleUiKey",
+      "handleUiPointerMove",
+      "handleUiPointerDown",
+      "handleUiPointerUp",
     ]) {
       if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
         throw new Error(`missing WebChunkRenderSession.${name} export`);
@@ -376,13 +410,14 @@ class WebChunkApp {
     const dtSeconds = Number.isFinite(rawDt)
       ? Math.max(0, Math.min(rawDt, MAX_FRAME_DT_SECONDS))
       : 0;
-    const mouseDeltaX = this.mouseDeltaX;
-    const mouseDeltaY = this.mouseDeltaY;
+    const uiActive = runtime.state.uiActive === true;
+    const mouseDeltaX = uiActive ? 0 : this.mouseDeltaX;
+    const mouseDeltaY = uiActive ? 0 : this.mouseDeltaY;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
     this.syncCanvasSize();
-    const keys = this.currentInputKeys();
-    const movementImpulse = this.currentMovementImpulse();
+    const keys = uiActive ? (defaultInputKeys() as InputKeys) : this.currentInputKeys();
+    const movementImpulse = uiActive ? defaultMovementImpulse() : this.currentMovementImpulse();
 
     runtime.state.frameCount += 1;
     runtime.state.tickPhase = "advance";
@@ -482,7 +517,7 @@ class WebChunkApp {
     const syncStart = performance.now();
     let frame: WasmReport;
     try {
-      frame = await this.withSessionAsync(() => session.syncCameraRenderFrame(RADIUS_CHUNKS));
+      frame = await this.withSessionAsync(() => session.syncCameraRenderFrame(this.radiusChunks));
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
@@ -674,6 +709,16 @@ class WebChunkApp {
     runtime.state.guiCommandCount = report.guiCommandCount;
     runtime.state.uiActive = Boolean(report.uiActive);
     runtime.state.uiCoversWorld = Boolean(report.uiCoversWorld);
+    runtime.state.nativeUiScreen = String(report.uiScreen ?? runtime.state.nativeUiScreen ?? "none");
+    runtime.state.nativeUiOptionsParent = report.uiOptionsParent ?? null;
+    if (typeof report.sectionOcclusionCulling !== "undefined") {
+      this.sectionOcclusionCulling = Boolean(report.sectionOcclusionCulling);
+    }
+    if (typeof report.forceFullbright !== "undefined") {
+      this.forceFullbright = Boolean(report.forceFullbright);
+    }
+    runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
+    runtime.state.forceFullbright = this.forceFullbright;
     runtime.state.status = "ready";
     runtime.state.lastReport = report;
   }
@@ -757,7 +802,22 @@ class WebChunkApp {
       setTimeout(() => this.openNativeTitleUi(), 0);
       return null;
     }
-    return this.session.openTitleUi();
+    const report = this.session.openTitleUi();
+    this.applyNativeUiReport(report);
+    return report;
+  }
+
+  openNativePauseUi(): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    if (this.sessionBusy) {
+      setTimeout(() => this.openNativePauseUi(), 0);
+      return null;
+    }
+    const report = this.session.openPauseUi();
+    this.applyNativeUiReport(report);
+    return report;
   }
 
   closeNativeUi(): WasmReport | null {
@@ -768,7 +828,128 @@ class WebChunkApp {
       setTimeout(() => this.closeNativeUi(), 0);
       return null;
     }
-    return this.session.closeUi();
+    const report = this.session.closeUi();
+    this.applyNativeUiReport(report);
+    return report;
+  }
+
+  handleNativeUiKey(key: string): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    if (this.sessionBusy) {
+      setTimeout(() => this.handleNativeUiKey(key), 0);
+      return deferredUiReport();
+    }
+    const report = this.session.handleUiKey(key);
+    this.applyNativeUiReport(report);
+    return report;
+  }
+
+  handleNativeUiPointerMove(clientX: number, clientY: number, pointerType = "mouse"): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    const point = this.canvasPixelPoint(clientX, clientY);
+    if (this.sessionBusy) {
+      setTimeout(() => this.handleNativeUiPointerMove(clientX, clientY, pointerType), 0);
+      return deferredUiReport();
+    }
+    const report = this.session.handleUiPointerMove(point.x, point.y, this.radiusChunks);
+    this.applyNativeUiReport(report, { pointerType });
+    return report;
+  }
+
+  handleNativeUiPointerDown(clientX: number, clientY: number, pointerType = "mouse"): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    const point = this.canvasPixelPoint(clientX, clientY);
+    if (this.sessionBusy) {
+      setTimeout(() => this.handleNativeUiPointerDown(clientX, clientY, pointerType), 0);
+      return deferredUiReport();
+    }
+    const report = this.session.handleUiPointerDown(point.x, point.y);
+    this.applyNativeUiReport(report, { pointerType });
+    return report;
+  }
+
+  handleNativeUiPointerUp(clientX: number, clientY: number, pointerType = "mouse"): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    const point = this.canvasPixelPoint(clientX, clientY);
+    if (this.sessionBusy) {
+      setTimeout(() => this.handleNativeUiPointerUp(clientX, clientY, pointerType), 0);
+      return deferredUiReport();
+    }
+    const report = this.session.handleUiPointerUp(point.x, point.y, this.radiusChunks);
+    this.applyNativeUiReport(report, { fromPointer: true, pointerType });
+    return report;
+  }
+
+  applyNativeUiReport(report: WasmReport | null | undefined, options: { fromPointer?: boolean, pointerType?: string } = {}): void {
+    if (!report?.ok) {
+      return;
+    }
+    runtime.state.uiActive = Boolean(report.active ?? report.uiActive);
+    runtime.state.uiCoversWorld = Boolean(report.coversWorld ?? report.uiCoversWorld);
+    runtime.state.nativeUiScreen = String(report.screen ?? report.uiScreen ?? "none");
+    runtime.state.nativeUiOptionsParent = report.optionsParent ?? report.uiOptionsParent ?? null;
+    this.sectionOcclusionCulling = Boolean(report.sectionOcclusionCulling);
+    this.forceFullbright = Boolean(report.forceFullbright);
+    runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
+    runtime.state.forceFullbright = this.forceFullbright;
+    if (typeof report.renderDistance !== "undefined") {
+      this.radiusChunks = clampRadiusChunks(report.renderDistance);
+      runtime.state.radiusChunks = this.radiusChunks;
+    }
+    if (report.action) {
+      runtime.state.lastUiAction = report;
+    }
+    if (runtime.state.uiActive) {
+      this.releasePointerLockForUi();
+      this.clearGameplayInput();
+    }
+    if (
+      (report.action === "startWorld" || report.action === "resume")
+      && options.fromPointer
+      && options.pointerType !== "touch"
+    ) {
+      this.requestPointerLock();
+    }
+    updateDom(runtime.state);
+  }
+
+  canvasPixelPoint(clientX: number, clientY: number): { x: number, y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = rect.width > 0 ? this.canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? this.canvas.height / rect.height : 1;
+    return {
+      x: (Number(clientX) - rect.left) * scaleX,
+      y: (Number(clientY) - rect.top) * scaleY,
+    };
+  }
+
+  clearGameplayInput(): void {
+    for (const name of INPUT_KEY_NAMES) {
+      this.keys[name] = false;
+      this.touchKeys[name] = false;
+    }
+    this.touchMovementImpulse = defaultMovementImpulse();
+    this.mouseDeltaX = 0;
+    this.mouseDeltaY = 0;
+    this.pointerDragging = false;
+    this.pointerDown = null;
+    this.touchControls?.clearAll();
+  }
+
+  releasePointerLockForUi(): void {
+    if (document.pointerLockElement === this.canvas && typeof document.exitPointerLock === "function") {
+      document.exitPointerLock();
+    }
+    runtime.state.pointerLocked = false;
+    runtime.state.pointerLockFallback = false;
   }
 
   async withSessionAsync<T>(operation: () => T | Promise<T>): Promise<Awaited<T>> {
@@ -874,6 +1055,9 @@ class WebChunkApp {
   }
 
   requestPointerLock(): void {
+    if (runtime.state.uiActive === true) {
+      return;
+    }
     runtime.state.pointerLockAttempted = true;
     if (typeof this.canvas.requestPointerLock === "function") {
       const result = this.canvas.requestPointerLock() as Promise<void> | undefined;
@@ -955,6 +1139,25 @@ function versionedUrl(path: string): URL {
 
 function snapshotState(): WasmReport {
   return JSON.parse(JSON.stringify(runtime.state));
+}
+
+function clampRadiusChunks(value: unknown): number {
+  const radius = Math.round(Number(value));
+  if (!Number.isFinite(radius)) {
+    return DEFAULT_RADIUS_CHUNKS;
+  }
+  return Math.min(MAX_RADIUS_CHUNKS, Math.max(MIN_RADIUS_CHUNKS, radius));
+}
+
+function deferredUiReport(): WasmReport {
+  return {
+    ok: true,
+    handled: runtime.state.uiActive === true,
+    deferred: true,
+    active: runtime.state.uiActive === true,
+    coversWorld: runtime.state.uiCoversWorld === true,
+    screen: runtime.state.nativeUiScreen ?? "none",
+  };
 }
 
 function stringifyError(error: unknown): string {

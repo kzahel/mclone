@@ -47,7 +47,8 @@ use mclone_render_session::{
 };
 use mclone_server::ServerRunnerKind;
 use mclone_ui::{
-    GameFramePacingMode, GameOptionsParent, GameScreen, GameUi, GameUiRenderState, GuiScale,
+    GameFramePacingMode, GameOptionsParent, GameScreen, GameUi, GameUiAction, GameUiRenderState,
+    GuiKey, GuiScale, Point,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -57,6 +58,9 @@ const CANVAS_WIDTH_SHIFT: u32 = 8;
 const CANVAS_HEIGHT_SHIFT: u32 = 20;
 const WEB_GROUND_PROBE_DISTANCE: f64 = 0.01;
 const WEB_FRAME_UPDATE_DRAIN_BUDGET: usize = 1;
+const WEB_MIN_RENDER_DISTANCE: i32 = 1;
+const WEB_MAX_RENDER_DISTANCE: i32 = 16;
+const WEB_FIXED_FPS_CAP: u32 = 60;
 // 067 Stage 3: web drives the shared streaming loop at the same per-frame increment as
 // desktop (`DEFAULT_RENDER_CHUNK_MESH_BUDGET`). One small job in flight per frame; the
 // resident cache stays visible while movement fills progressively.
@@ -831,6 +835,10 @@ struct GeneratedChunkRenderReport {
     gui_command_count: usize,
     ui_active: bool,
     ui_covers_world: bool,
+    ui_screen: &'static str,
+    ui_options_parent: Option<&'static str>,
+    section_occlusion_culling: bool,
+    force_fullbright: bool,
     compile_request_id: u32,
     pending_compile_job_count: usize,
     view_dirty_chunk_count: usize,
@@ -1000,6 +1008,16 @@ impl GeneratedChunkRenderReport {
         set_number(&object, "guiCommandCount", self.gui_command_count as f64)?;
         set_bool(&object, "uiActive", self.ui_active)?;
         set_bool(&object, "uiCoversWorld", self.ui_covers_world)?;
+        set_string(&object, "uiScreen", self.ui_screen)?;
+        if let Some(parent) = self.ui_options_parent {
+            set_string(&object, "uiOptionsParent", parent)?;
+        }
+        set_bool(
+            &object,
+            "sectionOcclusionCulling",
+            self.section_occlusion_culling,
+        )?;
+        set_bool(&object, "forceFullbright", self.force_fullbright)?;
         set_number(
             &object,
             "pendingCompileJobCount",
@@ -2182,6 +2200,8 @@ pub struct WebChunkRenderSession {
     actors: ActorDrawResources,
     gui: GuiRenderer,
     ui: GameUi,
+    section_occlusion_culling: bool,
+    force_fullbright: bool,
     loaded_chunk_positions: BTreeSet<ChunkPos>,
     // 067 Stage 3: the last chunk-view center we asked the runner to stream. The
     // streaming loop only re-sends the deferred SetChunkView command when this changes,
@@ -2248,6 +2268,55 @@ impl WebChunkRenderSession {
     pub fn close_ui(&mut self) -> Result<JsValue, JsValue> {
         self.ui.close();
         self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = handleUiKey)]
+    pub fn handle_ui_key(&mut self, key: &str) -> Result<JsValue, JsValue> {
+        let key = gui_key_from_label(key)
+            .ok_or_else(|| JsValue::from_str(&format!("unknown native UI key {key:?}")))?;
+        let (handled, action) = self.ui.key_pressed(key);
+        self.apply_ui_event_result(handled, action)
+            .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = handleUiPointerMove)]
+    pub fn handle_ui_pointer_move(
+        &mut self,
+        pixel_x: f64,
+        pixel_y: f64,
+        radius_chunks: u32,
+    ) -> Result<JsValue, JsValue> {
+        let point = self.ui_point_from_canvas_pixels(pixel_x, pixel_y);
+        let state = self.ui_render_state(radius_chunks);
+        let (handled, action) = self.ui.pointer_move(point, state);
+        self.apply_ui_event_result(handled, action)
+            .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = handleUiPointerDown)]
+    pub fn handle_ui_pointer_down(
+        &mut self,
+        pixel_x: f64,
+        pixel_y: f64,
+    ) -> Result<JsValue, JsValue> {
+        let point = self.ui_point_from_canvas_pixels(pixel_x, pixel_y);
+        let handled = self.ui.pointer_down(point);
+        self.apply_ui_event_result(handled, None)
+            .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = handleUiPointerUp)]
+    pub fn handle_ui_pointer_up(
+        &mut self,
+        pixel_x: f64,
+        pixel_y: f64,
+        radius_chunks: u32,
+    ) -> Result<JsValue, JsValue> {
+        let point = self.ui_point_from_canvas_pixels(pixel_x, pixel_y);
+        let state = self.ui_render_state(radius_chunks);
+        let (handled, action) = self.ui.pointer_up(point, state);
+        self.apply_ui_event_result(handled, action)
+            .map_err(JsValue::from)
     }
 
     /// 067 Stage 3 keystone: drive one frame of the shared per-frame streaming loop from
@@ -2420,43 +2489,111 @@ impl WebChunkRenderSession {
 impl WebChunkRenderSession {
     fn ui_status_to_js_value(&self) -> Result<JsValue, String> {
         let object = js_sys::Object::new();
-        set_bool(&object, "ok", true)?;
-        set_bool(&object, "active", self.ui.is_active())?;
-        set_bool(&object, "coversWorld", self.ui.covers_world())?;
-        set_string(
-            &object,
-            "screen",
-            match self.ui.screen() {
-                Some(GameScreen::Title) => "title",
-                Some(GameScreen::Pause) => "pause",
-                Some(GameScreen::Options { .. }) => "options",
-                None => "none",
-            },
-        )?;
+        self.write_ui_status_to_js_object(&object)?;
+        Ok(object.into())
+    }
+
+    fn write_ui_status_to_js_object(&self, object: &js_sys::Object) -> Result<(), String> {
+        set_bool(object, "ok", true)?;
+        set_bool(object, "active", self.ui.is_active())?;
+        set_bool(object, "coversWorld", self.ui.covers_world())?;
+        set_string(object, "screen", ui_screen_label(self.ui.screen()))?;
+        set_string(object, "uiScreen", ui_screen_label(self.ui.screen()))?;
         if let Some(GameScreen::Options { parent }) = self.ui.screen() {
-            set_string(
-                &object,
-                "optionsParent",
-                match parent {
-                    GameOptionsParent::Title => "title",
-                    GameOptionsParent::Pause => "pause",
-                },
-            )?;
+            set_string(object, "optionsParent", options_parent_label(parent))?;
+            set_string(object, "uiOptionsParent", options_parent_label(parent))?;
+        }
+        set_bool(
+            object,
+            "sectionOcclusionCulling",
+            self.section_occlusion_culling,
+        )?;
+        set_bool(object, "forceFullbright", self.force_fullbright)?;
+        Ok(())
+    }
+
+    fn ui_point_from_canvas_pixels(&self, pixel_x: f64, pixel_y: f64) -> Point {
+        self.ui.scale().client_to_gui(pixel_x, pixel_y)
+    }
+
+    fn apply_ui_event_result(
+        &mut self,
+        handled: bool,
+        action: Option<GameUiAction>,
+    ) -> Result<JsValue, String> {
+        if let Some(action) = action {
+            self.apply_web_ui_action(action);
+        }
+        self.ui_event_result_to_js_value(handled, action)
+    }
+
+    fn apply_web_ui_action(&mut self, action: GameUiAction) {
+        match action {
+            GameUiAction::ToggleSectionOcclusion => {
+                self.section_occlusion_culling = !self.section_occlusion_culling;
+            }
+            GameUiAction::ToggleFullbright => {
+                self.force_fullbright = !self.force_fullbright;
+            }
+            GameUiAction::Quit => {
+                self.runtime.request_shutdown();
+            }
+            GameUiAction::StartWorld
+            | GameUiAction::Resume
+            | GameUiAction::OpenOptions(_)
+            | GameUiAction::BackToTitle
+            | GameUiAction::BackToPause
+            | GameUiAction::CycleFramePacing
+            | GameUiAction::CycleFpsCap
+            | GameUiAction::SetRenderDistance(_) => {}
+        }
+        self.ui.apply_action(action);
+    }
+
+    fn ui_event_result_to_js_value(
+        &self,
+        handled: bool,
+        action: Option<GameUiAction>,
+    ) -> Result<JsValue, String> {
+        let object = js_sys::Object::new();
+        self.write_ui_status_to_js_object(&object)?;
+        set_bool(&object, "handled", handled)?;
+        if let Some(action) = action {
+            set_string(&object, "action", ui_action_label(action))?;
+            match action {
+                GameUiAction::OpenOptions(parent) => {
+                    set_string(&object, "actionParent", options_parent_label(parent))?;
+                }
+                GameUiAction::SetRenderDistance(render_distance) => {
+                    set_number(&object, "renderDistance", f64::from(render_distance))?;
+                }
+                GameUiAction::Quit => {
+                    set_bool(&object, "shutdownRequested", true)?;
+                }
+                GameUiAction::StartWorld
+                | GameUiAction::Resume
+                | GameUiAction::BackToTitle
+                | GameUiAction::BackToPause
+                | GameUiAction::ToggleSectionOcclusion
+                | GameUiAction::ToggleFullbright
+                | GameUiAction::CycleFramePacing
+                | GameUiAction::CycleFpsCap => {}
+            }
         }
         Ok(object.into())
     }
 
     fn ui_render_state(&self, radius_chunks: u32) -> GameUiRenderState {
         GameUiRenderState {
-            render_distance: i32::try_from(radius_chunks).unwrap_or(i32::MAX),
-            // Web currently drives a mobile-safe radius of 1 from TS. Keep that
-            // available in the shared UI until the web action adapter owns the setting.
-            min_render_distance: 1,
-            max_render_distance: 16,
-            section_occlusion_culling: true,
-            force_fullbright: false,
+            render_distance: i32::try_from(radius_chunks)
+                .unwrap_or(i32::MAX)
+                .clamp(WEB_MIN_RENDER_DISTANCE, WEB_MAX_RENDER_DISTANCE),
+            min_render_distance: WEB_MIN_RENDER_DISTANCE,
+            max_render_distance: WEB_MAX_RENDER_DISTANCE,
+            section_occlusion_culling: self.section_occlusion_culling,
+            force_fullbright: self.force_fullbright,
             frame_pacing_mode: GameFramePacingMode::Vsync,
-            fps_cap: 60,
+            fps_cap: WEB_FIXED_FPS_CAP,
         }
     }
 
@@ -2511,6 +2648,8 @@ impl WebChunkRenderSession {
             actors,
             gui,
             ui,
+            section_occlusion_culling: true,
+            force_fullbright: false,
             loaded_chunk_positions: BTreeSet::new(),
             interest_center: None,
             asset_pack_parse_count: 1,
@@ -3080,8 +3219,10 @@ impl WebChunkRenderSession {
         let sun_angle = self.runtime.client().sun_angle();
         let runner_diagnostics = self.runtime.runner_diagnostics();
         let sky_clear_color = mclone_render::sky::overworld_clear_color(time_of_day);
-        let render_options = TexturedSectionRenderOptions::default()
+        let mut render_options = TexturedSectionRenderOptions::default()
             .with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day));
+        render_options.section_occlusion_culling = self.section_occlusion_culling;
+        render_options.force_fullbright = self.force_fullbright;
         let actor_instances = self.interpolated_actor_instances();
         let ui_active = self.ui.is_active();
         let ui_covers_world = self.ui.covers_world();
@@ -3216,6 +3357,13 @@ impl WebChunkRenderSession {
             gui_command_count,
             ui_active,
             ui_covers_world,
+            ui_screen: ui_screen_label(self.ui.screen()),
+            ui_options_parent: match self.ui.screen() {
+                Some(GameScreen::Options { parent }) => Some(options_parent_label(parent)),
+                _ => None,
+            },
+            section_occlusion_culling: self.section_occlusion_culling,
+            force_fullbright: self.force_fullbright,
             compile_request_id: acceptance_report.request_id,
             pending_compile_job_count: self.render_compiler.pending_job_count(),
             view_dirty_chunk_count: compile_scope.view_dirty_chunk_count,
@@ -3570,6 +3718,45 @@ fn load_textured_mesh_assets_from_pack(bytes: Vec<u8>) -> Result<WebTexturedMesh
         atlas_sprite_count: assets.atlas_sprite_count,
         asset_pack_file_count,
     })
+}
+
+fn gui_key_from_label(label: &str) -> Option<GuiKey> {
+    match label {
+        "escape" | "Escape" => Some(GuiKey::Escape),
+        _ => None,
+    }
+}
+
+fn ui_screen_label(screen: Option<GameScreen>) -> &'static str {
+    match screen {
+        Some(GameScreen::Title) => "title",
+        Some(GameScreen::Pause) => "pause",
+        Some(GameScreen::Options { .. }) => "options",
+        None => "none",
+    }
+}
+
+fn options_parent_label(parent: GameOptionsParent) -> &'static str {
+    match parent {
+        GameOptionsParent::Title => "title",
+        GameOptionsParent::Pause => "pause",
+    }
+}
+
+fn ui_action_label(action: GameUiAction) -> &'static str {
+    match action {
+        GameUiAction::StartWorld => "startWorld",
+        GameUiAction::Resume => "resume",
+        GameUiAction::OpenOptions(_) => "openOptions",
+        GameUiAction::BackToTitle => "backToTitle",
+        GameUiAction::BackToPause => "backToPause",
+        GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
+        GameUiAction::ToggleFullbright => "toggleFullbright",
+        GameUiAction::CycleFramePacing => "cycleFramePacing",
+        GameUiAction::CycleFpsCap => "cycleFpsCap",
+        GameUiAction::SetRenderDistance(_) => "setRenderDistance",
+        GameUiAction::Quit => "quit",
+    }
 }
 
 struct WebCanvasContext {

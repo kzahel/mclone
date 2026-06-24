@@ -24,6 +24,8 @@ export interface HudMenuApp {
   hudToggle: Element | null;
   lookSensitivity: number;
   touchControls: TouchControls | null;
+  openNativePauseUi(): WasmReport | null;
+  closeNativeUi(): WasmReport | null;
 }
 
 interface HudRuntimeState extends Record<string, any> {
@@ -41,29 +43,19 @@ export interface StoredHudSettings {
 }
 
 export function bindMenu(app: HudMenuApp, runtimeState: HudRuntimeState): void {
-  // The hamburger now opens the main menu; the runtime/debug stats live behind
-  // the menu's "Debug info" entry. Stats stay open by default on desktop so the
-  // debug HUD remains a glance away, while mobile boots into the clean view.
+  // DOM menu controls are retired as authoritative UI. The hamburger remains as
+  // a browser/touch shortcut that opens the native-rendered pause screen.
   setHudOpen(runtimeState, defaultHudOpen());
   setMenuOpen(app, runtimeState, false);
   setSettingsOpen(runtimeState, false);
   syncSettingsControls(app);
 
-  app.hudToggle?.addEventListener("click", () => setMenuOpen(app, runtimeState, !isMenuOpen()));
-
-  document.getElementById("menu-resume")?.addEventListener("click", () => {
-    setMenuOpen(app, runtimeState, false);
-  });
-
-  const debugButton = document.getElementById("menu-debug");
-  debugButton?.addEventListener("click", () => {
-    const open = !isHudOpen();
-    setHudOpen(runtimeState, open);
-    setMenuOpen(app, runtimeState, false);
-  });
-
-  document.getElementById("menu-settings")?.addEventListener("click", () => {
-    setSettingsOpen(runtimeState, !isSettingsOpen());
+  app.hudToggle?.addEventListener("click", () => {
+    if (runtimeState.uiActive === true) {
+      app.closeNativeUi();
+    } else {
+      app.openNativePauseUi();
+    }
   });
 
   const lookInput = document.getElementById("setting-look-sensitivity") as HTMLInputElement | null;
@@ -71,44 +63,24 @@ export function bindMenu(app: HudMenuApp, runtimeState: HudRuntimeState): void {
     setLookSensitivity(app, runtimeState, Number(lookInput.value));
   });
 
-  window.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || document.pointerLockElement === app.canvas) {
-      return;
-    }
-    if (isSettingsOpen()) {
-      setSettingsOpen(runtimeState, false);
-    } else if (isMenuOpen()) {
-      setMenuOpen(app, runtimeState, false);
-    } else if (isHudOpen()) {
-      setHudOpen(runtimeState, false);
-    }
-  });
+  updateMenuShortcutState(runtimeState);
 }
 
 export function setMenuOpen(app: HudMenuApp, runtimeState: HudRuntimeState, open: boolean): void {
   const menu = document.getElementById("main-menu");
   const toggle = document.getElementById("hud-toggle");
   if (menu) {
-    menu.hidden = !open;
+    menu.hidden = true;
   }
-  if (toggle) {
-    toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  }
-  if (!open) {
-    setSettingsOpen(runtimeState, false);
-  } else {
-    // Releasing held touch input keeps the player from drifting while the modal
-    // menu is consuming the screen.
+  setSettingsOpen(runtimeState, false);
+  if (open) {
     app?.touchControls?.clearAll();
-    syncSettingsControls(app);
+    app.openNativePauseUi();
+  } else {
+    app.closeNativeUi();
   }
-  const debugButton = document.getElementById("menu-debug");
-  debugButton?.setAttribute("aria-pressed", isHudOpen() ? "true" : "false");
-  runtimeState.menuOpen = Boolean(open);
-}
-
-function isMenuOpen(): boolean {
-  return document.getElementById("main-menu")?.hidden === false;
+  runtimeState.menuOpen = false;
+  updateMenuShortcutState(runtimeState);
 }
 
 function setSettingsOpen(runtimeState: HudRuntimeState, open: boolean): void {
@@ -121,10 +93,6 @@ function setSettingsOpen(runtimeState: HudRuntimeState, open: boolean): void {
     button.setAttribute("aria-expanded", open ? "true" : "false");
   }
   runtimeState.settingsOpen = Boolean(open);
-}
-
-function isSettingsOpen(): boolean {
-  return document.getElementById("settings-panel")?.hidden === false;
 }
 
 function setLookSensitivity(app: HudMenuApp, runtimeState: HudRuntimeState, value: number): void {
@@ -182,6 +150,7 @@ export function updateDom(state: HudRuntimeState): void {
   if (state.failed || (state.ready && !state.ok)) {
     setHudOpen(state, true);
   }
+  updateMenuShortcutState(state);
   setText("center", `${state.centerX}, ${state.centerZ}`);
   setText("camera", `${state.cameraX.toFixed(1)}, ${state.cameraY.toFixed(1)}, ${state.cameraZ.toFixed(1)}`);
   setText("mode", state.movementMode);
@@ -220,8 +189,16 @@ function setText(id: string, value: string): void {
   if (element) element.textContent = value;
 }
 
-function isHudOpen(): boolean {
-  return document.getElementById("runtime-hud")?.hidden === false;
+function updateMenuShortcutState(state: HudRuntimeState): void {
+  const menu = document.getElementById("main-menu");
+  if (menu) {
+    menu.hidden = true;
+  }
+  const toggle = document.getElementById("hud-toggle");
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", state.uiActive === true ? "true" : "false");
+  }
+  state.menuOpen = false;
 }
 
 export function setHudOpen(runtimeState: HudRuntimeState, open: boolean): void {

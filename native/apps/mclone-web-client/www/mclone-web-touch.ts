@@ -23,6 +23,9 @@ export interface TouchControlApp {
   setTouchMovementImpulse(left: number, forward: number, active: boolean): void;
   queueMouseDelta(dx: number, dy: number): void;
   currentMovementImpulse(): TouchMovementImpulse;
+  handleNativeUiPointerMove(clientX: number, clientY: number, pointerType?: string): Record<string, any> | null;
+  handleNativeUiPointerDown(clientX: number, clientY: number, pointerType?: string): Record<string, any> | null;
+  handleNativeUiPointerUp(clientX: number, clientY: number, pointerType?: string): Record<string, any> | null;
 }
 
 interface TouchRuntimeState extends Record<string, any> {
@@ -32,6 +35,7 @@ interface TouchRuntimeState extends Record<string, any> {
   touchMovementForwardImpulse?: number;
   touchLookActive?: boolean;
   touchButtonActiveCount?: number;
+  uiActive?: boolean;
 }
 
 export interface TouchControlSnapshot {
@@ -110,6 +114,10 @@ export class TouchControls {
     }
     this.markTouchEvent();
     event.preventDefault();
+    if (this.runtimeState.uiActive === true) {
+      this.app.handleNativeUiPointerDown(event.clientX, event.clientY, "touch");
+      return;
+    }
     this.setVisible(true);
     this.canvas.focus();
     const rect = this.canvas.getBoundingClientRect();
@@ -122,6 +130,12 @@ export class TouchControls {
   }
 
   private onCanvasPointerMove(event: PointerEvent): void {
+    if (this.runtimeState.uiActive === true && isTouchPointer(event)) {
+      this.markTouchEvent();
+      event.preventDefault();
+      this.app.handleNativeUiPointerMove(event.clientX, event.clientY, "touch");
+      return;
+    }
     if (event.pointerId === this.movementPointerId) {
       this.markTouchEvent();
       event.preventDefault();
@@ -134,6 +148,12 @@ export class TouchControls {
   }
 
   private onCanvasPointerEnd(event: PointerEvent): void {
+    if (this.runtimeState.uiActive === true && isTouchPointer(event)) {
+      this.markTouchEvent();
+      event.preventDefault();
+      this.app.handleNativeUiPointerUp(event.clientX, event.clientY, "touch");
+      return;
+    }
     if (event.pointerId === this.movementPointerId) {
       this.markTouchEvent();
       event.preventDefault();
@@ -156,6 +176,9 @@ export class TouchControls {
     this.markTouchEvent();
     event.preventDefault();
     event.stopPropagation();
+    if (this.runtimeState.uiActive === true) {
+      return;
+    }
     this.setVisible(true);
     trySetPointerCapture(target, event.pointerId);
     this.buttonPointers.set(event.pointerId, key);
@@ -167,6 +190,10 @@ export class TouchControls {
   private onButtonPointerEnd(event: PointerEvent): void {
     const key = this.buttonPointers.get(event.pointerId);
     if (!key) {
+      if (this.runtimeState.uiActive === true) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
       return;
     }
     this.markTouchEvent();

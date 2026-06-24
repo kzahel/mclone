@@ -1,6 +1,6 @@
 # 072: Native UI DOM Retirement
 
-Status: active high-priority parent; Slices 1-2 landed.
+Status: active high-priority parent; Slices 1-3 core menu/input path landed.
 
 ## Purpose
 
@@ -200,21 +200,21 @@ Capture and inspect a browser screenshot with the native UI visible.
 
 Goal: the browser menu content is native UI; TS only forwards input and applies returned actions.
 
-- [ ] Route browser pointer/key events to the Rust UI first when a screen is active.
-- [ ] Add/adjust wasm exports for:
+- [x] Route browser pointer/key events to the Rust UI first when a screen is active.
+- [x] Add/adjust wasm exports for:
   - open pause/menu
   - process UI input
   - query whether UI is active/covers world
   - drain/apply `GameUiAction` results or return action reports
-- [ ] Apply shared actions in `mclone-web-app.ts` / `WebChunkRenderSession`:
+- [x] Apply shared actions in `mclone-web-app.ts` / `WebChunkRenderSession`:
   - resume/start closes UI and restores gameplay input
   - render distance changes replace hardcoded `RADIUS_CHUNKS`
-  - debug pane toggles native rendered debug UI
   - section occlusion/fullbright options update web render options where supported
   - shutdown/title behavior is explicit if supported, disabled if not
-- [ ] Remove DOM menu button handlers for `#main-menu`, `#menu-resume`, `#menu-debug`, `#menu-settings`.
-- [ ] Keep only a platform shortcut for opening native menu on touch, such as a gesture or a temporary invisible/native-rendered hamburger hit target.
-- [ ] Update this doc's status/landed section, commit, and report the next high-value step.
+- [ ] Add native-rendered debug pane toggles once Slice 4 moves debug/status presentation out of DOM.
+- [x] Remove DOM menu button handlers for `#main-menu`, `#menu-resume`, `#menu-debug`, `#menu-settings`.
+- [x] Keep only a platform shortcut for opening native menu on touch, such as a gesture or a temporary invisible/native-rendered hamburger hit target.
+- [x] Update this doc's status/landed section, commit, and report the next high-value step.
 
 Validation:
 
@@ -325,6 +325,17 @@ Do not leave a completed chunk uncommitted unless the user explicitly asks not t
 - Should debug HUD formatting live entirely in `mclone-ui`, or in shared runtime presentation structs consumed by `mclone-ui`?
 
 ## Landed
+
+### 2026-06-24 - Slice 3 Web Menu Input And Action Application
+
+- Added wasm-facing native UI input/action exports on `WebChunkRenderSession`: pause/menu open, pointer move/down/up, Escape key handling, status fields, and stable action reports.
+- Routed browser mouse, keyboard, and touch input through the shared Rust `GameUi` before gameplay while a native screen is active; Escape now opens pause from gameplay and resumes/backs out through shared UI actions.
+- Moved web render radius out of the hardcoded `RADIUS_CHUNKS` path and applied shared `SetRenderDistance`, section occlusion, fullbright, title/resume, and quit/shutdown intents in the web adapter/session boundary.
+- Removed authoritative DOM menu button handlers. The hamburger remains only as a browser shortcut for opening/closing the native pause UI; the legacy DOM menu stays hidden until the burn-down slices delete it.
+- Extended smoke coverage so desktop web opens the native title UI, clicks Options, backs out with Escape, starts the world through native UI, and captures `/tmp/mclone-native-web-ui-canvas.png`; mobile smoke opens native pause from the hamburger, keeps the DOM menu hidden, resumes with Escape, and captures `/tmp/mclone-native-web-mobile-ui-canvas.png`.
+- Validation: `cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown`; `pnpm native:web:build`; `pnpm native:web:typecheck`; `pnpm native:web:app-smoke`; `pnpm native:web:mobile-smoke`; `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-web-client`; `pnpm native:movement:smoke`; `git diff --check`.
+- Screenshots inspected: `/tmp/mclone-native-web-ui-canvas.png` showed the shared title menu; `/tmp/mclone-native-web-mobile-ui-canvas.png` showed the shared pause menu over the mobile canvas.
+- Known follow-up: Slice 4 should move debug/status/crosshair/settings presentation out of DOM and add a native-rendered debug toggle path; Slice 5 should replace the still-visible DOM touch controls with native widgets.
 
 ### 2026-06-23 - Slice 2 Web GUI Renderer Integration
 

@@ -60,6 +60,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     : appLoop ? "/tmp/mclone-native-web-app-canvas.png" : "/tmp/mclone-native-web-canvas.png");
 const nativeUiCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_UI_CANVAS_SCREENSHOT
   ?? "/tmp/mclone-native-web-ui-canvas.png";
+const mobileNativeUiCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_UI_CANVAS_SCREENSHOT
+  ?? "/tmp/mclone-native-web-mobile-ui-canvas.png";
 const movementPerfReportPath = process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_REPORT
   ?? "/tmp/mclone-native-web-movement-perf.json";
 const movementPerfChunkBoundaries = Math.max(
@@ -672,17 +674,59 @@ async function captureNativeUiProbe(page, canvas) {
     timeout: 60_000,
   });
   const canvasPixels = analyzePng(canvasPng);
-  await page.evaluate(() => {
-    globalThis.__mcloneWebApp?.closeNativeUi?.();
-  });
+
+  await clickCanvasFraction(canvas, 0.5, 0.55);
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.uiActive === true
+        && state.nativeUiScreen === "options"
+        && state.lastUiAction?.action === "openOptions";
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
+  const openedOptions = await readNativeUiState(page);
+
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.uiActive === true
+        && state.nativeUiScreen === "title"
+        && state.lastUiAction?.action === "backToTitle";
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
+  const backedToTitle = await readNativeUiState(page);
+
+  await clickCanvasFraction(canvas, 0.5, 0.45);
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.uiActive === false
+        && state.nativeUiScreen === "none"
+        && state.lastUiAction?.action === "startWorld";
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
+  const startedWorld = await readNativeUiState(page);
   return {
     ok: state.uiActive === true
       && state.uiCoversWorld === true
       && Number(state.guiCommandCount) > 500
       && canvasPixels.nonClearInteriorPixelCount > 128
-      && canvasPixels.distinctInteriorColorCount > 2,
+      && canvasPixels.distinctInteriorColorCount > 2
+      && openedOptions.nativeUiScreen === "options"
+      && backedToTitle.nativeUiScreen === "title"
+      && startedWorld.uiActive === false,
     requestedStatus,
     state,
+    openedOptions,
+    backedToTitle,
+    startedWorld,
     canvasScreenshotPath: nativeUiCanvasScreenshotPath,
     canvasPixels,
   };
@@ -860,44 +904,42 @@ async function exerciseMobileTouchControls(page, canvas) {
   const buttonProbe = await exerciseTouchButton(page, "jump", 41);
   await canvas.evaluate((element) => element.focus());
 
-  // The hamburger now opens the main menu; the runtime/debug stats live behind
-  // the menu's "Debug info" entry.
+  // The hamburger is now only a platform shortcut for the native-rendered pause UI.
   await page.locator("#hud-toggle").click();
   await page.waitForFunction(
-    () => document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "true"
-      && globalThis.__mcloneWebApp?.state?.menuOpen === true,
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "true"
+        && document.getElementById("main-menu")?.hidden === true
+        && state?.uiActive === true
+        && state.nativeUiScreen === "pause"
+        && state.menuOpen === false
+        && state.lastReport?.uiActive === true
+        && Number(state.lastReport?.guiCommandCount) > 100;
+    },
     undefined,
     { timeout: 10_000 },
   );
-  const openedMenu = await readMenuState(page);
+  const openedNativeMenu = await readNativeUiState(page);
+  const nativeMenuCanvasPng = await canvas.screenshot({
+    path: mobileNativeUiCanvasScreenshotPath,
+    timeout: 60_000,
+  });
+  const nativeMenuCanvasPixels = analyzePng(nativeMenuCanvasPng);
 
-  await page.locator("#menu-debug").click();
+  await page.keyboard.press("Escape");
   await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.hudOpen === true
-      && document.getElementById("runtime-hud")?.hidden === false
-      && globalThis.__mcloneWebApp?.state?.menuOpen === false,
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "false"
+        && state?.uiActive === false
+        && state.nativeUiScreen === "none"
+        && state.menuOpen === false;
+    },
     undefined,
     { timeout: 10_000 },
   );
-  const openedHud = await readMenuState(page);
-
-  // Re-open the menu and toggle the stats panel back off so the run ends in the
-  // clean mobile view (menu and debug HUD both closed).
-  await page.locator("#hud-toggle").click();
-  await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.menuOpen === true,
-    undefined,
-    { timeout: 10_000 },
-  );
-  await page.locator("#menu-debug").click();
-  await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.hudOpen === false
-      && globalThis.__mcloneWebApp?.state?.menuOpen === false
-      && document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "false",
-    undefined,
-    { timeout: 10_000 },
-  );
-  const closedHud = await readMenuState(page);
+  const closedNativeMenu = await readNativeUiState(page);
 
   return {
     ok: initial.hudOpen === false
@@ -907,18 +949,22 @@ async function exerciseMobileTouchControls(page, canvas) {
       && movementProbe.ok
       && lookProbe.ok
       && buttonProbe.ok
-      && openedMenu.menuOpen === true
-      && openedHud.hudOpen === true
-      && closedHud.hudOpen === false
-      && closedHud.menuOpen === false,
+      && openedNativeMenu.uiActive === true
+      && openedNativeMenu.nativeUiScreen === "pause"
+      && openedNativeMenu.menuHidden === true
+      && nativeMenuCanvasPixels.nonClearInteriorPixelCount > 128
+      && nativeMenuCanvasPixels.distinctInteriorColorCount > 2
+      && closedNativeMenu.uiActive === false
+      && closedNativeMenu.menuOpen === false,
     initial,
     movement: movementProbe,
     look: lookProbe,
     button: buttonProbe,
-    menu: { opened: openedMenu },
-    hud: {
-      opened: openedHud,
-      closed: closedHud,
+    menu: {
+      opened: openedNativeMenu,
+      closed: closedNativeMenu,
+      nativeCanvasScreenshotPath: mobileNativeUiCanvasScreenshotPath,
+      nativeCanvasPixels: nativeMenuCanvasPixels,
     },
   };
 }
@@ -967,7 +1013,7 @@ async function exerciseTouchButton(page, key, pointerId) {
 }
 
 /** @param {Page} page */
-async function readMenuState(page) {
+async function readNativeUiState(page) {
   return page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
     const hud = document.getElementById("runtime-hud");
@@ -976,6 +1022,11 @@ async function readMenuState(page) {
     return {
       menuOpen: state.menuOpen,
       hudOpen: state.hudOpen,
+      uiActive: state.uiActive,
+      uiCoversWorld: state.uiCoversWorld,
+      nativeUiScreen: state.nativeUiScreen,
+      nativeUiOptionsParent: state.nativeUiOptionsParent,
+      lastUiAction: state.lastUiAction,
       hudHidden: hud?.hidden ?? null,
       menuHidden: menu?.hidden ?? null,
       ariaExpanded: toggle?.getAttribute("aria-expanded") ?? null,
@@ -1000,6 +1051,24 @@ async function dispatchKeyboardEvent(page, type, { code, key }) {
     },
     { type, code, key },
   );
+}
+
+/**
+ * @param {Locator} canvas
+ * @param {number} xFraction
+ * @param {number} yFraction
+ */
+async function clickCanvasFraction(canvas, xFraction, yFraction) {
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error("canvas bounding box was unavailable");
+  }
+  await canvas.click({
+    position: {
+      x: box.width * xFraction,
+      y: box.height * yFraction,
+    },
+  });
 }
 
 /**

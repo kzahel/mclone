@@ -28,6 +28,11 @@ export interface InputBindingApp {
   setInputKey(name: string, down: boolean): boolean;
   queueMouseDelta(dx: number, dy: number): void;
   interactBlock(action: string): Promise<any>;
+  openNativePauseUi(): WasmReport | null;
+  handleNativeUiKey(key: string): WasmReport | null;
+  handleNativeUiPointerMove(clientX: number, clientY: number, pointerType?: string): WasmReport | null;
+  handleNativeUiPointerDown(clientX: number, clientY: number, pointerType?: string): WasmReport | null;
+  handleNativeUiPointerUp(clientX: number, clientY: number, pointerType?: string): WasmReport | null;
   requestPointerLock(): void;
   updatePointerLockState(): void;
   syncCanvasSize(): void;
@@ -45,6 +50,20 @@ export function bindInput(
   updateDom: () => void,
 ): void {
   window.addEventListener("keydown", (event) => {
+    if (isEscapeKey(event)) {
+      event.preventDefault();
+      if (runtimeState.uiActive === true) {
+        app.handleNativeUiKey("escape");
+      } else if (!event.repeat) {
+        app.openNativePauseUi();
+      }
+      updateDom();
+      return;
+    }
+    if (runtimeState.uiActive === true) {
+      event.preventDefault();
+      return;
+    }
     if (isPhysicalKey(event, "KeyN", "n") && !event.repeat) {
       event.preventDefault();
       const camera = app.session?.toggleMovementMode?.();
@@ -70,11 +89,19 @@ export function bindInput(
     const key = inputNameForEvent(event);
     if (!key) return;
     event.preventDefault();
+    if (runtimeState.uiActive === true) {
+      app.setInputKey(key, false);
+      return;
+    }
     app.setInputKey(key, false);
   });
 
   app.canvas.addEventListener("click", (event) => {
     if (app.touchControls?.shouldIgnoreMouseEvent()) {
+      event.preventDefault();
+      return;
+    }
+    if (runtimeState.uiActive === true) {
       event.preventDefault();
       return;
     }
@@ -85,6 +112,14 @@ export function bindInput(
   app.canvas.addEventListener("mousedown", (event) => {
     if (app.touchControls?.shouldIgnoreMouseEvent()) {
       event.preventDefault();
+      return;
+    }
+    if (runtimeState.uiActive === true) {
+      event.preventDefault();
+      app.canvas.focus();
+      if (event.button === 0) {
+        app.handleNativeUiPointerDown(event.clientX, event.clientY, "mouse");
+      }
       return;
     }
     app.pointerDragging = true;
@@ -100,6 +135,13 @@ export function bindInput(
   });
 
   window.addEventListener("mouseup", (event) => {
+    if (runtimeState.uiActive === true) {
+      if (event.button === 0) {
+        event.preventDefault();
+        app.handleNativeUiPointerUp(event.clientX, event.clientY, "mouse");
+      }
+      return;
+    }
     const pointerDown = app.pointerDown;
     app.pointerDragging = false;
     app.pointerDown = null;
@@ -123,6 +165,10 @@ export function bindInput(
     if (app.touchControls?.shouldIgnoreMouseEvent()) {
       return;
     }
+    if (runtimeState.uiActive === true) {
+      app.handleNativeUiPointerMove(event.clientX, event.clientY, "mouse");
+      return;
+    }
     if (document.pointerLockElement === app.canvas) {
       app.queueMouseDelta(event.movementX, event.movementY);
     } else if (app.pointerDragging) {
@@ -132,6 +178,9 @@ export function bindInput(
 
   app.canvas.addEventListener("wheel", (event) => {
     event.preventDefault();
+    if (runtimeState.uiActive === true) {
+      return;
+    }
     const amount = event.deltaMode === WheelEvent.DOM_DELTA_PIXEL
       ? -event.deltaY * 0.001
       : -event.deltaY * 0.12;
@@ -149,6 +198,10 @@ export function bindInput(
     app.syncCanvasSize();
     updateDom();
   });
+}
+
+function isEscapeKey(event: KeyboardEvent): boolean {
+  return keyboardCode(event) === "Escape" || (keyboardCode(event) === null && event.key === "Escape");
 }
 
 function inputNameForEvent(event: KeyboardEvent): string | null {
