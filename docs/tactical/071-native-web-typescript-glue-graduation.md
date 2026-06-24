@@ -1,28 +1,42 @@
 # 071: Native Web Glue TypeScript Graduation
 
-Status: **App/touch/input/HUD, render-compiler, server-worker, and thread-smoke worker TypeScript slices landed; Stage 5 cleanup remains.**
+Status: **Complete: native web glue TypeScript graduation landed; residual JS inventory recorded.**
 
 ## Context
 
-070 hardened the native web glue without changing deploy shape: the browser still loads
-plain ES modules from `native/apps/mclone-web-client/www/`, and `scripts/deploy-native-web.sh`
-still copies that directory into `dist-native-web` before adding the wasm-bindgen bundle and
-the Minecraft asset pack.
+070 hardened the native web glue with `checkJs`, ABI lock modules, and an app/touch/input/HUD
+module split. 071 graduated that authored browser glue to real TypeScript while preserving the
+runtime module graph and smoke/deploy behaviour. The browser still loads `.js` ES modules, but
+smoke/deploy now serve a staged generated root at `native/target/mclone-web-client-www`: static
+assets and residual JS are copied there, while authored `www/**/*.ts` is emitted to matching
+`.js` filenames.
 
-That was the right first step while `mclone-web-app.js` was oversized. 070 now has a cleaner
-module split:
+Final authored TypeScript inventory:
 
-| File | Lines | Current role |
+| Source | Source lines | Emitted JS lines | Role |
+|---|---:|---:|---|
+| `www/mclone-web-app.ts` | 967 | 776 | entry module, URL/versioning, runtime global, `WebChunkApp`, bootstrap |
+| `www/mclone-web-touch.ts` | 352 | 273 | touch controls and touch capability helpers |
+| `www/mclone-web-input.ts` | 289 | 232 | keyboard/mouse/hotbar binding |
+| `www/mclone-web-hud.ts` | 261 | 214 | HUD/menu/settings DOM glue |
+| `www/mclone-render-compiler-shared.ts` | 644 | 467 | render compiler app/worker shared contracts |
+| `www/mclone-render-compiler-worker.ts` | 400 | 292 | render compiler worker entry |
+| `www/mclone-integrated-server-worker.ts` | 435 | 333 | integrated server worker entry |
+| `www/mclone-server-job-worker.ts` | 164 | 119 | worldgen/light job worker entry |
+| `www/mclone-thread-smoke-worker.ts` | 47 | 39 | browser threading smoke worker |
+
+Residual source JS is intentional:
+
+| Source | Lines | Why it stays JS |
 |---|---:|---|
-| `www/mclone-web-app.js` | 962 | entry module, URL/versioning, runtime global, `WebChunkApp`, bootstrap |
-| `www/mclone-web-touch.js` | 339 | touch controls and touch capability helpers |
-| `www/mclone-web-input.js` | 297 | keyboard/mouse/hotbar binding |
-| `www/mclone-web-hud.js` | 291 | HUD/menu/settings DOM glue |
+| `www/mclone-web-smoke.js` | 772 | Browser smoke entry only; still uses JSDoc/checkJs because it is validation harness glue, not player runtime glue. |
+| `www/mclone-render-compiler-abi.js` | 33 | Single source parsed by `render_compiler_abi_lock.rs`; paired with `mclone-render-compiler-abi.d.ts`. |
+| `www/mclone-runner-shared-abi.js` | 32 | Single source parsed by `runner_shared_abi_lock.rs`; paired with `mclone-runner-shared-abi.d.ts`. |
 
-The current `pnpm native:web:typecheck` gate uses `tsc --checkJs` plus JSDoc typedefs. That
-keeps the code checkable, but the module split makes the remaining JSDoc machinery mostly
-temporary scaffolding. This tactical graduates the authored browser glue to real TypeScript
-while preserving the runtime module graph and smoke/deploy behaviour.
+Node-side tooling stays `.mjs` (`scripts/build-web-glue.mjs`, `scripts/browser-smoke.mjs`) and
+continues to rely on JSDoc/checkJs. The current `pnpm native:web:typecheck` gate therefore keeps
+`allowJs`/`checkJs` enabled for residual JS and tooling, while the app and worker glue that ships
+as the player-facing native web path is authored as `.ts`.
 
 ## Goals
 
@@ -60,7 +74,8 @@ while preserving the runtime module graph and smoke/deploy behaviour.
 Use the existing `www/` directory for authored web sources and static assets:
 
 - Converted source files become `www/*.ts`.
-- Unconverted shipped glue can remain `www/*.js` during the migration.
+- Residual shipped JS can remain `www/*.js` only where it is intentionally not part of the
+  authored app/worker glue migration.
 - `app.html` and `index.html` keep importing `.js` entrypoints.
 - TypeScript source imports sibling modules using `.js` specifiers.
 
@@ -159,11 +174,11 @@ Only after app/touch/input/HUD are stable.
 
 ### Stage 5 - Cleanup
 
-- [ ] Remove obsolete JSDoc typedef blocks once their TS replacements exist.
-- [ ] Update comments in deploy/typecheck scripts that still describe the old no-emit-only deploy
+- [x] Remove obsolete JSDoc typedef blocks once their TS replacements exist.
+- [x] Update comments in deploy/typecheck scripts that still describe the old no-emit-only deploy
       shape.
-- [ ] Refresh final line counts and any residual `.js`/`.ts` inventory in this doc.
-- [ ] Decide whether optional eslint is still worth doing, or leave it as a separate 070/071
+- [x] Refresh final line counts and any residual `.js`/`.ts` inventory in this doc.
+- [x] Decide whether optional eslint is still worth doing, or leave it as a separate 070/071
       follow-up.
 
 ## Validation
@@ -521,6 +536,45 @@ present, no `.ts`), `pnpm native:web:app-smoke`, `pnpm native:web:chunk-smoke` p
 
 Implementation commit: `f870b9a12e6dafd198e90698f48d80f4945e0a2c`
 (`071: graduate thread smoke worker glue to TypeScript`).
+
+### Stage 5 — cleanup and residual inventory (landed)
+
+The cleanup slice refreshed the tactical's final inventory and updated stale staging/typecheck
+comments now that app and worker glue has finished graduating from JSDoc-authored JavaScript to
+TypeScript. No runtime source, worker protocol, import specifier, URL, render, input, touch, HUD,
+or Rust behaviour changed.
+
+Final source inventory is:
+
+- Authored TypeScript player/runtime glue: 9 files, 3,559 source lines.
+- Residual shipped JS: 3 files, 837 source lines (`mclone-web-smoke.js` plus the two ABI lock
+  single-source modules).
+- ABI declaration shims: 2 files, 23 source lines.
+- Staged web root: 12 emitted/copied `.js` files and no `.ts` files.
+
+Residual JS is intentional. `mclone-web-smoke.js` is a browser validation entry, not the
+player-facing app runtime. `mclone-render-compiler-abi.js` and `mclone-runner-shared-abi.js` stay
+JavaScript because Rust ABI lock tests parse those files directly as the single source of truth;
+their `.d.ts` shims provide TypeScript visibility without moving the lock source. Node-side
+`.mjs` tooling remains outside the shipped browser module graph and continues to use checkJs/JSDoc.
+
+Optional eslint remains deferred. The existing `tsc --noEmit` gate covers the converted TS and
+residual JS/tooling boundaries without adding another formatter/linter policy in this tactical.
+
+Correctness fences held. Pre-slice and final `pnpm native:web:chunk-smoke` both produced
+`0ba8251f6c0dba012782e80921b8d45ead799a216decf50e9041958babcb6a4c` for
+`/tmp/mclone-native-web-canvas.png`; the chunk canvas was visually inspected. URL/import stability
+is unchanged: authored `.ts` modules keep `.js` sibling import specifiers, worker constructors
+still target emitted `.js` URLs, and deploy still ships browser-loadable `.js` with no `.ts`.
+
+Validation (all green): `pnpm native:web:chunk-smoke` baseline, `pnpm native:web:glue`,
+`pnpm native:web:typecheck`, `node --check native/apps/mclone-web-client/scripts/build-web-glue.mjs`,
+`bash -n scripts/deploy-native-web.sh`, `pnpm native:web:bundle`, explicit staged/deploy
+inventory checks (all expected emitted/copied `.js`, no `.ts`), `pnpm native:web:chunk-smoke`
+plus final sha256, and `git diff --check`.
+
+Implementation cleanup commit: `a9b3d87cf967461b3964052d9661efafc8ccd42a`
+(`071: clean up native web TS staging comments`).
 
 ## Relationship to Other Tacticals
 
