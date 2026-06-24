@@ -2,8 +2,8 @@ use glam::Vec3;
 #[cfg(test)]
 use mclone_core::ChunkPos;
 use mclone_ui::{
-    Color, Font, GameOptionsParent, GameScreen, GameUi, GameUiRenderState, GuiDrawList, GuiScale,
-    Rect,
+    DebugOverlay, GameOptionsParent, GameScreen, GameUi, GameUiRenderState, GuiDrawList, GuiScale,
+    render_debug_overlay,
 };
 
 use crate::app::RenderStreamStats;
@@ -183,34 +183,10 @@ impl HeadlessScreenshotUi {
 }
 
 pub(crate) fn render_debug_pane(scale: GuiScale, draw: &mut GuiDrawList, stats: &DebugPaneStats) {
-    let font = Font::default();
-    let line_height = font.line_height();
     let lines = stats.lines();
-    let panel_width = 236.0_f32.min(scale.width - 8.0).max(120.0);
-    let panel_height = 8.0 + line_height * lines.len() as f32;
-    let panel = Rect::new(
-        4.0,
-        4.0,
-        panel_width,
-        panel_height.min((scale.height - 8.0).max(0.0)),
-    );
-    draw.fill(panel, Color::rgba(6, 9, 10, 185));
-    draw.outline(panel, Color::rgba(110, 140, 136, 230));
-    draw.push_clip(panel.inset(4.0));
-    let text = Color::rgba(220, 238, 220, 255);
-    let muted = Color::rgba(165, 186, 176, 255);
-    let mut y = panel.y + 5.0;
-    for (index, line) in lines.iter().enumerate() {
-        font.draw_shadow(
-            draw,
-            line,
-            panel.x + 6.0,
-            y,
-            if index == 0 { text } else { muted },
-        );
-        y += line_height;
-    }
-    draw.pop_clip();
+    let title = lines.first().cloned().unwrap_or_else(|| "DEBUG".to_owned());
+    let overlay = DebugOverlay::new(title, lines.into_iter().skip(1));
+    render_debug_overlay(scale, draw, &overlay);
 }
 
 pub(crate) fn render_static_title_ui(width: u32, height: u32) -> GuiDrawList {

@@ -1,6 +1,6 @@
 # 072: Native UI DOM Retirement
 
-Status: active high-priority parent; Slices 1-3 core menu/input path landed.
+Status: active high-priority parent; Slices 1-4 core menu/input/HUD path landed; touch controls and settings remain.
 
 ## Purpose
 
@@ -211,7 +211,7 @@ Goal: the browser menu content is native UI; TS only forwards input and applies 
   - render distance changes replace hardcoded `RADIUS_CHUNKS`
   - section occlusion/fullbright options update web render options where supported
   - shutdown/title behavior is explicit if supported, disabled if not
-- [ ] Add native-rendered debug pane toggles once Slice 4 moves debug/status presentation out of DOM.
+- [x] Add native-rendered debug pane toggles once Slice 4 moves debug/status presentation out of DOM.
 - [x] Remove DOM menu button handlers for `#main-menu`, `#menu-resume`, `#menu-debug`, `#menu-settings`.
 - [x] Keep only a platform shortcut for opening native menu on touch, such as a gesture or a temporary invisible/native-rendered hamburger hit target.
 - [x] Update this doc's status/landed section, commit, and report the next high-value step.
@@ -232,13 +232,13 @@ Inspect desktop and mobile web screenshots with menu open/closed.
 
 Goal: remove the remaining visible HUD/status DOM.
 
-- [ ] Move runtime/debug HUD formatting to Rust UI or shared presentation structs.
-- [ ] Render debug pane through `mclone-ui` on both desktop and web.
-- [ ] Render boot/ready/failure status through native UI once Rust is loaded.
-- [ ] Render crosshair through native UI or renderer-owned screen overlay, not DOM.
+- [x] Move runtime/debug HUD formatting to Rust UI or shared presentation structs.
+- [x] Render debug pane through `mclone-ui` on both desktop and web.
+- [x] Render boot/ready/failure status through native UI once Rust is loaded.
+- [x] Render crosshair through native UI or renderer-owned screen overlay, not DOM.
 - [ ] Move look sensitivity into native UI state/action; persist it via a platform storage adapter instead of direct HUD DOM ownership.
-- [ ] Delete `#runtime-hud`, `#status`, `.hud`, `.status`, `.crosshair`, and associated DOM update code when replaced.
-- [ ] Update this doc's status/landed section, commit, and report the next high-value step.
+- [x] Delete `#runtime-hud`, `#status`, `.hud`, `.status`, `.crosshair`, and associated DOM update code when replaced.
+- [x] Update this doc's status/landed section, commit, and report the next high-value step.
 
 Validation:
 
@@ -325,6 +325,17 @@ Do not leave a completed chunk uncommitted unless the user explicitly asks not t
 - Should debug HUD formatting live entirely in `mclone-ui`, or in shared runtime presentation structs consumed by `mclone-ui`?
 
 ## Landed
+
+### 2026-06-24 - Slice 4 Native Debug HUD, Status, And Crosshair
+
+- Added shared platform-neutral `DebugOverlay`, `StatusOverlay`, crosshair rendering, and offset-capable debug overlay helpers to `mclone-ui`, with focused overlay tests.
+- Switched native desktop debug-pane drawing to the shared `mclone-ui` overlay renderer while keeping debug text/application behavior in the desktop adapter.
+- Added web `WebChunkRenderSession` native overlay state and wasm exports for debug visibility and status messages; web gameplay frames now draw native crosshair, status, and debug HUD through `mclone-render::gui`.
+- Removed visible debug HUD, status panel, crosshair, settings panel, and DOM menu markup/CSS from `app.html`; `mclone-web-hud.ts` now keeps only stored touch sensitivity and the hamburger shortcut plumbing.
+- Added web backquote handling for the native debug overlay and updated browser smoke probes for removed DOM nodes.
+- Validation: `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-native-client -p mclone-web-client`; `cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown`; `pnpm native:web:build`; `pnpm native:web:typecheck`; `pnpm native:web:app-smoke`; `pnpm native:web:mobile-smoke`; `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --headless-ui /tmp/mclone-ui-title.png --width 960 --height 540`; `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-native-ui-debug.png --width 1280 --height 720 --screenshot-debug-pane true`; `git diff --check`.
+- Screenshots inspected: `/tmp/mclone-ui-title.png`, `/tmp/mclone-native-ui-debug.png`, `/tmp/mclone-native-web-app-canvas.png`, `/tmp/mclone-native-web-ui-canvas.png`, and `/tmp/mclone-native-web-mobile-ui-canvas.png`.
+- Known follow-up: move look sensitivity into native UI/settings with a platform storage adapter, then replace the still-visible DOM touch controls with native-rendered widgets in Slice 5.
 
 ### 2026-06-24 - Slice 3 Web Menu Input And Action Application
 

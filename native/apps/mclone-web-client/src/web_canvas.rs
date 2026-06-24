@@ -47,8 +47,9 @@ use mclone_render_session::{
 };
 use mclone_server::ServerRunnerKind;
 use mclone_ui::{
-    GameFramePacingMode, GameOptionsParent, GameScreen, GameUi, GameUiAction, GameUiRenderState,
-    GuiKey, GuiScale, Point,
+    DebugOverlay, GameFramePacingMode, GameOptionsParent, GameScreen, GameUi, GameUiAction,
+    GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, render_crosshair,
+    render_debug_overlay_at, render_status_overlay,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -837,6 +838,8 @@ struct GeneratedChunkRenderReport {
     ui_covers_world: bool,
     ui_screen: &'static str,
     ui_options_parent: Option<&'static str>,
+    debug_overlay_visible: bool,
+    status_overlay_visible: bool,
     section_occlusion_culling: bool,
     force_fullbright: bool,
     compile_request_id: u32,
@@ -1012,6 +1015,8 @@ impl GeneratedChunkRenderReport {
         if let Some(parent) = self.ui_options_parent {
             set_string(&object, "uiOptionsParent", parent)?;
         }
+        set_bool(&object, "debugOverlayVisible", self.debug_overlay_visible)?;
+        set_bool(&object, "statusOverlayVisible", self.status_overlay_visible)?;
         set_bool(
             &object,
             "sectionOcclusionCulling",
@@ -2200,6 +2205,8 @@ pub struct WebChunkRenderSession {
     actors: ActorDrawResources,
     gui: GuiRenderer,
     ui: GameUi,
+    debug_overlay_visible: bool,
+    status_overlay: StatusOverlay,
     section_occlusion_culling: bool,
     force_fullbright: bool,
     loaded_chunk_positions: BTreeSet<ChunkPos>,
@@ -2234,6 +2241,31 @@ impl WebChunkRenderSession {
 
     #[wasm_bindgen(js_name = uiStatus)]
     pub fn ui_status(&self) -> Result<JsValue, JsValue> {
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = setDebugOverlayVisible)]
+    pub fn set_debug_overlay_visible(&mut self, visible: bool) -> Result<JsValue, JsValue> {
+        self.debug_overlay_visible = visible;
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = setStatusOverlay)]
+    pub fn set_status_overlay(
+        &mut self,
+        message: &str,
+        ok: bool,
+        visible: bool,
+    ) -> Result<JsValue, JsValue> {
+        self.status_overlay = if visible {
+            StatusOverlay {
+                message: message.to_owned(),
+                ok,
+                visible: true,
+            }
+        } else {
+            StatusOverlay::hidden()
+        };
         self.ui_status_to_js_value().map_err(JsValue::from)
     }
 
@@ -2509,6 +2541,12 @@ impl WebChunkRenderSession {
             self.section_occlusion_culling,
         )?;
         set_bool(object, "forceFullbright", self.force_fullbright)?;
+        set_bool(object, "debugOverlayVisible", self.debug_overlay_visible)?;
+        set_bool(
+            object,
+            "statusOverlayVisible",
+            self.status_overlay.visible && !self.status_overlay.message.is_empty(),
+        )?;
         Ok(())
     }
 
@@ -2648,6 +2686,8 @@ impl WebChunkRenderSession {
             actors,
             gui,
             ui,
+            debug_overlay_visible: false,
+            status_overlay: StatusOverlay::hidden(),
             section_occlusion_culling: true,
             force_fullbright: false,
             loaded_chunk_positions: BTreeSet::new(),
@@ -2747,6 +2787,91 @@ impl WebChunkRenderSession {
             total_update_count: self.runtime.update_count(),
             pending_compile_job_count: self.render_compiler.pending_job_count(),
         }
+    }
+
+    fn debug_overlay(
+        &self,
+        center: ChunkPos,
+        radius_chunks: u32,
+        day_time: u64,
+        time_of_day: f32,
+        render_stats: TexturedSectionRenderStats,
+        actor_count: usize,
+        actor_stats: mclone_render::entity::ActorRenderStats,
+        runner_diagnostics: &mclone_server::ServerRunnerDiagnostics,
+    ) -> DebugOverlay {
+        let camera_state = self.camera.frame_state(&self.interaction);
+        let camera = camera_state.camera;
+        let target = self.preview_block_target_report();
+        let target_line = if target.hit.hit_type() == HitResultType::Block {
+            format!(
+                "TARGET {} {} {}",
+                target.hit.block_pos.x, target.hit.block_pos.y, target.hit.block_pos.z
+            )
+        } else {
+            "TARGET MISS".to_owned()
+        };
+        let occlusion = if self.section_occlusion_culling {
+            "ON"
+        } else {
+            "OFF"
+        };
+        let lighting = if self.force_fullbright {
+            "FULL"
+        } else {
+            "LIGHT"
+        };
+
+        DebugOverlay::new(
+            "DEBUG",
+            [
+                format!(
+                    "POS {:.1} {:.1} {:.1}",
+                    camera.eye.x, camera.eye.y, camera.eye.z
+                ),
+                format!(
+                    "CHUNK {} {} SPEED {:.1}",
+                    camera.chunk_pos.x, camera.chunk_pos.z, camera.speed_blocks_per_second
+                ),
+                format!(
+                    "MODE {} GROUND {}",
+                    camera_state.movement_mode_label(),
+                    if camera_state.on_ground { "Y" } else { "N" }
+                ),
+                format!("VIEW R{} CENTER {} {}", radius_chunks, center.x, center.z),
+                format!(
+                    "RUN {} CQ{} UQ{}",
+                    runner_diagnostics.kind.label().to_ascii_uppercase(),
+                    runner_diagnostics.command_queue_depth,
+                    runner_diagnostics.update_queue_depth
+                ),
+                format!(
+                    "CHUNKS L{} V{}",
+                    self.runtime.client().loaded_chunk_count(),
+                    self.loaded_chunk_positions.len()
+                ),
+                format!(
+                    "DRAW S {}/{} F {}/{}",
+                    render_stats.drawn_section_count,
+                    render_stats.loaded_section_count,
+                    render_stats.drawn_face_count(),
+                    render_stats.loaded_face_count()
+                ),
+                format!(
+                    "ACTOR R {}/{} I{}",
+                    actor_stats.drawn_actor_count, actor_count, actor_stats.index_count
+                ),
+                format!(
+                    "MESH B{} U{} R{}",
+                    self.mesh_build_count, self.mesh_upload_count, self.render_count
+                ),
+                format!("PENDING {}", self.render_compiler.pending_job_count()),
+                format!("TIME {} {:.3}", day_time, time_of_day),
+                format!("SLOT {}", u16::from(camera_state.selected_hotbar_slot) + 1),
+                target_line,
+                format!("OCC {}  {}", occlusion, lighting),
+            ],
+        )
     }
 
     async fn sync_carried_item(&mut self) -> Result<bool, String> {
@@ -3227,8 +3352,6 @@ impl WebChunkRenderSession {
         let ui_active = self.ui.is_active();
         let ui_covers_world = self.ui.covers_world();
         let ui_render_state = self.ui_render_state(radius_chunks);
-        let ui_draw = self.ui.render_draw_list(ui_render_state);
-        let gui_command_count = ui_draw.commands().len();
 
         let frame = self
             .context
@@ -3295,7 +3418,31 @@ impl WebChunkRenderSession {
                 .map_err(|error| format!("failed to render browser actor meshes: {error:#}"))?;
             render_stats
         };
-        if ui_active {
+        let mut ui_draw = self.ui.render_draw_list(ui_render_state);
+        if !ui_active {
+            render_crosshair(self.ui.scale(), &mut ui_draw);
+            if self.debug_overlay_visible {
+                let overlay = self.debug_overlay(
+                    center,
+                    radius_chunks,
+                    day_time,
+                    time_of_day,
+                    render_stats,
+                    actor_instances.len(),
+                    actor_stats,
+                    &runner_diagnostics,
+                );
+                render_debug_overlay_at(
+                    self.ui.scale(),
+                    &mut ui_draw,
+                    &overlay,
+                    Point { x: 4.0, y: 52.0 },
+                );
+            }
+        }
+        render_status_overlay(self.ui.scale(), &mut ui_draw, &self.status_overlay);
+        let gui_command_count = ui_draw.commands().len();
+        if gui_command_count > 0 {
             self.gui
                 .render(
                     &self.context.device,
@@ -3362,6 +3509,9 @@ impl WebChunkRenderSession {
                 Some(GameScreen::Options { parent }) => Some(options_parent_label(parent)),
                 _ => None,
             },
+            debug_overlay_visible: self.debug_overlay_visible,
+            status_overlay_visible: self.status_overlay.visible
+                && !self.status_overlay.message.is_empty(),
             section_occlusion_culling: self.section_occlusion_culling,
             force_fullbright: self.force_fullbright,
             compile_request_id: acceptance_report.request_id,

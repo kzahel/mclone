@@ -87,210 +87,6 @@
         background: currentColor;
       }
 
-      .menu {
-        position: absolute;
-        z-index: 40;
-        inset: 0;
-        display: grid;
-        place-items: center;
-        padding: 24px;
-        background: rgba(4, 6, 9, 0.62);
-        backdrop-filter: blur(4px);
-      }
-
-      .menu[hidden] {
-        display: none;
-      }
-
-      .menu-card {
-        display: grid;
-        gap: 16px;
-        width: min(340px, calc(100vw - 48px));
-        max-height: calc(100dvh - 48px);
-        overflow: auto;
-        padding: 20px;
-        border: 1px solid rgba(184, 198, 214, 0.24);
-        border-radius: 12px;
-        background: rgba(11, 16, 22, 0.94);
-        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
-      }
-
-      .menu-title {
-        margin: 0;
-        font-size: 20px;
-        font-weight: 700;
-        letter-spacing: 0.01em;
-        text-align: center;
-      }
-
-      .menu-actions {
-        display: grid;
-        gap: 10px;
-      }
-
-      .menu-button {
-        display: block;
-        width: 100%;
-        padding: 12px 14px;
-        border: 1px solid rgba(184, 198, 214, 0.24);
-        border-radius: 8px;
-        background: rgba(28, 36, 46, 0.9);
-        color: #e7edf3;
-        font: 600 14px/1.2 inherit;
-        text-align: left;
-        cursor: pointer;
-      }
-
-      .menu-button:hover {
-        background: rgba(40, 51, 64, 0.95);
-      }
-
-      .menu-button:focus-visible {
-        outline: 2px solid #80bfff;
-        outline-offset: 2px;
-      }
-
-      .menu-button[aria-pressed="true"] {
-        border-color: rgba(128, 191, 255, 0.7);
-        background: rgba(40, 64, 92, 0.95);
-      }
-
-      .settings {
-        display: grid;
-        gap: 14px;
-        padding: 14px;
-        border: 1px solid rgba(184, 198, 214, 0.18);
-        border-radius: 8px;
-        background: rgba(9, 13, 18, 0.7);
-      }
-
-      .settings[hidden] {
-        display: none;
-      }
-
-      .setting {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        align-items: center;
-        gap: 6px 10px;
-        font-size: 13px;
-      }
-
-      .setting-range {
-        grid-column: 1 / -1;
-        width: 100%;
-      }
-
-      .setting-value {
-        font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        color: #9aa8b6;
-        text-align: right;
-      }
-
-      .hud {
-        position: absolute;
-        z-index: 25;
-        top: 66px;
-        left: 16px;
-        display: grid;
-        gap: 8px;
-        width: min(300px, calc(100vw - 32px));
-        max-height: calc(100vh - 92px);
-        overflow: auto;
-        padding: 12px;
-        border: 1px solid rgba(184, 198, 214, 0.22);
-        border-radius: 8px;
-        background: rgba(9, 13, 18, 0.84);
-        backdrop-filter: blur(10px);
-      }
-
-      .hud[hidden] {
-        display: none;
-      }
-
-      .hud h1 {
-        margin: 0;
-        font-size: 14px;
-        line-height: 1.2;
-        font-weight: 700;
-      }
-
-      .stats {
-        display: grid;
-        grid-template-columns: auto auto;
-        gap: 4px 14px;
-        font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      }
-
-      .stats dt {
-        color: #9aa8b6;
-      }
-
-      .stats dd {
-        margin: 0;
-        text-align: right;
-      }
-
-      .crosshair {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        width: 18px;
-        height: 18px;
-        transform: translate(-50%, -50%);
-        opacity: 0.72;
-        pointer-events: none;
-      }
-
-      .crosshair::before,
-      .crosshair::after {
-        content: "";
-        position: absolute;
-        background: rgba(238, 244, 250, 0.86);
-      }
-
-      .crosshair::before {
-        left: 8px;
-        top: 1px;
-        width: 2px;
-        height: 16px;
-      }
-
-      .crosshair::after {
-        left: 1px;
-        top: 8px;
-        width: 16px;
-        height: 2px;
-      }
-
-      .status {
-        position: absolute;
-        z-index: 20;
-        top: 16px;
-        right: 16px;
-        max-width: min(460px, calc(100vw - 86px));
-        min-height: 0;
-        padding: 9px 12px;
-        overflow: hidden;
-        border: 1px solid rgba(184, 198, 214, 0.18);
-        border-radius: 8px;
-        background: rgba(13, 18, 24, 0.86);
-        font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        color: #aeb9c5;
-        pointer-events: none;
-        transition: opacity 160ms ease, visibility 160ms ease;
-      }
-
-      .status[data-ready="true"][data-ok="true"] {
-        display: none;
-        opacity: 0;
-        visibility: hidden;
-      }
-
-      .status[data-ok="false"] {
-        color: #ffb4b4;
-      }
-
       .touch-controls {
         position: absolute;
         z-index: 18;
@@ -434,28 +230,6 @@
           width: 40px;
           height: 40px;
         }
-
-        .hud {
-          top: 58px;
-          left: 10px;
-          width: min(300px, calc(100vw - 20px));
-          max-height: calc(100vh - 74px);
-          padding: 10px;
-        }
-
-        .status {
-          top: 10px;
-          right: 10px;
-          max-width: calc(100vw - 68px);
-        }
-
-        .stats {
-          grid-template-columns: auto;
-        }
-
-        .stats dd {
-          text-align: left;
-        }
       }
     </style>
   </head>
@@ -463,47 +237,9 @@
     <main>
       <section class="viewport">
         <canvas id="mclone-canvas" width="960" height="540" tabindex="0"></canvas>
-        <div class="crosshair" aria-hidden="true"></div>
-        <button id="hud-toggle" class="hud-toggle" type="button" aria-label="Open menu" aria-controls="main-menu" aria-expanded="false">
+        <button id="hud-toggle" class="hud-toggle" type="button" aria-label="Open menu" aria-expanded="false">
           <span class="hud-toggle-lines" aria-hidden="true"><span></span><span></span><span></span></span>
         </button>
-        <div id="main-menu" class="menu" role="dialog" aria-modal="true" aria-label="Menu" hidden>
-          <div class="menu-card" role="document">
-            <h1 class="menu-title">mclone</h1>
-            <div class="menu-actions">
-              <button id="menu-resume" class="menu-button" type="button">Resume</button>
-              <button id="menu-debug" class="menu-button" type="button" aria-controls="runtime-hud" aria-pressed="false">Debug info</button>
-              <button id="menu-settings" class="menu-button" type="button" aria-controls="settings-panel" aria-expanded="false">Settings</button>
-            </div>
-            <section id="settings-panel" class="settings" aria-label="Settings" hidden>
-              <label class="setting" for="setting-look-sensitivity">
-                <span class="setting-label">Look sensitivity</span>
-                <input id="setting-look-sensitivity" class="setting-range" type="range" min="0.5" max="5" step="0.1" value="2.4" />
-                <output id="setting-look-sensitivity-value" class="setting-value" for="setting-look-sensitivity">2.4×</output>
-              </label>
-            </section>
-          </div>
-        </div>
-        <aside id="runtime-hud" class="hud" aria-label="Runtime status" hidden>
-          <h1>mclone native web</h1>
-          <dl class="stats">
-            <dt>center</dt><dd id="center">0, 0</dd>
-            <dt>camera</dt><dd id="camera">0, 0, 0</dd>
-            <dt>mode</dt><dd id="mode">WALK</dd>
-            <dt>slot</dt><dd id="slot">1</dd>
-            <dt>ground</dt><dd id="ground">air</dd>
-            <dt>target</dt><dd id="target">-</dd>
-            <dt>action</dt><dd id="action">idle</dd>
-            <dt>chunks</dt><dd id="chunks">0</dd>
-            <dt>sections</dt><dd id="sections">0</dd>
-            <dt>time</dt><dd id="time">0 / 0.000</dd>
-            <dt>actors</dt><dd id="actors">0/0</dd>
-            <dt>pending</dt><dd id="pending">0</dd>
-            <dt>compile</dt><dd id="compile">-</dd>
-            <dt>frames</dt><dd id="frames">0</dd>
-            <dt>lock</dt><dd id="lock">off</dd>
-          </dl>
-        </aside>
         <div id="touch-controls" class="touch-controls" data-visible="false" aria-hidden="true">
           <div id="touch-joystick" class="touch-joystick" data-active="false" aria-hidden="true">
             <div id="touch-joystick-thumb" class="touch-joystick-thumb"></div>
@@ -520,7 +256,6 @@
             </button>
           </div>
         </div>
-        <div id="status" class="status" data-ok="true" data-ready="false">booting</div>
       </section>
     </main>
     <script>

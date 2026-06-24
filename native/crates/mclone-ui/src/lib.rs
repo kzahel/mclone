@@ -673,6 +673,142 @@ impl GameUiRenderState {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct DebugOverlay {
+    pub title: String,
+    pub lines: Vec<String>,
+}
+
+impl DebugOverlay {
+    pub fn new<I, S>(title: impl Into<String>, lines: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            title: title.into(),
+            lines: lines.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.title.is_empty() && self.lines.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StatusOverlay {
+    pub message: String,
+    pub ok: bool,
+    pub visible: bool,
+}
+
+impl StatusOverlay {
+    pub fn hidden() -> Self {
+        Self {
+            message: String::new(),
+            ok: true,
+            visible: false,
+        }
+    }
+
+    pub fn new(message: impl Into<String>, ok: bool) -> Self {
+        let message = message.into();
+        Self {
+            visible: !message.is_empty(),
+            message,
+            ok,
+        }
+    }
+}
+
+pub fn render_debug_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &DebugOverlay) {
+    render_debug_overlay_at(scale, draw, overlay, Point { x: 4.0, y: 4.0 });
+}
+
+pub fn render_debug_overlay_at(
+    scale: GuiScale,
+    draw: &mut GuiDrawList,
+    overlay: &DebugOverlay,
+    origin: Point,
+) {
+    if overlay.is_empty() {
+        return;
+    }
+    let font = Font::default();
+    let line_height = font.line_height();
+    let max_width = std::iter::once(overlay.title.as_str())
+        .chain(overlay.lines.iter().map(String::as_str))
+        .map(|line| font.width(line))
+        .fold(0.0_f32, f32::max);
+    let panel_width = (max_width + 14.0)
+        .max(120.0)
+        .min((scale.width - origin.x - 4.0).max(0.0));
+    let line_count = 1 + overlay.lines.len();
+    let panel_height = 8.0 + line_height * line_count as f32;
+    let panel = Rect::new(
+        origin.x,
+        origin.y,
+        panel_width,
+        panel_height.min((scale.height - origin.y - 4.0).max(0.0)),
+    );
+    draw.fill(panel, Color::rgba(6, 9, 10, 185));
+    draw.outline(panel, Color::rgba(110, 140, 136, 230));
+    draw.push_clip(panel.inset(4.0));
+    let title = Color::rgba(220, 238, 220, 255);
+    let muted = Color::rgba(165, 186, 176, 255);
+    let mut y = panel.y + 5.0;
+    font.draw_shadow(draw, &overlay.title, panel.x + 6.0, y, title);
+    y += line_height;
+    for line in &overlay.lines {
+        font.draw_shadow(draw, line, panel.x + 6.0, y, muted);
+        y += line_height;
+    }
+    draw.pop_clip();
+}
+
+pub fn render_status_overlay(scale: GuiScale, draw: &mut GuiDrawList, status: &StatusOverlay) {
+    if !status.visible || status.message.is_empty() {
+        return;
+    }
+    let font = Font::default();
+    let panel_width = (font.width(&status.message) + 16.0)
+        .max(80.0)
+        .min((scale.width - 16.0).max(0.0));
+    let panel = Rect::new(
+        (scale.width - panel_width - 8.0).max(4.0),
+        8.0,
+        panel_width,
+        22.0,
+    );
+    let border = if status.ok {
+        Color::rgba(110, 140, 136, 230)
+    } else {
+        Color::rgba(220, 120, 120, 240)
+    };
+    let text = if status.ok {
+        Color::rgba(205, 220, 214, 255)
+    } else {
+        Color::rgba(255, 196, 196, 255)
+    };
+    draw.fill(panel, Color::rgba(8, 12, 14, 205));
+    draw.outline(panel, border);
+    draw.push_clip(panel.inset(4.0));
+    font.draw_shadow(draw, &status.message, panel.x + 7.0, panel.y + 7.0, text);
+    draw.pop_clip();
+}
+
+pub fn render_crosshair(scale: GuiScale, draw: &mut GuiDrawList) {
+    let center_x = (scale.width * 0.5).floor();
+    let center_y = (scale.height * 0.5).floor();
+    let shadow = Color::rgba(0, 0, 0, 115);
+    let color = Color::rgba(238, 244, 250, 220);
+    draw.fill(Rect::new(center_x - 1.0, center_y - 8.0, 2.0, 16.0), shadow);
+    draw.fill(Rect::new(center_x - 8.0, center_y - 1.0, 16.0, 2.0), shadow);
+    draw.fill(Rect::new(center_x, center_y - 7.0, 1.0, 14.0), color);
+    draw.fill(Rect::new(center_x - 7.0, center_y, 14.0, 1.0), color);
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct GameUi {
     screen: Option<GameScreen>,
     pointer: Option<Point>,
@@ -1386,6 +1522,37 @@ mod tests {
         ui.set_scale(GuiScale::from_pixels(960, 540));
         let draw = ui.render_draw_list(GameUiRenderState::default());
         assert!(!draw.commands().is_empty());
+    }
+
+    #[test]
+    fn debug_overlay_renders_title_and_lines() {
+        let overlay = DebugOverlay::new("DEBUG", ["POS 1.0 64.0 -2.0", "CHUNKS 9"]);
+        let mut draw = GuiDrawList::new();
+
+        render_debug_overlay(GuiScale::from_pixels(960, 540), &mut draw, &overlay);
+
+        assert!(!draw.commands().is_empty());
+    }
+
+    #[test]
+    fn status_overlay_visibility_controls_rendering() {
+        let scale = GuiScale::from_pixels(960, 540);
+        let mut draw = GuiDrawList::new();
+
+        render_status_overlay(scale, &mut draw, &StatusOverlay::hidden());
+        assert!(draw.commands().is_empty());
+
+        render_status_overlay(scale, &mut draw, &StatusOverlay::new("loading", true));
+        assert!(!draw.commands().is_empty());
+    }
+
+    #[test]
+    fn crosshair_renders_center_marks() {
+        let mut draw = GuiDrawList::new();
+
+        render_crosshair(GuiScale::from_pixels(960, 540), &mut draw);
+
+        assert_eq!(draw.commands().len(), 4);
     }
 
     #[test]

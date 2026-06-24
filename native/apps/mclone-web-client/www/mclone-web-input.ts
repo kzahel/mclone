@@ -29,6 +29,7 @@ export interface InputBindingApp {
   queueMouseDelta(dx: number, dy: number): void;
   interactBlock(action: string): Promise<any>;
   openNativePauseUi(): WasmReport | null;
+  setNativeDebugOverlay(open: boolean): WasmReport | null;
   handleNativeUiKey(key: string): WasmReport | null;
   handleNativeUiPointerMove(clientX: number, clientY: number, pointerType?: string): WasmReport | null;
   handleNativeUiPointerDown(clientX: number, clientY: number, pointerType?: string): WasmReport | null;
@@ -57,6 +58,12 @@ export function bindInput(
       } else if (!event.repeat) {
         app.openNativePauseUi();
       }
+      updateDom();
+      return;
+    }
+    if (isPhysicalKey(event, "Backquote", "`") && !event.repeat) {
+      event.preventDefault();
+      app.setNativeDebugOverlay(!runtimeState.hudOpen);
       updateDom();
       return;
     }

@@ -909,8 +909,9 @@ async function exerciseMobileTouchControls(page, canvas) {
   await page.waitForFunction(
     () => {
       const state = globalThis.__mcloneWebApp?.state;
+      const menu = document.getElementById("main-menu");
       return document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "true"
-        && document.getElementById("main-menu")?.hidden === true
+        && (menu === null || menu.hidden === true)
         && state?.uiActive === true
         && state.nativeUiScreen === "pause"
         && state.menuOpen === false
@@ -951,7 +952,7 @@ async function exerciseMobileTouchControls(page, canvas) {
       && buttonProbe.ok
       && openedNativeMenu.uiActive === true
       && openedNativeMenu.nativeUiScreen === "pause"
-      && openedNativeMenu.menuHidden === true
+      && (openedNativeMenu.menuHidden === true || openedNativeMenu.menuHidden === null)
       && nativeMenuCanvasPixels.nonClearInteriorPixelCount > 128
       && nativeMenuCanvasPixels.distinctInteriorColorCount > 2
       && closedNativeMenu.uiActive === false

@@ -210,7 +210,7 @@ async function boot(): Promise<WasmReport> {
     app.handleNativeUiPointerUp(clientX, clientY, pointerType)
   );
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
-  runtime.setHudOpen = (open: boolean) => setHudOpen(runtime.state, Boolean(open));
+  runtime.setHudOpen = (open: boolean) => app.setNativeDebugOverlay(Boolean(open));
   runtime.setMenuOpen = (open: boolean) => setMenuOpen(app, runtime.state, Boolean(open));
   try {
     await app.init();
@@ -219,6 +219,7 @@ async function boot(): Promise<WasmReport> {
     runtime.state.ok = true;
     runtime.state.failed = false;
     runtime.state.status = "ready";
+    app.setNativeStatusOverlay("ready", true, false);
     app.start();
     return snapshotState();
   } catch (error) {
@@ -226,6 +227,7 @@ async function boot(): Promise<WasmReport> {
     runtime.state.ok = false;
     runtime.state.failed = true;
     runtime.state.status = stringifyError(error);
+    app.setNativeStatusOverlay(runtime.state.status, false, true);
     updateDom(runtime.state);
     return snapshotState();
   }
@@ -233,8 +235,6 @@ async function boot(): Promise<WasmReport> {
 
 class WebChunkApp {
   canvas: HTMLCanvasElement;
-  status: HTMLElement | null;
-  hud: HTMLElement | null;
   hudToggle: HTMLElement | null;
   module: WasmModule | null;
   session: WebChunkRenderSession | null;
@@ -265,8 +265,6 @@ class WebChunkApp {
     // Required for the app to run; `init()` re-validates with `instanceof HTMLCanvasElement` and
     // throws if it is missing, so treating it as a non-null canvas here is sound for the lifecycle.
     this.canvas = document.getElementById("mclone-canvas") as HTMLCanvasElement;
-    this.status = document.getElementById("status");
-    this.hud = document.getElementById("runtime-hud");
     this.hudToggle = document.getElementById("hud-toggle");
     this.module = null;
     this.session = null;
@@ -349,6 +347,8 @@ class WebChunkApp {
       "handleUiPointerMove",
       "handleUiPointerDown",
       "handleUiPointerUp",
+      "setDebugOverlayVisible",
+      "setStatusOverlay",
     ]) {
       if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
         throw new Error(`missing WebChunkRenderSession.${name} export`);
@@ -373,6 +373,7 @@ class WebChunkApp {
     this.applyTargetState(this.session.previewBlockTarget());
 
     runtime.state.status = "rendering";
+    this.setNativeStatusOverlay(runtime.state.status, true, true);
     updateDom(runtime.state);
     // 067 Stage 3: warm up the streaming loop to idle so the first presented frame has
     // terrain (the web analog of desktop's pre-render `sync_all_render_sections`).
@@ -521,6 +522,7 @@ class WebChunkApp {
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
+      this.setNativeStatusOverlay(runtime.state.status, false, true);
       console.error(error);
       updateDom(runtime.state);
       return true;
@@ -537,6 +539,7 @@ class WebChunkApp {
     if (!frame?.ok) {
       runtime.state.ok = false;
       runtime.state.status = frame?.reason ?? "streaming render frame failed";
+      this.setNativeStatusOverlay(runtime.state.status, false, true);
       updateDom(runtime.state);
       return null;
     }
@@ -720,6 +723,7 @@ class WebChunkApp {
     runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
     runtime.state.forceFullbright = this.forceFullbright;
     runtime.state.status = "ready";
+    this.setNativeStatusOverlay("ready", true, false);
     runtime.state.lastReport = report;
   }
 
@@ -754,6 +758,7 @@ class WebChunkApp {
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
+      this.setNativeStatusOverlay(runtime.state.status, false, true);
       console.error(error);
       updateDom(runtime.state);
       return null;
@@ -792,6 +797,33 @@ class WebChunkApp {
     this.applyCameraState(camera);
     updateDom(runtime.state);
     return camera;
+  }
+
+  setNativeDebugOverlay(open: boolean): WasmReport | null {
+    setHudOpen(runtime.state, Boolean(open));
+    if (!this.session) {
+      return null;
+    }
+    if (this.sessionBusy) {
+      setTimeout(() => this.setNativeDebugOverlay(open), 0);
+      return null;
+    }
+    const report = this.session.setDebugOverlayVisible(Boolean(open));
+    this.applyNativeUiReport(report);
+    return report;
+  }
+
+  setNativeStatusOverlay(message: string, ok = true, visible = true): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    if (this.sessionBusy) {
+      setTimeout(() => this.setNativeStatusOverlay(message, ok, visible), 0);
+      return null;
+    }
+    const report = this.session.setStatusOverlay(String(message ?? ""), Boolean(ok), Boolean(visible));
+    this.applyNativeUiReport(report);
+    return report;
   }
 
   openNativeTitleUi(): WasmReport | null {
