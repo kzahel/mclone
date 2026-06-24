@@ -125,9 +125,9 @@ If `PackedChunkSection` needs to live outside `mclone-core` to keep `mclone-core
 
 ## Implementation Order
 
-1. Read the TypeScript and Java references listed above.
+1. Read the native implementation references and Java source listed above.
 2. Add constants and indexing helpers to `mclone-core`.
-3. Port the small `palette_bits_for` and `BitStorage` behavior from `src/util/bit-storage.ts`, cross-checking the Java source.
+3. Keep the small `palette_bits_for` and `BitStorage` behavior in `native/crates/mclone-core/src/bit_storage.rs`, cross-checking the Java source and the oracle-owned helper copy in `oracle/lib/util/bit-storage.ts`.
 4. Add `PackedChunkSection` and `ChunkSnapshot`.
 5. Add a minimal generated-terrain snapshot builder from current `GeneratedChunk` data.
 6. Add protocol enums around chunk interest, snapshot, and unload.

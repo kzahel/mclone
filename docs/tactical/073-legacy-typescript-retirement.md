@@ -1,6 +1,6 @@
 # 073: Legacy TypeScript Engine Retirement
 
-Status: active high-priority parent. Slices 1-6 landed enough to remove the live legacy TypeScript engine and the stale docs archive; next recommended slice is final negative search and native validation.
+Status: completed on 2026-06-24. Slices 1-7 landed; the live legacy TypeScript engine, stale docs archive, root browser app, and legacy validation surface are retired from the checkout.
 
 ## Purpose
 
@@ -10,7 +10,7 @@ The desired result is a repo that does not need defensive wording like "do not e
 
 ## Problem
 
-The current tree still carries two different histories:
+Before this retirement, the tree carried two different histories:
 
 - the active native Rust engine under `native/`
 - the legacy TypeScript engine under root-level `src/`, root browser/Vite entrypoints, Vitest tests, Playwright configs, Deno smoke scripts, and archived tacticals
@@ -380,9 +380,11 @@ Expected remaining `src/` hits should primarily be:
 
 ### Slice 7 - Final Negative Search And Native Validation
 
+Status: landed on 2026-06-24.
+
 Goal: prove the live tree no longer carries the retired surface.
 
-- [ ] Confirm these paths no longer exist:
+- [x] Confirm these paths no longer exist:
   - `src/`
   - `docs/tactical/legacy/`
   - `docs/legacy-typescript-engine-info.md`
@@ -393,11 +395,11 @@ Goal: prove the live tree no longer carries the retired surface.
   - root `index.html`
   - root `smoke.html`
   - `scripts/deploy-legacy.sh`
-- [ ] Confirm root package scripts no longer mention legacy commands.
-- [ ] Confirm no retained script imports root `src/**`.
-- [ ] Run the native validation suite.
-- [ ] Run native web validation.
-- [ ] Update this tactical with landed notes and any intentional survivors.
+- [x] Confirm root package scripts no longer mention legacy commands.
+- [x] Confirm no retained script imports root `src/**`.
+- [x] Run the native validation suite.
+- [x] Run native web validation.
+- [x] Update this tactical with landed notes and any intentional survivors.
 
 Validation:
 
@@ -408,6 +410,7 @@ test ! -d test/browser
 test -z "$(find . -maxdepth 1 -name 'playwright*.ts' -print)"
 rg -n "legacy-deploy|dev:browser|probe:browser|test:browser|perf:d5|vite build|vitest|/src/renderer/main.ts" package.json scripts docs README.md AGENTS.md --glob '!docs/tactical/073-legacy-typescript-retirement.md'
 cargo test --manifest-path native/Cargo.toml
+pnpm test
 pnpm native:web:build
 pnpm native:web:smoke
 pnpm native:web:app-smoke
@@ -425,3 +428,4 @@ pnpm native:web:app-smoke
 - 2026-06-23: Slice 1 moved oracle-owned TypeScript helpers from `src/oracle/**` to `oracle/lib/**`, copied the required BitStorage utility into `oracle/lib/util/bit-storage.ts`, retargeted oracle integration CLIs and existing TS tests, and updated oracle/durable docs. Validation: `pnpm exec vitest run test/oracle`; direct Node TS-loader import of moved oracle libraries.
 - 2026-06-23: Slices 2-5 kept `test/fixtures/**` as shared oracle fixture data with its own README, removed `src/**`, removed non-fixture root TypeScript tests, removed root browser app/config/test files, deleted legacy Deno/Vite/Playwright smoke and deploy helpers, retargeted root `test` / `typecheck` to native validation lanes, removed `vite` / `vitest` / `unzipit`, regenerated the pnpm lockfile, and simplified host capability checks around native web validation. Validation: `test ! -d src`; `test ! -d test/browser`; `test ! -f vite.config.ts`; `test ! -f vitest.config.ts`; no root `playwright*.ts`; `node -c scripts/check-host-capabilities.mjs`; negative searches for retired package/doc/import references; `cargo test --manifest-path native/Cargo.toml -p mclone-worldgen -p mclone-server -p mclone-mesh`; `pnpm native:web:typecheck`; `pnpm test`.
 - 2026-06-23: Slice 6 deleted `docs/legacy-typescript-engine-info.md`, `docs/tactical/legacy/**`, and `docs/deno-wgpu-native-spike.md`; rewrote durable docs and active tacticals to point at native crates, oracle fixtures, reference source, or Git history instead of the removed root engine tree. Intentional survivor: `docs/player-movement-netcode.md` keeps an external `/Users/kgraehl/code/tilefun/src/...` reference because it is not the retired mclone engine. Validation: negative searches for stale legacy docs, deleted root engine paths, and old legacy-TypeScript wording outside this tactical; final native/web validation remains Slice 7.
+- 2026-06-24: Slice 7 closed the retirement by re-running deleted-path checks, `git ls-files` absence checks, package/script/doc negative searches, root-import negative searches, and native/web validation. Intentional survivors: native crate-local `../src/...` references inside native tests, native Rust source paths such as `native/crates/mclone-server/src/worldgen_mailbox.rs`, and the external `tilefun/src/client/PlayerPredictor.ts` research reference. Validation: `pnpm test`; `pnpm native:web:build`; `pnpm native:web:smoke`; `pnpm native:web:app-smoke`; `git diff --check`.
