@@ -158,8 +158,7 @@ async function run() {
         );
       } catch (error) {
         const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
-        const statusText = await page.locator("#status").textContent().catch(() => null);
-        throw new Error(`native web app did not finish booting: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}\nstatus=${statusText}\nlogs=${pageLogs.join("\n")}`);
+        throw new Error(`native web app did not finish booting: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}\nlogs=${pageLogs.join("\n")}`);
       }
       const bootState = await page.evaluate(() => globalThis.__mcloneWebApp.state);
       if (!bootState?.ready || !bootState?.ok) {
@@ -741,12 +740,9 @@ async function captureNativeUiProbe(page, canvas) {
 async function exerciseMobileTouchControls(page, canvas) {
   const initial = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
-    const toggle = document.getElementById("hud-toggle");
     return {
-      hudOpen: state.hudOpen,
-      menuOpen: state.menuOpen,
+      debugOverlayVisible: state.debugOverlayVisible,
       touchControlsVisible: state.touchControlsVisible,
-      ariaExpanded: toggle?.getAttribute("aria-expanded") ?? null,
     };
   });
 
@@ -915,8 +911,7 @@ async function exerciseMobileTouchControls(page, canvas) {
       const menu = document.getElementById("main-menu");
       return (menu === null || menu.hidden === true)
         && state?.uiActive === true
-        && state.nativeUiScreen === "pause"
-        && state.menuOpen === false;
+        && state.nativeUiScreen === "pause";
     },
     undefined,
     { timeout: 10_000 },
@@ -947,8 +942,7 @@ async function exerciseMobileTouchControls(page, canvas) {
     () => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.uiActive === false
-        && state.nativeUiScreen === "none"
-        && state.menuOpen === false;
+        && state.nativeUiScreen === "none";
     },
     undefined,
     { timeout: 10_000 },
@@ -956,8 +950,7 @@ async function exerciseMobileTouchControls(page, canvas) {
   const closedNativeMenu = await readNativeUiState(page);
 
   return {
-    ok: initial.hudOpen === false
-      && initial.menuOpen === false
+    ok: initial.debugOverlayVisible === false
       && initial.touchControlsVisible === true
       && activeMovementProbe?.ok === true
       && movementProbe.ok
@@ -969,8 +962,7 @@ async function exerciseMobileTouchControls(page, canvas) {
       && (openedNativeMenu.menuHidden === true || openedNativeMenu.menuHidden === null)
       && nativeMenuCanvasPixels.nonClearInteriorPixelCount > 128
       && nativeMenuCanvasPixels.distinctInteriorColorCount > 2
-      && closedNativeMenu.uiActive === false
-      && closedNativeMenu.menuOpen === false,
+      && closedNativeMenu.uiActive === false,
     initial,
     movement: movementProbe,
     look: lookProbe,
@@ -1115,20 +1107,15 @@ async function exerciseTouchButton(page, key, pointerId) {
 async function readNativeUiState(page) {
   return page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
-    const hud = document.getElementById("runtime-hud");
     const menu = document.getElementById("main-menu");
-    const toggle = document.getElementById("hud-toggle");
     return {
-      menuOpen: state.menuOpen,
-      hudOpen: state.hudOpen,
+      debugOverlayVisible: state.debugOverlayVisible,
       uiActive: state.uiActive,
       uiCoversWorld: state.uiCoversWorld,
       nativeUiScreen: state.nativeUiScreen,
       nativeUiOptionsParent: state.nativeUiOptionsParent,
       lastUiAction: state.lastUiAction,
-      hudHidden: hud?.hidden ?? null,
       menuHidden: menu?.hidden ?? null,
-      ariaExpanded: toggle?.getAttribute("aria-expanded") ?? null,
     };
   });
 }
@@ -1926,14 +1913,14 @@ function assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouch
     throw new Error(`native web mobile app did not maintain the expected rendered world:\n${JSON.stringify(result, null, 2)}`);
   }
   if (!mobileTouchProbe?.ok) {
-    throw new Error(`native web mobile controls did not satisfy movement/look/HUD probes:\n${JSON.stringify({ mobileTouchProbe, result }, null, 2)}`);
+    throw new Error(`native web mobile controls did not satisfy movement/look/native UI probes:\n${JSON.stringify({ mobileTouchProbe, result }, null, 2)}`);
   }
   if (result.compileTimingCount < 1 || !result.lastCompileTiming) {
     throw new Error(`native web mobile app did not expose compile timing diagnostics:\n${JSON.stringify(result, null, 2)}`);
   }
   assertCompileTimingDiagnostics(result.lastCompileTiming, "mobile last compile timing");
-  if (result.touchControlsVisible !== true || result.hudOpen !== false) {
-    throw new Error(`native web mobile HUD/touch state ended in an unexpected state:\n${JSON.stringify(result, null, 2)}`);
+  if (result.touchControlsVisible !== true || result.debugOverlayVisible !== false) {
+    throw new Error(`native web mobile native UI/touch state ended in an unexpected state:\n${JSON.stringify(result, null, 2)}`);
   }
   if (!Number.isFinite(result.cameraX) || !Number.isFinite(result.cameraY) || !Number.isFinite(result.cameraZ)) {
     throw new Error(`native web mobile app did not report a finite camera pose:\n${JSON.stringify(result, null, 2)}`);

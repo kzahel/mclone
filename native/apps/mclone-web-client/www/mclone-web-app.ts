@@ -8,17 +8,13 @@ import {
   sanitizeInputImpulse,
 } from "./mclone-web-input.js";
 import {
-  DEFAULT_LOOK_SENSITIVITY,
-  bindMenu,
   clampLookSensitivity,
+  DEFAULT_LOOK_SENSITIVITY,
   formatInteractionStatus,
   loadStoredSettings,
-  setHudOpen,
-  setMenuOpen,
   storeLookSensitivity,
-  updateDom,
-} from "./mclone-web-hud.js";
-import { TouchControls } from "./mclone-web-touch.js";
+} from "./mclone-web-settings.js";
+import { TouchControls, hasTouchInput } from "./mclone-web-touch.js";
 import type { TouchOverlayState } from "./mclone-web-touch.js";
 import type { WebChunkRenderSession, WebCompileTiming } from "mclone-web-client-wasm";
 
@@ -76,8 +72,6 @@ interface AppRuntime {
   handleNativeUiPointerUp?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
   setNativeTouchLookSensitivity?: (value: number, available?: boolean, persist?: boolean) => WasmReport | null;
   touchControlState?: () => any;
-  setHudOpen?: (open: boolean) => void;
-  setMenuOpen?: (open: boolean) => void;
 }
 
 declare global {
@@ -178,9 +172,7 @@ const runtime: AppRuntime = {
     runnerFrameMetrics: null,
     worldgenJobFrameMetrics: null,
     lightStatusJobFrameMetrics: null,
-    hudOpen: true,
-    menuOpen: false,
-    settingsOpen: false,
+    debugOverlayVisible: false,
     lookSensitivity: DEFAULT_LOOK_SENSITIVITY,
     touchLookSensitivityAvailable: false,
     touchControlsVisible: false,
@@ -218,8 +210,6 @@ async function boot(): Promise<WasmReport> {
     app.setNativeTouchLookSensitivity(value, available, persist)
   );
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
-  runtime.setHudOpen = (open: boolean) => app.setNativeDebugOverlay(Boolean(open));
-  runtime.setMenuOpen = (open: boolean) => setMenuOpen(app, runtime.state, Boolean(open));
   try {
     await app.init();
     runtime.ready = true;
@@ -236,14 +226,13 @@ async function boot(): Promise<WasmReport> {
     runtime.state.failed = true;
     runtime.state.status = stringifyError(error);
     app.setNativeStatusOverlay(runtime.state.status, false, true);
-    updateDom(runtime.state);
+    publishRuntimeState(runtime.state);
     return snapshotState();
   }
 }
 
 class WebChunkApp {
   canvas: HTMLCanvasElement;
-  hudToggle: HTMLElement | null;
   module: WasmModule | null;
   session: WebChunkRenderSession | null;
   compiler: RenderCompiler | null;
@@ -274,7 +263,6 @@ class WebChunkApp {
     // Required for the app to run; `init()` re-validates with `instanceof HTMLCanvasElement` and
     // throws if it is missing, so treating it as a non-null canvas here is sound for the lifecycle.
     this.canvas = document.getElementById("mclone-canvas") as HTMLCanvasElement;
-    this.hudToggle = document.getElementById("hud-toggle");
     this.module = null;
     this.session = null;
     this.compiler = null;
@@ -316,7 +304,7 @@ class WebChunkApp {
     this.canvas.focus();
 
     runtime.state.status = "loading wasm";
-    updateDom(runtime.state);
+    publishRuntimeState(runtime.state);
     const module = await import(BINDGEN_JS_URL.href) as WasmModule;
     await module.default(BINDGEN_WASM_URL.href);
     this.module = module;
@@ -327,10 +315,10 @@ class WebChunkApp {
     }
 
     runtime.state.status = "loading assets";
-    updateDom(runtime.state);
+    publishRuntimeState(runtime.state);
     const assetPack = await fetchAssetPack(ASSET_PACK_URL);
     runtime.state.status = "initializing webgpu";
-    updateDom(runtime.state);
+    publishRuntimeState(runtime.state);
     this.session = await module.mclone_web_create_worker_chunk_render_session(
       this.canvas,
       assetPack,
@@ -377,8 +365,8 @@ class WebChunkApp {
       bindgenWasmUrl: BINDGEN_WASM_URL,
       workerName: "mclone-render-compiler-app",
     });
-    bindMenu(this, runtime.state);
-    bindInput(this, runtime.state, () => updateDom(runtime.state));
+    this.setNativeDebugOverlay(defaultDebugOverlayVisible());
+    bindInput(this, runtime.state, () => publishRuntimeState(runtime.state));
     this.touchControls = new TouchControls(this, runtime.state);
     this.flushNativeTouchControlsOverlay();
     this.setNativeTouchLookSensitivity(
@@ -392,7 +380,7 @@ class WebChunkApp {
 
     runtime.state.status = "rendering";
     this.setNativeStatusOverlay(runtime.state.status, true, true);
-    updateDom(runtime.state);
+    publishRuntimeState(runtime.state);
     // 067 Stage 3: warm up the streaming loop to idle so the first presented frame has
     // terrain (the web analog of desktop's pre-render `sync_all_render_sections`).
     await this.warmUpStreamingToIdle();
@@ -542,7 +530,7 @@ class WebChunkApp {
       runtime.state.status = stringifyError(error);
       this.setNativeStatusOverlay(runtime.state.status, false, true);
       console.error(error);
-      updateDom(runtime.state);
+      publishRuntimeState(runtime.state);
       return true;
     }
     const syncMs = performance.now() - syncStart;
@@ -558,7 +546,7 @@ class WebChunkApp {
       runtime.state.ok = false;
       runtime.state.status = frame?.reason ?? "streaming render frame failed";
       this.setNativeStatusOverlay(runtime.state.status, false, true);
-      updateDom(runtime.state);
+      publishRuntimeState(runtime.state);
       return null;
     }
     this.hasRendered = true;
@@ -596,7 +584,7 @@ class WebChunkApp {
     if (frame.doorbell) {
       workerPromise = this.startAndPostCompileTiming(frame.doorbell, syncMs);
     }
-    updateDom(runtime.state);
+    publishRuntimeState(runtime.state);
     return workerPromise;
   }
 
@@ -677,7 +665,7 @@ class WebChunkApp {
       runtime.state.lastCompileReport = frame;
       this.finalizingCount = Math.max(0, this.finalizingCount - 1);
       runtime.state.compileFinalizingCount = this.finalizingCount;
-      updateDom(runtime.state);
+      publishRuntimeState(runtime.state);
     })();
   }
 
@@ -740,6 +728,9 @@ class WebChunkApp {
     }
     runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
     runtime.state.forceFullbright = this.forceFullbright;
+    if (typeof report.debugOverlayVisible !== "undefined") {
+      runtime.state.debugOverlayVisible = Boolean(report.debugOverlayVisible);
+    }
     runtime.state.status = "ready";
     this.setNativeStatusOverlay("ready", true, false);
     runtime.state.lastReport = report;
@@ -771,14 +762,14 @@ class WebChunkApp {
       // 067 Stage 3: a block edit publishes a SectionBlockUpdates server update, which the
       // streaming loop marks render-dirty on its next drain and recompiles automatically —
       // no explicit compile request needed.
-      updateDom(runtime.state);
+      publishRuntimeState(runtime.state);
       return interaction;
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
       this.setNativeStatusOverlay(runtime.state.status, false, true);
       console.error(error);
-      updateDom(runtime.state);
+      publishRuntimeState(runtime.state);
       return null;
     }
   }
@@ -796,7 +787,7 @@ class WebChunkApp {
       return false;
     }
     applyHotbarState(hotbar, runtime.state);
-    updateDom(runtime.state);
+    publishRuntimeState(runtime.state);
     return true;
   }
 
@@ -813,12 +804,12 @@ class WebChunkApp {
       return null;
     }
     this.applyCameraState(camera);
-    updateDom(runtime.state);
+    publishRuntimeState(runtime.state);
     return camera;
   }
 
   setNativeDebugOverlay(open: boolean): WasmReport | null {
-    setHudOpen(runtime.state, Boolean(open));
+    runtime.state.debugOverlayVisible = Boolean(open);
     if (!this.session) {
       return null;
     }
@@ -1006,6 +997,9 @@ class WebChunkApp {
     if (typeof report.touchLookSensitivityAvailable !== "undefined") {
       runtime.state.touchLookSensitivityAvailable = Boolean(report.touchLookSensitivityAvailable);
     }
+    if (typeof report.debugOverlayVisible !== "undefined") {
+      runtime.state.debugOverlayVisible = Boolean(report.debugOverlayVisible);
+    }
     if (typeof report.touchLookSensitivity !== "undefined") {
       const sensitivity = clampLookSensitivity(report.touchLookSensitivity);
       this.lookSensitivity = sensitivity;
@@ -1034,7 +1028,7 @@ class WebChunkApp {
     ) {
       this.requestPointerLock();
     }
-    updateDom(runtime.state);
+    publishRuntimeState(runtime.state);
   }
 
   canvasPixelPoint(clientX: number, clientY: number): { x: number, y: number } {
@@ -1191,20 +1185,20 @@ class WebChunkApp {
       if (result && typeof result.catch === "function") {
         result.catch(() => {
           runtime.state.pointerLockFallback = true;
-          updateDom(runtime.state);
+          publishRuntimeState(runtime.state);
         });
       }
     } else {
       runtime.state.pointerLockFallback = true;
     }
-    updateDom(runtime.state);
+    publishRuntimeState(runtime.state);
   }
 
   updatePointerLockState(): void {
     runtime.state.pointerLocked = document.pointerLockElement === this.canvas;
     runtime.state.pointerLockFallback =
       runtime.state.pointerLockAttempted && !runtime.state.pointerLocked;
-    updateDom(runtime.state);
+    publishRuntimeState(runtime.state);
   }
 
   syncCanvasSize(): void {
@@ -1236,6 +1230,14 @@ function recordCompileTiming(timing: WebCompileTiming): void {
   runtime.state.compileTimings = [...runtime.state.compileTimings, snapshot].slice(-16);
   runtime.state.compileTimingCount += 1;
   runtime.state.activeCompileTiming = null;
+}
+
+function defaultDebugOverlayVisible(): boolean {
+  return !hasTouchInput() && window.matchMedia("(min-width: 681px)").matches;
+}
+
+function publishRuntimeState(_state: AppRuntimeState): void {
+  // The visible DOM UI is retired; runtime.state itself is the test/debug publication surface.
 }
 
 function nextAnimationFrame(): Promise<void> {

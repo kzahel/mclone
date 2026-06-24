@@ -1,6 +1,6 @@
 # 072: Native UI DOM Retirement
 
-Status: active high-priority parent; Slices 1-5 menu/input/HUD/settings/touch path landed; final HTML/CSS/TS burn-down remains.
+Status: completed first pass; native web player-facing UI is now rendered through shared `mclone-ui`/WebGPU, and `app.html` is canvas-only platform shell.
 
 ## Purpose
 
@@ -18,8 +18,8 @@ The current desktop client has a Rust UI stack:
 
 The native-web client has a separate visible UI stack:
 
-- `native/apps/mclone-web-client/www/app.html` owns menu, HUD, status, crosshair, and touch-control DOM.
-- `native/apps/mclone-web-client/www/mclone-web-hud.ts` owns menu/settings state and the web-only look-sensitivity setting.
+- At the start of this tactical, `native/apps/mclone-web-client/www/app.html` owned menu, HUD, status, crosshair, and touch-control DOM.
+- At the start of this tactical, `native/apps/mclone-web-client/www/mclone-web-hud.ts` owned menu/settings state and the web-only look-sensitivity setting.
 - `native/apps/mclone-web-client/www/mclone-web-app.ts` hardcodes render radius through `RADIUS_CHUNKS` and calls into Rust only for world/render/session operations.
 - `native/apps/mclone-web-client/src/web_canvas.rs` renders sky, chunks, and actors, then presents without a GUI pass.
 
@@ -276,13 +276,13 @@ Inspect mobile screenshots and verify no page scroll/selection occurs during tou
 
 Goal: make drift hard by removing the places where visible web UI can accumulate.
 
-- [ ] Reduce `app.html` to canvas, scripts, and minimal non-game bootstrap fallback only.
-- [ ] Remove CSS rules for menus, cards, HUD, settings, status, crosshair, and touch controls.
-- [ ] Remove `mclone-web-hud.ts` if fully obsolete.
-- [ ] Shrink `mclone-web-app.ts` state to runtime/test facts and platform adapters, not visible UI state.
-- [ ] Add a static check or smoke assertion that `app.html` contains no visible game UI controls.
-- [ ] Update `docs/gui.md`, `064`, `070`, and `071` only where they still describe the retired DOM UI as current.
-- [ ] Update this doc's status/landed section, commit, and report the next high-value step.
+- [x] Reduce `app.html` to canvas, scripts, and minimal non-game bootstrap fallback only.
+- [x] Remove CSS rules for menus, cards, HUD, settings, status, crosshair, and touch controls.
+- [x] Remove `mclone-web-hud.ts` if fully obsolete.
+- [x] Shrink `mclone-web-app.ts` state to runtime/test facts and platform adapters, not visible UI state.
+- [x] Add a static check or smoke assertion that `app.html` contains no visible game UI controls.
+- [x] Update `docs/gui.md`, `064`, `070`, and `071` only where they still describe the retired DOM UI as current.
+- [x] Update this doc's status/landed section, commit, and report the next high-value step.
 
 Validation:
 
@@ -326,6 +326,18 @@ Do not leave a completed chunk uncommitted unless the user explicitly asks not t
 
 ## Landed
 
+### 2026-06-24 - Slice 6 HTML/CSS/TS Final Burn-down
+
+- Deleted the obsolete `mclone-web-hud.ts` module; surviving touch look sensitivity storage and small report-format helpers now live in the small browser-plumbing `mclone-web-settings.ts` module.
+- Removed remaining visible-UI state names from the native web runtime surface (`hudOpen`, `menuOpen`, `settingsOpen`) and kept only runtime/test facts such as `debugOverlayVisible`, native UI screen state, and touch-control diagnostics.
+- Replaced DOM update callbacks with a neutral runtime-state publish hook; TypeScript now updates native UI/session state and browser platform state, not visible DOM widgets.
+- Added a staging-time static guard in `build-web-glue.mjs` that fails if `app.html` contains visible game UI fragments such as buttons, HUD/menu IDs, crosshair, or touch-control elements.
+- Updated browser smoke probes to assert native UI/touch runtime facts instead of retired DOM HUD/menu nodes, while keeping canvas screenshot validation.
+- Updated historical docs (`064`, `070`, `071`) so they no longer describe retired DOM HUD/touch UI as current architecture.
+- Validation: `pnpm native:web:typecheck`; `pnpm native:web:build`; `pnpm native:web:bundle`; `pnpm native:web:app-smoke` (elevated for local browser server); `pnpm native:web:mobile-smoke` (elevated for local browser server); `pnpm native:web:movement-perf` (elevated for local browser server); `cargo test --manifest-path native/Cargo.toml` (elevated for local socket/headless test coverage); static staged/bundled artifact checks for no `.ts` or HUD output; `git diff --check`.
+- Inspected screenshots: `/tmp/mclone-native-web-app-canvas.png`; `/tmp/mclone-native-web-ui-canvas.png`; `/tmp/mclone-native-web-mobile-app-canvas.png`; `/tmp/mclone-native-web-mobile-ui-canvas.png`; `/tmp/mclone-native-web-mobile-options-canvas.png`; `/tmp/mclone-native-web-movement-perf-canvas.png`.
+- Known follow-up: continue feature work from native UI rather than DOM, with future polish focused on richer shared `mclone-ui` widgets and vanilla-style GUI assets.
+
 ### 2026-06-24 - Slice 5 Native Touch Controls Overlay
 
 - Added platform-neutral `TouchOverlay` and `TouchJoystickOverlay` drawing to `mclone-ui`, including a shared test that verifies native touch controls emit GUI draw commands when visible.
@@ -336,7 +348,7 @@ Do not leave a completed chunk uncommitted unless the user explicitly asks not t
 - Updated browser smoke coverage to synthesize touch menu/button pointer events against the canvas and verify native pause/options rendering without visible DOM controls.
 - Validation: `cargo test --manifest-path native/Cargo.toml -p mclone-ui`; `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-web-client -p mclone-native-client` (rerun elevated for localhost TCP tests); `pnpm native:web:typecheck`; `pnpm native:web:mobile-smoke` (elevated for local browser server); `pnpm native:web:app-smoke` (elevated for local browser server); `pnpm native:web:movement-perf` (elevated for local browser server).
 - Screenshots inspected: `/tmp/mclone-native-web-mobile-app-canvas.png`, `/tmp/mclone-native-web-mobile-ui-canvas.png`, `/tmp/mclone-native-web-mobile-options-canvas.png`, and `/tmp/mclone-native-web-movement-perf-canvas.png`.
-- Known follow-up: Slice 6 should remove the remaining optional HUD/status compatibility plumbing from TypeScript, add a static no-visible-UI assertion for `app.html`, and update older docs that still describe DOM UI as current.
+- Follow-up status: completed by Slice 6.
 
 ### 2026-06-24 - Slice 4 Touch Look Sensitivity Setting
 
@@ -347,18 +359,18 @@ Do not leave a completed chunk uncommitted unless the user explicitly asks not t
 - Extended mobile browser smoke to open native Options, adjust the touch-look slider to `5.0x`, verify the native action report and stored setting, and capture `/tmp/mclone-native-web-mobile-options-canvas.png`.
 - Validation: `cargo test --manifest-path native/Cargo.toml -p mclone-ui`; `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-native-client -p mclone-web-client` (rerun elevated for localhost TCP tests); `pnpm native:web:typecheck`; `pnpm native:web:build`; `pnpm native:web:mobile-smoke` (elevated for local browser server); `pnpm native:web:app-smoke` (elevated for local browser server); `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --headless-ui /tmp/mclone-ui-title.png --width 960 --height 540` (rerun elevated for wgpu adapter).
 - Screenshots inspected: `/tmp/mclone-ui-title.png`, `/tmp/mclone-native-web-ui-canvas.png`, `/tmp/mclone-native-web-mobile-ui-canvas.png`, and `/tmp/mclone-native-web-mobile-options-canvas.png`.
-- Known follow-up: Slice 5 should replace the remaining visible DOM touch joystick/buttons/hamburger affordances with native-rendered touch widgets or a native overlay while keeping browser touch capture as platform plumbing.
+- Follow-up status: completed by Slice 5.
 
 ### 2026-06-24 - Slice 4 Native Debug HUD, Status, And Crosshair
 
 - Added shared platform-neutral `DebugOverlay`, `StatusOverlay`, crosshair rendering, and offset-capable debug overlay helpers to `mclone-ui`, with focused overlay tests.
 - Switched native desktop debug-pane drawing to the shared `mclone-ui` overlay renderer while keeping debug text/application behavior in the desktop adapter.
 - Added web `WebChunkRenderSession` native overlay state and wasm exports for debug visibility and status messages; web gameplay frames now draw native crosshair, status, and debug HUD through `mclone-render::gui`.
-- Removed visible debug HUD, status panel, crosshair, settings panel, and DOM menu markup/CSS from `app.html`; `mclone-web-hud.ts` now keeps only stored touch sensitivity and the hamburger shortcut plumbing.
+- Removed visible debug HUD, status panel, crosshair, settings panel, and DOM menu markup/CSS from `app.html`; at this stage `mclone-web-hud.ts` kept only stored touch sensitivity and shortcut plumbing, before Slice 6 deleted the module.
 - Added web backquote handling for the native debug overlay and updated browser smoke probes for removed DOM nodes.
 - Validation: `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-native-client -p mclone-web-client`; `cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown`; `pnpm native:web:build`; `pnpm native:web:typecheck`; `pnpm native:web:app-smoke`; `pnpm native:web:mobile-smoke`; `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --headless-ui /tmp/mclone-ui-title.png --width 960 --height 540`; `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-native-ui-debug.png --width 1280 --height 720 --screenshot-debug-pane true`; `git diff --check`.
 - Screenshots inspected: `/tmp/mclone-ui-title.png`, `/tmp/mclone-native-ui-debug.png`, `/tmp/mclone-native-web-app-canvas.png`, `/tmp/mclone-native-web-ui-canvas.png`, and `/tmp/mclone-native-web-mobile-ui-canvas.png`.
-- Known follow-up: replace the still-visible DOM touch controls with native-rendered widgets in Slice 5.
+- Follow-up status: completed by Slice 5.
 
 ### 2026-06-24 - Slice 3 Web Menu Input And Action Application
 
@@ -369,7 +381,7 @@ Do not leave a completed chunk uncommitted unless the user explicitly asks not t
 - Extended smoke coverage so desktop web opens the native title UI, clicks Options, backs out with Escape, starts the world through native UI, and captures `/tmp/mclone-native-web-ui-canvas.png`; mobile smoke opens native pause from the hamburger, keeps the DOM menu hidden, resumes with Escape, and captures `/tmp/mclone-native-web-mobile-ui-canvas.png`.
 - Validation: `cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown`; `pnpm native:web:build`; `pnpm native:web:typecheck`; `pnpm native:web:app-smoke`; `pnpm native:web:mobile-smoke`; `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-web-client`; `pnpm native:movement:smoke`; `git diff --check`.
 - Screenshots inspected: `/tmp/mclone-native-web-ui-canvas.png` showed the shared title menu; `/tmp/mclone-native-web-mobile-ui-canvas.png` showed the shared pause menu over the mobile canvas.
-- Known follow-up: Slice 4 should move debug/status/crosshair/settings presentation out of DOM and add a native-rendered debug toggle path; Slice 5 should replace the still-visible DOM touch controls with native widgets.
+- Follow-up status: completed by Slices 4 and 5.
 
 ### 2026-06-23 - Slice 2 Web GUI Renderer Integration
 
@@ -378,7 +390,7 @@ Do not leave a completed chunk uncommitted unless the user explicitly asks not t
 - Added wasm-facing UI status/open/close methods and TypeScript test hooks that can open the native title screen without making DOM menu behavior authoritative.
 - Extended the web app smoke to capture `/tmp/mclone-native-web-ui-canvas.png` and assert the canvas contains a visible native UI menu with GUI commands emitted.
 - Validation: `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-web-client`; `cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown`; `pnpm native:web:build`; `pnpm native:web:typecheck`; `pnpm native:web:app-smoke`.
-- Screenshot inspected: `/tmp/mclone-native-web-ui-canvas.png` showed the shared Rust title UI rendered into the web canvas; existing DOM HUD/crosshair overlays are still expected until later burn-down slices.
+- Screenshot inspected: `/tmp/mclone-native-web-ui-canvas.png` showed the shared Rust title UI rendered into the web canvas; at the time, DOM HUD/crosshair overlays remained until later burn-down slices removed them.
 - Known follow-up: Slice 3 should route browser pointer/key input into `GameUi` first, apply returned actions in the web adapter, and begin removing duplicate DOM menu controls.
 
 ### 2026-06-23 - Slice 1 Shared Menu Model Extraction

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { cp, readdir, rm } from "node:fs/promises";
+import { cp, readFile, readdir, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, extname, join, relative, resolve } from "node:path";
 
@@ -30,6 +30,7 @@ export async function buildWebGlue(options = {}) {
     recursive: true,
     filter: (source) => extname(source) !== ".ts",
   });
+  await assertNoVisibleGameUiInAppHtml(stagedWebRoot);
 
   const result = spawnSync(
     "pnpm",
@@ -54,6 +55,36 @@ export async function buildWebGlue(options = {}) {
   }
 
   return stagedWebRoot;
+}
+
+const forbiddenAppHtmlFragments = [
+  "<button",
+  "<form",
+  "<input",
+  "<select",
+  "<textarea",
+  "crosshair",
+  "hud-toggle",
+  "main-menu",
+  "runtime-hud",
+  "touch-button",
+  "touch-controls",
+  "touch-joystick",
+];
+
+/** @param {string} root */
+async function assertNoVisibleGameUiInAppHtml(root) {
+  const appHtmlPath = join(root, "app.html");
+  const html = await readFile(appHtmlPath, "utf8");
+  const lowerHtml = html.toLowerCase();
+  const matches = forbiddenAppHtmlFragments.filter((fragment) => lowerHtml.includes(fragment));
+  if (matches.length > 0) {
+    throw new Error(
+      `native web app.html contains visible game UI fragments after DOM retirement:\n${matches
+        .map((fragment) => `  ${fragment}`)
+        .join("\n")}`,
+    );
+  }
 }
 
 /**

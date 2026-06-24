@@ -40,6 +40,7 @@ export interface InputBindingApp {
 }
 
 interface InputRuntimeState extends Record<string, any> {
+  debugOverlayVisible?: boolean;
   pointerLockAttempted?: boolean;
   pointerLockFallback?: boolean;
   selectedHotbarSlot?: number;
@@ -48,7 +49,7 @@ interface InputRuntimeState extends Record<string, any> {
 export function bindInput(
   app: InputBindingApp,
   runtimeState: InputRuntimeState,
-  updateDom: () => void,
+  publishRuntimeState: () => void,
 ): void {
   window.addEventListener("keydown", (event) => {
     if (isEscapeKey(event)) {
@@ -58,13 +59,13 @@ export function bindInput(
       } else if (!event.repeat) {
         app.openNativePauseUi();
       }
-      updateDom();
+      publishRuntimeState();
       return;
     }
     if (isPhysicalKey(event, "Backquote", "`") && !event.repeat) {
       event.preventDefault();
-      app.setNativeDebugOverlay(!runtimeState.hudOpen);
-      updateDom();
+      app.setNativeDebugOverlay(!runtimeState.debugOverlayVisible);
+      publishRuntimeState();
       return;
     }
     if (runtimeState.uiActive === true) {
@@ -75,7 +76,7 @@ export function bindInput(
       event.preventDefault();
       const camera = app.session?.toggleMovementMode?.();
       if (camera) app.applyCameraState(camera);
-      updateDom();
+      publishRuntimeState();
       return;
     }
     const hotbarSlot = hotbarSlotForEvent(event);
@@ -193,17 +194,17 @@ export function bindInput(
       : -event.deltaY * 0.12;
     const camera = app.session?.adjustCameraSpeed?.(amount);
     if (camera) app.applyCameraState(camera);
-    updateDom();
+    publishRuntimeState();
   }, { passive: false });
 
   document.addEventListener("pointerlockchange", () => app.updatePointerLockState());
   document.addEventListener("pointerlockerror", () => {
     runtimeState.pointerLockFallback = true;
-    updateDom();
+    publishRuntimeState();
   });
   window.addEventListener("resize", () => {
     app.syncCanvasSize();
-    updateDom();
+    publishRuntimeState();
   });
 }
 

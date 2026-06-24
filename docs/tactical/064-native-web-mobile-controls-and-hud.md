@@ -1,13 +1,13 @@
 # 064: Native Web Mobile Controls and HUD
 
-Status: active; mobile controls/HUD and analog movement slices landed.
+Status: completed historical mobile-control bring-up; visible DOM HUD/touch controls were later retired by [`072-native-ui-dom-retirement.md`](072-native-ui-dom-retirement.md).
 
 ## Purpose
 
 Make the native web/WASM app usable on phones and tablets without reviving the
 retired browser engine.
 
-The immediate user-facing problems are:
+The immediate user-facing problems at the start of this tactical were:
 
 - the native web app has keyboard/mouse input, but no mobile movement controls
 - the runtime/debug HUD is always visible and takes too much screen space on
@@ -16,6 +16,10 @@ The immediate user-facing problems are:
 This tactical ports the useful interaction shape from the retired browser
 implementation into the native web adapter, while keeping runtime,
 movement, renderer, and server ownership in the native Rust workspace.
+
+Current state: the browser adapter still owns touch/pointer capture and analog
+movement/look facts, but the visible HUD, menu, status, crosshair, and touch
+controls now render through the shared native UI/WebGPU path from `072`.
 
 ## Reference Prior Art
 

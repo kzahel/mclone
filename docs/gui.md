@@ -278,7 +278,7 @@ Replace or keep retired these visible DOM/native-web surfaces:
 |---|---|
 | native-web HTML/CSS start/menu chrome | WebGPU `TitleScreen` / `WorldSetupScreen` |
 | native-web HUD/debug DOM controls | Rust/WGPU pause/options/debug settings screens |
-| temporary web touch/HUD TypeScript glue | shared Rust UI once [`tactical/072-native-ui-dom-retirement.md`](tactical/072-native-ui-dom-retirement.md) completes |
+| temporary web touch/HUD TypeScript glue | shared Rust UI; completed first pass in [`tactical/072-native-ui-dom-retirement.md`](tactical/072-native-ui-dom-retirement.md) |
 | browser `window.confirm` for destructive world storage reset | WebGPU confirm screen |
 
 Keep machine hooks where tests need them. Visible test control must not become product UI.

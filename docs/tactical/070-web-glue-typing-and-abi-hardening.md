@@ -414,6 +414,9 @@ deploy asset-version bump still relies on HTTP cache revalidation of the bare he
   `www/mclone-web-hud.js:88`, `www/mclone-web-hud.js:170`,
   `www/mclone-web-hud.js:200`, `www/mclone-web-hud.js:255`). HUD imports only the touch capability
   probe (`www/mclone-web-hud.js:1`) and otherwise gets app/runtime state through parameters.
+  Follow-up in `072` deleted this historical HUD module after visible DOM UI retirement; surviving
+  storage/formatting helpers now live in `mclone-web-settings.ts`, and player-facing UI renders
+  through native `mclone-ui`.
 
 **Typing / import shape.** No shared runtime module was added: the entry module remains the owner of
 the app singleton and state bag, and extracted modules depend on small app-shaped typedefs plus
@@ -452,7 +455,8 @@ noise: touch split 16 compiles, totalMs avg 9.72 ms / workerRoundTrip avg 6.49 m
 
 - ~~**Split `mclone-web-app.js`** (1930 lines) into loader / input / touch / hud modules.~~
   Landed as app core + `mclone-web-touch.js` / `mclone-web-input.js` /
-  `mclone-web-hud.js`; entry is now 962 lines.
+  `mclone-web-hud.js`; entry is now 962 lines. The HUD module was later retired by 072's native UI
+  DOM burn-down.
 - **Replace `waitForSessionIdle` busy-poll** with a promise/signal from the session.
 - **Optional minimal eslint** (typescript-eslint recommended set) if `tsc` strictness
   proves insufficient — quality polish, not essential.

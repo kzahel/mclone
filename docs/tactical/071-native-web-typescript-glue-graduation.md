@@ -15,10 +15,10 @@ Final authored TypeScript inventory:
 
 | Source | Source lines | Emitted JS lines | Role |
 |---|---:|---:|---|
-| `www/mclone-web-app.ts` | 967 | 776 | entry module, URL/versioning, runtime global, `WebChunkApp`, bootstrap |
-| `www/mclone-web-touch.ts` | 352 | 273 | touch controls and touch capability helpers |
-| `www/mclone-web-input.ts` | 289 | 232 | keyboard/mouse/hotbar binding |
-| `www/mclone-web-hud.ts` | 261 | 214 | HUD/menu/settings DOM glue |
+| `www/mclone-web-app.ts` | 1299 | 1056 | entry module, URL/versioning, runtime global, `WebChunkApp`, bootstrap, native UI adapter |
+| `www/mclone-web-touch.ts` | 482 | 366 | touch input capture, analog movement/look facts, and native touch-overlay state |
+| `www/mclone-web-input.ts` | 350 | 286 | keyboard/mouse/hotbar binding and native UI input forwarding |
+| `www/mclone-web-settings.ts` | 69 | 55 | localStorage-backed touch look settings and small report-format helpers |
 | `www/mclone-render-compiler-shared.ts` | 644 | 467 | render compiler app/worker shared contracts |
 | `www/mclone-render-compiler-worker.ts` | 400 | 292 | render compiler worker entry |
 | `www/mclone-integrated-server-worker.ts` | 435 | 333 | integrated server worker entry |
@@ -300,6 +300,10 @@ imports `./mclone-web-hud.js`, `app.html` / `index.html` still load `.js` entryp
 HUD module still imports the live `hasTouchInput` helper from `./mclone-web-touch.js`. Its
 `TouchControls` dependency is now type-only and erased from runtime emit. The staged root and
 deploy bundle both contain `mclone-web-hud.js` and no `.ts` files.
+
+Later follow-up: `072` removed this historical HUD module after visible DOM UI retirement. The
+current authored inventory uses `mclone-web-settings.ts` for the surviving storage helpers, and the
+player-facing HUD/menu/status/touch surfaces render through native `mclone-ui`.
 
 Line counts from the start of this slice were app/touch/input/HUD `962 / 352 / 289 / 291`.
 Ending source counts are app `962`, touch TS `352`, input TS `289`, HUD TS `261`. The emitted
