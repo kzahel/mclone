@@ -1,6 +1,6 @@
 # 071: Native Web Glue TypeScript Graduation
 
-Status: **App/touch/input/HUD, render-compiler, and server-worker TypeScript slices landed; optional thread-smoke worker glue remains.**
+Status: **App/touch/input/HUD, render-compiler, server-worker, and thread-smoke worker TypeScript slices landed; Stage 5 cleanup remains.**
 
 ## Context
 
@@ -470,6 +470,57 @@ inspection, `pnpm native:web:movement-perf`, `pnpm native:web:smoke`,
 
 Implementation commit: `880c0e0d3609decdc55952bb14fd3687799c75bb`
 (`071: graduate server worker glue to TypeScript`).
+
+### Stage 4c — thread-smoke worker TypeScript conversion (landed)
+
+The seventh slice converted the remaining thread probe worker:
+`www/mclone-thread-smoke-worker.js` is now authored as
+`www/mclone-thread-smoke-worker.ts`. This worker remains a tiny browser/WASM threading sentinel:
+it receives a `WebAssembly.Memory`, verifies the backing buffer is a `SharedArrayBuffer`, mutates
+the shared `Int32Array` with `Atomics`, wakes the waiter, and posts the same result bag as before.
+
+Runtime imports and URLs stayed stable: `mclone-web-smoke.js` still uses
+`new URL("./mclone-thread-smoke-worker.js", import.meta.url)`, and the smoke harness still serves
+`/mclone-thread-smoke-worker.js` from the staged web root. Worker construction remains
+`type: "module"` with the same `mclone-thread-smoke` worker name. The staged root and deploy
+bundle both contain emitted `mclone-thread-smoke-worker.js`, with no `.ts` files shipped.
+
+Line counts from the start of this slice were thread-smoke worker JS `38`. Ending source count is
+thread-smoke worker TS `47`; the emitted staged/deploy JS is `39` lines.
+
+Correctness and perf fences held. Pre-slice and final `pnpm native:web:chunk-smoke` both produced
+`0ba8251f6c0dba012782e80921b8d45ead799a216decf50e9041958babcb6a4c` for
+`/tmp/mclone-native-web-canvas.png`; the desktop chunk canvas, app canvas, mobile app canvas, and
+movement-perf canvas were visually inspected. The browser threading probe stayed green:
+`crossOriginIsolated`, `SharedArrayBuffer`, shared `WebAssembly.Memory`, Worker construction,
+Atomics, and worker round trip all passed with initial value `7` and final value `42`.
+
+Movement perf passed across 3 chunk boundaries, moving from center `[-1, -1]` to `[-1, 2]`, with
+`compileTimingCount=29`, 9 accepted movement compile timings, `renderCount=300`, `frameCount=66`,
+and `maxFrameGapMs=10.33`. Accepted compile `totalMs` averaged `15.26` ms (min `8.8`, max
+`17.6`); `workerRoundTripMs` averaged `7.22` ms (min `6.4`, max `8.1`); packed byte length ranged
+`1061676..1687276`. The last compile was request `29`, `17.0` ms total / `7.0` ms worker round
+trip, packed `1160484` bytes. Render compiler transport stayed `shared-result-buffer`; no
+shared-result overflow occurred and no generated-view fallback was used. Server runner metrics
+stayed on shared memory: `runnerFrameMetrics` reported `29` request frames / `119` response
+frames with `0` shared-buffer fallback response frames; `worldgenJobFrameMetrics` reported `5`
+request frames / `5` response frames, `5901775` request bytes, `55106044` response bytes, and
+`0` shared-buffer fallback response frames; `lightStatusJobFrameMetrics` reported `5` request
+frames / `5` response frames, `38916115` request bytes, `1024056` response bytes, and `0`
+shared-buffer fallback response frames.
+
+Validation (all green): `pnpm native:web:chunk-smoke` baseline, `pnpm native:web:glue`,
+`pnpm native:web:typecheck`, `node --check` on emitted staged and deploy
+`mclone-thread-smoke-worker.js`, `bash -n scripts/deploy-native-web.sh`, `cargo test
+--manifest-path native/Cargo.toml`, `cargo check -p mclone-web-client --target
+wasm32-unknown-unknown --manifest-path native/Cargo.toml`, `pnpm native:web:build`,
+`pnpm native:web:bundle`, explicit staged/deploy inventory checks (`mclone-thread-smoke-worker.js`
+present, no `.ts`), `pnpm native:web:app-smoke`, `pnpm native:web:chunk-smoke` plus final sha256,
+`pnpm native:web:mobile-smoke` with mobile canvas inspection, `pnpm native:web:movement-perf`,
+`pnpm native:web:smoke`, `pnpm native:movement:smoke`, and `pnpm native:timedemo:smoke`.
+
+Implementation commit: `f870b9a12e6dafd198e90698f48d80f4945e0a2c`
+(`071: graduate thread smoke worker glue to TypeScript`).
 
 ## Relationship to Other Tacticals
 
