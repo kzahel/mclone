@@ -19,6 +19,7 @@ import {
   updateDom,
 } from "./mclone-web-hud.js";
 import { TouchControls } from "./mclone-web-touch.js";
+import type { TouchOverlayState } from "./mclone-web-touch.js";
 import type { WebChunkRenderSession, WebCompileTiming } from "mclone-web-client-wasm";
 
 // The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
@@ -250,6 +251,7 @@ class WebChunkApp {
   touchKeys: InputKeys;
   touchMovementImpulse: TouchMovementImpulse;
   touchControls: TouchControls | null;
+  pendingTouchOverlay: TouchOverlayState | null;
   lookSensitivity: number;
   mouseDeltaX: number;
   mouseDeltaY: number;
@@ -280,6 +282,7 @@ class WebChunkApp {
     this.touchKeys = defaultInputKeys() as InputKeys;
     this.touchMovementImpulse = defaultMovementImpulse();
     this.touchControls = null;
+    this.pendingTouchOverlay = null;
     const settings = loadStoredSettings();
     this.lookSensitivity = settings.lookSensitivity;
     runtime.state.lookSensitivity = this.lookSensitivity;
@@ -357,6 +360,7 @@ class WebChunkApp {
       "setDebugOverlayVisible",
       "setStatusOverlay",
       "setTouchLookSensitivity",
+      "setTouchControlsOverlay",
     ]) {
       if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
         throw new Error(`missing WebChunkRenderSession.${name} export`);
@@ -376,6 +380,7 @@ class WebChunkApp {
     bindMenu(this, runtime.state);
     bindInput(this, runtime.state, () => updateDom(runtime.state));
     this.touchControls = new TouchControls(this, runtime.state);
+    this.flushNativeTouchControlsOverlay();
     this.setNativeTouchLookSensitivity(
       this.lookSensitivity,
       this.touchControls.snapshot().visible,
@@ -957,10 +962,39 @@ class WebChunkApp {
     return report;
   }
 
+  setNativeTouchControlsOverlay(overlay: TouchOverlayState): WasmReport | null {
+    this.pendingTouchOverlay = overlay;
+    return this.flushNativeTouchControlsOverlay();
+  }
+
+  flushNativeTouchControlsOverlay(): WasmReport | null {
+    if (!this.session || !this.pendingTouchOverlay || this.sessionBusy) {
+      return null;
+    }
+    const overlay = this.pendingTouchOverlay;
+    const base = this.canvasLocalPointToPixel(overlay.movementBaseX, overlay.movementBaseY);
+    const thumb = this.canvasLocalPointToPixel(overlay.movementThumbX, overlay.movementThumbY);
+    const report = this.session.setTouchControlsOverlay(
+      overlay.visible,
+      overlay.movementActive,
+      base.x,
+      base.y,
+      thumb.x,
+      thumb.y,
+      overlay.jumpPressed,
+      overlay.sprintPressed,
+      overlay.descendPressed,
+      overlay.menuPressed,
+    );
+    this.applyNativeUiReport(report);
+    return report;
+  }
+
   applyNativeUiReport(report: WasmReport | null | undefined, options: { fromPointer?: boolean, pointerType?: string } = {}): void {
     if (!report?.ok) {
       return;
     }
+    const wasUiActive = runtime.state.uiActive === true;
     runtime.state.uiActive = Boolean(report.active ?? report.uiActive);
     runtime.state.uiCoversWorld = Boolean(report.coversWorld ?? report.uiCoversWorld);
     runtime.state.nativeUiScreen = String(report.screen ?? report.uiScreen ?? "none");
@@ -989,7 +1023,9 @@ class WebChunkApp {
     }
     if (runtime.state.uiActive) {
       this.releasePointerLockForUi();
-      this.clearGameplayInput();
+      if (!wasUiActive) {
+        this.clearGameplayInput();
+      }
     }
     if (
       (report.action === "startWorld" || report.action === "resume")
@@ -1008,6 +1044,16 @@ class WebChunkApp {
     return {
       x: (Number(clientX) - rect.left) * scaleX,
       y: (Number(clientY) - rect.top) * scaleY,
+    };
+  }
+
+  canvasLocalPointToPixel(localX: number, localY: number): { x: number, y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = rect.width > 0 ? this.canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? this.canvas.height / rect.height : 1;
+    return {
+      x: Number(localX) * scaleX,
+      y: Number(localY) * scaleY,
     };
   }
 
@@ -1039,6 +1085,7 @@ class WebChunkApp {
       return await operation();
     } finally {
       this.sessionBusy = false;
+      this.flushNativeTouchControlsOverlay();
     }
   }
 

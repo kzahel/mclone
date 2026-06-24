@@ -8,9 +8,7 @@
     <style>
       :root {
         color-scheme: dark;
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background: #080a0d;
-        color: #e7edf3;
       }
 
       * {
@@ -24,7 +22,8 @@
         background: #080a0d;
       }
 
-      main {
+      main,
+      .viewport {
         width: 100vw;
         height: 100vh;
         height: 100dvh;
@@ -33,10 +32,6 @@
 
       .viewport {
         position: relative;
-        width: 100vw;
-        height: 100vh;
-        height: 100dvh;
-        min-height: 100vh;
         overflow: hidden;
         touch-action: none;
       }
@@ -49,213 +44,12 @@
         touch-action: none;
         user-select: none;
       }
-
-      .hud-toggle {
-        position: absolute;
-        z-index: 30;
-        top: 16px;
-        left: 16px;
-        display: grid;
-        place-items: center;
-        width: 42px;
-        height: 42px;
-        padding: 0;
-        border: 1px solid rgba(184, 198, 214, 0.24);
-        border-radius: 8px;
-        background: rgba(9, 13, 18, 0.84);
-        backdrop-filter: blur(10px);
-        color: #e7edf3;
-        cursor: pointer;
-      }
-
-      .hud-toggle:focus-visible,
-      .touch-button:focus-visible {
-        outline: 2px solid #80bfff;
-        outline-offset: 2px;
-      }
-
-      .hud-toggle-lines {
-        display: grid;
-        gap: 4px;
-      }
-
-      .hud-toggle-lines span {
-        display: block;
-        width: 18px;
-        height: 2px;
-        border-radius: 2px;
-        background: currentColor;
-      }
-
-      .touch-controls {
-        position: absolute;
-        z-index: 18;
-        inset: 0;
-        display: none;
-        pointer-events: none;
-      }
-
-      .touch-controls[data-visible="true"] {
-        display: block;
-      }
-
-      .touch-joystick {
-        position: absolute;
-        left: 0;
-        top: 0;
-        width: 100px;
-        height: 100px;
-        border: 1px solid rgba(232, 240, 248, 0.2);
-        border-radius: 50%;
-        background: rgba(0, 0, 0, 0.28);
-        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
-        opacity: 0;
-        transform: translate(-50%, -50%);
-        transition: opacity 100ms ease;
-      }
-
-      .touch-joystick[data-active="true"] {
-        opacity: 1;
-      }
-
-      .touch-joystick-thumb {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        background: rgba(245, 250, 255, 0.62);
-        transform: translate(-50%, -50%);
-      }
-
-      .touch-buttons {
-        position: absolute;
-        right: max(18px, env(safe-area-inset-right));
-        bottom: max(24px, env(safe-area-inset-bottom));
-        display: grid;
-        grid-template-columns: repeat(2, 58px);
-        gap: 12px;
-        pointer-events: none;
-      }
-
-      .touch-button {
-        position: relative;
-        display: grid;
-        place-items: center;
-        width: 58px;
-        height: 58px;
-        padding: 0;
-        border: 1px solid rgba(232, 240, 248, 0.22);
-        border-radius: 50%;
-        background: rgba(0, 0, 0, 0.32);
-        color: rgba(245, 250, 255, 0.82);
-        pointer-events: auto;
-        touch-action: none;
-      }
-
-      .touch-button[data-active="true"] {
-        background: rgba(245, 250, 255, 0.68);
-        color: rgba(12, 16, 20, 0.9);
-      }
-
-      .touch-button[data-touch-key="jump"] {
-        grid-column: 2;
-        grid-row: 1;
-      }
-
-      .touch-button[data-touch-key="descend"] {
-        grid-column: 2;
-        grid-row: 2;
-      }
-
-      .touch-button[data-touch-key="sprint"] {
-        grid-column: 1;
-        grid-row: 2;
-      }
-
-      .touch-button-icon {
-        position: relative;
-        display: block;
-        width: 22px;
-        height: 22px;
-      }
-
-      .touch-button[data-touch-key="jump"] .touch-button-icon::before,
-      .touch-button[data-touch-key="descend"] .touch-button-icon::before {
-        content: "";
-        position: absolute;
-        left: 5px;
-        top: 5px;
-        width: 12px;
-        height: 12px;
-        border-color: currentColor;
-        border-style: solid;
-        border-width: 3px 3px 0 0;
-      }
-
-      .touch-button[data-touch-key="jump"] .touch-button-icon::before {
-        transform: rotate(-45deg);
-      }
-
-      .touch-button[data-touch-key="descend"] .touch-button-icon::before {
-        transform: rotate(135deg);
-      }
-
-      .touch-button[data-touch-key="sprint"] .touch-button-icon::before,
-      .touch-button[data-touch-key="sprint"] .touch-button-icon::after {
-        content: "";
-        position: absolute;
-        top: 5px;
-        width: 8px;
-        height: 12px;
-        border-color: currentColor;
-        border-style: solid;
-        border-width: 3px 3px 0 0;
-        transform: rotate(45deg);
-      }
-
-      .touch-button[data-touch-key="sprint"] .touch-button-icon::before {
-        left: 1px;
-      }
-
-      .touch-button[data-touch-key="sprint"] .touch-button-icon::after {
-        left: 10px;
-      }
-
-      @media (max-width: 680px), (pointer: coarse) {
-        .hud-toggle {
-          top: 10px;
-          left: 10px;
-          width: 40px;
-          height: 40px;
-        }
-      }
     </style>
   </head>
   <body>
     <main>
       <section class="viewport">
         <canvas id="mclone-canvas" width="960" height="540" tabindex="0"></canvas>
-        <button id="hud-toggle" class="hud-toggle" type="button" aria-label="Open menu" aria-expanded="false">
-          <span class="hud-toggle-lines" aria-hidden="true"><span></span><span></span><span></span></span>
-        </button>
-        <div id="touch-controls" class="touch-controls" data-visible="false" aria-hidden="true">
-          <div id="touch-joystick" class="touch-joystick" data-active="false" aria-hidden="true">
-            <div id="touch-joystick-thumb" class="touch-joystick-thumb"></div>
-          </div>
-          <div class="touch-buttons" aria-hidden="false">
-            <button class="touch-button" type="button" data-touch-key="jump" data-active="false" aria-label="Jump">
-              <span class="touch-button-icon" aria-hidden="true"></span>
-            </button>
-            <button class="touch-button" type="button" data-touch-key="sprint" data-active="false" aria-label="Sprint">
-              <span class="touch-button-icon" aria-hidden="true"></span>
-            </button>
-            <button class="touch-button" type="button" data-touch-key="descend" data-active="false" aria-label="Descend">
-              <span class="touch-button-icon" aria-hidden="true"></span>
-            </button>
-          </div>
-        </div>
       </section>
     </main>
     <script>

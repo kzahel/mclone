@@ -1,6 +1,6 @@
 # 072: Native UI DOM Retirement
 
-Status: active high-priority parent; Slices 1-4 menu/input/HUD/settings path landed; touch controls and final DOM burn-down remain.
+Status: active high-priority parent; Slices 1-5 menu/input/HUD/settings/touch path landed; final HTML/CSS/TS burn-down remains.
 
 ## Purpose
 
@@ -256,12 +256,12 @@ Inspect `/tmp/mclone-native-ui-debug.png` and web screenshots.
 
 Goal: retire visible DOM touch controls.
 
-- [ ] Represent touch joystick, jump, sprint, descend, and hamburger/menu affordances as `mclone-ui` widgets or a small native-rendered touch overlay.
-- [ ] Keep browser pointer/touch event capture in TS, but send input facts into Rust.
-- [ ] Preserve analog movement impulse behavior from `064`.
-- [ ] Delete `.touch-controls`, `.touch-joystick`, `.touch-button`, and associated HTML once the native overlay is validated.
-- [ ] Keep touch controls hidden on non-touch desktop unless explicitly enabled for testing.
-- [ ] Update this doc's status/landed section, commit, and report the next high-value step.
+- [x] Represent touch joystick, jump, sprint, descend, and hamburger/menu affordances as `mclone-ui` widgets or a small native-rendered touch overlay.
+- [x] Keep browser pointer/touch event capture in TS, but send input facts into Rust.
+- [x] Preserve analog movement impulse behavior from `064`.
+- [x] Delete `.touch-controls`, `.touch-joystick`, `.touch-button`, and associated HTML once the native overlay is validated.
+- [x] Keep touch controls hidden on non-touch desktop unless explicitly enabled for testing.
+- [x] Update this doc's status/landed section, commit, and report the next high-value step.
 
 Validation:
 
@@ -325,6 +325,18 @@ Do not leave a completed chunk uncommitted unless the user explicitly asks not t
 - Should debug HUD formatting live entirely in `mclone-ui`, or in shared runtime presentation structs consumed by `mclone-ui`?
 
 ## Landed
+
+### 2026-06-24 - Slice 5 Native Touch Controls Overlay
+
+- Added platform-neutral `TouchOverlay` and `TouchJoystickOverlay` drawing to `mclone-ui`, including a shared test that verifies native touch controls emit GUI draw commands when visible.
+- Added a web `setTouchControlsOverlay` wasm boundary on `WebChunkRenderSession`; the browser adapter now forwards touch-control facts to Rust and the web GUI pass renders the hamburger, joystick, jump, sprint, and descend affordances into the canvas.
+- Reworked `mclone-web-touch.ts` so TypeScript owns only canvas pointer capture, analog movement/look math, and platform UI shortcuts; visible joystick/buttons/hamburger DOM elements are gone.
+- Reduced `app.html` to the canvas, scripts, and minimal sizing/browser-reset CSS by deleting `.touch-controls`, `.touch-joystick`, `.touch-button`, and the `#hud-toggle` markup.
+- Fixed the web native-UI adapter so gameplay/touch state is cleared only when entering UI-active mode, avoiding repeated clears while tapping shared native UI widgets.
+- Updated browser smoke coverage to synthesize touch menu/button pointer events against the canvas and verify native pause/options rendering without visible DOM controls.
+- Validation: `cargo test --manifest-path native/Cargo.toml -p mclone-ui`; `cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-web-client -p mclone-native-client` (rerun elevated for localhost TCP tests); `pnpm native:web:typecheck`; `pnpm native:web:mobile-smoke` (elevated for local browser server); `pnpm native:web:app-smoke` (elevated for local browser server); `pnpm native:web:movement-perf` (elevated for local browser server).
+- Screenshots inspected: `/tmp/mclone-native-web-mobile-app-canvas.png`, `/tmp/mclone-native-web-mobile-ui-canvas.png`, `/tmp/mclone-native-web-mobile-options-canvas.png`, and `/tmp/mclone-native-web-movement-perf-canvas.png`.
+- Known follow-up: Slice 6 should remove the remaining optional HUD/status compatibility plumbing from TypeScript, add a static no-visible-UI assertion for `app.html`, and update older docs that still describe DOM UI as current.
 
 ### 2026-06-24 - Slice 4 Touch Look Sensitivity Setting
 

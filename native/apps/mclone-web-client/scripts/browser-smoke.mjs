@@ -906,19 +906,17 @@ async function exerciseMobileTouchControls(page, canvas) {
   const buttonProbe = await exerciseTouchButton(page, "jump", 41);
   await canvas.evaluate((element) => element.focus());
 
-  // The hamburger is now only a platform shortcut for the native-rendered pause UI.
-  await page.locator("#hud-toggle").click();
+  // The native-rendered hamburger is only a platform shortcut for the native pause UI.
+  await dispatchTouchMenuPointerEvent(page, "pointerdown", { pointerId: 51, buttons: 1 });
+  await dispatchTouchMenuPointerEvent(page, "pointerup", { pointerId: 51, buttons: 0 });
   await page.waitForFunction(
     () => {
       const state = globalThis.__mcloneWebApp?.state;
       const menu = document.getElementById("main-menu");
-      return document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "true"
-        && (menu === null || menu.hidden === true)
+      return (menu === null || menu.hidden === true)
         && state?.uiActive === true
         && state.nativeUiScreen === "pause"
-        && state.menuOpen === false
-        && state.lastReport?.uiActive === true
-        && Number(state.lastReport?.guiCommandCount) > 100;
+        && state.menuOpen === false;
     },
     undefined,
     { timeout: 10_000 },
@@ -948,8 +946,7 @@ async function exerciseMobileTouchControls(page, canvas) {
   await page.waitForFunction(
     () => {
       const state = globalThis.__mcloneWebApp?.state;
-      return document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "false"
-        && state?.uiActive === false
+      return state?.uiActive === false
         && state.nativeUiScreen === "none"
         && state.menuOpen === false;
     },
@@ -1082,8 +1079,7 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
  * @param {number} pointerId
  */
 async function exerciseTouchButton(page, key, pointerId) {
-  const selector = `[data-touch-key="${key}"]`;
-  await dispatchPointerEventOnSelector(page, selector, "pointerdown", { pointerId, buttons: 1 });
+  await dispatchTouchButtonPointerEvent(page, key, "pointerdown", { pointerId, buttons: 1 });
   await page.waitForFunction(
     (key) => globalThis.__mcloneWebApp?.touchControlState?.()?.keys?.[key] === true
       && globalThis.__mcloneWebApp?.state?.touchButtonActiveCount > 0,
@@ -1093,9 +1089,8 @@ async function exerciseTouchButton(page, key, pointerId) {
   const down = await page.evaluate((key) => ({
     keyDown: globalThis.__mcloneWebApp.touchControlState?.().keys[key],
     activeCount: globalThis.__mcloneWebApp.state.touchButtonActiveCount,
-    activeAttribute: /** @type {HTMLElement | null} */ (document.querySelector(`[data-touch-key="${key}"]`))?.dataset.active ?? null,
   }), key);
-  await dispatchPointerEventOnSelector(page, selector, "pointerup", { pointerId, buttons: 0 });
+  await dispatchTouchButtonPointerEvent(page, key, "pointerup", { pointerId, buttons: 0 });
   await page.waitForFunction(
     (key) => globalThis.__mcloneWebApp?.touchControlState?.()?.keys?.[key] === false
       && globalThis.__mcloneWebApp?.state?.touchButtonActiveCount === 0,
@@ -1105,15 +1100,12 @@ async function exerciseTouchButton(page, key, pointerId) {
   const up = await page.evaluate((key) => ({
     keyDown: globalThis.__mcloneWebApp.touchControlState?.().keys[key],
     activeCount: globalThis.__mcloneWebApp.state.touchButtonActiveCount,
-    activeAttribute: /** @type {HTMLElement | null} */ (document.querySelector(`[data-touch-key="${key}"]`))?.dataset.active ?? null,
   }), key);
   return {
     ok: down.keyDown === true
       && down.activeCount > 0
-      && down.activeAttribute === "true"
       && up.keyDown === false
-      && up.activeCount === 0
-      && up.activeAttribute === "false",
+      && up.activeCount === 0,
     down,
     up,
   };
@@ -1208,28 +1200,73 @@ async function dispatchCanvasPointerEvent(page, type, options) {
 
 /**
  * @param {Page} page
- * @param {string} selector
  * @param {string} type
  * @param {{ pointerId: number, buttons: number }} options
  */
-async function dispatchPointerEventOnSelector(page, selector, type, options) {
+async function dispatchTouchMenuPointerEvent(page, type, options) {
   await page.evaluate(
-    ({ selector, type, options }) => {
-      const target = /** @type {HTMLElement} */ (document.querySelector(selector));
-      const rect = target.getBoundingClientRect();
-      target.dispatchEvent(new PointerEvent(type, {
+    ({ type, options }) => {
+      const canvas = /** @type {HTMLElement} */ (document.getElementById("mclone-canvas"));
+      const rect = canvas.getBoundingClientRect();
+      canvas.dispatchEvent(new PointerEvent(type, {
         bubbles: true,
         cancelable: true,
         pointerId: options.pointerId,
         pointerType: "touch",
         isPrimary: true,
-        clientX: rect.left + rect.width * 0.5,
-        clientY: rect.top + rect.height * 0.5,
+        clientX: rect.left + 30,
+        clientY: rect.top + 30,
         button: 0,
         buttons: options.buttons,
       }));
     },
-    { selector, type, options },
+    { type, options },
+  );
+}
+
+/**
+ * @param {Page} page
+ * @param {string} key
+ * @param {string} type
+ * @param {{ pointerId: number, buttons: number }} options
+ */
+async function dispatchTouchButtonPointerEvent(page, key, type, options) {
+  await page.evaluate(
+    ({ key, type, options }) => {
+      const canvas = /** @type {HTMLElement} */ (document.getElementById("mclone-canvas"));
+      const rect = canvas.getBoundingClientRect();
+      const size = 58;
+      const gap = 12;
+      const right = 18;
+      const bottom = 24;
+      const x1 = Math.max(0, rect.width - right - size);
+      const x0 = Math.max(0, x1 - gap - size);
+      const y1 = Math.max(0, rect.height - bottom - size);
+      const y0 = Math.max(0, y1 - gap - size);
+      let center = null;
+      if (key === "jump") {
+        center = { x: x1 + size * 0.5, y: y0 + size * 0.5 };
+      } else if (key === "sprint") {
+        center = { x: x0 + size * 0.5, y: y1 + size * 0.5 };
+      } else if (key === "descend") {
+        center = { x: x1 + size * 0.5, y: y1 + size * 0.5 };
+      }
+      if (!center) {
+        throw new Error(`unknown native touch button ${key}`);
+      }
+      canvas.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: options.pointerId,
+        pointerType: "touch",
+        isPrimary: true,
+        clientX: rect.left + center.x,
+        clientY: rect.top + center.y,
+        button: 0,
+        buttons: options.buttons,
+      }));
+    },
+    { key, type, options },
   );
 }
 

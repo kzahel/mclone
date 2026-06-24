@@ -756,6 +756,29 @@ impl StatusOverlay {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TouchOverlay {
+    pub visible: bool,
+    pub menu_pressed: bool,
+    pub movement: TouchJoystickOverlay,
+    pub jump_pressed: bool,
+    pub sprint_pressed: bool,
+    pub descend_pressed: bool,
+}
+
+impl TouchOverlay {
+    pub fn hidden() -> Self {
+        Self::default()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TouchJoystickOverlay {
+    pub active: bool,
+    pub base: Point,
+    pub thumb: Point,
+}
+
 pub fn render_debug_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &DebugOverlay) {
     render_debug_overlay_at(scale, draw, overlay, Point { x: 4.0, y: 4.0 });
 }
@@ -841,6 +864,21 @@ pub fn render_crosshair(scale: GuiScale, draw: &mut GuiDrawList) {
     draw.fill(Rect::new(center_x - 8.0, center_y - 1.0, 16.0, 2.0), shadow);
     draw.fill(Rect::new(center_x, center_y - 7.0, 1.0, 14.0), color);
     draw.fill(Rect::new(center_x - 7.0, center_y, 14.0, 1.0), color);
+}
+
+pub fn render_touch_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &TouchOverlay) {
+    if !overlay.visible {
+        return;
+    }
+    let font = Font::default();
+    render_touch_menu_button(draw, touch_menu_button_rect(), overlay.menu_pressed);
+    if overlay.movement.active {
+        render_touch_joystick(draw, overlay.movement);
+    }
+    let buttons = touch_action_button_rects(scale);
+    render_touch_action_button(draw, &font, buttons.jump, "UP", overlay.jump_pressed);
+    render_touch_action_button(draw, &font, buttons.sprint, ">>", overlay.sprint_pressed);
+    render_touch_action_button(draw, &font, buttons.descend, "DN", overlay.descend_pressed);
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1365,6 +1403,94 @@ fn render_distance_label(state: GameUiRenderState) -> String {
     format!("Render Distance: {radius} {suffix}")
 }
 
+#[derive(Clone, Copy, Debug)]
+struct TouchActionButtonRects {
+    jump: Rect,
+    sprint: Rect,
+    descend: Rect,
+}
+
+fn touch_menu_button_rect() -> Rect {
+    Rect::new(10.0, 10.0, 40.0, 40.0)
+}
+
+fn touch_action_button_rects(scale: GuiScale) -> TouchActionButtonRects {
+    let size = 58.0;
+    let gap = 12.0;
+    let right = 18.0;
+    let bottom = 24.0;
+    let x1 = (scale.width - right - size).max(0.0);
+    let x0 = (x1 - gap - size).max(0.0);
+    let y1 = (scale.height - bottom - size).max(0.0);
+    let y0 = (y1 - gap - size).max(0.0);
+    TouchActionButtonRects {
+        jump: Rect::new(x1, y0, size, size),
+        sprint: Rect::new(x0, y1, size, size),
+        descend: Rect::new(x1, y1, size, size),
+    }
+}
+
+fn render_touch_menu_button(draw: &mut GuiDrawList, rect: Rect, pressed: bool) {
+    render_touch_panel(draw, rect, pressed);
+    let color = if pressed {
+        Color::rgba(24, 30, 34, 235)
+    } else {
+        Color::rgba(238, 246, 248, 220)
+    };
+    let line_x = rect.x + 11.0;
+    let mut y = rect.y + 12.0;
+    for _ in 0..3 {
+        draw.fill(Rect::new(line_x, y, 18.0, 3.0), color);
+        y += 7.0;
+    }
+}
+
+fn render_touch_joystick(draw: &mut GuiDrawList, joystick: TouchJoystickOverlay) {
+    let base = Rect::new(joystick.base.x - 50.0, joystick.base.y - 50.0, 100.0, 100.0);
+    let thumb = Rect::new(joystick.thumb.x - 18.0, joystick.thumb.y - 18.0, 36.0, 36.0);
+    draw.fill(base, Color::rgba(0, 0, 0, 70));
+    draw.outline(base, Color::rgba(232, 240, 248, 58));
+    draw.outline(base.inset(1.0), Color::rgba(0, 0, 0, 65));
+    draw.fill(thumb, Color::rgba(245, 250, 255, 158));
+    draw.outline(thumb, Color::rgba(245, 250, 255, 205));
+}
+
+fn render_touch_action_button(
+    draw: &mut GuiDrawList,
+    font: &Font,
+    rect: Rect,
+    label: &str,
+    pressed: bool,
+) {
+    render_touch_panel(draw, rect, pressed);
+    let color = if pressed {
+        Color::rgba(12, 16, 20, 230)
+    } else {
+        Color::rgba(245, 250, 255, 210)
+    };
+    font.draw_centered(
+        draw,
+        label,
+        rect.center_x(),
+        rect.y + ((rect.height - font.line_height()) * 0.5).floor(),
+        color,
+    );
+}
+
+fn render_touch_panel(draw: &mut GuiDrawList, rect: Rect, pressed: bool) {
+    let (fill, border) = if pressed {
+        (
+            Color::rgba(245, 250, 255, 174),
+            Color::rgba(245, 250, 255, 225),
+        )
+    } else {
+        (Color::rgba(0, 0, 0, 86), Color::rgba(232, 240, 248, 60))
+    };
+    draw.fill(rect, fill);
+    draw.outline(rect, border);
+    draw.outline(rect.inset(1.0), Color::rgba(0, 0, 0, 64));
+}
+
 fn touch_look_slider_value(settings: GameTouchSettings) -> f32 {
     let (min, max) = settings.look_sensitivity_limits();
     if max <= min {
@@ -1664,6 +1790,27 @@ mod tests {
         render_crosshair(GuiScale::from_pixels(960, 540), &mut draw);
 
         assert_eq!(draw.commands().len(), 4);
+    }
+
+    #[test]
+    fn touch_overlay_renders_native_controls_when_visible() {
+        let mut draw = GuiDrawList::new();
+        let overlay = TouchOverlay {
+            visible: true,
+            menu_pressed: false,
+            movement: TouchJoystickOverlay {
+                active: true,
+                base: Point { x: 80.0, y: 320.0 },
+                thumb: Point { x: 96.0, y: 284.0 },
+            },
+            jump_pressed: true,
+            sprint_pressed: false,
+            descend_pressed: false,
+        };
+
+        render_touch_overlay(GuiScale::from_pixels(780, 1688), &mut draw, &overlay);
+
+        assert!(!draw.commands().is_empty());
     }
 
     #[test]

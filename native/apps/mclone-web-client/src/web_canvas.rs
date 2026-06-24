@@ -48,8 +48,9 @@ use mclone_render_session::{
 use mclone_server::ServerRunnerKind;
 use mclone_ui::{
     DebugOverlay, GameFramePacingMode, GameOptionsParent, GameScreen, GameTouchSettings, GameUi,
-    GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, render_crosshair,
-    render_debug_overlay_at, render_status_overlay,
+    GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay,
+    TouchOverlay, render_crosshair, render_debug_overlay_at, render_status_overlay,
+    render_touch_overlay,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -2214,6 +2215,7 @@ pub struct WebChunkRenderSession {
     force_fullbright: bool,
     touch_look_sensitivity: f32,
     touch_settings_available: bool,
+    touch_overlay: TouchOverlay,
     loaded_chunk_positions: BTreeSet<ChunkPos>,
     // 067 Stage 3: the last chunk-view center we asked the runner to stream. The
     // streaming loop only re-sends the deferred SetChunkView command when this changes,
@@ -2282,6 +2284,36 @@ impl WebChunkRenderSession {
     ) -> Result<JsValue, JsValue> {
         self.touch_look_sensitivity = clamp_touch_look_sensitivity(look_sensitivity);
         self.touch_settings_available = available;
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = setTouchControlsOverlay)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_touch_controls_overlay(
+        &mut self,
+        visible: bool,
+        movement_active: bool,
+        base_pixel_x: f64,
+        base_pixel_y: f64,
+        thumb_pixel_x: f64,
+        thumb_pixel_y: f64,
+        jump_pressed: bool,
+        sprint_pressed: bool,
+        descend_pressed: bool,
+        menu_pressed: bool,
+    ) -> Result<JsValue, JsValue> {
+        self.touch_overlay = TouchOverlay {
+            visible,
+            menu_pressed,
+            movement: TouchJoystickOverlay {
+                active: movement_active,
+                base: self.ui_point_from_canvas_pixels(base_pixel_x, base_pixel_y),
+                thumb: self.ui_point_from_canvas_pixels(thumb_pixel_x, thumb_pixel_y),
+            },
+            jump_pressed,
+            sprint_pressed,
+            descend_pressed,
+        };
         self.ui_status_to_js_value().map_err(JsValue::from)
     }
 
@@ -2570,6 +2602,11 @@ impl WebChunkRenderSession {
             "touchLookSensitivityAvailable",
             self.touch_settings_available,
         )?;
+        set_bool(
+            object,
+            "touchControlsOverlayVisible",
+            self.touch_overlay.visible,
+        )?;
         if self.touch_settings_available {
             set_number(
                 object,
@@ -2739,6 +2776,7 @@ impl WebChunkRenderSession {
             force_fullbright: false,
             touch_look_sensitivity: WEB_TOUCH_LOOK_SENSITIVITY_DEFAULT,
             touch_settings_available: false,
+            touch_overlay: TouchOverlay::hidden(),
             loaded_chunk_positions: BTreeSet::new(),
             interest_center: None,
             asset_pack_parse_count: 1,
@@ -3490,6 +3528,7 @@ impl WebChunkRenderSession {
             }
         }
         render_status_overlay(self.ui.scale(), &mut ui_draw, &self.status_overlay);
+        render_touch_overlay(self.ui.scale(), &mut ui_draw, &self.touch_overlay);
         let gui_command_count = ui_draw.commands().len();
         if gui_command_count > 0 {
             self.gui
