@@ -10,17 +10,19 @@ use anyhow::{Context, Result, anyhow, bail};
 #[cfg(target_os = "android")]
 use anyhow::{Result, bail};
 #[cfg(not(target_os = "android"))]
-use glam::{Mat3, Mat4, Quat, Vec3, Vec4};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
     render_full_frame_for_view,
 };
 #[cfg(not(target_os = "android"))]
+use mclone_core::{ChunkPos, Vec3d};
+#[cfg(not(target_os = "android"))]
 use mclone_mesh::quad_face_count_from_indices;
 #[cfg(not(target_os = "android"))]
 use mclone_render::chunk::{
-    ChunkCamera, ChunkRenderView, TexturedSectionDrawResources, TexturedSectionRenderOptions,
+    ChunkRenderView, TexturedSectionDrawResources, TexturedSectionRenderOptions,
     TexturedSectionUploadReport,
 };
 #[cfg(not(target_os = "android"))]
@@ -29,6 +31,13 @@ use mclone_render::entity::{ActorDrawResources, ActorInstance};
 use mclone_render::sky_render::SkyRenderer;
 #[cfg(not(target_os = "android"))]
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
+#[cfg(all(test, not(target_os = "android")))]
+use mclone_render_session::ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND;
+#[cfg(not(target_os = "android"))]
+use mclone_render_session::{
+    ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineCameraInput,
+    EngineCameraMovementImpulse, EngineCameraSnapshot,
+};
 #[cfg(not(target_os = "android"))]
 use mclone_ui::GuiDrawList;
 #[cfg(not(target_os = "android"))]
@@ -49,7 +58,7 @@ mod graphics_metal;
 #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
 mod graphics_vulkan;
 #[cfg(not(target_os = "android"))]
-use actions::{OpenXrControllerActions, XrControllerInputSummary};
+use actions::{OpenXrControllerActions, XrControllerInputSummary, XrControllerSnapshot, XrHand};
 #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
 use graphics_metal as platform_graphics;
 #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
@@ -85,6 +94,12 @@ const SESSION_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const XR_NEAR: f32 = 0.05;
 #[cfg(not(target_os = "android"))]
 const XR_FAR: f32 = 700.0;
+#[cfg(not(target_os = "android"))]
+const XR_JOYPAD_DEAD_ZONE: f32 = 0.18;
+#[cfg(not(target_os = "android"))]
+const XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND: f64 = 1.6;
+#[cfg(not(target_os = "android"))]
+const XR_LOCOMOTION_MAX_FRAME_SECONDS: f64 = 0.1;
 
 #[cfg(not(target_os = "android"))]
 #[derive(Debug)]
@@ -400,6 +415,7 @@ fn run_smoke_frames(
                             &mut left_eye,
                             &mut right_eye,
                             mclone,
+                            &controllers,
                         )
                     } else {
                         render_clear_frame(
@@ -562,14 +578,15 @@ fn poll_openxr_events(
 #[cfg(not(target_os = "android"))]
 struct XrMcloneWorldState {
     runtime: WindowSceneRuntime,
-    base_camera: ChunkCamera,
-    view_pose: Option<XrViewPose>,
+    camera: EngineCameraController,
+    initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
     draw: TexturedSectionDrawResources,
     sky: SkyRenderer,
     actors: ActorDrawResources,
     render_stats: RenderStreamStats,
-    stage_to_world: Option<XrStageToWorld>,
+    tracking_origin: Option<XrTrackingOrigin>,
+    last_locomotion_update: Option<Instant>,
     first_eye_summary: Option<FullFrameRenderSummary>,
     rendered_frames: u32,
 }
@@ -585,14 +602,33 @@ impl XrMcloneWorldState {
         let initial_poll_start = Instant::now();
         let (initial_poll_count, initial_poll_ms) = poll_window_runtime_until_idle(&mut runtime)
             .context("wait for initial mclone runtime chunks")?;
-        let base_camera = ChunkCamera::overview_for_chunk_area(
+        let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(
             options.scene.chunk_x,
             options.scene.chunk_z,
-            options.scene.render_distance,
-        );
-        let base_camera_position = Vec3::from_array(base_camera.eye);
+        ));
+        let mut initial_pose_changed = runtime
+            .apply_pending_engine_camera_position_updates(&mut camera)
+            .context("accept initial XR server player pose")?;
+        let initial_alignment_mode = if let Some(view_pose) = options.view_pose {
+            apply_xr_startup_view_pose(&mut camera, view_pose)
+                .context("apply XR startup view pose")?;
+            initial_pose_changed |= runtime
+                .commit_engine_camera_player_pose(&mut camera)
+                .context("sync initial XR view-pose player pose")?;
+            XrViewAlignmentMode::ViewPose
+        } else {
+            initial_pose_changed |= runtime
+                .commit_engine_camera_player_pose(&mut camera)
+                .context("sync initial XR player pose")?;
+            XrViewAlignmentMode::PlayerSpawn
+        };
+        if initial_pose_changed {
+            let _ = poll_window_runtime_until_idle(&mut runtime)
+                .context("wait for chunks after initial XR player pose")?;
+        }
+        let camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
         let section_update = runtime
-            .sync_all_render_sections(base_camera_position)
+            .sync_all_render_sections(camera_position)
             .context("compile initial mclone render sections for XR")?;
         let sections = runtime.cached_sections();
         if sections.is_empty() {
@@ -613,7 +649,7 @@ impl XrMcloneWorldState {
         )
         .context("upload initial mclone render sections for XR")?;
         draw.set_traversal_ready_sections(
-            &runtime.traversal_ready_render_section_keys(base_camera_position),
+            &runtime.traversal_ready_render_section_keys(camera_position),
         );
         let sky = SkyRenderer::new(device, XR_COLOR_FORMAT);
         let actors = ActorDrawResources::new(
@@ -652,14 +688,15 @@ impl XrMcloneWorldState {
         );
         Ok(Self {
             runtime,
-            base_camera,
-            view_pose: options.view_pose,
+            camera,
+            initial_alignment_mode,
             render_options: options.render_options,
             draw,
             sky,
             actors,
             render_stats,
-            stage_to_world: None,
+            tracking_origin: None,
+            last_locomotion_update: None,
             first_eye_summary: None,
             rendered_frames: 0,
         })
@@ -669,30 +706,50 @@ impl XrMcloneWorldState {
         if views.len() < 2 {
             bail!("OpenXR runtime returned fewer than two stereo views");
         }
-        let transform = match self.stage_to_world {
-            Some(transform) => transform,
+        let tracking_origin = match self.tracking_origin {
+            Some(origin) => origin,
             None => {
-                let transform =
-                    XrStageToWorld::from_initial_views(views, self.base_camera, self.view_pose)?;
+                let origin =
+                    XrTrackingOrigin::from_initial_views(views, self.initial_alignment_mode)?;
+                let snapshot = self.camera.snapshot();
                 println!(
-                    "mclone XR view alignment: mode={} world_eye=({:.2}, {:.2}, {:.2}) world_yaw_degrees={:.1} stage_center=({:.3}, {:.3}, {:.3})",
-                    transform.mode_label(),
-                    transform.origin_world.x,
-                    transform.origin_world.y,
-                    transform.origin_world.z,
-                    transform.world_yaw_degrees,
-                    transform.origin_stage.x,
-                    transform.origin_stage.y,
-                    transform.origin_stage.z
+                    "mclone XR player-root alignment: mode={} root_eye=({:.2}, {:.2}, {:.2}) root_yaw_degrees={:.1} stage_center=({:.3}, {:.3}, {:.3}) stage_yaw_degrees={:.1}",
+                    origin.mode_label(),
+                    snapshot.eye.x,
+                    snapshot.eye.y,
+                    snapshot.eye.z,
+                    snapshot.yaw_radians.to_degrees(),
+                    origin.origin_stage.x,
+                    origin.origin_stage.y,
+                    origin.origin_stage.z,
+                    origin.stage_yaw.to_degrees()
                 );
-                self.stage_to_world = Some(transform);
-                transform
+                self.tracking_origin = Some(origin);
+                origin
             }
         };
+        let transform =
+            XrStageToWorld::from_tracking_origin(tracking_origin, self.camera.snapshot())?;
         Ok([
             xr_view_to_chunk_render_view(&views[0], transform, XR_NEAR, XR_FAR)?,
             xr_view_to_chunk_render_view(&views[1], transform, XR_NEAR, XR_FAR)?,
         ])
+    }
+
+    fn apply_locomotion_input(&mut self, controllers: &[XrControllerSnapshot]) -> Result<()> {
+        let now = Instant::now();
+        let dt_seconds = self
+            .last_locomotion_update
+            .replace(now)
+            .map(|last| now.duration_since(last).as_secs_f64())
+            .unwrap_or(0.0);
+        let input = xr_locomotion_input_from_controllers(controllers, dt_seconds);
+        self.camera
+            .apply_movement_input(self.runtime.client(), input);
+        self.runtime
+            .commit_engine_camera_player_pose(&mut self.camera)
+            .context("sync XR locomotion player pose")?;
+        Ok(())
     }
 
     fn poll_runtime_and_upload(
@@ -770,74 +827,166 @@ impl XrMcloneWorldState {
 }
 
 #[cfg(not(target_os = "android"))]
+fn apply_xr_startup_view_pose(
+    camera: &mut EngineCameraController,
+    view_pose: XrViewPose,
+) -> Result<()> {
+    let yaw_radians = view_pose.yaw_degrees.to_radians();
+    if !yaw_radians.is_finite() {
+        bail!("invalid XR startup view yaw {}", view_pose.yaw_degrees);
+    }
+    camera.set_eye_pose(
+        vec3d_from_glam(Vec3::from_array(view_pose.position)),
+        f64::from(yaw_radians),
+        0.0,
+    );
+    Ok(())
+}
+
+#[cfg(not(target_os = "android"))]
+fn xr_locomotion_input_from_controllers(
+    controllers: &[XrControllerSnapshot],
+    dt_seconds: f64,
+) -> EngineCameraInput {
+    let dt_seconds = if dt_seconds.is_finite() {
+        dt_seconds.clamp(0.0, XR_LOCOMOTION_MAX_FRAME_SECONDS)
+    } else {
+        0.0
+    };
+    let left_axis = controllers
+        .iter()
+        .find(|controller| controller.hand == XrHand::Left)
+        .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
+        .unwrap_or(Vec2::ZERO);
+    let right_axis = controllers
+        .iter()
+        .find(|controller| controller.hand == XrHand::Right)
+        .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
+        .unwrap_or(Vec2::ZERO);
+    let jump = controllers
+        .iter()
+        .any(|controller| controller.hand == XrHand::Right && controller.a_pressed);
+    let movement_impulse = (left_axis.length_squared() > f32::EPSILON)
+        .then(|| EngineCameraMovementImpulse::new(-left_axis.x, left_axis.y));
+    let yaw_delta = f64::from(right_axis.x) * XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * dt_seconds;
+    let mouse_delta_x = if ENGINE_CAMERA_MOUSE_SENSITIVITY > 0.0 {
+        yaw_delta / ENGINE_CAMERA_MOUSE_SENSITIVITY
+    } else {
+        0.0
+    };
+
+    EngineCameraInput {
+        dt_seconds,
+        mouse_delta_x,
+        jump,
+        movement_impulse,
+        ..EngineCameraInput::default()
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn joypad_axis_after_dead_zone(axis: Vec2) -> Vec2 {
+    if !axis.is_finite() {
+        return Vec2::ZERO;
+    }
+    let length = axis.length();
+    if length <= XR_JOYPAD_DEAD_ZONE {
+        return Vec2::ZERO;
+    }
+    let normalized = axis / length;
+    let adjusted = ((length.min(1.0) - XR_JOYPAD_DEAD_ZONE) / (1.0 - XR_JOYPAD_DEAD_ZONE)).max(0.0);
+    normalized * adjusted
+}
+
+#[cfg(not(target_os = "android"))]
+fn glam_vec3_from_vec3d(value: Vec3d) -> Vec3 {
+    Vec3::new(value.x as f32, value.y as f32, value.z as f32)
+}
+
+#[cfg(not(target_os = "android"))]
+fn vec3d_from_glam(value: Vec3) -> Vec3d {
+    Vec3d::new(f64::from(value.x), f64::from(value.y), f64::from(value.z))
+}
+
+#[cfg(not(target_os = "android"))]
+#[derive(Clone, Copy, Debug)]
+struct XrTrackingOrigin {
+    origin_stage: Vec3,
+    stage_yaw: f32,
+    mode: XrViewAlignmentMode,
+}
+
+#[cfg(not(target_os = "android"))]
 #[derive(Clone, Copy, Debug)]
 struct XrStageToWorld {
     origin_stage: Vec3,
     origin_world: Vec3,
     stage_to_world_rotation: Quat,
-    world_yaw_degrees: f32,
-    mode: XrViewAlignmentMode,
 }
 
 #[cfg(not(target_os = "android"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum XrViewAlignmentMode {
-    Overview,
+    PlayerSpawn,
     ViewPose,
 }
 
 #[cfg(not(target_os = "android"))]
-impl XrStageToWorld {
-    fn from_initial_views(
-        views: &[xr::View],
-        base_camera: ChunkCamera,
-        view_pose: Option<XrViewPose>,
-    ) -> Result<Self> {
+impl XrTrackingOrigin {
+    fn from_initial_views(views: &[xr::View], mode: XrViewAlignmentMode) -> Result<Self> {
         let (left_stage_position, left_stage_orientation) = eye_pose(&views[0])?;
         let (right_stage_position, _) = eye_pose(&views[1])?;
         let origin_stage = (left_stage_position + right_stage_position) * 0.5;
-        if let Some(view_pose) = view_pose {
-            return Self::from_view_pose(origin_stage, left_stage_orientation, view_pose);
-        }
-        let origin_world = Vec3::from_array(base_camera.eye);
-        let desired_world_orientation = chunk_camera_orientation(base_camera)?;
-        let world_yaw_degrees = chunk_camera_yaw_degrees(base_camera)?;
-        Ok(Self {
-            origin_stage,
-            origin_world,
-            stage_to_world_rotation: (desired_world_orientation * left_stage_orientation.inverse())
-                .normalize(),
-            world_yaw_degrees,
-            mode: XrViewAlignmentMode::Overview,
-        })
+        Self::from_stage_view(origin_stage, left_stage_orientation, mode)
     }
 
-    fn from_view_pose(
+    fn from_stage_view(
         origin_stage: Vec3,
         left_stage_orientation: Quat,
-        view_pose: XrViewPose,
+        mode: XrViewAlignmentMode,
     ) -> Result<Self> {
         let stage_forward = left_stage_orientation * Vec3::NEG_Z;
         let stage_yaw = yaw_from_forward(stage_forward)
-            .ok_or_else(|| anyhow!("OpenXR returned an invalid startup view yaw"))?;
-        let world_yaw = view_pose.yaw_degrees.to_radians();
-        if !world_yaw.is_finite() {
-            bail!("invalid XR startup view yaw {}", view_pose.yaw_degrees);
-        }
+            .ok_or_else(|| anyhow!("OpenXR returned an invalid tracking-origin yaw"))?;
         Ok(Self {
             origin_stage,
-            origin_world: Vec3::from_array(view_pose.position),
-            stage_to_world_rotation: Quat::from_rotation_y(normalize_angle(world_yaw - stage_yaw)),
-            world_yaw_degrees: view_pose.yaw_degrees,
-            mode: XrViewAlignmentMode::ViewPose,
+            stage_yaw,
+            mode,
         })
     }
 
     fn mode_label(self) -> &'static str {
-        match self.mode {
-            XrViewAlignmentMode::Overview => "overview",
+        self.mode.label()
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+impl XrViewAlignmentMode {
+    const fn label(self) -> &'static str {
+        match self {
+            XrViewAlignmentMode::PlayerSpawn => "player-spawn",
             XrViewAlignmentMode::ViewPose => "view-pose",
         }
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+impl XrStageToWorld {
+    fn from_tracking_origin(
+        origin: XrTrackingOrigin,
+        snapshot: EngineCameraSnapshot,
+    ) -> Result<Self> {
+        let world_yaw = snapshot.yaw_radians as f32;
+        if !world_yaw.is_finite() {
+            bail!("invalid XR player root yaw {}", snapshot.yaw_radians);
+        }
+        Ok(Self {
+            origin_stage: origin.origin_stage,
+            origin_world: glam_vec3_from_vec3d(snapshot.eye),
+            stage_to_world_rotation: Quat::from_rotation_y(normalize_angle(
+                world_yaw - origin.stage_yaw,
+            )),
+        })
     }
 
     fn transform_pose(self, stage_position: Vec3, stage_orientation: Quat) -> (Vec3, Quat) {
@@ -860,11 +1009,13 @@ fn render_mclone_frame(
     left_eye: &mut platform_graphics::OpenXrEyeState,
     right_eye: &mut platform_graphics::OpenXrEyeState,
     mclone: &mut XrMcloneWorldState,
+    controllers: &[XrControllerSnapshot],
 ) -> Result<()> {
     let (_, views) = graphics
         .session
         .locate_views(VIEW_TYPE, predicted_display_time, stage)
         .context("locate OpenXR stereo views for mclone frame")?;
+    mclone.apply_locomotion_input(controllers)?;
     let render_views = mclone.render_views(&views)?;
     let center_position = (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
     mclone.poll_runtime_and_upload(&graphics.device, center_position)?;
@@ -1157,32 +1308,6 @@ fn eye_pose(view: &xr::View) -> Result<(Vec3, Quat)> {
         bail!("OpenXR returned an invalid view pose");
     }
     Ok((position, orientation.normalize()))
-}
-
-#[cfg(not(target_os = "android"))]
-fn chunk_camera_orientation(camera: ChunkCamera) -> Result<Quat> {
-    let eye = Vec3::from_array(camera.eye);
-    let target = Vec3::from_array(camera.target);
-    let world_up = Vec3::from_array(camera.up).normalize_or_zero();
-    let forward = (target - eye).normalize_or_zero();
-    let right = forward.cross(world_up).normalize_or_zero();
-    let up = right.cross(forward).normalize_or_zero();
-    if forward.length_squared() < 1.0e-6
-        || right.length_squared() < 1.0e-6
-        || up.length_squared() < 1.0e-6
-    {
-        bail!("invalid base mclone XR camera orientation");
-    }
-    Ok(Quat::from_mat3(&Mat3::from_cols(right, up, -forward)).normalize())
-}
-
-#[cfg(not(target_os = "android"))]
-fn chunk_camera_yaw_degrees(camera: ChunkCamera) -> Result<f32> {
-    let eye = Vec3::from_array(camera.eye);
-    let target = Vec3::from_array(camera.target);
-    let yaw = yaw_from_forward(target - eye)
-        .ok_or_else(|| anyhow!("invalid base mclone XR camera yaw"))?;
-    Ok(yaw.to_degrees())
 }
 
 #[cfg(not(target_os = "android"))]
@@ -1644,14 +1769,112 @@ mod tests {
             yaw_degrees: 0.0,
         };
 
-        let transform =
-            XrStageToWorld::from_view_pose(stage_center, stage_orientation, view_pose).unwrap();
+        let origin = XrTrackingOrigin::from_stage_view(
+            stage_center,
+            stage_orientation,
+            XrViewAlignmentMode::ViewPose,
+        )
+        .unwrap();
+        let snapshot = EngineCameraSnapshot::from_eye_pose(
+            Vec3d::new(8.0, 72.0, -12.0),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+        let transform = XrStageToWorld::from_tracking_origin(origin, snapshot).unwrap();
         let (world_position, world_orientation) =
             transform.transform_pose(stage_center, stage_orientation);
         let world_forward = world_orientation * Vec3::NEG_Z;
 
         assert!((world_position - Vec3::from_array(view_pose.position)).length() < 1.0e-5);
         assert!((world_forward - Vec3::NEG_Z).length() < 1.0e-5);
-        assert_eq!(transform.mode_label(), "view-pose");
+        assert_eq!(origin.mode_label(), "view-pose");
+    }
+
+    #[test]
+    fn player_root_transform_preserves_physical_hmd_offset() {
+        let origin = XrTrackingOrigin::from_stage_view(
+            Vec3::new(1.0, 1.6, -0.25),
+            Quat::IDENTITY,
+            XrViewAlignmentMode::ViewPose,
+        )
+        .unwrap();
+        let snapshot = EngineCameraSnapshot::from_eye_pose(
+            Vec3d::new(8.0, 72.0, -12.0),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+        let transform = XrStageToWorld::from_tracking_origin(origin, snapshot).unwrap();
+
+        let (world_position, _) = transform.transform_pose(
+            origin.origin_stage + Vec3::new(0.35, 0.0, -0.2),
+            Quat::IDENTITY,
+        );
+
+        assert!((world_position - Vec3::new(8.35, 72.0, -12.2)).length() < 1.0e-5);
+    }
+
+    fn test_controller(hand: XrHand, thumbstick: Vec2, a_pressed: bool) -> XrControllerSnapshot {
+        XrControllerSnapshot {
+            hand,
+            aim_position: Some(Vec3::ZERO),
+            grip_position: Some(Vec3::ZERO),
+            trigger: 0.0,
+            squeeze: 0.0,
+            select_pressed: false,
+            a_pressed,
+            thumbstick,
+            thumbstick_pressed: false,
+        }
+    }
+
+    #[test]
+    fn xr_locomotion_maps_left_stick_and_a_button_to_engine_input() {
+        let input = xr_locomotion_input_from_controllers(
+            &[
+                test_controller(XrHand::Left, Vec2::Y, false),
+                test_controller(XrHand::Right, Vec2::ZERO, true),
+            ],
+            0.05,
+        );
+
+        assert_eq!(input.dt_seconds, 0.05);
+        assert!(input.jump);
+        let impulse = input.movement_impulse.unwrap();
+        assert!(impulse.left.abs() < 1.0e-6);
+        assert!((impulse.forward - 1.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn xr_locomotion_dead_zone_filters_small_thumbstick_noise() {
+        let input = xr_locomotion_input_from_controllers(
+            &[
+                test_controller(XrHand::Left, Vec2::splat(XR_JOYPAD_DEAD_ZONE * 0.25), false),
+                test_controller(
+                    XrHand::Right,
+                    Vec2::splat(XR_JOYPAD_DEAD_ZONE * 0.25),
+                    false,
+                ),
+            ],
+            0.05,
+        );
+
+        assert!(input.movement_impulse.is_none());
+        assert_eq!(input.mouse_delta_x, 0.0);
+        assert!(!input.jump);
+    }
+
+    #[test]
+    fn xr_locomotion_maps_right_stick_to_desktop_mouse_turn_path() {
+        let input = xr_locomotion_input_from_controllers(
+            &[test_controller(XrHand::Right, Vec2::X, false)],
+            0.05,
+        );
+
+        let expected_mouse_delta =
+            XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * 0.05 / ENGINE_CAMERA_MOUSE_SENSITIVITY;
+        assert!((input.mouse_delta_x - expected_mouse_delta).abs() < 1.0e-9);
+        assert_eq!(input.mouse_delta_y, 0.0);
     }
 }

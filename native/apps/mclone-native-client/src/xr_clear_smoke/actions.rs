@@ -16,6 +16,7 @@ pub(super) struct XrControllerSnapshot {
     pub(super) trigger: f32,
     pub(super) squeeze: f32,
     pub(super) select_pressed: bool,
+    pub(super) a_pressed: bool,
     pub(super) thumbstick: Vec2,
     pub(super) thumbstick_pressed: bool,
 }
@@ -36,6 +37,7 @@ pub(super) struct OpenXrControllerActions {
     right_squeeze: xr::Action<f32>,
     left_select: xr::Action<bool>,
     right_select: xr::Action<bool>,
+    right_a_click: xr::Action<bool>,
     left_thumbstick_x: xr::Action<f32>,
     left_thumbstick_y: xr::Action<f32>,
     right_thumbstick_x: xr::Action<f32>,
@@ -64,6 +66,8 @@ impl OpenXrControllerActions {
             action_set.create_action::<f32>("right_squeeze", "Right Squeeze", &[])?;
         let left_select = action_set.create_action::<bool>("left_select", "Left Select", &[])?;
         let right_select = action_set.create_action::<bool>("right_select", "Right Select", &[])?;
+        let right_a_click =
+            action_set.create_action::<bool>("right_a_click", "Right A Button", &[])?;
         let left_thumbstick_x =
             action_set.create_action::<f32>("left_thumbstick_x", "Left Thumbstick X", &[])?;
         let left_thumbstick_y =
@@ -104,6 +108,7 @@ impl OpenXrControllerActions {
             &right_squeeze,
             &left_select,
             &right_select,
+            &right_a_click,
             &left_thumbstick_x,
             &left_thumbstick_y,
             &right_thumbstick_x,
@@ -143,6 +148,7 @@ impl OpenXrControllerActions {
             right_squeeze,
             left_select,
             right_select,
+            right_a_click,
             left_thumbstick_x,
             left_thumbstick_y,
             right_thumbstick_x,
@@ -227,6 +233,7 @@ impl OpenXrControllerActions {
         right_squeeze: &xr::Action<f32>,
         left_select: &xr::Action<bool>,
         right_select: &xr::Action<bool>,
+        right_a_click: &xr::Action<bool>,
         left_thumbstick_x: &xr::Action<f32>,
         left_thumbstick_y: &xr::Action<f32>,
         right_thumbstick_x: &xr::Action<f32>,
@@ -276,7 +283,7 @@ impl OpenXrControllerActions {
                 instance.string_to_path("/user/hand/left/input/y/click")?,
             ),
             xr::Binding::new(
-                right_select,
+                right_a_click,
                 instance.string_to_path("/user/hand/right/input/a/click")?,
             ),
             xr::Binding::new(
@@ -346,6 +353,7 @@ impl OpenXrControllerActions {
             thumbstick_x_action,
             thumbstick_y_action,
             thumbstick_click_action,
+            a_click_action,
         ) = match hand {
             XrHand::Left => (
                 &self.left_aim,
@@ -358,6 +366,7 @@ impl OpenXrControllerActions {
                 &self.left_thumbstick_x,
                 &self.left_thumbstick_y,
                 &self.left_thumbstick_click,
+                None,
             ),
             XrHand::Right => (
                 &self.right_aim,
@@ -370,6 +379,7 @@ impl OpenXrControllerActions {
                 &self.right_thumbstick_x,
                 &self.right_thumbstick_y,
                 &self.right_thumbstick_click,
+                Some(&self.right_a_click),
             ),
         };
 
@@ -396,6 +406,9 @@ impl OpenXrControllerActions {
             trigger: Self::read_float_action(session, trigger_action),
             squeeze: Self::read_float_action(session, squeeze_action),
             select_pressed: Self::read_bool_action(session, select_action),
+            a_pressed: a_click_action
+                .map(|action| Self::read_bool_action(session, action))
+                .unwrap_or(false),
             thumbstick: Vec2::new(
                 Self::read_float_action(session, thumbstick_x_action),
                 Self::read_float_action(session, thumbstick_y_action),
@@ -462,6 +475,7 @@ pub(super) struct XrControllerInputSummary {
     max_squeeze: f32,
     max_thumbstick: f32,
     select_pressed_frames: u32,
+    a_pressed_frames: u32,
     latest_left: Option<XrControllerSnapshot>,
     latest_right: Option<XrControllerSnapshot>,
 }
@@ -487,12 +501,13 @@ impl XrControllerInputSummary {
             self.max_squeeze = self.max_squeeze.max(snapshot.squeeze);
             self.max_thumbstick = self.max_thumbstick.max(snapshot.thumbstick.length());
             self.select_pressed_frames += u32::from(snapshot.select_pressed);
+            self.a_pressed_frames += u32::from(snapshot.a_pressed);
         }
     }
 
     pub(super) fn print_summary(&self) {
         println!(
-            "OpenXR controller input summary: frames_polled={} left_active={} right_active={} left_tracked={} right_tracked={} max_trigger={:.3} max_squeeze={:.3} max_thumbstick={:.3} select_pressed_frames={}",
+            "OpenXR controller input summary: frames_polled={} left_active={} right_active={} left_tracked={} right_tracked={} max_trigger={:.3} max_squeeze={:.3} max_thumbstick={:.3} select_pressed_frames={} a_pressed_frames={}",
             self.frames_polled,
             self.left_active_frames,
             self.right_active_frames,
@@ -501,7 +516,8 @@ impl XrControllerInputSummary {
             self.max_trigger,
             self.max_squeeze,
             self.max_thumbstick,
-            self.select_pressed_frames
+            self.select_pressed_frames,
+            self.a_pressed_frames
         );
         if let Some(left) = self.latest_left {
             println!("OpenXR controller latest left: {}", format_snapshot(left));
@@ -514,12 +530,13 @@ impl XrControllerInputSummary {
 
 fn format_snapshot(snapshot: XrControllerSnapshot) -> String {
     format!(
-        "aim={} grip={} trigger={:.3} squeeze={:.3} select={} thumbstick=({:.3}, {:.3}) thumbstick_pressed={}",
+        "aim={} grip={} trigger={:.3} squeeze={:.3} select={} a={} thumbstick=({:.3}, {:.3}) thumbstick_pressed={}",
         format_position(snapshot.aim_position),
         format_position(snapshot.grip_position),
         snapshot.trigger,
         snapshot.squeeze,
         snapshot.select_pressed,
+        snapshot.a_pressed,
         snapshot.thumbstick.x,
         snapshot.thumbstick.y,
         snapshot.thumbstick_pressed

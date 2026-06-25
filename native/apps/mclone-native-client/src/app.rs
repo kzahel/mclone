@@ -467,23 +467,6 @@ impl ChunkApp {
         }
     }
 
-    fn update_interest_from_camera(&mut self) -> Result<bool> {
-        let view = self.window_camera_view();
-        let center = view.snapshot.chunk_pos;
-        if self.runtime.set_interest_center(center)? {
-            log::info!(
-                "chunk interest moved to ({}, {}) at camera position ({:.1}, {:.1}, {:.1})",
-                center.x,
-                center.z,
-                view.eye.x,
-                view.eye.y,
-                view.eye.z
-            );
-            return Ok(true);
-        }
-        Ok(false)
-    }
-
     fn poll_runtime_and_upload(&mut self) -> Result<()> {
         let poll_start = Instant::now();
         let mut changed = self.runtime.poll()?;
@@ -598,10 +581,11 @@ impl ChunkApp {
     }
 
     fn commit_player_pose_change(&mut self) -> Result<bool> {
+        let changed = self
+            .runtime
+            .commit_engine_camera_player_pose(&mut self.camera)?;
         sync_spectator_from_camera(&mut self.spectator, &self.camera);
-        let server_changed = self.sync_server_player_pose()?;
-        let interest_changed = self.update_interest_from_camera()?;
-        Ok(server_changed || interest_changed)
+        Ok(changed)
     }
 
     fn interpolated_actor_instances(&mut self) -> Vec<ActorInstance> {
@@ -618,40 +602,18 @@ impl ChunkApp {
     }
 
     fn sync_server_player_pose(&mut self) -> Result<bool> {
-        let changed = if let Some(report) = self.camera.next_pose_sync_command() {
-            self.runtime
-                .send_gameplay_command(report.command)
-                .context("failed to sync player pose to server")?
-        } else {
-            false
-        };
-        Ok(changed || self.apply_pending_player_position_updates()?)
+        let changed = self
+            .runtime
+            .sync_engine_camera_player_pose(&mut self.camera)?;
+        sync_spectator_from_camera(&mut self.spectator, &self.camera);
+        Ok(changed)
     }
 
     fn apply_pending_player_position_updates(&mut self) -> Result<bool> {
-        let mut changed = false;
-        for update in self.runtime.drain_player_position_updates() {
-            let accepted = self.camera.accept_position_update(update);
-            sync_spectator_from_camera(&mut self.spectator, &self.camera);
-            self.runtime
-                .send_gameplay_command(accepted.accept_command)
-                .context("failed to acknowledge player position correction")?;
-            let resync = self.camera.corrected_pose_sync_command();
-            self.runtime
-                .send_gameplay_command(resync.command)
-                .context("failed to sync corrected player pose to server")?;
-            log::warn!(
-                "accepted server player position correction id={} feet=({:.2}, {:.2}, {:.2})",
-                accepted.update.teleport_id,
-                accepted.feet_position.x,
-                accepted.feet_position.y,
-                accepted.feet_position.z
-            );
-            changed = true;
-        }
-        if changed {
-            changed |= self.update_interest_from_camera()?;
-        }
+        let changed = self
+            .runtime
+            .apply_pending_engine_camera_position_updates(&mut self.camera)?;
+        sync_spectator_from_camera(&mut self.spectator, &self.camera);
         Ok(changed)
     }
 
