@@ -122,6 +122,13 @@ pub(crate) struct XrMcloneSmokeOptions {
     pub(crate) scene: SceneOptions,
     pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) frames: u32,
+    pub(crate) view_pose: Option<XrViewPose>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct XrViewPose {
+    pub(crate) position: [f32; 3],
+    pub(crate) yaw_degrees: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -282,6 +289,8 @@ impl Cli {
         let mut xr_mclone_smoke = false;
         let mut xr_frames_explicit = false;
         let mut xr_frames = DEFAULT_XR_CLEAR_SMOKE_FRAMES;
+        let mut xr_view_pose_explicit = false;
+        let mut xr_view_pose = None;
         let mut args = args.into_iter();
 
         while let Some(arg) = args.next() {
@@ -530,6 +539,22 @@ impl Cli {
                     xr_frames_explicit = true;
                     xr_frames = parse_xr_smoke_frames_arg("--xr-frames", args.next())?;
                 }
+                "--xr-view-pose" | "--view-pose" => {
+                    xr_view_pose_explicit = true;
+                    xr_view_pose = parse_xr_view_pose_arg(&arg, args.next())?;
+                }
+                _ if arg.starts_with("--xr-view-pose=") => {
+                    xr_view_pose_explicit = true;
+                    xr_view_pose = parse_xr_view_pose_value(
+                        "--xr-view-pose",
+                        &arg["--xr-view-pose=".len()..],
+                    )?;
+                }
+                _ if arg.starts_with("--view-pose=") => {
+                    xr_view_pose_explicit = true;
+                    xr_view_pose =
+                        parse_xr_view_pose_value("--view-pose", &arg["--view-pose=".len()..])?;
+                }
                 "--help" | "-h" => {
                     print_help();
                     std::process::exit(0);
@@ -552,6 +577,9 @@ impl Cli {
         }
         if xr_frames_explicit && !xr_clear_smoke && !xr_mclone_smoke {
             bail!("--frames requires --xr-clear-smoke or --xr-mclone-smoke");
+        }
+        if xr_view_pose_explicit && !xr_mclone_smoke {
+            bail!("--xr-view-pose requires --xr-mclone-smoke");
         }
         if !scene.lighting_enabled && !fullbright_explicit {
             render_options.force_fullbright = true;
@@ -649,6 +677,7 @@ impl Cli {
                     scene,
                     render_options,
                     frames: xr_frames,
+                    view_pose: xr_view_pose,
                 },
             }),
             None => Ok(Self::Window {
@@ -746,6 +775,43 @@ fn parse_xr_smoke_frames_arg(flag: &str, value: Option<String>) -> Result<u32> {
         bail!("{flag} must be between 1 and {MAX_XR_SMOKE_FRAMES}");
     }
     Ok(parsed)
+}
+
+fn parse_xr_view_pose_arg(flag: &str, value: Option<String>) -> Result<Option<XrViewPose>> {
+    let value = value.with_context(|| format!("{flag} requires X,Y,Z,YAW_DEGREES"))?;
+    parse_xr_view_pose_value(flag, &value)
+}
+
+fn parse_xr_view_pose_value(flag: &str, value: &str) -> Result<Option<XrViewPose>> {
+    let value = value.trim();
+    if matches!(
+        value,
+        "" | "default" | "off" | "none" | "false" | "0" | "disabled"
+    ) {
+        return Ok(None);
+    }
+    let parts = value
+        .split([',', ':', ';', ' '])
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() != 4 {
+        bail!("{flag} expects X,Y,Z,YAW_DEGREES");
+    }
+    let mut numbers = [0.0; 4];
+    for (index, part) in parts.into_iter().enumerate() {
+        let number = part
+            .parse::<f32>()
+            .with_context(|| format!("invalid {flag} component `{part}`"))?;
+        if !number.is_finite() {
+            bail!("{flag} component `{part}` must be finite");
+        }
+        numbers[index] = number;
+    }
+    Ok(Some(XrViewPose {
+        position: [numbers[0], numbers[1], numbers[2]],
+        yaw_degrees: numbers[3],
+    }))
 }
 
 fn parse_target_hz_arg(flag: &str, value: Option<String>) -> Result<f64> {
@@ -853,7 +919,7 @@ fn print_help() {
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120]\n\
-           mclone-native-client --xr-mclone-smoke [--frames 120] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+           mclone-native-client --xr-mclone-smoke [--frames 120] [--xr-view-pose X,Y,Z,YAW_DEGREES] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
          Window mode streams chunks around a collision-backed local player with WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane toggle, O section-occlusion toggle, and L fullbright toggle. Use --disable-lighting/--enable-lighting to bypass or restore server-side ChunkStatus::Light promotion; --disable-lighting defaults to fullbright unless --disable-fullbright is also passed. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }

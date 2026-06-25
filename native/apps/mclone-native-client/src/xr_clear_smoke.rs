@@ -36,7 +36,7 @@ use openxr as xr;
 
 #[cfg(not(target_os = "android"))]
 use crate::app::actor_instances_from_presentations;
-use crate::cli::{XrClearSmokeOptions, XrMcloneSmokeOptions};
+use crate::cli::{XrClearSmokeOptions, XrMcloneSmokeOptions, XrViewPose};
 #[cfg(not(target_os = "android"))]
 use crate::frame_pacing::elapsed_ms;
 #[cfg(not(target_os = "android"))]
@@ -522,6 +522,7 @@ fn poll_openxr_events(
 struct XrMcloneWorldState {
     runtime: WindowSceneRuntime,
     base_camera: ChunkCamera,
+    view_pose: Option<XrViewPose>,
     render_options: TexturedSectionRenderOptions,
     draw: TexturedSectionDrawResources,
     sky: SkyRenderer,
@@ -611,6 +612,7 @@ impl XrMcloneWorldState {
         Ok(Self {
             runtime,
             base_camera,
+            view_pose: options.view_pose,
             render_options: options.render_options,
             draw,
             sky,
@@ -629,12 +631,15 @@ impl XrMcloneWorldState {
         let transform = match self.stage_to_world {
             Some(transform) => transform,
             None => {
-                let transform = XrStageToWorld::from_initial_views(views, self.base_camera)?;
+                let transform =
+                    XrStageToWorld::from_initial_views(views, self.base_camera, self.view_pose)?;
                 println!(
-                    "mclone XR view alignment: world_eye=({:.2}, {:.2}, {:.2}) stage_center=({:.3}, {:.3}, {:.3})",
+                    "mclone XR view alignment: mode={} world_eye=({:.2}, {:.2}, {:.2}) world_yaw_degrees={:.1} stage_center=({:.3}, {:.3}, {:.3})",
+                    transform.mode_label(),
                     transform.origin_world.x,
                     transform.origin_world.y,
                     transform.origin_world.z,
+                    transform.world_yaw_degrees,
                     transform.origin_stage.x,
                     transform.origin_stage.y,
                     transform.origin_stage.z
@@ -729,22 +734,69 @@ struct XrStageToWorld {
     origin_stage: Vec3,
     origin_world: Vec3,
     stage_to_world_rotation: Quat,
+    world_yaw_degrees: f32,
+    mode: XrViewAlignmentMode,
+}
+
+#[cfg(not(target_os = "android"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum XrViewAlignmentMode {
+    Overview,
+    ViewPose,
 }
 
 #[cfg(not(target_os = "android"))]
 impl XrStageToWorld {
-    fn from_initial_views(views: &[xr::View], base_camera: ChunkCamera) -> Result<Self> {
+    fn from_initial_views(
+        views: &[xr::View],
+        base_camera: ChunkCamera,
+        view_pose: Option<XrViewPose>,
+    ) -> Result<Self> {
         let (left_stage_position, left_stage_orientation) = eye_pose(&views[0])?;
         let (right_stage_position, _) = eye_pose(&views[1])?;
         let origin_stage = (left_stage_position + right_stage_position) * 0.5;
+        if let Some(view_pose) = view_pose {
+            return Self::from_view_pose(origin_stage, left_stage_orientation, view_pose);
+        }
         let origin_world = Vec3::from_array(base_camera.eye);
         let desired_world_orientation = chunk_camera_orientation(base_camera)?;
+        let world_yaw_degrees = chunk_camera_yaw_degrees(base_camera)?;
         Ok(Self {
             origin_stage,
             origin_world,
             stage_to_world_rotation: (desired_world_orientation * left_stage_orientation.inverse())
                 .normalize(),
+            world_yaw_degrees,
+            mode: XrViewAlignmentMode::Overview,
         })
+    }
+
+    fn from_view_pose(
+        origin_stage: Vec3,
+        left_stage_orientation: Quat,
+        view_pose: XrViewPose,
+    ) -> Result<Self> {
+        let stage_forward = left_stage_orientation * Vec3::NEG_Z;
+        let stage_yaw = yaw_from_forward(stage_forward)
+            .ok_or_else(|| anyhow!("OpenXR returned an invalid startup view yaw"))?;
+        let world_yaw = view_pose.yaw_degrees.to_radians();
+        if !world_yaw.is_finite() {
+            bail!("invalid XR startup view yaw {}", view_pose.yaw_degrees);
+        }
+        Ok(Self {
+            origin_stage,
+            origin_world: Vec3::from_array(view_pose.position),
+            stage_to_world_rotation: Quat::from_rotation_y(normalize_angle(world_yaw - stage_yaw)),
+            world_yaw_degrees: view_pose.yaw_degrees,
+            mode: XrViewAlignmentMode::ViewPose,
+        })
+    }
+
+    fn mode_label(self) -> &'static str {
+        match self.mode {
+            XrViewAlignmentMode::Overview => "overview",
+            XrViewAlignmentMode::ViewPose => "view-pose",
+        }
     }
 
     fn transform_pose(self, stage_position: Vec3, stage_orientation: Quat) -> (Vec3, Quat) {
@@ -1057,6 +1109,35 @@ fn chunk_camera_orientation(camera: ChunkCamera) -> Result<Quat> {
         bail!("invalid base mclone XR camera orientation");
     }
     Ok(Quat::from_mat3(&Mat3::from_cols(right, up, -forward)).normalize())
+}
+
+#[cfg(not(target_os = "android"))]
+fn chunk_camera_yaw_degrees(camera: ChunkCamera) -> Result<f32> {
+    let eye = Vec3::from_array(camera.eye);
+    let target = Vec3::from_array(camera.target);
+    let yaw = yaw_from_forward(target - eye)
+        .ok_or_else(|| anyhow!("invalid base mclone XR camera yaw"))?;
+    Ok(yaw.to_degrees())
+}
+
+#[cfg(not(target_os = "android"))]
+fn yaw_from_forward(forward: Vec3) -> Option<f32> {
+    if !forward.is_finite() {
+        return None;
+    }
+    let horizontal = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+    if horizontal.length_squared() <= f32::EPSILON {
+        return None;
+    }
+    Some((-horizontal.x).atan2(-horizontal.z))
+}
+
+#[cfg(not(target_os = "android"))]
+fn normalize_angle(angle: f32) -> f32 {
+    if !angle.is_finite() {
+        return 0.0;
+    }
+    (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
 }
 
 #[cfg(not(target_os = "android"))]
@@ -1487,5 +1568,25 @@ mod tests {
         let expected = Mat4::perspective_rh(fov_y, aspect, near, far);
 
         assert_mat4_close(actual, expected);
+    }
+
+    #[test]
+    fn startup_view_pose_maps_stage_center_to_requested_world_pose() {
+        let stage_center = Vec3::new(1.0, 1.6, -0.25);
+        let stage_orientation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let view_pose = XrViewPose {
+            position: [8.0, 72.0, -12.0],
+            yaw_degrees: 0.0,
+        };
+
+        let transform =
+            XrStageToWorld::from_view_pose(stage_center, stage_orientation, view_pose).unwrap();
+        let (world_position, world_orientation) =
+            transform.transform_pose(stage_center, stage_orientation);
+        let world_forward = world_orientation * Vec3::NEG_Z;
+
+        assert!((world_position - Vec3::from_array(view_pose.position)).length() < 1.0e-5);
+        assert!((world_forward - Vec3::NEG_Z).length() < 1.0e-5);
+        assert_eq!(transform.mode_label(), "view-pose");
     }
 }

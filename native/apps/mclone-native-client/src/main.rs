@@ -25,7 +25,8 @@ use crate::cli::Cli;
 use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessDualViewOptions,
     HeadlessScreenshotOptions, HeadlessScreenshotUi, MovementPerfOptions, SceneOptions,
-    TimedemoOptions, XrClearSmokeOptions, XrMcloneSmokeOptions, parse_screenshot_ui_arg,
+    TimedemoOptions, XrClearSmokeOptions, XrMcloneSmokeOptions, XrViewPose,
+    parse_screenshot_ui_arg,
 };
 use crate::headless::{
     run_headless_screenshot, write_headless_chunk_scenarios, write_headless_dual_view,
@@ -376,6 +377,8 @@ mod tests {
             "6000".to_owned(),
             "--freeze-time".to_owned(),
             "--force-fullbright".to_owned(),
+            "--xr-view-pose".to_owned(),
+            "8,72,-12,180".to_owned(),
         ])
         .unwrap();
 
@@ -397,6 +400,31 @@ mod tests {
                         ..TexturedSectionRenderOptions::default()
                     },
                     frames: 24,
+                    view_pose: Some(XrViewPose {
+                        position: [8.0, 72.0, -12.0],
+                        yaw_degrees: 180.0,
+                    }),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_xr_view_pose_alias_and_default() {
+        let cli = Cli::parse([
+            "--xr-mclone-smoke".to_owned(),
+            "--view-pose=default".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::XrMcloneSmoke {
+                options: XrMcloneSmokeOptions {
+                    scene: SceneOptions::default(),
+                    render_options: TexturedSectionRenderOptions::default(),
+                    frames: 120,
+                    view_pose: None,
                 },
             }
         );
@@ -422,6 +450,28 @@ mod tests {
             .to_string();
 
         assert!(err.contains("--frames requires --xr-clear-smoke or --xr-mclone-smoke"));
+    }
+
+    #[test]
+    fn cli_rejects_xr_view_pose_without_mclone_smoke() {
+        let err = Cli::parse(["--xr-view-pose".to_owned(), "0,64,0,0".to_owned()])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("--xr-view-pose requires --xr-mclone-smoke"));
+    }
+
+    #[test]
+    fn cli_rejects_invalid_xr_view_pose() {
+        let err = Cli::parse([
+            "--xr-mclone-smoke".to_owned(),
+            "--xr-view-pose".to_owned(),
+            "0,64,0".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("--xr-view-pose expects X,Y,Z,YAW_DEGREES"));
     }
 
     #[test]

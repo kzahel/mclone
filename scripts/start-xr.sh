@@ -15,6 +15,12 @@ Script options:
   --build-only           Build the XR binary without launching it.
   --check-only           Check the XR feature without building an executable.
   --smoke clear|mclone   Select the smoke mode. Default: clear.
+  --runtime wivrn|active|json|environment
+                         Select the OpenXR runtime bootstrap. Default: wivrn
+                         on macOS, environment elsewhere.
+  --runtime-json PATH    Runtime manifest to use with --runtime json.
+  --view-pose X,Y,Z,YAW  Map the first tracked headset pose to this mclone
+                         world pose. Requires --smoke mclone.
   --wivrn-usb            Start/reuse the local macOS WiVRn host, install an ADB
                          reverse tunnel, and launch the Quest WiVRn client.
   --frames N             Set the XR smoke frame budget. Default: 120.
@@ -23,7 +29,7 @@ Script options:
 Examples:
   scripts/start-xr.sh --check-only
   scripts/start-xr.sh --frames 2
-  scripts/start-xr.sh --smoke mclone --frames 120
+  scripts/start-xr.sh --smoke mclone --view-pose 0,72,0,0 --frames 120
   scripts/start-xr.sh --wivrn-usb --frames 2
 
 On macOS, this follows the Playbox WiVRn defaults:
@@ -181,6 +187,9 @@ build_only=0
 check_only=0
 wivrn_usb=0
 smoke=clear
+runtime=auto
+runtime_json=""
+view_pose=""
 frames=120
 wivrn_host_pid=""
 wivrn_host_log=""
@@ -222,6 +231,39 @@ while [ "$#" -gt 0 ]; do
             esac
             shift 2
             ;;
+        --runtime)
+            if [ "$#" -lt 2 ]; then
+                echo "--runtime requires wivrn, active, json, or environment" >&2
+                exit 1
+            fi
+            case "$2" in
+                wivrn|active|json|environment)
+                    runtime="$2"
+                    ;;
+                *)
+                    echo "--runtime requires wivrn, active, json, or environment, got $2" >&2
+                    exit 1
+                    ;;
+            esac
+            shift 2
+            ;;
+        --runtime-json)
+            if [ "$#" -lt 2 ]; then
+                echo "--runtime-json requires a path" >&2
+                exit 1
+            fi
+            runtime_json="$2"
+            runtime=json
+            shift 2
+            ;;
+        --view-pose|--xr-view-pose)
+            if [ "$#" -lt 2 ]; then
+                echo "$1 requires X,Y,Z,YAW_DEGREES" >&2
+                exit 1
+            fi
+            view_pose="$2"
+            shift 2
+            ;;
         --frames)
             if [ "$#" -lt 2 ]; then
                 echo "--frames requires a value" >&2
@@ -250,7 +292,50 @@ need_cmd cargo
 
 uname_s="$(uname -s 2>/dev/null || printf 'unknown')"
 
-if [ "${uname_s}" = "Darwin" ] || [[ "${uname_s}" == Darwin* ]]; then
+if [ "${runtime}" = "auto" ]; then
+    if [ "${uname_s}" = "Darwin" ] || [[ "${uname_s}" == Darwin* ]]; then
+        runtime=wivrn
+    else
+        runtime=environment
+    fi
+fi
+
+case "${runtime}" in
+    active)
+        unset XR_RUNTIME_JSON
+        unset MONADO_OPENXR_RUNTIME_PATH
+        echo "Using active OpenXR loader/runtime discovery."
+        ;;
+    environment)
+        if [ -n "${XR_RUNTIME_JSON:-}" ]; then
+            echo "Using XR_RUNTIME_JSON=${XR_RUNTIME_JSON}"
+        else
+            echo "Using OpenXR loader/runtime discovery from the current environment."
+        fi
+        ;;
+    json)
+        if [ -z "${runtime_json}" ] && [ -z "${XR_RUNTIME_JSON:-}" ]; then
+            echo "--runtime json requires --runtime-json PATH or XR_RUNTIME_JSON." >&2
+            exit 1
+        fi
+        if [ -n "${runtime_json}" ]; then
+            export XR_RUNTIME_JSON="${runtime_json}"
+        fi
+        echo "Using XR_RUNTIME_JSON=${XR_RUNTIME_JSON}"
+        ;;
+    wivrn)
+        ;;
+    *)
+        echo "internal error: unsupported runtime ${runtime}" >&2
+        exit 1
+        ;;
+esac
+
+if [ "${runtime}" = "wivrn" ]; then
+    if [ "${uname_s}" != "Darwin" ] && [[ "${uname_s}" != Darwin* ]]; then
+        echo "--runtime wivrn is only implemented for the local macOS WiVRn host path." >&2
+        exit 1
+    fi
     runtime_dylib="${MONADO_OPENXR_RUNTIME_PATH:-${host_build_dir}/_deps/monado-build/src/xrt/targets/openxr/libopenxr_wivrn.dylib}"
     runtime_json="${XR_RUNTIME_JSON:-${host_build_dir}/openxr_wivrn-dev.json}"
 
@@ -285,6 +370,13 @@ if [ "${smoke}" = "mclone" ]; then
     app_args=(--xr-mclone-smoke --frames "${frames}" "${mclone_args[@]}")
 else
     app_args=(--xr-clear-smoke --frames "${frames}" "${mclone_args[@]}")
+fi
+if [ -n "${view_pose}" ]; then
+    if [ "${smoke}" != "mclone" ]; then
+        echo "--view-pose requires --smoke mclone" >&2
+        exit 1
+    fi
+    app_args=("${app_args[@]:0:3}" --xr-view-pose "${view_pose}" "${app_args[@]:3}")
 fi
 
 if [ "${check_only}" -eq 1 ]; then

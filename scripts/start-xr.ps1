@@ -5,12 +5,15 @@ param(
     [ValidateSet("clear", "mclone")]
     [string]$Smoke = "clear",
     [int]$Frames = 120,
+    [ValidateSet("virtual-desktop", "active", "json", "environment")]
+    [string]$Runtime = "virtual-desktop",
     [switch]$UseActiveRuntime,
     [switch]$NoVirtualDesktop,
     [switch]$NoQuestLaunch,
     [switch]$NoQuestRestore,
     [switch]$AllowUnsupported,
     [string]$RuntimeJson,
+    [string]$ViewPose,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$McloneArgs
 )
@@ -96,32 +99,54 @@ if ($BuildOnly) {
 }
 
 $virtualDesktopManifest = Get-McloneVirtualDesktopRuntimeManifest
-if ($RuntimeJson) {
+if ($RuntimeJson -and $Runtime -eq "virtual-desktop") {
+    $Runtime = "json"
+}
+if ($UseActiveRuntime) {
+    $Runtime = "active"
+}
+if ($NoVirtualDesktop -and $Runtime -eq "virtual-desktop") {
+    $Runtime = "active"
+}
+
+if ($Runtime -eq "json") {
+    if (-not $RuntimeJson) {
+        Write-Error "-Runtime json requires -RuntimeJson PATH."
+    }
     $env:XR_RUNTIME_JSON = $RuntimeJson
-    Write-Host "Using OpenXR runtime: $RuntimeJson"
-} elseif (-not $env:XR_RUNTIME_JSON -and -not $UseActiveRuntime -and -not $NoVirtualDesktop -and (Test-Path $virtualDesktopManifest)) {
-    $env:XR_RUNTIME_JSON = $virtualDesktopManifest
-    Write-Host "Using Virtual Desktop OpenXR runtime: $virtualDesktopManifest"
-} elseif (-not $env:XR_RUNTIME_JSON -and $env:OS -eq "Windows_NT") {
+    Write-Host "Using OpenXR runtime JSON: $RuntimeJson"
+} elseif ($Runtime -eq "virtual-desktop") {
+    if (Test-Path $virtualDesktopManifest) {
+        $env:XR_RUNTIME_JSON = $virtualDesktopManifest
+        Write-Host "Using Virtual Desktop OpenXR runtime: $virtualDesktopManifest"
+    } else {
+        Write-Host "Virtual Desktop OpenXR runtime was not found; using active runtime discovery."
+        $Runtime = "active"
+    }
+}
+
+if ($Runtime -eq "active" -and $env:OS -eq "Windows_NT") {
+    Remove-Item Env:XR_RUNTIME_JSON -ErrorAction SilentlyContinue
     $activeRuntime = Get-ActiveOpenXrRuntime
     if ($activeRuntime) {
-        $env:XR_RUNTIME_JSON = $activeRuntime
         Write-Host "Using OpenXR active runtime: $activeRuntime"
     } else {
         Write-Host "No OpenXR ActiveRuntime registry entry found; relying on loader discovery."
     }
-} elseif ($env:XR_RUNTIME_JSON) {
+} elseif ($Runtime -eq "environment" -and $env:XR_RUNTIME_JSON) {
     Write-Host "Using OpenXR runtime from environment: $env:XR_RUNTIME_JSON"
+} elseif ($Runtime -eq "environment") {
+    Write-Host "Using OpenXR loader/runtime discovery from the current environment."
 }
 
 $questPrepared = $false
 $exitCode = 0
 try {
-    if (-not $NoVirtualDesktop -and (Test-Path $virtualDesktopManifest)) {
+    if ($Runtime -eq "virtual-desktop" -and -not $NoVirtualDesktop -and (Test-Path $virtualDesktopManifest)) {
         Start-McloneVirtualDesktopHost
     }
 
-    if (-not $NoQuestLaunch) {
+    if ($Runtime -eq "virtual-desktop" -and -not $NoQuestLaunch) {
         Start-McloneQuestVirtualDesktop -StatePath $QuestStartupStatePath | Out-Null
         $questPrepared = $true
     }
@@ -131,7 +156,14 @@ try {
     }
 
     $smokeFlag = if ($Smoke -eq "mclone") { "--xr-mclone-smoke" } else { "--xr-clear-smoke" }
-    $appArgs = @($smokeFlag, "--frames", "$Frames") + $McloneArgs
+    if ($ViewPose -and $Smoke -ne "mclone") {
+        Write-Error "-ViewPose requires -Smoke mclone."
+    }
+    $appArgs = @($smokeFlag, "--frames", "$Frames")
+    if ($ViewPose) {
+        $appArgs += @("--xr-view-pose", $ViewPose)
+    }
+    $appArgs += $McloneArgs
     $runCommand = $cargoRun + @("--") + $appArgs
 
     Write-Host "Starting mclone XR $Smoke smoke..."
