@@ -2,6 +2,8 @@ param(
     [switch]$Release,
     [switch]$BuildOnly,
     [switch]$CheckOnly,
+    [ValidateSet("clear", "mclone")]
+    [string]$Smoke = "clear",
     [int]$Frames = 120,
     [switch]$UseActiveRuntime,
     [switch]$NoVirtualDesktop,
@@ -128,10 +130,11 @@ try {
         $env:RUST_LOG = "warn,mclone_native_client=info"
     }
 
-    $appArgs = @("--xr-clear-smoke", "--frames", "$Frames") + $McloneArgs
+    $smokeFlag = if ($Smoke -eq "mclone") { "--xr-mclone-smoke" } else { "--xr-clear-smoke" }
+    $appArgs = @($smokeFlag, "--frames", "$Frames") + $McloneArgs
     $runCommand = $cargoRun + @("--") + $appArgs
 
-    Write-Host "Starting mclone XR smoke..."
+    Write-Host "Starting mclone XR $Smoke smoke..."
     Write-CommandLine $runCommand
     Push-Location $RepoRoot
     try {
@@ -143,6 +146,19 @@ try {
 } finally {
     if ($questPrepared -and -not $NoQuestRestore) {
         Restore-McloneQuestVirtualDesktopState -StatePath $QuestStartupStatePath -StopQuestApp -SleepAfterRestore
+    } elseif ($NoQuestRestore) {
+        Write-Host "Quest restore/sleep skipped by -NoQuestRestore; headset may remain awake."
+    } elseif ($NoQuestLaunch) {
+        try {
+            Restore-McloneQuestVirtualDesktopState -SleepAfterRestore
+        } catch {
+            Write-Host "Warning: failed to restore Quest state after connected smoke: $($_.Exception.Message)"
+        }
+        try {
+            Suspend-McloneQuestHeadset
+        } catch {
+            Write-Host "Warning: failed to sleep Quest after connected smoke: $($_.Exception.Message)"
+        }
     }
 }
 exit $exitCode

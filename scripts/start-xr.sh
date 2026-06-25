@@ -14,14 +14,16 @@ Script options:
   --release              Run the optimized release build.
   --build-only           Build the XR binary without launching it.
   --check-only           Check the XR feature without building an executable.
+  --smoke clear|mclone   Select the smoke mode. Default: clear.
   --wivrn-usb            Start/reuse the local macOS WiVRn host, install an ADB
                          reverse tunnel, and launch the Quest WiVRn client.
-  --frames N             Set --xr-clear-smoke frame budget. Default: 120.
+  --frames N             Set the XR smoke frame budget. Default: 120.
   -h, --help             Show this help.
 
 Examples:
   scripts/start-xr.sh --check-only
   scripts/start-xr.sh --frames 2
+  scripts/start-xr.sh --smoke mclone --frames 120
   scripts/start-xr.sh --wivrn-usb --frames 2
 
 On macOS, this follows the Playbox WiVRn defaults:
@@ -178,6 +180,7 @@ release=0
 build_only=0
 check_only=0
 wivrn_usb=0
+smoke=clear
 frames=120
 wivrn_host_pid=""
 wivrn_host_log=""
@@ -202,6 +205,22 @@ while [ "$#" -gt 0 ]; do
         --wivrn-usb)
             wivrn_usb=1
             shift
+            ;;
+        --smoke)
+            if [ "$#" -lt 2 ]; then
+                echo "--smoke requires clear or mclone" >&2
+                exit 1
+            fi
+            case "$2" in
+                clear|mclone)
+                    smoke="$2"
+                    ;;
+                *)
+                    echo "--smoke requires clear or mclone, got $2" >&2
+                    exit 1
+                    ;;
+            esac
+            shift 2
             ;;
         --frames)
             if [ "$#" -lt 2 ]; then
@@ -262,7 +281,11 @@ if [ "${release}" -eq 1 ]; then
     cargo_build_cmd=(cargo build --release --manifest-path native/Cargo.toml -p mclone-native-client --features xr)
     cargo_run_cmd=(cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --features xr)
 fi
-app_args=(--xr-clear-smoke --frames "${frames}" "${mclone_args[@]}")
+if [ "${smoke}" = "mclone" ]; then
+    app_args=(--xr-mclone-smoke --frames "${frames}" "${mclone_args[@]}")
+else
+    app_args=(--xr-clear-smoke --frames "${frames}" "${mclone_args[@]}")
+fi
 
 if [ "${check_only}" -eq 1 ]; then
     echo "Checking mclone XR feature..."

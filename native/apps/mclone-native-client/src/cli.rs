@@ -14,7 +14,7 @@ use crate::{
 
 const MAX_SCREENSHOT_REMOTE_SETTLE_MS: u64 = 10_000;
 const DEFAULT_XR_CLEAR_SMOKE_FRAMES: u32 = 120;
-const MAX_XR_CLEAR_SMOKE_FRAMES: u32 = 4096;
+const MAX_XR_SMOKE_FRAMES: u32 = 4096;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SceneOptions {
@@ -114,6 +114,13 @@ pub(crate) struct HeadlessDualViewOptions {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct XrClearSmokeOptions {
+    pub(crate) frames: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct XrMcloneSmokeOptions {
+    pub(crate) scene: SceneOptions,
+    pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) frames: u32,
 }
 
@@ -232,6 +239,9 @@ pub(crate) enum Cli {
     XrClearSmoke {
         options: XrClearSmokeOptions,
     },
+    XrMcloneSmoke {
+        options: XrMcloneSmokeOptions,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -269,8 +279,9 @@ impl Cli {
         let mut movement_speed = SPECTATOR_BASE_SPEED;
         let mut path_radius = DEFAULT_MOVEMENT_PERF_PATH_RADIUS;
         let mut xr_clear_smoke = false;
-        let mut xr_clear_frames_explicit = false;
-        let mut xr_clear_frames = DEFAULT_XR_CLEAR_SMOKE_FRAMES;
+        let mut xr_mclone_smoke = false;
+        let mut xr_frames_explicit = false;
+        let mut xr_frames = DEFAULT_XR_CLEAR_SMOKE_FRAMES;
         let mut args = args.into_iter();
 
         while let Some(arg) = args.next() {
@@ -281,10 +292,23 @@ impl Cli {
                         || timedemo
                         || frame_budget_probe
                         || movement_frame_probe
+                        || xr_mclone_smoke
                     {
                         bail!("--xr-clear-smoke cannot be combined with other run modes");
                     }
                     xr_clear_smoke = true;
+                }
+                "--xr-mclone-smoke" => {
+                    if mode.is_some()
+                        || movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || xr_clear_smoke
+                    {
+                        bail!("--xr-mclone-smoke cannot be combined with other run modes");
+                    }
+                    xr_mclone_smoke = true;
                 }
                 "--movement-perf" => {
                     if mode.is_some() {
@@ -499,12 +523,12 @@ impl Cli {
                     path_radius = parse_path_radius_arg(&arg, args.next())?;
                 }
                 "--frames" => {
-                    xr_clear_frames_explicit = true;
-                    xr_clear_frames = parse_xr_clear_frames_arg("--frames", args.next())?;
+                    xr_frames_explicit = true;
+                    xr_frames = parse_xr_smoke_frames_arg("--frames", args.next())?;
                 }
                 "--xr-frames" => {
-                    xr_clear_frames_explicit = true;
-                    xr_clear_frames = parse_xr_clear_frames_arg("--xr-frames", args.next())?;
+                    xr_frames_explicit = true;
+                    xr_frames = parse_xr_smoke_frames_arg("--xr-frames", args.next())?;
                 }
                 "--help" | "-h" => {
                     print_help();
@@ -523,11 +547,11 @@ impl Cli {
                 "--movement-perf, --timedemo, --frame-budget-probe, and --movement-frame-probe are mutually exclusive"
             );
         }
-        if xr_clear_smoke && (mode.is_some() || perf_mode_count > 0) {
-            bail!("--xr-clear-smoke cannot be combined with headless or perf modes");
+        if (xr_clear_smoke || xr_mclone_smoke) && (mode.is_some() || perf_mode_count > 0) {
+            bail!("XR smoke modes cannot be combined with headless or perf modes");
         }
-        if xr_clear_frames_explicit && !xr_clear_smoke {
-            bail!("--frames requires --xr-clear-smoke");
+        if xr_frames_explicit && !xr_clear_smoke && !xr_mclone_smoke {
+            bail!("--frames requires --xr-clear-smoke or --xr-mclone-smoke");
         }
         if !scene.lighting_enabled && !fullbright_explicit {
             render_options.force_fullbright = true;
@@ -618,8 +642,13 @@ impl Cli {
                 },
             }),
             None if xr_clear_smoke => Ok(Self::XrClearSmoke {
-                options: XrClearSmokeOptions {
-                    frames: xr_clear_frames,
+                options: XrClearSmokeOptions { frames: xr_frames },
+            }),
+            None if xr_mclone_smoke => Ok(Self::XrMcloneSmoke {
+                options: XrMcloneSmokeOptions {
+                    scene,
+                    render_options,
+                    frames: xr_frames,
                 },
             }),
             None => Ok(Self::Window {
@@ -711,10 +740,10 @@ fn parse_frame_budget_frames_arg(flag: &str, value: Option<String>) -> Result<us
     Ok(parsed)
 }
 
-fn parse_xr_clear_frames_arg(flag: &str, value: Option<String>) -> Result<u32> {
+fn parse_xr_smoke_frames_arg(flag: &str, value: Option<String>) -> Result<u32> {
     let parsed = parse_u32_arg(flag, value)?;
-    if !(1..=MAX_XR_CLEAR_SMOKE_FRAMES).contains(&parsed) {
-        bail!("{flag} must be between 1 and {MAX_XR_CLEAR_SMOKE_FRAMES}");
+    if !(1..=MAX_XR_SMOKE_FRAMES).contains(&parsed) {
+        bail!("{flag} must be between 1 and {MAX_XR_SMOKE_FRAMES}");
     }
     Ok(parsed)
 }
@@ -823,7 +852,8 @@ fn print_help() {
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-           mclone-native-client --xr-clear-smoke [--frames 120]\n\n\
+           mclone-native-client --xr-clear-smoke [--frames 120]\n\
+           mclone-native-client --xr-mclone-smoke [--frames 120] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
          Window mode streams chunks around a collision-backed local player with WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane toggle, O section-occlusion toggle, and L fullbright toggle. Use --disable-lighting/--enable-lighting to bypass or restore server-side ChunkStatus::Light promotion; --disable-lighting defaults to fullbright unless --disable-fullbright is also passed. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }

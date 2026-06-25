@@ -494,6 +494,7 @@ Landed in Slice 2G:
 - Added package scripts:
   - `pnpm native:xr:windows:prepare`
   - `pnpm native:xr:windows:restore`
+  - `pnpm native:xr:windows:sleep`
   - `pnpm native:xr:windows:smoke:connected`
 
 Manual Virtual Desktop flow:
@@ -506,10 +507,16 @@ pnpm native:xr:windows:restore
 ```
 
 `native:xr:windows:restore` restores Quest wake/proximity settings from the
-saved state file and intentionally does not stop Windows Virtual Desktop
-Streamer processes. The standalone restore also leaves the Quest app/headset
-running by default; use the lower-level PowerShell flags only for autonomous
-test cleanup that should stop the headset app or sleep the device.
+saved state file and sleeps the headset. It intentionally does not stop Windows
+Virtual Desktop Streamer processes. `native:xr:windows:sleep` is available for
+the deliberate manual/debug path where the headset was left awake with
+`-NoQuestRestore` and only needs a scripted proximity reset plus
+`KEYCODE_SLEEP`.
+
+Connected smoke package scripts now sleep the headset by default after the run.
+Pass `-NoQuestRestore` only for intentional short-lived debugging or screenshot
+capture; the launcher prints an explicit warning because the headset may remain
+awake.
 
 Implementation should follow the measured platform path. On macOS this likely
 means Metal-specific runtime/device matching. On Windows/Linux this likely

@@ -1,7 +1,8 @@
 # 079: Desktop OpenXR Mclone Frame
 
-Status: proposed, blocked on `077-multiview-render-contract.md` and
-`078-desktop-openxr-clear-smoke.md`.
+Status: complete for the first desktop mclone-frame smoke. Windows
+VirtualDesktopXR/Quest 3 over Vulkan was validated on June 25, 2026; macOS
+Metal has matching launcher/backend wiring and should be rerun on a Mac runtime.
 
 ## Purpose
 
@@ -38,13 +39,13 @@ comfort features should be separate follow-ups.
 
 ### Slice 1 - Runtime Reuse In XR Host
 
-- [ ] Build the same integrated-runtime scene used by desktop and flat Android
+- [x] Build the same integrated-runtime scene used by desktop and flat Android
   smokes.
-- [ ] Load the standard packed/loose Minecraft asset source through shared
+- [x] Load the standard packed/loose Minecraft asset source through shared
   render asset helpers.
-- [ ] Poll until the initial chunk set is ready.
-- [ ] Compile and upload render sections before the first XR world frame.
-- [ ] Keep the runtime/asset setup independent of OpenXR types.
+- [x] Poll until the initial chunk set is ready.
+- [x] Compile and upload render sections before the first XR world frame.
+- [x] Keep the runtime/asset setup independent of OpenXR types.
 
 Validation:
 
@@ -55,11 +56,11 @@ cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features
 
 ### Slice 2 - Per-Eye World Rendering
 
-- [ ] Convert OpenXR view/projection facts into `ChunkRenderView` values.
-- [ ] Render sky and terrain once per eye through the shared full-frame helper.
-- [ ] Use one host-owned depth target per eye.
-- [ ] Reuse one render-section cache and texture atlas for both eyes.
-- [ ] Ensure frustum/culling behavior is view-specific but cache ownership is
+- [x] Convert OpenXR view/projection facts into `ChunkRenderView` values.
+- [x] Render sky and terrain once per eye through the shared full-frame helper.
+- [x] Use one host-owned depth target per eye.
+- [x] Reuse one render-section cache and texture atlas for both eyes.
+- [x] Ensure frustum/culling behavior is view-specific but cache ownership is
   frame/runtime-shared.
 
 Suggested smoke:
@@ -75,12 +76,106 @@ The exact CLI spelling can change, but it should be bounded and scriptable.
 
 ### Slice 3 - Diagnostics And Capture
 
-- [ ] Log runtime name, backend, swapchain format, view count, target size, and
+- [x] Log runtime name, backend, swapchain format, view count, target size, and
   frame count.
-- [ ] Log render-section counts and drawn indices for eye 0 at least once.
-- [ ] Add a mirror or readback screenshot only if it is cheap and reliable on
+- [x] Log render-section counts and drawn indices for eye 0 at least once.
+- [x] Add a mirror or readback screenshot only if it is cheap and reliable on
   the local desktop runtime.
-- [ ] Record inspected output or headset-visible validation notes in this doc.
+- [x] Record inspected output or headset-visible validation notes in this doc.
+
+## Landed
+
+- Added `--xr-mclone-smoke [--frames N]` as a bounded XR mode that accepts the
+  existing scene/render options (`--seed`, `--chunk-x`, `--chunk-z`,
+  `--render-distance`, `--day-time`, `--freeze-time`, section occlusion, and
+  fullbright toggles).
+- Reused `WindowSceneRuntime`, render-section upload, texture atlas, sky
+  renderer, actor draw resources, and `render_full_frame_for_view`; OpenXR
+  types remain app-local in `mclone-native-client`.
+- Converted runtime `xr::View` pose/FOV into per-eye `ChunkRenderView` values
+  and render each eye into the OpenXR swapchain with a host-owned
+  `ChunkDepthTarget`.
+- Added a focused XR projection test proving symmetric OpenXR FOV conversion
+  matches the existing `Mat4::perspective_rh` convention used by
+  `ChunkCamera`.
+- Extended `scripts/start-xr.sh` with `--smoke clear|mclone` for macOS/Linux
+  and `scripts/start-xr.ps1` with `-Smoke clear|mclone` for Windows.
+- Added package scripts:
+  - `pnpm native:xr:mclone`
+  - `pnpm native:xr:windows:mclone:connected`
+- Tightened the Windows Quest/Virtual Desktop helper so connected smoke runs
+  sleep the headset by default unless `-NoQuestRestore` is passed explicitly.
+
+## Validation
+
+Required gates:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client --features xr symmetric_xr_fov_matches_chunk_projection_convention
+pnpm native:web:build
+git diff --check
+```
+
+Launcher checks:
+
+```powershell
+bash -n scripts/start-xr.sh
+powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-xr.ps1 -CheckOnly
+```
+
+Windows runtime used on June 25, 2026:
+
+- Launcher-selected manifest:
+  `C:\Program Files\Virtual Desktop Streamer\OpenXR\virtualdesktop-openxr.json`
+- Entry: fallback loader
+  `C:\Program Files (x86)\Steam\steamapps\common\SteamVR\bin\win64\openxr_loader.dll`
+- Runtime: `VirtualDesktopXR v1.0.10`
+- System: `Meta Quest 3`
+- Backend: Vulkan through `XR_KHR_vulkan_enable2`
+- GPU: `NVIDIA GeForce RTX 4090`, Vulkan API `1.4.341`, queue family `0`
+- Reference space: `STAGE`
+- Swapchains: `Rgba8UnormSrgb`, `1728x1824` per eye, `3/3` images
+
+Connected clear-smoke regression:
+
+```powershell
+pnpm native:xr:windows:prepare
+powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-xr.ps1 -Frames 2 -NoQuestLaunch -NoQuestRestore
+```
+
+Observed result: `submitted=2 runtime_frames=2 skipped=0`.
+
+Connected mclone-frame smoke:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-xr.ps1 -Smoke mclone -Frames 1500 -NoQuestLaunch
+```
+
+Observed result:
+
+- Runtime scene: `seed=12345`, center `(0, 0)`, render distance `2`
+- Initial scene upload: `chunks=49`, `sections=166`, `faces=130029`,
+  `indices=780174`
+- Warmup: `initial_polls=6295`, `elapsed_ms=9587.242`
+- Frames: `submitted=1500 runtime_frames=1500 skipped=0`
+- Eye-0 render summary: `sections=166`, `drawn_sections=66`,
+  `indices=780174`, `drawn_indices=396498`, `actors=1`, `drawn_actors=1`
+- Cleanup: restored Quest wake/proximity settings from the saved state file and
+  sent scripted headset sleep.
+
+Visual validation:
+
+```powershell
+adb shell screencap -p /sdcard/mclone-xr-mclone.png
+adb pull /sdcard/mclone-xr-mclone.png C:\tmp\mclone-xr-mclone.png
+```
+
+The inspected screenshot at `C:\tmp\mclone-xr-mclone.png` showed stereo mclone
+terrain rendered in both eyes with the Virtual Desktop overlay composited
+above it.
 
 ## Out Of Scope
 

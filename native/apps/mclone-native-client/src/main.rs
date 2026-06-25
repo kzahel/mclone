@@ -25,7 +25,7 @@ use crate::cli::Cli;
 use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessDualViewOptions,
     HeadlessScreenshotOptions, HeadlessScreenshotUi, MovementPerfOptions, SceneOptions,
-    TimedemoOptions, XrClearSmokeOptions, parse_screenshot_ui_arg,
+    TimedemoOptions, XrClearSmokeOptions, XrMcloneSmokeOptions, parse_screenshot_ui_arg,
 };
 use crate::headless::{
     run_headless_screenshot, write_headless_chunk_scenarios, write_headless_dual_view,
@@ -207,6 +207,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cli::XrClearSmoke { options } => run_xr_clear_smoke(options),
+        Cli::XrMcloneSmoke { options } => run_xr_mclone_smoke(options),
         Cli::Window {
             scene,
             render_options,
@@ -275,6 +276,16 @@ fn run_xr_clear_smoke(options: crate::cli::XrClearSmokeOptions) -> Result<()> {
 #[cfg(not(feature = "xr"))]
 fn run_xr_clear_smoke(_options: crate::cli::XrClearSmokeOptions) -> Result<()> {
     anyhow::bail!("rebuild with `--features xr` to use --xr-clear-smoke")
+}
+
+#[cfg(feature = "xr")]
+fn run_xr_mclone_smoke(options: crate::cli::XrMcloneSmokeOptions) -> Result<()> {
+    xr_clear_smoke::run_mclone(options)
+}
+
+#[cfg(not(feature = "xr"))]
+fn run_xr_mclone_smoke(_options: crate::cli::XrMcloneSmokeOptions) -> Result<()> {
+    anyhow::bail!("rebuild with `--features xr` to use --xr-mclone-smoke")
 }
 
 #[cfg(test)]
@@ -348,6 +359,50 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_xr_mclone_smoke_options() {
+        let cli = Cli::parse([
+            "--xr-mclone-smoke".to_owned(),
+            "--frames".to_owned(),
+            "24".to_owned(),
+            "--seed".to_owned(),
+            "54321".to_owned(),
+            "--chunk-x".to_owned(),
+            "2".to_owned(),
+            "--chunk-z".to_owned(),
+            "-1".to_owned(),
+            "--render-distance".to_owned(),
+            "3".to_owned(),
+            "--day-time".to_owned(),
+            "6000".to_owned(),
+            "--freeze-time".to_owned(),
+            "--force-fullbright".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::XrMcloneSmoke {
+                options: XrMcloneSmokeOptions {
+                    scene: SceneOptions {
+                        seed: 54321,
+                        chunk_x: 2,
+                        chunk_z: -1,
+                        render_distance: 3,
+                        day_time_override: Some(6000),
+                        freeze_time: true,
+                        ..SceneOptions::default()
+                    },
+                    render_options: TexturedSectionRenderOptions {
+                        force_fullbright: true,
+                        ..TexturedSectionRenderOptions::default()
+                    },
+                    frames: 24,
+                },
+            }
+        );
+    }
+
+    #[test]
     fn cli_rejects_xr_clear_smoke_with_headless_mode() {
         let err = Cli::parse([
             "--xr-clear-smoke".to_owned(),
@@ -357,7 +412,7 @@ mod tests {
         .unwrap_err()
         .to_string();
 
-        assert!(err.contains("--xr-clear-smoke cannot be combined"));
+        assert!(err.contains("XR smoke modes cannot be combined"));
     }
 
     #[test]
@@ -366,7 +421,19 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("--frames requires --xr-clear-smoke"));
+        assert!(err.contains("--frames requires --xr-clear-smoke or --xr-mclone-smoke"));
+    }
+
+    #[test]
+    fn cli_rejects_combined_xr_smoke_modes() {
+        let err = Cli::parse([
+            "--xr-clear-smoke".to_owned(),
+            "--xr-mclone-smoke".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("--xr-mclone-smoke cannot be combined"));
     }
 
     #[test]

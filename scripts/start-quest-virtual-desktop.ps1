@@ -1,5 +1,6 @@
 param(
     [switch]$Restore,
+    [switch]$SleepOnly,
     [switch]$NoVirtualDesktop,
     [switch]$NoQuestLaunch,
     [switch]$NoWake,
@@ -20,6 +21,11 @@ $ErrorActionPreference = "Stop"
 #   ~/code/playbox/scripts/run_playbox_wivrn_capture.sh
 # Use those as the source pattern before adding new ADB wake/proximity behavior.
 Import-Module (Join-Path $PSScriptRoot "xr-quest-virtual-desktop.psm1") -Force
+
+if ($SleepOnly) {
+    Suspend-McloneQuestHeadset -Serial $AdbSerial
+    exit 0
+}
 
 if ($Restore) {
     Restore-McloneQuestVirtualDesktopState `
@@ -46,7 +52,8 @@ if (-not $NoQuestLaunch) {
 
     Write-Host "Quest Virtual Desktop startup sequence is ready."
     Write-Host "Connect to this PC in the headset, then run: pnpm native:xr:windows:smoke:connected"
-    Write-Host "Restore Quest wake/proximity settings with: pnpm native:xr:windows:restore"
+    Write-Host "Restore Quest wake/proximity settings and sleep the headset with: pnpm native:xr:windows:restore"
+    Write-Host "Sleep the connected headset without restoring saved settings with: pnpm native:xr:windows:sleep"
     Write-Host "Restore state path: $($result.StatePath)"
 } else {
     Write-Host "Virtual Desktop host startup complete; Quest launch skipped."

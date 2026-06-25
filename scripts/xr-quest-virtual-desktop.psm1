@@ -351,6 +351,39 @@ function Restore-McloneQuestVirtualDesktopState {
     }
 }
 
+function Suspend-McloneQuestHeadset {
+    param(
+        [string]$AdbPath,
+        [string]$Serial
+    )
+
+    $target = Get-McloneQuestAdbTarget -AdbPath $AdbPath -Serial $Serial
+    $AdbPath = $target.AdbPath
+    $Serial = $target.Serial
+
+    Write-Host "Sleeping Quest $Serial."
+    try {
+        Invoke-McloneAdbQuiet $AdbPath $Serial @("shell", "setprop", "debug.oculus.disableProximity", "0")
+    } catch {
+        Write-Host "Warning: failed to clear Quest proximity property: $($_.Exception.Message)"
+    }
+    try {
+        Invoke-McloneAdbQuiet $AdbPath $Serial @("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_open", "--ei", "timeout", "0")
+    } catch {
+        Write-Host "Warning: failed to send Quest proximity-open broadcast: $($_.Exception.Message)"
+    }
+    try {
+        Invoke-McloneAdbQuiet $AdbPath $Serial @("shell", "input", "keyevent", "KEYCODE_SLEEP")
+    } catch {
+        Write-Host "Warning: failed to sleep Quest: $($_.Exception.Message)"
+    }
+    try {
+        Invoke-McloneAdbQuiet $AdbPath $Serial @("shell", "setprop", "debug.oculus.disableProximity", "0")
+    } catch {
+        Write-Host "Warning: failed to clear Quest proximity property after sleep: $($_.Exception.Message)"
+    }
+}
+
 function Get-McloneVirtualDesktopRuntimeManifest {
     return $script:McloneQuestVdManifest
 }
@@ -359,5 +392,6 @@ Export-ModuleMember -Function @(
     "Get-McloneVirtualDesktopRuntimeManifest",
     "Start-McloneVirtualDesktopHost",
     "Start-McloneQuestVirtualDesktop",
-    "Restore-McloneQuestVirtualDesktopState"
+    "Restore-McloneQuestVirtualDesktopState",
+    "Suspend-McloneQuestHeadset"
 )

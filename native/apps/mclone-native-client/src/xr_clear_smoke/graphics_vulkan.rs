@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use ash::vk;
 use ash::vk::Handle as _;
+use mclone_render::chunk::ChunkDepthTarget;
 use openxr as xr;
 use wgpu::hal::api::Vulkan as HalVulkan;
 
@@ -10,7 +11,7 @@ pub(super) type GraphicsSession = VulkanGraphicsSession;
 pub(super) struct OpenXrEyeState {
     pub(super) swapchain: xr::Swapchain<AppGraphics>,
     pub(super) textures: Vec<wgpu::Texture>,
-    pub(super) depth_view: wgpu::TextureView,
+    pub(super) depth: ChunkDepthTarget,
     pub(super) width: u32,
     pub(super) height: u32,
 }
@@ -253,25 +254,20 @@ pub(super) fn create_eye(
         })
         .collect();
 
-    let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("mclone_xr_depth"),
-        size: wgpu::Extent3d {
-            width: eye_width,
-            height: eye_height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count,
-        dimension: wgpu::TextureDimension::D2,
-        format: depth_format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
+    if sample_count != 1 {
+        bail!("OpenXR mclone eye depth targets require sample_count=1, got {sample_count}");
+    }
+    if depth_format != mclone_render::chunk::DEPTH_FORMAT {
+        bail!(
+            "OpenXR mclone eye depth targets require {:?}, got {depth_format:?}",
+            mclone_render::chunk::DEPTH_FORMAT
+        );
+    }
 
     Ok(OpenXrEyeState {
         swapchain,
         textures,
-        depth_view: depth_texture.create_view(&Default::default()),
+        depth: ChunkDepthTarget::new(device, eye_width, eye_height),
         width: eye_width,
         height: eye_height,
     })
