@@ -7,7 +7,14 @@ publish.workspace = true
 
 [features]
 default = []
-xr = ["dep:ash", "dep:libloading", "dep:openxr", "dep:serde_json"]
+xr = [
+    "dep:ash",
+    "dep:libloading",
+    "dep:metal",
+    "dep:openxr",
+    "dep:pollster",
+    "dep:serde_json",
+]
 
 [dependencies]
 anyhow.workspace = true
@@ -29,9 +36,13 @@ mclone-render-session.workspace = true
 mclone-server.workspace = true
 mclone-ui.workspace = true
 openxr = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 wgpu.workspace = true
 winit.workspace = true
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+metal = { workspace = true, optional = true }
 
 [[bin]]
 name = "mclone-native-client"

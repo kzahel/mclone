@@ -1,6 +1,6 @@
 # 078: Desktop OpenXR Clear Smoke
 
-Status: active; Slice 2A loader/instance diagnostics complete, graphics session work next.
+Status: active; Slice 2B Mac Metal graphics session compiles, swapchains/frame loop next.
 
 ## Purpose
 
@@ -57,6 +57,9 @@ Use Playbox as a pattern library only:
   the flag shape but fail with a clear "rebuild with `--features xr`" message.
 - `~/code/playbox/src/xr/mod.rs` for the registered-loader-first OpenXR entry
   path with `XR_RUNTIME_JSON` and `MONADO_OPENXR_RUNTIME_PATH` fallbacks.
+- `~/code/playbox/src/xr/graphics_metal.rs` for the macOS
+  `XR_KHR_metal_enable` graphics binding, runtime-required `MTLDevice`
+  matching, and raw Metal command-queue session creation.
 - `~/code/playbox/docs/tactical/106-desktop-xr-companion-window.md` if a
   companion window is needed later. Do not add companion-window complexity in
   this first smoke unless required by the local runtime.
@@ -132,9 +135,9 @@ Expected Slice 1 CLI results:
 - [x] Load the active OpenXR runtime.
 - [x] Create an OpenXR instance with the required graphics extension for the
   local desktop backend.
-- [ ] Create the runtime-selected graphics device or validate that the current
-  `wgpu` device is compatible, depending on backend requirements.
-- [ ] Create a session and reference space.
+- [x] Create the runtime-selected Metal graphics device on Apple targets.
+- [x] Create a Metal session and `STAGE` reference space on Apple targets.
+- [ ] Create the runtime-selected Vulkan graphics device on Windows/Linux.
 - [ ] Create color swapchains for both eyes and host-owned depth targets.
 
 Landed in Slice 2A:
@@ -172,6 +175,34 @@ cargo test --manifest-path native/Cargo.toml -p mclone-native-client
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
 # Expected local failure until an OpenXR runtime is installed/configured:
 cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client --features xr -- --xr-clear-smoke --frames 2
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+pnpm native:web:build
+git diff --check
+```
+
+Landed in Slice 2B:
+
+- Added an app-local `graphics_metal` module modeled after Playbox's Metal
+  OpenXR graphics binding.
+- Implemented a Metal `openxr::Graphics` type that calls
+  `xrGetMetalGraphicsRequirementsKHR`, creates `XrGraphicsBindingMetalKHR`,
+  and lets `openxr` create the session.
+- Matched `wgpu`'s Metal adapter/device against the runtime-required
+  `MTLDevice`, then passed the raw Metal command queue to OpenXR session
+  creation.
+- Created a `STAGE` reference space after session creation.
+- Kept the Mac-specific `metal` and `pollster` dependencies behind the `xr`
+  feature and the Apple target. Shared engine crates remain OpenXR-free.
+
+Slice 2B validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+# Expected local failure until an OpenXR runtime is installed/configured:
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client --features xr -- --xr-clear-smoke --frames 2
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client
 cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
 pnpm native:web:build

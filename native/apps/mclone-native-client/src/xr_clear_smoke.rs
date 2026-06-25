@@ -10,6 +10,9 @@ use openxr as xr;
 
 use crate::cli::XrClearSmokeOptions;
 
+#[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
+mod graphics_metal;
+
 #[cfg(target_os = "android")]
 pub(crate) fn run(options: XrClearSmokeOptions) -> Result<()> {
     let _ = options;
@@ -97,8 +100,11 @@ pub(crate) fn run(options: XrClearSmokeOptions) -> Result<()> {
         "OpenXR stereo views: {}",
         format_view_configurations(&views)
     );
+
+    create_graphics_session_probe(&instance, system)?;
+
     println!(
-        "desktop OpenXR runtime diagnostics ready: frames={} (graphics session/swapchains next)",
+        "desktop OpenXR runtime diagnostics ready: frames={} (swapchains/frame loop next)",
         options.frames
     );
 
@@ -127,6 +133,28 @@ fn enable_platform_graphics_extension(
     }
     enabled.khr_vulkan_enable2 = true;
     Ok("XR_KHR_vulkan_enable2")
+}
+
+#[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
+fn create_graphics_session_probe(instance: &xr::Instance, system: xr::SystemId) -> Result<()> {
+    let graphics = graphics_metal::create_graphics_session(instance, system)
+        .context("create OpenXR Metal graphics session")?;
+    let _stage = graphics
+        .session
+        .create_reference_space(xr::ReferenceSpaceType::STAGE, xr::Posef::IDENTITY)
+        .context("create OpenXR STAGE reference space")?;
+    println!(
+        "OpenXR Metal session: runtime_device='{}' matched_adapter='{}'",
+        graphics.required_device_name, graphics.adapter_name
+    );
+    println!("OpenXR reference space: STAGE");
+    Ok(())
+}
+
+#[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
+fn create_graphics_session_probe(_instance: &xr::Instance, _system: xr::SystemId) -> Result<()> {
+    println!("OpenXR graphics session: skipped on non-Apple target until the Vulkan slice");
+    Ok(())
 }
 
 #[cfg(not(target_os = "android"))]
