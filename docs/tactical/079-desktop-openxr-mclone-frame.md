@@ -98,6 +98,10 @@ The exact CLI spelling can change, but it should be bounded and scriptable.
 - Added a focused XR projection test proving symmetric OpenXR FOV conversion
   matches the existing `Mat4::perspective_rh` convention used by
   `ChunkCamera`.
+- Matched Playbox's per-eye stereo submission lifetime for the mclone XR path:
+  each eye render is submitted and waited before encoding the next eye. This
+  keeps shared renderer uniform buffers from being overwritten by the right-eye
+  view before the left-eye pass reaches the GPU.
 - Extended `scripts/start-xr.sh` with `--smoke clear|mclone` for macOS/Linux
   and `scripts/start-xr.ps1` with `-Smoke clear|mclone` for Windows.
 - Added package scripts:
@@ -176,6 +180,22 @@ adb pull /sdcard/mclone-xr-mclone.png C:\tmp\mclone-xr-mclone.png
 The inspected screenshot at `C:\tmp\mclone-xr-mclone.png` showed stereo mclone
 terrain rendered in both eyes with the Virtual Desktop overlay composited
 above it.
+
+Follow-up stereo check on June 25, 2026:
+
+```powershell
+cmd /c scripts\start-xr.bat --vdxr --mclone --view-pose 0,78,-96,180 --forever --no-quest-restore --no-pause
+```
+
+- User headset inspection found the left eye appeared mirrored/wrong while the
+  right eye looked correct.
+- Cross-check against Playbox showed Playbox submits/waits each eye render
+  independently; mclone had batched both mclone eye passes into one command
+  encoder while reusing uniform-buffer-backed shared render resources.
+- Updated mclone XR rendering to submit/wait left eye before encoding right
+  eye.
+- Revalidated with `C:\tmp\mclone-xr-eye-submit-fix.png`; the headset session
+  reached `FOCUSED` and remained live for manual inspection.
 
 ## Out Of Scope
 

@@ -956,88 +956,112 @@ fn render_mclone_eye_targets(
     time_of_day: f32,
     sun_angle: f32,
 ) -> Result<FullFrameRenderSummary> {
+    let mut left_stats = mclone.render_stats;
+    // The shared mclone render resources own per-view uniform buffers. Match
+    // Playbox's per-eye submit shape so the right-eye uniform writes cannot
+    // overwrite the left-eye pass before the GPU consumes it.
+    let left_summary = render_mclone_eye_target(
+        graphics,
+        left_target,
+        &mclone.sky,
+        &mut mclone.draw,
+        &mut mclone.actors,
+        render_views[0],
+        actor_instances,
+        render_options,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        &mut left_stats,
+        "left",
+    )?;
+    let mut right_stats = left_stats;
+    render_mclone_eye_target(
+        graphics,
+        right_target,
+        &mclone.sky,
+        &mut mclone.draw,
+        &mut mclone.actors,
+        render_views[1],
+        actor_instances,
+        render_options,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        &mut right_stats,
+        "right",
+    )?;
+    mclone.render_stats = left_stats;
+    Ok(left_summary)
+}
+
+#[cfg(not(target_os = "android"))]
+#[allow(clippy::too_many_arguments)]
+fn render_mclone_eye_target(
+    graphics: &mut platform_graphics::GraphicsSession,
+    target: &AcquiredEyeTarget<'_>,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    actors: &mut ActorDrawResources,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    render_options: TexturedSectionRenderOptions,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_stats: &mut RenderStreamStats,
+    label: &'static str,
+) -> Result<FullFrameRenderSummary> {
     let mut encoder = graphics
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("mclone_xr_world_encoder"),
+            label: Some(match label {
+                "left" => "mclone_xr_left_eye_encoder",
+                "right" => "mclone_xr_right_eye_encoder",
+                _ => "mclone_xr_eye_encoder",
+            }),
         });
-    let mut left_stats = mclone.render_stats;
-    let left_summary = {
-        let frame = RenderFrameContext::new(
-            &graphics.device,
-            &graphics.queue,
-            &mut encoder,
-            RenderFrameTarget::color(
-                &left_target.color_view,
-                [left_target.eye_state.width, left_target.eye_state.height],
-            ),
-        );
-        render_full_frame_for_view(
-            frame,
-            &left_target.eye_state.depth,
-            &mclone.sky,
-            &mut mclone.draw,
-            Some(&mut mclone.actors),
-            None,
-            None,
-            render_views[0],
-            actor_instances,
-            None,
-            sky_clear_color,
-            time_of_day,
-            sun_angle,
-            render_options,
-            FullFrameGui::new(false, false, [1.0, 1.0]),
-            |_| GuiDrawList::new(),
-            &mut left_stats,
-        )
-        .context("render mclone left eye")?
-    };
-    let mut right_stats = left_stats;
-    {
-        let frame = RenderFrameContext::new(
-            &graphics.device,
-            &graphics.queue,
-            &mut encoder,
-            RenderFrameTarget::color(
-                &right_target.color_view,
-                [right_target.eye_state.width, right_target.eye_state.height],
-            ),
-        );
-        render_full_frame_for_view(
-            frame,
-            &right_target.eye_state.depth,
-            &mclone.sky,
-            &mut mclone.draw,
-            Some(&mut mclone.actors),
-            None,
-            None,
-            render_views[1],
-            actor_instances,
-            None,
-            sky_clear_color,
-            time_of_day,
-            sun_angle,
-            render_options,
-            FullFrameGui::new(false, false, [1.0, 1.0]),
-            |_| GuiDrawList::new(),
-            &mut right_stats,
-        )
-        .context("render mclone right eye")?;
-    }
+    let frame = RenderFrameContext::new(
+        &graphics.device,
+        &graphics.queue,
+        &mut encoder,
+        RenderFrameTarget::color(
+            &target.color_view,
+            [target.eye_state.width, target.eye_state.height],
+        ),
+    );
+    let summary = render_full_frame_for_view(
+        frame,
+        &target.eye_state.depth,
+        sky,
+        draw,
+        Some(actors),
+        None,
+        None,
+        render_view,
+        actor_instances,
+        None,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        FullFrameGui::new(false, false, [1.0, 1.0]),
+        |_| GuiDrawList::new(),
+        render_stats,
+    )
+    .with_context(|| format!("render mclone {label} eye"))?;
     let submission = graphics.queue.submit(Some(encoder.finish()));
     graphics
         .device
         .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
         .map(|_| ())
-        .context("wait for OpenXR mclone render submission")?;
+        .with_context(|| format!("wait for OpenXR mclone {label}-eye render submission"))?;
     graphics
         .device
         .poll(wgpu::PollType::Wait)
         .map(|_| ())
-        .context("wait for OpenXR mclone render device idle")?;
-    mclone.render_stats = left_stats;
-    Ok(left_summary)
+        .with_context(|| format!("wait for OpenXR mclone {label}-eye render device idle"))?;
+    Ok(summary)
 }
 
 #[cfg(not(target_os = "android"))]
