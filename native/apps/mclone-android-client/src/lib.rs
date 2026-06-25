@@ -35,13 +35,15 @@ mod android {
     };
     use mclone_ui::GuiDrawList;
     use winit::application::ApplicationHandler;
-    use winit::event::WindowEvent;
+    use winit::dpi::PhysicalPosition;
+    use winit::event::{Touch, TouchPhase, WindowEvent};
     use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
     use winit::platform::android::EventLoopBuilderExtAndroid;
     use winit::platform::android::activity::AndroidApp;
     use winit::window::{Window, WindowAttributes, WindowId};
 
     const LOG_TAG: &str = "mclone_android";
+    const TOUCH_ORBIT_RADIANS_PER_SCREEN: f32 = 2.4;
 
     #[allow(unsafe_code)]
     #[link(name = "log")]
@@ -235,6 +237,15 @@ mod android {
                 .resize(&self.device, self.config.width, self.config.height);
         }
 
+        fn orbit_camera_by_pixels(&mut self, delta_x: f64, delta_y: f64) {
+            self.renderer.orbit_camera_by_pixels(
+                delta_x,
+                delta_y,
+                self.config.width,
+                self.config.height,
+            );
+        }
+
         fn render_mclone_frame(&mut self) -> Result<(), AndroidRenderError> {
             let frame = self
                 .surface
@@ -344,6 +355,13 @@ mod android {
 
         fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
             self.depth.resize(device, width, height);
+        }
+
+        fn orbit_camera_by_pixels(&mut self, delta_x: f64, delta_y: f64, width: u32, height: u32) {
+            let scale = width.min(height).max(1) as f32;
+            let yaw_delta = -(delta_x as f32 / scale) * TOUCH_ORBIT_RADIANS_PER_SCREEN;
+            let pitch_delta = -(delta_y as f32 / scale) * TOUCH_ORBIT_RADIANS_PER_SCREEN;
+            self.camera.orbit(yaw_delta, pitch_delta);
         }
 
         fn render(&mut self, frame: RenderFrameContext<'_>) -> Result<()> {
@@ -607,6 +625,13 @@ mod android {
     struct McloneAndroidApp {
         window: Option<Arc<Window>>,
         gpu: Option<AndroidGpuState>,
+        active_touch: Option<ActiveTouch>,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct ActiveTouch {
+        id: u64,
+        position: PhysicalPosition<f64>,
     }
 
     impl ApplicationHandler for McloneAndroidApp {
@@ -645,6 +670,7 @@ mod android {
             log::info!("Mclone Android suspended");
             self.gpu = None;
             self.window = None;
+            self.active_touch = None;
         }
 
         fn window_event(
@@ -653,7 +679,7 @@ mod android {
             window_id: WindowId,
             event: WindowEvent,
         ) {
-            let Some(window) = self.window.as_ref() else {
+            let Some(window) = self.window.as_ref().cloned() else {
                 return;
             };
             if window.id() != window_id {
@@ -699,7 +725,61 @@ mod android {
                         size.height
                     );
                 }
+                WindowEvent::Touch(touch) => self.handle_touch(&window, touch),
                 _ => {}
+            }
+        }
+    }
+
+    impl McloneAndroidApp {
+        fn handle_touch(&mut self, window: &Window, touch: Touch) {
+            match touch.phase {
+                TouchPhase::Started => {
+                    if self.active_touch.is_none() {
+                        log::info!(
+                            "Mclone Android touch orbit started: id={} x={:.1} y={:.1}",
+                            touch.id,
+                            touch.location.x,
+                            touch.location.y
+                        );
+                        self.active_touch = Some(ActiveTouch {
+                            id: touch.id,
+                            position: touch.location,
+                        });
+                    }
+                }
+                TouchPhase::Moved => {
+                    let Some(active) = self.active_touch.as_mut() else {
+                        return;
+                    };
+                    if active.id != touch.id {
+                        return;
+                    }
+                    let delta_x = touch.location.x - active.position.x;
+                    let delta_y = touch.location.y - active.position.y;
+                    active.position = touch.location;
+                    if delta_x.abs() < 0.5 && delta_y.abs() < 0.5 {
+                        return;
+                    }
+                    if let Some(gpu) = self.gpu.as_mut() {
+                        gpu.orbit_camera_by_pixels(delta_x, delta_y);
+                        log::info!(
+                            "Mclone Android touch orbit moved: dx={:.1} dy={:.1}",
+                            delta_x,
+                            delta_y
+                        );
+                        window.request_redraw();
+                    }
+                }
+                TouchPhase::Ended | TouchPhase::Cancelled => {
+                    if self
+                        .active_touch
+                        .is_some_and(|active| active.id == touch.id)
+                    {
+                        log::info!("Mclone Android touch orbit ended: id={}", touch.id);
+                        self.active_touch = None;
+                    }
+                }
             }
         }
     }

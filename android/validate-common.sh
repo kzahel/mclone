@@ -169,6 +169,27 @@ mclone_stage_asset_pack() {
     "$ADB" -s "$serial" push "$asset_pack_path" "$remote_path" >/dev/null
 }
 
+mclone_run_touch_swipe() {
+    local serial="$1"
+    local spec="${MCLONE_ANDROID_TOUCH_SWIPE:-}"
+    local x1
+    local y1
+    local x2
+    local y2
+    local duration_ms
+    local extra
+
+    [[ -n "$spec" ]] || return 0
+    IFS=, read -r x1 y1 x2 y2 duration_ms extra <<<"$spec"
+    if [[ -z "${x1:-}" || -z "${y1:-}" || -z "${x2:-}" || -z "${y2:-}" || -z "${duration_ms:-}" || -n "${extra:-}" ]]; then
+        mclone_die "invalid --touch-swipe '$spec'; expected x1,y1,x2,y2,duration_ms"
+    fi
+
+    mclone_note "Injecting Android touch swipe $spec"
+    "$ADB" -s "$serial" shell input swipe "$x1" "$y1" "$x2" "$y2" "$duration_ms" >/dev/null
+    sleep "${MCLONE_ANDROID_AFTER_TOUCH_SECONDS:-1}"
+}
+
 mclone_install_launch_smoke() {
     local serial="$1"
     local screenshot_path="$2"
@@ -231,6 +252,8 @@ mclone_install_launch_smoke() {
         fi
         mclone_note "NativeActivity is resumed"
     fi
+
+    mclone_run_touch_swipe "$serial"
 
     mclone_collect_logcat "$serial" "$pid" "$log_path"
     if grep -E "FATAL EXCEPTION|Fatal signal|SIGSEGV|thread .* panicked|panicked at" "$log_path" >/dev/null 2>&1; then

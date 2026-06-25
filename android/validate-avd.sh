@@ -39,6 +39,7 @@ Options:
   --smoke-seconds N   Seconds to wait after launch before validation.
   --asset-pack PATH   Local packed assets file to stage before launch.
   --skip-assets       Do not stage the packed Minecraft assets before launch.
+  --touch-swipe SPEC  Inject a touch swipe before capture: x1,y1,x2,y2,duration_ms.
   -h, --help          Show this help.
 USAGE
 }
@@ -88,6 +89,10 @@ while [[ $# -gt 0 ]]; do
         --skip-assets)
             STAGE_ASSETS=0
             shift
+            ;;
+        --touch-swipe)
+            MCLONE_ANDROID_TOUCH_SWIPE="$2"
+            shift 2
             ;;
         -h|--help)
             usage

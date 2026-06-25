@@ -1,8 +1,8 @@
 # 074: Flat Android Build Smoke
 
 Status: proposed high-priority platform slice; Slices 0-3 completed. Slice 4
-runtime/asset-pack terrain rendering is landed; Android touch and GUI/title
-polish remain pending.
+runtime/asset-pack terrain rendering and minimal touch orbit are landed;
+Android GUI/title polish remains pending.
 
 Prerequisite: land [`075-shared-single-view-runtime-prereq.md`](075-shared-single-view-runtime-prereq.md)
 before starting Android runtime integration. Android should consume
@@ -376,10 +376,10 @@ owning only platform lifecycle, input, surface, and package paths.
   integrated server/client replica/render-section synchronization.
 - [x] Render a real full frame with sky and terrain.
 - [ ] Render GUI/title state if needed for the Android smoke frame.
-- [ ] Add minimal touch handling:
+- [x] Add minimal touch handling:
   - one-finger look or orbit for smoke
   - optional simple move/look controls only if cheap to wire
-- [ ] Do not implement polished mobile controls here if it blocks platform
+- [x] Do not implement polished mobile controls here if it blocks platform
   bring-up.
 
 Recorded Slice 4 runtime/asset-pack result:
@@ -419,6 +419,14 @@ Recorded Slice 4 runtime/asset-pack result:
 - Scenario directory smoke wrote `/tmp/mclone-desktop-runtime-scenarios/`
   (`overview.png`, `orbit-east.png`, `close.png`) with the same runtime section
   set for each camera.
+- Android touch follow-up: the host now tracks one active `WindowEvent::Touch`
+  pointer and maps drag deltas to `ChunkCamera::orbit` on the existing overview
+  camera. The validator can inject a deterministic swipe with `--touch-swipe`
+  before screenshot capture.
+- Touch screenshot inspected: `/tmp/mclone-android-avd-touch.png` (`2560x1600`),
+  showing the post-swipe orbit view. Logcat
+  `/tmp/mclone-android-avd-touch-logcat.txt` recorded touch start, movement, and
+  end events in Rust.
 
 Validation:
 
@@ -431,10 +439,12 @@ pnpm native:desktop-chunk:smoke
 cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --headless-chunk-scenarios /tmp/mclone-desktop-runtime-scenarios --width 640 --height 400 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 pnpm native:android:apk
 bash android/validate-avd.sh --avd jstorrent-tablet --skip-build --screenshot /tmp/mclone-android-avd-chunk.png --log /tmp/mclone-android-avd-logcat.txt --smoke-seconds 15
+bash android/validate-avd.sh --avd jstorrent-tablet --skip-build --screenshot /tmp/mclone-android-avd-touch.png --log /tmp/mclone-android-avd-touch-logcat.txt --smoke-seconds 15 --touch-swipe 1280,820,1680,680,500
 ```
 
 Inspect `/tmp/mclone-desktop-runtime-chunk.png` and
-`/tmp/mclone-android-avd-chunk.png`.
+`/tmp/mclone-android-avd-chunk.png`. Inspect the touch orbit capture at
+`/tmp/mclone-android-avd-touch.png`.
 
 ### Slice 5 - Quest-Flat Optional Smoke
 
