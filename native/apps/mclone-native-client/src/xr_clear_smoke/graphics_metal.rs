@@ -1,7 +1,8 @@
 use std::{ffi::c_void, ptr};
 
 use anyhow::{Context, Result, bail};
-use metal::foreign_types::ForeignTypeRef;
+use metal::foreign_types::{ForeignType, ForeignTypeRef};
+use metal::{MTLPixelFormat, MTLTextureType};
 use openxr as xr;
 use wgpu::hal::api::Metal as HalMetal;
 use xr::Graphics;
@@ -11,6 +12,7 @@ use xr::sys::{
 };
 
 pub(super) enum AppGraphics {}
+pub(super) type GraphicsSession = MetalGraphicsSession;
 
 #[derive(Debug, Copy, Clone)]
 pub(super) struct Requirements {
@@ -23,13 +25,21 @@ pub(super) struct SessionCreateInfo {
 }
 
 pub(super) struct MetalGraphicsSession {
+    pub(super) frame_wait: xr::FrameWaiter,
+    pub(super) frame_stream: xr::FrameStream<AppGraphics>,
     pub(super) session: xr::Session<AppGraphics>,
+    pub(super) device: wgpu::Device,
+    pub(super) queue: wgpu::Queue,
     pub(super) adapter_name: String,
     pub(super) required_device_name: String,
-    _device: wgpu::Device,
-    _queue: wgpu::Queue,
-    _frame_wait: xr::FrameWaiter,
-    _frame_stream: xr::FrameStream<AppGraphics>,
+}
+
+pub(super) struct OpenXrEyeState {
+    pub(super) swapchain: xr::Swapchain<AppGraphics>,
+    pub(super) textures: Vec<wgpu::Texture>,
+    pub(super) depth_view: wgpu::TextureView,
+    pub(super) width: u32,
+    pub(super) height: u32,
 }
 
 impl Graphics for AppGraphics {
@@ -145,13 +155,81 @@ pub(super) fn create_graphics_session(
     .context("create OpenXR Metal session")?;
 
     Ok(MetalGraphicsSession {
+        frame_wait,
+        frame_stream,
         session,
+        device,
+        queue,
         adapter_name,
         required_device_name,
-        _device: device,
-        _queue: queue,
-        _frame_wait: frame_wait,
-        _frame_stream: frame_stream,
+    })
+}
+
+pub(super) fn create_eye(
+    device: &wgpu::Device,
+    session: &xr::Session<AppGraphics>,
+    eye_width: u32,
+    eye_height: u32,
+    color_format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
+    sample_count: u32,
+) -> Result<OpenXrEyeState> {
+    let metal_format = wgpu_format_to_metal_pixel_format(color_format)
+        .ok_or_else(|| anyhow::anyhow!("unsupported XR color format {color_format:?}"))?;
+    let xr_format = metal_format as i64;
+    let supported_formats = session
+        .enumerate_swapchain_formats()
+        .context("enumerate OpenXR Metal swapchain formats")?;
+    if !supported_formats.contains(&xr_format) {
+        bail!("OpenXR runtime does not advertise {metal_format:?} swapchain images");
+    }
+
+    let swapchain = session
+        .create_swapchain(&xr::SwapchainCreateInfo {
+            create_flags: xr::SwapchainCreateFlags::EMPTY,
+            usage_flags: xr::SwapchainUsageFlags::COLOR_ATTACHMENT
+                | xr::SwapchainUsageFlags::SAMPLED
+                | xr::SwapchainUsageFlags::TRANSFER_SRC,
+            format: xr_format,
+            sample_count,
+            width: eye_width,
+            height: eye_height,
+            face_count: 1,
+            array_size: 1,
+            mip_count: 1,
+        })
+        .context("create OpenXR Metal eye swapchain")?;
+
+    let textures = swapchain
+        .enumerate_images()
+        .context("enumerate OpenXR Metal swapchain images")?
+        .into_iter()
+        .map(|texture| {
+            create_metal_swapchain_texture(device, texture, eye_width, eye_height, color_format)
+        })
+        .collect();
+
+    let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mclone_xr_depth"),
+        size: wgpu::Extent3d {
+            width: eye_width,
+            height: eye_height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count,
+        dimension: wgpu::TextureDimension::D2,
+        format: depth_format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+
+    Ok(OpenXrEyeState {
+        swapchain,
+        textures,
+        depth_view: depth_texture.create_view(&Default::default()),
+        width: eye_width,
+        height: eye_height,
     })
 }
 
@@ -211,6 +289,60 @@ fn metal_command_queue_ptr(queue: &wgpu::Queue) -> *mut c_void {
                 .as_ptr()
                 .cast::<c_void>()
         })
+    }
+}
+
+fn create_metal_swapchain_texture(
+    device: &wgpu::Device,
+    texture_ptr: *mut c_void,
+    width: u32,
+    height: u32,
+    color_format: wgpu::TextureFormat,
+) -> wgpu::Texture {
+    let texture_ref = unsafe { metal::TextureRef::from_ptr(texture_ptr.cast()) };
+    let texture = texture_ref.to_owned();
+    let hal_texture = unsafe {
+        wgpu::hal::metal::Device::texture_from_raw(
+            texture,
+            color_format,
+            MTLTextureType::D2,
+            1,
+            1,
+            wgpu::hal::CopyExtent {
+                width,
+                height,
+                depth: 1,
+            },
+        )
+    };
+    unsafe {
+        device.create_texture_from_hal::<HalMetal>(
+            hal_texture,
+            &wgpu::TextureDescriptor {
+                label: Some("mclone_xr_swapchain"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: color_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            },
+        )
+    }
+}
+
+fn wgpu_format_to_metal_pixel_format(format: wgpu::TextureFormat) -> Option<MTLPixelFormat> {
+    match format {
+        wgpu::TextureFormat::Rgba8UnormSrgb => Some(MTLPixelFormat::RGBA8Unorm_sRGB),
+        wgpu::TextureFormat::Rgba8Unorm => Some(MTLPixelFormat::RGBA8Unorm),
+        wgpu::TextureFormat::Bgra8UnormSrgb => Some(MTLPixelFormat::BGRA8Unorm_sRGB),
+        wgpu::TextureFormat::Bgra8Unorm => Some(MTLPixelFormat::BGRA8Unorm),
+        _ => None,
     }
 }
 

@@ -1,6 +1,6 @@
 # 078: Desktop OpenXR Clear Smoke
 
-Status: active; Slice 2D Windows/Linux Vulkan graphics session compiles; Slice 2E/2F Windows launcher starts Virtual Desktop/Quest client with Playbox-style headset wake/restore; Windows Virtual Desktop runtime creates the Vulkan OpenXR session once the headset is connected to the PC Streamer, swapchains/frame loop next.
+Status: active; Slice 3 desktop XR clear submission is validated on Windows with VirtualDesktopXR/Quest 3 over Vulkan; macOS Metal keeps the same backend shape and should be rerun on a Mac runtime.
 
 ## Purpose
 
@@ -149,7 +149,7 @@ Expected Slice 1 CLI results:
 - [x] Create the runtime-selected Metal graphics device on Apple targets.
 - [x] Create a Metal session and `STAGE` reference space on Apple targets.
 - [x] Create the runtime-selected Vulkan graphics device on Windows/Linux.
-- [ ] Create color swapchains for both eyes and host-owned depth targets.
+- [x] Create color swapchains for both eyes and host-owned depth targets.
 
 Landed in Slice 2A:
 
@@ -518,11 +518,32 @@ inside the app/platform XR module.
 
 ### Slice 3 - Clear Frame Submission
 
-- [ ] Wait/begin/end OpenXR frames.
-- [ ] Acquire and release per-eye swapchain images.
-- [ ] Clear each eye to a visible diagnostic color or pattern.
-- [ ] Submit a projection layer using runtime-provided views/projections.
-- [ ] Run for a bounded number of frames in smoke mode and exit cleanly.
+- [x] Wait/begin/end OpenXR frames.
+- [x] Acquire and release per-eye swapchain images.
+- [x] Clear each eye to a visible diagnostic color or pattern.
+- [x] Submit a projection layer using runtime-provided views/projections.
+- [x] Run for a bounded number of frames in smoke mode and exit cleanly.
+
+Landed in Slice 3:
+
+- Added Playbox-shaped per-eye XR state for both desktop backends:
+  - Windows/Linux Vulkan wraps runtime-owned `VkImage` swapchain images into
+    `wgpu::Texture` values via `wgpu-hal`.
+  - macOS Metal wraps runtime-owned `MTLTexture` swapchain images into
+    `wgpu::Texture` values via `wgpu-hal`.
+- The smoke creates left/right color swapchains and host-owned depth targets
+  from the runtime-recommended stereo view size.
+- The frame loop waits and begins OpenXR frames, handles non-renderable frames
+  with an empty `xrEndFrame`, locates runtime stereo views in `STAGE`, clears
+  the two eye targets to diagnostic colors, releases both images, and submits a
+  projection layer with the runtime pose/FOV data.
+- The bounded smoke requests session exit and drains session state changes.
+- The process-bounded smoke intentionally keeps the XR graphics object graph
+  alive after a clean app-requested `EXITING` transition. This mirrors
+  Playbox's desktop runtime workaround for OpenXR runtimes that can fault while
+  destroying session-owned graphics handles after shutdown. On this Windows
+  VirtualDesktopXR setup, the smoke submitted frames successfully but exited
+  with `STATUS_ACCESS_VIOLATION` until this Playbox teardown shape was applied.
 
 Suggested validation:
 
@@ -530,8 +551,49 @@ Suggested validation:
 cargo run --manifest-path native/Cargo.toml -p mclone-native-client --features xr -- --xr-clear-smoke --frames 120
 ```
 
-Record the exact runtime, platform backend, and observed result in this doc
-when the smoke lands.
+Windows validation on June 25, 2026:
+
+```powershell
+pnpm native:xr:windows:smoke:connected
+```
+
+Observed result:
+
+- Launcher selected
+  `C:\Program Files\Virtual Desktop Streamer\OpenXR\virtualdesktop-openxr.json`.
+- Entry: fallback loader
+  `C:\Program Files (x86)\Steam\steamapps\common\SteamVR\bin\win64\openxr_loader.dll`.
+- Runtime: `VirtualDesktopXR v1.0.10`.
+- System: `Meta Quest 3`, orientation and position tracking available.
+- Blend mode: `OPAQUE`.
+- Stereo views:
+  - eye 0 recommended `1728x1824`, max `16384x16384`, samples `1/4`
+  - eye 1 recommended `1728x1824`, max `16384x16384`, samples `1/4`
+- Vulkan session:
+  `physical_device='NVIDIA GeForce RTX 4090' api=1.4.341 queue_family=0`.
+- Reference space: `STAGE`.
+- Swapchains: `Rgba8UnormSrgb`, eye size `1728x1824`, images `3/3`.
+- Frame result: `submitted=2 runtime_frames=2 skipped=0`.
+- Session state sequence included `IDLE`, `READY`, `SYNCHRONIZED`,
+  `VISIBLE`, `FOCUSED`, then app-requested shutdown through `STOPPING`,
+  `IDLE`, and `EXITING`.
+- Process exit: success, with
+  `desktop OpenXR clear smoke complete: frames=2`.
+
+Visual validation:
+
+```powershell
+.\scripts\start-xr.ps1 -Frames 600 -NoQuestLaunch -NoQuestRestore
+adb shell screencap -p /sdcard/mclone-xr-clear.png
+adb pull /sdcard/mclone-xr-clear.png C:\tmp\mclone-xr-clear.png
+adb shell rm /sdcard/mclone-xr-clear.png
+```
+
+The 600-frame run reported
+`submitted=600 runtime_frames=600 skipped=0` and exited successfully. The
+captured headset screenshot at `C:\tmp\mclone-xr-clear.png` showed the expected
+stereo diagnostic clear: blue left eye, green right eye, with the Virtual
+Desktop overlay composited above it.
 
 ## Out Of Scope
 

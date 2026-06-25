@@ -5,16 +5,25 @@ use openxr as xr;
 use wgpu::hal::api::Vulkan as HalVulkan;
 
 pub(super) type AppGraphics = xr::Vulkan;
+pub(super) type GraphicsSession = VulkanGraphicsSession;
+
+pub(super) struct OpenXrEyeState {
+    pub(super) swapchain: xr::Swapchain<AppGraphics>,
+    pub(super) textures: Vec<wgpu::Texture>,
+    pub(super) depth_view: wgpu::TextureView,
+    pub(super) width: u32,
+    pub(super) height: u32,
+}
 
 pub(super) struct VulkanGraphicsSession {
+    pub(super) frame_wait: xr::FrameWaiter,
+    pub(super) frame_stream: xr::FrameStream<AppGraphics>,
     pub(super) session: xr::Session<AppGraphics>,
+    pub(super) device: wgpu::Device,
+    pub(super) queue: wgpu::Queue,
     pub(super) physical_device_name: String,
     pub(super) physical_device_api_version: String,
     pub(super) queue_family_index: u32,
-    _device: wgpu::Device,
-    _queue: wgpu::Queue,
-    _frame_wait: xr::FrameWaiter,
-    _frame_stream: xr::FrameStream<AppGraphics>,
 }
 
 pub(super) fn create_graphics_session(
@@ -183,19 +192,142 @@ pub(super) fn create_graphics_session(
     .context("create OpenXR Vulkan session")?;
 
     Ok(VulkanGraphicsSession {
+        frame_wait,
+        frame_stream,
         session,
+        device,
+        queue,
         physical_device_name,
         physical_device_api_version,
         queue_family_index,
-        _device: device,
-        _queue: queue,
-        _frame_wait: frame_wait,
-        _frame_stream: frame_stream,
+    })
+}
+
+pub(super) fn create_eye(
+    device: &wgpu::Device,
+    session: &xr::Session<AppGraphics>,
+    eye_width: u32,
+    eye_height: u32,
+    color_format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
+    sample_count: u32,
+) -> Result<OpenXrEyeState> {
+    let vk_format = wgpu_format_to_vk_format(color_format)
+        .ok_or_else(|| anyhow!("unsupported XR color format {color_format:?}"))?;
+    let xr_format = vk_format.as_raw() as u32;
+    let supported_formats = session
+        .enumerate_swapchain_formats()
+        .context("enumerate OpenXR Vulkan swapchain formats")?;
+    if !supported_formats.contains(&xr_format) {
+        bail!("OpenXR runtime does not advertise {vk_format:?} swapchain images");
+    }
+
+    let swapchain = session
+        .create_swapchain(&xr::SwapchainCreateInfo {
+            create_flags: xr::SwapchainCreateFlags::EMPTY,
+            usage_flags: xr::SwapchainUsageFlags::COLOR_ATTACHMENT
+                | xr::SwapchainUsageFlags::SAMPLED
+                | xr::SwapchainUsageFlags::TRANSFER_SRC,
+            format: xr_format,
+            sample_count,
+            width: eye_width,
+            height: eye_height,
+            face_count: 1,
+            array_size: 1,
+            mip_count: 1,
+        })
+        .context("create OpenXR Vulkan eye swapchain")?;
+
+    let textures = swapchain
+        .enumerate_images()
+        .context("enumerate OpenXR Vulkan swapchain images")?
+        .into_iter()
+        .map(|vk_image_raw| {
+            create_vulkan_swapchain_texture(
+                device,
+                vk_image_raw,
+                eye_width,
+                eye_height,
+                color_format,
+            )
+        })
+        .collect();
+
+    let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mclone_xr_depth"),
+        size: wgpu::Extent3d {
+            width: eye_width,
+            height: eye_height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count,
+        dimension: wgpu::TextureDimension::D2,
+        format: depth_format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+
+    Ok(OpenXrEyeState {
+        swapchain,
+        textures,
+        depth_view: depth_texture.create_view(&Default::default()),
+        width: eye_width,
+        height: eye_height,
     })
 }
 
 fn load_vulkan_entry() -> Result<ash::Entry> {
     unsafe { ash::Entry::load().context("load Vulkan loader") }
+}
+
+fn create_vulkan_swapchain_texture(
+    device: &wgpu::Device,
+    vk_image_raw: <AppGraphics as xr::Graphics>::SwapchainImage,
+    width: u32,
+    height: u32,
+    color_format: wgpu::TextureFormat,
+) -> wgpu::Texture {
+    let hal_texture = unsafe {
+        wgpu::hal::vulkan::Device::texture_from_raw(
+            vk::Image::from_raw(vk_image_raw),
+            &wgpu::hal::TextureDescriptor {
+                label: Some("mclone_xr_swapchain"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: color_format,
+                usage: wgpu::wgt::TextureUses::COLOR_TARGET | wgpu::wgt::TextureUses::COPY_SRC,
+                memory_flags: wgpu::hal::MemoryFlags::empty(),
+                view_formats: vec![],
+            },
+            None,
+        )
+    };
+    unsafe {
+        device.create_texture_from_hal::<HalVulkan>(
+            hal_texture,
+            &wgpu::TextureDescriptor {
+                label: Some("mclone_xr_swapchain"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: color_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            },
+        )
+    }
 }
 
 fn physical_device_name(properties: &vk::PhysicalDeviceProperties) -> String {
@@ -212,4 +344,14 @@ fn format_vulkan_api_version(version: u32) -> String {
         vk::api_version_minor(version),
         vk::api_version_patch(version)
     )
+}
+
+fn wgpu_format_to_vk_format(format: wgpu::TextureFormat) -> Option<vk::Format> {
+    match format {
+        wgpu::TextureFormat::Rgba8UnormSrgb => Some(vk::Format::R8G8B8A8_SRGB),
+        wgpu::TextureFormat::Rgba8Unorm => Some(vk::Format::R8G8B8A8_UNORM),
+        wgpu::TextureFormat::Bgra8UnormSrgb => Some(vk::Format::B8G8R8A8_SRGB),
+        wgpu::TextureFormat::Bgra8Unorm => Some(vk::Format::B8G8R8A8_UNORM),
+        _ => None,
+    }
 }
