@@ -7,35 +7,39 @@ source "$ANDROID_DIR/validate-common.sh"
 
 MCLONE_ANDROID_APP_ID="${MCLONE_ANDROID_APP_ID:-com.kzahel.mclone}"
 MCLONE_ANDROID_ACTIVITY="${MCLONE_ANDROID_ACTIVITY:-android.app.NativeActivity}"
+MCLONE_ANDROID_REQUIRE_FOCUS="${MCLONE_ANDROID_REQUIRE_FOCUS:-0}"
 APK_PATH="${MCLONE_ANDROID_APK:-$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk}"
-AVD_NAME="${MCLONE_ANDROID_AVD:-jstorrent-tablet}"
-SCREENSHOT_PATH="${MCLONE_ANDROID_SCREENSHOT:-/tmp/mclone-android-avd-clear.png}"
-LOG_PATH="${MCLONE_ANDROID_LOGCAT:-/tmp/mclone-android-avd-logcat.txt}"
-BOOT_TIMEOUT_SECONDS="${MCLONE_ANDROID_BOOT_TIMEOUT:-120}"
+SCREENSHOT_PATH="${MCLONE_ANDROID_SCREENSHOT:-/tmp/mclone-quest-flat.png}"
+LOG_PATH="${MCLONE_ANDROID_LOGCAT:-/tmp/mclone-quest-flat-logcat.txt}"
+BOOT_TIMEOUT_SECONDS="${MCLONE_ANDROID_BOOT_TIMEOUT:-60}"
 SMOKE_SECONDS="${MCLONE_ANDROID_SMOKE_SECONDS:-3}"
 STAGE_ASSETS="${MCLONE_ANDROID_STAGE_ASSETS:-1}"
 SKIP_BUILD=0
-KEEP_EMULATOR=0
-HEADLESS=1
 SERIAL=""
-STARTED_EMULATOR=0
-EMULATOR_PID=""
+
+cleanup() {
+    local status=$?
+    if [[ -n "$SERIAL" ]]; then
+        mclone_restore_headset_after_test "$SERIAL" "$MCLONE_ANDROID_APP_ID"
+    fi
+    exit "$status"
+}
+trap cleanup EXIT INT TERM
 
 usage() {
     cat <<'USAGE'
-Usage: android/validate-avd.sh [options]
+Usage: android/validate-quest-flat.sh [options]
 
-Build, install, launch, and smoke-test the flat Mclone Android APK on an AVD.
+Build, install, launch, and smoke-test the flat Mclone Android APK on an
+attached Quest headset. This validates the non-XR NativeActivity shell on Quest
+before a standalone OpenXR target exists.
 
 Options:
-  --avd NAME          AVD name to boot when no emulator is already online.
-  --serial SERIAL     Use an already-running emulator/device serial.
+  --serial SERIAL     Use a specific attached headset serial.
   --skip-build        Reuse the existing APK.
-  --keep-emulator     Leave an emulator started by this script running.
-  --window            Show the emulator window instead of using -no-window.
   --screenshot PATH   Local screenshot output path.
   --log PATH          Local logcat output path.
-  --timeout SECONDS   Boot/device wait timeout.
+  --timeout SECONDS   Device boot wait timeout.
   --smoke-seconds N   Seconds to wait after launch before validation.
   --asset-pack PATH   Local packed assets file to stage before launch.
   --skip-assets       Do not stage the packed Minecraft assets before launch.
@@ -46,24 +50,12 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --avd)
-            AVD_NAME="$2"
-            shift 2
-            ;;
         --serial)
             SERIAL="$2"
             shift 2
             ;;
         --skip-build)
             SKIP_BUILD=1
-            shift
-            ;;
-        --keep-emulator)
-            KEEP_EMULATOR=1
-            shift
-            ;;
-        --window)
-            HEADLESS=0
             shift
             ;;
         --screenshot)
@@ -107,48 +99,20 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-cleanup() {
-    local status=$?
-    if [[ "$STARTED_EMULATOR" == "1" && "$KEEP_EMULATOR" != "1" && -n "$SERIAL" ]]; then
-        mclone_note "Stopping emulator $SERIAL"
-        "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
-    elif [[ "$STARTED_EMULATOR" == "1" && "$KEEP_EMULATOR" != "1" && -n "$EMULATOR_PID" ]]; then
-        kill "$EMULATOR_PID" >/dev/null 2>&1 || true
-    fi
-    exit "$status"
-}
-trap cleanup EXIT INT TERM
-
 cd "$REPO_ROOT"
 ADB="$(mclone_android_tool adb platform-tools/adb)"
-EMULATOR="$(mclone_android_tool emulator emulator/emulator)"
 
 mclone_build_apk
 "$ADB" start-server >/dev/null
 
 if [[ -z "$SERIAL" ]]; then
-    SERIAL="$(mclone_online_devices | awk '/^emulator-/ { print; exit }')"
+    SERIAL="$(mclone_detect_quest_serial || true)"
 fi
 
 if [[ -z "$SERIAL" ]]; then
-    unauthorized_devices="$(mclone_unauthorized_devices | paste -sd, -)"
-    if [[ -n "$unauthorized_devices" ]]; then
-        mclone_die "attached Android device(s) are unauthorized: $unauthorized_devices"
-    fi
-
-    emulator_args=(-avd "$AVD_NAME" -no-audio -no-boot-anim -no-snapshot-save)
-    if [[ "$HEADLESS" == "1" ]]; then
-        emulator_args+=(-no-window)
-    fi
-
-    mclone_note "Starting AVD $AVD_NAME"
-    "$EMULATOR" "${emulator_args[@]}" &
-    EMULATOR_PID="$!"
-    STARTED_EMULATOR=1
-    SERIAL="$(mclone_wait_for_any_emulator "$BOOT_TIMEOUT_SECONDS")"
-else
-    mclone_note "Using existing device $SERIAL"
+    mclone_report_no_quest_found
 fi
 
 mclone_wait_for_boot "$SERIAL" "$BOOT_TIMEOUT_SECONDS"
+mclone_wake_headset_for_test "$SERIAL"
 mclone_install_launch_smoke "$SERIAL" "$SCREENSHOT_PATH" "$LOG_PATH" "$SMOKE_SECONDS"

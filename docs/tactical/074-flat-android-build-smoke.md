@@ -2,7 +2,8 @@
 
 Status: proposed high-priority platform slice; Slices 0-3 completed. Slice 4
 runtime/asset-pack terrain rendering and minimal touch orbit are landed;
-Android GUI/title polish remains pending.
+Android GUI/title polish remains pending. Slice 5 Quest-flat validator is added;
+headset capture is pending an attached authorized Quest.
 
 Prerequisite: land [`075-shared-single-view-runtime-prereq.md`](075-shared-single-view-runtime-prereq.md)
 before starting Android runtime integration. Android should consume
@@ -451,16 +452,34 @@ Inspect `/tmp/mclone-desktop-runtime-chunk.png` and
 Goal: validate the flat Android APK as a 2D panel on Quest without introducing
 OpenXR.
 
-- [ ] Add `android/validate-quest-flat.sh` adapted from Playbox.
-- [ ] Detect attached Quest-like devices.
-- [ ] Wake headset for test and restore headset settings afterward.
+- [x] Add `android/validate-quest-flat.sh` adapted from Playbox.
+- [x] Detect attached Quest-like devices.
+- [x] Wake headset for test and restore headset settings afterward.
 - [ ] Launch the same flat `NativeActivity`, not a VR activity.
 - [ ] Capture `/tmp/mclone-quest-flat.png` and logcat.
+
+Recorded Slice 5 setup result:
+
+- Added `android/validate-quest-flat.sh` for a non-XR NativeActivity launch on
+  Quest hardware.
+- Added Quest-like device detection by manufacturer/model/features, headset wake
+  setup, controller-launch-check bypass, proximity handling, and restoration of
+  modified headset settings on exit.
+- Added `pnpm native:android:quest-flat`.
+- Local attempt stopped at device discovery because `adb devices` reported no
+  attached Quest headset.
 
 Validation:
 
 ```bash
-bash android/validate-quest-flat.sh --screenshot /tmp/mclone-quest-flat.png
+bash -n android/validate-common.sh android/validate-avd.sh android/validate-quest-flat.sh
+pnpm native:android:quest-flat -- --skip-build --screenshot /tmp/mclone-quest-flat.png --log /tmp/mclone-quest-flat-logcat.txt
+```
+
+Expected current blocker without a connected headset:
+
+```text
+error: no attached Quest headset was found
 ```
 
 ## Expected Risks

@@ -65,6 +65,17 @@ mclone_unauthorized_devices() {
     "$ADB" devices | tr -d '\r' | awk '$2 == "unauthorized" { print $1 }'
 }
 
+mclone_report_no_quest_found() {
+    local unauthorized_devices
+
+    "$ADB" devices
+    unauthorized_devices="$(mclone_unauthorized_devices | paste -sd, -)"
+    if [[ -n "$unauthorized_devices" ]]; then
+        mclone_die "attached Android device(s) are unauthorized: $unauthorized_devices. Put on the headset, accept the USB debugging RSA prompt, and rerun adb devices."
+    fi
+    mclone_die "no attached Quest headset was found"
+}
+
 mclone_wait_for_boot() {
     local serial="$1"
     local timeout_seconds="$2"
@@ -114,6 +125,128 @@ mclone_device_summary() {
     api="$("$ADB" -s "$serial" shell getprop ro.build.version.sdk | tr -d '\r' || true)"
     abi="$("$ADB" -s "$serial" shell getprop ro.product.cpu.abi | tr -d '\r' || true)"
     echo "$serial ${manufacturer:-unknown} ${model:-unknown} API ${api:-unknown} ${abi:-unknown}"
+}
+
+mclone_quest_like_device() {
+    local serial="$1"
+    local manufacturer
+    local model
+    local features
+
+    manufacturer="$("$ADB" -s "$serial" shell getprop ro.product.manufacturer | tr -d '\r' || true)"
+    model="$("$ADB" -s "$serial" shell getprop ro.product.model | tr -d '\r' || true)"
+    features="$("$ADB" -s "$serial" shell pm list features 2>/dev/null | tr -d '\r' || true)"
+
+    if printf '%s\n%s\n' "$manufacturer" "$model" | grep -Ei "Oculus|Meta|Quest" >/dev/null; then
+        return 0
+    fi
+
+    if printf '%s\n' "$features" | grep -E "oculus.hardware.standalone_vr|oculus.software.xrsp" >/dev/null; then
+        return 0
+    fi
+
+    return 1
+}
+
+mclone_detect_quest_serial() {
+    local serial
+
+    for serial in $(mclone_online_devices | awk '!/^emulator-/ { print }'); do
+        if mclone_quest_like_device "$serial"; then
+            echo "$serial"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+MCLONE_UNSET_MARKER="__mclone_unset__"
+MCLONE_HEADSET_SETTINGS_SAVED=0
+MCLONE_PREVIOUS_STAY_ON=""
+MCLONE_PREVIOUS_SKIP_LAUNCH_CHECK=""
+MCLONE_PREVIOUS_REQUIRE_CONTROLLERS=""
+
+mclone_read_android_setting() {
+    local serial="$1"
+    local namespace="$2"
+    local name="$3"
+    local value
+
+    value="$("$ADB" -s "$serial" shell settings get "$namespace" "$name" 2>/dev/null | tr -d '\r' || true)"
+    if [[ -z "$value" || "$value" == "null" ]]; then
+        echo "$MCLONE_UNSET_MARKER"
+    else
+        echo "$value"
+    fi
+}
+
+mclone_restore_android_setting() {
+    local serial="$1"
+    local namespace="$2"
+    local name="$3"
+    local value="$4"
+
+    if [[ "$value" == "$MCLONE_UNSET_MARKER" ]]; then
+        "$ADB" -s "$serial" shell settings delete "$namespace" "$name" >/dev/null 2>&1 || true
+    else
+        "$ADB" -s "$serial" shell settings put "$namespace" "$name" "$value" >/dev/null 2>&1 || true
+    fi
+}
+
+mclone_save_headset_power_settings() {
+    local serial="$1"
+
+    MCLONE_PREVIOUS_STAY_ON="$(mclone_read_android_setting "$serial" global stay_on_while_plugged_in)"
+    MCLONE_PREVIOUS_SKIP_LAUNCH_CHECK="$(mclone_read_android_setting "$serial" secure skip_launch_check_requires_controllers_enabled)"
+    MCLONE_PREVIOUS_REQUIRE_CONTROLLERS="$(mclone_read_android_setting "$serial" global require_controllers_for_vr_apps)"
+    MCLONE_HEADSET_SETTINGS_SAVED=1
+}
+
+mclone_disable_headset_proximity_sensor() {
+    local serial="$1"
+
+    "$ADB" -s "$serial" shell setprop debug.oculus.disableProximity 1 >/dev/null 2>&1 || true
+}
+
+mclone_enable_headset_proximity_sensor() {
+    local serial="$1"
+
+    "$ADB" -s "$serial" shell setprop debug.oculus.disableProximity 0 >/dev/null 2>&1 || true
+    "$ADB" -s "$serial" shell am broadcast -a com.oculus.vrpowermanager.prox_open --ei timeout 0 >/dev/null 2>&1 || true
+}
+
+mclone_wake_headset_for_test() {
+    local serial="$1"
+
+    if [[ "$MCLONE_HEADSET_SETTINGS_SAVED" != "1" ]]; then
+        mclone_save_headset_power_settings "$serial"
+    fi
+    mclone_disable_headset_proximity_sensor "$serial"
+    "$ADB" -s "$serial" shell settings put global stay_on_while_plugged_in 3 >/dev/null 2>&1 || true
+    "$ADB" -s "$serial" shell settings put secure skip_launch_check_requires_controllers_enabled 1 >/dev/null 2>&1 || true
+    "$ADB" -s "$serial" shell settings put global require_controllers_for_vr_apps 0 >/dev/null 2>&1 || true
+    "$ADB" -s "$serial" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+    "$ADB" -s "$serial" shell am broadcast -a com.oculus.vrpowermanager.prox_close --ei timeout 0 >/dev/null 2>&1 || true
+}
+
+mclone_restore_headset_after_test() {
+    local serial="$1"
+    local package_name="${2:-}"
+
+    if [[ -z "$serial" || "$MCLONE_HEADSET_SETTINGS_SAVED" != "1" ]]; then
+        return
+    fi
+
+    if [[ -n "$package_name" ]]; then
+        "$ADB" -s "$serial" shell am force-stop "$package_name" >/dev/null 2>&1 || true
+    fi
+    mclone_restore_android_setting "$serial" global stay_on_while_plugged_in "$MCLONE_PREVIOUS_STAY_ON"
+    mclone_restore_android_setting "$serial" secure skip_launch_check_requires_controllers_enabled "$MCLONE_PREVIOUS_SKIP_LAUNCH_CHECK"
+    mclone_restore_android_setting "$serial" global require_controllers_for_vr_apps "$MCLONE_PREVIOUS_REQUIRE_CONTROLLERS"
+    mclone_enable_headset_proximity_sensor "$serial"
+    "$ADB" -s "$serial" shell input keyevent KEYCODE_SLEEP >/dev/null 2>&1 || true
+    "$ADB" -s "$serial" shell setprop debug.oculus.disableProximity 0 >/dev/null 2>&1 || true
 }
 
 mclone_build_apk() {
