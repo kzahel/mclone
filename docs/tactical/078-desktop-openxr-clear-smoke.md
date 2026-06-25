@@ -1,6 +1,6 @@
 # 078: Desktop OpenXR Clear Smoke
 
-Status: active; Slice 2B Mac Metal graphics session compiles, swapchains/frame loop next.
+Status: active; Slice 2D Windows/Linux Vulkan graphics session compiles; local Windows runtime reaches instance diagnostics but reports the HMD unavailable, swapchains/frame loop next.
 
 ## Purpose
 
@@ -141,7 +141,7 @@ Expected Slice 1 CLI results:
   local desktop backend.
 - [x] Create the runtime-selected Metal graphics device on Apple targets.
 - [x] Create a Metal session and `STAGE` reference space on Apple targets.
-- [ ] Create the runtime-selected Vulkan graphics device on Windows/Linux.
+- [x] Create the runtime-selected Vulkan graphics device on Windows/Linux.
 - [ ] Create color swapchains for both eyes and host-owned depth targets.
 
 Landed in Slice 2A:
@@ -246,6 +246,98 @@ Use `scripts/start-xr.sh --wivrn-usb --frames 2` to start the host, install the
 ADB USB tunnel, launch the Quest WiVRn client, and then run the smoke. The
 local `--wivrn-usb` validation stopped before host startup because ADB reported
 `no devices/emulators found`.
+
+Landed in Slice 2D:
+
+- Added an app-local `graphics_vulkan` module modeled after Playbox's Vulkan
+  OpenXR graphics binding.
+- Implemented the non-Apple desktop path with `openxr::Vulkan`,
+  `XR_KHR_vulkan_enable2`, runtime-created Vulkan instance/device, and the
+  runtime-selected physical device.
+- Wrapped the runtime-selected Vulkan instance/device into `wgpu` so the next
+  swapchain slice can reuse the same graphics ownership boundary.
+- Created a Vulkan OpenXR session and `STAGE` reference space on non-Apple
+  desktop targets after runtime/system diagnostics succeed.
+- Kept all OpenXR/Vulkan ownership inside `mclone-native-client`; no shared
+  engine crates gained OpenXR types.
+
+Windows runtime state on June 25, 2026:
+
+- `XR_RUNTIME_JSON` and `MONADO_OPENXR_RUNTIME_PATH` were unset.
+- `HKLM\SOFTWARE\Khronos\OpenXR\1\ActiveRuntime` was
+  `C:\Program Files\Virtual Desktop Streamer\OpenXR\virtualdesktop-openxr.json`.
+- Installed runtime manifests found locally:
+  - Virtual Desktop:
+    `C:\Program Files\Virtual Desktop Streamer\OpenXR\virtualdesktop-openxr.json`
+    (`VirtualDesktopXR (Bundled)`, library `.\virtualdesktop-openxr.dll`)
+  - Meta:
+    `C:\Program Files\Meta Horizon\Support\oculus-runtime\oculus_openxr_64.json`
+    (`Oculus OpenXR`, library `.\LibOVRRTImpl64_1.dll`)
+  - SteamVR:
+    `C:\Program Files (x86)\Steam\steamapps\common\SteamVR\steamxr_win64.json`
+    (`SteamVR`, library `bin\vrclient_x64.dll`)
+- The generic OpenXR loader was not present at
+  `C:\Windows\System32\openxr_loader.dll`; the smoke loaded SteamVR's
+  `openxr_loader.dll` fallback, which then selected the active/explicit
+  runtime.
+- A Quest 3 was visible over ADB on Android 14 and `OVRService` was running,
+  but the desktop OpenXR runtimes did not report an available HMD form factor.
+
+Slice 2D validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+pnpm native:web:build
+```
+
+Local setup notes:
+
+- `cargo test -p mclone-native-client` initially failed two asset-dependent
+  tests because this Windows checkout had no hydrated
+  `reference/minecraft-1.17.1/extracted` tree or `extracted.zip`. Hydrating the
+  local 1.17.1 client assets and running
+  `python .\scripts\build-reference-asset-pack.py` made the package tests pass
+  (`70 passed`).
+- `pnpm native:web:build` initially failed because the Rust
+  `wasm32-unknown-unknown` target was not installed on this machine. After
+  `rustup target add wasm32-unknown-unknown`, the build passed.
+
+Windows runtime probes:
+
+```bash
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client --features xr -- --xr-clear-smoke --frames 2
+```
+
+Observed with the active Virtual Desktop runtime:
+
+- Entry: fallback loader
+  `C:\Program Files (x86)\Steam\steamapps\common\SteamVR\bin\win64\openxr_loader.dll`
+- Runtime: `VirtualDesktopXR v1.0.10`
+- Extensions: `XR_KHR_vulkan_enable2=true`, `ext_debug_utils=true`,
+  `ext_hand_tracking=true`, `fb_display_refresh_rate=true`
+- Result: failed before system/session creation at
+  `locate OpenXR head-mounted display system` with
+  `FORM_FACTOR_UNAVAILABLE` ("device is currently not available").
+
+Observed with the Meta runtime forced explicitly:
+
+```powershell
+$env:XR_RUNTIME_JSON='C:\Program Files\Meta Horizon\Support\oculus-runtime\oculus_openxr_64.json'
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client --features xr -- --xr-clear-smoke --frames 2
+```
+
+- Entry: same SteamVR `openxr_loader.dll` fallback.
+- Runtime: `Oculus v1.117.0`
+- Extensions: `XR_KHR_vulkan_enable2=true`, `ext_debug_utils=true`,
+  `ext_hand_tracking=true`, `fb_display_refresh_rate=true`
+- Result: same `FORM_FACTOR_UNAVAILABLE` before system/session creation.
+
+The Vulkan session path is compile-validated on Windows in this slice, but the
+local runtime did not reach session creation until the headset is active in a
+PC OpenXR runtime (for example, Virtual Desktop connected in-headset or Quest
+Link active for the Meta runtime).
 
 Implementation should follow the measured platform path. On macOS this likely
 means Metal-specific runtime/device matching. On Windows/Linux this likely

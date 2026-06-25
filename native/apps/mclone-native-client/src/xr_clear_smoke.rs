@@ -12,6 +12,8 @@ use crate::cli::XrClearSmokeOptions;
 
 #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
 mod graphics_metal;
+#[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
+mod graphics_vulkan;
 
 #[cfg(target_os = "android")]
 pub(crate) fn run(options: XrClearSmokeOptions) -> Result<()> {
@@ -152,8 +154,20 @@ fn create_graphics_session_probe(instance: &xr::Instance, system: xr::SystemId) 
 }
 
 #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
-fn create_graphics_session_probe(_instance: &xr::Instance, _system: xr::SystemId) -> Result<()> {
-    println!("OpenXR graphics session: skipped on non-Apple target until the Vulkan slice");
+fn create_graphics_session_probe(instance: &xr::Instance, system: xr::SystemId) -> Result<()> {
+    let graphics = graphics_vulkan::create_graphics_session(instance, system)
+        .context("create OpenXR Vulkan graphics session")?;
+    let _stage = graphics
+        .session
+        .create_reference_space(xr::ReferenceSpaceType::STAGE, xr::Posef::IDENTITY)
+        .context("create OpenXR STAGE reference space")?;
+    println!(
+        "OpenXR Vulkan session: physical_device='{}' api={} queue_family={}",
+        graphics.physical_device_name,
+        graphics.physical_device_api_version,
+        graphics.queue_family_index
+    );
+    println!("OpenXR reference space: STAGE");
     Ok(())
 }
 
