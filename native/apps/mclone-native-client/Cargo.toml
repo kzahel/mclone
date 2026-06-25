@@ -7,7 +7,7 @@ publish.workspace = true
 
 [features]
 default = []
-xr = ["dep:ash", "dep:libloading", "dep:openxr"]
+xr = ["dep:ash", "dep:libloading", "dep:openxr", "dep:serde_json"]
 
 [dependencies]
 anyhow.workspace = true
@@ -29,6 +29,7 @@ mclone-render-session.workspace = true
 mclone-server.workspace = true
 mclone-ui.workspace = true
 openxr = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 wgpu.workspace = true
 winit.workspace = true
 

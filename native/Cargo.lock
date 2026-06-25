@@ -1152,6 +1152,7 @@ dependencies = [
  "mclone-server",
  "mclone-ui",
  "openxr",
+ "serde_json",
  "wgpu",
  "winit",
 ]
