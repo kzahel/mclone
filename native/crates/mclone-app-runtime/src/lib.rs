@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 pub mod frame_render;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod render_assets;
 
 use std::collections::BTreeSet;
 #[cfg(not(target_arch = "wasm32"))]

@@ -1,6 +1,8 @@
 # 074: Flat Android Build Smoke
 
-Status: proposed high-priority platform slice; Slices 0-3 completed.
+Status: proposed high-priority platform slice; Slices 0-3 completed. Slice 4
+runtime/asset-pack terrain rendering is landed; Android touch and GUI/title
+polish remain pending.
 
 Prerequisite: land [`075-shared-single-view-runtime-prereq.md`](075-shared-single-view-runtime-prereq.md)
 before starting Android runtime integration. Android should consume
@@ -50,11 +52,10 @@ Landed:
 
 Missing:
 
-- No Android asset-pack staging policy.
-- Android renders a static full-frame mclone renderer smoke through the
-  NativeActivity surface; integrated runtime and packed assets are still
-  pending.
-- No Android gameplay input adapter.
+- Android now stages a packed asset source and renders integrated-runtime
+  terrain through the NativeActivity surface, but it does not yet expose a
+  gameplay input adapter.
+- Android GUI/title-state rendering is not wired into the smoke frame yet.
 
 Resolved Slice 0 compile blocker:
 
@@ -68,9 +69,9 @@ was selected through `winit`, but neither `native-activity` nor
 `winit` dependency now enables `android-native-activity`; the command above
 passes.
 
-Next blocker: the APK launches and presents static mclone renderer pixels on
-`jstorrent-tablet`; Slice 4 should move from the static in-memory mesh/atlas to
-the integrated runtime and Android asset-pack path.
+Next blocker: the APK launches and presents integrated-runtime terrain on
+`jstorrent-tablet`; the remaining Slice 4 work is Android-local touch input and
+optional GUI/title-state rendering.
 
 ## Non-goals
 
@@ -360,35 +361,65 @@ Inspect `/tmp/mclone-android-avd-chunk.png`.
 Goal: run the same client/server/render-session path as desktop, with Android
 owning only platform lifecycle, input, surface, and package paths.
 
-- [ ] Consume `mclone-app-runtime` for shared single-view runtime state,
+- [x] Consume `mclone-app-runtime` for shared single-view runtime state,
   update exchange application, world queries, and render-section streaming.
-- [ ] Load packed Minecraft assets from Android app files or a staged external
+- [x] Load packed Minecraft assets from Android app files or a staged external
   files directory.
-- [ ] Add an Android asset-pack staging/install helper, likely copying the
+- [x] Add an Android asset-pack staging/install helper, likely copying the
   current reference pack into:
 
 ```text
 /sdcard/Android/data/com.kzahel.mclone/files/assets/packs/
 ```
 
-- [ ] Use `WindowSceneRuntime` or its extracted shared successor for local
+- [x] Use `WindowSceneRuntime` or its extracted shared successor for local
   integrated server/client replica/render-section synchronization.
-- [ ] Render a real full frame with sky, terrain, and GUI/title state.
+- [x] Render a real full frame with sky and terrain.
+- [ ] Render GUI/title state if needed for the Android smoke frame.
 - [ ] Add minimal touch handling:
   - one-finger look or orbit for smoke
   - optional simple move/look controls only if cheap to wire
 - [ ] Do not implement polished mobile controls here if it blocks platform
   bring-up.
 
+Recorded Slice 4 runtime/asset-pack result:
+
+- Extracted shared native render asset helpers into
+  `mclone_app_runtime::render_assets`, including packed/loose asset-source
+  resolution, texture atlas loading, actor texture loading, and the threaded
+  render-section compile worker previously owned by the desktop client.
+- The desktop client now reuses those helpers instead of keeping its own
+  render-cache implementation; web remains gated away from the native-only
+  module.
+- Android resolves `MCLONE_ANDROID_ASSET_ROOT` from the NativeActivity app data
+  directory and the validator stages
+  `/sdcard/Android/data/com.kzahel.mclone/files/assets/packs/extracted.zip`.
+- Android renderer startup now loads the staged pack, starts the integrated
+  server, polls until worldgen is idle, compiles render sections, uploads the
+  real terrain atlas/meshes, and renders through
+  `mclone_app_runtime::frame_render::render_full_frame`.
+- Android platform ownership remains local to the Android host: NativeActivity
+  lifecycle, `wgpu` surface/config/resize, logcat logging, and app data path
+  handling stay in `mclone-android-client`.
+- Screenshot inspected: `/tmp/mclone-android-avd-chunk.png` (`2560x1600`),
+  showing integrated-runtime vanilla terrain with sky.
+- Logcat: `/tmp/mclone-android-avd-logcat.txt`; fatal exception, fatal signal,
+  segfault, and Rust panic scan passed. Key diagnostics showed the staged asset
+  pack loaded, 49 chunks loaded, 166 uploaded/drawn sections, and 780174 drawn
+  indices.
+
 Validation:
 
 ```bash
-bash android/validate-avd.sh --screenshot /tmp/mclone-android-avd-runtime.png
-pnpm native:movement:smoke
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -p mclone-native-client
 pnpm native:web:build
+pnpm native:android:apk
+bash android/validate-avd.sh --avd jstorrent-tablet --skip-build --screenshot /tmp/mclone-android-avd-chunk.png --log /tmp/mclone-android-avd-logcat.txt --smoke-seconds 15
 ```
 
-Inspect `/tmp/mclone-android-avd-runtime.png`.
+Inspect `/tmp/mclone-android-avd-chunk.png`.
 
 ### Slice 5 - Quest-Flat Optional Smoke
 

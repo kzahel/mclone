@@ -1030,10 +1030,14 @@ name = "mclone-android-client"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "glam",
  "log",
  "mclone-app-runtime",
+ "mclone-core",
  "mclone-mesh",
  "mclone-render",
+ "mclone-render-session",
+ "mclone-server",
  "mclone-ui",
  "pollster",
  "wgpu",
@@ -1046,6 +1050,8 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "glam",
+ "log",
+ "mclone-assets",
  "mclone-client",
  "mclone-core",
  "mclone-mesh",

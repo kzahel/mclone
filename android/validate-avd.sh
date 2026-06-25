@@ -13,6 +13,7 @@ SCREENSHOT_PATH="${MCLONE_ANDROID_SCREENSHOT:-/tmp/mclone-android-avd-clear.png}
 LOG_PATH="${MCLONE_ANDROID_LOGCAT:-/tmp/mclone-android-avd-logcat.txt}"
 BOOT_TIMEOUT_SECONDS="${MCLONE_ANDROID_BOOT_TIMEOUT:-120}"
 SMOKE_SECONDS="${MCLONE_ANDROID_SMOKE_SECONDS:-3}"
+STAGE_ASSETS="${MCLONE_ANDROID_STAGE_ASSETS:-1}"
 SKIP_BUILD=0
 KEEP_EMULATOR=0
 HEADLESS=1
@@ -36,6 +37,8 @@ Options:
   --log PATH          Local logcat output path.
   --timeout SECONDS   Boot/device wait timeout.
   --smoke-seconds N   Seconds to wait after launch before validation.
+  --asset-pack PATH   Local packed assets file to stage before launch.
+  --skip-assets       Do not stage the packed Minecraft assets before launch.
   -h, --help          Show this help.
 USAGE
 }
@@ -77,6 +80,14 @@ while [[ $# -gt 0 ]]; do
         --smoke-seconds)
             SMOKE_SECONDS="$2"
             shift 2
+            ;;
+        --asset-pack)
+            MCLONE_ANDROID_ASSET_PACK="$2"
+            shift 2
+            ;;
+        --skip-assets)
+            STAGE_ASSETS=0
+            shift
             ;;
         -h|--help)
             usage

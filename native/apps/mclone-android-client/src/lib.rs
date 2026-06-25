@@ -2,20 +2,37 @@
 
 #[cfg(target_os = "android")]
 mod android {
-    use std::collections::BTreeSet;
+    use std::ffi::{CString, c_char, c_int};
     use std::sync::Arc;
+    use std::sync::Once;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
-    use mclone_app_runtime::frame_render::{FullFrameGui, RenderStreamStats, render_full_frame};
-    use mclone_mesh::{
-        RenderSectionKey, TexturedChunkVertex, TexturedRenderSectionMesh, TexturedVisibleChunkMesh,
-        VisibilitySet, quad_face_count_from_indices,
+    use anyhow::{Context, Result, bail};
+    use glam::Vec3;
+    use mclone_app_runtime::frame_render::{
+        FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame,
     };
+    use mclone_app_runtime::render_assets::{
+        RenderSectionCompileWorker, TexturedMeshAssets, load_textured_mesh_assets,
+    };
+    use mclone_app_runtime::{
+        RuntimeUpdateApplyReport, SingleViewRuntime, chunk_tracking_radius_for_render_distance,
+        elapsed_ms,
+    };
+    use mclone_core::ChunkPos;
+    use mclone_mesh::quad_face_count_from_indices;
     use mclone_render::chunk::{
-        ChunkCamera, ChunkDepthTarget, ChunkTextureAtlas, TexturedSectionDrawResources,
-        TexturedSectionRenderOptions,
+        ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
+        TexturedSectionUploadReport,
     };
     use mclone_render::sky_render::SkyRenderer;
     use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
+    use mclone_render_session::RenderSectionCacheUpdate;
+    use mclone_server::{
+        IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
+        ServerRunnerDiagnostics,
+    };
     use mclone_ui::GuiDrawList;
     use winit::application::ApplicationHandler;
     use winit::event::WindowEvent;
@@ -23,6 +40,90 @@ mod android {
     use winit::platform::android::EventLoopBuilderExtAndroid;
     use winit::platform::android::activity::AndroidApp;
     use winit::window::{Window, WindowAttributes, WindowId};
+
+    const LOG_TAG: &str = "mclone_android";
+
+    #[allow(unsafe_code)]
+    #[link(name = "log")]
+    unsafe extern "C" {
+        fn __android_log_print(
+            priority: c_int,
+            tag: *const c_char,
+            format: *const c_char,
+            ...
+        ) -> c_int;
+    }
+
+    #[allow(unsafe_code)]
+    fn android_log(priority: c_int, message: impl AsRef<str>) {
+        let tag = CString::new(LOG_TAG).expect("static log tag contains no nul");
+        let format = c"%s";
+        let message = CString::new(message.as_ref().replace('\0', "\\0"))
+            .expect("nul bytes were escaped before logging");
+        unsafe {
+            __android_log_print(priority, tag.as_ptr(), format.as_ptr(), message.as_ptr());
+        }
+    }
+
+    struct AndroidLogger;
+
+    impl log::Log for AndroidLogger {
+        fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+            metadata.level() <= log::Level::Info
+        }
+
+        fn log(&self, record: &log::Record<'_>) {
+            if !self.enabled(record.metadata()) {
+                return;
+            }
+            let priority = match record.level() {
+                log::Level::Error => 6,
+                log::Level::Warn => 5,
+                log::Level::Info => 4,
+                log::Level::Debug => 3,
+                log::Level::Trace => 2,
+            };
+            android_log(priority, format!("{}: {}", record.target(), record.args()));
+        }
+
+        fn flush(&self) {}
+    }
+
+    static LOGGER: AndroidLogger = AndroidLogger;
+    static INIT_LOGGER: Once = Once::new();
+
+    fn init_android_logger() {
+        INIT_LOGGER.call_once(|| {
+            if log::set_logger(&LOGGER).is_ok() {
+                log::set_max_level(log::LevelFilter::Info);
+            }
+        });
+    }
+
+    #[allow(unsafe_code)]
+    fn configure_android_asset_root(app: &AndroidApp) {
+        if let Some(existing) = std::env::var_os("MCLONE_ANDROID_ASSET_ROOT") {
+            log::info!(
+                "preserving MCLONE_ANDROID_ASSET_ROOT={}",
+                std::path::PathBuf::from(existing).display()
+            );
+            return;
+        }
+        let Some(path) = app
+            .external_data_path()
+            .or_else(|| app.internal_data_path())
+        else {
+            log::warn!("could not resolve Android app data path for MCLONE_ANDROID_ASSET_ROOT");
+            return;
+        };
+        unsafe {
+            std::env::set_var("MCLONE_ANDROID_ASSET_ROOT", &path);
+        }
+        log::info!(
+            "configured MCLONE_ANDROID_ASSET_ROOT from app data path: {}",
+            path.display()
+        );
+    }
 
     struct AndroidGpuState {
         surface: wgpu::Surface<'static>,
@@ -36,10 +137,18 @@ mod android {
         depth: ChunkDepthTarget,
         sky: SkyRenderer,
         draw: TexturedSectionDrawResources,
+        scene: AndroidSceneRuntime,
         camera: ChunkCamera,
         render_options: TexturedSectionRenderOptions,
         render_stats: RenderStreamStats,
         frame_index: u64,
+    }
+
+    struct AndroidSceneRuntime {
+        core: SingleViewRuntime,
+        server_runner: NativeIntegratedServerRunner,
+        mesh_assets: TexturedMeshAssets,
+        render_compile_worker: RenderSectionCompileWorker,
     }
 
     enum AndroidRenderError {
@@ -161,47 +270,73 @@ mod android {
             format: wgpu::TextureFormat,
             width: u32,
             height: u32,
-        ) -> anyhow::Result<Self> {
+        ) -> Result<Self> {
+            let mut scene = AndroidSceneRuntime::new()?;
+            let camera = android_smoke_camera(scene.render_distance());
+            let camera_position = camera_position(camera);
+            let (poll_count, poll_ms) = scene.poll_until_idle()?;
+            log::info!(
+                "Mclone Android integrated runtime idle: polls={} poll_ms={:.1} loaded_chunks={}",
+                poll_count,
+                poll_ms,
+                scene.loaded_chunk_count()
+            );
+            let section_update = scene.sync_all_render_sections(camera_position)?;
+            let sections = scene.cached_sections();
+            if sections.is_empty() {
+                bail!(
+                    "Android integrated runtime produced no render sections: loaded_chunks={} rebuilt_sections={} submitted_compile_sections={} completed_compile_sections={} pending_compile_jobs={}",
+                    scene.loaded_chunk_count(),
+                    section_update.rebuilt_section_count(),
+                    section_update.submitted_compile_section_count,
+                    section_update.completed_compile_section_count,
+                    section_update.pending_compile_jobs
+                );
+            }
+
             let depth = ChunkDepthTarget::new(device, width, height);
             let sky = SkyRenderer::new(device, format);
-            let sections = static_textured_sections();
-            let ready_sections = sections
-                .iter()
-                .map(|section| section.key)
-                .collect::<BTreeSet<_>>();
+            let upload_report = TexturedSectionUploadReport {
+                uploaded_section_count: section_update.rebuilt_section_count(),
+                removed_section_count: section_update.removed_section_count(),
+                uploaded_vertex_count: section_update.rebuilt_vertex_count,
+                uploaded_index_count: section_update.rebuilt_index_count,
+            };
             let mut draw = TexturedSectionDrawResources::new(
                 device,
                 queue,
                 format,
                 &sections,
-                static_chunk_atlas(),
+                scene.mesh_assets.atlas.as_upload(),
             )?;
-            draw.set_traversal_ready_sections(&ready_sections);
+            draw.set_traversal_ready_sections(
+                &scene.traversal_ready_render_section_keys(camera_position),
+            );
 
             let index_count = draw.index_count();
-            let render_stats = RenderStreamStats {
+            let mut render_stats = RenderStreamStats {
                 section_count: draw.section_count(),
                 face_count: quad_face_count_from_indices(index_count),
                 index_count,
                 ..RenderStreamStats::default()
             };
+            record_render_section_update_stats(&mut render_stats, &section_update, upload_report);
             log::info!(
-                "Mclone Android uploaded static render section smoke: sections={} faces={} indices={}",
+                "Mclone Android uploaded integrated render sections: sections={} faces={} indices={} rebuilt_sections={} visibility_graph_count={}",
                 render_stats.section_count,
                 render_stats.face_count,
-                render_stats.index_count
+                render_stats.index_count,
+                section_update.rebuilt_section_count(),
+                section_update.visibility_graph_stats.build_count
             );
 
             Ok(Self {
                 depth,
                 sky,
                 draw,
-                camera: static_camera(),
-                render_options: TexturedSectionRenderOptions {
-                    section_occlusion_culling: false,
-                    force_fullbright: true,
-                    ..TexturedSectionRenderOptions::default()
-                },
+                scene,
+                camera,
+                render_options: TexturedSectionRenderOptions::default(),
                 render_stats,
                 frame_index: 0,
             })
@@ -211,9 +346,35 @@ mod android {
             self.depth.resize(device, width, height);
         }
 
-        fn render(&mut self, frame: RenderFrameContext<'_>) -> anyhow::Result<()> {
-            let time_of_day = 0.0;
-            let sun_angle = 0.0;
+        fn render(&mut self, frame: RenderFrameContext<'_>) -> Result<()> {
+            let camera_position = camera_position(self.camera);
+            let _ = self.scene.poll()?;
+            let section_update = self.scene.sync_render_sections(camera_position)?;
+            if section_update.rebuilt_section_count() > 0
+                || section_update.removed_section_count() > 0
+            {
+                let upload_report = self.draw.apply_section_updates(
+                    frame.device,
+                    &section_update.rebuilt_sections,
+                    &section_update.removed_section_keys,
+                )?;
+                record_render_section_update_stats(
+                    &mut self.render_stats,
+                    &section_update,
+                    upload_report,
+                );
+                self.render_stats.section_count = self.draw.section_count();
+                self.render_stats.index_count = self.draw.index_count();
+                self.render_stats.face_count =
+                    quad_face_count_from_indices(self.render_stats.index_count);
+            }
+            self.draw.set_traversal_ready_sections(
+                &self
+                    .scene
+                    .traversal_ready_render_section_keys(camera_position),
+            );
+            let time_of_day = self.scene.time_of_day();
+            let sun_angle = self.scene.sun_angle();
             let summary = render_full_frame(
                 frame,
                 &self.depth,
@@ -225,7 +386,7 @@ mod android {
                 self.camera,
                 &[],
                 None,
-                mclone_render::sky::overworld_clear_color(time_of_day),
+                self.scene.sky_clear_color(),
                 time_of_day,
                 sun_angle,
                 self.render_options,
@@ -235,7 +396,7 @@ mod android {
             )?;
             if self.frame_index == 0 {
                 log::info!(
-                    "Mclone Android rendered static frame: sections={}/{} indices={}/{} gui_commands={}",
+                    "Mclone Android rendered integrated frame: sections={}/{} indices={}/{} gui_commands={}",
                     summary.drawn_section_count,
                     summary.section_count,
                     summary.drawn_index_count,
@@ -246,6 +407,200 @@ mod android {
             self.frame_index += 1;
             Ok(())
         }
+    }
+
+    impl AndroidSceneRuntime {
+        fn new() -> Result<Self> {
+            const ANDROID_SMOKE_SEED: i64 = 12345;
+            const ANDROID_SMOKE_RENDER_DISTANCE: u32 = 2;
+            const ANDROID_SMOKE_DAY_TIME: u64 = 6000;
+
+            let render_distance = ANDROID_SMOKE_RENDER_DISTANCE;
+            let chunk_tracking_radius = chunk_tracking_radius_for_render_distance(render_distance);
+            let interest_center = ChunkPos::new(0, 0);
+            let mesh_assets = load_textured_mesh_assets()?;
+            let render_compile_worker =
+                RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
+            let server_runner = NativeIntegratedServerRunner::new(
+                NativeIntegratedServerRunnerConfig::new(ANDROID_SMOKE_SEED)
+                    .with_day_time(Some(ANDROID_SMOKE_DAY_TIME))
+                    .with_day_time_frozen(true),
+            )
+            .context("failed to start Android integrated server runner")?;
+            let mut scene = Self {
+                core: SingleViewRuntime::local_integrated(
+                    interest_center,
+                    render_distance,
+                    chunk_tracking_radius,
+                ),
+                server_runner,
+                mesh_assets,
+                render_compile_worker,
+            };
+            scene.core.force_day_time(ANDROID_SMOKE_DAY_TIME);
+            scene.set_chunk_view(interest_center, render_distance, chunk_tracking_radius)?;
+            Ok(scene)
+        }
+
+        fn render_distance(&self) -> u32 {
+            self.core.render_distance()
+        }
+
+        fn set_chunk_view(
+            &mut self,
+            center: ChunkPos,
+            render_distance: u32,
+            chunk_tracking_radius: u32,
+        ) -> Result<()> {
+            let Some(command) =
+                self.core
+                    .set_chunk_view_command(center, render_distance, chunk_tracking_radius)
+            else {
+                return Ok(());
+            };
+            self.server_runner
+                .send_command(command)
+                .context("failed to send Android chunk view command")?;
+            let _ = self.drain_runner_updates_report()?;
+            Ok(())
+        }
+
+        fn poll(&mut self) -> Result<bool> {
+            let flush_start = Instant::now();
+            let apply_report = self.drain_runner_updates_report()?;
+            let changed = apply_report.changed;
+            let runner_diagnostics = self
+                .server_runner
+                .poll_diagnostics()
+                .context("failed to poll Android integrated server diagnostics")?;
+            self.core.finish_poll_diagnostics(
+                elapsed_ms(flush_start.elapsed()),
+                apply_report,
+                Some(&runner_diagnostics),
+            );
+            Ok(changed)
+        }
+
+        fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
+            let deadline = Instant::now() + Duration::from_secs(120);
+            let mut polls = 0_usize;
+            let mut poll_ms = 0.0_f64;
+            loop {
+                let poll_start = Instant::now();
+                self.poll()?;
+                poll_ms += elapsed_ms(poll_start.elapsed());
+                polls += 1;
+                let diagnostics = self.server_runner_diagnostics()?;
+                if runner_idle(&diagnostics) {
+                    return Ok((polls, poll_ms));
+                }
+                if Instant::now() >= deadline {
+                    bail!("timed out waiting for Android integrated runtime worldgen jobs");
+                }
+                if diagnostics.update_queue_depth == 0 {
+                    thread::sleep(Duration::from_millis(1));
+                }
+            }
+        }
+
+        fn server_runner_diagnostics(&self) -> Result<ServerRunnerDiagnostics> {
+            self.server_runner
+                .poll_diagnostics()
+                .context("failed to poll Android integrated server diagnostics")
+        }
+
+        fn drain_runner_updates_report(&mut self) -> Result<RuntimeUpdateApplyReport> {
+            let updates = self
+                .server_runner
+                .drain_updates()
+                .context("failed to drain Android integrated server updates")?;
+            if updates.is_empty() {
+                return Ok(RuntimeUpdateApplyReport::default());
+            }
+            Ok(self.core.apply_server_updates_report(updates))
+        }
+
+        fn sync_render_sections(
+            &mut self,
+            camera_position: Vec3,
+        ) -> Result<RenderSectionCacheUpdate> {
+            let render_compile_worker = &mut self.render_compile_worker;
+            self.core.sync_render_sections(
+                render_compile_worker,
+                camera_position,
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
+        }
+
+        fn sync_all_render_sections(
+            &mut self,
+            camera_position: Vec3,
+        ) -> Result<RenderSectionCacheUpdate> {
+            let deadline = Instant::now() + Duration::from_secs(120);
+            let mut combined = RenderSectionCacheUpdate::default();
+            loop {
+                let update = self.core.sync_render_sections_with_budget(
+                    &mut self.render_compile_worker,
+                    camera_position,
+                    usize::MAX,
+                    |client, _compiler| client.chunk_snapshots().cloned().collect(),
+                )?;
+                let progressed = update.rebuilt_section_count() > 0
+                    || update.removed_section_count() > 0
+                    || update.submitted_compile_section_count > 0
+                    || update.completed_compile_section_count > 0
+                    || update.stale_compile_section_count > 0;
+                combined.merge(update);
+                if self.render_compile_worker.pending_job_count() == 0
+                    && !self.core.has_ready_pending_render_work(camera_position)
+                {
+                    combined.pending_compile_jobs = 0;
+                    return Ok(combined);
+                }
+                if Instant::now() >= deadline {
+                    bail!("timed out waiting for Android render section compile queue");
+                }
+                if !progressed {
+                    thread::sleep(Duration::from_millis(1));
+                }
+            }
+        }
+
+        fn cached_sections(&self) -> Vec<mclone_mesh::TexturedRenderSectionMesh> {
+            self.core.cached_sections()
+        }
+
+        fn loaded_chunk_count(&self) -> usize {
+            self.core.client().loaded_chunk_count()
+        }
+
+        fn traversal_ready_render_section_keys(
+            &self,
+            camera_position: Vec3,
+        ) -> std::collections::BTreeSet<mclone_mesh::RenderSectionKey> {
+            self.core
+                .traversal_ready_render_section_keys(camera_position)
+        }
+
+        fn sky_clear_color(&self) -> wgpu::Color {
+            mclone_render::sky::overworld_clear_color(self.core.time_of_day())
+        }
+
+        fn time_of_day(&self) -> f32 {
+            self.core.time_of_day()
+        }
+
+        fn sun_angle(&self) -> f32 {
+            self.core.sun_angle()
+        }
+    }
+
+    fn runner_idle(diagnostics: &ServerRunnerDiagnostics) -> bool {
+        diagnostics.command_queue_depth == 0
+            && diagnostics.update_queue_depth == 0
+            && !diagnostics.awaiting_tick
+            && diagnostics.pending_jobs == 0
+            && diagnostics.pending_publications == 0
     }
 
     #[derive(Default)]
@@ -352,6 +707,8 @@ mod android {
     #[allow(unsafe_code)]
     #[unsafe(no_mangle)]
     fn android_main(app: AndroidApp) {
+        init_android_logger();
+        configure_android_asset_root(&app);
         log::info!("Mclone Android starting");
         let event_loop = EventLoop::builder()
             .with_android_app(app)
@@ -364,149 +721,12 @@ mod android {
             .expect("run Android event loop");
     }
 
-    const STATIC_ATLAS_RGBA: [u8; 16] = [
-        255, 255, 255, 255, 205, 210, 215, 255, 205, 210, 215, 255, 255, 255, 255, 255,
-    ];
-
-    fn static_chunk_atlas() -> ChunkTextureAtlas<'static> {
-        ChunkTextureAtlas {
-            width: 2,
-            height: 2,
-            rgba: &STATIC_ATLAS_RGBA,
-        }
+    fn android_smoke_camera(render_distance: u32) -> ChunkCamera {
+        ChunkCamera::overview_for_chunk_area(0, 0, render_distance as i32)
     }
 
-    fn static_camera() -> ChunkCamera {
-        ChunkCamera {
-            eye: [39.0, 61.0, -42.0],
-            target: [8.0, 39.0, 8.0],
-            up: [0.0, 1.0, 0.0],
-            fov_y_radians: 58.0_f32.to_radians(),
-            z_near: 0.1,
-            z_far: 180.0,
-        }
-    }
-
-    fn static_textured_sections() -> Vec<TexturedRenderSectionMesh> {
-        let mut vertices = Vec::new();
-        let mut indices = Vec::new();
-        push_cuboid(
-            &mut vertices,
-            &mut indices,
-            [0.0, 32.0, 0.0],
-            [16.0, 34.0, 16.0],
-            [0.42, 0.75, 0.28, 1.0],
-        );
-        push_cuboid(
-            &mut vertices,
-            &mut indices,
-            [3.0, 34.0, 3.0],
-            [13.0, 38.0, 13.0],
-            [0.55, 0.42, 0.30, 1.0],
-        );
-        push_cuboid(
-            &mut vertices,
-            &mut indices,
-            [5.0, 38.0, 5.0],
-            [11.0, 45.0, 11.0],
-            [0.62, 0.64, 0.68, 1.0],
-        );
-        push_cuboid(
-            &mut vertices,
-            &mut indices,
-            [7.0, 45.0, 7.0],
-            [9.0, 48.0, 9.0],
-            [0.95, 0.72, 0.25, 1.0],
-        );
-        let opaque_index_count = indices.len() as u32;
-        vec![TexturedRenderSectionMesh {
-            key: RenderSectionKey::new(0, 2, 0),
-            mesh: TexturedVisibleChunkMesh {
-                vertices,
-                indices,
-                opaque_index_count,
-            },
-            visibility: VisibilitySet::all_visible(),
-        }]
-    }
-
-    fn push_cuboid(
-        vertices: &mut Vec<TexturedChunkVertex>,
-        indices: &mut Vec<u32>,
-        min: [f32; 3],
-        max: [f32; 3],
-        color: [f32; 4],
-    ) {
-        let [x0, y0, z0] = min;
-        let [x1, y1, z1] = max;
-        push_quad(
-            vertices,
-            indices,
-            [[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]],
-            color,
-        );
-        push_quad(
-            vertices,
-            indices,
-            [[x0, y0, z1], [x1, y0, z1], [x1, y0, z0], [x0, y0, z0]],
-            color,
-        );
-        push_quad(
-            vertices,
-            indices,
-            [[x0, y0, z0], [x0, y1, z0], [x0, y1, z1], [x0, y0, z1]],
-            color,
-        );
-        push_quad(
-            vertices,
-            indices,
-            [[x1, y0, z1], [x1, y1, z1], [x1, y1, z0], [x1, y0, z0]],
-            color,
-        );
-        push_quad(
-            vertices,
-            indices,
-            [[x0, y0, z1], [x0, y1, z1], [x1, y1, z1], [x1, y0, z1]],
-            color,
-        );
-        push_quad(
-            vertices,
-            indices,
-            [[x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z0]],
-            color,
-        );
-    }
-
-    fn push_quad(
-        vertices: &mut Vec<TexturedChunkVertex>,
-        indices: &mut Vec<u32>,
-        positions: [[f32; 3]; 4],
-        color: [f32; 4],
-    ) {
-        let base = vertices.len() as u32;
-        let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
-        for (position, uv) in positions.into_iter().zip(uvs) {
-            vertices.push(TexturedChunkVertex {
-                position,
-                uv,
-                color,
-                packed_light: mclone_render::light_texture::FULL_BRIGHT,
-            });
-        }
-        indices.extend_from_slice(&[
-            base,
-            base + 1,
-            base + 2,
-            base,
-            base + 2,
-            base + 3,
-            base,
-            base + 2,
-            base + 1,
-            base,
-            base + 3,
-            base + 2,
-        ]);
+    fn camera_position(camera: ChunkCamera) -> Vec3 {
+        Vec3::from_array(camera.eye)
     }
 }
 

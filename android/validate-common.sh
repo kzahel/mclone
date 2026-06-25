@@ -154,6 +154,21 @@ mclone_capture_screenshot() {
     [[ -s "$screenshot_path" ]] || mclone_die "screenshot capture failed: $screenshot_path"
 }
 
+mclone_stage_asset_pack() {
+    local serial="$1"
+    local asset_pack_path="${MCLONE_ANDROID_ASSET_PACK:-$REPO_ROOT/reference/minecraft-1.17.1/extracted.zip}"
+    local remote_dir="/sdcard/Android/data/$MCLONE_ANDROID_APP_ID/files/assets/packs"
+    local remote_path="$remote_dir/extracted.zip"
+
+    [[ -f "$asset_pack_path" ]] || {
+        mclone_die "asset pack not found at $asset_pack_path; run pnpm assets:pack"
+    }
+
+    mclone_note "Staging asset pack $asset_pack_path to $remote_path"
+    "$ADB" -s "$serial" shell mkdir -p "$remote_dir" >/dev/null
+    "$ADB" -s "$serial" push "$asset_pack_path" "$remote_path" >/dev/null
+}
+
 mclone_install_launch_smoke() {
     local serial="$1"
     local screenshot_path="$2"
@@ -167,6 +182,12 @@ mclone_install_launch_smoke() {
     mclone_note "Using $(mclone_device_summary "$serial")"
     mclone_note "Installing $APK_PATH"
     "$ADB" -s "$serial" install -r "$APK_PATH"
+
+    if [[ "${STAGE_ASSETS:-1}" == "1" ]]; then
+        mclone_stage_asset_pack "$serial"
+    else
+        mclone_note "Skipping Android asset-pack staging"
+    fi
 
     "$ADB" -s "$serial" shell am force-stop "$MCLONE_ANDROID_APP_ID" >/dev/null 2>&1 || true
     "$ADB" -s "$serial" logcat -c || true
@@ -185,7 +206,10 @@ mclone_install_launch_smoke() {
     sleep "$smoke_seconds"
 
     pid="$("$ADB" -s "$serial" shell pidof "$MCLONE_ANDROID_APP_ID" 2>/dev/null | tr -d '\r' || true)"
-    [[ -n "$pid" ]] || mclone_die "$MCLONE_ANDROID_APP_ID is not running after launch"
+    if [[ -z "$pid" ]]; then
+        mclone_collect_logcat "$serial" "" "$log_path"
+        mclone_die "$MCLONE_ANDROID_APP_ID is not running after launch; logcat: $log_path"
+    fi
     mclone_note "$MCLONE_ANDROID_APP_ID pid: $pid"
 
     if [[ "${MCLONE_ANDROID_REQUIRE_FOCUS:-1}" == "1" ]]; then
@@ -193,13 +217,17 @@ mclone_install_launch_smoke() {
             | grep -F "$MCLONE_ANDROID_APP_ID/$MCLONE_ANDROID_ACTIVITY" \
             | grep -E "mCurrentFocus|mFocusedApp|mFocusedWindow" \
             | head -1 || true)"
-        [[ -n "$focused_line" ]] || mclone_die "$MCLONE_ANDROID_APP_ID is running but is not the focused activity"
+        if [[ -z "$focused_line" ]]; then
+            mclone_collect_logcat "$serial" "$pid" "$log_path"
+            mclone_die "$MCLONE_ANDROID_APP_ID is running but is not the focused activity; logcat: $log_path"
+        fi
         mclone_note "Focused activity: $focused_line"
     else
         activity_block="$("$ADB" -s "$serial" shell dumpsys activity top 2>/dev/null | tr -d '\r' \
             | grep -A12 -F "ACTIVITY $MCLONE_ANDROID_APP_ID/$MCLONE_ANDROID_ACTIVITY" || true)"
         if ! printf '%s\n' "$activity_block" | grep -F "mResumed=true" >/dev/null; then
-            mclone_die "$MCLONE_ANDROID_APP_ID is running but its NativeActivity is not resumed"
+            mclone_collect_logcat "$serial" "$pid" "$log_path"
+            mclone_die "$MCLONE_ANDROID_APP_ID is running but its NativeActivity is not resumed; logcat: $log_path"
         fi
         mclone_note "NativeActivity is resumed"
     fi

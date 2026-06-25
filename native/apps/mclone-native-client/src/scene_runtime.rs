@@ -30,9 +30,7 @@ use crate::render_cache::{
     RenderSectionCompileWorker, SceneTexturedSections, TexturedMeshAssets,
     load_textured_mesh_assets,
 };
-use mclone_render_session::{
-    RenderSectionCacheUpdate, RenderSectionCompiler, build_client_textured_sections,
-};
+use mclone_render_session::{RenderSectionCacheUpdate, build_client_textured_sections};
 #[cfg(test)]
 use mclone_render_session::{RenderSectionSession, render_section_neighbor_readiness};
 
