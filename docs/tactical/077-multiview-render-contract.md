@@ -1,6 +1,6 @@
 # 077: Multiview Render Contract
 
-Status: Slices 1-2 complete; shared render tests remain.
+Status: completed. Desktop OpenXR clear smoke is the next XR-frontload slice.
 
 ## Purpose
 
@@ -128,11 +128,33 @@ small left/right view offset.
 
 ### Slice 3 - Shared Render Tests
 
-- [ ] Add focused tests for view-derived sky matrix behavior if the helper is
+- [x] Add focused tests for view-derived sky matrix behavior if the helper is
   changed.
-- [ ] Add a small smoke/test that proves culling consumes `ChunkRenderView`,
+- [x] Add a small smoke/test that proves culling consumes `ChunkRenderView`,
   not a desktop window or camera helper.
-- [ ] Record the final validation output paths in this doc.
+- [x] Record the final validation output paths in this doc.
+
+Recorded Slice 3 result:
+
+- Added `sky_view_projection_drops_camera_translation`, which verifies the
+  normal world view-projection retains camera translation while
+  `ChunkRenderView::sky_view_projection()` stays equal for translated cameras
+  with the same orientation.
+- Added `textured_section_visibility_stats_uses_host_supplied_render_view`,
+  which constructs `ChunkRenderView` directly from host-provided matrices and
+  verifies section visibility changes with the supplied view direction.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-render render_view -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-render sky_view_projection_drops_camera_translation -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -p mclone-render -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+pnpm native:web:build
+git diff --check
+```
 
 ## Review Rejection Criteria
 
@@ -146,10 +168,10 @@ small left/right view offset.
 
 ## Completion Criteria
 
-- Shared full-frame rendering can be driven from an explicit
+- [x] Shared full-frame rendering can be driven from an explicit
   `ChunkRenderView`.
-- Desktop, headless, flat Android, and native web builds remain green.
-- A dual-view headless validation path produces inspected nonblank output under
+- [x] Desktop, headless, flat Android, and native web builds remain green.
+- [x] A dual-view headless validation path produces inspected nonblank output under
   `/tmp`.
-- The next desktop OpenXR smoke can feed per-eye views/targets without
+- [x] The next desktop OpenXR smoke can feed per-eye views/targets without
   refactoring frame composition again.

@@ -1728,6 +1728,35 @@ mod tests {
     }
 
     #[test]
+    fn sky_view_projection_drops_camera_translation() {
+        let camera = ChunkCamera {
+            eye: [12.0, 72.0, -30.0],
+            target: [18.0, 64.0, 4.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 64.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 700.0,
+        };
+        let mut shifted = camera;
+        let offset = Vec3::new(128.0, -11.0, 47.0);
+        shifted.eye = (Vec3::from_array(shifted.eye) + offset).to_array();
+        shifted.target = (Vec3::from_array(shifted.target) + offset).to_array();
+
+        let base = camera.render_view(1280, 720);
+        let shifted = shifted.render_view(1280, 720);
+
+        assert!(
+            !mat4_near(base.view_projection, shifted.view_projection, 0.0001),
+            "regular view projection should retain camera translation"
+        );
+        assert_mat4_near(
+            base.sky_view_projection(),
+            shifted.sky_view_projection(),
+            0.0001,
+        );
+    }
+
+    #[test]
     fn textured_render_options_serialize_fullbright_and_sky_darken() {
         let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
         let bytes = uniform_bytes(
@@ -2064,6 +2093,35 @@ mod tests {
     }
 
     #[test]
+    fn textured_section_visibility_stats_uses_host_supplied_render_view() {
+        let west = RenderSectionKey::new(-2, 0, 0);
+        let east = RenderSectionKey::new(2, 0, 0);
+        let sections = vec![
+            fake_section(west, 6, VisibilitySet::all_visible()),
+            fake_section(east, 6, VisibilitySet::all_visible()),
+        ];
+        let eye = Vec3::new(8.0, 8.0, 8.0);
+        let east_view = test_render_view(eye, Vec3::new(48.0, 8.0, 8.0), Vec3::Y, 800, 800);
+        let west_view = test_render_view(eye, Vec3::new(-32.0, 8.0, 8.0), Vec3::Y, 800, 800);
+        let options = TexturedSectionRenderOptions {
+            section_occlusion_culling: false,
+            ..TexturedSectionRenderOptions::default()
+        };
+
+        let east_stats =
+            textured_section_visibility_stats_with_options(&sections, east_view, options);
+        let west_stats =
+            textured_section_visibility_stats_with_options(&sections, west_view, options);
+
+        assert_eq!(east_stats.frustum_section_count, 1);
+        assert_eq!(east_stats.frustum_index_count, 6);
+        assert_eq!(east_stats.drawn_section_count, 1);
+        assert_eq!(west_stats.frustum_section_count, 1);
+        assert_eq!(west_stats.frustum_index_count, 6);
+        assert_eq!(west_stats.drawn_section_count, 1);
+    }
+
+    #[test]
     fn frustum_marks_target_section_visible() {
         let camera = ChunkCamera {
             eye: [8.0, 80.0, -40.0],
@@ -2123,5 +2181,51 @@ mod tests {
             textured_vertex_bytes(&mesh).len() as wgpu::BufferAddress,
             TEXTURED_VERTEX_BYTE_SIZE
         );
+    }
+
+    fn test_render_view(
+        eye: Vec3,
+        target: Vec3,
+        world_up: Vec3,
+        width: u32,
+        height: u32,
+    ) -> ChunkRenderView {
+        let aspect = width.max(1) as f32 / height.max(1) as f32;
+        let fov_y_radians = 70.0_f32.to_radians();
+        let z_near = 0.05;
+        let z_far = 200.0;
+        let view = Mat4::look_at_rh(eye, target, world_up);
+        let projection = Mat4::perspective_rh(fov_y_radians, aspect, z_near, z_far);
+        let forward = (target - eye).normalize_or_zero();
+        let right = forward.cross(world_up).normalize_or_zero();
+        let up = right.cross(forward).normalize_or_zero();
+
+        ChunkRenderView {
+            view,
+            projection,
+            view_projection: projection * view,
+            camera_position: eye,
+            camera_forward: forward,
+            camera_right: right,
+            camera_up: up,
+            aspect,
+            fov_y_radians,
+            z_near,
+            z_far,
+        }
+    }
+
+    fn assert_mat4_near(left: Mat4, right: Mat4, epsilon: f32) {
+        assert!(
+            mat4_near(left, right, epsilon),
+            "matrices differed beyond {epsilon}: left={left:?} right={right:?}"
+        );
+    }
+
+    fn mat4_near(left: Mat4, right: Mat4, epsilon: f32) -> bool {
+        left.to_cols_array()
+            .into_iter()
+            .zip(right.to_cols_array())
+            .all(|(left, right)| (left - right).abs() <= epsilon)
     }
 }
