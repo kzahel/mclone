@@ -6,6 +6,7 @@ param(
     [switch]$UseActiveRuntime,
     [switch]$NoVirtualDesktop,
     [switch]$NoQuestLaunch,
+    [switch]$NoQuestRestore,
     [switch]$AllowUnsupported,
     [string]$RuntimeJson,
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -19,6 +20,13 @@ $VirtualDesktopManifest = "C:\Program Files\Virtual Desktop Streamer\OpenXR\virt
 $VirtualDesktopExe = "C:\Program Files\Virtual Desktop Streamer\VirtualDesktop.Streamer.exe"
 $VirtualDesktopServiceName = "VirtualDesktop.Service.exe"
 $QuestVirtualDesktopPackage = "VirtualDesktop.Android"
+$UnsetMarker = "__mclone_unset__"
+$QuestAdbPath = $null
+$QuestSerial = $null
+$QuestSettingsSaved = $false
+$PreviousStayOn = $UnsetMarker
+$PreviousSkipLaunchCheck = $UnsetMarker
+$PreviousRequireControllers = $UnsetMarker
 
 function Write-CommandLine {
     param([string[]]$Command)
@@ -74,6 +82,31 @@ function Start-VirtualDesktopHost {
     Start-Sleep -Seconds 5
 }
 
+function Invoke-NativeOutput {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments
+    )
+
+    $oldErrorActionPreference = $ErrorActionPreference
+    $exitCode = 0
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = & $FilePath @Arguments 2> $null
+        if ($null -ne $LASTEXITCODE) {
+            $exitCode = $LASTEXITCODE
+        }
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+
+    if ($exitCode -ne 0) {
+        throw "$FilePath $($Arguments -join ' ') failed with exit code $exitCode"
+    }
+
+    return $output
+}
+
 function Invoke-NativeQuiet {
     param(
         [string]$FilePath,
@@ -97,6 +130,126 @@ function Invoke-NativeQuiet {
     }
 }
 
+function Invoke-AdbQuiet {
+    param([string[]]$Arguments)
+
+    if (-not $QuestAdbPath -or -not $QuestSerial) {
+        return
+    }
+    Invoke-NativeQuiet $QuestAdbPath (@("-s", $QuestSerial) + $Arguments)
+}
+
+function Invoke-AdbOutput {
+    param([string[]]$Arguments)
+
+    if (-not $QuestAdbPath -or -not $QuestSerial) {
+        return @()
+    }
+    return Invoke-NativeOutput $QuestAdbPath (@("-s", $QuestSerial) + $Arguments)
+}
+
+function Read-AndroidSetting {
+    param(
+        [string]$Namespace,
+        [string]$Name
+    )
+
+    try {
+        $value = (Invoke-AdbOutput @("shell", "settings", "get", $Namespace, $Name)) -join "`n"
+        $value = $value.Trim()
+        if (-not $value -or $value -eq "null") {
+            return $UnsetMarker
+        }
+        return $value
+    } catch {
+        return $UnsetMarker
+    }
+}
+
+function Restore-AndroidSetting {
+    param(
+        [string]$Namespace,
+        [string]$Name,
+        [string]$Value
+    )
+
+    try {
+        if ($Value -eq $UnsetMarker) {
+            Invoke-AdbQuiet @("shell", "settings", "delete", $Namespace, $Name)
+        } else {
+            Invoke-AdbQuiet @("shell", "settings", "put", $Namespace, $Name, $Value)
+        }
+    } catch {
+        Write-Host "Warning: failed to restore Android setting $Namespace/$Name`: $($_.Exception.Message)"
+    }
+}
+
+function Save-QuestSettings {
+    if ($QuestSettingsSaved) {
+        return
+    }
+
+    $script:PreviousStayOn = Read-AndroidSetting "global" "stay_on_while_plugged_in"
+    $script:PreviousSkipLaunchCheck = Read-AndroidSetting "secure" "skip_launch_check_requires_controllers_enabled"
+    $script:PreviousRequireControllers = Read-AndroidSetting "global" "require_controllers_for_vr_apps"
+    $script:QuestSettingsSaved = $true
+}
+
+function Disable-QuestProximitySensor {
+    Invoke-AdbQuiet @("shell", "setprop", "debug.oculus.disableProximity", "1")
+}
+
+function Enable-QuestProximitySensor {
+    try {
+        Invoke-AdbQuiet @("shell", "setprop", "debug.oculus.disableProximity", "0")
+    } catch {
+        Write-Host "Warning: failed to re-enable Quest proximity property: $($_.Exception.Message)"
+    }
+    try {
+        Invoke-AdbQuiet @("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_open", "--ei", "timeout", "0")
+    } catch {
+        Write-Host "Warning: failed to send Quest proximity-open broadcast: $($_.Exception.Message)"
+    }
+}
+
+function Restore-QuestAfterTest {
+    if ($NoQuestRestore -or -not $QuestSettingsSaved -or -not $QuestAdbPath -or -not $QuestSerial) {
+        return
+    }
+
+    Write-Host "Restoring Quest wake/proximity settings."
+    try {
+        Invoke-AdbQuiet @("shell", "am", "force-stop", $QuestVirtualDesktopPackage)
+    } catch {
+    }
+    Restore-AndroidSetting "global" "stay_on_while_plugged_in" $PreviousStayOn
+    Restore-AndroidSetting "secure" "skip_launch_check_requires_controllers_enabled" $PreviousSkipLaunchCheck
+    Restore-AndroidSetting "global" "require_controllers_for_vr_apps" $PreviousRequireControllers
+    Enable-QuestProximitySensor
+    try {
+        Invoke-AdbQuiet @("shell", "input", "keyevent", "KEYCODE_SLEEP")
+    } catch {
+        Write-Host "Warning: failed to sleep Quest after restore: $($_.Exception.Message)"
+    }
+    try {
+        Invoke-AdbQuiet @("shell", "setprop", "debug.oculus.disableProximity", "0")
+    } catch {
+        Write-Host "Warning: failed to clear Quest proximity property after restore: $($_.Exception.Message)"
+    }
+}
+
+function Get-FirstAdbDeviceSerial {
+    param([string]$AdbPath)
+
+    $devices = Invoke-NativeOutput $AdbPath @("devices")
+    foreach ($line in $devices) {
+        if ($line -match "^(?<serial>\S+)\s+device$") {
+            return $Matches.serial
+        }
+    }
+    return $null
+}
+
 function Start-QuestVirtualDesktop {
     $adb = Get-Command adb -ErrorAction SilentlyContinue
     if (-not $adb) {
@@ -104,17 +257,24 @@ function Start-QuestVirtualDesktop {
         return
     }
 
-    $devices = & $adb.Source devices
-    $hasDevice = $devices | Select-String -Pattern "`tdevice$" -Quiet
-    if (-not $hasDevice) {
+    $serial = Get-FirstAdbDeviceSerial $adb.Source
+    if (-not $serial) {
         Write-Host "No adb device is connected; skipping Quest Virtual Desktop launch."
         return
     }
 
-    Write-Host "Waking Quest and launching $QuestVirtualDesktopPackage."
-    Invoke-NativeQuiet $adb.Source @("shell", "svc", "power", "stayon", "true")
-    Invoke-NativeQuiet $adb.Source @("shell", "input", "keyevent", "KEYCODE_WAKEUP")
-    Invoke-NativeQuiet $adb.Source @(
+    $script:QuestAdbPath = $adb.Source
+    $script:QuestSerial = $serial
+    Save-QuestSettings
+
+    Write-Host "Waking Quest $serial and launching $QuestVirtualDesktopPackage."
+    Disable-QuestProximitySensor
+    Invoke-AdbQuiet @("shell", "settings", "put", "global", "stay_on_while_plugged_in", "3")
+    Invoke-AdbQuiet @("shell", "settings", "put", "secure", "skip_launch_check_requires_controllers_enabled", "1")
+    Invoke-AdbQuiet @("shell", "settings", "put", "global", "require_controllers_for_vr_apps", "0")
+    Invoke-AdbQuiet @("shell", "input", "keyevent", "KEYCODE_WAKEUP")
+    Invoke-AdbQuiet @("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_close", "--ei", "timeout", "0")
+    Invoke-AdbQuiet @(
         "shell",
         "monkey",
         "-p",
@@ -193,27 +353,33 @@ if ($RuntimeJson) {
     Write-Host "Using OpenXR runtime from environment: $env:XR_RUNTIME_JSON"
 }
 
-if (-not $NoVirtualDesktop -and (Test-Path $VirtualDesktopManifest)) {
-    Start-VirtualDesktopHost
-}
-
-if (-not $NoQuestLaunch) {
-    Start-QuestVirtualDesktop
-}
-
-if (-not $env:RUST_LOG) {
-    $env:RUST_LOG = "warn,mclone_native_client=info"
-}
-
-$appArgs = @("--xr-clear-smoke", "--frames", "$Frames") + $McloneArgs
-$runCommand = $cargoRun + @("--") + $appArgs
-
-Write-Host "Starting mclone XR smoke..."
-Write-CommandLine $runCommand
-Push-Location $RepoRoot
+$exitCode = 0
 try {
-    & $cargoRun[0] $cargoRun[1..($cargoRun.Count - 1)] -- @appArgs
+    if (-not $NoVirtualDesktop -and (Test-Path $VirtualDesktopManifest)) {
+        Start-VirtualDesktopHost
+    }
+
+    if (-not $NoQuestLaunch) {
+        Start-QuestVirtualDesktop
+    }
+
+    if (-not $env:RUST_LOG) {
+        $env:RUST_LOG = "warn,mclone_native_client=info"
+    }
+
+    $appArgs = @("--xr-clear-smoke", "--frames", "$Frames") + $McloneArgs
+    $runCommand = $cargoRun + @("--") + $appArgs
+
+    Write-Host "Starting mclone XR smoke..."
+    Write-CommandLine $runCommand
+    Push-Location $RepoRoot
+    try {
+        & $cargoRun[0] $cargoRun[1..($cargoRun.Count - 1)] -- @appArgs
+        $exitCode = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
 } finally {
-    Pop-Location
+    Restore-QuestAfterTest
 }
-exit $LASTEXITCODE
+exit $exitCode

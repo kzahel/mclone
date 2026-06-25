@@ -1,6 +1,6 @@
 # 078: Desktop OpenXR Clear Smoke
 
-Status: active; Slice 2D Windows/Linux Vulkan graphics session compiles; Slice 2E Windows launcher starts Virtual Desktop/Quest client; local Windows runtime reaches instance diagnostics but reports the HMD unavailable until the headset connects to the PC runtime, swapchains/frame loop next.
+Status: active; Slice 2D Windows/Linux Vulkan graphics session compiles; Slice 2E/2F Windows launcher starts Virtual Desktop/Quest client with Playbox-style headset wake/restore; local Windows runtime reaches instance diagnostics but reports the HMD unavailable until the headset connects to the PC runtime, swapchains/frame loop next.
 
 ## Purpose
 
@@ -382,6 +382,68 @@ The current blocker is not loader, extension, or process startup; it is that
 the Virtual Desktop headset app has not completed an active connection to the
 PC Streamer. A manual in-headset computer selection may be required before the
 runtime exposes `HEAD_MOUNTED_DISPLAY`.
+
+Landed in Slice 2F:
+
+- Updated `scripts/start-xr.ps1` to use the Playbox Quest wake/restore pattern
+  from `android/validate-common.sh` and `scripts/run_playbox_wivrn_capture.sh`.
+- The launcher now saves and restores these Android settings:
+  - `global stay_on_while_plugged_in`
+  - `secure skip_launch_check_requires_controllers_enabled`
+  - `global require_controllers_for_vr_apps`
+- During the smoke it disables the proximity override with
+  `debug.oculus.disableProximity=1`, applies the test wake settings, sends
+  `KEYCODE_WAKEUP`, and broadcasts
+  `com.oculus.vrpowermanager.prox_close`.
+- On cleanup it force-stops `VirtualDesktop.Android`, restores the saved
+  settings, re-enables proximity with `debug.oculus.disableProximity=0` and
+  `com.oculus.vrpowermanager.prox_open`, then sends `KEYCODE_SLEEP`.
+- Added `-NoQuestRestore` for deliberate manual headset debugging after the
+  launcher has prepared the Quest. Do not use it in normal smoke validation.
+
+Slice 2F validation:
+
+```powershell
+pnpm native:xr:windows:check
+git diff --check
+pnpm native:xr:windows:smoke
+```
+
+Observed pre-smoke headset baseline:
+
+- `global stay_on_while_plugged_in=15`
+- `secure skip_launch_check_requires_controllers_enabled=false`
+- `global require_controllers_for_vr_apps=0`
+- `debug.oculus.disableProximity=0`
+- `mWakefulness=Asleep`
+
+Observed during `pnpm native:xr:windows:smoke` on June 25, 2026:
+
+- Quest serial: `2G0YC1ZF93041Z`
+- Launcher selected
+  `C:\Program Files\Virtual Desktop Streamer\OpenXR\virtualdesktop-openxr.json`.
+- `VirtualDesktop.Service.exe` and `VirtualDesktop.Streamer.exe` were already
+  running.
+- The launcher woke the Quest and launched `VirtualDesktop.Android`.
+- The smoke reached `VirtualDesktopXR v1.0.10` and still failed at
+  `xrGetSystem` with `XR_ERROR_FORM_FACTOR_UNAVAILABLE`.
+- The launcher restore block ran after the cargo failure.
+
+Observed post-smoke headset state:
+
+- `global stay_on_while_plugged_in=15`
+- `secure skip_launch_check_requires_controllers_enabled=false`
+- `global require_controllers_for_vr_apps=0`
+- `debug.oculus.disableProximity=0`
+- `mWakefulness=Asleep`
+
+Manual debug with `-NoQuestRestore` confirmed that disabling proximity and
+sending `prox_close` makes the Virtual Desktop headset UI visible to ADB screen
+capture. The headset UI showed the PC entry `rex`, but an ADB tap did not
+complete a Streamer connection and
+`C:\ProgramData\Virtual Desktop\StreamerSettings.json` still had
+`LastConnectDate: 2026-05-28T00:00:00Z`. The remaining blocker is an actual
+Virtual Desktop/PC connection, not mclone's OpenXR loader or Vulkan binding.
 
 Implementation should follow the measured platform path. On macOS this likely
 means Metal-specific runtime/device matching. On Windows/Linux this likely
