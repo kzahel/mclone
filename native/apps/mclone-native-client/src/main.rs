@@ -14,6 +14,8 @@ mod remote_session;
 mod render_cache;
 mod scene_runtime;
 mod ui;
+#[cfg(feature = "xr")]
+mod xr_clear_smoke;
 
 use crate::app::run_window;
 #[cfg(test)]
@@ -23,7 +25,7 @@ use crate::cli::Cli;
 use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessDualViewOptions,
     HeadlessScreenshotOptions, HeadlessScreenshotUi, MovementPerfOptions, SceneOptions,
-    TimedemoOptions, parse_screenshot_ui_arg,
+    TimedemoOptions, XrClearSmokeOptions, parse_screenshot_ui_arg,
 };
 use crate::headless::{
     run_headless_screenshot, write_headless_chunk_scenarios, write_headless_dual_view,
@@ -204,6 +206,7 @@ fn main() -> Result<()> {
             report.print_json();
             Ok(())
         }
+        Cli::XrClearSmoke { options } => run_xr_clear_smoke(options),
         Cli::Window {
             scene,
             render_options,
@@ -264,6 +267,16 @@ fn json_escape(value: &str) -> String {
         .replace('\n', "\\n")
 }
 
+#[cfg(feature = "xr")]
+fn run_xr_clear_smoke(options: crate::cli::XrClearSmokeOptions) -> Result<()> {
+    xr_clear_smoke::run(options)
+}
+
+#[cfg(not(feature = "xr"))]
+fn run_xr_clear_smoke(_options: crate::cli::XrClearSmokeOptions) -> Result<()> {
+    anyhow::bail!("rebuild with `--features xr` to use --xr-clear-smoke")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,6 +328,45 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn cli_parses_xr_clear_smoke_options() {
+        let cli = Cli::parse([
+            "--xr-clear-smoke".to_owned(),
+            "--frames".to_owned(),
+            "12".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::XrClearSmoke {
+                options: XrClearSmokeOptions { frames: 12 },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_rejects_xr_clear_smoke_with_headless_mode() {
+        let err = Cli::parse([
+            "--xr-clear-smoke".to_owned(),
+            "--headless-clear".to_owned(),
+            "/tmp/mclone-clear.png".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("--xr-clear-smoke cannot be combined"));
+    }
+
+    #[test]
+    fn cli_rejects_xr_frames_without_xr_clear_smoke() {
+        let err = Cli::parse(["--frames".to_owned(), "12".to_owned()])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("--frames requires --xr-clear-smoke"));
     }
 
     #[test]

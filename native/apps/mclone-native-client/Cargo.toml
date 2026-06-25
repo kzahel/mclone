@@ -5,11 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+xr = ["dep:ash", "dep:libloading", "dep:openxr"]
+
 [dependencies]
 anyhow.workspace = true
+ash = { workspace = true, optional = true }
 env_logger.workspace = true
 glam.workspace = true
 image.workspace = true
+libloading = { workspace = true, optional = true }
 log.workspace = true
 mclone-assets.workspace = true
 mclone-app-runtime.workspace = true
@@ -22,6 +28,7 @@ mclone-render.workspace = true
 mclone-render-session.workspace = true
 mclone-server.workspace = true
 mclone-ui.workspace = true
+openxr = { workspace = true, optional = true }
 wgpu.workspace = true
 winit.workspace = true
 

@@ -1,6 +1,6 @@
 # 078: Desktop OpenXR Clear Smoke
 
-Status: proposed, blocked on `077-multiview-render-contract.md`.
+Status: active; Slice 1 dependency/feature gate complete, loader/session work next.
 
 ## Purpose
 
@@ -51,6 +51,10 @@ Use Playbox as a pattern library only:
 - `~/code/playbox/docs/architecture/platforms.md` for desktop OpenXR platform
   ownership.
 - `~/code/playbox/src/xr/` for loader/session/swapchain/frame-loop shape.
+- `~/code/playbox/Cargo.toml` for the opt-in `xr` feature shape:
+  `default = []`, `xr = ["dep:ash", "dep:openxr", "dep:libloading"]`.
+- `~/code/playbox/src/main.rs` for the CLI pattern where non-XR builds accept
+  the flag shape but fail with a clear "rebuild with `--features xr`" message.
 - `~/code/playbox/docs/tactical/106-desktop-xr-companion-window.md` if a
   companion window is needed later. Do not add companion-window complexity in
   this first smoke unless required by the local runtime.
@@ -62,11 +66,33 @@ spatial-room systems.
 
 ### Slice 1 - Dependency And Feature Gate
 
-- [ ] Add the minimum OpenXR dependency behind an `xr` feature.
-- [ ] Keep default desktop, web, Android, and dedicated-server builds unchanged.
-- [ ] Add a CLI mode for the clear smoke.
-- [ ] Document local runtime prerequisites and environment variables used by
-  the implementation.
+- [x] Add the minimum OpenXR dependency behind an `xr` feature.
+- [x] Keep default desktop, web, Android, and dedicated-server builds unchanged.
+- [x] Add a CLI mode for the clear smoke.
+- [x] Document that no runtime prerequisites or environment variables are used
+  before the loader/session slice.
+
+Landed in Slice 1:
+
+- `mclone-native-client` now has an opt-in `xr` feature modeled after
+  Playbox's feature gate: optional `ash`, `openxr`, and `libloading`
+  dependencies with `default = []`.
+- `--xr-clear-smoke [--frames N]` is parsed as a separate run mode and rejects
+  combinations with headless or perf modes.
+- Non-XR builds retain the CLI mode but return
+  `rebuild with --features xr to use --xr-clear-smoke`.
+- XR-enabled builds compile a small placeholder module that proves the feature
+  dependency path and leaves loader/session/swapchain work to Slice 2.
+- No OpenXR types were added to shared engine crates.
+
+Runtime prerequisites:
+
+- Slice 1 does not load the OpenXR runtime and does not require runtime
+  environment variables.
+- Slice 2 should document the exact desktop runtime path it uses. Based on
+  Playbox, likely candidates are loader/runtime discovery variables such as
+  `XR_RUNTIME_JSON` or Monado/WiVRn-specific runtime paths, but mclone should
+  record only variables it actually consumes.
 
 Validation:
 
@@ -75,6 +101,28 @@ cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client
 pnpm native:web:build
 ```
+
+Slice 1 validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+# Expected failure with a feature hint:
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --xr-clear-smoke --frames 2
+# Expected success:
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client --features xr -- --xr-clear-smoke --frames 2
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+pnpm native:web:build
+git diff --check
+```
+
+Expected Slice 1 CLI results:
+
+- Without `--features xr`: exits with
+  `rebuild with --features xr to use --xr-clear-smoke`.
+- With `--features xr`: exits successfully after printing that loader/session/
+  swapchain bring-up is next.
 
 ### Slice 2 - Runtime And Graphics Binding
 
