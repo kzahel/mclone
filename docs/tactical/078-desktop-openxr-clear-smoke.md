@@ -491,6 +491,12 @@ Landed in Slice 2G:
   `com.oculus.vrpowermanager.prox_close`, and launches `VirtualDesktop.Android`.
 - Refactored `scripts/start-xr.ps1` to reuse the same helper instead of
   carrying a separate ADB wake/restore implementation.
+- Added Playbox-shaped headset startup guardrails:
+  - log Quest battery state before keeping the headset awake
+  - refuse to keep the headset awake below 15% battery when not charging
+  - dismiss known Quest settings/Link system panel tasks before launching
+    Virtual Desktop
+  - log the focused Quest activity after launching `VirtualDesktop.Android`
 - Added package scripts:
   - `pnpm native:xr:windows:prepare`
   - `pnpm native:xr:windows:restore`
@@ -517,6 +523,27 @@ Connected smoke package scripts now sleep the headset by default after the run.
 Pass `-NoQuestRestore` only for intentional short-lived debugging or screenshot
 capture; the launcher prints an explicit warning because the headset may remain
 awake.
+
+Batch launcher validation on June 25, 2026:
+
+```powershell
+cmd /c scripts\start-xr.bat --vdxr --mclone --view-pose 0,78,-96,180 --frames 1200 --no-pause
+```
+
+- The launcher selected VirtualDesktopXR, logged
+  `Quest battery: level=94% status=2 power=AC`, launched
+  `VirtualDesktop.Android`, and reported the Virtual Desktop activity as
+  focused before running mclone.
+- Earlier fixed-delay screenshot capture could catch the Quest overlay before
+  mclone frame submission because Virtual Desktop launch wait plus mclone scene
+  preparation is roughly 25 seconds on this machine. Marker-driven capture
+  after `OpenXR session state: FOCUSED` is the reliable path.
+- The 1200-frame run reported
+  `submitted=1200 runtime_frames=1200 skipped=0`.
+- The inspected screenshot at `C:\tmp\mclone-xr-bat-validation-3.png` showed
+  the mclone stereo world with Virtual Desktop overlays composited above it.
+- The launcher restored Quest wake/proximity settings and slept the headset
+  after the run.
 
 Implementation should follow the measured platform path. On macOS this likely
 means Metal-specific runtime/device matching. On Windows/Linux this likely

@@ -11,6 +11,7 @@ param(
     [switch]$NoVirtualDesktop,
     [switch]$NoQuestLaunch,
     [switch]$NoQuestRestore,
+    [switch]$NoSystemPanelDismiss,
     [switch]$AllowUnsupported,
     [string]$RuntimeJson,
     [string]$ViewPose,
@@ -147,7 +148,7 @@ try {
     }
 
     if ($Runtime -eq "virtual-desktop" -and -not $NoQuestLaunch) {
-        Start-McloneQuestVirtualDesktop -StatePath $QuestStartupStatePath | Out-Null
+        Start-McloneQuestVirtualDesktop -StatePath $QuestStartupStatePath -NoSystemPanelDismiss:$NoSystemPanelDismiss | Out-Null
         $questPrepared = $true
     }
 

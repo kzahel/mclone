@@ -148,6 +148,16 @@ if /I "%~1"=="-NoQuestRestore" (
     shift
     goto parse_args
 )
+if /I "%~1"=="--no-system-panel-dismiss" (
+    call :append_arg "-NoSystemPanelDismiss"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="-NoSystemPanelDismiss" (
+    call :append_arg "-NoSystemPanelDismiss"
+    shift
+    goto parse_args
+)
 if /I "%~1"=="--no-virtual-desktop" (
     call :append_arg "-NoVirtualDesktop"
     shift
@@ -262,6 +272,8 @@ echo   --frames N             Set the XR smoke frame budget. Default: 120.
 echo   --view-pose X,Y,Z,YAW  Map headset startup pose to mclone world pose.
 echo   --no-quest-launch      Reuse an already-connected headset session.
 echo   --no-quest-restore     Leave Quest wake/proximity state untouched after run.
+echo   --no-system-panel-dismiss
+echo                          Do not dismiss known Quest system panels before launch.
 echo   --no-pause             Do not pause if the launch fails.
 echo   --pause-on-error       Pause before closing on failures. This is the default.
 echo   -h, --help             Show this help.

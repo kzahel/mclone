@@ -122,6 +122,178 @@ function Get-McloneQuestAdbTarget {
     }
 }
 
+function Get-McloneQuestBatteryInfo {
+    param(
+        [string]$AdbPath,
+        [string]$Serial
+    )
+
+    try {
+        $lines = Invoke-McloneAdbOutput $AdbPath $Serial @("shell", "dumpsys", "battery")
+    } catch {
+        Write-Host "Warning: failed to query Quest battery state: $($_.Exception.Message)"
+        return $null
+    }
+
+    $info = [ordered]@{
+        Level = $null
+        Status = $null
+        AcPowered = $false
+        UsbPowered = $false
+        WirelessPowered = $false
+        DockPowered = $false
+    }
+
+    foreach ($line in $lines) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match "^level:\s+(?<value>\d+)") {
+            $info.Level = [int]$Matches.value
+        } elseif ($trimmed -match "^status:\s+(?<value>\d+)") {
+            $info.Status = [int]$Matches.value
+        } elseif ($trimmed -match "^AC powered:\s+(?<value>true|false)") {
+            $info.AcPowered = $Matches.value -eq "true"
+        } elseif ($trimmed -match "^USB powered:\s+(?<value>true|false)") {
+            $info.UsbPowered = $Matches.value -eq "true"
+        } elseif ($trimmed -match "^Wireless powered:\s+(?<value>true|false)") {
+            $info.WirelessPowered = $Matches.value -eq "true"
+        } elseif ($trimmed -match "^Dock powered:\s+(?<value>true|false)") {
+            $info.DockPowered = $Matches.value -eq "true"
+        }
+    }
+
+    return [pscustomobject]$info
+}
+
+function Write-McloneQuestBatteryStatus {
+    param([object]$BatteryInfo)
+
+    if (-not $BatteryInfo -or $null -eq $BatteryInfo.Level) {
+        return
+    }
+
+    $power = @()
+    if ($BatteryInfo.AcPowered) { $power += "AC" }
+    if ($BatteryInfo.UsbPowered) { $power += "USB" }
+    if ($BatteryInfo.WirelessPowered) { $power += "wireless" }
+    if ($BatteryInfo.DockPowered) { $power += "dock" }
+    if ($power.Count -eq 0) { $power += "battery" }
+
+    Write-Host "Quest battery: level=$($BatteryInfo.Level)% status=$($BatteryInfo.Status) power=$($power -join '+')"
+}
+
+function Test-McloneQuestBatterySafeForWake {
+    param([object]$BatteryInfo)
+
+    if (-not $BatteryInfo -or $null -eq $BatteryInfo.Level) {
+        return
+    }
+
+    $powered =
+        $BatteryInfo.AcPowered -or
+        $BatteryInfo.UsbPowered -or
+        $BatteryInfo.WirelessPowered -or
+        $BatteryInfo.DockPowered
+    if ($BatteryInfo.Level -lt 15 -and -not $powered) {
+        throw "Quest battery is $($BatteryInfo.Level)% and not charging; refusing to keep the headset awake for XR validation."
+    }
+}
+
+function Get-McloneQuestActivityDump {
+    param(
+        [string]$AdbPath,
+        [string]$Serial
+    )
+
+    try {
+        return Invoke-McloneAdbOutput $AdbPath $Serial @("shell", "dumpsys", "activity", "activities")
+    } catch {
+        Write-Host "Warning: failed to query Quest activity state: $($_.Exception.Message)"
+        return @()
+    }
+}
+
+function Get-McloneQuestActivityTaskIds {
+    param(
+        [string[]]$ActivityDump,
+        [string[]]$Patterns
+    )
+
+    $ids = New-Object "System.Collections.Generic.List[string]"
+    foreach ($line in $ActivityDump) {
+        $matched = $false
+        foreach ($pattern in $Patterns) {
+            if ($line -match $pattern) {
+                $matched = $true
+                break
+            }
+        }
+        if (-not $matched) {
+            continue
+        }
+        if ($line -match "Task\{[^#]*#(?<id>\d+)") {
+            if (-not $ids.Contains($Matches.id)) {
+                $ids.Add($Matches.id)
+            }
+        } elseif ($line -match "\st(?<id>\d+)\}") {
+            if (-not $ids.Contains($Matches.id)) {
+                $ids.Add($Matches.id)
+            }
+        }
+    }
+    return $ids.ToArray()
+}
+
+function Dismiss-McloneQuestSystemPanels {
+    param(
+        [string]$AdbPath,
+        [string]$Serial
+    )
+
+    # Playbox's Quest validation runbook calls out reprojected OS dialogs as a
+    # real source of false XR failures. Remove only known panel/dialog tasks,
+    # then send BACK before launching the target app.
+    $patterns = @(
+        "com\.oculus\.panelapp\.settings",
+        "OculusLinkAvailableDialogActivity",
+        "com\.meta\.link\.ui\.dialogs"
+    )
+    $taskIds = Get-McloneQuestActivityTaskIds -ActivityDump (Get-McloneQuestActivityDump $AdbPath $Serial) -Patterns $patterns
+    foreach ($taskId in $taskIds) {
+        try {
+            Write-Host "Dismissing Quest system panel task $taskId before launch."
+            Invoke-McloneAdbQuiet $AdbPath $Serial @("shell", "am", "stack", "remove", $taskId)
+        } catch {
+            Write-Host "Warning: failed to dismiss Quest system panel task $taskId`: $($_.Exception.Message)"
+        }
+    }
+
+    try {
+        Invoke-McloneAdbQuiet $AdbPath $Serial @("shell", "input", "keyevent", "KEYCODE_BACK")
+    } catch {
+        Write-Host "Warning: failed to send Quest BACK key before launch: $($_.Exception.Message)"
+    }
+}
+
+function Write-McloneQuestFocusSummary {
+    param(
+        [string]$AdbPath,
+        [string]$Serial,
+        [string]$PackageName
+    )
+
+    $lines = Get-McloneQuestActivityDump $AdbPath $Serial
+    $summary = $lines | Where-Object {
+        $_ -match "ResumedActivity|mFocusedApp|topDisplayFocusedRootTask|$([regex]::Escape($PackageName))"
+    } | Select-Object -First 12
+
+    if ($summary) {
+        Write-Host "Quest focus after launch:"
+        foreach ($line in $summary) {
+            Write-Host ("  " + $line.Trim())
+        }
+    }
+}
+
 function Read-McloneAndroidSetting {
     param(
         [string]$AdbPath,
@@ -243,12 +415,17 @@ function Start-McloneQuestVirtualDesktop {
         [switch]$ForceSave,
         [switch]$NoWake,
         [switch]$NoProximityDisable,
+        [switch]$NoSystemPanelDismiss,
         [switch]$NoLaunch
     )
 
     $target = Get-McloneQuestAdbTarget -AdbPath $AdbPath -Serial $Serial
     $AdbPath = $target.AdbPath
     $Serial = $target.Serial
+
+    $batteryInfo = Get-McloneQuestBatteryInfo -AdbPath $AdbPath -Serial $Serial
+    Write-McloneQuestBatteryStatus $batteryInfo
+    Test-McloneQuestBatterySafeForWake $batteryInfo
 
     Save-McloneQuestVirtualDesktopState -AdbPath $AdbPath -Serial $Serial -StatePath $StatePath -PackageName $PackageName -Force:$ForceSave | Out-Null
 
@@ -265,6 +442,10 @@ function Start-McloneQuestVirtualDesktop {
         Invoke-McloneAdbQuiet $AdbPath $Serial @("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_close", "--ei", "timeout", "0")
     }
 
+    if (-not $NoSystemPanelDismiss) {
+        Dismiss-McloneQuestSystemPanels -AdbPath $AdbPath -Serial $Serial
+    }
+
     if (-not $NoLaunch) {
         Write-Host "Launching $PackageName on Quest $Serial."
         Invoke-McloneAdbQuiet $AdbPath $Serial @(
@@ -279,6 +460,7 @@ function Start-McloneQuestVirtualDesktop {
         if ($LaunchWaitSeconds -gt 0) {
             Start-Sleep -Seconds $LaunchWaitSeconds
         }
+        Write-McloneQuestFocusSummary -AdbPath $AdbPath -Serial $Serial -PackageName $PackageName
     }
 
     return [pscustomobject]@{

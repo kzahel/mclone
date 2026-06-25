@@ -59,6 +59,9 @@ roll remain runtime-tracked head motion.
   - Bash: `--view-pose X,Y,Z,YAW_DEGREES`
 - Added a Playbox-patterned Windows batch launcher at `scripts/start-xr.bat`
   for common Windows XR smoke commands.
+- Kept Windows Quest startup aligned with Playbox validation helpers by logging
+  battery state, refusing low unpowered wake runs, dismissing known Quest
+  system panels before launch, and logging the focused headset activity.
 
 ## Validation
 
@@ -76,6 +79,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-xr.ps1 -Chec
 cmd /c scripts\start-xr.bat --check-only --runtime environment --mclone --view-pose 0,78,-96,180 --frames 5 --no-pause
 cmd /c scripts\start-xr.bat --check-only --runtime environment --mclone --view-pose "0,78,-96,180" --frames 5 --no-pause
 pnpm native:xr:windows:check
+cmd /c scripts\start-xr.bat --vdxr --mclone --view-pose 0,78,-96,180 --frames 1200 --no-pause
 ```
 
 Live Windows validation:
@@ -109,6 +113,9 @@ Observed view-pose result:
 - Render summary:
   `sections=166 drawn_sections=166 indices=780174 drawn_indices=780174 actors=1 drawn_actors=1`
 - Cleanup restored Quest wake/proximity settings and slept the headset.
+- Batch launcher validation on June 25, 2026 reported
+  `submitted=1200 runtime_frames=1200 skipped=0`, with Quest battery
+  `94%` on AC power and `VirtualDesktop.Android` focused before mclone launch.
 
 Visual validation:
 
@@ -120,6 +127,12 @@ adb pull /sdcard/mclone-xr-view-pose.png C:\tmp\mclone-xr-view-pose.png
 The inspected headset screenshot at `C:\tmp\mclone-xr-view-pose.png` showed
 the mclone world rendered closer in both eyes with the Virtual Desktop overlay
 composited above it.
+
+The later BAT-driven screenshot at `C:\tmp\mclone-xr-bat-validation-3.png`
+also showed the mclone stereo world with Virtual Desktop overlays. Capture
+should wait for the `OpenXR session state: FOCUSED` log marker; a fixed early
+delay can capture the Quest overlay before the mclone scene starts submitting
+frames.
 
 ## Next Step
 

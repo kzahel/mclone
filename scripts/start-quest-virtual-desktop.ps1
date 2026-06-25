@@ -5,6 +5,7 @@ param(
     [switch]$NoQuestLaunch,
     [switch]$NoWake,
     [switch]$NoProximityDisable,
+    [switch]$NoSystemPanelDismiss,
     [switch]$ForceSave,
     [switch]$StopQuestApp,
     [switch]$SleepAfterRestore,
@@ -48,7 +49,8 @@ if (-not $NoQuestLaunch) {
         -LaunchWaitSeconds $LaunchWaitSeconds `
         -ForceSave:$ForceSave `
         -NoWake:$NoWake `
-        -NoProximityDisable:$NoProximityDisable
+        -NoProximityDisable:$NoProximityDisable `
+        -NoSystemPanelDismiss:$NoSystemPanelDismiss
 
     Write-Host "Quest Virtual Desktop startup sequence is ready."
     Write-Host "Connect to this PC in the headset, then run: pnpm native:xr:windows:smoke:connected"
