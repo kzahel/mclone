@@ -1,6 +1,7 @@
 # 074: Flat Android Build Smoke
 
-Status: proposed high-priority platform slice.
+Status: proposed high-priority platform slice; Slice 0 baseline/dependency probe
+completed.
 
 Prerequisite: land [`075-shared-single-view-runtime-prereq.md`](075-shared-single-view-runtime-prereq.md)
 before starting Android runtime integration. Android should consume
@@ -57,16 +58,21 @@ Missing:
 - No Android asset-pack staging policy.
 - No Android lifecycle/input adapter.
 
-Observed first compile blocker:
+Resolved Slice 0 compile blocker:
 
 ```bash
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client --target aarch64-linux-android
 ```
 
-The check fails before mclone app code because `android-activity` is selected
-through `winit`, but neither `native-activity` nor `game-activity` is enabled.
-The likely dependency fix is to enable `winit/android-native-activity` for the
-Android host path, matching Playbox.
+Before Slice 0, this failed before mclone app code because `android-activity`
+was selected through `winit`, but neither `native-activity` nor
+`game-activity` was enabled. Matching Playbox's dependency shape, the workspace
+`winit` dependency now enables `android-native-activity`; the command above
+passes.
+
+Next blocker: there is still no Android `cdylib` host crate or Gradle package
+shell. Start Slice 1 with a thin `mclone-android-client` crate and Playbox-style
+`android/` project.
 
 ## Non-goals
 
@@ -130,18 +136,34 @@ chunk smoke.
 Goal: make the current Android state explicit and fix the shallow dependency
 gate without creating inert app scaffolding.
 
-- [ ] Confirm workstream: native Rust platform.
-- [ ] Run and record:
+- [x] Confirm workstream: native Rust platform.
+- [x] Run and record:
   - `rustup target list --installed`
   - `which cargo-ndk`
   - Android SDK/NDK discovery under `$ANDROID_HOME`, `$ANDROID_SDK_ROOT`, or
     `~/Android/Sdk`
   - `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --target aarch64-linux-android`
-- [ ] Enable Android NativeActivity support in the host dependency path:
+- [x] Enable Android NativeActivity support in the host dependency path:
   - `winit = { version = "0.30", features = ["android-native-activity"] }`
     or the workspace-equivalent target-specific shape.
   - Add target Android dependencies only where needed.
-- [ ] Re-run an Android target check and record the next real blocker.
+- [x] Re-run an Android target check and record the next real blocker.
+
+Recorded local probe:
+
+- Installed Android Rust targets include `aarch64-linux-android`,
+  `armv7-linux-androideabi`, `i686-linux-android`, and
+  `x86_64-linux-android`.
+- `cargo-ndk`: `/Users/kgraehl/.cargo/bin/cargo-ndk`, version `4.1.2`.
+- SDK: `$ANDROID_HOME=/Users/kgraehl/Android/Sdk`.
+- NDK: `$ANDROID_NDK_HOME=/Users/kgraehl/Android/Sdk/ndk/27.0.12077973`;
+  SDK also has NDK `28.2.13676358`.
+- SDK platforms present: `android-34`, `android-35`, `android-36`.
+- Java: OpenJDK `17.0.18`.
+- `adb`: `/Users/kgraehl/Android/Sdk/platform-tools/adb`, version `36.0.2`.
+- `sdkmanager`: `/Users/kgraehl/Android/Sdk/cmdline-tools/latest/bin/sdkmanager`.
+- First target check reproduced the `android-activity` feature error.
+- After enabling `winit/android-native-activity`, the target check passed.
 
 Validation:
 

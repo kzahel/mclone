@@ -54,7 +54,7 @@ wasm-bindgen = "0.2.125"
 wasm-bindgen-futures = "0.4.75"
 web-sys = "0.3.102"
 wgpu = { version = "25", features = ["metal", "vulkan", "vulkan-portability"] }
-winit = "0.30"
+winit = { version = "0.30", features = ["android-native-activity"] }
 
 # Keep native debug runs useful for movement/render/worldgen performance work.
 # This mirrors the Playbox policy in ~/code/playbox/Cargo.toml: optimize dev
