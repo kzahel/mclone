@@ -54,7 +54,11 @@ roll remain runtime-tracked head motion.
   - JSON override remains available as `-RuntimeJson` / `--runtime-json`.
 - Added launcher-level pose forwarding:
   - PowerShell: `-ViewPose "X,Y,Z,YAW_DEGREES"`
+  - Batch: `--view-pose X,Y,Z,YAW_DEGREES`, delegated to PowerShell to keep
+    Quest wake/proximity setup and restore centralized
   - Bash: `--view-pose X,Y,Z,YAW_DEGREES`
+- Added a Playbox-patterned Windows batch launcher at `scripts/start-xr.bat`
+  for common Windows XR smoke commands.
 
 ## Validation
 
@@ -69,6 +73,9 @@ cargo test --manifest-path native/Cargo.toml -p mclone-native-client --features 
 pnpm native:web:build
 bash -n scripts/start-xr.sh
 powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-xr.ps1 -CheckOnly -Runtime environment
+cmd /c scripts\start-xr.bat --check-only --runtime environment --mclone --view-pose 0,78,-96,180 --frames 5 --no-pause
+cmd /c scripts\start-xr.bat --check-only --runtime environment --mclone --view-pose "0,78,-96,180" --frames 5 --no-pause
+pnpm native:xr:windows:check
 ```
 
 Live Windows validation:
