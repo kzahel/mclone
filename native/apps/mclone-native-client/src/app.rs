@@ -61,7 +61,7 @@ pub(crate) fn run_window(
         scene.chunk_x,
         scene.chunk_z,
         scene.render_distance,
-        runtime.chunk_tracking_radius,
+        runtime.chunk_tracking_radius(),
         if scene.lighting_enabled {
             "enabled"
         } else {
@@ -472,7 +472,7 @@ impl ChunkApp {
 
     fn current_ui_render_state(&self) -> GameUiRenderState {
         game_ui_render_state(
-            self.runtime.render_distance as i32,
+            self.runtime.render_distance() as i32,
             self.render_options,
             self.frame_pacing.ui_state(),
         )
@@ -541,7 +541,7 @@ impl ChunkApp {
                         log::info!(
                             "render distance set to {} (chunk tracking radius {})",
                             render_distance,
-                            self.runtime.chunk_tracking_radius
+                            self.runtime.chunk_tracking_radius()
                         );
                     }
                     Ok(false) => {}
@@ -1411,7 +1411,7 @@ impl ApplicationHandler for ChunkApp {
                 };
                 self.ui.set_scale(gui_scale);
                 let camera_view = self.window_camera_view();
-                let camera = camera_view.chunk_camera(self.runtime.render_distance);
+                let camera = camera_view.chunk_camera(self.runtime.render_distance());
                 let sky_clear_color = self.runtime.sky_clear_color();
                 let time_of_day = self.runtime.time_of_day();
                 let sun_angle = self.runtime.sun_angle();
@@ -1419,7 +1419,7 @@ impl ApplicationHandler for ChunkApp {
                 let underwater_overlay = self.underwater_overlay(camera_view);
                 let frame_pacing = self.frame_pacing.ui_state();
                 let ui_render_state = game_ui_render_state(
-                    self.runtime.render_distance as i32,
+                    self.runtime.render_distance() as i32,
                     render_options,
                     frame_pacing,
                 );

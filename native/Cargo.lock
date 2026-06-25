@@ -1026,6 +1026,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-app-runtime"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "glam",
+ "mclone-client",
+ "mclone-core",
+ "mclone-mesh",
+ "mclone-protocol",
+ "mclone-render-session",
+ "mclone-server",
+]
+
+[[package]]
 name = "mclone-assets"
 version = "0.0.0"
 dependencies = [
@@ -1090,6 +1104,7 @@ dependencies = [
  "glam",
  "image",
  "log",
+ "mclone-app-runtime",
  "mclone-assets",
  "mclone-client",
  "mclone-core",
@@ -1173,6 +1188,7 @@ dependencies = [
  "anyhow",
  "glam",
  "js-sys",
+ "mclone-app-runtime",
  "mclone-assets",
  "mclone-client",
  "mclone-core",

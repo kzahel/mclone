@@ -2,6 +2,10 @@
 
 Status: proposed high-priority platform slice.
 
+Prerequisite: land [`075-shared-single-view-runtime-prereq.md`](075-shared-single-view-runtime-prereq.md)
+before starting Android runtime integration. Android should consume
+`mclone-app-runtime` instead of copying the desktop or native-web shell.
+
 ## Purpose
 
 Bring up a flat, non-XR Android build for the native Rust engine. The first
@@ -96,24 +100,24 @@ android/
   validate-quest-flat.sh
 ```
 
-The Android host can start as a thin crate, but the playable path should reuse
-desktop/native-web runtime code. If direct reuse requires moving code, extract
-the platform-neutral parts out of `mclone-native-client` rather than duplicating
-them in the Android crate.
+The Android host can start as a thin crate, but the playable path should consume
+the shared runtime shell landed in
+[`075-shared-single-view-runtime-prereq.md`](075-shared-single-view-runtime-prereq.md)
+instead of copying desktop or native-web runtime orchestration.
 
-Likely extraction boundary:
+Expected ownership boundary:
 
 ```text
-shared single-view runtime/render helpers
-  - scene/runtime setup around ClientRuntime and NativeIntegratedServerRunner
-  - render-section cache synchronization
-  - asset source selection hooks
-  - full-frame render composition
+mclone-app-runtime
+  - ClientRuntime / EngineRenderSession orchestration
+  - chunk-view state and host-exchange application
+  - render-section cache synchronization through RenderSectionCompiler
+  - platform-neutral world/time/query helpers
 
 platform adapters
-  - desktop winit keyboard/mouse/window/frame pacing
+  - desktop winit keyboard/mouse/window/frame pacing/assets/full-frame capture
   - Android NativeActivity lifecycle/touch/surface/package paths
-  - browser canvas/DOM/worker/storage glue
+  - browser canvas/DOM/worker/storage/JsValue glue
 ```
 
 Temporary Android-local code is acceptable only for the first clear or static
@@ -237,8 +241,8 @@ Inspect `/tmp/mclone-android-avd-chunk.png`.
 Goal: run the same client/server/render-session path as desktop, with Android
 owning only platform lifecycle, input, surface, and package paths.
 
-- [ ] Extract or expose shared single-view runtime helpers from
-  `mclone-native-client` as needed.
+- [ ] Consume `mclone-app-runtime` for shared single-view runtime state,
+  update exchange application, world queries, and render-section streaming.
 - [ ] Load packed Minecraft assets from Android app files or a staged external
   files directory.
 - [ ] Add an Android asset-pack staging/install helper, likely copying the

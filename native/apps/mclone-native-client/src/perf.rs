@@ -1048,7 +1048,7 @@ pub(crate) fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<M
         let sections = runtime.cached_sections();
         let ready_sections = runtime.traversal_ready_render_section_keys(spectator.position);
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
-        let camera = spectator.camera(runtime.render_distance);
+        let camera = spectator.camera(runtime.render_distance());
         let render_view = camera.render_view(options.width, options.height);
         let visibility = textured_section_visibility_stats_with_options_and_ready_sections(
             &sections,
@@ -1313,7 +1313,7 @@ pub(crate) fn run_frame_budget_probe(
             };
 
             let set_interest_start = Instant::now();
-            report.interest_center_changed = state.runtime.interest_center != center;
+            report.interest_center_changed = state.runtime.interest_center() != center;
             report.interest_updates_changed = state.runtime.set_interest_center(center)?;
             report.set_interest_ms = elapsed_ms(set_interest_start.elapsed());
             let poll_start = Instant::now();
@@ -1362,7 +1362,7 @@ pub(crate) fn run_frame_budget_probe(
                 report.add_section_timing(update);
             }
 
-            let camera = spectator.camera(state.runtime.render_distance);
+            let camera = spectator.camera(state.runtime.render_distance());
             let underwater_overlay =
                 state
                     .runtime
@@ -1409,7 +1409,7 @@ pub(crate) fn run_frame_budget_probe(
                 sun_angle,
                 render_options,
                 game_ui_render_state(
-                    state.runtime.render_distance as i32,
+                    state.runtime.render_distance() as i32,
                     render_options,
                     FramePacingUiState::default(),
                 ),

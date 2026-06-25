@@ -119,7 +119,7 @@ pub(crate) fn run_headless_screenshot(
     let mut render_stats = RenderStreamStats::default();
     let debug_pane = options.debug_pane;
     let render_options = options.render_options;
-    let camera = spectator.camera(runtime.render_distance);
+    let camera = spectator.camera(runtime.render_distance());
     let underwater_overlay = runtime
         .camera_inside_water(spectator.position)
         .then(|| UnderwaterOverlay::vanilla_from_native_camera(spectator.yaw, spectator.pitch));
@@ -208,7 +208,7 @@ pub(crate) fn run_headless_screenshot(
                 sun_angle,
                 render_options,
                 game_ui_render_state(
-                    runtime.render_distance as i32,
+                    runtime.render_distance() as i32,
                     render_options,
                     FramePacingUiState::default(),
                 ),

@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/mclone-assets",
+  "crates/mclone-app-runtime",
   "crates/mclone-client",
   "crates/mclone-core",
   "crates/mclone-light",
@@ -33,6 +34,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 js-sys = "0.3.102"
 log = "0.4"
 mclone-assets = { path = "crates/mclone-assets" }
+mclone-app-runtime = { path = "crates/mclone-app-runtime" }
 mclone-client = { path = "crates/mclone-client" }
 mclone-core = { path = "crates/mclone-core" }
 mclone-light = { path = "crates/mclone-light" }

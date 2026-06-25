@@ -42,8 +42,7 @@ use mclone_render_session::{
     RenderSectionNeighborReadiness, RenderSectionRemovalMode, RenderSectionSyncPlan,
     RenderSectionViewSync, build_client_textured_sections, build_render_sections_from_snapshots,
     decode_textured_render_section_build_report, encode_textured_render_section_build_report,
-    render_section_neighbor_readiness, sort_chunk_positions_by_distance,
-    sort_dirty_section_chunks_by_distance, summarize_textured_render_section_build_report,
+    summarize_textured_render_section_build_report,
 };
 use mclone_server::ServerRunnerKind;
 use mclone_ui::{
@@ -3243,24 +3242,10 @@ impl WebChunkRenderSession {
         let render_compiler = &mut self.render_compiler;
         let cache_update = self
             .runtime
-            .engine_mut()
             .sync_render_sections_with_budget(
                 render_compiler,
+                camera_position,
                 WEB_RENDER_CHUNK_MESH_BUDGET,
-                |dirty_work| {
-                    sort_chunk_positions_by_distance(
-                        dirty_work.loaded_dirty_chunks.iter().copied(),
-                        camera_position,
-                    )
-                },
-                |dirty_work| {
-                    sort_dirty_section_chunks_by_distance(
-                        &dirty_work.loaded_dirty_sections_by_chunk,
-                        camera_position,
-                    )
-                },
-                |client, key| render_section_neighbor_readiness(client, key, camera_position),
-                RenderSectionRemovalMode::ApplyImmediately,
                 // 067 follow-up 1: instead of deep-cloning every loaded column each frame, the
                 // compiler diffs the live snapshots (borrowed) against its own mirror shadow and
                 // clones only the changed columns; the eviction/reset/generation parts of the
@@ -3279,13 +3264,8 @@ impl WebChunkRenderSession {
         let armed_doorbell = new_in_flight.is_some() && new_in_flight != prev_in_flight;
         let applied = self.render_compiler.take_last_completed();
         let pending_compile_jobs = self.render_compiler.pending_job_count();
-        let streaming_idle = pending_compile_jobs == 0
-            && !self
-                .runtime
-                .engine()
-                .has_pending_render_work(0, |client, key| {
-                    render_section_neighbor_readiness(client, key, camera_position)
-                });
+        let streaming_idle =
+            pending_compile_jobs == 0 && !self.runtime.has_pending_render_work(0, camera_position);
 
         // 4. Synthesize this frame's compile diagnostics from the streaming cache update.
         let acceptance_report = RenderSectionCompileAcceptanceReport {

@@ -274,10 +274,6 @@ pub(crate) fn next_capped_redraw_deadline(
     next
 }
 
-pub(crate) fn micros_to_ms(micros: u128) -> f64 {
-    micros as f64 / 1000.0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
