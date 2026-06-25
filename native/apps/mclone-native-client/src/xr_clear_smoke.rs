@@ -42,10 +42,14 @@ use crate::frame_pacing::elapsed_ms;
 #[cfg(not(target_os = "android"))]
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 
+#[cfg(not(target_os = "android"))]
+mod actions;
 #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
 mod graphics_metal;
 #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
 mod graphics_vulkan;
+#[cfg(not(target_os = "android"))]
+use actions::{OpenXrControllerActions, XrControllerInputSummary};
 #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
 use graphics_metal as platform_graphics;
 #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
@@ -324,6 +328,10 @@ fn run_smoke_frames(
                 .context("initialize mclone XR world state")?,
         ),
     };
+    let controller_actions =
+        OpenXrControllerActions::create(graphics.session.instance(), &graphics.session)
+            .context("initialize OpenXR controller actions")?;
+    let mut controller_summary = XrControllerInputSummary::default();
 
     let mut event_storage = xr::EventDataBuffer::new();
     let mut session_running = false;
@@ -355,26 +363,35 @@ fn run_smoke_frames(
         runtime_frames += 1;
 
         let frame_result = if frame_state.should_render {
-            let result = if let Some(mclone) = &mut mclone {
-                render_mclone_frame(
-                    &mut graphics,
+            let result = controller_actions
+                .poll(
+                    &graphics.session,
                     &stage,
-                    environment_blend_mode,
                     frame_state.predicted_display_time,
-                    &mut left_eye,
-                    &mut right_eye,
-                    mclone,
                 )
-            } else {
-                render_clear_frame(
-                    &mut graphics,
-                    &stage,
-                    environment_blend_mode,
-                    frame_state.predicted_display_time,
-                    &mut left_eye,
-                    &mut right_eye,
-                )
-            };
+                .and_then(|controllers| {
+                    controller_summary.record(&controllers);
+                    if let Some(mclone) = &mut mclone {
+                        render_mclone_frame(
+                            &mut graphics,
+                            &stage,
+                            environment_blend_mode,
+                            frame_state.predicted_display_time,
+                            &mut left_eye,
+                            &mut right_eye,
+                            mclone,
+                        )
+                    } else {
+                        render_clear_frame(
+                            &mut graphics,
+                            &stage,
+                            environment_blend_mode,
+                            frame_state.predicted_display_time,
+                            &mut left_eye,
+                            &mut right_eye,
+                        )
+                    }
+                });
             result.map(|()| {
                 submitted_frames += 1;
             })
@@ -403,6 +420,7 @@ fn run_smoke_frames(
     println!(
         "OpenXR frames submitted: submitted={submitted_frames} runtime_frames={runtime_frames} skipped={skipped_frames}"
     );
+    controller_summary.print_summary();
     if let Some(mclone) = &mclone {
         mclone.print_summary();
     }
@@ -416,6 +434,7 @@ fn run_smoke_frames(
     std::mem::forget(left_eye);
     std::mem::forget(right_eye);
     std::mem::forget(stage);
+    std::mem::forget(controller_actions);
     std::mem::forget(graphics);
     if let Some(mclone) = mclone {
         std::mem::forget(mclone);
