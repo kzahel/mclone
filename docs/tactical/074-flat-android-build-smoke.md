@@ -427,7 +427,7 @@ cargo fmt --manifest-path native/Cargo.toml --all --check
 cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
 cargo test --manifest-path native/Cargo.toml -p mclone-render -p mclone-native-client
 pnpm native:web:build
-cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --headless-chunk /tmp/mclone-desktop-runtime-chunk.png --width 2560 --height 1600 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
+pnpm native:desktop-chunk:smoke
 cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --headless-chunk-scenarios /tmp/mclone-desktop-runtime-scenarios --width 640 --height 400 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 pnpm native:android:apk
 bash android/validate-avd.sh --avd jstorrent-tablet --skip-build --screenshot /tmp/mclone-android-avd-chunk.png --log /tmp/mclone-android-avd-logcat.txt --smoke-seconds 15
