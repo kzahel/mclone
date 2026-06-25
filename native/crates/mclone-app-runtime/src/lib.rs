@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod frame_render;
+
 use std::collections::BTreeSet;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;

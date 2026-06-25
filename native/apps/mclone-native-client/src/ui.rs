@@ -1,4 +1,5 @@
 use glam::Vec3;
+use mclone_app_runtime::frame_render::RenderStreamStats;
 #[cfg(test)]
 use mclone_core::ChunkPos;
 use mclone_ui::{
@@ -6,7 +7,6 @@ use mclone_ui::{
     render_debug_overlay,
 };
 
-use crate::app::RenderStreamStats;
 use crate::cli::HeadlessScreenshotUi;
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingMode, FrameTimingStats};
 use crate::scene_runtime::WindowRuntimeStats;

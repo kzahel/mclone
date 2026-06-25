@@ -10,16 +10,14 @@ use mclone_core::{BlockPos, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_protocol::EntityKind;
 use mclone_render::chunk::{
-    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, TexturedSectionDrawResources,
-    TexturedSectionRenderOptions, TexturedSectionUploadReport,
+    ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
+    TexturedSectionUploadReport,
 };
 use mclone_render::entity::{ActorDrawResources, ActorInstance};
-use mclone_render::fog::RenderFog;
-use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
+use mclone_render::gui::GuiRenderer;
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
-use mclone_render::target::RenderFrameContext;
 use mclone_ui::{
     GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point,
 };
@@ -41,6 +39,9 @@ use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 use crate::ui::{DebugPaneStats, render_debug_pane};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
+use mclone_app_runtime::frame_render::{
+    FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame,
+};
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraMovementMode, EngineCameraSnapshot,
     RenderSectionCacheUpdate, render_camera_from_snapshot,
@@ -83,181 +84,6 @@ pub(crate) fn run_window(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct RenderStreamStats {
-    pub(crate) section_count: usize,
-    pub(crate) drawn_section_count: usize,
-    pub(crate) face_count: u32,
-    pub(crate) drawn_face_count: u32,
-    pub(crate) index_count: u32,
-    pub(crate) drawn_index_count: u32,
-    pub(crate) last_rebuilt_section_count: usize,
-    pub(crate) last_removed_section_count: usize,
-    pub(crate) last_rebuilt_vertex_count: u32,
-    pub(crate) last_rebuilt_face_count: u32,
-    pub(crate) last_rebuilt_index_count: u32,
-    pub(crate) last_neighbor_ready_section_count: usize,
-    pub(crate) last_near_exception_section_count: usize,
-    pub(crate) last_deferred_section_count: usize,
-    pub(crate) last_submitted_compile_section_count: usize,
-    pub(crate) last_completed_compile_section_count: usize,
-    pub(crate) last_stale_compile_section_count: usize,
-    pub(crate) last_pending_compile_jobs: usize,
-    pub(crate) last_visibility_graph_build_count: usize,
-    pub(crate) last_visibility_graph_total_ms: f64,
-    pub(crate) last_visibility_graph_worst_ms: f64,
-    pub(crate) last_uploaded_section_count: usize,
-    pub(crate) last_upload_removed_section_count: usize,
-    pub(crate) last_uploaded_vertex_count: u32,
-    pub(crate) last_uploaded_face_count: u32,
-    pub(crate) last_uploaded_index_count: u32,
-    pub(crate) last_remesh_ms: f64,
-    pub(crate) last_upload_ms: f64,
-    pub(crate) last_frame_ms: f32,
-    pub(crate) actor_count: usize,
-    pub(crate) drawn_actor_count: usize,
-    pub(crate) drawn_actor_index_count: u32,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct FullFrameRenderSummary {
-    pub(crate) section_count: usize,
-    pub(crate) drawn_section_count: usize,
-    pub(crate) index_count: u32,
-    pub(crate) drawn_index_count: u32,
-    pub(crate) gui_command_count: usize,
-    pub(crate) actor_count: usize,
-    pub(crate) drawn_actor_count: usize,
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn render_full_frame(
-    frame: RenderFrameContext<'_>,
-    depth: &ChunkDepthTarget,
-    sky: &SkyRenderer,
-    draw: &mut TexturedSectionDrawResources,
-    actors: &mut ActorDrawResources,
-    screen_effects: &mut ScreenEffectsRenderer,
-    gui: &mut GuiRenderer,
-    camera: ChunkCamera,
-    actor_instances: &[ActorInstance],
-    underwater_overlay: Option<UnderwaterOverlay>,
-    sky_clear_color: wgpu::Color,
-    time_of_day: f32,
-    sun_angle: f32,
-    render_options: TexturedSectionRenderOptions,
-    ui_render_state: GameUiRenderState,
-    ui: &GameUi,
-    debug_stats: Option<DebugPaneStats>,
-    render_stats: &mut RenderStreamStats,
-) -> Result<FullFrameRenderSummary> {
-    let ui_active = ui.is_active();
-    let ui_covers_world = ui.covers_world();
-    let debug_stats = (!ui_active).then_some(debug_stats).flatten();
-    let gui_active = ui_active || debug_stats.is_some();
-    let fog = underwater_overlay
-        .is_some()
-        .then(RenderFog::underwater)
-        .unwrap_or_default();
-    let render_options = render_options
-        .with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day))
-        .with_fog(fog);
-    let mut actor_stats = mclone_render::entity::ActorRenderStats::default();
-
-    if !ui_covers_world {
-        let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
-        let background_clear_color = if fog.enabled {
-            clear_frame_color(frame.encoder, frame.target.color_view, fog.clear_color());
-            fog.clear_color()
-        } else {
-            sky.render(
-                frame.queue,
-                frame.encoder,
-                frame.target.color_view,
-                sky_clear_color,
-                render_view.sky_view_projection(),
-                time_of_day,
-                sun_angle,
-            );
-            sky_clear_color
-        };
-        // The sky/clear pass prepared the background; the chunk pass loads it.
-        let render_target = ChunkRenderTarget::from_frame_target(
-            frame.target.with_depth(&depth.view),
-            background_clear_color,
-        )?
-        .with_loaded_color();
-        let frame_stats = draw.render_with_options(
-            frame.queue,
-            frame.encoder,
-            render_target,
-            render_view,
-            render_options,
-        )?;
-        render_stats.drawn_section_count = frame_stats.drawn_section_count;
-        render_stats.drawn_face_count = frame_stats.drawn_face_count();
-        render_stats.drawn_index_count = frame_stats.drawn_index_count;
-        actor_stats = actors.render(
-            frame.device,
-            frame.queue,
-            frame.encoder,
-            frame.target.with_depth(&depth.view),
-            render_view,
-            render_options,
-            actor_instances,
-        )?;
-        if let Some(overlay) = underwater_overlay {
-            screen_effects.render_underwater(
-                frame.device,
-                frame.queue,
-                frame.encoder,
-                frame.target,
-                overlay,
-            );
-        }
-    } else {
-        render_stats.drawn_section_count = 0;
-        render_stats.drawn_face_count = 0;
-        render_stats.drawn_index_count = 0;
-    }
-    render_stats.actor_count = actor_instances.len();
-    render_stats.drawn_actor_count = actor_stats.drawn_actor_count;
-    render_stats.drawn_actor_index_count = actor_stats.index_count;
-
-    let mut ui_draw = ui.render_draw_list(ui_render_state);
-    if let Some(mut stats) = debug_stats {
-        stats.render = *render_stats;
-        render_debug_pane(ui.scale(), &mut ui_draw, &stats);
-    }
-
-    let gui_command_count = ui_draw.commands().len();
-    if gui_active {
-        gui.render(
-            frame.device,
-            frame.queue,
-            frame.encoder,
-            frame.target,
-            [ui.scale().width, ui.scale().height],
-            &ui_draw,
-            if ui_covers_world {
-                GuiRenderOptions::clear(mclone_render::default_clear_color())
-            } else {
-                GuiRenderOptions::overlay()
-            },
-        )?;
-    }
-
-    Ok(FullFrameRenderSummary {
-        section_count: draw.section_count(),
-        drawn_section_count: render_stats.drawn_section_count,
-        index_count: draw.index_count(),
-        drawn_index_count: render_stats.drawn_index_count,
-        gui_command_count,
-        actor_count: actor_instances.len(),
-        drawn_actor_count: actor_stats.drawn_actor_count,
-    })
-}
-
 pub(crate) fn game_ui_render_state(
     render_distance: i32,
     render_options: TexturedSectionRenderOptions,
@@ -288,26 +114,6 @@ fn gui_key_from_key_code(key_code: KeyCode) -> Option<GuiKey> {
         KeyCode::Escape => Some(GuiKey::Escape),
         _ => None,
     }
-}
-
-fn clear_frame_color(
-    encoder: &mut wgpu::CommandEncoder,
-    color_view: &wgpu::TextureView,
-    color: wgpu::Color,
-) {
-    let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("mclone_world_background_clear_pass"),
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: color_view,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(color),
-                store: wgpu::StoreOp::Store,
-            },
-        })],
-        depth_stencil_attachment: None,
-        ..Default::default()
-    });
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -976,36 +782,6 @@ fn sync_spectator_from_camera(spectator: &mut SpectatorCamera, camera: &EngineCa
     spectator.speed = snapshot.speed_blocks_per_second as f32;
 }
 
-pub(crate) fn record_render_section_update_stats(
-    render_stats: &mut RenderStreamStats,
-    section_update: &RenderSectionCacheUpdate,
-    upload_report: TexturedSectionUploadReport,
-) {
-    render_stats.last_rebuilt_section_count = section_update.rebuilt_section_count();
-    render_stats.last_removed_section_count = section_update.removed_section_count();
-    render_stats.last_rebuilt_vertex_count = section_update.rebuilt_vertex_count;
-    render_stats.last_rebuilt_face_count = section_update.rebuilt_face_count();
-    render_stats.last_rebuilt_index_count = section_update.rebuilt_index_count;
-    render_stats.last_neighbor_ready_section_count = section_update.neighbor_ready_section_count;
-    render_stats.last_near_exception_section_count = section_update.near_exception_section_count;
-    render_stats.last_deferred_section_count = section_update.deferred_section_count;
-    render_stats.last_submitted_compile_section_count =
-        section_update.submitted_compile_section_count;
-    render_stats.last_completed_compile_section_count =
-        section_update.completed_compile_section_count;
-    render_stats.last_stale_compile_section_count = section_update.stale_compile_section_count;
-    render_stats.last_pending_compile_jobs = section_update.pending_compile_jobs;
-    render_stats.last_visibility_graph_build_count =
-        section_update.visibility_graph_stats.build_count;
-    render_stats.last_visibility_graph_total_ms = section_update.visibility_graph_stats.total_ms;
-    render_stats.last_visibility_graph_worst_ms = section_update.visibility_graph_stats.worst_ms;
-    render_stats.last_uploaded_section_count = upload_report.uploaded_section_count;
-    render_stats.last_upload_removed_section_count = upload_report.removed_section_count;
-    render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;
-    render_stats.last_uploaded_face_count = upload_report.uploaded_face_count();
-    render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
-}
-
 impl ApplicationHandler for ChunkApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -1427,6 +1203,17 @@ impl ApplicationHandler for ChunkApp {
                 let debug_stats = self
                     .debug_visible
                     .then(|| self.debug_pane_stats(render_options));
+                let ui_active = self.ui.is_active();
+                let ui_covers_world = self.ui.covers_world();
+                let debug_stats = (!ui_active).then_some(debug_stats).flatten();
+                let gui_active = ui_active || debug_stats.is_some();
+                let gui_scale = self.ui.scale();
+                let base_ui_draw = self.ui.render_draw_list(ui_render_state);
+                let gui_state = FullFrameGui::new(
+                    gui_active,
+                    ui_covers_world,
+                    [gui_scale.width, gui_scale.height],
+                );
                 let traversal_ready_sections = self
                     .runtime
                     .traversal_ready_render_section_keys(camera_view.eye);
@@ -1471,9 +1258,15 @@ impl ApplicationHandler for ChunkApp {
                             time_of_day,
                             sun_angle,
                             render_options,
-                            ui_render_state,
-                            &self.ui,
-                            debug_stats,
+                            gui_state,
+                            |stats| {
+                                let mut ui_draw = base_ui_draw;
+                                if let Some(mut debug_stats) = debug_stats {
+                                    debug_stats.render = *stats;
+                                    render_debug_pane(gui_scale, &mut ui_draw, &debug_stats);
+                                }
+                                ui_draw
+                            },
                             &mut render_stats,
                         )?;
                         Ok(())

@@ -3,6 +3,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
+use mclone_app_runtime::frame_render::{
+    FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame,
+};
 use mclone_client::{
     ActorInterpolationState, ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
@@ -23,16 +26,13 @@ use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_ui::{GameUi, GuiScale};
 
-use crate::app::{
-    RenderStreamStats, actor_instances_from_presentations, game_ui_render_state,
-    record_render_section_update_stats, render_full_frame,
-};
+use crate::app::{actor_instances_from_presentations, game_ui_render_state};
 use crate::camera::SpectatorCamera;
 use crate::cli::{HeadlessScreenshotOptions, SceneOptions};
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState, FrameTimingStats};
 use crate::render_cache::{SceneTexturedSections, load_asset_source};
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
-use crate::ui::DebugPaneStats;
+use crate::ui::{DebugPaneStats, render_debug_pane};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct HeadlessScreenshotReport {
@@ -191,6 +191,21 @@ pub(crate) fn run_headless_screenshot(
                 section_occlusion: render_options.section_occlusion_culling,
                 force_fullbright: render_options.force_fullbright,
             });
+            let ui_active = ui.is_active();
+            let ui_covers_world = ui.covers_world();
+            let debug_stats = (!ui_active).then_some(debug_stats).flatten();
+            let gui_active = ui_active || debug_stats.is_some();
+            let gui_scale = ui.scale();
+            let base_ui_draw = ui.render_draw_list(game_ui_render_state(
+                runtime.render_distance() as i32,
+                render_options,
+                FramePacingUiState::default(),
+            ));
+            let gui_state = FullFrameGui::new(
+                gui_active,
+                ui_covers_world,
+                [gui_scale.width, gui_scale.height],
+            );
 
             render_full_frame(
                 frame,
@@ -207,13 +222,15 @@ pub(crate) fn run_headless_screenshot(
                 time_of_day,
                 sun_angle,
                 render_options,
-                game_ui_render_state(
-                    runtime.render_distance() as i32,
-                    render_options,
-                    FramePacingUiState::default(),
-                ),
-                &ui,
-                debug_stats,
+                gui_state,
+                |stats| {
+                    let mut ui_draw = base_ui_draw;
+                    if let Some(mut debug_stats) = debug_stats {
+                        debug_stats.render = *stats;
+                        render_debug_pane(gui_scale, &mut ui_draw, &debug_stats);
+                    }
+                    ui_draw
+                },
                 &mut render_stats,
             )
         },

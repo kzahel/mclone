@@ -1,6 +1,6 @@
 # 074: Flat Android Build Smoke
 
-Status: proposed high-priority platform slice; Slices 0-2 completed.
+Status: proposed high-priority platform slice; Slices 0-2.5 completed.
 
 Prerequisite: land [`075-shared-single-view-runtime-prereq.md`](075-shared-single-view-runtime-prereq.md)
 before starting Android runtime integration. Android should consume
@@ -255,6 +255,46 @@ Validation:
 cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
 pnpm native:android:apk
 bash android/validate-avd.sh --avd jstorrent-tablet --screenshot /tmp/mclone-android-avd-clear.png --log /tmp/mclone-android-avd-logcat.txt
+```
+
+### Slice 2.5 - Shared Render Composition Cleanup
+
+Goal: remove the desktop-only ownership of full-frame pass ordering before
+Android starts rendering real mclone pixels.
+
+This is deliberately smaller than runtime integration. It should extract the
+generic sky/chunk/actor/screen-effect/GUI composition helper and render-stream
+stats into shared native code, while keeping desktop-specific debug pane,
+frame-pacing, windowing, and input routing in `mclone-native-client`.
+
+- [x] Move reusable full-frame render composition out of
+  `mclone-native-client::app`.
+- [x] Keep platform-specific UI/debug draw-list construction in the app crates.
+- [x] Keep desktop headless/perf/window captures behavior-equivalent.
+- [x] Do not pull winit, desktop frame pacing, or native debug pane types into
+  shared runtime code.
+
+Recorded Slice 2.5 result:
+
+- Added `mclone_app_runtime::frame_render` for reusable full-frame composition,
+  `RenderStreamStats`, `FullFrameGui`, and render-section upload/update stat
+  recording.
+- Native window, headless screenshot, and timedemo/perf paths now build
+  platform-specific UI/debug draw lists and pass them to the shared renderer.
+- The shared helper owns pass ordering for sky/clear, chunks, actors,
+  underwater overlay, and GUI, but does not depend on winit or desktop debug
+  pane types.
+- Screenshot inspected:
+  `/tmp/mclone-render-composition-cleanup.png` (`960x540`), showing terrain,
+  sky, cow actor, and the desktop debug pane.
+
+Validation:
+
+```bash
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -p mclone-native-client
+pnpm native:timedemo:smoke
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-render-composition-cleanup.png --width 960 --height 540 --screenshot-ui none --screenshot-debug-pane true --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
+pnpm native:web:build
 ```
 
 ### Slice 3 - Static Chunk Or Full-Frame Render Smoke

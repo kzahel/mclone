@@ -2,6 +2,9 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
+use mclone_app_runtime::frame_render::{
+    FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame,
+};
 use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 use mclone_mesh::{VisibilityGraphBuildStats, quad_face_count_from_indices};
@@ -20,10 +23,7 @@ use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_ui::{GameUi, GuiScale};
 
-use crate::app::{
-    RenderStreamStats, actor_instances_from_presentations, game_ui_render_state,
-    record_render_section_update_stats, render_full_frame,
-};
+use crate::app::{actor_instances_from_presentations, game_ui_render_state};
 use crate::camera::{
     SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED, SpectatorCamera,
 };
@@ -1392,6 +1392,18 @@ pub(crate) fn run_frame_budget_probe(
                     .runtime
                     .traversal_ready_render_section_keys(spectator.position),
             );
+            let ui_render_state = game_ui_render_state(
+                state.runtime.render_distance() as i32,
+                render_options,
+                FramePacingUiState::default(),
+            );
+            let gui_scale = state.ui.scale();
+            let gui_state = FullFrameGui::new(
+                state.ui.is_active(),
+                state.ui.covers_world(),
+                [gui_scale.width, gui_scale.height],
+            );
+            let ui_draw = state.ui.render_draw_list(ui_render_state);
             let render_start = Instant::now();
             render_full_frame(
                 frame,
@@ -1408,13 +1420,8 @@ pub(crate) fn run_frame_budget_probe(
                 time_of_day,
                 sun_angle,
                 render_options,
-                game_ui_render_state(
-                    state.runtime.render_distance() as i32,
-                    render_options,
-                    FramePacingUiState::default(),
-                ),
-                &state.ui,
-                None,
+                gui_state,
+                |_| ui_draw,
                 &mut state.render_stats,
             )?;
             report.render_ms = elapsed_ms(render_start.elapsed());
