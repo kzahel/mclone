@@ -1,6 +1,6 @@
 # 077: Multiview Render Contract
 
-Status: Slice 1 complete; dual-view headless capture is next.
+Status: Slices 1-2 complete; shared render tests remain.
 
 ## Purpose
 
@@ -93,24 +93,38 @@ vertices and `780174` indices.
 
 ### Slice 2 - Dual-View Headless Capture
 
-- [ ] Add a deterministic headless validation path that renders the same
+- [x] Add a deterministic headless validation path that renders the same
   runtime section set from two slightly offset views.
-- [ ] Save either two PNGs or one side-by-side PNG under `/tmp`.
-- [ ] Assert both views are nonblank and carry expected terrain pixels.
-- [ ] Keep the capture independent of OpenXR.
+- [x] Save either two PNGs or one side-by-side PNG under `/tmp`.
+- [x] Assert both views are nonblank and carry expected terrain pixels.
+- [x] Keep the capture independent of OpenXR.
+
+Recorded Slice 2 result:
+
+- Added `--headless-dual-view DIR`, writing `left.png` and `right.png`.
+- The mode builds one integrated runtime, polls it to idle, syncs one runtime
+  section set, and renders two offset full-frame world views through
+  `render_full_frame_for_view(...)`.
+- The capture fails if either rendered image has no RGB pixels differing from
+  the top-left clear/background color, so an all-clear or all-sky frame does
+  not pass as terrain output.
+- The output remains OpenXR-free and uses ordinary headless `wgpu` readback.
 
 Suggested command shape:
 
 ```bash
-cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- \
-  --headless-dual-view /tmp/mclone-dual-view \
-  --width 960 --height 640 \
-  --seed 12345 --chunk-x 0 --chunk-z 0 \
-  --render-distance 2 --day-time 6000 --freeze-time
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --headless-dual-view /tmp/mclone-dual-view --width 960 --height 640 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 ```
 
-The exact CLI spelling can change during implementation, but the validation
-must leave inspectable images under `/tmp`.
+Validation output:
+
+- `/tmp/mclone-dual-view/left.png`: `960x640`, `35971` non-clear RGB pixels,
+  `166` drawn sections, `780174` drawn indices.
+- `/tmp/mclone-dual-view/right.png`: `960x640`, `36011` non-clear RGB pixels,
+  `166` drawn sections, `780174` drawn indices.
+
+Both screenshots were inspected and showed the expected terrain cutaway with a
+small left/right view offset.
 
 ### Slice 3 - Shared Render Tests
 

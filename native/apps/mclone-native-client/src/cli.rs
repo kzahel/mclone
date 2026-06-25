@@ -101,6 +101,15 @@ pub(crate) struct HeadlessScreenshotOptions {
     pub(crate) eye: Option<[f32; 3]>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct HeadlessDualViewOptions {
+    pub(crate) directory: PathBuf,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) scene: SceneOptions,
+    pub(crate) render_options: TexturedSectionRenderOptions,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum HeadlessScreenshotUi {
     #[default]
@@ -201,6 +210,9 @@ pub(crate) enum Cli {
     HeadlessScreenshot {
         options: HeadlessScreenshotOptions,
     },
+    HeadlessDualView {
+        options: HeadlessDualViewOptions,
+    },
     MovementPerf {
         options: MovementPerfOptions,
     },
@@ -217,6 +229,7 @@ enum HeadlessMode {
     Clear(PathBuf),
     Chunk(PathBuf),
     ChunkScenarios(PathBuf),
+    DualView(PathBuf),
     Ui(PathBuf),
     Screenshot(PathBuf),
 }
@@ -324,6 +337,16 @@ impl Cli {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::ChunkScenarios(path))?;
+                }
+                "--headless-dual-view" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--headless-dual-view requires an output directory")?;
+                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                        bail!("headless output modes cannot be combined with perf modes");
+                    }
+                    set_headless_mode(&mut mode, HeadlessMode::DualView(path))?;
                 }
                 "--headless-ui" => {
                     let path = args
@@ -490,6 +513,15 @@ impl Cli {
                 height: height.unwrap_or(640),
                 scene,
                 render_options,
+            }),
+            Some(HeadlessMode::DualView(directory)) => Ok(Self::HeadlessDualView {
+                options: HeadlessDualViewOptions {
+                    directory,
+                    width: width.unwrap_or(960),
+                    height: height.unwrap_or(640),
+                    scene,
+                    render_options,
+                },
             }),
             Some(HeadlessMode::Ui(path)) => Ok(Self::HeadlessUi {
                 path,
@@ -735,6 +767,7 @@ fn print_help() {
            mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
+           mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\

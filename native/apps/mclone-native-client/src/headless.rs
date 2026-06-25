@@ -24,11 +24,11 @@ use mclone_render::headless::{
 };
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
-use mclone_ui::{GameUi, GuiScale};
+use mclone_ui::{GameUi, GuiDrawList, GuiScale};
 
 use crate::app::{actor_instances_from_presentations, game_ui_render_state};
 use crate::camera::SpectatorCamera;
-use crate::cli::{HeadlessScreenshotOptions, SceneOptions};
+use crate::cli::{HeadlessDualViewOptions, HeadlessScreenshotOptions, SceneOptions};
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState, FrameTimingStats};
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
@@ -51,6 +51,172 @@ pub(crate) struct HeadlessScreenshotReport {
     pub(crate) drawn_actor_count: usize,
     pub(crate) underwater: bool,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct HeadlessDualViewReport {
+    pub(crate) view_name: &'static str,
+    pub(crate) path: PathBuf,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) byte_len: usize,
+    pub(crate) non_clear_rgb_pixel_count: usize,
+    pub(crate) section_count: usize,
+    pub(crate) drawn_section_count: usize,
+    pub(crate) index_count: u32,
+    pub(crate) drawn_index_count: u32,
+}
+
+pub(crate) fn write_headless_dual_view(
+    options: &HeadlessDualViewOptions,
+) -> Result<Vec<HeadlessDualViewReport>> {
+    std::fs::create_dir_all(&options.directory).with_context(|| {
+        format!(
+            "failed to create dual-view output directory {}",
+            options.directory.display()
+        )
+    })?;
+
+    let mut runtime = WindowSceneRuntime::new(&options.scene)?;
+    poll_window_runtime_until_idle(&mut runtime)?;
+    if let Some(day_time) = options.scene.day_time_override {
+        runtime.force_day_time(day_time);
+    }
+
+    let base_camera = ChunkCamera::overview_for_chunk_area(
+        options.scene.chunk_x,
+        options.scene.chunk_z,
+        options.scene.render_distance,
+    );
+    runtime.sync_all_render_sections(Vec3::from_array(base_camera.eye))?;
+    let sections = runtime.cached_sections();
+    if sections.is_empty() {
+        bail!(
+            "headless dual-view seed={} center=({}, {}) render_distance={} produced no render sections",
+            options.scene.seed,
+            options.scene.chunk_x,
+            options.scene.chunk_z,
+            options.scene.render_distance
+        );
+    }
+
+    let mut reports = Vec::new();
+    for (view_name, camera) in dual_view_cameras(base_camera) {
+        let path = options.directory.join(format!("{view_name}.png"));
+        reports.push(write_headless_dual_view_frame(
+            &runtime,
+            &sections,
+            path,
+            options.width,
+            options.height,
+            view_name,
+            camera,
+            options.render_options,
+        )?);
+    }
+    Ok(reports)
+}
+
+fn write_headless_dual_view_frame(
+    runtime: &WindowSceneRuntime,
+    sections: &[mclone_mesh::TexturedRenderSectionMesh],
+    path: PathBuf,
+    width: u32,
+    height: u32,
+    view_name: &'static str,
+    camera: ChunkCamera,
+    render_options: TexturedSectionRenderOptions,
+) -> Result<HeadlessDualViewReport> {
+    let sky_clear_color = runtime.sky_clear_color();
+    let time_of_day = runtime.time_of_day();
+    let sun_angle = runtime.sun_angle();
+    let (frame_report, summary) = write_headless_frame_png(
+        HeadlessFrameOptions {
+            path,
+            width,
+            height,
+        },
+        |frame| {
+            let depth =
+                ChunkDepthTarget::new(frame.device, frame.target.size[0], frame.target.size[1]);
+            let mut draw = TexturedSectionDrawResources::new(
+                frame.device,
+                frame.queue,
+                HEADLESS_FORMAT,
+                sections,
+                runtime.mesh_assets.atlas.as_upload(),
+            )?;
+            let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
+            draw.set_traversal_ready_sections(
+                &runtime.traversal_ready_render_section_keys(render_view.camera_position),
+            );
+            let sky = SkyRenderer::new(frame.device, HEADLESS_FORMAT);
+            let mut render_stats = RenderStreamStats {
+                section_count: draw.section_count(),
+                index_count: draw.index_count(),
+                face_count: quad_face_count_from_indices(draw.index_count()),
+                ..RenderStreamStats::default()
+            };
+            render_full_frame_for_view(
+                frame,
+                &depth,
+                &sky,
+                &mut draw,
+                None,
+                None,
+                None,
+                render_view,
+                &[],
+                None,
+                sky_clear_color,
+                time_of_day,
+                sun_angle,
+                render_options,
+                FullFrameGui::new(false, false, [1.0, 1.0]),
+                |_| GuiDrawList::new(),
+                &mut render_stats,
+            )
+        },
+    )?;
+    if frame_report.non_clear_rgb_pixel_count == 0 {
+        bail!(
+            "headless dual-view {view_name} capture had no world pixels over the clear background: {}",
+            frame_report.path.display()
+        );
+    }
+
+    Ok(HeadlessDualViewReport {
+        view_name,
+        path: frame_report.path,
+        width: frame_report.width,
+        height: frame_report.height,
+        byte_len: frame_report.byte_len,
+        non_clear_rgb_pixel_count: frame_report.non_clear_rgb_pixel_count,
+        section_count: summary.section_count,
+        drawn_section_count: summary.drawn_section_count,
+        index_count: summary.index_count,
+        drawn_index_count: summary.drawn_index_count,
+    })
+}
+
+fn dual_view_cameras(base: ChunkCamera) -> [(&'static str, ChunkCamera); 2] {
+    let eye = Vec3::from_array(base.eye);
+    let target = Vec3::from_array(base.target);
+    let up = Vec3::from_array(base.up);
+    let forward = (target - eye).normalize_or_zero();
+    let right = forward.cross(up).normalize_or_zero();
+    let separation = 1.2_f32;
+    [
+        ("left", offset_camera(base, right * -separation * 0.5)),
+        ("right", offset_camera(base, right * separation * 0.5)),
+    ]
+}
+
+fn offset_camera(mut camera: ChunkCamera, offset: Vec3) -> ChunkCamera {
+    camera.eye = (Vec3::from_array(camera.eye) + offset).to_array();
+    camera.target = (Vec3::from_array(camera.target) + offset).to_array();
+    camera
+}
+
 pub(crate) fn write_headless_chunk_scenarios(
     directory: &Path,
     width: u32,

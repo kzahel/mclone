@@ -21,11 +21,13 @@ use crate::camera::SPECTATOR_BASE_SPEED;
 use crate::cli::Cli;
 #[cfg(test)]
 use crate::cli::{
-    FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessScreenshotOptions, HeadlessScreenshotUi,
-    MovementPerfOptions, SceneOptions, TimedemoOptions, parse_screenshot_ui_arg,
+    FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessDualViewOptions,
+    HeadlessScreenshotOptions, HeadlessScreenshotUi, MovementPerfOptions, SceneOptions,
+    TimedemoOptions, parse_screenshot_ui_arg,
 };
 use crate::headless::{
-    run_headless_screenshot, write_headless_chunk_scenarios, write_headless_runtime_chunk,
+    run_headless_screenshot, write_headless_chunk_scenarios, write_headless_dual_view,
+    write_headless_runtime_chunk,
 };
 use crate::perf::{run_frame_budget_probe, run_movement_perf_smoke, run_timedemo};
 use crate::ui::render_static_title_ui;
@@ -165,6 +167,25 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Cli::HeadlessDualView { options } => {
+            let reports = write_headless_dual_view(&options)?;
+            for report in reports {
+                println!(
+                    "headless dual-view {} saved to {} ({}x{}, {} bytes, {} non-clear RGB pixels, {} sections, {} drawn sections, {} indices, {} drawn indices)",
+                    report.view_name,
+                    report.path.display(),
+                    report.width,
+                    report.height,
+                    report.byte_len,
+                    report.non_clear_rgb_pixel_count,
+                    report.section_count,
+                    report.drawn_section_count,
+                    report.index_count,
+                    report.drawn_index_count
+                );
+            }
+            Ok(())
+        }
         Cli::MovementPerf { options } => {
             let report = run_movement_perf_smoke(&options)?;
             report.validate()?;
@@ -255,6 +276,43 @@ mod tests {
             Cli::Window {
                 scene: SceneOptions::default(),
                 render_options: TexturedSectionRenderOptions::default(),
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_headless_dual_view_scene_options() {
+        let cli = Cli::parse([
+            "--headless-dual-view".to_owned(),
+            "/tmp/mclone-dual-view".to_owned(),
+            "--width".to_owned(),
+            "960".to_owned(),
+            "--height".to_owned(),
+            "640".to_owned(),
+            "--seed".to_owned(),
+            "54321".to_owned(),
+            "--chunk-x".to_owned(),
+            "2".to_owned(),
+            "--chunk-z".to_owned(),
+            "-1".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::HeadlessDualView {
+                options: HeadlessDualViewOptions {
+                    directory: PathBuf::from("/tmp/mclone-dual-view"),
+                    width: 960,
+                    height: 640,
+                    scene: SceneOptions {
+                        seed: 54321,
+                        chunk_x: 2,
+                        chunk_z: -1,
+                        ..SceneOptions::default()
+                    },
+                    render_options: TexturedSectionRenderOptions::default(),
+                },
             }
         );
     }

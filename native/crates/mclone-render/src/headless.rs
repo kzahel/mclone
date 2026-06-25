@@ -86,6 +86,7 @@ pub struct HeadlessFrameReport {
     pub width: u32,
     pub height: u32,
     pub byte_len: usize,
+    pub non_clear_rgb_pixel_count: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -436,6 +437,7 @@ where
             width,
             height,
             byte_len: pixels.len(),
+            non_clear_rgb_pixel_count: count_non_clear_rgb_pixels(&pixels),
         },
         render_output,
     ))
@@ -813,6 +815,16 @@ fn save_rgba_png(path: &Path, width: u32, height: u32, pixels: &[u8]) -> Result<
         .save(path)
         .with_context(|| format!("failed to save `{}`", path.display()))?;
     Ok(())
+}
+
+fn count_non_clear_rgb_pixels(pixels: &[u8]) -> usize {
+    let Some(clear) = pixels.get(0..3) else {
+        return 0;
+    };
+    pixels
+        .chunks_exact(4)
+        .filter(|pixel| &pixel[0..3] != clear)
+        .count()
 }
 
 fn ensure_parent_dir(path: &Path) -> Result<()> {
