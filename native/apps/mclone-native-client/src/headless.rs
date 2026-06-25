@@ -20,7 +20,7 @@ use mclone_render::entity::ActorDrawResources;
 use mclone_render::gui::GuiRenderer;
 use mclone_render::headless::{
     HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessFrameOptions, write_headless_frame_png,
-    write_headless_textured_sections_png_with_options,
+    write_headless_textured_sections_png_with_ready_sections,
 };
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
@@ -30,7 +30,7 @@ use crate::app::{actor_instances_from_presentations, game_ui_render_state};
 use crate::camera::SpectatorCamera;
 use crate::cli::{HeadlessScreenshotOptions, SceneOptions};
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState, FrameTimingStats};
-use crate::render_cache::{SceneTexturedSections, load_asset_source};
+use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 use crate::ui::{DebugPaneStats, render_debug_pane};
 
@@ -56,26 +56,71 @@ pub(crate) fn write_headless_chunk_scenarios(
     width: u32,
     height: u32,
     scene: &SceneOptions,
-    scene_mesh: &SceneTexturedSections,
     render_options: TexturedSectionRenderOptions,
 ) -> Result<Vec<mclone_render::headless::HeadlessChunkReport>> {
+    let mut runtime = WindowSceneRuntime::new(scene)?;
+    poll_window_runtime_until_idle(&mut runtime)?;
     let mut reports = Vec::new();
     for (name, camera) in chunk_capture_scenarios(scene) {
-        let path = directory.join(format!("{name}.png"));
-        reports.push(write_headless_textured_sections_png_with_options(
-            HeadlessChunkOptions {
-                path,
-                width,
-                height,
-                color: mclone_render::default_clear_color(),
-                camera,
-            },
-            &scene_mesh.sections,
-            scene_mesh.atlas.as_upload(),
+        reports.push(write_headless_runtime_chunk_with_camera(
+            &mut runtime,
+            directory.join(format!("{name}.png")),
+            width,
+            height,
+            camera,
             render_options,
         )?);
     }
     Ok(reports)
+}
+
+pub(crate) fn write_headless_runtime_chunk(
+    path: PathBuf,
+    width: u32,
+    height: u32,
+    scene: &SceneOptions,
+    render_options: TexturedSectionRenderOptions,
+) -> Result<mclone_render::headless::HeadlessChunkReport> {
+    let mut runtime = WindowSceneRuntime::new(scene)?;
+    poll_window_runtime_until_idle(&mut runtime)?;
+    write_headless_runtime_chunk_with_camera(
+        &mut runtime,
+        path,
+        width,
+        height,
+        ChunkCamera::overview_for_chunk_area(scene.chunk_x, scene.chunk_z, scene.render_distance),
+        render_options,
+    )
+}
+
+fn write_headless_runtime_chunk_with_camera(
+    runtime: &mut WindowSceneRuntime,
+    path: PathBuf,
+    width: u32,
+    height: u32,
+    camera: ChunkCamera,
+    render_options: TexturedSectionRenderOptions,
+) -> Result<mclone_render::headless::HeadlessChunkReport> {
+    let camera_position = Vec3::from_array(camera.eye);
+    runtime.sync_all_render_sections(camera_position)?;
+    let sections = runtime.cached_sections();
+    if sections.is_empty() {
+        bail!("headless runtime chunk capture produced no render sections");
+    }
+    let ready_sections = runtime.traversal_ready_render_section_keys(camera_position);
+    write_headless_textured_sections_png_with_ready_sections(
+        HeadlessChunkOptions {
+            path,
+            width,
+            height,
+            color: mclone_render::default_clear_color(),
+            camera,
+        },
+        &sections,
+        runtime.mesh_assets.atlas.as_upload(),
+        render_options,
+        Some(&ready_sections),
+    )
 }
 
 pub(crate) fn run_headless_screenshot(

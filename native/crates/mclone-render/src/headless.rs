@@ -1,9 +1,12 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use mclone_mesh::{TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh};
+use mclone_mesh::{
+    RenderSectionKey, TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh,
+};
 use mclone_ui::{GuiDrawList, GuiScale};
 
 use crate::chunk::{
@@ -291,13 +294,32 @@ pub fn write_headless_textured_sections_png_with_options(
     atlas: ChunkTextureAtlas<'_>,
     render_options: TexturedSectionRenderOptions,
 ) -> Result<HeadlessChunkReport> {
+    write_headless_textured_sections_png_with_ready_sections(
+        options,
+        sections,
+        atlas,
+        render_options,
+        None,
+    )
+}
+
+pub fn write_headless_textured_sections_png_with_ready_sections(
+    options: HeadlessChunkOptions,
+    sections: &[TexturedRenderSectionMesh],
+    atlas: ChunkTextureAtlas<'_>,
+    render_options: TexturedSectionRenderOptions,
+    ready_sections: Option<&BTreeSet<RenderSectionKey>>,
+) -> Result<HeadlessChunkReport> {
     let width = options.width.max(1);
     let height = options.height.max(1);
     let (device, queue) = create_headless_device()?;
     let target = OffscreenTarget::new(&device, width, height, HEADLESS_FORMAT);
     let depth = ChunkDepthTarget::new(&device, width, height);
-    let draw =
+    let mut draw =
         TexturedSectionDrawResources::new(&device, &queue, HEADLESS_FORMAT, sections, atlas)?;
+    if let Some(ready_sections) = ready_sections {
+        draw.set_traversal_ready_sections(ready_sections);
+    }
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("mclone_headless_textured_sections_encoder"),

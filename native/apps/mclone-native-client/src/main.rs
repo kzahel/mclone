@@ -24,19 +24,18 @@ use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessScreenshotOptions, HeadlessScreenshotUi,
     MovementPerfOptions, SceneOptions, TimedemoOptions, parse_screenshot_ui_arg,
 };
-use crate::headless::{run_headless_screenshot, write_headless_chunk_scenarios};
+use crate::headless::{
+    run_headless_screenshot, write_headless_chunk_scenarios, write_headless_runtime_chunk,
+};
 use crate::perf::{run_frame_budget_probe, run_movement_perf_smoke, run_timedemo};
-use crate::scene_runtime::build_scene_textured_sections;
 use crate::ui::render_static_title_ui;
 use anyhow::Result;
 #[cfg(test)]
 use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, ChunkPos, ChunkSnapshot};
-use mclone_render::chunk::ChunkCamera;
 #[cfg(test)]
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::headless::{
-    HeadlessChunkOptions, HeadlessClearOptions, HeadlessUiOptions, write_headless_clear_png,
-    write_headless_textured_sections_png_with_options, write_headless_ui_png,
+    HeadlessClearOptions, HeadlessUiOptions, write_headless_clear_png, write_headless_ui_png,
 };
 #[cfg(test)]
 use mclone_render_session::snapshot_mesh_block_state_ids;
@@ -88,25 +87,9 @@ fn main() -> Result<()> {
             scene,
             render_options,
         } => {
-            let scene_mesh = build_scene_textured_sections(&scene)?;
-            let report = write_headless_textured_sections_png_with_options(
-                HeadlessChunkOptions {
-                    path,
-                    width,
-                    height,
-                    color: mclone_render::default_clear_color(),
-                    camera: ChunkCamera::overview_for_chunk_area(
-                        scene.chunk_x,
-                        scene.chunk_z,
-                        scene.render_distance,
-                    ),
-                },
-                &scene_mesh.sections,
-                scene_mesh.atlas.as_upload(),
-                render_options,
-            )?;
+            let report = write_headless_runtime_chunk(path, width, height, &scene, render_options)?;
             println!(
-                "headless textured sections saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
+                "headless runtime chunk saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
                 report.path.display(),
                 report.width,
                 report.height,
@@ -123,18 +106,11 @@ fn main() -> Result<()> {
             scene,
             render_options,
         } => {
-            let scene_mesh = build_scene_textured_sections(&scene)?;
-            let reports = write_headless_chunk_scenarios(
-                &directory,
-                width,
-                height,
-                &scene,
-                &scene_mesh,
-                render_options,
-            )?;
+            let reports =
+                write_headless_chunk_scenarios(&directory, width, height, &scene, render_options)?;
             for report in reports {
                 println!(
-                    "headless textured scenario saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
+                    "headless runtime chunk scenario saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
                     report.path.display(),
                     report.width,
                     report.height,

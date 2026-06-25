@@ -407,19 +407,34 @@ Recorded Slice 4 runtime/asset-pack result:
   segfault, and Rust panic scan passed. Key diagnostics showed the staged asset
   pack loaded, 49 chunks loaded, 166 uploaded/drawn sections, and 780174 drawn
   indices.
+- Desktop comparison follow-up: `--headless-chunk` and
+  `--headless-chunk-scenarios` now use `WindowSceneRuntime`, integrated server
+  polling, render-section streaming, and traversal-ready filtering before
+  handing sections to the headless chunk renderer. The renderer-only helper
+  still exists for lower-level callers, but the default desktop chunk smoke now
+  matches the runtime section set that Android renders.
+- Screenshot inspected: `/tmp/mclone-desktop-runtime-chunk.png` (`2560x1600`),
+  showing the same terrain cutaway shape as Android; the desktop smoke reported
+  `780174` indices, matching the Android log.
+- Scenario directory smoke wrote `/tmp/mclone-desktop-runtime-scenarios/`
+  (`overview.png`, `orbit-east.png`, `close.png`) with the same runtime section
+  set for each camera.
 
 Validation:
 
 ```bash
 cargo fmt --manifest-path native/Cargo.toml --all --check
 cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
-cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-render -p mclone-native-client
 pnpm native:web:build
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --headless-chunk /tmp/mclone-desktop-runtime-chunk.png --width 2560 --height 1600 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --headless-chunk-scenarios /tmp/mclone-desktop-runtime-scenarios --width 640 --height 400 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 pnpm native:android:apk
 bash android/validate-avd.sh --avd jstorrent-tablet --skip-build --screenshot /tmp/mclone-android-avd-chunk.png --log /tmp/mclone-android-avd-logcat.txt --smoke-seconds 15
 ```
 
-Inspect `/tmp/mclone-android-avd-chunk.png`.
+Inspect `/tmp/mclone-desktop-runtime-chunk.png` and
+`/tmp/mclone-android-avd-chunk.png`.
 
 ### Slice 5 - Quest-Flat Optional Smoke
 
