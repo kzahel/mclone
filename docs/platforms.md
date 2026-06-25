@@ -2,7 +2,7 @@
 
 This document owns Mclone's platform posture for the native Rust engine. It
 captures the current target status, how to use the Playbox reference engine,
-and why the next platform investment is a flat Android build before XR.
+and how XR work should proceed after the flat Android baseline.
 
 The durable rewrite roadmap remains [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md).
 This page is narrower: app hosts, surfaces, packaging, validation lanes, and
@@ -15,8 +15,8 @@ the boundaries that keep shared engine crates platform-neutral.
 | Native desktop | active primary target | `native/apps/mclone-native-client` is the main interactive loop and validation surface. It owns desktop `winit`, surface acquisition, input, frame pacing, and headless/native screenshots. |
 | Native web/WASM | active compatibility and deploy target | `native/apps/mclone-web-client` builds for `wasm32-unknown-unknown`, uses WebGPU through `wgpu`, and keeps browser workers, TypeScript glue, mobile web controls, and deployment alive. |
 | Native dedicated server | active | `native/apps/mclone-dedicated-server` validates the protocol/server boundary without a renderer. |
-| Flat Android | next platform frontload target | No app crate, Gradle project, manifest, APK script, or device validation lane exists yet. A target check currently fails before mclone code because `winit` pulls `android-activity` without the `android-native-activity` feature enabled. |
-| Desktop OpenXR | future, likely before Android XR | No mclone OpenXR code exists. Keep render view/target boundaries compatible with per-eye rendering, but do not add OpenXR scaffolding in the flat Android slice. |
+| Flat Android | baseline validation lane complete | `native/apps/mclone-android-client` builds a flat `NativeActivity` APK, renders integrated-runtime terrain through Vulkan-backed `wgpu`, stages packed assets, validates on AVD with screenshot/logcat smokes, and has a touch-orbit smoke. Quest-flat hardware capture remains optional/pending. |
+| Desktop OpenXR | next XR runtime target after multi-view cleanup | No mclone OpenXR code exists. The next XR sequence is multi-view render-boundary cleanup, then desktop OpenXR clear/session smoke, then a real mclone frame through OpenXR. |
 | Android XR / Quest standalone | future | A real future native target, but gated behind flat Android confidence and a desktop OpenXR path. Do not fold Quest/OpenXR assumptions into the flat Android app. |
 | Legacy TypeScript/browser engine | reference only | Useful for prior behavior and fixtures until retired, not a platform direction for new engine work. |
 
@@ -26,16 +26,17 @@ Desktop native remains the main development loop. Native web/WASM remains a
 compatibility gate because browser constraints can still expose bad shared API
 decisions early.
 
-Flat Android is now the next platform target to frontload. The goal is not a
-complete mobile product immediately. The goal is to discover native Android
-packaging, lifecycle, Vulkan-backed `wgpu`, asset packaging, and touch/control
-constraints while the app and renderer boundaries are still malleable.
+Flat Android is now a baseline platform validation lane. The goal was not a
+complete mobile product; it was to discover native Android packaging,
+lifecycle, Vulkan-backed `wgpu`, asset packaging, and touch/control constraints
+while app and renderer boundaries were still malleable.
 
-XR stays out of the flat Android workstream. The likely XR sequence is:
+XR stays out of the flat Android workstream. The likely XR sequence is now:
 
-1. keep render targets and views explicit during desktop and flat Android work
-2. bring up desktop OpenXR when stereo/runtime risks become the next priority
-3. add Android XR / Quest standalone after flat Android and desktop XR have
+1. finish multi-view render-contract cleanup without OpenXR
+2. harden platform-neutral input/startup seams where they affect XR
+3. bring up desktop OpenXR when stereo/runtime risks become the next priority
+4. add Android XR / Quest standalone after flat Android and desktop XR have
    proven the separate platform concerns
 
 ## Reference Engine
@@ -116,10 +117,10 @@ Mclone's current desktop code already has most of the pieces:
 - `RenderFrameContext` describes host-acquired device/queue/encoder/target
   facts independent of window, canvas, or offscreen readback.
 
-The flat Android work should reuse or extract these pieces instead of forking
-the engine. A temporary Android-local clear/chunk smoke is acceptable, but the
-playable path should share the desktop/native-web runtime and render-session
-policy.
+Flat Android now reuses these pieces instead of forking the engine. Future
+platform work should preserve that shape: host adapters own lifecycle, surface,
+input, and package paths; shared crates own runtime/render-session policy and
+rendering from explicit frame facts.
 
 ## Flat Android Target
 
@@ -163,7 +164,7 @@ app files without changing model/atlas loading code.
 
 Every platform bring-up must have an executable validation lane.
 
-For flat Android, the minimum lane is:
+For flat Android, the baseline lane is:
 
 1. build the Rust shared library with `cargo ndk`
 2. build an APK
@@ -176,7 +177,17 @@ Quest-flat validation is useful after AVD works, but it is not a substitute for
 an emulator smoke because Quest availability should not be required for every
 platform regression check.
 
+For desktop OpenXR, the first lane should be bounded and scriptable:
+
+1. build/check the XR feature without affecting non-XR builds
+2. launch the active OpenXR runtime
+3. create a real session and per-eye swapchains
+4. submit a bounded number of clear/test-pattern frames
+5. log runtime/backend/swapchain facts and exit cleanly
+
 ## Tactical Link
 
-The concrete flat Android workstream lives in
+The completed flat Android workstream lives in
 [`tactical/074-flat-android-build-smoke.md`](tactical/074-flat-android-build-smoke.md).
+The XR frontload sequence lives in
+[`tactical/076-native-xr-frontload-plan.md`](tactical/076-native-xr-frontload-plan.md).

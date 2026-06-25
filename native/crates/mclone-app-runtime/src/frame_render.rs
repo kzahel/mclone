@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use mclone_render::chunk::{
-    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, TexturedSectionDrawResources,
-    TexturedSectionRenderOptions, TexturedSectionUploadReport,
+    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView,
+    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
 use mclone_render::entity::{ActorDrawResources, ActorInstance, ActorRenderStats};
 use mclone_render::fog::RenderFog;
@@ -99,6 +99,51 @@ pub fn render_full_frame<BuildGuiDraw>(
 where
     BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
 {
+    let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
+    render_full_frame_for_view(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        render_stats,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    render_stats: &mut RenderStreamStats,
+) -> Result<FullFrameRenderSummary>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
     let fog = underwater_overlay
         .is_some()
         .then(RenderFog::underwater)
@@ -109,7 +154,6 @@ where
     let mut actor_stats = ActorRenderStats::default();
 
     if !gui.covers_world {
-        let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
         let background_clear_color = if fog.enabled {
             clear_frame_color(frame.encoder, frame.target.color_view, fog.clear_color());
             fog.clear_color()

@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_app_runtime::frame_render::{
-    FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame,
+    FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame_for_view,
 };
 use mclone_client::{
     ActorInterpolationState, ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
@@ -252,7 +252,8 @@ pub(crate) fn run_headless_screenshot(
                 [gui_scale.width, gui_scale.height],
             );
 
-            render_full_frame(
+            let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
+            render_full_frame_for_view(
                 frame,
                 &depth,
                 &sky,
@@ -260,7 +261,7 @@ pub(crate) fn run_headless_screenshot(
                 Some(&mut actors),
                 Some(&mut screen_effects),
                 Some(&mut gui),
-                camera,
+                render_view,
                 &actor_instances,
                 underwater_overlay,
                 sky_clear_color,

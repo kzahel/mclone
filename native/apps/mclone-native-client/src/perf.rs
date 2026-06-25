@@ -3,7 +3,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_app_runtime::frame_render::{
-    FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame,
+    FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame_for_view,
 };
 use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
@@ -1405,7 +1405,8 @@ pub(crate) fn run_frame_budget_probe(
             );
             let ui_draw = state.ui.render_draw_list(ui_render_state);
             let render_start = Instant::now();
-            render_full_frame(
+            let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
+            render_full_frame_for_view(
                 frame,
                 &state.depth,
                 &state.sky,
@@ -1413,7 +1414,7 @@ pub(crate) fn run_frame_budget_probe(
                 Some(&mut state.actors),
                 Some(&mut state.screen_effects),
                 Some(&mut state.gui),
-                camera,
+                render_view,
                 &actor_instances,
                 underwater_overlay,
                 sky_clear_color,

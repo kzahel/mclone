@@ -40,7 +40,7 @@ use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 use crate::ui::{DebugPaneStats, render_debug_pane};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 use mclone_app_runtime::frame_render::{
-    FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame,
+    FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame_for_view,
 };
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraMovementMode, EngineCameraSnapshot,
@@ -1243,7 +1243,9 @@ impl ApplicationHandler for ChunkApp {
                     draw.set_traversal_ready_sections(&traversal_ready_sections);
                     self.frame_pacing.apply_to_surface(surface);
                     surface.render_with_report(|frame| {
-                        render_full_frame(
+                        let render_view =
+                            camera.render_view(frame.target.size[0], frame.target.size[1]);
+                        render_full_frame_for_view(
                             frame,
                             depth,
                             sky,
@@ -1251,7 +1253,7 @@ impl ApplicationHandler for ChunkApp {
                             Some(actors),
                             Some(screen_effects),
                             Some(gui),
-                            camera,
+                            render_view,
                             &actor_instances,
                             underwater_overlay,
                             sky_clear_color,

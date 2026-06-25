@@ -11,7 +11,8 @@ mod android {
     use anyhow::{Context, Result, bail};
     use glam::Vec3;
     use mclone_app_runtime::frame_render::{
-        FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame,
+        FullFrameGui, RenderStreamStats, record_render_section_update_stats,
+        render_full_frame_for_view,
     };
     use mclone_app_runtime::render_assets::{
         RenderSectionCompileWorker, TexturedMeshAssets, load_textured_mesh_assets,
@@ -393,7 +394,10 @@ mod android {
             );
             let time_of_day = self.scene.time_of_day();
             let sun_angle = self.scene.sun_angle();
-            let summary = render_full_frame(
+            let render_view = self
+                .camera
+                .render_view(frame.target.size[0], frame.target.size[1]);
+            let summary = render_full_frame_for_view(
                 frame,
                 &self.depth,
                 &self.sky,
@@ -401,7 +405,7 @@ mod android {
                 None,
                 None,
                 None,
-                self.camera,
+                render_view,
                 &[],
                 None,
                 self.scene.sky_clear_color(),

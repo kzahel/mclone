@@ -25,7 +25,7 @@ The Rust workspace owns live engine implementation:
 - Rust crates should not import, execute, or depend on retired browser-engine code from Git history.
 - Minecraft Java `1.17.1` and the existing oracle fixtures remain the correctness target.
 - The browser target should be kept alive early, but native desktop is the main development loop.
-- Android and Android XR / Quest should stay visible as future platform constraints; do not introduce their packaging/runtime scaffolding until the renderer and app boundaries are explicit enough to validate them.
+- Flat Android should remain a focused validation lane; Android XR / Quest should stay visible as a future platform constraint, but do not introduce its packaging/runtime scaffolding until the renderer and app boundaries are explicit enough to validate it.
 - `winit`, Android activity glue, and OpenXR session/swapchain code belong in app/platform adapters, not in shared client/server/mesh/asset crates.
 
 ## Initial crate boundaries
@@ -63,4 +63,4 @@ Useful gates:
 
 Native benchmark baselines are recorded in [`../docs/performance-records.md`](../docs/performance-records.md). Use `pnpm native:worldgen:smoke`, `pnpm native:movement:smoke`, and `pnpm native:timedemo:smoke` for the standard optimized-dev smoke lanes; use the matching `:perf` scripts for release-oriented runs.
 
-Start narrow: prefer oracle-backed engine slices and validation-backed platform work over broad scaffolding. Flat Android remains a focused non-XR APK/screenshot smoke, borrowing Playbox's package and validation shape while keeping Android lifecycle, input, and asset paths in the platform adapter.
+Start narrow: prefer oracle-backed engine slices and validation-backed platform work over broad scaffolding. Flat Android remains a focused non-XR APK/screenshot smoke; the next XR lane is multi-view render cleanup followed by desktop OpenXR before any Android XR package.

@@ -21,13 +21,14 @@ Reference Rust engine for native app/render/XR patterns:
 
 ## Direction
 
-Build the engine as normal Rust crates first, with desktop/native as the main development loop. Keep a thin WASM/web target compiling and booting early so browser constraints stay visible while APIs are still easy to adjust. Flat Android is now the next platform frontload target, limited to a non-XR single-view host with a real validation lane. Treat Android XR / Quest standalone as a real later native target, but do not pull OpenXR app scaffolding forward before the flat Android and desktop/XR boundaries are mature enough to validate them. Current platform posture lives in [`platforms.md`](platforms.md).
+Build the engine as normal Rust crates first, with desktop/native as the main development loop. Keep a thin WASM/web target compiling and booting early so browser constraints stay visible while APIs are still easy to adjust. Flat Android is now a validation-backed, non-XR single-view host. The next XR frontload work is explicit multi-view renderer cleanup followed by desktop OpenXR, not Android XR scaffolding. Treat Android XR / Quest standalone as a real later native target after the flat Android and desktop XR boundaries are mature enough to validate it. Current platform posture lives in [`platforms.md`](platforms.md), and the XR frontload sequence lives in [`tactical/076-native-xr-frontload-plan.md`](tactical/076-native-xr-frontload-plan.md).
 
 This is not equal effort across targets:
 
 - native desktop is the first-priority bring-up and validation target
 - web is an early compatibility gate
-- flat Android is the next single-view native host workstream, tracked by [`tactical/074-flat-android-build-smoke.md`](tactical/074-flat-android-build-smoke.md)
+- flat Android is the current single-view native mobile validation lane, tracked by [`tactical/074-flat-android-build-smoke.md`](tactical/074-flat-android-build-smoke.md)
+- desktop OpenXR is the next XR runtime target after multi-view render-boundary cleanup
 - Android XR / Quest standalone is a later native XR host, not part of the flat Android workstream
 - XR remains native-only until there is a concrete WebXR path worth supporting
 
@@ -83,11 +84,11 @@ apps/
   mclone_web_client
 ```
 
-Future app crates should stay out of the workspace until they have a validation lane. Flat Android now has a proposed validation-backed tactical:
+Future app crates should stay out of the workspace until they have a validation lane. Flat Android now has a validation-backed app crate, while Android XR remains future:
 
 ```text
 apps/
-  mclone_android_client      # next flat Android single-view host
+  mclone_android_client      # flat Android single-view host
   mclone_android_xr_client   # future Quest/OpenXR host
 ```
 
@@ -115,7 +116,7 @@ input -> mclone_client -> mclone_protocol -> mclone_net
 mclone_client -> mclone_render
 ```
 
-Future flat Android client:
+Flat Android client:
 
 ```text
 Android lifecycle/input adapters -> mclone_client
@@ -177,7 +178,7 @@ render via wgpu/web
 
 6. **Preserve future Android XR boundaries**
 
-   Before adding Android or OpenXR app crates, make renderer view/projection inputs and render targets explicit enough that desktop, headless, web, flat Android, and stereo XR hosts can drive the same renderer without desktop `winit` assumptions leaking into shared crates. The near-term tactical for this is [`tactical/022-platform-target-contract-and-render-boundary.md`](tactical/022-platform-target-contract-and-render-boundary.md).
+   Before adding Android XR app crates, make renderer view/projection inputs and render targets explicit enough that desktop, headless, web, flat Android, and stereo XR hosts can drive the same renderer without desktop `winit` assumptions leaking into shared crates. The first boundary pass is [`tactical/022-platform-target-contract-and-render-boundary.md`](tactical/022-platform-target-contract-and-render-boundary.md); the next XR-specific cleanup is [`tactical/077-multiview-render-contract.md`](tactical/077-multiview-render-contract.md).
 
 ## Rule Of Thumb
 
