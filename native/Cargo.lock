@@ -1030,6 +1030,8 @@ name = "mclone-android-client"
 version = "0.0.0"
 dependencies = [
  "log",
+ "pollster",
+ "wgpu",
  "winit",
 ]
 

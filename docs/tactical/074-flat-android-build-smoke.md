@@ -1,6 +1,6 @@
 # 074: Flat Android Build Smoke
 
-Status: proposed high-priority platform slice; Slices 0-1 completed.
+Status: proposed high-priority platform slice; Slices 0-2 completed.
 
 Prerequisite: land [`075-shared-single-view-runtime-prereq.md`](075-shared-single-view-runtime-prereq.md)
 before starting Android runtime integration. Android should consume
@@ -50,9 +50,8 @@ Landed:
 
 Missing:
 
-- No Android validation scripts or AVD launch smoke yet.
 - No Android asset-pack staging policy.
-- No Android GPU clear-frame/render adapter yet.
+- No Android full-frame mclone renderer/runtime smoke yet.
 - No Android gameplay input adapter.
 
 Resolved Slice 0 compile blocker:
@@ -67,9 +66,9 @@ was selected through `winit`, but neither `native-activity` nor
 `winit` dependency now enables `android-native-activity`; the command above
 passes.
 
-Next blocker: there is still no Android `cdylib` host crate or Gradle package
-shell. Start Slice 1 with a thin `mclone-android-client` crate and Playbox-style
-`android/` project.
+Next blocker: the APK launches and presents a Vulkan clear frame on
+`jstorrent-tablet`; Slice 3 should move from clear color to static chunk or
+full-frame mclone pixels.
 
 ## Non-goals
 
@@ -212,15 +211,15 @@ bash android/build-apk.sh
 Goal: prove Android lifecycle, surface acquisition, Vulkan `wgpu`, present, and
 validation scripts before loading the full mclone runtime.
 
-- [ ] Create an Android GPU state adapted from Playbox:
+- [x] Create an Android GPU state adapted from Playbox:
   - `wgpu::Backends::VULKAN`
   - preferred sRGB surface format when available
   - `PresentMode::Fifo`
   - explicit resize/reconfigure
   - surface-lost/outdated/skipped handling
-- [ ] Render a clear frame or simple GUI/title frame on redraw.
-- [ ] Drop window/GPU state on `suspended`.
-- [ ] Add `android/validate-common.sh` adapted from Playbox:
+- [x] Render a clear frame or simple GUI/title frame on redraw.
+- [x] Drop window/GPU state on `suspended`.
+- [x] Add `android/validate-common.sh` adapted from Playbox:
   - find `adb`
   - wait for boot
   - install APK
@@ -229,13 +228,33 @@ validation scripts before loading the full mclone runtime.
   - collect logcat
   - fail on fatal exception, fatal signal, Rust panic, or segfault
   - capture screenshot to `/tmp`
-- [ ] Add `android/validate-avd.sh`.
-- [ ] Inspect the captured screenshot before proceeding.
+- [x] Add `android/validate-avd.sh`.
+- [x] Inspect the captured screenshot before proceeding.
+
+Recorded Slice 2 result:
+
+- Added Android-only `wgpu`/`pollster` dependencies to
+  `mclone-android-client`.
+- The Android host now creates a Vulkan `wgpu` surface on resume, chooses an
+  sRGB format when available, presents FIFO clear frames, reconfigures on
+  resize/lost/outdated surfaces, and drops GPU/window state on suspend.
+- Added `android/validate-common.sh` and `android/validate-avd.sh`.
+- Validation AVD: `jstorrent-tablet`, running as `emulator-5554`.
+- Screenshot inspected: `/tmp/mclone-android-avd-clear.png` (`2560x1600`),
+  showing the expected Android system bars plus a solid clear-color app surface.
+- Logcat: `/tmp/mclone-android-avd-logcat.txt`; fatal exception, fatal signal,
+  segfault, and Rust panic scan passed.
+- `am start -W` may report `Status: timeout` during a cold NativeActivity
+  launch even when the process becomes focused and renders; the validator now
+  treats that status as inconclusive and relies on process/focus/logcat/
+  screenshot checks.
 
 Validation:
 
 ```bash
-bash android/validate-avd.sh --screenshot /tmp/mclone-android-avd-clear.png
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+pnpm native:android:apk
+bash android/validate-avd.sh --avd jstorrent-tablet --screenshot /tmp/mclone-android-avd-clear.png --log /tmp/mclone-android-avd-logcat.txt
 ```
 
 ### Slice 3 - Static Chunk Or Full-Frame Render Smoke
