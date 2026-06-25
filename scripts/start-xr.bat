@@ -125,6 +125,21 @@ if /I "%~1"=="-Frames" (
     shift
     goto parse_args
 )
+if /I "%~1"=="--forever" (
+    call :append_arg "-Forever"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="--xr-forever" (
+    call :append_arg "-Forever"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="-Forever" (
+    call :append_arg "-Forever"
+    shift
+    goto parse_args
+)
 if /I "%~1"=="--view-pose" goto parse_view_pose
 if /I "%~1"=="--xr-view-pose" goto parse_view_pose
 if /I "%~1"=="-ViewPose" goto parse_view_pose
@@ -269,6 +284,7 @@ echo   --active-runtime       Alias for --runtime active.
 echo   --smoke clear^|mclone   Select the smoke mode. Default: clear.
 echo   --mclone               Alias for --smoke mclone.
 echo   --frames N             Set the XR smoke frame budget. Default: 120.
+echo   --forever              Run until the OpenXR session exits or the app is closed.
 echo   --view-pose X,Y,Z,YAW  Map headset startup pose to mclone world pose.
 echo   --no-quest-launch      Reuse an already-connected headset session.
 echo   --no-quest-restore     Leave Quest wake/proximity state untouched after run.
@@ -282,6 +298,7 @@ echo Examples:
 echo   scripts\start-xr.bat --check-only --runtime environment
 echo   scripts\start-xr.bat --vdxr --frames 2
 echo   scripts\start-xr.bat --vdxr --mclone --view-pose 0,78,-96,180 --frames 120
+echo   scripts\start-xr.bat --vdxr --mclone --view-pose 0,78,-96,180 --forever --no-quest-restore
 exit /b 0
 
 :args_done

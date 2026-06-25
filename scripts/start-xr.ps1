@@ -5,6 +5,7 @@ param(
     [ValidateSet("clear", "mclone")]
     [string]$Smoke = "clear",
     [int]$Frames = 120,
+    [switch]$Forever,
     [ValidateSet("virtual-desktop", "active", "json", "environment")]
     [string]$Runtime = "virtual-desktop",
     [switch]$UseActiveRuntime,
@@ -52,6 +53,10 @@ function Get-ActiveOpenXrRuntime {
 
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
     Write-Error "Missing required command: cargo. Install Rust with rustup, or make sure Cargo is on PATH."
+}
+
+if ($Forever -and $PSBoundParameters.ContainsKey("Frames")) {
+    Write-Error "-Forever cannot be combined with -Frames."
 }
 
 $platformSupported =
@@ -160,7 +165,12 @@ try {
     if ($ViewPose -and $Smoke -ne "mclone") {
         Write-Error "-ViewPose requires -Smoke mclone."
     }
-    $appArgs = @($smokeFlag, "--frames", "$Frames")
+    $appArgs = @($smokeFlag)
+    if ($Forever) {
+        $appArgs += "--xr-forever"
+    } else {
+        $appArgs += @("--frames", "$Frames")
+    }
     if ($ViewPose) {
         $appArgs += @("--xr-view-pose", $ViewPose)
     }

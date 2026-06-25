@@ -524,6 +524,12 @@ Pass `-NoQuestRestore` only for intentional short-lived debugging or screenshot
 capture; the launcher prints an explicit warning because the headset may remain
 awake.
 
+For hands-on headset sessions, `mclone-native-client --xr-forever` and the
+Windows launcher alias `scripts\start-xr.bat --forever` disable both the XR
+frame-count limit and the initial OpenXR session READY timeout. This is for
+manual use when someone is present to close the app or turn off the headset;
+bounded `--frames N` remains the validation default.
+
 Batch launcher validation on June 25, 2026:
 
 ```powershell

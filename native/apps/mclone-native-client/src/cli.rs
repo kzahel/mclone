@@ -114,14 +114,14 @@ pub(crate) struct HeadlessDualViewOptions {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct XrClearSmokeOptions {
-    pub(crate) frames: u32,
+    pub(crate) frame_limit: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct XrMcloneSmokeOptions {
     pub(crate) scene: SceneOptions,
     pub(crate) render_options: TexturedSectionRenderOptions,
-    pub(crate) frames: u32,
+    pub(crate) frame_limit: Option<u32>,
     pub(crate) view_pose: Option<XrViewPose>,
 }
 
@@ -288,7 +288,8 @@ impl Cli {
         let mut xr_clear_smoke = false;
         let mut xr_mclone_smoke = false;
         let mut xr_frames_explicit = false;
-        let mut xr_frames = DEFAULT_XR_CLEAR_SMOKE_FRAMES;
+        let mut xr_forever_explicit = false;
+        let mut xr_frame_limit = Some(DEFAULT_XR_CLEAR_SMOKE_FRAMES);
         let mut xr_view_pose_explicit = false;
         let mut xr_view_pose = None;
         let mut args = args.into_iter();
@@ -533,11 +534,15 @@ impl Cli {
                 }
                 "--frames" => {
                     xr_frames_explicit = true;
-                    xr_frames = parse_xr_smoke_frames_arg("--frames", args.next())?;
+                    xr_frame_limit = Some(parse_xr_smoke_frames_arg("--frames", args.next())?);
                 }
                 "--xr-frames" => {
                     xr_frames_explicit = true;
-                    xr_frames = parse_xr_smoke_frames_arg("--xr-frames", args.next())?;
+                    xr_frame_limit = Some(parse_xr_smoke_frames_arg("--xr-frames", args.next())?);
+                }
+                "--xr-forever" => {
+                    xr_forever_explicit = true;
+                    xr_frame_limit = None;
                 }
                 "--xr-view-pose" | "--view-pose" => {
                     xr_view_pose_explicit = true;
@@ -577,6 +582,12 @@ impl Cli {
         }
         if xr_frames_explicit && !xr_clear_smoke && !xr_mclone_smoke {
             bail!("--frames requires --xr-clear-smoke or --xr-mclone-smoke");
+        }
+        if xr_forever_explicit && !xr_clear_smoke && !xr_mclone_smoke {
+            bail!("--xr-forever requires --xr-clear-smoke or --xr-mclone-smoke");
+        }
+        if xr_frames_explicit && xr_forever_explicit {
+            bail!("--xr-forever cannot be combined with --frames or --xr-frames");
         }
         if xr_view_pose_explicit && !xr_mclone_smoke {
             bail!("--xr-view-pose requires --xr-mclone-smoke");
@@ -670,13 +681,15 @@ impl Cli {
                 },
             }),
             None if xr_clear_smoke => Ok(Self::XrClearSmoke {
-                options: XrClearSmokeOptions { frames: xr_frames },
+                options: XrClearSmokeOptions {
+                    frame_limit: xr_frame_limit,
+                },
             }),
             None if xr_mclone_smoke => Ok(Self::XrMcloneSmoke {
                 options: XrMcloneSmokeOptions {
                     scene,
                     render_options,
-                    frames: xr_frames,
+                    frame_limit: xr_frame_limit,
                     view_pose: xr_view_pose,
                 },
             }),
@@ -918,8 +931,8 @@ fn print_help() {
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-           mclone-native-client --xr-clear-smoke [--frames 120]\n\
-           mclone-native-client --xr-mclone-smoke [--frames 120] [--xr-view-pose X,Y,Z,YAW_DEGREES] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+           mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
+           mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--xr-view-pose X,Y,Z,YAW_DEGREES] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
          Window mode streams chunks around a collision-backed local player with WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane toggle, O section-occlusion toggle, and L fullbright toggle. Use --disable-lighting/--enable-lighting to bypass or restore server-side ChunkStatus::Light promotion; --disable-lighting defaults to fullbright unless --disable-fullbright is also passed. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }

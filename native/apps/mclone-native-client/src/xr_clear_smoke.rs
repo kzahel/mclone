@@ -94,14 +94,14 @@ struct OpenXrRuntimeManifest {
 
 #[cfg(not(target_os = "android"))]
 enum DesktopXrSmoke {
-    Clear { frames: u32 },
+    Clear { frame_limit: Option<u32> },
     Mclone { options: XrMcloneSmokeOptions },
 }
 
 #[cfg(not(target_os = "android"))]
 pub(crate) fn run(options: XrClearSmokeOptions) -> Result<()> {
     run_desktop_xr_smoke(DesktopXrSmoke::Clear {
-        frames: options.frames,
+        frame_limit: options.frame_limit,
     })
 }
 
@@ -288,10 +288,13 @@ fn run_smoke_frames(
     environment_blend_mode: xr::EnvironmentBlendMode,
     smoke: DesktopXrSmoke,
 ) -> Result<()> {
-    let frames = match &smoke {
-        DesktopXrSmoke::Clear { frames } => *frames,
-        DesktopXrSmoke::Mclone { options } => options.frames,
+    let frame_limit = match &smoke {
+        DesktopXrSmoke::Clear { frame_limit } => *frame_limit,
+        DesktopXrSmoke::Mclone { options } => options.frame_limit,
     };
+    let frame_limit_label = frame_limit
+        .map(|frames| frames.to_string())
+        .unwrap_or_else(|| "unbounded".to_owned());
     let eye_width = views[0].recommended_image_rect_width.max(1);
     let eye_height = views[0].recommended_image_rect_height.max(1);
     let mut left_eye = platform_graphics::create_eye(
@@ -321,6 +324,10 @@ fn run_smoke_frames(
         left_eye.textures.len(),
         right_eye.textures.len()
     );
+    println!("OpenXR frame limit: {frame_limit_label}");
+    if frame_limit.is_none() {
+        println!("OpenXR session READY timeout: disabled");
+    }
     let mut mclone = match smoke {
         DesktopXrSmoke::Clear { .. } => None,
         DesktopXrSmoke::Mclone { options } => Some(
@@ -335,18 +342,31 @@ fn run_smoke_frames(
 
     let mut event_storage = xr::EventDataBuffer::new();
     let mut session_running = false;
-    let session_ready_deadline = Instant::now() + SESSION_READY_TIMEOUT;
-    let mut submitted_frames = 0;
-    let mut skipped_frames = 0;
-    let mut runtime_frames = 0;
+    let session_ready_deadline = frame_limit.map(|_| Instant::now() + SESSION_READY_TIMEOUT);
+    let mut submitted_frames = 0_u64;
+    let mut skipped_frames = 0_u64;
+    let mut runtime_frames = 0_u64;
+    let mut runtime_requested_exit = false;
 
-    while submitted_frames < frames {
+    while frame_limit
+        .map(|frames| submitted_frames < u64::from(frames))
+        .unwrap_or(true)
+    {
         match poll_openxr_events(&graphics.session, &mut event_storage, &mut session_running)
             .context("poll OpenXR events")?
         {
-            OpenXrPollStatus::Exit => bail!("OpenXR session requested exit before smoke completed"),
+            OpenXrPollStatus::Exit if frame_limit.is_some() => {
+                bail!("OpenXR session requested exit before smoke completed")
+            }
+            OpenXrPollStatus::Exit => {
+                runtime_requested_exit = true;
+                break;
+            }
             OpenXrPollStatus::Idle if !session_running => {
-                if Instant::now() >= session_ready_deadline {
+                if session_ready_deadline
+                    .map(|deadline| Instant::now() >= deadline)
+                    .unwrap_or(false)
+                {
                     bail!("timed out waiting for OpenXR session READY state");
                 }
                 thread::sleep(SESSION_IDLE_POLL_INTERVAL);
@@ -425,8 +445,10 @@ fn run_smoke_frames(
         mclone.print_summary();
     }
     let completed_label = if mclone.is_some() { "mclone" } else { "clear" };
-    shutdown_openxr_session(&mut graphics, &mut event_storage, &mut session_running)
-        .context("shut down OpenXR session after smoke")?;
+    if !runtime_requested_exit {
+        shutdown_openxr_session(&mut graphics, &mut event_storage, &mut session_running)
+            .context("shut down OpenXR session after smoke")?;
+    }
     // Mirrors Playbox's desktop OpenXR shutdown shape. Some runtimes fault while
     // destroying session-owned graphics handles after an app-requested EXITING
     // transition; this smoke is process-bounded, so keep the XR object graph
@@ -439,7 +461,7 @@ fn run_smoke_frames(
     if let Some(mclone) = mclone {
         std::mem::forget(mclone);
     }
-    println!("desktop OpenXR {completed_label} smoke complete: frames={frames}");
+    println!("desktop OpenXR {completed_label} smoke complete: frames={frame_limit_label}");
     Ok(())
 }
 

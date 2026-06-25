@@ -354,7 +354,9 @@ mod tests {
         assert_eq!(
             cli,
             Cli::XrClearSmoke {
-                options: XrClearSmokeOptions { frames: 12 },
+                options: XrClearSmokeOptions {
+                    frame_limit: Some(12),
+                },
             }
         );
     }
@@ -399,7 +401,7 @@ mod tests {
                         force_fullbright: true,
                         ..TexturedSectionRenderOptions::default()
                     },
-                    frames: 24,
+                    frame_limit: Some(24),
                     view_pose: Some(XrViewPose {
                         position: [8.0, 72.0, -12.0],
                         yaw_degrees: 180.0,
@@ -423,8 +425,33 @@ mod tests {
                 options: XrMcloneSmokeOptions {
                     scene: SceneOptions::default(),
                     render_options: TexturedSectionRenderOptions::default(),
-                    frames: 120,
+                    frame_limit: Some(120),
                     view_pose: None,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_xr_forever_smoke_options() {
+        let cli = Cli::parse([
+            "--xr-mclone-smoke".to_owned(),
+            "--xr-forever".to_owned(),
+            "--view-pose=0,78,-96,180".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::XrMcloneSmoke {
+                options: XrMcloneSmokeOptions {
+                    scene: SceneOptions::default(),
+                    render_options: TexturedSectionRenderOptions::default(),
+                    frame_limit: None,
+                    view_pose: Some(XrViewPose {
+                        position: [0.0, 78.0, -96.0],
+                        yaw_degrees: 180.0,
+                    }),
                 },
             }
         );
@@ -450,6 +477,29 @@ mod tests {
             .to_string();
 
         assert!(err.contains("--frames requires --xr-clear-smoke or --xr-mclone-smoke"));
+    }
+
+    #[test]
+    fn cli_rejects_xr_forever_without_xr_smoke() {
+        let err = Cli::parse(["--xr-forever".to_owned()])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("--xr-forever requires --xr-clear-smoke or --xr-mclone-smoke"));
+    }
+
+    #[test]
+    fn cli_rejects_xr_forever_with_frame_count() {
+        let err = Cli::parse([
+            "--xr-clear-smoke".to_owned(),
+            "--frames".to_owned(),
+            "12".to_owned(),
+            "--xr-forever".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("--xr-forever cannot be combined"));
     }
 
     #[test]
