@@ -64,6 +64,13 @@ Use Playbox as a pattern library only:
   defaults and optional Quest USB tunnel workflow.
 - `~/code/playbox/scripts/run_playbox_wivrn_capture.sh` for the fully explicit
   WiVRn runtime manifest/library env used in capture validation.
+- `~/code/playbox/android/validate-common.sh` for Quest wake/proximity
+  save/restore helpers. Keep mclone's Windows Quest/Virtual Desktop startup
+  script aligned with this source pattern instead of growing one-off ADB
+  command sequences.
+- `~/code/playbox/docs/quest-testing-tips.md` for Quest-side validation notes,
+  including the current limitation that blind `KEYCODE_*` and tap injection do
+  not reliably drive spatial VR UI.
 - `~/code/playbox/docs/tactical/106-desktop-xr-companion-window.md` if a
   companion window is needed later. Do not add companion-window complexity in
   this first smoke unless required by the local runtime.
@@ -472,6 +479,37 @@ without force-stopping the headset app or Windows Streamer, and the direct smoke
 still succeeded. The next implementation slice can assume loader, runtime,
 system, Vulkan graphics binding, and `STAGE` creation are validated on this
 Windows/Virtual Desktop setup.
+
+Landed in Slice 2G:
+
+- Added `scripts/xr-quest-virtual-desktop.psm1` as the shared Windows
+  Quest/Virtual Desktop helper.
+- Added `scripts/start-quest-virtual-desktop.ps1` as the simple reproducible
+  startup entry point. It starts/reuses the Windows Virtual Desktop host,
+  saves Quest wake settings to a temp state file, disables the proximity
+  override, applies test wake settings, sends `KEYCODE_WAKEUP`, broadcasts
+  `com.oculus.vrpowermanager.prox_close`, and launches `VirtualDesktop.Android`.
+- Refactored `scripts/start-xr.ps1` to reuse the same helper instead of
+  carrying a separate ADB wake/restore implementation.
+- Added package scripts:
+  - `pnpm native:xr:windows:prepare`
+  - `pnpm native:xr:windows:restore`
+  - `pnpm native:xr:windows:smoke:connected`
+
+Manual Virtual Desktop flow:
+
+```powershell
+pnpm native:xr:windows:prepare
+# Select/connect the PC inside the Virtual Desktop headset UI.
+pnpm native:xr:windows:smoke:connected
+pnpm native:xr:windows:restore
+```
+
+`native:xr:windows:restore` restores Quest wake/proximity settings from the
+saved state file and intentionally does not stop Windows Virtual Desktop
+Streamer processes. The standalone restore also leaves the Quest app/headset
+running by default; use the lower-level PowerShell flags only for autonomous
+test cleanup that should stop the headset app or sleep the device.
 
 Implementation should follow the measured platform path. On macOS this likely
 means Metal-specific runtime/device matching. On Windows/Linux this likely
