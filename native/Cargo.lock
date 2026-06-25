@@ -1029,7 +1029,12 @@ dependencies = [
 name = "mclone-android-client"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "log",
+ "mclone-app-runtime",
+ "mclone-mesh",
+ "mclone-render",
+ "mclone-ui",
  "pollster",
  "wgpu",
  "winit",

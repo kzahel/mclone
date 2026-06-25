@@ -6,7 +6,12 @@ rust-version.workspace = true
 publish.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
+anyhow.workspace = true
 log.workspace = true
+mclone-app-runtime.workspace = true
+mclone-mesh.workspace = true
+mclone-render.workspace = true
+mclone-ui.workspace = true
 pollster.workspace = true
 wgpu.workspace = true
 winit.workspace = true

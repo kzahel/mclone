@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, TexturedSectionDrawResources,
     TexturedSectionRenderOptions, TexturedSectionUploadReport,
@@ -82,9 +82,9 @@ pub fn render_full_frame<BuildGuiDraw>(
     depth: &ChunkDepthTarget,
     sky: &SkyRenderer,
     draw: &mut TexturedSectionDrawResources,
-    actors: &mut ActorDrawResources,
-    screen_effects: &mut ScreenEffectsRenderer,
-    gui_renderer: &mut GuiRenderer,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
     camera: ChunkCamera,
     actor_instances: &[ActorInstance],
     underwater_overlay: Option<UnderwaterOverlay>,
@@ -141,23 +141,29 @@ where
         render_stats.drawn_section_count = frame_stats.drawn_section_count;
         render_stats.drawn_face_count = frame_stats.drawn_face_count();
         render_stats.drawn_index_count = frame_stats.drawn_index_count;
-        actor_stats = actors.render(
-            frame.device,
-            frame.queue,
-            frame.encoder,
-            frame.target.with_depth(&depth.view),
-            render_view,
-            render_options,
-            actor_instances,
-        )?;
+        if !actor_instances.is_empty() {
+            actor_stats = actors
+                .context("actor instances requested without actor draw resources")?
+                .render(
+                    frame.device,
+                    frame.queue,
+                    frame.encoder,
+                    frame.target.with_depth(&depth.view),
+                    render_view,
+                    render_options,
+                    actor_instances,
+                )?;
+        }
         if let Some(overlay) = underwater_overlay {
-            screen_effects.render_underwater(
-                frame.device,
-                frame.queue,
-                frame.encoder,
-                frame.target,
-                overlay,
-            );
+            screen_effects
+                .context("underwater overlay requested without screen effects renderer")?
+                .render_underwater(
+                    frame.device,
+                    frame.queue,
+                    frame.encoder,
+                    frame.target,
+                    overlay,
+                );
         }
     } else {
         render_stats.drawn_section_count = 0;
@@ -171,19 +177,21 @@ where
     let gui_draw = build_gui_draw(render_stats);
     let gui_command_count = gui_draw.commands().len();
     if gui.active {
-        gui_renderer.render(
-            frame.device,
-            frame.queue,
-            frame.encoder,
-            frame.target,
-            gui.scale,
-            &gui_draw,
-            if gui.covers_world {
-                GuiRenderOptions::clear(mclone_render::default_clear_color())
-            } else {
-                GuiRenderOptions::overlay()
-            },
-        )?;
+        gui_renderer
+            .context("active GUI requested without GUI renderer")?
+            .render(
+                frame.device,
+                frame.queue,
+                frame.encoder,
+                frame.target,
+                gui.scale,
+                &gui_draw,
+                if gui.covers_world {
+                    GuiRenderOptions::clear(mclone_render::default_clear_color())
+                } else {
+                    GuiRenderOptions::overlay()
+                },
+            )?;
     }
 
     Ok(FullFrameRenderSummary {

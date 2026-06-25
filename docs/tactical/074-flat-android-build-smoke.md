@@ -1,6 +1,6 @@
 # 074: Flat Android Build Smoke
 
-Status: proposed high-priority platform slice; Slices 0-2.5 completed.
+Status: proposed high-priority platform slice; Slices 0-3 completed.
 
 Prerequisite: land [`075-shared-single-view-runtime-prereq.md`](075-shared-single-view-runtime-prereq.md)
 before starting Android runtime integration. Android should consume
@@ -51,7 +51,9 @@ Landed:
 Missing:
 
 - No Android asset-pack staging policy.
-- No Android full-frame mclone renderer/runtime smoke yet.
+- Android renders a static full-frame mclone renderer smoke through the
+  NativeActivity surface; integrated runtime and packed assets are still
+  pending.
 - No Android gameplay input adapter.
 
 Resolved Slice 0 compile blocker:
@@ -66,9 +68,9 @@ was selected through `winit`, but neither `native-activity` nor
 `winit` dependency now enables `android-native-activity`; the command above
 passes.
 
-Next blocker: the APK launches and presents a Vulkan clear frame on
-`jstorrent-tablet`; Slice 3 should move from clear color to static chunk or
-full-frame mclone pixels.
+Next blocker: the APK launches and presents static mclone renderer pixels on
+`jstorrent-tablet`; Slice 4 should move from the static in-memory mesh/atlas to
+the integrated runtime and Android asset-pack path.
 
 ## Non-goals
 
@@ -311,18 +313,44 @@ Two acceptable paths:
 
 Requirements:
 
-- [ ] Use existing `mclone-render` target/view types; do not create Android-only
+- [x] Use existing `mclone-render` target/view types; do not create Android-only
   renderer APIs.
-- [ ] Own depth target in the Android host and recreate it on resize.
-- [ ] Save validation screenshots to `/tmp`, not the repo.
-- [ ] Keep desktop headless and native web checks green after any shared
+- [x] Own depth target in the Android host and recreate it on resize.
+- [x] Save validation screenshots to `/tmp`, not the repo.
+- [x] Keep desktop headless and native web checks green after any shared
   extraction.
+
+Recorded Slice 3 result:
+
+- The Android host now replaces the clear pass with an `AndroidFrameRenderer`
+  that owns `ChunkDepthTarget`, `SkyRenderer`, `TexturedSectionDrawResources`,
+  a static `ChunkCamera`, and render stats.
+- Rendering goes through `mclone_app_runtime::frame_render::render_full_frame`
+  and `RenderFrameTarget`/`RenderFrameContext`; Android still owns only
+  NativeActivity lifecycle, `wgpu` surface/config/resize, and frame acquisition.
+- The smoke uses one deterministic `TexturedRenderSectionMesh` in section
+  `(0, 2, 0)` plus a tiny in-memory texture atlas. This intentionally avoids
+  Android asset-pack policy until Slice 4 while still proving the textured
+  section renderer, sky pass, depth target, shared composition, and surface
+  presentation.
+- `render_full_frame` now accepts optional actor, screen-effect, and GUI
+  renderer resources and errors only if content requiring that renderer is
+  submitted. Desktop/headless/perf paths pass their existing resources with
+  `Some(...)`; Android passes `None` for this no-actor/no-overlay/no-GUI smoke.
+- Screenshot inspected: `/tmp/mclone-android-avd-chunk.png` (`2560x1600`),
+  showing Android system bars around a sky-backed static textured block stack.
+- Logcat: `/tmp/mclone-android-avd-logcat.txt`; the validator fatal exception,
+  fatal signal, segfault, and Rust panic scan passed.
 
 Validation:
 
 ```bash
-bash android/validate-avd.sh --screenshot /tmp/mclone-android-avd-chunk.png
-cargo test --manifest-path native/Cargo.toml -p mclone-render -p mclone-render-session
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -p mclone-native-client
+pnpm native:web:build
+pnpm native:android:apk
+bash android/validate-avd.sh --avd jstorrent-tablet --skip-build --screenshot /tmp/mclone-android-avd-chunk.png --log /tmp/mclone-android-avd-logcat.txt
 ```
 
 Inspect `/tmp/mclone-android-avd-chunk.png`.
