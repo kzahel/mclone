@@ -1026,6 +1026,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-android-client"
+version = "0.0.0"
+dependencies = [
+ "log",
+ "winit",
+]
+
+[[package]]
 name = "mclone-app-runtime"
 version = "0.0.0"
 dependencies = [

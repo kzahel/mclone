@@ -38,6 +38,7 @@
     "native:web:movement-perf": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --movement-perf",
     "native:web:glue": "node ./native/apps/mclone-web-client/scripts/build-web-glue.mjs",
     "native:web:typecheck": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --build-only && tsc --noEmit -p native/apps/mclone-web-client/tsconfig.json",
+    "native:android:apk": "bash ./android/build-apk.sh",
     "deploy": "pnpm native:web:deploy",
     "assets:pack": "python3 ./scripts/build-reference-asset-pack.py",
     "assets:pack:check": "python3 ./scripts/build-reference-asset-pack.py --check-lock",

@@ -1,0 +1,15 @@
+[package]
+name = "mclone-android-client"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+log.workspace = true
+winit.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "mclone_android_client"
+path = "src/lib.rs"

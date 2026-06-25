@@ -1,7 +1,6 @@
 # 074: Flat Android Build Smoke
 
-Status: proposed high-priority platform slice; Slice 0 baseline/dependency probe
-completed.
+Status: proposed high-priority platform slice; Slices 0-1 completed.
 
 Prerequisite: land [`075-shared-single-view-runtime-prereq.md`](075-shared-single-view-runtime-prereq.md)
 before starting Android runtime integration. Android should consume
@@ -51,12 +50,10 @@ Landed:
 
 Missing:
 
-- No `native/apps/mclone-android-client` crate.
-- No Android `cdylib` target.
-- No `android/` Gradle project, manifest, APK build script, or validation
-  scripts.
+- No Android validation scripts or AVD launch smoke yet.
 - No Android asset-pack staging policy.
-- No Android lifecycle/input adapter.
+- No Android GPU clear-frame/render adapter yet.
+- No Android gameplay input adapter.
 
 Resolved Slice 0 compile blocker:
 
@@ -176,20 +173,33 @@ cargo check --manifest-path native/Cargo.toml -p mclone-native-client --target a
 Goal: build an APK that launches native Rust code, even if it only clears the
 screen.
 
-- [ ] Add `native/apps/mclone-android-client` as a `cdylib` Android host crate.
-- [ ] Export `android_main(app: AndroidApp)` from the crate.
-- [ ] Build the Android `winit` event loop with `EventLoopBuilderExtAndroid`.
-- [ ] Add an `android/` Gradle project adapted from Playbox:
+- [x] Add `native/apps/mclone-android-client` as a `cdylib` Android host crate.
+- [x] Export `android_main(app: AndroidApp)` from the crate.
+- [x] Build the Android `winit` event loop with `EventLoopBuilderExtAndroid`.
+- [x] Add an `android/` Gradle project adapted from Playbox:
   - application id such as `com.kzahel.mclone`
   - app label `Mclone`
   - `android.app.NativeActivity`
   - `android.app.lib_name` matching the Rust shared library
   - Vulkan level feature
   - no XR or Quest VR categories
-- [ ] Add `android/build-apk.sh` and `android/build-common.sh` adapted from
+- [x] Add `android/build-apk.sh` and `android/build-common.sh` adapted from
   Playbox, including SDK/NDK/cargo-ndk preflight and `libc++_shared.so`
   bundling.
-- [ ] Add a package script if useful, for example `pnpm native:android:apk`.
+- [x] Add a package script if useful, for example `pnpm native:android:apk`.
+
+Recorded Slice 1 result:
+
+- Added `native/apps/mclone-android-client` with `crate-type = ["cdylib",
+  "rlib"]` and Android-only `android_main(app: AndroidApp)`.
+- The host creates a `winit` NativeActivity event loop and Android window, but
+  does not create GPU state yet.
+- Added `android/` Gradle project, manifest, wrapper, and build scripts.
+- `android.app.lib_name` is `mclone_android_client`.
+- `bash android/build-apk.sh` produced
+  `android/app/build/outputs/apk/debug/app-debug.apk`.
+- Next blocker: launch/validation and real clear-frame rendering are still
+  missing; start Slice 2 on `jstorrent-tablet`.
 
 Validation:
 

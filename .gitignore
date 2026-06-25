@@ -11,6 +11,7 @@ node_modules/
 
 # Reference / downloaded artifacts if paths end up inside the repo
 **/*.jar
+!android/gradle/wrapper/gradle-wrapper.jar
 **/*.zip
 parchment/
 tools/
@@ -52,3 +53,9 @@ blob-report/
 playwright/.cache/
 
 .attachments
+
+# Android package outputs
+android/.gradle/
+android/app/build/
+android/build/
+android/jniLibs/**/*.so
