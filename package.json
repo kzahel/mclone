@@ -27,6 +27,8 @@
     "native:xr:check": "bash ./scripts/start-xr.sh --check-only",
     "native:xr:smoke": "bash ./scripts/start-xr.sh --frames 2",
     "native:xr:wivrn-usb": "bash ./scripts/start-xr.sh --wivrn-usb --frames 2",
+    "native:xr:windows:check": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-xr.ps1 -CheckOnly",
+    "native:xr:windows:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-xr.ps1 -Frames 2",
     "native:perf:smoke": "pnpm native:worldgen:smoke && pnpm native:movement:smoke && pnpm native:timedemo:smoke",
     "native:web:build": "cargo build --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown",
     "native:web:bundle": "bash ./scripts/deploy-native-web.sh --bundle-only",

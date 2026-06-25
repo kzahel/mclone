@@ -1,6 +1,6 @@
 # 078: Desktop OpenXR Clear Smoke
 
-Status: active; Slice 2D Windows/Linux Vulkan graphics session compiles; local Windows runtime reaches instance diagnostics but reports the HMD unavailable, swapchains/frame loop next.
+Status: active; Slice 2D Windows/Linux Vulkan graphics session compiles; Slice 2E Windows launcher starts Virtual Desktop/Quest client; local Windows runtime reaches instance diagnostics but reports the HMD unavailable until the headset connects to the PC runtime, swapchains/frame loop next.
 
 ## Purpose
 
@@ -338,6 +338,50 @@ The Vulkan session path is compile-validated on Windows in this slice, but the
 local runtime did not reach session creation until the headset is active in a
 PC OpenXR runtime (for example, Virtual Desktop connected in-headset or Quest
 Link active for the Meta runtime).
+
+Landed in Slice 2E:
+
+- Added `scripts/start-xr.ps1` for Windows desktop XR smoke bring-up.
+- Added package scripts:
+  - `pnpm native:xr:windows:check`
+  - `pnpm native:xr:windows:smoke`
+- The PowerShell launcher:
+  - checks/builds/runs `mclone-native-client` with `--features xr`
+  - defaults to Virtual Desktop's OpenXR manifest when installed unless
+    `-UseActiveRuntime`, `-NoVirtualDesktop`, or `-RuntimeJson` overrides it
+  - starts `VirtualDesktop.Service.exe` when present and stopped
+  - launches `VirtualDesktop.Streamer.exe` when it is not already running
+  - wakes a connected Quest over ADB and launches `VirtualDesktop.Android`
+    unless `-NoQuestLaunch` is passed
+  - runs `--xr-clear-smoke --frames N`
+
+Additional Windows/Virtual Desktop probe on June 25, 2026:
+
+```powershell
+.\scripts\start-xr.ps1 -Frames 2
+```
+
+- Confirmed `VirtualDesktop.Service.exe` was already running.
+- Launched `VirtualDesktop.Streamer.exe`.
+- Confirmed Quest 3 over ADB at `192.168.1.103`, same subnet as the PC
+  (`192.168.1.107`).
+- Woke the headset with `adb shell svc power stayon true` and
+  `KEYCODE_WAKEUP`.
+- Launched the headset app package `VirtualDesktop.Android`; activity
+  `md59102214312e19799944a61bf7bc2f23e.VrActivity` became focused and
+  `isSleeping=false`.
+- Windows firewall has an enabled inbound allow rule named
+  `Virtual Desktop Streamer`.
+- `C:\ProgramData\Virtual Desktop\StreamerSettings.json` still showed
+  `LastConnectDate: 2026-05-28T00:00:00Z`; host logs did not record a new
+  headset connection.
+- The smoke still reached `VirtualDesktopXR v1.0.10` and failed at
+  `xrGetSystem` with `XR_ERROR_FORM_FACTOR_UNAVAILABLE`.
+
+The current blocker is not loader, extension, or process startup; it is that
+the Virtual Desktop headset app has not completed an active connection to the
+PC Streamer. A manual in-headset computer selection may be required before the
+runtime exposes `HEAD_MOUNTED_DISPLAY`.
 
 Implementation should follow the measured platform path. On macOS this likely
 means Metal-specific runtime/device matching. On Windows/Linux this likely
