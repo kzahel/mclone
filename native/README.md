@@ -1,8 +1,8 @@
 # mclone native workspace
 
-This workspace is the Rust track for the native-first engine. Native desktop is the current bring-up priority, web/WASM is kept alive as an early compatibility gate, and future Android XR / Quest standalone support is an explicit native target once the desktop/runtime/renderer path is mature enough. It lives inside the existing repository so it can reuse the project oracle fixtures, reference notes, and asset extraction scripts.
+This workspace is the Rust track for the native-first engine. Native desktop is the current bring-up priority, web/WASM is kept alive as an early compatibility gate, flat Android has a NativeActivity validation lane, and future Android XR / Quest standalone support is an explicit native target once the desktop/runtime/renderer path is mature enough. It lives inside the existing repository so it can reuse the project oracle fixtures, reference notes, and asset extraction scripts.
 
-The durable direction is documented in [`../docs/native-rewrite-roadmap.md`](../docs/native-rewrite-roadmap.md), and current platform posture is documented in [`../docs/platforms.md`](../docs/platforms.md). The short version: native desktop is the primary development target, web/WASM is an early compatibility gate, flat Android is the next platform frontload target, and Android XR / Quest is a later native target.
+The durable direction is documented in [`../docs/native-rewrite-roadmap.md`](../docs/native-rewrite-roadmap.md), current platform posture is documented in [`../docs/platforms.md`](../docs/platforms.md), and flat Android build/validation commands are documented in [`../android/README.md`](../android/README.md). The short version: native desktop is the primary development target, web/WASM is an early compatibility gate, flat Android is a scaffolded mobile validation lane, and Android XR / Quest is a later native target.
 
 Native Rust tactical docs live in [`../docs/tactical/`](../docs/tactical/README.md) and use zero-padded numeric filenames such as `000-native-render-bringup.md`.
 
@@ -46,10 +46,10 @@ Applications:
 - `mclone-native-client`: desktop client.
 - `mclone-dedicated-server`: headless native server.
 - `mclone-web-client`: browser/WASM client shell.
+- `mclone-android-client`: flat Android `NativeActivity` client shell.
 
 Future applications, not scaffolded yet:
 
-- flat Android client: next platform target, expected to reuse the single-view client/render path with Android lifecycle/input adapters; see [`../docs/tactical/074-flat-android-build-smoke.md`](../docs/tactical/074-flat-android-build-smoke.md).
 - Android XR / Quest client: expected to own a separate XR host loop over shared client/runtime/render data because stereo views, runtime swapchains, and controller/hand input do not fit the desktop single-window loop.
 
 Useful gates:
@@ -63,4 +63,4 @@ Useful gates:
 
 Native benchmark baselines are recorded in [`../docs/performance-records.md`](../docs/performance-records.md). Use `pnpm native:worldgen:smoke`, `pnpm native:movement:smoke`, and `pnpm native:timedemo:smoke` for the standard optimized-dev smoke lanes; use the matching `:perf` scripts for release-oriented runs.
 
-Start narrow: prefer oracle-backed engine slices and validation-backed platform work over broad scaffolding. Flat Android should start as a focused non-XR APK/screenshot smoke, borrowing Playbox's package and validation shape while keeping Android lifecycle, input, and asset paths in the platform adapter.
+Start narrow: prefer oracle-backed engine slices and validation-backed platform work over broad scaffolding. Flat Android remains a focused non-XR APK/screenshot smoke, borrowing Playbox's package and validation shape while keeping Android lifecycle, input, and asset paths in the platform adapter.

@@ -40,6 +40,8 @@
     "native:web:glue": "node ./native/apps/mclone-web-client/scripts/build-web-glue.mjs",
     "native:web:typecheck": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --build-only && tsc --noEmit -p native/apps/mclone-web-client/tsconfig.json",
     "native:android:apk": "bash ./android/build-apk.sh",
+    "native:android:avd-smoke": "bash ./android/validate-avd.sh --avd jstorrent-tablet --screenshot /tmp/mclone-android-avd-chunk.png --log /tmp/mclone-android-avd-logcat.txt --smoke-seconds 15",
+    "native:android:avd-touch-smoke": "bash ./android/validate-avd.sh --avd jstorrent-tablet --screenshot /tmp/mclone-android-avd-touch.png --log /tmp/mclone-android-avd-touch-logcat.txt --smoke-seconds 15 --touch-swipe 1280,820,1680,680,500",
     "native:android:quest-flat": "bash ./android/validate-quest-flat.sh",
     "deploy": "pnpm native:web:deploy",
     "assets:pack": "python3 ./scripts/build-reference-asset-pack.py",

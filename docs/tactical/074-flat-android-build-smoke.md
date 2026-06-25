@@ -1,9 +1,12 @@
 # 074: Flat Android Build Smoke
 
-Status: proposed high-priority platform slice; Slices 0-3 completed. Slice 4
-runtime/asset-pack terrain rendering and minimal touch orbit are landed;
-Android GUI/title polish remains pending. Slice 5 Quest-flat validator is added;
-headset capture is pending an attached authorized Quest.
+Status: flat Android baseline complete. Slices 0-4 are landed: the APK builds,
+the AVD validator launches a NativeActivity, real integrated-runtime terrain
+renders through the Android surface, the validator stages the packed asset
+source, and minimal touch orbit is wired for smoke validation. Slice 5
+Quest-flat validation is scripted, but headset capture is pending an attached
+authorized Quest. Android GUI/title polish remains a future gameplay/UI item,
+not a blocker for the platform smoke.
 
 Prerequisite: land [`075-shared-single-view-runtime-prereq.md`](075-shared-single-view-runtime-prereq.md)
 before starting Android runtime integration. Android should consume
@@ -22,7 +25,8 @@ is still easy to adjust.
 
 ## Direction
 
-Flat Android is the next platform target. It is a single-view host, not XR.
+Flat Android is a scaffolded single-view host and validation lane. It is not
+XR.
 
 Use Playbox as the reference engine:
 
@@ -70,9 +74,9 @@ was selected through `winit`, but neither `native-activity` nor
 `winit` dependency now enables `android-native-activity`; the command above
 passes.
 
-Next blocker: the APK launches and presents integrated-runtime terrain on
-`jstorrent-tablet`; the remaining Slice 4 work is Android-local touch input and
-optional GUI/title-state rendering.
+Current blocker: no flat Android platform blocker remains for AVD validation.
+The remaining open items are optional Quest hardware capture and later
+gameplay/UI polish.
 
 ## Non-goals
 
@@ -482,6 +486,40 @@ Expected current blocker without a connected headset:
 error: no attached Quest headset was found
 ```
 
+### Wrap-up Docs And Scripts
+
+Goal: make the completed flat Android validation lanes easy to discover and
+rerun without treating optional Quest/OpenXR work as part of the baseline.
+
+- [x] Add package scripts for the standard AVD chunk and touch-orbit smokes.
+- [x] Document flat Android build, AVD validation, touch validation, desktop
+  comparison, and Quest-flat validation in `android/README.md`.
+- [x] Link Android packaging and validation docs from the root and native
+  READMEs.
+
+Recorded wrap-up result:
+
+- Added `pnpm native:android:avd-smoke` for the standard integrated-runtime
+  terrain screenshot smoke. It captures
+  `/tmp/mclone-android-avd-chunk.png` and
+  `/tmp/mclone-android-avd-logcat.txt`.
+- Added `pnpm native:android:avd-touch-smoke` for the deterministic orbit-swipe
+  screenshot smoke. It captures `/tmp/mclone-android-avd-touch.png` and
+  `/tmp/mclone-android-avd-touch-logcat.txt`.
+- Added `android/README.md` as the durable workflow doc for flat Android.
+- Updated `README.md` and `native/README.md` to describe flat Android as a
+  scaffolded validation lane and link the Android workflow doc.
+
+Validation:
+
+```bash
+bash -n android/validate-common.sh android/validate-avd.sh android/validate-quest-flat.sh
+pnpm native:android:avd-smoke -- --help
+pnpm native:android:avd-touch-smoke -- --help
+pnpm native:android:quest-flat -- --help
+git diff --check
+```
+
 ## Expected Risks
 
 - Android `winit`/`android-activity` feature resolution is the first known
@@ -508,6 +546,10 @@ This tactical is complete when:
   `native/README.md`.
 - Desktop native validation and native web build still pass after shared
   extraction.
+
+Baseline status: complete for flat Android AVD validation. Remaining follow-ups
+are outside the baseline: Quest-flat hardware capture on a machine with the
+headset attached, Android GUI/title polish, and future XR/OpenXR tacticals.
 
 ## Follow-ups
 
