@@ -13,10 +13,10 @@ use mclone_worldgen::levelgen::{
 
 use crate::ChunkJobId;
 use crate::level_light_bridge::LevelLightComputationTiming;
-use crate::lighting_seed::provisional_sky_light_includes_chunk;
 use crate::light_mailbox::CompletedLightStatus;
 use crate::light_status::{PendingLightStatus, PendingLightStatusBatch};
 use crate::light_world::RetainedInitialLightState;
+use crate::lighting_seed::provisional_sky_light_includes_chunk;
 
 const WORLDGEN_REQUEST_MAGIC: u32 = 0x5747_4A52;
 const WORLDGEN_RESPONSE_MAGIC: u32 = 0x5747_4A53;
@@ -243,8 +243,7 @@ impl WorldgenJobSession {
         let generation = reader.read_u64()?;
         let reset = reader.read_bool()?;
         let targets = reader.read_vec("worldgen delta targets", FrameReader::read_chunk_pos)?;
-        let upserts =
-            reader.read_vec("worldgen delta upserts", FrameReader::read_mutable_chunk)?;
+        let upserts = reader.read_vec("worldgen delta upserts", FrameReader::read_mutable_chunk)?;
         reader.finish()?;
 
         if reset {
@@ -978,10 +977,7 @@ mod tests {
         assert!(decoded.cache_report.retained_dependency_chunks > 0);
     }
 
-    fn stateless_reference(
-        seed: i64,
-        targets: &[ChunkPos],
-    ) -> OverworldFeatureBatchResult {
+    fn stateless_reference(seed: i64, targets: &[ChunkPos]) -> OverworldFeatureBatchResult {
         let mut cache = OverworldFeatureDependencyCache::new();
         cache.generate_features_chunks_with_dependencies(seed, targets.iter().copied(), Vec::new())
     }
@@ -998,23 +994,37 @@ mod tests {
         let mut session = WorldgenJobSession::new();
         let request =
             encode_worldgen_delta_request(ChunkJobId(1), seed, 1, true, &targets, &[]).unwrap();
-        let decoded = decode_worldgen_response(&session.compute_delta_job_frame(&request).unwrap())
-            .unwrap();
+        let decoded =
+            decode_worldgen_response(&session.compute_delta_job_frame(&request).unwrap()).unwrap();
 
         assert_eq!(decoded.job_id, ChunkJobId(1));
         assert_eq!(decoded.generated_chunks, reference.chunks);
         // Reset job: the mirror started empty, so every retained column is new this
         // job and the response subset is the whole retained set (matches the
         // stateless full-frame path and the native `mpsc` worker's full set).
-        assert_eq!(decoded.retained_dependencies, reference.retained_dependencies);
-        let positions: BTreeSet<_> = decoded.retained_dependency_positions.iter().copied().collect();
+        assert_eq!(
+            decoded.retained_dependencies,
+            reference.retained_dependencies
+        );
+        let positions: BTreeSet<_> = decoded
+            .retained_dependency_positions
+            .iter()
+            .copied()
+            .collect();
         assert_eq!(
             positions,
-            reference.retained_dependencies.keys().copied().collect::<BTreeSet<_>>()
+            reference
+                .retained_dependencies
+                .keys()
+                .copied()
+                .collect::<BTreeSet<_>>()
         );
         assert_eq!(session.mirror_generation(), Some(1));
         assert!(session.last_delta_was_reset());
-        assert_eq!(session.mirror_chunk_count(), reference.retained_dependencies.len());
+        assert_eq!(
+            session.mirror_chunk_count(),
+            reference.retained_dependencies.len()
+        );
     }
 
     #[test]
@@ -1029,9 +1039,8 @@ mod tests {
         let second_targets = [ChunkPos::new(1, 0)];
 
         let mut session = WorldgenJobSession::new();
-        let req1 =
-            encode_worldgen_delta_request(ChunkJobId(1), seed, 7, true, &first_targets, &[])
-                .unwrap();
+        let req1 = encode_worldgen_delta_request(ChunkJobId(1), seed, 7, true, &first_targets, &[])
+            .unwrap();
         session.compute_delta_job_frame(&req1).unwrap();
 
         let req2 =
@@ -1056,8 +1065,11 @@ mod tests {
         // is strictly smaller than the full retained set the warm job actually holds.
         let full_positions: BTreeSet<_> =
             reference2.retained_dependencies.keys().copied().collect();
-        let shadow_positions: BTreeSet<_> =
-            decoded2.retained_dependency_positions.iter().copied().collect();
+        let shadow_positions: BTreeSet<_> = decoded2
+            .retained_dependency_positions
+            .iter()
+            .copied()
+            .collect();
         assert_eq!(
             shadow_positions, full_positions,
             "retained_dependency_positions must report the full retained set for the shadow"
@@ -1081,7 +1093,10 @@ mod tests {
                 let shipped = decoded2.retained_dependencies.get(pos).unwrap_or_else(|| {
                     panic!("light-ring dependency {pos:?} missing from response subset")
                 });
-                assert_eq!(shipped, buffer, "light-ring dependency {pos:?} bytes diverged");
+                assert_eq!(
+                    shipped, buffer,
+                    "light-ring dependency {pos:?} bytes diverged"
+                );
             }
         }
     }

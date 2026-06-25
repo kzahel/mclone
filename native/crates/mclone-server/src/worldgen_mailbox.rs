@@ -6,9 +6,9 @@
 //! `ChunkStatus::Light` is scheduler-owned and runs after completed feature
 //! chunks are published to holders.
 
-use std::collections::{BTreeMap, VecDeque};
 #[cfg(target_arch = "wasm32")]
 use std::collections::BTreeSet;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::time::Duration;
 
@@ -187,7 +187,8 @@ impl WorldgenMailboxBackend {
             // sent — byte-identical output (this only changes transport).
             let reset = !self.worker_mirror_initialized;
             if reset {
-                self.worker_mirror_generation = self.worker_mirror_generation.wrapping_add(1).max(1);
+                self.worker_mirror_generation =
+                    self.worker_mirror_generation.wrapping_add(1).max(1);
                 self.worker_mirror_shadow.clear();
             }
             let generation = self.worker_mirror_generation;
@@ -200,10 +201,9 @@ impl WorldgenMailboxBackend {
                             .contains(&ChunkPos::new(dependency.chunk_x, dependency.chunk_z))
                 })
                 .collect();
-            let frame = encode_worldgen_delta_request(
-                job_id, seed, generation, reset, targets, &upserts,
-            )
-            .expect("failed to encode wasm worldgen worker delta request");
+            let frame =
+                encode_worldgen_delta_request(job_id, seed, generation, reset, targets, &upserts)
+                    .expect("failed to encode wasm worldgen worker delta request");
             self.worker
                 .as_mut()
                 .expect("wasm worldgen worker present")
@@ -254,8 +254,11 @@ impl WorldgenMailboxBackend {
             // set comes from the positions-only `retained_dependency_positions` list.
             // Keeps the shadow in lockstep with the worker mirror across boundary
             // crossings (where the worker evicts the columns the new plan drops).
-            self.worker_mirror_shadow =
-                decoded.retained_dependency_positions.iter().copied().collect();
+            self.worker_mirror_shadow = decoded
+                .retained_dependency_positions
+                .iter()
+                .copied()
+                .collect();
             self.completed.push_back(WorldgenCompletedJob {
                 job_id: decoded.job_id,
                 generated_chunks: decoded.generated_chunks,

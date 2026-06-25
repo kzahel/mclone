@@ -716,10 +716,7 @@ impl WebWorldgenJobSession {
     /// (the 067 Stage 4 desync tripwire) rather than generated against a partial
     /// mirror.
     #[wasm_bindgen(js_name = computeWorldgenJobFrame)]
-    pub fn compute_worldgen_job_frame(
-        &mut self,
-        frame: Uint8Array,
-    ) -> Result<Uint8Array, JsValue> {
+    pub fn compute_worldgen_job_frame(&mut self, frame: Uint8Array) -> Result<Uint8Array, JsValue> {
         let response = self
             .session
             .compute_delta_job_frame(&frame.to_vec())
@@ -1382,9 +1379,7 @@ pub fn mclone_web_write_packed_runner_updates(
 }
 
 fn runner_update_frame_len(value: &JsValue) -> u32 {
-    value
-        .dyn_ref::<Uint8Array>()
-        .map_or(0, Uint8Array::length)
+    value.dyn_ref::<Uint8Array>().map_or(0, Uint8Array::length)
 }
 
 fn write_packed_runner_u32(view: &Uint8Array, offset: u32, value: u32) -> u32 {

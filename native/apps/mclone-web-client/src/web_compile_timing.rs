@@ -222,7 +222,8 @@ impl WebCompileTiming {
         self.request_id = coerce_number_or_null(request, "requestId");
         self.target_center_x = Some(coerce_number(request, "centerX"));
         self.target_center_z = Some(coerce_number(request, "centerZ"));
-        self.submitted_compile_section_count = coerce_number(request, "submittedCompileSectionCount");
+        self.submitted_compile_section_count =
+            coerce_number(request, "submittedCompileSectionCount");
         self.update_scope(request);
     }
 
@@ -247,15 +248,18 @@ impl WebCompileTiming {
         let summary = reflect_get(report, "summary").unwrap_or(JsValue::UNDEFINED);
 
         self.render_compiler_transport_kind = coerce_string(&source, "transportKind", "unknown");
-        self.render_compiler_shared_memory_supported = coerce_bool(&source, "sharedMemorySupported");
+        self.render_compiler_shared_memory_supported =
+            coerce_bool(&source, "sharedMemorySupported");
         self.render_compiler_worker_init_count = coerce_number(&source, "workerInitCount");
         self.render_compiler_worker_wasm_init_count = coerce_number(&source, "workerWasmInitCount");
-        self.render_compiler_worker_asset_load_count = coerce_number(&source, "workerAssetLoadCount");
+        self.render_compiler_worker_asset_load_count =
+            coerce_number(&source, "workerAssetLoadCount");
         self.render_compiler_worker_asset_pack_init_byte_length =
             coerce_number(&source, "workerAssetPackInitByteLength");
         self.render_compiler_worker_asset_pack_file_count =
             coerce_number(&source, "workerAssetPackFileCount");
-        self.render_compiler_persistent_asset_catalog = coerce_bool(&source, "persistentAssetCatalog");
+        self.render_compiler_persistent_asset_catalog =
+            coerce_bool(&source, "persistentAssetCatalog");
         self.render_compiler_compile_count = coerce_number(&source, "compileCount");
         self.render_compiler_worker_compile_count = coerce_number(&source, "workerCompileCount");
         self.render_compiler_asset_pack_send_count = coerce_number(&source, "assetPackSendCount");
@@ -286,8 +290,10 @@ impl WebCompileTiming {
             coerce_number(&source, "transferredRequestByteCount");
         self.render_compiler_transferred_response_byte_count =
             coerce_number(&source, "transferredResponseByteCount");
-        self.render_compiler_shared_input_buffer_used = coerce_bool(&source, "sharedInputBufferUsed");
-        self.render_compiler_shared_input_byte_length = coerce_number(&source, "sharedInputByteLength");
+        self.render_compiler_shared_input_buffer_used =
+            coerce_bool(&source, "sharedInputBufferUsed");
+        self.render_compiler_shared_input_byte_length =
+            coerce_number(&source, "sharedInputByteLength");
         self.render_compiler_shared_input_buffer_capacity_bytes =
             coerce_number(&source, "sharedInputBufferCapacityBytes");
         self.render_compiler_snapshot_input_chunk_count =
@@ -298,7 +304,8 @@ impl WebCompileTiming {
             coerce_bool(&source, "snapshotInputCompileUsed");
         self.render_compiler_generated_view_fallback_used =
             coerce_bool(&source, "generatedViewFallbackUsed");
-        self.render_compiler_shared_result_buffer_used = coerce_bool(&source, "sharedResultBufferUsed");
+        self.render_compiler_shared_result_buffer_used =
+            coerce_bool(&source, "sharedResultBufferUsed");
         // `Number(sharedResultByteLength) || (sharedResultBufferUsed ? Number(packedByteLength) : 0) || 0`
         self.render_compiler_shared_result_byte_length = {
             let primary = js_number(&source, "sharedResultByteLength");
@@ -318,7 +325,8 @@ impl WebCompileTiming {
         self.render_compiler_shared_result_overflow = coerce_bool(&source, "sharedResultOverflow");
         self.render_compiler_shared_result_response_count =
             coerce_number(&source, "sharedResultResponseCount");
-        self.render_compiler_shared_result_byte_count = coerce_number(&source, "sharedResultByteCount");
+        self.render_compiler_shared_result_byte_count =
+            coerce_number(&source, "sharedResultByteCount");
         self.render_compiler_shared_result_overflow_count =
             coerce_number(&source, "sharedResultOverflowCount");
 
@@ -333,7 +341,8 @@ impl WebCompileTiming {
 
         self.worker_section_count = coerce_number(&summary, "sectionCount");
         self.worker_non_empty_section_count = coerce_number(&summary, "nonEmptySectionCount");
-        self.worker_visibility_graph_build_count = coerce_number(&summary, "visibilityGraphBuildCount");
+        self.worker_visibility_graph_build_count =
+            coerce_number(&summary, "visibilityGraphBuildCount");
         self.worker_visibility_graph_total_ms = coerce_number(&summary, "visibilityGraphTotalMs");
         self.worker_visibility_graph_worst_ms = coerce_number(&summary, "visibilityGraphWorstMs");
         self.worker_vertex_count = coerce_number(&summary, "vertexCount");
@@ -437,8 +446,16 @@ impl WebCompileTiming {
         set_optional_number(&object, "loadedCenterAfterX", self.loaded_center_after_x)?;
         set_optional_number(&object, "loadedCenterAfterZ", self.loaded_center_after_z)?;
         set_number(&object, "totalMs", round_timing(total_ms))?;
-        set_number(&object, "beginRequestMs", round_timing(self.begin_request_ms))?;
-        set_number(&object, "workerRoundTripMs", round_timing(self.worker_round_trip_ms))?;
+        set_number(
+            &object,
+            "beginRequestMs",
+            round_timing(self.begin_request_ms),
+        )?;
+        set_number(
+            &object,
+            "workerRoundTripMs",
+            round_timing(self.worker_round_trip_ms),
+        )?;
         set_number(&object, "packedByteLength", self.packed_byte_length)?;
         set_string(
             &object,
@@ -610,21 +627,45 @@ impl WebCompileTiming {
         } else {
             JsValue::NULL
         };
-        Reflect::set(&object, &JsValue::from_str("renderCompilerMetrics"), &metrics)
-            .map_err(|error| JsValue::from_str(&format!("set renderCompilerMetrics: {error:?}")))?;
+        Reflect::set(
+            &object,
+            &JsValue::from_str("renderCompilerMetrics"),
+            &metrics,
+        )
+        .map_err(|error| JsValue::from_str(&format!("set renderCompilerMetrics: {error:?}")))?;
         set_number(
             &object,
             "decodeFinishApplyMs",
             round_timing(self.decode_finish_apply_ms),
         )?;
-        set_number(&object, "chunkViewUpdateCount", self.chunk_view_update_count)?;
+        set_number(
+            &object,
+            "chunkViewUpdateCount",
+            self.chunk_view_update_count,
+        )?;
         set_bool(&object, "centerLoaded", self.center_loaded)?;
         set_bool(&object, "runnerSettled", self.runner_settled)?;
         set_number(&object, "viewDirtyChunkCount", self.view_dirty_chunk_count)?;
-        set_number(&object, "viewRemovalChunkCount", self.view_removal_chunk_count)?;
-        set_number(&object, "loadedDirtyChunkCount", self.loaded_dirty_chunk_count)?;
-        set_number(&object, "removalDirtyChunkCount", self.removal_dirty_chunk_count)?;
-        set_number(&object, "staleDirtyChunkCount", self.stale_dirty_chunk_count)?;
+        set_number(
+            &object,
+            "viewRemovalChunkCount",
+            self.view_removal_chunk_count,
+        )?;
+        set_number(
+            &object,
+            "loadedDirtyChunkCount",
+            self.loaded_dirty_chunk_count,
+        )?;
+        set_number(
+            &object,
+            "removalDirtyChunkCount",
+            self.removal_dirty_chunk_count,
+        )?;
+        set_number(
+            &object,
+            "staleDirtyChunkCount",
+            self.stale_dirty_chunk_count,
+        )?;
         set_number(
             &object,
             "loadedDirtySectionCount",
@@ -701,7 +742,11 @@ impl WebCompileTiming {
         set_number(&object, "workerVertexCount", self.worker_vertex_count)?;
         set_number(&object, "workerIndexCount", self.worker_index_count)?;
         set_number(&object, "workerFaceCount", self.worker_face_count)?;
-        set_number(&object, "maxFrameGapMs", round_timing(self.max_frame_gap_ms))?;
+        set_number(
+            &object,
+            "maxFrameGapMs",
+            round_timing(self.max_frame_gap_ms),
+        )?;
         set_number(&object, "frameCountBefore", self.frame_count_before)?;
         set_optional_number(&object, "frameCountAfter", self.frame_count_after)?;
         set_number(&object, "renderCountBefore", self.render_count_before)?;
@@ -726,7 +771,8 @@ impl WebCompileTiming {
         self.ready_compile_section_count = coerce_number(source, "readyCompileSectionCount");
         self.deferred_compile_section_count = coerce_number(source, "deferredCompileSectionCount");
         self.budgeted_loaded_chunk_count = coerce_number(source, "budgetedLoadedChunkCount");
-        self.budgeted_dirty_section_chunk_count = coerce_number(source, "budgetedDirtySectionChunkCount");
+        self.budgeted_dirty_section_chunk_count =
+            coerce_number(source, "budgetedDirtySectionChunkCount");
     }
 
     /// Rebuild the nested `renderCompilerMetrics` object from the stored scalars (which are a
@@ -734,13 +780,21 @@ impl WebCompileTiming {
     /// `update_from_worker`).
     fn metrics_object(&self) -> Result<JsValue, JsValue> {
         let object = Object::new();
-        set_string(&object, "transportKind", &self.render_compiler_transport_kind)?;
+        set_string(
+            &object,
+            "transportKind",
+            &self.render_compiler_transport_kind,
+        )?;
         set_bool(
             &object,
             "sharedMemorySupported",
             self.render_compiler_shared_memory_supported,
         )?;
-        set_number(&object, "workerInitCount", self.render_compiler_worker_init_count)?;
+        set_number(
+            &object,
+            "workerInitCount",
+            self.render_compiler_worker_init_count,
+        )?;
         set_number(
             &object,
             "workerWasmInitCount",
@@ -792,7 +846,11 @@ impl WebCompileTiming {
             "requestSnapshotInputByteLength",
             self.render_compiler_request_snapshot_input_byte_length,
         )?;
-        set_number(&object, "requestByteLength", self.render_compiler_request_byte_length)?;
+        set_number(
+            &object,
+            "requestByteLength",
+            self.render_compiler_request_byte_length,
+        )?;
         set_number(
             &object,
             "transferredRequestByteLength",
