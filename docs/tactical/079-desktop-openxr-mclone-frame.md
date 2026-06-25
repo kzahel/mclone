@@ -196,6 +196,7 @@ cmd /c scripts\start-xr.bat --vdxr --mclone --view-pose 0,78,-96,180 --forever -
   eye.
 - Revalidated with `C:\tmp\mclone-xr-eye-submit-fix.png`; the headset session
   reached `FOCUSED` and remained live for manual inspection.
+- User headset inspection confirmed the corrected stereo rendering.
 
 ## Out Of Scope
 
