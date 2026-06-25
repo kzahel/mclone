@@ -1,6 +1,6 @@
 # 078: Desktop OpenXR Clear Smoke
 
-Status: active; Slice 2D Windows/Linux Vulkan graphics session compiles; Slice 2E/2F Windows launcher starts Virtual Desktop/Quest client with Playbox-style headset wake/restore; local Windows runtime reaches instance diagnostics but reports the HMD unavailable until the headset connects to the PC runtime, swapchains/frame loop next.
+Status: active; Slice 2D Windows/Linux Vulkan graphics session compiles; Slice 2E/2F Windows launcher starts Virtual Desktop/Quest client with Playbox-style headset wake/restore; Windows Virtual Desktop runtime creates the Vulkan OpenXR session once the headset is connected to the PC Streamer, swapchains/frame loop next.
 
 ## Purpose
 
@@ -444,6 +444,34 @@ complete a Streamer connection and
 `C:\ProgramData\Virtual Desktop\StreamerSettings.json` still had
 `LastConnectDate: 2026-05-28T00:00:00Z`. The remaining blocker is an actual
 Virtual Desktop/PC connection, not mclone's OpenXR loader or Vulkan binding.
+
+Successful connected probe on June 25, 2026:
+
+```powershell
+$env:XR_RUNTIME_JSON='C:\Program Files\Virtual Desktop Streamer\OpenXR\virtualdesktop-openxr.json'
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client --features xr -- --xr-clear-smoke --frames 2
+```
+
+After the headset was manually connected to the PC in Virtual Desktop, the
+smoke succeeded:
+
+- Entry: fallback loader
+  `C:\Program Files (x86)\Steam\steamapps\common\SteamVR\bin\win64\openxr_loader.dll`
+- Runtime: `VirtualDesktopXR v1.0.10`
+- System: `Meta Quest 3`, orientation and position tracking available.
+- Blend modes: `OPAQUE`
+- Stereo views:
+  - eye 0 recommended `1728x1824`, max `16384x16384`, samples `1/4`
+  - eye 1 recommended `1728x1824`, max `16384x16384`, samples `1/4`
+- Vulkan session:
+  `physical_device='NVIDIA GeForce RTX 4090' api=1.4.341 queue_family=0`
+- Reference space: `STAGE`
+
+The test was rerun after restoring the forced Quest wake/proximity settings
+without force-stopping the headset app or Windows Streamer, and the direct smoke
+still succeeded. The next implementation slice can assume loader, runtime,
+system, Vulkan graphics binding, and `STAGE` creation are validated on this
+Windows/Virtual Desktop setup.
 
 Implementation should follow the measured platform path. On macOS this likely
 means Metal-specific runtime/device matching. On Windows/Linux this likely
