@@ -60,6 +60,10 @@ Use Playbox as a pattern library only:
 - `~/code/playbox/src/xr/graphics_metal.rs` for the macOS
   `XR_KHR_metal_enable` graphics binding, runtime-required `MTLDevice`
   matching, and raw Metal command-queue session creation.
+- `~/code/playbox/scripts/start-xr.sh` for the macOS WiVRn launcher/env
+  defaults and optional Quest USB tunnel workflow.
+- `~/code/playbox/scripts/run_playbox_wivrn_capture.sh` for the fully explicit
+  WiVRn runtime manifest/library env used in capture validation.
 - `~/code/playbox/docs/tactical/106-desktop-xr-companion-window.md` if a
   companion window is needed later. Do not add companion-window complexity in
   this first smoke unless required by the local runtime.
@@ -208,6 +212,40 @@ cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target 
 pnpm native:web:build
 git diff --check
 ```
+
+Landed in Slice 2C:
+
+- Added `scripts/start-xr.sh`, modeled after Playbox's `scripts/start-xr.sh`.
+- The launcher defaults to the working local WiVRn macOS build shape:
+  `HOST_BUILD_DIR=$HOME/code/wivrn-macos/build/wivrn`,
+  `MONADO_OPENXR_RUNTIME_PATH=$HOST_BUILD_DIR/_deps/monado-build/src/xrt/targets/openxr/libopenxr_wivrn.dylib`,
+  and `XR_RUNTIME_JSON=$HOST_BUILD_DIR/openxr_wivrn-dev.json`.
+- Added `--wivrn-usb` to start/reuse `wivrn-server-headless --no-encrypt`,
+  install `adb reverse tcp:9757 tcp:9757`, and launch the Quest WiVRn client
+  with `wivrn+tcp://localhost:9757`.
+- Added package scripts:
+  - `pnpm native:xr:check`
+  - `pnpm native:xr:smoke`
+  - `pnpm native:xr:wivrn-usb`
+
+Slice 2C validation:
+
+```bash
+bash -n scripts/start-xr.sh
+pnpm native:xr:check
+scripts/start-xr.sh --frames 2
+```
+
+`scripts/start-xr.sh --frames 2` should now use the WiVRn OpenXR runtime env
+automatically on macOS when the local `~/code/wivrn-macos/build/wivrn` files
+are present. Local validation reached the WiVRn runtime dylib and reported
+`XR_KHR_metal_enable=true`; it then failed at `xrCreateInstance` because the
+WiVRn/Monado service socket was not active:
+`Failed to connect to socket .../Library/Caches/monado/wivrn/comp_ipc`.
+Use `scripts/start-xr.sh --wivrn-usb --frames 2` to start the host, install the
+ADB USB tunnel, launch the Quest WiVRn client, and then run the smoke. The
+local `--wivrn-usb` validation stopped before host startup because ADB reported
+`no devices/emulators found`.
 
 Implementation should follow the measured platform path. On macOS this likely
 means Metal-specific runtime/device matching. On Windows/Linux this likely
