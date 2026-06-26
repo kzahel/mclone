@@ -129,7 +129,7 @@ use (and should) · — n/a.
 | `app-runtime::SingleViewRuntime` | ✅ | ✅ | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::frame_render` | ✅ | ⚑ (inline reimpl) | ✅ | ✅ (via xr-scene) | `native:desktop-chunk:smoke`; `native:web:smoke` |
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime composes) | — (wasm-gated) | ✅ | ⚑ (xr-scene re-derives) | `cargo test -p mclone-app-runtime` |
-| `app-runtime::host_mode` (local vs remote) | ✅ | ⚑ (parallel async enum) | ✅ | ✗ | `cargo test -p mclone-app-runtime host_mode` |
+| `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✗ | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✗ (empty list) | ✗ (empty list) | `native:web:app-smoke` |
 | `mclone-xr-{host,graphics,scene}` | ⚑ (app-local XrMcloneWorldState) | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
@@ -151,8 +151,9 @@ Concretely:
   keeps a parallel app-local `XrMcloneWorldState` plus ~130 LoC of byte-identical
   transform helpers instead of consuming it.
 - `web-client` re-inlines the whole sky→chunk→actor render sequence instead of
-  calling `render_full_frame_for_view`, and runs a parallel `WebRuntimeHost`
-  enum instead of `host_mode` (see blocker #1).
+  calling `render_full_frame_for_view`. It still owns an async `WebRuntimeHost`
+  enum, but command/update accounting and remote WebSocket reconnect/resync prep
+  now flow through `mclone-app-runtime::host_mode` (see blocker #1).
 - flat Android now has a TCP remote-dedicated path through
   `debug.mclone.remote_addr`; Android XR still has no remote transport adapter.
 
@@ -181,12 +182,12 @@ Every new feature added today gets forked across up to four app shells. The
 highest-leverage work is the shared contracts that *stop* the forking. Land
 these first:
 
-1. **Reconcile the host-mode async/sync seam.** `RemoteDedicatedServerSession`
-   has a synchronous `send_command`, but the browser WebSocket is async, so web
-   forked into a parallel `WebRuntimeHost`. Until the trait has an async-friendly
-   shape, shared host mode serves native desktop and flat Android but not web or
-   XR. This unblocks remote-dedicated connect on the remaining lanes. (tactical
-   084 Slice 3 follow-on)
+1. **Finish the host-mode async/sync seam.** Native desktop and flat Android use
+   blocking TCP/session adapters, while browser worker/WebSocket mechanics stay
+   async and still sit behind `WebRuntimeHost`. Shared exchange accounting and
+   remote WebSocket reconnect/resync prep have landed; remaining work is naming
+   cleanup plus playable browser remote-connect wiring. XR still needs a remote
+   transport adapter. (tactical 085)
 2. **Build the connect/menu flow + the missing UI widgets.** Title → singleplayer
    vs server → address entry (`EditBox`) → world/seed select → loading screen. No
    lane can join a server in-app without this. Needed by the whole flat class.

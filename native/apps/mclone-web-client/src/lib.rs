@@ -3,7 +3,8 @@
 use mclone_app_runtime::host_mode::update_drain_exchange;
 #[cfg(target_arch = "wasm32")]
 use mclone_app_runtime::host_mode::{
-    command_exchange, deferred_command_exchange, diagnostics_command_update_queues_drained,
+    RemoteDedicatedExchangeReport, command_exchange, deferred_command_exchange,
+    diagnostics_command_update_queues_drained, resolve_remote_dedicated_exchange_report,
 };
 use mclone_app_runtime::{RuntimeExchange, RuntimeStepReport, SingleViewRuntime};
 use mclone_client::{ClientHost, ClientRuntime};
@@ -29,7 +30,7 @@ mod web_remote_session;
 mod web_server_worker;
 
 #[cfg(target_arch = "wasm32")]
-use web_remote_session::WebSocketServerSession;
+use web_remote_session::{WebSocketExchange, WebSocketServerSession};
 #[cfg(target_arch = "wasm32")]
 pub use web_server_worker::{WebIntegratedServerRunner, WebIntegratedServerRunnerConfig};
 
@@ -155,6 +156,10 @@ impl WebRuntime {
         chunk_tracking_radius: u32,
     ) -> Result<WebRuntimeStepReport, String> {
         let command = self.chunk_view_command(center, render_distance, chunk_tracking_radius);
+        #[cfg(target_arch = "wasm32")]
+        if matches!(self.host, WebRuntimeHost::RemoteWebSocket(_)) {
+            return self.exchange_remote_websocket_command_async(command).await;
+        }
         let exchange = self.host.exchange_async(command).await?;
         Ok(self.apply_exchange(exchange))
     }
@@ -182,6 +187,10 @@ impl WebRuntime {
         &mut self,
         command: ClientCommand,
     ) -> Result<WebRuntimeStepReport, String> {
+        #[cfg(target_arch = "wasm32")]
+        if matches!(self.host, WebRuntimeHost::RemoteWebSocket(_)) {
+            return self.exchange_remote_websocket_command_async(command).await;
+        }
         let exchange = self.host.exchange_async(command).await?;
         Ok(self.apply_exchange(exchange))
     }
@@ -226,6 +235,40 @@ impl WebRuntime {
 
     fn apply_exchange(&mut self, exchange: RuntimeExchange) -> WebRuntimeStepReport {
         self.core.apply_exchange(exchange)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn exchange_remote_websocket_command_async(
+        &mut self,
+        command: ClientCommand,
+    ) -> Result<WebRuntimeStepReport, String> {
+        let WebRuntimeHost::RemoteWebSocket(host) = &mut self.host else {
+            return Err("remote websocket exchange called for non-websocket host".to_owned());
+        };
+        let result = host
+            .exchange_command(command)
+            .await
+            .map(websocket_exchange_runtime_exchange);
+        match resolve_remote_dedicated_exchange_report(&mut self.core, result)
+            .map_err(|error| error.to_string())?
+        {
+            RemoteDedicatedExchangeReport::Applied { report, .. } => Ok(report),
+            RemoteDedicatedExchangeReport::ReconnectAndResync { command, error } => {
+                host.reconnect().await.map_err(|reconnect_error| {
+                    format!(
+                        "failed to reconnect websocket after command failure {error}: {reconnect_error}"
+                    )
+                })?;
+                let exchange =
+                    websocket_exchange_runtime_exchange(host.exchange_command(command).await?);
+                Ok(self.core.apply_exchange(RuntimeExchange::new(
+                    exchange.updates,
+                    0,
+                    exchange.protocol_codec_roundtrip,
+                    exchange.transport_drained,
+                )))
+            }
+        }
     }
 
     pub const fn client(&self) -> &ClientRuntime {
@@ -304,6 +347,15 @@ impl WebRuntime {
 }
 
 pub type WebRuntimeStepReport = RuntimeStepReport;
+
+#[cfg(target_arch = "wasm32")]
+fn websocket_exchange_runtime_exchange(exchange: WebSocketExchange) -> RuntimeExchange {
+    command_exchange(
+        exchange.updates,
+        exchange.protocol_codec_roundtrip,
+        exchange.transport_drained,
+    )
+}
 
 #[derive(Debug)]
 enum WebRuntimeHost {

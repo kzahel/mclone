@@ -169,6 +169,12 @@ impl WebSocketServerSession {
         })
     }
 
+    pub async fn reconnect(&mut self) -> Result<(), String> {
+        let replacement = Self::connect(self.url.clone()).await?;
+        *self = replacement;
+        Ok(())
+    }
+
     pub fn diagnostics(&self) -> ServerRunnerDiagnostics {
         let mut diagnostics =
             ServerRunnerDiagnostics::initial(ServerRunnerKind::RemoteWebSocket, 0, self.day_time);

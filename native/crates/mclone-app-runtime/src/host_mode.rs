@@ -5,7 +5,8 @@ use mclone_protocol::{ClientCommand, ServerUpdate};
 use mclone_server::ServerRunnerDiagnostics;
 
 use crate::{
-    RuntimeExchange, SingleViewRuntime, chunk_tracking_radius_for_render_distance, chunk_view,
+    RuntimeExchange, RuntimeStepReport, SingleViewRuntime,
+    chunk_tracking_radius_for_render_distance, chunk_view,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,6 +48,18 @@ impl SingleViewHostOptions {
 pub trait RemoteDedicatedServerSession {
     fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>>;
     fn reconnect(&mut self) -> Result<()>;
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum RemoteDedicatedExchangeReport<E> {
+    Applied {
+        changed: bool,
+        report: RuntimeStepReport,
+    },
+    ReconnectAndResync {
+        command: ClientCommand,
+        error: E,
+    },
 }
 
 pub fn command_exchange(
@@ -112,9 +125,14 @@ pub fn dispatch_remote_dedicated_command<S>(
 where
     S: RemoteDedicatedServerSession + ?Sized,
 {
-    match session.send_command(command) {
-        Ok(updates) => Ok(apply_remote_dedicated_command_updates(runtime, updates)),
-        Err(err) => reconnect_remote_dedicated_session_and_resync(runtime, session, err),
+    let result = session
+        .send_command(command)
+        .map(|updates| command_exchange(updates, true, true));
+    match resolve_remote_dedicated_exchange_report(runtime, result)? {
+        RemoteDedicatedExchangeReport::Applied { changed, .. } => Ok(changed),
+        RemoteDedicatedExchangeReport::ReconnectAndResync { command, error: _ } => {
+            reconnect_remote_dedicated_session_and_resync(runtime, session, command)
+        }
     }
 }
 
@@ -129,20 +147,54 @@ pub fn apply_remote_dedicated_command_exchange(
     runtime: &mut SingleViewRuntime,
     exchange: RuntimeExchange,
 ) -> bool {
+    apply_remote_dedicated_command_exchange_report(runtime, exchange).0
+}
+
+pub fn apply_remote_dedicated_command_exchange_report(
+    runtime: &mut SingleViewRuntime,
+    exchange: RuntimeExchange,
+) -> (bool, RuntimeStepReport) {
     let changed = !exchange.updates.is_empty();
-    runtime.apply_exchange(exchange);
-    changed
+    let report = runtime.apply_exchange(exchange);
+    (changed, report)
+}
+
+pub fn resolve_remote_dedicated_exchange_report<E>(
+    runtime: &mut SingleViewRuntime,
+    result: std::result::Result<RuntimeExchange, E>,
+) -> Result<RemoteDedicatedExchangeReport<E>>
+where
+    E: std::fmt::Display,
+{
+    match result {
+        Ok(exchange) => {
+            let (changed, report) =
+                apply_remote_dedicated_command_exchange_report(runtime, exchange);
+            Ok(RemoteDedicatedExchangeReport::Applied { changed, report })
+        }
+        Err(error) => {
+            let command = prepare_remote_dedicated_resync_command_for_error(runtime, &error)?;
+            Ok(RemoteDedicatedExchangeReport::ReconnectAndResync { command, error })
+        }
+    }
 }
 
 pub fn prepare_remote_dedicated_resync_command(
     runtime: &mut SingleViewRuntime,
     err: anyhow::Error,
 ) -> Result<ClientCommand> {
+    prepare_remote_dedicated_resync_command_for_error(runtime, err)
+}
+
+pub fn prepare_remote_dedicated_resync_command_for_error(
+    runtime: &mut SingleViewRuntime,
+    err: impl std::fmt::Display,
+) -> Result<ClientCommand> {
     let Some(view) = runtime.client().chunk_view().cloned() else {
         bail!("remote dedicated command failed before a chunk view was established: {err:#}");
     };
 
-    log::warn!("remote dedicated command failed; reconnecting and resyncing chunk view: {err:#}");
+    log::warn!("remote dedicated command failed; reconnecting and resyncing chunk view: {err}");
     runtime.clear_client_replica_and_mark_render_dirty();
     Ok(ClientCommand::SetChunkView(view))
 }
@@ -150,12 +202,11 @@ pub fn prepare_remote_dedicated_resync_command(
 pub fn reconnect_remote_dedicated_session_and_resync<S>(
     runtime: &mut SingleViewRuntime,
     session: &mut S,
-    err: anyhow::Error,
+    command: ClientCommand,
 ) -> Result<bool>
 where
     S: RemoteDedicatedServerSession + ?Sized,
 {
-    let command = prepare_remote_dedicated_resync_command(runtime, err)?;
     session.reconnect()?;
     let updates = session
         .send_command(command)
