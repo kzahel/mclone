@@ -3,12 +3,15 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
+use mclone_app_runtime::host_mode::{
+    SingleViewHostOptions, build_remote_dedicated_client_runtime, dispatch_remote_dedicated_command,
+};
 use mclone_app_runtime::local_single_view::{
     LocalSingleViewSceneOptions, build_local_single_view_client_runtime,
 };
 use mclone_app_runtime::{
-    RuntimeExchange, RuntimePollDiagnostics, RuntimeUpdateApplyReport, SingleViewRuntime,
-    SingleViewRuntimeStats, elapsed_ms,
+    RuntimePollDiagnostics, RuntimeUpdateApplyReport, SingleViewRuntime, SingleViewRuntimeStats,
+    elapsed_ms,
 };
 #[cfg(test)]
 use mclone_app_runtime::{camera_position_inside_water_block, snapshot_block_state_at_world};
@@ -18,7 +21,9 @@ use mclone_client::{ClientHost, ClientRuntime};
 use mclone_core::AIR_BLOCK_STATE_ID;
 use mclone_core::ChunkPos;
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
-use mclone_protocol::{ClientCommand, PlayerPositionUpdate, ServerUpdate};
+#[cfg(test)]
+use mclone_protocol::ServerUpdate;
+use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
 #[cfg(test)]
 use mclone_server::{IntegratedServer, ServerRunnerKind};
 use mclone_server::{
@@ -73,16 +78,11 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
         return build_local_single_view_client_runtime(local_single_view_options(scene)?);
     };
 
-    let mut client = ClientRuntime::new(ClientHost::RemoteDedicated);
-    let command = client.set_chunk_view(mclone_app_runtime::chunk_view(
-        center,
-        render_distance,
-        chunk_tracking_radius_for_render_distance(render_distance),
-    ));
     let mut session = RemoteServerSession::connect(remote_addr.as_str())?;
-    let updates = session.send_command(command)?;
-    client.apply_updates(updates);
-    Ok(client)
+    build_remote_dedicated_client_runtime(
+        SingleViewHostOptions::new(center, render_distance),
+        &mut session,
+    )
 }
 
 fn local_single_view_options(scene: &SceneOptions) -> Result<LocalSingleViewSceneOptions> {
@@ -306,8 +306,8 @@ impl WindowSceneRuntime {
     }
 
     fn dispatch_client_command(&mut self, command: ClientCommand) -> Result<bool> {
-        if self.remote_session.is_some() {
-            return self.dispatch_remote_client_command(command);
+        if let Some(remote_session) = &mut self.remote_session {
+            return dispatch_remote_dedicated_command(&mut self.core, remote_session, command);
         }
 
         let Some(runner) = &mut self.server_runner else {
@@ -318,44 +318,6 @@ impl WindowSceneRuntime {
             .context("failed to send command to integrated server runner")?;
         let _ = self.drain_local_runner_updates_report()?;
         Ok(true)
-    }
-
-    fn dispatch_remote_client_command(&mut self, command: ClientCommand) -> Result<bool> {
-        let remote_session = self
-            .remote_session
-            .as_mut()
-            .expect("remote dispatch requires a remote session");
-        match remote_session.send_command(command) {
-            Ok(updates) => {
-                let changed = !updates.is_empty();
-                self.core.apply_exchange(RuntimeExchange::command(updates));
-                Ok(changed)
-            }
-            Err(err) => self.reconnect_remote_session_and_resync(err),
-        }
-    }
-
-    fn reconnect_remote_session_and_resync(&mut self, err: anyhow::Error) -> Result<bool> {
-        let Some(view) = self.client().chunk_view().cloned() else {
-            bail!("remote server command failed before a chunk view was established: {err:#}");
-        };
-
-        log::warn!("remote server command failed; reconnecting and resyncing chunk view: {err:#}");
-        self.clear_remote_replica_for_resync();
-        let remote_session = self
-            .remote_session
-            .as_mut()
-            .expect("remote resync requires a remote session");
-        remote_session.reconnect()?;
-        let updates = remote_session
-            .send_command(ClientCommand::SetChunkView(view))
-            .context("failed to resync chunk view after reconnect")?;
-        self.apply_server_updates(updates);
-        Ok(true)
-    }
-
-    fn clear_remote_replica_for_resync(&mut self) {
-        self.core.clear_client_replica_and_mark_render_dirty();
     }
 
     pub(crate) fn poll(&mut self) -> Result<bool> {
@@ -389,6 +351,7 @@ impl WindowSceneRuntime {
         Ok(self.core.apply_server_updates_report(updates))
     }
 
+    #[cfg(test)]
     fn apply_server_updates(&mut self, updates: Vec<ServerUpdate>) -> bool {
         self.core.apply_server_updates(updates)
     }

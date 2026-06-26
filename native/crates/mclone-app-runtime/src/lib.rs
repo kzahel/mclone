@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod frame_render;
+pub mod host_mode;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod local_single_view;
 #[cfg(not(target_arch = "wasm32"))]

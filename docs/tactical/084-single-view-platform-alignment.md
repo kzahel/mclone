@@ -2,8 +2,9 @@
 
 Status: active. Slice 1 is complete. Slice 2 has two chunks landed:
 desktop's local static client-runtime construction and shared render-section
-queue draining now use `mclone-app-runtime` helpers, while deeper live
-`WindowSceneRuntime` convergence remains next.
+queue draining now use `mclone-app-runtime` helpers. Slice 3 has started by
+moving desktop remote dedicated dispatch/resync policy into a shared
+host-mode module while keeping TCP transport in the desktop app.
 
 ## Purpose
 
@@ -160,19 +161,51 @@ git diff --check
 
 ### Slice 3 - Dedicated Host Mode Contract
 
-- [ ] Introduce a shared host-mode/options contract in `mclone-app-runtime`
+- [x] Introduce a shared host-mode/options contract in `mclone-app-runtime`
   that represents local integrated and remote dedicated play without desktop
   app terminology.
-- [ ] Move command/update exchange and resync semantics behind a shared
+- [x] Move command/update exchange and resync semantics behind a shared
   session/transport boundary. Desktop TCP, browser WebSocket, Android network
   config, and future P2P should be adapters around that boundary.
-- [ ] Keep desktop's existing `--remote-addr` behavior working while making it
+- [x] Keep desktop's existing `--remote-addr` behavior working while making it
   one consumer of the shared host-mode contract.
 - [ ] Add a flat Android remote dedicated configuration path once the shared
   contract exists. Android-specific property/intent/UI details stay in the app
   crate.
-- [ ] Add host-mode conformance coverage so local integrated and remote
+- [x] Add host-mode conformance coverage so local integrated and remote
   dedicated construction can be validated without running every device lane.
+
+Recorded Slice 3 first-chunk result:
+
+- Added `mclone-app-runtime::host_mode` with `SingleViewHostMode`,
+  `SingleViewHostOptions`, `RemoteDedicatedServerSession`, and shared helpers
+  for initial remote dedicated client construction, command/update application,
+  reconnect preparation, replica clearing, and chunk-view resync.
+- Kept concrete TCP in `mclone-native-client::remote_session::RemoteServerSession`.
+  The desktop session now implements the shared `RemoteDedicatedServerSession`
+  trait.
+- Rewired desktop remote client construction and live remote command dispatch
+  through `mclone-app-runtime::host_mode`.
+- Removed desktop-private copies of remote command success handling,
+  reconnect/resync, and client-replica clearing policy from
+  `WindowSceneRuntime`.
+- Added app-runtime host-mode unit coverage for initial remote chunk-view load,
+  normal remote update application, and reconnect/resync after a failed
+  command.
+
+Validation after Slice 3 first chunk:
+
+```bash
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime host_mode
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client remote_session
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+pnpm native:web:build
+git diff --check
+```
 
 ### Slice 4 - Contract Matrix
 

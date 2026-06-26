@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
 use mclone_net::NativeClientSession;
 use mclone_protocol::{ClientCommand, ServerUpdate};
 
@@ -29,6 +30,16 @@ impl RemoteServerSession {
                 self.addr
             )
         })
+    }
+}
+
+impl RemoteDedicatedServerSession for RemoteServerSession {
+    fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>> {
+        RemoteServerSession::send_command(self, command)
+    }
+
+    fn reconnect(&mut self) -> Result<()> {
+        RemoteServerSession::reconnect(self)
     }
 }
 
