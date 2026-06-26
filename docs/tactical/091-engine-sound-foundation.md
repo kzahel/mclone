@@ -1,9 +1,10 @@
 # 091: Engine Audio Foundation and Landing Sound
 
-Status: active; Slice 1 code landed 2026-06-26. The shared landing event,
-`mclone-audio` OGG sample mixer, desktop-flat wiring, optional local sound
-overlay, and placeholder fetch script are implemented and validated through
-automated gates. Desktop manual listening and the non-web adapter wiring remain.
+Status: active; Slices 1-2 code landed 2026-06-26. The shared landing event,
+`mclone-audio` OGG sample mixer, desktop-flat wiring, desktop OpenXR wiring,
+flat Android wiring, Android XR wiring, optional local sound overlay, and
+placeholder fetch script are implemented and validated through automated gates.
+Manual listening/device validation and web/WASM remain.
 
 ## Purpose
 
@@ -108,16 +109,30 @@ Landed on 2026-06-26:
 - Added `scripts/fetch-sound-assets.ps1` and fetched the two local placeholder
   OGGs into the gitignored
   `reference/minecraft-1.17.1/sound-overlay/` directory.
+- Added shared XR-scene audio ownership via an optional `AudioEngine`, with
+  desktop OpenXR and Android XR hosts creating audio from their existing asset
+  sources and the shared scene draining landing events after controller
+  locomotion.
+- Added flat Android audio initialization in the renderer lifecycle and landing
+  playback after touch movement.
+- Updated Android and Android XR build scripts to pass Gradle `minSdk` to
+  `cargo ndk` (`--platform 28` today), which is required for CPAL's Android
+  AAudio link path.
+- Routed `native:android-xr:*` package scripts through `run-native-bash.mjs` so
+  they work from the repo's normal PowerShell-driven workflow.
 
 Validated:
 
 - `cargo test --manifest-path native/Cargo.toml`
 - `pnpm native:movement:smoke`
 - `pnpm native:web:build`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-native-client --features xr`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-client -p mclone-android-xr-client --target x86_64-linux-android`
+- `pnpm native:android:apk:avd`
+- `pnpm native:android-xr:apk`
 
-Not yet validated by automation: audible desktop playback, because that requires
-manual listening. The next implementation chunk should wire desktop OpenXR, flat
-Android, and Android XR through the same event drain and lifecycle shape.
+Not yet validated by automation: audible playback, AVD/Quest runtime audio, and
+desktop/headset manual listening. Web remains deferred by design.
 
 ## Placeholder Sound Assets
 
@@ -293,11 +308,12 @@ Runtime contract:
     `pnpm native:movement:smoke`, and a manual desktop run. Automated gates have
     passed; manual listening remains.
 
-- [ ] **Slice 2: desktop OpenXR, flat Android, Android XR.**
+- [x] **Slice 2: desktop OpenXR, flat Android, Android XR.**
   - Wire the same event drain and `AudioEngine` into the shared XR scene/host
     path and the flat Android app.
   - Keep platform code limited to lifecycle construction/suspend/drop.
   - Validate desktop XR smoke plus Android/Quest build and headset or AVD smoke.
+    Code compile/build gates passed; headset/AVD runtime audio validation remains.
 
 - [ ] **Slice 3: web/WASM, only if the glue stays thin.**
   - Compile the same crate for `wasm32-unknown-unknown`.
@@ -312,9 +328,9 @@ Runtime contract:
 |---|---|
 | Shared logic | `cargo test --manifest-path native/Cargo.toml` for mixer, bounded-command behavior, missing-key no-op, and landing detection |
 | Desktop flat | `pnpm native:movement:smoke` passed; manual run still needed: hop = small landing, ledge fall = big landing, standing = silent |
-| Desktop OpenXR | Existing XR smoke plus no crash and centered local landing playback/logging |
-| Flat Android | APK/AVD smoke: no lifecycle crash and landing audible/logged |
-| Android XR | Quest/AVD smoke when the adapter is touched |
+| Desktop OpenXR | XR-feature tests passed; manual OpenXR listen/smoke remains |
+| Flat Android | `pnpm native:android:apk:avd` passed; AVD/device listen smoke remains |
+| Android XR | `pnpm native:android-xr:apk` passed; Quest listen smoke remains |
 | Web/WASM | Deferred until Slice 3; build/smoke must pass with audio optional |
 
 No screenshot applies. Regression coverage is deterministic mixer/controller

@@ -21,13 +21,17 @@ use mclone_xr_scene::{XrMcloneTerrainState, XrStartupViewPose, XrTerrainEyeTarge
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
 
-#[cfg(not(target_os = "android"))]
-use crate::actor_assets::load_actor_texture_assets;
 use crate::cli::{XrClearSmokeOptions, XrMcloneSmokeOptions};
 #[cfg(not(target_os = "android"))]
 use crate::remote_session::RemoteServerSession;
 #[cfg(not(target_os = "android"))]
+use crate::render_cache::load_asset_source;
+#[cfg(not(target_os = "android"))]
 use crate::scene_runtime::native_window_scene_runtime;
+#[cfg(not(target_os = "android"))]
+use mclone_app_runtime::render_assets::load_actor_texture_assets_from_asset_source;
+#[cfg(not(target_os = "android"))]
+use mclone_audio::{AudioEngine, AudioSettings};
 
 #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
 mod graphics_metal;
@@ -654,9 +658,18 @@ fn create_mclone_terrain_state(
     queue: &wgpu::Queue,
     options: XrMcloneSmokeOptions,
 ) -> Result<DesktopXrMcloneTerrainState> {
-    let actor_assets = load_actor_texture_assets().context("load mclone actor texture assets")?;
+    let asset_source = load_asset_source().context("load mclone XR asset source")?;
+    let actor_assets = load_actor_texture_assets_from_asset_source(&asset_source)
+        .context("load mclone actor texture assets")?;
+    let audio = match AudioEngine::new(&asset_source, AudioSettings::default()) {
+        Ok(audio) => Some(audio),
+        Err(err) => {
+            println!("desktop OpenXR audio disabled: {err:#}");
+            None
+        }
+    };
     let runtime = native_window_scene_runtime(&options.scene)?;
-    XrMcloneTerrainState::with_runtime(
+    let mut state = XrMcloneTerrainState::with_runtime(
         device,
         queue,
         XR_COLOR_FORMAT,
@@ -668,7 +681,9 @@ fn create_mclone_terrain_state(
             yaw_degrees: view_pose.yaw_degrees,
         }),
     )
-    .context("initialize shared mclone XR terrain scene")
+    .context("initialize shared mclone XR terrain scene")?;
+    state.set_audio_engine(audio);
+    Ok(state)
 }
 
 #[cfg(not(target_os = "android"))]

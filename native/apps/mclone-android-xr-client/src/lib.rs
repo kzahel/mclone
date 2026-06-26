@@ -19,6 +19,8 @@ mod android {
         ActorTextureAssets, TexturedMeshAssets, load_actor_texture_assets_from_asset_source,
         load_asset_source, load_textured_mesh_assets_from_source,
     };
+    use mclone_assets::AssetSourceChain;
+    use mclone_audio::{AudioEngine, AudioSettings};
     use mclone_net::NativeClientSession;
     use mclone_protocol::{ClientCommand, ServerUpdate};
     use mclone_render::chunk::TexturedSectionRenderOptions;
@@ -144,6 +146,7 @@ mod android {
     struct AndroidXrRuntimeAssets {
         mesh_assets: TexturedMeshAssets,
         actor_assets: ActorTextureAssets,
+        asset_source: AssetSourceChain,
     }
 
     impl AndroidXrRuntimeAssets {
@@ -175,6 +178,7 @@ mod android {
         let assets = AndroidXrRuntimeAssets {
             mesh_assets,
             actor_assets,
+            asset_source: source,
         };
         let (terrain_atlas_width, terrain_atlas_height) = assets.terrain_atlas_size();
         let (actor_atlas_width, actor_atlas_height) = assets.actor_atlas_size();
@@ -747,6 +751,7 @@ mod android {
         let AndroidXrRuntimeAssets {
             mesh_assets,
             actor_assets,
+            asset_source,
         } = runtime_assets;
         let runtime = if let Some(remote_addr) = remote_addr {
             let session = AndroidXrRemoteServerSession::connect(remote_addr.as_str())?;
@@ -767,7 +772,14 @@ mod android {
             )
             .context("failed to initialize Android XR local integrated runtime")?
         };
-        XrMcloneTerrainState::with_runtime(
+        let audio = match AudioEngine::new(&asset_source, AudioSettings::default()) {
+            Ok(audio) => Some(audio),
+            Err(error) => {
+                log::warn!("Android XR audio disabled: {error:#}");
+                None
+            }
+        };
+        let mut terrain = XrMcloneTerrainState::with_runtime(
             device,
             queue,
             XR_COLOR_FORMAT,
@@ -775,7 +787,9 @@ mod android {
             TexturedSectionRenderOptions::default(),
             actor_assets.atlas,
             startup_view_pose,
-        )
+        )?;
+        terrain.set_audio_engine(audio);
+        Ok(terrain)
     }
 
     fn android_xr_local_options(scene: XrSceneOptions) -> LocalSingleViewSceneOptions {

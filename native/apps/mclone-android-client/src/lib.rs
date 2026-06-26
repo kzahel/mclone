@@ -17,6 +17,8 @@ mod android {
     use mclone_app_runtime::local_single_view::{
         LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime,
     };
+    use mclone_app_runtime::render_assets::load_asset_source;
+    use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
     use mclone_core::{ChunkPos, Vec3d};
     use mclone_mesh::quad_face_count_from_indices;
     use mclone_net::NativeClientSession;
@@ -164,6 +166,7 @@ mod android {
         render_stats: RenderStreamStats,
         frame_index: u64,
         last_movement_update: Option<Instant>,
+        audio: Option<AudioEngine>,
     }
 
     enum AndroidRenderError {
@@ -476,6 +479,16 @@ mod android {
                 section_update.rebuilt_section_count(),
                 section_update.visibility_graph_stats.build_count
             );
+            let audio = match load_asset_source()
+                .context("load Android sound assets")
+                .and_then(|source| AudioEngine::new(&source, AudioSettings::default()))
+            {
+                Ok(audio) => Some(audio),
+                Err(error) => {
+                    log::warn!("Mclone Android audio disabled: {error:#}");
+                    None
+                }
+            };
 
             Ok(Self {
                 depth,
@@ -493,6 +506,7 @@ mod android {
                 render_stats,
                 frame_index: 0,
                 last_movement_update: None,
+                audio,
             })
         }
 
@@ -830,9 +844,21 @@ mod android {
                 return Ok(());
             };
             self.camera.apply_movement_input(self.scene.client(), input);
+            self.play_landing_events();
             self.commit_engine_camera_player_pose()
                 .context("sync Android touch-movement player pose")?;
             Ok(())
+        }
+
+        fn play_landing_events(&mut self) {
+            let events = self.camera.take_landing_events();
+            let Some(audio) = &self.audio else {
+                return;
+            };
+            for event in events {
+                let (sound, gain) = landing_playback_for_impact(event.impact_speed);
+                audio.play(sound, gain);
+            }
         }
 
         fn commit_engine_camera_player_pose(&mut self) -> Result<bool> {

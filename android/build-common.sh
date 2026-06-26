@@ -38,6 +38,13 @@ mclone_gradle_ndk_version() {
     sed -n 's/.*ndkVersion *= *"\([^"]*\)".*/\1/p' "$gradle_file" | head -1
 }
 
+mclone_gradle_min_sdk() {
+    local gradle_file="$1"
+
+    [[ -f "$gradle_file" ]] || return 0
+    sed -n 's/.*minSdk *= *\([0-9][0-9]*\).*/\1/p' "$gradle_file" | head -1
+}
+
 mclone_normalize_android_abis() {
     local requested="${1:-arm64-v8a}"
     local normalized=()

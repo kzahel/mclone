@@ -65,12 +65,14 @@ case "$BUILD_TYPE" in
 esac
 
 NDK_HOME="$(mclone_resolve_ndk_home "$ANDROID_SDK_HOME" "$NDK_HOME" "$REQUIRED_NDK_VERSION")"
+CARGO_NDK_PLATFORM="$(mclone_gradle_min_sdk "$SCRIPT_DIR/app/build.gradle.kts")"
+CARGO_NDK_PLATFORM="${CARGO_NDK_PLATFORM:-28}"
 mclone_android_build_preflight "$ANDROID_SDK_HOME" "$NDK_HOME" "$REQUIRED_NDK_VERSION"
 mclone_export_android_build_env "$ANDROID_SDK_HOME" "$NDK_HOME"
 
-echo "Building Mclone Android XR shared library ($BUILD_TYPE)..."
+echo "Building Mclone Android XR shared library ($BUILD_TYPE, API $CARGO_NDK_PLATFORM)..."
 cd "$REPO_ROOT/native"
-cargo ndk -t arm64-v8a -o ../android-xr/jniLibs build "${CARGO_PROFILE_ARGS[@]}" --package mclone-android-xr-client --lib
+cargo ndk -t arm64-v8a --platform "$CARGO_NDK_PLATFORM" -o ../android-xr/jniLibs build "${CARGO_PROFILE_ARGS[@]}" --package mclone-android-xr-client --lib
 
 echo "Bundling libc++_shared.so..."
 NDK_PREBUILT="$(find "$NDK_HOME/toolchains/llvm/prebuilt" -maxdepth 1 -mindepth 1 -type d | head -1)"

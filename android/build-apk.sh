@@ -8,6 +8,8 @@ source "$REPO_ROOT/android/build-common.sh"
 ANDROID_SDK_HOME="$(mclone_android_sdk_home_for_build)"
 NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
 REQUIRED_NDK_VERSION="$(mclone_gradle_ndk_version "$SCRIPT_DIR/app/build.gradle.kts")"
+CARGO_NDK_PLATFORM="$(mclone_gradle_min_sdk "$SCRIPT_DIR/app/build.gradle.kts")"
+CARGO_NDK_PLATFORM="${CARGO_NDK_PLATFORM:-28}"
 BUILD_ABIS="${MCLONE_ANDROID_ABIS:-arm64-v8a}"
 
 usage() {
@@ -70,8 +72,8 @@ done
 cd "$REPO_ROOT/native"
 while IFS= read -r abi; do
     [[ -n "$abi" ]] || continue
-    echo "Building Mclone Android shared library for $abi..."
-    cargo ndk -t "$abi" -o ../android/jniLibs build --release --package mclone-android-client --lib
+    echo "Building Mclone Android shared library for $abi (API $CARGO_NDK_PLATFORM)..."
+    cargo ndk -t "$abi" --platform "$CARGO_NDK_PLATFORM" -o ../android/jniLibs build --release --package mclone-android-client --lib
 
     echo "Bundling libc++_shared.so for $abi..."
     libcxx_dir="$(mclone_android_libcxx_target_dir_for_abi "$abi")"
