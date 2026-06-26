@@ -867,7 +867,7 @@ fn xr_locomotion_input_from_controllers(
         .iter()
         .any(|controller| controller.hand == XrHand::Right && controller.a_pressed);
     let movement_impulse = (left_axis.length_squared() > f32::EPSILON)
-        .then(|| EngineCameraMovementImpulse::new(-left_axis.x, left_axis.y));
+        .then(|| xr_left_stick_movement_impulse(left_axis));
     let yaw_delta = f64::from(right_axis.x) * XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * dt_seconds;
     let mouse_delta_x = if ENGINE_CAMERA_MOUSE_SENSITIVITY > 0.0 {
         yaw_delta / ENGINE_CAMERA_MOUSE_SENSITIVITY
@@ -882,6 +882,14 @@ fn xr_locomotion_input_from_controllers(
         movement_impulse,
         ..EngineCameraInput::default()
     }
+}
+
+#[cfg(not(target_os = "android"))]
+fn xr_left_stick_movement_impulse(axis: Vec2) -> EngineCameraMovementImpulse {
+    // Quest/VirtualDesktopXR validation reports the left locomotion axes as
+    // transposed relative to the engine movement impulse: physical left/right
+    // arrives on Y, while physical forward/back arrives on X.
+    EngineCameraMovementImpulse::new(axis.y, axis.x)
 }
 
 #[cfg(not(target_os = "android"))]
@@ -1833,7 +1841,7 @@ mod tests {
     fn xr_locomotion_maps_left_stick_and_a_button_to_engine_input() {
         let input = xr_locomotion_input_from_controllers(
             &[
-                test_controller(XrHand::Left, Vec2::Y, false),
+                test_controller(XrHand::Left, Vec2::X, false),
                 test_controller(XrHand::Right, Vec2::ZERO, true),
             ],
             0.05,
@@ -1844,6 +1852,18 @@ mod tests {
         let impulse = input.movement_impulse.unwrap();
         assert!(impulse.left.abs() < 1.0e-6);
         assert!((impulse.forward - 1.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn xr_locomotion_maps_left_stick_lateral_axis_to_strafe() {
+        let input = xr_locomotion_input_from_controllers(
+            &[test_controller(XrHand::Left, Vec2::Y, false)],
+            0.05,
+        );
+
+        let impulse = input.movement_impulse.unwrap();
+        assert!((impulse.left - 1.0).abs() < 1.0e-6);
+        assert!(impulse.forward.abs() < 1.0e-6);
     }
 
     #[test]

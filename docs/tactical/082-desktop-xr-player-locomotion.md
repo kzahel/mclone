@@ -67,7 +67,8 @@ slices.
   - the initial OpenXR stage view is captured as the tracking origin,
   - per-frame HMD poses render under the current player/root.
 - Mapped XR input into shared `EngineCameraInput`:
-  - left stick to analog `EngineCameraMovementImpulse`,
+  - left stick to analog `EngineCameraMovementImpulse`, using the
+    Quest/VirtualDesktopXR-observed transposed axes and corrected strafe sign,
   - right stick X through the desktop mouse-look yaw path,
   - right A to jump.
 - Added unit coverage for XR rig alignment, physical HMD offset, thumbstick
@@ -143,9 +144,31 @@ cmd /c scripts\start-xr.bat --vdxr --mclone --view-pose 0,120,-96,180 --frames 1
   Live thumbstick/yaw/A-jump feel still needs a person in-headset with awake
   controllers.
 
+Human headset verification on June 26, 2026:
+
+- Open-ended command:
+
+```powershell
+cmd /c scripts\start-xr.bat --vdxr --mclone --view-pose 0,78,-96,180 --forever --no-quest-restore --no-pause
+```
+
+- User verified the basic XR locomotion loop in-headset on Quest 3 through
+  VirtualDesktopXR.
+- Initial movement feel was good except the left thumbstick axes were
+  transposed: physical left/right drove forward/back in-game.
+- After swapping left-stick locomotion axes, forward/back was correct but
+  strafe left/right was inverted.
+- After inverting only the strafe sign, user reported the controls were
+  "all good".
+- Validation before the final manual relaunch:
+  - `cargo fmt --manifest-path native/Cargo.toml --all --check`
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-native-client --features xr xr_locomotion`
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`
+- After manual validation, the live `mclone-native-client` process was stopped
+  and `Restore-McloneQuestVirtualDesktopState -StopQuestApp -SleepAfterRestore`
+  was run to restore Quest wake/proximity settings and request headset sleep.
+
 ## Next Step
 
-Run an open-ended headset session and manually validate left-stick movement,
-right-stick yaw direction, and A jump with awake controllers. If the feel is
-acceptable, add XR block-selection diagnostics from controller aim poses so
-movement and interaction can be validated together before comfort options.
+Add XR block-selection diagnostics from controller aim poses so movement and
+interaction can be validated together before comfort options.
