@@ -15,6 +15,7 @@ members = [
   "crates/mclone-worldgen",
   "apps/mclone-dedicated-server",
   "apps/mclone-android-client",
+  "apps/mclone-android-xr-client",
   "apps/mclone-native-client",
   "apps/mclone-web-client",
 ]
@@ -33,6 +34,7 @@ crc32fast = "1"
 flate2 = "1"
 glam = "0.30"
 image = { version = "0.25", default-features = false, features = ["png"] }
+jni = "0.22"
 js-sys = "0.3.102"
 libloading = "0.8"
 log = "0.4"

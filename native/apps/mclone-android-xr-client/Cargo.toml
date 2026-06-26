@@ -1,0 +1,17 @@
+[package]
+name = "mclone-android-xr-client"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+anyhow.workspace = true
+jni.workspace = true
+log.workspace = true
+winit.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "mclone_android_xr_client"
+path = "src/lib.rs"

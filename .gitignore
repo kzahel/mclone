@@ -59,3 +59,7 @@ android/.gradle/
 android/app/build/
 android/build/
 android/jniLibs/**/*.so
+android-xr/.gradle/
+android-xr/app/build/
+android-xr/build/
+android-xr/jniLibs/**/*.so

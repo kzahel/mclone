@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <uses-feature
+        android:name="android.hardware.vulkan.level"
+        android:required="true"
+        android:version="1" />
+
+    <application
+        android:allowBackup="false"
+        android:hasCode="true"
+        android:label="Mclone XR"
+        android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+
+        <meta-data android:name="com.oculus.vr.focusaware" android:value="true" />
+        <meta-data android:name="com.oculus.supportedDevices" android:value="quest3|quest3s|questpro" />
+        <meta-data android:name="com.oculus.supportedInputDevices" android:value="controllers|hands" />
+        <meta-data android:name="com.oculus.ossplash" android:value="false" />
+
+        <activity
+            android:name="com.kzahel.mclone.xr.McloneXrActivity"
+            android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape">
+
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="mclone_android_xr_client" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="com.oculus.intent.category.VR" />
+            </intent-filter>
+        </activity>
+    </application>
+
+    <queries>
+        <provider android:authorities="org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runtime_broker" />
+    </queries>
+</manifest>
