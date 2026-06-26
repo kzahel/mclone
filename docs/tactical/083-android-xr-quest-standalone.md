@@ -792,7 +792,9 @@ Observed Quest result:
 
 - [x] Reuse the shared XR host action set shape for Quest Touch controllers.
 - [x] Feed left-stick/right-stick/A-button into the shared locomotion path.
-- [ ] Validate movement, yaw, and jump on-device with awake controllers.
+- [x] Validate movement, yaw, and jump on-device with awake controllers.
+- [ ] Decide and tune the Quest locomotion frame: player/body-yaw relative,
+  HMD-yaw relative, controller-hand relative, or a configurable policy.
 
 Recorded Slice 4 first-chunk result:
 
@@ -851,6 +853,20 @@ Observed Quest result:
 - Awake controller snapshots were observed after the first frame:
   `MCLONE_ANDROID_XR_CONTROLLERS_ACTIVE count=2`
 - Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
+
+Manual headset validation, June 26, 2026:
+
+- User verified the standalone Quest build runs and basic locomotion works.
+- Remaining issue is not bring-up but locomotion feel: strafe direction appears
+  tied to the current player/body yaw path rather than changing with physical
+  HMD heading. This needs an explicit UX decision before tuning.
+- Current implementation applies stick input through `EngineCameraInput` and
+  the engine/player yaw. The HMD pose remains a render-only offset under the
+  player root, so physically looking around does not by itself redefine
+  forward/strafe.
+- Next tuning slice should add a named locomotion-frame policy. The likely
+  Quest default is HMD-yaw-relative smooth locomotion, while retaining
+  player/body-yaw-relative as a deterministic desktop-style option.
 
 ### Slice 5 - Quest Runtime Hardening
 
@@ -916,5 +932,5 @@ pnpm native:web:build
 
 This tactical is complete when Android XR / Quest standalone can launch through
 its own package, create an OpenXR session on Quest, render real mclone terrain
-in stereo, and accept basic controller locomotion through the shared XR/player
+in stereo, and accept tuned controller locomotion through the shared XR/player
 path.

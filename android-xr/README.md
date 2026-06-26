@@ -120,5 +120,7 @@ On the attached Quest 3, mclone reaches `MCLONE_ANDROID_XR_READY` after pinning
 Vulkan XR and Android XR now share the OpenXR/Vulkan/wgpu graphics factory
 through `mclone-xr-graphics`, and both desktop XR and Android XR consume
 `mclone-xr-scene` for shared XR terrain constants/alignment/runtime shape. The
-next implementation step is awake-controller headset validation for movement,
-yaw, and jump tuning on top of the rendered terrain frame.
+standalone headset path has been manually verified with awake Quest
+controllers. The next implementation step is locomotion-frame tuning: decide
+whether smooth movement should be player/body-yaw relative, HMD-yaw relative,
+controller-hand relative, or configurable.
