@@ -1,5 +1,10 @@
 #![deny(unsafe_code)]
 
+use mclone_app_runtime::host_mode::update_drain_exchange;
+#[cfg(target_arch = "wasm32")]
+use mclone_app_runtime::host_mode::{
+    command_exchange, deferred_command_exchange, diagnostics_command_update_queues_drained,
+};
 use mclone_app_runtime::{RuntimeExchange, RuntimeStepReport, SingleViewRuntime};
 use mclone_client::{ClientHost, ClientRuntime};
 use mclone_core::{ChunkPos, ChunkSnapshot};
@@ -327,12 +332,7 @@ impl WebRuntimeHost {
             Self::Worker(host) => {
                 host.send_command(command)
                     .map_err(|error| error.to_string())?;
-                Ok(RuntimeExchange {
-                    updates: Vec::new(),
-                    command_count: 1,
-                    protocol_codec_roundtrip: true,
-                    transport_drained: false,
-                })
+                Ok(deferred_command_exchange())
             }
             #[cfg(target_arch = "wasm32")]
             Self::RemoteWebSocket(_) => Err(
@@ -347,22 +347,20 @@ impl WebRuntimeHost {
             #[cfg(target_arch = "wasm32")]
             Self::Worker(host) => {
                 let exchange = host.exchange_command(command).await?;
-                Ok(RuntimeExchange {
-                    updates: exchange.updates,
-                    command_count: 1,
-                    protocol_codec_roundtrip: exchange.protocol_codec_roundtrip,
-                    transport_drained: exchange.transport_drained,
-                })
+                Ok(command_exchange(
+                    exchange.updates,
+                    exchange.protocol_codec_roundtrip,
+                    exchange.transport_drained,
+                ))
             }
             #[cfg(target_arch = "wasm32")]
             Self::RemoteWebSocket(host) => {
                 let exchange = host.exchange_command(command).await?;
-                Ok(RuntimeExchange {
-                    updates: exchange.updates,
-                    command_count: 1,
-                    protocol_codec_roundtrip: exchange.protocol_codec_roundtrip,
-                    transport_drained: exchange.transport_drained,
-                })
+                Ok(command_exchange(
+                    exchange.updates,
+                    exchange.protocol_codec_roundtrip,
+                    exchange.transport_drained,
+                ))
             }
         }
     }
@@ -376,34 +374,23 @@ impl WebRuntimeHost {
         _max_update_frames: usize,
     ) -> Result<RuntimeExchange, String> {
         match self {
-            Self::Inline(_) => Ok(RuntimeExchange {
-                updates: Vec::new(),
-                command_count: 0,
-                protocol_codec_roundtrip: true,
-                transport_drained: true,
-            }),
+            Self::Inline(_) => Ok(update_drain_exchange(Vec::new(), true)),
             #[cfg(target_arch = "wasm32")]
             Self::Worker(host) => {
                 let updates = host.drain_decoded_updates_budgeted(_max_update_frames)?;
                 let diagnostics = host.diagnostics();
-                Ok(RuntimeExchange {
+                Ok(update_drain_exchange(
                     updates,
-                    command_count: 0,
-                    protocol_codec_roundtrip: true,
-                    transport_drained: diagnostics.command_queue_depth == 0
-                        && diagnostics.update_queue_depth == 0,
-                })
+                    diagnostics_command_update_queues_drained(&diagnostics),
+                ))
             }
             #[cfg(target_arch = "wasm32")]
             Self::RemoteWebSocket(host) => {
                 let diagnostics = host.diagnostics();
-                Ok(RuntimeExchange {
-                    updates: Vec::new(),
-                    command_count: 0,
-                    protocol_codec_roundtrip: true,
-                    transport_drained: diagnostics.command_queue_depth == 0
-                        && diagnostics.update_queue_depth == 0,
-                })
+                Ok(update_drain_exchange(
+                    Vec::new(),
+                    diagnostics_command_update_queues_drained(&diagnostics),
+                ))
             }
         }
     }

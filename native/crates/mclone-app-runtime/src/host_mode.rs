@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use mclone_client::ClientRuntime;
 use mclone_core::ChunkPos;
 use mclone_protocol::{ClientCommand, ServerUpdate};
+use mclone_server::ServerRunnerDiagnostics;
 
 use crate::{
     RuntimeExchange, SingleViewRuntime, chunk_tracking_radius_for_render_distance, chunk_view,
@@ -48,6 +49,35 @@ pub trait RemoteDedicatedServerSession {
     fn reconnect(&mut self) -> Result<()>;
 }
 
+pub fn command_exchange(
+    updates: Vec<ServerUpdate>,
+    protocol_codec_roundtrip: bool,
+    transport_drained: bool,
+) -> RuntimeExchange {
+    RuntimeExchange::new(updates, 1, protocol_codec_roundtrip, transport_drained)
+}
+
+pub fn deferred_command_exchange() -> RuntimeExchange {
+    RuntimeExchange::new(Vec::new(), 1, true, false)
+}
+
+pub fn update_drain_exchange(
+    updates: Vec<ServerUpdate>,
+    transport_drained: bool,
+) -> RuntimeExchange {
+    RuntimeExchange::updates(updates, transport_drained)
+}
+
+pub fn diagnostics_command_update_queues_drained(diagnostics: &ServerRunnerDiagnostics) -> bool {
+    diagnostics.command_queue_depth == 0 && diagnostics.update_queue_depth == 0
+}
+
+pub fn diagnostics_worker_exchange_drained(diagnostics: &ServerRunnerDiagnostics) -> bool {
+    diagnostics_command_update_queues_drained(diagnostics)
+        && diagnostics.pending_jobs == 0
+        && diagnostics.pending_publications == 0
+}
+
 pub fn build_remote_dedicated_client_runtime<S>(
     options: SingleViewHostOptions,
     session: &mut S,
@@ -92,8 +122,15 @@ pub fn apply_remote_dedicated_command_updates(
     runtime: &mut SingleViewRuntime,
     updates: Vec<ServerUpdate>,
 ) -> bool {
-    let changed = !updates.is_empty();
-    runtime.apply_exchange(RuntimeExchange::command(updates));
+    apply_remote_dedicated_command_exchange(runtime, command_exchange(updates, true, true))
+}
+
+pub fn apply_remote_dedicated_command_exchange(
+    runtime: &mut SingleViewRuntime,
+    exchange: RuntimeExchange,
+) -> bool {
+    let changed = !exchange.updates.is_empty();
+    runtime.apply_exchange(exchange);
     changed
 }
 
@@ -211,6 +248,27 @@ mod tests {
 
         assert_eq!(runtime.day_time(), 6000);
         assert_eq!(runtime.command_count(), 1);
+    }
+
+    #[test]
+    fn host_exchange_helpers_preserve_command_and_drain_accounting() {
+        assert_eq!(
+            command_exchange(vec![ServerUpdate::TimeUpdate { day_time: 42 }], false, true),
+            RuntimeExchange::new(
+                vec![ServerUpdate::TimeUpdate { day_time: 42 }],
+                1,
+                false,
+                true
+            )
+        );
+        assert_eq!(
+            deferred_command_exchange(),
+            RuntimeExchange::new(Vec::new(), 1, true, false)
+        );
+        assert_eq!(
+            update_drain_exchange(vec![ServerUpdate::TimeUpdate { day_time: 43 }], false),
+            RuntimeExchange::updates(vec![ServerUpdate::TimeUpdate { day_time: 43 }], false)
+        );
     }
 
     #[test]

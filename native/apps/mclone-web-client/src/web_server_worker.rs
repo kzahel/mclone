@@ -6,6 +6,7 @@ use std::rc::Rc;
 use js_sys::{
     Array, Atomics, Function, Int32Array, Object, Promise, Reflect, SharedArrayBuffer, Uint8Array,
 };
+use mclone_app_runtime::host_mode::diagnostics_worker_exchange_drained;
 use mclone_core::ChunkPos;
 use mclone_protocol::{
     ChunkView, ClientCommand, ServerUpdate, decode_client_command, decode_server_update,
@@ -285,10 +286,7 @@ impl WebIntegratedServerRunner {
         Ok(WebWorkerExchange {
             updates,
             protocol_codec_roundtrip,
-            transport_drained: diagnostics.command_queue_depth == 0
-                && diagnostics.update_queue_depth == 0
-                && diagnostics.pending_jobs == 0
-                && diagnostics.pending_publications == 0,
+            transport_drained: diagnostics_worker_exchange_drained(&diagnostics),
         })
     }
 
