@@ -893,6 +893,7 @@ pub struct EngineCameraInput {
     pub shift: bool,
     pub sprint: bool,
     pub movement_impulse: Option<EngineCameraMovementImpulse>,
+    pub movement_yaw_radians: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -926,6 +927,7 @@ impl Default for EngineCameraInput {
             shift: false,
             sprint: false,
             movement_impulse: None,
+            movement_yaw_radians: None,
         }
     }
 }
@@ -1338,6 +1340,7 @@ impl EngineCameraController {
             input
                 .movement_impulse
                 .map(EngineCameraMovementImpulse::as_player_impulse),
+            input.movement_yaw_radians,
         )
         .is_some()
     }
@@ -1347,12 +1350,20 @@ impl EngineCameraController {
         speed_blocks_per_second: f64,
         dt_seconds: f64,
         movement_impulse: Option<(f32, f32)>,
+        movement_yaw_radians: Option<f64>,
     ) -> Option<Vec3d> {
         let pose = player.pose();
+        let movement_yaw = finite_movement_yaw(movement_yaw_radians);
+        let yaw_radians = movement_yaw.unwrap_or_else(|| pose.native_yaw_radians());
+        let pitch_radians = if movement_yaw.is_some() {
+            0.0
+        } else {
+            pose.native_pitch_radians()
+        };
         player.tick_no_clip_movement_with_impulse(
             NoClipMovementStep {
-                yaw_radians: pose.native_yaw_radians(),
-                pitch_radians: pose.native_pitch_radians(),
+                yaw_radians,
+                pitch_radians,
                 speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
                 dt_seconds,
                 descending: false,
@@ -1365,6 +1376,9 @@ impl EngineCameraController {
     fn tick_walking(&mut self, client: &ClientRuntime, input: EngineCameraInput) -> bool {
         let pose = self.player.pose();
         let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
+        let y_rot_degrees = finite_movement_yaw(input.movement_yaw_radians)
+            .map(|yaw| -yaw.to_degrees())
+            .unwrap_or(pose.y_rot_degrees);
         let was_on_ground = self.player.on_ground();
         let pre_move_fall_speed = (-self.player.delta_movement().y).max(0.0);
         let moved = self
@@ -1372,7 +1386,7 @@ impl EngineCameraController {
             .tick_walking_movement_with_impulse(
                 client,
                 WalkingMovementStep {
-                    y_rot_degrees: pose.y_rot_degrees,
+                    y_rot_degrees,
                     dt_seconds,
                 },
                 input
@@ -1422,6 +1436,10 @@ fn clamp_camera_speed(speed_blocks_per_second: f64) -> f64 {
     } else {
         ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND
     }
+}
+
+fn finite_movement_yaw(yaw_radians: Option<f64>) -> Option<f64> {
+    yaw_radians.filter(|yaw| yaw.is_finite())
 }
 
 fn view_forward(yaw_radians: f64, pitch_radians: f64) -> Vec3d {
@@ -3336,6 +3354,29 @@ mod tests {
         assert_eq!(camera.movement_mode(), EngineCameraMovementMode::Walking);
         assert!(after.eye.z > before.eye.z);
         assert!(camera.player().delta_movement().y < 0.0);
+    }
+
+    #[test]
+    fn engine_camera_movement_yaw_override_walks_without_turning_view() {
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), 0.0, 0.0, 32.0);
+        let client = ClientRuntime::local_integrated();
+        let before = camera.snapshot();
+
+        let after = camera.apply_movement_input(
+            &client,
+            EngineCameraInput {
+                dt_seconds: 0.05,
+                movement_impulse: Some(EngineCameraMovementImpulse::new(0.0, 1.0)),
+                movement_yaw_radians: Some(std::f64::consts::FRAC_PI_2),
+                ..EngineCameraInput::default()
+            },
+        );
+
+        assert!(after.eye.x > before.eye.x);
+        assert!((after.eye.z - before.eye.z).abs() < 1.0e-6);
+        assert!((after.yaw_radians - before.yaw_radians).abs() < 1.0e-12);
+        assert!((after.pitch_radians - before.pitch_radians).abs() < 1.0e-12);
     }
 
     #[test]

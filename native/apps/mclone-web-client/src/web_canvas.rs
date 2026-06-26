@@ -2514,6 +2514,7 @@ impl WebChunkRenderSession {
             shift,
             sprint,
             movement_impulse,
+            movement_yaw_radians: None,
         };
         self.camera
             .apply_movement_input(self.runtime.client(), input);

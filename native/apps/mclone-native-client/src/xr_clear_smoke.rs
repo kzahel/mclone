@@ -715,7 +715,7 @@ fn render_mclone_frame(
     let stereo_views =
         mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)
             .context("locate OpenXR stereo views for mclone frame")?;
-    mclone.apply_locomotion_input(controllers)?;
+    mclone.apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])?;
 
     let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
     let right_target = match acquire_eye_target(right_eye).context("acquire right-eye OpenXR image")

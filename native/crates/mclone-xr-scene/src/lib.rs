@@ -56,6 +56,22 @@ const XR_MENU_LEFT_RAY_COLOR: [f32; 4] = [0.18, 0.85, 1.0, 0.95];
 const XR_MENU_RIGHT_RAY_COLOR: [f32; 4] = [0.2, 1.0, 0.45, 0.95];
 const XR_MENU_TRIGGER_RAY_COLOR: [f32; 4] = [1.0, 0.42, 0.12, 1.0];
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum XrLocomotionMode {
+    #[default]
+    HeadsetYaw,
+    PlayerYaw,
+}
+
+impl XrLocomotionMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::HeadsetYaw => "headset-yaw",
+            Self::PlayerYaw => "player-yaw",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct XrSceneOptions {
     pub seed: i64,
@@ -169,6 +185,7 @@ where
     sky: SkyRenderer,
     render_stats: RenderStreamStats,
     tracking_origin: Option<XrTrackingOrigin>,
+    locomotion_mode: XrLocomotionMode,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
     menu_pointer_down: bool,
@@ -249,6 +266,7 @@ where
             sky: SkyRenderer::new(device, color_format),
             render_stats: RenderStreamStats::default(),
             tracking_origin: None,
+            locomotion_mode: XrLocomotionMode::default(),
             last_locomotion_update: None,
             menu_toggle_down: false,
             menu_pointer_down: false,
@@ -402,7 +420,19 @@ where
         Ok(self.frame_summary())
     }
 
-    pub fn apply_locomotion_input(&mut self, controllers: &[XrControllerSnapshot]) -> Result<()> {
+    pub fn set_locomotion_mode(&mut self, locomotion_mode: XrLocomotionMode) {
+        self.locomotion_mode = locomotion_mode;
+    }
+
+    pub fn locomotion_mode(&self) -> XrLocomotionMode {
+        self.locomotion_mode
+    }
+
+    pub fn apply_locomotion_input(
+        &mut self,
+        controllers: &[XrControllerSnapshot],
+        views: [xr::View; 2],
+    ) -> Result<()> {
         self.latest_controllers.clear();
         self.latest_controllers.extend_from_slice(controllers);
         let now = Instant::now();
@@ -415,7 +445,11 @@ where
         if self.ui.is_active() {
             return Ok(());
         }
-        let input = xr_locomotion_input_from_controllers(controllers, dt_seconds);
+        let movement_yaw_radians = self
+            .locomotion_movement_yaw_radians(&views)
+            .context("resolve XR locomotion frame")?;
+        let input =
+            xr_locomotion_input_from_controllers(controllers, dt_seconds, movement_yaw_radians);
         self.camera
             .apply_movement_input(self.runtime.client(), input);
         self.play_landing_events();
@@ -455,34 +489,47 @@ where
         if views.len() < 2 {
             bail!("OpenXR runtime returned fewer than two stereo views");
         }
-        let tracking_origin = match self.tracking_origin {
-            Some(origin) => origin,
-            None => {
-                let origin =
-                    XrTrackingOrigin::from_initial_views(views, self.initial_alignment_mode)?;
-                let snapshot = self.camera.snapshot();
-                log::info!(
-                    "mclone XR terrain player-root alignment: mode={} root_eye=({:.2}, {:.2}, {:.2}) root_yaw_degrees={:.1} stage_center=({:.3}, {:.3}, {:.3}) stage_yaw_degrees={:.1}",
-                    origin.mode_label(),
-                    snapshot.eye.x,
-                    snapshot.eye.y,
-                    snapshot.eye.z,
-                    snapshot.yaw_radians.to_degrees(),
-                    origin.origin_stage.x,
-                    origin.origin_stage.y,
-                    origin.origin_stage.z,
-                    origin.stage_yaw.to_degrees()
-                );
-                self.tracking_origin = Some(origin);
-                origin
-            }
-        };
+        let tracking_origin = self.tracking_origin_for_views(views)?;
         let transform =
             XrStageToWorld::from_tracking_origin(tracking_origin, self.camera.snapshot())?;
         Ok([
             xr_view_to_chunk_render_view(&views[0], transform, XR_NEAR, XR_FAR)?,
             xr_view_to_chunk_render_view(&views[1], transform, XR_NEAR, XR_FAR)?,
         ])
+    }
+
+    fn tracking_origin_for_views(&mut self, views: &[xr::View]) -> Result<XrTrackingOrigin> {
+        if let Some(origin) = self.tracking_origin {
+            return Ok(origin);
+        }
+        let origin = XrTrackingOrigin::from_initial_views(views, self.initial_alignment_mode)?;
+        let snapshot = self.camera.snapshot();
+        log::info!(
+            "mclone XR terrain player-root alignment: mode={} root_eye=({:.2}, {:.2}, {:.2}) root_yaw_degrees={:.1} stage_center=({:.3}, {:.3}, {:.3}) stage_yaw_degrees={:.1}",
+            origin.mode_label(),
+            snapshot.eye.x,
+            snapshot.eye.y,
+            snapshot.eye.z,
+            snapshot.yaw_radians.to_degrees(),
+            origin.origin_stage.x,
+            origin.origin_stage.y,
+            origin.origin_stage.z,
+            origin.stage_yaw.to_degrees()
+        );
+        self.tracking_origin = Some(origin);
+        Ok(origin)
+    }
+
+    fn locomotion_movement_yaw_radians(&mut self, views: &[xr::View]) -> Result<Option<f64>> {
+        match self.locomotion_mode {
+            XrLocomotionMode::PlayerYaw => Ok(None),
+            XrLocomotionMode::HeadsetYaw => {
+                let tracking_origin = self.tracking_origin_for_views(views)?;
+                let transform =
+                    XrStageToWorld::from_tracking_origin(tracking_origin, self.camera.snapshot())?;
+                xr_headset_world_yaw_from_views(views, transform).map(|yaw| Some(f64::from(yaw)))
+            }
+        }
     }
 
     fn poll_runtime_and_upload(
@@ -1091,6 +1138,7 @@ pub fn apply_xr_startup_view_pose(
 pub fn xr_locomotion_input_from_controllers(
     controllers: &[XrControllerSnapshot],
     dt_seconds: f64,
+    movement_yaw_radians: Option<f64>,
 ) -> EngineCameraInput {
     let dt_seconds = if dt_seconds.is_finite() {
         dt_seconds.clamp(0.0, XR_LOCOMOTION_MAX_FRAME_SECONDS)
@@ -1124,6 +1172,7 @@ pub fn xr_locomotion_input_from_controllers(
         mouse_delta_x,
         jump,
         movement_impulse,
+        movement_yaw_radians,
         ..EngineCameraInput::default()
     }
 }
@@ -1340,11 +1389,36 @@ fn average_unit_direction(a: Vec3, b: Vec3, fallback: Vec3) -> Vec3 {
     }
 }
 
+pub fn xr_headset_world_yaw_from_views(
+    views: &[xr::View],
+    transform: XrStageToWorld,
+) -> Result<f32> {
+    if views.len() < 2 {
+        bail!("OpenXR runtime returned fewer than two stereo views");
+    }
+    let left_pose = mclone_xr_host::view_pose(&views[0])?;
+    let right_pose = mclone_xr_host::view_pose(&views[1])?;
+    let left_forward = left_pose.orientation * Vec3::NEG_Z;
+    let right_forward = right_pose.orientation * Vec3::NEG_Z;
+    let stage_forward = average_unit_direction(left_forward, right_forward, Vec3::NEG_Z);
+    let world_forward = transform.transform_direction(stage_forward);
+    engine_movement_yaw_from_forward(world_forward)
+        .ok_or_else(|| anyhow!("OpenXR returned an invalid headset locomotion yaw"))
+}
+
+fn engine_movement_yaw_from_forward(forward: Vec3) -> Option<f32> {
+    if !forward.is_finite() {
+        return None;
+    }
+    let horizontal = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+    if horizontal.length_squared() <= f32::EPSILON {
+        return None;
+    }
+    Some(horizontal.x.atan2(horizontal.z))
+}
+
 fn xr_left_stick_movement_impulse(axis: Vec2) -> EngineCameraMovementImpulse {
-    // Quest/VirtualDesktopXR validation reports the left locomotion axes as
-    // transposed relative to the engine movement impulse: physical left/right
-    // arrives on Y, while physical forward/back arrives on X.
-    EngineCameraMovementImpulse::new(axis.y, axis.x)
+    EngineCameraMovementImpulse::new(-axis.x, axis.y)
 }
 
 fn joypad_axis_after_dead_zone(axis: Vec2) -> Vec2 {
@@ -1382,13 +1456,21 @@ mod tests {
     }
 
     #[test]
+    fn default_xr_locomotion_mode_is_headset_yaw() {
+        assert_eq!(XrLocomotionMode::default(), XrLocomotionMode::HeadsetYaw);
+        assert_eq!(XrLocomotionMode::HeadsetYaw.label(), "headset-yaw");
+        assert_eq!(XrLocomotionMode::PlayerYaw.label(), "player-yaw");
+    }
+
+    #[test]
     fn xr_locomotion_maps_left_stick_and_a_button_to_engine_input() {
         let input = xr_locomotion_input_from_controllers(
             &[
-                test_controller(XrHand::Left, Vec2::new(1.0, 0.0), false),
+                test_controller(XrHand::Left, Vec2::new(0.0, 1.0), false),
                 test_controller(XrHand::Right, Vec2::ZERO, true),
             ],
             1.0 / 72.0,
+            Some(0.25),
         );
 
         assert_eq!(input.dt_seconds, 1.0 / 72.0);
@@ -1397,20 +1479,23 @@ mod tests {
             input.movement_impulse,
             Some(EngineCameraMovementImpulse::new(0.0, 1.0))
         );
+        assert_eq!(input.movement_yaw_radians, Some(0.25));
         assert_eq!(input.mouse_delta_x, 0.0);
     }
 
     #[test]
     fn xr_locomotion_maps_left_stick_lateral_axis_to_strafe() {
         let input = xr_locomotion_input_from_controllers(
-            &[test_controller(XrHand::Left, Vec2::new(0.0, 1.0), false)],
+            &[test_controller(XrHand::Left, Vec2::new(1.0, 0.0), false)],
             1.0 / 72.0,
+            None,
         );
 
         assert_eq!(
             input.movement_impulse,
-            Some(EngineCameraMovementImpulse::new(1.0, 0.0))
+            Some(EngineCameraMovementImpulse::new(-1.0, 0.0))
         );
+        assert_eq!(input.movement_yaw_radians, None);
     }
 
     #[test]
@@ -1425,6 +1510,7 @@ mod tests {
                 ),
             ],
             1.0,
+            None,
         );
 
         assert_eq!(input.movement_impulse, None);
@@ -1436,6 +1522,7 @@ mod tests {
         let input = xr_locomotion_input_from_controllers(
             &[test_controller(XrHand::Right, Vec2::new(1.0, 0.0), false)],
             0.05,
+            None,
         );
         let expected_mouse_delta =
             XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * 0.05 / ENGINE_CAMERA_MOUSE_SENSITIVITY;
@@ -1632,6 +1719,32 @@ mod tests {
         assert!((world_position - Vec3::new(8.35, 72.0, -12.2)).length() < 1.0e-5);
     }
 
+    #[test]
+    fn headset_locomotion_yaw_uses_engine_movement_forward_convention() {
+        let transform = test_stage_to_world();
+        let left = test_xr_view(Vec3::new(-0.03, 0.0, 0.0), Quat::IDENTITY);
+        let right = test_xr_view(Vec3::new(0.03, 0.0, 0.0), Quat::IDENTITY);
+
+        let yaw = xr_headset_world_yaw_from_views(&[left, right], transform).unwrap();
+
+        assert!((yaw - std::f32::consts::PI).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn headset_locomotion_yaw_follows_stage_to_world_transform() {
+        let transform = XrStageToWorld {
+            origin_stage: Vec3::ZERO,
+            origin_world: Vec3::ZERO,
+            stage_to_world_rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        };
+        let left = test_xr_view(Vec3::new(-0.03, 0.0, 0.0), Quat::IDENTITY);
+        let right = test_xr_view(Vec3::new(0.03, 0.0, 0.0), Quat::IDENTITY);
+
+        let yaw = xr_headset_world_yaw_from_views(&[left, right], transform).unwrap();
+
+        assert!((yaw + std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
+    }
+
     fn test_controller(hand: XrHand, thumbstick: Vec2, a_pressed: bool) -> XrControllerSnapshot {
         XrControllerSnapshot {
             hand,
@@ -1644,6 +1757,30 @@ mod tests {
             a_pressed,
             thumbstick,
             thumbstick_pressed: false,
+        }
+    }
+
+    fn test_xr_view(position: Vec3, orientation: Quat) -> xr::View {
+        xr::View {
+            pose: xr::Posef {
+                orientation: xr::Quaternionf {
+                    x: orientation.x,
+                    y: orientation.y,
+                    z: orientation.z,
+                    w: orientation.w,
+                },
+                position: xr::Vector3f {
+                    x: position.x,
+                    y: position.y,
+                    z: position.z,
+                },
+            },
+            fov: xr::Fovf {
+                angle_left: -0.5,
+                angle_right: 0.5,
+                angle_up: 0.5,
+                angle_down: -0.5,
+            },
         }
     }
 

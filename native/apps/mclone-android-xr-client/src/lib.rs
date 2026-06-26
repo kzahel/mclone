@@ -995,7 +995,7 @@ mod android {
         let stereo_views =
             mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
         terrain
-            .apply_locomotion_input(controllers)
+            .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
             .context("apply Android XR controller locomotion")?;
 
         let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
