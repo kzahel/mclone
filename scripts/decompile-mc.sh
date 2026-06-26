@@ -67,6 +67,16 @@ else
     SHA1SUM="shasum"
 fi
 
+# On Windows, `winget install jqlang.jq` drops jq under the WinGet Packages
+# directory but does NOT update the PATH of an already-open shell. If jq isn't
+# already resolvable, look for it there and prepend its directory to PATH so the
+# rest of this script's jq calls work without a manual PATH edit. No-op on
+# Linux/macOS (the search base won't exist).
+if ! command -v jq >/dev/null 2>&1; then
+    _jq=$(find "$HOME/AppData/Local/Microsoft/WinGet/Packages" -iname 'jq*.exe' 2>/dev/null | head -1) || true
+    [ -n "${_jq:-}" ] && PATH="$(dirname "$_jq"):$PATH" && export PATH
+fi
+
 for bin in java curl jq "$SHA1SUM"; do
     command -v "$bin" >/dev/null 2>&1 || { echo "Missing prereq: $bin" >&2; exit 1; }
 done
@@ -76,6 +86,24 @@ fi
 
 log()  { printf '[mc-decompile] %s\n' "$*"; }
 need() { [ "$FORCE" = 1 ] || [ ! -e "$1" ]; }
+
+# Echo a working Python 3 launcher, or return 1 if none is found. On Windows,
+# `python3` is usually a Microsoft Store stub: it sits on PATH (so `command -v`
+# finds it) but exits non-zero with "Python was not found" on any real call. We
+# therefore probe each candidate with `--version` and confirm it reports Python
+# 3 before trusting it. Candidates may be multi-word (`py -3`), so callers must
+# use the result unquoted.
+find_python() {
+    local cand
+    for cand in python3 python "py -3"; do
+        if $cand --version >/dev/null 2>&1 \
+           && $cand -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1; then
+            printf '%s' "$cand"
+            return 0
+        fi
+    done
+    return 1
+}
 
 mkdir -p "$OUT_DIR/tools"
 cd "$OUT_DIR"
@@ -158,9 +186,13 @@ fi
 
 # 7. Optionally apply Parchment parameter names
 if [ "$PARCHMENT" = 1 ]; then
-    command -v python3 >/dev/null 2>&1 || { echo "python3 required for --parchment" >&2; exit 1; }
-    log "Applying Parchment parameter mappings..."
-    python3 "$SCRIPT_DIR/apply-parchment.py" "$OUT_DIR/$SRC_DIR" --mc "$VERSION"
+    PYTHON=$(find_python) || {
+        echo "python3 required for --parchment, but no working Python 3 was found." >&2
+        echo "(A Microsoft Store 'python3' stub on PATH does not count — install real Python 3.)" >&2
+        exit 1
+    }
+    log "Applying Parchment parameter mappings (using: $PYTHON)..."
+    $PYTHON "$SCRIPT_DIR/apply-parchment.py" "$OUT_DIR/$SRC_DIR" --mc "$VERSION"
 fi
 
 # 8. Extract renderer-bootstrap assets (client only). Idempotent.
