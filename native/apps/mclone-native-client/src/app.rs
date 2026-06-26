@@ -19,7 +19,8 @@ use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_ui::{
-    GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point,
+    GameFramePacingMode, GameScreen, GameUi, GameUiAction, GameUiRenderState, GuiKey, GuiScale,
+    Point, StatusOverlay, render_status_overlay,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -151,6 +152,8 @@ struct ChunkApp {
     scene: SceneOptions,
     assets: WindowSceneAssets,
     runtime: Option<WindowSceneRuntime>,
+    pending_world_start: Option<PendingWorldStart>,
+    world_status: StatusOverlay,
     spectator: SpectatorCamera,
     camera: EngineCameraController,
     actor_interpolation: ActorInterpolationState,
@@ -179,6 +182,13 @@ struct ChunkApp {
     seed_reroll_state: u64,
 }
 
+#[derive(Clone, Debug)]
+struct PendingWorldStart {
+    scene: SceneOptions,
+    seed: i64,
+    arm_mouse_lock: bool,
+}
+
 impl ChunkApp {
     fn new(
         scene: SceneOptions,
@@ -197,6 +207,8 @@ impl ChunkApp {
             scene,
             assets,
             runtime: None,
+            pending_world_start: None,
+            world_status: StatusOverlay::hidden(),
             spectator,
             camera,
             actor_interpolation: ActorInterpolationState::new(),
@@ -330,13 +342,61 @@ impl ChunkApp {
         self.seed_reroll_state as i64
     }
 
+    fn local_world_scene(&self, seed: i64) -> SceneOptions {
+        let mut scene = self.scene.clone();
+        scene.seed = seed;
+        scene.remote_addr = None;
+        scene
+    }
+
+    fn queue_local_world_start(&mut self, seed: i64, arm_mouse_lock: bool) {
+        self.pending_world_start = Some(PendingWorldStart {
+            scene: self.local_world_scene(seed),
+            seed,
+            arm_mouse_lock,
+        });
+        self.world_status = StatusOverlay::new("Creating world...", true);
+        self.mouse_lock_requested = false;
+        self.camera.clear_keys();
+        self.ui.clear_input();
+        self.sync_mouse_lock();
+    }
+
+    fn finish_pending_world_start(&mut self, pending: PendingWorldStart) {
+        match self.start_world_from_scene(pending.scene) {
+            Ok(()) => {
+                self.world_status = StatusOverlay::hidden();
+                self.ui
+                    .apply_action(GameUiAction::CreateWorld(pending.seed));
+                self.mouse_lock_requested = pending.arm_mouse_lock;
+                self.sync_mouse_lock();
+                log::info!("created local world seed={}", pending.seed);
+            }
+            Err(err) => {
+                log::error!(
+                    "failed to create local world seed={}: {err:#}",
+                    pending.seed
+                );
+                self.world_status = StatusOverlay::new("World creation failed; see log", false);
+                self.ui.set_new_world_seed(pending.seed);
+                self.mouse_lock_requested = false;
+                self.sync_mouse_lock();
+            }
+        }
+    }
+
     fn apply_ui_action(
         &mut self,
         action: GameUiAction,
         event_loop: &ActiveEventLoop,
         from_pointer_click: bool,
     ) {
-        let mut should_arm_mouse_lock =
+        if self.pending_world_start.is_some() && !matches!(action, GameUiAction::Quit) {
+            self.schedule_next_redraw(event_loop);
+            return;
+        }
+
+        let should_arm_mouse_lock =
             from_pointer_click && matches!(action, GameUiAction::StartWorld | GameUiAction::Resume);
         let preserve_pointer_state = matches!(
             action,
@@ -427,38 +487,37 @@ impl ChunkApp {
             GameUiAction::OpenNewWorld => {
                 let seed = self.next_new_world_seed();
                 self.ui.set_new_world_seed(seed);
+                self.world_status = StatusOverlay::hidden();
             }
             GameUiAction::RerollSeed => {
                 let seed = self.next_new_world_seed();
                 self.ui.set_new_world_seed(seed);
+                self.world_status = StatusOverlay::hidden();
                 log::info!("new-world seed rerolled to {seed}");
             }
-            GameUiAction::CreateWorld(seed) => match self.start_local_world(seed) {
-                Ok(()) => {
-                    should_arm_mouse_lock = from_pointer_click;
-                    log::info!("created local world seed={seed}");
-                }
-                Err(err) => {
-                    log::error!("failed to create local world seed={seed}: {err:#}");
-                    self.schedule_next_redraw(event_loop);
-                    return;
-                }
-            },
+            GameUiAction::CreateWorld(seed) => {
+                self.queue_local_world_start(seed, from_pointer_click);
+                self.schedule_next_redraw(event_loop);
+                return;
+            }
             GameUiAction::QuitToTitle => {
                 if let Err(err) = self.teardown_world() {
                     log::error!("failed to tear down world: {err:#}");
                     self.schedule_next_redraw(event_loop);
                     return;
                 }
+                self.world_status = StatusOverlay::hidden();
             }
             GameUiAction::Quit => {
                 event_loop.exit();
                 return;
             }
+            GameUiAction::BackToTitle => {
+                self.world_status = StatusOverlay::hidden();
+            }
             GameUiAction::StartWorld
             | GameUiAction::Resume
             | GameUiAction::OpenOptions(_)
-            | GameUiAction::BackToTitle
             | GameUiAction::BackToPause
             | GameUiAction::SetTouchLookSensitivity(_) => {}
         }
@@ -563,11 +622,9 @@ impl ChunkApp {
         Ok(())
     }
 
+    #[cfg(test)]
     fn start_local_world(&mut self, seed: i64) -> Result<()> {
-        let mut scene = self.scene.clone();
-        scene.seed = seed;
-        scene.remote_addr = None;
-        self.start_world_from_scene(scene)
+        self.start_world_from_scene(self.local_world_scene(seed))
     }
 
     fn place_spectator_above_loaded_surface(&mut self) {
@@ -1091,8 +1148,8 @@ impl ApplicationHandler for ChunkApp {
             let scene = self.scene.clone();
             if let Err(err) = self.start_world_from_scene(scene) {
                 log::error!("failed to start initial world: {err:#}");
-                event_loop.exit();
-                return;
+                self.world_status = StatusOverlay::new("Initial world failed; see log", false);
+                self.ui.set_screen(Some(GameScreen::Title));
             }
         }
         self.sync_mouse_lock();
@@ -1353,7 +1410,8 @@ impl ApplicationHandler for ChunkApp {
                 let ui_active = self.ui.is_active();
                 let ui_covers_world = self.ui.covers_world();
                 let debug_stats = (!ui_active).then_some(debug_stats).flatten();
-                let gui_active = ui_active || debug_stats.is_some();
+                let status_overlay = self.world_status.clone();
+                let gui_active = ui_active || debug_stats.is_some() || status_overlay.visible;
                 let gui_scale = self.ui.scale();
                 let base_ui_draw = self.ui.render_draw_list(ui_render_state);
                 let gui_state = FullFrameGui::new(
@@ -1411,6 +1469,7 @@ impl ApplicationHandler for ChunkApp {
                             gui_state,
                             |stats| {
                                 let mut ui_draw = base_ui_draw;
+                                render_status_overlay(gui_scale, &mut ui_draw, &status_overlay);
                                 if let Some(mut debug_stats) = debug_stats {
                                     debug_stats.render = *stats;
                                     render_debug_pane(gui_scale, &mut ui_draw, &debug_stats);
@@ -1434,6 +1493,9 @@ impl ApplicationHandler for ChunkApp {
                         match report.status {
                             SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped => {
                                 self.render_stats = render_stats;
+                                if let Some(pending) = self.pending_world_start.take() {
+                                    self.finish_pending_world_start(pending);
+                                }
                                 self.finish_redraw(event_loop, frame_start);
                             }
                             SurfaceFrameStatus::Reconfigured => {
@@ -1519,6 +1581,26 @@ mod tests {
         );
         app.runtime = Some(runtime);
         app
+    }
+
+    fn center_chunk_signature(runtime: &WindowSceneRuntime, center: mclone_core::ChunkPos) -> u64 {
+        let snapshot = runtime
+            .client()
+            .chunk_snapshot(center)
+            .expect("center chunk must be loaded");
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+        hash = hash_signature_value(hash, snapshot.sections.len() as u64);
+        for section in &snapshot.sections {
+            hash = hash_signature_value(hash, section.section_y as u64);
+            for state_id in section.unpack_block_state_ids() {
+                hash = hash_signature_value(hash, u64::from(state_id.0));
+            }
+        }
+        hash
+    }
+
+    fn hash_signature_value(hash: u64, value: u64) -> u64 {
+        (hash ^ value).wrapping_mul(0x0000_0100_0000_01b3)
     }
 
     #[test]
@@ -1657,6 +1739,79 @@ mod tests {
         );
         assert_eq!(view.snapshot.chunk_pos, mclone_core::ChunkPos::new(2, -1));
         assert_ne!(app.spectator.position, view.eye);
+    }
+
+    #[test]
+    fn queue_local_world_start_sets_loading_status_without_closing_menu() {
+        let scene = SceneOptions {
+            remote_addr: Some("127.0.0.1:25565".to_owned()),
+            ..SceneOptions::default()
+        };
+        let assets = WindowSceneAssets::load().unwrap();
+        let mut app = ChunkApp::new(
+            scene,
+            assets,
+            TexturedSectionRenderOptions::default(),
+            WindowStartIntent::Menu,
+        );
+        app.ui.set_screen(Some(GameScreen::NewWorld));
+
+        app.queue_local_world_start(44, true);
+
+        let pending = app.pending_world_start.as_ref().unwrap();
+        assert_eq!(pending.seed, 44);
+        assert_eq!(pending.scene.seed, 44);
+        assert_eq!(pending.scene.remote_addr, None);
+        assert!(pending.arm_mouse_lock);
+        assert_eq!(app.ui.screen(), Some(GameScreen::NewWorld));
+        assert!(app.world_status.visible);
+        assert!(app.world_status.ok);
+        assert_eq!(app.world_status.message, "Creating world...");
+        assert!(!app.mouse_lock_requested);
+    }
+
+    #[test]
+    fn start_local_world_rebuilds_runtime_for_new_seed_without_stale_sections() {
+        let scene = SceneOptions {
+            seed: 12_345,
+            render_distance: 0,
+            ..SceneOptions::default()
+        };
+        let center = mclone_core::ChunkPos::new(scene.chunk_x, scene.chunk_z);
+        let assets = WindowSceneAssets::load().unwrap();
+        let mut app = ChunkApp::new(
+            scene.clone(),
+            assets,
+            TexturedSectionRenderOptions::default(),
+            WindowStartIntent::Menu,
+        );
+
+        app.start_world_from_scene(scene).unwrap();
+        let first_runtime = app.runtime.as_ref().unwrap();
+        assert!(first_runtime.client().chunk_snapshot(center).is_some());
+        let first_signature = center_chunk_signature(first_runtime, center);
+
+        let camera_eye = app.window_camera_view().eye;
+        let first_update = app
+            .runtime
+            .as_mut()
+            .unwrap()
+            .sync_all_render_sections(camera_eye)
+            .unwrap();
+        assert!(first_update.rebuilt_section_count() > 0);
+        assert!(!app.runtime.as_ref().unwrap().cached_sections().is_empty());
+
+        app.start_local_world(98_765).unwrap();
+        let second_runtime = app.runtime.as_ref().unwrap();
+        assert_eq!(app.scene.seed, 98_765);
+        assert_eq!(app.scene.remote_addr, None);
+        assert!(second_runtime.client().chunk_snapshot(center).is_some());
+        let second_signature = center_chunk_signature(second_runtime, center);
+
+        assert_ne!(first_signature, second_signature);
+        assert!(second_runtime.cached_sections().is_empty());
+        assert_eq!(app.render_stats.section_count, 0);
+        assert_eq!(app.render_stats.index_count, 0);
     }
 
     #[test]

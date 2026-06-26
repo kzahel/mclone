@@ -1,10 +1,10 @@
 # 094: Runtime World Teardown and New-World Menu
 
-Status: active; desktop first pass landed on 2026-06-26. The app can now boot
-to a no-world Title menu, open a reroll-only New World screen, create a fresh
-local integrated world in-process, and tear the current world down back to
-Title. Remaining work is loading/error UI, a stronger rebuild-signature test,
-and non-desktop parity.
+Status: active; desktop runtime/menu path landed on 2026-06-26. The app can now
+boot to a no-world Title menu, open a reroll-only New World screen, present
+loading/error status while creating a world, create a fresh local integrated
+world in-process, and tear the current world down back to Title. Remaining work
+is manual interactive smoke and non-desktop app-owned parity.
 
 ## Purpose
 
@@ -107,15 +107,21 @@ and the seed was fixed for the life of the process.
   creation succeeds.
 - `QuitToTitle` drops the runtime and clears draw sections; `BackToTitle`
   remains non-destructive UI navigation.
+- Create World now queues a pending local world start, presents a loading status
+  frame first, then does the synchronous rebuild. Failure keeps the New World
+  screen open, shows an error status, and leaves mouse-lock off. Initial
+  auto-start failure also falls back to Title with an error status instead of
+  exiting after the window is live.
+- App-level rebuild coverage starts one seed, forces render-section cache
+  construction, rebuilds with a second seed through the same app path, and
+  asserts the center-chunk signature changes, the new center chunk is loaded,
+  launch `remote_addr` is cleared for local Create World, and stale cached render
+  sections do not survive the runtime swap.
 
 Open follow-ups for this doc:
 
-- Add a visible loading/error state around world creation instead of doing the
-  first rebuild synchronously inside the UI action.
-- Add a focused rebuild-with-new-seed test that compares chunk/section
-  signatures across chosen seeds and asserts no stale render sections survive.
 - Run a manual interactive desktop smoke for Quit To Title -> New World ->
-  Reroll -> Create once the next slice adds better failure-state feedback.
+  Reroll -> Create, including the visible loading status frame.
 - Carry the app-owned new-world flow to web and XR host shells; current web/XR
   shared UI/action surfaces only compile and label/ignore the new app actions.
 
@@ -130,7 +136,7 @@ Open follow-ups for this doc:
     background; keep UI input, scaling, and frame pacing working.
   - Keep `BackToTitle` as UI navigation only. Add a distinct app-owned
     `QuitToTitle` action for destructive teardown from the pause screen.
-- [x] **Slice 2: runtime world teardown/bringup (the unlock), first pass.**
+- [x] **Slice 2: runtime world teardown/bringup (the unlock), desktop path.**
   - Have the app hold the runtime as droppable world-session state and
     reconstruct it around retained immutable assets. Avoid
     `WindowSceneRuntime::rebuild(&mut self)` unless later evidence shows that
@@ -161,7 +167,7 @@ Open follow-ups for this doc:
     for UI regression, matching the existing convention.
   - Reroll entropy lives in the app layer (not the deterministic worldgen path)
     and should be injectable so headless screenshots stay deterministic.
-- [x] **Slice 5: wire menu actions to teardown end-to-end, first pass.**
+- [x] **Slice 5: wire menu actions to teardown end-to-end, desktop path.**
   - `CreateWorld(seed)` starts a local integrated world from an explicit local
     start intent, updates the app's current local-world seed, runs the Slice 2
     reconstruction path, and returns to gameplay with mouse-lock armed only after
@@ -182,21 +188,22 @@ cargo test --manifest-path native/Cargo.toml -p mclone-ui
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client
 cargo test --manifest-path native/Cargo.toml
 pnpm native:web:build
-cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot $TEMP/mclone-new-world-menu.png --screenshot-ui new-world --width 960 --height 540 --seed 12345
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot C:\tmp\mclone-new-world-menu-after-loading.png --screenshot-ui new-world --width 960 --height 540 --seed 12345
 ```
 
 Per-slice additions:
 
-- Slice 1: no-world render path exists through `--menu`; add a dedicated
-  capture/test when the loading/error shell lands.
-- Slice 2: rebuild path is used by `CreateWorld`; add the explicit
-  rebuild-with-new-seed runtime signature test next.
+- Slice 1: no-world render path exists through `--menu`; loading/error status
+  renders through the same GUI overlay path.
+- Slice 2: rebuild-with-new-seed app test covers changed center-chunk signature,
+  loaded new center chunk, cleared remote address, cleared stale render cache,
+  and reset render stats.
 - Slice 3: CLI parse tests cover default in-world startup and menu startup.
 - Slice 4: `--screenshot-ui new-world` PNG was generated and inspected; UI
   hit-test/action unit tests cover Open New World, Reroll, Create World, and
   Back.
-- Slice 5: code path is wired; manual desktop smoke and failed-create UX remain
-  follow-ups.
+- Slice 5: code path is wired with queued loading/error status; manual desktop
+  smoke remains a follow-up.
 
 ## Guardrails
 
