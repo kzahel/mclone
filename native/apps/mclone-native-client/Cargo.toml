@@ -11,6 +11,7 @@ xr = [
     "dep:ash",
     "dep:libloading",
     "dep:metal",
+    "dep:mclone-xr-host",
     "dep:openxr",
     "dep:pollster",
     "dep:serde_json",
@@ -35,6 +36,7 @@ mclone-render.workspace = true
 mclone-render-session.workspace = true
 mclone-server.workspace = true
 mclone-ui.workspace = true
+mclone-xr-host = { workspace = true, optional = true }
 openxr = { workspace = true, optional = true }
 pollster = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }

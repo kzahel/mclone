@@ -41,6 +41,8 @@ use mclone_render_session::{
 #[cfg(not(target_os = "android"))]
 use mclone_ui::GuiDrawList;
 #[cfg(not(target_os = "android"))]
+use mclone_xr_host::{OpenXrHostEvent, OpenXrPollStatus, XrFrameStats};
+#[cfg(not(target_os = "android"))]
 use openxr as xr;
 
 #[cfg(not(target_os = "android"))]
@@ -278,13 +280,6 @@ fn create_graphics_session_probe(
 }
 
 #[cfg(not(target_os = "android"))]
-enum OpenXrPollStatus {
-    Idle,
-    Running,
-    Exit,
-}
-
-#[cfg(not(target_os = "android"))]
 fn selected_environment_blend_mode(
     blend_modes: &[xr::EnvironmentBlendMode],
 ) -> xr::EnvironmentBlendMode {
@@ -293,6 +288,21 @@ fn selected_environment_blend_mode(
         .copied()
         .find(|mode| *mode == xr::EnvironmentBlendMode::OPAQUE)
         .unwrap_or(blend_modes[0])
+}
+
+#[cfg(not(target_os = "android"))]
+fn log_openxr_host_event(event: OpenXrHostEvent) {
+    match event {
+        OpenXrHostEvent::SessionStateChanged(state) => {
+            println!("OpenXR session state: {state:?}");
+        }
+        OpenXrHostEvent::InstanceLossPending => {
+            println!("OpenXR instance loss pending");
+        }
+        OpenXrHostEvent::EventsLost(count) => {
+            println!("OpenXR events lost: {count}");
+        }
+    }
 }
 
 #[cfg(not(target_os = "android"))]
@@ -358,17 +368,21 @@ fn run_smoke_frames(
     let mut event_storage = xr::EventDataBuffer::new();
     let mut session_running = false;
     let session_ready_deadline = frame_limit.map(|_| Instant::now() + SESSION_READY_TIMEOUT);
-    let mut submitted_frames = 0_u64;
-    let mut skipped_frames = 0_u64;
-    let mut runtime_frames = 0_u64;
+    let mut frame_stats = XrFrameStats::default();
     let mut runtime_requested_exit = false;
 
     while frame_limit
-        .map(|frames| submitted_frames < u64::from(frames))
+        .map(|frames| frame_stats.submitted_frames < u64::from(frames))
         .unwrap_or(true)
     {
-        match poll_openxr_events(&graphics.session, &mut event_storage, &mut session_running)
-            .context("poll OpenXR events")?
+        match mclone_xr_host::poll_openxr_events(
+            &graphics.session,
+            &mut event_storage,
+            &mut session_running,
+            VIEW_TYPE,
+            log_openxr_host_event,
+        )
+        .context("poll OpenXR events")?
         {
             OpenXrPollStatus::Exit if frame_limit.is_some() => {
                 bail!("OpenXR session requested exit before smoke completed")
@@ -395,7 +409,7 @@ fn run_smoke_frames(
             .frame_stream
             .begin()
             .context("begin OpenXR frame")?;
-        runtime_frames += 1;
+        frame_stats.record_runtime_frame();
 
         let frame_result = if frame_state.should_render {
             let result = controller_actions
@@ -429,10 +443,10 @@ fn run_smoke_frames(
                     }
                 });
             result.map(|()| {
-                submitted_frames += 1;
+                frame_stats.record_submitted_frame();
             })
         } else {
-            skipped_frames += 1;
+            frame_stats.record_skipped_frame();
             graphics
                 .frame_stream
                 .end(
@@ -454,7 +468,8 @@ fn run_smoke_frames(
     }
 
     println!(
-        "OpenXR frames submitted: submitted={submitted_frames} runtime_frames={runtime_frames} skipped={skipped_frames}"
+        "OpenXR frames submitted: submitted={} runtime_frames={} skipped={}",
+        frame_stats.submitted_frames, frame_stats.runtime_frames, frame_stats.skipped_frames
     );
     controller_summary.print_summary();
     if let Some(mclone) = &mclone {
@@ -504,8 +519,14 @@ fn shutdown_openxr_session(
 
     let deadline = Instant::now() + Duration::from_secs(2);
     while *session_running && Instant::now() < deadline {
-        match poll_openxr_events(&graphics.session, event_storage, session_running)
-            .context("poll OpenXR events during shutdown")?
+        match mclone_xr_host::poll_openxr_events(
+            &graphics.session,
+            event_storage,
+            session_running,
+            VIEW_TYPE,
+            log_openxr_host_event,
+        )
+        .context("poll OpenXR events during shutdown")?
         {
             OpenXrPollStatus::Exit => break,
             OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
@@ -528,51 +549,6 @@ fn shutdown_openxr_session(
     }
 
     Ok(())
-}
-
-#[cfg(not(target_os = "android"))]
-fn poll_openxr_events(
-    session: &xr::Session<platform_graphics::AppGraphics>,
-    event_storage: &mut xr::EventDataBuffer,
-    session_running: &mut bool,
-) -> Result<OpenXrPollStatus> {
-    while let Some(event) = session
-        .instance()
-        .poll_event(event_storage)
-        .context("poll OpenXR event")?
-    {
-        match event {
-            xr::Event::SessionStateChanged(event) => {
-                let state = event.state();
-                println!("OpenXR session state: {state:?}");
-                match state {
-                    xr::SessionState::READY if !*session_running => {
-                        session.begin(VIEW_TYPE).context("begin OpenXR session")?;
-                        *session_running = true;
-                    }
-                    xr::SessionState::STOPPING if *session_running => {
-                        session.end().context("end OpenXR session")?;
-                        *session_running = false;
-                    }
-                    xr::SessionState::EXITING | xr::SessionState::LOSS_PENDING => {
-                        return Ok(OpenXrPollStatus::Exit);
-                    }
-                    _ => {}
-                }
-            }
-            xr::Event::InstanceLossPending(_) => return Ok(OpenXrPollStatus::Exit),
-            xr::Event::EventsLost(event) => {
-                println!("OpenXR events lost: {}", event.lost_event_count());
-            }
-            _ => {}
-        }
-    }
-
-    if *session_running {
-        Ok(OpenXrPollStatus::Running)
-    } else {
-        Ok(OpenXrPollStatus::Idle)
-    }
 }
 
 #[cfg(not(target_os = "android"))]

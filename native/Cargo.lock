@@ -1063,6 +1063,7 @@ dependencies = [
  "ash",
  "jni",
  "log",
+ "mclone-xr-host",
  "openxr",
  "wgpu",
  "winit",
@@ -1165,6 +1166,7 @@ dependencies = [
  "mclone-render-session",
  "mclone-server",
  "mclone-ui",
+ "mclone-xr-host",
  "metal",
  "openxr",
  "pollster",
@@ -1267,6 +1269,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "mclone-xr-host"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "openxr",
 ]
 
 [[package]]

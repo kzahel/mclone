@@ -11,6 +11,7 @@ anyhow.workspace = true
 ash.workspace = true
 jni.workspace = true
 log.workspace = true
+mclone-xr-host.workspace = true
 openxr.workspace = true
 wgpu.workspace = true
 winit.workspace = true

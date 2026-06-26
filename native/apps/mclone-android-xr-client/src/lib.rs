@@ -11,6 +11,7 @@ mod android {
 
     use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
     use anyhow::{Context, Result, anyhow, bail};
+    use mclone_xr_host::{OpenXrHostEvent, OpenXrPollStatus, XrFrameStats};
     use openxr as xr;
 
     use super::graphics_vulkan;
@@ -438,12 +439,6 @@ mod android {
         )
     }
 
-    enum OpenXrPollStatus {
-        Idle,
-        Running,
-        Exit,
-    }
-
     fn run_clear_frame_loop(
         app: &AndroidApp,
         graphics: &mut graphics_vulkan::VulkanGraphicsSession,
@@ -454,9 +449,7 @@ mod android {
     ) -> Result<()> {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
-        let mut submitted_frames = 0_u64;
-        let mut runtime_frames = 0_u64;
-        let mut skipped_frames = 0_u64;
+        let mut frame_stats = XrFrameStats::default();
         let mut logged_ready = false;
 
         loop {
@@ -465,12 +458,21 @@ mod android {
                 return Ok(());
             }
 
-            match poll_openxr_events(&graphics.session, &mut event_storage, &mut session_running)
-                .context("poll OpenXR events")?
+            match mclone_xr_host::poll_openxr_events(
+                &graphics.session,
+                &mut event_storage,
+                &mut session_running,
+                VIEW_TYPE,
+                log_openxr_host_event,
+            )
+            .context("poll OpenXR events")?
             {
                 OpenXrPollStatus::Exit => {
                     log::info!(
-                        "OpenXR session requested exit: submitted={submitted_frames} runtime_frames={runtime_frames} skipped={skipped_frames}"
+                        "OpenXR session requested exit: submitted={} runtime_frames={} skipped={}",
+                        frame_stats.submitted_frames,
+                        frame_stats.runtime_frames,
+                        frame_stats.skipped_frames
                     );
                     return Ok(());
                 }
@@ -489,7 +491,7 @@ mod android {
                 .frame_stream
                 .begin()
                 .context("begin OpenXR frame")?;
-            runtime_frames += 1;
+            frame_stats.record_runtime_frame();
 
             let frame_result = if frame_state.should_render {
                 render_clear_frame(
@@ -501,14 +503,14 @@ mod android {
                     right_eye,
                 )
                 .map(|()| {
-                    submitted_frames += 1;
+                    frame_stats.record_submitted_frame();
                     if !logged_ready {
                         logged_ready = true;
                         log::info!("MCLONE_ANDROID_XR_READY");
                     }
                 })
             } else {
-                skipped_frames += 1;
+                frame_stats.record_skipped_frame();
                 graphics
                     .frame_stream
                     .end(
@@ -528,55 +530,28 @@ mod android {
                 return Err(error);
             }
 
-            if submitted_frames == 1 {
+            if frame_stats.submitted_frames == 1 {
                 log::info!(
-                    "OpenXR clear frame submitted: submitted={submitted_frames} runtime_frames={runtime_frames} skipped={skipped_frames}"
+                    "OpenXR clear frame submitted: submitted={} runtime_frames={} skipped={}",
+                    frame_stats.submitted_frames,
+                    frame_stats.runtime_frames,
+                    frame_stats.skipped_frames
                 );
             }
         }
     }
 
-    fn poll_openxr_events(
-        session: &xr::Session<graphics_vulkan::AppGraphics>,
-        event_storage: &mut xr::EventDataBuffer,
-        session_running: &mut bool,
-    ) -> Result<OpenXrPollStatus> {
-        while let Some(event) = session
-            .instance()
-            .poll_event(event_storage)
-            .context("poll OpenXR event")?
-        {
-            match event {
-                xr::Event::SessionStateChanged(event) => {
-                    let state = event.state();
-                    log::info!("OpenXR session state: {state:?}");
-                    match state {
-                        xr::SessionState::READY if !*session_running => {
-                            session.begin(VIEW_TYPE).context("begin OpenXR session")?;
-                            *session_running = true;
-                        }
-                        xr::SessionState::STOPPING if *session_running => {
-                            session.end().context("end OpenXR session")?;
-                            *session_running = false;
-                        }
-                        xr::SessionState::EXITING | xr::SessionState::LOSS_PENDING => {
-                            return Ok(OpenXrPollStatus::Exit);
-                        }
-                        _ => {}
-                    }
-                }
-                xr::Event::InstanceLossPending(_) => return Ok(OpenXrPollStatus::Exit),
-                xr::Event::EventsLost(event) => {
-                    log::warn!("OpenXR events lost: {}", event.lost_event_count());
-                }
-                _ => {}
+    fn log_openxr_host_event(event: OpenXrHostEvent) {
+        match event {
+            OpenXrHostEvent::SessionStateChanged(state) => {
+                log::info!("OpenXR session state: {state:?}");
             }
-        }
-
-        if *session_running {
-            Ok(OpenXrPollStatus::Running)
-        } else {
-            Ok(OpenXrPollStatus::Idle)
+            OpenXrHostEvent::InstanceLossPending => {
+                log::info!("OpenXR instance loss pending");
+            }
+            OpenXrHostEvent::EventsLost(count) => {
+                log::warn!("OpenXR events lost: {count}");
+            }
         }
     }
 
