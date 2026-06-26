@@ -43,6 +43,10 @@ use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 use mclone_app_runtime::frame_render::{
     FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame_for_view,
 };
+use mclone_app_runtime::session::{
+    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
+    RemoteSessionEndpoint, SessionFailure, SessionStartRequest,
+};
 use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 use mclone_render_session::{
     ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
@@ -152,8 +156,7 @@ struct ChunkApp {
     scene: SceneOptions,
     assets: WindowSceneAssets,
     runtime: Option<WindowSceneRuntime>,
-    pending_world_start: Option<PendingWorldStart>,
-    world_status: StatusOverlay,
+    session: GameSessionCoordinator<PendingWindowSessionStart>,
     spectator: SpectatorCamera,
     camera: EngineCameraController,
     actor_interpolation: ActorInterpolationState,
@@ -183,9 +186,8 @@ struct ChunkApp {
 }
 
 #[derive(Clone, Debug)]
-struct PendingWorldStart {
+struct PendingWindowSessionStart {
     scene: SceneOptions,
-    seed: i64,
     arm_mouse_lock: bool,
 }
 
@@ -207,8 +209,7 @@ impl ChunkApp {
             scene,
             assets,
             runtime: None,
-            pending_world_start: None,
-            world_status: StatusOverlay::hidden(),
+            session: GameSessionCoordinator::new(),
             spectator,
             camera,
             actor_interpolation: ActorInterpolationState::new(),
@@ -349,36 +350,71 @@ impl ChunkApp {
         scene
     }
 
+    fn active_session_descriptor_for_scene(scene: &SceneOptions) -> ActiveSessionDescriptor {
+        scene.remote_addr.as_ref().map_or(
+            ActiveSessionDescriptor::LocalWorld { seed: scene.seed },
+            |remote_addr| ActiveSessionDescriptor::Remote {
+                endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
+            },
+        )
+    }
+
+    fn session_status_overlay(&self) -> StatusOverlay {
+        self.session
+            .status()
+            .map_or_else(StatusOverlay::hidden, |status| {
+                StatusOverlay::new(status.message, status.ok)
+            })
+    }
+
+    fn clear_inactive_session_status(&mut self) {
+        if !matches!(self.session.state(), GameSessionState::Active { .. }) {
+            self.session.clear();
+        }
+    }
+
     fn queue_local_world_start(&mut self, seed: i64, arm_mouse_lock: bool) {
-        self.pending_world_start = Some(PendingWorldStart {
-            scene: self.local_world_scene(seed),
-            seed,
-            arm_mouse_lock,
-        });
-        self.world_status = StatusOverlay::new("Creating world...", true);
+        self.session.request_start(
+            SessionStartRequest::NewLocalWorld { seed },
+            PendingWindowSessionStart {
+                scene: self.local_world_scene(seed),
+                arm_mouse_lock,
+            },
+        );
         self.mouse_lock_requested = false;
         self.camera.clear_keys();
         self.ui.clear_input();
         self.sync_mouse_lock();
     }
 
-    fn finish_pending_world_start(&mut self, pending: PendingWorldStart) {
-        match self.start_world_from_scene(pending.scene) {
-            Ok(()) => {
-                self.world_status = StatusOverlay::hidden();
-                self.ui
-                    .apply_action(GameUiAction::CreateWorld(pending.seed));
-                self.mouse_lock_requested = pending.arm_mouse_lock;
+    fn finish_pending_session_start(
+        &mut self,
+        pending: PendingSessionStart<PendingWindowSessionStart>,
+    ) {
+        let seed = match pending.request {
+            SessionStartRequest::NewLocalWorld { seed } => seed,
+            SessionStartRequest::JoinRemote { .. } | SessionStartRequest::Unknown => {
+                self.session
+                    .fail_start(SessionFailure::new("Unsupported session start"));
+                self.mouse_lock_requested = false;
                 self.sync_mouse_lock();
-                log::info!("created local world seed={}", pending.seed);
+                return;
+            }
+        };
+        match self.start_world_from_scene(pending.payload.scene) {
+            Ok(()) => {
+                self.session
+                    .complete_start(ActiveSessionDescriptor::LocalWorld { seed });
+                self.ui.apply_action(GameUiAction::CreateWorld(seed));
+                self.mouse_lock_requested = pending.payload.arm_mouse_lock;
+                self.sync_mouse_lock();
+                log::info!("created local world seed={seed}");
             }
             Err(err) => {
-                log::error!(
-                    "failed to create local world seed={}: {err:#}",
-                    pending.seed
-                );
-                self.world_status = StatusOverlay::new("World creation failed; see log", false);
-                self.ui.set_new_world_seed(pending.seed);
+                log::error!("failed to create local world seed={seed}: {err:#}");
+                self.session
+                    .fail_start(SessionFailure::new("World creation failed; see log"));
+                self.ui.set_new_world_seed(seed);
                 self.mouse_lock_requested = false;
                 self.sync_mouse_lock();
             }
@@ -391,7 +427,7 @@ impl ChunkApp {
         event_loop: &ActiveEventLoop,
         from_pointer_click: bool,
     ) {
-        if self.pending_world_start.is_some() && !matches!(action, GameUiAction::Quit) {
+        if self.session.is_starting() && !matches!(action, GameUiAction::Quit) {
             self.schedule_next_redraw(event_loop);
             return;
         }
@@ -487,12 +523,12 @@ impl ChunkApp {
             GameUiAction::OpenNewWorld => {
                 let seed = self.next_new_world_seed();
                 self.ui.set_new_world_seed(seed);
-                self.world_status = StatusOverlay::hidden();
+                self.clear_inactive_session_status();
             }
             GameUiAction::RerollSeed => {
                 let seed = self.next_new_world_seed();
                 self.ui.set_new_world_seed(seed);
-                self.world_status = StatusOverlay::hidden();
+                self.clear_inactive_session_status();
                 log::info!("new-world seed rerolled to {seed}");
             }
             GameUiAction::CreateWorld(seed) => {
@@ -506,14 +542,14 @@ impl ChunkApp {
                     self.schedule_next_redraw(event_loop);
                     return;
                 }
-                self.world_status = StatusOverlay::hidden();
+                self.session.clear();
             }
             GameUiAction::Quit => {
                 event_loop.exit();
                 return;
             }
             GameUiAction::BackToTitle => {
-                self.world_status = StatusOverlay::hidden();
+                self.clear_inactive_session_status();
             }
             GameUiAction::StartWorld
             | GameUiAction::Resume
@@ -1025,6 +1061,15 @@ fn initial_seed_reroll_state(seed: i64) -> u64 {
         .max(1)
 }
 
+fn session_start_request_for_scene(scene: &SceneOptions) -> SessionStartRequest {
+    scene.remote_addr.as_ref().map_or(
+        SessionStartRequest::NewLocalWorld { seed: scene.seed },
+        |remote_addr| SessionStartRequest::JoinRemote {
+            endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
+        },
+    )
+}
+
 fn engine_camera_controller_from_spectator(spectator: &SpectatorCamera) -> EngineCameraController {
     EngineCameraController::from_eye_pose(
         vec3d_from_glam(spectator.position),
@@ -1146,10 +1191,16 @@ impl ApplicationHandler for ChunkApp {
         event_loop.listen_device_events(DeviceEvents::WhenFocused);
         if self.start_intent == WindowStartIntent::InWorld {
             let scene = self.scene.clone();
+            self.session
+                .begin_start(session_start_request_for_scene(&scene));
             if let Err(err) = self.start_world_from_scene(scene) {
                 log::error!("failed to start initial world: {err:#}");
-                self.world_status = StatusOverlay::new("Initial world failed; see log", false);
+                self.session
+                    .fail_start(SessionFailure::new("Initial world failed; see log"));
                 self.ui.set_screen(Some(GameScreen::Title));
+            } else {
+                self.session
+                    .complete_start(Self::active_session_descriptor_for_scene(&self.scene));
             }
         }
         self.sync_mouse_lock();
@@ -1410,7 +1461,7 @@ impl ApplicationHandler for ChunkApp {
                 let ui_active = self.ui.is_active();
                 let ui_covers_world = self.ui.covers_world();
                 let debug_stats = (!ui_active).then_some(debug_stats).flatten();
-                let status_overlay = self.world_status.clone();
+                let status_overlay = self.session_status_overlay();
                 let gui_active = ui_active || debug_stats.is_some() || status_overlay.visible;
                 let gui_scale = self.ui.scale();
                 let base_ui_draw = self.ui.render_draw_list(ui_render_state);
@@ -1493,8 +1544,8 @@ impl ApplicationHandler for ChunkApp {
                         match report.status {
                             SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped => {
                                 self.render_stats = render_stats;
-                                if let Some(pending) = self.pending_world_start.take() {
-                                    self.finish_pending_world_start(pending);
+                                if let Some(pending) = self.session.take_pending_start() {
+                                    self.finish_pending_session_start(pending);
                                 }
                                 self.finish_redraw(event_loop, frame_start);
                             }
@@ -1758,15 +1809,24 @@ mod tests {
 
         app.queue_local_world_start(44, true);
 
-        let pending = app.pending_world_start.as_ref().unwrap();
-        assert_eq!(pending.seed, 44);
-        assert_eq!(pending.scene.seed, 44);
-        assert_eq!(pending.scene.remote_addr, None);
-        assert!(pending.arm_mouse_lock);
+        assert_eq!(
+            app.session.state(),
+            &GameSessionState::Starting {
+                request: SessionStartRequest::NewLocalWorld { seed: 44 }
+            }
+        );
+        let status = app.session.status().unwrap();
+        assert!(status.ok);
+        assert_eq!(status.message, "Creating world...");
+        let pending = app.session.take_pending_start().unwrap();
+        assert_eq!(
+            pending.request,
+            SessionStartRequest::NewLocalWorld { seed: 44 }
+        );
+        assert_eq!(pending.payload.scene.seed, 44);
+        assert_eq!(pending.payload.scene.remote_addr, None);
+        assert!(pending.payload.arm_mouse_lock);
         assert_eq!(app.ui.screen(), Some(GameScreen::NewWorld));
-        assert!(app.world_status.visible);
-        assert!(app.world_status.ok);
-        assert_eq!(app.world_status.message, "Creating world...");
         assert!(!app.mouse_lock_requested);
     }
 
