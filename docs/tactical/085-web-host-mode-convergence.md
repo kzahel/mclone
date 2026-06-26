@@ -1,9 +1,10 @@
 # 085: Web Host-Mode Convergence
 
-Status: active. Slice 1 landed shared command/update exchange accounting
-without forcing native desktop or Android TCP paths into async. Slice 2 landed
-an enum/free-function remote exchange resolver consumed by the browser
-WebSocket path. Remaining work is naming cleanup and fuller web remote wiring.
+Status: active. Slices 1-2 landed shared command/update exchange accounting
+and remote-dedicated reconnect/resync policy without forcing native desktop or
+Android TCP paths into async. Slice 3 wired the playable browser app to the
+dedicated WebSocket path. Remaining work is naming cleanup plus deeper web
+runtime/render convergence.
 
 ## Purpose
 
@@ -126,10 +127,50 @@ cargo check --manifest-path native/Cargo.toml -p mclone-native-client
 
 - [ ] Replace remaining web-only host-mode naming with shared names where behavior is
   aligned.
-- [ ] Keep worker/WebSocket connection setup, JS promises, and browser
+- [x] Keep worker/WebSocket connection setup, JS promises, and browser
   diagnostics in the web app crate.
-- [ ] Update smoke/app entrypoints so remote WebSocket play is reachable from
+- [x] Update smoke/app entrypoints so remote WebSocket play is reachable from
   the playable browser app, not only smoke exports.
+
+Recorded Slice 3 result:
+
+- Added `mclone_web_create_remote_chunk_render_session(...)` so the browser app
+  can construct the normal `WebChunkRenderSession` against a dedicated
+  WebSocket server.
+- Added `?remoteWsUrl=ws://...` app selection in `mclone-web-app.ts`. Without
+  the parameter the app still uses the worker-integrated local host.
+- Made the live camera streaming frame path remote-aware: WebSocket hosts await
+  `SetChunkView` and camera-pose exchanges, while worker-integrated mode keeps
+  the existing deferred command path. The common render/doorbell tail remains
+  shared.
+- Extended app/smoke diagnostics with the runtime kind, client host mode,
+  requested remote URL, and render dirty/in-flight counts. Remote boot treats a
+  visible loaded view with no runner queues or compile jobs as playable even if
+  strict section-level render quiescence still has dirty sections to revisit.
+- Updated `native:web:remote-smoke` so `--remote-websocket` launches the
+  playable app with a dedicated WebSocket URL, then exercises walking,
+  targeting, break/place, no-clip movement, actor rendering, native UI, and
+  canvas screenshot validation.
+- Fixed the web glue TypeScript emit launcher on Windows by invoking `pnpm`
+  through `cmd.exe` when Node's direct spawn cannot resolve the shim.
+
+Validation after Slice 3:
+
+```bash
+pnpm native:web:typecheck
+pnpm native:web:remote-smoke
+pnpm native:web:app-smoke
+cargo fmt --manifest-path native/Cargo.toml --all
+```
+
+Follow-up:
+
+- Investigate why render-section dirty counts can remain nonzero after the
+  visible web view is playable and `renderPendingWork` is false. Keep the new
+  diagnostics until the strict section-level idle story is clearer.
+- Rename the web host-mode surface where it now aligns with shared
+  `host_mode` concepts, without moving browser promises/WebSocket setup into
+  shared native crates.
 
 ## Validation
 

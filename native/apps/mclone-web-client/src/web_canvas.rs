@@ -185,6 +185,21 @@ pub async fn mclone_web_create_worker_chunk_render_session(
 }
 
 #[wasm_bindgen]
+pub async fn mclone_web_create_remote_chunk_render_session(
+    canvas: HtmlCanvasElement,
+    asset_pack_bytes: js_sys::Uint8Array,
+    websocket_url: String,
+) -> Result<WebChunkRenderSession, JsValue> {
+    WebChunkRenderSession::new_with_remote_websocket(
+        canvas,
+        asset_pack_bytes.to_vec(),
+        websocket_url,
+    )
+    .await
+    .map_err(JsValue::from)
+}
+
+#[wasm_bindgen]
 pub fn mclone_web_remote_websocket_smoke_report(websocket_url: String) -> js_sys::Promise {
     wasm_bindgen_futures::future_to_promise(async move {
         let report = remote_websocket_smoke_report(websocket_url)
@@ -2406,15 +2421,19 @@ impl WebChunkRenderSession {
     /// was armed this frame, a `doorbell` for JS to post to the worker — the worker writes
     /// the packed result back into the resident ring that the next frame's poll drains.
     #[wasm_bindgen(js_name = syncCameraRenderFrame)]
-    pub fn sync_camera_render_frame(&mut self, radius_chunks: u32) -> Result<JsValue, JsValue> {
+    pub async fn sync_camera_render_frame(
+        &mut self,
+        radius_chunks: u32,
+    ) -> Result<JsValue, JsValue> {
         let snapshot = self.camera.snapshot();
         let camera_position = glam_vec3_from_vec3d(snapshot.eye);
-        self.sync_render_streaming_frame(
+        self.sync_render_streaming_frame_async(
             WebFrameCamera::Camera,
             snapshot.chunk_pos,
             camera_position,
             radius_chunks,
         )
+        .await
         .map_err(JsValue::from)
     }
 
@@ -2438,7 +2457,7 @@ impl WebChunkRenderSession {
             WEB_OVERVIEW_CAMERA_EYE_Y,
             chunk_middle_block_coord(center.z) as f32,
         );
-        self.sync_render_streaming_frame(
+        self.sync_render_streaming_frame_deferred(
             WebFrameCamera::Overview {
                 center,
                 radius_chunks,
@@ -2498,8 +2517,14 @@ impl WebChunkRenderSession {
         };
         self.camera
             .apply_movement_input(self.runtime.client(), input);
-        self.sync_camera_pose_to_server_deferred()
-            .map_err(JsValue::from)?;
+        if self.is_remote_websocket_runtime() {
+            self.sync_camera_pose_to_server()
+                .await
+                .map_err(JsValue::from)?;
+        } else {
+            self.sync_camera_pose_to_server_deferred()
+                .map_err(JsValue::from)?;
+        }
         camera_state_to_js_value(&self.camera, &self.interaction).map_err(JsValue::from)
     }
 
@@ -2735,6 +2760,15 @@ impl WebChunkRenderSession {
         Self::new_with_runtime(canvas, asset_pack_bytes, runtime).await
     }
 
+    async fn new_with_remote_websocket(
+        canvas: HtmlCanvasElement,
+        asset_pack_bytes: Vec<u8>,
+        websocket_url: String,
+    ) -> Result<Self, String> {
+        let runtime = WebRuntime::websocket_remote(websocket_url).await?;
+        Self::new_with_runtime(canvas, asset_pack_bytes, runtime).await
+    }
+
     async fn new_with_runtime(
         canvas: HtmlCanvasElement,
         asset_pack_bytes: Vec<u8>,
@@ -2785,6 +2819,10 @@ impl WebChunkRenderSession {
             render_count: 0,
             render_compiler: WebRenderSectionCompiler::new(),
         })
+    }
+
+    fn is_remote_websocket_runtime(&self) -> bool {
+        self.runtime.runner_kind() == ServerRunnerKind::RemoteWebSocket
     }
 
     async fn interact_block_with_kind(
@@ -3205,20 +3243,52 @@ impl WebChunkRenderSession {
         })
     }
 
-    fn sync_render_streaming_frame(
+    async fn sync_render_streaming_frame_async(
         &mut self,
         frame_camera: WebFrameCamera,
         center: ChunkPos,
         camera_position: glam::Vec3,
         radius_chunks: u32,
     ) -> Result<JsValue, String> {
-        if !self.render_compiler.shared_supported() {
-            return Err(
-                "shared render compile transport unavailable: cross-origin isolation \
-                 (SharedArrayBuffer/Atomics) is required for the streaming render loop"
-                    .into(),
+        if !self.is_remote_websocket_runtime() {
+            return self.sync_render_streaming_frame_deferred(
+                frame_camera,
+                center,
+                camera_position,
+                radius_chunks,
             );
         }
+
+        self.ensure_streaming_compile_supported()?;
+
+        // Remote websocket exchanges are awaited command/response round trips. Unlike the
+        // worker-integrated path there is no deferred command queue to drain after the fact;
+        // the returned updates are applied by `request_chunk_view_async`.
+        if self.interest_center != Some(center) {
+            self.runtime
+                .request_chunk_view_async(center, radius_chunks, radius_chunks)
+                .await
+                .map_err(|error| {
+                    format!("failed to request remote streaming chunk view: {error}")
+                })?;
+            self.interest_center = Some(center);
+        }
+
+        self.runtime
+            .drain_pending_runner_updates_budgeted(WEB_FRAME_UPDATE_DRAIN_BUDGET)
+            .map_err(|error| format!("failed to drain web server updates: {error}"))?;
+
+        self.finish_render_streaming_frame(frame_camera, center, camera_position, radius_chunks)
+    }
+
+    fn sync_render_streaming_frame_deferred(
+        &mut self,
+        frame_camera: WebFrameCamera,
+        center: ChunkPos,
+        camera_position: glam::Vec3,
+        radius_chunks: u32,
+    ) -> Result<JsValue, String> {
+        self.ensure_streaming_compile_supported()?;
 
         // 1. Keep the runner's streaming interest centered on the camera. Deferred send,
         //    only when the center actually moved, so movement does not re-issue the view
@@ -3236,6 +3306,27 @@ impl WebChunkRenderSession {
             .drain_pending_runner_updates_budgeted(WEB_FRAME_UPDATE_DRAIN_BUDGET)
             .map_err(|error| format!("failed to drain web server worker updates: {error}"))?;
 
+        self.finish_render_streaming_frame(frame_camera, center, camera_position, radius_chunks)
+    }
+
+    fn ensure_streaming_compile_supported(&self) -> Result<(), String> {
+        if self.render_compiler.shared_supported() {
+            return Ok(());
+        }
+        Err(
+            "shared render compile transport unavailable: cross-origin isolation \
+             (SharedArrayBuffer/Atomics) is required for the streaming render loop"
+                .into(),
+        )
+    }
+
+    fn finish_render_streaming_frame(
+        &mut self,
+        frame_camera: WebFrameCamera,
+        center: ChunkPos,
+        camera_position: glam::Vec3,
+        radius_chunks: u32,
+    ) -> Result<JsValue, String> {
         // 3. Shared per-frame streaming sync (budget 1) over the resident-ring compiler.
         let prev_in_flight = self.render_compiler.in_flight_request_id();
         let render_compiler = &mut self.render_compiler;
@@ -3263,8 +3354,12 @@ impl WebChunkRenderSession {
         let armed_doorbell = new_in_flight.is_some() && new_in_flight != prev_in_flight;
         let applied = self.render_compiler.take_last_completed();
         let pending_compile_jobs = self.render_compiler.pending_job_count();
-        let streaming_idle =
-            pending_compile_jobs == 0 && !self.runtime.has_pending_render_work(0, camera_position);
+        let render_pending_work = self.runtime.has_pending_render_work(0, camera_position);
+        let streaming_idle = pending_compile_jobs == 0 && !render_pending_work;
+        let dirty = self.runtime.engine().render_session().dirty();
+        let render_dirty_chunk_count = dirty.dirty_chunks.len();
+        let render_dirty_section_count = dirty.dirty_sections.len();
+        let render_inflight_section_count = dirty.inflight_sections.len();
 
         // 4. Synthesize this frame's compile diagnostics from the streaming cache update.
         let acceptance_report = RenderSectionCompileAcceptanceReport {
@@ -3317,6 +3412,22 @@ impl WebChunkRenderSession {
         let object: js_sys::Object = report.to_js_value()?.unchecked_into();
         set_bool(&object, "shared", true)?;
         set_bool(&object, "streamingIdle", streaming_idle)?;
+        set_bool(&object, "renderPendingWork", render_pending_work)?;
+        set_number(
+            &object,
+            "renderDirtyChunkCount",
+            render_dirty_chunk_count as f64,
+        )?;
+        set_number(
+            &object,
+            "renderDirtySectionCount",
+            render_dirty_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "renderInflightSectionCount",
+            render_inflight_section_count as f64,
+        )?;
         set_number(
             &object,
             "pendingCompileJobCount",

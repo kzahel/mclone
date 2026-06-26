@@ -32,15 +32,18 @@ export async function buildWebGlue(options = {}) {
   });
   await assertNoVisibleGameUiInAppHtml(stagedWebRoot);
 
-  const result = spawnSync(
-    "pnpm",
-    ["exec", "tsc", "-p", webEmitTsconfig],
-    {
-      cwd: repoRoot,
-      env: process.env,
-      stdio: "inherit",
-    },
-  );
+  const tscArgs = ["exec", "tsc", "-p", webEmitTsconfig];
+  const command = process.platform === "win32"
+    ? (process.env.ComSpec ?? "cmd.exe")
+    : "pnpm";
+  const args = process.platform === "win32"
+    ? ["/d", "/s", "/c", "pnpm", ...tscArgs]
+    : tscArgs;
+  const result = spawnSync(command, args, {
+    cwd: repoRoot,
+    env: process.env,
+    stdio: "inherit",
+  });
   if (result.status !== 0) {
     throw new Error(`native web glue TypeScript emit failed with status ${result.status ?? "unknown"}`);
   }

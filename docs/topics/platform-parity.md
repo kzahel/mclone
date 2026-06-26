@@ -95,7 +95,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✅ |
 | Menus (title/pause/options) | ✅ | ✗ | ✗ | ✗ | ✅ |
 | Connect / world-select UI | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ◐ (transport exists, not wired) |
+| Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ✅ WebSocket query param |
 | Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ (cfg-excluded) |
 | Audio | ✗ | ✗ | ✗ | ✗ | ✗ |
 
@@ -103,7 +103,7 @@ Reading the matrix:
 
 - **desktop-flat** is the reference; the only flat-class gaps are connect-UI,
   persistence, audio, and an in-world crosshair.
-- **web** is near desktop parity; gaps are connect-UI wiring, underwater FX,
+- **web** is near desktop parity; gaps are connect-UI, underwater FX,
   persistence (structurally impossible on `wasm32` today), audio.
 - **desktop-XR** has render/locomotion parity but no interaction, no UI, and no
   actors spawned.
@@ -154,7 +154,9 @@ Concretely:
 - `web-client` re-inlines the whole sky→chunk→actor render sequence instead of
   calling `render_full_frame_for_view`. It still owns an async `WebRuntimeHost`
   enum, but command/update accounting and remote WebSocket reconnect/resync prep
-  now flow through `mclone-app-runtime::host_mode` (see blocker #1).
+  now flow through `mclone-app-runtime::host_mode`. The playable browser app can
+  join a dedicated WebSocket server through `?remoteWsUrl=...`, covered by
+  `native:web:remote-smoke` (see blocker #1).
 - flat Android has a TCP remote-dedicated path through
   `debug.mclone.remote_addr`; Android XR now uses launch-scoped
   `mclone.startup.argv --remote-addr HOST:PORT` and can have the validator start
@@ -186,12 +188,13 @@ Every new feature added today gets forked across up to four app shells. The
 highest-leverage work is the shared contracts that *stop* the forking. Land
 these first:
 
-1. **Finish the host-mode async/sync seam.** Native desktop, flat Android, and
-   XR app shells use blocking TCP/session adapters, while browser
+1. **Finish the host-mode async/sync cleanup.** Native desktop, flat Android,
+   and XR app shells use blocking TCP/session adapters, while browser
    worker/WebSocket mechanics stay async and still sit behind `WebRuntimeHost`.
-   Shared exchange accounting and remote WebSocket reconnect/resync prep have
-   landed; remaining work is naming cleanup plus playable browser
-   remote-connect wiring. (tactical 085)
+   Shared exchange accounting, remote WebSocket reconnect/resync prep, and
+   playable browser remote-connect wiring have landed; remaining work is naming
+   cleanup plus clarifying the web render-section idle diagnostics. (tactical
+   085)
 2. **Build the connect/menu flow + the missing UI widgets.** Title → singleplayer
    vs server → address entry (`EditBox`) → world/seed select → loading screen. No
    lane can join a server in-app without this. Needed by the whole flat class.

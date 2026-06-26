@@ -72,8 +72,11 @@ Client connect status (full grid in
   `--start-server`. Quest remote smokes passed over direct LAN and through
   `adb reverse`; direct LAN still needs a headset-reachable host address and
   host firewall allow.
-- **Web** has a complete WebSocket client, but it is not yet wired into the
-  playable browser app (reachable only from a smoke export).
+- **Web** can connect over WebSocket by launching the browser app with
+  `?remoteWsUrl=ws://HOST:PORT`. `native:web:remote-smoke` starts a native
+  dedicated WebSocket server, loads the normal playable app through that URL,
+  and validates movement, block interaction, rendering, native UI, and canvas
+  pixels. There is not yet an in-app connect UI.
 
 Making remote-dedicated play reachable from every client is a tracked invariant,
 not a desktop-only feature.

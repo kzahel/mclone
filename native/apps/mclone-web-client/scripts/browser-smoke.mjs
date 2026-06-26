@@ -37,7 +37,10 @@ const bindgenOutDir = join(
 );
 const movementPerf = process.argv.includes("--movement-perf")
   || process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF === "1";
+const remoteWebSocket = process.argv.includes("--remote-websocket")
+  || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
 const appLoop = movementPerf
+  || remoteWebSocket
   || process.argv.includes("--app-loop")
   || process.argv.includes("--mobile-app-loop")
   || process.env.MCLONE_NATIVE_WEB_APP_LOOP === "1";
@@ -78,8 +81,6 @@ const requireCanvas = requireChunk
 const requireThreading = process.argv.includes("--require-threading")
   || (!process.argv.includes("--skip-threading")
     && process.env.MCLONE_NATIVE_WEB_REQUIRE_THREADING !== "0");
-const remoteWebSocket = process.argv.includes("--remote-websocket")
-  || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
 // --build-only compiles the wasm, runs wasm-bindgen (emitting mclone_web_client.d.ts via
 // --typescript), stages the browser-loadable web root, and exits before launching a browser. This
 // is how native:web:typecheck cheaply materializes the .d.ts its tsconfig path-maps, without a full
@@ -141,7 +142,10 @@ async function run() {
     });
 
     if (appLoop) {
-      await page.goto(`${baseUrl}/app.html`, { waitUntil: "load" });
+      const appUrl = remoteServer
+        ? `${baseUrl}/app.html?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
+        : `${baseUrl}/app.html`;
+      await page.goto(appUrl, { waitUntil: "load" });
       await page.waitForFunction(
         () => typeof globalThis.__mcloneWebApp !== "undefined",
         undefined,
@@ -178,13 +182,15 @@ async function run() {
         const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
         const canvasPixels = analyzePng(canvasPng);
         const report = {
-          url: `${baseUrl}/app.html`,
+          url: appUrl,
           screenshotPath,
           pageScreenshotCaptured,
           canvasScreenshotPath,
           movementPerfReportPath,
           appLoop,
           mobileViewport,
+          remoteWebSocket,
+          remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
           movementPerf,
           movementPerfChunkBoundaries,
           canvasPixels,
@@ -227,12 +233,14 @@ async function run() {
 
         assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouchProbe);
         console.log(JSON.stringify({
-          url: `${baseUrl}/app.html`,
+          url: appUrl,
           screenshotPath,
           pageScreenshotCaptured,
           canvasScreenshotPath,
           appLoop,
           mobileAppLoop,
+          remoteWebSocket,
+          remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
           canvasPixels,
           mobileTouchProbe,
           result,
@@ -341,6 +349,7 @@ async function run() {
           const state = globalThis.__mcloneWebApp?.state;
           return state?.ok === true
             && (state.centerX !== 0 || state.centerZ !== 0)
+            && state.lastReport?.movementMode === "NOCLIP"
             && state.renderCount >= 3
             && state.frameCount > 0;
         },
@@ -378,15 +387,18 @@ async function run() {
         walkingProbe,
         targetPreviewProbe,
         blockInteractionProbe,
+        remoteServer?.websocketUrl ?? null,
       );
       assertNativeUiProbe(nativeUiProbe);
       console.log(JSON.stringify({
-        url: `${baseUrl}/app.html`,
+        url: appUrl,
         screenshotPath,
         pageScreenshotCaptured,
         canvasScreenshotPath,
         nativeUiCanvasScreenshotPath,
         appLoop,
+        remoteWebSocket,
+        remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
         canvasPixels,
         nativeUiProbe,
         walkingProbe,
@@ -1785,6 +1797,7 @@ function assertAppLoopResult(
   walkingProbe,
   targetPreviewProbe,
   blockInteractionProbe,
+  remoteWebSocketUrl = null,
 ) {
   if (pageErrors.length > 0) {
     throw new Error(`browser app page errors:\n${pageErrors.join("\n")}`);
@@ -1833,8 +1846,16 @@ function assertAppLoopResult(
     throw new Error(`native web app did not report streaming compile timings:\n${JSON.stringify(result, null, 2)}`);
   }
   assertCompileTimingDiagnostics(result.lastCompileTiming, "app last compile timing");
-  if (result.runnerKind !== "web-worker" || result.lastReport?.runnerKind !== "web-worker") {
-    throw new Error(`native web app did not use the integrated server Web Worker runner:\n${JSON.stringify(result, null, 2)}`);
+  const expectedRunnerKind = remoteWebSocketUrl ? "remote-websocket" : "web-worker";
+  const expectedClientHost = remoteWebSocketUrl ? "remote-dedicated" : "worker-integrated";
+  if (result.runnerKind !== expectedRunnerKind || result.lastReport?.runnerKind !== expectedRunnerKind) {
+    throw new Error(`native web app did not use the expected ${expectedRunnerKind} runner:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (result.clientHost !== expectedClientHost) {
+    throw new Error(`native web app did not report the expected ${expectedClientHost} host mode:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (remoteWebSocketUrl && result.remoteWebSocketUrl !== remoteWebSocketUrl) {
+    throw new Error(`native web app did not preserve the requested remote websocket URL:\n${JSON.stringify({ remoteWebSocketUrl, result }, null, 2)}`);
   }
   if (
     result.runnerCommandQueueDepth !== 0

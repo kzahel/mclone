@@ -87,6 +87,7 @@ const RENDER_COMPILER_WORKER_URL = versionedUrl("./mclone-render-compiler-worker
 const SERVER_WORKER_URL = versionedUrl("./mclone-integrated-server-worker.js");
 const SERVER_JOB_WORKER_URL = versionedUrl("./mclone-server-job-worker.js");
 const ASSET_PACK_URL = versionedUrl("/reference/minecraft-1.17.1/extracted.zip");
+const REMOTE_WS_URL = remoteWebSocketUrlFromLocation();
 
 const DEFAULT_RADIUS_CHUNKS = 1;
 const MIN_RADIUS_CHUNKS = 1;
@@ -129,6 +130,10 @@ const runtime: AppRuntime = {
     loadedChunkCount: 0,
     residentSectionCount: 0,
     pendingCompileJobCount: 0,
+    renderPendingWork: false,
+    renderDirtyChunkCount: 0,
+    renderDirtySectionCount: 0,
+    renderInflightSectionCount: 0,
     compileInFlight: false,
     compileInFlightCount: 0,
     compileFinalizingCount: 0,
@@ -181,6 +186,8 @@ const runtime: AppRuntime = {
     touchMovementForwardImpulse: 0,
     touchLookActive: false,
     touchButtonActiveCount: 0,
+    clientHost: REMOTE_WS_URL ? "remote-dedicated" : "worker-integrated",
+    remoteWebSocketUrl: REMOTE_WS_URL,
     status: "booting",
   },
 };
@@ -308,7 +315,11 @@ class WebChunkApp {
     const module = await import(BINDGEN_JS_URL.href) as WasmModule;
     await module.default(BINDGEN_WASM_URL.href);
     this.module = module;
-    for (const name of ["mclone_web_create_worker_chunk_render_session"]) {
+    const requiredExports = ["mclone_web_create_worker_chunk_render_session"];
+    if (REMOTE_WS_URL) {
+      requiredExports.push("mclone_web_create_remote_chunk_render_session");
+    }
+    for (const name of requiredExports) {
       if (typeof (module as Record<string, any>)[name] !== "function") {
         throw new Error(`missing ${name} export`);
       }
@@ -319,14 +330,24 @@ class WebChunkApp {
     const assetPack = await fetchAssetPack(ASSET_PACK_URL);
     runtime.state.status = "initializing webgpu";
     publishRuntimeState(runtime.state);
-    this.session = await module.mclone_web_create_worker_chunk_render_session(
-      this.canvas,
-      assetPack,
-      SERVER_WORKER_URL.href,
-      SERVER_JOB_WORKER_URL.href,
-      BINDGEN_JS_URL.href,
-      BINDGEN_WASM_URL.href,
-    );
+    if (REMOTE_WS_URL) {
+      runtime.state.status = "connecting remote websocket";
+      publishRuntimeState(runtime.state);
+      this.session = await module.mclone_web_create_remote_chunk_render_session(
+        this.canvas,
+        assetPack,
+        REMOTE_WS_URL,
+      );
+    } else {
+      this.session = await module.mclone_web_create_worker_chunk_render_session(
+        this.canvas,
+        assetPack,
+        SERVER_WORKER_URL.href,
+        SERVER_JOB_WORKER_URL.href,
+        BINDGEN_JS_URL.href,
+        BINDGEN_WASM_URL.href,
+      );
+    }
     for (const name of [
       "advanceCameraFrame",
       "renderCompilerSharedSupported",
@@ -566,7 +587,12 @@ class WebChunkApp {
       && Number(frame.runnerUpdateQueueDepth) === 0
       && Number(frame.runnerPendingJobs) === 0
       && Number(frame.runnerPendingPublications) === 0;
-    const streamingSettled = Boolean(frame.streamingIdle)
+    const remoteVisibleSettled = REMOTE_WS_URL !== null
+      && !frame.doorbell
+      && Number(frame.residentSectionCount) > 0
+      && Number(frame.renderDirtyChunkCount) === 0
+      && Number(frame.renderInflightSectionCount) === 0;
+    const streamingSettled = (Boolean(frame.streamingIdle) || remoteVisibleSettled)
       && runnerSettled
       && pendingJobs === 0
       && this.pendingTimings.size === 0
@@ -702,6 +728,10 @@ class WebChunkApp {
     runtime.state.loadedChunkCount = report.loadedChunkCount;
     runtime.state.residentSectionCount = report.residentSectionCount;
     runtime.state.pendingCompileJobCount = report.pendingCompileJobCount;
+    runtime.state.renderPendingWork = Boolean(report.renderPendingWork);
+    runtime.state.renderDirtyChunkCount = Number(report.renderDirtyChunkCount) || 0;
+    runtime.state.renderDirtySectionCount = Number(report.renderDirtySectionCount) || 0;
+    runtime.state.renderInflightSectionCount = Number(report.renderInflightSectionCount) || 0;
     runtime.state.runnerKind = report.runnerKind;
     runtime.state.runnerCommandQueueDepth = report.runnerCommandQueueDepth;
     runtime.state.runnerUpdateQueueDepth = report.runnerUpdateQueueDepth;
@@ -1264,6 +1294,15 @@ function versionedUrl(path: string): URL {
     url.searchParams.set("v", DEPLOY_ASSET_VERSION);
   }
   return url;
+}
+
+function remoteWebSocketUrlFromLocation(): string | null {
+  const value = new URL(globalThis.location.href).searchParams.get("remoteWsUrl");
+  if (value === null) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function snapshotState(): WasmReport {

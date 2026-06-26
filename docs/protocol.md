@@ -154,8 +154,9 @@ plus app-owned sockets):
   request/response batches. Desktop's remote-dedicated path.
 - **WebSocket** — `mclone-net` owns the frame/handshake codec; the socket lives
   in the app (tungstenite on the dedicated server's `--listen-ws` bridge,
-  `web-sys` WebSocket in the browser client). The browser client is complete but
-  not yet wired into the playable web app.
+  `web-sys` WebSocket in the browser client). The playable browser app can join
+  through `?remoteWsUrl=ws://HOST:PORT`, and `native:web:remote-smoke` validates
+  that path against a native dedicated WebSocket server.
 
 There is no HTTP, WebTransport, or WebRTC gameplay transport, and no Node/Deno
 host.
