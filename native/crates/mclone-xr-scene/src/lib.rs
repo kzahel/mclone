@@ -585,16 +585,7 @@ impl XrMcloneTerrainState {
     }
 
     fn apply_startup_view_pose(&mut self, view_pose: XrStartupViewPose) -> Result<()> {
-        let yaw_radians = view_pose.yaw_degrees.to_radians();
-        if !yaw_radians.is_finite() {
-            bail!("invalid XR startup view yaw {}", view_pose.yaw_degrees);
-        }
-        self.camera.set_eye_pose(
-            vec3d_from_glam(Vec3::from_array(view_pose.position)),
-            f64::from(yaw_radians),
-            0.0,
-        );
-        Ok(())
+        apply_xr_startup_view_pose(&mut self.camera, view_pose.position, view_pose.yaw_degrees)
     }
 
     fn commit_engine_camera_player_pose(&mut self) -> Result<bool> {
@@ -746,28 +737,28 @@ fn server_diagnostics_idle(diagnostics: ServerRunnerDiagnostics) -> bool {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct XrTrackingOrigin {
+pub struct XrTrackingOrigin {
     origin_stage: Vec3,
     stage_yaw: f32,
     mode: XrViewAlignmentMode,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct XrStageToWorld {
+pub struct XrStageToWorld {
     origin_stage: Vec3,
     origin_world: Vec3,
     stage_to_world_rotation: Quat,
 }
 
 impl XrTrackingOrigin {
-    fn from_initial_views(views: &[xr::View], mode: XrViewAlignmentMode) -> Result<Self> {
+    pub fn from_initial_views(views: &[xr::View], mode: XrViewAlignmentMode) -> Result<Self> {
         let left_stage_pose = mclone_xr_host::view_pose(&views[0])?;
         let right_stage_pose = mclone_xr_host::view_pose(&views[1])?;
         let origin_stage = (left_stage_pose.position + right_stage_pose.position) * 0.5;
         Self::from_stage_view(origin_stage, left_stage_pose.orientation, mode)
     }
 
-    fn from_stage_view(
+    pub fn from_stage_view(
         origin_stage: Vec3,
         left_stage_orientation: Quat,
         mode: XrViewAlignmentMode,
@@ -782,13 +773,21 @@ impl XrTrackingOrigin {
         })
     }
 
-    fn mode_label(self) -> &'static str {
+    pub fn mode_label(self) -> &'static str {
         self.mode.label()
+    }
+
+    pub fn origin_stage(self) -> Vec3 {
+        self.origin_stage
+    }
+
+    pub fn stage_yaw(self) -> f32 {
+        self.stage_yaw
     }
 }
 
 impl XrStageToWorld {
-    fn from_tracking_origin(
+    pub fn from_tracking_origin(
         origin: XrTrackingOrigin,
         snapshot: EngineCameraSnapshot,
     ) -> Result<Self> {
@@ -805,7 +804,7 @@ impl XrStageToWorld {
         })
     }
 
-    fn transform_pose(self, stage_position: Vec3, stage_orientation: Quat) -> (Vec3, Quat) {
+    pub fn transform_pose(self, stage_position: Vec3, stage_orientation: Quat) -> (Vec3, Quat) {
         (
             self.origin_world
                 + self
@@ -816,7 +815,7 @@ impl XrStageToWorld {
     }
 }
 
-fn xr_view_to_chunk_render_view(
+pub fn xr_view_to_chunk_render_view(
     view: &xr::View,
     transform: XrStageToWorld,
     near: f32,
@@ -837,7 +836,9 @@ fn xr_view_to_chunk_render_view(
     Ok(chunk_render_view_from_xr_render_view(render_view))
 }
 
-fn chunk_render_view_from_xr_render_view(view: mclone_xr_host::XrRenderView) -> ChunkRenderView {
+pub fn chunk_render_view_from_xr_render_view(
+    view: mclone_xr_host::XrRenderView,
+) -> ChunkRenderView {
     ChunkRenderView {
         view: view.view,
         projection: view.projection,
@@ -853,7 +854,7 @@ fn chunk_render_view_from_xr_render_view(view: mclone_xr_host::XrRenderView) -> 
     }
 }
 
-fn yaw_from_forward(forward: Vec3) -> Option<f32> {
+pub fn yaw_from_forward(forward: Vec3) -> Option<f32> {
     if !forward.is_finite() {
         return None;
     }
@@ -864,19 +865,36 @@ fn yaw_from_forward(forward: Vec3) -> Option<f32> {
     Some((-horizontal.x).atan2(-horizontal.z))
 }
 
-fn normalize_angle(angle: f32) -> f32 {
+pub fn normalize_angle(angle: f32) -> f32 {
     if !angle.is_finite() {
         return 0.0;
     }
     (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
 }
 
-fn glam_vec3_from_vec3d(value: Vec3d) -> Vec3 {
+pub fn glam_vec3_from_vec3d(value: Vec3d) -> Vec3 {
     Vec3::new(value.x as f32, value.y as f32, value.z as f32)
 }
 
-fn vec3d_from_glam(value: Vec3) -> Vec3d {
+pub fn vec3d_from_glam(value: Vec3) -> Vec3d {
     Vec3d::new(f64::from(value.x), f64::from(value.y), f64::from(value.z))
+}
+
+pub fn apply_xr_startup_view_pose(
+    camera: &mut EngineCameraController,
+    position: [f32; 3],
+    yaw_degrees: f32,
+) -> Result<()> {
+    let yaw_radians = yaw_degrees.to_radians();
+    if !yaw_radians.is_finite() {
+        bail!("invalid XR startup view yaw {}", yaw_degrees);
+    }
+    camera.set_eye_pose(
+        vec3d_from_glam(Vec3::from_array(position)),
+        f64::from(yaw_radians),
+        0.0,
+    );
+    Ok(())
 }
 
 pub fn xr_locomotion_input_from_controllers(
@@ -942,7 +960,9 @@ fn joypad_axis_after_dead_zone(axis: Vec2) -> Vec2 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_render_session::ENGINE_CAMERA_MOUSE_SENSITIVITY;
+    use mclone_render_session::{
+        ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MOUSE_SENSITIVITY,
+    };
 
     #[test]
     fn default_scene_options_match_desktop_xr_smoke_defaults() {
@@ -1020,6 +1040,61 @@ mod tests {
         assert!((input.mouse_delta_x - expected_mouse_delta).abs() < 1.0e-6);
         assert_eq!(input.movement_impulse, None);
         assert!(!input.jump);
+    }
+
+    #[test]
+    fn startup_view_pose_maps_stage_center_to_requested_world_pose() {
+        let stage_center = Vec3::new(1.0, 1.6, -0.25);
+        let stage_orientation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let view_pose = XrStartupViewPose {
+            position: [8.0, 72.0, -12.0],
+            yaw_degrees: 0.0,
+        };
+
+        let origin = XrTrackingOrigin::from_stage_view(
+            stage_center,
+            stage_orientation,
+            XrViewAlignmentMode::ViewPose,
+        )
+        .unwrap();
+        let snapshot = EngineCameraSnapshot::from_eye_pose(
+            Vec3d::new(8.0, 72.0, -12.0),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+        let transform = XrStageToWorld::from_tracking_origin(origin, snapshot).unwrap();
+        let (world_position, world_orientation) =
+            transform.transform_pose(stage_center, stage_orientation);
+        let world_forward = world_orientation * Vec3::NEG_Z;
+
+        assert!((world_position - Vec3::from_array(view_pose.position)).length() < 1.0e-5);
+        assert!((world_forward - Vec3::NEG_Z).length() < 1.0e-5);
+        assert_eq!(origin.mode_label(), "view-pose");
+    }
+
+    #[test]
+    fn player_root_transform_preserves_physical_hmd_offset() {
+        let origin = XrTrackingOrigin::from_stage_view(
+            Vec3::new(1.0, 1.6, -0.25),
+            Quat::IDENTITY,
+            XrViewAlignmentMode::ViewPose,
+        )
+        .unwrap();
+        let snapshot = EngineCameraSnapshot::from_eye_pose(
+            Vec3d::new(8.0, 72.0, -12.0),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+        let transform = XrStageToWorld::from_tracking_origin(origin, snapshot).unwrap();
+
+        let (world_position, _) = transform.transform_pose(
+            origin.origin_stage + Vec3::new(0.35, 0.0, -0.2),
+            Quat::IDENTITY,
+        );
+
+        assert!((world_position - Vec3::new(8.35, 72.0, -12.2)).length() < 1.0e-5);
     }
 
     fn test_controller(hand: XrHand, thumbstick: Vec2, a_pressed: bool) -> XrControllerSnapshot {

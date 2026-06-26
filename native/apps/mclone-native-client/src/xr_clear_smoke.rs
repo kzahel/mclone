@@ -10,14 +10,14 @@ use anyhow::{Context, Result, anyhow, bail};
 #[cfg(target_os = "android")]
 use anyhow::{Result, bail};
 #[cfg(not(target_os = "android"))]
-use glam::{Quat, Vec3};
+use glam::Vec3;
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
     render_full_frame_for_view,
 };
 #[cfg(not(target_os = "android"))]
-use mclone_core::{ChunkPos, Vec3d};
+use mclone_core::ChunkPos;
 #[cfg(not(target_os = "android"))]
 use mclone_mesh::quad_face_count_from_indices;
 #[cfg(not(target_os = "android"))]
@@ -31,10 +31,8 @@ use mclone_render::entity::{ActorDrawResources, ActorInstance};
 use mclone_render::sky_render::SkyRenderer;
 #[cfg(not(target_os = "android"))]
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
-#[cfg(all(test, not(target_os = "android")))]
-use mclone_render_session::ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND;
 #[cfg(not(target_os = "android"))]
-use mclone_render_session::{EngineCameraController, EngineCameraSnapshot};
+use mclone_render_session::EngineCameraController;
 #[cfg(not(target_os = "android"))]
 use mclone_ui::GuiDrawList;
 #[cfg(not(target_os = "android"))]
@@ -43,13 +41,17 @@ use mclone_xr_host::{
     XrControllerSnapshot, XrFrameStats, XrHand, XrStereoConfig,
 };
 #[cfg(not(target_os = "android"))]
-use mclone_xr_scene::{XR_FAR, XR_NEAR, XrViewAlignmentMode, xr_locomotion_input_from_controllers};
+use mclone_xr_scene::{
+    XR_FAR, XR_NEAR, XrStageToWorld, XrTrackingOrigin, XrViewAlignmentMode,
+    apply_xr_startup_view_pose, glam_vec3_from_vec3d, xr_locomotion_input_from_controllers,
+    xr_view_to_chunk_render_view,
+};
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
 
 #[cfg(not(target_os = "android"))]
 use crate::app::actor_instances_from_presentations;
-use crate::cli::{XrClearSmokeOptions, XrMcloneSmokeOptions, XrViewPose};
+use crate::cli::{XrClearSmokeOptions, XrMcloneSmokeOptions};
 #[cfg(not(target_os = "android"))]
 use crate::frame_pacing::elapsed_ms;
 #[cfg(not(target_os = "android"))]
@@ -693,7 +695,7 @@ impl XrMcloneWorldState {
             .apply_pending_engine_camera_position_updates(&mut camera)
             .context("accept initial XR server player pose")?;
         let initial_alignment_mode = if let Some(view_pose) = options.view_pose {
-            apply_xr_startup_view_pose(&mut camera, view_pose)
+            apply_xr_startup_view_pose(&mut camera, view_pose.position, view_pose.yaw_degrees)
                 .context("apply XR startup view pose")?;
             initial_pose_changed |= runtime
                 .commit_engine_camera_player_pose(&mut camera)
@@ -795,6 +797,7 @@ impl XrMcloneWorldState {
                 let origin =
                     XrTrackingOrigin::from_initial_views(views, self.initial_alignment_mode)?;
                 let snapshot = self.camera.snapshot();
+                let origin_stage = origin.origin_stage();
                 println!(
                     "mclone XR player-root alignment: mode={} root_eye=({:.2}, {:.2}, {:.2}) root_yaw_degrees={:.1} stage_center=({:.3}, {:.3}, {:.3}) stage_yaw_degrees={:.1}",
                     origin.mode_label(),
@@ -802,10 +805,10 @@ impl XrMcloneWorldState {
                     snapshot.eye.y,
                     snapshot.eye.z,
                     snapshot.yaw_radians.to_degrees(),
-                    origin.origin_stage.x,
-                    origin.origin_stage.y,
-                    origin.origin_stage.z,
-                    origin.stage_yaw.to_degrees()
+                    origin_stage.x,
+                    origin_stage.y,
+                    origin_stage.z,
+                    origin.stage_yaw().to_degrees()
                 );
                 self.tracking_origin = Some(origin);
                 origin
@@ -906,108 +909,6 @@ impl XrMcloneWorldState {
                 summary.drawn_actor_count
             );
         }
-    }
-}
-
-#[cfg(not(target_os = "android"))]
-fn apply_xr_startup_view_pose(
-    camera: &mut EngineCameraController,
-    view_pose: XrViewPose,
-) -> Result<()> {
-    let yaw_radians = view_pose.yaw_degrees.to_radians();
-    if !yaw_radians.is_finite() {
-        bail!("invalid XR startup view yaw {}", view_pose.yaw_degrees);
-    }
-    camera.set_eye_pose(
-        vec3d_from_glam(Vec3::from_array(view_pose.position)),
-        f64::from(yaw_radians),
-        0.0,
-    );
-    Ok(())
-}
-
-#[cfg(not(target_os = "android"))]
-fn glam_vec3_from_vec3d(value: Vec3d) -> Vec3 {
-    Vec3::new(value.x as f32, value.y as f32, value.z as f32)
-}
-
-#[cfg(not(target_os = "android"))]
-fn vec3d_from_glam(value: Vec3) -> Vec3d {
-    Vec3d::new(f64::from(value.x), f64::from(value.y), f64::from(value.z))
-}
-
-#[cfg(not(target_os = "android"))]
-#[derive(Clone, Copy, Debug)]
-struct XrTrackingOrigin {
-    origin_stage: Vec3,
-    stage_yaw: f32,
-    mode: XrViewAlignmentMode,
-}
-
-#[cfg(not(target_os = "android"))]
-#[derive(Clone, Copy, Debug)]
-struct XrStageToWorld {
-    origin_stage: Vec3,
-    origin_world: Vec3,
-    stage_to_world_rotation: Quat,
-}
-
-#[cfg(not(target_os = "android"))]
-impl XrTrackingOrigin {
-    fn from_initial_views(views: &[xr::View], mode: XrViewAlignmentMode) -> Result<Self> {
-        let left_stage_pose = mclone_xr_host::view_pose(&views[0])?;
-        let right_stage_pose = mclone_xr_host::view_pose(&views[1])?;
-        let origin_stage = (left_stage_pose.position + right_stage_pose.position) * 0.5;
-        Self::from_stage_view(origin_stage, left_stage_pose.orientation, mode)
-    }
-
-    fn from_stage_view(
-        origin_stage: Vec3,
-        left_stage_orientation: Quat,
-        mode: XrViewAlignmentMode,
-    ) -> Result<Self> {
-        let stage_forward = left_stage_orientation * Vec3::NEG_Z;
-        let stage_yaw = yaw_from_forward(stage_forward)
-            .ok_or_else(|| anyhow!("OpenXR returned an invalid tracking-origin yaw"))?;
-        Ok(Self {
-            origin_stage,
-            stage_yaw,
-            mode,
-        })
-    }
-
-    fn mode_label(self) -> &'static str {
-        self.mode.label()
-    }
-}
-
-#[cfg(not(target_os = "android"))]
-impl XrStageToWorld {
-    fn from_tracking_origin(
-        origin: XrTrackingOrigin,
-        snapshot: EngineCameraSnapshot,
-    ) -> Result<Self> {
-        let world_yaw = snapshot.yaw_radians as f32;
-        if !world_yaw.is_finite() {
-            bail!("invalid XR player root yaw {}", snapshot.yaw_radians);
-        }
-        Ok(Self {
-            origin_stage: origin.origin_stage,
-            origin_world: glam_vec3_from_vec3d(snapshot.eye),
-            stage_to_world_rotation: Quat::from_rotation_y(normalize_angle(
-                world_yaw - origin.stage_yaw,
-            )),
-        })
-    }
-
-    fn transform_pose(self, stage_position: Vec3, stage_orientation: Quat) -> (Vec3, Quat) {
-        (
-            self.origin_world
-                + self
-                    .stage_to_world_rotation
-                    .mul_vec3(stage_position - self.origin_stage),
-            (self.stage_to_world_rotation * stage_orientation).normalize(),
-        )
     }
 }
 
@@ -1196,65 +1097,6 @@ fn render_mclone_eye_target(
         .map(|_| ())
         .with_context(|| format!("wait for OpenXR mclone {label}-eye render device idle"))?;
     Ok(summary)
-}
-
-#[cfg(not(target_os = "android"))]
-fn xr_view_to_chunk_render_view(
-    view: &xr::View,
-    transform: XrStageToWorld,
-    near: f32,
-    far: f32,
-) -> Result<ChunkRenderView> {
-    let stage_pose = mclone_xr_host::view_pose(view)?;
-    let (camera_position, camera_orientation) =
-        transform.transform_pose(stage_pose.position, stage_pose.orientation);
-    let render_view = mclone_xr_host::render_view_from_world_pose(
-        mclone_xr_host::XrViewPose {
-            position: camera_position,
-            orientation: camera_orientation,
-        },
-        view.fov,
-        near,
-        far,
-    )?;
-    Ok(chunk_render_view_from_xr_render_view(render_view))
-}
-
-#[cfg(not(target_os = "android"))]
-fn chunk_render_view_from_xr_render_view(view: mclone_xr_host::XrRenderView) -> ChunkRenderView {
-    ChunkRenderView {
-        view: view.view,
-        projection: view.projection,
-        view_projection: view.view_projection,
-        camera_position: view.camera_position,
-        camera_forward: view.camera_forward,
-        camera_right: view.camera_right,
-        camera_up: view.camera_up,
-        aspect: view.aspect,
-        fov_y_radians: view.fov_y_radians,
-        z_near: view.z_near,
-        z_far: view.z_far,
-    }
-}
-
-#[cfg(not(target_os = "android"))]
-fn yaw_from_forward(forward: Vec3) -> Option<f32> {
-    if !forward.is_finite() {
-        return None;
-    }
-    let horizontal = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
-    if horizontal.length_squared() <= f32::EPSILON {
-        return None;
-    }
-    Some((-horizontal.x).atan2(-horizontal.z))
-}
-
-#[cfg(not(target_os = "android"))]
-fn normalize_angle(angle: f32) -> f32 {
-    if !angle.is_finite() {
-        return 0.0;
-    }
-    (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
 }
 
 #[cfg(not(target_os = "android"))]
@@ -1495,64 +1337,4 @@ unsafe fn load_runtime_entry_from_negotiation(path: &Path) -> Result<xr::Entry> 
         .ok_or_else(|| anyhow!("runtime negotiation returned null xrGetInstanceProcAddr"))?;
     unsafe { xr::Entry::from_get_instance_proc_addr(get_instance_proc_addr) }
         .context("create OpenXR entry from negotiated xrGetInstanceProcAddr")
-}
-
-#[cfg(all(test, not(target_os = "android")))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn startup_view_pose_maps_stage_center_to_requested_world_pose() {
-        let stage_center = Vec3::new(1.0, 1.6, -0.25);
-        let stage_orientation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
-        let view_pose = XrViewPose {
-            position: [8.0, 72.0, -12.0],
-            yaw_degrees: 0.0,
-        };
-
-        let origin = XrTrackingOrigin::from_stage_view(
-            stage_center,
-            stage_orientation,
-            XrViewAlignmentMode::ViewPose,
-        )
-        .unwrap();
-        let snapshot = EngineCameraSnapshot::from_eye_pose(
-            Vec3d::new(8.0, 72.0, -12.0),
-            0.0,
-            0.0,
-            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
-        );
-        let transform = XrStageToWorld::from_tracking_origin(origin, snapshot).unwrap();
-        let (world_position, world_orientation) =
-            transform.transform_pose(stage_center, stage_orientation);
-        let world_forward = world_orientation * Vec3::NEG_Z;
-
-        assert!((world_position - Vec3::from_array(view_pose.position)).length() < 1.0e-5);
-        assert!((world_forward - Vec3::NEG_Z).length() < 1.0e-5);
-        assert_eq!(origin.mode_label(), "view-pose");
-    }
-
-    #[test]
-    fn player_root_transform_preserves_physical_hmd_offset() {
-        let origin = XrTrackingOrigin::from_stage_view(
-            Vec3::new(1.0, 1.6, -0.25),
-            Quat::IDENTITY,
-            XrViewAlignmentMode::ViewPose,
-        )
-        .unwrap();
-        let snapshot = EngineCameraSnapshot::from_eye_pose(
-            Vec3d::new(8.0, 72.0, -12.0),
-            0.0,
-            0.0,
-            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
-        );
-        let transform = XrStageToWorld::from_tracking_origin(origin, snapshot).unwrap();
-
-        let (world_position, _) = transform.transform_pose(
-            origin.origin_stage + Vec3::new(0.35, 0.0, -0.2),
-            Quat::IDENTITY,
-        );
-
-        assert!((world_position - Vec3::new(8.35, 72.0, -12.2)).length() < 1.0e-5);
-    }
 }
