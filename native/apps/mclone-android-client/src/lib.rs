@@ -16,7 +16,7 @@ mod android {
     use mclone_app_runtime::local_single_view::{
         LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime,
     };
-    use mclone_core::ChunkPos;
+    use mclone_core::{ChunkPos, Vec3d};
     use mclone_mesh::quad_face_count_from_indices;
     use mclone_net::NativeClientSession;
     use mclone_protocol::{ClientCommand, ServerUpdate};
@@ -27,6 +27,9 @@ mod android {
     use mclone_render::gui::GuiRenderer;
     use mclone_render::sky_render::SkyRenderer;
     use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
+    use mclone_render_session::{
+        ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineRenderCamera,
+    };
     use mclone_ui::{
         GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiScale, Point,
         TouchOverlay, render_touch_overlay, touch_menu_button_rect,
@@ -42,7 +45,7 @@ mod android {
     const LOG_TAG: &str = "mclone_android";
     const REMOTE_ADDR_PROPERTY: &str = "debug.mclone.remote_addr";
     const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
-    const TOUCH_ORBIT_RADIANS_PER_SCREEN: f32 = 2.4;
+    const TOUCH_LOOK_RADIANS_PER_SCREEN: f64 = 2.4;
     const ANDROID_MIN_RENDER_DISTANCE: i32 = 1;
     const ANDROID_MAX_RENDER_DISTANCE: i32 = 16;
     const ANDROID_FIXED_FPS_CAP: u32 = 60;
@@ -145,7 +148,7 @@ mod android {
         draw: TexturedSectionDrawResources,
         gui: GuiRenderer,
         scene: AndroidSingleViewSceneRuntime,
-        camera: ChunkCamera,
+        camera: EngineCameraController,
         render_options: TexturedSectionRenderOptions,
         ui: GameUi,
         touch_menu_touch_id: Option<u64>,
@@ -245,13 +248,13 @@ mod android {
                 .resize(&self.device, self.config.width, self.config.height);
         }
 
-        fn orbit_camera_by_pixels(&mut self, delta_x: f64, delta_y: f64) {
-            self.renderer.orbit_camera_by_pixels(
+        fn look_camera_by_pixels(&mut self, delta_x: f64, delta_y: f64) -> Result<()> {
+            self.renderer.look_camera_by_pixels(
                 delta_x,
                 delta_y,
                 self.config.width,
                 self.config.height,
-            );
+            )
         }
 
         fn handle_ui_touch(&mut self, touch: &Touch) -> Result<AndroidUiTouchResult> {
@@ -298,8 +301,7 @@ mod android {
             let scene_options = android_scene_options();
             let mut scene = android_single_view_scene_runtime(scene_options)?;
             let host_label = scene.host_label();
-            let camera = android_smoke_camera(scene.render_distance());
-            let camera_position = camera_position(camera);
+            let mut camera = EngineCameraController::spawn_for_chunk(scene.interest_center());
             let (poll_count, poll_ms) = scene.poll_until_idle()?;
             log::info!(
                 "Mclone Android {host_label} runtime idle: polls={} poll_ms={:.1} loaded_chunks={}",
@@ -307,6 +309,16 @@ mod android {
                 poll_ms,
                 scene.loaded_chunk_count()
             );
+            if commit_engine_camera_player_pose(&mut scene, &mut camera)? {
+                let (pose_poll_count, pose_poll_ms) = scene.poll_until_idle()?;
+                log::info!(
+                    "Mclone Android {host_label} player pose synced: polls={} poll_ms={:.1}",
+                    pose_poll_count,
+                    pose_poll_ms
+                );
+                apply_pending_engine_camera_position_updates(&mut scene, &mut camera)?;
+            }
+            let camera_position = camera_position(&camera);
             let section_update = scene.sync_all_render_sections(camera_position)?;
             let sections = scene.cached_sections();
             if sections.is_empty() {
@@ -377,11 +389,23 @@ mod android {
             self.depth.resize(device, width, height);
         }
 
-        fn orbit_camera_by_pixels(&mut self, delta_x: f64, delta_y: f64, width: u32, height: u32) {
-            let scale = width.min(height).max(1) as f32;
-            let yaw_delta = -(delta_x as f32 / scale) * TOUCH_ORBIT_RADIANS_PER_SCREEN;
-            let pitch_delta = -(delta_y as f32 / scale) * TOUCH_ORBIT_RADIANS_PER_SCREEN;
-            self.camera.orbit(yaw_delta, pitch_delta);
+        fn look_camera_by_pixels(
+            &mut self,
+            delta_x: f64,
+            delta_y: f64,
+            width: u32,
+            height: u32,
+        ) -> Result<()> {
+            let scale = f64::from(width.min(height).max(1));
+            let yaw_delta = -(delta_x / scale) * TOUCH_LOOK_RADIANS_PER_SCREEN;
+            let pitch_delta = -(delta_y / scale) * TOUCH_LOOK_RADIANS_PER_SCREEN;
+            self.camera.turn_mouse_delta(
+                -yaw_delta / ENGINE_CAMERA_MOUSE_SENSITIVITY,
+                -pitch_delta / ENGINE_CAMERA_MOUSE_SENSITIVITY,
+            );
+            self.commit_engine_camera_player_pose()
+                .context("sync Android touch-look player pose")?;
+            Ok(())
         }
 
         fn handle_touch(
@@ -597,9 +621,19 @@ mod android {
             draw
         }
 
+        fn commit_engine_camera_player_pose(&mut self) -> Result<bool> {
+            commit_engine_camera_player_pose(&mut self.scene, &mut self.camera)
+        }
+
+        fn apply_pending_engine_camera_position_updates(&mut self) -> Result<bool> {
+            apply_pending_engine_camera_position_updates(&mut self.scene, &mut self.camera)
+        }
+
         fn render(&mut self, frame: RenderFrameContext<'_>) -> Result<()> {
-            let camera_position = camera_position(self.camera);
             let _ = self.scene.poll()?;
+            self.apply_pending_engine_camera_position_updates()
+                .context("apply Android player position corrections")?;
+            let camera_position = camera_position(&self.camera);
             let section_update = self.scene.sync_render_sections(camera_position)?;
             if section_update.rebuilt_section_count() > 0
                 || section_update.removed_section_count() > 0
@@ -626,9 +660,9 @@ mod android {
             );
             let time_of_day = self.scene.time_of_day();
             let sun_angle = self.scene.sun_angle();
-            let render_view = self
-                .camera
-                .render_view(frame.target.size[0], frame.target.size[1]);
+            let render_view =
+                chunk_camera_from_engine(self.camera.render_camera(self.scene.render_distance()))
+                    .render_view(frame.target.size[0], frame.target.size[1]);
             let gui_scale = GuiScale::from_pixels(frame.target.size[0], frame.target.size[1]);
             self.ui.set_scale(gui_scale);
             let ui_state = self.current_ui_render_state();
@@ -923,7 +957,7 @@ mod android {
                 TouchPhase::Started => {
                     if self.active_touch.is_none() {
                         log::info!(
-                            "Mclone Android touch orbit started: id={} x={:.1} y={:.1}",
+                            "Mclone Android touch look started: id={} x={:.1} y={:.1}",
                             touch.id,
                             touch.location.x,
                             touch.location.y
@@ -948,9 +982,13 @@ mod android {
                         return;
                     }
                     if let Some(gpu) = self.gpu.as_mut() {
-                        gpu.orbit_camera_by_pixels(delta_x, delta_y);
+                        if let Err(error) = gpu.look_camera_by_pixels(delta_x, delta_y) {
+                            log::error!("failed to handle Mclone Android touch look: {error:#}");
+                            event_loop.exit();
+                            return;
+                        }
                         log::info!(
-                            "Mclone Android touch orbit moved: dx={:.1} dy={:.1}",
+                            "Mclone Android touch look moved: dx={:.1} dy={:.1}",
                             delta_x,
                             delta_y
                         );
@@ -962,7 +1000,7 @@ mod android {
                         .active_touch
                         .is_some_and(|active| active.id == touch.id)
                     {
-                        log::info!("Mclone Android touch orbit ended: id={}", touch.id);
+                        log::info!("Mclone Android touch look ended: id={}", touch.id);
                         self.active_touch = None;
                     }
                 }
@@ -987,12 +1025,95 @@ mod android {
             .expect("run Android event loop");
     }
 
-    fn android_smoke_camera(render_distance: u32) -> ChunkCamera {
-        ChunkCamera::overview_for_chunk_area(0, 0, render_distance as i32)
+    fn commit_engine_camera_player_pose(
+        scene: &mut AndroidSingleViewSceneRuntime,
+        camera: &mut EngineCameraController,
+    ) -> Result<bool> {
+        let server_changed = sync_engine_camera_player_pose(scene, camera)?;
+        let interest_changed = update_interest_from_engine_camera(scene, camera)?;
+        Ok(server_changed || interest_changed)
     }
 
-    fn camera_position(camera: ChunkCamera) -> Vec3 {
-        Vec3::from_array(camera.eye)
+    fn sync_engine_camera_player_pose(
+        scene: &mut AndroidSingleViewSceneRuntime,
+        camera: &mut EngineCameraController,
+    ) -> Result<bool> {
+        let changed = if let Some(report) = camera.next_pose_sync_command() {
+            scene
+                .send_gameplay_command(report.command)
+                .context("failed to sync Android player pose to server")?
+        } else {
+            false
+        };
+        Ok(changed || apply_pending_engine_camera_position_updates(scene, camera)?)
+    }
+
+    fn apply_pending_engine_camera_position_updates(
+        scene: &mut AndroidSingleViewSceneRuntime,
+        camera: &mut EngineCameraController,
+    ) -> Result<bool> {
+        let mut changed = false;
+        for update in scene.drain_player_position_updates() {
+            let accepted = camera.accept_position_update(update);
+            scene
+                .send_gameplay_command(accepted.accept_command)
+                .context("failed to acknowledge Android player position correction")?;
+            let resync = camera.corrected_pose_sync_command();
+            scene
+                .send_gameplay_command(resync.command)
+                .context("failed to sync corrected Android player pose")?;
+            log::warn!(
+                "accepted Android player position correction id={} feet=({:.2}, {:.2}, {:.2})",
+                accepted.update.teleport_id,
+                accepted.feet_position.x,
+                accepted.feet_position.y,
+                accepted.feet_position.z
+            );
+            changed = true;
+        }
+        if changed {
+            changed |= update_interest_from_engine_camera(scene, camera)?;
+        }
+        Ok(changed)
+    }
+
+    fn update_interest_from_engine_camera(
+        scene: &mut AndroidSingleViewSceneRuntime,
+        camera: &EngineCameraController,
+    ) -> Result<bool> {
+        let snapshot = camera.snapshot();
+        let center = snapshot.chunk_pos;
+        if scene.set_interest_center(center)? {
+            log::info!(
+                "Mclone Android chunk interest moved to ({}, {}) at camera position ({:.1}, {:.1}, {:.1})",
+                center.x,
+                center.z,
+                snapshot.eye.x,
+                snapshot.eye.y,
+                snapshot.eye.z
+            );
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn camera_position(camera: &EngineCameraController) -> Vec3 {
+        glam_vec3_from_vec3d(camera.snapshot().eye)
+    }
+
+    fn glam_vec3_from_vec3d(value: Vec3d) -> Vec3 {
+        Vec3::new(value.x as f32, value.y as f32, value.z as f32)
+    }
+
+    fn chunk_camera_from_engine(camera: EngineRenderCamera) -> ChunkCamera {
+        ChunkCamera {
+            eye: camera.eye,
+            target: camera.target,
+            up: camera.up,
+            fov_y_radians: camera.fov_y_radians,
+            z_near: camera.z_near,
+            z_far: camera.z_far,
+        }
     }
 }
 

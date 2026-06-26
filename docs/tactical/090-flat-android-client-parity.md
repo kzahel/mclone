@@ -1,6 +1,7 @@
 # 090: Flat Android Client Parity
 
-Status: active; first shared menu/touch slice landed in code. Parent status matrix:
+Status: active; shared menu/touch and player camera/look slices landed in code.
+Parent status matrix:
 [`../topics/platform-parity.md`](../topics/platform-parity.md). This tactical
 owns the flat-Android follow-up that tactical
 [`089-shared-xr-menu-surface.md`](089-shared-xr-menu-surface.md) previously
@@ -24,10 +25,11 @@ shared UI, touch input, player movement, HUD/hotbar, and gameplay interaction.
 - Remote dedicated connect is wired through the Android property
   `debug.mclone.remote_addr`; in-app connect UI is intentionally out of scope
   for the first parity slices.
-- The current app/player shell is still thin: touch input still orbits a smoke
-  camera when the menu is closed, `mclone-ui` now renders pause/options and a
-  touch menu button in code, and gameplay-facing HUD/hotbar, player movement,
-  block interaction, and actors are not surfaced.
+- The current app/player shell is still thin: closed-menu touch look now drives
+  `EngineCameraController` and syncs player pose/interest through the shared
+  runtime, `mclone-ui` renders pause/options and a touch menu button in code,
+  but touch movement controls, gameplay-facing HUD/hotbar, block interaction,
+  and actors are not surfaced.
 
 ## Target End State
 
@@ -47,15 +49,18 @@ shared UI, touch input, player movement, HUD/hotbar, and gameplay interaction.
   - Add `GameUi` and `GuiRenderer` to the flat Android renderer.
   - Replace the empty `GuiDrawList` with shared pause/options draw lists.
   - Render the shared touch menu button when the menu is closed.
-  - Route touch down/move/up into `GameUi` before orbit-camera handling.
+  - Route touch down/move/up into `GameUi` before closed-menu look handling.
   - Apply scene-local menu actions: resume/open/back, fullbright, section
     occlusion, and render distance.
   - Device visual/touch validation is still pending.
-- [ ] **Slice 2: player camera/movement adapter.**
+- [x] **Slice 2: player camera/look adapter.**
   - Replace the orbit smoke camera with `EngineCameraController` and the shared
     player pose/interest-center path.
-  - Keep touch look/move as Android input glue feeding shared movement
-    intentions.
+  - Convert closed-menu touch drag into the same mouse-look path used by the
+    shared player controller.
+  - Commit initial and touch-look player pose through the same local/remote
+    runtime command/update path used by desktop/XR.
+  - Touch movement intentions are intentionally deferred to Slice 3.
 - [ ] **Slice 3: Android touch HUD controls.**
   - Reuse `mclone-ui` touch overlay for movement/jump/menu affordances.
   - Keep control state render-only in UI and gameplay intent state in shared
@@ -83,6 +88,13 @@ Slice 1 validation on 2026-06-26:
 - [x] `cargo test --manifest-path native/Cargo.toml -p mclone-ui`
 - [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android`
 - [ ] Device visual/touch smoke of the shared Android menu path.
+
+Slice 2 validation on 2026-06-26:
+
+- [x] `cargo fmt --manifest-path native/Cargo.toml --all`
+- [x] `cargo test --manifest-path native/Cargo.toml -p mclone-render-session`
+- [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android`
+- [ ] Device visual/touch smoke of shared player camera/look on flat Android.
 
 Device gates after visual slices:
 
