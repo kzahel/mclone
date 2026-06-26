@@ -1,8 +1,8 @@
 # 089: Shared XR Menu Surface
 
-Status: active; first shared XR overlay-menu slice landed in
-`mclone-xr-scene`. True world-space panel rendering and controller-pointer
-interaction remain open.
+Status: active; shared XR menu state plus first world-space panel renderer have
+landed. Headset visual validation and controller-pointer interaction remain
+open.
 
 ## Purpose
 
@@ -16,8 +16,9 @@ controller input can land behind shared contracts.
 - Desktop flat and web render the shared `mclone-ui` menu/HUD path.
 - Desktop XR and Android XR share `mclone-xr-scene`, but previously passed an
   empty `GuiDrawList` through `app-runtime::frame_render`.
-- `GuiRenderer` is currently a flat NDC overlay renderer. It can draw the menu
-  per eye, but it is not a true 3D panel anchored in world/head space.
+- `GuiRenderer` remains a flat NDC overlay renderer, but
+  `mclone-render::gui::WorldGuiRenderer` can now rasterize a `GuiDrawList` to a
+  texture and draw it as a 3D quad from a `ChunkRenderView`.
 - XR controller actions already expose a left-hand `select_pressed` input. On
   Touch controllers this is bound to left X/Y; on simple controllers it is the
   left select click.
@@ -45,11 +46,14 @@ controller input can land behind shared contracts.
   - Both desktop XR and Android XR render the same menu through
     `render_full_frame_for_view`.
   - XR frame summaries include GUI command count and active UI state.
-- [ ] **Slice 2: true XR panel presentation.**
-  - Render `GuiDrawList` to a texture or add a world-space GUI pass.
-  - Anchor the panel in front of the current HMD pose, initially head-following
-    or recentered on open.
-  - Choose comfort sizing/distance and validate stereo readability on headset.
+- [x] **Slice 2: first true XR panel presentation.**
+  - `WorldGuiRenderer` renders `GuiDrawList` to an offscreen texture and draws
+    it as a transparent 3D quad.
+  - `mclone-xr-scene` recenters the menu panel in front of the stereo HMD center
+    when the menu opens, then reuses the same world pose for both eyes.
+  - Initial sizing is 1024x576 pixels, 1.75 blocks wide, and 2.2 blocks in front
+    of the HMD.
+  - Headset visual readability and comfort validation are still pending.
 - [ ] **Slice 3: XR pointer and menu actions.**
   - Raycast controller aim against the panel.
   - Map trigger press/release to shared pointer down/up.
@@ -83,7 +87,17 @@ Slice 1 validation on 2026-06-26:
 - [x] `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`
 - [x] `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`
 - [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
-- [ ] Headset visual smoke of the overlay menu.
+- [ ] Headset visual smoke of the menu toggle path. Superseded by the Slice 2
+      world-panel validation item for current behavior.
+
+Slice 2 validation on 2026-06-26:
+
+- [x] `cargo fmt --manifest-path native/Cargo.toml --all`
+- [x] `cargo test --manifest-path native/Cargo.toml -p mclone-render -p mclone-xr-scene`
+- [x] `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`
+- [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+- [x] `pnpm native:web:build`
+- [ ] Headset visual smoke of the world-space panel.
 
 Device gates for Slices 2-3:
 

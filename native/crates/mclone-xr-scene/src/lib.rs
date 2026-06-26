@@ -22,7 +22,7 @@ use mclone_render::chunk::{
     TexturedSectionUploadReport,
 };
 use mclone_render::entity::ActorDrawResources;
-use mclone_render::gui::GuiRenderer;
+use mclone_render::gui::{WorldGuiPanel, WorldGuiRenderer};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render_session::{
@@ -45,6 +45,9 @@ pub const XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND: f64 = 1.6;
 pub const XR_LOCOMOTION_MAX_FRAME_SECONDS: f64 = 0.1;
 pub const XR_MENU_TOGGLE_HAND: XrHand = XrHand::Left;
 pub const XR_UI_FPS_CAP: u32 = 90;
+pub const XR_MENU_PANEL_PIXELS: [u32; 2] = [1024, 576];
+pub const XR_MENU_PANEL_DISTANCE_BLOCKS: f32 = 2.2;
+pub const XR_MENU_PANEL_WIDTH_BLOCKS: f32 = 1.75;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct XrSceneOptions {
@@ -154,13 +157,15 @@ where
     render_options: TexturedSectionRenderOptions,
     draw: TexturedSectionDrawResources,
     actors: ActorDrawResources,
-    gui_renderer: GuiRenderer,
+    world_gui_renderer: WorldGuiRenderer,
     ui: GameUi,
     sky: SkyRenderer,
     render_stats: RenderStreamStats,
     tracking_origin: Option<XrTrackingOrigin>,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
+    menu_panel_pose: Option<WorldGuiPanel>,
+    menu_panel_recenter_pending: bool,
     first_eye_summary: Option<FullFrameRenderSummary>,
     rendered_frames: u32,
 }
@@ -229,13 +234,15 @@ where
             draw,
             actors: ActorDrawResources::new(device, queue, color_format, actor_atlas.as_upload())
                 .context("initialize XR terrain actor draw resources")?,
-            gui_renderer: GuiRenderer::new(device, color_format),
+            world_gui_renderer: WorldGuiRenderer::new(device, color_format),
             ui: GameUi::new_ingame(),
             sky: SkyRenderer::new(device, color_format),
             render_stats: RenderStreamStats::default(),
             tracking_origin: None,
             last_locomotion_update: None,
             menu_toggle_down: false,
+            menu_panel_pose: None,
+            menu_panel_recenter_pending: false,
             first_eye_summary: None,
             rendered_frames: 0,
         };
@@ -338,6 +345,7 @@ where
         let render_views = self.render_views(&views)?;
         let center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+        self.update_menu_panel_pose(render_views);
         self.poll_runtime_and_upload(device, center_position)?;
         let render_options = self.effective_render_options(center_position);
         let sky_clear_color = self.sky_clear_color();
@@ -519,12 +527,12 @@ where
             &mut encoder,
             RenderFrameTarget::color(target.color_view, target.size),
         );
-        let gui_scale = GuiScale::from_pixels(target.size[0], target.size[1]);
+        let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
         self.ui.set_scale(gui_scale);
         let ui_state = self.current_ui_render_state();
         let ui_active = self.ui.is_active();
-        let ui_covers_world = self.ui.covers_world();
         let ui_draw = self.ui.render_draw_list(ui_state);
+        let summary_ui_draw = ui_draw.clone();
         let mut render_stats = self.render_stats;
         let summary = render_full_frame_for_view(
             frame,
@@ -533,7 +541,7 @@ where
             &mut self.draw,
             Some(&mut self.actors),
             None,
-            Some(&mut self.gui_renderer),
+            None,
             render_view,
             actor_instances,
             None,
@@ -541,15 +549,28 @@ where
             time_of_day,
             sun_angle,
             render_options,
-            FullFrameGui::new(
-                ui_active,
-                ui_covers_world,
-                [gui_scale.width, gui_scale.height],
-            ),
-            |_| ui_draw,
+            FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
+            |_| summary_ui_draw,
             &mut render_stats,
         )
         .with_context(|| format!("render XR terrain {label} eye"))?;
+        if ui_active {
+            if let Some(panel) = self.menu_panel_pose {
+                self.world_gui_renderer
+                    .render_panel(
+                        device,
+                        queue,
+                        &mut encoder,
+                        RenderFrameTarget::color(target.color_view, target.size),
+                        render_view,
+                        XR_MENU_PANEL_PIXELS,
+                        [gui_scale.width, gui_scale.height],
+                        &ui_draw,
+                        panel,
+                    )
+                    .with_context(|| format!("render XR menu panel for {label} eye"))?;
+            }
+        }
         let submission = queue.submit(Some(encoder.finish()));
         device
             .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
@@ -686,13 +707,29 @@ where
         if toggle_down && !self.menu_toggle_down {
             if self.ui.is_active() {
                 self.ui.close();
+                self.menu_panel_pose = None;
+                self.menu_panel_recenter_pending = false;
                 log::info!("XR menu closed");
             } else {
                 self.ui.open_pause();
+                self.menu_panel_recenter_pending = true;
                 log::info!("XR menu opened");
             }
         }
         self.menu_toggle_down = toggle_down;
+    }
+
+    fn update_menu_panel_pose(&mut self, render_views: [ChunkRenderView; 2]) {
+        if !self.ui.is_active() {
+            self.menu_panel_pose = None;
+            self.menu_panel_recenter_pending = false;
+            return;
+        }
+        if self.menu_panel_pose.is_some() && !self.menu_panel_recenter_pending {
+            return;
+        }
+        self.menu_panel_pose = Some(xr_menu_panel_from_render_views(render_views));
+        self.menu_panel_recenter_pending = false;
     }
 
     fn camera_inside_occluding_block(&self, position: Vec3) -> bool {
@@ -922,6 +959,45 @@ pub fn xr_menu_toggle_pressed(controllers: &[XrControllerSnapshot]) -> bool {
         .any(|controller| controller.hand == XR_MENU_TOGGLE_HAND && controller.select_pressed)
 }
 
+pub fn xr_menu_panel_from_render_views(render_views: [ChunkRenderView; 2]) -> WorldGuiPanel {
+    let center_position = (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+    let forward = average_unit_direction(
+        render_views[0].camera_forward,
+        render_views[1].camera_forward,
+        Vec3::NEG_Z,
+    );
+    let up = average_unit_direction(
+        render_views[0].camera_up,
+        render_views[1].camera_up,
+        Vec3::Y,
+    );
+    let right = average_unit_direction(
+        render_views[0].camera_right,
+        render_views[1].camera_right,
+        Vec3::X,
+    );
+    WorldGuiPanel::new(
+        center_position + forward * XR_MENU_PANEL_DISTANCE_BLOCKS,
+        right,
+        up,
+        XR_MENU_PANEL_WIDTH_BLOCKS,
+        xr_menu_panel_height_blocks(),
+    )
+}
+
+fn xr_menu_panel_height_blocks() -> f32 {
+    XR_MENU_PANEL_WIDTH_BLOCKS * XR_MENU_PANEL_PIXELS[1] as f32 / XR_MENU_PANEL_PIXELS[0] as f32
+}
+
+fn average_unit_direction(a: Vec3, b: Vec3, fallback: Vec3) -> Vec3 {
+    let direction = (a + b) * 0.5;
+    if direction.is_finite() && direction.length_squared() > f32::EPSILON {
+        direction.normalize()
+    } else {
+        fallback
+    }
+}
+
 fn xr_left_stick_movement_impulse(axis: Vec2) -> EngineCameraMovementImpulse {
     // Quest/VirtualDesktopXR validation reports the left locomotion axes as
     // transposed relative to the engine movement impulse: physical left/right
@@ -1041,6 +1117,22 @@ mod tests {
     }
 
     #[test]
+    fn xr_menu_panel_anchors_in_front_of_hmd_center() {
+        let left = test_render_view(Vec3::new(-0.03, 64.0, 0.0));
+        let right = test_render_view(Vec3::new(0.03, 64.0, 0.0));
+
+        let panel = xr_menu_panel_from_render_views([left, right]);
+
+        assert!(
+            (panel.center - Vec3::new(0.0, 64.0, -XR_MENU_PANEL_DISTANCE_BLOCKS)).length() < 1.0e-6
+        );
+        assert!((panel.right - Vec3::X).length() < 1.0e-6);
+        assert!((panel.up - Vec3::Y).length() < 1.0e-6);
+        assert_eq!(panel.width, XR_MENU_PANEL_WIDTH_BLOCKS);
+        assert_eq!(panel.height, xr_menu_panel_height_blocks());
+    }
+
+    #[test]
     fn startup_view_pose_maps_stage_center_to_requested_world_pose() {
         let stage_center = Vec3::new(1.0, 1.6, -0.25);
         let stage_orientation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
@@ -1106,6 +1198,22 @@ mod tests {
             a_pressed,
             thumbstick,
             thumbstick_pressed: false,
+        }
+    }
+
+    fn test_render_view(camera_position: Vec3) -> ChunkRenderView {
+        ChunkRenderView {
+            view: glam::Mat4::IDENTITY,
+            projection: glam::Mat4::IDENTITY,
+            view_projection: glam::Mat4::IDENTITY,
+            camera_position,
+            camera_forward: Vec3::NEG_Z,
+            camera_right: Vec3::X,
+            camera_up: Vec3::Y,
+            aspect: 1.0,
+            fov_y_radians: 1.0,
+            z_near: XR_NEAR,
+            z_far: XR_FAR,
         }
     }
 }

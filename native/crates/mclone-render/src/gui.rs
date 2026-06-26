@@ -1,13 +1,19 @@
 use anyhow::Result;
+use glam::{Mat4, Vec3};
 use mclone_ui::{ClipRect, Color, GuiDrawCommand, GuiDrawList, Rect};
 use wgpu::util::DeviceExt;
 
+use crate::chunk::ChunkRenderView;
 use crate::target::RenderFrameTarget;
 
 const FLOATS_PER_VERTEX: usize = 6;
 const VERTEX_SIZE: wgpu::BufferAddress =
     (FLOATS_PER_VERTEX * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
 const QUAD_VERTEX_COUNT: u32 = 6;
+const WORLD_PANEL_FLOATS_PER_VERTEX: usize = 5;
+const WORLD_PANEL_VERTEX_SIZE: wgpu::BufferAddress =
+    (WORLD_PANEL_FLOATS_PER_VERTEX * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
+const WORLD_GUI_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 const GUI_SOLID_WGSL: &str = r#"
 struct VertexOut {
@@ -29,6 +35,37 @@ fn vertex_main(
 @fragment
 fn fragment_main(input: VertexOut) -> @location(0) vec4f {
   return input.color;
+}
+"#;
+
+const WORLD_GUI_WGSL: &str = r#"
+struct PanelUniform {
+  view_projection: mat4x4<f32>,
+};
+
+@group(0) @binding(0) var panel_texture: texture_2d<f32>;
+@group(0) @binding(1) var panel_sampler: sampler;
+@group(1) @binding(0) var<uniform> panel_uniform: PanelUniform;
+
+struct VertexOut {
+  @builtin(position) position: vec4f,
+  @location(0) uv: vec2f,
+};
+
+@vertex
+fn vertex_main(
+  @location(0) world_position: vec3f,
+  @location(1) uv: vec2f,
+) -> VertexOut {
+  var out: VertexOut;
+  out.position = panel_uniform.view_projection * vec4f(world_position, 1.0);
+  out.uv = uv;
+  return out;
+}
+
+@fragment
+fn fragment_main(input: VertexOut) -> @location(0) vec4f {
+  return textureSample(panel_texture, panel_sampler, input.uv);
 }
 "#;
 
@@ -216,6 +253,342 @@ impl GuiRenderer {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WorldGuiPanel {
+    pub center: Vec3,
+    pub right: Vec3,
+    pub up: Vec3,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl WorldGuiPanel {
+    pub fn new(center: Vec3, right: Vec3, up: Vec3, width: f32, height: f32) -> Self {
+        Self {
+            center,
+            right: right.normalize_or_zero(),
+            up: up.normalize_or_zero(),
+            width: width.max(0.0),
+            height: height.max(0.0),
+        }
+    }
+}
+
+pub struct WorldGuiRenderer {
+    gui_renderer: GuiRenderer,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
+    _uniform_bind_group_layout: wgpu::BindGroupLayout,
+    pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind_group: wgpu::BindGroup,
+    vertex_buffer: Option<wgpu::Buffer>,
+    vertex_buffer_size: wgpu::BufferAddress,
+    panel_texture: Option<WorldGuiTexture>,
+}
+
+impl WorldGuiRenderer {
+    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_world_gui_texture_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_world_gui_uniform_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_world_gui_uniforms"),
+            size: 64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_world_gui_uniform_bind_group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_world_gui_shader"),
+            source: wgpu::ShaderSource::Wgsl(WORLD_GUI_WGSL.into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_world_gui_pipeline_layout"),
+            bind_group_layouts: &[&texture_bind_group_layout, &uniform_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mclone_world_gui_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vertex_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: WORLD_PANEL_VERTEX_SIZE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            shader_location: 0,
+                            offset: 0,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                        wgpu::VertexAttribute {
+                            shader_location: 1,
+                            offset: 12,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                    ],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fragment_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
+        Self {
+            gui_renderer: GuiRenderer::new(device, WORLD_GUI_TEXTURE_FORMAT),
+            texture_bind_group_layout,
+            _uniform_bind_group_layout: uniform_bind_group_layout,
+            pipeline,
+            uniform_buffer,
+            uniform_bind_group,
+            vertex_buffer: None,
+            vertex_buffer_size: 0,
+            panel_texture: None,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_panel(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_view: ChunkRenderView,
+        panel_pixels: [u32; 2],
+        gui_size: [f32; 2],
+        gui: &GuiDrawList,
+        panel: WorldGuiPanel,
+    ) -> Result<()> {
+        if gui.commands().is_empty() || panel.width <= 0.0 || panel.height <= 0.0 {
+            return Ok(());
+        }
+        let panel_pixels = [panel_pixels[0].max(1), panel_pixels[1].max(1)];
+        self.ensure_panel_texture(device, panel_pixels);
+        {
+            let texture = self
+                .panel_texture
+                .as_ref()
+                .expect("world GUI panel texture exists");
+            self.gui_renderer.render(
+                device,
+                queue,
+                encoder,
+                RenderFrameTarget::color(&texture.view, panel_pixels),
+                gui_size,
+                gui,
+                GuiRenderOptions::clear(wgpu::Color::TRANSPARENT),
+            )?;
+        }
+
+        let vertices = world_gui_panel_vertices(panel);
+        self.upload_world_vertices(device, queue, &vertices);
+        queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            &matrix_bytes(render_view.view_projection),
+        );
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_world_gui_panel_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        let texture = self
+            .panel_texture
+            .as_ref()
+            .expect("world GUI panel texture exists");
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &texture.bind_group, &[]);
+        pass.set_bind_group(1, &self.uniform_bind_group, &[]);
+        pass.set_vertex_buffer(
+            0,
+            self.vertex_buffer
+                .as_ref()
+                .expect("world GUI vertex buffer exists")
+                .slice(..),
+        );
+        pass.draw(0..QUAD_VERTEX_COUNT, 0..1);
+        Ok(())
+    }
+
+    fn ensure_panel_texture(&mut self, device: &wgpu::Device, size: [u32; 2]) {
+        if self
+            .panel_texture
+            .as_ref()
+            .is_some_and(|texture| texture.size == size)
+        {
+            return;
+        }
+        self.panel_texture = Some(WorldGuiTexture::new(
+            device,
+            &self.texture_bind_group_layout,
+            size,
+        ));
+    }
+
+    fn upload_world_vertices(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        vertices: &[f32],
+    ) {
+        let bytes = f32_bytes_vec(vertices);
+        let required_size = bytes.len().max(4) as wgpu::BufferAddress;
+        let needs_recreate = self
+            .vertex_buffer
+            .as_ref()
+            .is_none_or(|_| self.vertex_buffer_size < required_size);
+        if needs_recreate {
+            self.vertex_buffer = Some(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("mclone_world_gui_vertices"),
+                    contents: &bytes,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                },
+            ));
+            self.vertex_buffer_size = required_size;
+        } else if let Some(buffer) = &self.vertex_buffer {
+            queue.write_buffer(buffer, 0, &bytes);
+        }
+    }
+}
+
+struct WorldGuiTexture {
+    size: [u32; 2],
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    _sampler: wgpu::Sampler,
+    bind_group: wgpu::BindGroup,
+}
+
+impl WorldGuiTexture {
+    fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, size: [u32; 2]) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_world_gui_panel_texture"),
+            size: wgpu::Extent3d {
+                width: size[0],
+                height: size[1],
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: WORLD_GUI_TEXTURE_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("mclone_world_gui_panel_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_world_gui_panel_bind_group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        Self {
+            size,
+            _texture: texture,
+            view,
+            _sampler: sampler,
+            bind_group,
+        }
+    }
+}
+
 struct PreparedDraws {
     vertices: Vec<f32>,
     draws: Vec<PreparedDraw>,
@@ -312,6 +685,37 @@ fn f32_bytes_vec(values: &[f32]) -> Vec<u8> {
     bytes
 }
 
+fn matrix_bytes(matrix: Mat4) -> [u8; 64] {
+    let mut bytes = [0; 64];
+    for (index, value) in matrix.to_cols_array().into_iter().enumerate() {
+        let start = index * 4;
+        bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+    bytes
+}
+
+fn world_gui_panel_vertices(panel: WorldGuiPanel) -> Vec<f32> {
+    let half_right = panel.right * (panel.width * 0.5);
+    let half_up = panel.up * (panel.height * 0.5);
+    let top_left = panel.center - half_right + half_up;
+    let top_right = panel.center + half_right + half_up;
+    let bottom_right = panel.center + half_right - half_up;
+    let bottom_left = panel.center - half_right - half_up;
+    let mut vertices =
+        Vec::with_capacity(QUAD_VERTEX_COUNT as usize * WORLD_PANEL_FLOATS_PER_VERTEX);
+    push_world_gui_vertex(&mut vertices, top_left, [0.0, 0.0]);
+    push_world_gui_vertex(&mut vertices, top_right, [1.0, 0.0]);
+    push_world_gui_vertex(&mut vertices, bottom_right, [1.0, 1.0]);
+    push_world_gui_vertex(&mut vertices, top_left, [0.0, 0.0]);
+    push_world_gui_vertex(&mut vertices, bottom_right, [1.0, 1.0]);
+    push_world_gui_vertex(&mut vertices, bottom_left, [0.0, 1.0]);
+    vertices
+}
+
+fn push_world_gui_vertex(vertices: &mut Vec<f32>, position: Vec3, uv: [f32; 2]) {
+    vertices.extend_from_slice(&[position.x, position.y, position.z, uv[0], uv[1]]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,5 +730,31 @@ mod tests {
         let prepared = prepare_draws(draw.commands(), [100.0, 100.0]);
         assert_eq!(prepared.draws.len(), 1);
         assert_eq!(prepared.vertices.len(), 6 * FLOATS_PER_VERTEX);
+    }
+
+    #[test]
+    fn world_panel_vertices_face_camera_basis() {
+        let panel = WorldGuiPanel::new(Vec3::ZERO, Vec3::X, Vec3::Y, 2.0, 1.0);
+        let vertices = world_gui_panel_vertices(panel);
+
+        assert_eq!(
+            &vertices[0..5],
+            &[-1.0, 0.5, 0.0, 0.0, 0.0],
+            "top-left vertex"
+        );
+        assert_eq!(
+            &vertices[5..10],
+            &[1.0, 0.5, 0.0, 1.0, 0.0],
+            "top-right vertex"
+        );
+        assert_eq!(
+            &vertices[10..15],
+            &[1.0, -0.5, 0.0, 1.0, 1.0],
+            "bottom-right vertex"
+        );
+        assert_eq!(
+            vertices.len(),
+            QUAD_VERTEX_COUNT as usize * WORLD_PANEL_FLOATS_PER_VERTEX
+        );
     }
 }
