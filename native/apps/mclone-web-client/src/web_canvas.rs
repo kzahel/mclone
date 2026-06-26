@@ -9,22 +9,21 @@ use super::{
 };
 use mclone_assets::PackedAssetSource;
 use mclone_client::{
-    ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, ActorPresentationKind,
-    ClientInteractionController, ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+    ActorInterpolationConfig, ActorInterpolationState, ClientInteractionController, ClientRuntime,
 };
 #[cfg(test)]
 use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkStatus, chunk_section_index,
 };
 use mclone_core::{
-    BlockHitResult, BlockPos, BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, Direction,
-    HitResultType, Vec3d, chunk_middle_block_coord,
+    BlockHitResult, BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, Direction, HitResultType,
+    Vec3d, chunk_middle_block_coord,
 };
 use mclone_mesh::{
     RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
     load_textured_terrain_assets,
 };
-use mclone_protocol::{EntityKind, ServerUpdate, decode_server_update, encode_server_update};
+use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
 use mclone_render::actor_assets::{ActorTextureImage, load_actor_texture_assets};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
@@ -40,9 +39,9 @@ use mclone_render_session::{
     EngineRenderCamera, RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport,
     RenderSectionCompileRequest, RenderSectionCompileResult, RenderSectionCompiler,
     RenderSectionNeighborReadiness, RenderSectionRemovalMode, RenderSectionSyncPlan,
-    RenderSectionViewSync, build_client_textured_sections, build_render_sections_from_snapshots,
-    decode_textured_render_section_build_report, encode_textured_render_section_build_report,
-    summarize_textured_render_section_build_report,
+    RenderSectionViewSync, actor_instances_from_presentations, build_client_textured_sections,
+    build_render_sections_from_snapshots, decode_textured_render_section_build_report,
+    encode_textured_render_section_build_report, summarize_textured_render_section_build_report,
 };
 use mclone_server::ServerRunnerKind;
 use mclone_ui::{
@@ -3734,60 +3733,8 @@ fn chunk_camera_from_engine(camera: EngineRenderCamera) -> ChunkCamera {
     }
 }
 
-fn actor_instances_from_presentations(
-    presentations: &[ActorPresentation],
-    client: &ClientRuntime,
-) -> Vec<ActorInstance> {
-    presentations
-        .iter()
-        .map(|actor| {
-            let packed_light =
-                client.packed_light_at_world_or_fullbright(actor_light_probe_block_pos(actor));
-            match actor.kind {
-                ActorPresentationKind::RemotePlayer => ActorInstance::remote_player(
-                    glam_vec3_from_vec3d(actor.feet_position),
-                    actor.y_rot_degrees,
-                )
-                .with_packed_light(packed_light),
-                ActorPresentationKind::Entity(EntityKind::Cow) => ActorInstance::cow_model(
-                    glam_vec3_from_vec3d(actor.feet_position),
-                    actor.y_rot_degrees,
-                    actor.width,
-                    actor.height,
-                )
-                .with_packed_light(packed_light),
-                ActorPresentationKind::Entity(EntityKind::Chicken) => {
-                    ActorInstance::chicken_placeholder(
-                        glam_vec3_from_vec3d(actor.feet_position),
-                        actor.y_rot_degrees,
-                        actor.width,
-                        actor.height,
-                    )
-                    .with_packed_light(packed_light)
-                }
-            }
-        })
-        .collect()
-}
-
 fn glam_vec3_from_vec3d(value: Vec3d) -> glam::Vec3 {
     glam::Vec3::new(value.x as f32, value.y as f32, value.z as f32)
-}
-
-fn actor_light_probe_block_pos(actor: &ActorPresentation) -> BlockPos {
-    BlockPos::containing(actor.feet_position.add(Vec3d::new(
-        0.0,
-        actor_light_probe_height(actor),
-        0.0,
-    )))
-}
-
-fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
-    match actor.kind {
-        ActorPresentationKind::RemotePlayer => LOCAL_PLAYER_STANDING_EYE_HEIGHT,
-        ActorPresentationKind::Entity(EntityKind::Cow) => 1.3,
-        ActorPresentationKind::Entity(EntityKind::Chicken) => f64::from(actor.height) * 0.92,
-    }
 }
 
 fn camera_state_to_js_value(

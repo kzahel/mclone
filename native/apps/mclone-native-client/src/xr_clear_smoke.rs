@@ -32,7 +32,7 @@ use mclone_render::sky_render::SkyRenderer;
 #[cfg(not(target_os = "android"))]
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 #[cfg(not(target_os = "android"))]
-use mclone_render_session::EngineCameraController;
+use mclone_render_session::{EngineCameraController, actor_instances_from_presentations};
 #[cfg(not(target_os = "android"))]
 use mclone_ui::GuiDrawList;
 #[cfg(not(target_os = "android"))]
@@ -49,8 +49,6 @@ use mclone_xr_scene::{
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
 
-#[cfg(not(target_os = "android"))]
-use crate::app::actor_instances_from_presentations;
 use crate::cli::{XrClearSmokeOptions, XrMcloneSmokeOptions};
 #[cfg(not(target_os = "android"))]
 use crate::frame_pacing::elapsed_ms;

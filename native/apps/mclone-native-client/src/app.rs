@@ -3,12 +3,11 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use mclone_client::{
-    ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, ActorPresentationKind,
-    ClientInteractionController, ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT, PlayerInputKey,
+    ActorInterpolationConfig, ActorInterpolationState, ClientInteractionController,
+    LOCAL_PLAYER_STANDING_EYE_HEIGHT, PlayerInputKey,
 };
-use mclone_core::{BlockPos, Vec3d};
+use mclone_core::Vec3d;
 use mclone_mesh::quad_face_count_from_indices;
-use mclone_protocol::EntityKind;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
     TexturedSectionUploadReport,
@@ -44,7 +43,7 @@ use mclone_app_runtime::frame_render::{
 };
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraMovementMode, EngineCameraSnapshot,
-    RenderSectionCacheUpdate, render_camera_from_snapshot,
+    RenderSectionCacheUpdate, actor_instances_from_presentations, render_camera_from_snapshot,
 };
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
@@ -673,58 +672,6 @@ fn vec3d_from_glam(value: glam::Vec3) -> Vec3d {
 
 fn glam_vec3_from_vec3d(value: Vec3d) -> glam::Vec3 {
     glam::Vec3::new(value.x as f32, value.y as f32, value.z as f32)
-}
-
-pub(crate) fn actor_instances_from_presentations(
-    presentations: &[ActorPresentation],
-    client: &ClientRuntime,
-) -> Vec<ActorInstance> {
-    presentations
-        .iter()
-        .map(|actor| {
-            let packed_light =
-                client.packed_light_at_world_or_fullbright(actor_light_probe_block_pos(actor));
-            match actor.kind {
-                ActorPresentationKind::RemotePlayer => ActorInstance::remote_player(
-                    glam_vec3_from_vec3d(actor.feet_position),
-                    actor.y_rot_degrees,
-                )
-                .with_packed_light(packed_light),
-                ActorPresentationKind::Entity(EntityKind::Cow) => ActorInstance::cow_model(
-                    glam_vec3_from_vec3d(actor.feet_position),
-                    actor.y_rot_degrees,
-                    actor.width,
-                    actor.height,
-                )
-                .with_packed_light(packed_light),
-                ActorPresentationKind::Entity(EntityKind::Chicken) => {
-                    ActorInstance::chicken_placeholder(
-                        glam_vec3_from_vec3d(actor.feet_position),
-                        actor.y_rot_degrees,
-                        actor.width,
-                        actor.height,
-                    )
-                    .with_packed_light(packed_light)
-                }
-            }
-        })
-        .collect()
-}
-
-fn actor_light_probe_block_pos(actor: &ActorPresentation) -> BlockPos {
-    BlockPos::containing(actor.feet_position.add(Vec3d::new(
-        0.0,
-        actor_light_probe_height(actor),
-        0.0,
-    )))
-}
-
-fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
-    match actor.kind {
-        ActorPresentationKind::RemotePlayer => LOCAL_PLAYER_STANDING_EYE_HEIGHT,
-        ActorPresentationKind::Entity(EntityKind::Cow) => 1.3,
-        ActorPresentationKind::Entity(EntityKind::Chicken) => f64::from(actor.height) * 0.92,
-    }
 }
 
 fn engine_camera_controller_from_spectator(spectator: &SpectatorCamera) -> EngineCameraController {
@@ -1381,7 +1328,7 @@ mod tests {
         entity_client.apply_update(mclone_protocol::ServerUpdate::EntitySnapshot(
             mclone_protocol::EntitySnapshot {
                 id: mclone_protocol::EntityId(1),
-                kind: EntityKind::Cow,
+                kind: mclone_protocol::EntityKind::Cow,
                 position: Vec3d::new(3.0, 64.0, 4.0),
                 y_rot_degrees: 45.0,
                 x_rot_degrees: 0.0,

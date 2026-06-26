@@ -1,8 +1,9 @@
 # 086: XR Scene Driver Convergence
 
-Status: active. Slice 1 landed shared XR transform helpers and removed the
-desktop-local copies. Slice 2, the shared actor instance builder, is the next
-implementation chunk.
+Status: active. Slices 1 and 2 landed: XR transform helpers now live in
+`mclone-xr-scene`, and actor presentation-to-render-instance building now lives
+in `mclone-render-session`. Slice 3, rendering actors through the shared XR
+scene, is the next implementation chunk.
 
 ## Purpose
 
@@ -23,6 +24,8 @@ construction, and host-mode integration live behind shared native contracts.
 - XR tracking-origin, stage-to-world, render-view conversion, yaw
   normalization, and startup view-pose helpers now live in `mclone-xr-scene`;
   desktop XR imports them.
+- Desktop flat, headless/perf, web, and desktop XR now share
+  `mclone-render-session::actor_instances_from_presentations(...)`.
 - Desktop XR renders actors through `ActorDrawResources`; shared
   `mclone-xr-scene` currently renders terrain only.
 - `mclone-xr-scene` owns a concrete local integrated `SingleViewRuntime` plus
@@ -78,12 +81,36 @@ git diff --check
 
 ### Slice 2 - Shared Actor Instance Builder
 
-- [ ] Move `actor_instances_from_presentations(...)` and light-probe helpers
+- [x] Move `actor_instances_from_presentations(...)` and light-probe helpers
   out of app-local desktop/web code into a shared native crate.
-- [ ] Keep actor presentations as an input parameter so flat desktop can pass
+- [x] Keep actor presentations as an input parameter so flat desktop can pass
   interpolated presentations and XR can pass raw client presentations.
-- [ ] Repoint desktop flat/headless/perf, web, and desktop XR callers.
-- [ ] Validate native client, web client, and render-session/app-runtime gates.
+- [x] Repoint desktop flat/headless/perf, web, and desktop XR callers.
+- [x] Validate native client, web client, render-session, app-runtime, Android
+  XR, and wasm build gates.
+
+Recorded Slice 2 result:
+
+- Added `mclone-render` as a dependency of `mclone-render-session` so
+  renderer-facing actor instances can be built at the render-session boundary.
+- Moved actor instance construction and actor light-probe helpers into
+  `mclone-render-session`.
+- Rewired desktop flat, headless, perf, desktop XR, and web canvas callers to
+  use the shared helper.
+- Removed duplicate native app and web canvas helper implementations while
+  preserving caller-owned interpolation policy.
+
+Validation after Slice 2:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+pnpm native:web:build
+```
 
 ### Slice 3 - Actors In Shared XR Scene
 

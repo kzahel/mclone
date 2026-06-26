@@ -24,9 +24,10 @@ use mclone_render::headless::{
 };
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
+use mclone_render_session::actor_instances_from_presentations;
 use mclone_ui::{GameUi, GuiDrawList, GuiScale};
 
-use crate::app::{actor_instances_from_presentations, game_ui_render_state};
+use crate::app::game_ui_render_state;
 use crate::camera::SpectatorCamera;
 use crate::cli::{HeadlessDualViewOptions, HeadlessScreenshotOptions, SceneOptions};
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState, FrameTimingStats};

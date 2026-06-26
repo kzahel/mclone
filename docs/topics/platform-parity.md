@@ -149,7 +149,8 @@ Concretely:
   composing the shared native scene shell.
 - `mclone-xr-scene` is still too narrow (no actors, no remote host), so desktop
   XR keeps a parallel app-local `XrMcloneWorldState`. The prior byte-identical
-  XR transform-helper copy was removed in tactical 086 Slice 1.
+  XR transform-helper copy was removed in tactical 086 Slice 1, and the
+  flat/web/XR actor-instance builder copy was removed in Slice 2.
 - `web-client` re-inlines the whole sky→chunk→actor render sequence instead of
   calling `render_full_frame_for_view`. It still owns an async `WebRuntimeHost`
   enum, but command/update accounting and remote WebSocket reconnect/resync prep
@@ -196,9 +197,9 @@ these first:
    pointer, and interact**, not just locomotion. Required for XR interaction and
    for flat Android to use the player controller. (tactical 076 follow-up)
 4. **Widen `mclone-xr-scene` (actors + pluggable/remote host) and delete the
-   desktop-XR fork.** Helper sharing landed in tactical 086 Slice 1; actors and
-   host-mode plumbing remain before desktop XR can consume the shared scene like
-   Android XR does. (platforms.md alignment #4)
+   desktop-XR fork.** Helper sharing landed in tactical 086 Slices 1-2; shared
+   XR actor rendering and host-mode plumbing remain before desktop XR can
+   consume the shared scene like Android XR does. (platforms.md alignment #4)
 5. **Collapse the remaining XR scene-driver fork** so `XrMcloneTerrainState`
    composes the shared native scene shell where possible instead of re-owning
    local runtime setup, polling, render-section sync, and terrain assets.

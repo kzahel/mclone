@@ -12,6 +12,7 @@ mclone-client.workspace = true
 mclone-core.workspace = true
 mclone-mesh.workspace = true
 mclone-protocol.workspace = true
+mclone-render.workspace = true
 
 [lib]
 name = "mclone_render_session"
