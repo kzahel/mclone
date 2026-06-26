@@ -15,7 +15,8 @@ Current status:
 - The default host mode is local integrated. Setting
   `debug.mclone.remote_addr` switches the flat Android app to remote dedicated
   play through the shared host-mode contract.
-- AVD chunk and one-finger orbit smokes pass locally.
+- AVD validation builds an x86_64 emulator APK, stages assets, verifies the
+  app-rendered frame marker, and captures a screenshot.
 - Quest-flat validation is scripted, but still needs a machine with an attached
   authorized Quest headset.
 
@@ -24,17 +25,35 @@ Current status:
 - Android SDK with platform tools, emulator, and NDK installed.
 - JDK 17 or newer.
 - `cargo-ndk`.
-- Rust target `aarch64-linux-android`.
+- Rust target `aarch64-linux-android` for physical Android/Quest devices.
+- Rust target `x86_64-linux-android` for local x86_64 AVD validation.
 - Packed assets at `reference/minecraft-1.17.1/extracted.zip`; rebuild with
   `pnpm assets:pack` if needed.
 
 The scripts discover Android tools through `ANDROID_HOME`, `ANDROID_SDK_ROOT`,
 or `~/Android/Sdk`.
 
+On Windows, the `pnpm native:android:*` scripts route through
+`scripts/run-native-bash.mjs` so they use Git Bash with the native Windows Rust
+toolchain instead of WSL `bash`.
+
 ## Build
 
 ```bash
 pnpm native:android:apk
+```
+
+The default APK build targets `arm64-v8a`, which is the physical device/Quest
+path. Build an emulator APK explicitly with:
+
+```bash
+pnpm native:android:apk:avd
+```
+
+or:
+
+```bash
+bash android/build-apk.sh --abi x86_64
 ```
 
 The debug APK is written to:
@@ -52,7 +71,9 @@ pnpm native:android:avd-smoke
 ```
 
 By default this uses the `jstorrent-tablet` AVD, builds the APK, stages
-`reference/minecraft-1.17.1/extracted.zip`, launches the app, captures:
+`reference/minecraft-1.17.1/extracted.zip`, repairs staged asset ownership on
+rootable emulator images, launches the app, requires a rendered-frame log
+marker, and captures:
 
 ```text
 /tmp/mclone-android-avd-chunk.png
@@ -86,7 +107,8 @@ pnpm native:android:avd-smoke -- --skip-build --remote-addr 10.0.2.2:25565
 
 The validator writes the address to Android property
 `debug.mclone.remote_addr` before launch. When `--remote-addr` is omitted, the
-property is cleared so normal smokes stay local integrated.
+property is set to the `__mclone_none__` sentinel so normal smokes stay local
+integrated; Android `setprop` cannot write an empty value.
 
 Use the raw validator when you need custom paths, a visible emulator window, a
 specific serial, or a different swipe:
@@ -145,8 +167,9 @@ Use these after Android platform or shared runtime/render changes:
 ```bash
 cargo fmt --manifest-path native/Cargo.toml --all --check
 cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target x86_64-linux-android
 pnpm native:android:apk
-pnpm native:android:avd-smoke -- --skip-build
+pnpm native:android:avd-smoke
 ```
 
 If shared native render/runtime code changed, also run the affected desktop and

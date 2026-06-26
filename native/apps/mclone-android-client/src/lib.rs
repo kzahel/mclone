@@ -47,6 +47,7 @@ mod android {
 
     const LOG_TAG: &str = "mclone_android";
     const REMOTE_ADDR_PROPERTY: &str = "debug.mclone.remote_addr";
+    const REMOTE_ADDR_NONE_SENTINEL: &str = "__mclone_none__";
     const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
     const TOUCH_LOOK_RADIANS_PER_SCREEN: f64 = 2.4;
     const TOUCH_JOYSTICK_RADIUS_GUI: f32 = 50.0;
@@ -973,7 +974,7 @@ mod android {
     fn android_remote_addr() -> Option<String> {
         android_property(REMOTE_ADDR_PROPERTY)
             .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
+            .filter(|value| !value.is_empty() && value != REMOTE_ADDR_NONE_SENTINEL)
     }
 
     #[allow(unsafe_code)]

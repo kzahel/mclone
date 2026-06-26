@@ -28,11 +28,23 @@ mclone_configure_msys_adb_path_conversion() {
 
 mclone_configure_msys_adb_path_conversion
 
+mclone_windows_local_android_sdk() {
+    if [[ -n "${LOCALAPPDATA:-}" && "$(uname -s 2>/dev/null || true)" =~ MINGW|MSYS|CYGWIN ]] && command -v cygpath >/dev/null 2>&1; then
+        cygpath -u "$LOCALAPPDATA/Android/Sdk"
+        return
+    fi
+    return 1
+}
+
 mclone_android_sdk_home() {
+    local windows_sdk
+
     if [[ -n "${ANDROID_HOME:-}" ]]; then
         echo "$ANDROID_HOME"
     elif [[ -n "${ANDROID_SDK_ROOT:-}" ]]; then
         echo "$ANDROID_SDK_ROOT"
+    elif windows_sdk="$(mclone_windows_local_android_sdk 2>/dev/null)" && [[ -d "$windows_sdk" ]]; then
+        echo "$windows_sdk"
     else
         echo "$HOME/Android/Sdk"
     fi
@@ -313,6 +325,49 @@ mclone_stage_asset_pack() {
     mclone_note "Staging asset pack $asset_pack_path to $remote_path"
     "$ADB" -s "$serial" shell mkdir -p "$remote_dir" >/dev/null
     "$ADB" -s "$serial" push "$asset_pack_path" "$remote_path" >/dev/null
+    mclone_repair_emulator_asset_permissions "$serial"
+}
+
+mclone_repair_emulator_asset_permissions() {
+    local serial="$1"
+    local remote_app_dir="/sdcard/Android/data/$MCLONE_ANDROID_APP_ID"
+    local app_user
+    local package_uid
+
+    [[ "${MCLONE_ANDROID_REPAIR_ASSET_PERMS:-1}" == "1" ]] || return 0
+    [[ "$serial" == emulator-* ]] || return 0
+
+    if [[ "$("$ADB" -s "$serial" shell id -u 2>/dev/null | tr -d '\r' || true)" != "0" ]]; then
+        mclone_note "Restarting emulator adbd as root for staged asset ownership repair"
+        "$ADB" -s "$serial" root >/dev/null 2>&1 || {
+            mclone_note "Emulator adbd root is unavailable; leaving staged asset ownership unchanged"
+            return 0
+        }
+        "$ADB" -s "$serial" wait-for-device >/dev/null
+    fi
+
+    if [[ "$("$ADB" -s "$serial" shell id -u 2>/dev/null | tr -d '\r' || true)" != "0" ]]; then
+        mclone_note "Emulator adbd did not become root; leaving staged asset ownership unchanged"
+        return 0
+    fi
+
+    app_user="$("$ADB" -s "$serial" shell stat -c %U "/data/user/0/$MCLONE_ANDROID_APP_ID" 2>/dev/null | tr -d '\r' || true)"
+    if [[ -z "$app_user" || "$app_user" == "UNKNOWN" ]]; then
+        package_uid="$("$ADB" -s "$serial" shell cmd package list packages -U "$MCLONE_ANDROID_APP_ID" 2>/dev/null \
+            | tr -d '\r' | sed -n 's/.* uid:\([0-9][0-9]*\).*/\1/p' | head -1)"
+        app_user="$package_uid"
+    fi
+
+    if [[ -z "$app_user" ]]; then
+        mclone_note "Could not resolve app owner for $MCLONE_ANDROID_APP_ID; leaving staged asset ownership unchanged"
+        return 0
+    fi
+
+    mclone_note "Repairing staged asset ownership for $MCLONE_ANDROID_APP_ID on emulator"
+    "$ADB" -s "$serial" shell chown -R "$app_user:ext_data_rw" "$remote_app_dir" >/dev/null 2>&1 \
+        || "$ADB" -s "$serial" shell chown -R "$app_user:$app_user" "$remote_app_dir" >/dev/null 2>&1 \
+        || true
+    "$ADB" -s "$serial" shell chmod -R u+rwX,g+rwX "$remote_app_dir" >/dev/null 2>&1 || true
 }
 
 mclone_run_touch_swipe() {
@@ -407,6 +462,10 @@ mclone_install_launch_smoke() {
     if grep -E "FATAL EXCEPTION|Fatal signal|SIGSEGV|thread .* panicked|panicked at" "$log_path" >/dev/null 2>&1; then
         mclone_die "fatal Mclone logcat entries found in $log_path"
     fi
+    if [[ "${MCLONE_ANDROID_REQUIRE_RENDERED_FRAME:-1}" == "1" ]] \
+        && ! grep -E "Mclone Android rendered .* frame" "$log_path" >/dev/null 2>&1; then
+        mclone_die "no Mclone rendered-frame marker found in $log_path"
+    fi
 
     mclone_capture_screenshot "$serial" "$screenshot_path"
     mclone_note "Screenshot: $screenshot_path"
@@ -421,8 +480,9 @@ mclone_configure_remote_addr() {
 
     if [[ -n "$remote_addr" ]]; then
         mclone_note "Configuring Android remote dedicated address $property=$remote_addr"
+        "$ADB" -s "$serial" shell setprop "$property" "$remote_addr" >/dev/null
     else
         mclone_note "Clearing Android remote dedicated address $property"
+        "$ADB" -s "$serial" shell setprop "$property" "__mclone_none__" >/dev/null
     fi
-    "$ADB" -s "$serial" shell setprop "$property" "$remote_addr" >/dev/null
 }

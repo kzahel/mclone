@@ -18,7 +18,7 @@ Mclone currently has five supported client/platform validation lanes:
 | Desktop flat | primary development lane | `native/apps/mclone-native-client` owns desktop `winit`, surface acquisition, keyboard/mouse input, frame pacing, and headless screenshots. Basics validated: integrated runtime, locomotion, world rendering, chunk loading/generation. |
 | Desktop OpenXR | active XR lane | `mclone-native-client --features xr` owns desktop runtime selection and OpenXR startup. Shared XR crates provide host/session helpers, graphics wrapping, scene alignment, and controller locomotion. Validated with real stereo mclone terrain on Quest 3 through VirtualDesktopXR. |
 | Android XR / Quest standalone | active XR lane | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, launch-scoped remote-address argv, and validation. Validated with staged assets, stereo terrain, controller actions, basic locomotion, and remote-dedicated play over direct LAN and through the `--adb-reverse` USB tunnel path. |
-| Flat Android | active mobile lane | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity` package. Validated on AVD with Vulkan-backed `wgpu`, real terrain pixels, staged assets, and touch-orbit smoke. |
+| Flat Android | active mobile lane | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity` package. Validated on x86_64 AVD with Vulkan-backed `wgpu`, real terrain pixels, staged assets, rendered-frame log marker, and touch smoke; arm64 remains the physical device / Quest-flat ABI. |
 | Web/WASM | active browser lane | `native/apps/mclone-web-client` builds for `wasm32-unknown-unknown`, uses WebGPU through `wgpu`, and keeps browser workers, TypeScript glue, mobile web controls, shared Rust/WebGPU UI, and deployment alive. |
 
 Additional host lane:
@@ -196,6 +196,7 @@ pnpm native:xr:windows:mclone:connected
 
 # Flat Android, SDK/AVD required
 pnpm native:android:apk
+pnpm native:android:apk:avd
 pnpm native:android:avd-smoke -- --skip-build
 pnpm native:android:avd-touch-smoke -- --skip-build
 

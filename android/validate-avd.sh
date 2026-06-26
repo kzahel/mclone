@@ -14,12 +14,14 @@ LOG_PATH="${MCLONE_ANDROID_LOGCAT:-/tmp/mclone-android-avd-logcat.txt}"
 BOOT_TIMEOUT_SECONDS="${MCLONE_ANDROID_BOOT_TIMEOUT:-120}"
 SMOKE_SECONDS="${MCLONE_ANDROID_SMOKE_SECONDS:-3}"
 STAGE_ASSETS="${MCLONE_ANDROID_STAGE_ASSETS:-1}"
+BUILD_ABIS="${MCLONE_ANDROID_ABIS:-x86_64}"
 SKIP_BUILD=0
 KEEP_EMULATOR=0
 HEADLESS=1
 SERIAL=""
 STARTED_EMULATOR=0
 EMULATOR_PID=""
+EXPLICIT_ABIS=()
 
 usage() {
     cat <<'USAGE'
@@ -31,6 +33,9 @@ Options:
   --avd NAME          AVD name to boot when no emulator is already online.
   --serial SERIAL     Use an already-running emulator/device serial.
   --skip-build        Reuse the existing APK.
+  --abi ABI           Build for one Android ABI. May be repeated.
+                      Defaults to x86_64 for AVD validation.
+  --abis LIST         Build for comma- or space-separated Android ABIs.
   --keep-emulator     Leave an emulator started by this script running.
   --window            Show the emulator window instead of using -no-window.
   --screenshot PATH   Local screenshot output path.
@@ -58,6 +63,14 @@ while [[ $# -gt 0 ]]; do
         --skip-build)
             SKIP_BUILD=1
             shift
+            ;;
+        --abi)
+            EXPLICIT_ABIS+=("$2")
+            shift 2
+            ;;
+        --abis)
+            BUILD_ABIS="$2"
+            shift 2
             ;;
         --keep-emulator)
             KEEP_EMULATOR=1
@@ -111,6 +124,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "${#EXPLICIT_ABIS[@]}" -gt 0 ]]; then
+    BUILD_ABIS="${EXPLICIT_ABIS[*]}"
+fi
+export MCLONE_ANDROID_ABIS="${MCLONE_ANDROID_ABIS:-$BUILD_ABIS}"
 
 cleanup() {
     local status=$?

@@ -8,24 +8,77 @@ source "$REPO_ROOT/android/build-common.sh"
 ANDROID_SDK_HOME="$(mclone_android_sdk_home_for_build)"
 NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
 REQUIRED_NDK_VERSION="$(mclone_gradle_ndk_version "$SCRIPT_DIR/app/build.gradle.kts")"
+BUILD_ABIS="${MCLONE_ANDROID_ABIS:-arm64-v8a}"
+
+usage() {
+    cat <<'USAGE'
+Usage: android/build-apk.sh [options]
+
+Build the flat Android APK.
+
+Options:
+  --abi ABI       Build for one Android ABI. May be repeated.
+                  Supported: arm64-v8a, x86_64.
+  --abis LIST     Build for comma- or space-separated ABIs.
+  -h, --help      Show this help.
+USAGE
+}
+
+EXPLICIT_ABIS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --abi)
+            EXPLICIT_ABIS+=("$2")
+            shift 2
+            ;;
+        --abis)
+            BUILD_ABIS="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "unknown option: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [[ "${#EXPLICIT_ABIS[@]}" -gt 0 ]]; then
+    BUILD_ABIS="${EXPLICIT_ABIS[*]}"
+fi
 
 NDK_HOME="$(mclone_resolve_ndk_home "$ANDROID_SDK_HOME" "$NDK_HOME" "$REQUIRED_NDK_VERSION")"
-mclone_android_build_preflight "$ANDROID_SDK_HOME" "$NDK_HOME" "$REQUIRED_NDK_VERSION"
+NORMALIZED_ABIS="$(mclone_normalize_android_abis "$BUILD_ABIS")"
+mclone_android_build_preflight "$ANDROID_SDK_HOME" "$NDK_HOME" "$REQUIRED_NDK_VERSION" "$NORMALIZED_ABIS"
 mclone_export_android_build_env "$ANDROID_SDK_HOME" "$NDK_HOME"
 
-echo "Building Mclone Android shared library..."
-cd "$REPO_ROOT/native"
-cargo ndk -t arm64-v8a -o ../android/jniLibs build --release --package mclone-android-client --lib
-
-echo "Bundling libc++_shared.so..."
 NDK_PREBUILT="$(find "$NDK_HOME/toolchains/llvm/prebuilt" -maxdepth 1 -mindepth 1 -type d | head -1)"
 if [[ -z "$NDK_PREBUILT" ]]; then
     echo "Could not find an LLVM prebuilt toolchain under $NDK_HOME" >&2
     exit 1
 fi
-mkdir -p "$SCRIPT_DIR/jniLibs/arm64-v8a"
-cp "$NDK_PREBUILT/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" \
-    "$SCRIPT_DIR/jniLibs/arm64-v8a/"
+
+for abi in arm64-v8a x86_64; do
+    rm -f "$SCRIPT_DIR/jniLibs/$abi/libmclone_android_client.so" \
+        "$SCRIPT_DIR/jniLibs/$abi/libc++_shared.so"
+done
+
+cd "$REPO_ROOT/native"
+while IFS= read -r abi; do
+    [[ -n "$abi" ]] || continue
+    echo "Building Mclone Android shared library for $abi..."
+    cargo ndk -t "$abi" -o ../android/jniLibs build --release --package mclone-android-client --lib
+
+    echo "Bundling libc++_shared.so for $abi..."
+    libcxx_dir="$(mclone_android_libcxx_target_dir_for_abi "$abi")"
+    mkdir -p "$SCRIPT_DIR/jniLibs/$abi"
+    cp "$NDK_PREBUILT/sysroot/usr/lib/$libcxx_dir/libc++_shared.so" \
+        "$SCRIPT_DIR/jniLibs/$abi/"
+done <<< "$NORMALIZED_ABIS"
 
 cd "$SCRIPT_DIR"
 if [[ -x ./gradlew ]]; then

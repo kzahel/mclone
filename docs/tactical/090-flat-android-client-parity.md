@@ -1,7 +1,8 @@
 # 090: Flat Android Client Parity
 
-Status: active; shared menu/touch, player camera/look, and touch movement
-slices landed in code. Parent status matrix:
+Status: active; shared menu/touch, player camera/look, touch movement, and
+first-class x86_64 AVD validation tooling slices landed in code. Parent status
+matrix:
 [`../topics/platform-parity.md`](../topics/platform-parity.md). This tactical
 owns the flat-Android follow-up that tactical
 [`089-shared-xr-menu-surface.md`](089-shared-xr-menu-surface.md) previously
@@ -74,8 +75,24 @@ shared UI, touch input, player movement, HUD/hotbar, and gameplay interaction.
 - [ ] **Slice 4: gameplay interaction parity.**
   - Route block raycast/break/place through the shared interaction controller.
   - Add hotbar/debug palette presentation and touch selection.
-- [ ] **Slice 5: device validation and parity matrix update.**
-  - Run flat Android validation on device/emulator for local and remote modes.
+- [x] **Slice 5a: first-class AVD validation lane.**
+  - Make `android/build-apk.sh` ABI-selectable instead of hard-coding
+    `arm64-v8a`.
+  - Make `android/validate-avd.sh` build `x86_64` by default for local
+    emulator images while preserving arm64 as the physical-device default.
+  - Repair app-scoped external asset ownership on rootable emulators after
+    `adb push`, so API 35 AVDs can read the staged pack.
+  - Require the Mclone rendered-frame log marker before accepting an Android
+    smoke as passed.
+  - Route flat Android `pnpm` scripts through a native Git Bash launcher on
+    Windows so they do not resolve to WSL `bash` and miss native cargo.
+  - Clear `debug.mclone.remote_addr` with the `__mclone_none__` sentinel because
+    Android `setprop` cannot write an empty value; the app filters the sentinel
+    back to local integrated mode.
+  - Document `pnpm native:android:apk:avd` and the AVD/device ABI split.
+- [ ] **Slice 5b: device validation and parity matrix update.**
+  - Run flat Android validation on emulator for local and remote modes.
+  - Run Quest-flat validation on attached headset hardware.
   - Update platform parity status only after actual device evidence.
 
 ## Validation
@@ -110,6 +127,18 @@ Slice 3 validation on 2026-06-26:
 - [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android`
 - [ ] Device visual/touch smoke of movement joystick and jump/sprint/descend
       controls on flat Android.
+
+Slice 5a validation on 2026-06-26:
+
+- [x] `bash -n android/build-common.sh android/build-apk.sh android/validate-common.sh android/validate-avd.sh android/validate-quest-flat.sh`
+- [x] `cargo fmt --manifest-path native/Cargo.toml --all --check`
+- [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target x86_64-linux-android`
+- [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android`
+- [x] `pnpm native:android:apk:avd`
+- [x] `pnpm native:android:avd-smoke -- --skip-build`
+      - Screenshot inspected: `/tmp/mclone-android-avd-chunk.png`
+- [x] `pnpm native:android:avd-touch-smoke -- --skip-build`
+      - Screenshot inspected: `/tmp/mclone-android-avd-touch.png`
 
 Device gates after visual slices:
 
