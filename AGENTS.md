@@ -1,5 +1,13 @@
 See [`README.md`](README.md) for project context.
 
+## Windows: shell and Rust toolchain
+
+This repo is developed on Windows. Run `cargo`, `pnpm`, and any native build/test/run from **PowerShell** (or the Git Bash / MINGW64 shell) — both use the native Windows Rust toolchain at `C:\Users\<user>\.cargo\bin\cargo.exe` and work correctly (clean `cargo build`/`cargo test`, including MSVC linking and test-binary execution, all pass).
+
+**Do not run cargo from WSL.** WSL is installed and running on this machine, but it has **no Rust toolchain** (`cargo: command not found`), and even with one it builds over the slow `/mnt/c` mount, which hangs and targets Linux instead of Windows. If a `cargo`/`pnpm` command "gets stuck" or reports `command not found`, you are almost certainly in WSL, not Git Bash — switch shells rather than trying to fix the build.
+
+The `.sh` setup scripts (`scripts/decompile-mc.sh`, `scripts/extract-assets.sh`, `oracle/build.sh`, `oracle/run.sh`, etc.) require bash; run those from Git Bash, not PowerShell. The `pnpm` cargo wrappers in `package.json` are shell-agnostic and run fine from either PowerShell or Git Bash.
+
 ## Notes for agents
 
 **Do not use the auto-memory system** for this project (the `~/.claude/projects/-home-kgraehl-code-mclone/memory/` directory). Persist project-relevant guidance in this file (`AGENTS.md`) instead.
