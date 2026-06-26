@@ -10,6 +10,7 @@ android-activity.workspace = true
 anyhow.workspace = true
 jni.workspace = true
 log.workspace = true
+mclone-app-runtime.workspace = true
 mclone-xr-graphics.workspace = true
 mclone-xr-host.workspace = true
 openxr.workspace = true

@@ -634,7 +634,7 @@ Exit criteria:
 
 - [x] Stage `reference/minecraft-1.17.1/extracted.zip` into the Android XR app
   external files directory from the install/validate scripts.
-- [ ] Load the staged asset pack from the Android XR app external files
+- [x] Load the staged asset pack from the Android XR app external files
   directory in the mclone runtime path.
 - [ ] Reuse the shared XR host plus the desktop-proven mclone-frame path for
   integrated server/client, render-section sync, texture atlas, sky, terrain,
@@ -677,6 +677,42 @@ Observed Quest result:
   `/sdcard/Android/data/com.kzahel.mclone.xr/files/assets/packs/extracted.zip`
 - Device file size: `5828345`
 - Log marker observed by validator: `MCLONE_ANDROID_XR_READY`
+- Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
+
+Recorded Slice 3 second-chunk result:
+
+- Added `mclone-app-runtime` to the Android XR app dependencies.
+- Android XR now loads the staged pack through `load_asset_source`,
+  `load_textured_mesh_assets_from_source`, and
+  `load_actor_texture_assets_from_asset_source` before OpenXR startup.
+- The loaded terrain and actor texture assets are retained in
+  `AndroidXrRuntimeAssets`, so the next terrain chunk can consume them instead
+  of reloading the pack.
+- Added the `MCLONE_ANDROID_XR_ASSETS_READY` marker and made
+  `android-xr/validate-quest-openxr.sh` require it in addition to
+  `MCLONE_ANDROID_XR_READY`.
+
+Validation after the second Slice 3 chunk, June 26, 2026:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash -n android-xr/validate-quest-openxr.sh'
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/build-apk.sh --debug'
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --wait-seconds 60'
+"C:\Program Files\Git\bin\bash.exe" -lc 'grep -E "loaded Minecraft asset pack|Android XR runtime assets|MCLONE_ANDROID_XR_ASSETS_READY|MCLONE_ANDROID_XR_READY|MCLONE_ANDROID_XR_FAILURE" /tmp/mclone-quest-openxr-logcat.txt | head -20'
+```
+
+Observed Quest result:
+
+- Quest serial: `2G0YC1ZF93041Z`
+- Asset pack loaded by app:
+  `/storage/emulated/0/Android/data/com.kzahel.mclone.xr/files/assets/packs/extracted.zip`
+- Asset pack manifest: `asset_set=mclone-vanilla-1.17.1`, `files=6982`
+- Runtime asset facts: `terrain_atlas=512x2048`, `actor_atlas=65x32`
+- Runtime asset load time in debug build: `92.602 ms`
+- Log markers observed: `MCLONE_ANDROID_XR_ASSETS_READY`,
+  `MCLONE_ANDROID_XR_READY`
 - Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
 
 ### Slice 4 - Controller Actions And Locomotion

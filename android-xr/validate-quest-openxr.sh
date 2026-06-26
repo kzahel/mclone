@@ -29,7 +29,7 @@ Usage: android-xr/validate-quest-openxr.sh [options]
 
 Build, install, launch, and smoke-test the standalone Quest Android XR package.
 This validator waits for MCLONE_ANDROID_XR_READY, which is logged only after
-the app submits the first Android OpenXR stereo frame.
+the app loads runtime assets and submits the first Android OpenXR stereo frame.
 
 Options:
   --release          Build and validate the release APK. This is the default.
@@ -275,6 +275,10 @@ if [[ "$success" != "1" ]]; then
     else
         mclone_die "Android XR submitted-frame ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     fi
+fi
+
+if ! grep -F "MCLONE_ANDROID_XR_ASSETS_READY" "$LOG_PATH" >/dev/null 2>&1; then
+    mclone_die "Android XR assets-ready marker was not seen; see $LOG_PATH"
 fi
 
 pid="$("$ADB" -s "$SERIAL" shell pidof "$MCLONE_ANDROID_XR_APP_ID" 2>/dev/null | tr -d '\r' || true)"

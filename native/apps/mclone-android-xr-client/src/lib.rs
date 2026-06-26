@@ -7,10 +7,14 @@ mod graphics_vulkan;
 mod android {
     use std::ffi::{CStr, CString, c_char, c_int};
     use std::sync::Once;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
     use anyhow::{Context, Result, bail};
+    use mclone_app_runtime::render_assets::{
+        ActorTextureAssets, TexturedMeshAssets, load_actor_texture_assets_from_asset_source,
+        load_asset_source, load_textured_mesh_assets_from_source,
+    };
     use mclone_xr_host::{
         OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE, XrFrameStats,
     };
@@ -27,6 +31,7 @@ mod android {
     const LOG_TAG: &str = "mclone_android_xr";
     const STARTUP_ARGV_INTENT_EXTRA: &str = "mclone.startup.argv";
     const XR_VIEW_POSE_PROPERTY: &str = "debug.mclone.xr_view_pose";
+    const ANDROID_ASSET_ROOT_ENV: &str = "MCLONE_ANDROID_ASSET_ROOT";
     const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
     const VIEW_TYPE: xr::ViewConfigurationType = PRIMARY_STEREO_VIEW_TYPE;
     const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -95,9 +100,9 @@ mod android {
 
     #[allow(unsafe_code)]
     fn configure_android_asset_root(app: &AndroidApp) {
-        if let Some(existing) = std::env::var_os("MCLONE_ANDROID_ASSET_ROOT") {
+        if let Some(existing) = std::env::var_os(ANDROID_ASSET_ROOT_ENV) {
             log::info!(
-                "Android XR preserving MCLONE_ANDROID_ASSET_ROOT={}",
+                "Android XR preserving {ANDROID_ASSET_ROOT_ENV}={}",
                 std::path::PathBuf::from(existing).display()
             );
             return;
@@ -114,12 +119,62 @@ mod android {
         };
 
         unsafe {
-            std::env::set_var("MCLONE_ANDROID_ASSET_ROOT", &path);
+            std::env::set_var(ANDROID_ASSET_ROOT_ENV, &path);
         }
         log::info!(
-            "Android XR MCLONE_ANDROID_ASSET_ROOT configured from app data path: {}",
+            "Android XR {ANDROID_ASSET_ROOT_ENV} configured from app data path: {}",
             path.display()
         );
+    }
+
+    struct AndroidXrRuntimeAssets {
+        mesh_assets: TexturedMeshAssets,
+        actor_assets: ActorTextureAssets,
+    }
+
+    impl AndroidXrRuntimeAssets {
+        fn terrain_atlas_size(&self) -> (u32, u32) {
+            (self.mesh_assets.atlas.width, self.mesh_assets.atlas.height)
+        }
+
+        fn actor_atlas_size(&self) -> (u32, u32) {
+            (
+                self.actor_assets.atlas.width,
+                self.actor_assets.atlas.height,
+            )
+        }
+    }
+
+    fn load_android_xr_runtime_assets() -> Result<AndroidXrRuntimeAssets> {
+        let asset_root = std::env::var_os(ANDROID_ASSET_ROOT_ENV)
+            .map(std::path::PathBuf::from)
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unset>".to_owned());
+        let load_start = Instant::now();
+        let source = load_asset_source().with_context(|| {
+            format!("load Android XR asset source from {ANDROID_ASSET_ROOT_ENV}={asset_root}")
+        })?;
+        let mesh_assets = load_textured_mesh_assets_from_source(&source)
+            .context("load Android XR textured mesh assets")?;
+        let actor_assets = load_actor_texture_assets_from_asset_source(&source)
+            .context("load Android XR actor texture assets")?;
+        let assets = AndroidXrRuntimeAssets {
+            mesh_assets,
+            actor_assets,
+        };
+        let (terrain_atlas_width, terrain_atlas_height) = assets.terrain_atlas_size();
+        let (actor_atlas_width, actor_atlas_height) = assets.actor_atlas_size();
+        log::info!(
+            "Android XR runtime assets: root={} terrain_atlas={}x{} actor_atlas={}x{} load_ms={:.3}",
+            asset_root,
+            terrain_atlas_width,
+            terrain_atlas_height,
+            actor_atlas_width,
+            actor_atlas_height,
+            load_start.elapsed().as_secs_f64() * 1000.0
+        );
+        log::info!("MCLONE_ANDROID_XR_ASSETS_READY");
+        Ok(assets)
     }
 
     #[allow(unsafe_code)]
@@ -199,6 +254,14 @@ mod android {
                 log::info!("Android XR startup view pose from {XR_VIEW_POSE_PROPERTY}: <default>");
             }
         }
+
+        let _runtime_assets = match load_android_xr_runtime_assets() {
+            Ok(assets) => assets,
+            Err(error) => {
+                log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
+                return;
+            }
+        };
 
         log::info!("MCLONE_ANDROID_XR_PACKAGE_READY");
         if let Err(error) = run_android_openxr_clear(&app) {
