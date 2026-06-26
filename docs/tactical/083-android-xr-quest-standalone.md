@@ -653,8 +653,9 @@ Exit criteria:
 - [x] Reuse the shared XR host plus the desktop-proven mclone-frame path for
   integrated server/client, render-section sync, texture atlas, sky, and terrain
   resources.
-- [ ] Add Quest actor resources/rendering after terrain and locomotion are
-  stable.
+- [x] Add Quest actor resources/rendering after terrain and locomotion are
+  stable. Tactical 086 Slice 3 wires the shared path; Quest visual validation
+  with spawned actors is still pending.
 - [x] Convert Quest runtime eye poses/FOV into `ChunkRenderView` values.
 - [x] Render a small-radius real mclone scene per eye.
 - [x] Validate headset-visible terrain and log render-section/drawn-index

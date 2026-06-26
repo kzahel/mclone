@@ -22,7 +22,7 @@ boundary; this doc owns the per-feature and per-contract grids and the rule that
 keeps new features from re-forking.
 
 > Status note: the current-state cells below were derived from a code audit on
-> 2026-06-26 and refreshed after tactical 084's native scene-shell convergence.
+> 2026-06-26 and refreshed after tactical 086's XR helper/actor convergence.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -87,8 +87,8 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Day/night + sky | ✅ | ✅ | ◐ (frozen) | ✅ | ✅ |
 | Player movement + collision | ✅ | ✅ | ✗ (orbit cam) | ✅ | ✅ |
 | Block interaction (break/place) | ✅ | ✗ | ✗ | ✗ | ✅ |
-| Remote-player rendering | ✅ | ◐ (path, unspawned) | ✗ | ✗ | ✅ |
-| Passive entities (cow/chicken) | ✅ | ◐ (path, unspawned) | ✗ | ✗ | ◐ (placeholder) |
+| Remote-player rendering | ✅ | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ✅ |
+| Passive entities (cow/chicken) | ✅ | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ◐ (placeholder) |
 | Fluids (server sim, renders as terrain) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Underwater / screen effects | ✅ | ✗ | ✗ | ✗ | ✗ |
 | HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ✗ | ✗ | ✗ | ✅ |
@@ -105,10 +105,11 @@ Reading the matrix:
   persistence, audio, and an in-world crosshair.
 - **web** is near desktop parity; gaps are connect-UI wiring, underwater FX,
   persistence (structurally impossible on `wasm32` today), audio.
-- **desktop-XR** has render/locomotion parity but no interaction, no UI, no
+- **desktop-XR** has render/locomotion parity but no interaction, no UI, and no
   actors spawned.
-- **Android-XR** trails desktop-XR by one row: actor rendering is not wired
-  (assets are loaded then discarded).
+- **Android-XR** now has the same shared actor render path wired through
+  `mclone-xr-scene`, but device visual validation and actual spawned actor
+  scenarios remain pending.
 - **flat-Android** is still the thinnest full-client lane: it has terrain,
   lighting, shared local/remote host wiring, and a touch-orbit shell, but still
   lacks player movement, interaction, actors, UI, and an in-app connect flow.
@@ -147,10 +148,12 @@ Concretely:
   `XrMcloneTerrainState` still re-derives local integrated runtime setup,
   polling, idle wait, render-section sync, and render assets instead of
   composing the shared native scene shell.
-- `mclone-xr-scene` is still too narrow (no actors, no remote host), so desktop
-  XR keeps a parallel app-local `XrMcloneWorldState`. The prior byte-identical
-  XR transform-helper copy was removed in tactical 086 Slice 1, and the
-  flat/web/XR actor-instance builder copy was removed in Slice 2.
+- `mclone-xr-scene` now owns shared XR transform helpers and actor draw
+  resources, but it still has no remote host path. Desktop XR therefore keeps a
+  parallel app-local `XrMcloneWorldState` until host runtime convergence lands.
+  The prior byte-identical XR transform-helper copy was removed in tactical 086
+  Slice 1, the flat/web/XR actor-instance builder copy was removed in Slice 2,
+  and Android XR actor resources were wired in Slice 3.
 - `web-client` re-inlines the whole sky→chunk→actor render sequence instead of
   calling `render_full_frame_for_view`. It still owns an async `WebRuntimeHost`
   enum, but command/update accounting and remote WebSocket reconnect/resync prep
@@ -196,10 +199,11 @@ these first:
    keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
    pointer, and interact**, not just locomotion. Required for XR interaction and
    for flat Android to use the player controller. (tactical 076 follow-up)
-4. **Widen `mclone-xr-scene` (actors + pluggable/remote host) and delete the
-   desktop-XR fork.** Helper sharing landed in tactical 086 Slices 1-2; shared
-   XR actor rendering and host-mode plumbing remain before desktop XR can
-   consume the shared scene like Android XR does. (platforms.md alignment #4)
+4. **Widen `mclone-xr-scene` with pluggable/remote host support and delete the
+   desktop-XR fork.** Helper sharing and shared Android XR actor rendering
+   landed in tactical 086 Slices 1-3; host-mode plumbing remains before desktop
+   XR can consume the shared scene like Android XR does. (platforms.md
+   alignment #4)
 5. **Collapse the remaining XR scene-driver fork** so `XrMcloneTerrainState`
    composes the shared native scene shell where possible instead of re-owning
    local runtime setup, polling, render-section sync, and terrain assets.

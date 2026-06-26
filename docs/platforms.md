@@ -110,8 +110,8 @@ Shared app/runtime boundary crates currently include:
   by desktop XR and Android XR
 - `mclone-xr-graphics`: shared unsafe Vulkan/OpenXR/`wgpu` graphics bridge used
   by desktop Vulkan XR and Android XR
-- `mclone-xr-scene`: shared XR terrain scene, startup view-pose alignment, and
-  controller-to-engine locomotion mapper
+- `mclone-xr-scene`: shared XR terrain/actor scene, startup view-pose
+  alignment, and controller-to-engine locomotion mapper
 
 Core shared crates must not depend on:
 
@@ -240,10 +240,10 @@ manual checks:
    Android now share `mclone-app-runtime` host-mode and native scene-shell
    contracts. Web still has an async `WebRuntimeHost`, and XR lanes still lack a
    remote transport adapter.
-4. **Finish XR terrain-state convergence.** `mclone-xr-scene` is now shared,
-   but desktop XR still retains some richer app-local terrain/actor/session
-   behavior. Migrating that behind shared XR scene interfaces will reduce
-   divergence before adding UI, actors, or comfort settings.
+4. **Finish XR scene convergence.** `mclone-xr-scene` now owns shared
+   terrain/actor rendering, but desktop XR still retains richer app-local
+   terrain/session behavior. Migrating that behind shared XR scene interfaces
+   will reduce divergence before adding UI or comfort settings.
 5. **Promote lighting and UI as shared feature contracts.** Lighting and
    menus/HUD/options/loading UI are the next user-visible parity blockers.
    Land them once through shared data/UI/render contracts instead of per

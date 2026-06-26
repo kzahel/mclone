@@ -13,15 +13,17 @@ use mclone_app_runtime::{RuntimeUpdateApplyReport, SingleViewRuntime, elapsed_ms
 use mclone_client::ClientRuntime;
 use mclone_core::{ChunkPos, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
+use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
     ChunkDepthTarget, ChunkRenderView, TexturedSectionDrawResources, TexturedSectionRenderOptions,
     TexturedSectionUploadReport,
 };
+use mclone_render::entity::ActorDrawResources;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render_session::{
     ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineCameraInput,
-    EngineCameraMovementImpulse, EngineCameraSnapshot,
+    EngineCameraMovementImpulse, EngineCameraSnapshot, actor_instances_from_presentations,
 };
 use mclone_server::{
     IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
@@ -111,6 +113,8 @@ pub struct XrTerrainFrameSummary {
     pub drawn_section_count: usize,
     pub index_count: u32,
     pub drawn_index_count: u32,
+    pub actor_count: usize,
+    pub drawn_actor_count: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -128,6 +132,7 @@ pub struct XrMcloneTerrainState {
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
     draw: TexturedSectionDrawResources,
+    actors: ActorDrawResources,
     sky: SkyRenderer,
     mesh_assets: TexturedMeshAssets,
     render_stats: RenderStreamStats,
@@ -145,6 +150,7 @@ impl XrMcloneTerrainState {
         scene: XrSceneOptions,
         render_options: TexturedSectionRenderOptions,
         mesh_assets: TexturedMeshAssets,
+        actor_atlas: ActorTextureImage,
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
         let scene = scene.validated()?;
@@ -188,6 +194,8 @@ impl XrMcloneTerrainState {
                 mesh_assets.atlas.as_upload(),
             )
             .context("create empty XR terrain draw resources")?,
+            actors: ActorDrawResources::new(device, queue, color_format, actor_atlas.as_upload())
+                .context("initialize XR terrain actor draw resources")?,
             sky: SkyRenderer::new(device, color_format),
             mesh_assets,
             render_stats: RenderStreamStats::default(),
@@ -300,11 +308,16 @@ impl XrMcloneTerrainState {
         let sky_clear_color = self.sky_clear_color();
         let time_of_day = self.runtime.time_of_day();
         let sun_angle = self.runtime.sun_angle();
+        let actor_instances = actor_instances_from_presentations(
+            &self.runtime.client().actor_presentations(),
+            self.runtime.client(),
+        );
         let left_summary = self.render_eye_target(
             device,
             queue,
             left_target,
             render_views[0],
+            &actor_instances,
             render_options,
             sky_clear_color,
             time_of_day,
@@ -316,6 +329,7 @@ impl XrMcloneTerrainState {
             queue,
             right_target,
             render_views[1],
+            &actor_instances,
             render_options,
             sky_clear_color,
             time_of_day,
@@ -349,6 +363,8 @@ impl XrMcloneTerrainState {
                 drawn_section_count: summary.drawn_section_count,
                 index_count: summary.index_count,
                 drawn_index_count: summary.drawn_index_count,
+                actor_count: summary.actor_count,
+                drawn_actor_count: summary.drawn_actor_count,
             };
         }
         XrTerrainFrameSummary {
@@ -357,6 +373,8 @@ impl XrMcloneTerrainState {
             drawn_section_count: self.render_stats.drawn_section_count,
             index_count: self.render_stats.index_count,
             drawn_index_count: self.render_stats.drawn_index_count,
+            actor_count: self.render_stats.actor_count,
+            drawn_actor_count: self.render_stats.drawn_actor_count,
         }
     }
 
@@ -438,6 +456,7 @@ impl XrMcloneTerrainState {
         queue: &wgpu::Queue,
         target: XrTerrainEyeTarget<'_>,
         render_view: ChunkRenderView,
+        actor_instances: &[mclone_render::entity::ActorInstance],
         render_options: TexturedSectionRenderOptions,
         sky_clear_color: wgpu::Color,
         time_of_day: f32,
@@ -463,11 +482,11 @@ impl XrMcloneTerrainState {
             target.depth,
             &self.sky,
             &mut self.draw,
-            None,
+            Some(&mut self.actors),
             None,
             None,
             render_view,
-            &[],
+            actor_instances,
             None,
             sky_clear_color,
             time_of_day,

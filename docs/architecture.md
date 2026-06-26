@@ -482,9 +482,10 @@ Current gaps:
 - remote dedicated play is now shared for native desktop and flat Android, but
   web and XR still need host-mode convergence before dedicated-server play is a
   true platform invariant
-- desktop XR and Android XR share the new XR host/graphics/scene crates, but
-  desktop XR still has richer app-local terrain/actor/session behavior that
-  should converge before adding more XR-only features
+- desktop XR and Android XR share the new XR host/graphics/scene crates, and
+  the shared scene now owns Android XR actor rendering, but desktop XR still has
+  richer app-local terrain/session behavior that should converge before adding
+  more XR-only features
 - lighting has a strong first pass, but parity correctness and render integration are still a user-visible feature gap
 - shared menu/HUD/options/loading UI is not yet complete enough to be the obvious feature path for every platform
 - the platform parity tracker now records the contract matrix, but its sentinel

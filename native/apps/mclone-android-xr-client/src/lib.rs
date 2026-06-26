@@ -629,7 +629,7 @@ mod android {
 
         let AndroidXrRuntimeAssets {
             mesh_assets,
-            actor_assets: _actor_assets,
+            actor_assets,
         } = runtime_assets;
         let mut terrain = XrMcloneTerrainState::new(
             &graphics.device,
@@ -638,14 +638,16 @@ mod android {
             scene_options,
             TexturedSectionRenderOptions::default(),
             mesh_assets,
+            actor_assets.atlas,
             startup_view_pose,
         )
         .context("initialize Android XR terrain runtime")?;
         let terrain_summary = terrain.frame_summary();
         log::info!(
-            "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={}",
+            "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={} actors={}",
             terrain_summary.section_count,
-            terrain_summary.index_count
+            terrain_summary.index_count,
+            terrain_summary.actor_count
         );
 
         run_mclone_frame_loop(
@@ -747,12 +749,14 @@ mod android {
                     if !logged_ready {
                         logged_ready = true;
                         log::info!(
-                            "Android XR terrain first-frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={}",
+                            "Android XR terrain first-frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
                             summary.rendered_frames,
                             summary.section_count,
                             summary.drawn_section_count,
                             summary.index_count,
-                            summary.drawn_index_count
+                            summary.drawn_index_count,
+                            summary.actor_count,
+                            summary.drawn_actor_count
                         );
                         log::info!("MCLONE_ANDROID_XR_READY");
                     }

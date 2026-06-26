@@ -1,9 +1,9 @@
 # 086: XR Scene Driver Convergence
 
-Status: active. Slices 1 and 2 landed: XR transform helpers now live in
-`mclone-xr-scene`, and actor presentation-to-render-instance building now lives
-in `mclone-render-session`. Slice 3, rendering actors through the shared XR
-scene, is the next implementation chunk.
+Status: active. Slices 1-3 landed: XR transform helpers now live in
+`mclone-xr-scene`, actor presentation-to-render-instance building now lives in
+`mclone-render-session`, and the shared XR scene owns actor draw resources.
+Slice 4, pluggable host/runtime convergence, is the next implementation chunk.
 
 ## Purpose
 
@@ -26,8 +26,11 @@ construction, and host-mode integration live behind shared native contracts.
   desktop XR imports them.
 - Desktop flat, headless/perf, web, and desktop XR now share
   `mclone-render-session::actor_instances_from_presentations(...)`.
-- Desktop XR renders actors through `ActorDrawResources`; shared
-  `mclone-xr-scene` currently renders terrain only.
+- Shared `mclone-xr-scene` now owns `ActorDrawResources`, accepts an actor
+  atlas, and renders actor instances. Android XR passes the actor atlas it
+  already loaded.
+- Desktop XR still has app-local terrain/actor render orchestration until it
+  consumes the shared XR scene driver.
 - `mclone-xr-scene` owns a concrete local integrated `SingleViewRuntime` plus
   `NativeIntegratedServerRunner` plumbing instead of composing
   `NativeSingleViewSceneRuntime<S>`.
@@ -114,12 +117,44 @@ pnpm native:web:build
 
 ### Slice 3 - Actors In Shared XR Scene
 
-- [ ] Add `ActorDrawResources` ownership to `XrMcloneTerrainState`.
-- [ ] Pass actor atlas assets into `mclone-xr-scene::new(...)`.
-- [ ] Render shared XR actor instances through `render_eye_target(...)`.
-- [ ] Repoint Android XR to pass the actor atlas it currently loads but
+- [x] Add `ActorDrawResources` ownership to `XrMcloneTerrainState`.
+- [x] Pass actor atlas assets into `mclone-xr-scene::new(...)`.
+- [x] Render shared XR actor instances through `render_eye_target(...)`.
+- [x] Repoint Android XR to pass the actor atlas it currently loads but
   discards.
-- [ ] Update platform parity docs based on actual validation status.
+- [x] Update platform parity docs based on actual validation status.
+
+Recorded Slice 3 result:
+
+- Added `ActorDrawResources` to `XrMcloneTerrainState`.
+- Added an actor-atlas argument to `XrMcloneTerrainState::new(...)`.
+- Built shared XR actor instances through
+  `mclone-render-session::actor_instances_from_presentations(...)` and passed
+  them to both eye renders.
+- Rewired Android XR to pass `actor_assets.atlas` into the shared scene instead
+  of discarding loaded actor assets.
+- Extended `XrTerrainFrameSummary` and Android XR readiness/first-frame logs
+  with actor counts.
+
+Validation after Slice 3:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+pnpm native:web:build
+cargo fmt --manifest-path native/Cargo.toml --all --check
+git diff --check
+```
+
+Device visual validation is still pending: this slice compiles and wires the
+shared Android XR actor path, but Quest smoke/logcat validation must confirm
+nonzero actor rendering when the runtime has remote players or passive entities
+to present.
 
 ### Slice 4 - Pluggable XR Host Runtime
 
