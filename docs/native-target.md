@@ -2,7 +2,7 @@
 
 Historical note on preserving native host/renderer paths for `mclone`.
 
-This document has been superseded by [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). The committed direction is now native-first Rust: native desktop is the first-priority bring-up path, web/WASM is kept alive as an early compatibility gate, flat Android is the next platform frontload target, and Android XR / Quest standalone is a future native target once the engine is mature enough.
+This document has been superseded by [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). The committed direction is now native-first Rust with five validated client/platform lanes: desktop flat, desktop OpenXR, Android XR / Quest standalone, flat Android, and web/WASM. Use [`platforms.md`](platforms.md) for the current platform matrix and validation policy.
 
 ## Current posture
 
@@ -11,7 +11,7 @@ Native desktop is the current product and validation loop because it is the fast
 Future native targets matter for cases where desktop and browser are a poor fit:
 
 - **Direct OpenXR integration**: browser XR exists via WebXR, but if we decide we need direct OpenXR runtime/headset integration, native is the clearer path.
-- **Android XR / Quest standalone**: once the engine is mature, a standalone headset target should be able to reuse shared client/server/render data while owning its own Android lifecycle, OpenXR session, stereo swapchains, and controller/hand input.
+- **Android XR / Quest standalone**: the standalone headset target now reuses shared client/server/render data while owning its own Android lifecycle, OpenXR loader/session, stereo swapchains, and controller input.
 - **Flat Android**: useful as a single-view native host and packaging baseline, but less compelling than Quest/XR for product direction.
 - **High-tier rendering experiments**: compute-heavy simulation, indirect multi-draw, bindless-style resource models, and other advanced GPU techniques may fit better outside the browser sandbox.
 
@@ -57,8 +57,8 @@ In short, the same engine logic should ideally remain usable in:
 - native desktop app + `wgpu` renderer
 - browser/WASM app + WebGPU renderer
 - dedicated native server (no renderer)
-- future flat Android app + Vulkan-backed `wgpu`
-- future Android XR / Quest app + OpenXR swapchains wrapped for renderer submission
+- flat Android app + Vulkan-backed `wgpu`
+- Android XR / Quest app + OpenXR swapchains wrapped for renderer submission
 
 The exact embedding and threading model can differ by host without changing parity-critical simulation logic.
 

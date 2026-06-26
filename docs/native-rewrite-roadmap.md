@@ -7,7 +7,8 @@ The retired browser engine has been removed from the live tree. Retained referen
 The primary implementation direction is now:
 
 ```text
-native-first Rust engine, desktop bring-up first, web target kept alive early, Android XR later
+native-first Rust engine with five validated client/platform lanes:
+desktop flat, desktop OpenXR, Android XR / Quest, flat Android, and web/WASM
 ```
 
 Reference Rust engine for native app/render/XR patterns:
@@ -21,15 +22,15 @@ Reference Rust engine for native app/render/XR patterns:
 
 ## Direction
 
-Build the engine as normal Rust crates first, with desktop/native as the main development loop. Keep a thin WASM/web target compiling and booting early so browser constraints stay visible while APIs are still easy to adjust. Flat Android is now a validation-backed, non-XR single-view host. The next XR frontload work is explicit multi-view renderer cleanup followed by desktop OpenXR, not Android XR scaffolding. Treat Android XR / Quest standalone as a real later native target after the flat Android and desktop XR boundaries are mature enough to validate it. Current platform posture lives in [`platforms.md`](platforms.md), and the XR frontload sequence lives in [`tactical/076-native-xr-frontload-plan.md`](tactical/076-native-xr-frontload-plan.md).
+Build the engine as normal Rust crates first, with desktop/native as the fastest main development loop. Keep the other validated lanes alive through explicit contracts and targeted smokes rather than platform-specific feature forks. Current platform posture lives in [`platforms.md`](platforms.md), and the completed XR frontload sequence is recorded through [`tactical/076-native-xr-frontload-plan.md`](tactical/076-native-xr-frontload-plan.md), [`tactical/077-multiview-render-contract.md`](tactical/077-multiview-render-contract.md), [`tactical/079-desktop-openxr-mclone-frame.md`](tactical/079-desktop-openxr-mclone-frame.md), and [`tactical/083-android-xr-quest-standalone.md`](tactical/083-android-xr-quest-standalone.md).
 
 This is not equal effort across targets:
 
-- native desktop is the first-priority bring-up and validation target
-- web is an early compatibility gate
-- flat Android is the current single-view native mobile validation lane, tracked by [`tactical/074-flat-android-build-smoke.md`](tactical/074-flat-android-build-smoke.md)
-- desktop OpenXR is the next XR runtime target after multi-view render-boundary cleanup
-- Android XR / Quest standalone is a later native XR host, not part of the flat Android workstream
+- desktop flat is the first-priority daily development and screenshot target
+- desktop OpenXR is the desktop stereo/runtime validation lane
+- Android XR / Quest standalone is the standalone headset validation lane
+- flat Android is the single-view native mobile validation lane, tracked by [`tactical/074-flat-android-build-smoke.md`](tactical/074-flat-android-build-smoke.md)
+- web/WASM is the browser compatibility/deploy lane
 - XR remains native-only until there is a concrete WebXR path worth supporting
 
 ## Why Native-First
@@ -77,19 +78,30 @@ crates/
   mclone_mesh          # chunk meshing
   mclone_assets        # blockstate/model/texture/NBT asset loading
   mclone_render        # wgpu renderer
+  mclone_render_session # render-section dirty/cache/compile policy
+  mclone_app_runtime   # shared single-view runtime/render helpers
+  mclone_ui            # shared Rust/WebGPU UI model
+  mclone_xr_host       # shared OpenXR host/session/action/view helpers
+  mclone_xr_graphics   # shared Vulkan OpenXR/wgpu graphics bridge
+  mclone_xr_scene      # shared XR terrain/runtime/locomotion scene
 
 apps/
-  mclone_native_client
-  mclone_dedicated_server
-  mclone_web_client
+  mclone-native-client
+  mclone-dedicated-server
+  mclone-web-client
+  mclone-android-client
+  mclone-android-xr-client
 ```
 
-Future app crates should stay out of the workspace until they have a validation lane. Flat Android now has a validation-backed app crate, while Android XR remains future:
+Future app crates should stay out of the workspace until they have a validation lane. The current app crates are already validation-backed:
 
 ```text
 apps/
-  mclone_android_client      # flat Android single-view host
-  mclone_android_xr_client   # future Quest/OpenXR host
+  mclone-native-client       # desktop flat + opt-in desktop OpenXR
+  mclone-web-client          # Rust/WASM browser client
+  mclone-android-client      # flat Android single-view host
+  mclone-android-xr-client   # Quest/OpenXR standalone host
+  mclone-dedicated-server    # headless server host
 ```
 
 Responsibilities:
@@ -104,6 +116,12 @@ Responsibilities:
 | `mclone_light` | vanilla-shaped sky/block light data and solving | mesh ownership |
 | `mclone_mesh` | renderer-ready chunk mesh data | GPU handles |
 | `mclone_render` | native/web `wgpu` presentation backend | authoritative world state |
+| `mclone_render_session` | render-section dirty state, compile requests, cache updates, neighbor readiness, camera controller contracts | platform windows, GPU swapchains |
+| `mclone_app_runtime` | shared single-view runtime/render helpers, asset loading, full-frame composition | platform event loops or package glue |
+| `mclone_ui` | shared GUI draw model and renderer-facing UI facts | platform DOM or native menu systems |
+| `mclone_xr_host` | OpenXR session/event/frame/action/view helpers shared by desktop XR and Android XR | Android activity/JNI, desktop runtime launcher scripts |
+| `mclone_xr_graphics` | shared unsafe Vulkan OpenXR/wgpu graphics bridge | platform loader/bootstrap policy |
+| `mclone_xr_scene` | shared XR terrain runtime, startup pose alignment, and controller locomotion mapping | Quest package or desktop window ownership |
 
 The protocol/network split is first-class. Singleplayer should use the same client/server boundary through a local transport, not a private shortcut that makes multiplayer a retrofit.
 
@@ -123,7 +141,7 @@ Android lifecycle/input adapters -> mclone_client
 mclone_client -> explicit single-view render target -> mclone_render
 ```
 
-Future Android XR / Quest client:
+Android XR / Quest client:
 
 ```text
 OpenXR session/actions/swapchains -> XR host app
@@ -176,48 +194,55 @@ render via wgpu/web
 
    When threading, storage, networking, asset streaming, or renderer capabilities are introduced, make the web adapter real before the API freezes.
 
-6. **Preserve future Android XR boundaries**
+6. **Preserve platform boundaries while adding features**
 
-   Before adding Android XR app crates, make renderer view/projection inputs and render targets explicit enough that desktop, headless, web, flat Android, and stereo XR hosts can drive the same renderer without desktop `winit` assumptions leaking into shared crates. The first boundary pass is [`tactical/022-platform-target-contract-and-render-boundary.md`](tactical/022-platform-target-contract-and-render-boundary.md); the next XR-specific cleanup is [`tactical/077-multiview-render-contract.md`](tactical/077-multiview-render-contract.md).
+   Renderer view/projection inputs and render targets are now explicit enough for desktop, headless, web, flat Android, and stereo XR hosts to drive shared rendering. Keep that boundary intact while lighting, UI, entities, and gameplay grow. The first boundary pass is [`tactical/022-platform-target-contract-and-render-boundary.md`](tactical/022-platform-target-contract-and-render-boundary.md); the multi-view pass is [`tactical/077-multiview-render-contract.md`](tactical/077-multiview-render-contract.md).
 
 ## Rule Of Thumb
 
 ```text
 core logic: native tests first, web compile gate
-renderer: native first, web smoke per milestone
+renderer: desktop/headless first, web smoke per milestone, device/headset smoke for target/view/platform boundary changes
 threading/scheduler: design for web constraints immediately
 storage/network: adapter-shaped from day one
-Android/XR: document and protect boundaries now; defer app scaffolding until renderer view/target contracts are explicit
+Android/XR: keep package/activity/session/swapchain glue in app/platform adapters
 XR: native-only until there is a concrete WebXR path worth supporting
 ```
 
-## Immediate Native Worldgen Arc
+## Current Health Arc
 
-The current native rewrite is intentionally starting with worldgen because it is highly oracle-testable and independent of renderer/runtime decisions.
+The platform bring-up arc is now broad enough that the highest-value work is
+shared feature parity and boundary consolidation, not more app scaffolding.
 
 Current native shape:
 
-- PRNG and JavaRandom-compatible worldgen seed helpers
-- noise primitives and `NoiseSampler`
-- terrain density fill
-- `OverworldBiomeSource`
-- surface and bedrock stage
-- classic AIR and LIQUID carvers
-- first placement/decorator foundation through range and heightmap placement
+- Java-shaped worldgen, terrain, carvers, surface/decorated chunk foundation,
+  server scheduler, client replica, movement, interaction, and persistence
+- first-pass sky/block lighting pipeline and render-light integration
+- shared render-section dirty/cache/compile policy across desktop and web
+- shared single-view runtime helpers consumed by desktop/headless and flat
+  Android, with more app-local glue still worth collapsing
+- shared XR host/graphics/scene crates consumed by desktop XR and Android XR
+- Rust/WebGPU UI path replacing the old web DOM UI, with menu/options/loading
+  feature parity still needed
 
-Next worldgen milestones:
+Recommended next alignment milestones:
 
-1. decorator composition (`DecoratedDecorator`) and feature placement core
-2. block/state palette boundary for generated chunks
-3. ores and underground features as the first block-mutating feature family
-4. biome decoration tables for a narrow fixture
-5. full decorated native chunk parity against committed oracle fixtures
-
-Only after that should renderer/lighting/meshing work compete for primary focus, unless a small native renderer smoke or platform-boundary cleanup is needed to keep the app path honest. The renderer should keep explicit view/projection and target ownership so future Android and XR hosts do not have to unwind desktop-only assumptions.
+1. document the platform contract matrix: which crate boundary each app uses,
+   and which smoke/test catches regressions there
+2. move reusable flat Android scene/runtime glue into `mclone-app-runtime` so
+   single-view hosts share one thinner contract
+3. finish desktop XR terrain-state convergence onto `mclone-xr-scene` so
+   desktop XR and Quest do not diverge before actors/UI/comfort features
+4. advance lighting correctness/rendering and shared menu/HUD/options/loading
+   UI as platform-neutral features
+5. add adapter conformance tests for render targets/views, asset discovery,
+   input intent mapping, and render-section compile contracts
 
 ## Documentation Ownership
 
 - This file owns the native rewrite direction and target topology.
 - [`native/README.md`](../native/README.md) owns workspace mechanics and crate list.
+- [`platforms.md`](platforms.md) owns the current platform matrix and validation policy.
 - [`worldgen-status.md`](worldgen-status.md) should describe native worldgen status and oracle fixture coverage.
 - Numbered tactical docs remain useful work logs, but older TS-first tactical language should not override this roadmap.

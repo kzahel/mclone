@@ -6,7 +6,7 @@ For rough sequencing of the active runtime refactor work, see the Client Runtime
 
 This document exists to answer a different question than [`strategy.md`](./strategy.md), [`worldgen-status.md`](./worldgen-status.md), and the more specific runtime contract docs:
 
-- `strategy.md`: how we translate Minecraft 1.17.1 into TypeScript
+- `strategy.md`: how we translate Minecraft 1.17.1 into native Rust
 - `worldgen-status.md`: what parts of worldgen are landed today
 - `worldgen-deterministic-order.md`: vanilla chunk-status order, decoration finality, lighting gates, and publication gates
 - `runtime-data-model.md`: the shared chunk/block-state data model across simulation, storage, protocol, client workers, and meshing
@@ -19,11 +19,12 @@ This document exists to answer a different question than [`strategy.md`](./strat
 - `player-movement-netcode.md`: paused high-rate player movement and netcode constraint notes
 - `structures.md`: vanilla overworld structure starts, references, placement, and implementation order
 - `worker-ownership.md`: concrete worker/cache ownership and the no-hangs baseline for UI/GPU and host ticks
-- this document: how the engine should be split across simulation, rendering, storage, workers, and multiplayer hosts
+- `platforms.md`: supported desktop flat, desktop XR, Android XR, flat Android, and web/WASM lanes plus validation policy
+- this document: how the engine should be split across simulation, rendering, storage, workers, multiplayer hosts, and platform adapters
 
 The central decision is simple:
 
-**Keep Minecraft parity in the simulation where it matters; diverge deliberately in runtime architecture where the browser, WebGPU, workers, storage, and multiplayer needs require it.**
+**Keep Minecraft parity in the simulation where it matters; diverge deliberately in runtime architecture where native, web, Android, OpenXR, storage, workers, and multiplayer needs require it.**
 
 ## Architectural divergence standard
 
@@ -39,7 +40,7 @@ That means:
 Before committing to an architectural divergence, answer these questions:
 
 1. What does the reference source do here?
-2. Why is that shape a poor fit for browser/WebGPU/worker/Node constraints?
+2. Why is that shape a poor fit for native/web/Android/OpenXR/worker constraints?
 3. What exact layer or boundary is diverging?
 4. Does the divergence make future parity work easier, neutral, or harder?
 5. What constraint keeps the divergence from leaking into parity-critical simulation logic?
@@ -54,9 +55,10 @@ Good divergences are ones where we can say all of the following clearly:
 
 ## Goals
 
-- Support browser singleplayer without render-thread worldgen stalls.
-- Support browser multiplayer clients against an authoritative server.
-- Support a headless dedicated server in Node.
+- Support desktop flat, desktop OpenXR, Android XR / Quest standalone, flat Android, and web/WASM clients over shared engine contracts.
+- Support local singleplayer without render-thread worldgen stalls.
+- Support browser and native multiplayer clients against an authoritative server.
+- Support a headless dedicated server.
 - Preserve a path to vanilla 1.17.1 overworld parity.
 - Preserve a path to non-vanilla gameplay later, including alternate physics systems such as PhysX-backed simulation.
 
@@ -64,7 +66,7 @@ Good divergences are ones where we can say all of the following clearly:
 
 - Do not reproduce Minecraft Java's thread model class-for-class.
 - Do not make IndexedDB the canonical world-storage model.
-- Do not make the current browser smoke harness architecture the long-term engine architecture.
+- Do not make any one platform app shell the long-term engine architecture.
 - Do not tie all future gameplay to strict vanilla movement/collision rules.
 
 ## Core decisions
@@ -79,9 +81,11 @@ Canonical generation from seed is host-only. `ClientWorld` may interpret receive
 
 The same simulation core should be usable by:
 
-- browser singleplayer
-- browser multiplayer client-facing local prediction systems
-- dedicated server in Node
+- desktop flat and desktop XR
+- flat Android and Android XR / Quest
+- web/WASM singleplayer
+- browser/native multiplayer client-facing local prediction systems
+- dedicated server
 - future test/oracle harnesses
 
 This core must not depend on:
@@ -90,7 +94,10 @@ This core must not depend on:
 - `Worker`
 - WebGPU
 - IndexedDB
-- Node-specific filesystem APIs
+- desktop windowing
+- Android activity/JNI APIs
+- OpenXR sessions, actions, or swapchains
+- platform-specific filesystem APIs
 
 ### 3. The renderer is a consumer, not the owner of world state
 
@@ -153,8 +160,38 @@ The client runtime architecture must not bake in vanilla's 20 TPS rate or a brow
 | Client runtime | protocol application, client-world replica, input/session ownership, prediction/interpolation services, presentation-state publication | engine-native divergence shaped by vanilla `ClientLevel` ownership |
 | Meshing/build pipeline | convert chunk/block state into renderer-ready geometry | renderer-native divergence, while consuming parity-correct chunk contents |
 | Renderer | WebGPU resources, uploads, passes, shaders, frame submission | engine-native divergence |
+| UI | shared Rust/WebGPU GUI model and draw list for menus, HUD, loading, options, and debug surfaces | engine-native divergence with vanilla-inspired behavior where useful |
+| App/platform adapters | desktop `winit`, Android activity/JNI, browser canvas/workers, OpenXR runtime/session/swapchain, packaging, validation scripts | platform divergence |
 | Persistence adapters | IndexedDB, filesystem, future alternate backends | engine-native divergence |
 | Transport adapters | local worker transport, WebSocket, future transports | engine-native divergence |
+
+## Current Platform Architecture Status
+
+The repo is materially past the original browser-first split. Current validated
+platform lanes are tracked in [`platforms.md`](./platforms.md):
+
+- desktop flat: `mclone-native-client`
+- desktop OpenXR: `mclone-native-client --features xr`
+- Android XR / Quest: `mclone-android-xr-client` plus `android-xr/`
+- flat Android: `mclone-android-client` plus `android/`
+- web/WASM: `mclone-web-client`
+
+The shared boundaries that matter most today are:
+
+- `mclone_server`, `mclone_client`, and `mclone_protocol` for host/client
+  authority and replicated state
+- `mclone_app_runtime` for shared single-view runtime/render helpers
+- `mclone_render_session` for render-section dirty/cache/compile policy and
+  camera-controller contracts
+- `mclone_render` for drawing from explicit view/target facts
+- `mclone_ui` for shared Rust/WebGPU UI data
+- `mclone_xr_host`, `mclone_xr_graphics`, and `mclone_xr_scene` for shared
+  desktop/Quest XR session, graphics, terrain, and controller-locomotion
+  contracts
+
+The architectural goal is no longer "can another platform boot?" The goal is
+"can features land once, behind shared contracts, with targeted platform
+sentinel smokes catching adapter regressions?"
 
 ## Recommended runtime shape
 
@@ -184,7 +221,7 @@ It should not know whether it is running in:
 
 - a browser worker
 - the main thread
-- Node
+- a native dedicated-server process
 - a test harness
 
 ### Authoritative server runtime
@@ -201,8 +238,8 @@ Responsibilities:
 
 There should be two host forms of the same conceptual server:
 
-- `IntegratedServer`: browser-singleplayer, worker-backed, created by a local game session
-- dedicated/headless host: Node-backed
+- `IntegratedServer`: local singleplayer, runner/worker-backed, created by a local game session
+- dedicated/headless host: native server process
 
 The client should not bypass this layer even in singleplayer.
 
@@ -254,7 +291,7 @@ For the current worker/cache ownership baseline, including the dedicated lightin
 
 ## Host modes
 
-### Browser singleplayer
+### Web/WASM singleplayer
 
 Recommended shape:
 
@@ -265,7 +302,7 @@ Recommended shape:
 
 This should feel like local singleplayer, but architecturally it should behave like a local client talking to a local server.
 
-### Browser multiplayer client
+### Web/WASM multiplayer client
 
 Recommended shape:
 
@@ -279,7 +316,7 @@ This mode does not need local worldgen for authority, though it may still use lo
 
 Recommended shape:
 
-- Node process as authoritative server runtime
+- native process as authoritative server runtime
 - file-backed or database-backed persistence adapter
 - remote transport adapter for clients
 - optional worker-thread job pools later for chunk generation, meshing-independent preprocessing, or heavy simulation tasks
@@ -322,7 +359,7 @@ These should be serializable without depending on live class instances.
 
 ## Persistence model
 
-The canonical model should be engine-defined chunk/world records, not raw IndexedDB layout and not whatever Node filesystem structure we choose first.
+The canonical model should be engine-defined chunk/world records, not raw IndexedDB layout and not whatever native filesystem structure we choose first.
 
 Detailed loading, dirty-state, lazy-save, and eviction policy lives in [`loading-persistence.md`](./loading-persistence.md).
 Vanilla chunk-status order, generation finality, lighting gates, and publication gates live in [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md).
@@ -396,7 +433,7 @@ The direct-translation rule from [`AGENTS.md`](../AGENTS.md) remains correct for
 - block/state systems
 - content logic where vanilla parity is the goal
 
-But the runtime shell should intentionally diverge where Minecraft's JVM architecture is not the right fit for browser and Node hosts:
+But the runtime shell should intentionally diverge where Minecraft's JVM architecture is not the right fit for native, browser, Android, or OpenXR hosts:
 
 - worker boundaries
 - scheduling
@@ -435,32 +472,37 @@ The important design rule is that these remain server-authoritative systems with
 
 ## Current mismatch in the repo
 
-The codebase is materially closer to this target architecture now that the first live browser-control pass is landed, but it still does not fully match the long-term shape.
+The codebase is materially closer to this target architecture now that the five client/platform lanes have basic validation, but it still does not fully match the long-term shape.
 
 Current gaps:
 
-- the remote update flow is still poll-driven HTTP, not a measured push-capable transport
-- the authoritative host still lacks the vanilla-style scheduler split that keeps player/session work responsive while chunk load/generation/snapshot jobs run
-- the gameplay layer still stops at baseline player/session motion state rather than parity movement, entities, or interactions
+- flat Android still carries app-local scene/runtime glue that should be collapsed into `mclone-app-runtime` where it is not truly Android-specific
+- desktop XR and Android XR share the new XR host/graphics/scene crates, but desktop XR still has richer app-local terrain/actor/session behavior that should converge before adding more XR-only features
+- lighting has a strong first pass, but parity correctness and render integration are still a user-visible feature gap
+- shared menu/HUD/options/loading UI is not yet complete enough to be the obvious feature path for every platform
+- validation is still more script-list than contract matrix; contributors need clearer guidance on which shared boundary requires which platform sentinel
+- richer gameplay still needs parity movement, entities, interactions, and server correctness work without moving ownership back into renderer/app shells
 
-That is why host scheduling, transport efficiency, and richer authoritative gameplay are now the architectural priorities, not more ownership-split work.
+That is why boundary consolidation, lighting/UI feature parity, and richer authoritative gameplay are now the architectural priorities, not more platform bring-up.
 
 ## Immediate implications
 
 The next major refactor direction should be:
 
-1. Measure whether player input, polling, and authoritative `player_state` ticks stay responsive while chunk work is active.
-2. If they do not, add the host scheduler split described in [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md) before optimizing transport carriers.
-3. If host scheduling is healthy but remote delivery still lags, add a push-capable transport without changing the world host/client authority model.
-4. Grow the authoritative gameplay layer beyond baseline player/session motion state without moving ownership back into the renderer.
+1. Publish a platform contract matrix: crate boundary, consuming apps, required tests/smokes, and device/headset requirements.
+2. Collapse reusable flat Android scene/runtime code into `mclone-app-runtime` so single-view hosts share the same contract.
+3. Finish XR scene convergence so desktop XR and Android XR share terrain, actor, controller, startup-pose, and locomotion behavior behind `mclone-xr-scene`.
+4. Advance lighting and shared UI as platform-neutral feature contracts.
+5. Grow authoritative gameplay beyond baseline player/session motion state without moving ownership back into renderer or app shells.
 
 ## Decision checklist
 
 When making architectural changes, prefer the option that satisfies all of these:
 
-- Can the same simulation core run in browser worker, main-thread tests, and Node?
+- Can the same simulation core run in browser workers, native runners, dedicated server processes, and tests?
 - Can browser singleplayer and remote multiplayer share the same command/update protocol shape?
 - Can the renderer remain a consumer rather than an owner of world state?
+- Can desktop flat, desktop XR, Android XR, flat Android, and web drive the renderer from explicit view/target facts?
 - Can persistence be swapped without touching simulation logic?
 - Can a future `vanilla17` mode and a future custom-physics mode both fit without a rewrite?
 
