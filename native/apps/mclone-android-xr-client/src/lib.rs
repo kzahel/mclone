@@ -15,8 +15,12 @@ mod android {
         ActorTextureAssets, TexturedMeshAssets, load_actor_texture_assets_from_asset_source,
         load_asset_source, load_textured_mesh_assets_from_source,
     };
+    use mclone_render::chunk::TexturedSectionRenderOptions;
     use mclone_xr_host::{
         OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE, XrFrameStats,
+    };
+    use mclone_xr_scene::{
+        XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
     };
     use openxr as xr;
 
@@ -177,6 +181,92 @@ mod android {
         Ok(assets)
     }
 
+    fn parse_android_xr_scene_options(startup_argv_json: Option<&str>) -> Result<XrSceneOptions> {
+        let Some(json) = startup_argv_json.filter(|json| !json.trim().is_empty()) else {
+            return Ok(XrSceneOptions::default());
+        };
+        let argv = serde_json::from_str::<Vec<String>>(json)
+            .context("parse Android XR startup argv JSON")?;
+        let mut options = XrSceneOptions::default();
+        let mut index = 0;
+        while index < argv.len() {
+            match argv[index].as_str() {
+                "--seed" => {
+                    options.seed = parse_next(&argv, &mut index, "--seed")?;
+                }
+                "--chunk-x" => {
+                    options.chunk_x = parse_next(&argv, &mut index, "--chunk-x")?;
+                }
+                "--chunk-z" => {
+                    options.chunk_z = parse_next(&argv, &mut index, "--chunk-z")?;
+                }
+                "--render-distance" => {
+                    options.render_distance = parse_next(&argv, &mut index, "--render-distance")?;
+                }
+                "--day-time" => {
+                    options.day_time_override = Some(parse_next(&argv, &mut index, "--day-time")?);
+                }
+                "--freeze-time" => {}
+                unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
+            }
+            if argv[index] == "--freeze-time" {
+                options.freeze_time = true;
+            }
+            index += 1;
+        }
+        options.validated()
+    }
+
+    fn parse_next<T>(argv: &[String], index: &mut usize, flag: &str) -> Result<T>
+    where
+        T: std::str::FromStr,
+        T::Err: std::error::Error + Send + Sync + 'static,
+    {
+        *index += 1;
+        let value = argv
+            .get(*index)
+            .with_context(|| format!("{flag} requires a value"))?;
+        value
+            .parse::<T>()
+            .with_context(|| format!("{flag} has invalid value `{value}`"))
+    }
+
+    fn parse_android_xr_startup_view_pose(
+        value: Option<&str>,
+    ) -> Result<Option<XrStartupViewPose>> {
+        let Some(value) = value.map(str::trim) else {
+            return Ok(None);
+        };
+        if matches!(
+            value,
+            "" | "default" | "off" | "none" | "false" | "0" | "disabled"
+        ) {
+            return Ok(None);
+        }
+        let parts = value
+            .split([',', ':', ';', ' '])
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        if parts.len() != 4 {
+            bail!("{XR_VIEW_POSE_PROPERTY} expects X,Y,Z,YAW_DEGREES");
+        }
+        let mut numbers = [0.0; 4];
+        for (index, part) in parts.into_iter().enumerate() {
+            let number = part
+                .parse::<f32>()
+                .with_context(|| format!("invalid {XR_VIEW_POSE_PROPERTY} component `{part}`"))?;
+            if !number.is_finite() {
+                bail!("{XR_VIEW_POSE_PROPERTY} component `{part}` must be finite");
+            }
+            numbers[index] = number;
+        }
+        Ok(Some(XrStartupViewPose {
+            position: [numbers[0], numbers[1], numbers[2]],
+            yaw_degrees: numbers[3],
+        }))
+    }
+
     #[allow(unsafe_code)]
     fn android_property(name: &str) -> Option<String> {
         let name = CString::new(name).ok()?;
@@ -246,7 +336,8 @@ mod android {
             }
         }
 
-        match android_property(XR_VIEW_POSE_PROPERTY) {
+        let startup_view_pose_property = android_property(XR_VIEW_POSE_PROPERTY);
+        match startup_view_pose_property.as_deref() {
             Some(value) if !value.trim().is_empty() && value.trim() != "0" => {
                 log::info!("Android XR startup view pose from {XR_VIEW_POSE_PROPERTY}: {value}");
             }
@@ -254,8 +345,33 @@ mod android {
                 log::info!("Android XR startup view pose from {XR_VIEW_POSE_PROPERTY}: <default>");
             }
         }
+        let scene_options = match parse_android_xr_scene_options(startup_argv.as_deref()) {
+            Ok(options) => options,
+            Err(error) => {
+                log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
+                return;
+            }
+        };
+        let startup_view_pose =
+            match parse_android_xr_startup_view_pose(startup_view_pose_property.as_deref()) {
+                Ok(value) => value,
+                Err(error) => {
+                    log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
+                    return;
+                }
+            };
+        log::info!(
+            "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
+            scene_options.seed,
+            scene_options.chunk_x,
+            scene_options.chunk_z,
+            scene_options.render_distance,
+            scene_options.day_time_override,
+            scene_options.freeze_time,
+            scene_options.lighting_enabled
+        );
 
-        let _runtime_assets = match load_android_xr_runtime_assets() {
+        let runtime_assets = match load_android_xr_runtime_assets() {
             Ok(assets) => assets,
             Err(error) => {
                 log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
@@ -264,13 +380,20 @@ mod android {
         };
 
         log::info!("MCLONE_ANDROID_XR_PACKAGE_READY");
-        if let Err(error) = run_android_openxr_clear(&app) {
+        if let Err(error) =
+            run_android_openxr_mclone(&app, runtime_assets, scene_options, startup_view_pose)
+        {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
     }
 
     #[allow(unsafe_code)]
-    fn run_android_openxr_clear(app: &AndroidApp) -> Result<()> {
+    fn run_android_openxr_mclone(
+        app: &AndroidApp,
+        runtime_assets: AndroidXrRuntimeAssets,
+        scene_options: XrSceneOptions,
+        startup_view_pose: Option<XrStartupViewPose>,
+    ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
         entry
@@ -491,23 +614,46 @@ mod android {
         );
         log::info!("MCLONE_ANDROID_XR_SESSION_READY");
 
-        run_clear_frame_loop(
+        let AndroidXrRuntimeAssets {
+            mesh_assets,
+            actor_assets: _actor_assets,
+        } = runtime_assets;
+        let mut terrain = XrMcloneTerrainState::new(
+            &graphics.device,
+            &graphics.queue,
+            XR_COLOR_FORMAT,
+            scene_options,
+            TexturedSectionRenderOptions::default(),
+            mesh_assets,
+            startup_view_pose,
+        )
+        .context("initialize Android XR terrain runtime")?;
+        let terrain_summary = terrain.frame_summary();
+        log::info!(
+            "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={}",
+            terrain_summary.section_count,
+            terrain_summary.index_count
+        );
+
+        run_mclone_frame_loop(
             app,
             &mut graphics,
             &stage,
             environment_blend_mode,
             &mut left_eye,
             &mut right_eye,
+            &mut terrain,
         )
     }
 
-    fn run_clear_frame_loop(
+    fn run_mclone_frame_loop(
         app: &AndroidApp,
         graphics: &mut graphics_vulkan::VulkanGraphicsSession,
         stage: &xr::Space,
         environment_blend_mode: xr::EnvironmentBlendMode,
         left_eye: &mut graphics_vulkan::OpenXrEyeState,
         right_eye: &mut graphics_vulkan::OpenXrEyeState,
+        terrain: &mut XrMcloneTerrainState,
     ) -> Result<()> {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
@@ -555,18 +701,27 @@ mod android {
             )?;
 
             let frame_result = if frame_state.should_render {
-                render_clear_frame(
+                render_mclone_frame(
                     graphics,
                     stage,
                     environment_blend_mode,
                     frame_state.predicted_display_time,
                     left_eye,
                     right_eye,
+                    terrain,
                 )
-                .map(|()| {
+                .map(|summary| {
                     frame_stats.record_submitted_frame();
                     if !logged_ready {
                         logged_ready = true;
+                        log::info!(
+                            "Android XR terrain first-frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={}",
+                            summary.rendered_frames,
+                            summary.section_count,
+                            summary.drawn_section_count,
+                            summary.index_count,
+                            summary.drawn_index_count
+                        );
                         log::info!("MCLONE_ANDROID_XR_READY");
                     }
                 })
@@ -591,7 +746,7 @@ mod android {
 
             if frame_stats.submitted_frames == 1 {
                 log::info!(
-                    "OpenXR clear frame submitted: submitted={} runtime_frames={} skipped={}",
+                    "OpenXR mclone terrain frame submitted: submitted={} runtime_frames={} skipped={}",
                     frame_stats.submitted_frames,
                     frame_stats.runtime_frames,
                     frame_stats.skipped_frames
@@ -614,14 +769,15 @@ mod android {
         }
     }
 
-    fn render_clear_frame(
+    fn render_mclone_frame(
         graphics: &mut graphics_vulkan::VulkanGraphicsSession,
         stage: &xr::Space,
         environment_blend_mode: xr::EnvironmentBlendMode,
         predicted_display_time: xr::Time,
         left_eye: &mut graphics_vulkan::OpenXrEyeState,
         right_eye: &mut graphics_vulkan::OpenXrEyeState,
-    ) -> Result<()> {
+        terrain: &mut XrMcloneTerrainState,
+    ) -> Result<mclone_xr_scene::XrTerrainFrameSummary> {
         let stereo_views =
             mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
 
@@ -634,15 +790,24 @@ mod android {
                     return Err(err);
                 }
             };
-        let clear_result = clear_stereo_targets(
+        let frame_summary = terrain.render_frame(
             &graphics.device,
             &graphics.queue,
-            &left_target,
-            &right_target,
+            [stereo_views.left, stereo_views.right],
+            XrTerrainEyeTarget {
+                color_view: left_target.color_view(),
+                depth: &left_target.eye().depth,
+                size: [left_target.eye().width, left_target.eye().height],
+            },
+            XrTerrainEyeTarget {
+                color_view: right_target.color_view(),
+                depth: &right_target.eye().depth,
+                size: [right_target.eye().width, right_target.eye().height],
+            },
         );
         let left_release_result = left_target.release();
         let right_release_result = right_target.release();
-        clear_result?;
+        let frame_summary = frame_summary?;
         left_release_result?;
         right_release_result?;
 
@@ -654,33 +819,14 @@ mod android {
             stereo_views,
             left_eye,
             right_eye,
-        )
+        )?;
+        Ok(frame_summary)
     }
 
     fn acquire_eye_target(
         eye_state: &mut graphics_vulkan::OpenXrEyeState,
     ) -> Result<AcquiredEyeTarget<'_>> {
         mclone_xr_host::acquire_eye_target(eye_state)
-    }
-
-    fn clear_stereo_targets(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        left_target: &AcquiredEyeTarget<'_>,
-        right_target: &AcquiredEyeTarget<'_>,
-    ) -> Result<()> {
-        mclone_xr_host::clear_stereo_targets(
-            device,
-            queue,
-            mclone_xr_host::XrClearTarget {
-                color_view: left_target.color_view(),
-                depth_view: Some(&left_target.eye().depth_view),
-            },
-            mclone_xr_host::XrClearTarget {
-                color_view: right_target.color_view(),
-                depth_view: Some(&right_target.eye().depth_view),
-            },
-        )
     }
 
     fn wait_for_android_resume(app: &AndroidApp) -> Result<()> {

@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
+use mclone_render::chunk::ChunkDepthTarget;
 use mclone_xr_graphics::vulkan::{self, VulkanEyeSwapchain};
 use openxr as xr;
 
@@ -7,7 +8,7 @@ pub(super) type VulkanGraphicsSession = vulkan::VulkanGraphicsSession;
 
 pub(super) struct OpenXrEyeState {
     swapchain: VulkanEyeSwapchain,
-    pub(super) depth_view: wgpu::TextureView,
+    pub(super) depth: ChunkDepthTarget,
     pub(super) width: u32,
     pub(super) height: u32,
 }
@@ -56,6 +57,16 @@ pub(super) fn create_eye(
     depth_format: wgpu::TextureFormat,
     sample_count: u32,
 ) -> Result<OpenXrEyeState> {
+    if sample_count != 1 {
+        bail!("Android XR eye depth targets require sample_count=1, got {sample_count}");
+    }
+    if depth_format != mclone_render::chunk::DEPTH_FORMAT {
+        bail!(
+            "Android XR eye depth targets require {:?}, got {depth_format:?}",
+            mclone_render::chunk::DEPTH_FORMAT
+        );
+    }
+
     let swapchain = vulkan::create_eye_swapchain(
         device,
         session,
@@ -65,24 +76,10 @@ pub(super) fn create_eye(
         sample_count,
         "mclone_android_xr_swapchain",
     )?;
-    let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("mclone_android_xr_depth"),
-        size: wgpu::Extent3d {
-            width: eye_width,
-            height: eye_height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count,
-        dimension: wgpu::TextureDimension::D2,
-        format: depth_format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
 
     Ok(OpenXrEyeState {
         swapchain,
-        depth_view: depth_texture.create_view(&Default::default()),
+        depth: ChunkDepthTarget::new(device, eye_width, eye_height),
         width: eye_width,
         height: eye_height,
     })

@@ -46,6 +46,8 @@ use mclone_xr_host::{
     XrControllerSnapshot, XrFrameStats, XrHand, XrStereoConfig,
 };
 #[cfg(not(target_os = "android"))]
+use mclone_xr_scene::{XR_FAR, XR_NEAR, XrViewAlignmentMode};
+#[cfg(not(target_os = "android"))]
 use openxr as xr;
 
 #[cfg(not(target_os = "android"))]
@@ -98,10 +100,6 @@ const XR_SAMPLE_COUNT: u32 = 1;
 const SESSION_READY_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(not(target_os = "android"))]
 const SESSION_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(25);
-#[cfg(not(target_os = "android"))]
-const XR_NEAR: f32 = 0.05;
-#[cfg(not(target_os = "android"))]
-const XR_FAR: f32 = 700.0;
 #[cfg(not(target_os = "android"))]
 const XR_JOYPAD_DEAD_ZONE: f32 = 0.18;
 #[cfg(not(target_os = "android"))]
@@ -1005,13 +1003,6 @@ struct XrStageToWorld {
 }
 
 #[cfg(not(target_os = "android"))]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum XrViewAlignmentMode {
-    PlayerSpawn,
-    ViewPose,
-}
-
-#[cfg(not(target_os = "android"))]
 impl XrTrackingOrigin {
     fn from_initial_views(views: &[xr::View], mode: XrViewAlignmentMode) -> Result<Self> {
         let left_stage_pose = mclone_xr_host::view_pose(&views[0])?;
@@ -1037,16 +1028,6 @@ impl XrTrackingOrigin {
 
     fn mode_label(self) -> &'static str {
         self.mode.label()
-    }
-}
-
-#[cfg(not(target_os = "android"))]
-impl XrViewAlignmentMode {
-    const fn label(self) -> &'static str {
-        match self {
-            XrViewAlignmentMode::PlayerSpawn => "player-spawn",
-            XrViewAlignmentMode::ViewPose => "view-pose",
-        }
     }
 }
 

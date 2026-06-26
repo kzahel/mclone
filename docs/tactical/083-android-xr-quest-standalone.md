@@ -5,11 +5,13 @@ Slice 2's loader/session/swapchain/first-frame clear milestone is complete on
 Quest. Slice 2A has landed shared-host chunks: desktop XR and Android XR now
 share OpenXR session-state polling, frame counters, stereo config/view helpers,
 STAGE reference-space setup, frame wait/begin/end helpers, swapchain image
-acquire/release, diagnostic clear, stereo projection submission, and controller
-actions, validated view poses, and renderer-facing XR frame descriptors
-through `mclone-xr-host`; desktop Vulkan and Android Vulkan now share the
-unsafe OpenXR/Vulkan/wgpu graphics factory through `mclone-xr-graphics`.
-Continue into Quest terrain before controller features.
+acquire/release, diagnostic clear, stereo projection submission, controller
+actions, validated view poses, and renderer-facing XR frame descriptors through
+`mclone-xr-host`; desktop Vulkan and Android Vulkan now share the unsafe
+OpenXR/Vulkan/wgpu graphics factory through `mclone-xr-graphics`. Slice 3 now
+renders real mclone terrain on Quest through the shared `mclone-xr-scene`
+terrain runtime. Continue into Quest controller locomotion before optional XR
+features.
 
 ## Purpose
 
@@ -55,6 +57,13 @@ Ready inputs:
   bridge used by both desktop Vulkan XR and Android XR: OpenXR-driven Vulkan
   instance/device creation, wgpu wrapping, session creation, Vulkan swapchain
   format validation, and Vulkan swapchain image texture wrapping.
+- `native/crates/mclone-xr-scene` owns the first shared mclone terrain XR
+  runtime boundary: local integrated server/client bring-up, render-section
+  compilation/upload, terrain atlas upload, sky/terrain full-frame rendering,
+  startup view-pose alignment mode, and stereo `ChunkRenderView` conversion for
+  Android XR. Desktop XR consumes the shared alignment type and clip-plane
+  constants now; migrating the full desktop mclone terrain state onto the same
+  crate remains a tightening follow-up.
 - Playbox has the mature reference implementation for Android XR packaging,
   loader/session ownership, launch-scoped startup arguments, Android property
   toggles, and Quest validation scripts.
@@ -102,6 +111,9 @@ native/crates/mclone-xr-host/
   src/frame_loop.rs
   src/actions.rs
   src/graphics_vulkan.rs
+native/crates/mclone-xr-scene/
+  Cargo.toml
+  src/lib.rs
 native/apps/mclone-android-xr-client/
   Cargo.toml
   src/lib.rs
@@ -636,12 +648,14 @@ Exit criteria:
   external files directory from the install/validate scripts.
 - [x] Load the staged asset pack from the Android XR app external files
   directory in the mclone runtime path.
-- [ ] Reuse the shared XR host plus the desktop-proven mclone-frame path for
-  integrated server/client, render-section sync, texture atlas, sky, terrain,
-  and actor resources.
-- [ ] Convert Quest runtime eye poses/FOV into `ChunkRenderView` values.
-- [ ] Render a small-radius real mclone scene per eye.
-- [ ] Validate headset-visible terrain and log render-section/drawn-index
+- [x] Reuse the shared XR host plus the desktop-proven mclone-frame path for
+  integrated server/client, render-section sync, texture atlas, sky, and terrain
+  resources.
+- [ ] Add Quest actor resources/rendering after terrain and locomotion are
+  stable.
+- [x] Convert Quest runtime eye poses/FOV into `ChunkRenderView` values.
+- [x] Render a small-radius real mclone scene per eye.
+- [x] Validate headset-visible terrain and log render-section/drawn-index
   diagnostics.
 
 Recorded Slice 3 first-chunk result:
@@ -715,6 +729,63 @@ Observed Quest result:
   `MCLONE_ANDROID_XR_READY`
 - Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
 
+Recorded Slice 3 third-chunk result:
+
+- Added `native/crates/mclone-xr-scene` as the shared mclone terrain XR runtime
+  crate. It depends on OpenXR/`wgpu` as an app/platform XR boundary and stays
+  free of Android activity/JNI and desktop window ownership.
+- Android XR now parses the launch-scoped `mclone.startup.argv` for `--seed`,
+  `--chunk-x`, `--chunk-z`, `--render-distance`, `--day-time`, and
+  `--freeze-time`; `debug.mclone.xr_view_pose` is parsed into the shared
+  startup view-pose shape.
+- Android XR constructs `XrMcloneTerrainState` after OpenXR Vulkan device and
+  swapchain creation, using the staged terrain asset pack, local integrated
+  server/client runtime, render-section compile worker, uploaded terrain atlas,
+  `SkyRenderer`, and `TexturedSectionDrawResources`.
+- Android XR eye depth targets now use `mclone_render::chunk::ChunkDepthTarget`,
+  matching the shared full-frame renderer contract.
+- The old Android diagnostic clear frame loop now renders real mclone terrain
+  into each acquired OpenXR eye target before stereo projection submission.
+- Added `MCLONE_ANDROID_XR_TERRAIN_READY`; the Quest validator now requires it
+  for full submitted-frame validation.
+- Desktop XR consumes `mclone-xr-scene` for shared XR alignment mode and clip
+  planes. Full desktop terrain-state migration is intentionally left as a
+  follow-up because the current desktop path still includes controller
+  locomotion, remote-session support, and actor rendering.
+
+Validation after the third Slice 3 chunk, June 26, 2026:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/build-apk.sh --debug'
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --wait-seconds 90'
+"C:\Program Files\Git\bin\bash.exe" -lc 'grep -E "Android XR scene options|mclone XR terrain runtime|MCLONE_ANDROID_XR_TERRAIN_READY|Android XR terrain first-frame summary|OpenXR mclone terrain frame submitted|MCLONE_ANDROID_XR_READY|MCLONE_ANDROID_XR_FAILURE" /tmp/mclone-quest-openxr-logcat.txt | head -40'
+```
+
+Observed Quest result:
+
+- Quest serial: `2G0YC1ZF93041Z`
+- Runtime scene options: `seed=12345`, center `(0, 0)`, render distance `2`,
+  `day_time=Some(6000)`, `freeze_time=true`
+- Terrain runtime: `chunks=49`, `sections=122`, `faces=96699`,
+  `indices=580194`
+- Session-ready marker is emitted before terrain warmup:
+  `MCLONE_ANDROID_XR_SESSION_READY`
+- Initial debug-build terrain warmup: `initial_polls=10244`,
+  `poll_ms=476.192`, `elapsed_ms=17848.920`
+- Terrain-ready marker: `MCLONE_ANDROID_XR_TERRAIN_READY sections=122
+  indices=580194`
+- First-eye frame summary: `frames=1`, `drawn_sections=27`,
+  `drawn_indices=236490`
+- Submitted-frame marker: `MCLONE_ANDROID_XR_READY`
+- First submitted frame: `OpenXR mclone terrain frame submitted: submitted=1
+  runtime_frames=1 skipped=0`
+- Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
+
 ### Slice 4 - Controller Actions And Locomotion
 
 - [ ] Reuse the shared XR host action set shape for Quest Touch controllers.
@@ -748,12 +819,12 @@ Observed Quest result:
 
 ## Validation Lanes
 
-Current first-frame validation:
+Current terrain-frame validation:
 
 ```bash
 cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
 bash android-xr/build-apk.sh --debug
-bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,-96,180
+bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --wait-seconds 90
 ```
 
 Historical Slice 2 session-only milestone:

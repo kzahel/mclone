@@ -1087,9 +1087,12 @@ dependencies = [
  "jni 0.22.4",
  "log",
  "mclone-app-runtime",
+ "mclone-render",
  "mclone-xr-graphics",
  "mclone-xr-host",
+ "mclone-xr-scene",
  "openxr",
+ "serde_json",
  "wgpu",
  "winit",
 ]
@@ -1192,6 +1195,7 @@ dependencies = [
  "mclone-ui",
  "mclone-xr-graphics",
  "mclone-xr-host",
+ "mclone-xr-scene",
  "metal",
  "openxr",
  "pollster",
@@ -1313,6 +1317,27 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "glam",
+ "openxr",
+ "wgpu",
+]
+
+[[package]]
+name = "mclone-xr-scene"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "glam",
+ "log",
+ "mclone-app-runtime",
+ "mclone-client",
+ "mclone-core",
+ "mclone-mesh",
+ "mclone-protocol",
+ "mclone-render",
+ "mclone-render-session",
+ "mclone-server",
+ "mclone-ui",
+ "mclone-xr-host",
  "openxr",
  "wgpu",
 ]

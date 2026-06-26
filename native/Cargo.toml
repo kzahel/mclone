@@ -15,6 +15,7 @@ members = [
   "crates/mclone-worldgen",
   "crates/mclone-xr-graphics",
   "crates/mclone-xr-host",
+  "crates/mclone-xr-scene",
   "apps/mclone-dedicated-server",
   "apps/mclone-android-client",
   "apps/mclone-android-xr-client",
@@ -56,6 +57,7 @@ mclone-ui = { path = "crates/mclone-ui" }
 mclone-worldgen = { path = "crates/mclone-worldgen" }
 mclone-xr-graphics = { path = "crates/mclone-xr-graphics" }
 mclone-xr-host = { path = "crates/mclone-xr-host" }
+mclone-xr-scene = { path = "crates/mclone-xr-scene" }
 metal = "0.31"
 pollster = "0.4"
 openxr = "0.21"

@@ -11,9 +11,12 @@ anyhow.workspace = true
 jni.workspace = true
 log.workspace = true
 mclone-app-runtime.workspace = true
+mclone-render.workspace = true
 mclone-xr-graphics.workspace = true
 mclone-xr-host.workspace = true
+mclone-xr-scene.workspace = true
 openxr.workspace = true
+serde_json.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 

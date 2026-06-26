@@ -9,12 +9,13 @@ argv through an intent extra, Android debug properties for wrapper settings,
 validation scripts that wake/restore the headset, and packed asset staging into
 the XR package external files directory.
 
-Current status: Android OpenXR first-frame smoke with runtime assets loaded.
-The app loads the staged Minecraft asset pack through `mclone-app-runtime`,
-initializes the Android OpenXR loader, creates a Vulkan-backed OpenXR session,
-creates per-eye color swapchains and depth targets, receives Horizon
-`nativeOnActivityReady`, transitions to READY, submits the first stereo
-diagnostic clear frame, and logs `MCLONE_ANDROID_XR_ASSETS_READY` plus
+Current status: Android OpenXR terrain-frame smoke. The app loads the staged
+Minecraft asset pack through `mclone-app-runtime`, initializes the Android
+OpenXR loader, creates a Vulkan-backed OpenXR session, creates per-eye color
+swapchains and renderer-compatible depth targets, receives Horizon
+`nativeOnActivityReady`, builds the shared `mclone-xr-scene` terrain runtime,
+submits the first real stereo mclone terrain frame, and logs
+`MCLONE_ANDROID_XR_ASSETS_READY`, `MCLONE_ANDROID_XR_TERRAIN_READY`, and
 `MCLONE_ANDROID_XR_READY`.
 
 ## Build
@@ -79,10 +80,11 @@ bash android-xr/validate-quest-openxr.sh --debug --view-pose 0,120,-96,180
 The validator builds unless `--skip-build` is passed, installs the APK on an
 attached Quest, stages `reference/minecraft-1.17.1/extracted.zip` to the XR app
 external files directory, wakes the headset, launches the VR activity, waits
-for `MCLONE_ANDROID_XR_ASSETS_READY` and `MCLONE_ANDROID_XR_READY`, scans for
-fatal logcat entries, force-stops the app, restores headset wake/proximity
-settings, and sleeps the headset. Use `--asset-pack PATH` to stage a different
-pack, or `--skip-assets` to leave the device copy unchanged.
+for `MCLONE_ANDROID_XR_ASSETS_READY`, `MCLONE_ANDROID_XR_TERRAIN_READY`, and
+`MCLONE_ANDROID_XR_READY`, scans for fatal logcat entries, force-stops the app,
+restores headset wake/proximity settings, and sleeps the headset. Use
+`--asset-pack PATH` to stage a different pack, or `--skip-assets` to leave the
+device copy unchanged.
 
 For session/swapchain-only debugging:
 
@@ -91,7 +93,7 @@ bash android-xr/validate-quest-openxr.sh --debug --skip-build --session-only --v
 ```
 
 `--session-only` accepts `MCLONE_ANDROID_XR_SESSION_READY` without requiring the
-first submitted stereo frame.
+terrain runtime or first submitted stereo frame.
 
 Logcat defaults to:
 
@@ -112,6 +114,7 @@ shape. Mclone does not use those product features yet.
 On the attached Quest 3, mclone reaches `MCLONE_ANDROID_XR_READY` after pinning
 `android-activity` to Playbox's known-good NativeActivity glue version. Desktop
 Vulkan XR and Android XR now share the OpenXR/Vulkan/wgpu graphics factory
-through `mclone-xr-graphics`, and Android XR now retains loaded terrain and
-actor texture assets for the runtime path. The next implementation step is a
-real mclone terrain frame on Quest.
+through `mclone-xr-graphics`, and both desktop XR and Android XR consume
+`mclone-xr-scene` for shared XR terrain constants/alignment/runtime shape. The
+next implementation step is basic Quest controller locomotion on top of the
+rendered terrain frame.
