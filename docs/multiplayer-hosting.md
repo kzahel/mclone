@@ -66,9 +66,10 @@ Client connect status (full grid in
   `--remote-addr HOST:PORT`.
 - **Flat Android** can connect over TCP through the Android-owned
   `debug.mclone.remote_addr` property. There is not yet an in-app connect UI.
-- **Android XR** can connect over TCP through the Android-owned
-  `debug.mclone.remote_addr` property and the shared XR scene runtime. The app
-  path is wired; a Quest remote smoke against a reachable dedicated server is
+- **Android XR** can connect over TCP through launch-scoped
+  `mclone.startup.argv` (`--remote-addr HOST:PORT`) and the shared XR scene
+  runtime. The validator can start a local `mclone-dedicated-server` with
+  `--start-server`; a Quest remote smoke against a reachable dedicated server is
   still pending.
 - **Web** has a complete WebSocket client, but it is not yet wired into the
   playable browser app (reachable only from a smoke export).

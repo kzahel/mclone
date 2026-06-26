@@ -20,8 +20,8 @@ shared XR locomotion mapper, submits the first real stereo mclone terrain
 frame, and logs `MCLONE_ANDROID_XR_ASSETS_READY`,
 `MCLONE_ANDROID_XR_CONTROLLERS_READY`, `MCLONE_ANDROID_XR_TERRAIN_READY`, and
 `MCLONE_ANDROID_XR_READY`. It can run local integrated or remote dedicated
-through the shared XR scene runtime; set `debug.mclone.remote_addr` (or use
-`--remote-addr` in the scripts) to select TCP remote dedicated play.
+through the shared XR scene runtime; use `--remote-addr` in the scripts to pass
+a launch-scoped TCP remote address through `mclone.startup.argv`.
 
 ## Build
 
@@ -78,12 +78,14 @@ The launch-scoped argv is passed as:
 mclone.startup.argv
 ```
 
-The current wrapper properties are:
+The current wrapper property is:
 
 ```text
-debug.mclone.remote_addr
 debug.mclone.xr_view_pose
 ```
+
+`debug.mclone.remote_addr` is retained only as a legacy fallback and is cleared
+by the install/validate scripts before launch.
 
 ## Validate
 
@@ -110,14 +112,26 @@ bash android-xr/validate-quest-openxr.sh --debug --skip-build --session-only --v
 `--session-only` accepts `MCLONE_ANDROID_XR_SESSION_READY` without requiring the
 terrain runtime or first submitted stereo frame.
 
-For remote dedicated validation, start `mclone-dedicated-server` on a host the
-headset can reach, then pass:
+For remote dedicated validation, either start `mclone-dedicated-server` on a
+host the headset can reach and pass `--remote-addr`, or let the validator build
+and start the server locally:
 
 ```bash
 bash android-xr/validate-quest-openxr.sh --debug --skip-build \
   --remote-addr HOST:25565 \
   --view-pose 0,120,-96,180
 ```
+
+```bash
+bash android-xr/validate-quest-openxr.sh --debug --skip-build \
+  --start-server \
+  --server-listen 0.0.0.0:25565 \
+  --remote-addr HOST:25565 \
+  --view-pose 0,120,-96,180
+```
+
+`HOST:25565` must be reachable from the headset. Do not use `127.0.0.1`; that
+would point the headset back at itself.
 
 Logcat defaults to:
 

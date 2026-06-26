@@ -480,9 +480,10 @@ Current gaps:
   native scene-shell contracts where applicable, but web still carries an async
   host/runtime fork
 - remote dedicated play is now shared for native desktop, flat Android, and
-  Android XR through app-owned session adapters; web still needs playable
-  remote-connect wiring before dedicated-server play is a true platform
-  invariant
+  Android XR through app-owned session adapters; Android XR uses launch-scoped
+  startup argv for remote selection and still needs a Quest remote smoke, while
+  web still needs playable remote-connect wiring before dedicated-server play is
+  a true platform invariant
 - desktop XR and Android XR share the new XR host/graphics/scene crates; the
   shared scene now owns terrain/actor rendering, startup pose, locomotion, and
   the generic local/remote host runtime shape

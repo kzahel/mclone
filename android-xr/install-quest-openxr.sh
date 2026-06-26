@@ -39,7 +39,7 @@ Options:
   --view-pose X,Y,Z,YAW_DEGREES
                   Set debug.mclone.xr_view_pose before launch.
   --remote-addr ADDR
-                  Set debug.mclone.remote_addr before launch.
+                  Add --remote-addr ADDR to the launch-scoped mclone.startup.argv.
   --seed SEED      Add --seed SEED to the launch-scoped mclone.startup.argv.
   --chunk-x X      Add --chunk-x X to startup argv.
   --chunk-z Z      Add --chunk-z Z to startup argv.
@@ -170,12 +170,10 @@ if [[ -n "$START_VIEW_POSE" ]]; then
     mclone_note "Configured startup view pose via $VIEW_POSE_PROPERTY=$START_VIEW_POSE"
 fi
 if [[ -n "$REMOTE_ADDR" ]]; then
-    mclone_xr_set_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" "$REMOTE_ADDR" >/dev/null 2>&1 || true
-    mclone_note "Configured Android XR remote dedicated address via $REMOTE_ADDR_PROPERTY=$REMOTE_ADDR"
-else
-    mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
-    mclone_note "Cleared Android XR remote dedicated address via $REMOTE_ADDR_PROPERTY"
+    STARTUP_ARGV+=(--remote-addr "$REMOTE_ADDR")
 fi
+mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
+mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"
 
 STARTUP_ARGV_JSON=""
 if ((${#STARTUP_ARGV[@]} > 0)); then

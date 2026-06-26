@@ -191,40 +191,74 @@ mod android {
         Ok(assets)
     }
 
-    fn parse_android_xr_scene_options(startup_argv_json: Option<&str>) -> Result<XrSceneOptions> {
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct AndroidXrStartupOptions {
+        scene: XrSceneOptions,
+        remote_addr: Option<String>,
+    }
+
+    impl Default for AndroidXrStartupOptions {
+        fn default() -> Self {
+            Self {
+                scene: XrSceneOptions::default(),
+                remote_addr: None,
+            }
+        }
+    }
+
+    fn parse_android_xr_startup_options(
+        startup_argv_json: Option<&str>,
+    ) -> Result<AndroidXrStartupOptions> {
         let Some(json) = startup_argv_json.filter(|json| !json.trim().is_empty()) else {
-            return Ok(XrSceneOptions::default());
+            return Ok(AndroidXrStartupOptions::default());
         };
         let argv = serde_json::from_str::<Vec<String>>(json)
             .context("parse Android XR startup argv JSON")?;
-        let mut options = XrSceneOptions::default();
+        let mut options = AndroidXrStartupOptions::default();
         let mut index = 0;
         while index < argv.len() {
             match argv[index].as_str() {
                 "--seed" => {
-                    options.seed = parse_next(&argv, &mut index, "--seed")?;
+                    options.scene.seed = parse_next(&argv, &mut index, "--seed")?;
                 }
                 "--chunk-x" => {
-                    options.chunk_x = parse_next(&argv, &mut index, "--chunk-x")?;
+                    options.scene.chunk_x = parse_next(&argv, &mut index, "--chunk-x")?;
                 }
                 "--chunk-z" => {
-                    options.chunk_z = parse_next(&argv, &mut index, "--chunk-z")?;
+                    options.scene.chunk_z = parse_next(&argv, &mut index, "--chunk-z")?;
                 }
                 "--render-distance" => {
-                    options.render_distance = parse_next(&argv, &mut index, "--render-distance")?;
+                    options.scene.render_distance =
+                        parse_next(&argv, &mut index, "--render-distance")?;
                 }
                 "--day-time" => {
-                    options.day_time_override = Some(parse_next(&argv, &mut index, "--day-time")?);
+                    options.scene.day_time_override =
+                        Some(parse_next(&argv, &mut index, "--day-time")?);
+                }
+                "--remote-addr" => {
+                    options.remote_addr = parse_remote_addr_arg(parse_next_string(
+                        &argv,
+                        &mut index,
+                        "--remote-addr",
+                    )?);
                 }
                 "--freeze-time" => {}
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
             if argv[index] == "--freeze-time" {
-                options.freeze_time = true;
+                options.scene.freeze_time = true;
             }
             index += 1;
         }
-        options.validated()
+        options.scene = options.scene.validated()?;
+        Ok(options)
+    }
+
+    fn parse_next_string(argv: &[String], index: &mut usize, flag: &str) -> Result<String> {
+        *index += 1;
+        argv.get(*index)
+            .cloned()
+            .with_context(|| format!("{flag} requires a value"))
     }
 
     fn parse_next<T>(argv: &[String], index: &mut usize, flag: &str) -> Result<T>
@@ -239,6 +273,15 @@ mod android {
         value
             .parse::<T>()
             .with_context(|| format!("{flag} has invalid value `{value}`"))
+    }
+
+    fn parse_remote_addr_arg(value: String) -> Option<String> {
+        let value = value.trim();
+        if value.is_empty() || matches!(value, "default" | "off" | "none" | "false" | "0") {
+            None
+        } else {
+            Some(value.to_owned())
+        }
     }
 
     fn parse_android_xr_startup_view_pose(
@@ -361,13 +404,14 @@ mod android {
                 log::info!("Android XR startup view pose from {XR_VIEW_POSE_PROPERTY}: <default>");
             }
         }
-        let scene_options = match parse_android_xr_scene_options(startup_argv.as_deref()) {
+        let startup_options = match parse_android_xr_startup_options(startup_argv.as_deref()) {
             Ok(options) => options,
             Err(error) => {
                 log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
                 return;
             }
         };
+        let scene_options = startup_options.scene;
         let startup_view_pose =
             match parse_android_xr_startup_view_pose(startup_view_pose_property.as_deref()) {
                 Ok(value) => value,
@@ -376,13 +420,21 @@ mod android {
                     return;
                 }
             };
-        let remote_addr = android_remote_addr();
-        if let Some(remote_addr) = &remote_addr {
+        let legacy_remote_addr = android_remote_addr();
+        let remote_addr = startup_options
+            .remote_addr
+            .clone()
+            .or_else(|| legacy_remote_addr.clone());
+        if let Some(remote_addr) = startup_options.remote_addr.as_deref() {
             log::info!(
-                "Android XR remote dedicated address from {REMOTE_ADDR_PROPERTY}: {remote_addr}"
+                "Android XR remote dedicated address from {STARTUP_ARGV_INTENT_EXTRA}: {remote_addr}"
+            );
+        } else if let Some(remote_addr) = legacy_remote_addr.as_deref() {
+            log::info!(
+                "Android XR remote dedicated address from legacy {REMOTE_ADDR_PROPERTY}: {remote_addr}"
             );
         } else {
-            log::info!("Android XR remote dedicated address from {REMOTE_ADDR_PROPERTY}: <none>");
+            log::info!("Android XR remote dedicated address: <none>");
         }
         log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",

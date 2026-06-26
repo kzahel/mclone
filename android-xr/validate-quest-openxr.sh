@@ -22,6 +22,12 @@ SKIP_BUILD=0
 SESSION_ONLY=0
 START_VIEW_POSE="${MCLONE_ANDROID_XR_VIEW_POSE:-0}"
 REMOTE_ADDR="${MCLONE_ANDROID_XR_REMOTE_ADDR:-}"
+START_SERVER=0
+SERVER_LISTEN="${MCLONE_ANDROID_XR_SERVER_LISTEN:-0.0.0.0:25565}"
+SERVER_LOG="${MCLONE_ANDROID_XR_SERVER_LOG:-/tmp/mclone-android-xr-dedicated-server.log}"
+SERVER_SEED="${MCLONE_ANDROID_XR_SERVER_SEED:-12345}"
+SERVER_SEED_EXPLICIT="${MCLONE_ANDROID_XR_SERVER_SEED:+1}"
+SERVER_PID=""
 STARTUP_ARGV=()
 
 usage() {
@@ -48,7 +54,14 @@ Options:
   --view-pose X,Y,Z,YAW_DEGREES
                      Set debug.mclone.xr_view_pose before launch.
   --remote-addr ADDR
-                     Set debug.mclone.remote_addr before launch.
+                     Add --remote-addr ADDR to mclone.startup.argv.
+  --start-server     Build and start local mclone-dedicated-server for this
+                     validation. Requires --remote-addr with a headset-routable
+                     HOST:PORT.
+  --server-listen ADDR
+                     Address for --start-server to bind. Default: 0.0.0.0:25565.
+  --server-seed SEED Seed for --start-server. Defaults to --seed or 12345.
+  --server-log PATH  Local dedicated-server log path.
   --seed SEED        Add --seed SEED to mclone.startup.argv.
   --chunk-x X        Add --chunk-x X to startup argv.
   --chunk-z Z        Add --chunk-z Z to startup argv.
@@ -74,6 +87,49 @@ stop_logcat_capture() {
     fi
 }
 
+stop_dedicated_server() {
+    if [[ -n "$SERVER_PID" ]]; then
+        kill "$SERVER_PID" >/dev/null 2>&1 || true
+        wait "$SERVER_PID" >/dev/null 2>&1 || true
+        SERVER_PID=""
+    fi
+}
+
+start_dedicated_server() {
+    [[ -n "$REMOTE_ADDR" ]] || {
+        mclone_die "--start-server requires --remote-addr HOST:PORT; use a host address the headset can reach, not 127.0.0.1"
+    }
+
+    mclone_note "Building native dedicated server"
+    cargo build --manifest-path native/Cargo.toml -p mclone-dedicated-server
+
+    local server_bin="$REPO_ROOT/native/target/debug/mclone-dedicated-server"
+    if [[ -x "$server_bin.exe" ]]; then
+        server_bin="$server_bin.exe"
+    fi
+    [[ -x "$server_bin" ]] || mclone_die "dedicated server binary not found at $server_bin"
+
+    mkdir -p "$(dirname "$SERVER_LOG")"
+    : > "$SERVER_LOG"
+    mclone_note "Starting dedicated server on $SERVER_LISTEN seed=$SERVER_SEED; headset connects to $REMOTE_ADDR"
+    "$server_bin" --listen "$SERVER_LISTEN" --seed "$SERVER_SEED" > "$SERVER_LOG" 2>&1 &
+    SERVER_PID="$!"
+
+    local deadline=$((SECONDS + 30))
+    while (( SECONDS < deadline )); do
+        if ! kill -0 "$SERVER_PID" >/dev/null 2>&1; then
+            mclone_die "dedicated server exited before readiness; see $SERVER_LOG"
+        fi
+        if grep -F "mclone dedicated server listening" "$SERVER_LOG" >/dev/null 2>&1; then
+            mclone_note "Dedicated server ready; log: $SERVER_LOG"
+            return 0
+        fi
+        sleep 1
+    done
+
+    mclone_die "dedicated server did not report readiness within 30s; see $SERVER_LOG"
+}
+
 start_logcat_capture() {
     mkdir -p "$(dirname "$LOG_PATH")"
     : > "$LOG_PATH"
@@ -84,6 +140,7 @@ start_logcat_capture() {
 cleanup() {
     local status=$?
     stop_logcat_capture
+    stop_dedicated_server
     if [[ -n "$SERIAL" ]]; then
         mclone_xr_clear_all_startup_properties "$SERIAL" >/dev/null 2>&1 || true
         mclone_restore_headset_after_test "$SERIAL" "$MCLONE_ANDROID_XR_APP_ID"
@@ -149,7 +206,35 @@ while [[ $# -gt 0 ]]; do
             REMOTE_ADDR="$2"
             shift 2
             ;;
-        --seed|--chunk-x|--chunk-z|--render-distance|--day-time)
+        --start-server)
+            START_SERVER=1
+            shift
+            ;;
+        --server-listen)
+            require_arg "$1" "${2:-}"
+            SERVER_LISTEN="$2"
+            shift 2
+            ;;
+        --server-seed)
+            require_arg "$1" "${2:-}"
+            SERVER_SEED="$2"
+            SERVER_SEED_EXPLICIT=1
+            shift 2
+            ;;
+        --server-log)
+            require_arg "$1" "${2:-}"
+            SERVER_LOG="$2"
+            shift 2
+            ;;
+        --seed)
+            require_arg "$1" "${2:-}"
+            STARTUP_ARGV+=("$1" "$2")
+            if [[ -z "$SERVER_SEED_EXPLICIT" ]]; then
+                SERVER_SEED="$2"
+            fi
+            shift 2
+            ;;
+        --chunk-x|--chunk-z|--render-distance|--day-time)
             require_arg "$1" "${2:-}"
             STARTUP_ARGV+=("$1" "$2")
             shift 2
@@ -225,12 +310,10 @@ if [[ -n "$START_VIEW_POSE" ]]; then
     mclone_note "Configured startup view pose via $VIEW_POSE_PROPERTY=$START_VIEW_POSE"
 fi
 if [[ -n "$REMOTE_ADDR" ]]; then
-    mclone_xr_set_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" "$REMOTE_ADDR" >/dev/null 2>&1 || true
-    mclone_note "Configured Android XR remote dedicated address via $REMOTE_ADDR_PROPERTY=$REMOTE_ADDR"
-else
-    mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
-    mclone_note "Cleared Android XR remote dedicated address via $REMOTE_ADDR_PROPERTY"
+    STARTUP_ARGV+=(--remote-addr "$REMOTE_ADDR")
 fi
+mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
+mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"
 
 STARTUP_ARGV_JSON=""
 if ((${#STARTUP_ARGV[@]} > 0)); then
@@ -239,6 +322,10 @@ if ((${#STARTUP_ARGV[@]} > 0)); then
 fi
 
 start_logcat_capture
+
+if [[ "$START_SERVER" == "1" ]]; then
+    start_dedicated_server
+fi
 
 mclone_note "Launching $MCLONE_ANDROID_XR_APP_ID/$MCLONE_ANDROID_XR_ACTIVITY"
 launch_component="$MCLONE_ANDROID_XR_APP_ID/$MCLONE_ANDROID_XR_ACTIVITY"

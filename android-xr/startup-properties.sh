@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 STARTUP_ARGV_INTENT_EXTRA="mclone.startup.argv"
+# Legacy fallback only. New launch-scoped remote selection should use
+# --remote-addr in STARTUP_ARGV_INTENT_EXTRA.
 REMOTE_ADDR_PROPERTY="debug.mclone.remote_addr"
 VIEW_POSE_PROPERTY="debug.mclone.xr_view_pose"
 

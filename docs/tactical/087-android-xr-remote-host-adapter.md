@@ -1,9 +1,10 @@
 # 087: Android XR Remote Host Adapter
 
 Status: completed first pass. Android XR can now construct the shared XR scene
-against a TCP remote-dedicated runtime through `debug.mclone.remote_addr`.
-Compile validation passed; a Quest remote smoke against a reachable dedicated
-server is still pending.
+against a TCP remote-dedicated runtime. Tactical 088 moved script-driven remote
+selection to launch-scoped `mclone.startup.argv` and added validator-owned
+server startup. A Quest remote smoke against a reachable dedicated server is
+still pending.
 
 ## Purpose
 
@@ -19,13 +20,16 @@ runtime, render-session, or XR scene internals.
 - Desktop XR passes the desktop TCP `RemoteServerSession`.
 - Android XR now owns its own concrete `AndroidXrRemoteServerSession` wrapper
   around `mclone_net::NativeClientSession`.
-- Android XR startup reads `debug.mclone.remote_addr`. When set, it constructs
+- Android XR startup reads launch-scoped `--remote-addr ADDR` from
+  `mclone.startup.argv` (tactical 088) and still accepts the legacy
+  `debug.mclone.remote_addr` fallback. When a remote address is set, it
+  constructs
   `NativeSingleViewSceneRuntime::remote_dedicated_with_mesh_assets(...)`; when
   unset or empty, it constructs the local integrated runtime with the same
   preloaded assets and still enters the shared XR scene through
   `XrMcloneTerrainState::with_runtime(...)`.
-- Quest install/validate scripts expose `--remote-addr ADDR` and clear the
-  property when omitted so local smokes are deterministic.
+- Quest install/validate scripts expose `--remote-addr ADDR`; tactical 088
+  routes it through the launch intent and clears the legacy property.
 
 ## Implementation Slice
 
@@ -64,7 +68,7 @@ git diff --check
 Still pending:
 
 ```bash
-pnpm native:android-xr:validate -- --debug --skip-build --remote-addr HOST:25565 --view-pose 0,120,-96,180
+pnpm native:android-xr:validate -- --debug --skip-build --start-server --remote-addr HOST:25565 --view-pose 0,120,-96,180
 ```
 
 That device smoke needs a dedicated server reachable from the headset.
