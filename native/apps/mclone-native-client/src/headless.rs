@@ -325,6 +325,9 @@ pub(crate) fn run_headless_screenshot(
     }
 
     let mut ui = GameUi::new();
+    if options.ui == crate::cli::HeadlessScreenshotUi::NewWorld {
+        ui.set_new_world_seed(options.scene.seed);
+    }
     ui.set_screen(options.ui.game_screen());
     ui.set_scale(GuiScale::from_pixels(options.width, options.height));
 
@@ -412,6 +415,8 @@ pub(crate) fn run_headless_screenshot(
                 runtime.render_distance() as i32,
                 render_options,
                 FramePacingUiState::default(),
+                false,
+                1.0,
             ));
             let gui_state = FullFrameGui::new(
                 gui_active,

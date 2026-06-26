@@ -31,8 +31,9 @@ mod android {
     use mclone_render::sky_render::SkyRenderer;
     use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
     use mclone_render_session::{
+        ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
         ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineCameraInput,
-        EngineCameraMovementImpulse, EngineRenderCamera,
+        EngineCameraMovementImpulse, EngineCameraMovementMode, EngineRenderCamera,
     };
     use mclone_ui::{
         GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiScale, Point,
@@ -783,6 +784,21 @@ mod android {
                         );
                     }
                 }
+                GameUiAction::ToggleFly => {
+                    let movement_mode = self.camera.toggle_movement_mode();
+                    log::info!(
+                        "Mclone Android player movement mode {}",
+                        movement_mode.label()
+                    );
+                }
+                GameUiAction::SetFlySpeed(multiplier) => {
+                    self.camera.set_fly_speed_multiplier(f64::from(multiplier));
+                    log::info!(
+                        "Mclone Android fly speed set to {:.1}x ({:.0} blocks/s)",
+                        self.camera.fly_speed_multiplier(),
+                        self.camera.speed_blocks_per_second()
+                    );
+                }
                 GameUiAction::Quit => {
                     result.quit = true;
                 }
@@ -790,10 +806,14 @@ mod android {
                 | GameUiAction::CycleFpsCap
                 | GameUiAction::SetTouchLookSensitivity(_) => {}
                 GameUiAction::StartWorld
+                | GameUiAction::OpenNewWorld
+                | GameUiAction::RerollSeed
+                | GameUiAction::CreateWorld(_)
                 | GameUiAction::Resume
                 | GameUiAction::OpenOptions(_)
                 | GameUiAction::BackToTitle
-                | GameUiAction::BackToPause => {}
+                | GameUiAction::BackToPause
+                | GameUiAction::QuitToTitle => {}
             }
             self.ui.apply_action(action);
             if !self.ui.is_active() {
@@ -811,6 +831,10 @@ mod android {
                 max_render_distance: ANDROID_MAX_RENDER_DISTANCE,
                 section_occlusion_culling: self.render_options.section_occlusion_culling,
                 force_fullbright: self.render_options.force_fullbright,
+                fly_enabled: self.camera.movement_mode() == EngineCameraMovementMode::NoClip,
+                fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
+                min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
+                max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
                 frame_pacing_mode: GameFramePacingMode::Vsync,
                 fps_cap: ANDROID_FIXED_FPS_CAP,
                 touch_settings: None,

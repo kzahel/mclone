@@ -39,6 +39,21 @@ use mclone_render_session::{RenderSectionSession, render_section_neighbor_readin
 pub(crate) type WindowRuntimeStats = SingleViewRuntimeStats;
 pub(crate) type NativeWindowSceneRuntime = NativeSingleViewSceneRuntime<RemoteServerSession>;
 
+#[derive(Clone, Debug)]
+pub(crate) struct WindowSceneAssets {
+    pub(crate) mesh_assets: TexturedMeshAssets,
+    pub(crate) actor_textures: ActorTextureAssets,
+}
+
+impl WindowSceneAssets {
+    pub(crate) fn load() -> Result<Self> {
+        Ok(Self {
+            mesh_assets: load_textured_mesh_assets()?,
+            actor_textures: load_actor_texture_assets()?,
+        })
+    }
+}
+
 fn scene_render_distance(scene: &SceneOptions) -> Result<u32> {
     u32::try_from(scene.render_distance).context("render distance must be non-negative")
 }
@@ -88,19 +103,31 @@ fn local_single_view_options(scene: &SceneOptions) -> Result<LocalSingleViewScen
     .with_lighting_enabled(scene.lighting_enabled))
 }
 
+#[cfg_attr(not(feature = "xr"), allow(dead_code))]
 pub(crate) fn native_window_scene_runtime(
     scene: &SceneOptions,
+) -> Result<NativeWindowSceneRuntime> {
+    native_window_scene_runtime_with_mesh_assets(scene, load_textured_mesh_assets()?)
+}
+
+pub(crate) fn native_window_scene_runtime_with_mesh_assets(
+    scene: &SceneOptions,
+    mesh_assets: TexturedMeshAssets,
 ) -> Result<NativeWindowSceneRuntime> {
     let render_distance = scene_render_distance(scene)?;
     let center = ChunkPos::new(scene.chunk_x, scene.chunk_z);
     let Some(remote_addr) = &scene.remote_addr else {
-        return NativeWindowSceneRuntime::local(local_single_view_options(scene)?);
+        return NativeWindowSceneRuntime::local_with_mesh_assets(
+            local_single_view_options(scene)?,
+            mesh_assets,
+        );
     };
 
     let session = RemoteServerSession::connect(remote_addr.as_str())?;
-    NativeWindowSceneRuntime::remote_dedicated(
+    NativeWindowSceneRuntime::remote_dedicated_with_mesh_assets(
         SingleViewHostOptions::new(center, render_distance),
         session,
+        mesh_assets,
     )
     .with_context(|| {
         format!("failed to initialize desktop remote dedicated runtime from {remote_addr}")
@@ -115,10 +142,13 @@ pub(crate) struct WindowSceneRuntime {
 
 impl WindowSceneRuntime {
     pub(crate) fn new(scene: &SceneOptions) -> Result<Self> {
-        let actor_textures = load_actor_texture_assets()?;
+        Self::with_assets(scene, &WindowSceneAssets::load()?)
+    }
+
+    pub(crate) fn with_assets(scene: &SceneOptions, assets: &WindowSceneAssets) -> Result<Self> {
         Ok(Self {
-            scene: native_window_scene_runtime(scene)?,
-            actor_textures,
+            scene: native_window_scene_runtime_with_mesh_assets(scene, assets.mesh_assets.clone())?,
+            actor_textures: assets.actor_textures.clone(),
         })
     }
 

@@ -27,8 +27,10 @@ use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiRenderer};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render_session::{
+    ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineCameraInput,
-    EngineCameraMovementImpulse, EngineCameraSnapshot, actor_instances_from_presentations,
+    EngineCameraMovementImpulse, EngineCameraMovementMode, EngineCameraSnapshot,
+    actor_instances_from_presentations,
 };
 use mclone_ui::{GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiScale, Point};
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
@@ -780,6 +782,10 @@ where
             max_render_distance: MAX_XR_RENDER_DISTANCE as i32,
             section_occlusion_culling: self.render_options.section_occlusion_culling,
             force_fullbright: self.render_options.force_fullbright,
+            fly_enabled: self.camera.movement_mode() == EngineCameraMovementMode::NoClip,
+            fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
+            min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
+            max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: XR_UI_FPS_CAP,
             touch_settings: None,
@@ -919,6 +925,18 @@ where
                     );
                 }
             }
+            GameUiAction::ToggleFly => {
+                let movement_mode = self.camera.toggle_movement_mode();
+                log::info!("XR player movement mode {}", movement_mode.label());
+            }
+            GameUiAction::SetFlySpeed(multiplier) => {
+                self.camera.set_fly_speed_multiplier(f64::from(multiplier));
+                log::info!(
+                    "XR fly speed set to {:.1}x ({:.0} blocks/s)",
+                    self.camera.fly_speed_multiplier(),
+                    self.camera.speed_blocks_per_second()
+                );
+            }
             GameUiAction::Quit => {
                 log::info!("XR menu quit action ignored by shared scene");
             }
@@ -926,10 +944,14 @@ where
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetTouchLookSensitivity(_) => {}
             GameUiAction::StartWorld
+            | GameUiAction::OpenNewWorld
+            | GameUiAction::RerollSeed
+            | GameUiAction::CreateWorld(_)
             | GameUiAction::Resume
             | GameUiAction::OpenOptions(_)
             | GameUiAction::BackToTitle
-            | GameUiAction::BackToPause => {}
+            | GameUiAction::BackToPause
+            | GameUiAction::QuitToTitle => {}
         }
         self.ui.apply_action(action);
         if !self.ui.is_active() {
@@ -1158,6 +1180,9 @@ pub fn xr_locomotion_input_from_controllers(
     let jump = controllers
         .iter()
         .any(|controller| controller.hand == XrHand::Right && controller.a_pressed);
+    let descend = controllers
+        .iter()
+        .any(|controller| controller.hand == XrHand::Left && controller.y_pressed);
     let movement_impulse = (left_axis.length_squared() > f32::EPSILON)
         .then(|| xr_left_stick_movement_impulse(left_axis));
     let yaw_delta = f64::from(right_axis.x) * XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * dt_seconds;
@@ -1171,6 +1196,7 @@ pub fn xr_locomotion_input_from_controllers(
         dt_seconds,
         mouse_delta_x,
         jump,
+        descend,
         movement_impulse,
         movement_yaw_radians,
         ..EngineCameraInput::default()
@@ -1533,6 +1559,25 @@ mod tests {
     }
 
     #[test]
+    fn xr_locomotion_maps_right_a_button_to_jump() {
+        let right = test_controller(XrHand::Right, Vec2::ZERO, true);
+        let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
+
+        assert!(input.jump);
+        assert!(!input.descend);
+    }
+
+    #[test]
+    fn xr_locomotion_maps_left_y_button_to_descend() {
+        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
+        left.y_pressed = true;
+        let input = xr_locomotion_input_from_controllers(&[left], 1.0 / 72.0, None);
+
+        assert!(input.descend);
+        assert!(!input.jump);
+    }
+
+    #[test]
     fn xr_menu_toggle_uses_left_select_only() {
         let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
         left.select_pressed = true;
@@ -1755,6 +1800,7 @@ mod tests {
             squeeze: 0.0,
             select_pressed: false,
             a_pressed,
+            y_pressed: false,
             thumbstick,
             thumbstick_pressed: false,
         }

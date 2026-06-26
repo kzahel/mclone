@@ -171,6 +171,7 @@ impl HeadlessScreenshotUi {
         match self {
             Self::None => None,
             Self::Title => Some(GameScreen::Title),
+            Self::NewWorld => Some(GameScreen::NewWorld),
             Self::Pause => Some(GameScreen::Pause),
             Self::OptionsTitle => Some(GameScreen::Options {
                 parent: GameOptionsParent::Title,

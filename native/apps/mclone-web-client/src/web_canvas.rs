@@ -35,13 +35,15 @@ use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameTarget;
 use mclone_render_session::{
+    ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
-    EngineRenderCamera, RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport,
-    RenderSectionCompileRequest, RenderSectionCompileResult, RenderSectionCompiler,
-    RenderSectionNeighborReadiness, RenderSectionRemovalMode, RenderSectionSyncPlan,
-    RenderSectionViewSync, actor_instances_from_presentations, build_client_textured_sections,
-    build_render_sections_from_snapshots, decode_textured_render_section_build_report,
-    encode_textured_render_section_build_report, summarize_textured_render_section_build_report,
+    EngineCameraMovementMode, EngineRenderCamera, RenderSectionCacheUpdate,
+    RenderSectionCompileAcceptanceReport, RenderSectionCompileRequest, RenderSectionCompileResult,
+    RenderSectionCompiler, RenderSectionNeighborReadiness, RenderSectionRemovalMode,
+    RenderSectionSyncPlan, RenderSectionViewSync, actor_instances_from_presentations,
+    build_client_textured_sections, build_render_sections_from_snapshots,
+    decode_textured_render_section_build_report, encode_textured_render_section_build_report,
+    summarize_textured_render_section_build_report,
 };
 use mclone_server::ServerRunnerKind;
 use mclone_ui::{
@@ -2667,14 +2669,24 @@ impl WebChunkRenderSession {
             GameUiAction::SetTouchLookSensitivity(look_sensitivity) => {
                 self.touch_look_sensitivity = clamp_touch_look_sensitivity(look_sensitivity);
             }
+            GameUiAction::ToggleFly => {
+                self.camera.toggle_movement_mode();
+            }
+            GameUiAction::SetFlySpeed(multiplier) => {
+                self.camera.set_fly_speed_multiplier(f64::from(multiplier));
+            }
             GameUiAction::Quit => {
                 self.runtime.request_shutdown();
             }
             GameUiAction::StartWorld
+            | GameUiAction::OpenNewWorld
+            | GameUiAction::RerollSeed
+            | GameUiAction::CreateWorld(_)
             | GameUiAction::Resume
             | GameUiAction::OpenOptions(_)
             | GameUiAction::BackToTitle
             | GameUiAction::BackToPause
+            | GameUiAction::QuitToTitle
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetRenderDistance(_) => {}
@@ -2710,11 +2722,17 @@ impl WebChunkRenderSession {
                     set_bool(&object, "shutdownRequested", true)?;
                 }
                 GameUiAction::StartWorld
+                | GameUiAction::OpenNewWorld
+                | GameUiAction::RerollSeed
+                | GameUiAction::CreateWorld(_)
                 | GameUiAction::Resume
                 | GameUiAction::BackToTitle
                 | GameUiAction::BackToPause
+                | GameUiAction::QuitToTitle
                 | GameUiAction::ToggleSectionOcclusion
                 | GameUiAction::ToggleFullbright
+                | GameUiAction::ToggleFly
+                | GameUiAction::SetFlySpeed(_)
                 | GameUiAction::CycleFramePacing
                 | GameUiAction::CycleFpsCap => {}
             }
@@ -2731,6 +2749,10 @@ impl WebChunkRenderSession {
             max_render_distance: WEB_MAX_RENDER_DISTANCE,
             section_occlusion_culling: self.section_occlusion_culling,
             force_fullbright: self.force_fullbright,
+            fly_enabled: self.camera.movement_mode() == EngineCameraMovementMode::NoClip,
+            fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
+            min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
+            max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: WEB_FIXED_FPS_CAP,
             touch_settings: self
@@ -4007,6 +4029,7 @@ fn gui_key_from_label(label: &str) -> Option<GuiKey> {
 fn ui_screen_label(screen: Option<GameScreen>) -> &'static str {
     match screen {
         Some(GameScreen::Title) => "title",
+        Some(GameScreen::NewWorld) => "newWorld",
         Some(GameScreen::Pause) => "pause",
         Some(GameScreen::Options { .. }) => "options",
         None => "none",
@@ -4023,15 +4046,21 @@ fn options_parent_label(parent: GameOptionsParent) -> &'static str {
 fn ui_action_label(action: GameUiAction) -> &'static str {
     match action {
         GameUiAction::StartWorld => "startWorld",
+        GameUiAction::OpenNewWorld => "openNewWorld",
+        GameUiAction::RerollSeed => "rerollSeed",
+        GameUiAction::CreateWorld(_) => "createWorld",
         GameUiAction::Resume => "resume",
         GameUiAction::OpenOptions(_) => "openOptions",
         GameUiAction::BackToTitle => "backToTitle",
         GameUiAction::BackToPause => "backToPause",
+        GameUiAction::QuitToTitle => "quitToTitle",
         GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
         GameUiAction::ToggleFullbright => "toggleFullbright",
+        GameUiAction::ToggleFly => "toggleFly",
         GameUiAction::CycleFramePacing => "cycleFramePacing",
         GameUiAction::CycleFpsCap => "cycleFpsCap",
         GameUiAction::SetRenderDistance(_) => "setRenderDistance",
+        GameUiAction::SetFlySpeed(_) => "setFlySpeed",
         GameUiAction::SetTouchLookSensitivity(_) => "setTouchLookSensitivity",
         GameUiAction::Quit => "quit",
     }

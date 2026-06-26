@@ -590,6 +590,7 @@ pub enum GuiKey {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GameScreen {
     Title,
+    NewWorld,
     Pause,
     Options { parent: GameOptionsParent },
 }
@@ -603,15 +604,21 @@ pub enum GameOptionsParent {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GameUiAction {
     StartWorld,
+    OpenNewWorld,
+    RerollSeed,
+    CreateWorld(i64),
     Resume,
     OpenOptions(GameOptionsParent),
     BackToTitle,
     BackToPause,
+    QuitToTitle,
     ToggleSectionOcclusion,
     ToggleFullbright,
+    ToggleFly,
     CycleFramePacing,
     CycleFpsCap,
     SetRenderDistance(i32),
+    SetFlySpeed(f32),
     SetTouchLookSensitivity(f32),
     Quit,
 }
@@ -673,6 +680,10 @@ pub struct GameUiRenderState {
     pub max_render_distance: i32,
     pub section_occlusion_culling: bool,
     pub force_fullbright: bool,
+    pub fly_enabled: bool,
+    pub fly_speed_multiplier: f32,
+    pub min_fly_speed_multiplier: f32,
+    pub max_fly_speed_multiplier: f32,
     pub frame_pacing_mode: GameFramePacingMode,
     pub fps_cap: u32,
     pub touch_settings: Option<GameTouchSettings>,
@@ -686,6 +697,10 @@ impl Default for GameUiRenderState {
             max_render_distance: 16,
             section_occlusion_culling: true,
             force_fullbright: false,
+            fly_enabled: false,
+            fly_speed_multiplier: 1.0,
+            min_fly_speed_multiplier: 0.5,
+            max_fly_speed_multiplier: 8.0,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: 120,
             touch_settings: None,
@@ -704,6 +719,17 @@ impl GameUiRenderState {
     pub fn clamped_render_distance(self) -> i32 {
         let (min, max) = self.render_distance_limits();
         self.render_distance.clamp(min, max)
+    }
+
+    pub fn fly_speed_multiplier_limits(self) -> (f32, f32) {
+        let min = finite_or(self.min_fly_speed_multiplier, 0.5);
+        let max = finite_or(self.max_fly_speed_multiplier, min);
+        (min.min(max), min.max(max))
+    }
+
+    pub fn clamped_fly_speed_multiplier(self) -> f32 {
+        let (min, max) = self.fly_speed_multiplier_limits();
+        finite_or(self.fly_speed_multiplier, min).clamp(min, max)
     }
 }
 
@@ -884,6 +910,7 @@ pub fn render_touch_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &T
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameUi {
     screen: Option<GameScreen>,
+    new_world_seed: i64,
     pointer: Option<Point>,
     pressed: Option<WidgetId>,
     font: Font,
@@ -903,6 +930,11 @@ const ID_OPTIONS_BACK: WidgetId = WidgetId(10);
 const ID_OPTIONS_FRAME_PACING: WidgetId = WidgetId(11);
 const ID_OPTIONS_FPS_CAP: WidgetId = WidgetId(12);
 const ID_OPTIONS_TOUCH_LOOK: WidgetId = WidgetId(13);
+const ID_OPTIONS_FLY: WidgetId = WidgetId(14);
+const ID_OPTIONS_FLY_SPEED: WidgetId = WidgetId(15);
+const ID_NEW_WORLD_REROLL: WidgetId = WidgetId(16);
+const ID_NEW_WORLD_CREATE: WidgetId = WidgetId(17);
+const ID_NEW_WORLD_BACK: WidgetId = WidgetId(18);
 
 impl Default for GameUi {
     fn default() -> Self {
@@ -914,6 +946,7 @@ impl GameUi {
     pub fn new() -> Self {
         Self {
             screen: Some(GameScreen::Title),
+            new_world_seed: 0,
             pointer: None,
             pressed: None,
             font: Font::default(),
@@ -929,6 +962,14 @@ impl GameUi {
 
     pub fn screen(&self) -> Option<GameScreen> {
         self.screen
+    }
+
+    pub fn new_world_seed(&self) -> i64 {
+        self.new_world_seed
+    }
+
+    pub fn set_new_world_seed(&mut self, seed: i64) {
+        self.new_world_seed = seed;
     }
 
     pub fn scale(&self) -> GuiScale {
@@ -952,7 +993,7 @@ impl GameUi {
     }
 
     pub fn covers_world(&self) -> bool {
-        self.screen == Some(GameScreen::Title)
+        matches!(self.screen, Some(GameScreen::Title | GameScreen::NewWorld))
     }
 
     pub fn open_pause(&mut self) {
@@ -986,6 +1027,7 @@ impl GameUi {
         self.pointer = Some(point);
         let action = match self.pressed {
             Some(ID_OPTIONS_RADIUS) => Some(self.render_distance_action_at(point, state)),
+            Some(ID_OPTIONS_FLY_SPEED) => Some(self.fly_speed_action_at(point, state)),
             Some(ID_OPTIONS_TOUCH_LOOK) => self.touch_look_action_at(point, state),
             _ => None,
         };
@@ -1016,6 +1058,9 @@ impl GameUi {
             (Some(ID_OPTIONS_RADIUS), Some(ID_OPTIONS_RADIUS)) => {
                 Some(self.render_distance_action_at(point, state))
             }
+            (Some(ID_OPTIONS_FLY_SPEED), Some(ID_OPTIONS_FLY_SPEED)) => {
+                Some(self.fly_speed_action_at(point, state))
+            }
             (Some(ID_OPTIONS_TOUCH_LOOK), Some(ID_OPTIONS_TOUCH_LOOK)) => {
                 self.touch_look_action_at(point, state)
             }
@@ -1031,6 +1076,7 @@ impl GameUi {
         };
         match (screen, key) {
             (GameScreen::Pause, GuiKey::Escape) => (true, Some(GameUiAction::Resume)),
+            (GameScreen::NewWorld, GuiKey::Escape) => (true, Some(GameUiAction::BackToTitle)),
             (GameScreen::Options { parent }, GuiKey::Escape) => match parent {
                 GameOptionsParent::Title => (true, Some(GameUiAction::BackToTitle)),
                 GameOptionsParent::Pause => (true, Some(GameUiAction::BackToPause)),
@@ -1042,6 +1088,10 @@ impl GameUi {
     pub fn apply_action(&mut self, action: GameUiAction) {
         match action {
             GameUiAction::StartWorld | GameUiAction::Resume => self.close(),
+            GameUiAction::OpenNewWorld => {
+                self.screen = Some(GameScreen::NewWorld);
+                self.pressed = None;
+            }
             GameUiAction::OpenOptions(parent) => {
                 self.screen = Some(GameScreen::Options { parent });
                 self.pressed = None;
@@ -1050,15 +1100,23 @@ impl GameUi {
                 self.screen = Some(GameScreen::Title);
                 self.pressed = None;
             }
+            GameUiAction::QuitToTitle => {
+                self.screen = Some(GameScreen::Title);
+                self.pressed = None;
+            }
             GameUiAction::BackToPause => {
                 self.screen = Some(GameScreen::Pause);
                 self.pressed = None;
             }
+            GameUiAction::CreateWorld(_) => self.close(),
+            GameUiAction::RerollSeed => {}
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::ToggleFullbright
+            | GameUiAction::ToggleFly
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetRenderDistance(_)
+            | GameUiAction::SetFlySpeed(_)
             | GameUiAction::SetTouchLookSensitivity(_)
             | GameUiAction::Quit => {}
         }
@@ -1068,6 +1126,7 @@ impl GameUi {
         let mut draw = GuiDrawList::new();
         match self.screen {
             Some(GameScreen::Title) => self.render_title(&mut draw),
+            Some(GameScreen::NewWorld) => self.render_new_world(&mut draw),
             Some(GameScreen::Pause) => self.render_pause(&mut draw),
             Some(GameScreen::Options { parent }) => {
                 self.render_options_screen(&mut draw, state, parent)
@@ -1083,6 +1142,10 @@ impl GameUi {
                 .into_iter()
                 .find(|button| button.contains(point))
                 .map(|button| button.id),
+            GameScreen::NewWorld => new_world_buttons(self.scale)
+                .into_iter()
+                .find(|button| button.contains(point))
+                .map(|button| button.id),
             GameScreen::Pause => pause_buttons(self.scale)
                 .into_iter()
                 .find(|button| button.contains(point))
@@ -1093,12 +1156,16 @@ impl GameUi {
                     Some(ID_OPTIONS_OCCLUSION)
                 } else if rects.fullbright.contains(point) {
                     Some(ID_OPTIONS_FULLBRIGHT)
+                } else if rects.fly.contains(point) {
+                    Some(ID_OPTIONS_FLY)
                 } else if rects.frame_pacing.contains(point) {
                     Some(ID_OPTIONS_FRAME_PACING)
                 } else if rects.fps_cap.contains(point) {
                     Some(ID_OPTIONS_FPS_CAP)
                 } else if rects.radius.contains(point) {
                     Some(ID_OPTIONS_RADIUS)
+                } else if rects.fly_speed.contains(point) {
+                    Some(ID_OPTIONS_FLY_SPEED)
                 } else if rects.touch_look.is_some_and(|rect| rect.contains(point)) {
                     Some(ID_OPTIONS_TOUCH_LOOK)
                 } else if rects.back.contains(point) {
@@ -1112,14 +1179,18 @@ impl GameUi {
 
     fn action_for(&self, id: WidgetId) -> Option<GameUiAction> {
         match id {
-            ID_TITLE_START => Some(GameUiAction::StartWorld),
+            ID_TITLE_START => Some(GameUiAction::OpenNewWorld),
             ID_TITLE_OPTIONS => Some(GameUiAction::OpenOptions(GameOptionsParent::Title)),
             ID_TITLE_QUIT => Some(GameUiAction::Quit),
+            ID_NEW_WORLD_REROLL => Some(GameUiAction::RerollSeed),
+            ID_NEW_WORLD_CREATE => Some(GameUiAction::CreateWorld(self.new_world_seed)),
+            ID_NEW_WORLD_BACK => Some(GameUiAction::BackToTitle),
             ID_PAUSE_RESUME => Some(GameUiAction::Resume),
             ID_PAUSE_OPTIONS => Some(GameUiAction::OpenOptions(GameOptionsParent::Pause)),
-            ID_PAUSE_TITLE => Some(GameUiAction::BackToTitle),
+            ID_PAUSE_TITLE => Some(GameUiAction::QuitToTitle),
             ID_OPTIONS_OCCLUSION => Some(GameUiAction::ToggleSectionOcclusion),
             ID_OPTIONS_FULLBRIGHT => Some(GameUiAction::ToggleFullbright),
+            ID_OPTIONS_FLY => Some(GameUiAction::ToggleFly),
             ID_OPTIONS_FRAME_PACING => Some(GameUiAction::CycleFramePacing),
             ID_OPTIONS_FPS_CAP => Some(GameUiAction::CycleFpsCap),
             ID_OPTIONS_BACK => match self.screen {
@@ -1143,6 +1214,19 @@ impl GameUi {
             render_distance_slider_value(state),
         );
         GameUiAction::SetRenderDistance(render_distance_from_slider_value(
+            slider.value_from_point(point),
+            state,
+        ))
+    }
+
+    fn fly_speed_action_at(&self, point: Point, state: GameUiRenderState) -> GameUiAction {
+        let slider = Slider::new(
+            ID_OPTIONS_FLY_SPEED,
+            option_widgets(self.scale, state).fly_speed,
+            "",
+            fly_speed_slider_value(state),
+        );
+        GameUiAction::SetFlySpeed(fly_speed_from_slider_value(
             slider.value_from_point(point),
             state,
         ))
@@ -1205,6 +1289,35 @@ impl GameUi {
         );
     }
 
+    fn render_new_world(&self, draw: &mut GuiDrawList) {
+        draw.fill_gradient(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(24, 44, 51, 255),
+            Color::rgba(7, 10, 12, 255),
+        );
+        draw.fill(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(0, 0, 0, 55),
+        );
+        self.font.draw_centered(
+            draw,
+            "NEW WORLD",
+            self.scale.width * 0.5,
+            self.scale.height * 0.28,
+            Color::rgba(245, 252, 234, 255),
+        );
+        self.font.draw_centered(
+            draw,
+            &format!("Seed: {}", self.new_world_seed),
+            self.scale.width * 0.5,
+            self.scale.height * 0.28 + 22.0,
+            Color::rgba(185, 212, 198, 255),
+        );
+        for button in new_world_buttons(self.scale) {
+            button.render(draw, &self.font, self.interaction());
+        }
+    }
+
     fn render_pause(&self, draw: &mut GuiDrawList) {
         draw.fill(
             Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
@@ -1261,6 +1374,11 @@ impl GameUi {
             state.force_fullbright,
         )
         .render(draw, &self.font, self.interaction());
+        Checkbox::new(ID_OPTIONS_FLY, widgets.fly, "Fly Mode", state.fly_enabled).render(
+            draw,
+            &self.font,
+            self.interaction(),
+        );
         CycleButton::new(
             ID_OPTIONS_FRAME_PACING,
             widgets.frame_pacing,
@@ -1280,6 +1398,13 @@ impl GameUi {
             widgets.radius,
             render_distance_label(state),
             render_distance_slider_value(state),
+        )
+        .render(draw, &self.font, self.interaction());
+        Slider::new(
+            ID_OPTIONS_FLY_SPEED,
+            widgets.fly_speed,
+            fly_speed_label(state),
+            fly_speed_slider_value(state),
         )
         .render(draw, &self.font, self.interaction());
         if let (Some(settings), Some(rect)) = (state.touch_settings, widgets.touch_look) {
@@ -1307,9 +1432,11 @@ impl GameUi {
 struct OptionWidgetRects {
     occlusion: Rect,
     fullbright: Rect,
+    fly: Rect,
     frame_pacing: Rect,
     fps_cap: Rect,
     radius: Rect,
+    fly_speed: Rect,
     touch_look: Option<Rect>,
     back: Rect,
 }
@@ -1328,6 +1455,19 @@ fn title_buttons(scale: GuiScale) -> [Button; 3] {
             "Options",
         ),
         Button::new(ID_TITLE_QUIT, menu_button_rect(scale, y + 48.0), "Quit"),
+    ]
+}
+
+fn new_world_buttons(scale: GuiScale) -> [Button; 3] {
+    let y = scale.height * 0.5 - 4.0;
+    [
+        Button::new(ID_NEW_WORLD_REROLL, menu_button_rect(scale, y), "Reroll"),
+        Button::new(
+            ID_NEW_WORLD_CREATE,
+            menu_button_rect(scale, y + 24.0),
+            "Create World",
+        ),
+        Button::new(ID_NEW_WORLD_BACK, menu_button_rect(scale, y + 48.0), "Back"),
     ]
 }
 
@@ -1351,19 +1491,44 @@ fn pause_buttons(scale: GuiScale) -> [Button; 3] {
 fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRects {
     let panel = options_panel(scale, state);
     let show_touch = state.touch_settings.is_some();
+    let check_x = panel.x + 26.0;
+    let row_x = panel.x + 25.0;
+    let mut y = panel.y + 34.0;
+
+    let occlusion = Rect::new(check_x, y, 190.0, 18.0);
+    y += 20.0;
+    let fullbright = Rect::new(check_x, y, 190.0, 18.0);
+    y += 20.0;
+    let fly = Rect::new(check_x, y, 190.0, 18.0);
+    y += 24.0;
+    let frame_pacing = Rect::new(row_x, y, 192.0, 20.0);
+    y += 22.0;
+    let fps_cap = Rect::new(row_x, y, 192.0, 20.0);
+    y += 22.0;
+    let radius = Rect::new(row_x, y, 192.0, 20.0);
+    y += 22.0;
+    let fly_speed = Rect::new(row_x, y, 192.0, 20.0);
+    y += 22.0;
+    let touch_look = if show_touch {
+        let rect = Rect::new(row_x, y, 192.0, 20.0);
+        y += 22.0;
+        Some(rect)
+    } else {
+        None
+    };
+    y += 6.0;
+    let back = Rect::new(panel.center_x() - 55.0, y, 110.0, 20.0);
+
     OptionWidgetRects {
-        occlusion: Rect::new(panel.x + 26.0, panel.y + 38.0, 190.0, 18.0),
-        fullbright: Rect::new(panel.x + 26.0, panel.y + 60.0, 190.0, 18.0),
-        frame_pacing: Rect::new(panel.x + 25.0, panel.y + 84.0, 192.0, 20.0),
-        fps_cap: Rect::new(panel.x + 25.0, panel.y + 108.0, 192.0, 20.0),
-        radius: Rect::new(panel.x + 25.0, panel.y + 132.0, 192.0, 20.0),
-        touch_look: show_touch.then_some(Rect::new(panel.x + 25.0, panel.y + 156.0, 192.0, 20.0)),
-        back: Rect::new(
-            panel.center_x() - 55.0,
-            panel.y + if show_touch { 184.0 } else { 160.0 },
-            110.0,
-            20.0,
-        ),
+        occlusion,
+        fullbright,
+        fly,
+        frame_pacing,
+        fps_cap,
+        radius,
+        fly_speed,
+        touch_look,
+        back,
     }
 }
 
@@ -1372,9 +1537,9 @@ fn options_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
         scale,
         242.0,
         if state.touch_settings.is_some() {
-            214.0
+            244.0
         } else {
-            190.0
+            222.0
         },
     )
 }
@@ -1401,6 +1566,29 @@ fn render_distance_label(state: GameUiRenderState) -> String {
     let radius = state.clamped_render_distance();
     let suffix = if radius == 1 { "chunk" } else { "chunks" };
     format!("Render Distance: {radius} {suffix}")
+}
+
+fn fly_speed_slider_value(state: GameUiRenderState) -> f32 {
+    let (min, max) = state.fly_speed_multiplier_limits();
+    if max <= min || min <= 0.0 {
+        0.0
+    } else {
+        (state.clamped_fly_speed_multiplier().ln() - min.ln()) / (max.ln() - min.ln())
+    }
+}
+
+fn fly_speed_from_slider_value(value: f32, state: GameUiRenderState) -> f32 {
+    let (min, max) = state.fly_speed_multiplier_limits();
+    if max <= min || min <= 0.0 {
+        min
+    } else {
+        let raw = (min.ln() + value.clamp(0.0, 1.0) * (max.ln() - min.ln())).exp();
+        ((raw * 10.0).round() / 10.0).clamp(min, max)
+    }
+}
+
+fn fly_speed_label(state: GameUiRenderState) -> String {
+    format!("Fly Speed: {:.1}x", state.clamped_fly_speed_multiplier())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1771,6 +1959,47 @@ mod tests {
     }
 
     #[test]
+    fn game_ui_new_world_flow_emits_seeded_create_action() {
+        let mut ui = GameUi::new();
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState::default();
+        let click = |rect: Rect| Point {
+            x: rect.center_x(),
+            y: rect.y + rect.height * 0.5,
+        };
+
+        let start = click(title_buttons(ui.scale())[0].rect);
+        assert!(ui.pointer_down(start, state));
+        let (_handled, action) = ui.pointer_up(start, state);
+        assert_eq!(action, Some(GameUiAction::OpenNewWorld));
+        ui.apply_action(action.unwrap());
+        assert_eq!(ui.screen(), Some(GameScreen::NewWorld));
+        assert!(ui.covers_world());
+
+        ui.set_new_world_seed(12345);
+        let buttons = new_world_buttons(ui.scale());
+        let reroll = click(buttons[0].rect);
+        assert!(ui.pointer_down(reroll, state));
+        let (_handled, action) = ui.pointer_up(reroll, state);
+        assert_eq!(action, Some(GameUiAction::RerollSeed));
+
+        let create = click(buttons[1].rect);
+        assert!(ui.pointer_down(create, state));
+        let (_handled, action) = ui.pointer_up(create, state);
+        assert_eq!(action, Some(GameUiAction::CreateWorld(12345)));
+        ui.apply_action(action.unwrap());
+        assert_eq!(ui.screen(), None);
+
+        ui.set_screen(Some(GameScreen::NewWorld));
+        let back = click(buttons[2].rect);
+        assert!(ui.pointer_down(back, state));
+        let (_handled, action) = ui.pointer_up(back, state);
+        assert_eq!(action, Some(GameUiAction::BackToTitle));
+        ui.apply_action(action.unwrap());
+        assert_eq!(ui.screen(), Some(GameScreen::Title));
+    }
+
+    #[test]
     fn debug_overlay_renders_title_and_lines() {
         let overlay = DebugOverlay::new("DEBUG", ["POS 1.0 64.0 -2.0", "CHUNKS 9"]);
         let mut draw = GuiDrawList::new();
@@ -1916,5 +2145,56 @@ mod tests {
 
         let state = GameUiRenderState::default();
         assert!(option_widgets(ui.scale(), state).touch_look.is_none());
+    }
+
+    #[test]
+    fn game_ui_options_fly_checkbox_emits_toggle_fly_action() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState::default();
+
+        let fly = option_widgets(ui.scale(), state).fly;
+        let point = Point {
+            x: fly.x + fly.width * 0.5,
+            y: fly.y + fly.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(action, Some(GameUiAction::ToggleFly));
+    }
+
+    #[test]
+    fn game_ui_options_fly_speed_slider_emits_fly_speed_action() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            fly_speed_multiplier: 1.0,
+            min_fly_speed_multiplier: 0.5,
+            max_fly_speed_multiplier: 8.0,
+            ..GameUiRenderState::default()
+        };
+
+        let fly_speed = option_widgets(ui.scale(), state).fly_speed;
+        let point = Point {
+            x: fly_speed.right() - 0.1,
+            y: fly_speed.y + fly_speed.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(action, Some(GameUiAction::SetFlySpeed(8.0)));
+
+        let point = Point {
+            x: fly_speed.x,
+            y: fly_speed.y + fly_speed.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(action, Some(GameUiAction::SetFlySpeed(0.5)));
     }
 }

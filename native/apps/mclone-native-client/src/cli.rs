@@ -136,9 +136,17 @@ pub(crate) enum HeadlessScreenshotUi {
     #[default]
     None,
     Title,
+    NewWorld,
     Pause,
     OptionsTitle,
     OptionsPause,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum WindowStartIntent {
+    #[default]
+    InWorld,
+    Menu,
 }
 
 impl Default for MovementPerfOptions {
@@ -203,6 +211,7 @@ pub(crate) enum Cli {
     Window {
         scene: SceneOptions,
         render_options: TexturedSectionRenderOptions,
+        start_intent: WindowStartIntent,
     },
     HeadlessClear {
         path: PathBuf,
@@ -274,6 +283,7 @@ impl Cli {
         let mut screenshot_scripted_interaction = false;
         let mut screenshot_remote_settle_ms = 0;
         let mut screenshot_eye = None;
+        let mut window_start_intent = WindowStartIntent::InWorld;
         let mut movement_perf = false;
         let mut timedemo = false;
         let mut frame_budget_probe = false;
@@ -443,6 +453,16 @@ impl Cli {
                 "--screenshot-eye" => {
                     screenshot_eye = Some(parse_f32_vec3_arg("--screenshot-eye", args.next())?);
                 }
+                "--menu" => {
+                    window_start_intent = WindowStartIntent::Menu;
+                }
+                "--start-in-world" => {
+                    window_start_intent = if parse_bool_arg("--start-in-world", args.next())? {
+                        WindowStartIntent::InWorld
+                    } else {
+                        WindowStartIntent::Menu
+                    };
+                }
                 "--width" => width = Some(parse_u32_arg("--width", args.next())?),
                 "--height" => height = Some(parse_u32_arg("--height", args.next())?),
                 "--seed" => scene.seed = parse_i64_arg("--seed", args.next())?,
@@ -580,6 +600,11 @@ impl Cli {
         if (xr_clear_smoke || xr_mclone_smoke) && (mode.is_some() || perf_mode_count > 0) {
             bail!("XR smoke modes cannot be combined with headless or perf modes");
         }
+        if window_start_intent == WindowStartIntent::Menu
+            && (mode.is_some() || perf_mode_count > 0 || xr_clear_smoke || xr_mclone_smoke)
+        {
+            bail!("--menu/--start-in-world false only apply to window mode");
+        }
         if xr_frames_explicit && !xr_clear_smoke && !xr_mclone_smoke {
             bail!("--frames requires --xr-clear-smoke or --xr-mclone-smoke");
         }
@@ -696,6 +721,7 @@ impl Cli {
             None => Ok(Self::Window {
                 scene,
                 render_options,
+                start_intent: window_start_intent,
             }),
         }
     }
@@ -902,16 +928,17 @@ pub(crate) fn parse_screenshot_ui_arg(
     value: Option<String>,
 ) -> Result<HeadlessScreenshotUi> {
     let value = value.with_context(|| {
-        format!("{flag} requires none, title, pause, options-title, or options-pause")
+        format!("{flag} requires none, title, new-world, pause, options-title, or options-pause")
     })?;
     match value.as_str() {
         "none" | "off" | "false" | "0" => Ok(HeadlessScreenshotUi::None),
         "title" => Ok(HeadlessScreenshotUi::Title),
+        "new-world" | "new_world" => Ok(HeadlessScreenshotUi::NewWorld),
         "pause" => Ok(HeadlessScreenshotUi::Pause),
         "options-title" | "options_title" => Ok(HeadlessScreenshotUi::OptionsTitle),
         "options-pause" | "options_pause" | "options" => Ok(HeadlessScreenshotUi::OptionsPause),
         _ => bail!(
-            "{flag} must be none, title, pause, options-title, or options-pause, got `{value}`"
+            "{flag} must be none, title, new-world, pause, options-title, or options-pause, got `{value}`"
         ),
     }
 }
@@ -920,10 +947,10 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false]\n\
+          mclone-native-client [--menu|--start-in-world true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --headless-ui /tmp/mclone-ui-title.png [--width 960] [--height 540]\n\
-           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|new-world|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\

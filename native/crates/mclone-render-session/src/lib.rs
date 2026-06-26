@@ -874,6 +874,11 @@ pub fn finish_render_section_compile_result(
 pub const ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND: f64 = 32.0;
 pub const ENGINE_CAMERA_MIN_SPEED_BLOCKS_PER_SECOND: f64 = 2.0;
 pub const ENGINE_CAMERA_MAX_SPEED_BLOCKS_PER_SECOND: f64 = 256.0;
+/// Fly-speed range exposed to the in-game menu, expressed as a multiplier of the
+/// base speed. The range is symmetric in log space so a 1.0x multiplier sits at
+/// the slider's midpoint.
+pub const ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER: f64 = 0.125;
+pub const ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER: f64 = 8.0;
 pub const ENGINE_CAMERA_MOUSE_SENSITIVITY: f64 = 0.0035;
 pub const ENGINE_CAMERA_SPAWN_Y: f64 = 104.0;
 pub const ENGINE_CAMERA_SPAWN_YAW_RADIANS: f64 = 0.55;
@@ -1203,6 +1208,20 @@ impl EngineCameraController {
 
     pub fn set_speed_blocks_per_second(&mut self, speed_blocks_per_second: f64) {
         self.speed_blocks_per_second = clamp_camera_speed(speed_blocks_per_second);
+    }
+
+    /// Current fly speed expressed as a multiplier of the base speed.
+    pub fn fly_speed_multiplier(&self) -> f64 {
+        self.speed_blocks_per_second / ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND
+    }
+
+    /// Set the fly speed from a multiplier of the base speed. The resulting
+    /// speed is clamped to the engine's absolute speed limits.
+    pub fn set_fly_speed_multiplier(&mut self, multiplier: f64) {
+        if !multiplier.is_finite() {
+            return;
+        }
+        self.set_speed_blocks_per_second(multiplier * ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND);
     }
 
     pub fn adjust_speed(&mut self, wheel_amount: f64) {

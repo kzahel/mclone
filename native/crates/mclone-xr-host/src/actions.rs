@@ -18,6 +18,7 @@ pub struct XrControllerSnapshot {
     pub squeeze: f32,
     pub select_pressed: bool,
     pub a_pressed: bool,
+    pub y_pressed: bool,
     pub thumbstick: Vec2,
     pub thumbstick_pressed: bool,
 }
@@ -39,6 +40,7 @@ pub struct OpenXrControllerActions {
     left_select: xr::Action<bool>,
     right_select: xr::Action<bool>,
     right_a_click: xr::Action<bool>,
+    left_y_click: xr::Action<bool>,
     left_thumbstick_x: xr::Action<f32>,
     left_thumbstick_y: xr::Action<f32>,
     right_thumbstick_x: xr::Action<f32>,
@@ -81,6 +83,8 @@ impl OpenXrControllerActions {
         let right_select = action_set.create_action::<bool>("right_select", "Right Select", &[])?;
         let right_a_click =
             action_set.create_action::<bool>("right_a_click", "Right A Button", &[])?;
+        let left_y_click =
+            action_set.create_action::<bool>("left_y_click", "Left Y Button", &[])?;
         let left_thumbstick_x =
             action_set.create_action::<f32>("left_thumbstick_x", "Left Thumbstick X", &[])?;
         let left_thumbstick_y =
@@ -123,6 +127,7 @@ impl OpenXrControllerActions {
             &left_select,
             &right_select,
             &right_a_click,
+            &left_y_click,
             &left_thumbstick_x,
             &left_thumbstick_y,
             &right_thumbstick_x,
@@ -160,6 +165,7 @@ impl OpenXrControllerActions {
             left_select,
             right_select,
             right_a_click,
+            left_y_click,
             left_thumbstick_x,
             left_thumbstick_y,
             right_thumbstick_x,
@@ -250,6 +256,7 @@ impl OpenXrControllerActions {
         left_select: &xr::Action<bool>,
         right_select: &xr::Action<bool>,
         right_a_click: &xr::Action<bool>,
+        left_y_click: &xr::Action<bool>,
         left_thumbstick_x: &xr::Action<f32>,
         left_thumbstick_y: &xr::Action<f32>,
         right_thumbstick_x: &xr::Action<f32>,
@@ -299,7 +306,7 @@ impl OpenXrControllerActions {
                 instance.string_to_path("/user/hand/left/input/x/click")?,
             ),
             xr::Binding::new(
-                left_select,
+                left_y_click,
                 instance.string_to_path("/user/hand/left/input/y/click")?,
             ),
             xr::Binding::new(
@@ -380,6 +387,7 @@ impl OpenXrControllerActions {
             thumbstick_y_action,
             thumbstick_click_action,
             a_click_action,
+            y_click_action,
         ) = match hand {
             XrHand::Left => (
                 &self.left_aim,
@@ -393,6 +401,7 @@ impl OpenXrControllerActions {
                 &self.left_thumbstick_y,
                 &self.left_thumbstick_click,
                 None,
+                Some(&self.left_y_click),
             ),
             XrHand::Right => (
                 &self.right_aim,
@@ -406,6 +415,7 @@ impl OpenXrControllerActions {
                 &self.right_thumbstick_y,
                 &self.right_thumbstick_click,
                 Some(&self.right_a_click),
+                None,
             ),
         };
 
@@ -435,6 +445,9 @@ impl OpenXrControllerActions {
             squeeze: Self::read_float_action(session, squeeze_action),
             select_pressed: Self::read_bool_action(session, select_action),
             a_pressed: a_click_action
+                .map(|action| Self::read_bool_action(session, action))
+                .unwrap_or(false),
+            y_pressed: y_click_action
                 .map(|action| Self::read_bool_action(session, action))
                 .unwrap_or(false),
             thumbstick: Vec2::new(

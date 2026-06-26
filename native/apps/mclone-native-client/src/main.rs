@@ -25,7 +25,7 @@ use crate::cli::Cli;
 use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessDualViewOptions,
     HeadlessScreenshotOptions, HeadlessScreenshotUi, MovementPerfOptions, SceneOptions,
-    TimedemoOptions, XrClearSmokeOptions, XrMcloneSmokeOptions, XrViewPose,
+    TimedemoOptions, WindowStartIntent, XrClearSmokeOptions, XrMcloneSmokeOptions, XrViewPose,
     parse_screenshot_ui_arg,
 };
 use crate::headless::{
@@ -212,7 +212,8 @@ fn main() -> Result<()> {
         Cli::Window {
             scene,
             render_options,
-        } => run_window(scene, render_options),
+            start_intent,
+        } => run_window(scene, render_options, start_intent),
     }
 }
 
@@ -301,6 +302,28 @@ mod tests {
             Cli::Window {
                 scene: SceneOptions::default(),
                 render_options: TexturedSectionRenderOptions::default(),
+                start_intent: WindowStartIntent::InWorld,
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_window_menu_start_intent() {
+        assert_eq!(
+            Cli::parse(["--menu".to_owned()]).unwrap(),
+            Cli::Window {
+                scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions::default(),
+                start_intent: WindowStartIntent::Menu,
+            }
+        );
+
+        assert_eq!(
+            Cli::parse(["--start-in-world".to_owned(), "false".to_owned()]).unwrap(),
+            Cli::Window {
+                scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions::default(),
+                start_intent: WindowStartIntent::Menu,
             }
         );
     }
@@ -663,6 +686,10 @@ mod tests {
             HeadlessScreenshotUi::Title
         );
         assert_eq!(
+            parse_screenshot_ui_arg("--screenshot-ui", Some("new-world".to_owned())).unwrap(),
+            HeadlessScreenshotUi::NewWorld
+        );
+        assert_eq!(
             parse_screenshot_ui_arg("--screenshot-ui", Some("options-title".to_owned())).unwrap(),
             HeadlessScreenshotUi::OptionsTitle
         );
@@ -782,6 +809,7 @@ mod tests {
             Cli::Window {
                 scene: SceneOptions::default(),
                 render_options: TexturedSectionRenderOptions::default(),
+                start_intent: WindowStartIntent::InWorld,
             }
         );
     }
@@ -821,6 +849,7 @@ mod tests {
             Cli::Window {
                 scene: SceneOptions::default(),
                 render_options: TexturedSectionRenderOptions::default(),
+                start_intent: WindowStartIntent::InWorld,
             }
         );
     }
@@ -840,6 +869,7 @@ mod tests {
                     force_fullbright: true,
                     ..TexturedSectionRenderOptions::default()
                 },
+                start_intent: WindowStartIntent::InWorld,
             }
         );
 
@@ -857,6 +887,7 @@ mod tests {
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),
+                start_intent: WindowStartIntent::InWorld,
             }
         );
     }
