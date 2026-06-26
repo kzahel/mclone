@@ -1,27 +1,27 @@
 use anyhow::{Context, Result};
-use glam::{Quat, Vec2, Vec3};
+use glam::{Vec2, Vec3};
 use openxr as xr;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum XrHand {
+pub enum XrHand {
     Left,
     Right,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct XrControllerSnapshot {
-    pub(super) hand: XrHand,
-    pub(super) aim_position: Option<Vec3>,
-    pub(super) grip_position: Option<Vec3>,
-    pub(super) trigger: f32,
-    pub(super) squeeze: f32,
-    pub(super) select_pressed: bool,
-    pub(super) a_pressed: bool,
-    pub(super) thumbstick: Vec2,
-    pub(super) thumbstick_pressed: bool,
+pub struct XrControllerSnapshot {
+    pub hand: XrHand,
+    pub aim_position: Option<Vec3>,
+    pub grip_position: Option<Vec3>,
+    pub trigger: f32,
+    pub squeeze: f32,
+    pub select_pressed: bool,
+    pub a_pressed: bool,
+    pub thumbstick: Vec2,
+    pub thumbstick_pressed: bool,
 }
 
-pub(super) struct OpenXrControllerActions {
+pub struct OpenXrControllerActions {
     action_set: xr::ActionSet,
     left_aim: xr::Action<xr::Posef>,
     right_aim: xr::Action<xr::Posef>,
@@ -47,10 +47,22 @@ pub(super) struct OpenXrControllerActions {
 }
 
 impl OpenXrControllerActions {
-    pub(super) fn create<G: xr::Graphics>(
+    pub fn create<G: xr::Graphics>(
         instance: &xr::Instance,
         session: &xr::Session<G>,
     ) -> Result<Self> {
+        Self::create_with_binding_logger(instance, session, |_, _| {})
+    }
+
+    pub fn create_with_binding_logger<G, F>(
+        instance: &xr::Instance,
+        session: &xr::Session<G>,
+        mut on_binding_warning: F,
+    ) -> Result<Self>
+    where
+        G: xr::Graphics,
+        F: FnMut(&'static str, xr::sys::Result),
+    {
         let action_set = instance
             .create_action_set("mclone_input", "mclone input", 0)
             .context("create OpenXR mclone input action set")?;
@@ -95,6 +107,7 @@ impl OpenXrControllerActions {
             &right_grip,
             &left_select,
             &right_select,
+            &mut on_binding_warning,
         )?;
         Self::suggest_touch_controller_bindings(
             instance,
@@ -115,6 +128,7 @@ impl OpenXrControllerActions {
             &right_thumbstick_y,
             &left_thumbstick_click,
             &right_thumbstick_click,
+            &mut on_binding_warning,
         )?;
 
         session
@@ -127,10 +141,6 @@ impl OpenXrControllerActions {
             left_grip.create_space(session, xr::Path::NULL, xr::Posef::IDENTITY)?;
         let right_grip_space =
             right_grip.create_space(session, xr::Path::NULL, xr::Posef::IDENTITY)?;
-
-        println!(
-            "OpenXR controller actions: requested binding profiles=simple_controller, oculus_touch, valve_index, htc_vive, microsoft_motion_controller"
-        );
 
         Ok(Self {
             action_set,
@@ -158,7 +168,7 @@ impl OpenXrControllerActions {
         })
     }
 
-    pub(super) fn poll<G: xr::Graphics>(
+    pub fn poll<G: xr::Graphics>(
         &self,
         session: &xr::Session<G>,
         stage: &xr::Space,
@@ -177,7 +187,7 @@ impl OpenXrControllerActions {
         Ok(snapshots)
     }
 
-    fn suggest_simple_controller_bindings(
+    fn suggest_simple_controller_bindings<F>(
         instance: &xr::Instance,
         left_aim: &xr::Action<xr::Posef>,
         right_aim: &xr::Action<xr::Posef>,
@@ -185,7 +195,11 @@ impl OpenXrControllerActions {
         right_grip: &xr::Action<xr::Posef>,
         left_select: &xr::Action<bool>,
         right_select: &xr::Action<bool>,
-    ) -> Result<()> {
+        on_binding_warning: &mut F,
+    ) -> Result<()>
+    where
+        F: FnMut(&'static str, xr::sys::Result),
+    {
         let bindings = [
             xr::Binding::new(
                 left_aim,
@@ -216,12 +230,13 @@ impl OpenXrControllerActions {
             instance,
             "/interaction_profiles/khr/simple_controller",
             &bindings,
+            on_binding_warning,
         );
         Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn suggest_touch_controller_bindings(
+    fn suggest_touch_controller_bindings<F>(
         instance: &xr::Instance,
         left_aim: &xr::Action<xr::Posef>,
         right_aim: &xr::Action<xr::Posef>,
@@ -240,7 +255,11 @@ impl OpenXrControllerActions {
         right_thumbstick_y: &xr::Action<f32>,
         left_thumbstick_click: &xr::Action<bool>,
         right_thumbstick_click: &xr::Action<bool>,
-    ) -> Result<()> {
+        on_binding_warning: &mut F,
+    ) -> Result<()>
+    where
+        F: FnMut(&'static str, xr::sys::Result),
+    {
         let bindings = vec![
             xr::Binding::new(
                 left_aim,
@@ -321,17 +340,23 @@ impl OpenXrControllerActions {
             "/interaction_profiles/htc/vive_controller",
             "/interaction_profiles/microsoft/motion_controller",
         ] {
-            Self::suggest_bindings(instance, profile, &bindings);
+            Self::suggest_bindings(instance, profile, &bindings, on_binding_warning);
         }
         Ok(())
     }
 
-    fn suggest_bindings(instance: &xr::Instance, profile: &str, bindings: &[xr::Binding<'_>]) {
-        match instance.string_to_path(profile).and_then(|profile_path| {
+    fn suggest_bindings<F>(
+        instance: &xr::Instance,
+        profile: &'static str,
+        bindings: &[xr::Binding<'_>],
+        on_binding_warning: &mut F,
+    ) where
+        F: FnMut(&'static str, xr::sys::Result),
+    {
+        if let Err(err) = instance.string_to_path(profile).and_then(|profile_path| {
             instance.suggest_interaction_profile_bindings(profile_path, bindings)
         }) {
-            Ok(()) => {}
-            Err(err) => println!("OpenXR binding suggestion unavailable for {profile}: {err:?}"),
+            on_binding_warning(profile, err);
         }
     }
 
@@ -428,15 +453,20 @@ impl OpenXrControllerActions {
         {
             return None;
         }
-        let (_, rotation) = openxr_pose_to_glam(location.pose);
-        if !rotation.is_finite() {
-            return None;
-        }
-        Some(Vec3::new(
+        let position = Vec3::new(
             location.pose.position.x,
             location.pose.position.y,
             location.pose.position.z,
-        ))
+        );
+        if !position.is_finite()
+            || !location.pose.orientation.x.is_finite()
+            || !location.pose.orientation.y.is_finite()
+            || !location.pose.orientation.z.is_finite()
+            || !location.pose.orientation.w.is_finite()
+        {
+            return None;
+        }
+        Some(position)
     }
 
     fn read_float_action<G: xr::Graphics>(
@@ -462,102 +492,4 @@ impl OpenXrControllerActions {
             .map(|state| state.current_state)
             .unwrap_or(false)
     }
-}
-
-#[derive(Default)]
-pub(super) struct XrControllerInputSummary {
-    frames_polled: u32,
-    left_active_frames: u32,
-    right_active_frames: u32,
-    left_tracked_frames: u32,
-    right_tracked_frames: u32,
-    max_trigger: f32,
-    max_squeeze: f32,
-    max_thumbstick: f32,
-    select_pressed_frames: u32,
-    a_pressed_frames: u32,
-    latest_left: Option<XrControllerSnapshot>,
-    latest_right: Option<XrControllerSnapshot>,
-}
-
-impl XrControllerInputSummary {
-    pub(super) fn record(&mut self, snapshots: &[XrControllerSnapshot]) {
-        self.frames_polled += 1;
-        for snapshot in snapshots {
-            let tracked = snapshot.aim_position.is_some() || snapshot.grip_position.is_some();
-            match snapshot.hand {
-                XrHand::Left => {
-                    self.left_active_frames += 1;
-                    self.left_tracked_frames += u32::from(tracked);
-                    self.latest_left = Some(*snapshot);
-                }
-                XrHand::Right => {
-                    self.right_active_frames += 1;
-                    self.right_tracked_frames += u32::from(tracked);
-                    self.latest_right = Some(*snapshot);
-                }
-            }
-            self.max_trigger = self.max_trigger.max(snapshot.trigger);
-            self.max_squeeze = self.max_squeeze.max(snapshot.squeeze);
-            self.max_thumbstick = self.max_thumbstick.max(snapshot.thumbstick.length());
-            self.select_pressed_frames += u32::from(snapshot.select_pressed);
-            self.a_pressed_frames += u32::from(snapshot.a_pressed);
-        }
-    }
-
-    pub(super) fn print_summary(&self) {
-        println!(
-            "OpenXR controller input summary: frames_polled={} left_active={} right_active={} left_tracked={} right_tracked={} max_trigger={:.3} max_squeeze={:.3} max_thumbstick={:.3} select_pressed_frames={} a_pressed_frames={}",
-            self.frames_polled,
-            self.left_active_frames,
-            self.right_active_frames,
-            self.left_tracked_frames,
-            self.right_tracked_frames,
-            self.max_trigger,
-            self.max_squeeze,
-            self.max_thumbstick,
-            self.select_pressed_frames,
-            self.a_pressed_frames
-        );
-        if let Some(left) = self.latest_left {
-            println!("OpenXR controller latest left: {}", format_snapshot(left));
-        }
-        if let Some(right) = self.latest_right {
-            println!("OpenXR controller latest right: {}", format_snapshot(right));
-        }
-    }
-}
-
-fn format_snapshot(snapshot: XrControllerSnapshot) -> String {
-    format!(
-        "aim={} grip={} trigger={:.3} squeeze={:.3} select={} a={} thumbstick=({:.3}, {:.3}) thumbstick_pressed={}",
-        format_position(snapshot.aim_position),
-        format_position(snapshot.grip_position),
-        snapshot.trigger,
-        snapshot.squeeze,
-        snapshot.select_pressed,
-        snapshot.a_pressed,
-        snapshot.thumbstick.x,
-        snapshot.thumbstick.y,
-        snapshot.thumbstick_pressed
-    )
-}
-
-fn format_position(position: Option<Vec3>) -> String {
-    position
-        .map(|position| format!("({:.3}, {:.3}, {:.3})", position.x, position.y, position.z))
-        .unwrap_or_else(|| "untracked".to_owned())
-}
-
-fn openxr_pose_to_glam(pose: xr::Posef) -> (Vec3, Quat) {
-    (
-        Vec3::new(pose.position.x, pose.position.y, pose.position.z),
-        Quat::from_xyzw(
-            pose.orientation.x,
-            pose.orientation.y,
-            pose.orientation.z,
-            pose.orientation.w,
-        )
-        .normalize(),
-    )
 }

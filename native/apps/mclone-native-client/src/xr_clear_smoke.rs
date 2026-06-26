@@ -42,7 +42,8 @@ use mclone_render_session::{
 use mclone_ui::GuiDrawList;
 #[cfg(not(target_os = "android"))]
 use mclone_xr_host::{
-    OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE, XrFrameStats, XrStereoConfig,
+    OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
+    XrControllerSnapshot, XrFrameStats, XrHand, XrStereoConfig,
 };
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
@@ -55,14 +56,10 @@ use crate::frame_pacing::elapsed_ms;
 #[cfg(not(target_os = "android"))]
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 
-#[cfg(not(target_os = "android"))]
-mod actions;
 #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
 mod graphics_metal;
 #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
 mod graphics_vulkan;
-#[cfg(not(target_os = "android"))]
-use actions::{OpenXrControllerActions, XrControllerInputSummary, XrControllerSnapshot, XrHand};
 #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
 use graphics_metal as platform_graphics;
 #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
@@ -314,6 +311,95 @@ fn log_openxr_host_event(event: OpenXrHostEvent) {
 }
 
 #[cfg(not(target_os = "android"))]
+#[derive(Default)]
+struct XrControllerInputSummary {
+    frames_polled: u32,
+    left_active_frames: u32,
+    right_active_frames: u32,
+    left_tracked_frames: u32,
+    right_tracked_frames: u32,
+    max_trigger: f32,
+    max_squeeze: f32,
+    max_thumbstick: f32,
+    select_pressed_frames: u32,
+    a_pressed_frames: u32,
+    latest_left: Option<XrControllerSnapshot>,
+    latest_right: Option<XrControllerSnapshot>,
+}
+
+#[cfg(not(target_os = "android"))]
+impl XrControllerInputSummary {
+    fn record(&mut self, snapshots: &[XrControllerSnapshot]) {
+        self.frames_polled += 1;
+        for snapshot in snapshots {
+            let tracked = snapshot.aim_position.is_some() || snapshot.grip_position.is_some();
+            match snapshot.hand {
+                XrHand::Left => {
+                    self.left_active_frames += 1;
+                    self.left_tracked_frames += u32::from(tracked);
+                    self.latest_left = Some(*snapshot);
+                }
+                XrHand::Right => {
+                    self.right_active_frames += 1;
+                    self.right_tracked_frames += u32::from(tracked);
+                    self.latest_right = Some(*snapshot);
+                }
+            }
+            self.max_trigger = self.max_trigger.max(snapshot.trigger);
+            self.max_squeeze = self.max_squeeze.max(snapshot.squeeze);
+            self.max_thumbstick = self.max_thumbstick.max(snapshot.thumbstick.length());
+            self.select_pressed_frames += u32::from(snapshot.select_pressed);
+            self.a_pressed_frames += u32::from(snapshot.a_pressed);
+        }
+    }
+
+    fn print_summary(&self) {
+        println!(
+            "OpenXR controller input summary: frames_polled={} left_active={} right_active={} left_tracked={} right_tracked={} max_trigger={:.3} max_squeeze={:.3} max_thumbstick={:.3} select_pressed_frames={} a_pressed_frames={}",
+            self.frames_polled,
+            self.left_active_frames,
+            self.right_active_frames,
+            self.left_tracked_frames,
+            self.right_tracked_frames,
+            self.max_trigger,
+            self.max_squeeze,
+            self.max_thumbstick,
+            self.select_pressed_frames,
+            self.a_pressed_frames
+        );
+        if let Some(left) = self.latest_left {
+            println!("OpenXR controller latest left: {}", format_snapshot(left));
+        }
+        if let Some(right) = self.latest_right {
+            println!("OpenXR controller latest right: {}", format_snapshot(right));
+        }
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn format_snapshot(snapshot: XrControllerSnapshot) -> String {
+    format!(
+        "aim={} grip={} trigger={:.3} squeeze={:.3} select={} a={} thumbstick=({:.3}, {:.3}) thumbstick_pressed={}",
+        format_position(snapshot.aim_position),
+        format_position(snapshot.grip_position),
+        snapshot.trigger,
+        snapshot.squeeze,
+        snapshot.select_pressed,
+        snapshot.a_pressed,
+        snapshot.thumbstick.x,
+        snapshot.thumbstick.y,
+        snapshot.thumbstick_pressed
+    )
+}
+
+#[cfg(not(target_os = "android"))]
+fn format_position(position: Option<Vec3>) -> String {
+    position
+        .map(|position| format!("({:.3}, {:.3}, {:.3})", position.x, position.y, position.z))
+        .unwrap_or_else(|| "untracked".to_owned())
+}
+
+#[cfg(not(target_os = "android"))]
 fn run_smoke_frames(
     mut graphics: platform_graphics::GraphicsSession,
     stage: xr::Space,
@@ -367,9 +453,15 @@ fn run_smoke_frames(
                 .context("initialize mclone XR world state")?,
         ),
     };
-    let controller_actions =
-        OpenXrControllerActions::create(graphics.session.instance(), &graphics.session)
-            .context("initialize OpenXR controller actions")?;
+    let controller_actions = OpenXrControllerActions::create_with_binding_logger(
+        graphics.session.instance(),
+        &graphics.session,
+        |profile, err| println!("OpenXR binding suggestion unavailable for {profile}: {err:?}"),
+    )
+    .context("initialize OpenXR controller actions")?;
+    println!(
+        "OpenXR controller actions: requested binding profiles=simple_controller, oculus_touch, valve_index, htc_vive, microsoft_motion_controller"
+    );
     let mut controller_summary = XrControllerInputSummary::default();
 
     let mut event_storage = xr::EventDataBuffer::new();
