@@ -1410,7 +1410,7 @@ struct TouchActionButtonRects {
     descend: Rect,
 }
 
-fn touch_menu_button_rect() -> Rect {
+pub fn touch_menu_button_rect() -> Rect {
     Rect::new(10.0, 10.0, 40.0, 40.0)
 }
 

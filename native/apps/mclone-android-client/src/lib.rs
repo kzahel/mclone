@@ -24,9 +24,13 @@ mod android {
         ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
         TexturedSectionUploadReport,
     };
+    use mclone_render::gui::GuiRenderer;
     use mclone_render::sky_render::SkyRenderer;
     use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
-    use mclone_ui::GuiDrawList;
+    use mclone_ui::{
+        GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiScale, Point,
+        TouchOverlay, render_touch_overlay, touch_menu_button_rect,
+    };
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
     use winit::event::{Touch, TouchPhase, WindowEvent};
@@ -39,6 +43,9 @@ mod android {
     const REMOTE_ADDR_PROPERTY: &str = "debug.mclone.remote_addr";
     const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
     const TOUCH_ORBIT_RADIANS_PER_SCREEN: f32 = 2.4;
+    const ANDROID_MIN_RENDER_DISTANCE: i32 = 1;
+    const ANDROID_MAX_RENDER_DISTANCE: i32 = 16;
+    const ANDROID_FIXED_FPS_CAP: u32 = 60;
 
     #[allow(unsafe_code)]
     #[link(name = "log")]
@@ -136,9 +143,14 @@ mod android {
         depth: ChunkDepthTarget,
         sky: SkyRenderer,
         draw: TexturedSectionDrawResources,
+        gui: GuiRenderer,
         scene: AndroidSingleViewSceneRuntime,
         camera: ChunkCamera,
         render_options: TexturedSectionRenderOptions,
+        ui: GameUi,
+        touch_menu_touch_id: Option<u64>,
+        touch_menu_pressed: bool,
+        ui_touch_id: Option<u64>,
         render_stats: RenderStreamStats,
         frame_index: u64,
     }
@@ -146,6 +158,12 @@ mod android {
     enum AndroidRenderError {
         Surface(wgpu::SurfaceError),
         Render(anyhow::Error),
+    }
+
+    #[derive(Clone, Copy, Debug, Default)]
+    struct AndroidUiTouchResult {
+        handled: bool,
+        quit: bool,
     }
 
     impl AndroidGpuState {
@@ -234,6 +252,11 @@ mod android {
                 self.config.width,
                 self.config.height,
             );
+        }
+
+        fn handle_ui_touch(&mut self, touch: &Touch) -> Result<AndroidUiTouchResult> {
+            self.renderer
+                .handle_touch(touch, self.config.width, self.config.height)
         }
 
         fn render_mclone_frame(&mut self) -> Result<(), AndroidRenderError> {
@@ -337,9 +360,14 @@ mod android {
                 depth,
                 sky,
                 draw,
+                gui: GuiRenderer::new(device, format),
                 scene,
                 camera,
                 render_options: TexturedSectionRenderOptions::default(),
+                ui: GameUi::new_ingame(),
+                touch_menu_touch_id: None,
+                touch_menu_pressed: false,
+                ui_touch_id: None,
                 render_stats,
                 frame_index: 0,
             })
@@ -354,6 +382,219 @@ mod android {
             let yaw_delta = -(delta_x as f32 / scale) * TOUCH_ORBIT_RADIANS_PER_SCREEN;
             let pitch_delta = -(delta_y as f32 / scale) * TOUCH_ORBIT_RADIANS_PER_SCREEN;
             self.camera.orbit(yaw_delta, pitch_delta);
+        }
+
+        fn handle_touch(
+            &mut self,
+            touch: &Touch,
+            width: u32,
+            height: u32,
+        ) -> Result<AndroidUiTouchResult> {
+            let gui_scale = GuiScale::from_pixels(width.max(1), height.max(1));
+            self.ui.set_scale(gui_scale);
+            let point = gui_scale.client_to_gui(touch.location.x, touch.location.y);
+            if self.ui.is_active() {
+                return self.handle_active_ui_touch(touch, point);
+            }
+            Ok(self.handle_menu_button_touch(touch, point))
+        }
+
+        fn handle_menu_button_touch(
+            &mut self,
+            touch: &Touch,
+            point: Point,
+        ) -> AndroidUiTouchResult {
+            match touch.phase {
+                TouchPhase::Started => {
+                    if touch_menu_button_rect().contains(point) {
+                        self.touch_menu_touch_id = Some(touch.id);
+                        self.touch_menu_pressed = true;
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
+                }
+                TouchPhase::Moved => {
+                    if self.touch_menu_touch_id == Some(touch.id) {
+                        self.touch_menu_pressed = touch_menu_button_rect().contains(point);
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
+                }
+                TouchPhase::Ended | TouchPhase::Cancelled => {
+                    if self.touch_menu_touch_id == Some(touch.id) {
+                        let should_open =
+                            touch.phase == TouchPhase::Ended && self.touch_menu_pressed;
+                        self.touch_menu_touch_id = None;
+                        self.touch_menu_pressed = false;
+                        if should_open {
+                            self.ui.open_pause();
+                            self.ui.clear_input();
+                            log::info!("Mclone Android shared menu opened");
+                        }
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
+                }
+            }
+            AndroidUiTouchResult::default()
+        }
+
+        fn handle_active_ui_touch(
+            &mut self,
+            touch: &Touch,
+            point: Point,
+        ) -> Result<AndroidUiTouchResult> {
+            let ui_state = self.current_ui_render_state();
+            match touch.phase {
+                TouchPhase::Started => {
+                    if self.ui_touch_id.is_none() {
+                        self.ui_touch_id = Some(touch.id);
+                        self.ui.pointer_down(point, ui_state);
+                    }
+                    Ok(AndroidUiTouchResult {
+                        handled: true,
+                        quit: false,
+                    })
+                }
+                TouchPhase::Moved => {
+                    if self.ui_touch_id == Some(touch.id) {
+                        let (_handled, action) = self.ui.pointer_move(point, ui_state);
+                        if let Some(action) = action {
+                            return self.apply_ui_action(action);
+                        }
+                    }
+                    Ok(AndroidUiTouchResult {
+                        handled: true,
+                        quit: false,
+                    })
+                }
+                TouchPhase::Ended => {
+                    if self.ui_touch_id == Some(touch.id) {
+                        self.ui_touch_id = None;
+                        let (_handled, action) = self.ui.pointer_up(point, ui_state);
+                        if let Some(action) = action {
+                            return self.apply_ui_action(action);
+                        }
+                    }
+                    Ok(AndroidUiTouchResult {
+                        handled: true,
+                        quit: false,
+                    })
+                }
+                TouchPhase::Cancelled => {
+                    if self.ui_touch_id == Some(touch.id) {
+                        self.ui_touch_id = None;
+                        self.ui.clear_input();
+                    }
+                    Ok(AndroidUiTouchResult {
+                        handled: true,
+                        quit: false,
+                    })
+                }
+            }
+        }
+
+        fn apply_ui_action(&mut self, action: GameUiAction) -> Result<AndroidUiTouchResult> {
+            let mut result = AndroidUiTouchResult {
+                handled: true,
+                quit: false,
+            };
+            match action {
+                GameUiAction::ToggleSectionOcclusion => {
+                    self.render_options.section_occlusion_culling =
+                        !self.render_options.section_occlusion_culling;
+                    log::info!(
+                        "Mclone Android section occlusion culling {}",
+                        if self.render_options.section_occlusion_culling {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    );
+                }
+                GameUiAction::ToggleFullbright => {
+                    self.render_options.force_fullbright = !self.render_options.force_fullbright;
+                    log::info!(
+                        "Mclone Android fullbright {}",
+                        if self.render_options.force_fullbright {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    );
+                }
+                GameUiAction::SetRenderDistance(render_distance) => {
+                    let render_distance = render_distance
+                        .clamp(ANDROID_MIN_RENDER_DISTANCE, ANDROID_MAX_RENDER_DISTANCE);
+                    if self
+                        .scene
+                        .set_render_distance(render_distance as u32)
+                        .with_context(|| {
+                            format!("set Android render distance from menu to {render_distance}")
+                        })?
+                    {
+                        log::info!(
+                            "Mclone Android render distance set to {} (chunk tracking radius {})",
+                            render_distance,
+                            self.scene.chunk_tracking_radius()
+                        );
+                    }
+                }
+                GameUiAction::Quit => {
+                    result.quit = true;
+                }
+                GameUiAction::CycleFramePacing
+                | GameUiAction::CycleFpsCap
+                | GameUiAction::SetTouchLookSensitivity(_) => {}
+                GameUiAction::StartWorld
+                | GameUiAction::Resume
+                | GameUiAction::OpenOptions(_)
+                | GameUiAction::BackToTitle
+                | GameUiAction::BackToPause => {}
+            }
+            self.ui.apply_action(action);
+            if !self.ui.is_active() {
+                self.ui.clear_input();
+                self.ui_touch_id = None;
+            }
+            Ok(result)
+        }
+
+        fn current_ui_render_state(&self) -> GameUiRenderState {
+            GameUiRenderState {
+                render_distance: (self.scene.render_distance() as i32)
+                    .clamp(ANDROID_MIN_RENDER_DISTANCE, ANDROID_MAX_RENDER_DISTANCE),
+                min_render_distance: ANDROID_MIN_RENDER_DISTANCE,
+                max_render_distance: ANDROID_MAX_RENDER_DISTANCE,
+                section_occlusion_culling: self.render_options.section_occlusion_culling,
+                force_fullbright: self.render_options.force_fullbright,
+                frame_pacing_mode: GameFramePacingMode::Vsync,
+                fps_cap: ANDROID_FIXED_FPS_CAP,
+                touch_settings: None,
+            }
+        }
+
+        fn gui_draw_list(&self, gui_scale: GuiScale, ui_state: GameUiRenderState) -> GuiDrawList {
+            if self.ui.is_active() {
+                return self.ui.render_draw_list(ui_state);
+            }
+            let mut draw = GuiDrawList::new();
+            render_touch_overlay(
+                gui_scale,
+                &mut draw,
+                &TouchOverlay {
+                    visible: true,
+                    menu_pressed: self.touch_menu_pressed,
+                    ..TouchOverlay::hidden()
+                },
+            );
+            draw
         }
 
         fn render(&mut self, frame: RenderFrameContext<'_>) -> Result<()> {
@@ -388,6 +629,12 @@ mod android {
             let render_view = self
                 .camera
                 .render_view(frame.target.size[0], frame.target.size[1]);
+            let gui_scale = GuiScale::from_pixels(frame.target.size[0], frame.target.size[1]);
+            self.ui.set_scale(gui_scale);
+            let ui_state = self.current_ui_render_state();
+            let ui_covers_world = self.ui.covers_world();
+            let gui_draw = self.gui_draw_list(gui_scale, ui_state);
+            let gui_active = !gui_draw.commands().is_empty();
             let summary = render_full_frame_for_view(
                 frame,
                 &self.depth,
@@ -395,7 +642,7 @@ mod android {
                 &mut self.draw,
                 None,
                 None,
-                None,
+                Some(&mut self.gui),
                 render_view,
                 &[],
                 None,
@@ -403,8 +650,12 @@ mod android {
                 time_of_day,
                 sun_angle,
                 self.render_options,
-                FullFrameGui::new(false, false, [1.0, 1.0]),
-                |_| GuiDrawList::new(),
+                FullFrameGui::new(
+                    gui_active,
+                    ui_covers_world,
+                    [gui_scale.width, gui_scale.height],
+                ),
+                |_| gui_draw,
                 &mut self.render_stats,
             )?;
             if self.frame_index == 0 {
@@ -642,14 +893,32 @@ mod android {
                         size.height
                     );
                 }
-                WindowEvent::Touch(touch) => self.handle_touch(&window, touch),
+                WindowEvent::Touch(touch) => self.handle_touch(event_loop, &window, touch),
                 _ => {}
             }
         }
     }
 
     impl McloneAndroidApp {
-        fn handle_touch(&mut self, window: &Window, touch: Touch) {
+        fn handle_touch(&mut self, event_loop: &ActiveEventLoop, window: &Window, touch: Touch) {
+            if let Some(gpu) = self.gpu.as_mut() {
+                match gpu.handle_ui_touch(&touch) {
+                    Ok(result) if result.handled => {
+                        if result.quit {
+                            event_loop.exit();
+                            return;
+                        }
+                        window.request_redraw();
+                        return;
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        log::error!("failed to handle Mclone Android UI touch: {error:#}");
+                        event_loop.exit();
+                        return;
+                    }
+                }
+            }
             match touch.phase {
                 TouchPhase::Started => {
                     if self.active_touch.is_none() {

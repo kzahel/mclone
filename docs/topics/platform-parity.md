@@ -92,7 +92,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Underwater / screen effects | ✅ | ✗ | ✗ | ✗ | ✗ |
 | HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ✗ | ✗ | ✗ | ✅ |
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✅ |
-| Menus (title/pause/options) | ✅ | ◐ (world panel + pointer, unvalidated) | ✗ | ◐ (world panel + pointer, unvalidated) | ✅ |
+| Menus (title/pause/options) | ✅ | ◐ (world panel + pointer, unvalidated) | ◐ (shared touch menu, device pending) | ◐ (world panel + pointer, unvalidated) | ✅ |
 | Connect / world-select UI | ✗ | ✗ | ✗ | ✗ | ✗ |
 | Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ✅ WebSocket query param |
 | Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ (cfg-excluded) |
@@ -112,8 +112,9 @@ Reading the matrix:
   validation of menu presentation/interaction and actual spawned actor scenarios
   remain pending.
 - **flat-Android** is still the thinnest full-client lane: it has terrain,
-  lighting, shared local/remote host wiring, and a touch-orbit shell, but still
-  lacks player movement, interaction, actors, UI, and an in-app connect flow.
+  lighting, shared local/remote host wiring, a shared menu/touch path in code,
+  and a touch-orbit shell, but still lacks player movement, interaction, actors,
+  HUD/hotbar, device-validated menu UX, and an in-app connect flow.
 
 ## Matrix 2 — Shared Contract × Consumer (reuse burn-down)
 
@@ -133,7 +134,7 @@ use (and should) · — n/a.
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
-| `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✗ (empty list) | ◐ (XR world panel + pointer, unvalidated) | `native:web:app-smoke`; `cargo test -p mclone-xr-scene` |
+| `mclone-ui` (GuiDrawList) | ✅ | ✅ | ◐ (shared touch menu, device pending) | ◐ (XR world panel + pointer, unvalidated) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene` |
 | `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
 The reuse story in one line: **desktop flat, flat Android, desktop XR, and
@@ -203,10 +204,11 @@ these first:
    085)
 2. **Finish the shared menu surface before adding more menu features.** XR now
    has a shared world-panel pause/options menu with pointer input, but it still
-   needs headset visual/interaction validation. Flat Android still needs to consume
-   `mclone-ui` instead of rendering an empty list. Connect/world-select UI and
-   `EditBox` should build on this surface later, not define the first slice.
-   (tactical 089)
+   needs headset visual/interaction validation. Flat Android now consumes
+   `mclone-ui` in code for pause/options touch input, but still needs device
+   validation and broader HUD/touch gameplay controls. Connect/world-select UI
+   and `EditBox` should build on this surface later, not define the first slice.
+   (tactical 089, tactical 090)
 3. **Finish the shared input-intent layer.** Unify raw input → intent across
    keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
    pointer, and interact**, not just locomotion. Required for XR interaction and

@@ -66,9 +66,9 @@ controller input can land behind shared contracts.
   - App-owned actions such as quitting remain explicitly ignored by the shared
     scene.
 - [ ] **Slice 4: flat Android `mclone-ui` adoption.**
-  - Replace the empty GUI draw list with the shared menu path.
-  - Route touch menu/pointer input through the same `GameUi` APIs used by
-    desktop/web.
+  - Ownership moved to
+    [`090-flat-android-client-parity.md`](090-flat-android-client-parity.md)
+    so flat Android parity has its own tactical record.
 - [ ] **Slice 5: shared input-intent contract.**
   - Factor raw input to menu/pointer/gameplay intentions across keyboard/mouse,
     touch, and XR controllers.
