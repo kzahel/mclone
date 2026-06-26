@@ -16,6 +16,7 @@ ACTIVITY_PATH="${MCLONE_ANDROID_XR_ACTIVITY_DUMP:-/tmp/mclone-quest-openxr-activ
 WAIT_SECONDS="${MCLONE_ANDROID_XR_WAIT_SECONDS:-20}"
 BOOT_TIMEOUT_SECONDS="${MCLONE_ANDROID_BOOT_TIMEOUT:-60}"
 STAGE_ASSETS="${MCLONE_ANDROID_XR_STAGE_ASSETS:-1}"
+ADB=""
 SERIAL=""
 LOGCAT_PID=""
 SKIP_BUILD=0
@@ -24,10 +25,14 @@ START_VIEW_POSE="${MCLONE_ANDROID_XR_VIEW_POSE:-0}"
 REMOTE_ADDR="${MCLONE_ANDROID_XR_REMOTE_ADDR:-}"
 START_SERVER=0
 SERVER_LISTEN="${MCLONE_ANDROID_XR_SERVER_LISTEN:-0.0.0.0:25565}"
+SERVER_LISTEN_EXPLICIT="${MCLONE_ANDROID_XR_SERVER_LISTEN:+1}"
 SERVER_LOG="${MCLONE_ANDROID_XR_SERVER_LOG:-/tmp/mclone-android-xr-dedicated-server.log}"
 SERVER_SEED="${MCLONE_ANDROID_XR_SERVER_SEED:-12345}"
 SERVER_SEED_EXPLICIT="${MCLONE_ANDROID_XR_SERVER_SEED:+1}"
 SERVER_PID=""
+ADB_REVERSE=0
+ADB_REVERSE_PORT="${MCLONE_ANDROID_XR_ADB_REVERSE_PORT:-}"
+ADB_REVERSE_INSTALLED=0
 STARTUP_ARGV=()
 
 usage() {
@@ -55,9 +60,16 @@ Options:
                      Set debug.mclone.xr_view_pose before launch.
   --remote-addr ADDR
                      Add --remote-addr ADDR to mclone.startup.argv.
+  --adb-reverse      Install adb reverse tcp:PORT tcp:PORT for USB validation.
+                     If --remote-addr is omitted, defaults it to
+                     127.0.0.1:PORT. With --start-server and no explicit
+                     --server-listen, binds the server to 127.0.0.1:PORT.
+  --adb-reverse-port PORT
+                     Port for --adb-reverse. Defaults from --remote-addr,
+                     --server-listen, or 25565.
   --start-server     Build and start local mclone-dedicated-server for this
                      validation. Requires --remote-addr with a headset-routable
-                     HOST:PORT.
+                     HOST:PORT, or --adb-reverse.
   --server-listen ADDR
                      Address for --start-server to bind. Default: 0.0.0.0:25565.
   --server-seed SEED Seed for --start-server. Defaults to --seed or 12345.
@@ -79,6 +91,59 @@ require_arg() {
     [[ -n "$value" ]] || mclone_die "$option requires a value"
 }
 
+tcp_port_from_addr() {
+    local addr="$1"
+    local port="${addr##*:}"
+    [[ "$port" =~ ^[0-9]+$ ]] || return 1
+    printf '%s' "$port"
+}
+
+validate_tcp_port() {
+    local port="$1"
+    [[ "$port" =~ ^[0-9]+$ ]] || mclone_die "invalid TCP port: $port"
+    (( 10#$port >= 1 && 10#$port <= 65535 )) || mclone_die "TCP port out of range: $port"
+}
+
+derive_adb_reverse_port() {
+    if [[ -n "$ADB_REVERSE_PORT" ]]; then
+        validate_tcp_port "$ADB_REVERSE_PORT"
+        return
+    fi
+    if [[ -n "$REMOTE_ADDR" ]]; then
+        ADB_REVERSE_PORT="$(tcp_port_from_addr "$REMOTE_ADDR" || true)"
+    fi
+    if [[ -z "$ADB_REVERSE_PORT" && -n "$SERVER_LISTEN" ]]; then
+        ADB_REVERSE_PORT="$(tcp_port_from_addr "$SERVER_LISTEN" || true)"
+    fi
+    ADB_REVERSE_PORT="${ADB_REVERSE_PORT:-25565}"
+    validate_tcp_port "$ADB_REVERSE_PORT"
+}
+
+configure_adb_reverse_defaults() {
+    [[ "$ADB_REVERSE" == "1" ]] || return 0
+    derive_adb_reverse_port
+    if [[ -z "$REMOTE_ADDR" ]]; then
+        REMOTE_ADDR="127.0.0.1:$ADB_REVERSE_PORT"
+    fi
+    if [[ "$START_SERVER" == "1" && -z "$SERVER_LISTEN_EXPLICIT" && "$REMOTE_ADDR" == "127.0.0.1:$ADB_REVERSE_PORT" ]]; then
+        SERVER_LISTEN="127.0.0.1:$ADB_REVERSE_PORT"
+    fi
+}
+
+install_adb_reverse() {
+    [[ "$ADB_REVERSE" == "1" ]] || return 0
+    "$ADB" -s "$SERIAL" reverse "tcp:$ADB_REVERSE_PORT" "tcp:$ADB_REVERSE_PORT" >/dev/null
+    ADB_REVERSE_INSTALLED=1
+    mclone_note "Installed adb reverse tcp:$ADB_REVERSE_PORT -> tcp:$ADB_REVERSE_PORT"
+}
+
+remove_adb_reverse() {
+    if [[ "$ADB_REVERSE_INSTALLED" == "1" && -n "$ADB" && -n "$SERIAL" ]]; then
+        "$ADB" -s "$SERIAL" reverse --remove "tcp:$ADB_REVERSE_PORT" >/dev/null 2>&1 || true
+        ADB_REVERSE_INSTALLED=0
+    fi
+}
+
 stop_logcat_capture() {
     if [[ -n "$LOGCAT_PID" ]]; then
         kill "$LOGCAT_PID" >/dev/null 2>&1 || true
@@ -97,7 +162,7 @@ stop_dedicated_server() {
 
 start_dedicated_server() {
     [[ -n "$REMOTE_ADDR" ]] || {
-        mclone_die "--start-server requires --remote-addr HOST:PORT; use a host address the headset can reach, not 127.0.0.1"
+        mclone_die "--start-server requires --remote-addr HOST:PORT or --adb-reverse"
     }
 
     mclone_note "Building native dedicated server"
@@ -141,6 +206,7 @@ cleanup() {
     local status=$?
     stop_logcat_capture
     stop_dedicated_server
+    remove_adb_reverse
     if [[ -n "$SERIAL" ]]; then
         mclone_xr_clear_all_startup_properties "$SERIAL" >/dev/null 2>&1 || true
         mclone_restore_headset_after_test "$SERIAL" "$MCLONE_ANDROID_XR_APP_ID"
@@ -206,6 +272,16 @@ while [[ $# -gt 0 ]]; do
             REMOTE_ADDR="$2"
             shift 2
             ;;
+        --adb-reverse)
+            ADB_REVERSE=1
+            shift
+            ;;
+        --adb-reverse-port)
+            require_arg "$1" "${2:-}"
+            ADB_REVERSE=1
+            ADB_REVERSE_PORT="$2"
+            shift 2
+            ;;
         --start-server)
             START_SERVER=1
             shift
@@ -213,6 +289,7 @@ while [[ $# -gt 0 ]]; do
         --server-listen)
             require_arg "$1" "${2:-}"
             SERVER_LISTEN="$2"
+            SERVER_LISTEN_EXPLICIT=1
             shift 2
             ;;
         --server-seed)
@@ -304,6 +381,9 @@ fi
 "$ADB" -s "$SERIAL" shell am force-stop "$MCLONE_ANDROID_XR_APP_ID" >/dev/null 2>&1 || true
 mclone_dismiss_vr_system_dialogs "$SERIAL"
 "$ADB" -s "$SERIAL" logcat -c || true
+
+configure_adb_reverse_defaults
+install_adb_reverse
 
 if [[ -n "$START_VIEW_POSE" ]]; then
     mclone_xr_set_startup_property "$SERIAL" "$VIEW_POSE_PROPERTY" "$START_VIEW_POSE" >/dev/null 2>&1 || true

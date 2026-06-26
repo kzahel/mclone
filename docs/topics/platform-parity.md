@@ -95,7 +95,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✅ |
 | Menus (title/pause/options) | ✅ | ✗ | ✗ | ✗ | ✅ |
 | Connect / world-select UI | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + adb reverse smokes passed) | ◐ (transport exists, not wired) |
+| Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ◐ (transport exists, not wired) |
 | Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ (cfg-excluded) |
 | Audio | ✗ | ✗ | ✗ | ✗ | ✗ |
 
@@ -159,7 +159,7 @@ Concretely:
   `debug.mclone.remote_addr`; Android XR now uses launch-scoped
   `mclone.startup.argv --remote-addr HOST:PORT` and can have the validator start
   a local dedicated server. Android XR reached `MCLONE_ANDROID_XR_READY` against
-  a dedicated server over direct LAN and through `adb reverse`.
+  a dedicated server over direct LAN and through `--adb-reverse`.
 
 ## Whole Systems That Do Not Exist Yet
 
@@ -199,11 +199,11 @@ these first:
    keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
    pointer, and interact**, not just locomotion. Required for XR interaction and
    for flat Android to use the player controller. (tactical 076 follow-up)
-4. **Make Android XR remote validation first-class for both USB and LAN.** The
+4. **Keep Android XR remote validation first-class for both USB and LAN.** The
    adapter and Playbox-style launch argv option exist now (`--remote-addr` in
    `mclone.startup.argv`), and Quest smokes passed over direct LAN and through
-   `adb reverse`. Keep the LAN route documented as firewall-sensitive, and add
-   a script option for the repeatable USB-tunnel path.
+   the `--adb-reverse` validator path. Keep the LAN route documented as
+   firewall-sensitive.
 5. **Add a stereo/world-space UI render path** so XR can show a reticle, menus,
    and a connect screen. (new; no doc owns this yet)
 6. **Protocol: add server push and cross-version negotiation.** Today it is

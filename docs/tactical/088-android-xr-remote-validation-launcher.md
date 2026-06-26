@@ -1,6 +1,6 @@
 # 088: Android XR Remote Validation Launcher
 
-Status: validated via Quest direct LAN and USB tunnel. Android XR remote
+Status: validated via Quest direct LAN and `--adb-reverse`. Android XR remote
 selection now uses the Playbox-style launch-scoped `mclone.startup.argv` intent
 extra, and the Quest validator can build/start a local dedicated server for the
 duration of a remote smoke.
@@ -21,9 +21,12 @@ startup option, not a sticky Android debug property.
 - `android-xr/validate-quest-openxr.sh --start-server` builds and starts
   `mclone-dedicated-server` locally, waits for the ready log line, launches the
   headset app, then stops the server during cleanup.
-- `--start-server` intentionally requires `--remote-addr HOST:PORT`; the
-  headset needs a routable host address, and guessing that from ADB/host
-  network state is unreliable.
+- `--adb-reverse` installs and removes the USB reverse tunnel for validation,
+  defaults `--remote-addr` to `127.0.0.1:PORT`, and with `--start-server`
+  defaults the server listen address to `127.0.0.1:PORT`.
+- Without `--adb-reverse`, `--start-server` intentionally requires
+  `--remote-addr HOST:PORT`; the headset needs a routable host address, and
+  guessing that from ADB/host network state is unreliable.
 - On 2026-06-26, the Quest remote smoke passed through both direct LAN and
   `adb reverse`. The direct LAN probe initially timed out while the server was
   listening, then passed after the Windows Firewall allow prompt was accepted.
@@ -35,6 +38,8 @@ startup option, not a sticky Android debug property.
 - [x] Change install/validate scripts so `--remote-addr` is passed through
   `mclone.startup.argv`.
 - [x] Add validator options:
+  - `--adb-reverse`
+  - `--adb-reverse-port PORT`
   - `--start-server`
   - `--server-listen ADDR`
   - `--server-seed SEED`
@@ -72,19 +77,16 @@ MCLONE_ANDROID_XR_TERRAIN_READY sections=122 indices=580248 actors=0
 MCLONE_ANDROID_XR_READY
 ```
 
-USB reverse validation also passed:
+First-class `--adb-reverse` validation also passed:
 
 ```bash
-adb reverse tcp:25565 tcp:25565
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:validate -- --debug --skip-build \
+  --adb-reverse \
   --start-server \
-  --server-listen 127.0.0.1:25565 \
-  --remote-addr 127.0.0.1:25565 \
   --view-pose 0,120,-96,180
-adb reverse --remove tcp:25565
 ```
 
-Observed USB-tunnel ready markers:
+Observed `--adb-reverse` ready markers:
 
 ```text
 Android XR remote dedicated address from mclone.startup.argv: 127.0.0.1:25565
@@ -107,8 +109,8 @@ pnpm native:android-xr:validate -- --debug --skip-build \
 
 ## Guardrails
 
-- Do not infer `HOST` silently; a wrong `127.0.0.1` or USB-only address makes
-  the headset connect to itself or nowhere.
+- Do not infer a LAN `HOST` silently. `127.0.0.1` is valid only when the
+  validator owns an `adb reverse` tunnel for that port.
 - Do not move launch argv parsing into Android properties. Properties are for
   wrapper/runtime toggles such as view pose.
 - Do not let the validator-owned server path change the shared client/server

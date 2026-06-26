@@ -3,8 +3,8 @@
 Status: completed first pass. Android XR can now construct the shared XR scene
 against a TCP remote-dedicated runtime. Tactical 088 moved script-driven remote
 selection to launch-scoped `mclone.startup.argv` and added validator-owned
-server startup. Quest remote smokes passed through direct LAN and an
-`adb reverse` USB tunnel.
+server startup. Quest remote smokes passed through direct LAN and the
+first-class `--adb-reverse` USB tunnel path.
 
 ## Purpose
 
@@ -71,12 +71,10 @@ Direct LAN device validation result:
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:validate -- --debug --skip-build --remote-addr 192.168.1.107:25565 --view-pose 0,120,-96,180
 ```
 
-USB tunnel validation result:
+First-class `--adb-reverse` validation result:
 
 ```bash
-adb reverse tcp:25565 tcp:25565
-MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:validate -- --debug --skip-build --start-server --server-listen 127.0.0.1:25565 --remote-addr 127.0.0.1:25565 --view-pose 0,120,-96,180
-adb reverse --remove tcp:25565
+MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:validate -- --debug --skip-build --adb-reverse --start-server --view-pose 0,120,-96,180
 ```
 
 Both reached `MCLONE_ANDROID_XR_READY` with the remote address supplied through
