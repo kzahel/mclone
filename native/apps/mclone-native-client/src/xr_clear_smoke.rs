@@ -728,7 +728,7 @@ impl XrMcloneWorldState {
             queue,
             XR_COLOR_FORMAT,
             &sections,
-            runtime.mesh_assets.atlas.as_upload(),
+            runtime.mesh_assets().atlas.as_upload(),
         )
         .context("upload initial mclone render sections for XR")?;
         draw.set_traversal_ready_sections(

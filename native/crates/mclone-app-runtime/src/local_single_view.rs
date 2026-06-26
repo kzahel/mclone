@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_client::ClientRuntime;
-use mclone_core::ChunkPos;
+use mclone_core::{BlockStateId, ChunkPos};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 use mclone_protocol::{ClientCommand, ServerUpdate};
 use mclone_render_session::RenderSectionCacheUpdate;
@@ -21,8 +21,8 @@ use crate::render_assets::{
     RenderSectionCompileWorker, TexturedMeshAssets, load_textured_mesh_assets,
 };
 use crate::{
-    RuntimeUpdateApplyReport, SingleViewRuntime, chunk_tracking_radius_for_render_distance,
-    elapsed_ms,
+    RuntimePollDiagnostics, RuntimeUpdateApplyReport, SingleViewRuntime, SingleViewRuntimeStats,
+    chunk_tracking_radius_for_render_distance, elapsed_ms,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -297,6 +297,20 @@ where
         }
     }
 
+    pub fn core(&self) -> &SingleViewRuntime {
+        match self {
+            Self::Local(scene) => scene.core(),
+            Self::RemoteDedicated(scene) => scene.core(),
+        }
+    }
+
+    pub fn core_mut(&mut self) -> &mut SingleViewRuntime {
+        match self {
+            Self::Local(scene) => scene.core_mut(),
+            Self::RemoteDedicated(scene) => scene.core_mut(),
+        }
+    }
+
     pub fn client(&self) -> &ClientRuntime {
         match self {
             Self::Local(scene) => scene.client(),
@@ -312,10 +326,15 @@ where
     }
 
     pub fn render_distance(&self) -> u32 {
-        match self {
-            Self::Local(scene) => scene.render_distance(),
-            Self::RemoteDedicated(scene) => scene.render_distance(),
-        }
+        self.core().render_distance()
+    }
+
+    pub fn chunk_tracking_radius(&self) -> u32 {
+        self.core().chunk_tracking_radius()
+    }
+
+    pub fn interest_center(&self) -> ChunkPos {
+        self.core().interest_center()
     }
 
     pub fn loaded_chunk_count(&self) -> usize {
@@ -325,11 +344,42 @@ where
         }
     }
 
+    pub fn set_interest_center(&mut self, center: ChunkPos) -> Result<bool> {
+        self.set_chunk_view(center, self.render_distance(), self.chunk_tracking_radius())
+    }
+
+    pub fn set_render_distance(&mut self, render_distance: u32) -> Result<bool> {
+        self.set_chunk_view(
+            self.interest_center(),
+            render_distance,
+            chunk_tracking_radius_for_render_distance(render_distance),
+        )
+    }
+
+    pub fn set_chunk_view(
+        &mut self,
+        center: ChunkPos,
+        render_distance: u32,
+        chunk_tracking_radius: u32,
+    ) -> Result<bool> {
+        let Some(command) =
+            self.core_mut()
+                .set_chunk_view_command(center, render_distance, chunk_tracking_radius)
+        else {
+            return Ok(false);
+        };
+        self.send_gameplay_command(command)
+    }
+
     pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
         match self {
             Self::Local(scene) => scene.send_gameplay_command(command),
             Self::RemoteDedicated(scene) => scene.send_gameplay_command(command),
         }
+    }
+
+    pub fn drain_player_position_updates(&mut self) -> Vec<mclone_protocol::PlayerPositionUpdate> {
+        self.core_mut().drain_player_position_updates()
     }
 
     pub fn poll(&mut self) -> Result<bool> {
@@ -404,6 +454,54 @@ where
             Self::Local(scene) => scene.sun_angle(),
             Self::RemoteDedicated(scene) => scene.sun_angle(),
         }
+    }
+
+    pub fn force_day_time(&mut self, day_time: u64) {
+        self.core_mut().force_day_time(day_time);
+    }
+
+    pub fn has_pending_render_work(&self, camera_position: Vec3) -> bool {
+        self.core()
+            .has_pending_render_work(self.render_compile_pending_job_count(), camera_position)
+    }
+
+    pub fn render_compile_pending_job_count(&self) -> usize {
+        match self {
+            Self::Local(scene) => scene.render_compile_worker.pending_job_count(),
+            Self::RemoteDedicated(scene) => scene.render_compile_worker.pending_job_count(),
+        }
+    }
+
+    pub fn pending_render_chunk_count(&self) -> usize {
+        self.core().pending_render_chunk_count()
+    }
+
+    pub fn last_poll_diagnostics(&self) -> RuntimePollDiagnostics {
+        self.core().last_poll_diagnostics()
+    }
+
+    pub fn camera_inside_water(&self, position: Vec3) -> bool {
+        self.core().camera_inside_water(position)
+    }
+
+    pub fn highest_non_air_block_y_at_world(&self, world_x: i32, world_z: i32) -> Option<i32> {
+        self.core()
+            .highest_non_air_block_y_at_world(world_x, world_z)
+    }
+
+    pub fn block_state_at_position(&self, position: Vec3) -> Option<BlockStateId> {
+        self.core().block_state_at_position(position)
+    }
+
+    pub fn stats(&self) -> SingleViewRuntimeStats {
+        let runner_diagnostics = match self {
+            Self::Local(scene) => scene.server_runner_diagnostics().ok(),
+            Self::RemoteDedicated(_) => None,
+        };
+        self.core().stats(
+            runner_diagnostics.as_ref(),
+            self.render_compile_pending_job_count(),
+        )
     }
 }
 

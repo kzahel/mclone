@@ -1,22 +1,21 @@
 use std::collections::BTreeSet;
+#[cfg(test)]
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
-use mclone_app_runtime::host_mode::{
-    SingleViewHostOptions, build_remote_dedicated_client_runtime, dispatch_remote_dedicated_command,
-};
+use mclone_app_runtime::host_mode::{SingleViewHostOptions, build_remote_dedicated_client_runtime};
 use mclone_app_runtime::local_single_view::{
-    LocalSingleViewSceneOptions, build_local_single_view_client_runtime,
+    LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime,
+    build_local_single_view_client_runtime,
 };
-use mclone_app_runtime::{
-    RuntimePollDiagnostics, RuntimeUpdateApplyReport, SingleViewRuntime, SingleViewRuntimeStats,
-    elapsed_ms,
-};
+use mclone_app_runtime::{RuntimePollDiagnostics, SingleViewRuntimeStats};
 #[cfg(test)]
 use mclone_app_runtime::{camera_position_inside_water_block, snapshot_block_state_at_world};
 pub(crate) use mclone_app_runtime::{chunk_tracking_radius_for_render_distance, square_count};
-use mclone_client::{ClientHost, ClientRuntime};
+#[cfg(test)]
+use mclone_client::ClientHost;
+use mclone_client::ClientRuntime;
 #[cfg(test)]
 use mclone_core::AIR_BLOCK_STATE_ID;
 use mclone_core::ChunkPos;
@@ -26,26 +25,19 @@ use mclone_protocol::ServerUpdate;
 use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
 #[cfg(test)]
 use mclone_server::{IntegratedServer, ServerRunnerKind};
-use mclone_server::{
-    IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
-    ServerRunnerDiagnostics,
-};
 
 use crate::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
 use crate::cli::SceneOptions;
 use crate::remote_session::RemoteServerSession;
-use crate::render_cache::{
-    RenderSectionCompileWorker, SceneTexturedSections, TexturedMeshAssets,
-    load_textured_mesh_assets,
-};
+use crate::render_cache::{SceneTexturedSections, TexturedMeshAssets, load_textured_mesh_assets};
 use mclone_render_session::{
     EngineCameraController, RenderSectionCacheUpdate, build_client_textured_sections,
 };
 #[cfg(test)]
 use mclone_render_session::{RenderSectionSession, render_section_neighbor_readiness};
 
-const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub(crate) type WindowRuntimeStats = SingleViewRuntimeStats;
+type NativeWindowSceneRuntime = NativeSingleViewSceneRuntime<RemoteServerSession>;
 
 fn scene_render_distance(scene: &SceneOptions) -> Result<u32> {
     u32::try_from(scene.render_distance).context("render distance must be non-negative")
@@ -96,144 +88,82 @@ fn local_single_view_options(scene: &SceneOptions) -> Result<LocalSingleViewScen
     .with_lighting_enabled(scene.lighting_enabled))
 }
 
-fn native_runner_config(scene: &SceneOptions) -> NativeIntegratedServerRunnerConfig {
-    NativeIntegratedServerRunnerConfig::new(scene.seed)
-        .with_lighting_enabled(scene.lighting_enabled)
-        .with_day_time(scene.day_time_override)
-        .with_day_time_frozen(scene.freeze_time)
+fn native_window_scene_runtime(scene: &SceneOptions) -> Result<NativeWindowSceneRuntime> {
+    let render_distance = scene_render_distance(scene)?;
+    let center = ChunkPos::new(scene.chunk_x, scene.chunk_z);
+    let Some(remote_addr) = &scene.remote_addr else {
+        return NativeWindowSceneRuntime::local(local_single_view_options(scene)?);
+    };
+
+    let session = RemoteServerSession::connect(remote_addr.as_str())?;
+    NativeWindowSceneRuntime::remote_dedicated(
+        SingleViewHostOptions::new(center, render_distance),
+        session,
+    )
+    .with_context(|| {
+        format!("failed to initialize desktop remote dedicated runtime from {remote_addr}")
+    })
 }
 
 #[derive(Debug)]
 pub(crate) struct WindowSceneRuntime {
-    core: SingleViewRuntime,
-    server_runner: Option<NativeIntegratedServerRunner>,
-    remote_session: Option<RemoteServerSession>,
-    pub(crate) mesh_assets: TexturedMeshAssets,
+    scene: NativeWindowSceneRuntime,
     pub(crate) actor_textures: ActorTextureAssets,
-    render_compile_worker: RenderSectionCompileWorker,
 }
 
 impl WindowSceneRuntime {
     pub(crate) fn new(scene: &SceneOptions) -> Result<Self> {
-        let client = if scene.remote_addr.is_some() {
-            ClientRuntime::new(ClientHost::RemoteDedicated)
-        } else {
-            ClientRuntime::local_integrated()
-        };
-        let render_distance = scene_render_distance(scene)?;
-        let chunk_tracking_radius = chunk_tracking_radius_for_render_distance(render_distance);
-        let mesh_assets = load_textured_mesh_assets()?;
         let actor_textures = load_actor_texture_assets()?;
-        let render_compile_worker = RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
-        let remote_session = scene
-            .remote_addr
-            .as_deref()
-            .map(RemoteServerSession::connect)
-            .transpose()?;
-        let server_runner = if remote_session.is_none() {
-            Some(NativeIntegratedServerRunner::new(native_runner_config(
-                scene,
-            ))?)
-        } else {
-            None
-        };
-        let mut runtime = Self {
-            core: SingleViewRuntime::new(
-                client,
-                ChunkPos::new(scene.chunk_x, scene.chunk_z),
-                render_distance,
-                chunk_tracking_radius,
-            ),
-            server_runner,
-            remote_session,
-            mesh_assets,
+        Ok(Self {
+            scene: native_window_scene_runtime(scene)?,
             actor_textures,
-            render_compile_worker,
-        };
-        if let Some(day_time) = runtime
-            .server_runner
-            .as_ref()
-            .map(|runner| {
-                runner
-                    .poll_diagnostics()
-                    .map(|diagnostics| diagnostics.day_time)
-            })
-            .transpose()?
-        {
-            runtime.force_day_time(day_time);
-        }
-        runtime.set_chunk_view(
-            runtime.interest_center(),
-            runtime.render_distance(),
-            runtime.chunk_tracking_radius(),
-        )?;
-        // Debug day/night controls are applied before the runner starts ticking;
-        // seed the client so the first frame is correct before server updates.
-        if let Some(day_time) = scene.day_time_override {
-            runtime.force_day_time(day_time);
-        }
-        Ok(runtime)
+        })
     }
 
     pub(crate) fn client(&self) -> &ClientRuntime {
-        self.core.client()
+        self.scene.client()
+    }
+
+    pub(crate) fn mesh_assets(&self) -> &TexturedMeshAssets {
+        self.scene.mesh_assets()
     }
 
     #[cfg(test)]
     fn render_session(&self) -> &RenderSectionSession {
-        self.core.render_session()
+        self.scene.core().render_session()
     }
 
     #[cfg(test)]
     fn render_session_mut(&mut self) -> &mut RenderSectionSession {
-        self.core.render_session_mut()
+        self.scene.core_mut().render_session_mut()
     }
 
     pub(crate) fn render_distance(&self) -> u32 {
-        self.core.render_distance()
+        self.scene.render_distance()
     }
 
     pub(crate) fn chunk_tracking_radius(&self) -> u32 {
-        self.core.chunk_tracking_radius()
+        self.scene.chunk_tracking_radius()
     }
 
     pub(crate) fn interest_center(&self) -> ChunkPos {
-        self.core.interest_center()
+        self.scene.interest_center()
     }
 
     pub(crate) fn set_interest_center(&mut self, center: ChunkPos) -> Result<bool> {
-        self.set_chunk_view(center, self.render_distance(), self.chunk_tracking_radius())
+        self.scene.set_interest_center(center)
     }
 
     pub(crate) fn set_render_distance(&mut self, render_distance: u32) -> Result<bool> {
-        self.set_chunk_view(
-            self.interest_center(),
-            render_distance,
-            chunk_tracking_radius_for_render_distance(render_distance),
-        )
-    }
-
-    fn set_chunk_view(
-        &mut self,
-        center: ChunkPos,
-        render_distance: u32,
-        chunk_tracking_radius: u32,
-    ) -> Result<bool> {
-        let Some(command) =
-            self.core
-                .set_chunk_view_command(center, render_distance, chunk_tracking_radius)
-        else {
-            return Ok(false);
-        };
-        self.dispatch_client_command(command)
+        self.scene.set_render_distance(render_distance)
     }
 
     pub(crate) fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
-        self.dispatch_client_command(command)
+        self.scene.send_gameplay_command(command)
     }
 
     pub(crate) fn drain_player_position_updates(&mut self) -> Vec<PlayerPositionUpdate> {
-        self.core.drain_player_position_updates()
+        self.scene.drain_player_position_updates()
     }
 
     pub(crate) fn commit_engine_camera_player_pose(
@@ -305,170 +235,85 @@ impl WindowSceneRuntime {
         Ok(false)
     }
 
-    fn dispatch_client_command(&mut self, command: ClientCommand) -> Result<bool> {
-        if let Some(remote_session) = &mut self.remote_session {
-            return dispatch_remote_dedicated_command(&mut self.core, remote_session, command);
-        }
-
-        let Some(runner) = &mut self.server_runner else {
-            return Ok(false);
-        };
-        runner
-            .send_command(command)
-            .context("failed to send command to integrated server runner")?;
-        let _ = self.drain_local_runner_updates_report()?;
-        Ok(true)
-    }
-
     pub(crate) fn poll(&mut self) -> Result<bool> {
-        let flush_start = Instant::now();
-        let apply_report = self.drain_local_runner_updates_report()?;
-        let changed = apply_report.changed;
-        let runner_diagnostics = self
-            .server_runner
-            .as_ref()
-            .map(|runner| runner.poll_diagnostics())
-            .transpose()
-            .context("failed to poll integrated server runner diagnostics")?;
-        self.core.finish_poll_diagnostics(
-            elapsed_ms(flush_start.elapsed()),
-            apply_report,
-            runner_diagnostics.as_ref(),
-        );
-        Ok(changed)
-    }
-
-    fn drain_local_runner_updates_report(&mut self) -> Result<RuntimeUpdateApplyReport> {
-        let Some(runner) = &mut self.server_runner else {
-            return Ok(RuntimeUpdateApplyReport::default());
-        };
-        let updates = runner
-            .drain_updates()
-            .context("failed to drain integrated server runner updates")?;
-        if updates.is_empty() {
-            return Ok(RuntimeUpdateApplyReport::default());
-        }
-        Ok(self.core.apply_server_updates_report(updates))
+        self.scene.poll()
     }
 
     #[cfg(test)]
     fn apply_server_updates(&mut self, updates: Vec<ServerUpdate>) -> bool {
-        self.core.apply_server_updates(updates)
+        self.scene.core_mut().apply_server_updates(updates)
     }
 
     pub(crate) fn sync_render_sections(
         &mut self,
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
-        self.sync_render_sections_with_budget(camera_position, DEFAULT_RENDER_CHUNK_MESH_BUDGET)
+        self.scene.sync_render_sections(camera_position)
     }
 
     pub(crate) fn sync_all_render_sections(
         &mut self,
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
-        self.core.sync_all_render_sections(
-            &mut self.render_compile_worker,
-            camera_position,
-            |client, _compiler| client.chunk_snapshots().cloned().collect(),
-        )
-    }
-
-    fn sync_render_sections_with_budget(
-        &mut self,
-        camera_position: Vec3,
-        chunk_budget: usize,
-    ) -> Result<RenderSectionCacheUpdate> {
-        // 067 Stage 3: desktop drives the shared streaming loop over its OS-thread
-        // `mpsc` worker. Distance ordering, near-camera readiness, and immediate removal
-        // are the shared engine/web policy; the only desktop specifics are the worker
-        // (moved by reference) and the by-clone snapshot collector for the request.
-        let render_compile_worker = &mut self.render_compile_worker;
-        self.core.sync_render_sections_with_budget(
-            render_compile_worker,
-            camera_position,
-            chunk_budget,
-            // Desktop ignores the compiler argument: the owned snapshot `Vec` is moved over
-            // `mpsc` to the worker thread, so cloning every loaded column is load-bearing here.
-            |client, _compiler| client.chunk_snapshots().cloned().collect(),
-        )
+        self.scene.sync_all_render_sections(camera_position)
     }
 
     pub(crate) fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
-        self.core.cached_sections()
+        self.scene.cached_sections()
     }
 
     /// Sky clear color for the current day-time, driving the day/night gradient.
     pub(crate) fn sky_clear_color(&self) -> wgpu::Color {
-        mclone_render::sky::overworld_clear_color(self.client().time_of_day())
+        self.scene.sky_clear_color()
     }
 
     /// Celestial phase in `[0, 1)` for the current day-time (noon = 0).
     pub(crate) fn time_of_day(&self) -> f32 {
-        self.core.time_of_day()
+        self.scene.time_of_day()
     }
 
     /// Celestial rig rotation in radians for the current day-time.
     pub(crate) fn sun_angle(&self) -> f32 {
-        self.core.sun_angle()
+        self.scene.sun_angle()
     }
 
     /// Force the client day/night clock to a specific `dayTime`. Debug-only hook
     /// for captures; the next server tick will overwrite it with authoritative
     /// time.
     pub(crate) fn force_day_time(&mut self, day_time: u64) {
-        self.core.force_day_time(day_time);
+        self.scene.force_day_time(day_time);
     }
 
     pub(crate) fn traversal_ready_render_section_keys(
         &self,
         camera_position: Vec3,
     ) -> BTreeSet<RenderSectionKey> {
-        self.core
+        self.scene
             .traversal_ready_render_section_keys(camera_position)
     }
 
     pub(crate) fn has_pending_render_work(&self, camera_position: Vec3) -> bool {
-        self.core.has_pending_render_work(
-            self.render_compile_worker.pending_job_count(),
-            camera_position,
-        )
+        self.scene.has_pending_render_work(camera_position)
     }
 
     #[cfg(test)]
     pub(crate) fn pending_render_chunk_count(&self) -> usize {
-        self.core.pending_render_chunk_count()
-    }
-
-    fn server_runner_diagnostics(&self) -> Option<ServerRunnerDiagnostics> {
-        self.server_runner
-            .as_ref()
-            .and_then(|runner| runner.poll_diagnostics().ok())
-    }
-
-    fn local_server_idle(&self) -> bool {
-        self.server_runner_diagnostics().is_none_or(|diagnostics| {
-            diagnostics.command_queue_depth == 0
-                && diagnostics.update_queue_depth == 0
-                && !diagnostics.awaiting_tick
-                && diagnostics.pending_jobs == 0
-                && diagnostics.pending_publications == 0
-        })
+        self.scene.pending_render_chunk_count()
     }
 
     pub(crate) fn last_poll_diagnostics(&self) -> RuntimePollDiagnostics {
-        self.core.last_poll_diagnostics()
+        self.scene.last_poll_diagnostics()
     }
 
     pub(crate) fn camera_inside_occluding_block(&self, position: Vec3) -> bool {
         let Some(state_id) = self.block_state_at_position(position) else {
             return false;
         };
-        self.mesh_assets.catalog.occludes(state_id)
+        self.mesh_assets().catalog.occludes(state_id)
     }
 
     pub(crate) fn camera_inside_water(&self, position: Vec3) -> bool {
-        self.core.camera_inside_water(position)
+        self.scene.camera_inside_water(position)
     }
 
     pub(crate) fn highest_non_air_block_y_at_world(
@@ -476,19 +321,16 @@ impl WindowSceneRuntime {
         world_x: i32,
         world_z: i32,
     ) -> Option<i32> {
-        self.core.highest_non_air_block_y_at_world(world_x, world_z)
+        self.scene
+            .highest_non_air_block_y_at_world(world_x, world_z)
     }
 
     fn block_state_at_position(&self, position: Vec3) -> Option<mclone_core::BlockStateId> {
-        self.core.block_state_at_position(position)
+        self.scene.block_state_at_position(position)
     }
 
     pub(crate) fn stats(&self) -> WindowRuntimeStats {
-        let runner_diagnostics = self.server_runner_diagnostics();
-        self.core.stats(
-            runner_diagnostics.as_ref(),
-            self.render_compile_worker.pending_job_count(),
-        )
+        self.scene.stats()
     }
 }
 
@@ -518,27 +360,7 @@ fn poll_integrated_server_until_idle(server: &mut IntegratedServer) -> Result<Ve
 pub(crate) fn poll_window_runtime_until_idle(
     runtime: &mut WindowSceneRuntime,
 ) -> Result<(usize, f64)> {
-    let deadline = Instant::now() + Duration::from_secs(120);
-    let mut polls = 0_usize;
-    let mut poll_ms = 0.0_f64;
-    loop {
-        let poll_start = Instant::now();
-        runtime.poll()?;
-        poll_ms += elapsed_ms(poll_start.elapsed());
-        polls += 1;
-        if runtime.local_server_idle() {
-            return Ok((polls, poll_ms));
-        }
-        if Instant::now() >= deadline {
-            bail!("timed out waiting for window runtime worldgen jobs");
-        }
-        if runtime
-            .server_runner_diagnostics()
-            .is_none_or(|diagnostics| diagnostics.update_queue_depth == 0)
-        {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
+    runtime.scene.poll_until_idle()
 }
 
 impl SceneOptions {
@@ -1414,17 +1236,7 @@ mod tests {
     }
 
     fn poll_window_runtime_until_idle(runtime: &mut WindowSceneRuntime) -> Result<()> {
-        let deadline = Instant::now() + Duration::from_secs(120);
-        loop {
-            runtime.poll()?;
-            if runtime.local_server_idle() {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                bail!("timed out waiting for window runtime worldgen jobs");
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        runtime.scene.poll_until_idle().map(|_| ())
     }
 
     fn section_index_count(sections: &[TexturedRenderSectionMesh]) -> u32 {

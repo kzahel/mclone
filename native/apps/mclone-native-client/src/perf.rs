@@ -1264,7 +1264,7 @@ pub(crate) fn run_frame_budget_probe(
                 queue,
                 format,
                 &initial_sections,
-                runtime.mesh_assets.atlas.as_upload(),
+                runtime.mesh_assets().atlas.as_upload(),
             )?;
             let mut draw = draw;
             draw.set_traversal_ready_sections(

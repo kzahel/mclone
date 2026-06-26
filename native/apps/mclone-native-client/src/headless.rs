@@ -143,7 +143,7 @@ fn write_headless_dual_view_frame(
                 frame.queue,
                 HEADLESS_FORMAT,
                 sections,
-                runtime.mesh_assets.atlas.as_upload(),
+                runtime.mesh_assets().atlas.as_upload(),
             )?;
             let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
             draw.set_traversal_ready_sections(
@@ -283,7 +283,7 @@ fn write_headless_runtime_chunk_with_camera(
             camera,
         },
         &sections,
-        runtime.mesh_assets.atlas.as_upload(),
+        runtime.mesh_assets().atlas.as_upload(),
         render_options,
         Some(&ready_sections),
     )
@@ -364,7 +364,7 @@ pub(crate) fn run_headless_screenshot(
                 frame.queue,
                 HEADLESS_FORMAT,
                 &sections,
-                runtime.mesh_assets.atlas.as_upload(),
+                runtime.mesh_assets().atlas.as_upload(),
             )?;
             draw.set_traversal_ready_sections(
                 &runtime.traversal_ready_render_section_keys(spectator.position),

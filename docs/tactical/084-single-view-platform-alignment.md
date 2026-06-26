@@ -1,11 +1,11 @@
 # 084: Single-View Platform Alignment
 
-Status: active. Slice 1 is complete. Slice 2 has two chunks landed:
-desktop's local static client-runtime construction and shared render-section
-queue draining now use `mclone-app-runtime` helpers. Slice 3 has moved remote
-dedicated dispatch/resync policy, flat Android remote-host selection, and the
-native local/remote single-view scene shell into shared app-runtime contracts
-while keeping concrete transports and platform config in app crates.
+Status: active. Slice 1 is complete. Slice 2 has moved desktop's
+static-client and live `WindowSceneRuntime` paths onto shared app-runtime
+helpers. Slice 3 has moved remote dedicated dispatch/resync policy, flat
+Android remote-host selection, and the native local/remote single-view scene
+shell into shared app-runtime contracts while keeping concrete transports and
+platform config in app crates.
 
 ## Purpose
 
@@ -29,8 +29,10 @@ and rendering continue to grow.
   session state.
 - `mclone-render-session` owns render-section dirty state, compile requests,
   cache updates, neighbor readiness, and camera-controller contracts.
-- Desktop flat wraps these through `WindowSceneRuntime`, with extra desktop
-  and remote-session behavior.
+- Desktop flat wraps the shared native local/remote scene shell through
+  `WindowSceneRuntime`. Desktop still owns `winit`, headless/perf/XR-smoke
+  entrypoints, CLI options, actor textures, UI/debug state, and concrete TCP
+  session construction.
 - Flat Android renders real terrain through shared crates, selects local
   integrated or remote dedicated through the shared host-mode contract, and now
   uses a shared native local/remote scene shell. Android still owns
@@ -106,12 +108,12 @@ git diff --check
   local single-view helpers without changing remote-session behavior.
 - [x] Move native blocking render-section "sync all until idle" policy onto
   `SingleViewRuntime`.
-- [ ] Compare live `WindowSceneRuntime` with the new shared helper.
-- [ ] Move local-only desktop code that does not involve remote sessions,
+- [x] Compare live `WindowSceneRuntime` with the new shared helper.
+- [x] Move local-only desktop code that does not involve remote sessions,
   desktop CLI, actor resources, or app-specific diagnostics into shared
   helpers.
-- [ ] Keep remote dedicated session recovery and desktop-specific UI/debug
-  ownership app-local.
+- [x] Keep concrete remote transport and desktop-specific UI/debug ownership
+  app-local while shared host-mode code owns recovery/resync semantics.
 
 Recorded Slice 2 first-chunk result:
 
@@ -158,6 +160,43 @@ cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client render_compile
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client
 cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+pnpm native:web:build
+git diff --check
+```
+
+Recorded Slice 2 third-chunk result:
+
+- Extended `NativeSingleViewSceneRuntime<S>` with the live desktop-facing
+  surface: core accessors for tests/diagnostics, chunk-view changes, player
+  position update drains, forced day-time, pending render-work queries,
+  block/sky/time facts, and shared runtime stats.
+- Replaced desktop `WindowSceneRuntime`'s owned `SingleViewRuntime`, local
+  integrated runner, remote-session slot, and render compile worker with
+  `NativeSingleViewSceneRuntime<RemoteServerSession>`.
+- Desktop now keeps platform/app concerns only: actor textures, `winit`,
+  headless/perf/XR-smoke entrypoints, CLI scene options, UI/debug state, and
+  concrete TCP session construction.
+- Shared app-runtime now owns desktop and flat Android terrain mesh assets,
+  render compile queue, polling/idle waits, render-section sync, cached
+  sections, traversal-ready queries, local command dispatch, and remote
+  dedicated dispatch/reconnect/resync behavior for the native single-view
+  shell.
+- Updated desktop window, headless, perf, and XR smoke code to read terrain
+  mesh assets through `WindowSceneRuntime::mesh_assets()` instead of a
+  desktop-owned field.
+
+Validation after Slice 2 third chunk:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo check --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo fmt --manifest-path native/Cargo.toml --all --check
 pnpm native:web:build
 git diff --check
 ```

@@ -69,8 +69,8 @@ pub(crate) fn run_window(
             "disabled"
         },
         scene.remote_addr,
-        runtime.mesh_assets.atlas.width,
-        runtime.mesh_assets.atlas.height
+        runtime.mesh_assets().atlas.width,
+        runtime.mesh_assets().atlas.height
     );
 
     let event_loop = EventLoop::new()?;
@@ -822,7 +822,7 @@ impl ApplicationHandler for ChunkApp {
             &surface.queue,
             surface.config.format,
             &sections,
-            self.runtime.mesh_assets.atlas.as_upload(),
+            self.runtime.mesh_assets().atlas.as_upload(),
         ) {
             Ok(draw) => draw,
             Err(err) => {
