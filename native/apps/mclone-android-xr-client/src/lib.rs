@@ -11,7 +11,9 @@ mod android {
 
     use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
     use anyhow::{Context, Result, anyhow, bail};
-    use mclone_xr_host::{OpenXrHostEvent, OpenXrPollStatus, XrFrameStats};
+    use mclone_xr_host::{
+        OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE, XrFrameStats,
+    };
     use openxr as xr;
 
     use super::graphics_vulkan;
@@ -20,7 +22,7 @@ mod android {
     const STARTUP_ARGV_INTENT_EXTRA: &str = "mclone.startup.argv";
     const XR_VIEW_POSE_PROPERTY: &str = "debug.mclone.xr_view_pose";
     const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
-    const VIEW_TYPE: xr::ViewConfigurationType = xr::ViewConfigurationType::PRIMARY_STEREO;
+    const VIEW_TYPE: xr::ViewConfigurationType = PRIMARY_STEREO_VIEW_TYPE;
     const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
     const XR_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
     const XR_SAMPLE_COUNT: u32 = 1;
@@ -364,24 +366,19 @@ mod android {
         if blend_modes.is_empty() {
             bail!("OpenXR runtime reported no PRIMARY_STEREO environment blend modes");
         }
-        let environment_blend_mode = selected_environment_blend_mode(&blend_modes);
+        let environment_blend_mode = mclone_xr_host::selected_environment_blend_mode(&blend_modes);
         log::info!(
             "OpenXR environment blend modes: {}; selected={environment_blend_mode:?}",
-            format_debug_list(&blend_modes)
+            mclone_xr_host::format_debug_list(&blend_modes)
         );
 
         let view_configs = instance
             .enumerate_view_configuration_views(system, VIEW_TYPE)
             .context("enumerate OpenXR PRIMARY_STEREO view configuration")?;
-        if view_configs.len() < 2 {
-            bail!(
-                "OpenXR PRIMARY_STEREO reported {} view(s); mclone requires at least two",
-                view_configs.len()
-            );
-        }
+        let stereo_config = mclone_xr_host::stereo_config(&view_configs)?;
         log::info!(
             "OpenXR stereo views: {}",
-            format_view_configurations(&view_configs)
+            mclone_xr_host::format_view_configurations(&view_configs)
         );
 
         let mut graphics = graphics_vulkan::create_graphics_session(&instance, system)
@@ -392,14 +389,10 @@ mod android {
             graphics.physical_device_api_version,
             graphics.queue_family_index
         );
-        let stage = graphics
-            .session
-            .create_reference_space(xr::ReferenceSpaceType::STAGE, xr::Posef::IDENTITY)
-            .context("create OpenXR STAGE reference space")?;
+        let stage = mclone_xr_host::create_stage_reference_space(&graphics.session)?;
         log::info!("OpenXR reference space: STAGE");
 
-        let eye_width = view_configs[0].recommended_image_rect_width.max(1);
-        let eye_height = view_configs[0].recommended_image_rect_height.max(1);
+        let (eye_width, eye_height) = stereo_config.primary_eye_size();
         let mut left_eye = graphics_vulkan::create_eye(
             &graphics.device,
             &graphics.session,
@@ -486,12 +479,11 @@ mod android {
                 OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
             }
 
-            let frame_state = graphics.frame_wait.wait().context("wait OpenXR frame")?;
-            graphics
-                .frame_stream
-                .begin()
-                .context("begin OpenXR frame")?;
-            frame_stats.record_runtime_frame();
+            let frame_state = mclone_xr_host::wait_begin_frame(
+                &mut graphics.frame_wait,
+                &mut graphics.frame_stream,
+                &mut frame_stats,
+            )?;
 
             let frame_result = if frame_state.should_render {
                 render_clear_frame(
@@ -510,19 +502,17 @@ mod android {
                     }
                 })
             } else {
-                frame_stats.record_skipped_frame();
-                graphics
-                    .frame_stream
-                    .end(
-                        frame_state.predicted_display_time,
-                        environment_blend_mode,
-                        &[],
-                    )
-                    .context("end skipped OpenXR frame")
+                mclone_xr_host::end_skipped_frame(
+                    &mut graphics.frame_stream,
+                    frame_state.predicted_display_time,
+                    environment_blend_mode,
+                    &mut frame_stats,
+                )
             };
 
             if let Err(error) = frame_result {
-                let _ = graphics.frame_stream.end(
+                let _ = mclone_xr_host::end_frame_with_layers(
+                    &mut graphics.frame_stream,
                     frame_state.predicted_display_time,
                     environment_blend_mode,
                     &[],
@@ -563,13 +553,8 @@ mod android {
         left_eye: &mut graphics_vulkan::OpenXrEyeState,
         right_eye: &mut graphics_vulkan::OpenXrEyeState,
     ) -> Result<()> {
-        let (_, views) = graphics
-            .session
-            .locate_views(VIEW_TYPE, predicted_display_time, stage)
-            .context("locate OpenXR stereo views")?;
-        if views.len() < 2 {
-            bail!("OpenXR runtime returned fewer than two stereo views");
-        }
+        let stereo_views =
+            mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
 
         let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
         let right_target =
@@ -601,8 +586,8 @@ mod android {
         };
         let projection_views = [
             xr::CompositionLayerProjectionView::new()
-                .pose(views[0].pose)
-                .fov(views[0].fov)
+                .pose(stereo_views.left.pose)
+                .fov(stereo_views.left.fov)
                 .sub_image(
                     xr::SwapchainSubImage::new()
                         .swapchain(&left_eye.swapchain)
@@ -610,8 +595,8 @@ mod android {
                         .image_rect(rect),
                 ),
             xr::CompositionLayerProjectionView::new()
-                .pose(views[1].pose)
-                .fov(views[1].fov)
+                .pose(stereo_views.right.pose)
+                .fov(stereo_views.right.fov)
                 .sub_image(
                     xr::SwapchainSubImage::new()
                         .swapchain(&right_eye.swapchain)
@@ -624,10 +609,12 @@ mod android {
             .views(&projection_views);
         let layers: [&xr::CompositionLayerBase<'_, graphics_vulkan::AppGraphics>; 1] =
             [&projection];
-        graphics
-            .frame_stream
-            .end(predicted_display_time, environment_blend_mode, &layers)
-            .context("end OpenXR frame with projection layer")
+        mclone_xr_host::end_frame_with_layers(
+            &mut graphics.frame_stream,
+            predicted_display_time,
+            environment_blend_mode,
+            &layers,
+        )
     }
 
     struct AcquiredEyeTarget<'a> {
@@ -727,43 +714,6 @@ mod android {
                 a: 1.0,
             },
         }
-    }
-
-    fn selected_environment_blend_mode(
-        blend_modes: &[xr::EnvironmentBlendMode],
-    ) -> xr::EnvironmentBlendMode {
-        blend_modes
-            .iter()
-            .copied()
-            .find(|mode| *mode == xr::EnvironmentBlendMode::OPAQUE)
-            .unwrap_or(blend_modes[0])
-    }
-
-    fn format_debug_list<T: std::fmt::Debug>(items: &[T]) -> String {
-        items
-            .iter()
-            .map(|item| format!("{item:?}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-
-    fn format_view_configurations(views: &[xr::ViewConfigurationView]) -> String {
-        views
-            .iter()
-            .enumerate()
-            .map(|(index, view)| {
-                format!(
-                    "#{index} recommended={}x{} max={}x{} samples={:?}/{:?}",
-                    view.recommended_image_rect_width,
-                    view.recommended_image_rect_height,
-                    view.max_image_rect_width,
-                    view.max_image_rect_height,
-                    view.recommended_swapchain_sample_count,
-                    view.max_swapchain_sample_count
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("; ")
     }
 
     fn wait_for_android_resume(app: &AndroidApp) -> Result<()> {

@@ -41,7 +41,9 @@ use mclone_render_session::{
 #[cfg(not(target_os = "android"))]
 use mclone_ui::GuiDrawList;
 #[cfg(not(target_os = "android"))]
-use mclone_xr_host::{OpenXrHostEvent, OpenXrPollStatus, XrFrameStats};
+use mclone_xr_host::{
+    OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE, XrFrameStats, XrStereoConfig,
+};
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
 
@@ -79,7 +81,7 @@ pub(crate) fn run_mclone(options: XrMcloneSmokeOptions) -> Result<()> {
 }
 
 #[cfg(not(target_os = "android"))]
-const VIEW_TYPE: xr::ViewConfigurationType = xr::ViewConfigurationType::PRIMARY_STEREO;
+const VIEW_TYPE: xr::ViewConfigurationType = PRIMARY_STEREO_VIEW_TYPE;
 #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
 const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
@@ -184,25 +186,29 @@ fn run_desktop_xr_smoke(smoke: DesktopXrSmoke) -> Result<()> {
     if blend_modes.is_empty() {
         bail!("OpenXR runtime reported no PRIMARY_STEREO environment blend modes");
     }
-    println!("OpenXR blend modes: {}", format_debug_list(&blend_modes));
-    let environment_blend_mode = selected_environment_blend_mode(&blend_modes);
+    println!(
+        "OpenXR blend modes: {}",
+        mclone_xr_host::format_debug_list(&blend_modes)
+    );
+    let environment_blend_mode = mclone_xr_host::selected_environment_blend_mode(&blend_modes);
     println!("OpenXR environment blend mode: {environment_blend_mode:?}");
 
     let views = instance
         .enumerate_view_configuration_views(system, VIEW_TYPE)
         .context("enumerate OpenXR PRIMARY_STEREO view configuration")?;
-    if views.len() < 2 {
-        bail!(
-            "OpenXR PRIMARY_STEREO reported {} view(s); mclone requires at least two",
-            views.len()
-        );
-    }
+    let stereo_config = mclone_xr_host::stereo_config(&views)?;
     println!(
         "OpenXR stereo views: {}",
-        format_view_configurations(&views)
+        mclone_xr_host::format_view_configurations(&views)
     );
 
-    create_graphics_session_probe(&instance, system, &views, environment_blend_mode, smoke)?;
+    create_graphics_session_probe(
+        &instance,
+        system,
+        stereo_config,
+        environment_blend_mode,
+        smoke,
+    )?;
 
     Ok(())
 }
@@ -235,22 +241,25 @@ fn enable_platform_graphics_extension(
 fn create_graphics_session_probe(
     instance: &xr::Instance,
     system: xr::SystemId,
-    views: &[xr::ViewConfigurationView],
+    stereo_config: XrStereoConfig,
     environment_blend_mode: xr::EnvironmentBlendMode,
     smoke: DesktopXrSmoke,
 ) -> Result<()> {
     let graphics = graphics_metal::create_graphics_session(instance, system)
         .context("create OpenXR Metal graphics session")?;
-    let stage = graphics
-        .session
-        .create_reference_space(xr::ReferenceSpaceType::STAGE, xr::Posef::IDENTITY)
-        .context("create OpenXR STAGE reference space")?;
+    let stage = mclone_xr_host::create_stage_reference_space(&graphics.session)?;
     println!(
         "OpenXR Metal session: runtime_device='{}' matched_adapter='{}'",
         graphics.required_device_name, graphics.adapter_name
     );
     println!("OpenXR reference space: STAGE");
-    run_smoke_frames(graphics, stage, views, environment_blend_mode, smoke)?;
+    run_smoke_frames(
+        graphics,
+        stage,
+        stereo_config,
+        environment_blend_mode,
+        smoke,
+    )?;
     Ok(())
 }
 
@@ -258,16 +267,13 @@ fn create_graphics_session_probe(
 fn create_graphics_session_probe(
     instance: &xr::Instance,
     system: xr::SystemId,
-    views: &[xr::ViewConfigurationView],
+    stereo_config: XrStereoConfig,
     environment_blend_mode: xr::EnvironmentBlendMode,
     smoke: DesktopXrSmoke,
 ) -> Result<()> {
     let graphics = graphics_vulkan::create_graphics_session(instance, system)
         .context("create OpenXR Vulkan graphics session")?;
-    let stage = graphics
-        .session
-        .create_reference_space(xr::ReferenceSpaceType::STAGE, xr::Posef::IDENTITY)
-        .context("create OpenXR STAGE reference space")?;
+    let stage = mclone_xr_host::create_stage_reference_space(&graphics.session)?;
     println!(
         "OpenXR Vulkan session: physical_device='{}' api={} queue_family={}",
         graphics.physical_device_name,
@@ -275,19 +281,14 @@ fn create_graphics_session_probe(
         graphics.queue_family_index
     );
     println!("OpenXR reference space: STAGE");
-    run_smoke_frames(graphics, stage, views, environment_blend_mode, smoke)?;
+    run_smoke_frames(
+        graphics,
+        stage,
+        stereo_config,
+        environment_blend_mode,
+        smoke,
+    )?;
     Ok(())
-}
-
-#[cfg(not(target_os = "android"))]
-fn selected_environment_blend_mode(
-    blend_modes: &[xr::EnvironmentBlendMode],
-) -> xr::EnvironmentBlendMode {
-    blend_modes
-        .iter()
-        .copied()
-        .find(|mode| *mode == xr::EnvironmentBlendMode::OPAQUE)
-        .unwrap_or(blend_modes[0])
 }
 
 #[cfg(not(target_os = "android"))]
@@ -309,7 +310,7 @@ fn log_openxr_host_event(event: OpenXrHostEvent) {
 fn run_smoke_frames(
     mut graphics: platform_graphics::GraphicsSession,
     stage: xr::Space,
-    views: &[xr::ViewConfigurationView],
+    stereo_config: XrStereoConfig,
     environment_blend_mode: xr::EnvironmentBlendMode,
     smoke: DesktopXrSmoke,
 ) -> Result<()> {
@@ -320,8 +321,7 @@ fn run_smoke_frames(
     let frame_limit_label = frame_limit
         .map(|frames| frames.to_string())
         .unwrap_or_else(|| "unbounded".to_owned());
-    let eye_width = views[0].recommended_image_rect_width.max(1);
-    let eye_height = views[0].recommended_image_rect_height.max(1);
+    let (eye_width, eye_height) = stereo_config.primary_eye_size();
     let mut left_eye = platform_graphics::create_eye(
         &graphics.device,
         &graphics.session,
@@ -404,12 +404,11 @@ fn run_smoke_frames(
             OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
         }
 
-        let frame_state = graphics.frame_wait.wait().context("wait OpenXR frame")?;
-        graphics
-            .frame_stream
-            .begin()
-            .context("begin OpenXR frame")?;
-        frame_stats.record_runtime_frame();
+        let frame_state = mclone_xr_host::wait_begin_frame(
+            &mut graphics.frame_wait,
+            &mut graphics.frame_stream,
+            &mut frame_stats,
+        )?;
 
         let frame_result = if frame_state.should_render {
             let result = controller_actions
@@ -446,19 +445,17 @@ fn run_smoke_frames(
                 frame_stats.record_submitted_frame();
             })
         } else {
-            frame_stats.record_skipped_frame();
-            graphics
-                .frame_stream
-                .end(
-                    frame_state.predicted_display_time,
-                    environment_blend_mode,
-                    &[],
-                )
-                .context("end skipped OpenXR frame")
+            mclone_xr_host::end_skipped_frame(
+                &mut graphics.frame_stream,
+                frame_state.predicted_display_time,
+                environment_blend_mode,
+                &mut frame_stats,
+            )
         };
 
         if let Err(err) = frame_result {
-            let _ = graphics.frame_stream.end(
+            let _ = mclone_xr_host::end_frame_with_layers(
+                &mut graphics.frame_stream,
                 frame_state.predicted_display_time,
                 environment_blend_mode,
                 &[],
@@ -995,10 +992,10 @@ fn render_mclone_frame(
     mclone: &mut XrMcloneWorldState,
     controllers: &[XrControllerSnapshot],
 ) -> Result<()> {
-    let (_, views) = graphics
-        .session
-        .locate_views(VIEW_TYPE, predicted_display_time, stage)
-        .context("locate OpenXR stereo views for mclone frame")?;
+    let stereo_views =
+        mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)
+            .context("locate OpenXR stereo views for mclone frame")?;
+    let views = [stereo_views.left, stereo_views.right];
     mclone.apply_locomotion_input(controllers)?;
     let render_views = mclone.render_views(&views)?;
     let center_position = (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
@@ -1047,8 +1044,8 @@ fn render_mclone_frame(
     };
     let projection_views = [
         xr::CompositionLayerProjectionView::new()
-            .pose(views[0].pose)
-            .fov(views[0].fov)
+            .pose(stereo_views.left.pose)
+            .fov(stereo_views.left.fov)
             .sub_image(
                 xr::SwapchainSubImage::new()
                     .swapchain(&left_eye.swapchain)
@@ -1056,8 +1053,8 @@ fn render_mclone_frame(
                     .image_rect(rect),
             ),
         xr::CompositionLayerProjectionView::new()
-            .pose(views[1].pose)
-            .fov(views[1].fov)
+            .pose(stereo_views.right.pose)
+            .fov(stereo_views.right.fov)
             .sub_image(
                 xr::SwapchainSubImage::new()
                     .swapchain(&right_eye.swapchain)
@@ -1071,10 +1068,12 @@ fn render_mclone_frame(
     let mut layers: Vec<&xr::CompositionLayerBase<'_, platform_graphics::AppGraphics>> =
         Vec::with_capacity(1);
     layers.push(&projection);
-    graphics
-        .frame_stream
-        .end(predicted_display_time, environment_blend_mode, &layers)
-        .context("end OpenXR frame with mclone projection layer")
+    mclone_xr_host::end_frame_with_layers(
+        &mut graphics.frame_stream,
+        predicted_display_time,
+        environment_blend_mode,
+        &layers,
+    )
 }
 
 #[cfg(not(target_os = "android"))]
@@ -1328,13 +1327,8 @@ fn render_clear_frame(
     left_eye: &mut platform_graphics::OpenXrEyeState,
     right_eye: &mut platform_graphics::OpenXrEyeState,
 ) -> Result<()> {
-    let (_, views) = graphics
-        .session
-        .locate_views(VIEW_TYPE, predicted_display_time, stage)
-        .context("locate OpenXR stereo views")?;
-    if views.len() < 2 {
-        bail!("OpenXR runtime returned fewer than two stereo views");
-    }
+    let stereo_views =
+        mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
 
     let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
     let right_target = match acquire_eye_target(right_eye).context("acquire right-eye OpenXR image")
@@ -1367,8 +1361,8 @@ fn render_clear_frame(
     };
     let projection_views = [
         xr::CompositionLayerProjectionView::new()
-            .pose(views[0].pose)
-            .fov(views[0].fov)
+            .pose(stereo_views.left.pose)
+            .fov(stereo_views.left.fov)
             .sub_image(
                 xr::SwapchainSubImage::new()
                     .swapchain(&left_eye.swapchain)
@@ -1376,8 +1370,8 @@ fn render_clear_frame(
                     .image_rect(rect),
             ),
         xr::CompositionLayerProjectionView::new()
-            .pose(views[1].pose)
-            .fov(views[1].fov)
+            .pose(stereo_views.right.pose)
+            .fov(stereo_views.right.fov)
             .sub_image(
                 xr::SwapchainSubImage::new()
                     .swapchain(&right_eye.swapchain)
@@ -1391,10 +1385,12 @@ fn render_clear_frame(
     let mut layers: Vec<&xr::CompositionLayerBase<'_, platform_graphics::AppGraphics>> =
         Vec::with_capacity(1);
     layers.push(&projection);
-    graphics
-        .frame_stream
-        .end(predicted_display_time, environment_blend_mode, &layers)
-        .context("end OpenXR frame with projection layer")
+    mclone_xr_host::end_frame_with_layers(
+        &mut graphics.frame_stream,
+        predicted_display_time,
+        environment_blend_mode,
+        &layers,
+    )
 }
 
 #[cfg(not(target_os = "android"))]
@@ -1675,35 +1671,6 @@ unsafe fn load_runtime_entry_from_negotiation(path: &Path) -> Result<xr::Entry> 
         .ok_or_else(|| anyhow!("runtime negotiation returned null xrGetInstanceProcAddr"))?;
     unsafe { xr::Entry::from_get_instance_proc_addr(get_instance_proc_addr) }
         .context("create OpenXR entry from negotiated xrGetInstanceProcAddr")
-}
-
-#[cfg(not(target_os = "android"))]
-fn format_debug_list<T: std::fmt::Debug>(values: &[T]) -> String {
-    values
-        .iter()
-        .map(|value| format!("{value:?}"))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-#[cfg(not(target_os = "android"))]
-fn format_view_configurations(views: &[xr::ViewConfigurationView]) -> String {
-    views
-        .iter()
-        .enumerate()
-        .map(|(index, view)| {
-            format!(
-                "#{index} recommended={}x{} max={}x{} samples={}/{}",
-                view.recommended_image_rect_width,
-                view.recommended_image_rect_height,
-                view.max_image_rect_width,
-                view.max_image_rect_height,
-                view.recommended_swapchain_sample_count,
-                view.max_swapchain_sample_count
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ")
 }
 
 #[cfg(all(test, not(target_os = "android")))]
