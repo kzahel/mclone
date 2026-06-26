@@ -16,6 +16,28 @@ pub(super) struct OpenXrEyeState {
     pub(super) height: u32,
 }
 
+impl mclone_xr_host::XrEyeSwapchain<AppGraphics> for OpenXrEyeState {
+    fn swapchain(&self) -> &xr::Swapchain<AppGraphics> {
+        &self.swapchain
+    }
+
+    fn swapchain_mut(&mut self) -> &mut xr::Swapchain<AppGraphics> {
+        &mut self.swapchain
+    }
+
+    fn textures(&self) -> &[wgpu::Texture] {
+        &self.textures
+    }
+
+    fn width(&self) -> u32 {
+        self.width
+    }
+
+    fn height(&self) -> u32 {
+        self.height
+    }
+}
+
 pub(super) struct VulkanGraphicsSession {
     pub(super) frame_wait: xr::FrameWaiter,
     pub(super) frame_stream: xr::FrameStream<AppGraphics>,

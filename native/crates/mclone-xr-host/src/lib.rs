@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use openxr as xr;
+use std::marker::PhantomData;
 
 pub const PRIMARY_STEREO_VIEW_TYPE: xr::ViewConfigurationType =
     xr::ViewConfigurationType::PRIMARY_STEREO;
@@ -59,6 +60,54 @@ pub struct XrStereoConfig {
 pub struct XrStereoFrameViews {
     pub left: xr::View,
     pub right: xr::View,
+}
+
+pub trait XrEyeSwapchain<G>
+where
+    G: xr::Graphics,
+{
+    fn swapchain(&self) -> &xr::Swapchain<G>;
+    fn swapchain_mut(&mut self) -> &mut xr::Swapchain<G>;
+    fn textures(&self) -> &[wgpu::Texture];
+    fn width(&self) -> u32;
+    fn height(&self) -> u32;
+}
+
+pub struct XrAcquiredEyeTarget<'a, G, E>
+where
+    G: xr::Graphics,
+    E: XrEyeSwapchain<G> + ?Sized,
+{
+    eye_state: &'a mut E,
+    color_view: wgpu::TextureView,
+    _graphics: PhantomData<G>,
+}
+
+impl<'a, G, E> XrAcquiredEyeTarget<'a, G, E>
+where
+    G: xr::Graphics,
+    E: XrEyeSwapchain<G> + ?Sized,
+{
+    pub fn eye(&self) -> &E {
+        self.eye_state
+    }
+
+    pub fn color_view(&self) -> &wgpu::TextureView {
+        &self.color_view
+    }
+
+    pub fn release(self) -> Result<()> {
+        self.eye_state
+            .swapchain_mut()
+            .release_image()
+            .context("release OpenXR swapchain image")
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct XrClearTarget<'a> {
+    pub color_view: &'a wgpu::TextureView,
+    pub depth_view: Option<&'a wgpu::TextureView>,
 }
 
 impl XrStereoConfig {
@@ -229,6 +278,160 @@ where
     frame_stream
         .end(predicted_display_time, environment_blend_mode, layers)
         .context("end OpenXR frame with projection layer")
+}
+
+pub fn acquire_eye_target<G, E>(eye_state: &mut E) -> Result<XrAcquiredEyeTarget<'_, G, E>>
+where
+    G: xr::Graphics,
+    E: XrEyeSwapchain<G> + ?Sized,
+{
+    let image_index = eye_state
+        .swapchain_mut()
+        .acquire_image()
+        .context("acquire OpenXR swapchain image")?;
+    if let Err(err) = eye_state.swapchain_mut().wait_image(xr::Duration::INFINITE) {
+        let _ = eye_state.swapchain_mut().release_image();
+        return Err(err).context("wait for OpenXR swapchain image");
+    }
+    let color_view = {
+        let texture = eye_state
+            .textures()
+            .get(image_index as usize)
+            .ok_or_else(|| {
+                anyhow::anyhow!("OpenXR returned out-of-range image index {image_index}")
+            })?;
+        texture.create_view(&Default::default())
+    };
+    Ok(XrAcquiredEyeTarget {
+        eye_state,
+        color_view,
+        _graphics: PhantomData,
+    })
+}
+
+pub fn end_stereo_projection_frame<G, L, R>(
+    frame_stream: &mut xr::FrameStream<G>,
+    predicted_display_time: xr::Time,
+    environment_blend_mode: xr::EnvironmentBlendMode,
+    stage: &xr::Space,
+    stereo_views: XrStereoFrameViews,
+    left_eye: &L,
+    right_eye: &R,
+) -> Result<()>
+where
+    G: xr::Graphics,
+    L: XrEyeSwapchain<G> + ?Sized,
+    R: XrEyeSwapchain<G> + ?Sized,
+{
+    let rect = xr::Rect2Di {
+        offset: xr::Offset2Di { x: 0, y: 0 },
+        extent: xr::Extent2Di {
+            width: left_eye.width() as _,
+            height: left_eye.height() as _,
+        },
+    };
+    let projection_views = [
+        xr::CompositionLayerProjectionView::new()
+            .pose(stereo_views.left.pose)
+            .fov(stereo_views.left.fov)
+            .sub_image(
+                xr::SwapchainSubImage::new()
+                    .swapchain(left_eye.swapchain())
+                    .image_array_index(0)
+                    .image_rect(rect),
+            ),
+        xr::CompositionLayerProjectionView::new()
+            .pose(stereo_views.right.pose)
+            .fov(stereo_views.right.fov)
+            .sub_image(
+                xr::SwapchainSubImage::new()
+                    .swapchain(right_eye.swapchain())
+                    .image_array_index(0)
+                    .image_rect(rect),
+            ),
+    ];
+    let projection = xr::CompositionLayerProjection::new()
+        .space(stage)
+        .views(&projection_views);
+    let layers: [&xr::CompositionLayerBase<'_, G>; 1] = [&projection];
+    end_frame_with_layers(
+        frame_stream,
+        predicted_display_time,
+        environment_blend_mode,
+        &layers,
+    )
+}
+
+pub fn clear_stereo_targets(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    left_target: XrClearTarget<'_>,
+    right_target: XrClearTarget<'_>,
+) -> Result<()> {
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("mclone_xr_clear_encoder"),
+    });
+    clear_eye_target(&mut encoder, left_target, diagnostic_eye_clear_color(0));
+    clear_eye_target(&mut encoder, right_target, diagnostic_eye_clear_color(1));
+    let submission = queue.submit(Some(encoder.finish()));
+    device
+        .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+        .map(|_| ())
+        .context("wait for OpenXR clear submission")?;
+    device
+        .poll(wgpu::PollType::Wait)
+        .map(|_| ())
+        .context("wait for OpenXR clear device idle")
+}
+
+pub fn diagnostic_eye_clear_color(eye: usize) -> wgpu::Color {
+    match eye {
+        0 => wgpu::Color {
+            r: 0.04,
+            g: 0.10,
+            b: 0.35,
+            a: 1.0,
+        },
+        _ => wgpu::Color {
+            r: 0.05,
+            g: 0.28,
+            b: 0.12,
+            a: 1.0,
+        },
+    }
+}
+
+fn clear_eye_target(
+    encoder: &mut wgpu::CommandEncoder,
+    target: XrClearTarget<'_>,
+    color: wgpu::Color,
+) {
+    let color_attachments = [Some(wgpu::RenderPassColorAttachment {
+        view: target.color_view,
+        resolve_target: None,
+        ops: wgpu::Operations {
+            load: wgpu::LoadOp::Clear(color),
+            store: wgpu::StoreOp::Store,
+        },
+    })];
+    let depth_stencil_attachment =
+        target
+            .depth_view
+            .map(|view| wgpu::RenderPassDepthStencilAttachment {
+                view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            });
+    let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("mclone_xr_clear_pass"),
+        color_attachments: &color_attachments,
+        depth_stencil_attachment,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+    });
 }
 
 pub fn locate_stereo_views<G>(

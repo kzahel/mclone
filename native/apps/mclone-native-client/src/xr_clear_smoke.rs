@@ -68,6 +68,13 @@ use graphics_metal as platform_graphics;
 #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
 use graphics_vulkan as platform_graphics;
 
+#[cfg(not(target_os = "android"))]
+type AcquiredEyeTarget<'a> = mclone_xr_host::XrAcquiredEyeTarget<
+    'a,
+    platform_graphics::AppGraphics,
+    platform_graphics::OpenXrEyeState,
+>;
+
 #[cfg(target_os = "android")]
 pub(crate) fn run(options: XrClearSmokeOptions) -> Result<()> {
     let _ = options;
@@ -1035,44 +1042,14 @@ fn render_mclone_frame(
     right_release_result?;
     mclone.record_eye0_summary(eye0_summary);
 
-    let rect = xr::Rect2Di {
-        offset: xr::Offset2Di { x: 0, y: 0 },
-        extent: xr::Extent2Di {
-            width: left_eye.width as _,
-            height: left_eye.height as _,
-        },
-    };
-    let projection_views = [
-        xr::CompositionLayerProjectionView::new()
-            .pose(stereo_views.left.pose)
-            .fov(stereo_views.left.fov)
-            .sub_image(
-                xr::SwapchainSubImage::new()
-                    .swapchain(&left_eye.swapchain)
-                    .image_array_index(0)
-                    .image_rect(rect),
-            ),
-        xr::CompositionLayerProjectionView::new()
-            .pose(stereo_views.right.pose)
-            .fov(stereo_views.right.fov)
-            .sub_image(
-                xr::SwapchainSubImage::new()
-                    .swapchain(&right_eye.swapchain)
-                    .image_array_index(0)
-                    .image_rect(rect),
-            ),
-    ];
-    let projection = xr::CompositionLayerProjection::new()
-        .space(stage)
-        .views(&projection_views);
-    let mut layers: Vec<&xr::CompositionLayerBase<'_, platform_graphics::AppGraphics>> =
-        Vec::with_capacity(1);
-    layers.push(&projection);
-    mclone_xr_host::end_frame_with_layers(
+    mclone_xr_host::end_stereo_projection_frame(
         &mut graphics.frame_stream,
         predicted_display_time,
         environment_blend_mode,
-        &layers,
+        stage,
+        stereo_views,
+        left_eye,
+        right_eye,
     )
 }
 
@@ -1160,13 +1137,13 @@ fn render_mclone_eye_target(
         &graphics.queue,
         &mut encoder,
         RenderFrameTarget::color(
-            &target.color_view,
-            [target.eye_state.width, target.eye_state.height],
+            target.color_view(),
+            [target.eye().width, target.eye().height],
         ),
     );
     let summary = render_full_frame_for_view(
         frame,
-        &target.eye_state.depth,
+        &target.eye().depth,
         sky,
         draw,
         Some(actors),
@@ -1352,86 +1329,22 @@ fn render_clear_frame(
     left_release_result?;
     right_release_result?;
 
-    let rect = xr::Rect2Di {
-        offset: xr::Offset2Di { x: 0, y: 0 },
-        extent: xr::Extent2Di {
-            width: left_eye.width as _,
-            height: left_eye.height as _,
-        },
-    };
-    let projection_views = [
-        xr::CompositionLayerProjectionView::new()
-            .pose(stereo_views.left.pose)
-            .fov(stereo_views.left.fov)
-            .sub_image(
-                xr::SwapchainSubImage::new()
-                    .swapchain(&left_eye.swapchain)
-                    .image_array_index(0)
-                    .image_rect(rect),
-            ),
-        xr::CompositionLayerProjectionView::new()
-            .pose(stereo_views.right.pose)
-            .fov(stereo_views.right.fov)
-            .sub_image(
-                xr::SwapchainSubImage::new()
-                    .swapchain(&right_eye.swapchain)
-                    .image_array_index(0)
-                    .image_rect(rect),
-            ),
-    ];
-    let projection = xr::CompositionLayerProjection::new()
-        .space(stage)
-        .views(&projection_views);
-    let mut layers: Vec<&xr::CompositionLayerBase<'_, platform_graphics::AppGraphics>> =
-        Vec::with_capacity(1);
-    layers.push(&projection);
-    mclone_xr_host::end_frame_with_layers(
+    mclone_xr_host::end_stereo_projection_frame(
         &mut graphics.frame_stream,
         predicted_display_time,
         environment_blend_mode,
-        &layers,
+        stage,
+        stereo_views,
+        left_eye,
+        right_eye,
     )
-}
-
-#[cfg(not(target_os = "android"))]
-struct AcquiredEyeTarget<'a> {
-    eye_state: &'a mut platform_graphics::OpenXrEyeState,
-    color_view: wgpu::TextureView,
-}
-
-#[cfg(not(target_os = "android"))]
-impl<'a> AcquiredEyeTarget<'a> {
-    fn release(self) -> Result<()> {
-        self.eye_state
-            .swapchain
-            .release_image()
-            .context("release OpenXR swapchain image")
-    }
 }
 
 #[cfg(not(target_os = "android"))]
 fn acquire_eye_target(
     eye_state: &mut platform_graphics::OpenXrEyeState,
 ) -> Result<AcquiredEyeTarget<'_>> {
-    let image_index = eye_state
-        .swapchain
-        .acquire_image()
-        .context("acquire OpenXR swapchain image")?;
-    if let Err(err) = eye_state.swapchain.wait_image(xr::Duration::INFINITE) {
-        let _ = eye_state.swapchain.release_image();
-        return Err(err).context("wait for OpenXR swapchain image");
-    }
-    let color_view = {
-        let texture = eye_state
-            .textures
-            .get(image_index as usize)
-            .ok_or_else(|| anyhow!("OpenXR returned out-of-range image index {image_index}"))?;
-        texture.create_view(&Default::default())
-    };
-    Ok(AcquiredEyeTarget {
-        eye_state,
-        color_view,
-    })
+    mclone_xr_host::acquire_eye_target(eye_state)
 }
 
 #[cfg(not(target_os = "android"))]
@@ -1441,69 +1354,18 @@ fn clear_stereo_targets(
     left_target: &AcquiredEyeTarget<'_>,
     right_target: &AcquiredEyeTarget<'_>,
 ) -> Result<()> {
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("mclone_xr_clear_encoder"),
-    });
-    clear_eye_target(&mut encoder, left_target, diagnostic_eye_clear_color(0));
-    clear_eye_target(&mut encoder, right_target, diagnostic_eye_clear_color(1));
-    let submission = queue.submit(Some(encoder.finish()));
-    device
-        .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
-        .map(|_| ())
-        .context("wait for OpenXR clear submission")?;
-    device
-        .poll(wgpu::PollType::Wait)
-        .map(|_| ())
-        .context("wait for OpenXR clear device idle")
-}
-
-#[cfg(not(target_os = "android"))]
-fn clear_eye_target(
-    encoder: &mut wgpu::CommandEncoder,
-    target: &AcquiredEyeTarget<'_>,
-    color: wgpu::Color,
-) {
-    let color_attachments = [Some(wgpu::RenderPassColorAttachment {
-        view: &target.color_view,
-        resolve_target: None,
-        ops: wgpu::Operations {
-            load: wgpu::LoadOp::Clear(color),
-            store: wgpu::StoreOp::Store,
+    mclone_xr_host::clear_stereo_targets(
+        device,
+        queue,
+        mclone_xr_host::XrClearTarget {
+            color_view: left_target.color_view(),
+            depth_view: Some(&left_target.eye().depth.view),
         },
-    })];
-    let depth_stencil_attachment = Some(wgpu::RenderPassDepthStencilAttachment {
-        view: &target.eye_state.depth.view,
-        depth_ops: Some(wgpu::Operations {
-            load: wgpu::LoadOp::Clear(1.0),
-            store: wgpu::StoreOp::Store,
-        }),
-        stencil_ops: None,
-    });
-    let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("mclone_xr_clear_pass"),
-        color_attachments: &color_attachments,
-        depth_stencil_attachment,
-        timestamp_writes: None,
-        occlusion_query_set: None,
-    });
-}
-
-#[cfg(not(target_os = "android"))]
-fn diagnostic_eye_clear_color(eye: usize) -> wgpu::Color {
-    match eye {
-        0 => wgpu::Color {
-            r: 0.04,
-            g: 0.10,
-            b: 0.35,
-            a: 1.0,
+        mclone_xr_host::XrClearTarget {
+            color_view: right_target.color_view(),
+            depth_view: Some(&right_target.eye().depth.view),
         },
-        _ => wgpu::Color {
-            r: 0.05,
-            g: 0.28,
-            b: 0.12,
-            a: 1.0,
-        },
-    }
+    )
 }
 
 #[cfg(not(target_os = "android"))]

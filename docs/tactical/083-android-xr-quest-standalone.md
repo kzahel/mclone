@@ -5,9 +5,10 @@ Slice 2's loader/session/swapchain first chunk is complete. Slice 2A has landed
 two shared-host chunks: desktop XR and Android XR now share OpenXR
 session-state polling, frame counters, stereo config/view helpers, STAGE
 reference-space setup, and frame wait/begin/end helpers through
-`mclone-xr-host`. Continue extracting eye-target, graphics-factory, diagnostic
-clear, and action-set behavior before adding Quest terrain or controller
-features.
+`mclone-xr-host`. The shared host also owns swapchain image acquire/release,
+diagnostic clear, and stereo projection submission. Continue extracting
+graphics-factory and action-set behavior before adding Quest terrain or
+controller features.
 
 ## Purpose
 
@@ -42,7 +43,9 @@ Ready inputs:
   session-state event polling, READY/STOPPING begin/end transitions, poll
   status, host event reporting, frame counters, stereo view configuration,
   STAGE reference-space setup, frame wait/begin/end helpers, and stereo
-  per-frame view/FOV lookup used by both desktop XR and Android XR.
+  per-frame view/FOV lookup used by both desktop XR and Android XR. It also
+  owns the shared swapchain-eye trait, acquired target wrapper, diagnostic
+  clear pass, and stereo projection-frame submission.
 - Playbox has the mature reference implementation for Android XR packaging,
   loader/session ownership, launch-scoped startup arguments, Android property
   toggles, and Quest validation scripts.
@@ -308,8 +311,9 @@ Target boundary:
 - [x] Move frame wait/begin/end helpers, reference-space setup, stereo
   configuration validation, blend-mode selection, view-configuration
   formatting, and per-frame stereo pose/FOV lookup into the shared boundary.
-- [ ] Move diagnostic clear plumbing, per-eye swapchain target acquisition, and
-  renderer-facing XR frame descriptors into the shared boundary.
+- [x] Move diagnostic clear plumbing, per-eye swapchain target acquisition, and
+  stereo projection-frame submission into the shared boundary.
+- [ ] Move renderer-facing XR frame descriptors into the shared boundary.
 - [ ] Move or expose the controller action set shape used by desktop XR so
   Quest Touch input can reuse the same locomotion-facing contract.
 - [ ] Keep platform bootstrap adapters thin. Desktop loads/selects the runtime
@@ -375,6 +379,42 @@ Recorded Slice 2A second-chunk result:
   app-local for the next extraction chunk.
 
 Validation after the second chunk, June 26, 2026:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo check --manifest-path native/Cargo.toml -p mclone-xr-host
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/build-apk.sh --debug'
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/validate-quest-openxr.sh --debug --skip-build --session-only --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --wait-seconds 45'
+```
+
+Observed Quest result:
+
+- Quest serial: `2G0YC1ZF93041Z`
+- OpenXR runtime/system still probes as `Oculus v204.201.0` / `Meta Quest 3`
+- Vulkan session still probes as `Adreno (TM) 740`, Vulkan API `1.3.295`,
+  queue family `0`
+- Swapchains still allocate per-eye `1680x1760`, `3` color images per eye
+- Log marker observed: `MCLONE_ANDROID_XR_SESSION_READY`
+- Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
+
+Recorded Slice 2A third-chunk result:
+
+- Added `wgpu` to `mclone-xr-host`, keeping it as an app/platform XR crate
+  rather than a shared engine crate.
+- Added shared `XrEyeSwapchain`, `XrAcquiredEyeTarget`, `XrClearTarget`,
+  swapchain image acquire/wait/release, diagnostic clear colors, diagnostic
+  stereo color/depth clear, and stereo projection-frame submission.
+- Implemented `XrEyeSwapchain` for desktop Vulkan, desktop Metal, and Android
+  Vulkan eye-state types.
+- Removed duplicate app-local swapchain acquisition/release, diagnostic clear
+  colors, clear-pass encoding, and projection-layer construction from desktop
+  XR and Android XR.
+- Kept platform graphics factories, desktop mclone terrain rendering, and
+  controller actions app-local for the next extraction chunks.
+
+Validation after the third chunk, June 26, 2026:
 
 ```bash
 cargo fmt --manifest-path native/Cargo.toml --all --check
