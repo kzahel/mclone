@@ -8,14 +8,11 @@ Khronos' Android OpenXR loader package, a Rust `cdylib`, launch-scoped startup
 argv through an intent extra, Android debug properties for wrapper settings,
 and validation scripts that wake/restore the headset.
 
-Current status: Android OpenXR session smoke. The app initializes the Android
-OpenXR loader, creates a Vulkan-backed OpenXR session, creates per-eye color
-swapchains and depth targets, and logs `MCLONE_ANDROID_XR_SESSION_READY`.
-
-The default validator still waits for `MCLONE_ANDROID_XR_READY`, which is
-reserved for the first submitted stereo diagnostic clear frame. Use
-`--session-only` while the remaining Quest runtime readiness issue is being
-isolated.
+Current status: Android OpenXR first-frame smoke. The app initializes the
+Android OpenXR loader, creates a Vulkan-backed OpenXR session, creates per-eye
+color swapchains and depth targets, receives Horizon `nativeOnActivityReady`,
+transitions to READY, submits the first stereo diagnostic clear frame, and logs
+`MCLONE_ANDROID_XR_READY`.
 
 ## Build
 
@@ -75,7 +72,7 @@ attached Quest, wakes the headset, launches the VR activity, waits for
 `MCLONE_ANDROID_XR_READY`, scans for fatal logcat entries, force-stops the app,
 restores headset wake/proximity settings, and sleeps the headset.
 
-For the current session/swapchain milestone:
+For session/swapchain-only debugging:
 
 ```bash
 bash android-xr/validate-quest-openxr.sh --debug --skip-build --session-only --view-pose 0,120,-96,180
@@ -92,17 +89,15 @@ Logcat defaults to:
 
 Use `--serial SERIAL` when multiple Android devices are attached.
 
-## Current Quest Runtime Note
+## Quest Runtime Note
 
-The package now mirrors Playbox's Quest launch-policy surface more closely:
+The package mirrors Playbox's Quest launch-policy surface closely:
 manifest permissions/features for hand tracking, body tracking, render models,
 spatial scene/anchors, passthrough, and controller/hand input metadata are
 declared so the Horizon/OpenXR runtime path matches the known-good Playbox
 shape. Mclone does not use those product features yet.
 
-On the attached Quest 3, mclone reaches `XR_SESSION_STATE_IDLE` and logs
-`MCLONE_ANDROID_XR_SESSION_READY`, but does not yet receive the runtime
-`nativeOnActivityReady` callback or transition to `XR_SESSION_STATE_READY`.
-Playbox reaches both callbacks on the same headset. The next implementation
-step is to isolate that Java/NativeActivity/runtime readiness delta, then keep
-the default validator on `MCLONE_ANDROID_XR_READY` for first-frame acceptance.
+On the attached Quest 3, mclone reaches `MCLONE_ANDROID_XR_READY` after pinning
+`android-activity` to Playbox's known-good NativeActivity glue version. The
+next implementation step is to reuse the shared XR host render-view descriptors
+for a real mclone terrain frame on Quest.

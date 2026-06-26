@@ -10,7 +10,7 @@ use anyhow::{Context, Result, anyhow, bail};
 #[cfg(target_os = "android")]
 use anyhow::{Result, bail};
 #[cfg(not(target_os = "android"))]
-use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
+use glam::{Quat, Vec2, Vec3};
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
@@ -1014,10 +1014,10 @@ enum XrViewAlignmentMode {
 #[cfg(not(target_os = "android"))]
 impl XrTrackingOrigin {
     fn from_initial_views(views: &[xr::View], mode: XrViewAlignmentMode) -> Result<Self> {
-        let (left_stage_position, left_stage_orientation) = eye_pose(&views[0])?;
-        let (right_stage_position, _) = eye_pose(&views[1])?;
-        let origin_stage = (left_stage_position + right_stage_position) * 0.5;
-        Self::from_stage_view(origin_stage, left_stage_orientation, mode)
+        let left_stage_pose = mclone_xr_host::view_pose(&views[0])?;
+        let right_stage_pose = mclone_xr_host::view_pose(&views[1])?;
+        let origin_stage = (left_stage_pose.position + right_stage_pose.position) * 0.5;
+        Self::from_stage_view(origin_stage, left_stage_pose.orientation, mode)
     }
 
     fn from_stage_view(
@@ -1274,92 +1274,36 @@ fn xr_view_to_chunk_render_view(
     near: f32,
     far: f32,
 ) -> Result<ChunkRenderView> {
-    let (stage_position, stage_orientation) = eye_pose(view)?;
+    let stage_pose = mclone_xr_host::view_pose(view)?;
     let (camera_position, camera_orientation) =
-        transform.transform_pose(stage_position, stage_orientation);
-    let camera_forward = (camera_orientation * Vec3::NEG_Z).normalize_or_zero();
-    let camera_right = (camera_orientation * Vec3::X).normalize_or_zero();
-    let camera_up = (camera_orientation * Vec3::Y).normalize_or_zero();
-    if camera_forward.length_squared() < 1.0e-6 || camera_up.length_squared() < 1.0e-6 {
-        bail!("OpenXR returned an invalid view orientation");
-    }
-    let view_matrix =
-        Mat4::from_rotation_translation(camera_orientation, camera_position).inverse();
-    let projection = xr_fov_to_projection_rh(view.fov, near, far)?;
-    Ok(ChunkRenderView {
-        view: view_matrix,
-        projection,
-        view_projection: projection * view_matrix,
-        camera_position,
-        camera_forward,
-        camera_right,
-        camera_up,
-        aspect: xr_fov_aspect(view.fov),
-        fov_y_radians: (view.fov.angle_up - view.fov.angle_down).abs(),
-        z_near: near,
-        z_far: far,
-    })
+        transform.transform_pose(stage_pose.position, stage_pose.orientation);
+    let render_view = mclone_xr_host::render_view_from_world_pose(
+        mclone_xr_host::XrViewPose {
+            position: camera_position,
+            orientation: camera_orientation,
+        },
+        view.fov,
+        near,
+        far,
+    )?;
+    Ok(chunk_render_view_from_xr_render_view(render_view))
 }
 
 #[cfg(not(target_os = "android"))]
-fn xr_fov_to_projection_rh(fov: xr::Fovf, near: f32, far: f32) -> Result<Mat4> {
-    if !near.is_finite() || !far.is_finite() || near <= 0.0 || far <= near {
-        bail!("invalid XR projection clipping planes near={near} far={far}");
+fn chunk_render_view_from_xr_render_view(view: mclone_xr_host::XrRenderView) -> ChunkRenderView {
+    ChunkRenderView {
+        view: view.view,
+        projection: view.projection,
+        view_projection: view.view_projection,
+        camera_position: view.camera_position,
+        camera_forward: view.camera_forward,
+        camera_right: view.camera_right,
+        camera_up: view.camera_up,
+        aspect: view.aspect,
+        fov_y_radians: view.fov_y_radians,
+        z_near: view.z_near,
+        z_far: view.z_far,
     }
-    let tan_left = fov.angle_left.tan();
-    let tan_right = fov.angle_right.tan();
-    let tan_up = fov.angle_up.tan();
-    let tan_down = fov.angle_down.tan();
-    let tan_width = tan_right - tan_left;
-    let tan_height = tan_up - tan_down;
-    if !tan_width.is_finite()
-        || !tan_height.is_finite()
-        || tan_width.abs() <= f32::EPSILON
-        || tan_height.abs() <= f32::EPSILON
-    {
-        bail!("invalid OpenXR FOV {:?}", fov);
-    }
-    Ok(Mat4::from_cols(
-        Vec4::new(2.0 / tan_width, 0.0, 0.0, 0.0),
-        Vec4::new(0.0, 2.0 / tan_height, 0.0, 0.0),
-        Vec4::new(
-            (tan_right + tan_left) / tan_width,
-            (tan_up + tan_down) / tan_height,
-            -far / (far - near),
-            -1.0,
-        ),
-        Vec4::new(0.0, 0.0, -(near * far) / (far - near), 0.0),
-    ))
-}
-
-#[cfg(not(target_os = "android"))]
-fn xr_fov_aspect(fov: xr::Fovf) -> f32 {
-    let width = fov.angle_right.tan() - fov.angle_left.tan();
-    let height = fov.angle_up.tan() - fov.angle_down.tan();
-    if width.is_finite() && height.is_finite() && height.abs() > f32::EPSILON {
-        (width / height).abs().max(0.01)
-    } else {
-        1.0
-    }
-}
-
-#[cfg(not(target_os = "android"))]
-fn eye_pose(view: &xr::View) -> Result<(Vec3, Quat)> {
-    let position = Vec3::new(
-        view.pose.position.x,
-        view.pose.position.y,
-        view.pose.position.z,
-    );
-    let orientation = Quat::from_xyzw(
-        view.pose.orientation.x,
-        view.pose.orientation.y,
-        view.pose.orientation.z,
-        view.pose.orientation.w,
-    );
-    if !position.is_finite() || !finite_quat(orientation) || orientation.length_squared() < 0.5 {
-        bail!("OpenXR returned an invalid view pose");
-    }
-    Ok((position, orientation.normalize()))
 }
 
 #[cfg(not(target_os = "android"))]
@@ -1380,11 +1324,6 @@ fn normalize_angle(angle: f32) -> f32 {
         return 0.0;
     }
     (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
-}
-
-#[cfg(not(target_os = "android"))]
-fn finite_quat(value: Quat) -> bool {
-    value.x.is_finite() && value.y.is_finite() && value.z.is_finite() && value.w.is_finite()
 }
 
 #[cfg(not(target_os = "android"))]
@@ -1630,40 +1569,6 @@ unsafe fn load_runtime_entry_from_negotiation(path: &Path) -> Result<xr::Entry> 
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
-
-    fn assert_mat4_close(actual: Mat4, expected: Mat4) {
-        for (actual, expected) in actual
-            .to_cols_array()
-            .into_iter()
-            .zip(expected.to_cols_array())
-        {
-            assert!(
-                (actual - expected).abs() < 1.0e-5,
-                "matrix mismatch: actual={actual} expected={expected}"
-            );
-        }
-    }
-
-    #[test]
-    fn symmetric_xr_fov_matches_chunk_projection_convention() {
-        let fov_y = 58.0_f32.to_radians();
-        let aspect = 1.25;
-        let near = 0.05;
-        let far = 700.0;
-        let tan_y = (fov_y * 0.5).tan();
-        let tan_x = tan_y * aspect;
-        let fov = xr::Fovf {
-            angle_left: -tan_x.atan(),
-            angle_right: tan_x.atan(),
-            angle_up: tan_y.atan(),
-            angle_down: -tan_y.atan(),
-        };
-
-        let actual = xr_fov_to_projection_rh(fov, near, far).unwrap();
-        let expected = Mat4::perspective_rh(fov_y, aspect, near, far);
-
-        assert_mat4_close(actual, expected);
-    }
 
     #[test]
     fn startup_view_pose_maps_stage_center_to_requested_world_pose() {

@@ -6,9 +6,9 @@ Quest. Slice 2A has landed shared-host chunks: desktop XR and Android XR now
 share OpenXR session-state polling, frame counters, stereo config/view helpers,
 STAGE reference-space setup, frame wait/begin/end helpers, swapchain image
 acquire/release, diagnostic clear, stereo projection submission, and controller
-actions through `mclone-xr-host`. Continue extracting graphics-factory and
-renderer-facing frame-descriptor behavior before adding Quest terrain or
-controller features.
+actions, validated view poses, and renderer-facing XR frame descriptors
+through `mclone-xr-host`. Continue extracting graphics-factory behavior before
+adding Quest terrain or controller features.
 
 ## Purpose
 
@@ -48,7 +48,8 @@ Ready inputs:
   per-frame view/FOV lookup used by both desktop XR and Android XR. It also
   owns the shared swapchain-eye trait, acquired target wrapper, diagnostic
   clear pass, stereo projection-frame submission, OpenXR controller action
-  set, and controller snapshot contract.
+  set, controller snapshot contract, validated view-pose extraction, OpenXR FOV
+  projection conversion, and renderer-neutral `XrRenderView` descriptors.
 - Playbox has the mature reference implementation for Android XR packaging,
   loader/session ownership, launch-scoped startup arguments, Android property
   toggles, and Quest validation scripts.
@@ -319,7 +320,7 @@ Target boundary:
   formatting, and per-frame stereo pose/FOV lookup into the shared boundary.
 - [x] Move diagnostic clear plumbing, per-eye swapchain target acquisition, and
   stereo projection-frame submission into the shared boundary.
-- [ ] Move renderer-facing XR frame descriptors into the shared boundary.
+- [x] Move renderer-facing XR frame descriptors into the shared boundary.
 - [x] Move or expose the controller action set shape used by desktop XR so
   Quest Touch input can reuse the same locomotion-facing contract.
 - [ ] Keep platform bootstrap adapters thin. Desktop loads/selects the runtime
@@ -476,6 +477,46 @@ Observed Quest result:
   queue family `0`
 - Swapchains still allocate per-eye `1680x1760`, `3` color images per eye
 - Log marker observed: `MCLONE_ANDROID_XR_SESSION_READY`
+- Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
+
+Recorded Slice 2A fifth-chunk result:
+
+- Added shared `XrViewPose` and `XrRenderView` descriptors to
+  `mclone-xr-host`.
+- Moved validated OpenXR `xr::View` pose extraction, FOV-to-projection
+  conversion, FOV aspect calculation, and world-pose-to-render-view descriptor
+  construction out of desktop `xr_clear_smoke.rs`.
+- Kept desktop app-specific XR rig alignment in `mclone-native-client`, then
+  adapted the shared renderer-neutral descriptor into
+  `mclone_render::chunk::ChunkRenderView`.
+- Added focused `mclone-xr-host` tests for the projection convention and camera
+  vectors.
+- Preserved the Quest READY path while moving this render-view math into the
+  shared host crate.
+
+Validation after the fifth chunk, June 26, 2026:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-host
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/build-apk.sh --debug'
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --wait-seconds 45'
+```
+
+Observed Quest result:
+
+- Quest serial: `2G0YC1ZF93041Z`
+- APK install succeeded for
+  `android-xr/app/build/outputs/apk/debug/app-debug.apk`
+- Startup argv intent extra:
+  `["--seed","12345","--chunk-x","0","--chunk-z","0","--render-distance","2","--day-time","6000","--freeze-time"]`
+- Launch activity:
+  `com.kzahel.mclone.xr/com.kzahel.mclone.xr.McloneXrActivity`
+- Log marker observed by validator: `MCLONE_ANDROID_XR_READY`
 - Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
 
 ### Slice 2B - Quest READY / First Clear Frame
