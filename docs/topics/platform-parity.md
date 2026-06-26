@@ -59,14 +59,13 @@ and controller-ray pointer instead).
 - controller locomotion + collision — *at par now*
 - remote-player and passive-entity rendering
 - **controller block interaction** (ray pick, break, place)
-- **world-space HUD + menus** (crosshair reticle, options, server-connect) via a
-  stereo/world-space UI path that does not exist yet
+- **world-space HUD + menus** (crosshair reticle, options, server-connect). A
+  shared per-eye overlay pause menu exists now; true stereo/world-space panel
+  presentation and controller-ray pointer are still open.
 - local-integrated **and** remote-dedicated host modes
 
-> **Straw-man, please confirm:** XR controller interaction and world-space menus
-> are listed as *targets* but sequenced **after** flat-class parity lands, since
-> they need new UI/input architecture (see Cross-Cutting Blockers). If you want
-> XR interaction pulled earlier, move it up.
+XR controller interaction and world-space menus are now an active alignment
+slice, ahead of text-entry/server-connect UI. See tactical 089.
 
 > **Straw-man, please confirm:** world **persistence** (server saves a world
 > between sessions) is treated as in-target for every lane below. The engine has
@@ -93,7 +92,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Underwater / screen effects | ✅ | ✗ | ✗ | ✗ | ✗ |
 | HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ✗ | ✗ | ✗ | ✅ |
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✅ |
-| Menus (title/pause/options) | ✅ | ✗ | ✗ | ✗ | ✅ |
+| Menus (title/pause/options) | ✅ | ◐ (overlay toggle) | ✗ | ◐ (overlay toggle) | ✅ |
 | Connect / world-select UI | ✗ | ✗ | ✗ | ✗ | ✗ |
 | Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ✅ WebSocket query param |
 | Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ (cfg-excluded) |
@@ -105,11 +104,11 @@ Reading the matrix:
   persistence, audio, and an in-world crosshair.
 - **web** is near desktop parity; gaps are connect-UI, underwater FX,
   persistence (structurally impossible on `wasm32` today), audio.
-- **desktop-XR** has render/locomotion parity but no interaction, no UI, and no
-  actors spawned.
-- **Android-XR** now has the same shared actor render path wired through
-  `mclone-xr-scene`, but device visual validation and actual spawned actor
-  scenarios remain pending.
+- **desktop-XR** has render/locomotion parity and a shared pause-menu overlay,
+  but no controller interaction, true world-space UI, or spawned actor scenarios.
+- **Android-XR** now has the same shared actor render path and pause-menu
+  overlay wired through `mclone-xr-scene`, but device visual validation of menu
+  presentation and actual spawned actor scenarios remain pending.
 - **flat-Android** is still the thinnest full-client lane: it has terrain,
   lighting, shared local/remote host wiring, and a touch-orbit shell, but still
   lacks player movement, interaction, actors, UI, and an in-app connect flow.
@@ -132,7 +131,7 @@ use (and should) · — n/a.
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
-| `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✗ (empty list) | ✗ (empty list) | `native:web:app-smoke` |
+| `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✗ (empty list) | ◐ (XR overlay menu, no pointer/panel) | `native:web:app-smoke`; `cargo test -p mclone-xr-scene` |
 | `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
 The reuse story in one line: **desktop flat, flat Android, desktop XR, and
@@ -176,9 +175,13 @@ built, exactly as transport/storage were:
   dedicated server has no `--world-dir`. Every launch regenerates from seed.
 - **Connect / world-select UI + text-input widget — absent.** `mclone-ui` has no
   `EditBox`, no loading/progress screen, and a 1px-rect uppercase-only font, so
-  typing a server address is currently impossible.
-- **Stereo / world-space UI — absent.** `GuiRenderer` is a flat-NDC quad pass; it
-  cannot render world-space panels and there is no controller-ray pointer.
+  typing a server address is currently impossible. This is separate from the
+  shared menu-surface bring-up; CLI, Android launch argv/properties, and web
+  query params remain acceptable connect surfaces for now.
+- **Stereo / world-space UI — partial.** Desktop XR and Android XR now share a
+  `mclone-ui` pause-menu overlay through `mclone-xr-scene`, toggled by left-hand
+  select. `GuiRenderer` is still a flat-NDC quad pass, so the XR target still
+  needs a true world/head-space panel and controller-ray pointer.
 - **Real inventory / items, crafting, mob AI / spawning, chat, settings
   persistence — absent.** Only a fixed 7-block debug hotbar exists.
 
@@ -195,9 +198,12 @@ these first:
    playable browser remote-connect wiring have landed; remaining work is naming
    cleanup plus clarifying the web render-section idle diagnostics. (tactical
    085)
-2. **Build the connect/menu flow + the missing UI widgets.** Title → singleplayer
-   vs server → address entry (`EditBox`) → world/seed select → loading screen. No
-   lane can join a server in-app without this. Needed by the whole flat class.
+2. **Finish the shared menu surface before adding more menu features.** XR now
+   has a shared overlay pause menu, but it still needs a real stereo/world-space
+   panel and controller pointer. Flat Android still needs to consume
+   `mclone-ui` instead of rendering an empty list. Connect/world-select UI and
+   `EditBox` should build on this surface later, not define the first slice.
+   (tactical 089)
 3. **Finish the shared input-intent layer.** Unify raw input → intent across
    keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
    pointer, and interact**, not just locomotion. Required for XR interaction and
@@ -207,8 +213,9 @@ these first:
    `mclone.startup.argv`), and Quest smokes passed over direct LAN and through
    the `--adb-reverse` validator path. Keep the LAN route documented as
    firewall-sensitive.
-5. **Add a stereo/world-space UI render path** so XR can show a reticle, menus,
-   and a connect screen. (new; no doc owns this yet)
+5. **Add a stereo/world-space UI render path** so XR can show a comfortable
+   panel, reticle/pointer, and later a connect screen. The first overlay-menu
+   slice landed; true panel presentation remains open. (tactical 089)
 6. **Protocol: add server push and cross-version negotiation.** Today it is
    strict request/response (a client that stops polling stops seeing others move)
    with strict-equality version match (independently-deployed web/APK/desktop

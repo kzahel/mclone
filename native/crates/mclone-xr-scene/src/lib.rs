@@ -22,13 +22,14 @@ use mclone_render::chunk::{
     TexturedSectionUploadReport,
 };
 use mclone_render::entity::ActorDrawResources;
+use mclone_render::gui::GuiRenderer;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render_session::{
     ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineCameraInput,
     EngineCameraMovementImpulse, EngineCameraSnapshot, actor_instances_from_presentations,
 };
-use mclone_ui::GuiDrawList;
+use mclone_ui::{GameFramePacingMode, GameUi, GameUiRenderState, GuiScale};
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
 
@@ -42,6 +43,8 @@ pub const XR_FAR: f32 = 700.0;
 pub const XR_JOYPAD_DEAD_ZONE: f32 = 0.18;
 pub const XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND: f64 = 1.6;
 pub const XR_LOCOMOTION_MAX_FRAME_SECONDS: f64 = 0.1;
+pub const XR_MENU_TOGGLE_HAND: XrHand = XrHand::Left;
+pub const XR_UI_FPS_CAP: u32 = 90;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct XrSceneOptions {
@@ -112,6 +115,8 @@ pub struct XrTerrainFrameSummary {
     pub drawn_section_count: usize,
     pub index_count: u32,
     pub drawn_index_count: u32,
+    pub gui_command_count: usize,
+    pub ui_active: bool,
     pub actor_count: usize,
     pub drawn_actor_count: usize,
 }
@@ -149,10 +154,13 @@ where
     render_options: TexturedSectionRenderOptions,
     draw: TexturedSectionDrawResources,
     actors: ActorDrawResources,
+    gui_renderer: GuiRenderer,
+    ui: GameUi,
     sky: SkyRenderer,
     render_stats: RenderStreamStats,
     tracking_origin: Option<XrTrackingOrigin>,
     last_locomotion_update: Option<Instant>,
+    menu_toggle_down: bool,
     first_eye_summary: Option<FullFrameRenderSummary>,
     rendered_frames: u32,
 }
@@ -221,10 +229,13 @@ where
             draw,
             actors: ActorDrawResources::new(device, queue, color_format, actor_atlas.as_upload())
                 .context("initialize XR terrain actor draw resources")?,
+            gui_renderer: GuiRenderer::new(device, color_format),
+            ui: GameUi::new_ingame(),
             sky: SkyRenderer::new(device, color_format),
             render_stats: RenderStreamStats::default(),
             tracking_origin: None,
             last_locomotion_update: None,
+            menu_toggle_down: false,
             first_eye_summary: None,
             rendered_frames: 0,
         };
@@ -371,6 +382,10 @@ where
             .replace(now)
             .map(|last| now.duration_since(last).as_secs_f64())
             .unwrap_or(0.0);
+        self.apply_menu_toggle_input(controllers);
+        if self.ui.is_active() {
+            return Ok(());
+        }
         let input = xr_locomotion_input_from_controllers(controllers, dt_seconds);
         self.camera
             .apply_movement_input(self.runtime.client(), input);
@@ -387,6 +402,8 @@ where
                 drawn_section_count: summary.drawn_section_count,
                 index_count: summary.index_count,
                 drawn_index_count: summary.drawn_index_count,
+                gui_command_count: summary.gui_command_count,
+                ui_active: self.ui.is_active(),
                 actor_count: summary.actor_count,
                 drawn_actor_count: summary.drawn_actor_count,
             };
@@ -397,6 +414,8 @@ where
             drawn_section_count: self.render_stats.drawn_section_count,
             index_count: self.render_stats.index_count,
             drawn_index_count: self.render_stats.drawn_index_count,
+            gui_command_count: 0,
+            ui_active: self.ui.is_active(),
             actor_count: self.render_stats.actor_count,
             drawn_actor_count: self.render_stats.drawn_actor_count,
         }
@@ -500,6 +519,12 @@ where
             &mut encoder,
             RenderFrameTarget::color(target.color_view, target.size),
         );
+        let gui_scale = GuiScale::from_pixels(target.size[0], target.size[1]);
+        self.ui.set_scale(gui_scale);
+        let ui_state = self.current_ui_render_state();
+        let ui_active = self.ui.is_active();
+        let ui_covers_world = self.ui.covers_world();
+        let ui_draw = self.ui.render_draw_list(ui_state);
         let mut render_stats = self.render_stats;
         let summary = render_full_frame_for_view(
             frame,
@@ -508,7 +533,7 @@ where
             &mut self.draw,
             Some(&mut self.actors),
             None,
-            None,
+            Some(&mut self.gui_renderer),
             render_view,
             actor_instances,
             None,
@@ -516,8 +541,12 @@ where
             time_of_day,
             sun_angle,
             render_options,
-            FullFrameGui::new(false, false, [1.0, 1.0]),
-            |_| GuiDrawList::new(),
+            FullFrameGui::new(
+                ui_active,
+                ui_covers_world,
+                [gui_scale.width, gui_scale.height],
+            ),
+            |_| ui_draw,
             &mut render_stats,
         )
         .with_context(|| format!("render XR terrain {label} eye"))?;
@@ -638,6 +667,34 @@ where
         options
     }
 
+    fn current_ui_render_state(&self) -> GameUiRenderState {
+        GameUiRenderState {
+            render_distance: (self.runtime.render_distance() as i32)
+                .clamp(1, MAX_XR_RENDER_DISTANCE as i32),
+            min_render_distance: 1,
+            max_render_distance: MAX_XR_RENDER_DISTANCE as i32,
+            section_occlusion_culling: self.render_options.section_occlusion_culling,
+            force_fullbright: self.render_options.force_fullbright,
+            frame_pacing_mode: GameFramePacingMode::Vsync,
+            fps_cap: XR_UI_FPS_CAP,
+            touch_settings: None,
+        }
+    }
+
+    fn apply_menu_toggle_input(&mut self, controllers: &[XrControllerSnapshot]) {
+        let toggle_down = xr_menu_toggle_pressed(controllers);
+        if toggle_down && !self.menu_toggle_down {
+            if self.ui.is_active() {
+                self.ui.close();
+                log::info!("XR menu closed");
+            } else {
+                self.ui.open_pause();
+                log::info!("XR menu opened");
+            }
+        }
+        self.menu_toggle_down = toggle_down;
+    }
+
     fn camera_inside_occluding_block(&self, position: Vec3) -> bool {
         let Some(state_id) = self.runtime.block_state_at_position(position) else {
             return false;
@@ -646,7 +703,7 @@ where
     }
 
     fn record_eye0_summary(&mut self, summary: FullFrameRenderSummary) {
-        self.first_eye_summary.get_or_insert(summary);
+        self.first_eye_summary = Some(summary);
         self.rendered_frames += 1;
     }
 }
@@ -859,6 +916,12 @@ pub fn xr_locomotion_input_from_controllers(
     }
 }
 
+pub fn xr_menu_toggle_pressed(controllers: &[XrControllerSnapshot]) -> bool {
+    controllers
+        .iter()
+        .any(|controller| controller.hand == XR_MENU_TOGGLE_HAND && controller.select_pressed)
+}
+
 fn xr_left_stick_movement_impulse(axis: Vec2) -> EngineCameraMovementImpulse {
     // Quest/VirtualDesktopXR validation reports the left locomotion axes as
     // transposed relative to the engine movement impulse: physical left/right
@@ -962,6 +1025,19 @@ mod tests {
         assert!((input.mouse_delta_x - expected_mouse_delta).abs() < 1.0e-6);
         assert_eq!(input.movement_impulse, None);
         assert!(!input.jump);
+    }
+
+    #[test]
+    fn xr_menu_toggle_uses_left_select_only() {
+        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
+        left.select_pressed = true;
+        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
+        right.select_pressed = true;
+
+        assert!(xr_menu_toggle_pressed(&[left]));
+        assert!(!xr_menu_toggle_pressed(&[right]));
+        assert!(xr_menu_toggle_pressed(&[right, left]));
+        assert!(!xr_menu_toggle_pressed(&[]));
     }
 
     #[test]
