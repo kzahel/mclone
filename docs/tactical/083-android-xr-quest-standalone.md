@@ -1,14 +1,14 @@
 # 083: Android XR / Quest Standalone
 
 Status: active. Slice 1 package/build/install/launch plumbing is complete.
-Slice 2's loader/session/swapchain first chunk is complete. Slice 2A has landed
-two shared-host chunks: desktop XR and Android XR now share OpenXR
-session-state polling, frame counters, stereo config/view helpers, STAGE
-reference-space setup, and frame wait/begin/end helpers through
-`mclone-xr-host`. The shared host also owns swapchain image acquire/release,
-diagnostic clear, and stereo projection submission. Continue extracting
-graphics-factory and renderer-facing frame-descriptor behavior before adding
-Quest terrain or controller features.
+Slice 2's loader/session/swapchain/first-frame clear milestone is complete on
+Quest. Slice 2A has landed shared-host chunks: desktop XR and Android XR now
+share OpenXR session-state polling, frame counters, stereo config/view helpers,
+STAGE reference-space setup, frame wait/begin/end helpers, swapchain image
+acquire/release, diagnostic clear, stereo projection submission, and controller
+actions through `mclone-xr-host`. Continue extracting graphics-factory and
+renderer-facing frame-descriptor behavior before adding Quest terrain or
+controller features.
 
 ## Purpose
 
@@ -35,7 +35,9 @@ Ready inputs:
 - A Quest headset is attached for standalone validation.
 - The standalone Quest package now initializes the Android OpenXR loader,
   creates a Vulkan-backed OpenXR session, allocates per-eye color swapchains
-  and depth targets, and validates `MCLONE_ANDROID_XR_SESSION_READY` on device.
+  and depth targets, receives Horizon `nativeOnActivityReady`, transitions
+  through `XR_SESSION_STATE_READY`, submits the first clear stereo frame, and
+  validates `MCLONE_ANDROID_XR_READY` on device.
 - The Quest session code added so far is a bring-up spike in the Android app
   crate. It proves device/runtime facts, but it is not the architecture to keep
   extending by copying private desktop XR code.
@@ -276,16 +278,19 @@ Observed validation result:
 - Log marker observed: `MCLONE_ANDROID_XR_SESSION_READY`
 - Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
 
-Known remaining blocker for completing Slice 2:
+Resolved Slice 2 blocker:
 
-- Mclone reaches `XR_SESSION_STATE_IDLE` but does not yet receive the runtime
-  `nativeOnActivityReady` callback or transition to `XR_SESSION_STATE_READY`.
-- Playbox reaches `nativeOnActivityReady`, transitions from `IDLE` to `READY`,
-  and logs its first-frame marker on the same headset.
-- Next investigation target: isolate the Java `NativeActivity`, manifest, and
-  Horizon launch/readiness delta between Playbox and mclone. Once READY arrives,
-  the existing clear-loop path should be able to submit the first stereo
-  diagnostic frame and log `MCLONE_ANDROID_XR_READY`.
+- The `XR_SESSION_STATE_IDLE` hang was caused by a subtle Playbox parity miss:
+  mclone resolved `android-activity` `0.6.1`, while Playbox pins
+  `android-activity` `0.6.0`.
+- On Quest, `0.6.1` let the Meta runtime create the OpenXR session but failed
+  the Horizon volumetric-window association: logcat showed
+  `clientDisplayId=-1`, an all-zero `clientVWToken`, no
+  `nativeOnActivityReady`, and no transition past `IDLE`.
+- Pinning mclone's workspace dependency to `android-activity = "=0.6.0"`
+  restored Playbox-equivalent NativeActivity glue. Logcat then showed a real
+  `clientVWToken`, `nativeOnActivityReady`, `IDLE -> READY`, and
+  `MCLONE_ANDROID_XR_READY`.
 
 ### Slice 2A - Shared OpenXR Host Extraction
 
@@ -473,6 +478,57 @@ Observed Quest result:
 - Log marker observed: `MCLONE_ANDROID_XR_SESSION_READY`
 - Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
 
+### Slice 2B - Quest READY / First Clear Frame
+
+Goal: resolve the Horizon runtime readiness blocker without copying Playbox
+application features into mclone.
+
+Recorded Slice 2B result:
+
+- Compared mclone and Playbox Android XR manifests, Gradle package metadata,
+  Java `NativeActivity` subclasses, launch commands, and same-headset logcat.
+- Verified the source manifests and merged manifests were equivalent except
+  expected package, activity, label, and library names.
+- Reproduced Playbox passing on the same Quest 3 and isolated the key runtime
+  difference: Playbox's OpenXR client registered with `clientDisplayId=0` and
+  a real Horizon volumetric-window token, while mclone registered with
+  `clientDisplayId=-1` and an all-zero token.
+- Ruled out launch-intent extras and a UI-thread Java-to-native readiness hook.
+  The default launch and startup-argv launch both failed before the dependency
+  pin and both passed after it.
+- Pinned `native/Cargo.toml` to Playbox's exact
+  `android-activity = "=0.6.0"` NativeActivity glue and updated
+  `native/Cargo.lock`.
+
+Validation after Slice 2B, June 26, 2026:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo tree --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/build-apk.sh --debug'
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/validate-quest-openxr.sh --debug --skip-build --wait-seconds 45'
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --wait-seconds 45'
+```
+
+Observed Quest result with startup argv:
+
+- Quest serial: `2G0YC1ZF93041Z`
+- Runtime/system: `Oculus v204.201.0` / `Meta Quest 3`
+- Runtime client: `clientDisplayId=0` and nonzero
+  `clientVWToken=8621cbbc-456f-4d8f-9650-696089251c5b`
+- Horizon callback: `nativeOnActivityReady:
+  com.kzahel.mclone.xr/com.kzahel.mclone.xr.McloneXrActivity`
+- Session states observed: `IDLE`, `READY`, `SYNCHRONIZED`, `VISIBLE`,
+  `FOCUSED`
+- Vulkan session: `Adreno (TM) 740`, Vulkan API `1.3.295`, queue family `0`
+- Swapchains: per-eye `1680x1760`, `3` color images per eye
+- Log markers observed: `MCLONE_ANDROID_XR_SESSION_READY`,
+  `MCLONE_ANDROID_XR_READY`
+- First frame: `OpenXR clear frame submitted: submitted=1 runtime_frames=1
+  skipped=0`
+- Logcat: `/tmp/mclone-quest-openxr-aa060-startup-logcat.txt`
+
 Exit criteria:
 
 - Desktop XR and Android XR share one OpenXR session/frame/action host path.
@@ -528,7 +584,7 @@ Exit criteria:
 
 ## Validation Lanes
 
-Future first-frame validation:
+Current first-frame validation:
 
 ```bash
 cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
@@ -536,7 +592,7 @@ bash android-xr/build-apk.sh --debug
 bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,-96,180
 ```
 
-Current Slice 2 session milestone:
+Historical Slice 2 session-only milestone:
 
 ```bash
 cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
