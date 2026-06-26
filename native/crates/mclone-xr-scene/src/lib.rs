@@ -23,7 +23,7 @@ use mclone_render::chunk::{
     TexturedSectionUploadReport,
 };
 use mclone_render::entity::ActorDrawResources;
-use mclone_render::gui::{WorldGuiPanel, WorldGuiRenderer};
+use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiRenderer};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render_session::{
@@ -49,8 +49,12 @@ pub const XR_UI_FPS_CAP: u32 = 90;
 pub const XR_MENU_PANEL_PIXELS: [u32; 2] = [1024, 576];
 pub const XR_MENU_PANEL_DISTANCE_BLOCKS: f32 = 2.2;
 pub const XR_MENU_PANEL_WIDTH_BLOCKS: f32 = 1.75;
+pub const XR_MENU_CONTROLLER_RAY_LENGTH_BLOCKS: f32 = 6.0;
 pub const XR_MENU_POINTER_TRIGGER_PRESS: f32 = 0.55;
 pub const XR_MENU_POINTER_TRIGGER_RELEASE: f32 = 0.35;
+const XR_MENU_LEFT_RAY_COLOR: [f32; 4] = [0.18, 0.85, 1.0, 0.95];
+const XR_MENU_RIGHT_RAY_COLOR: [f32; 4] = [0.2, 1.0, 0.45, 0.95];
+const XR_MENU_TRIGGER_RAY_COLOR: [f32; 4] = [1.0, 0.42, 0.12, 1.0];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct XrSceneOptions {
@@ -574,6 +578,9 @@ where
         .with_context(|| format!("render XR terrain {label} eye"))?;
         if ui_active {
             if let Some(panel) = self.menu_panel_pose {
+                let controller_ray_lines = self
+                    .xr_menu_controller_ray_lines(panel)
+                    .context("build XR menu controller ray visuals")?;
                 self.world_gui_renderer
                     .render_panel(
                         device,
@@ -585,6 +592,7 @@ where
                         [gui_scale.width, gui_scale.height],
                         &ui_draw,
                         panel,
+                        &controller_ray_lines,
                     )
                     .with_context(|| format!("render XR menu panel for {label} eye"))?;
             }
@@ -810,6 +818,18 @@ where
             self.apply_xr_ui_action(action)?;
         }
         Ok(())
+    }
+
+    fn xr_menu_controller_ray_lines(&self, panel: WorldGuiPanel) -> Result<Vec<WorldGuiLine>> {
+        let Some(origin) = self.tracking_origin else {
+            return Ok(Vec::new());
+        };
+        let transform = XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())?;
+        Ok(xr_menu_controller_ray_lines_from_controllers(
+            &self.latest_controllers,
+            transform,
+            panel,
+        ))
     }
 
     fn apply_xr_ui_action(&mut self, action: GameUiAction) -> Result<()> {
@@ -1173,6 +1193,90 @@ pub fn xr_menu_pointer_hit_from_controllers(
     })
 }
 
+pub fn xr_menu_controller_ray_lines_from_controllers(
+    controllers: &[XrControllerSnapshot],
+    transform: XrStageToWorld,
+    panel: WorldGuiPanel,
+) -> Vec<WorldGuiLine> {
+    [XrHand::Left, XrHand::Right]
+        .into_iter()
+        .filter_map(|hand| {
+            controllers
+                .iter()
+                .find(|controller| controller.hand == hand)
+                .and_then(|controller| xr_menu_controller_ray_line(controller, transform, panel))
+        })
+        .collect()
+}
+
+fn xr_menu_controller_ray_line(
+    controller: &XrControllerSnapshot,
+    transform: XrStageToWorld,
+    panel: WorldGuiPanel,
+) -> Option<WorldGuiLine> {
+    let ray_origin = transform.transform_position(controller.aim_position?);
+    let ray_direction = transform.transform_direction(controller.aim_direction?);
+    if !ray_origin.is_finite()
+        || !ray_direction.is_finite()
+        || ray_direction.length_squared() <= f32::EPSILON
+    {
+        return None;
+    }
+    let direction = ray_direction.normalize();
+    let distance = xr_menu_panel_ray_distance(panel, ray_origin, direction)
+        .unwrap_or(XR_MENU_CONTROLLER_RAY_LENGTH_BLOCKS)
+        .clamp(0.0, XR_MENU_CONTROLLER_RAY_LENGTH_BLOCKS);
+    Some(WorldGuiLine::new(
+        ray_origin,
+        ray_origin + direction * distance,
+        xr_menu_controller_ray_color(controller),
+    ))
+}
+
+pub fn xr_menu_controller_ray_color(controller: &XrControllerSnapshot) -> [f32; 4] {
+    if controller.trigger.is_finite() && controller.trigger >= XR_MENU_POINTER_TRIGGER_PRESS {
+        return XR_MENU_TRIGGER_RAY_COLOR;
+    }
+    match controller.hand {
+        XrHand::Left => XR_MENU_LEFT_RAY_COLOR,
+        XrHand::Right => XR_MENU_RIGHT_RAY_COLOR,
+    }
+}
+
+pub fn xr_menu_panel_ray_distance(
+    panel: WorldGuiPanel,
+    ray_origin: Vec3,
+    ray_direction: Vec3,
+) -> Option<f32> {
+    if !ray_origin.is_finite()
+        || !ray_direction.is_finite()
+        || ray_direction.length_squared() <= f32::EPSILON
+    {
+        return None;
+    }
+    let direction = ray_direction.normalize();
+    let normal = panel.right.cross(panel.up).normalize_or_zero();
+    if normal.length_squared() <= f32::EPSILON {
+        return None;
+    }
+    let denominator = direction.dot(normal);
+    if denominator.abs() <= 1.0e-5 {
+        return None;
+    }
+    let distance = (panel.center - ray_origin).dot(normal) / denominator;
+    if !distance.is_finite() || distance < 0.0 {
+        return None;
+    }
+    let hit = ray_origin + direction * distance;
+    let local = hit - panel.center;
+    let panel_x = local.dot(panel.right) + panel.width * 0.5;
+    let panel_y = panel.height * 0.5 - local.dot(panel.up);
+    if panel_x < 0.0 || panel_x > panel.width || panel_y < 0.0 || panel_y > panel.height {
+        return None;
+    }
+    Some(distance)
+}
+
 pub fn xr_menu_panel_pointer_hit(
     panel: WorldGuiPanel,
     gui_scale: GuiScale,
@@ -1413,6 +1517,56 @@ mod tests {
         assert_eq!(hit.hand, XrHand::Right);
         assert_eq!(hit.trigger, 0.75);
         assert_eq!(hit.point.x, scale.width * 0.625);
+    }
+
+    #[test]
+    fn xr_menu_controller_ray_line_clips_at_panel_hit() {
+        let panel = WorldGuiPanel::new(Vec3::new(0.0, 64.0, -2.0), Vec3::X, Vec3::Y, 2.0, 1.0);
+        let transform = test_stage_to_world();
+        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
+        right.aim_position = Some(Vec3::new(0.25, 64.0, 0.0));
+        right.aim_direction = Some(Vec3::NEG_Z);
+
+        let lines = xr_menu_controller_ray_lines_from_controllers(&[right], transform, panel);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].start, Vec3::new(0.25, 64.0, 0.0));
+        assert!((lines[0].end - Vec3::new(0.25, 64.0, -2.0)).length() < 1.0e-6);
+        assert_eq!(lines[0].color, XR_MENU_RIGHT_RAY_COLOR);
+    }
+
+    #[test]
+    fn xr_menu_controller_ray_line_uses_full_length_when_panel_missed() {
+        let panel = WorldGuiPanel::new(Vec3::new(0.0, 64.0, -2.0), Vec3::X, Vec3::Y, 2.0, 1.0);
+        let transform = test_stage_to_world();
+        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
+        left.aim_position = Some(Vec3::new(2.0, 64.0, 0.0));
+        left.aim_direction = Some(Vec3::NEG_Z);
+
+        let lines = xr_menu_controller_ray_lines_from_controllers(&[left], transform, panel);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].start, Vec3::new(2.0, 64.0, 0.0));
+        assert!(
+            (lines[0].end - Vec3::new(2.0, 64.0, -XR_MENU_CONTROLLER_RAY_LENGTH_BLOCKS)).length()
+                < 1.0e-6
+        );
+        assert_eq!(lines[0].color, XR_MENU_LEFT_RAY_COLOR);
+    }
+
+    #[test]
+    fn xr_menu_controller_ray_color_highlights_trigger_press() {
+        let mut controller = test_controller(XrHand::Right, Vec2::ZERO, false);
+        assert_eq!(
+            xr_menu_controller_ray_color(&controller),
+            XR_MENU_RIGHT_RAY_COLOR
+        );
+
+        controller.trigger = XR_MENU_POINTER_TRIGGER_PRESS;
+        assert_eq!(
+            xr_menu_controller_ray_color(&controller),
+            XR_MENU_TRIGGER_RAY_COLOR
+        );
     }
 
     #[test]

@@ -13,6 +13,9 @@ const QUAD_VERTEX_COUNT: u32 = 6;
 const WORLD_PANEL_FLOATS_PER_VERTEX: usize = 5;
 const WORLD_PANEL_VERTEX_SIZE: wgpu::BufferAddress =
     (WORLD_PANEL_FLOATS_PER_VERTEX * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
+const WORLD_LINE_FLOATS_PER_VERTEX: usize = 7;
+const WORLD_LINE_VERTEX_SIZE: wgpu::BufferAddress =
+    (WORLD_LINE_FLOATS_PER_VERTEX * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
 const WORLD_GUI_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 const GUI_SOLID_WGSL: &str = r#"
@@ -66,6 +69,35 @@ fn vertex_main(
 @fragment
 fn fragment_main(input: VertexOut) -> @location(0) vec4f {
   return textureSample(panel_texture, panel_sampler, input.uv);
+}
+"#;
+
+const WORLD_LINE_WGSL: &str = r#"
+struct LineUniform {
+  view_projection: mat4x4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> line_uniform: LineUniform;
+
+struct VertexOut {
+  @builtin(position) position: vec4f,
+  @location(0) color: vec4f,
+};
+
+@vertex
+fn vertex_main(
+  @location(0) world_position: vec3f,
+  @location(1) color: vec4f,
+) -> VertexOut {
+  var out: VertexOut;
+  out.position = line_uniform.view_projection * vec4f(world_position, 1.0);
+  out.color = color;
+  return out;
+}
+
+@fragment
+fn fragment_main(input: VertexOut) -> @location(0) vec4f {
+  return input.color;
 }
 "#;
 
@@ -274,15 +306,31 @@ impl WorldGuiPanel {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WorldGuiLine {
+    pub start: Vec3,
+    pub end: Vec3,
+    pub color: [f32; 4],
+}
+
+impl WorldGuiLine {
+    pub fn new(start: Vec3, end: Vec3, color: [f32; 4]) -> Self {
+        Self { start, end, color }
+    }
+}
+
 pub struct WorldGuiRenderer {
     gui_renderer: GuiRenderer,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     _uniform_bind_group_layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
+    line_pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
     vertex_buffer: Option<wgpu::Buffer>,
     vertex_buffer_size: wgpu::BufferAddress,
+    line_vertex_buffer: Option<wgpu::Buffer>,
+    line_vertex_buffer_size: wgpu::BufferAddress,
     panel_texture: Option<WorldGuiTexture>,
 }
 
@@ -402,15 +450,71 @@ impl WorldGuiRenderer {
             multiview: None,
             cache: None,
         });
+        let line_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_world_gui_line_shader"),
+            source: wgpu::ShaderSource::Wgsl(WORLD_LINE_WGSL.into()),
+        });
+        let line_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_world_gui_line_pipeline_layout"),
+            bind_group_layouts: &[&uniform_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mclone_world_gui_line_pipeline"),
+            layout: Some(&line_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &line_shader,
+                entry_point: Some("vertex_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: WORLD_LINE_VERTEX_SIZE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            shader_location: 0,
+                            offset: 0,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                        wgpu::VertexAttribute {
+                            shader_location: 1,
+                            offset: 12,
+                            format: wgpu::VertexFormat::Float32x4,
+                        },
+                    ],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &line_shader,
+                entry_point: Some("fragment_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
         Self {
             gui_renderer: GuiRenderer::new(device, WORLD_GUI_TEXTURE_FORMAT),
             texture_bind_group_layout,
             _uniform_bind_group_layout: uniform_bind_group_layout,
             pipeline,
+            line_pipeline,
             uniform_buffer,
             uniform_bind_group,
             vertex_buffer: None,
             vertex_buffer_size: 0,
+            line_vertex_buffer: None,
+            line_vertex_buffer_size: 0,
             panel_texture: None,
         }
     }
@@ -427,6 +531,7 @@ impl WorldGuiRenderer {
         gui_size: [f32; 2],
         gui: &GuiDrawList,
         panel: WorldGuiPanel,
+        lines: &[WorldGuiLine],
     ) -> Result<()> {
         if gui.commands().is_empty() || panel.width <= 0.0 || panel.height <= 0.0 {
             return Ok(());
@@ -451,6 +556,10 @@ impl WorldGuiRenderer {
 
         let vertices = world_gui_panel_vertices(panel);
         self.upload_world_vertices(device, queue, &vertices);
+        let line_vertices = world_gui_line_vertices(lines);
+        if !line_vertices.is_empty() {
+            self.upload_world_line_vertices(device, queue, &line_vertices);
+        }
         queue.write_buffer(
             &self.uniform_buffer,
             0,
@@ -485,6 +594,21 @@ impl WorldGuiRenderer {
                 .slice(..),
         );
         pass.draw(0..QUAD_VERTEX_COUNT, 0..1);
+        if !line_vertices.is_empty() {
+            pass.set_pipeline(&self.line_pipeline);
+            pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            pass.set_vertex_buffer(
+                0,
+                self.line_vertex_buffer
+                    .as_ref()
+                    .expect("world GUI line vertex buffer exists")
+                    .slice(..),
+            );
+            pass.draw(
+                0..(line_vertices.len() / WORLD_LINE_FLOATS_PER_VERTEX) as u32,
+                0..1,
+            );
+        }
         Ok(())
     }
 
@@ -525,6 +649,32 @@ impl WorldGuiRenderer {
             ));
             self.vertex_buffer_size = required_size;
         } else if let Some(buffer) = &self.vertex_buffer {
+            queue.write_buffer(buffer, 0, &bytes);
+        }
+    }
+
+    fn upload_world_line_vertices(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        vertices: &[f32],
+    ) {
+        let bytes = f32_bytes_vec(vertices);
+        let required_size = bytes.len().max(4) as wgpu::BufferAddress;
+        let needs_recreate = self
+            .line_vertex_buffer
+            .as_ref()
+            .is_none_or(|_| self.line_vertex_buffer_size < required_size);
+        if needs_recreate {
+            self.line_vertex_buffer = Some(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("mclone_world_gui_line_vertices"),
+                    contents: &bytes,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                },
+            ));
+            self.line_vertex_buffer_size = required_size;
+        } else if let Some(buffer) = &self.line_vertex_buffer {
             queue.write_buffer(buffer, 0, &bytes);
         }
     }
@@ -716,6 +866,21 @@ fn push_world_gui_vertex(vertices: &mut Vec<f32>, position: Vec3, uv: [f32; 2]) 
     vertices.extend_from_slice(&[position.x, position.y, position.z, uv[0], uv[1]]);
 }
 
+fn world_gui_line_vertices(lines: &[WorldGuiLine]) -> Vec<f32> {
+    let mut vertices = Vec::with_capacity(lines.len() * 2 * WORLD_LINE_FLOATS_PER_VERTEX);
+    for line in lines {
+        push_world_gui_line_vertex(&mut vertices, line.start, line.color);
+        push_world_gui_line_vertex(&mut vertices, line.end, line.color);
+    }
+    vertices
+}
+
+fn push_world_gui_line_vertex(vertices: &mut Vec<f32>, position: Vec3, color: [f32; 4]) {
+    vertices.extend_from_slice(&[
+        position.x, position.y, position.z, color[0], color[1], color[2], color[3],
+    ]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -755,6 +920,22 @@ mod tests {
         assert_eq!(
             vertices.len(),
             QUAD_VERTEX_COUNT as usize * WORLD_PANEL_FLOATS_PER_VERTEX
+        );
+    }
+
+    #[test]
+    fn world_gui_line_vertices_pack_position_and_color() {
+        let vertices = world_gui_line_vertices(&[WorldGuiLine::new(
+            Vec3::new(1.0, 2.0, 3.0),
+            Vec3::new(4.0, 5.0, 6.0),
+            [0.1, 0.2, 0.3, 0.4],
+        )]);
+
+        assert_eq!(
+            vertices,
+            vec![
+                1.0, 2.0, 3.0, 0.1, 0.2, 0.3, 0.4, 4.0, 5.0, 6.0, 0.1, 0.2, 0.3, 0.4,
+            ]
         );
     }
 }
