@@ -1,9 +1,10 @@
 # 086: XR Scene Driver Convergence
 
-Status: active. Slices 1-3 landed: XR transform helpers now live in
+Status: completed. Slices 1-4 landed: XR transform helpers now live in
 `mclone-xr-scene`, actor presentation-to-render-instance building now lives in
-`mclone-render-session`, and the shared XR scene owns actor draw resources.
-Slice 4, pluggable host/runtime convergence, is the next implementation chunk.
+`mclone-render-session`, the shared XR scene owns actor draw resources, and
+desktop XR now consumes the shared scene driver. Android XR still needs a
+concrete remote transport adapter before remote-dedicated play is wired there.
 
 ## Purpose
 
@@ -18,9 +19,9 @@ construction, and host-mode integration live behind shared native contracts.
 
 ## Current State
 
-- Android XR constructs `mclone-xr-scene::XrMcloneTerrainState`.
-- Desktop XR still constructs app-local `XrMcloneWorldState` in
-  `mclone-native-client`.
+- Android XR constructs local `mclone-xr-scene::XrMcloneTerrainState`.
+- Desktop XR constructs `mclone-xr-scene::XrMcloneTerrainState` with the
+  desktop TCP `RemoteServerSession` type.
 - XR tracking-origin, stage-to-world, render-view conversion, yaw
   normalization, and startup view-pose helpers now live in `mclone-xr-scene`;
   desktop XR imports them.
@@ -29,11 +30,12 @@ construction, and host-mode integration live behind shared native contracts.
 - Shared `mclone-xr-scene` now owns `ActorDrawResources`, accepts an actor
   atlas, and renders actor instances. Android XR passes the actor atlas it
   already loaded.
-- Desktop XR still has app-local terrain/actor render orchestration until it
-  consumes the shared XR scene driver.
-- `mclone-xr-scene` owns a concrete local integrated `SingleViewRuntime` plus
-  `NativeIntegratedServerRunner` plumbing instead of composing
-  `NativeSingleViewSceneRuntime<S>`.
+- `mclone-xr-scene` composes `NativeSingleViewSceneRuntime<S>` instead of
+  re-owning local integrated runner, polling, idle wait, render-section sync,
+  and host command plumbing.
+- Desktop app code still owns OpenXR runtime/session/swapchain setup and the
+  concrete TCP session type. Android XR still owns activity/loader/packaging and
+  currently uses the local-only constructor.
 
 ## Target Shape
 
@@ -158,14 +160,44 @@ to present.
 
 ### Slice 4 - Pluggable XR Host Runtime
 
-- [ ] Replace `XrMcloneTerrainState`'s hand-rolled local runtime/runner plumbing
+- [x] Replace `XrMcloneTerrainState`'s hand-rolled local runtime/runner plumbing
   with `NativeSingleViewSceneRuntime<S>`.
-- [ ] Make the XR scene state generic over `S: RemoteDedicatedServerSession`.
-- [ ] Provide a local-only constructor/type path for Android XR.
-- [ ] Repoint desktop XR to construct the shared scene driver with
+- [x] Make the XR scene state generic over `S: RemoteDedicatedServerSession`.
+- [x] Provide a local-only constructor/type path for Android XR.
+- [x] Repoint desktop XR to construct the shared scene driver with
   `RemoteServerSession`.
-- [ ] Delete app-local `XrMcloneWorldState`.
-- [ ] Update platform parity docs to reflect shared XR scene-driver ownership.
+- [x] Delete app-local `XrMcloneWorldState`.
+- [x] Update platform parity docs to reflect shared XR scene-driver ownership.
+
+Recorded Slice 4 result:
+
+- Added preloaded-mesh constructors to
+  `NativeSingleViewSceneRuntime<S>` so platform apps can keep asset staging
+  while sharing the scene runtime shell.
+- Made `XrMcloneTerrainState<S>` generic over
+  `S: RemoteDedicatedServerSession` and added an uninhabited
+  `XrLocalOnlyRemoteSession` default for Android/local-only callers.
+- Added `XrMcloneTerrainState::with_runtime(...)` so app crates can pass a
+  local or remote `NativeSingleViewSceneRuntime<S>`.
+- Rewired desktop XR to construct the shared scene with
+  `RemoteServerSession` and deleted app-local `XrMcloneWorldState`.
+- Kept OpenXR session/swapchain/controller glue in the desktop and Android XR
+  app crates.
+
+Validation after Slice 4:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+pnpm native:web:build
+cargo fmt --manifest-path native/Cargo.toml --all --check
+git diff --check
+```
 
 ## Validation
 

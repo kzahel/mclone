@@ -12,48 +12,22 @@ use anyhow::{Result, bail};
 #[cfg(not(target_os = "android"))]
 use glam::Vec3;
 #[cfg(not(target_os = "android"))]
-use mclone_app_runtime::frame_render::{
-    FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
-    render_full_frame_for_view,
-};
-#[cfg(not(target_os = "android"))]
-use mclone_core::ChunkPos;
-#[cfg(not(target_os = "android"))]
-use mclone_mesh::quad_face_count_from_indices;
-#[cfg(not(target_os = "android"))]
-use mclone_render::chunk::{
-    ChunkRenderView, TexturedSectionDrawResources, TexturedSectionRenderOptions,
-    TexturedSectionUploadReport,
-};
-#[cfg(not(target_os = "android"))]
-use mclone_render::entity::{ActorDrawResources, ActorInstance};
-#[cfg(not(target_os = "android"))]
-use mclone_render::sky_render::SkyRenderer;
-#[cfg(not(target_os = "android"))]
-use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
-#[cfg(not(target_os = "android"))]
-use mclone_render_session::{EngineCameraController, actor_instances_from_presentations};
-#[cfg(not(target_os = "android"))]
-use mclone_ui::GuiDrawList;
-#[cfg(not(target_os = "android"))]
 use mclone_xr_host::{
     OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
     XrControllerSnapshot, XrFrameStats, XrHand, XrStereoConfig,
 };
 #[cfg(not(target_os = "android"))]
-use mclone_xr_scene::{
-    XR_FAR, XR_NEAR, XrStageToWorld, XrTrackingOrigin, XrViewAlignmentMode,
-    apply_xr_startup_view_pose, glam_vec3_from_vec3d, xr_locomotion_input_from_controllers,
-    xr_view_to_chunk_render_view,
-};
+use mclone_xr_scene::{XrMcloneTerrainState, XrStartupViewPose, XrTerrainEyeTarget};
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
 
+#[cfg(not(target_os = "android"))]
+use crate::actor_assets::load_actor_texture_assets;
 use crate::cli::{XrClearSmokeOptions, XrMcloneSmokeOptions};
 #[cfg(not(target_os = "android"))]
-use crate::frame_pacing::elapsed_ms;
+use crate::remote_session::RemoteServerSession;
 #[cfg(not(target_os = "android"))]
-use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
+use crate::scene_runtime::native_window_scene_runtime;
 
 #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
 mod graphics_metal;
@@ -70,6 +44,9 @@ type AcquiredEyeTarget<'a> = mclone_xr_host::XrAcquiredEyeTarget<
     platform_graphics::AppGraphics,
     platform_graphics::OpenXrEyeState,
 >;
+
+#[cfg(not(target_os = "android"))]
+type DesktopXrMcloneTerrainState = XrMcloneTerrainState<RemoteServerSession>;
 
 #[cfg(target_os = "android")]
 pub(crate) fn run(options: XrClearSmokeOptions) -> Result<()> {
@@ -444,8 +421,8 @@ fn run_smoke_frames(
     let mut mclone = match smoke {
         DesktopXrSmoke::Clear { .. } => None,
         DesktopXrSmoke::Mclone { options } => Some(
-            XrMcloneWorldState::new(&graphics.device, &graphics.queue, options)
-                .context("initialize mclone XR world state")?,
+            create_mclone_terrain_state(&graphics.device, &graphics.queue, options)
+                .context("initialize mclone XR terrain state")?,
         ),
     };
     let controller_actions = OpenXrControllerActions::create_with_binding_logger(
@@ -580,7 +557,7 @@ fn run_smoke_frames(
     );
     controller_summary.print_summary();
     if let Some(mclone) = &mclone {
-        mclone.print_summary();
+        print_mclone_summary(mclone);
     }
     let completed_label = if mclone.is_some() { "mclone" } else { "clear" };
     if !runtime_requested_exit {
@@ -659,255 +636,41 @@ fn shutdown_openxr_session(
 }
 
 #[cfg(not(target_os = "android"))]
-struct XrMcloneWorldState {
-    runtime: WindowSceneRuntime,
-    camera: EngineCameraController,
-    initial_alignment_mode: XrViewAlignmentMode,
-    render_options: TexturedSectionRenderOptions,
-    draw: TexturedSectionDrawResources,
-    sky: SkyRenderer,
-    actors: ActorDrawResources,
-    render_stats: RenderStreamStats,
-    tracking_origin: Option<XrTrackingOrigin>,
-    last_locomotion_update: Option<Instant>,
-    first_eye_summary: Option<FullFrameRenderSummary>,
-    rendered_frames: u32,
+fn create_mclone_terrain_state(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    options: XrMcloneSmokeOptions,
+) -> Result<DesktopXrMcloneTerrainState> {
+    let actor_assets = load_actor_texture_assets().context("load mclone actor texture assets")?;
+    let runtime = native_window_scene_runtime(&options.scene)?;
+    XrMcloneTerrainState::with_runtime(
+        device,
+        queue,
+        XR_COLOR_FORMAT,
+        runtime,
+        options.render_options,
+        actor_assets.atlas,
+        options.view_pose.map(|view_pose| XrStartupViewPose {
+            position: view_pose.position,
+            yaw_degrees: view_pose.yaw_degrees,
+        }),
+    )
+    .context("initialize shared mclone XR terrain scene")
 }
 
 #[cfg(not(target_os = "android"))]
-impl XrMcloneWorldState {
-    fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        options: XrMcloneSmokeOptions,
-    ) -> Result<Self> {
-        let mut runtime = WindowSceneRuntime::new(&options.scene)?;
-        let initial_poll_start = Instant::now();
-        let (initial_poll_count, initial_poll_ms) = poll_window_runtime_until_idle(&mut runtime)
-            .context("wait for initial mclone runtime chunks")?;
-        let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(
-            options.scene.chunk_x,
-            options.scene.chunk_z,
-        ));
-        let mut initial_pose_changed = runtime
-            .apply_pending_engine_camera_position_updates(&mut camera)
-            .context("accept initial XR server player pose")?;
-        let initial_alignment_mode = if let Some(view_pose) = options.view_pose {
-            apply_xr_startup_view_pose(&mut camera, view_pose.position, view_pose.yaw_degrees)
-                .context("apply XR startup view pose")?;
-            initial_pose_changed |= runtime
-                .commit_engine_camera_player_pose(&mut camera)
-                .context("sync initial XR view-pose player pose")?;
-            XrViewAlignmentMode::ViewPose
-        } else {
-            initial_pose_changed |= runtime
-                .commit_engine_camera_player_pose(&mut camera)
-                .context("sync initial XR player pose")?;
-            XrViewAlignmentMode::PlayerSpawn
-        };
-        if initial_pose_changed {
-            let _ = poll_window_runtime_until_idle(&mut runtime)
-                .context("wait for chunks after initial XR player pose")?;
-        }
-        let camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
-        let section_update = runtime
-            .sync_all_render_sections(camera_position)
-            .context("compile initial mclone render sections for XR")?;
-        let sections = runtime.cached_sections();
-        if sections.is_empty() {
-            bail!(
-                "mclone XR smoke seed={} center=({}, {}) render_distance={} produced no render sections",
-                options.scene.seed,
-                options.scene.chunk_x,
-                options.scene.chunk_z,
-                options.scene.render_distance
-            );
-        }
-        let mut draw = TexturedSectionDrawResources::new(
-            device,
-            queue,
-            XR_COLOR_FORMAT,
-            &sections,
-            runtime.mesh_assets().atlas.as_upload(),
-        )
-        .context("upload initial mclone render sections for XR")?;
-        draw.set_traversal_ready_sections(
-            &runtime.traversal_ready_render_section_keys(camera_position),
-        );
-        let sky = SkyRenderer::new(device, XR_COLOR_FORMAT);
-        let actors = ActorDrawResources::new(
-            device,
-            queue,
-            XR_COLOR_FORMAT,
-            runtime.actor_textures.atlas.as_upload(),
-        )
-        .context("initialize mclone actor resources for XR")?;
-        let initial_upload = TexturedSectionUploadReport {
-            uploaded_section_count: section_update.rebuilt_section_count(),
-            removed_section_count: section_update.removed_section_count(),
-            uploaded_vertex_count: section_update.rebuilt_vertex_count,
-            uploaded_index_count: section_update.rebuilt_index_count,
-        };
-        let mut render_stats = RenderStreamStats {
-            section_count: draw.section_count(),
-            index_count: draw.index_count(),
-            face_count: quad_face_count_from_indices(draw.index_count()),
-            ..RenderStreamStats::default()
-        };
-        record_render_section_update_stats(&mut render_stats, &section_update, initial_upload);
-        println!(
-            "mclone XR runtime: seed={} center=({}, {}) render_distance={} chunks={} sections={} faces={} indices={} initial_polls={} poll_ms={:.3} elapsed_ms={:.3}",
-            options.scene.seed,
-            options.scene.chunk_x,
-            options.scene.chunk_z,
-            options.scene.render_distance,
-            runtime.client().loaded_chunk_count(),
-            render_stats.section_count,
-            render_stats.face_count,
-            render_stats.index_count,
-            initial_poll_count,
-            initial_poll_ms,
-            elapsed_ms(initial_poll_start.elapsed())
-        );
-        Ok(Self {
-            runtime,
-            camera,
-            initial_alignment_mode,
-            render_options: options.render_options,
-            draw,
-            sky,
-            actors,
-            render_stats,
-            tracking_origin: None,
-            last_locomotion_update: None,
-            first_eye_summary: None,
-            rendered_frames: 0,
-        })
-    }
-
-    fn render_views(&mut self, views: &[xr::View]) -> Result<[ChunkRenderView; 2]> {
-        if views.len() < 2 {
-            bail!("OpenXR runtime returned fewer than two stereo views");
-        }
-        let tracking_origin = match self.tracking_origin {
-            Some(origin) => origin,
-            None => {
-                let origin =
-                    XrTrackingOrigin::from_initial_views(views, self.initial_alignment_mode)?;
-                let snapshot = self.camera.snapshot();
-                let origin_stage = origin.origin_stage();
-                println!(
-                    "mclone XR player-root alignment: mode={} root_eye=({:.2}, {:.2}, {:.2}) root_yaw_degrees={:.1} stage_center=({:.3}, {:.3}, {:.3}) stage_yaw_degrees={:.1}",
-                    origin.mode_label(),
-                    snapshot.eye.x,
-                    snapshot.eye.y,
-                    snapshot.eye.z,
-                    snapshot.yaw_radians.to_degrees(),
-                    origin_stage.x,
-                    origin_stage.y,
-                    origin_stage.z,
-                    origin.stage_yaw().to_degrees()
-                );
-                self.tracking_origin = Some(origin);
-                origin
-            }
-        };
-        let transform =
-            XrStageToWorld::from_tracking_origin(tracking_origin, self.camera.snapshot())?;
-        Ok([
-            xr_view_to_chunk_render_view(&views[0], transform, XR_NEAR, XR_FAR)?,
-            xr_view_to_chunk_render_view(&views[1], transform, XR_NEAR, XR_FAR)?,
-        ])
-    }
-
-    fn apply_locomotion_input(&mut self, controllers: &[XrControllerSnapshot]) -> Result<()> {
-        let now = Instant::now();
-        let dt_seconds = self
-            .last_locomotion_update
-            .replace(now)
-            .map(|last| now.duration_since(last).as_secs_f64())
-            .unwrap_or(0.0);
-        let input = xr_locomotion_input_from_controllers(controllers, dt_seconds);
-        self.camera
-            .apply_movement_input(self.runtime.client(), input);
-        self.runtime
-            .commit_engine_camera_player_pose(&mut self.camera)
-            .context("sync XR locomotion player pose")?;
-        Ok(())
-    }
-
-    fn poll_runtime_and_upload(
-        &mut self,
-        device: &wgpu::Device,
-        camera_position: Vec3,
-    ) -> Result<()> {
-        let changed = self.runtime.poll().context("poll mclone XR runtime")?;
-        if !changed && !self.runtime.has_pending_render_work(camera_position) {
-            self.draw.set_traversal_ready_sections(
-                &self
-                    .runtime
-                    .traversal_ready_render_section_keys(camera_position),
-            );
-            return Ok(());
-        }
-        let section_update = self
-            .runtime
-            .sync_render_sections(camera_position)
-            .context("sync mclone XR render sections")?;
-        let upload_report = self
-            .draw
-            .apply_section_updates(
-                device,
-                &section_update.rebuilt_sections,
-                &section_update.removed_section_keys,
-            )
-            .context("upload mclone XR render section updates")?;
-        self.draw.set_traversal_ready_sections(
-            &self
-                .runtime
-                .traversal_ready_render_section_keys(camera_position),
-        );
-        self.render_stats.section_count = self.draw.section_count();
-        self.render_stats.index_count = self.draw.index_count();
-        self.render_stats.face_count = quad_face_count_from_indices(self.render_stats.index_count);
-        record_render_section_update_stats(&mut self.render_stats, &section_update, upload_report);
-        Ok(())
-    }
-
-    fn actor_instances(&self) -> Vec<ActorInstance> {
-        actor_instances_from_presentations(
-            &self.runtime.client().actor_presentations(),
-            self.runtime.client(),
-        )
-    }
-
-    fn effective_render_options(&self, camera_position: Vec3) -> TexturedSectionRenderOptions {
-        let mut options = self.render_options;
-        if self.runtime.camera_inside_occluding_block(camera_position) {
-            options.section_occlusion_culling = false;
-        }
-        options
-    }
-
-    fn record_eye0_summary(&mut self, summary: FullFrameRenderSummary) {
-        self.first_eye_summary.get_or_insert(summary);
-        self.rendered_frames += 1;
-    }
-
-    fn print_summary(&self) {
-        if let Some(summary) = self.first_eye_summary {
-            println!(
-                "mclone XR frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
-                self.rendered_frames,
-                summary.section_count,
-                summary.drawn_section_count,
-                summary.index_count,
-                summary.drawn_index_count,
-                summary.actor_count,
-                summary.drawn_actor_count
-            );
-        }
-    }
+fn print_mclone_summary(mclone: &DesktopXrMcloneTerrainState) {
+    let summary = mclone.frame_summary();
+    println!(
+        "mclone XR frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+        summary.rendered_frames,
+        summary.section_count,
+        summary.drawn_section_count,
+        summary.index_count,
+        summary.drawn_index_count,
+        summary.actor_count,
+        summary.drawn_actor_count
+    );
 }
 
 #[cfg(not(target_os = "android"))]
@@ -918,22 +681,13 @@ fn render_mclone_frame(
     predicted_display_time: xr::Time,
     left_eye: &mut platform_graphics::OpenXrEyeState,
     right_eye: &mut platform_graphics::OpenXrEyeState,
-    mclone: &mut XrMcloneWorldState,
+    mclone: &mut DesktopXrMcloneTerrainState,
     controllers: &[XrControllerSnapshot],
 ) -> Result<()> {
     let stereo_views =
         mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)
             .context("locate OpenXR stereo views for mclone frame")?;
-    let views = [stereo_views.left, stereo_views.right];
     mclone.apply_locomotion_input(controllers)?;
-    let render_views = mclone.render_views(&views)?;
-    let center_position = (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
-    mclone.poll_runtime_and_upload(&graphics.device, center_position)?;
-    let render_options = mclone.effective_render_options(center_position);
-    let sky_clear_color = mclone.runtime.sky_clear_color();
-    let time_of_day = mclone.runtime.time_of_day();
-    let sun_angle = mclone.runtime.sun_angle();
-    let actor_instances = mclone.actor_instances();
 
     let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
     let right_target = match acquire_eye_target(right_eye).context("acquire right-eye OpenXR image")
@@ -945,24 +699,26 @@ fn render_mclone_frame(
         }
     };
 
-    let render_result = render_mclone_eye_targets(
-        graphics,
-        &left_target,
-        &right_target,
-        mclone,
-        render_views,
-        &actor_instances,
-        render_options,
-        sky_clear_color,
-        time_of_day,
-        sun_angle,
+    let render_result = mclone.render_frame(
+        &graphics.device,
+        &graphics.queue,
+        [stereo_views.left, stereo_views.right],
+        XrTerrainEyeTarget {
+            color_view: left_target.color_view(),
+            depth: &left_target.eye().depth,
+            size: [left_target.eye().width, left_target.eye().height],
+        },
+        XrTerrainEyeTarget {
+            color_view: right_target.color_view(),
+            depth: &right_target.eye().depth,
+            size: [right_target.eye().width, right_target.eye().height],
+        },
     );
     let left_release_result = left_target.release();
     let right_release_result = right_target.release();
-    let eye0_summary = render_result?;
+    render_result?;
     left_release_result?;
     right_release_result?;
-    mclone.record_eye0_summary(eye0_summary);
 
     mclone_xr_host::end_stereo_projection_frame(
         &mut graphics.frame_stream,
@@ -973,128 +729,6 @@ fn render_mclone_frame(
         left_eye,
         right_eye,
     )
-}
-
-#[cfg(not(target_os = "android"))]
-#[allow(clippy::too_many_arguments)]
-fn render_mclone_eye_targets(
-    graphics: &mut platform_graphics::GraphicsSession,
-    left_target: &AcquiredEyeTarget<'_>,
-    right_target: &AcquiredEyeTarget<'_>,
-    mclone: &mut XrMcloneWorldState,
-    render_views: [ChunkRenderView; 2],
-    actor_instances: &[ActorInstance],
-    render_options: TexturedSectionRenderOptions,
-    sky_clear_color: wgpu::Color,
-    time_of_day: f32,
-    sun_angle: f32,
-) -> Result<FullFrameRenderSummary> {
-    let mut left_stats = mclone.render_stats;
-    // The shared mclone render resources own per-view uniform buffers. Match
-    // Playbox's per-eye submit shape so the right-eye uniform writes cannot
-    // overwrite the left-eye pass before the GPU consumes it.
-    let left_summary = render_mclone_eye_target(
-        graphics,
-        left_target,
-        &mclone.sky,
-        &mut mclone.draw,
-        &mut mclone.actors,
-        render_views[0],
-        actor_instances,
-        render_options,
-        sky_clear_color,
-        time_of_day,
-        sun_angle,
-        &mut left_stats,
-        "left",
-    )?;
-    let mut right_stats = left_stats;
-    render_mclone_eye_target(
-        graphics,
-        right_target,
-        &mclone.sky,
-        &mut mclone.draw,
-        &mut mclone.actors,
-        render_views[1],
-        actor_instances,
-        render_options,
-        sky_clear_color,
-        time_of_day,
-        sun_angle,
-        &mut right_stats,
-        "right",
-    )?;
-    mclone.render_stats = left_stats;
-    Ok(left_summary)
-}
-
-#[cfg(not(target_os = "android"))]
-#[allow(clippy::too_many_arguments)]
-fn render_mclone_eye_target(
-    graphics: &mut platform_graphics::GraphicsSession,
-    target: &AcquiredEyeTarget<'_>,
-    sky: &SkyRenderer,
-    draw: &mut TexturedSectionDrawResources,
-    actors: &mut ActorDrawResources,
-    render_view: ChunkRenderView,
-    actor_instances: &[ActorInstance],
-    render_options: TexturedSectionRenderOptions,
-    sky_clear_color: wgpu::Color,
-    time_of_day: f32,
-    sun_angle: f32,
-    render_stats: &mut RenderStreamStats,
-    label: &'static str,
-) -> Result<FullFrameRenderSummary> {
-    let mut encoder = graphics
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some(match label {
-                "left" => "mclone_xr_left_eye_encoder",
-                "right" => "mclone_xr_right_eye_encoder",
-                _ => "mclone_xr_eye_encoder",
-            }),
-        });
-    let frame = RenderFrameContext::new(
-        &graphics.device,
-        &graphics.queue,
-        &mut encoder,
-        RenderFrameTarget::color(
-            target.color_view(),
-            [target.eye().width, target.eye().height],
-        ),
-    );
-    let summary = render_full_frame_for_view(
-        frame,
-        &target.eye().depth,
-        sky,
-        draw,
-        Some(actors),
-        None,
-        None,
-        render_view,
-        actor_instances,
-        None,
-        sky_clear_color,
-        time_of_day,
-        sun_angle,
-        render_options,
-        FullFrameGui::new(false, false, [1.0, 1.0]),
-        |_| GuiDrawList::new(),
-        render_stats,
-    )
-    .with_context(|| format!("render mclone {label} eye"))?;
-    let submission = graphics.queue.submit(Some(encoder.finish()));
-    graphics
-        .device
-        .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
-        .map(|_| ())
-        .with_context(|| format!("wait for OpenXR mclone {label}-eye render submission"))?;
-    graphics
-        .device
-        .poll(wgpu::PollType::Wait)
-        .map(|_| ())
-        .with_context(|| format!("wait for OpenXR mclone {label}-eye render device idle"))?;
-    Ok(summary)
 }
 
 #[cfg(not(target_os = "android"))]

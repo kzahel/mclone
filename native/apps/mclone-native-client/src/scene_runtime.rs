@@ -37,7 +37,7 @@ use mclone_render_session::{
 use mclone_render_session::{RenderSectionSession, render_section_neighbor_readiness};
 
 pub(crate) type WindowRuntimeStats = SingleViewRuntimeStats;
-type NativeWindowSceneRuntime = NativeSingleViewSceneRuntime<RemoteServerSession>;
+pub(crate) type NativeWindowSceneRuntime = NativeSingleViewSceneRuntime<RemoteServerSession>;
 
 fn scene_render_distance(scene: &SceneOptions) -> Result<u32> {
     u32::try_from(scene.render_distance).context("render distance must be non-negative")
@@ -88,7 +88,9 @@ fn local_single_view_options(scene: &SceneOptions) -> Result<LocalSingleViewScen
     .with_lighting_enabled(scene.lighting_enabled))
 }
 
-fn native_window_scene_runtime(scene: &SceneOptions) -> Result<NativeWindowSceneRuntime> {
+pub(crate) fn native_window_scene_runtime(
+    scene: &SceneOptions,
+) -> Result<NativeWindowSceneRuntime> {
     let render_distance = scene_render_distance(scene)?;
     let center = ChunkPos::new(scene.chunk_x, scene.chunk_z);
     let Some(remote_addr) = &scene.remote_addr else {

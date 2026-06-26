@@ -236,14 +236,15 @@ manual checks:
 2. **Make the contract matrix more executable.** For each shared crate boundary,
    keep the sentinel smoke/test close to scripts so platform coverage is
    deliberate instead of remembered manually.
-3. **Finish host-mode convergence for web and XR.** Native desktop and flat
-   Android now share `mclone-app-runtime` host-mode and native scene-shell
-   contracts. Web still has an async `WebRuntimeHost`, and XR lanes still lack a
-   remote transport adapter.
-4. **Finish XR scene convergence.** `mclone-xr-scene` now owns shared
-   terrain/actor rendering, but desktop XR still retains richer app-local
-   terrain/session behavior. Migrating that behind shared XR scene interfaces
-   will reduce divergence before adding UI or comfort settings.
+3. **Finish host-mode convergence for web and Android XR.** Native desktop,
+   desktop XR, and flat Android now share `mclone-app-runtime` host-mode and
+   native scene-shell contracts. Web still has an async `WebRuntimeHost`, and
+   Android XR still lacks a concrete remote transport adapter.
+4. **Keep XR scene convergence complete as features grow.** `mclone-xr-scene`
+   now owns shared terrain/actor rendering, startup pose, locomotion, and
+   local/remote-capable host shape. Keep future UI, comfort, and interaction
+   work behind that shared scene boundary instead of reintroducing app-local XR
+   forks.
 5. **Promote lighting and UI as shared feature contracts.** Lighting and
    menus/HUD/options/loading UI are the next user-visible parity blockers.
    Land them once through shared data/UI/render contracts instead of per

@@ -277,9 +277,29 @@ where
         Ok(Self::Local(LocalSingleViewSceneRuntime::new(options)?))
     }
 
+    pub fn local_with_mesh_assets(
+        options: LocalSingleViewSceneOptions,
+        mesh_assets: TexturedMeshAssets,
+    ) -> Result<Self> {
+        Ok(Self::Local(LocalSingleViewSceneRuntime::with_mesh_assets(
+            options,
+            mesh_assets,
+        )?))
+    }
+
     pub fn remote_dedicated(options: SingleViewHostOptions, session: S) -> Result<Self> {
         Ok(Self::RemoteDedicated(
             RemoteDedicatedSingleViewSceneRuntime::new(options, session)?,
+        ))
+    }
+
+    pub fn remote_dedicated_with_mesh_assets(
+        options: SingleViewHostOptions,
+        session: S,
+        mesh_assets: TexturedMeshAssets,
+    ) -> Result<Self> {
+        Ok(Self::RemoteDedicated(
+            RemoteDedicatedSingleViewSceneRuntime::with_mesh_assets(options, session, mesh_assets)?,
         ))
     }
 

@@ -1,16 +1,19 @@
 #![forbid(unsafe_code)]
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
+use mclone_app_runtime::elapsed_ms;
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
     render_full_frame_for_view,
 };
-use mclone_app_runtime::render_assets::{RenderSectionCompileWorker, TexturedMeshAssets};
-use mclone_app_runtime::{RuntimeUpdateApplyReport, SingleViewRuntime, elapsed_ms};
-use mclone_client::ClientRuntime;
+use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
+use mclone_app_runtime::local_single_view::{
+    LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime,
+};
+use mclone_app_runtime::render_assets::TexturedMeshAssets;
 use mclone_core::{ChunkPos, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -24,10 +27,6 @@ use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render_session::{
     ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineCameraInput,
     EngineCameraMovementImpulse, EngineCameraSnapshot, actor_instances_from_presentations,
-};
-use mclone_server::{
-    IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
-    ServerRunnerDiagnostics,
 };
 use mclone_ui::GuiDrawList;
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
@@ -124,17 +123,33 @@ pub struct XrTerrainEyeTarget<'a> {
     pub size: [u32; 2],
 }
 
-pub struct XrMcloneTerrainState {
-    runtime: SingleViewRuntime,
-    server_runner: NativeIntegratedServerRunner,
-    render_compile_worker: RenderSectionCompileWorker,
+#[derive(Debug)]
+pub enum XrLocalOnlyRemoteSession {}
+
+impl RemoteDedicatedServerSession for XrLocalOnlyRemoteSession {
+    fn send_command(
+        &mut self,
+        _command: mclone_protocol::ClientCommand,
+    ) -> Result<Vec<mclone_protocol::ServerUpdate>> {
+        match *self {}
+    }
+
+    fn reconnect(&mut self) -> Result<()> {
+        match *self {}
+    }
+}
+
+pub struct XrMcloneTerrainState<S = XrLocalOnlyRemoteSession>
+where
+    S: RemoteDedicatedServerSession,
+{
+    runtime: NativeSingleViewSceneRuntime<S>,
     camera: EngineCameraController,
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
     draw: TexturedSectionDrawResources,
     actors: ActorDrawResources,
     sky: SkyRenderer,
-    mesh_assets: TexturedMeshAssets,
     render_stats: RenderStreamStats,
     tracking_origin: Option<XrTrackingOrigin>,
     last_locomotion_update: Option<Instant>,
@@ -142,7 +157,7 @@ pub struct XrMcloneTerrainState {
     rendered_frames: u32,
 }
 
-impl XrMcloneTerrainState {
+impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -154,50 +169,59 @@ impl XrMcloneTerrainState {
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
         let scene = scene.validated()?;
-        let render_compile_worker = RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
-        let chunk_tracking_radius =
-            mclone_app_runtime::chunk_tracking_radius_for_render_distance(scene.render_distance);
-        let mut runtime = SingleViewRuntime::new(
-            ClientRuntime::local_integrated(),
-            scene.center(),
-            scene.render_distance,
-            chunk_tracking_radius,
+        let runtime = NativeSingleViewSceneRuntime::local_with_mesh_assets(
+            local_single_view_options(scene),
+            mesh_assets,
         );
-        let mut server_runner = NativeIntegratedServerRunner::new(native_runner_config(scene))
-            .context("start XR integrated server runner")?;
-        set_chunk_view(&mut runtime, &mut server_runner, scene.center())?;
-        let initial_day_time = server_runner
-            .poll_diagnostics()
-            .context("poll initial XR server diagnostics")?
-            .day_time;
-        runtime.force_day_time(initial_day_time);
-        if let Some(day_time) = scene.day_time_override {
-            runtime.force_day_time(day_time);
-        }
+        Self::with_runtime(
+            device,
+            queue,
+            color_format,
+            runtime.context("start XR local integrated scene runtime")?,
+            render_options,
+            actor_atlas,
+            startup_view_pose,
+        )
+    }
+}
 
+impl<S> XrMcloneTerrainState<S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    pub fn with_runtime(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        runtime: NativeSingleViewSceneRuntime<S>,
+        render_options: TexturedSectionRenderOptions,
+        actor_atlas: ActorTextureImage,
+        startup_view_pose: Option<XrStartupViewPose>,
+    ) -> Result<Self> {
+        let center = runtime.interest_center();
+        let render_distance = runtime.render_distance();
+        let host_label = runtime.host_label();
+        let draw = TexturedSectionDrawResources::new(
+            device,
+            queue,
+            color_format,
+            &[],
+            runtime.mesh_assets().atlas.as_upload(),
+        )
+        .context("create empty XR terrain draw resources")?;
         let mut state = Self {
             runtime,
-            server_runner,
-            render_compile_worker,
-            camera: EngineCameraController::spawn_for_chunk(scene.center()),
+            camera: EngineCameraController::spawn_for_chunk(center),
             initial_alignment_mode: if startup_view_pose.is_some() {
                 XrViewAlignmentMode::ViewPose
             } else {
                 XrViewAlignmentMode::PlayerSpawn
             },
             render_options,
-            draw: TexturedSectionDrawResources::new(
-                device,
-                queue,
-                color_format,
-                &[],
-                mesh_assets.atlas.as_upload(),
-            )
-            .context("create empty XR terrain draw resources")?,
+            draw,
             actors: ActorDrawResources::new(device, queue, color_format, actor_atlas.as_upload())
                 .context("initialize XR terrain actor draw resources")?,
             sky: SkyRenderer::new(device, color_format),
-            mesh_assets,
             render_stats: RenderStreamStats::default(),
             tracking_origin: None,
             last_locomotion_update: None,
@@ -237,11 +261,11 @@ impl XrMcloneTerrainState {
         let sections = state.runtime.cached_sections();
         if sections.is_empty() {
             bail!(
-                "XR terrain seed={} center=({}, {}) render_distance={} produced no render sections",
-                scene.seed,
-                scene.chunk_x,
-                scene.chunk_z,
-                scene.render_distance
+                "XR terrain host={} center=({}, {}) render_distance={} produced no render sections",
+                host_label,
+                center.x,
+                center.z,
+                render_distance
             );
         }
         state.draw = TexturedSectionDrawResources::new(
@@ -249,7 +273,7 @@ impl XrMcloneTerrainState {
             queue,
             color_format,
             &sections,
-            state.mesh_assets.atlas.as_upload(),
+            state.runtime.mesh_assets().atlas.as_upload(),
         )
         .context("upload initial XR terrain render sections")?;
         state.draw.set_traversal_ready_sections(
@@ -276,12 +300,12 @@ impl XrMcloneTerrainState {
             initial_upload,
         );
         log::info!(
-            "mclone XR terrain runtime: seed={} center=({}, {}) render_distance={} chunks={} sections={} faces={} indices={} initial_polls={} poll_ms={:.3} elapsed_ms={:.3}",
-            scene.seed,
-            scene.chunk_x,
-            scene.chunk_z,
-            scene.render_distance,
-            state.runtime.client().loaded_chunk_count(),
+            "mclone XR terrain runtime: host={} center=({}, {}) render_distance={} chunks={} sections={} faces={} indices={} initial_polls={} poll_ms={:.3} elapsed_ms={:.3}",
+            host_label,
+            center.x,
+            center.z,
+            render_distance,
+            state.runtime.loaded_chunk_count(),
             state.render_stats.section_count,
             state.render_stats.face_count,
             state.render_stats.index_count,
@@ -516,91 +540,26 @@ impl XrMcloneTerrainState {
         &mut self,
         camera_position: Vec3,
     ) -> Result<mclone_render_session::RenderSectionCacheUpdate> {
-        self.runtime.sync_render_sections(
-            &mut self.render_compile_worker,
-            camera_position,
-            |client, _compiler| client.chunk_snapshots().cloned().collect(),
-        )
+        self.runtime.sync_render_sections(camera_position)
     }
 
     fn sync_all_render_sections(
         &mut self,
         camera_position: Vec3,
     ) -> Result<mclone_render_session::RenderSectionCacheUpdate> {
-        let deadline = Instant::now() + Duration::from_secs(120);
-        let mut combined = mclone_render_session::RenderSectionCacheUpdate::default();
-        loop {
-            let update = self.runtime.sync_render_sections_with_budget(
-                &mut self.render_compile_worker,
-                camera_position,
-                usize::MAX,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
-            )?;
-            let progressed = update.rebuilt_section_count() > 0
-                || update.removed_section_count() > 0
-                || update.submitted_compile_section_count > 0
-                || update.completed_compile_section_count > 0
-                || update.stale_compile_section_count > 0;
-            combined.merge(update);
-            if self.render_compile_worker.pending_job_count() == 0
-                && !self.runtime.has_ready_pending_render_work(camera_position)
-            {
-                combined.pending_compile_jobs = 0;
-                return Ok(combined);
-            }
-            if Instant::now() >= deadline {
-                bail!("timed out waiting for XR terrain render section compile queue");
-            }
-            if !progressed {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
+        self.runtime.sync_all_render_sections(camera_position)
     }
 
     fn poll(&mut self) -> Result<bool> {
-        let apply_report = drain_runner_updates_report(&mut self.runtime, &mut self.server_runner)?;
-        let changed = apply_report.changed;
-        let runner_diagnostics = self
-            .server_runner
-            .poll_diagnostics()
-            .context("poll XR integrated server diagnostics")?;
-        self.runtime
-            .finish_poll_diagnostics(0.0, apply_report, Some(&runner_diagnostics));
-        Ok(changed)
+        self.runtime.poll()
     }
 
     fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
-        let deadline = Instant::now() + Duration::from_secs(120);
-        let mut polls = 0_usize;
-        let mut poll_ms = 0.0_f64;
-        loop {
-            let poll_start = Instant::now();
-            self.poll()?;
-            poll_ms += elapsed_ms(poll_start.elapsed());
-            polls += 1;
-            if local_server_idle(&self.server_runner)? {
-                return Ok((polls, poll_ms));
-            }
-            if Instant::now() >= deadline {
-                bail!("timed out waiting for XR terrain worldgen jobs");
-            }
-            if self
-                .server_runner
-                .poll_diagnostics()
-                .context("poll XR integrated server diagnostics")?
-                .update_queue_depth
-                == 0
-            {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
+        self.runtime.poll_until_idle()
     }
 
     fn has_pending_render_work(&self, camera_position: Vec3) -> bool {
-        self.runtime.has_pending_render_work(
-            self.render_compile_worker.pending_job_count(),
-            camera_position,
-        )
+        self.runtime.has_pending_render_work(camera_position)
     }
 
     fn apply_startup_view_pose(&mut self, view_pose: XrStartupViewPose) -> Result<()> {
@@ -615,7 +574,8 @@ impl XrMcloneTerrainState {
 
     fn sync_engine_camera_player_pose(&mut self) -> Result<bool> {
         let changed = if let Some(report) = self.camera.next_pose_sync_command() {
-            dispatch_runner_command(&mut self.runtime, &mut self.server_runner, report.command)
+            self.runtime
+                .send_gameplay_command(report.command)
                 .context("failed to sync XR terrain player pose to server")?
         } else {
             false
@@ -627,14 +587,12 @@ impl XrMcloneTerrainState {
         let mut changed = false;
         for update in self.runtime.drain_player_position_updates() {
             let accepted = self.camera.accept_position_update(update);
-            dispatch_runner_command(
-                &mut self.runtime,
-                &mut self.server_runner,
-                accepted.accept_command,
-            )
-            .context("failed to acknowledge XR terrain player position correction")?;
+            self.runtime
+                .send_gameplay_command(accepted.accept_command)
+                .context("failed to acknowledge XR terrain player position correction")?;
             let resync = self.camera.corrected_pose_sync_command();
-            dispatch_runner_command(&mut self.runtime, &mut self.server_runner, resync.command)
+            self.runtime
+                .send_gameplay_command(resync.command)
                 .context("failed to sync corrected XR terrain player pose")?;
             log::warn!(
                 "accepted XR terrain server player position correction id={} feet=({:.2}, {:.2}, {:.2})",
@@ -654,7 +612,7 @@ impl XrMcloneTerrainState {
     fn update_interest_from_engine_camera(&mut self) -> Result<bool> {
         let snapshot = self.camera.snapshot();
         let center = snapshot.chunk_pos;
-        if set_chunk_view(&mut self.runtime, &mut self.server_runner, center)? {
+        if self.runtime.set_interest_center(center)? {
             log::info!(
                 "XR terrain chunk interest moved to ({}, {}) at camera position ({:.1}, {:.1}, {:.1})",
                 center.x,
@@ -669,7 +627,7 @@ impl XrMcloneTerrainState {
     }
 
     fn sky_clear_color(&self) -> wgpu::Color {
-        mclone_render::sky::overworld_clear_color(self.runtime.client().time_of_day())
+        self.runtime.sky_clear_color()
     }
 
     fn effective_render_options(&self, camera_position: Vec3) -> TexturedSectionRenderOptions {
@@ -684,7 +642,7 @@ impl XrMcloneTerrainState {
         let Some(state_id) = self.runtime.block_state_at_position(position) else {
             return false;
         };
-        self.mesh_assets.catalog.occludes(state_id)
+        self.runtime.mesh_assets().catalog.occludes(state_id)
     }
 
     fn record_eye0_summary(&mut self, summary: FullFrameRenderSummary) {
@@ -693,66 +651,11 @@ impl XrMcloneTerrainState {
     }
 }
 
-fn native_runner_config(scene: XrSceneOptions) -> NativeIntegratedServerRunnerConfig {
-    NativeIntegratedServerRunnerConfig::new(scene.seed)
-        .with_lighting_enabled(scene.lighting_enabled)
+fn local_single_view_options(scene: XrSceneOptions) -> LocalSingleViewSceneOptions {
+    LocalSingleViewSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
         .with_day_time(scene.day_time_override)
-        .with_day_time_frozen(scene.freeze_time)
-}
-
-fn set_chunk_view(
-    runtime: &mut SingleViewRuntime,
-    runner: &mut NativeIntegratedServerRunner,
-    center: ChunkPos,
-) -> Result<bool> {
-    let render_distance = runtime.render_distance();
-    let chunk_tracking_radius = runtime.chunk_tracking_radius();
-    let Some(command) =
-        runtime.set_chunk_view_command(center, render_distance, chunk_tracking_radius)
-    else {
-        return Ok(false);
-    };
-    dispatch_runner_command(runtime, runner, command)
-}
-
-fn dispatch_runner_command(
-    runtime: &mut SingleViewRuntime,
-    runner: &mut NativeIntegratedServerRunner,
-    command: mclone_protocol::ClientCommand,
-) -> Result<bool> {
-    runner
-        .send_command(command)
-        .context("failed to send command to XR integrated server runner")?;
-    let _ = drain_runner_updates_report(runtime, runner)?;
-    Ok(true)
-}
-
-fn drain_runner_updates_report(
-    runtime: &mut SingleViewRuntime,
-    runner: &mut NativeIntegratedServerRunner,
-) -> Result<RuntimeUpdateApplyReport> {
-    let updates = runner
-        .drain_updates()
-        .context("failed to drain XR integrated server runner updates")?;
-    if updates.is_empty() {
-        return Ok(RuntimeUpdateApplyReport::default());
-    }
-    Ok(runtime.apply_server_updates_report(updates))
-}
-
-fn local_server_idle(runner: &NativeIntegratedServerRunner) -> Result<bool> {
-    let diagnostics = runner
-        .poll_diagnostics()
-        .context("poll XR integrated server diagnostics")?;
-    Ok(server_diagnostics_idle(diagnostics))
-}
-
-fn server_diagnostics_idle(diagnostics: ServerRunnerDiagnostics) -> bool {
-    diagnostics.command_queue_depth == 0
-        && diagnostics.update_queue_depth == 0
-        && !diagnostics.awaiting_tick
-        && diagnostics.pending_jobs == 0
-        && diagnostics.pending_publications == 0
+        .with_freeze_time(scene.freeze_time)
+        .with_lighting_enabled(scene.lighting_enabled)
 }
 
 #[derive(Clone, Copy, Debug)]

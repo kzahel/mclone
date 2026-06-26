@@ -129,14 +129,15 @@ use (and should) · — n/a.
 | `mclone-render-session` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-render-session` |
 | `app-runtime::SingleViewRuntime` | ✅ | ✅ | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::frame_render` | ✅ | ⚑ (inline reimpl) | ✅ | ✅ (via xr-scene) | `native:desktop-chunk:smoke`; `native:web:smoke` |
-| `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime composes) | — (wasm-gated) | ✅ | ⚑ (xr-scene re-derives) | `cargo test -p mclone-app-runtime` |
-| `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✗ | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
+| `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
+| `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ◐ (local via shared scene, no remote adapter) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✗ (empty list) | ✗ (empty list) | `native:web:app-smoke` |
-| `mclone-xr-{host,graphics,scene}` | ⚑ (app-local XrMcloneWorldState) | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
+| `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
-The reuse story in one line: **desktop flat and flat Android now share the
-native single-view scene shell; web and XR still carry the important forks.**
+The reuse story in one line: **desktop flat, flat Android, desktop XR, and
+Android XR now share the native scene shells; web still carries the important
+runtime/render fork.**
 Concretely:
 
 - The native flat single-view scene driver is shared:
@@ -144,16 +145,11 @@ Concretely:
   `NativeSingleViewSceneRuntime<S>`, while concrete TCP/property/config remains
   in the app crates. This landed in
   [`../tactical/084-single-view-platform-alignment.md`](../tactical/084-single-view-platform-alignment.md).
-- The remaining native scene-driver fork is XR:
-  `XrMcloneTerrainState` still re-derives local integrated runtime setup,
-  polling, idle wait, render-section sync, and render assets instead of
-  composing the shared native scene shell.
-- `mclone-xr-scene` now owns shared XR transform helpers and actor draw
-  resources, but it still has no remote host path. Desktop XR therefore keeps a
-  parallel app-local `XrMcloneWorldState` until host runtime convergence lands.
-  The prior byte-identical XR transform-helper copy was removed in tactical 086
-  Slice 1, the flat/web/XR actor-instance builder copy was removed in Slice 2,
-  and Android XR actor resources were wired in Slice 3.
+- The XR scene-driver fork is closed:
+  `XrMcloneTerrainState<S>` composes `NativeSingleViewSceneRuntime<S>`, desktop
+  XR passes the desktop TCP `RemoteServerSession`, Android XR uses a local-only
+  default session type, and app-local `XrMcloneWorldState` is gone. This landed
+  across tactical 086 Slices 1-4.
 - `web-client` re-inlines the whole sky→chunk→actor render sequence instead of
   calling `render_full_frame_for_view`. It still owns an async `WebRuntimeHost`
   enum, but command/update accounting and remote WebSocket reconnect/resync prep
@@ -199,18 +195,13 @@ these first:
    keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
    pointer, and interact**, not just locomotion. Required for XR interaction and
    for flat Android to use the player controller. (tactical 076 follow-up)
-4. **Widen `mclone-xr-scene` with pluggable/remote host support and delete the
-   desktop-XR fork.** Helper sharing and shared Android XR actor rendering
-   landed in tactical 086 Slices 1-3; host-mode plumbing remains before desktop
-   XR can consume the shared scene like Android XR does. (platforms.md
-   alignment #4)
-5. **Collapse the remaining XR scene-driver fork** so `XrMcloneTerrainState`
-   composes the shared native scene shell where possible instead of re-owning
-   local runtime setup, polling, render-section sync, and terrain assets.
-   (tactical 084 / XR follow-on)
-6. **Add a stereo/world-space UI render path** so XR can show a reticle, menus,
+4. **Add the Android XR remote transport adapter.** `mclone-xr-scene` is now
+   host-pluggable and desktop XR uses the TCP `RemoteServerSession`; Android XR
+   still needs a concrete remote session adapter before dedicated-server play is
+   available there.
+5. **Add a stereo/world-space UI render path** so XR can show a reticle, menus,
    and a connect screen. (new; no doc owns this yet)
-7. **Protocol: add server push and cross-version negotiation.** Today it is
+6. **Protocol: add server push and cross-version negotiation.** Today it is
    strict request/response (a client that stops polling stops seeing others move)
    with strict-equality version match (independently-deployed web/APK/desktop
    builds will skew). Real-time co-presence and mixed-build cross-play both
