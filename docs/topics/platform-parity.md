@@ -46,7 +46,7 @@ Target: **full game client.** Same player-facing feature set across all three.
 - underwater/screen effects (desktop/web; mobile may stage later for perf)
 
 > **Confirmed:** flat Android is a full client, not a viewer. Its current
-> shared player-camera/look shell is interim and must gain touch movement,
+> shared touch player-camera/movement shell is interim and must gain
 > interaction, HUD/hotbar, and device validation.
 
 ### Stereo-XR class — desktop OpenXR, Android XR / Quest
@@ -84,7 +84,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | World render (textured terrain) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Lighting (sky+block, render integ.) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Day/night + sky | ✅ | ✅ | ◐ (frozen) | ✅ | ✅ |
-| Player movement + collision | ✅ | ✅ | ◐ (shared camera/look, no touch move) | ✅ | ✅ |
+| Player movement + collision | ✅ | ✅ | ◐ (shared touch move, device pending) | ✅ | ✅ |
 | Block interaction (break/place) | ✅ | ✗ | ✗ | ✗ | ✅ |
 | Remote-player rendering | ✅ | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ✅ |
 | Passive entities (cow/chicken) | ✅ | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ◐ (placeholder) |
@@ -113,7 +113,7 @@ Reading the matrix:
   remain pending.
 - **flat-Android** is still the thinnest full-client lane: it has terrain,
   lighting, shared local/remote host wiring, shared menu/touch in code, and a
-  shared player camera/look path, but still lacks touch movement, interaction,
+  shared touch player camera/movement path, but still lacks interaction,
   actors, HUD/hotbar, device-validated menu UX, and an in-app connect flow.
 
 ## Matrix 2 — Shared Contract × Consumer (reuse burn-down)
@@ -134,7 +134,7 @@ use (and should) · — n/a.
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
-| `mclone-ui` (GuiDrawList) | ✅ | ✅ | ◐ (shared touch menu, device pending) | ◐ (XR world panel + pointer, unvalidated) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene` |
+| `mclone-ui` (GuiDrawList) | ✅ | ✅ | ◐ (shared touch menu+controls, device pending) | ◐ (XR world panel + pointer, unvalidated) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene` |
 | `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
 The reuse story in one line: **desktop flat, flat Android, desktop XR, and
@@ -205,15 +205,15 @@ these first:
 2. **Finish the shared menu surface before adding more menu features.** XR now
    has a shared world-panel pause/options menu with pointer input, but it still
    needs headset visual/interaction validation. Flat Android now consumes
-   `mclone-ui` in code for pause/options touch input and uses the shared player
-   camera/look path, but still needs device validation and broader HUD/touch
-   gameplay controls. Connect/world-select UI
+   `mclone-ui` in code for pause/options touch input and uses the shared touch
+   player movement path, but still needs device validation and broader
+   HUD/gameplay interaction controls. Connect/world-select UI
    and `EditBox` should build on this surface later, not define the first slice.
    (tactical 089, tactical 090)
 3. **Finish the shared input-intent layer.** Unify raw input → intent across
    keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
    pointer, and interact**, not just locomotion. Required for XR interaction and
-   for flat Android touch movement/HUD controls. (tactical 076 follow-up)
+   for flat Android HUD/hotbar/block-interaction controls. (tactical 076 follow-up)
 4. **Keep Android XR remote validation first-class for both USB and LAN.** The
    adapter and Playbox-style launch argv option exist now (`--remote-addr` in
    `mclone.startup.argv`), and Quest smokes passed over direct LAN and through

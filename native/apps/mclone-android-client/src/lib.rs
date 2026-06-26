@@ -5,6 +5,7 @@ mod android {
     use std::ffi::{CStr, CString, c_char, c_int};
     use std::sync::Arc;
     use std::sync::Once;
+    use std::time::Instant;
 
     use anyhow::{Context, Result, bail};
     use glam::Vec3;
@@ -28,11 +29,13 @@ mod android {
     use mclone_render::sky_render::SkyRenderer;
     use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
     use mclone_render_session::{
-        ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineRenderCamera,
+        ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineCameraInput,
+        EngineCameraMovementImpulse, EngineRenderCamera,
     };
     use mclone_ui::{
         GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiScale, Point,
-        TouchOverlay, render_touch_overlay, touch_menu_button_rect,
+        TouchJoystickOverlay, TouchOverlay, render_touch_overlay, touch_action_button_rects,
+        touch_menu_button_rect, touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -46,6 +49,8 @@ mod android {
     const REMOTE_ADDR_PROPERTY: &str = "debug.mclone.remote_addr";
     const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
     const TOUCH_LOOK_RADIANS_PER_SCREEN: f64 = 2.4;
+    const TOUCH_JOYSTICK_RADIUS_GUI: f32 = 50.0;
+    const TOUCH_MOVEMENT_MAX_FRAME_SECONDS: f64 = 0.05;
     const ANDROID_MIN_RENDER_DISTANCE: i32 = 1;
     const ANDROID_MAX_RENDER_DISTANCE: i32 = 16;
     const ANDROID_FIXED_FPS_CAP: u32 = 60;
@@ -153,9 +158,11 @@ mod android {
         ui: GameUi,
         touch_menu_touch_id: Option<u64>,
         touch_menu_pressed: bool,
+        touch_controls: AndroidTouchControls,
         ui_touch_id: Option<u64>,
         render_stats: RenderStreamStats,
         frame_index: u64,
+        last_movement_update: Option<Instant>,
     }
 
     enum AndroidRenderError {
@@ -167,6 +174,103 @@ mod android {
     struct AndroidUiTouchResult {
         handled: bool,
         quit: bool,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct AndroidMovementTouch {
+        id: u64,
+        base: Point,
+        thumb: Point,
+        impulse: EngineCameraMovementImpulse,
+    }
+
+    impl AndroidMovementTouch {
+        fn new(id: u64, base: Point) -> Self {
+            let mut touch = Self {
+                id,
+                base,
+                thumb: base,
+                impulse: EngineCameraMovementImpulse::new(0.0, 0.0),
+            };
+            touch.move_to(base);
+            touch
+        }
+
+        fn move_to(&mut self, point: Point) {
+            let mut dx = point.x - self.base.x;
+            let mut dy = point.y - self.base.y;
+            if !dx.is_finite() || !dy.is_finite() {
+                dx = 0.0;
+                dy = 0.0;
+            }
+            let distance = (dx * dx + dy * dy).sqrt();
+            if distance > TOUCH_JOYSTICK_RADIUS_GUI && distance > 0.0 {
+                let scale = TOUCH_JOYSTICK_RADIUS_GUI / distance;
+                dx *= scale;
+                dy *= scale;
+            }
+            self.thumb = Point {
+                x: self.base.x + dx,
+                y: self.base.y + dy,
+            };
+            self.impulse = EngineCameraMovementImpulse::new(
+                (-dx / TOUCH_JOYSTICK_RADIUS_GUI).clamp(-1.0, 1.0),
+                (-dy / TOUCH_JOYSTICK_RADIUS_GUI).clamp(-1.0, 1.0),
+            );
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Default)]
+    struct AndroidTouchControls {
+        movement: Option<AndroidMovementTouch>,
+        jump_touch_id: Option<u64>,
+        sprint_touch_id: Option<u64>,
+        descend_touch_id: Option<u64>,
+    }
+
+    impl AndroidTouchControls {
+        fn clear(&mut self) {
+            *self = Self::default();
+        }
+
+        fn has_active_input(self) -> bool {
+            self.movement.is_some()
+                || self.jump_touch_id.is_some()
+                || self.sprint_touch_id.is_some()
+                || self.descend_touch_id.is_some()
+        }
+
+        fn overlay(self) -> TouchOverlay {
+            TouchOverlay {
+                visible: true,
+                menu_pressed: false,
+                movement: self
+                    .movement
+                    .map(|movement| TouchJoystickOverlay {
+                        active: true,
+                        base: movement.base,
+                        thumb: movement.thumb,
+                    })
+                    .unwrap_or_default(),
+                jump_pressed: self.jump_touch_id.is_some(),
+                sprint_pressed: self.sprint_touch_id.is_some(),
+                descend_pressed: self.descend_touch_id.is_some(),
+            }
+        }
+
+        fn camera_input(self, dt_seconds: f64) -> Option<EngineCameraInput> {
+            if !self.has_active_input() {
+                return None;
+            }
+            Some(EngineCameraInput {
+                dt_seconds,
+                jump: self.jump_touch_id.is_some(),
+                sprint: self.sprint_touch_id.is_some(),
+                descend: self.descend_touch_id.is_some(),
+                movement_impulse: self.movement.map(|movement| movement.impulse),
+                ..EngineCameraInput::default()
+            })
+        }
     }
 
     impl AndroidGpuState {
@@ -260,6 +364,10 @@ mod android {
         fn handle_ui_touch(&mut self, touch: &Touch) -> Result<AndroidUiTouchResult> {
             self.renderer
                 .handle_touch(touch, self.config.width, self.config.height)
+        }
+
+        fn wants_continuous_redraw(&self) -> bool {
+            self.renderer.wants_continuous_redraw()
         }
 
         fn render_mclone_frame(&mut self) -> Result<(), AndroidRenderError> {
@@ -379,9 +487,11 @@ mod android {
                 ui: GameUi::new_ingame(),
                 touch_menu_touch_id: None,
                 touch_menu_pressed: false,
+                touch_controls: AndroidTouchControls::default(),
                 ui_touch_id: None,
                 render_stats,
                 frame_index: 0,
+                last_movement_update: None,
             })
         }
 
@@ -418,21 +528,58 @@ mod android {
             self.ui.set_scale(gui_scale);
             let point = gui_scale.client_to_gui(touch.location.x, touch.location.y);
             if self.ui.is_active() {
+                self.touch_controls.clear();
+                self.touch_menu_touch_id = None;
+                self.touch_menu_pressed = false;
                 return self.handle_active_ui_touch(touch, point);
             }
-            Ok(self.handle_menu_button_touch(touch, point))
+            Ok(self.handle_closed_gameplay_touch(touch, point, gui_scale))
         }
 
-        fn handle_menu_button_touch(
+        fn handle_closed_gameplay_touch(
             &mut self,
             touch: &Touch,
             point: Point,
+            gui_scale: GuiScale,
         ) -> AndroidUiTouchResult {
             match touch.phase {
                 TouchPhase::Started => {
                     if touch_menu_button_rect().contains(point) {
                         self.touch_menu_touch_id = Some(touch.id);
                         self.touch_menu_pressed = true;
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
+                    let buttons = touch_action_button_rects(gui_scale);
+                    if buttons.jump.contains(point) {
+                        self.touch_controls.jump_touch_id = Some(touch.id);
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
+                    if buttons.sprint.contains(point) {
+                        self.touch_controls.sprint_touch_id = Some(touch.id);
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
+                    if buttons.descend.contains(point) {
+                        self.touch_controls.descend_touch_id = Some(touch.id);
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
+                    if self.touch_controls.movement.is_none()
+                        && touch_movement_zone_rect(gui_scale).contains(point)
+                    {
+                        self.touch_controls.movement =
+                            Some(AndroidMovementTouch::new(touch.id, point));
+                        self.last_movement_update = Some(Instant::now());
                         return AndroidUiTouchResult {
                             handled: true,
                             quit: false,
@@ -447,6 +594,24 @@ mod android {
                             quit: false,
                         };
                     }
+                    if let Some(movement) = self.touch_controls.movement.as_mut()
+                        && movement.id == touch.id
+                    {
+                        movement.move_to(point);
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
+                    if self.touch_controls.jump_touch_id == Some(touch.id)
+                        || self.touch_controls.sprint_touch_id == Some(touch.id)
+                        || self.touch_controls.descend_touch_id == Some(touch.id)
+                    {
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
                 }
                 TouchPhase::Ended | TouchPhase::Cancelled => {
                     if self.touch_menu_touch_id == Some(touch.id) {
@@ -455,10 +620,43 @@ mod android {
                         self.touch_menu_touch_id = None;
                         self.touch_menu_pressed = false;
                         if should_open {
+                            self.touch_controls.clear();
                             self.ui.open_pause();
                             self.ui.clear_input();
                             log::info!("Mclone Android shared menu opened");
                         }
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
+                    if self
+                        .touch_controls
+                        .movement
+                        .is_some_and(|movement| movement.id == touch.id)
+                    {
+                        self.touch_controls.movement = None;
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
+                    if self.touch_controls.jump_touch_id == Some(touch.id) {
+                        self.touch_controls.jump_touch_id = None;
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
+                    if self.touch_controls.sprint_touch_id == Some(touch.id) {
+                        self.touch_controls.sprint_touch_id = None;
+                        return AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        };
+                    }
+                    if self.touch_controls.descend_touch_id == Some(touch.id) {
+                        self.touch_controls.descend_touch_id = None;
                         return AndroidUiTouchResult {
                             handled: true,
                             quit: false,
@@ -609,16 +807,31 @@ mod android {
                 return self.ui.render_draw_list(ui_state);
             }
             let mut draw = GuiDrawList::new();
-            render_touch_overlay(
-                gui_scale,
-                &mut draw,
-                &TouchOverlay {
-                    visible: true,
-                    menu_pressed: self.touch_menu_pressed,
-                    ..TouchOverlay::hidden()
-                },
-            );
+            let mut overlay = self.touch_controls.overlay();
+            overlay.menu_pressed = self.touch_menu_pressed;
+            render_touch_overlay(gui_scale, &mut draw, &overlay);
             draw
+        }
+
+        fn apply_touch_movement(&mut self) -> Result<()> {
+            let now = Instant::now();
+            if self.ui.is_active() || !self.touch_controls.has_active_input() {
+                self.last_movement_update = Some(now);
+                return Ok(());
+            }
+            let dt_seconds = self
+                .last_movement_update
+                .replace(now)
+                .map(|last| now.duration_since(last).as_secs_f64())
+                .unwrap_or(0.0)
+                .clamp(0.0, TOUCH_MOVEMENT_MAX_FRAME_SECONDS);
+            let Some(input) = self.touch_controls.camera_input(dt_seconds) else {
+                return Ok(());
+            };
+            self.camera.apply_movement_input(self.scene.client(), input);
+            self.commit_engine_camera_player_pose()
+                .context("sync Android touch-movement player pose")?;
+            Ok(())
         }
 
         fn commit_engine_camera_player_pose(&mut self) -> Result<bool> {
@@ -629,10 +842,16 @@ mod android {
             apply_pending_engine_camera_position_updates(&mut self.scene, &mut self.camera)
         }
 
+        fn wants_continuous_redraw(&self) -> bool {
+            !self.ui.is_active() && self.touch_controls.has_active_input()
+        }
+
         fn render(&mut self, frame: RenderFrameContext<'_>) -> Result<()> {
             let _ = self.scene.poll()?;
             self.apply_pending_engine_camera_position_updates()
                 .context("apply Android player position corrections")?;
+            self.apply_touch_movement()
+                .context("apply Android touch movement")?;
             let camera_position = camera_position(&self.camera);
             let section_update = self.scene.sync_render_sections(camera_position)?;
             if section_update.rebuilt_section_count() > 0
@@ -895,7 +1114,11 @@ mod android {
                         return;
                     };
                     match gpu.render_mclone_frame() {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            if gpu.wants_continuous_redraw() {
+                                window.request_redraw();
+                            }
+                        }
                         Err(AndroidRenderError::Surface(wgpu::SurfaceError::OutOfMemory)) => {
                             event_loop.exit()
                         }

@@ -1403,18 +1403,27 @@ fn render_distance_label(state: GameUiRenderState) -> String {
     format!("Render Distance: {radius} {suffix}")
 }
 
-#[derive(Clone, Copy, Debug)]
-struct TouchActionButtonRects {
-    jump: Rect,
-    sprint: Rect,
-    descend: Rect,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TouchActionButtonRects {
+    pub jump: Rect,
+    pub sprint: Rect,
+    pub descend: Rect,
 }
 
 pub fn touch_menu_button_rect() -> Rect {
     Rect::new(10.0, 10.0, 40.0, 40.0)
 }
 
-fn touch_action_button_rects(scale: GuiScale) -> TouchActionButtonRects {
+pub fn touch_movement_zone_rect(scale: GuiScale) -> Rect {
+    Rect::new(
+        0.0,
+        scale.height * 0.45,
+        scale.width * 0.58,
+        scale.height * 0.55,
+    )
+}
+
+pub fn touch_action_button_rects(scale: GuiScale) -> TouchActionButtonRects {
     let size = 58.0;
     let gap = 12.0;
     let right = 18.0;
@@ -1811,6 +1820,25 @@ mod tests {
         render_touch_overlay(GuiScale::from_pixels(780, 1688), &mut draw, &overlay);
 
         assert!(!draw.commands().is_empty());
+    }
+
+    #[test]
+    fn touch_control_hit_rects_stay_inside_gui_space() {
+        let scale = GuiScale::from_pixels(780, 1688);
+        let movement = touch_movement_zone_rect(scale);
+        let actions = touch_action_button_rects(scale);
+
+        assert_eq!(touch_menu_button_rect(), Rect::new(10.0, 10.0, 40.0, 40.0));
+        assert!(movement.contains(Point {
+            x: movement.x + 4.0,
+            y: movement.y + 4.0,
+        }));
+        for rect in [actions.jump, actions.sprint, actions.descend] {
+            assert!(rect.x >= 0.0);
+            assert!(rect.y >= 0.0);
+            assert!(rect.right() <= scale.width);
+            assert!(rect.bottom() <= scale.height);
+        }
     }
 
     #[test]

@@ -1,7 +1,7 @@
 # 090: Flat Android Client Parity
 
-Status: active; shared menu/touch and player camera/look slices landed in code.
-Parent status matrix:
+Status: active; shared menu/touch, player camera/look, and touch movement
+slices landed in code. Parent status matrix:
 [`../topics/platform-parity.md`](../topics/platform-parity.md). This tactical
 owns the flat-Android follow-up that tactical
 [`089-shared-xr-menu-surface.md`](089-shared-xr-menu-surface.md) previously
@@ -25,11 +25,11 @@ shared UI, touch input, player movement, HUD/hotbar, and gameplay interaction.
 - Remote dedicated connect is wired through the Android property
   `debug.mclone.remote_addr`; in-app connect UI is intentionally out of scope
   for the first parity slices.
-- The current app/player shell is still thin: closed-menu touch look now drives
-  `EngineCameraController` and syncs player pose/interest through the shared
-  runtime, `mclone-ui` renders pause/options and a touch menu button in code,
-  but touch movement controls, gameplay-facing HUD/hotbar, block interaction,
-  and actors are not surfaced.
+- The current app/player shell is still thin: closed-menu touch look and
+  movement controls now drive `EngineCameraController` and sync player
+  pose/interest through the shared runtime, `mclone-ui` renders pause/options
+  and touch controls in code, but gameplay-facing HUD/hotbar, block
+  interaction, actors, and device validation are still open.
 
 ## Target End State
 
@@ -61,10 +61,16 @@ shared UI, touch input, player movement, HUD/hotbar, and gameplay interaction.
   - Commit initial and touch-look player pose through the same local/remote
     runtime command/update path used by desktop/XR.
   - Touch movement intentions are intentionally deferred to Slice 3.
-- [ ] **Slice 3: Android touch HUD controls.**
+- [x] **Slice 3: Android touch HUD controls.**
   - Reuse `mclone-ui` touch overlay for movement/jump/menu affordances.
   - Keep control state render-only in UI and gameplay intent state in shared
     controller/runtime code.
+  - Expose shared touch action hit rects from `mclone-ui`.
+  - Convert the Android movement zone into analog `EngineCameraMovementImpulse`
+    and action buttons into shared jump/sprint/descend camera input.
+  - Keep requesting redraws while movement controls are held so movement ticks
+    continuously.
+  - Device visual/touch validation is still pending.
 - [ ] **Slice 4: gameplay interaction parity.**
   - Route block raycast/break/place through the shared interaction controller.
   - Add hotbar/debug palette presentation and touch selection.
@@ -95,6 +101,15 @@ Slice 2 validation on 2026-06-26:
 - [x] `cargo test --manifest-path native/Cargo.toml -p mclone-render-session`
 - [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android`
 - [ ] Device visual/touch smoke of shared player camera/look on flat Android.
+
+Slice 3 validation on 2026-06-26:
+
+- [x] `cargo fmt --manifest-path native/Cargo.toml --all`
+- [x] `cargo test --manifest-path native/Cargo.toml -p mclone-ui`
+- [x] `cargo test --manifest-path native/Cargo.toml -p mclone-render-session`
+- [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android`
+- [ ] Device visual/touch smoke of movement joystick and jump/sprint/descend
+      controls on flat Android.
 
 Device gates after visual slices:
 
