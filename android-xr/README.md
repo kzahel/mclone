@@ -46,6 +46,28 @@ android-xr/app/build/outputs/apk/release/app-release.apk
 
 ## Install
 
+For interactive Quest testing from Windows, use the wrapper:
+
+```powershell
+scripts\start-android-xr.bat
+```
+
+That refreshes `reference/minecraft-1.17.1/extracted.zip`, builds and installs
+the release APK, stages the packed assets and any local sound assets to the
+Quest, wakes the headset, and launches Mclone XR. The app keeps running until
+you exit it in-headset. Pass normal install options through the wrapper, for
+example:
+
+```powershell
+scripts\start-android-xr.bat --debug --view-pose 0,120,-96,180
+```
+
+The cross-shell entry point is:
+
+```bash
+bash android-xr/start-quest-openxr.sh
+```
+
 ```bash
 bash android-xr/install-quest-openxr.sh --debug
 ```
@@ -94,9 +116,9 @@ bash android-xr/validate-quest-openxr.sh --debug --view-pose 0,120,-96,180
 ```
 
 The validator builds unless `--skip-build` is passed, installs the APK on an
-attached Quest, stages `reference/minecraft-1.17.1/extracted.zip` to the XR app
-external files directory, wakes the headset, launches the VR activity, waits
-for `MCLONE_ANDROID_XR_ASSETS_READY`,
+attached Quest, stages `reference/minecraft-1.17.1/extracted.zip` and any local
+sound assets to the XR app external files directory, wakes the headset,
+launches the VR activity, waits for `MCLONE_ANDROID_XR_ASSETS_READY`,
 `MCLONE_ANDROID_XR_CONTROLLERS_READY`, `MCLONE_ANDROID_XR_TERRAIN_READY`, and
 `MCLONE_ANDROID_XR_READY`, scans for fatal logcat entries, force-stops the app,
 restores headset wake/proximity settings, and sleeps the headset. Use

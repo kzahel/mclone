@@ -17,7 +17,7 @@ The decompile pipeline only produces `.java` source. The `client.jar` contains a
 - `shaders/` — post-processing only (spectator mode, creeper view). Not a general rendering shader. We'll write our own.
 - `lang/`, `texts/`, `font/`, `particles/`, `gpu_warnlist.json` — niche / not needed.
 - `data/minecraft/advancements`, `loot_tables`, `recipes`, `tags` — game logic data, not relevant until we have a game loop.
-- Sounds — not in the jar. Live in a separate asset index (`totalSize: 348MB` per-version). Defer.
+- Sounds — not in the jar. Live in a separate asset index (`totalSize: 348MB` per-version). The current allowlisted local sounds are fetched separately into `reference/minecraft-1.17.1/local-sounds/`.
 
 ## Notes on 1.17.1 vs 1.18+
 
@@ -39,7 +39,7 @@ Output lands at `reference/minecraft-<version>/extracted/`. The script is idempo
 
 Expected output size: ~30MB (mostly textures and structure NBTs). Full `assets/*` + `data/*` dump would be ~40MB; the filter skips the categories we don't need.
 
-For browser/native deployment, the loose extracted tree is packed into `reference/minecraft-1.17.1/extracted.zip`. The ZIP contains `mclone-pack.json` and has a sibling `extracted.zip.json` sidecar manifest with format version, file records, compression modes, and portable/raw payload fingerprints. `scripts/asset-locks/mclone-vanilla-1.17.1.lock.json` records the expected local source and pack fingerprints; refresh it with `pnpm assets:pack:write-lock` only after inspecting a rebuilt pack.
+For browser/native deployment, the loose extracted tree is packed into `reference/minecraft-1.17.1/extracted.zip`. The ZIP contains `mclone-pack.json` and has a sibling `extracted.zip.json` sidecar manifest with format version, file records, compression modes, and portable/raw payload fingerprints. `tools/minecraft_assets/locks/mclone-game-1.17.1.lock.json` records the expected local source and pack fingerprints; refresh it with `pnpm assets:pack:write-lock` only after inspecting a rebuilt pack. Local sound assets are intentionally excluded from this pack and lock.
 
 ## Where to put extracted assets
 
@@ -47,9 +47,9 @@ For browser/native deployment, the loose extracted tree is packed into `referenc
 - Output sits next to the decomp: `reference/minecraft-1.17.1/extracted/`.
 - When we're ready to use them, reference by path from mclone's build system.
 
-## Not automated yet
+## Local sound assets
 
-Sound extraction. Sounds aren't in `client.jar` — they live in a per-version asset index (`totalSize: ~348MB`), each `.ogg` addressed by SHA1 from `resources.download.minecraft.net`. When/if we need audio, add a sound-fetching step (to `extract-assets.sh` or a sibling script).
+Sounds aren't in `client.jar` — they live in a per-version asset index (`totalSize: ~348MB`), each `.ogg` addressed by SHA1 from `resources.download.minecraft.net`. `scripts/fetch-sound-assets.ps1` downloads the current allowlist into `reference/minecraft-1.17.1/local-sounds/`. These files are gitignored, kept out of `extracted.zip`, and staged to Android separately.
 
 ## Legal reminder
 

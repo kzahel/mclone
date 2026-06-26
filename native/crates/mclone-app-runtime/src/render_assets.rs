@@ -20,7 +20,7 @@ use mclone_render_session::{
 
 pub const DEFAULT_REFERENCE_ASSET_VERSION: &str = "1.17.1";
 pub const DEFAULT_REFERENCE_PACK_FILE: &str = "extracted.zip";
-pub const DEFAULT_NAMED_PACK_FILE: &str = "mclone-vanilla-1.17.1.pbp";
+pub const DEFAULT_NAMED_PACK_FILE: &str = "mclone-game-1.17.1.pbp";
 pub const DEFAULT_ANDROID_APP_ID: &str = "com.kzahel.mclone";
 
 #[derive(Clone, Debug)]
@@ -219,7 +219,13 @@ pub fn default_android_external_files_dir() -> PathBuf {
     ))
 }
 
-pub fn default_sound_overlay_root() -> PathBuf {
+pub fn default_local_sound_asset_root() -> PathBuf {
+    repo_root().join(format!(
+        "reference/minecraft-{DEFAULT_REFERENCE_ASSET_VERSION}/local-sounds"
+    ))
+}
+
+pub fn legacy_sound_overlay_root() -> PathBuf {
     repo_root().join(format!(
         "reference/minecraft-{DEFAULT_REFERENCE_ASSET_VERSION}/sound-overlay"
     ))
@@ -268,8 +274,8 @@ pub fn load_asset_source() -> Result<AssetSourceChain> {
             "missing Minecraft assets; run ./scripts/decompile-mc.sh and `pnpm assets:pack` from the repository root"
         );
     }
-    if let Some(sound_overlay) = load_sound_overlay_asset_source()? {
-        source.push(sound_overlay);
+    if let Some(local_sounds) = load_local_sound_asset_source()? {
+        source.push(local_sounds);
     }
     Ok(source)
 }
@@ -356,10 +362,10 @@ fn load_pack_asset_source(required: bool) -> Result<Option<PackedAssetSource>> {
     Ok(None)
 }
 
-fn load_sound_overlay_asset_source() -> Result<Option<FilesystemAssetSource>> {
+fn load_local_sound_asset_source() -> Result<Option<FilesystemAssetSource>> {
     if let Some(root) = env_path("MCLONE_SOUND_ASSET_ROOT") {
         if root.join("assets").is_dir() {
-            log::info!("loaded sound asset overlay {}", root.display());
+            log::info!("loaded local sound assets {}", root.display());
             return Ok(Some(FilesystemAssetSource::new(root)));
         }
         bail!(
@@ -368,23 +374,29 @@ fn load_sound_overlay_asset_source() -> Result<Option<FilesystemAssetSource>> {
         );
     }
 
-    let root = default_sound_overlay_root();
-    if root.join("assets").is_dir() {
-        log::info!("loaded sound asset overlay {}", root.display());
-        return Ok(Some(FilesystemAssetSource::new(root)));
+    for root in local_sound_asset_roots() {
+        if root.join("assets").is_dir() {
+            log::info!("loaded local sound assets {}", root.display());
+            return Ok(Some(FilesystemAssetSource::new(root)));
+        }
     }
     Ok(None)
 }
 
+fn local_sound_asset_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for root in platform_configured_asset_roots() {
+        roots.push(root.join("assets/local-sounds"));
+        roots.push(root.join("assets/sound-overlay"));
+    }
+    roots.push(default_local_sound_asset_root());
+    roots.push(legacy_sound_overlay_root());
+    dedup_paths(roots)
+}
+
 fn loose_asset_roots() -> Result<Vec<PathBuf>> {
     let mut roots = Vec::new();
-    if let Some(root) = env_path("MCLONE_ASSET_ROOT") {
-        roots.push(root);
-    }
-    if let Some(root) = env_path("MCLONE_ANDROID_ASSET_ROOT") {
-        roots.push(root);
-    }
-    roots.extend(platform_asset_roots());
+    roots.extend(platform_configured_asset_roots());
     roots.push(extracted_asset_root());
     Ok(dedup_paths(roots))
 }
@@ -396,14 +408,7 @@ fn asset_pack_candidates() -> Result<(Vec<PathBuf>, bool)> {
     }
 
     let mut candidates = Vec::new();
-    let mut roots = Vec::new();
-    if let Some(root) = env_path("MCLONE_ASSET_ROOT") {
-        roots.push(root);
-    }
-    if let Some(root) = env_path("MCLONE_ANDROID_ASSET_ROOT") {
-        roots.push(root);
-    }
-    roots.extend(platform_asset_roots());
+    let roots = platform_configured_asset_roots();
 
     for root in roots {
         candidates.push(root.join(DEFAULT_REFERENCE_PACK_FILE));
@@ -416,6 +421,18 @@ fn asset_pack_candidates() -> Result<(Vec<PathBuf>, bool)> {
     candidates.push(root.join("assets/packs").join(DEFAULT_NAMED_PACK_FILE));
     candidates.push(root.join("assets/packs").join(DEFAULT_REFERENCE_PACK_FILE));
     Ok((dedup_paths(candidates), false))
+}
+
+fn platform_configured_asset_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(root) = env_path("MCLONE_ASSET_ROOT") {
+        roots.push(root);
+    }
+    if let Some(root) = env_path("MCLONE_ANDROID_ASSET_ROOT") {
+        roots.push(root);
+    }
+    roots.extend(platform_asset_roots());
+    dedup_paths(roots)
 }
 
 #[cfg(target_os = "android")]

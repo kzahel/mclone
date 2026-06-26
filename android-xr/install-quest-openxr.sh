@@ -16,6 +16,7 @@ STAGE_ASSETS="${MCLONE_ANDROID_XR_STAGE_ASSETS:-1}"
 SERIAL=""
 SKIP_BUILD=0
 LAUNCH_APP=0
+WAKE_HEADSET="${MCLONE_ANDROID_XR_WAKE:-0}"
 START_VIEW_POSE="${MCLONE_ANDROID_XR_VIEW_POSE:-}"
 REMOTE_ADDR="${MCLONE_ANDROID_XR_REMOTE_ADDR:-}"
 STARTUP_ARGV=()
@@ -33,6 +34,8 @@ Options:
   --serial SERIAL  Use a specific attached headset serial.
   --skip-build     Reuse the existing APK.
   --launch         Launch Mclone XR after installing.
+  --wake           Wake the Quest display before launch.
+  --no-wake        Do not wake the Quest display before launch.
   --asset-pack PATH
                   Local packed assets file to stage after install.
   --skip-assets    Do not stage the packed Minecraft assets after install.
@@ -57,6 +60,15 @@ require_arg() {
     [[ -n "$value" ]] || mclone_die "$option requires a value"
 }
 
+wake_headset_for_interactive_launch() {
+    local serial="$1"
+
+    mclone_note "Waking Quest headset for interactive Android XR launch"
+    "$ADB" -s "$serial" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+    "$ADB" -s "$serial" shell am broadcast -a com.oculus.vrpowermanager.prox_close --ei timeout 0 >/dev/null 2>&1 || true
+    mclone_dismiss_vr_system_dialogs "$serial"
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --release)
@@ -78,6 +90,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --launch)
             LAUNCH_APP=1
+            shift
+            ;;
+        --wake)
+            WAKE_HEADSET=1
+            shift
+            ;;
+        --no-wake)
+            WAKE_HEADSET=0
             shift
             ;;
         --asset-pack)
@@ -195,6 +215,9 @@ launch_command=("$ADB" -s "$SERIAL" shell "$remote_launch_command")
 if [[ "$LAUNCH_APP" == "1" ]]; then
     mclone_note "Force-stopping any running $MCLONE_ANDROID_XR_APP_ID before launch"
     "$ADB" -s "$SERIAL" shell am force-stop "$MCLONE_ANDROID_XR_APP_ID" >/dev/null 2>&1 || true
+    if [[ "$WAKE_HEADSET" == "1" ]]; then
+        wake_headset_for_interactive_launch "$SERIAL"
+    fi
     mclone_note "Launching $MCLONE_ANDROID_XR_APP_ID/$MCLONE_ANDROID_XR_ACTIVITY"
     launch_output="$("${launch_command[@]}" 2>&1 | tr -d '\r')"
     echo "$launch_output"

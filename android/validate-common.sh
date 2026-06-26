@@ -325,7 +325,55 @@ mclone_stage_asset_pack() {
     mclone_note "Staging asset pack $asset_pack_path to $remote_path"
     "$ADB" -s "$serial" shell mkdir -p "$remote_dir" >/dev/null
     "$ADB" -s "$serial" push "$asset_pack_path" "$remote_path" >/dev/null
+    mclone_stage_local_sound_assets "$serial"
     mclone_repair_emulator_asset_permissions "$serial"
+}
+
+mclone_local_sound_asset_source() {
+    if [[ -n "${MCLONE_ANDROID_SOUND_ASSET_ROOT:-}" ]]; then
+        [[ -d "$MCLONE_ANDROID_SOUND_ASSET_ROOT/assets" ]] || {
+            mclone_die "MCLONE_ANDROID_SOUND_ASSET_ROOT does not contain assets/: $MCLONE_ANDROID_SOUND_ASSET_ROOT"
+        }
+        printf '%s' "$MCLONE_ANDROID_SOUND_ASSET_ROOT"
+        return 0
+    fi
+
+    if [[ -n "${MCLONE_SOUND_ASSET_ROOT:-}" ]]; then
+        [[ -d "$MCLONE_SOUND_ASSET_ROOT/assets" ]] || {
+            mclone_die "MCLONE_SOUND_ASSET_ROOT does not contain assets/: $MCLONE_SOUND_ASSET_ROOT"
+        }
+        printf '%s' "$MCLONE_SOUND_ASSET_ROOT"
+        return 0
+    fi
+
+    local source="$REPO_ROOT/reference/minecraft-1.17.1/local-sounds"
+    if [[ -d "$source/assets" ]]; then
+        printf '%s' "$source"
+        return 0
+    fi
+
+    source="$REPO_ROOT/reference/minecraft-1.17.1/sound-overlay"
+    if [[ -d "$source/assets" ]]; then
+        printf '%s' "$source"
+        return 0
+    fi
+
+    return 1
+}
+
+mclone_stage_local_sound_assets() {
+    local serial="$1"
+    local source_dir
+    local remote_dir="/sdcard/Android/data/$MCLONE_ANDROID_APP_ID/files/assets/local-sounds"
+
+    if ! source_dir="$(mclone_local_sound_asset_source)"; then
+        mclone_note "No local sound assets found; skipping Android sound staging"
+        return 0
+    fi
+
+    mclone_note "Staging local sound assets $source_dir to $remote_dir"
+    "$ADB" -s "$serial" shell "rm -rf '$remote_dir' && mkdir -p '$remote_dir'" >/dev/null
+    "$ADB" -s "$serial" push "$source_dir/." "$remote_dir" >/dev/null
 }
 
 mclone_repair_emulator_asset_permissions() {

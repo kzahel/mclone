@@ -14,7 +14,6 @@ node_modules/
 !android/gradle/wrapper/gradle-wrapper.jar
 **/*.zip
 parchment/
-tools/
 version_manifest_v2.json
 [0-9]*.json
 client.txt

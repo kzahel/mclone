@@ -1,10 +1,10 @@
 {
-  "asset_set": "mclone-vanilla-1.17.1",
+  "asset_set": "mclone-game-1.17.1",
   "format_version": 1,
-  "generated_at": "2026-06-20T16:07:22.455029Z",
+  "generated_at": "2026-06-26T19:23:18.025601Z",
   "minecraft_version": "1.17.1",
   "pack": {
-    "asset_set": "mclone-vanilla-1.17.1",
+    "asset_set": "mclone-game-1.17.1",
     "content_manifest_sha256": "041b6d3fe15fd8b7cb7a951f628ed416ec6878fd1b9825e1fe74aa0a17fc3ad0",
     "file_count": 6982,
     "fingerprints": {
@@ -34958,16 +34958,16 @@
     },
     "root": "reference/minecraft-1.17.1/extracted"
   },
-  "tool": "scripts/build-reference-asset-pack.py",
+  "tool": "tools/minecraft_assets/asset_pack.py",
   "tool_fingerprint": {
     "algorithm": "sha256",
     "files": [
       {
-        "normalized_bytes": 20810,
-        "path": "scripts/build-reference-asset-pack.py",
-        "sha256": "46ab55b2906e8c6c6ff4ce23af3c006d6e6a70f19f86dcbbc6cc012a28b744bf"
+        "normalized_bytes": 20807,
+        "path": "tools/minecraft_assets/asset_pack.py",
+        "sha256": "2813feac8606f3f84b5c0b5d2b86571f7f3d07b9fffa078e2b428d87656d9681"
       }
     ],
-    "sha256": "e29e2997c60d9d8772796925c25a33d49ecc324e9c9873285908d0a0950731dc"
+    "sha256": "a71217f6dac9e69e989537c4255abcc11cdebeeecf7e53115a8228db437ebcb3"
   }
 }

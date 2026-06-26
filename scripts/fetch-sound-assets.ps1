@@ -18,7 +18,7 @@ if (-not (Test-Path $versionJson)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
-  $OutputRoot = Join-Path $versionRoot "sound-overlay"
+  $OutputRoot = Join-Path $versionRoot "local-sounds"
 }
 
 $manifest = Get-Content -Raw $versionJson | ConvertFrom-Json
@@ -59,4 +59,4 @@ foreach ($sound in $Sounds) {
   Write-Host "fetched $sound"
 }
 
-Write-Host "sound overlay ready: $OutputRoot"
+Write-Host "local sound assets ready: $OutputRoot"
