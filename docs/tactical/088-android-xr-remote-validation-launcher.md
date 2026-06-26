@@ -1,9 +1,9 @@
 # 088: Android XR Remote Validation Launcher
 
-Status: completed first pass. Android XR remote selection now uses the
-Playbox-style launch-scoped `mclone.startup.argv` intent extra, and the Quest
-validator can build/start a local dedicated server for the duration of a remote
-smoke.
+Status: validated via Quest USB tunnel. Android XR remote selection now uses
+the Playbox-style launch-scoped `mclone.startup.argv` intent extra, and the
+Quest validator can build/start a local dedicated server for the duration of a
+remote smoke.
 
 ## Purpose
 
@@ -24,6 +24,11 @@ startup option, not a sticky Android debug property.
 - `--start-server` intentionally requires `--remote-addr HOST:PORT`; the
   headset needs a routable host address, and guessing that from ADB/host
   network state is unreliable.
+- On 2026-06-26, the Quest remote smoke passed through `adb reverse`
+  (`127.0.0.1:25565` on the headset to the host server). Direct LAN reachability
+  from the same Quest to `192.168.1.107:25565` timed out while the server was
+  listening, so LAN validation is currently a host firewall/routing issue rather
+  than an app-runtime blocker.
 
 ## Implementation Slice
 
@@ -50,8 +55,30 @@ bash android-xr/validate-quest-openxr.sh --help
 bash android-xr/install-quest-openxr.sh --help
 ```
 
-Device validation still needs an attached Quest and a host address reachable
-from the headset:
+Device validation passed on an attached Quest 3 through a USB reverse tunnel:
+
+```bash
+adb reverse tcp:25565 tcp:25565
+MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:validate -- --debug --skip-build \
+  --start-server \
+  --server-listen 127.0.0.1:25565 \
+  --remote-addr 127.0.0.1:25565 \
+  --view-pose 0,120,-96,180
+adb reverse --remove tcp:25565
+```
+
+Observed ready markers:
+
+```text
+Android XR remote dedicated address from mclone.startup.argv: 127.0.0.1:25565
+MCLONE_ANDROID_XR_ASSETS_READY
+MCLONE_ANDROID_XR_CONTROLLERS_READY
+MCLONE_ANDROID_XR_SESSION_READY
+MCLONE_ANDROID_XR_TERRAIN_READY sections=122 indices=580248 actors=0
+MCLONE_ANDROID_XR_READY
+```
+
+Direct LAN validation still needs a host address reachable from the headset:
 
 ```bash
 pnpm native:android-xr:validate -- --debug --skip-build \

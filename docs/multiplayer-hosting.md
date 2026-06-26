@@ -69,8 +69,9 @@ Client connect status (full grid in
 - **Android XR** can connect over TCP through launch-scoped
   `mclone.startup.argv` (`--remote-addr HOST:PORT`) and the shared XR scene
   runtime. The validator can start a local `mclone-dedicated-server` with
-  `--start-server`; a Quest remote smoke against a reachable dedicated server is
-  still pending.
+  `--start-server`. A Quest remote smoke passed through `adb reverse`; direct
+  LAN validation still depends on a headset-reachable host address and
+  firewall/routing setup.
 - **Web** has a complete WebSocket client, but it is not yet wired into the
   playable browser app (reachable only from a smoke export).
 

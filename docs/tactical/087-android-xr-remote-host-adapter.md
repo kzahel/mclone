@@ -3,8 +3,9 @@
 Status: completed first pass. Android XR can now construct the shared XR scene
 against a TCP remote-dedicated runtime. Tactical 088 moved script-driven remote
 selection to launch-scoped `mclone.startup.argv` and added validator-owned
-server startup. A Quest remote smoke against a reachable dedicated server is
-still pending.
+server startup. A Quest remote smoke passed through an `adb reverse` USB tunnel;
+direct LAN reachability from the same host still needs firewall/routing
+follow-up.
 
 ## Purpose
 
@@ -65,13 +66,22 @@ bash -n android-xr/startup-properties.sh android-xr/install-quest-openxr.sh andr
 git diff --check
 ```
 
-Still pending:
+Device validation result:
+
+```bash
+adb reverse tcp:25565 tcp:25565
+MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:validate -- --debug --skip-build --start-server --server-listen 127.0.0.1:25565 --remote-addr 127.0.0.1:25565 --view-pose 0,120,-96,180
+adb reverse --remove tcp:25565
+```
+
+This reached `MCLONE_ANDROID_XR_READY` with the remote address supplied through
+`mclone.startup.argv`. Direct LAN validation remains environment-dependent:
 
 ```bash
 pnpm native:android-xr:validate -- --debug --skip-build --start-server --remote-addr HOST:25565 --view-pose 0,120,-96,180
 ```
 
-That device smoke needs a dedicated server reachable from the headset.
+That LAN smoke needs a dedicated server reachable from the headset.
 
 ## Guardrails
 

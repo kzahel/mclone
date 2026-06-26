@@ -114,7 +114,20 @@ terrain runtime or first submitted stereo frame.
 
 For remote dedicated validation, either start `mclone-dedicated-server` on a
 host the headset can reach and pass `--remote-addr`, or let the validator build
-and start the server locally:
+and start the server locally. For USB-attached validation, install an ADB
+reverse tunnel and point the headset at its loopback address:
+
+```bash
+adb reverse tcp:25565 tcp:25565
+MCLONE_ANDROID_XR_WAIT_SECONDS=60 bash android-xr/validate-quest-openxr.sh --debug --skip-build \
+  --start-server \
+  --server-listen 127.0.0.1:25565 \
+  --remote-addr 127.0.0.1:25565 \
+  --view-pose 0,120,-96,180
+adb reverse --remove tcp:25565
+```
+
+For direct LAN validation:
 
 ```bash
 bash android-xr/validate-quest-openxr.sh --debug --skip-build \
@@ -131,7 +144,8 @@ bash android-xr/validate-quest-openxr.sh --debug --skip-build \
 ```
 
 `HOST:25565` must be reachable from the headset. Do not use `127.0.0.1`; that
-would point the headset back at itself.
+would point the headset back at itself unless an `adb reverse` tunnel is
+installed for that port.
 
 Logcat defaults to:
 
