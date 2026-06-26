@@ -6,7 +6,8 @@ This package is separate from the flat Android `NativeActivity` app under
 `android/`. It follows the Playbox Android XR shape: a Quest VR activity,
 Khronos' Android OpenXR loader package, a Rust `cdylib`, launch-scoped startup
 argv through an intent extra, Android debug properties for wrapper settings,
-and validation scripts that wake/restore the headset.
+validation scripts that wake/restore the headset, and packed asset staging into
+the XR package external files directory.
 
 Current status: Android OpenXR first-frame smoke. The app initializes the
 Android OpenXR loader, creates a Vulkan-backed OpenXR session, creates per-eye
@@ -41,6 +42,12 @@ android-xr/app/build/outputs/apk/release/app-release.apk
 bash android-xr/install-quest-openxr.sh --debug
 ```
 
+Install and stage a specific packed asset file:
+
+```bash
+bash android-xr/install-quest-openxr.sh --debug --asset-pack reference/minecraft-1.17.1/extracted.zip
+```
+
 Install and launch with startup config:
 
 ```bash
@@ -68,9 +75,12 @@ bash android-xr/validate-quest-openxr.sh --debug --view-pose 0,120,-96,180
 ```
 
 The validator builds unless `--skip-build` is passed, installs the APK on an
-attached Quest, wakes the headset, launches the VR activity, waits for
-`MCLONE_ANDROID_XR_READY`, scans for fatal logcat entries, force-stops the app,
-restores headset wake/proximity settings, and sleeps the headset.
+attached Quest, stages `reference/minecraft-1.17.1/extracted.zip` to the XR app
+external files directory, wakes the headset, launches the VR activity, waits
+for `MCLONE_ANDROID_XR_READY`, scans for fatal logcat entries, force-stops the
+app, restores headset wake/proximity settings, and sleeps the headset. Use
+`--asset-pack PATH` to stage a different pack, or `--skip-assets` to leave the
+device copy unchanged.
 
 For session/swapchain-only debugging:
 

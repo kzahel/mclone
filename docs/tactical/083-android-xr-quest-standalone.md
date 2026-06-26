@@ -632,8 +632,10 @@ Exit criteria:
 
 ### Slice 3 - Mclone Runtime Frame On Quest
 
-- [ ] Stage/load `reference/minecraft-1.17.1/extracted.zip` from app external
-  files.
+- [x] Stage `reference/minecraft-1.17.1/extracted.zip` into the Android XR app
+  external files directory from the install/validate scripts.
+- [ ] Load the staged asset pack from the Android XR app external files
+  directory in the mclone runtime path.
 - [ ] Reuse the shared XR host plus the desktop-proven mclone-frame path for
   integrated server/client, render-section sync, texture atlas, sky, terrain,
   and actor resources.
@@ -641,6 +643,41 @@ Exit criteria:
 - [ ] Render a small-radius real mclone scene per eye.
 - [ ] Validate headset-visible terrain and log render-section/drawn-index
   diagnostics.
+
+Recorded Slice 3 first-chunk result:
+
+- Added default asset-pack staging to `android-xr/install-quest-openxr.sh` and
+  `android-xr/validate-quest-openxr.sh`.
+- The XR scripts now stage
+  `reference/minecraft-1.17.1/extracted.zip` to
+  `/sdcard/Android/data/com.kzahel.mclone.xr/files/assets/packs/extracted.zip`
+  unless `--skip-assets` is passed.
+- Added `--asset-pack PATH` to install and validate flows so alternate local
+  packs can be staged without changing environment variables.
+- Reused the flat Android staging helper while passing the XR package id, so
+  the pack lands under `com.kzahel.mclone.xr` rather than the flat Android app.
+- Kept runtime terrain loading open for the next chunk; this only proves the
+  Quest package has the pack available where `MCLONE_ANDROID_ASSET_ROOT`
+  already points.
+
+Validation after the first Slice 3 chunk, June 26, 2026:
+
+```bash
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash -n android-xr/install-quest-openxr.sh android-xr/validate-quest-openxr.sh'
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --wait-seconds 45'
+"C:\Program Files\Git\bin\bash.exe" -lc 'export MSYS2_ARG_CONV_EXCL=/sdcard; adb -s 2G0YC1ZF93041Z shell ls -l /sdcard/Android/data/com.kzahel.mclone.xr/files/assets/packs/extracted.zip'
+```
+
+Observed Quest result:
+
+- Quest serial: `2G0YC1ZF93041Z`
+- Staged local asset pack:
+  `/c/Users/sox/Documents/code/mclone/reference/minecraft-1.17.1/extracted.zip`
+- Device asset path:
+  `/sdcard/Android/data/com.kzahel.mclone.xr/files/assets/packs/extracted.zip`
+- Device file size: `5828345`
+- Log marker observed by validator: `MCLONE_ANDROID_XR_READY`
+- Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
 
 ### Slice 4 - Controller Actions And Locomotion
 

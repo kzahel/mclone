@@ -15,6 +15,7 @@ LOG_PATH="${MCLONE_ANDROID_XR_LOGCAT:-/tmp/mclone-quest-openxr-logcat.txt}"
 ACTIVITY_PATH="${MCLONE_ANDROID_XR_ACTIVITY_DUMP:-/tmp/mclone-quest-openxr-activity.txt}"
 WAIT_SECONDS="${MCLONE_ANDROID_XR_WAIT_SECONDS:-20}"
 BOOT_TIMEOUT_SECONDS="${MCLONE_ANDROID_BOOT_TIMEOUT:-60}"
+STAGE_ASSETS="${MCLONE_ANDROID_XR_STAGE_ASSETS:-1}"
 SERIAL=""
 LOGCAT_PID=""
 SKIP_BUILD=0
@@ -39,6 +40,8 @@ Options:
   --activity-log PATH
                      Local activity-manager dump path on launch failure.
   --wait-seconds N   Seconds to wait for ready/failure log markers.
+  --asset-pack PATH   Local packed assets file to stage before launch.
+  --skip-assets       Do not stage the packed Minecraft assets before launch.
   --session-only     Accept MCLONE_ANDROID_XR_SESSION_READY instead of waiting
                      for the first submitted stereo frame.
   --view-pose X,Y,Z,YAW_DEGREES
@@ -120,6 +123,15 @@ while [[ $# -gt 0 ]]; do
             WAIT_SECONDS="$2"
             shift 2
             ;;
+        --asset-pack)
+            require_arg "$1" "${2:-}"
+            MCLONE_ANDROID_ASSET_PACK="$2"
+            shift 2
+            ;;
+        --skip-assets)
+            STAGE_ASSETS=0
+            shift
+            ;;
         --session-only)
             SESSION_ONLY=1
             shift
@@ -191,6 +203,11 @@ mclone_note "Installing $APK_PATH"
 "$ADB" -s "$SERIAL" shell pm grant "$MCLONE_ANDROID_XR_APP_ID" com.oculus.permission.USE_SCENE >/dev/null 2>&1 || true
 "$ADB" -s "$SERIAL" shell pm grant "$MCLONE_ANDROID_XR_APP_ID" horizonos.permission.USE_SCENE >/dev/null 2>&1 || true
 "$ADB" -s "$SERIAL" shell pm grant "$MCLONE_ANDROID_XR_APP_ID" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
+if [[ "$STAGE_ASSETS" == "1" ]]; then
+    MCLONE_ANDROID_APP_ID="$MCLONE_ANDROID_XR_APP_ID" mclone_stage_asset_pack "$SERIAL"
+else
+    mclone_note "Skipping Android XR asset-pack staging"
+fi
 "$ADB" -s "$SERIAL" shell am force-stop "$MCLONE_ANDROID_XR_APP_ID" >/dev/null 2>&1 || true
 mclone_dismiss_vr_system_dialogs "$SERIAL"
 "$ADB" -s "$SERIAL" logcat -c || true

@@ -12,6 +12,7 @@ MCLONE_ANDROID_XR_ACTIVITY="${MCLONE_ANDROID_XR_ACTIVITY:-com.kzahel.mclone.xr.M
 APK_PATH="${MCLONE_ANDROID_XR_APK:-}"
 BUILD_TYPE="${MCLONE_ANDROID_XR_BUILD_TYPE:-release}"
 BOOT_TIMEOUT_SECONDS="${MCLONE_ANDROID_BOOT_TIMEOUT:-60}"
+STAGE_ASSETS="${MCLONE_ANDROID_XR_STAGE_ASSETS:-1}"
 SERIAL=""
 SKIP_BUILD=0
 LAUNCH_APP=0
@@ -31,6 +32,9 @@ Options:
   --serial SERIAL  Use a specific attached headset serial.
   --skip-build     Reuse the existing APK.
   --launch         Launch Mclone XR after installing.
+  --asset-pack PATH
+                  Local packed assets file to stage after install.
+  --skip-assets    Do not stage the packed Minecraft assets after install.
   --view-pose X,Y,Z,YAW_DEGREES
                   Set debug.mclone.xr_view_pose before launch.
   --seed SEED      Add --seed SEED to the launch-scoped mclone.startup.argv.
@@ -71,6 +75,15 @@ while [[ $# -gt 0 ]]; do
             ;;
         --launch)
             LAUNCH_APP=1
+            shift
+            ;;
+        --asset-pack)
+            require_arg "$1" "${2:-}"
+            MCLONE_ANDROID_ASSET_PACK="$2"
+            shift 2
+            ;;
+        --skip-assets)
+            STAGE_ASSETS=0
             shift
             ;;
         --view-pose)
@@ -138,6 +151,11 @@ mclone_note "Installing $APK_PATH"
 "$ADB" -s "$SERIAL" shell pm grant "$MCLONE_ANDROID_XR_APP_ID" com.oculus.permission.USE_SCENE >/dev/null 2>&1 || true
 "$ADB" -s "$SERIAL" shell pm grant "$MCLONE_ANDROID_XR_APP_ID" horizonos.permission.USE_SCENE >/dev/null 2>&1 || true
 "$ADB" -s "$SERIAL" shell pm grant "$MCLONE_ANDROID_XR_APP_ID" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
+if [[ "$STAGE_ASSETS" == "1" ]]; then
+    MCLONE_ANDROID_APP_ID="$MCLONE_ANDROID_XR_APP_ID" mclone_stage_asset_pack "$SERIAL"
+else
+    mclone_note "Skipping Android XR asset-pack staging"
+fi
 
 if [[ -n "$START_VIEW_POSE" ]]; then
     mclone_xr_set_startup_property "$SERIAL" "$VIEW_POSE_PROPERTY" "$START_VIEW_POSE" >/dev/null 2>&1 || true
