@@ -211,14 +211,18 @@ fn stitch_texture_atlas(
             });
         }
 
-        let image = image.as_raw();
-        for row in 0..sprite.info.height {
-            let source_start = (row * sprite.info.width * 4) as usize;
-            let source_end = source_start + (sprite.info.width * 4) as usize;
-            let dest_start = (((sprite.y + row) * width + sprite.x) * 4) as usize;
-            let dest_end = dest_start + (sprite.info.width * 4) as usize;
-            atlas[dest_start..dest_end].copy_from_slice(&image[source_start..source_end]);
-        }
+        copy_sprite_with_gutter(
+            &mut atlas,
+            width,
+            image.as_raw(),
+            sprite.x,
+            sprite.y,
+            sprite.info.width,
+            sprite.info.height,
+            sprite.gutter,
+            sprite.padded_width(),
+            sprite.padded_height(),
+        );
     }
 
     Ok(TextureAtlasImage {
@@ -228,9 +232,38 @@ fn stitch_texture_atlas(
     })
 }
 
+fn copy_sprite_with_gutter(
+    atlas: &mut [u8],
+    atlas_width: u32,
+    image: &[u8],
+    sprite_x: u32,
+    sprite_y: u32,
+    sprite_width: u32,
+    sprite_height: u32,
+    gutter: u32,
+    padded_width: u32,
+    padded_height: u32,
+) {
+    let dest_x0 = sprite_x - gutter;
+    let dest_y0 = sprite_y - gutter;
+
+    for dest_row in 0..padded_height {
+        let source_y = dest_row.saturating_sub(gutter).min(sprite_height - 1);
+        for dest_col in 0..padded_width {
+            let source_x = dest_col.saturating_sub(gutter).min(sprite_width - 1);
+            let source_start = ((source_y * sprite_width + source_x) * 4) as usize;
+            let dest_start =
+                (((dest_y0 + dest_row) * atlas_width + dest_x0 + dest_col) * 4) as usize;
+            atlas[dest_start..dest_start + 4]
+                .copy_from_slice(&image[source_start..source_start + 4]);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::ImageEncoder;
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -251,5 +284,91 @@ mod tests {
         );
         assert!(assets.atlas_sprite_count > 0);
         assert!(assets.catalog.get(mclone_core::BlockStateId(1)).is_some());
+    }
+
+    #[test]
+    fn stitch_texture_atlas_extrudes_sprite_edges_into_gutter() {
+        let red = TextureMaterial::blocks(ResourceLocation::parse("minecraft:block/red").unwrap());
+        let blue =
+            TextureMaterial::blocks(ResourceLocation::parse("minecraft:block/blue").unwrap());
+        let mut source = mclone_assets::MemoryAssetSource::new();
+        source.insert(
+            AssetPath::new("assets/minecraft/textures/block/red.png"),
+            test_png_rgba(2, 2, &[255, 0, 0, 255]),
+        );
+        source.insert(
+            AssetPath::new("assets/minecraft/textures/block/blue.png"),
+            test_png_rgba(2, 2, &[0, 0, 255, 255]),
+        );
+        let plan = TextureAtlasPlan::build(&source, [red.clone(), blue]).unwrap();
+        let red_sprite = plan.sprite(&red).unwrap();
+
+        let atlas = stitch_texture_atlas(&source, &plan).unwrap();
+
+        assert_eq!(
+            atlas_pixel(&atlas, red_sprite.x - 1, red_sprite.y),
+            [255, 0, 0, 255]
+        );
+        assert_eq!(
+            atlas_pixel(&atlas, red_sprite.x + red_sprite.info.width, red_sprite.y),
+            [255, 0, 0, 255]
+        );
+        assert_eq!(
+            atlas_pixel(&atlas, red_sprite.x, red_sprite.y - 1),
+            [255, 0, 0, 255]
+        );
+        assert_eq!(
+            atlas_pixel(&atlas, red_sprite.x, red_sprite.y + red_sprite.info.height),
+            [255, 0, 0, 255]
+        );
+    }
+
+    #[test]
+    fn stitch_texture_atlas_extrudes_into_alignment_slack() {
+        let odd = TextureMaterial::blocks(ResourceLocation::parse("minecraft:block/odd").unwrap());
+        let mut source = mclone_assets::MemoryAssetSource::new();
+        source.insert(
+            AssetPath::new("assets/minecraft/textures/block/odd.png"),
+            test_png_rgba(18, 18, &[24, 48, 72, 255]),
+        );
+        let plan = TextureAtlasPlan::build(&source, [odd.clone()]).unwrap();
+        let sprite = plan.sprite(&odd).unwrap();
+
+        let atlas = stitch_texture_atlas(&source, &plan).unwrap();
+
+        assert_eq!(sprite.padded_width(), 48);
+        assert_eq!(
+            atlas_pixel(
+                &atlas,
+                sprite.padded_x() + sprite.padded_width() - 1,
+                sprite.y
+            ),
+            [24, 48, 72, 255]
+        );
+        assert_eq!(
+            atlas_pixel(
+                &atlas,
+                sprite.x,
+                sprite.padded_y() + sprite.padded_height() - 1
+            ),
+            [24, 48, 72, 255]
+        );
+    }
+
+    fn test_png_rgba(width: u32, height: u32, pixel: &[u8; 4]) -> Vec<u8> {
+        let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
+        for _ in 0..width * height {
+            rgba.extend_from_slice(pixel);
+        }
+        let mut bytes = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut bytes)
+            .write_image(&rgba, width, height, image::ColorType::Rgba8.into())
+            .unwrap();
+        bytes
+    }
+
+    fn atlas_pixel(atlas: &TextureAtlasImage, x: u32, y: u32) -> [u8; 4] {
+        let index = ((y * atlas.width + x) * 4) as usize;
+        atlas.rgba[index..index + 4].try_into().unwrap()
     }
 }

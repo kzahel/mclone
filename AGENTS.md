@@ -14,6 +14,8 @@ The `.sh` setup scripts (`scripts/decompile-mc.sh`, `scripts/extract-assets.sh`,
 
 For the native Rust rewrite, use the sibling engine at `~/code/playbox` as a reference for mature `winit`/`wgpu`, headless capture, diagnostics, Android, and OpenXR patterns. Treat it as a pattern library only; do not depend on it directly, and do not copy its PhysX/VaM-specific runtime shape. When the user mentions "Playbox", inspect that sibling repo directly; useful entry points are `~/code/playbox/Cargo.toml` for debug-profile optimization policy, `~/code/playbox/docs/architecture/rendering.md` for render target/view boundaries, `~/code/playbox/docs/architecture/platforms.md` for desktop/Android/OpenXR platform shape, `~/code/playbox/android/README.md` for flat Android, and `~/code/playbox/android-xr/README.md` for Quest/OpenXR packaging and validation notes.
 
+For vanilla gameplay, assets, rendering semantics, and visual correctness, treat `reference/minecraft-1.17.1/src/` as an equally important and often more authoritative reference than Playbox. Use the Java client source first for behavior that exists in Minecraft itself: block/entity model baking, texture atlas stitching, mipmap generation and sampler filtering, UV shrink/bleed rules, light texture math, fog, sky, particles, render layers, transparency/cutout choices, chunk render-section traversal, and any renderer-facing state that affects vanilla appearance. Use Playbox for native `wgpu`/platform mechanics after the Java behavior is understood.
+
 Current target posture: five client/platform lanes are validated at the basic gameplay/rendering level: desktop flat, desktop OpenXR, Android XR / Quest standalone, flat Android, and web/WASM. Native desktop flat remains the fastest day-to-day bring-up path, but do not let shared engine, client, server, mesh, asset, renderer, UI, or runtime contracts become desktop-only. Treat client platform and server host mode as separate axes: every client lane must retain a path to dedicated-server play, and future P2P/session topologies must fit behind the same shared command/update contracts rather than becoming platform forks. Keep `winit`, Android activity glue, browser glue, and OpenXR session/swapchain ownership in app/platform adapters. Keep renderer-facing view/projection and render-target data explicit, and keep headless/offscreen validation available. Desktop XR and Android XR share OpenXR host/graphics/scene boundaries where practical; do not fork gameplay, runtime, meshing, asset, or renderer internals for a single platform.
 
 For web/WASM, keep `wasm32-unknown-unknown` as the browser target unless a tactical explicitly changes it, but do not treat that as permission for a single-threaded or reduced engine architecture. Browser CPU work should converge on the same job/worker lifecycle as desktop: desktop uses native OS threads, while browser/WASM uses Web Workers with shared Wasm memory (`SharedArrayBuffer`/atomics) once that slice is implemented. Inline synchronous WASM paths are acceptable only as temporary smoke/fallback implementations behind the same compiler/session interfaces, not as the target threading model.
@@ -40,11 +42,11 @@ Before the first edit, identify the workstream being modified: `native Rust`, `n
 
 ## Reference-porting policy
 
-For vanilla parity ports, every class or system has a 1:1 counterpart in `reference/minecraft-1.17.1/src/`. **Always read the source file before writing the port.** The default is direct translation: same field names where practical, same method names where practical, same logic flow. Diverge only when the target platform, runtime ownership, or Rust type system forces it.
+For vanilla parity ports, every class or system has a 1:1 counterpart in `reference/minecraft-1.17.1/src/`. **Always read the source file before writing the port.** The default is direct translation: same field names where practical, same method names where practical, same logic flow. This applies to client graphics behavior as well as simulation and content systems. Diverge only when the target platform, runtime ownership, or Rust type system forces it.
 
 The main rule is:
 
-- simulation/content parity is the default
+- simulation/content/vanilla visual behavior parity is the default
 - runtime orchestration may diverge when platform constraints require it
 - any such divergence must preserve a clear path for future parity work instead of making it opaque or harder to recover
 

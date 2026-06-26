@@ -2,7 +2,7 @@
 
 Minecraft-inspired voxel sandbox. Private project — primary target is home/LAN use for my daughter to play with.
 
-The current direction is a native-first Rust engine with five validated client/platform lanes: desktop flat, desktop OpenXR, Android XR / Quest standalone, flat Android, and web/WASM. The basic loop is proven across those lanes: local integrated runtime, locomotion/input, world rendering, and chunk loading/generation. Native desktop flat remains the fastest daily bring-up path, but shared gameplay, runtime, asset, mesh, UI, renderer, and XR contracts must stay host-neutral. Client platform and server host mode are separate axes: every client lane should be able to play against a dedicated server, with future P2P/session topologies fitting behind the same shared command/update contracts. See [`docs/platforms.md`](docs/platforms.md) for the current platform matrix, [`docs/native-rewrite-roadmap.md`](docs/native-rewrite-roadmap.md) for durable architecture, [`android/README.md`](android/README.md) for flat Android, and [`android-xr/README.md`](android-xr/README.md) for Quest/OpenXR. The retired browser engine has been removed from the live tree; retained reference tooling lives under [`oracle/`](oracle/) and shared oracle fixture data remains under [`test/fixtures/`](test/fixtures/). The sibling Rust engine at `~/code/playbox` is an explicit reference for native `winit`/`wgpu`, headless capture, diagnostics, Android, and OpenXR patterns.
+The current direction is a native-first Rust engine with five validated client/platform lanes: desktop flat, desktop OpenXR, Android XR / Quest standalone, flat Android, and web/WASM. The basic loop is proven across those lanes: local integrated runtime, locomotion/input, world rendering, and chunk loading/generation. Native desktop flat remains the fastest daily bring-up path, but shared gameplay, runtime, asset, mesh, UI, renderer, and XR contracts must stay host-neutral. Client platform and server host mode are separate axes: every client lane should be able to play against a dedicated server, with future P2P/session topologies fitting behind the same shared command/update contracts. See [`docs/platforms.md`](docs/platforms.md) for the current platform matrix, [`docs/native-rewrite-roadmap.md`](docs/native-rewrite-roadmap.md) for durable architecture, [`android/README.md`](android/README.md) for flat Android, and [`android-xr/README.md`](android-xr/README.md) for Quest/OpenXR. The retired browser engine has been removed from the live tree; retained reference tooling lives under [`oracle/`](oracle/) and shared oracle fixture data remains under [`test/fixtures/`](test/fixtures/). The decompiled Minecraft Java 1.17.1 client under [`reference/minecraft-1.17.1/src/`](reference/minecraft-1.17.1/src/) is the primary source for vanilla behavior and visual correctness; the sibling Rust engine at `~/code/playbox` is an explicit reference for native `winit`/`wgpu`, headless capture, diagnostics, Android, and OpenXR patterns.
 
 See [`docs/strategy.md`](docs/strategy.md) for translation/oracle policy, [`docs/architecture.md`](docs/architecture.md) for the existing runtime/host split, [`docs/runtime-data-model.md`](docs/runtime-data-model.md) for shared chunk/block-state data contracts, [`docs/protocol.md`](docs/protocol.md) for the host/client message model, [`docs/loading-persistence.md`](docs/loading-persistence.md) for world loading and save policy, [`docs/worldgen-deterministic-order.md`](docs/worldgen-deterministic-order.md) for vanilla status order, decoration finality, lighting gates, and chunk publication gates, [`docs/carver-status.md`](docs/carver-status.md) for the carver-parity/oracle tracker, [`docs/structures.md`](docs/structures.md) for vanilla overworld structure generation architecture, [`docs/liquids.md`](docs/liquids.md) for liquid simulation architecture, [`docs/creatures.md`](docs/creatures.md) for overworld creature spawning architecture, [`docs/topics/`](docs/topics/README.md) for durable subsystem progress indexes, [`docs/performance-records.md`](docs/performance-records.md) for native benchmark baselines, and [`docs/assets-plan.md`](docs/assets-plan.md) for asset extraction. Native Rust workstream tacticals live under [`docs/tactical/`](docs/tactical/README.md). Worldgen aims for **seed parity** with Minecraft Java 1.17.1 so we can oracle-test against real MC output.
 
@@ -16,11 +16,12 @@ Runtime/host arc status: `R0` through `R8` are landed: browser singleplayer, nat
 - **Android XR / Quest:** standalone Quest OpenXR package under [`android-xr/`](android-xr/) using `mclone-android-xr-client`; validated with staged assets, real stereo terrain, controller setup, and basic locomotion.
 - **Flat Android:** non-XR `NativeActivity` APK under [`android/`](android/) using `mclone-android-client`; validated with AVD screenshot and touch-orbit smokes.
 - **Web target:** Rust/WASM browser client through `mclone-web-client`, WebGPU, browser workers, and deployment at `mclone.kzahel.com`.
-- **Renderer:** `wgpu`, native first, web-compatible capability checks at renderer milestones.
+- **Renderer:** `wgpu`, native first, web-compatible capability checks at renderer milestones. Vanilla visual behavior should be checked against the Java 1.17.1 client source before borrowing renderer policy from other engines.
 - **Worldgen:** direct Rust port of MC Java 1.17.1's pipeline; bit-exact seed parity is the correctness bar.
 - **Protocol/runtime:** `mclone_protocol`, `mclone_net`, `mclone_server`, `mclone_client`, `mclone_app_runtime`, and `mclone_render_session` keep singleplayer, remote, render-section, and platform app paths on shared contracts.
 - **Host mode invariant:** local integrated, remote dedicated, and future P2P/session modes are runtime host choices, not platform identities. Desktop, web, flat Android, and XR clients should converge on the same client/server protocol and runtime shell wherever the display/input platform permits it.
 - **XR sharing:** `mclone_xr_host`, `mclone_xr_graphics`, and `mclone_xr_scene` keep desktop XR and Android XR from growing private copies of session, swapchain, terrain, and controller-locomotion behavior.
+- **Java reference client:** `reference/minecraft-1.17.1/src/` is the authority for vanilla block/entity rendering behavior, model baking, atlas stitching, mipmaps/filtering, render layers, lighting, fog, sky, particles, and client-visible state.
 - **Sibling reference engine:** `~/code/playbox` is the local Rust `winit`/`wgpu`/headless/Android/OpenXR pattern library. For platform or XR work, start with its `Cargo.toml`, `docs/architecture/rendering.md`, `docs/architecture/platforms.md`, `android/README.md`, and `android-xr/README.md`.
 - **Oracle tooling:** Java and TypeScript fixture-generation helpers live under [`oracle/`](oracle/); shared fixture JSON remains under [`test/fixtures/`](test/fixtures/) and is consumed by native Rust tests.
 
@@ -75,7 +76,7 @@ Runtime boundaries should stay chunk/section-sized: pass chunk or section facts 
 
 ### `minecraft-1.17.1/`
 
-Decompiled Minecraft 1.17.1 client, for reference when writing our own carvers / surface / features.
+Decompiled Minecraft 1.17.1 client, for reference when writing our own vanilla simulation, content, asset, and renderer behavior.
 
 Why 1.17 specifically: pre-Caves-and-Cliffs full release, so the terrain pipeline is way simpler than 1.18+ (no density functions, no continentalness splines). Bonus: 1.17.1 already ships Caves & Cliffs Part 1 internals (`Cavifier`, `NoodleCavifier`, `OreVeinifier`, `Aquifer`) that weren't enabled by default — so we get both systems to reference.
 
@@ -103,6 +104,14 @@ extracted/          filtered client.jar assets — textures, models,
 - `.../OreVeinifier.java` — ore vein placement
 - `.../surfacebuilders/` — grass/dirt/sand layering per biome
 - `.../feature/` — trees, ore blobs, foliage
+
+**Key files for client rendering and assets:**
+- `net/minecraft/client/renderer/texture/TextureAtlas.java` — atlas preparation, upload, mip-level selection, and filter updates
+- `net/minecraft/client/renderer/texture/TextureAtlasSprite.java` — sprite UVs, per-sprite mip generation, animation frame upload, and UV shrink ratio
+- `net/minecraft/client/renderer/texture/MipmapGenerator.java` — gamma-aware mipmap generation and alpha-cutout handling
+- `com/mojang/blaze3d/platform/NativeImage.java` and `TextureUtil.java` — texture upload/filtering and GL mip allocation behavior
+- `net/minecraft/client/renderer/block/model/` — block model baking and baked quad UV behavior
+- `net/minecraft/client/renderer/RenderType.java` and `RenderStateShard.java` — vanilla render-layer state, transparency, culling, and texture-state choices
 
 **Parameter names:** Mojang mappings don't cover method parameters, so a raw decompile has `var1, var2, …` in every signature. The `--parchment` flag to `decompile-mc.sh` runs `apply-parchment.py` afterwards, which pulls [Parchment](https://parchmentmc.org/) community mappings and rewrites signatures + bodies to use real names (e.g. `carve(CarvingContext context, CaveCarverConfiguration config, ChunkAccess chunk, …)` instead of `(var1, var2, var3, …)`). For 1.17.1 this renames ~15k methods across ~2.8k files.
 

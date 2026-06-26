@@ -16,6 +16,7 @@ use wgpu::util::DeviceExt;
 
 use crate::fog::RenderFog;
 use crate::target::RenderFrameTarget;
+use crate::texture_mips::generate_rgba_mip_chain;
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
@@ -25,6 +26,9 @@ const VERTEX_BYTE_SIZE: wgpu::BufferAddress =
 const TEXTURED_VERTEX_BYTE_SIZE: wgpu::BufferAddress = 40;
 const UNIFORM_BYTE_LEN: usize = 128;
 const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = UNIFORM_BYTE_LEN as wgpu::BufferAddress;
+// Matches the default Java 1.17.1 video option: Options.mipmapLevels = 4.
+// TextureUtil.prepareImage allocates levels 0..=4 for the block atlas.
+const CHUNK_ATLAS_MAX_MIP_LEVEL: u32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChunkCamera {
@@ -850,6 +854,8 @@ impl GpuChunkTextureAtlas {
             );
         }
 
+        let mip_levels =
+            generate_rgba_mip_chain(width, height, atlas.rgba, CHUNK_ATLAS_MAX_MIP_LEVEL + 1);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("mclone_chunk_texture_atlas"),
             size: wgpu::Extent3d {
@@ -857,33 +863,36 @@ impl GpuChunkTextureAtlas {
                 height,
                 depth_or_array_layers: 1,
             },
-            mip_level_count: 1,
+            mip_level_count: mip_levels.len() as u32,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: Default::default(),
-                aspect: Default::default(),
-            },
-            atlas.rgba,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
-                rows_per_image: Some(height),
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
+        for (mip_level, mip) in mip_levels.iter().enumerate() {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: mip_level as u32,
+                    origin: Default::default(),
+                    aspect: Default::default(),
+                },
+                &mip.rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(mip.width * 4),
+                    rows_per_image: Some(mip.height),
+                },
+                wgpu::Extent3d {
+                    width: mip.width,
+                    height: mip.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
         let view = texture.create_view(&Default::default());
+        let lod_max_clamp = mip_levels.len().saturating_sub(1) as f32;
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("mclone_chunk_texture_sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -891,7 +900,11 @@ impl GpuChunkTextureAtlas {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
+            // Java's AbstractTexture.setFilter(false, true) uses
+            // GL_NEAREST_MIPMAP_NEAREST, preserving pixelated blocks while
+            // still selecting a lower-detail mip for distant terrain.
             mipmap_filter: wgpu::FilterMode::Nearest,
+            lod_max_clamp,
             ..Default::default()
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {

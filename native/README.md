@@ -8,6 +8,8 @@ Native Rust tactical docs live in [`../docs/tactical/`](../docs/tactical/README.
 
 Use `~/code/playbox` as the reference Rust engine for native app/render/XR patterns. In particular, its `winit`/`wgpu` setup, frame pacing, headless capture, render-target, camera, diagnostics, Android NativeActivity, and OpenXR code are useful references. Do not depend on Playbox directly, and do not copy its PhysX/VaM-specific runtime shape.
 
+Use `../reference/minecraft-1.17.1/src/` as the reference for vanilla behavior and visual correctness. For renderer work that has a Java client counterpart, inspect the Minecraft source before borrowing behavior from Playbox. This includes block/entity model baking, texture atlas stitching, mipmap generation/filtering, UV shrink/bleed behavior, light texture math, fog, sky, render layers, transparency/cutout state, particles, and render-section traversal.
+
 Playbox reference entry points:
 
 - `~/code/playbox/Cargo.toml`: debug-profile optimization policy for meaningful `cargo run` perf numbers.
