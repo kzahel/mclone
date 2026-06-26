@@ -402,38 +402,27 @@ The hosting/product shape lives in [`multiplayer-hosting.md`](./multiplayer-host
 
 That means:
 
-- browser singleplayer uses the same command/update protocol shape over `postMessage`
-- remote dedicated play uses the same serialized message shapes over a persistent WebSocket channel by default
-- HTTP request/response remains temporary compatibility coverage, not the user-facing remote mode
-- future WebRTC or other transports must carry the same logical messages instead of redefining authority
+- native and browser singleplayer use the same command/update protocol shape
+  over an in-process or worker transport
+- remote dedicated play uses the same serialized messages over native TCP
+  (desktop) or WebSocket (browser)
+- future WebRTC or other transports must carry the same logical messages instead
+  of redefining authority
 
-`R6` landed the first hardening pass on that rule:
+What has landed on that rule (now on the Rust client/server boundary):
 
-- protocol-versioned remote envelopes
-- stable remote error codes
-- resumable remote sessions
-- baseline session/player state snapshots
-- shared dedicated-host chunk-interest management per save
+- a versioned handshake (`PROTOCOL_VERSION`) with accept/reject on mismatch
+- authoritative `MovePlayer` commands and `PlayerPosition` corrections — the
+  client derives camera/position from host-owned player state rather than
+  mutating a renderer-owned camera
+- chunk interest (`SetChunkView`) following authoritative player position
+- shared dedicated-host multi-client sessions with per-player chunk tracking and
+  remote-player replication, without moving ownership back into the renderer
 
-`R7` keeps that same transport rule but adds the first gameplay-state loop on top of it:
+Still to come: server-initiated push (the loop is request/response today) and
+version negotiation beyond strict equality. See [`protocol.md`](./protocol.md).
 
-- explicit `set_player_input` commands
-- authoritative `player_state` snapshots
-- queued `poll_world_updates` delivery for server-originated updates
-- dedicated-host shared-session ticking without moving the renderer back into ownership
-
-`R8` closes the first real browser-control ownership gap on top of that:
-
-- the live browser debug/control path now derives camera state from authoritative `player_state`
-- browser input is translated into `set_player_input` instead of mutating a renderer-owned camera directly
-- chunk-interest updates now follow authoritative player position in the live browser loop
-- the renderer remains a presentation consumer over host-owned player/world state
-
-This avoids building two engines:
-
-- a shortcut local one
-- a real remote one
-
+This avoids building two engines — a shortcut local one and a real remote one.
 Only the transport changes.
 
 ## Translation policy inside this architecture

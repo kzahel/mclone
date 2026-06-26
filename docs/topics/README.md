@@ -13,6 +13,10 @@ between sessions.
 
 ## Current Topics
 
+- [`platform-parity.md`](platform-parity.md): cross-platform parity tracker —
+  per-platform-class target state, the feature × platform matrix, the
+  shared-contract × consumer reuse matrix, and the cross-cutting blockers that
+  keep new features from re-forking across the five client lanes.
 - [`lighting.md`](lighting.md): native Java-shaped stored-light system,
   render handoff, solver/status/rendering gaps, and next slices.
 - [`performance.md`](performance.md): native performance priority queue,

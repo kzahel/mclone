@@ -1,227 +1,168 @@
 # Runtime Protocol
 
-Durable guidance for the logical host/client protocol used by browser singleplayer, browser remote clients, dedicated Node hosts, and tests.
+The logical host/client protocol shared by native and browser singleplayer,
+remote clients, the native dedicated server, and tests.
 
-[`architecture.md`](./architecture.md) owns the runtime boundary. [`runtime-data-model.md`](./runtime-data-model.md) owns chunk and block-state facts. [`loading-persistence.md`](./loading-persistence.md) owns world/chunk lifecycle and save policy. [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md) owns host scheduler rules that keep input, ticks, and polling from blocking behind chunk jobs. [`minecraft-client-replica-research.md`](./minecraft-client-replica-research.md) records the vanilla client-replica and networking source review that informs the client/host split.
+**Authoritative source:** the Rust enums in
+[`../native/crates/mclone-protocol/src/lib.rs`](../native/crates/mclone-protocol/src/lib.rs).
+This doc explains the shape and the durable rules; the code is the truth.
+
+[`architecture.md`](./architecture.md) owns the runtime boundary.
+[`runtime-data-model.md`](./runtime-data-model.md) owns chunk and block-state
+facts. [`loading-persistence.md`](./loading-persistence.md) owns world/chunk
+lifecycle and save policy. [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md)
+owns host scheduler rules. [`minecraft-client-replica-research.md`](./minecraft-client-replica-research.md)
+records the vanilla client-replica and networking review behind the split.
+Per-platform connect status lives in [`topics/platform-parity.md`](./topics/platform-parity.md).
+
+> This protocol began in the retired TypeScript engine and was reshaped around
+> the Rust client/server crates. The old TypeScript-era names (`open_world`,
+> `set_player_input`, `poll_world_updates`, `chunk_light_delta`,
+> `session_state`) and the HTTP-polling / Node lineage are gone. This doc
+> describes only the current Rust protocol plus clearly-labeled future intent.
 
 ## Core Rule
 
-Use one logical protocol for local and remote play.
+One logical protocol for local and remote play. Singleplayer is a client
+joining a local authoritative host; multiplayer is the same client joining the
+native dedicated server. Only the transport changes:
 
-Browser singleplayer should be a browser client joining a local authoritative host in a worker. Browser multiplayer should be the same browser client joining a remote authoritative host. Creating a new singleplayer world is a host-side world creation/open operation followed by the same join/session flow.
+- native singleplayer and tests use the in-process `LocalTransport`
+- browser singleplayer runs the authoritative host in a worker and talks to it
+  over a worker channel
+- remote play uses native TCP (desktop) or WebSocket (browser)
 
-Only the transport changes:
+The renderer never gets a protocol bypass. It consumes replicated
+chunk/light/entity facts; it does not read host internals or run worldgen.
 
-- in-process tests can call the host directly
-- local browser singleplayer can use `postMessage` or `MessagePort`
-- remote play can use HTTP polling today and a push transport later
+Host messages are the only source of canonical client chunk facts. Clients must
+not fill missing chunks by running seed-based worldgen or decoration locally.
+Missing data stays explicit so rendering can show loading state and prediction
+can report missing collision facts.
 
-The renderer should not get a special protocol bypass.
+## Protocol Version And Handshake
 
-The active client-runtime facade layer keeps this protocol split explicit:
+`PROTOCOL_VERSION` (currently `11`) is exchanged in the transport handshake
+before any messages — `MCLONE_NATIVE_TCP` for native TCP, `MCLONE_WS` for
+WebSocket. The server replies accept or reject; a mismatch fails the connection
+with `ProtocolVersionMismatch`.
 
-- `WorldHost` is the logical authority surface shared by integrated and dedicated hosts.
-- `IntegratedServer` is a browser-singleplayer facade over that same authority surface, not a new protocol.
-- `ClientRuntime` owns protocol application and transport polling/push draining.
-- `ClientWorld` owns hydrated replica facts and revision views.
-
-Transport adapters still decide only how records move. They do not decide host ticks, player command quanta, snapshot cadence, transport cadence, or render frames.
-
-Host protocol messages are the only source of canonical client chunk facts. Clients must not compensate for missing chunks by running seed-based worldgen or decoration locally. Missing data should stay explicit so rendering can show loading state and prediction can report missing collision facts.
+This is **strict equality** — there is no capability or version-range
+negotiation yet. That is a known cross-play gap once web (deployed URL), Android
+(APK), and desktop (binary) builds can drift apart; tracked in
+[`topics/platform-parity.md`](./topics/platform-parity.md).
 
 ## Logical Messages Vs Wire Codecs
 
-Keep the message model separate from wire encoding.
+Keep the message model separate from wire encoding. The logical protocol is two
+Rust enums; each transport decides how their variants move (length-prefixed
+binary frames over TCP, WebSocket frames in the browser, in-process handoff for
+`LocalTransport`). A current wire detail must not become the canonical protocol
+model.
 
-The logical protocol defines commands and updates in engine terms:
-
-- open or create world
-- join or resume session
-- set chunk interest
-- send player input
-- receive chunk snapshots/deltas
-- receive entity snapshots/deltas
-- receive player/session state
-
-Wire codecs decide how those messages move:
-
-- structured clone plus transferable buffers for workers
-- JSON envelopes for current HTTP control messages
-- binary records for packed chunk payloads
-- WebSocket/WebTransport frames later if polling stops fitting
-
-Do not let a current wire detail, such as HTTP JSON, become the canonical protocol model.
-
-## Session Lifecycle
-
-The durable lifecycle should be explicit even if current code still folds some steps together.
-
-1. **Open or create world**
-   The host validates save id, seed, preset, storage schema, and world metadata. If a requested save does not exist and creation is allowed, the host creates metadata.
-
-2. **Join session**
-   The client presents a player name/profile for the world. The host allocates or resumes an authoritative player slot, then returns a session id, player id, player name/profile facts, world metadata, and initial authoritative state.
-
-3. **Resume session**
-   A client can present a previous session id. The host either resumes it or returns a stable error that lets the client reopen and resync.
-
-4. **Set interest**
-   The client tells the host which chunks it needs. Today this is `set_chunk_view`; the durable concept is chunk interest, with view-based interest as the first policy. Setting interest should acknowledge the new session/interest revision promptly and queue chunk work. It should not require the command response to contain every newly visible chunk.
-
-5. **Run update loop**
-   The client sends input/commands. The host ticks authoritative state and sends or queues updates.
-
-6. **Close or expire session**
-   The host can eventually release per-session interest and player state while preserving world/save state.
-
-Current protocol names may evolve incrementally, but the semantics should move toward this lifecycle.
-
-## Player Identity And Slots
-
-Keep connection/session identity separate from player identity:
-
-- `sessionId` is a connection/resume handle. It owns transport state, chunk interest, pending messages, and reconnect behavior.
-- `playerId` is the authoritative player slot inside a world/save. Movement, inventory, game mode, spawn position, and future persistence attach to this slot.
-- player name/profile data is the human-facing join identity. Local singleplayer can default it, but multiplayer joins should provide it explicitly.
-- resuming by `sessionId` reconnects the same active session and therefore the same player slot while the session exists.
-- future profile-based resume may reclaim a persisted player slot even after the transport session expired, but that should be explicit and not inferred from a random session id.
-
-The current implementation still folds open/create and join into `open_world`, but the command can now carry a `playerProfile`. Local singleplayer defaults to `Player`; remote sessions allocate a separate player slot and return the associated profile in `session_state`. Do not infer persisted player recovery from `sessionId`; profile-based persisted-slot recovery remains a future explicit lifecycle step.
-
-## Client Commands
-
-Current and near-term client-to-host commands:
+### Client commands (`ClientCommand`)
 
 | Command | Purpose |
 |---|---|
-| `open_world` | open/create a world and establish baseline metadata; currently also carries the transitional join/profile fact |
-| `set_chunk_view` | current view-shaped chunk-interest command |
-| `set_player_input` | send sequenced movement command records to authoritative host |
-| `poll_world_updates` | drain queued server-originated updates on polling transports |
+| `SetChunkView` | view-shaped chunk-interest command (center + render/tracking radius) |
+| `MovePlayer` | sequenced movement record — `Pos` / `PosRot` / `Rot` / `StatusOnly`, mirroring Java 1.17 `ServerboundMovePlayerPacket` |
+| `PlayerAction` | block-destroy lifecycle (start/stop/abort destroy) plus debug instant-break |
+| `UseItemOn` | server-authoritative use/place against a `BlockHitResult` |
+| `SetCarriedItem` | select the active hotbar slot |
+| `AcceptTeleport` | acknowledge a server `PlayerPosition` teleport id |
 
-`set_chunk_view` is an interest command, not a synchronous "load my whole view now" RPC. Chunk snapshots are host-originated updates that may be returned by a polling response or delivered later by a push transport.
+`SetChunkView` is an interest command, not a synchronous "load my whole view
+now" RPC — chunk snapshots come back as host updates. There is no world-open or
+session-join command: the world/seed is host-owned (the dedicated server is
+launched with its seed) and play begins once the handshake is accepted. Client
+commands are intents, not client-owned state mutations.
 
-Likely future commands:
-
-| Command | Purpose |
-|---|---|
-| `join_world` / `resume_session` | split named player-slot join semantics from world creation/opening |
-| `set_chunk_interest` | generalize beyond camera-centered chunk views |
-| `ack_world_updates` | support reliable streaming transports |
-| `interact_block` / `use_item` | server-authoritative gameplay commands |
-
-Client commands are intents. They are not client-owned state mutations.
-
-## Host Updates
-
-Current and near-term host-to-client updates:
+### Host updates (`ServerUpdate`)
 
 | Update | Purpose |
 |---|---|
-| `world_opened` | world dimensions and save metadata |
-| `session_state` | session/player/save ids, player profile, revision, current interest state |
-| `player_state` | authoritative player position/rotation/tick/revision |
-| `chunk_snapshot` | baseline chunk facts |
-| `chunk_light_delta` | stored light changes for an already loaded chunk |
-| `chunk_unload` | release a chunk from client view/cache |
-| `entity_snapshot` | authoritative generated entity baseline data for a visible chunk |
-| `entity_update` | partial authoritative entity position/rotation/chunk/tracked-data/tick update after a baseline |
-| `entity_remove` | explicit entity untrack/remove fact for the client replica |
-| `world_error` | stable failure surface |
+| `ChunkSnapshot` | baseline chunk facts; **packed sky/block light rides inside the snapshot** (no separate light message) |
+| `ChunkUnload` | release a chunk from client view/cache |
+| `SectionBlockUpdates` | block mutations within a loaded section after the baseline |
+| `TimeUpdate` | authoritative world day-time (ticks) for the day/night cycle |
+| `PlayerPosition` | authoritative local-player position/rotation correction with relative flags and a teleport id |
+| `RemotePlayerAdd` / `RemotePlayerUpdate` / `RemotePlayerRemove` | other players entering / moving in / leaving the client's tracked view |
+| `EntitySnapshot` | passive-entity (cow/chicken) baseline for a visible chunk |
+| `EntityUpdate` | partial entity position/rotation/age update after a baseline |
+| `EntityRemove` | explicit entity untrack/remove for the replica |
 
-Likely future updates:
+Failures are surfaced through the transport handshake and connection errors, not
+yet an in-band error update.
 
-| Update | Purpose |
+The loop is **request/response**: the host emits queued updates as the reply to
+a client command. A server-push lane — so a player who stops sending commands
+still sees others move — is still to come.
+
+### Likely future messages (design intent; not implemented)
+
+| Message | Purpose |
 |---|---|
-| `chunk_delta` | block, section, light, and block-entity mutations |
-| `tick` / `time_state` | world time and tick metadata |
+| `chunk_delta` | broader block/section/light/block-entity mutation batching |
+| `session_state` / `world_opened` / `world_error` | explicit session/world lifecycle and a stable in-band failure surface |
+| `ack_world_updates` | client acknowledgement for a reliable streaming/push lane |
 | `inventory_state` | player inventory and container state |
-
-Updates should carry revision or tick context where ordering matters.
-
-`entity_snapshot` is the baseline/interested-chunk update. `entity_update` carries partial changes for an already known entity, and `entity_remove` explicitly clears entities when interest or lifecycle ends. Polling transports keep session/player state and entity removals ahead of capped bulk data, then drain chunk snapshots, light deltas, entity snapshots, and entity updates with other chunk-interest bulk data.
+| `join_world` / `resume_session` | named player-slot join split from world open, once persisted players exist |
 
 ## Client Replica And Prediction Inputs
 
-Prediction is a client runtime concern, but it sits on top of the broader client replica. The host protocol must provide enough authoritative facts for the client replica and predictor without exposing host internals.
+Prediction is a client-runtime concern sitting on top of the client replica. The
+protocol must provide enough authoritative facts for the replica and predictor
+without exposing host internals:
 
-The client replica/runtime should be able to hydrate visible world state and a bounded prediction view from client-facing messages:
+- authoritative local-player position corrections with teleport ids (`PlayerPosition`)
+- visible chunk, light, and entity snapshots/deltas for presentation
+- nearby chunk/collision facts for the local player's prediction window
 
-- authoritative local-player movement snapshots with ack sequence and body restart facts
-- nearby chunk/collision snapshots or deltas for the local player's prediction window
-- visible chunk, light, block-entity, and entity snapshots for presentation
-- movement physics and collision revision facts
-- dynamic collider snapshots for entities that can affect local prediction
-
-Those messages may share source payloads with rendering, lighting, and prediction, but their meaning should stay distinct. Chunk facts can feed a mesh worker and a prediction view; mesh payloads must not become collision truth, and prediction caches must not become renderer-owned world state.
-
-When the host cannot provide enough collision facts for prediction, the protocol should make that explicit through missing-collision diagnostics or revision mismatch facts. The client can then fall back to reduced prediction or accept correction instead of silently drifting.
+Those facts may share source payloads with rendering, lighting, and prediction,
+but their meaning stays distinct: mesh payloads must not become collision truth,
+and prediction caches must not become renderer-owned world state. When the host
+cannot provide enough collision facts, that should be explicit so the client can
+reduce prediction instead of silently drifting.
 
 ## Rate Separation Rule
 
-The logical protocol must not imply that one transport request, one host world tick, one snapshot, or one render frame equals one movement step.
-
-Future movement command records should keep these facts explicit:
-
-- command sequence
-- `commandQuantumUs`
-- `stepCount`
-- button and edge-button state for the command window
-- movement physics revision
-- collision/world revision facts when dynamic collision can affect prediction
-- authoritative snapshot ack of the last processed command sequence
-
-Polling, worker `postMessage`, WebSocket, WebTransport, and future WebRTC adapters may bundle or schedule records differently, but they must carry the same logical command/snapshot facts. The host may drain multiple fixed-quantum movement commands during one lower-rate world/network tick, and the client may render many frames from predicted/interpolated presentation state without creating additional authoritative movement.
-
-## Versioning And Errors
-
-Remote envelopes should stay protocol-versioned.
-
-Stable remote error codes should exist for at least:
-
-- protocol version mismatch
-- unknown or expired session
-- incompatible world request
-- malformed message
-- unauthorized or unsupported operation when those concerns become real
-
-Worker transports should validate the same logical conditions even if they do not need HTTP-style envelopes.
+The logical protocol must not imply that one transport request, one host world
+tick, one snapshot, or one render frame equals one movement step. Movement is
+sequenced command records plus authoritative correction snapshots. The host may
+drain multiple movement commands inside one lower-rate world/network tick, and
+the client may render many interpolated frames without creating additional
+authoritative movement. Any future transport (push WebSocket, WebRTC) must carry
+the same logical records rather than inventing a different gameplay protocol.
 
 ## Chunk Payloads
 
-Chunk messages should use the logical chunk model from [`runtime-data-model.md`](./runtime-data-model.md):
+Chunk messages use the logical chunk model from
+[`runtime-data-model.md`](./runtime-data-model.md): numeric block-state ids,
+packed sections, binary-friendly buffers, sparse non-empty sections. Do not send
+hot chunk payloads as large name/property object graphs. Small control messages
+may stay simple while packed chunk/light section payloads use binary records or
+transferable buffers.
 
-- numeric block-state ids
-- packed sections
-- binary-friendly buffers
-- sparse non-empty sections
+## Transports
 
-Do not send hot chunk payloads as large name/property object graphs once the packed model exists.
+Implemented today (all in
+[`../native/crates/mclone-net/src/lib.rs`](../native/crates/mclone-net/src/lib.rs)
+plus app-owned sockets):
 
-For remote transports, it is acceptable to keep small control messages in JSON while moving chunk section payloads to binary records or transferable buffers.
+- **`LocalTransport`** — in-process loopback for native singleplayer and tests.
+- **Native TCP** — length-prefixed binary frames, versioned handshake,
+  request/response batches. Desktop's remote-dedicated path.
+- **WebSocket** — `mclone-net` owns the frame/handshake codec; the socket lives
+  in the app (tungstenite on the dedicated server's `--listen-ws` bridge,
+  `web-sys` WebSocket in the browser client). The browser client is complete but
+  not yet wired into the playable web app.
 
-## WebSocket Remote Transport
+There is no HTTP, WebTransport, or WebRTC gameplay transport, and no Node/Deno
+host.
 
-The next remote transport target is a persistent WebSocket-backed message channel.
-
-Do not redesign authority around WebSocket. The transport changes delivery mechanics only; logical messages, host authority, client-world hydration, prediction facts, and chunk ownership remain the same.
-
-Transport adapters should preserve three logical lanes:
-
-- reliable ordered lane: open/join/resume, chunk interest, chunk snapshots/deltas, interactions, inventory, errors, and world/session state
-- realtime superseding lane: movement command bundles and player/entity snapshots where newer data can replace older unprocessed data
-- bulk/binary lane: packed chunk, light, and similar large payloads; these may use binary framing or transferables, but remain logically reliable unless a later protocol explicitly says otherwise
-
-Movement correctness must not depend on transport cadence. The movement model is sequenced command records plus authoritative ack snapshots. WebSocket should carry those same logical records instead of inventing a different gameplay protocol.
-
-The previous HTTP polling implementation is now a compatibility adapter, not the target remote path. The WebSocket migration now:
-
-- replace remote `poll_world_updates` network requests with server-pushed updates
-- keep a local drain API on `ClientRuntime` so the presentation loop can hydrate queued pushed messages without owning sockets
-- split the existing HTTP-specific envelope code from reusable message serialization
-- keep session resume, player slot identity, chunk interest, and reconnect behavior explicit
-- make packed chunk/light payloads ready for binary WebSocket frames after the initial JSON message-channel migration is stable
-
-As of `R9`, browser remote clients use WebSocket by default. `world-http-protocol.ts` remains only as the HTTP envelope compatibility layer; reusable remote serialization lives in the transport-neutral wire module.
-
-WebRTC/WebTransport datagram lanes are later options only if measurements justify lossy realtime traffic, and they require explicit command bundling, sequence-gap handling, authoritative acknowledgements, periodic baselines, and reliable control/chunk lanes.
+A future **server-push** lane (and later, if measured to be worth it, a WebRTC
+datagram lane for high-rate entity/player snapshots) should preserve three
+logical lanes — reliable ordered (interest, chunks, interactions, errors),
+realtime superseding (movement/entity snapshots where newer replaces older), and
+bulk/binary (packed chunk/light payloads) — without redesigning authority around
+the transport.
