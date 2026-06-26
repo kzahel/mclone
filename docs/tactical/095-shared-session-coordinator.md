@@ -1,11 +1,12 @@
 # 095: Shared Session Coordinator
 
-Status: active; Slice 1 landed on 2026-06-27. `mclone-app-runtime` now owns
-the platform-neutral session request/state vocabulary, including local-world
-start, remote-join start, active session descriptors, pending starts, failure
-state, and common status text. Desktop flat now consumes that coordinator for
-initial startup and queued New World creation. Runtime construction is still
-desktop-local; web/XR/Android adoption and remote-join UI remain follow-ups.
+Status: active; Slices 1-2 landed on 2026-06-27. `mclone-app-runtime` now owns
+the platform-neutral session request/state vocabulary and shared start-result
+boundary, including local-world start, remote-join start, active session
+descriptors, pending starts, failure state, status text, and success/failure
+transition policy. Desktop flat consumes that coordinator for initial startup
+and queued New World creation. Runtime construction is still desktop-local;
+web/XR/Android adoption and remote-join UI remain follow-ups.
 
 ## Purpose
 
@@ -119,14 +120,49 @@ without blank output or overlapping UI.
 
 ### Slice 2 - Shared Session Factory Boundary
 
-- [ ] Define the smallest common boundary between a session request and a live
+- [x] Define the smallest common boundary between a session request and a live
   platform session. Likely shape: common request/descriptor/result types in
   `mclone-app-runtime`, with platform-specific factories implemented in app
   crates.
-- [ ] Keep synchronous desktop construction and async browser construction
+- [x] Keep synchronous desktop construction and async browser construction
   behind different adapters rather than forcing one async model everywhere.
 - [ ] Move common teardown-before-start and failure-status policy behind this
   boundary once two platforms consume it.
+
+Recorded Slice 2 result:
+
+- Added `StartedGameSession<S>` and `SessionStartResult<S>` to
+  `mclone_app_runtime::session`, so platform factories can return a live
+  session payload plus the common `ActiveSessionDescriptor`.
+- Added `SessionStartRequest::active_descriptor()` and
+  `default_failure_message()` so local-world and remote-join requests derive
+  common success/failure facts without desktop-only matching.
+- Added `GameSessionCoordinator::apply_start_result(...)` and
+  `start_pending_with(...)` to centralize the transition from pending/starting
+  to active or failed.
+- Refactored desktop startup and queued New World creation to construct a
+  `SessionStartResult<()>` through a desktop-local runtime factory, then apply
+  the common result to the coordinator. The `()` payload means the live runtime
+  is already installed into the desktop app; future adapters can use a concrete
+  session payload when that is a better ownership shape.
+- Kept browser async and XR platform mechanics untouched. No common async trait
+  or platform resource ownership was introduced.
+
+Validation after Slice 2 on 2026-06-27:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml
+pnpm native:web:build
+git diff --check
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot C:\tmp\mclone-session-result-boundary-new-world.png --screenshot-ui new-world --width 960 --height 540 --seed 12345
+```
+
+The New World screenshot was inspected and still rendered correctly after the
+shared result-boundary refactor.
 
 ### Slice 3 - Join Remote Menu Flow
 

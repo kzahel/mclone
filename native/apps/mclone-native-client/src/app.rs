@@ -45,7 +45,8 @@ use mclone_app_runtime::frame_render::{
 };
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
-    RemoteSessionEndpoint, SessionFailure, SessionStartRequest,
+    RemoteSessionEndpoint, SessionFailure, SessionStartRequest, SessionStartResult,
+    StartedGameSession,
 };
 use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 use mclone_render_session::{
@@ -350,15 +351,6 @@ impl ChunkApp {
         scene
     }
 
-    fn active_session_descriptor_for_scene(scene: &SceneOptions) -> ActiveSessionDescriptor {
-        scene.remote_addr.as_ref().map_or(
-            ActiveSessionDescriptor::LocalWorld { seed: scene.seed },
-            |remote_addr| ActiveSessionDescriptor::Remote {
-                endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
-            },
-        )
-    }
-
     fn session_status_overlay(&self) -> StatusOverlay {
         self.session
             .status()
@@ -391,32 +383,59 @@ impl ChunkApp {
         &mut self,
         pending: PendingSessionStart<PendingWindowSessionStart>,
     ) {
-        let seed = match pending.request {
-            SessionStartRequest::NewLocalWorld { seed } => seed,
-            SessionStartRequest::JoinRemote { .. } | SessionStartRequest::Unknown => {
-                self.session
-                    .fail_start(SessionFailure::new("Unsupported session start"));
+        let request = pending.request.clone();
+        let arm_mouse_lock = pending.payload.arm_mouse_lock;
+        let result = self.start_pending_window_session(pending);
+        self.session.apply_start_result(&result);
+        match result {
+            Ok(started) => {
+                self.apply_started_session_ui(started.descriptor());
+                self.mouse_lock_requested = arm_mouse_lock;
+                self.sync_mouse_lock();
+            }
+            Err(_) => {
+                if let SessionStartRequest::NewLocalWorld { seed } = request {
+                    self.ui.set_new_world_seed(seed);
+                }
                 self.mouse_lock_requested = false;
                 self.sync_mouse_lock();
-                return;
             }
+        }
+    }
+
+    fn start_pending_window_session(
+        &mut self,
+        pending: PendingSessionStart<PendingWindowSessionStart>,
+    ) -> SessionStartResult<()> {
+        self.start_window_session_from_scene(pending.request, pending.payload.scene)
+    }
+
+    fn start_window_session_from_scene(
+        &mut self,
+        request: SessionStartRequest,
+        scene: SceneOptions,
+    ) -> SessionStartResult<()> {
+        let Some(descriptor) = request.active_descriptor() else {
+            return Err(SessionFailure::new("Unsupported session start"));
         };
-        match self.start_world_from_scene(pending.payload.scene) {
-            Ok(()) => {
-                self.session
-                    .complete_start(ActiveSessionDescriptor::LocalWorld { seed });
-                self.ui.apply_action(GameUiAction::CreateWorld(seed));
-                self.mouse_lock_requested = pending.payload.arm_mouse_lock;
-                self.sync_mouse_lock();
+        match self.start_world_from_scene(scene) {
+            Ok(()) => Ok(StartedGameSession::new(descriptor, ())),
+            Err(err) => {
+                log::error!("failed to start session {request:?}: {err:#}");
+                Err(SessionFailure::new(request.default_failure_message()))
+            }
+        }
+    }
+
+    fn apply_started_session_ui(&mut self, descriptor: &ActiveSessionDescriptor) {
+        match descriptor {
+            ActiveSessionDescriptor::LocalWorld { seed } => {
+                self.ui.apply_action(GameUiAction::CreateWorld(*seed));
                 log::info!("created local world seed={seed}");
             }
-            Err(err) => {
-                log::error!("failed to create local world seed={seed}: {err:#}");
-                self.session
-                    .fail_start(SessionFailure::new("World creation failed; see log"));
-                self.ui.set_new_world_seed(seed);
-                self.mouse_lock_requested = false;
-                self.sync_mouse_lock();
+            ActiveSessionDescriptor::Remote { endpoint } => {
+                self.ui.apply_action(GameUiAction::StartWorld);
+                log::info!("joined remote session {}", endpoint.address);
             }
         }
     }
@@ -1191,16 +1210,12 @@ impl ApplicationHandler for ChunkApp {
         event_loop.listen_device_events(DeviceEvents::WhenFocused);
         if self.start_intent == WindowStartIntent::InWorld {
             let scene = self.scene.clone();
-            self.session
-                .begin_start(session_start_request_for_scene(&scene));
-            if let Err(err) = self.start_world_from_scene(scene) {
-                log::error!("failed to start initial world: {err:#}");
-                self.session
-                    .fail_start(SessionFailure::new("Initial world failed; see log"));
+            let request = session_start_request_for_scene(&scene);
+            self.session.begin_start(request.clone());
+            let result = self.start_window_session_from_scene(request, scene);
+            self.session.apply_start_result(&result);
+            if result.is_err() {
                 self.ui.set_screen(Some(GameScreen::Title));
-            } else {
-                self.session
-                    .complete_start(Self::active_session_descriptor_for_scene(&self.scene));
             }
         }
         self.sync_mouse_lock();
