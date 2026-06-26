@@ -7,8 +7,9 @@ share OpenXR session-state polling, frame counters, stereo config/view helpers,
 STAGE reference-space setup, frame wait/begin/end helpers, swapchain image
 acquire/release, diagnostic clear, stereo projection submission, and controller
 actions, validated view poses, and renderer-facing XR frame descriptors
-through `mclone-xr-host`. Continue extracting graphics-factory behavior before
-adding Quest terrain or controller features.
+through `mclone-xr-host`; desktop Vulkan and Android Vulkan now share the
+unsafe OpenXR/Vulkan/wgpu graphics factory through `mclone-xr-graphics`.
+Continue into Quest terrain before controller features.
 
 ## Purpose
 
@@ -50,6 +51,10 @@ Ready inputs:
   clear pass, stereo projection-frame submission, OpenXR controller action
   set, controller snapshot contract, validated view-pose extraction, OpenXR FOV
   projection conversion, and renderer-neutral `XrRenderView` descriptors.
+- `native/crates/mclone-xr-graphics` owns the shared unsafe Vulkan graphics
+  bridge used by both desktop Vulkan XR and Android XR: OpenXR-driven Vulkan
+  instance/device creation, wgpu wrapping, session creation, Vulkan swapchain
+  format validation, and Vulkan swapchain image texture wrapping.
 - Playbox has the mature reference implementation for Android XR packaging,
   loader/session ownership, launch-scoped startup arguments, Android property
   toggles, and Quest validation scripts.
@@ -323,16 +328,18 @@ Target boundary:
 - [x] Move renderer-facing XR frame descriptors into the shared boundary.
 - [x] Move or expose the controller action set shape used by desktop XR so
   Quest Touch input can reuse the same locomotion-facing contract.
-- [ ] Keep platform bootstrap adapters thin. Desktop loads/selects the runtime
+- [x] Extract shared desktop/Android Vulkan graphics-factory behavior without
+  copying unsafe session/swapchain setup in each app.
+- [x] Keep platform bootstrap adapters thin. Desktop loads/selects the runtime
   and owns desktop launch options. Android initializes the Khronos Android
   loader and owns activity/JNI/Horizon readiness. Each platform passes the
   prepared entry/instance requirements, graphics factory, startup pose, and
   validation markers into the shared host.
-- [ ] Rewire desktop XR to consume the shared boundary and keep current desktop
+- [x] Rewire desktop XR to consume the shared boundary and keep current desktop
   terrain, controller, startup-pose, and locomotion validation passing.
-- [ ] Rewire Android XR to consume the same boundary and preserve the validated
-  `MCLONE_ANDROID_XR_SESSION_READY` Quest smoke.
-- [ ] Delete or shrink app-local duplicate session/frame/action code after both
+- [x] Rewire Android XR to consume the same boundary and preserve the validated
+  `MCLONE_ANDROID_XR_READY` Quest smoke.
+- [x] Delete or shrink app-local duplicate session/frame/action code after both
   callers compile and validate.
 
 Recorded Slice 2A first-chunk result:
@@ -503,6 +510,49 @@ cargo test --manifest-path native/Cargo.toml -p mclone-xr-host
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client --features xr
 cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/build-apk.sh --debug'
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --wait-seconds 45'
+```
+
+Observed Quest result:
+
+- Quest serial: `2G0YC1ZF93041Z`
+- APK install succeeded for
+  `android-xr/app/build/outputs/apk/debug/app-debug.apk`
+- Startup argv intent extra:
+  `["--seed","12345","--chunk-x","0","--chunk-z","0","--render-distance","2","--day-time","6000","--freeze-time"]`
+- Launch activity:
+  `com.kzahel.mclone.xr/com.kzahel.mclone.xr.McloneXrActivity`
+- Log marker observed by validator: `MCLONE_ANDROID_XR_READY`
+- Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
+
+Recorded Slice 2A sixth-chunk result:
+
+- Added `native/crates/mclone-xr-graphics` as the unsafe backend crate for
+  shared XR graphics factories.
+- Moved the duplicated desktop Vulkan / Android Vulkan OpenXR graphics
+  implementation into `mclone-xr-graphics::vulkan`: runtime Vulkan version
+  checks, OpenXR-created Vulkan instance/device, physical-device and queue
+  selection, wgpu-hal wrapping, OpenXR session creation, swapchain format
+  validation, and Vulkan swapchain image texture wrapping.
+- Replaced desktop and Android Vulkan modules with thin adapters that choose
+  labels and own app-specific depth target shape only.
+- Removed app-level direct `ash` dependencies from the desktop and Android XR
+  app crates; `ash` is now owned by the shared graphics crate.
+- Kept desktop Metal local because it has no Android counterpart in this
+  workstream.
+
+Validation after the sixth chunk, June 26, 2026:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo check --manifest-path native/Cargo.toml -p mclone-xr-graphics
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-graphics
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-host
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client --features xr
 "C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/build-apk.sh --debug'
 "C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --wait-seconds 45'
 ```

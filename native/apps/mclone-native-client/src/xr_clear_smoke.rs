@@ -439,8 +439,8 @@ fn run_smoke_frames(
         "OpenXR swapchains: format={XR_COLOR_FORMAT:?} eye={}x{} images={}/{}",
         eye_width,
         eye_height,
-        left_eye.textures.len(),
-        right_eye.textures.len()
+        left_eye.texture_count(),
+        right_eye.texture_count()
     );
     println!("OpenXR frame limit: {frame_limit_label}");
     if frame_limit.is_none() {

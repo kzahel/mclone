@@ -423,8 +423,8 @@ mod android {
             "OpenXR swapchains: color_format={XR_COLOR_FORMAT:?} depth_format={XR_DEPTH_FORMAT:?} eye={}x{} images={}/{}",
             eye_width,
             eye_height,
-            left_eye.textures.len(),
-            right_eye.textures.len()
+            left_eye.texture_count(),
+            right_eye.texture_count()
         );
         log::info!("MCLONE_ANDROID_XR_SESSION_READY");
 

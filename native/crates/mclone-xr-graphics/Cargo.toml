@@ -1,0 +1,13 @@
+[package]
+name = "mclone-xr-graphics"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+ash.workspace = true
+mclone-xr-host.workspace = true
+openxr.workspace = true
+wgpu.workspace = true

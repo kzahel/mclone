@@ -8,9 +8,9 @@ publish.workspace = true
 [features]
 default = []
 xr = [
-    "dep:ash",
     "dep:libloading",
     "dep:metal",
+    "dep:mclone-xr-graphics",
     "dep:mclone-xr-host",
     "dep:openxr",
     "dep:pollster",
@@ -19,7 +19,6 @@ xr = [
 
 [dependencies]
 anyhow.workspace = true
-ash = { workspace = true, optional = true }
 env_logger.workspace = true
 glam.workspace = true
 image.workspace = true
@@ -36,6 +35,7 @@ mclone-render.workspace = true
 mclone-render-session.workspace = true
 mclone-server.workspace = true
 mclone-ui.workspace = true
+mclone-xr-graphics = { workspace = true, optional = true }
 mclone-xr-host = { workspace = true, optional = true }
 openxr = { workspace = true, optional = true }
 pollster = { workspace = true, optional = true }

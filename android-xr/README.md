@@ -98,6 +98,7 @@ declared so the Horizon/OpenXR runtime path matches the known-good Playbox
 shape. Mclone does not use those product features yet.
 
 On the attached Quest 3, mclone reaches `MCLONE_ANDROID_XR_READY` after pinning
-`android-activity` to Playbox's known-good NativeActivity glue version. The
-next implementation step is to reuse the shared XR host render-view descriptors
-for a real mclone terrain frame on Quest.
+`android-activity` to Playbox's known-good NativeActivity glue version. Desktop
+Vulkan XR and Android XR now share the OpenXR/Vulkan/wgpu graphics factory
+through `mclone-xr-graphics`. The next implementation step is a real mclone
+terrain frame on Quest.
