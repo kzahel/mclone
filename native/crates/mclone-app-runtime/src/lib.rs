@@ -8,7 +8,7 @@ pub mod render_assets;
 
 use std::collections::BTreeSet;
 #[cfg(not(target_arch = "wasm32"))]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use glam::Vec3;
@@ -515,6 +515,47 @@ impl SingleViewRuntime {
             DEFAULT_RENDER_CHUNK_MESH_BUDGET,
             snapshots_for_submit,
         )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn sync_all_render_sections<C, Snapshots>(
+        &mut self,
+        compiler: &mut C,
+        camera_position: Vec3,
+        mut snapshots_for_submit: Snapshots,
+    ) -> Result<RenderSectionCacheUpdate>
+    where
+        C: RenderSectionCompiler,
+        Snapshots: FnMut(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
+    {
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let mut combined = RenderSectionCacheUpdate::default();
+        loop {
+            let update = self.sync_render_sections_with_budget(
+                compiler,
+                camera_position,
+                usize::MAX,
+                |client, compiler| snapshots_for_submit(client, compiler),
+            )?;
+            let progressed = update.rebuilt_section_count() > 0
+                || update.removed_section_count() > 0
+                || update.submitted_compile_section_count > 0
+                || update.completed_compile_section_count > 0
+                || update.stale_compile_section_count > 0;
+            combined.merge(update);
+            if compiler.pending_job_count() == 0
+                && !self.has_ready_pending_render_work(camera_position)
+            {
+                combined.pending_compile_jobs = 0;
+                return Ok(combined);
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("timed out waiting for render section compile queue");
+            }
+            if !progressed {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
     }
 
     pub fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {

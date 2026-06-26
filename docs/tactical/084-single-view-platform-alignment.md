@@ -1,8 +1,8 @@
 # 084: Single-View Platform Alignment
 
-Status: active. Slice 1 is complete. Slice 2 has its first chunk landed:
-desktop's local static client-runtime construction now uses shared
-`mclone-app-runtime::local_single_view` helpers, while live
+Status: active. Slice 1 is complete. Slice 2 has two chunks landed:
+desktop's local static client-runtime construction and shared render-section
+queue draining now use `mclone-app-runtime` helpers, while deeper live
 `WindowSceneRuntime` convergence remains next.
 
 ## Purpose
@@ -93,6 +93,8 @@ git diff --check
 
 - [x] Move desktop's local static client-runtime construction onto shared
   local single-view helpers without changing remote-session behavior.
+- [x] Move native blocking render-section "sync all until idle" policy onto
+  `SingleViewRuntime`.
 - [ ] Compare live `WindowSceneRuntime` with the new shared helper.
 - [ ] Move local-only desktop code that does not involve remote sessions,
   desktop CLI, actor resources, or app-specific diagnostics into shared
@@ -119,6 +121,30 @@ Validation after Slice 2 first chunk:
 cargo fmt --manifest-path native/Cargo.toml --all --check
 cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client scene_client_runtime_loads_center_chunk
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+pnpm native:web:build
+git diff --check
+```
+
+Recorded Slice 2 second-chunk result:
+
+- Added native-only `SingleViewRuntime::sync_all_render_sections(...)` in
+  `mclone-app-runtime`.
+- Rewired `LocalSingleViewSceneRuntime::sync_all_render_sections(...)` to use
+  the shared helper.
+- Rewired desktop `WindowSceneRuntime::sync_all_render_sections(...)` to use
+  the same shared helper.
+- Removed the now-dead desktop passthrough for render ready-work checks.
+- Kept the helper native-only because web/WASM render-worker draining is
+  nonblocking and should not inherit a blocking sleep-until-idle API.
+
+Validation after Slice 2 second chunk:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client render_compile
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client
 cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
 pnpm native:web:build

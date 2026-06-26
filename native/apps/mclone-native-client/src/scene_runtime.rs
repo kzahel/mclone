@@ -404,29 +404,11 @@ impl WindowSceneRuntime {
         &mut self,
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
-        let deadline = Instant::now() + Duration::from_secs(120);
-        let mut combined = RenderSectionCacheUpdate::default();
-        loop {
-            let update = self.sync_render_sections_with_budget(camera_position, usize::MAX)?;
-            let progressed = update.rebuilt_section_count() > 0
-                || update.removed_section_count() > 0
-                || update.submitted_compile_section_count > 0
-                || update.completed_compile_section_count > 0
-                || update.stale_compile_section_count > 0;
-            combined.merge(update);
-            if self.render_compile_worker.pending_job_count() == 0
-                && !self.has_ready_pending_render_work(camera_position)
-            {
-                combined.pending_compile_jobs = 0;
-                return Ok(combined);
-            }
-            if Instant::now() >= deadline {
-                bail!("timed out waiting for render section compile queue");
-            }
-            if !progressed {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
+        self.core.sync_all_render_sections(
+            &mut self.render_compile_worker,
+            camera_position,
+            |client, _compiler| client.chunk_snapshots().cloned().collect(),
+        )
     }
 
     fn sync_render_sections_with_budget(
@@ -493,10 +475,6 @@ impl WindowSceneRuntime {
     #[cfg(test)]
     pub(crate) fn pending_render_chunk_count(&self) -> usize {
         self.core.pending_render_chunk_count()
-    }
-
-    fn has_ready_pending_render_work(&self, camera_position: Vec3) -> bool {
-        self.core.has_ready_pending_render_work(camera_position)
     }
 
     fn server_runner_diagnostics(&self) -> Option<ServerRunnerDiagnostics> {

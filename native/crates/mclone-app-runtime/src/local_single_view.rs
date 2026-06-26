@@ -202,34 +202,11 @@ impl LocalSingleViewSceneRuntime {
         &mut self,
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
-        let deadline = Instant::now() + Duration::from_secs(120);
-        let mut combined = RenderSectionCacheUpdate::default();
-        loop {
-            let update = self.core.sync_render_sections_with_budget(
-                &mut self.render_compile_worker,
-                camera_position,
-                usize::MAX,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
-            )?;
-            let progressed = update.rebuilt_section_count() > 0
-                || update.removed_section_count() > 0
-                || update.submitted_compile_section_count > 0
-                || update.completed_compile_section_count > 0
-                || update.stale_compile_section_count > 0;
-            combined.merge(update);
-            if self.render_compile_worker.pending_job_count() == 0
-                && !self.core.has_ready_pending_render_work(camera_position)
-            {
-                combined.pending_compile_jobs = 0;
-                return Ok(combined);
-            }
-            if Instant::now() >= deadline {
-                bail!("timed out waiting for local single-view render section compile queue");
-            }
-            if !progressed {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
+        self.core.sync_all_render_sections(
+            &mut self.render_compile_worker,
+            camera_position,
+            |client, _compiler| client.chunk_snapshots().cloned().collect(),
+        )
     }
 
     pub fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
