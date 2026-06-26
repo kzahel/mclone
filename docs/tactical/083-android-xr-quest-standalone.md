@@ -1,8 +1,10 @@
 # 083: Android XR / Quest Standalone
 
 Status: active. Slice 1 package/build/install/launch plumbing is complete.
-Slice 2's loader/session/swapchain first chunk is complete; first submitted
-stereo frame is next.
+Slice 2's loader/session/swapchain first chunk is complete. Before continuing
+first-frame, mclone-frame, or controller work, extract the reusable desktop
+OpenXR host pieces into a shared app/platform XR boundary consumed by both
+desktop XR and Android XR.
 
 ## Purpose
 
@@ -30,6 +32,9 @@ Ready inputs:
 - The standalone Quest package now initializes the Android OpenXR loader,
   creates a Vulkan-backed OpenXR session, allocates per-eye color swapchains
   and depth targets, and validates `MCLONE_ANDROID_XR_SESSION_READY` on device.
+- The Quest session code added so far is a bring-up spike in the Android app
+  crate. It proves device/runtime facts, but it is not the architecture to keep
+  extending by copying private desktop XR code.
 - Playbox has the mature reference implementation for Android XR packaging,
   loader/session ownership, launch-scoped startup arguments, Android property
   toggles, and Quest validation scripts.
@@ -70,6 +75,13 @@ mclone tactical explicitly asks for that capability.
 New package shape:
 
 ```text
+native/crates/mclone-xr-host/
+  Cargo.toml
+  src/lib.rs
+  src/session.rs
+  src/frame_loop.rs
+  src/actions.rs
+  src/graphics_vulkan.rs
 native/apps/mclone-android-xr-client/
   Cargo.toml
   src/lib.rs
@@ -88,7 +100,19 @@ Ownership:
 
 - Android XR app/platform code owns Java activity glue, Android OpenXR loader
   setup, Quest manifest metadata, app data paths, system properties, launch
-  extras, headset wake/restore, and OpenXR session/swapchains.
+  extras, headset wake/restore, and Android-specific runtime readiness.
+- The shared app/platform XR boundary owns reusable OpenXR host behavior:
+  instance/session setup after platform bootstrap, session-state polling,
+  frame wait/begin/end, reference spaces, per-eye view/FOV data, swapchain eye
+  targets, diagnostic clear submission, controller action sets, and conversion
+  into renderer-facing view/target facts.
+- Desktop XR and Android XR consume that shared XR boundary instead of each
+  keeping private copies of session loops, action wiring, and per-eye target
+  logic.
+- Platform-specific graphics and loader glue may stay behind platform modules
+  or crate features. Android `NativeActivity`/JNI/Horizon behavior stays in the
+  Android app; desktop runtime-selection/window behavior stays in the desktop
+  app.
 - Shared engine crates stay free of Android activity, JNI, and OpenXR types.
 - The desktop XR implementation remains the behavior reference for per-eye
   mclone rendering, controller actions, startup view pose, and locomotion.
@@ -190,7 +214,10 @@ resolved to WSL during validation and did not see the Windows Rust toolchain.
 - [x] Create an OpenXR instance/system/session with Vulkan graphics binding.
 - [x] Create one color swapchain and one depth target per eye.
 - [x] Log `MCLONE_ANDROID_XR_SESSION_READY` after session/swapchain bring-up.
-- [ ] Wait/begin/end frames and submit a stereo diagnostic clear.
+- [ ] Fold the local Android OpenXR host spike into the shared XR host boundary
+  before extending frame, terrain, or controller behavior.
+- [ ] Wait/begin/end frames and submit a stereo diagnostic clear through the
+  shared XR host.
 - [ ] Log `MCLONE_ANDROID_XR_READY` after the first submitted stereo frame.
 - [ ] Keep bounded validation and restore headset state on every exit path.
 
@@ -248,12 +275,59 @@ Known remaining blocker for completing Slice 2:
   the existing clear-loop path should be able to submit the first stereo
   diagnostic frame and log `MCLONE_ANDROID_XR_READY`.
 
+### Slice 2A - Shared OpenXR Host Extraction
+
+Goal: remove the architectural hazard before more Quest work lands. Desktop XR
+currently lives inside the `mclone-native-client` binary app, while Android XR
+has an app-local Quest session spike. The next implementation step is to
+extract the reusable OpenXR host behavior into a shared app/platform XR crate
+or module consumed by both apps. Do not continue by cloning
+`mclone-native-client/src/xr_clear_smoke.rs` into Android.
+
+Target boundary:
+
+- [ ] Audit desktop `xr_clear_smoke.rs`, `xr_clear_smoke/actions.rs`, and
+  desktop graphics modules for reusable host responsibilities versus
+  desktop-only runtime/window behavior.
+- [ ] Create a shared app/platform XR boundary, tentatively
+  `native/crates/mclone-xr-host`, that may depend on OpenXR and graphics
+  backend crates but does not depend on Android activity/JNI or desktop window
+  ownership.
+- [ ] Move OpenXR session-state polling, begin/end lifecycle, frame
+  wait/begin/end structure, reference-space setup, diagnostic clear plumbing,
+  per-eye view/FOV facts, and renderer-facing XR frame descriptors into the
+  shared boundary.
+- [ ] Move or expose the controller action set shape used by desktop XR so
+  Quest Touch input can reuse the same locomotion-facing contract.
+- [ ] Keep platform bootstrap adapters thin. Desktop loads/selects the runtime
+  and owns desktop launch options. Android initializes the Khronos Android
+  loader and owns activity/JNI/Horizon readiness. Each platform passes the
+  prepared entry/instance requirements, graphics factory, startup pose, and
+  validation markers into the shared host.
+- [ ] Rewire desktop XR to consume the shared boundary and keep current desktop
+  terrain, controller, startup-pose, and locomotion validation passing.
+- [ ] Rewire Android XR to consume the same boundary and preserve the validated
+  `MCLONE_ANDROID_XR_SESSION_READY` Quest smoke.
+- [ ] Delete or shrink app-local duplicate session/frame/action code after both
+  callers compile and validate.
+
+Exit criteria:
+
+- Desktop XR and Android XR share one OpenXR session/frame/action host path.
+- App-local code is limited to platform bootstrap, launch/config plumbing,
+  graphics factory selection, validation markers, and app lifecycle concerns.
+- The shared boundary exposes renderer-facing view/target data rather than
+  leaking platform activity/window concepts into shared engine crates.
+- No new Quest terrain or controller feature is added on top of duplicated
+  Android-only copies of desktop XR logic.
+
 ### Slice 3 - Mclone Runtime Frame On Quest
 
 - [ ] Stage/load `reference/minecraft-1.17.1/extracted.zip` from app external
   files.
-- [ ] Reuse the desktop XR mclone-frame path for integrated server/client,
-  render-section sync, texture atlas, sky, terrain, and actor resources.
+- [ ] Reuse the shared XR host plus the desktop-proven mclone-frame path for
+  integrated server/client, render-section sync, texture atlas, sky, terrain,
+  and actor resources.
 - [ ] Convert Quest runtime eye poses/FOV into `ChunkRenderView` values.
 - [ ] Render a small-radius real mclone scene per eye.
 - [ ] Validate headset-visible terrain and log render-section/drawn-index
@@ -261,7 +335,7 @@ Known remaining blocker for completing Slice 2:
 
 ### Slice 4 - Controller Actions And Locomotion
 
-- [ ] Port/reuse the desktop XR action set shape for Quest Touch controllers.
+- [ ] Reuse the shared XR host action set shape for Quest Touch controllers.
 - [ ] Feed left-stick/right-stick/A-button into the shared locomotion path.
 - [ ] Validate movement, yaw, and jump on-device with awake controllers.
 
@@ -278,6 +352,13 @@ Known remaining blocker for completing Slice 2:
   package.
 - Do not add OpenXR, JNI, or Android activity types to shared client, server,
   protocol, mesh, worldgen, light, render-session, or app-runtime crates.
+- Do not continue Quest implementation by copying desktop XR private modules
+  into `mclone-android-xr-client`. The app-local Android OpenXR code from the
+  session smoke is temporary bring-up evidence and must be folded into the
+  shared app/platform XR boundary before terrain or controller work advances.
+- A dedicated app/platform XR crate may depend on OpenXR, `wgpu`, `wgpu-hal`,
+  and graphics backend crates behind platform features. It must not own Android
+  activity/JNI or desktop window/event-loop concerns.
 - Do not fork the mclone renderer or render-section cache for Quest.
 - Do not add hand tracking, passthrough, spatial scene, render models, or
   in-world UI until the basic mclone frame and locomotion are validated.
@@ -296,6 +377,15 @@ bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,
 Current Slice 2 session milestone:
 
 ```bash
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+bash android-xr/build-apk.sh --debug
+bash android-xr/validate-quest-openxr.sh --debug --skip-build --session-only --view-pose 0,120,-96,180
+```
+
+Shared XR host extraction gates:
+
+```bash
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
 cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
 bash android-xr/build-apk.sh --debug
 bash android-xr/validate-quest-openxr.sh --debug --skip-build --session-only --view-pose 0,120,-96,180
