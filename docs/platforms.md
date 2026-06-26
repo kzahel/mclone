@@ -36,6 +36,12 @@ helpers and fixtures remain active reference assets.
 Desktop flat remains the fastest daily loop. That is an iteration choice, not
 permission to make shared engine APIs desktop-shaped.
 
+Client platform and server host mode are separate axes. Local integrated play
+is a useful default for bring-up and offline validation, but every supported
+client lane should retain a path to dedicated-server play. Future P2P or
+shared-session modes should reuse the same command/update protocol and runtime
+contracts, with only the transport/session adapter changing.
+
 The platform posture is now validation-backed across the five client targets.
 New shared features should be designed against shared contracts first, then
 checked through representative gates. Do not require every feature branch to
@@ -86,6 +92,7 @@ Shared engine crates own:
 
 - protocol and client/server session facts
 - authoritative runtime, chunk scheduling, and chunk publication
+- host-mode-neutral client/server command and update contracts
 - client replica, movement/input intent, and interaction state
 - asset parsing and packed asset source abstractions
 - render-section meshing, dirty/cache policy, and compile scheduling
@@ -141,7 +148,10 @@ This includes desktop flat, flat Android, headless captures, and the web canvas
 path. The app shells are not identical: desktop owns native threads and
 keyboard/mouse, Android owns `NativeActivity` lifecycle and touch, and web owns
 browser workers and canvas APIs. The convergence point is shared runtime/render
-state and explicit frame facts.
+state and explicit frame facts. The server host mode is independent from that
+platform shell: local integrated and remote dedicated should differ by
+session/transport adapter, not by private client, simulation, or render-session
+logic.
 
 Stereo XR hosts:
 
@@ -226,18 +236,22 @@ manual checks:
    crates but still has app-local scene/runtime glue. Move reusable pieces into
    `mclone-app-runtime` so desktop flat, flat Android, headless, and web stay
    closer to one single-view host contract.
-3. **Finish XR terrain-state convergence.** `mclone-xr-scene` is now shared,
+3. **Make dedicated-server play a platform invariant.** Desktop currently has
+   the richest remote dedicated path. Promote local-integrated versus remote
+   dedicated into a shared host-mode contract so flat Android, web, and XR
+   clients can join dedicated hosts without platform-private runtime forks.
+4. **Finish XR terrain-state convergence.** `mclone-xr-scene` is now shared,
    but desktop XR still retains some richer app-local terrain/actor/session
    behavior. Migrating that behind shared XR scene interfaces will reduce
    divergence before adding UI, actors, or comfort settings.
-4. **Promote lighting and UI as shared feature contracts.** Lighting and
+5. **Promote lighting and UI as shared feature contracts.** Lighting and
    menus/HUD/options/loading UI are the next user-visible parity blockers.
    Land them once through shared data/UI/render contracts instead of per
    platform paths.
-5. **Add adapter conformance tests.** Prefer tests for render-target/view
+6. **Add adapter conformance tests.** Prefer tests for render-target/view
    descriptors, asset-source discovery, input intent mapping, and render-section
    compile contracts over running every device for every feature branch.
-6. **Keep device/headset smokes as boundary sentinels.** Run full Android,
+7. **Keep device/headset smokes as boundary sentinels.** Run full Android,
    Quest, and desktop XR validation when touching platform glue, packaging,
    OpenXR session/swapchain/action code, graphics wrapping, or shared contracts
    they uniquely exercise.

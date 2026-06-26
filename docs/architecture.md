@@ -58,6 +58,7 @@ Good divergences are ones where we can say all of the following clearly:
 - Support desktop flat, desktop OpenXR, Android XR / Quest standalone, flat Android, and web/WASM clients over shared engine contracts.
 - Support local singleplayer without render-thread worldgen stalls.
 - Support browser and native multiplayer clients against an authoritative server.
+- Preserve dedicated-server play as a supported host mode for every client lane.
 - Support a headless dedicated server.
 - Preserve a path to vanilla 1.17.1 overworld parity.
 - Preserve a path to non-vanilla gameplay later, including alternate physics systems such as PhysX-backed simulation.
@@ -112,6 +113,11 @@ Likewise, local singleplayer and remote multiplayer should share the same messag
 - local: `postMessage` / `MessagePort`
 - remote dedicated: WebSocket by default, with HTTP retained only as non-default compatibility coverage
 - future P2P or high-rate snapshot lanes: WebRTC only if the protocol needs it
+
+The client platform is not the host mode. Desktop flat, flat Android, web,
+desktop XR, and Android XR should be able to select local integrated or remote
+dedicated play through shared runtime contracts, with P2P later treated as
+another session/transport topology behind the same command/update model.
 
 ### 5. Parity and custom gameplay are policies, not architectural forks
 
@@ -331,6 +337,11 @@ The first dedicated-host slice is now landed in that shape:
 
 What is still missing is remote client connectivity, not a separate server runtime core.
 
+That missing connectivity must be closed as a cross-platform client invariant,
+not as a desktop-only feature. Desktop TCP, browser WebSocket, Android network
+permissions/config, and future P2P transports are adapter details around the
+same client/server protocol and runtime host-mode contract.
+
 ## Data boundaries
 
 The architecture should revolve around stable engine-level data contracts, not around direct object sharing across unrelated layers.
@@ -477,6 +488,7 @@ The codebase is materially closer to this target architecture now that the five 
 Current gaps:
 
 - flat Android still carries app-local scene/runtime glue that should be collapsed into `mclone-app-runtime` where it is not truly Android-specific
+- remote dedicated play is still richer on desktop than on the other client lanes; dedicated-server capability needs to become a platform invariant rather than a desktop app feature
 - desktop XR and Android XR share the new XR host/graphics/scene crates, but desktop XR still has richer app-local terrain/actor/session behavior that should converge before adding more XR-only features
 - lighting has a strong first pass, but parity correctness and render integration are still a user-visible feature gap
 - shared menu/HUD/options/loading UI is not yet complete enough to be the obvious feature path for every platform
@@ -491,9 +503,10 @@ The next major refactor direction should be:
 
 1. Publish a platform contract matrix: crate boundary, consuming apps, required tests/smokes, and device/headset requirements.
 2. Collapse reusable flat Android scene/runtime code into `mclone-app-runtime` so single-view hosts share the same contract.
-3. Finish XR scene convergence so desktop XR and Android XR share terrain, actor, controller, startup-pose, and locomotion behavior behind `mclone-xr-scene`.
-4. Advance lighting and shared UI as platform-neutral feature contracts.
-5. Grow authoritative gameplay beyond baseline player/session motion state without moving ownership back into renderer or app shells.
+3. Promote local-integrated versus remote-dedicated host mode into a shared runtime/session contract consumed by every client platform.
+4. Finish XR scene convergence so desktop XR and Android XR share terrain, actor, controller, startup-pose, and locomotion behavior behind `mclone-xr-scene`.
+5. Advance lighting and shared UI as platform-neutral feature contracts.
+6. Grow authoritative gameplay beyond baseline player/session motion state without moving ownership back into renderer or app shells.
 
 ## Decision checklist
 

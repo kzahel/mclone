@@ -11,6 +11,12 @@ Keep desktop flat, flat Android, headless capture, and web/WASM aligned around
 shared single-view runtime/render contracts so new features do not require
 manual platform-by-platform implementation work.
 
+An important invariant for this tactical: client platform and server host mode
+are separate axes. Local integrated is a default/validation mode, not a
+platform identity. Every client lane should retain a path to dedicated-server
+play, and future P2P/shared-session work should fit behind the same
+command/update contracts.
+
 The five validated client/platform lanes are now real. The next health problem
 is avoiding platform drift while lighting, UI, interaction, chunk streaming,
 and rendering continue to grow.
@@ -24,9 +30,8 @@ and rendering continue to grow.
 - Desktop flat wraps these through `WindowSceneRuntime`, with extra desktop
   and remote-session behavior.
 - Flat Android renders real terrain through shared crates, but still carries a
-  private `AndroidSceneRuntime` that duplicates local integrated-server
-  bring-up, chunk-view setup, polling, idle wait, render-section sync, and
-  traversal-ready queries.
+  private local-only scene shell; the first extraction removed its private
+  `AndroidSceneRuntime`, but it still has no dedicated-server host-mode path.
 - Web/WASM already consumes `SingleViewRuntime`, but its worker and browser
   adapter shape stays separate.
 
@@ -43,7 +48,9 @@ Single-view platform adapters should own only true platform concerns:
 
 Shared crates should own:
 
+- host-mode-neutral local-integrated versus remote-dedicated runtime selection
 - local integrated runtime setup and chunk-view dispatch
+- dedicated-server command/update exchange semantics
 - render-distance and chunk-tracking-radius policy
 - polling and idle wait helpers
 - render-section compile/sync policy
@@ -151,13 +158,29 @@ pnpm native:web:build
 git diff --check
 ```
 
-### Slice 3 - Contract Matrix
+### Slice 3 - Dedicated Host Mode Contract
+
+- [ ] Introduce a shared host-mode/options contract in `mclone-app-runtime`
+  that represents local integrated and remote dedicated play without desktop
+  app terminology.
+- [ ] Move command/update exchange and resync semantics behind a shared
+  session/transport boundary. Desktop TCP, browser WebSocket, Android network
+  config, and future P2P should be adapters around that boundary.
+- [ ] Keep desktop's existing `--remote-addr` behavior working while making it
+  one consumer of the shared host-mode contract.
+- [ ] Add a flat Android remote dedicated configuration path once the shared
+  contract exists. Android-specific property/intent/UI details stay in the app
+  crate.
+- [ ] Add host-mode conformance coverage so local integrated and remote
+  dedicated construction can be validated without running every device lane.
+
+### Slice 4 - Contract Matrix
 
 - [ ] Document each shared single-view boundary, consuming app crates, and the
   minimum test/smoke gate that covers it.
 - [ ] Add or update script names so the matrix is executable instead of prose.
 
-### Slice 4 - Web Adapter Check
+### Slice 5 - Web Adapter Check
 
 - [ ] Compare the web runtime/render-section path against the shared helper's
   policy.
@@ -188,7 +211,8 @@ pnpm native:android:avd-smoke -- --skip-build
 - Do not move Android activity, JNI, package, or surface ownership into
   `mclone-app-runtime`.
 - Do not add OpenXR behavior to the flat Android app.
-- Do not change desktop remote-session behavior while extracting flat Android's
-  local integrated runtime.
+- Do not regress desktop remote-session behavior while extracting shared
+  runtime contracts; remote transport generalization should be explicit and
+  covered by tests.
 - Do not make web depend on native OS threads or native filesystem assumptions.
 - Keep screenshots and logs under `/tmp`.
