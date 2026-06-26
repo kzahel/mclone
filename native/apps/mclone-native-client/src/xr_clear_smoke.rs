@@ -346,8 +346,9 @@ impl XrControllerInputSummary {
 #[cfg(not(target_os = "android"))]
 fn format_snapshot(snapshot: XrControllerSnapshot) -> String {
     format!(
-        "aim={} grip={} trigger={:.3} squeeze={:.3} select={} a={} thumbstick=({:.3}, {:.3}) thumbstick_pressed={}",
+        "aim={} aim_dir={} grip={} trigger={:.3} squeeze={:.3} select={} a={} thumbstick=({:.3}, {:.3}) thumbstick_pressed={}",
         format_position(snapshot.aim_position),
+        format_direction(snapshot.aim_direction),
         format_position(snapshot.grip_position),
         snapshot.trigger,
         snapshot.squeeze,
@@ -363,6 +364,18 @@ fn format_snapshot(snapshot: XrControllerSnapshot) -> String {
 fn format_position(position: Option<Vec3>) -> String {
     position
         .map(|position| format!("({:.3}, {:.3}, {:.3})", position.x, position.y, position.z))
+        .unwrap_or_else(|| "untracked".to_owned())
+}
+
+#[cfg(not(target_os = "android"))]
+fn format_direction(direction: Option<Vec3>) -> String {
+    direction
+        .map(|direction| {
+            format!(
+                "({:.3}, {:.3}, {:.3})",
+                direction.x, direction.y, direction.z
+            )
+        })
         .unwrap_or_else(|| "untracked".to_owned())
 }
 

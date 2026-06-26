@@ -29,7 +29,7 @@ use mclone_render_session::{
     ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineCameraInput,
     EngineCameraMovementImpulse, EngineCameraSnapshot, actor_instances_from_presentations,
 };
-use mclone_ui::{GameFramePacingMode, GameUi, GameUiRenderState, GuiScale};
+use mclone_ui::{GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiScale, Point};
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
 
@@ -48,6 +48,8 @@ pub const XR_UI_FPS_CAP: u32 = 90;
 pub const XR_MENU_PANEL_PIXELS: [u32; 2] = [1024, 576];
 pub const XR_MENU_PANEL_DISTANCE_BLOCKS: f32 = 2.2;
 pub const XR_MENU_PANEL_WIDTH_BLOCKS: f32 = 1.75;
+pub const XR_MENU_POINTER_TRIGGER_PRESS: f32 = 0.55;
+pub const XR_MENU_POINTER_TRIGGER_RELEASE: f32 = 0.35;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct XrSceneOptions {
@@ -164,8 +166,10 @@ where
     tracking_origin: Option<XrTrackingOrigin>,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
+    menu_pointer_down: bool,
     menu_panel_pose: Option<WorldGuiPanel>,
     menu_panel_recenter_pending: bool,
+    latest_controllers: Vec<XrControllerSnapshot>,
     first_eye_summary: Option<FullFrameRenderSummary>,
     rendered_frames: u32,
 }
@@ -241,8 +245,10 @@ where
             tracking_origin: None,
             last_locomotion_update: None,
             menu_toggle_down: false,
+            menu_pointer_down: false,
             menu_panel_pose: None,
             menu_panel_recenter_pending: false,
+            latest_controllers: Vec::new(),
             first_eye_summary: None,
             rendered_frames: 0,
         };
@@ -346,6 +352,8 @@ where
         let center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         self.update_menu_panel_pose(render_views);
+        self.apply_menu_pointer_input()
+            .context("apply XR menu pointer input")?;
         self.poll_runtime_and_upload(device, center_position)?;
         let render_options = self.effective_render_options(center_position);
         let sky_clear_color = self.sky_clear_color();
@@ -384,6 +392,8 @@ where
     }
 
     pub fn apply_locomotion_input(&mut self, controllers: &[XrControllerSnapshot]) -> Result<()> {
+        self.latest_controllers.clear();
+        self.latest_controllers.extend_from_slice(controllers);
         let now = Instant::now();
         let dt_seconds = self
             .last_locomotion_update
@@ -707,6 +717,8 @@ where
         if toggle_down && !self.menu_toggle_down {
             if self.ui.is_active() {
                 self.ui.close();
+                self.ui.clear_input();
+                self.menu_pointer_down = false;
                 self.menu_panel_pose = None;
                 self.menu_panel_recenter_pending = false;
                 log::info!("XR menu closed");
@@ -721,6 +733,8 @@ where
 
     fn update_menu_panel_pose(&mut self, render_views: [ChunkRenderView; 2]) {
         if !self.ui.is_active() {
+            self.ui.clear_input();
+            self.menu_pointer_down = false;
             self.menu_panel_pose = None;
             self.menu_panel_recenter_pending = false;
             return;
@@ -730,6 +744,115 @@ where
         }
         self.menu_panel_pose = Some(xr_menu_panel_from_render_views(render_views));
         self.menu_panel_recenter_pending = false;
+    }
+
+    fn apply_menu_pointer_input(&mut self) -> Result<()> {
+        if !self.ui.is_active() {
+            self.ui.clear_input();
+            self.menu_pointer_down = false;
+            return Ok(());
+        }
+        let Some(panel) = self.menu_panel_pose else {
+            self.ui.clear_input();
+            self.menu_pointer_down = false;
+            return Ok(());
+        };
+        let Some(origin) = self.tracking_origin else {
+            return Ok(());
+        };
+        let transform = XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())?;
+        let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
+        self.ui.set_scale(gui_scale);
+        let ui_state = self.current_ui_render_state();
+        let hit = xr_menu_pointer_hit_from_controllers(
+            &self.latest_controllers,
+            transform,
+            panel,
+            gui_scale,
+        );
+        let Some(hit) = hit else {
+            self.ui.clear_input();
+            self.menu_pointer_down = false;
+            return Ok(());
+        };
+        let trigger_down = xr_menu_pointer_trigger_down(hit.trigger, self.menu_pointer_down);
+        let action = if trigger_down && !self.menu_pointer_down {
+            self.ui.pointer_down(hit.point, ui_state);
+            None
+        } else if !trigger_down && self.menu_pointer_down {
+            let (_handled, action) = self.ui.pointer_up(hit.point, ui_state);
+            action
+        } else {
+            let (_handled, action) = self.ui.pointer_move(hit.point, ui_state);
+            action
+        };
+        self.menu_pointer_down = trigger_down;
+        if let Some(action) = action {
+            self.apply_xr_ui_action(action)?;
+        }
+        Ok(())
+    }
+
+    fn apply_xr_ui_action(&mut self, action: GameUiAction) -> Result<()> {
+        match action {
+            GameUiAction::ToggleSectionOcclusion => {
+                self.render_options.section_occlusion_culling =
+                    !self.render_options.section_occlusion_culling;
+                log::info!(
+                    "XR section occlusion culling {}",
+                    if self.render_options.section_occlusion_culling {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+            }
+            GameUiAction::ToggleFullbright => {
+                self.render_options.force_fullbright = !self.render_options.force_fullbright;
+                log::info!(
+                    "XR fullbright {}",
+                    if self.render_options.force_fullbright {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+            }
+            GameUiAction::SetRenderDistance(render_distance) => {
+                let render_distance =
+                    render_distance.clamp(1, MAX_XR_RENDER_DISTANCE as i32) as u32;
+                if self
+                    .runtime
+                    .set_render_distance(render_distance)
+                    .context("set XR render distance from menu")?
+                {
+                    log::info!(
+                        "XR render distance set to {} (chunk tracking radius {})",
+                        render_distance,
+                        self.runtime.chunk_tracking_radius()
+                    );
+                }
+            }
+            GameUiAction::Quit => {
+                log::info!("XR menu quit action ignored by shared scene");
+            }
+            GameUiAction::CycleFramePacing
+            | GameUiAction::CycleFpsCap
+            | GameUiAction::SetTouchLookSensitivity(_) => {}
+            GameUiAction::StartWorld
+            | GameUiAction::Resume
+            | GameUiAction::OpenOptions(_)
+            | GameUiAction::BackToTitle
+            | GameUiAction::BackToPause => {}
+        }
+        self.ui.apply_action(action);
+        if !self.ui.is_active() {
+            self.ui.clear_input();
+            self.menu_pointer_down = false;
+            self.menu_panel_pose = None;
+            self.menu_panel_recenter_pending = false;
+        }
+        Ok(())
     }
 
     fn camera_inside_occluding_block(&self, position: Vec3) -> bool {
@@ -828,6 +951,19 @@ impl XrStageToWorld {
                     .mul_vec3(stage_position - self.origin_stage),
             (self.stage_to_world_rotation * stage_orientation).normalize(),
         )
+    }
+
+    pub fn transform_position(self, stage_position: Vec3) -> Vec3 {
+        self.origin_world
+            + self
+                .stage_to_world_rotation
+                .mul_vec3(stage_position - self.origin_stage)
+    }
+
+    pub fn transform_direction(self, stage_direction: Vec3) -> Vec3 {
+        self.stage_to_world_rotation
+            .mul_vec3(stage_direction)
+            .normalize_or_zero()
     }
 }
 
@@ -985,6 +1121,89 @@ pub fn xr_menu_panel_from_render_views(render_views: [ChunkRenderView; 2]) -> Wo
     )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct XrMenuPointerHit {
+    pub hand: XrHand,
+    pub point: Point,
+    pub trigger: f32,
+    pub distance: f32,
+}
+
+pub fn xr_menu_pointer_hit_from_controllers(
+    controllers: &[XrControllerSnapshot],
+    transform: XrStageToWorld,
+    panel: WorldGuiPanel,
+    gui_scale: GuiScale,
+) -> Option<XrMenuPointerHit> {
+    [XrHand::Right, XrHand::Left].into_iter().find_map(|hand| {
+        controllers
+            .iter()
+            .find(|controller| controller.hand == hand)
+            .and_then(|controller| {
+                let ray_origin = transform.transform_position(controller.aim_position?);
+                let ray_direction = transform.transform_direction(controller.aim_direction?);
+                xr_menu_panel_pointer_hit(panel, gui_scale, ray_origin, ray_direction).map(
+                    |(point, distance)| XrMenuPointerHit {
+                        hand,
+                        point,
+                        trigger: controller.trigger,
+                        distance,
+                    },
+                )
+            })
+    })
+}
+
+pub fn xr_menu_panel_pointer_hit(
+    panel: WorldGuiPanel,
+    gui_scale: GuiScale,
+    ray_origin: Vec3,
+    ray_direction: Vec3,
+) -> Option<(Point, f32)> {
+    if !ray_origin.is_finite()
+        || !ray_direction.is_finite()
+        || ray_direction.length_squared() <= f32::EPSILON
+    {
+        return None;
+    }
+    let direction = ray_direction.normalize();
+    let normal = panel.right.cross(panel.up).normalize_or_zero();
+    if normal.length_squared() <= f32::EPSILON {
+        return None;
+    }
+    let denominator = direction.dot(normal);
+    if denominator.abs() <= 1.0e-5 {
+        return None;
+    }
+    let distance = (panel.center - ray_origin).dot(normal) / denominator;
+    if !distance.is_finite() || distance < 0.0 {
+        return None;
+    }
+    let hit = ray_origin + direction * distance;
+    let local = hit - panel.center;
+    let panel_x = local.dot(panel.right) + panel.width * 0.5;
+    let panel_y = panel.height * 0.5 - local.dot(panel.up);
+    if panel_x < 0.0 || panel_x > panel.width || panel_y < 0.0 || panel_y > panel.height {
+        return None;
+    }
+    Some((
+        Point {
+            x: panel_x / panel.width * gui_scale.width,
+            y: panel_y / panel.height * gui_scale.height,
+        },
+        distance,
+    ))
+}
+
+pub fn xr_menu_pointer_trigger_down(trigger: f32, was_down: bool) -> bool {
+    let trigger = if trigger.is_finite() { trigger } else { 0.0 };
+    if was_down {
+        trigger >= XR_MENU_POINTER_TRIGGER_RELEASE
+    } else {
+        trigger >= XR_MENU_POINTER_TRIGGER_PRESS
+    }
+}
+
 fn xr_menu_panel_height_blocks() -> f32 {
     XR_MENU_PANEL_WIDTH_BLOCKS * XR_MENU_PANEL_PIXELS[1] as f32 / XR_MENU_PANEL_PIXELS[0] as f32
 }
@@ -1133,6 +1352,59 @@ mod tests {
     }
 
     #[test]
+    fn xr_menu_panel_pointer_hit_maps_world_ray_to_gui_point() {
+        let panel = WorldGuiPanel::new(Vec3::new(0.0, 64.0, -2.0), Vec3::X, Vec3::Y, 2.0, 1.0);
+        let scale = GuiScale::from_pixels(1000, 500);
+
+        let (point, distance) =
+            xr_menu_panel_pointer_hit(panel, scale, Vec3::new(0.25, 64.25, 0.0), Vec3::NEG_Z)
+                .unwrap();
+
+        assert_eq!(
+            point,
+            Point {
+                x: scale.width * 0.625,
+                y: scale.height * 0.25
+            }
+        );
+        assert!((distance - 2.0).abs() < 1.0e-6);
+        assert!(
+            xr_menu_panel_pointer_hit(panel, scale, Vec3::new(2.0, 64.0, 0.0), Vec3::NEG_Z)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn xr_menu_pointer_prefers_right_controller_hit() {
+        let panel = WorldGuiPanel::new(Vec3::new(0.0, 64.0, -2.0), Vec3::X, Vec3::Y, 2.0, 1.0);
+        let scale = GuiScale::from_pixels(1000, 500);
+        let transform = test_stage_to_world();
+        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
+        left.aim_position = Some(Vec3::new(-0.25, 64.0, 0.0));
+        left.aim_direction = Some(Vec3::NEG_Z);
+        left.trigger = 0.25;
+        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
+        right.aim_position = Some(Vec3::new(0.25, 64.0, 0.0));
+        right.aim_direction = Some(Vec3::NEG_Z);
+        right.trigger = 0.75;
+
+        let hit = xr_menu_pointer_hit_from_controllers(&[left, right], transform, panel, scale)
+            .expect("right controller hit");
+
+        assert_eq!(hit.hand, XrHand::Right);
+        assert_eq!(hit.trigger, 0.75);
+        assert_eq!(hit.point.x, scale.width * 0.625);
+    }
+
+    #[test]
+    fn xr_menu_trigger_uses_hysteresis() {
+        assert!(!xr_menu_pointer_trigger_down(0.5, false));
+        assert!(xr_menu_pointer_trigger_down(0.56, false));
+        assert!(xr_menu_pointer_trigger_down(0.4, true));
+        assert!(!xr_menu_pointer_trigger_down(0.3, true));
+    }
+
+    #[test]
     fn startup_view_pose_maps_stage_center_to_requested_world_pose() {
         let stage_center = Vec3::new(1.0, 1.6, -0.25);
         let stage_orientation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
@@ -1191,6 +1463,7 @@ mod tests {
         XrControllerSnapshot {
             hand,
             aim_position: Some(Vec3::ZERO),
+            aim_direction: Some(Vec3::NEG_Z),
             grip_position: Some(Vec3::ZERO),
             trigger: 0.0,
             squeeze: 0.0,
@@ -1198,6 +1471,14 @@ mod tests {
             a_pressed,
             thumbstick,
             thumbstick_pressed: false,
+        }
+    }
+
+    fn test_stage_to_world() -> XrStageToWorld {
+        XrStageToWorld {
+            origin_stage: Vec3::ZERO,
+            origin_world: Vec3::ZERO,
+            stage_to_world_rotation: Quat::IDENTITY,
         }
     }
 

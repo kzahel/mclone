@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use glam::{Vec2, Vec3};
+use glam::{Quat, Vec2, Vec3};
 use openxr as xr;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,6 +12,7 @@ pub enum XrHand {
 pub struct XrControllerSnapshot {
     pub hand: XrHand,
     pub aim_position: Option<Vec3>,
+    pub aim_direction: Option<Vec3>,
     pub grip_position: Option<Vec3>,
     pub trigger: f32,
     pub squeeze: f32,
@@ -414,19 +415,21 @@ impl OpenXrControllerActions {
         let grip_active = grip_action
             .is_active(session, xr::Path::NULL)
             .unwrap_or(false);
-        let aim_position = aim_active
-            .then(|| Self::locate_position(aim_space, stage, time))
+        let aim_pose = aim_active
+            .then(|| Self::locate_pose(aim_space, stage, time))
             .flatten();
         let grip_position = grip_active
-            .then(|| Self::locate_position(grip_space, stage, time))
-            .flatten();
+            .then(|| Self::locate_pose(grip_space, stage, time))
+            .flatten()
+            .map(|pose| pose.position);
         if !aim_active && !grip_active {
             return None;
         }
 
         Some(XrControllerSnapshot {
             hand,
-            aim_position,
+            aim_position: aim_pose.map(|pose| pose.position),
+            aim_direction: aim_pose.map(|pose| pose.forward),
             grip_position,
             trigger: Self::read_float_action(session, trigger_action),
             squeeze: Self::read_float_action(session, squeeze_action),
@@ -442,7 +445,7 @@ impl OpenXrControllerActions {
         })
     }
 
-    fn locate_position(space: &xr::Space, stage: &xr::Space, time: xr::Time) -> Option<Vec3> {
+    fn locate_pose(space: &xr::Space, stage: &xr::Space, time: xr::Time) -> Option<XrActionPose> {
         let location = space.locate(stage, time).ok()?;
         if !location
             .location_flags
@@ -458,15 +461,20 @@ impl OpenXrControllerActions {
             location.pose.position.y,
             location.pose.position.z,
         );
-        if !position.is_finite()
-            || !location.pose.orientation.x.is_finite()
-            || !location.pose.orientation.y.is_finite()
-            || !location.pose.orientation.z.is_finite()
-            || !location.pose.orientation.w.is_finite()
+        let orientation = Quat::from_xyzw(
+            location.pose.orientation.x,
+            location.pose.orientation.y,
+            location.pose.orientation.z,
+            location.pose.orientation.w,
+        );
+        if !position.is_finite() || !finite_quat(orientation) || orientation.length_squared() < 0.5
         {
             return None;
         }
-        Some(position)
+        Some(XrActionPose {
+            position,
+            forward: (orientation.normalize() * Vec3::NEG_Z).normalize_or_zero(),
+        })
     }
 
     fn read_float_action<G: xr::Graphics>(
@@ -492,4 +500,14 @@ impl OpenXrControllerActions {
             .map(|state| state.current_state)
             .unwrap_or(false)
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct XrActionPose {
+    position: Vec3,
+    forward: Vec3,
+}
+
+fn finite_quat(value: Quat) -> bool {
+    value.x.is_finite() && value.y.is_finite() && value.z.is_finite() && value.w.is_finite()
 }

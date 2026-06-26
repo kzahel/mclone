@@ -1,8 +1,8 @@
 # 089: Shared XR Menu Surface
 
-Status: active; shared XR menu state plus first world-space panel renderer have
-landed. Headset visual validation and controller-pointer interaction remain
-open.
+Status: active; shared XR menu state, first world-space panel renderer, and
+first controller-ray pointer interaction have landed. Headset visual validation
+and comfort tuning remain open.
 
 ## Purpose
 
@@ -19,9 +19,10 @@ controller input can land behind shared contracts.
 - `GuiRenderer` remains a flat NDC overlay renderer, but
   `mclone-render::gui::WorldGuiRenderer` can now rasterize a `GuiDrawList` to a
   texture and draw it as a 3D quad from a `ChunkRenderView`.
-- XR controller actions already expose a left-hand `select_pressed` input. On
-  Touch controllers this is bound to left X/Y; on simple controllers it is the
-  left select click.
+- XR controller actions expose left-hand `select_pressed` for menu toggle and
+  aim-pose/trigger data for panel pointer input. On Touch controllers left
+  select is bound to left X/Y; on simple controllers it is the left select
+  click.
 - Flat Android still has an app-local empty UI path and should adopt
   `mclone-ui` separately.
 
@@ -54,12 +55,16 @@ controller input can land behind shared contracts.
   - Initial sizing is 1024x576 pixels, 1.75 blocks wide, and 2.2 blocks in front
     of the HMD.
   - Headset visual readability and comfort validation are still pending.
-- [ ] **Slice 3: XR pointer and menu actions.**
-  - Raycast controller aim against the panel.
-  - Map trigger press/release to shared pointer down/up.
-  - Apply menu actions in the shared XR scene where they are scene-local
-    (`Resume`, render-distance, fullbright, section occlusion), and surface
-    app-owned actions explicitly.
+- [x] **Slice 3: XR pointer and menu actions.**
+  - `XrControllerSnapshot` carries aim direction from the OpenXR aim pose.
+  - `mclone-xr-scene` transforms controller aim rays into world space and
+    raycasts them against the menu panel.
+  - Right-hand pointer hits win; left-hand pointer hits are fallback.
+  - Trigger press/release maps to shared `GameUi` pointer down/up with hysteresis.
+  - Shared XR scene applies scene-local menu actions: resume/open/back, fullbright,
+    section occlusion, and render distance.
+  - App-owned actions such as quitting remain explicitly ignored by the shared
+    scene.
 - [ ] **Slice 4: flat Android `mclone-ui` adoption.**
   - Replace the empty GUI draw list with the shared menu path.
   - Route touch menu/pointer input through the same `GameUi` APIs used by
@@ -98,6 +103,14 @@ Slice 2 validation on 2026-06-26:
 - [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
 - [x] `pnpm native:web:build`
 - [ ] Headset visual smoke of the world-space panel.
+
+Slice 3 validation on 2026-06-26:
+
+- [x] `cargo fmt --manifest-path native/Cargo.toml --all`
+- [x] `cargo test --manifest-path native/Cargo.toml -p mclone-xr-host -p mclone-xr-scene`
+- [x] `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`
+- [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+- [ ] Headset visual/interaction smoke of the world-space panel pointer.
 
 Device gates for Slices 2-3:
 
