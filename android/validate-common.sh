@@ -356,6 +356,8 @@ mclone_install_launch_smoke() {
         mclone_note "Skipping Android asset-pack staging"
     fi
 
+    mclone_configure_remote_addr "$serial"
+
     "$ADB" -s "$serial" shell am force-stop "$MCLONE_ANDROID_APP_ID" >/dev/null 2>&1 || true
     "$ADB" -s "$serial" logcat -c || true
 
@@ -410,4 +412,17 @@ mclone_install_launch_smoke() {
     mclone_note "Screenshot: $screenshot_path"
     mclone_note "Logcat: $log_path"
     mclone_note "Android smoke validation passed"
+}
+
+mclone_configure_remote_addr() {
+    local serial="$1"
+    local property="${MCLONE_ANDROID_REMOTE_ADDR_PROPERTY:-debug.mclone.remote_addr}"
+    local remote_addr="${MCLONE_ANDROID_REMOTE_ADDR:-}"
+
+    if [[ -n "$remote_addr" ]]; then
+        mclone_note "Configuring Android remote dedicated address $property=$remote_addr"
+    else
+        mclone_note "Clearing Android remote dedicated address $property"
+    fi
+    "$ADB" -s "$serial" shell setprop "$property" "$remote_addr" >/dev/null
 }

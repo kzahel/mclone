@@ -169,7 +169,7 @@ git diff --check
   config, and future P2P should be adapters around that boundary.
 - [x] Keep desktop's existing `--remote-addr` behavior working while making it
   one consumer of the shared host-mode contract.
-- [ ] Add a flat Android remote dedicated configuration path once the shared
+- [x] Add a flat Android remote dedicated configuration path once the shared
   contract exists. Android-specific property/intent/UI details stay in the app
   crate.
 - [x] Add host-mode conformance coverage so local integrated and remote
@@ -204,6 +204,42 @@ cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features
 cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
 cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
 pnpm native:web:build
+git diff --check
+```
+
+Recorded Slice 3 second-chunk result:
+
+- Added flat Android remote dedicated selection through Android-owned
+  `debug.mclone.remote_addr`. When unset or empty, flat Android remains local
+  integrated.
+- Added `INTERNET` permission to the flat Android manifest and `mclone-net` /
+  `mclone-protocol` dependencies to `mclone-android-client`.
+- Added an Android TCP session adapter implementing
+  `RemoteDedicatedServerSession`. The app owns address/property lookup and TCP;
+  remote command application and reconnect/resync policy still come from
+  `mclone-app-runtime::host_mode`.
+- Added an Android single-view scene wrapper that presents the same render,
+  polling, cached-section, sky/time, and traversal-ready surface to the frame
+  renderer for local integrated and remote dedicated host modes.
+- Updated AVD and Quest-flat validators with `--remote-addr`; validators clear
+  `debug.mclone.remote_addr` when the option is omitted so local smokes remain
+  deterministic.
+
+Validation after Slice 3 second chunk:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime host_mode
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+bash -n android/validate-avd.sh android/validate-quest-flat.sh android/validate-common.sh
+pnpm native:web:build
+cd native
+cargo ndk -t arm64-v8a -o ../android/jniLibs build --release --package mclone-android-client --lib
+cd ../android
+.\gradlew.bat assembleDebug
 git diff --check
 ```
 

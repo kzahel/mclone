@@ -2,27 +2,38 @@
 
 #[cfg(target_os = "android")]
 mod android {
-    use std::ffi::{CString, c_char, c_int};
+    use std::ffi::{CStr, CString, c_char, c_int};
     use std::sync::Arc;
     use std::sync::Once;
 
-    use anyhow::{Result, bail};
+    use anyhow::{Context, Result, bail};
     use glam::Vec3;
+    use mclone_app_runtime::SingleViewRuntime;
     use mclone_app_runtime::frame_render::{
         FullFrameGui, RenderStreamStats, record_render_section_update_stats,
         render_full_frame_for_view,
     };
+    use mclone_app_runtime::host_mode::{
+        RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions,
+        dispatch_remote_dedicated_command,
+    };
     use mclone_app_runtime::local_single_view::{
         LocalSingleViewSceneOptions, LocalSingleViewSceneRuntime,
     };
+    use mclone_app_runtime::render_assets::{
+        RenderSectionCompileWorker, TexturedMeshAssets, load_textured_mesh_assets,
+    };
     use mclone_core::ChunkPos;
     use mclone_mesh::quad_face_count_from_indices;
+    use mclone_net::NativeClientSession;
+    use mclone_protocol::{ClientCommand, ServerUpdate};
     use mclone_render::chunk::{
         ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
         TexturedSectionUploadReport,
     };
     use mclone_render::sky_render::SkyRenderer;
     use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
+    use mclone_render_session::RenderSectionCacheUpdate;
     use mclone_ui::GuiDrawList;
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -33,6 +44,8 @@ mod android {
     use winit::window::{Window, WindowAttributes, WindowId};
 
     const LOG_TAG: &str = "mclone_android";
+    const REMOTE_ADDR_PROPERTY: &str = "debug.mclone.remote_addr";
+    const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
     const TOUCH_ORBIT_RADIANS_PER_SCREEN: f32 = 2.4;
 
     #[allow(unsafe_code)]
@@ -44,6 +57,8 @@ mod android {
             format: *const c_char,
             ...
         ) -> c_int;
+
+        fn __system_property_get(name: *const c_char, value: *mut c_char) -> c_int;
     }
 
     #[allow(unsafe_code)]
@@ -129,7 +144,7 @@ mod android {
         depth: ChunkDepthTarget,
         sky: SkyRenderer,
         draw: TexturedSectionDrawResources,
-        scene: LocalSingleViewSceneRuntime,
+        scene: AndroidSingleViewSceneRuntime,
         camera: ChunkCamera,
         render_options: TexturedSectionRenderOptions,
         render_stats: RenderStreamStats,
@@ -265,12 +280,14 @@ mod android {
             width: u32,
             height: u32,
         ) -> Result<Self> {
-            let mut scene = LocalSingleViewSceneRuntime::new(android_scene_options())?;
+            let scene_options = android_scene_options();
+            let mut scene = AndroidSingleViewSceneRuntime::new(scene_options)?;
+            let host_label = scene.host_label();
             let camera = android_smoke_camera(scene.render_distance());
             let camera_position = camera_position(camera);
             let (poll_count, poll_ms) = scene.poll_until_idle()?;
             log::info!(
-                "Mclone Android integrated runtime idle: polls={} poll_ms={:.1} loaded_chunks={}",
+                "Mclone Android {host_label} runtime idle: polls={} poll_ms={:.1} loaded_chunks={}",
                 poll_count,
                 poll_ms,
                 scene.loaded_chunk_count()
@@ -279,7 +296,7 @@ mod android {
             let sections = scene.cached_sections();
             if sections.is_empty() {
                 bail!(
-                    "Android integrated runtime produced no render sections: loaded_chunks={} rebuilt_sections={} submitted_compile_sections={} completed_compile_sections={} pending_compile_jobs={}",
+                    "Android {host_label} runtime produced no render sections: loaded_chunks={} rebuilt_sections={} submitted_compile_sections={} completed_compile_sections={} pending_compile_jobs={}",
                     scene.loaded_chunk_count(),
                     section_update.rebuilt_section_count(),
                     section_update.submitted_compile_section_count,
@@ -316,7 +333,7 @@ mod android {
             };
             record_render_section_update_stats(&mut render_stats, &section_update, upload_report);
             log::info!(
-                "Mclone Android uploaded integrated render sections: sections={} faces={} indices={} rebuilt_sections={} visibility_graph_count={}",
+                "Mclone Android uploaded {host_label} render sections: sections={} faces={} indices={} rebuilt_sections={} visibility_graph_count={}",
                 render_stats.section_count,
                 render_stats.face_count,
                 render_stats.index_count,
@@ -400,7 +417,8 @@ mod android {
             )?;
             if self.frame_index == 0 {
                 log::info!(
-                    "Mclone Android rendered integrated frame: sections={}/{} indices={}/{} gui_commands={}",
+                    "Mclone Android rendered {} frame: sections={}/{} indices={}/{} gui_commands={}",
+                    self.scene.host_label(),
                     summary.drawn_section_count,
                     summary.section_count,
                     summary.drawn_index_count,
@@ -413,10 +431,338 @@ mod android {
         }
     }
 
-    fn android_scene_options() -> LocalSingleViewSceneOptions {
-        LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
-            .with_day_time(Some(6000))
-            .with_freeze_time(true)
+    #[derive(Clone, Debug)]
+    struct AndroidSceneOptions {
+        seed: i64,
+        center: ChunkPos,
+        render_distance: u32,
+        day_time_override: Option<u64>,
+        freeze_time: bool,
+        remote_addr: Option<String>,
+    }
+
+    impl AndroidSceneOptions {
+        fn local_options(&self) -> LocalSingleViewSceneOptions {
+            LocalSingleViewSceneOptions::new(self.seed, self.center, self.render_distance)
+                .with_day_time(self.day_time_override)
+                .with_freeze_time(self.freeze_time)
+        }
+
+        fn host_options(&self) -> SingleViewHostOptions {
+            SingleViewHostOptions::new(self.center, self.render_distance)
+        }
+    }
+
+    fn android_scene_options() -> AndroidSceneOptions {
+        let remote_addr = android_remote_addr();
+        if let Some(remote_addr) = &remote_addr {
+            log::info!(
+                "Mclone Android remote dedicated address from {REMOTE_ADDR_PROPERTY}: {remote_addr}"
+            );
+        } else {
+            log::info!(
+                "Mclone Android remote dedicated address from {REMOTE_ADDR_PROPERTY}: <none>"
+            );
+        }
+        AndroidSceneOptions {
+            seed: 12345,
+            center: ChunkPos::new(0, 0),
+            render_distance: 2,
+            day_time_override: Some(6000),
+            freeze_time: true,
+            remote_addr,
+        }
+    }
+
+    fn android_remote_addr() -> Option<String> {
+        android_property(REMOTE_ADDR_PROPERTY)
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    }
+
+    #[allow(unsafe_code)]
+    fn android_property(name: &str) -> Option<String> {
+        let name = CString::new(name).ok()?;
+        let mut value = [0 as c_char; ANDROID_PROPERTY_VALUE_MAX];
+        let len = unsafe { __system_property_get(name.as_ptr(), value.as_mut_ptr()) };
+        if len <= 0 {
+            return None;
+        }
+        Some(
+            unsafe { CStr::from_ptr(value.as_ptr()) }
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+
+    enum AndroidSingleViewSceneRuntime {
+        Local(LocalSingleViewSceneRuntime),
+        Remote(AndroidRemoteDedicatedSceneRuntime),
+    }
+
+    impl AndroidSingleViewSceneRuntime {
+        fn new(options: AndroidSceneOptions) -> Result<Self> {
+            if options.remote_addr.is_some() {
+                return Ok(Self::Remote(AndroidRemoteDedicatedSceneRuntime::new(
+                    options,
+                )?));
+            }
+            Ok(Self::Local(LocalSingleViewSceneRuntime::new(
+                options.local_options(),
+            )?))
+        }
+
+        fn host_mode(&self) -> SingleViewHostMode {
+            match self {
+                Self::Local(_) => SingleViewHostMode::LocalIntegrated,
+                Self::Remote(_) => SingleViewHostMode::RemoteDedicated,
+            }
+        }
+
+        fn host_label(&self) -> &'static str {
+            match self.host_mode() {
+                SingleViewHostMode::LocalIntegrated => "local integrated",
+                SingleViewHostMode::RemoteDedicated => "remote dedicated",
+            }
+        }
+
+        fn mesh_assets(&self) -> &TexturedMeshAssets {
+            match self {
+                Self::Local(scene) => scene.mesh_assets(),
+                Self::Remote(scene) => scene.mesh_assets(),
+            }
+        }
+
+        fn render_distance(&self) -> u32 {
+            match self {
+                Self::Local(scene) => scene.render_distance(),
+                Self::Remote(scene) => scene.render_distance(),
+            }
+        }
+
+        fn loaded_chunk_count(&self) -> usize {
+            match self {
+                Self::Local(scene) => scene.loaded_chunk_count(),
+                Self::Remote(scene) => scene.loaded_chunk_count(),
+            }
+        }
+
+        fn poll(&mut self) -> Result<bool> {
+            match self {
+                Self::Local(scene) => scene.poll(),
+                Self::Remote(scene) => scene.poll(),
+            }
+        }
+
+        fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
+            match self {
+                Self::Local(scene) => scene.poll_until_idle(),
+                Self::Remote(scene) => scene.poll_until_idle(),
+            }
+        }
+
+        fn sync_render_sections(
+            &mut self,
+            camera_position: Vec3,
+        ) -> Result<RenderSectionCacheUpdate> {
+            match self {
+                Self::Local(scene) => scene.sync_render_sections(camera_position),
+                Self::Remote(scene) => scene.sync_render_sections(camera_position),
+            }
+        }
+
+        fn sync_all_render_sections(
+            &mut self,
+            camera_position: Vec3,
+        ) -> Result<RenderSectionCacheUpdate> {
+            match self {
+                Self::Local(scene) => scene.sync_all_render_sections(camera_position),
+                Self::Remote(scene) => scene.sync_all_render_sections(camera_position),
+            }
+        }
+
+        fn cached_sections(&self) -> Vec<mclone_mesh::TexturedRenderSectionMesh> {
+            match self {
+                Self::Local(scene) => scene.cached_sections(),
+                Self::Remote(scene) => scene.cached_sections(),
+            }
+        }
+
+        fn traversal_ready_render_section_keys(
+            &self,
+            camera_position: Vec3,
+        ) -> std::collections::BTreeSet<mclone_mesh::RenderSectionKey> {
+            match self {
+                Self::Local(scene) => scene.traversal_ready_render_section_keys(camera_position),
+                Self::Remote(scene) => scene.traversal_ready_render_section_keys(camera_position),
+            }
+        }
+
+        fn sky_clear_color(&self) -> wgpu::Color {
+            match self {
+                Self::Local(scene) => scene.sky_clear_color(),
+                Self::Remote(scene) => scene.sky_clear_color(),
+            }
+        }
+
+        fn time_of_day(&self) -> f32 {
+            match self {
+                Self::Local(scene) => scene.time_of_day(),
+                Self::Remote(scene) => scene.time_of_day(),
+            }
+        }
+
+        fn sun_angle(&self) -> f32 {
+            match self {
+                Self::Local(scene) => scene.sun_angle(),
+                Self::Remote(scene) => scene.sun_angle(),
+            }
+        }
+    }
+
+    struct AndroidRemoteDedicatedSceneRuntime {
+        core: SingleViewRuntime,
+        session: AndroidRemoteServerSession,
+        mesh_assets: TexturedMeshAssets,
+        render_compile_worker: RenderSectionCompileWorker,
+    }
+
+    impl AndroidRemoteDedicatedSceneRuntime {
+        fn new(options: AndroidSceneOptions) -> Result<Self> {
+            let remote_addr = options
+                .remote_addr
+                .as_ref()
+                .context("remote dedicated Android scene requires a remote address")?
+                .clone();
+            let mesh_assets = load_textured_mesh_assets()?;
+            let render_compile_worker =
+                RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
+            let mut session = AndroidRemoteServerSession::connect(remote_addr.as_str())?;
+            let host_options = options.host_options();
+            let mut core = SingleViewRuntime::remote_dedicated(
+                host_options.center,
+                host_options.render_distance,
+                host_options.chunk_tracking_radius,
+            );
+            if let Some(command) = core.set_chunk_view_command(
+                host_options.center,
+                host_options.render_distance,
+                host_options.chunk_tracking_radius,
+            ) {
+                dispatch_remote_dedicated_command(&mut core, &mut session, command).with_context(
+                    || format!("failed to initialize Android remote dedicated runtime from {remote_addr}"),
+                )?;
+            }
+            Ok(Self {
+                core,
+                session,
+                mesh_assets,
+                render_compile_worker,
+            })
+        }
+
+        fn mesh_assets(&self) -> &TexturedMeshAssets {
+            &self.mesh_assets
+        }
+
+        fn render_distance(&self) -> u32 {
+            self.core.render_distance()
+        }
+
+        fn loaded_chunk_count(&self) -> usize {
+            self.core.client().loaded_chunk_count()
+        }
+
+        fn poll(&mut self) -> Result<bool> {
+            // Remote dedicated is request/response today. Keep the session
+            // resident so future Android gameplay commands reuse this
+            // connection instead of reconnecting per frame.
+            let _keep_session_open = &mut self.session;
+            Ok(false)
+        }
+
+        fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
+            Ok((0, 0.0))
+        }
+
+        fn sync_render_sections(
+            &mut self,
+            camera_position: Vec3,
+        ) -> Result<RenderSectionCacheUpdate> {
+            self.core.sync_render_sections(
+                &mut self.render_compile_worker,
+                camera_position,
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
+        }
+
+        fn sync_all_render_sections(
+            &mut self,
+            camera_position: Vec3,
+        ) -> Result<RenderSectionCacheUpdate> {
+            self.core.sync_all_render_sections(
+                &mut self.render_compile_worker,
+                camera_position,
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
+        }
+
+        fn cached_sections(&self) -> Vec<mclone_mesh::TexturedRenderSectionMesh> {
+            self.core.cached_sections()
+        }
+
+        fn traversal_ready_render_section_keys(
+            &self,
+            camera_position: Vec3,
+        ) -> std::collections::BTreeSet<mclone_mesh::RenderSectionKey> {
+            self.core
+                .traversal_ready_render_section_keys(camera_position)
+        }
+
+        fn sky_clear_color(&self) -> wgpu::Color {
+            mclone_render::sky::overworld_clear_color(self.core.time_of_day())
+        }
+
+        fn time_of_day(&self) -> f32 {
+            self.core.time_of_day()
+        }
+
+        fn sun_angle(&self) -> f32 {
+            self.core.sun_angle()
+        }
+    }
+
+    #[derive(Debug)]
+    struct AndroidRemoteServerSession {
+        addr: String,
+        session: NativeClientSession,
+    }
+
+    impl AndroidRemoteServerSession {
+        fn connect(addr: impl Into<String>) -> Result<Self> {
+            let addr = addr.into();
+            let session = NativeClientSession::connect(addr.as_str())
+                .with_context(|| format!("failed to connect to Android remote server {addr}"))?;
+            Ok(Self { addr, session })
+        }
+    }
+
+    impl RemoteDedicatedServerSession for AndroidRemoteServerSession {
+        fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>> {
+            self.session.send_command(&command).with_context(|| {
+                format!(
+                    "failed to exchange command with Android remote server {}",
+                    self.addr
+                )
+            })
+        }
+
+        fn reconnect(&mut self) -> Result<()> {
+            self.session = NativeClientSession::connect(self.addr.as_str()).with_context(|| {
+                format!("failed to reconnect to Android remote server {}", self.addr)
+            })?;
+            Ok(())
+        }
     }
 
     #[derive(Default)]

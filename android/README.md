@@ -12,6 +12,9 @@ Current status:
   resize, package paths, asset staging paths, and touch input.
 - Runtime, render-section streaming, texture/mesh asset loading, and full-frame
   sky/terrain composition come from shared native Rust crates.
+- The default host mode is local integrated. Setting
+  `debug.mclone.remote_addr` switches the flat Android app to remote dedicated
+  play through the shared host-mode contract.
 - AVD chunk and one-finger orbit smokes pass locally.
 - Quest-flat validation is scripted, but still needs a machine with an attached
   authorized Quest headset.
@@ -75,6 +78,16 @@ It captures:
 /tmp/mclone-android-avd-touch-logcat.txt
 ```
 
+Run against a dedicated server reachable from the AVD:
+
+```bash
+pnpm native:android:avd-smoke -- --skip-build --remote-addr 10.0.2.2:25565
+```
+
+The validator writes the address to Android property
+`debug.mclone.remote_addr` before launch. When `--remote-addr` is omitted, the
+property is cleared so normal smokes stay local integrated.
+
 Use the raw validator when you need custom paths, a visible emulator window, a
 specific serial, or a different swipe:
 
@@ -107,6 +120,13 @@ NativeActivity APK as a 2D app panel on headset hardware.
 
 ```bash
 pnpm native:android:quest-flat -- --skip-build --screenshot /tmp/mclone-quest-flat.png --log /tmp/mclone-quest-flat-logcat.txt
+```
+
+Quest-flat remote dedicated smoke uses the same option when the server is
+reachable from the headset network:
+
+```bash
+pnpm native:android:quest-flat -- --skip-build --remote-addr HOST:25565
 ```
 
 On a machine without an attached authorized Quest, the expected blocker is:

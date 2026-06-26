@@ -1069,6 +1069,8 @@ dependencies = [
  "mclone-app-runtime",
  "mclone-core",
  "mclone-mesh",
+ "mclone-net",
+ "mclone-protocol",
  "mclone-render",
  "mclone-render-session",
  "mclone-server",
