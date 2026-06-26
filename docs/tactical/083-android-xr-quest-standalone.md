@@ -10,8 +10,9 @@ actions, validated view poses, and renderer-facing XR frame descriptors through
 `mclone-xr-host`; desktop Vulkan and Android Vulkan now share the unsafe
 OpenXR/Vulkan/wgpu graphics factory through `mclone-xr-graphics`. Slice 3 now
 renders real mclone terrain on Quest through the shared `mclone-xr-scene`
-terrain runtime. Continue into Quest controller locomotion before optional XR
-features.
+terrain runtime. Slice 4 has its first controller-locomotion chunk wired
+through the shared action and locomotion contracts. Continue with
+awake-controller headset validation before optional XR features.
 
 ## Purpose
 
@@ -60,10 +61,11 @@ Ready inputs:
 - `native/crates/mclone-xr-scene` owns the first shared mclone terrain XR
   runtime boundary: local integrated server/client bring-up, render-section
   compilation/upload, terrain atlas upload, sky/terrain full-frame rendering,
-  startup view-pose alignment mode, and stereo `ChunkRenderView` conversion for
-  Android XR. Desktop XR consumes the shared alignment type and clip-plane
-  constants now; migrating the full desktop mclone terrain state onto the same
-  crate remains a tightening follow-up.
+  startup view-pose alignment mode, stereo `ChunkRenderView` conversion for
+  Android XR, and the shared XR thumbstick/A-button to `EngineCameraInput`
+  locomotion mapper. Desktop XR consumes the same locomotion mapper instead of
+  retaining a private copy; migrating the full desktop mclone terrain state
+  onto the same crate remains a tightening follow-up.
 - Playbox has the mature reference implementation for Android XR packaging,
   loader/session ownership, launch-scoped startup arguments, Android property
   toggles, and Quest validation scripts.
@@ -788,9 +790,67 @@ Observed Quest result:
 
 ### Slice 4 - Controller Actions And Locomotion
 
-- [ ] Reuse the shared XR host action set shape for Quest Touch controllers.
-- [ ] Feed left-stick/right-stick/A-button into the shared locomotion path.
+- [x] Reuse the shared XR host action set shape for Quest Touch controllers.
+- [x] Feed left-stick/right-stick/A-button into the shared locomotion path.
 - [ ] Validate movement, yaw, and jump on-device with awake controllers.
+
+Recorded Slice 4 first-chunk result:
+
+- Moved the desktop-proven XR locomotion mapper out of the desktop app crate
+  into `mclone-xr-scene`, keeping the Quest/VirtualDesktopXR axis transpose,
+  dead-zone, right-stick yaw, and right-A jump behavior covered by shared unit
+  tests.
+- Rewired desktop XR to consume the shared locomotion mapper instead of keeping
+  a private desktop-only copy.
+- Android XR now creates the shared `OpenXrControllerActions` action set after
+  session/swapchain setup, logs `MCLONE_ANDROID_XR_CONTROLLERS_READY`, polls
+  controller snapshots each rendered frame, and applies them to
+  `XrMcloneTerrainState` before rendering terrain.
+- `XrMcloneTerrainState` now owns the shared XR locomotion application point:
+  controller snapshots become `EngineCameraInput`, the engine camera applies
+  movement through the existing player runtime path, and the player pose is
+  committed back into the runtime before eye rendering.
+- `android-xr/validate-quest-openxr.sh` now requires
+  `MCLONE_ANDROID_XR_CONTROLLERS_READY` for both session-only and full
+  submitted-frame validation. `MCLONE_ANDROID_XR_CONTROLLERS_ACTIVE` is logged
+  opportunistically when awake controllers produce snapshots, but is not a
+  deterministic validator requirement yet.
+
+Validation after the first Slice 4 chunk, June 26, 2026:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash -n android-xr/validate-quest-openxr.sh'
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/build-apk.sh --debug'
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --wait-seconds 90'
+```
+
+Observed Quest result:
+
+- Quest serial: `2G0YC1ZF93041Z`
+- Scene options: `seed=12345`, center `(0, 0)`, render distance `2`,
+  `day_time=Some(6000)`, `freeze_time=true`
+- Log markers observed by validator: `MCLONE_ANDROID_XR_ASSETS_READY`,
+  `MCLONE_ANDROID_XR_CONTROLLERS_READY`, `MCLONE_ANDROID_XR_TERRAIN_READY`,
+  `MCLONE_ANDROID_XR_READY`
+- Controller action setup log:
+  `requested binding profiles=simple_controller, oculus_touch, valve_index, htc_vive, microsoft_motion_controller`
+- Runtime terrain: `chunks=49`, `sections=122`, `faces=96699`,
+  `indices=580194`
+- Initial debug-build terrain warmup: `initial_polls=10272`,
+  `poll_ms=503.213`, `elapsed_ms=17978.995`
+- First-eye frame summary: `frames=1`, `drawn_sections=27`,
+  `drawn_indices=236490`
+- First submitted frame: `OpenXR mclone terrain frame submitted: submitted=1
+  runtime_frames=1 skipped=0`
+- Awake controller snapshots were observed after the first frame:
+  `MCLONE_ANDROID_XR_CONTROLLERS_ACTIVE count=2`
+- Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
 
 ### Slice 5 - Quest Runtime Hardening
 
@@ -819,7 +879,7 @@ Observed Quest result:
 
 ## Validation Lanes
 
-Current terrain-frame validation:
+Current controller/terrain-frame validation:
 
 ```bash
 cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android

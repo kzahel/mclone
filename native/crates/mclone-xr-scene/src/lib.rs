@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec2, Vec3};
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
     render_full_frame_for_view,
@@ -19,12 +19,16 @@ use mclone_render::chunk::{
 };
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
-use mclone_render_session::{EngineCameraController, EngineCameraSnapshot};
+use mclone_render_session::{
+    ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineCameraInput,
+    EngineCameraMovementImpulse, EngineCameraSnapshot,
+};
 use mclone_server::{
     IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
     ServerRunnerDiagnostics,
 };
 use mclone_ui::GuiDrawList;
+use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
 
 pub const DEFAULT_XR_SEED: i64 = 12_345;
@@ -34,6 +38,9 @@ pub const DEFAULT_XR_RENDER_DISTANCE: u32 = 2;
 pub const MAX_XR_RENDER_DISTANCE: u32 = 16;
 pub const XR_NEAR: f32 = 0.05;
 pub const XR_FAR: f32 = 700.0;
+pub const XR_JOYPAD_DEAD_ZONE: f32 = 0.18;
+pub const XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND: f64 = 1.6;
+pub const XR_LOCOMOTION_MAX_FRAME_SECONDS: f64 = 0.1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct XrSceneOptions {
@@ -125,6 +132,7 @@ pub struct XrMcloneTerrainState {
     mesh_assets: TexturedMeshAssets,
     render_stats: RenderStreamStats,
     tracking_origin: Option<XrTrackingOrigin>,
+    last_locomotion_update: Option<Instant>,
     first_eye_summary: Option<FullFrameRenderSummary>,
     rendered_frames: u32,
 }
@@ -184,6 +192,7 @@ impl XrMcloneTerrainState {
             mesh_assets,
             render_stats: RenderStreamStats::default(),
             tracking_origin: None,
+            last_locomotion_update: None,
             first_eye_summary: None,
             rendered_frames: 0,
         };
@@ -315,6 +324,21 @@ impl XrMcloneTerrainState {
         )?;
         self.record_eye0_summary(left_summary);
         Ok(self.frame_summary())
+    }
+
+    pub fn apply_locomotion_input(&mut self, controllers: &[XrControllerSnapshot]) -> Result<()> {
+        let now = Instant::now();
+        let dt_seconds = self
+            .last_locomotion_update
+            .replace(now)
+            .map(|last| now.duration_since(last).as_secs_f64())
+            .unwrap_or(0.0);
+        let input = xr_locomotion_input_from_controllers(controllers, dt_seconds);
+        self.camera
+            .apply_movement_input(self.runtime.client(), input);
+        self.commit_engine_camera_player_pose()
+            .context("sync XR locomotion player pose")?;
+        Ok(())
     }
 
     pub fn frame_summary(&self) -> XrTerrainFrameSummary {
@@ -855,9 +879,70 @@ fn vec3d_from_glam(value: Vec3) -> Vec3d {
     Vec3d::new(f64::from(value.x), f64::from(value.y), f64::from(value.z))
 }
 
+pub fn xr_locomotion_input_from_controllers(
+    controllers: &[XrControllerSnapshot],
+    dt_seconds: f64,
+) -> EngineCameraInput {
+    let dt_seconds = if dt_seconds.is_finite() {
+        dt_seconds.clamp(0.0, XR_LOCOMOTION_MAX_FRAME_SECONDS)
+    } else {
+        0.0
+    };
+    let left_axis = controllers
+        .iter()
+        .find(|controller| controller.hand == XrHand::Left)
+        .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
+        .unwrap_or(Vec2::ZERO);
+    let right_axis = controllers
+        .iter()
+        .find(|controller| controller.hand == XrHand::Right)
+        .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
+        .unwrap_or(Vec2::ZERO);
+    let jump = controllers
+        .iter()
+        .any(|controller| controller.hand == XrHand::Right && controller.a_pressed);
+    let movement_impulse = (left_axis.length_squared() > f32::EPSILON)
+        .then(|| xr_left_stick_movement_impulse(left_axis));
+    let yaw_delta = f64::from(right_axis.x) * XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * dt_seconds;
+    let mouse_delta_x = if ENGINE_CAMERA_MOUSE_SENSITIVITY > 0.0 {
+        yaw_delta / ENGINE_CAMERA_MOUSE_SENSITIVITY
+    } else {
+        0.0
+    };
+
+    EngineCameraInput {
+        dt_seconds,
+        mouse_delta_x,
+        jump,
+        movement_impulse,
+        ..EngineCameraInput::default()
+    }
+}
+
+fn xr_left_stick_movement_impulse(axis: Vec2) -> EngineCameraMovementImpulse {
+    // Quest/VirtualDesktopXR validation reports the left locomotion axes as
+    // transposed relative to the engine movement impulse: physical left/right
+    // arrives on Y, while physical forward/back arrives on X.
+    EngineCameraMovementImpulse::new(axis.y, axis.x)
+}
+
+fn joypad_axis_after_dead_zone(axis: Vec2) -> Vec2 {
+    if !axis.is_finite() {
+        return Vec2::ZERO;
+    }
+    let length = axis.length();
+    if length <= XR_JOYPAD_DEAD_ZONE {
+        return Vec2::ZERO;
+    }
+    let normalized = axis / length;
+    let adjusted = ((length.min(1.0) - XR_JOYPAD_DEAD_ZONE) / (1.0 - XR_JOYPAD_DEAD_ZONE)).max(0.0);
+    normalized * adjusted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_render_session::ENGINE_CAMERA_MOUSE_SENSITIVITY;
 
     #[test]
     fn default_scene_options_match_desktop_xr_smoke_defaults() {
@@ -871,5 +956,83 @@ mod tests {
     fn startup_view_pose_alignment_mode_is_explicit() {
         assert_eq!(XrViewAlignmentMode::PlayerSpawn.label(), "player-spawn");
         assert_eq!(XrViewAlignmentMode::ViewPose.label(), "view-pose");
+    }
+
+    #[test]
+    fn xr_locomotion_maps_left_stick_and_a_button_to_engine_input() {
+        let input = xr_locomotion_input_from_controllers(
+            &[
+                test_controller(XrHand::Left, Vec2::new(1.0, 0.0), false),
+                test_controller(XrHand::Right, Vec2::ZERO, true),
+            ],
+            1.0 / 72.0,
+        );
+
+        assert_eq!(input.dt_seconds, 1.0 / 72.0);
+        assert!(input.jump);
+        assert_eq!(
+            input.movement_impulse,
+            Some(EngineCameraMovementImpulse::new(0.0, 1.0))
+        );
+        assert_eq!(input.mouse_delta_x, 0.0);
+    }
+
+    #[test]
+    fn xr_locomotion_maps_left_stick_lateral_axis_to_strafe() {
+        let input = xr_locomotion_input_from_controllers(
+            &[test_controller(XrHand::Left, Vec2::new(0.0, 1.0), false)],
+            1.0 / 72.0,
+        );
+
+        assert_eq!(
+            input.movement_impulse,
+            Some(EngineCameraMovementImpulse::new(1.0, 0.0))
+        );
+    }
+
+    #[test]
+    fn xr_locomotion_dead_zone_filters_small_thumbstick_noise() {
+        let input = xr_locomotion_input_from_controllers(
+            &[
+                test_controller(XrHand::Left, Vec2::splat(XR_JOYPAD_DEAD_ZONE * 0.25), false),
+                test_controller(
+                    XrHand::Right,
+                    Vec2::splat(XR_JOYPAD_DEAD_ZONE * 0.25),
+                    false,
+                ),
+            ],
+            1.0,
+        );
+
+        assert_eq!(input.movement_impulse, None);
+        assert_eq!(input.mouse_delta_x, 0.0);
+    }
+
+    #[test]
+    fn xr_locomotion_maps_right_stick_to_desktop_mouse_turn_path() {
+        let input = xr_locomotion_input_from_controllers(
+            &[test_controller(XrHand::Right, Vec2::new(1.0, 0.0), false)],
+            0.05,
+        );
+        let expected_mouse_delta =
+            XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * 0.05 / ENGINE_CAMERA_MOUSE_SENSITIVITY;
+
+        assert!((input.mouse_delta_x - expected_mouse_delta).abs() < 1.0e-6);
+        assert_eq!(input.movement_impulse, None);
+        assert!(!input.jump);
+    }
+
+    fn test_controller(hand: XrHand, thumbstick: Vec2, a_pressed: bool) -> XrControllerSnapshot {
+        XrControllerSnapshot {
+            hand,
+            aim_position: Some(Vec3::ZERO),
+            grip_position: Some(Vec3::ZERO),
+            trigger: 0.0,
+            squeeze: 0.0,
+            select_pressed: false,
+            a_pressed,
+            thumbstick,
+            thumbstick_pressed: false,
+        }
     }
 }

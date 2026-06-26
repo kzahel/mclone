@@ -280,6 +280,9 @@ fi
 if ! grep -F "MCLONE_ANDROID_XR_ASSETS_READY" "$LOG_PATH" >/dev/null 2>&1; then
     mclone_die "Android XR assets-ready marker was not seen; see $LOG_PATH"
 fi
+if ! grep -F "MCLONE_ANDROID_XR_CONTROLLERS_READY" "$LOG_PATH" >/dev/null 2>&1; then
+    mclone_die "Android XR controllers-ready marker was not seen; see $LOG_PATH"
+fi
 if [[ "$SESSION_ONLY" != "1" ]] && ! grep -F "MCLONE_ANDROID_XR_TERRAIN_READY" "$LOG_PATH" >/dev/null 2>&1; then
     mclone_die "Android XR terrain-ready marker was not seen; see $LOG_PATH"
 fi

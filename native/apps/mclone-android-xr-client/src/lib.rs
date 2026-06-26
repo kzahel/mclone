@@ -17,7 +17,8 @@ mod android {
     };
     use mclone_render::chunk::TexturedSectionRenderOptions;
     use mclone_xr_host::{
-        OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE, XrFrameStats,
+        OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
+        XrControllerSnapshot, XrFrameStats,
     };
     use mclone_xr_scene::{
         XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
@@ -612,6 +613,18 @@ mod android {
             left_eye.texture_count(),
             right_eye.texture_count()
         );
+        let controller_actions = OpenXrControllerActions::create_with_binding_logger(
+            graphics.session.instance(),
+            &graphics.session,
+            |profile, err| {
+                log::warn!("OpenXR binding suggestion unavailable for {profile}: {err:?}");
+            },
+        )
+        .context("initialize Android XR controller actions")?;
+        log::info!(
+            "Android XR controller actions: requested binding profiles=simple_controller, oculus_touch, valve_index, htc_vive, microsoft_motion_controller"
+        );
+        log::info!("MCLONE_ANDROID_XR_CONTROLLERS_READY");
         log::info!("MCLONE_ANDROID_XR_SESSION_READY");
 
         let AndroidXrRuntimeAssets {
@@ -643,6 +656,7 @@ mod android {
             &mut left_eye,
             &mut right_eye,
             &mut terrain,
+            &controller_actions,
         )
     }
 
@@ -654,11 +668,13 @@ mod android {
         left_eye: &mut graphics_vulkan::OpenXrEyeState,
         right_eye: &mut graphics_vulkan::OpenXrEyeState,
         terrain: &mut XrMcloneTerrainState,
+        controller_actions: &OpenXrControllerActions,
     ) -> Result<()> {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
         let mut frame_stats = XrFrameStats::default();
         let mut logged_ready = false;
+        let mut logged_controller_activity = false;
 
         loop {
             if !poll_android_events(app, Some(Duration::from_millis(0)))? {
@@ -701,15 +717,31 @@ mod android {
             )?;
 
             let frame_result = if frame_state.should_render {
-                render_mclone_frame(
-                    graphics,
-                    stage,
-                    environment_blend_mode,
-                    frame_state.predicted_display_time,
-                    left_eye,
-                    right_eye,
-                    terrain,
-                )
+                controller_actions
+                    .poll(
+                        &graphics.session,
+                        stage,
+                        frame_state.predicted_display_time,
+                    )
+                    .and_then(|controllers| {
+                        if !logged_controller_activity && !controllers.is_empty() {
+                            logged_controller_activity = true;
+                            log::info!(
+                                "MCLONE_ANDROID_XR_CONTROLLERS_ACTIVE count={}",
+                                controllers.len()
+                            );
+                        }
+                        render_mclone_frame(
+                            graphics,
+                            stage,
+                            environment_blend_mode,
+                            frame_state.predicted_display_time,
+                            left_eye,
+                            right_eye,
+                            terrain,
+                            &controllers,
+                        )
+                    })
                 .map(|summary| {
                     frame_stats.record_submitted_frame();
                     if !logged_ready {
@@ -777,9 +809,13 @@ mod android {
         left_eye: &mut graphics_vulkan::OpenXrEyeState,
         right_eye: &mut graphics_vulkan::OpenXrEyeState,
         terrain: &mut XrMcloneTerrainState,
+        controllers: &[XrControllerSnapshot],
     ) -> Result<mclone_xr_scene::XrTerrainFrameSummary> {
         let stereo_views =
             mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+        terrain
+            .apply_locomotion_input(controllers)
+            .context("apply Android XR controller locomotion")?;
 
         let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
         let right_target =

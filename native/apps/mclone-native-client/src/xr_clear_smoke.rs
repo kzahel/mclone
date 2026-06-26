@@ -10,7 +10,7 @@ use anyhow::{Context, Result, anyhow, bail};
 #[cfg(target_os = "android")]
 use anyhow::{Result, bail};
 #[cfg(not(target_os = "android"))]
-use glam::{Quat, Vec2, Vec3};
+use glam::{Quat, Vec3};
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
@@ -34,10 +34,7 @@ use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 #[cfg(all(test, not(target_os = "android")))]
 use mclone_render_session::ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND;
 #[cfg(not(target_os = "android"))]
-use mclone_render_session::{
-    ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineCameraInput,
-    EngineCameraMovementImpulse, EngineCameraSnapshot,
-};
+use mclone_render_session::{EngineCameraController, EngineCameraSnapshot};
 #[cfg(not(target_os = "android"))]
 use mclone_ui::GuiDrawList;
 #[cfg(not(target_os = "android"))]
@@ -46,7 +43,7 @@ use mclone_xr_host::{
     XrControllerSnapshot, XrFrameStats, XrHand, XrStereoConfig,
 };
 #[cfg(not(target_os = "android"))]
-use mclone_xr_scene::{XR_FAR, XR_NEAR, XrViewAlignmentMode};
+use mclone_xr_scene::{XR_FAR, XR_NEAR, XrViewAlignmentMode, xr_locomotion_input_from_controllers};
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
 
@@ -100,13 +97,6 @@ const XR_SAMPLE_COUNT: u32 = 1;
 const SESSION_READY_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(not(target_os = "android"))]
 const SESSION_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(25);
-#[cfg(not(target_os = "android"))]
-const XR_JOYPAD_DEAD_ZONE: f32 = 0.18;
-#[cfg(not(target_os = "android"))]
-const XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND: f64 = 1.6;
-#[cfg(not(target_os = "android"))]
-const XR_LOCOMOTION_MAX_FRAME_SECONDS: f64 = 0.1;
-
 #[cfg(not(target_os = "android"))]
 #[derive(Debug)]
 struct OpenXrRuntimeManifest {
@@ -914,69 +904,6 @@ fn apply_xr_startup_view_pose(
 }
 
 #[cfg(not(target_os = "android"))]
-fn xr_locomotion_input_from_controllers(
-    controllers: &[XrControllerSnapshot],
-    dt_seconds: f64,
-) -> EngineCameraInput {
-    let dt_seconds = if dt_seconds.is_finite() {
-        dt_seconds.clamp(0.0, XR_LOCOMOTION_MAX_FRAME_SECONDS)
-    } else {
-        0.0
-    };
-    let left_axis = controllers
-        .iter()
-        .find(|controller| controller.hand == XrHand::Left)
-        .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
-        .unwrap_or(Vec2::ZERO);
-    let right_axis = controllers
-        .iter()
-        .find(|controller| controller.hand == XrHand::Right)
-        .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
-        .unwrap_or(Vec2::ZERO);
-    let jump = controllers
-        .iter()
-        .any(|controller| controller.hand == XrHand::Right && controller.a_pressed);
-    let movement_impulse = (left_axis.length_squared() > f32::EPSILON)
-        .then(|| xr_left_stick_movement_impulse(left_axis));
-    let yaw_delta = f64::from(right_axis.x) * XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * dt_seconds;
-    let mouse_delta_x = if ENGINE_CAMERA_MOUSE_SENSITIVITY > 0.0 {
-        yaw_delta / ENGINE_CAMERA_MOUSE_SENSITIVITY
-    } else {
-        0.0
-    };
-
-    EngineCameraInput {
-        dt_seconds,
-        mouse_delta_x,
-        jump,
-        movement_impulse,
-        ..EngineCameraInput::default()
-    }
-}
-
-#[cfg(not(target_os = "android"))]
-fn xr_left_stick_movement_impulse(axis: Vec2) -> EngineCameraMovementImpulse {
-    // Quest/VirtualDesktopXR validation reports the left locomotion axes as
-    // transposed relative to the engine movement impulse: physical left/right
-    // arrives on Y, while physical forward/back arrives on X.
-    EngineCameraMovementImpulse::new(axis.y, axis.x)
-}
-
-#[cfg(not(target_os = "android"))]
-fn joypad_axis_after_dead_zone(axis: Vec2) -> Vec2 {
-    if !axis.is_finite() {
-        return Vec2::ZERO;
-    }
-    let length = axis.length();
-    if length <= XR_JOYPAD_DEAD_ZONE {
-        return Vec2::ZERO;
-    }
-    let normalized = axis / length;
-    let adjusted = ((length.min(1.0) - XR_JOYPAD_DEAD_ZONE) / (1.0 - XR_JOYPAD_DEAD_ZONE)).max(0.0);
-    normalized * adjusted
-}
-
-#[cfg(not(target_os = "android"))]
 fn glam_vec3_from_vec3d(value: Vec3d) -> Vec3 {
     Vec3::new(value.x as f32, value.y as f32, value.z as f32)
 }
@@ -1604,80 +1531,5 @@ mod tests {
         );
 
         assert!((world_position - Vec3::new(8.35, 72.0, -12.2)).length() < 1.0e-5);
-    }
-
-    fn test_controller(hand: XrHand, thumbstick: Vec2, a_pressed: bool) -> XrControllerSnapshot {
-        XrControllerSnapshot {
-            hand,
-            aim_position: Some(Vec3::ZERO),
-            grip_position: Some(Vec3::ZERO),
-            trigger: 0.0,
-            squeeze: 0.0,
-            select_pressed: false,
-            a_pressed,
-            thumbstick,
-            thumbstick_pressed: false,
-        }
-    }
-
-    #[test]
-    fn xr_locomotion_maps_left_stick_and_a_button_to_engine_input() {
-        let input = xr_locomotion_input_from_controllers(
-            &[
-                test_controller(XrHand::Left, Vec2::X, false),
-                test_controller(XrHand::Right, Vec2::ZERO, true),
-            ],
-            0.05,
-        );
-
-        assert_eq!(input.dt_seconds, 0.05);
-        assert!(input.jump);
-        let impulse = input.movement_impulse.unwrap();
-        assert!(impulse.left.abs() < 1.0e-6);
-        assert!((impulse.forward - 1.0).abs() < 1.0e-6);
-    }
-
-    #[test]
-    fn xr_locomotion_maps_left_stick_lateral_axis_to_strafe() {
-        let input = xr_locomotion_input_from_controllers(
-            &[test_controller(XrHand::Left, Vec2::Y, false)],
-            0.05,
-        );
-
-        let impulse = input.movement_impulse.unwrap();
-        assert!((impulse.left - 1.0).abs() < 1.0e-6);
-        assert!(impulse.forward.abs() < 1.0e-6);
-    }
-
-    #[test]
-    fn xr_locomotion_dead_zone_filters_small_thumbstick_noise() {
-        let input = xr_locomotion_input_from_controllers(
-            &[
-                test_controller(XrHand::Left, Vec2::splat(XR_JOYPAD_DEAD_ZONE * 0.25), false),
-                test_controller(
-                    XrHand::Right,
-                    Vec2::splat(XR_JOYPAD_DEAD_ZONE * 0.25),
-                    false,
-                ),
-            ],
-            0.05,
-        );
-
-        assert!(input.movement_impulse.is_none());
-        assert_eq!(input.mouse_delta_x, 0.0);
-        assert!(!input.jump);
-    }
-
-    #[test]
-    fn xr_locomotion_maps_right_stick_to_desktop_mouse_turn_path() {
-        let input = xr_locomotion_input_from_controllers(
-            &[test_controller(XrHand::Right, Vec2::X, false)],
-            0.05,
-        );
-
-        let expected_mouse_delta =
-            XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * 0.05 / ENGINE_CAMERA_MOUSE_SENSITIVITY;
-        assert!((input.mouse_delta_x - expected_mouse_delta).abs() < 1.0e-9);
-        assert_eq!(input.mouse_delta_y, 0.0);
     }
 }
