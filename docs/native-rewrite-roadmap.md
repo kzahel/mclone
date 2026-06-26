@@ -220,18 +220,19 @@ Current native shape:
   server scheduler, client replica, movement, interaction, and persistence
 - first-pass sky/block lighting pipeline and render-light integration
 - shared render-section dirty/cache/compile policy across desktop and web
-- shared single-view runtime helpers consumed by desktop/headless and flat
-  Android, with more app-local glue still worth collapsing
+- shared native single-view scene shell consumed by desktop/headless and flat
+  Android, with concrete transport/config kept in app crates
 - shared XR host/graphics/scene crates consumed by desktop XR and Android XR
 - Rust/WebGPU UI path replacing the old web DOM UI, with menu/options/loading
   feature parity still needed
 
 Recommended next alignment milestones:
 
-1. document the platform contract matrix: which crate boundary each app uses,
-   and which smoke/test catches regressions there
-2. move reusable flat Android scene/runtime glue into `mclone-app-runtime` so
-   single-view hosts share one thinner contract
+1. keep the platform parity/contract matrices in
+   [`topics/platform-parity.md`](topics/platform-parity.md) current and connect
+   each shared boundary to an explicit smoke/test sentinel
+2. reconcile host-mode convergence for web and XR so local-integrated versus
+   remote-dedicated remains a shared runtime/session contract across all lanes
 3. finish desktop XR terrain-state convergence onto `mclone-xr-scene` so
    desktop XR and Quest do not diverge before actors/UI/comfort features
 4. advance lighting correctness/rendering and shared menu/HUD/options/loading

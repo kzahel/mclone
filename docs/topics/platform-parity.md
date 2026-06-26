@@ -22,8 +22,9 @@ boundary; this doc owns the per-feature and per-contract grids and the rule that
 keeps new features from re-forking.
 
 > Status note: the current-state cells below were derived from a code audit on
-> 2026-06-26. When a slice closes a gap, update the affected cell **and** link
-> the tactical. If a cell and the code disagree, the code wins — fix the cell.
+> 2026-06-26 and refreshed after tactical 084's native scene-shell convergence.
+> When a slice closes a gap, update the affected cell **and** link the tactical.
+> If a cell and the code disagree, the code wins — fix the cell.
 
 ## Platform Classes And Target State
 
@@ -94,7 +95,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✅ |
 | Menus (title/pause/options) | ✅ | ✗ | ✗ | ✗ | ✅ |
 | Connect / world-select UI | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✗ | ✗ | ◐ (transport exists, not wired) |
+| Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✗ | ◐ (transport exists, not wired) |
 | Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ (cfg-excluded) |
 | Audio | ✗ | ✗ | ✗ | ✗ | ✗ |
 
@@ -108,9 +109,9 @@ Reading the matrix:
   actors spawned.
 - **Android-XR** trails desktop-XR by one row: actor rendering is not wired
   (assets are loaded then discarded).
-- **flat-Android** is the thinnest lane and the largest gap to its (now full)
-  target: it is a render demo with an orbit camera, no player, no interaction,
-  no UI, no networking.
+- **flat-Android** is still the thinnest full-client lane: it has terrain,
+  lighting, shared local/remote host wiring, and a touch-orbit shell, but still
+  lacks player movement, interaction, actors, UI, and an in-app connect flow.
 
 ## Matrix 2 — Shared Contract × Consumer (reuse burn-down)
 
@@ -120,34 +121,40 @@ use (and should) · — n/a.
 
 | Shared boundary | native-client | web-client | flat-Android | Android-XR | Sentinel gate |
 |---|:--:|:--:|:--:|:--:|---|
-| `mclone-protocol` / `mclone-net` | ✅ | ✅ | ✗ (no dep) | ✗ (no dep) | `cargo test -p mclone-net`; `--multi-client-smoke` |
+| `mclone-protocol` / `mclone-net` | ✅ | ✅ | ✅ | ◐ (`mclone-protocol` via xr-scene, no net adapter) | `cargo test -p mclone-net`; `--multi-client-smoke` |
 | `mclone-server` / `IntegratedServer` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-server` |
 | `mclone-client::ClientRuntime` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-client` |
 | `mclone-render` (view/target draw) | ✅ | ⚑ (inline render path) | ✅ | ✅ | `native:desktop-chunk:smoke` |
 | `mclone-render-session` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-render-session` |
 | `app-runtime::SingleViewRuntime` | ✅ | ✅ | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::frame_render` | ✅ | ⚑ (inline reimpl) | ✅ | ✅ (via xr-scene) | `native:desktop-chunk:smoke`; `native:web:smoke` |
-| `app-runtime::local_single_view` (scene driver) | ◐ (WindowSceneRuntime re-derives) | — (wasm-gated) | ✅ | ⚑ (xr-scene re-derives) | `cargo test -p mclone-app-runtime` |
-| `app-runtime::host_mode` (local vs remote) | ✅ | ⚑ (parallel async enum) | ✗ | ✗ | `cargo test -p mclone-app-runtime host_mode` |
+| `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime composes) | — (wasm-gated) | ✅ | ⚑ (xr-scene re-derives) | `cargo test -p mclone-app-runtime` |
+| `app-runtime::host_mode` (local vs remote) | ✅ | ⚑ (parallel async enum) | ✅ | ✗ | `cargo test -p mclone-app-runtime host_mode` |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✗ (empty list) | ✗ (empty list) | `native:web:app-smoke` |
 | `mclone-xr-{host,graphics,scene}` | ⚑ (app-local XrMcloneWorldState) | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
-The reuse story in one line: **the two Android crates are the only thin
-adapters; `native-client` and `web-client` carry the forks.** Concretely:
+The reuse story in one line: **desktop flat and flat Android now share the
+native single-view scene shell; web and XR still carry the important forks.**
+Concretely:
 
-- One "integrated-server scene driver" exists in **three** hand-maintained
-  copies — `LocalSingleViewSceneRuntime` (shared), `WindowSceneRuntime`
-  (`native-client`), `XrMcloneTerrainState` (`mclone-xr-scene`) — ~270 LoC of
-  near-duplicate poll/sync/idle logic.
+- The native flat single-view scene driver is shared:
+  `WindowSceneRuntime` and flat Android both compose
+  `NativeSingleViewSceneRuntime<S>`, while concrete TCP/property/config remains
+  in the app crates. This landed in
+  [`../tactical/084-single-view-platform-alignment.md`](../tactical/084-single-view-platform-alignment.md).
+- The remaining native scene-driver fork is XR:
+  `XrMcloneTerrainState` still re-derives local integrated runtime setup,
+  polling, idle wait, render-section sync, and render assets instead of
+  composing the shared native scene shell.
 - `mclone-xr-scene` is too narrow (no actors, no remote host), so desktop XR
   keeps a parallel app-local `XrMcloneWorldState` plus ~130 LoC of byte-identical
   transform helpers instead of consuming it.
 - `web-client` re-inlines the whole sky→chunk→actor render sequence instead of
   calling `render_full_frame_for_view`, and runs a parallel `WebRuntimeHost`
   enum instead of `host_mode` (see blocker #1).
-- flat Android and Android XR do not depend on `mclone-net`/`mclone-protocol` at
-  all, so remote play is unreachable from those apps.
+- flat Android now has a TCP remote-dedicated path through
+  `debug.mclone.remote_addr`; Android XR still has no remote transport adapter.
 
 ## Whole Systems That Do Not Exist Yet
 
@@ -177,8 +184,9 @@ these first:
 1. **Reconcile the host-mode async/sync seam.** `RemoteDedicatedServerSession`
    has a synchronous `send_command`, but the browser WebSocket is async, so web
    forked into a parallel `WebRuntimeHost`. Until the trait has an async-friendly
-   shape, "shared host mode" does not actually serve web/Android/XR. This unblocks
-   remote-dedicated connect on every lane. (tactical 084 Slice 3 follow-on)
+   shape, shared host mode serves native desktop and flat Android but not web or
+   XR. This unblocks remote-dedicated connect on the remaining lanes. (tactical
+   084 Slice 3 follow-on)
 2. **Build the connect/menu flow + the missing UI widgets.** Title → singleplayer
    vs server → address entry (`EditBox`) → world/seed select → loading screen. No
    lane can join a server in-app without this. Needed by the whole flat class.
@@ -189,8 +197,10 @@ these first:
 4. **Widen `mclone-xr-scene` (actors + pluggable/remote host) and delete the
    desktop-XR fork.** Lets desktop XR consume the shared scene like Android XR
    does. (platforms.md alignment #4)
-5. **Collapse the three scene-driver copies into one shared driver** that
-   `WindowSceneRuntime` and `XrMcloneTerrainState` compose. (tactical 084 Slice 2)
+5. **Collapse the remaining XR scene-driver fork** so `XrMcloneTerrainState`
+   composes the shared native scene shell where possible instead of re-owning
+   local runtime setup, polling, render-section sync, and terrain assets.
+   (tactical 084 / XR follow-on)
 6. **Add a stereo/world-space UI render path** so XR can show a reticle, menus,
    and a connect screen. (new; no doc owns this yet)
 7. **Protocol: add server push and cross-version negotiation.** Today it is

@@ -476,12 +476,19 @@ The codebase is materially closer to this target architecture now that the five 
 
 Current gaps:
 
-- flat Android still carries app-local scene/runtime glue that should be collapsed into `mclone-app-runtime` where it is not truly Android-specific
-- remote dedicated play is still richer on desktop than on the other client lanes; dedicated-server capability needs to become a platform invariant rather than a desktop app feature
-- desktop XR and Android XR share the new XR host/graphics/scene crates, but desktop XR still has richer app-local terrain/actor/session behavior that should converge before adding more XR-only features
+- native desktop flat and flat Android now share the native local/remote
+  single-view scene shell, but web still carries an async host/runtime fork and
+  XR still carries a terrain-state fork
+- remote dedicated play is now shared for native desktop and flat Android, but
+  web and XR still need host-mode convergence before dedicated-server play is a
+  true platform invariant
+- desktop XR and Android XR share the new XR host/graphics/scene crates, but
+  desktop XR still has richer app-local terrain/actor/session behavior that
+  should converge before adding more XR-only features
 - lighting has a strong first pass, but parity correctness and render integration are still a user-visible feature gap
 - shared menu/HUD/options/loading UI is not yet complete enough to be the obvious feature path for every platform
-- validation is still more script-list than contract matrix; contributors need clearer guidance on which shared boundary requires which platform sentinel
+- the platform parity tracker now records the contract matrix, but its sentinel
+  gates should become more executable and script-adjacent
 - richer gameplay still needs parity movement, entities, interactions, and server correctness work without moving ownership back into renderer/app shells
 
 That is why boundary consolidation, lighting/UI feature parity, and richer authoritative gameplay are now the architectural priorities, not more platform bring-up.
@@ -490,12 +497,18 @@ That is why boundary consolidation, lighting/UI feature parity, and richer autho
 
 The next major refactor direction should be:
 
-1. Publish a platform contract matrix: crate boundary, consuming apps, required tests/smokes, and device/headset requirements.
-2. Collapse reusable flat Android scene/runtime code into `mclone-app-runtime` so single-view hosts share the same contract.
-3. Promote local-integrated versus remote-dedicated host mode into a shared runtime/session contract consumed by every client platform.
-4. Finish XR scene convergence so desktop XR and Android XR share terrain, actor, controller, startup-pose, and locomotion behavior behind `mclone-xr-scene`.
-5. Advance lighting and shared UI as platform-neutral feature contracts.
-6. Grow authoritative gameplay beyond baseline player/session motion state without moving ownership back into renderer or app shells.
+1. Keep the feature/platform and shared-contract matrices in
+   `docs/topics/platform-parity.md` current as implementation slices land.
+2. Reconcile host-mode convergence for web and XR so local-integrated versus
+   remote-dedicated remains one runtime/session contract across all lanes.
+3. Finish XR scene convergence so desktop XR and Android XR share terrain,
+   actor, controller, startup-pose, and locomotion behavior behind
+   `mclone-xr-scene`.
+4. Advance lighting and shared UI as platform-neutral feature contracts.
+5. Add executable adapter conformance gates for render targets/views, asset
+   discovery, input intent mapping, and render-section compile contracts.
+6. Grow authoritative gameplay beyond baseline player/session motion state
+   without moving ownership back into renderer or app shells.
 
 ## Decision checklist
 

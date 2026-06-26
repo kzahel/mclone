@@ -64,10 +64,12 @@ Client connect status (full grid in
 
 - **Desktop flat + OpenXR** connect to a dedicated server over TCP via
   `--remote-addr HOST:PORT`.
+- **Flat Android** can connect over TCP through the Android-owned
+  `debug.mclone.remote_addr` property. There is not yet an in-app connect UI.
 - **Web** has a complete WebSocket client, but it is not yet wired into the
   playable browser app (reachable only from a smoke export).
-- **Flat Android and Android XR** have no networking yet — they do not depend on
-  `mclone-net`/`mclone-protocol` and run local-integrated only.
+- **Android XR** has no remote transport adapter yet and runs local-integrated
+  only.
 
 Making remote-dedicated play reachable from every client is a tracked invariant,
 not a desktop-only feature.

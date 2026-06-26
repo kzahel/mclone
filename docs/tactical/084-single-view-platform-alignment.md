@@ -5,7 +5,10 @@ static-client and live `WindowSceneRuntime` paths onto shared app-runtime
 helpers. Slice 3 has moved remote dedicated dispatch/resync policy, flat
 Android remote-host selection, and the native local/remote single-view scene
 shell into shared app-runtime contracts while keeping concrete transports and
-platform config in app crates.
+platform config in app crates. Slice 4's durable matrix now lives in
+`docs/topics/platform-parity.md`; the remaining alignment work is making the
+sentinel gates more executable and auditing web/XR forks against the shared
+contracts.
 
 ## Purpose
 
@@ -323,9 +326,21 @@ git diff --check
 
 ### Slice 4 - Contract Matrix
 
-- [ ] Document each shared single-view boundary, consuming app crates, and the
+- [x] Document each shared single-view boundary, consuming app crates, and the
   minimum test/smoke gate that covers it.
 - [ ] Add or update script names so the matrix is executable instead of prose.
+
+Recorded Slice 4 first-chunk result:
+
+- `docs/topics/platform-parity.md` now owns the durable feature/platform matrix
+  and shared-contract/consumer matrix.
+- Refreshed the matrix after the native scene-shell convergence: desktop
+  `WindowSceneRuntime` and flat Android both compose
+  `NativeSingleViewSceneRuntime<S>`, and flat Android has a TCP remote-dedicated
+  path through `debug.mclone.remote_addr`.
+- Left the remaining contract gaps explicit: web still carries an async host
+  fork and inline render path, while XR still carries a terrain-state fork and
+  lacks a remote transport adapter.
 
 ### Slice 5 - Web Adapter Check
 

@@ -229,17 +229,17 @@ Run the narrowest lane that can catch the bug class:
 Highest-value next steps to keep features from requiring constant full-matrix
 manual checks:
 
-1. **Write a platform contract matrix.** For each shared crate boundary, record
-   which app crates consume it and which smoke/test catches regressions. Keep
-   this in docs and close to scripts so platform coverage is deliberate.
-2. **Thin the flat Android runtime fork.** Flat Android currently reuses shared
-   crates but still has app-local scene/runtime glue. Move reusable pieces into
-   `mclone-app-runtime` so desktop flat, flat Android, headless, and web stay
-   closer to one single-view host contract.
-3. **Make dedicated-server play a platform invariant.** Desktop currently has
-   the richest remote dedicated path. Promote local-integrated versus remote
-   dedicated into a shared host-mode contract so flat Android, web, and XR
-   clients can join dedicated hosts without platform-private runtime forks.
+1. **Keep the platform parity tracker current.** The feature/platform and
+   shared-contract matrices live in
+   [`topics/platform-parity.md`](topics/platform-parity.md). Update those cells
+   when a slice changes platform capability or shared-boundary ownership.
+2. **Make the contract matrix more executable.** For each shared crate boundary,
+   keep the sentinel smoke/test close to scripts so platform coverage is
+   deliberate instead of remembered manually.
+3. **Finish host-mode convergence for web and XR.** Native desktop and flat
+   Android now share `mclone-app-runtime` host-mode and native scene-shell
+   contracts. Web still has an async `WebRuntimeHost`, and XR lanes still lack a
+   remote transport adapter.
 4. **Finish XR terrain-state convergence.** `mclone-xr-scene` is now shared,
    but desktop XR still retains some richer app-local terrain/actor/session
    behavior. Migrating that behind shared XR scene interfaces will reduce
