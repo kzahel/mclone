@@ -3,8 +3,9 @@
 Status: completed. Slices 1-4 landed: XR transform helpers now live in
 `mclone-xr-scene`, actor presentation-to-render-instance building now lives in
 `mclone-render-session`, the shared XR scene owns actor draw resources, and
-desktop XR now consumes the shared scene driver. Android XR still needs a
-concrete remote transport adapter before remote-dedicated play is wired there.
+desktop XR now consumes the shared scene driver. The remaining Android XR
+remote-transport follow-up landed in
+[`087`](087-android-xr-remote-host-adapter.md).
 
 ## Purpose
 
@@ -19,7 +20,9 @@ construction, and host-mode integration live behind shared native contracts.
 
 ## Current State
 
-- Android XR constructs local `mclone-xr-scene::XrMcloneTerrainState`.
+- Android XR constructs `mclone-xr-scene::XrMcloneTerrainState` through the
+  local path in this tactical; tactical 087 added the Android-owned TCP remote
+  adapter.
 - Desktop XR constructs `mclone-xr-scene::XrMcloneTerrainState` with the
   desktop TCP `RemoteServerSession` type.
 - XR tracking-origin, stage-to-world, render-view conversion, yaw
@@ -34,8 +37,8 @@ construction, and host-mode integration live behind shared native contracts.
   re-owning local integrated runner, polling, idle wait, render-section sync,
   and host command plumbing.
 - Desktop app code still owns OpenXR runtime/session/swapchain setup and the
-  concrete TCP session type. Android XR still owns activity/loader/packaging and
-  currently uses the local-only constructor.
+  concrete desktop TCP session type. Android XR still owns
+  activity/loader/packaging and now owns its concrete TCP session adapter.
 
 ## Target Shape
 

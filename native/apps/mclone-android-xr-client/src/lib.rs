@@ -11,10 +11,16 @@ mod android {
 
     use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
     use anyhow::{Context, Result, bail};
+    use mclone_app_runtime::host_mode::{RemoteDedicatedServerSession, SingleViewHostOptions};
+    use mclone_app_runtime::local_single_view::{
+        LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime,
+    };
     use mclone_app_runtime::render_assets::{
         ActorTextureAssets, TexturedMeshAssets, load_actor_texture_assets_from_asset_source,
         load_asset_source, load_textured_mesh_assets_from_source,
     };
+    use mclone_net::NativeClientSession;
+    use mclone_protocol::{ClientCommand, ServerUpdate};
     use mclone_render::chunk::TexturedSectionRenderOptions;
     use mclone_xr_host::{
         OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
@@ -32,9 +38,12 @@ mod android {
         graphics_vulkan::AppGraphics,
         graphics_vulkan::OpenXrEyeState,
     >;
+    type AndroidXrSceneRuntime = NativeSingleViewSceneRuntime<AndroidXrRemoteServerSession>;
+    type AndroidXrTerrainState = XrMcloneTerrainState<AndroidXrRemoteServerSession>;
 
     const LOG_TAG: &str = "mclone_android_xr";
     const STARTUP_ARGV_INTENT_EXTRA: &str = "mclone.startup.argv";
+    const REMOTE_ADDR_PROPERTY: &str = "debug.mclone.remote_addr";
     const XR_VIEW_POSE_PROPERTY: &str = "debug.mclone.xr_view_pose";
     const ANDROID_ASSET_ROOT_ENV: &str = "MCLONE_ANDROID_ASSET_ROOT";
     const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
@@ -268,6 +277,12 @@ mod android {
         }))
     }
 
+    fn android_remote_addr() -> Option<String> {
+        android_property(REMOTE_ADDR_PROPERTY)
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    }
+
     #[allow(unsafe_code)]
     fn android_property(name: &str) -> Option<String> {
         let name = CString::new(name).ok()?;
@@ -361,6 +376,14 @@ mod android {
                     return;
                 }
             };
+        let remote_addr = android_remote_addr();
+        if let Some(remote_addr) = &remote_addr {
+            log::info!(
+                "Android XR remote dedicated address from {REMOTE_ADDR_PROPERTY}: {remote_addr}"
+            );
+        } else {
+            log::info!("Android XR remote dedicated address from {REMOTE_ADDR_PROPERTY}: <none>");
+        }
         log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
@@ -381,9 +404,13 @@ mod android {
         };
 
         log::info!("MCLONE_ANDROID_XR_PACKAGE_READY");
-        if let Err(error) =
-            run_android_openxr_mclone(&app, runtime_assets, scene_options, startup_view_pose)
-        {
+        if let Err(error) = run_android_openxr_mclone(
+            &app,
+            runtime_assets,
+            scene_options,
+            startup_view_pose,
+            remote_addr,
+        ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
     }
@@ -394,6 +421,7 @@ mod android {
         runtime_assets: AndroidXrRuntimeAssets,
         scene_options: XrSceneOptions,
         startup_view_pose: Option<XrStartupViewPose>,
+        remote_addr: Option<String>,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -627,19 +655,13 @@ mod android {
         log::info!("MCLONE_ANDROID_XR_CONTROLLERS_READY");
         log::info!("MCLONE_ANDROID_XR_SESSION_READY");
 
-        let AndroidXrRuntimeAssets {
-            mesh_assets,
-            actor_assets,
-        } = runtime_assets;
-        let mut terrain = XrMcloneTerrainState::new(
+        let mut terrain = create_android_xr_terrain_state(
             &graphics.device,
             &graphics.queue,
-            XR_COLOR_FORMAT,
-            scene_options,
-            TexturedSectionRenderOptions::default(),
-            mesh_assets,
-            actor_assets.atlas,
+            runtime_assets,
             startup_view_pose,
+            scene_options,
+            remote_addr,
         )
         .context("initialize Android XR terrain runtime")?;
         let terrain_summary = terrain.frame_summary();
@@ -662,6 +684,95 @@ mod android {
         )
     }
 
+    fn create_android_xr_terrain_state(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        runtime_assets: AndroidXrRuntimeAssets,
+        startup_view_pose: Option<XrStartupViewPose>,
+        scene_options: XrSceneOptions,
+        remote_addr: Option<String>,
+    ) -> Result<AndroidXrTerrainState> {
+        let AndroidXrRuntimeAssets {
+            mesh_assets,
+            actor_assets,
+        } = runtime_assets;
+        let runtime = if let Some(remote_addr) = remote_addr {
+            let session = AndroidXrRemoteServerSession::connect(remote_addr.as_str())?;
+            AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
+                android_xr_host_options(scene_options),
+                session,
+                mesh_assets,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to initialize Android XR remote dedicated runtime from {remote_addr}"
+                )
+            })?
+        } else {
+            AndroidXrSceneRuntime::local_with_mesh_assets(
+                android_xr_local_options(scene_options),
+                mesh_assets,
+            )
+            .context("failed to initialize Android XR local integrated runtime")?
+        };
+        XrMcloneTerrainState::with_runtime(
+            device,
+            queue,
+            XR_COLOR_FORMAT,
+            runtime,
+            TexturedSectionRenderOptions::default(),
+            actor_assets.atlas,
+            startup_view_pose,
+        )
+    }
+
+    fn android_xr_local_options(scene: XrSceneOptions) -> LocalSingleViewSceneOptions {
+        LocalSingleViewSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
+            .with_day_time(scene.day_time_override)
+            .with_freeze_time(scene.freeze_time)
+            .with_lighting_enabled(scene.lighting_enabled)
+    }
+
+    fn android_xr_host_options(scene: XrSceneOptions) -> SingleViewHostOptions {
+        SingleViewHostOptions::new(scene.center(), scene.render_distance)
+    }
+
+    #[derive(Debug)]
+    struct AndroidXrRemoteServerSession {
+        addr: String,
+        session: NativeClientSession,
+    }
+
+    impl AndroidXrRemoteServerSession {
+        fn connect(addr: impl Into<String>) -> Result<Self> {
+            let addr = addr.into();
+            let session = NativeClientSession::connect(addr.as_str())
+                .with_context(|| format!("failed to connect to Android XR remote server {addr}"))?;
+            Ok(Self { addr, session })
+        }
+    }
+
+    impl RemoteDedicatedServerSession for AndroidXrRemoteServerSession {
+        fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>> {
+            self.session.send_command(&command).with_context(|| {
+                format!(
+                    "failed to exchange command with Android XR remote server {}",
+                    self.addr
+                )
+            })
+        }
+
+        fn reconnect(&mut self) -> Result<()> {
+            self.session = NativeClientSession::connect(self.addr.as_str()).with_context(|| {
+                format!(
+                    "failed to reconnect to Android XR remote server {}",
+                    self.addr
+                )
+            })?;
+            Ok(())
+        }
+    }
+
     fn run_mclone_frame_loop(
         app: &AndroidApp,
         graphics: &mut graphics_vulkan::VulkanGraphicsSession,
@@ -669,7 +780,7 @@ mod android {
         environment_blend_mode: xr::EnvironmentBlendMode,
         left_eye: &mut graphics_vulkan::OpenXrEyeState,
         right_eye: &mut graphics_vulkan::OpenXrEyeState,
-        terrain: &mut XrMcloneTerrainState,
+        terrain: &mut AndroidXrTerrainState,
         controller_actions: &OpenXrControllerActions,
     ) -> Result<()> {
         let mut event_storage = xr::EventDataBuffer::new();
@@ -812,7 +923,7 @@ mod android {
         predicted_display_time: xr::Time,
         left_eye: &mut graphics_vulkan::OpenXrEyeState,
         right_eye: &mut graphics_vulkan::OpenXrEyeState,
-        terrain: &mut XrMcloneTerrainState,
+        terrain: &mut AndroidXrTerrainState,
         controllers: &[XrControllerSnapshot],
     ) -> Result<mclone_xr_scene::XrTerrainFrameSummary> {
         let stereo_views =

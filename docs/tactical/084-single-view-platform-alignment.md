@@ -339,8 +339,8 @@ Recorded Slice 4 first-chunk result:
   `NativeSingleViewSceneRuntime<S>`, and flat Android has a TCP remote-dedicated
   path through `debug.mclone.remote_addr`.
 - Left the then-remaining contract gaps explicit. Follow-up tactical 086 closed
-  the XR scene-driver fork; web still carries an async host fork and inline
-  render path, and Android XR still lacks a concrete remote transport adapter.
+  the XR scene-driver fork, and tactical 087 added the Android XR TCP remote
+  adapter; web still carries an async host fork and inline render path.
 
 ### Slice 5 - Web Adapter Check
 

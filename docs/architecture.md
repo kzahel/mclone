@@ -479,9 +479,10 @@ Current gaps:
 - native desktop flat, desktop XR, flat Android, and Android XR now share the
   native scene-shell contracts where applicable, but web still carries an async
   host/runtime fork
-- remote dedicated play is now shared for native desktop and flat Android, but
-  web and XR still need host-mode convergence before dedicated-server play is a
-  true platform invariant
+- remote dedicated play is now shared for native desktop, flat Android, and
+  Android XR through app-owned session adapters; web still needs playable
+  remote-connect wiring before dedicated-server play is a true platform
+  invariant
 - desktop XR and Android XR share the new XR host/graphics/scene crates; the
   shared scene now owns terrain/actor rendering, startup pose, locomotion, and
   the generic local/remote host runtime shape
@@ -499,9 +500,9 @@ The next major refactor direction should be:
 
 1. Keep the feature/platform and shared-contract matrices in
    `docs/topics/platform-parity.md` current as implementation slices land.
-2. Reconcile host-mode convergence for web and add the Android XR remote
-   transport adapter so local-integrated versus remote-dedicated remains one
-   runtime/session contract across all lanes.
+2. Reconcile host-mode convergence for web and device-validate Android XR
+   remote dedicated play so local-integrated versus remote-dedicated remains
+   one runtime/session contract across all lanes.
 3. Keep XR scene convergence intact as controller interaction, world-space UI,
    and comfort settings are added behind `mclone-xr-scene`.
 4. Advance lighting and shared UI as platform-neutral feature contracts.

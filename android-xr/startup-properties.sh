@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 
 STARTUP_ARGV_INTENT_EXTRA="mclone.startup.argv"
+REMOTE_ADDR_PROPERTY="debug.mclone.remote_addr"
 VIEW_POSE_PROPERTY="debug.mclone.xr_view_pose"
 
 MCLONE_XR_STARTUP_PROPERTIES=(
+    "$REMOTE_ADDR_PROPERTY"
     "$VIEW_POSE_PROPERTY"
 )
 
@@ -11,6 +13,9 @@ mclone_xr_startup_property_default() {
     case "$1" in
         "$VIEW_POSE_PROPERTY")
             printf '0'
+            ;;
+        "$REMOTE_ADDR_PROPERTY")
+            printf ''
             ;;
         *)
             printf '0'

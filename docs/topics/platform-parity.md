@@ -22,7 +22,7 @@ boundary; this doc owns the per-feature and per-contract grids and the rule that
 keeps new features from re-forking.
 
 > Status note: the current-state cells below were derived from a code audit on
-> 2026-06-26 and refreshed after tactical 086's XR helper/actor convergence.
+> 2026-06-26 and refreshed after tactical 087's Android XR remote adapter.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -95,7 +95,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✅ |
 | Menus (title/pause/options) | ✅ | ✗ | ✗ | ✗ | ✅ |
 | Connect / world-select UI | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✗ | ◐ (transport exists, not wired) |
+| Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✅ TCP property (remote smoke pending) | ◐ (transport exists, not wired) |
 | Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ (cfg-excluded) |
 | Audio | ✗ | ✗ | ✗ | ✗ | ✗ |
 
@@ -122,7 +122,7 @@ use (and should) · — n/a.
 
 | Shared boundary | native-client | web-client | flat-Android | Android-XR | Sentinel gate |
 |---|:--:|:--:|:--:|:--:|---|
-| `mclone-protocol` / `mclone-net` | ✅ | ✅ | ✅ | ◐ (`mclone-protocol` via xr-scene, no net adapter) | `cargo test -p mclone-net`; `--multi-client-smoke` |
+| `mclone-protocol` / `mclone-net` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-net`; `--multi-client-smoke` |
 | `mclone-server` / `IntegratedServer` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-server` |
 | `mclone-client::ClientRuntime` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-client` |
 | `mclone-render` (view/target draw) | ✅ | ⚑ (inline render path) | ✅ | ✅ | `native:desktop-chunk:smoke` |
@@ -130,7 +130,7 @@ use (and should) · — n/a.
 | `app-runtime::SingleViewRuntime` | ✅ | ✅ | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::frame_render` | ✅ | ⚑ (inline reimpl) | ✅ | ✅ (via xr-scene) | `native:desktop-chunk:smoke`; `native:web:smoke` |
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
-| `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ◐ (local via shared scene, no remote adapter) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
+| `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✗ (empty list) | ✗ (empty list) | `native:web:app-smoke` |
 | `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
@@ -147,15 +147,16 @@ Concretely:
   [`../tactical/084-single-view-platform-alignment.md`](../tactical/084-single-view-platform-alignment.md).
 - The XR scene-driver fork is closed:
   `XrMcloneTerrainState<S>` composes `NativeSingleViewSceneRuntime<S>`, desktop
-  XR passes the desktop TCP `RemoteServerSession`, Android XR uses a local-only
-  default session type, and app-local `XrMcloneWorldState` is gone. This landed
-  across tactical 086 Slices 1-4.
+  XR passes the desktop TCP `RemoteServerSession`, Android XR can pass its
+  Android-owned TCP session adapter, and app-local `XrMcloneWorldState` is
+  gone. This landed across tactical 086 Slices 1-4 and tactical 087.
 - `web-client` re-inlines the whole sky→chunk→actor render sequence instead of
   calling `render_full_frame_for_view`. It still owns an async `WebRuntimeHost`
   enum, but command/update accounting and remote WebSocket reconnect/resync prep
   now flow through `mclone-app-runtime::host_mode` (see blocker #1).
-- flat Android now has a TCP remote-dedicated path through
-  `debug.mclone.remote_addr`; Android XR still has no remote transport adapter.
+- flat Android and Android XR now have TCP remote-dedicated paths through
+  `debug.mclone.remote_addr`; Android XR still needs a Quest remote smoke
+  against a reachable dedicated server.
 
 ## Whole Systems That Do Not Exist Yet
 
@@ -182,12 +183,12 @@ Every new feature added today gets forked across up to four app shells. The
 highest-leverage work is the shared contracts that *stop* the forking. Land
 these first:
 
-1. **Finish the host-mode async/sync seam.** Native desktop and flat Android use
-   blocking TCP/session adapters, while browser worker/WebSocket mechanics stay
-   async and still sit behind `WebRuntimeHost`. Shared exchange accounting and
-   remote WebSocket reconnect/resync prep have landed; remaining work is naming
-   cleanup plus playable browser remote-connect wiring. XR still needs a remote
-   transport adapter. (tactical 085)
+1. **Finish the host-mode async/sync seam.** Native desktop, flat Android, and
+   XR app shells use blocking TCP/session adapters, while browser
+   worker/WebSocket mechanics stay async and still sit behind `WebRuntimeHost`.
+   Shared exchange accounting and remote WebSocket reconnect/resync prep have
+   landed; remaining work is naming cleanup plus playable browser
+   remote-connect wiring. (tactical 085)
 2. **Build the connect/menu flow + the missing UI widgets.** Title → singleplayer
    vs server → address entry (`EditBox`) → world/seed select → loading screen. No
    lane can join a server in-app without this. Needed by the whole flat class.
@@ -195,10 +196,10 @@ these first:
    keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
    pointer, and interact**, not just locomotion. Required for XR interaction and
    for flat Android to use the player controller. (tactical 076 follow-up)
-4. **Add the Android XR remote transport adapter.** `mclone-xr-scene` is now
-   host-pluggable and desktop XR uses the TCP `RemoteServerSession`; Android XR
-   still needs a concrete remote session adapter before dedicated-server play is
-   available there.
+4. **Device-validate Android XR remote dedicated play.** The adapter and script
+   option exist now (`debug.mclone.remote_addr` / `--remote-addr`), but a Quest
+   smoke against a reachable dedicated server should be run before calling the
+   lane fully validated.
 5. **Add a stereo/world-space UI render path** so XR can show a reticle, menus,
    and a connect screen. (new; no doc owns this yet)
 6. **Protocol: add server push and cross-version negotiation.** Today it is

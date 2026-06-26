@@ -17,7 +17,7 @@ Mclone currently has five supported client/platform validation lanes:
 |---|---|---|
 | Desktop flat | primary development lane | `native/apps/mclone-native-client` owns desktop `winit`, surface acquisition, keyboard/mouse input, frame pacing, and headless screenshots. Basics validated: integrated runtime, locomotion, world rendering, chunk loading/generation. |
 | Desktop OpenXR | active XR lane | `mclone-native-client --features xr` owns desktop runtime selection and OpenXR startup. Shared XR crates provide host/session helpers, graphics wrapping, scene alignment, and controller locomotion. Validated with real stereo mclone terrain on Quest 3 through VirtualDesktopXR. |
-| Android XR / Quest standalone | active XR lane | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, and validation. Validated with staged assets, stereo terrain, controller actions, and basic locomotion. |
+| Android XR / Quest standalone | active XR lane | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, remote-address property selection, and validation. Validated with staged assets, stereo terrain, controller actions, and basic locomotion; remote dedicated compile path is wired and still needs a Quest remote smoke. |
 | Flat Android | active mobile lane | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity` package. Validated on AVD with Vulkan-backed `wgpu`, real terrain pixels, staged assets, and touch-orbit smoke. |
 | Web/WASM | active browser lane | `native/apps/mclone-web-client` builds for `wasm32-unknown-unknown`, uses WebGPU through `wgpu`, and keeps browser workers, TypeScript glue, mobile web controls, shared Rust/WebGPU UI, and deployment alive. |
 
@@ -202,6 +202,7 @@ pnpm native:android:avd-touch-smoke -- --skip-build
 # Android XR / Quest, attached authorized Quest required
 pnpm native:android-xr:apk
 pnpm native:android-xr:validate -- --debug --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
+pnpm native:android-xr:validate -- --debug --skip-build --remote-addr HOST:25565 --view-pose 0,120,-96,180
 
 # Web/WASM
 pnpm native:web:smoke
@@ -236,10 +237,11 @@ manual checks:
 2. **Make the contract matrix more executable.** For each shared crate boundary,
    keep the sentinel smoke/test close to scripts so platform coverage is
    deliberate instead of remembered manually.
-3. **Finish host-mode convergence for web and Android XR.** Native desktop,
-   desktop XR, and flat Android now share `mclone-app-runtime` host-mode and
-   native scene-shell contracts. Web still has an async `WebRuntimeHost`, and
-   Android XR still lacks a concrete remote transport adapter.
+3. **Finish host-mode convergence for web and validate Android XR remote.**
+   Native desktop, desktop XR, flat Android, and Android XR now share
+   `mclone-app-runtime` host-mode and native scene-shell contracts where
+   applicable. Web still has an async `WebRuntimeHost`; Android XR needs a
+   Quest remote smoke against a reachable dedicated server.
 4. **Keep XR scene convergence complete as features grow.** `mclone-xr-scene`
    now owns shared terrain/actor rendering, startup pose, locomotion, and
    local/remote-capable host shape. Keep future UI, comfort, and interaction

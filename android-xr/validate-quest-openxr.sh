@@ -21,6 +21,7 @@ LOGCAT_PID=""
 SKIP_BUILD=0
 SESSION_ONLY=0
 START_VIEW_POSE="${MCLONE_ANDROID_XR_VIEW_POSE:-0}"
+REMOTE_ADDR="${MCLONE_ANDROID_XR_REMOTE_ADDR:-}"
 STARTUP_ARGV=()
 
 usage() {
@@ -46,6 +47,8 @@ Options:
                      for the first submitted stereo frame.
   --view-pose X,Y,Z,YAW_DEGREES
                      Set debug.mclone.xr_view_pose before launch.
+  --remote-addr ADDR
+                     Set debug.mclone.remote_addr before launch.
   --seed SEED        Add --seed SEED to mclone.startup.argv.
   --chunk-x X        Add --chunk-x X to startup argv.
   --chunk-z Z        Add --chunk-z Z to startup argv.
@@ -141,6 +144,11 @@ while [[ $# -gt 0 ]]; do
             START_VIEW_POSE="$2"
             shift 2
             ;;
+        --remote-addr)
+            require_arg "$1" "${2:-}"
+            REMOTE_ADDR="$2"
+            shift 2
+            ;;
         --seed|--chunk-x|--chunk-z|--render-distance|--day-time)
             require_arg "$1" "${2:-}"
             STARTUP_ARGV+=("$1" "$2")
@@ -215,6 +223,13 @@ mclone_dismiss_vr_system_dialogs "$SERIAL"
 if [[ -n "$START_VIEW_POSE" ]]; then
     mclone_xr_set_startup_property "$SERIAL" "$VIEW_POSE_PROPERTY" "$START_VIEW_POSE" >/dev/null 2>&1 || true
     mclone_note "Configured startup view pose via $VIEW_POSE_PROPERTY=$START_VIEW_POSE"
+fi
+if [[ -n "$REMOTE_ADDR" ]]; then
+    mclone_xr_set_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" "$REMOTE_ADDR" >/dev/null 2>&1 || true
+    mclone_note "Configured Android XR remote dedicated address via $REMOTE_ADDR_PROPERTY=$REMOTE_ADDR"
+else
+    mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
+    mclone_note "Cleared Android XR remote dedicated address via $REMOTE_ADDR_PROPERTY"
 fi
 
 STARTUP_ARGV_JSON=""
