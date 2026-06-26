@@ -17,7 +17,7 @@ Mclone currently has five supported client/platform validation lanes:
 |---|---|---|
 | Desktop flat | primary development lane | `native/apps/mclone-native-client` owns desktop `winit`, surface acquisition, keyboard/mouse input, frame pacing, and headless screenshots. Basics validated: integrated runtime, locomotion, world rendering, chunk loading/generation. |
 | Desktop OpenXR | active XR lane | `mclone-native-client --features xr` owns desktop runtime selection and OpenXR startup. Shared XR crates provide host/session helpers, graphics wrapping, scene alignment, and controller locomotion. Validated with real stereo mclone terrain on Quest 3 through VirtualDesktopXR. |
-| Android XR / Quest standalone | active XR lane | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, launch-scoped remote-address argv, and validation. Validated with staged assets, stereo terrain, controller actions, basic locomotion, and remote-dedicated play through an `adb reverse` USB tunnel; direct LAN remote validation is firewall/routing dependent. |
+| Android XR / Quest standalone | active XR lane | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, launch-scoped remote-address argv, and validation. Validated with staged assets, stereo terrain, controller actions, basic locomotion, and remote-dedicated play over direct LAN and through an `adb reverse` USB tunnel. |
 | Flat Android | active mobile lane | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity` package. Validated on AVD with Vulkan-backed `wgpu`, real terrain pixels, staged assets, and touch-orbit smoke. |
 | Web/WASM | active browser lane | `native/apps/mclone-web-client` builds for `wasm32-unknown-unknown`, uses WebGPU through `wgpu`, and keeps browser workers, TypeScript glue, mobile web controls, shared Rust/WebGPU UI, and deployment alive. |
 
@@ -244,8 +244,8 @@ manual checks:
    Native desktop, desktop XR, flat Android, and Android XR now share
    `mclone-app-runtime` host-mode and native scene-shell contracts where
    applicable. Web still has an async `WebRuntimeHost`; Android XR remote works
-   through `adb reverse`, while direct LAN validation needs a repeatable
-   firewall/routing setup or a first-class USB tunnel script option.
+   over LAN after host firewall allow and through `adb reverse`, but the USB
+   tunnel path should become a first-class script option.
 4. **Keep XR scene convergence complete as features grow.** `mclone-xr-scene`
    now owns shared terrain/actor rendering, startup pose, locomotion, and
    local/remote-capable host shape. Keep future UI, comfort, and interaction

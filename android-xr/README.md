@@ -145,7 +145,9 @@ bash android-xr/validate-quest-openxr.sh --debug --skip-build \
 
 `HOST:25565` must be reachable from the headset. Do not use `127.0.0.1`; that
 would point the headset back at itself unless an `adb reverse` tunnel is
-installed for that port.
+installed for that port. On Windows, allow the `mclone-dedicated-server`
+firewall prompt or add an inbound TCP allow rule for the chosen port before
+expecting direct LAN validation to pass.
 
 Logcat defaults to:
 

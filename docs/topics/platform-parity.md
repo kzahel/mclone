@@ -95,7 +95,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✅ |
 | Menus (title/pause/options) | ✅ | ✗ | ✗ | ✗ | ✅ |
 | Connect / world-select UI | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (adb reverse smoke passed) | ◐ (transport exists, not wired) |
+| Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + adb reverse smokes passed) | ◐ (transport exists, not wired) |
 | Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ (cfg-excluded) |
 | Audio | ✗ | ✗ | ✗ | ✗ | ✗ |
 
@@ -159,8 +159,7 @@ Concretely:
   `debug.mclone.remote_addr`; Android XR now uses launch-scoped
   `mclone.startup.argv --remote-addr HOST:PORT` and can have the validator start
   a local dedicated server. Android XR reached `MCLONE_ANDROID_XR_READY` against
-  a dedicated server through `adb reverse`; direct LAN reachability remains a
-  host firewall/routing concern.
+  a dedicated server over direct LAN and through `adb reverse`.
 
 ## Whole Systems That Do Not Exist Yet
 
@@ -202,9 +201,9 @@ these first:
    for flat Android to use the player controller. (tactical 076 follow-up)
 4. **Make Android XR remote validation first-class for both USB and LAN.** The
    adapter and Playbox-style launch argv option exist now (`--remote-addr` in
-   `mclone.startup.argv`), and the Quest smoke passed through `adb reverse`.
-   Direct LAN validation still depends on a headset-reachable host address and
-   firewall/routing setup.
+   `mclone.startup.argv`), and Quest smokes passed over direct LAN and through
+   `adb reverse`. Keep the LAN route documented as firewall-sensitive, and add
+   a script option for the repeatable USB-tunnel path.
 5. **Add a stereo/world-space UI render path** so XR can show a reticle, menus,
    and a connect screen. (new; no doc owns this yet)
 6. **Protocol: add server push and cross-version negotiation.** Today it is
