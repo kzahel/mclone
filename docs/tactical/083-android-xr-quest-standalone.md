@@ -1,7 +1,8 @@
 # 083: Android XR / Quest Standalone
 
-Status: active. Slice 1 package/build/install/launch plumbing is complete;
-Slice 2 Android OpenXR clear submission is next.
+Status: active. Slice 1 package/build/install/launch plumbing is complete.
+Slice 2's loader/session/swapchain first chunk is complete; first submitted
+stereo frame is next.
 
 ## Purpose
 
@@ -26,6 +27,9 @@ Ready inputs:
   locomotion are implemented.
 - Manual desktop XR headset validation confirmed movement feels good.
 - A Quest headset is attached for standalone validation.
+- The standalone Quest package now initializes the Android OpenXR loader,
+  creates a Vulkan-backed OpenXR session, allocates per-eye color swapchains
+  and depth targets, and validates `MCLONE_ANDROID_XR_SESSION_READY` on device.
 - Playbox has the mature reference implementation for Android XR packaging,
   loader/session ownership, launch-scoped startup arguments, Android property
   toggles, and Quest validation scripts.
@@ -182,12 +186,67 @@ resolved to WSL during validation and did not see the Windows Rust toolchain.
 
 ### Slice 2 - Android OpenXR Loader And Clear Submission
 
-- [ ] Initialize Khronos' Android OpenXR loader from the Android activity.
-- [ ] Create an OpenXR instance/system/session with Vulkan graphics binding.
-- [ ] Create one color swapchain and one depth target per eye.
+- [x] Initialize Khronos' Android OpenXR loader from the Android activity.
+- [x] Create an OpenXR instance/system/session with Vulkan graphics binding.
+- [x] Create one color swapchain and one depth target per eye.
+- [x] Log `MCLONE_ANDROID_XR_SESSION_READY` after session/swapchain bring-up.
 - [ ] Wait/begin/end frames and submit a stereo diagnostic clear.
 - [ ] Log `MCLONE_ANDROID_XR_READY` after the first submitted stereo frame.
 - [ ] Keep bounded validation and restore headset state on every exit path.
+
+Recorded Slice 2 first-chunk result:
+
+- Added Android OpenXR loader initialization using Khronos'
+  `XR_KHR_android_create_instance` path from the `NativeActivity`.
+- Added a narrowed Playbox-shaped OpenXR Vulkan graphics module for Quest:
+  runtime-owned Vulkan instance/device creation, queue selection, OpenXR session
+  graphics binding, and `wgpu-hal` device/queue wrapping.
+- Added `STAGE` reference-space creation and per-eye color swapchains with
+  matching depth targets.
+- Added Playbox-aligned Quest runtime declarations to the Android XR manifest
+  for passthrough, controller/hand input metadata, hand/body tracking, render
+  models, and spatial scene/anchor permissions. These are launch/runtime
+  compatibility declarations only; mclone does not use those product features
+  yet.
+- Added runtime permission grants and a VR system-dialog dismissal helper in
+  the Quest validation/install scripts.
+- Added `--session-only` to `android-xr/validate-quest-openxr.sh` so this
+  milestone can accept `MCLONE_ANDROID_XR_SESSION_READY` while the default lane
+  continues to require first-frame `MCLONE_ANDROID_XR_READY`.
+
+Validation on the attached Quest 3, June 26, 2026:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash -n android/validate-common.sh android-xr/build-apk.sh android-xr/install-quest-openxr.sh android-xr/validate-quest-openxr.sh android-xr/startup-properties.sh'
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/build-apk.sh --debug'
+"C:\Program Files\Git\bin\bash.exe" -lc 'cd /c/Users/sox/Documents/code/mclone && bash android-xr/validate-quest-openxr.sh --debug --skip-build --session-only --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --wait-seconds 45'
+```
+
+Observed validation result:
+
+- Quest serial: `2G0YC1ZF93041Z`
+- Device: `Oculus Quest 3`, API `34`, ABI `arm64-v8a`
+- OpenXR runtime: `Oculus v204.201.0`
+- OpenXR system: `Meta Quest 3`
+- Vulkan session: `Adreno (TM) 740`, Vulkan API `1.3.295`, queue family `0`
+- Reference space: `STAGE`
+- Swapchains: per-eye `1680x1760`, `3` color images per eye, plus depth target
+  per eye
+- Log marker observed: `MCLONE_ANDROID_XR_SESSION_READY`
+- Logcat: `/tmp/mclone-quest-openxr-logcat.txt`
+
+Known remaining blocker for completing Slice 2:
+
+- Mclone reaches `XR_SESSION_STATE_IDLE` but does not yet receive the runtime
+  `nativeOnActivityReady` callback or transition to `XR_SESSION_STATE_READY`.
+- Playbox reaches `nativeOnActivityReady`, transitions from `IDLE` to `READY`,
+  and logs its first-frame marker on the same headset.
+- Next investigation target: isolate the Java `NativeActivity`, manifest, and
+  Horizon launch/readiness delta between Playbox and mclone. Once READY arrives,
+  the existing clear-loop path should be able to submit the first stereo
+  diagnostic frame and log `MCLONE_ANDROID_XR_READY`.
 
 ### Slice 3 - Mclone Runtime Frame On Quest
 
@@ -226,12 +285,20 @@ resolved to WSL during validation and did not see the Windows Rust toolchain.
 
 ## Validation Lanes
 
-First-slice validation:
+Future first-frame validation:
 
 ```bash
 cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
 bash android-xr/build-apk.sh --debug
 bash android-xr/validate-quest-openxr.sh --debug --skip-build --view-pose 0,120,-96,180
+```
+
+Current Slice 2 session milestone:
+
+```bash
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+bash android-xr/build-apk.sh --debug
+bash android-xr/validate-quest-openxr.sh --debug --skip-build --session-only --view-pose 0,120,-96,180
 ```
 
 Shared regression gates after touching common XR/render code:

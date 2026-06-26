@@ -135,6 +135,9 @@ mclone_wait_for_boot "$SERIAL" "$BOOT_TIMEOUT_SECONDS"
 mclone_note "Using $(mclone_device_summary "$SERIAL")"
 mclone_note "Installing $APK_PATH"
 "$ADB" -s "$SERIAL" install -r "$APK_PATH"
+"$ADB" -s "$SERIAL" shell pm grant "$MCLONE_ANDROID_XR_APP_ID" com.oculus.permission.USE_SCENE >/dev/null 2>&1 || true
+"$ADB" -s "$SERIAL" shell pm grant "$MCLONE_ANDROID_XR_APP_ID" horizonos.permission.USE_SCENE >/dev/null 2>&1 || true
+"$ADB" -s "$SERIAL" shell pm grant "$MCLONE_ANDROID_XR_APP_ID" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
 
 if [[ -n "$START_VIEW_POSE" ]]; then
     mclone_xr_set_startup_property "$SERIAL" "$VIEW_POSE_PROPERTY" "$START_VIEW_POSE" >/dev/null 2>&1 || true

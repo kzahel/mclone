@@ -230,6 +230,19 @@ mclone_wake_headset_for_test() {
     "$ADB" -s "$serial" shell am broadcast -a com.oculus.vrpowermanager.prox_close --ei timeout 0 >/dev/null 2>&1 || true
 }
 
+mclone_dismiss_vr_system_dialogs() {
+    local serial="$1"
+
+    "$ADB" -s "$serial" shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
+    "$ADB" -s "$serial" shell input keyevent KEYCODE_ESCAPE >/dev/null 2>&1 || true
+    sleep 1
+    if "$ADB" -s "$serial" shell dumpsys activity activities 2>/dev/null \
+        | grep -F "LaunchCheckControllerRequiredDialogActivity" >/dev/null 2>&1; then
+        "$ADB" -s "$serial" shell am force-stop com.oculus.vrshell >/dev/null 2>&1 || true
+        sleep 4
+    fi
+}
+
 mclone_restore_headset_after_test() {
     local serial="$1"
     local package_name="${2:-}"

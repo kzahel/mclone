@@ -18,6 +18,7 @@ BOOT_TIMEOUT_SECONDS="${MCLONE_ANDROID_BOOT_TIMEOUT:-60}"
 SERIAL=""
 LOGCAT_PID=""
 SKIP_BUILD=0
+SESSION_ONLY=0
 START_VIEW_POSE="${MCLONE_ANDROID_XR_VIEW_POSE:-0}"
 STARTUP_ARGV=()
 
@@ -26,8 +27,8 @@ usage() {
 Usage: android-xr/validate-quest-openxr.sh [options]
 
 Build, install, launch, and smoke-test the standalone Quest Android XR package.
-This first-slice validator waits for MCLONE_ANDROID_XR_PACKAGE_READY; later
-OpenXR slices should wait for MCLONE_ANDROID_XR_READY after a submitted frame.
+This validator waits for MCLONE_ANDROID_XR_READY, which is logged only after
+the app submits the first Android OpenXR stereo frame.
 
 Options:
   --release          Build and validate the release APK. This is the default.
@@ -38,6 +39,8 @@ Options:
   --activity-log PATH
                      Local activity-manager dump path on launch failure.
   --wait-seconds N   Seconds to wait for ready/failure log markers.
+  --session-only     Accept MCLONE_ANDROID_XR_SESSION_READY instead of waiting
+                     for the first submitted stereo frame.
   --view-pose X,Y,Z,YAW_DEGREES
                      Set debug.mclone.xr_view_pose before launch.
   --seed SEED        Add --seed SEED to mclone.startup.argv.
@@ -117,6 +120,10 @@ while [[ $# -gt 0 ]]; do
             WAIT_SECONDS="$2"
             shift 2
             ;;
+        --session-only)
+            SESSION_ONLY=1
+            shift
+            ;;
         --view-pose)
             require_arg "$1" "${2:-}"
             START_VIEW_POSE="$2"
@@ -181,7 +188,11 @@ mclone_wake_headset_for_test "$SERIAL"
 
 mclone_note "Installing $APK_PATH"
 "$ADB" -s "$SERIAL" install -r "$APK_PATH"
+"$ADB" -s "$SERIAL" shell pm grant "$MCLONE_ANDROID_XR_APP_ID" com.oculus.permission.USE_SCENE >/dev/null 2>&1 || true
+"$ADB" -s "$SERIAL" shell pm grant "$MCLONE_ANDROID_XR_APP_ID" horizonos.permission.USE_SCENE >/dev/null 2>&1 || true
+"$ADB" -s "$SERIAL" shell pm grant "$MCLONE_ANDROID_XR_APP_ID" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
 "$ADB" -s "$SERIAL" shell am force-stop "$MCLONE_ANDROID_XR_APP_ID" >/dev/null 2>&1 || true
+mclone_dismiss_vr_system_dialogs "$SERIAL"
 "$ADB" -s "$SERIAL" logcat -c || true
 
 if [[ -n "$START_VIEW_POSE" ]]; then
@@ -217,7 +228,11 @@ deadline=$((SECONDS + WAIT_SECONDS))
 success=0
 failure=0
 while (( SECONDS < deadline )); do
-    if grep -F "MCLONE_ANDROID_XR_PACKAGE_READY" "$LOG_PATH" >/dev/null 2>&1; then
+    if grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
+        success=1
+        break
+    fi
+    if [[ "$SESSION_ONLY" == "1" ]] && grep -F "MCLONE_ANDROID_XR_SESSION_READY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
     fi
@@ -238,7 +253,11 @@ if [[ "$success" != "1" ]]; then
     if grep -F "LaunchCheckControllerRequiredDialogActivity" "$ACTIVITY_PATH" >/dev/null 2>&1; then
         mclone_die "OpenXR launch was blocked by the Oculus controller-required launch check; activity dump: $ACTIVITY_PATH; logcat: $LOG_PATH"
     fi
-    mclone_die "Android XR package ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
+    if [[ "$SESSION_ONLY" == "1" ]]; then
+        mclone_die "Android XR session-ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
+    else
+        mclone_die "Android XR submitted-frame ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
+    fi
 fi
 
 pid="$("$ADB" -s "$SERIAL" shell pidof "$MCLONE_ANDROID_XR_APP_ID" 2>/dev/null | tr -d '\r' || true)"

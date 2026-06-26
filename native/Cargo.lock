@@ -1058,9 +1058,13 @@ dependencies = [
 name = "mclone-android-xr-client"
 version = "0.0.0"
 dependencies = [
+ "android-activity",
  "anyhow",
+ "ash",
  "jni",
  "log",
+ "openxr",
+ "wgpu",
  "winit",
 ]
 

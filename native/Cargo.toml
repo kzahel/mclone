@@ -27,6 +27,7 @@ rust-version = "1.92"
 publish = false
 
 [workspace.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
 anyhow = "1"
 ash = "0.38"
 env_logger = "0.11"
