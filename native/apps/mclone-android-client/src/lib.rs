@@ -5,21 +5,15 @@ mod android {
     use std::ffi::{CString, c_char, c_int};
     use std::sync::Arc;
     use std::sync::Once;
-    use std::thread;
-    use std::time::{Duration, Instant};
 
-    use anyhow::{Context, Result, bail};
+    use anyhow::{Result, bail};
     use glam::Vec3;
     use mclone_app_runtime::frame_render::{
         FullFrameGui, RenderStreamStats, record_render_section_update_stats,
         render_full_frame_for_view,
     };
-    use mclone_app_runtime::render_assets::{
-        RenderSectionCompileWorker, TexturedMeshAssets, load_textured_mesh_assets,
-    };
-    use mclone_app_runtime::{
-        RuntimeUpdateApplyReport, SingleViewRuntime, chunk_tracking_radius_for_render_distance,
-        elapsed_ms,
+    use mclone_app_runtime::local_single_view::{
+        LocalSingleViewSceneOptions, LocalSingleViewSceneRuntime,
     };
     use mclone_core::ChunkPos;
     use mclone_mesh::quad_face_count_from_indices;
@@ -29,11 +23,6 @@ mod android {
     };
     use mclone_render::sky_render::SkyRenderer;
     use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
-    use mclone_render_session::RenderSectionCacheUpdate;
-    use mclone_server::{
-        IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
-        ServerRunnerDiagnostics,
-    };
     use mclone_ui::GuiDrawList;
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -140,18 +129,11 @@ mod android {
         depth: ChunkDepthTarget,
         sky: SkyRenderer,
         draw: TexturedSectionDrawResources,
-        scene: AndroidSceneRuntime,
+        scene: LocalSingleViewSceneRuntime,
         camera: ChunkCamera,
         render_options: TexturedSectionRenderOptions,
         render_stats: RenderStreamStats,
         frame_index: u64,
-    }
-
-    struct AndroidSceneRuntime {
-        core: SingleViewRuntime,
-        server_runner: NativeIntegratedServerRunner,
-        mesh_assets: TexturedMeshAssets,
-        render_compile_worker: RenderSectionCompileWorker,
     }
 
     enum AndroidRenderError {
@@ -283,7 +265,7 @@ mod android {
             width: u32,
             height: u32,
         ) -> Result<Self> {
-            let mut scene = AndroidSceneRuntime::new()?;
+            let mut scene = LocalSingleViewSceneRuntime::new(android_scene_options())?;
             let camera = android_smoke_camera(scene.render_distance());
             let camera_position = camera_position(camera);
             let (poll_count, poll_ms) = scene.poll_until_idle()?;
@@ -319,7 +301,7 @@ mod android {
                 queue,
                 format,
                 &sections,
-                scene.mesh_assets.atlas.as_upload(),
+                scene.mesh_assets().atlas.as_upload(),
             )?;
             draw.set_traversal_ready_sections(
                 &scene.traversal_ready_render_section_keys(camera_position),
@@ -431,198 +413,10 @@ mod android {
         }
     }
 
-    impl AndroidSceneRuntime {
-        fn new() -> Result<Self> {
-            const ANDROID_SMOKE_SEED: i64 = 12345;
-            const ANDROID_SMOKE_RENDER_DISTANCE: u32 = 2;
-            const ANDROID_SMOKE_DAY_TIME: u64 = 6000;
-
-            let render_distance = ANDROID_SMOKE_RENDER_DISTANCE;
-            let chunk_tracking_radius = chunk_tracking_radius_for_render_distance(render_distance);
-            let interest_center = ChunkPos::new(0, 0);
-            let mesh_assets = load_textured_mesh_assets()?;
-            let render_compile_worker =
-                RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
-            let server_runner = NativeIntegratedServerRunner::new(
-                NativeIntegratedServerRunnerConfig::new(ANDROID_SMOKE_SEED)
-                    .with_day_time(Some(ANDROID_SMOKE_DAY_TIME))
-                    .with_day_time_frozen(true),
-            )
-            .context("failed to start Android integrated server runner")?;
-            let mut scene = Self {
-                core: SingleViewRuntime::local_integrated(
-                    interest_center,
-                    render_distance,
-                    chunk_tracking_radius,
-                ),
-                server_runner,
-                mesh_assets,
-                render_compile_worker,
-            };
-            scene.core.force_day_time(ANDROID_SMOKE_DAY_TIME);
-            scene.set_chunk_view(interest_center, render_distance, chunk_tracking_radius)?;
-            Ok(scene)
-        }
-
-        fn render_distance(&self) -> u32 {
-            self.core.render_distance()
-        }
-
-        fn set_chunk_view(
-            &mut self,
-            center: ChunkPos,
-            render_distance: u32,
-            chunk_tracking_radius: u32,
-        ) -> Result<()> {
-            let Some(command) =
-                self.core
-                    .set_chunk_view_command(center, render_distance, chunk_tracking_radius)
-            else {
-                return Ok(());
-            };
-            self.server_runner
-                .send_command(command)
-                .context("failed to send Android chunk view command")?;
-            let _ = self.drain_runner_updates_report()?;
-            Ok(())
-        }
-
-        fn poll(&mut self) -> Result<bool> {
-            let flush_start = Instant::now();
-            let apply_report = self.drain_runner_updates_report()?;
-            let changed = apply_report.changed;
-            let runner_diagnostics = self
-                .server_runner
-                .poll_diagnostics()
-                .context("failed to poll Android integrated server diagnostics")?;
-            self.core.finish_poll_diagnostics(
-                elapsed_ms(flush_start.elapsed()),
-                apply_report,
-                Some(&runner_diagnostics),
-            );
-            Ok(changed)
-        }
-
-        fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
-            let deadline = Instant::now() + Duration::from_secs(120);
-            let mut polls = 0_usize;
-            let mut poll_ms = 0.0_f64;
-            loop {
-                let poll_start = Instant::now();
-                self.poll()?;
-                poll_ms += elapsed_ms(poll_start.elapsed());
-                polls += 1;
-                let diagnostics = self.server_runner_diagnostics()?;
-                if runner_idle(&diagnostics) {
-                    return Ok((polls, poll_ms));
-                }
-                if Instant::now() >= deadline {
-                    bail!("timed out waiting for Android integrated runtime worldgen jobs");
-                }
-                if diagnostics.update_queue_depth == 0 {
-                    thread::sleep(Duration::from_millis(1));
-                }
-            }
-        }
-
-        fn server_runner_diagnostics(&self) -> Result<ServerRunnerDiagnostics> {
-            self.server_runner
-                .poll_diagnostics()
-                .context("failed to poll Android integrated server diagnostics")
-        }
-
-        fn drain_runner_updates_report(&mut self) -> Result<RuntimeUpdateApplyReport> {
-            let updates = self
-                .server_runner
-                .drain_updates()
-                .context("failed to drain Android integrated server updates")?;
-            if updates.is_empty() {
-                return Ok(RuntimeUpdateApplyReport::default());
-            }
-            Ok(self.core.apply_server_updates_report(updates))
-        }
-
-        fn sync_render_sections(
-            &mut self,
-            camera_position: Vec3,
-        ) -> Result<RenderSectionCacheUpdate> {
-            let render_compile_worker = &mut self.render_compile_worker;
-            self.core.sync_render_sections(
-                render_compile_worker,
-                camera_position,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
-            )
-        }
-
-        fn sync_all_render_sections(
-            &mut self,
-            camera_position: Vec3,
-        ) -> Result<RenderSectionCacheUpdate> {
-            let deadline = Instant::now() + Duration::from_secs(120);
-            let mut combined = RenderSectionCacheUpdate::default();
-            loop {
-                let update = self.core.sync_render_sections_with_budget(
-                    &mut self.render_compile_worker,
-                    camera_position,
-                    usize::MAX,
-                    |client, _compiler| client.chunk_snapshots().cloned().collect(),
-                )?;
-                let progressed = update.rebuilt_section_count() > 0
-                    || update.removed_section_count() > 0
-                    || update.submitted_compile_section_count > 0
-                    || update.completed_compile_section_count > 0
-                    || update.stale_compile_section_count > 0;
-                combined.merge(update);
-                if self.render_compile_worker.pending_job_count() == 0
-                    && !self.core.has_ready_pending_render_work(camera_position)
-                {
-                    combined.pending_compile_jobs = 0;
-                    return Ok(combined);
-                }
-                if Instant::now() >= deadline {
-                    bail!("timed out waiting for Android render section compile queue");
-                }
-                if !progressed {
-                    thread::sleep(Duration::from_millis(1));
-                }
-            }
-        }
-
-        fn cached_sections(&self) -> Vec<mclone_mesh::TexturedRenderSectionMesh> {
-            self.core.cached_sections()
-        }
-
-        fn loaded_chunk_count(&self) -> usize {
-            self.core.client().loaded_chunk_count()
-        }
-
-        fn traversal_ready_render_section_keys(
-            &self,
-            camera_position: Vec3,
-        ) -> std::collections::BTreeSet<mclone_mesh::RenderSectionKey> {
-            self.core
-                .traversal_ready_render_section_keys(camera_position)
-        }
-
-        fn sky_clear_color(&self) -> wgpu::Color {
-            mclone_render::sky::overworld_clear_color(self.core.time_of_day())
-        }
-
-        fn time_of_day(&self) -> f32 {
-            self.core.time_of_day()
-        }
-
-        fn sun_angle(&self) -> f32 {
-            self.core.sun_angle()
-        }
-    }
-
-    fn runner_idle(diagnostics: &ServerRunnerDiagnostics) -> bool {
-        diagnostics.command_queue_depth == 0
-            && diagnostics.update_queue_depth == 0
-            && !diagnostics.awaiting_tick
-            && diagnostics.pending_jobs == 0
-            && diagnostics.pending_publications == 0
+    fn android_scene_options() -> LocalSingleViewSceneOptions {
+        LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
+            .with_day_time(Some(6000))
+            .with_freeze_time(true)
     }
 
     #[derive(Default)]

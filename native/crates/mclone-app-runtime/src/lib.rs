@@ -2,6 +2,8 @@
 
 pub mod frame_render;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod local_single_view;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod render_assets;
 
 use std::collections::BTreeSet;
