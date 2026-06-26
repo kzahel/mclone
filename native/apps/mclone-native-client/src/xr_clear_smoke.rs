@@ -96,6 +96,8 @@ const XR_SAMPLE_COUNT: u32 = 1;
 #[cfg(not(target_os = "android"))]
 const SESSION_READY_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(not(target_os = "android"))]
+const SUBMITTED_FRAME_PROGRESS_TIMEOUT: Duration = Duration::from_secs(15);
+#[cfg(not(target_os = "android"))]
 const SESSION_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(25);
 #[cfg(not(target_os = "android"))]
 #[derive(Debug)]
@@ -433,6 +435,11 @@ fn run_smoke_frames(
     println!("OpenXR frame limit: {frame_limit_label}");
     if frame_limit.is_none() {
         println!("OpenXR session READY timeout: disabled");
+    } else {
+        println!(
+            "OpenXR submitted-frame progress timeout: {:.1}s",
+            SUBMITTED_FRAME_PROGRESS_TIMEOUT.as_secs_f64()
+        );
     }
     let mut mclone = match smoke {
         DesktopXrSmoke::Clear { .. } => None,
@@ -455,6 +462,8 @@ fn run_smoke_frames(
     let mut event_storage = xr::EventDataBuffer::new();
     let mut session_running = false;
     let session_ready_deadline = frame_limit.map(|_| Instant::now() + SESSION_READY_TIMEOUT);
+    let mut submitted_frame_progress_deadline =
+        frame_limit.map(|_| Instant::now() + SUBMITTED_FRAME_PROGRESS_TIMEOUT);
     let mut frame_stats = XrFrameStats::default();
     let mut runtime_requested_exit = false;
 
@@ -491,6 +500,7 @@ fn run_smoke_frames(
             OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
         }
 
+        let submitted_frames_before = frame_stats.submitted_frames;
         let frame_state = mclone_xr_host::wait_begin_frame(
             &mut graphics.frame_wait,
             &mut graphics.frame_stream,
@@ -548,6 +558,19 @@ fn run_smoke_frames(
                 &[],
             );
             return Err(err);
+        }
+
+        if let Some(deadline) = submitted_frame_progress_deadline.as_mut() {
+            if frame_stats.submitted_frames > submitted_frames_before {
+                *deadline = Instant::now() + SUBMITTED_FRAME_PROGRESS_TIMEOUT;
+            } else if Instant::now() >= *deadline {
+                bail!(
+                    "timed out waiting for OpenXR submitted-frame progress: submitted={} runtime_frames={} skipped={}",
+                    frame_stats.submitted_frames,
+                    frame_stats.runtime_frames,
+                    frame_stats.skipped_frames
+                );
+            }
         }
     }
 

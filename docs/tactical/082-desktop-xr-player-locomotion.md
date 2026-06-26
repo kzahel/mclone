@@ -158,6 +158,25 @@ cmd /c scripts\start-xr.bat --vdxr --mclone --view-pose 0,78,-96,180 --forever -
   transposed: physical left/right drove forward/back in-game.
 - After swapping left-stick locomotion axes, forward/back was correct but
   strafe left/right was inverted.
+
+Regression check after Android XR shared-locomotion extraction, June 26, 2026:
+
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`:
+  passed.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client --features xr`:
+  passed, 80 tests.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`:
+  passed, 6 tests.
+- `cmd /c scripts\start-xr.bat --vdxr --mclone --view-pose 0,120,-96,180 --frames 120 --no-pause`:
+  passed.
+- Observed runtime: `VirtualDesktopXR v1.0.10`, `Meta Quest 3`,
+  `NVIDIA GeForce RTX 4090`.
+- OpenXR submitted `120` frames with `skipped=0`.
+- Mclone frame summary reported real terrain draw work:
+  `sections=122 drawn_sections=18 indices=580194 drawn_indices=163944`.
+- Added a bounded-smoke submitted-frame progress timeout so a future
+  VirtualDesktopXR/Quest focus problem fails fast instead of hanging the
+  regression script indefinitely.
 - After inverting only the strafe sign, user reported the controls were
   "all good".
 - Validation before the final manual relaunch:
