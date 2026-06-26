@@ -2,9 +2,10 @@
 
 Status: active. Slice 1 is complete. Slice 2 has two chunks landed:
 desktop's local static client-runtime construction and shared render-section
-queue draining now use `mclone-app-runtime` helpers. Slice 3 has started by
-moving desktop remote dedicated dispatch/resync policy into a shared
-host-mode module while keeping TCP transport in the desktop app.
+queue draining now use `mclone-app-runtime` helpers. Slice 3 has moved remote
+dedicated dispatch/resync policy, flat Android remote-host selection, and the
+native local/remote single-view scene shell into shared app-runtime contracts
+while keeping concrete transports and platform config in app crates.
 
 ## Purpose
 
@@ -30,9 +31,11 @@ and rendering continue to grow.
   cache updates, neighbor readiness, and camera-controller contracts.
 - Desktop flat wraps these through `WindowSceneRuntime`, with extra desktop
   and remote-session behavior.
-- Flat Android renders real terrain through shared crates, but still carries a
-  private local-only scene shell; the first extraction removed its private
-  `AndroidSceneRuntime`, but it still has no dedicated-server host-mode path.
+- Flat Android renders real terrain through shared crates, selects local
+  integrated or remote dedicated through the shared host-mode contract, and now
+  uses a shared native local/remote scene shell. Android still owns
+  `NativeActivity`, property lookup, TCP session construction, surface/device
+  ownership, touch input, and APK validation scripts.
 - Web/WASM already consumes `SingleViewRuntime`, but its worker and browser
   adapter shape stays separate.
 
@@ -172,6 +175,9 @@ git diff --check
 - [x] Add a flat Android remote dedicated configuration path once the shared
   contract exists. Android-specific property/intent/UI details stay in the app
   crate.
+- [x] Move flat Android's local/remote scene wrapper into `mclone-app-runtime`
+  so Android does not own render-section, mesh asset, sky/time, or
+  traversal-ready dispatch for host-mode variants.
 - [x] Add host-mode conformance coverage so local integrated and remote
   dedicated construction can be validated without running every device lane.
 
@@ -240,6 +246,39 @@ cd native
 cargo ndk -t arm64-v8a -o ../android/jniLibs build --release --package mclone-android-client --lib
 cd ../android
 .\gradlew.bat assembleDebug
+git diff --check
+```
+
+Recorded Slice 3 third-chunk result:
+
+- Added `NativeSingleViewSceneRuntime<S>` to
+  `mclone-app-runtime::local_single_view`, pairing
+  `LocalSingleViewSceneRuntime` with a generic remote dedicated scene runtime
+  over `RemoteDedicatedServerSession`.
+- Added `RemoteDedicatedSingleViewSceneRuntime<S>` for native remote hosts.
+  It owns shared remote client initialization, render-section compilation,
+  cache/traversal-ready queries, mesh assets, and sky/time facts.
+- Added shared local/remote methods for host labels, mesh assets, render
+  distance, loaded chunk count, polling/idle wait, render-section sync, cached
+  sections, traversal-ready section keys, sky color, time of day, sun angle,
+  and gameplay command dispatch.
+- Rewired flat Android to call the shared scene shell. Android now retains only
+  `debug.mclone.remote_addr` lookup and the concrete
+  `AndroidRemoteServerSession` TCP adapter.
+
+Validation after Slice 3 third chunk:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
+cargo check --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+pnpm native:web:build
+cd native
+cargo ndk -t arm64-v8a -o ../android/jniLibs build --release --package mclone-android-client --lib
 git diff --check
 ```
 

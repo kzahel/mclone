@@ -8,20 +8,13 @@ mod android {
 
     use anyhow::{Context, Result, bail};
     use glam::Vec3;
-    use mclone_app_runtime::SingleViewRuntime;
     use mclone_app_runtime::frame_render::{
         FullFrameGui, RenderStreamStats, record_render_section_update_stats,
         render_full_frame_for_view,
     };
-    use mclone_app_runtime::host_mode::{
-        RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions,
-        dispatch_remote_dedicated_command,
-    };
+    use mclone_app_runtime::host_mode::{RemoteDedicatedServerSession, SingleViewHostOptions};
     use mclone_app_runtime::local_single_view::{
-        LocalSingleViewSceneOptions, LocalSingleViewSceneRuntime,
-    };
-    use mclone_app_runtime::render_assets::{
-        RenderSectionCompileWorker, TexturedMeshAssets, load_textured_mesh_assets,
+        LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime,
     };
     use mclone_core::ChunkPos;
     use mclone_mesh::quad_face_count_from_indices;
@@ -33,7 +26,6 @@ mod android {
     };
     use mclone_render::sky_render::SkyRenderer;
     use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
-    use mclone_render_session::RenderSectionCacheUpdate;
     use mclone_ui::GuiDrawList;
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -281,7 +273,7 @@ mod android {
             height: u32,
         ) -> Result<Self> {
             let scene_options = android_scene_options();
-            let mut scene = AndroidSingleViewSceneRuntime::new(scene_options)?;
+            let mut scene = android_single_view_scene_runtime(scene_options)?;
             let host_label = scene.host_label();
             let camera = android_smoke_camera(scene.render_distance());
             let camera_position = camera_position(camera);
@@ -495,241 +487,22 @@ mod android {
         )
     }
 
-    enum AndroidSingleViewSceneRuntime {
-        Local(LocalSingleViewSceneRuntime),
-        Remote(AndroidRemoteDedicatedSceneRuntime),
-    }
+    type AndroidSingleViewSceneRuntime = NativeSingleViewSceneRuntime<AndroidRemoteServerSession>;
 
-    impl AndroidSingleViewSceneRuntime {
-        fn new(options: AndroidSceneOptions) -> Result<Self> {
-            if options.remote_addr.is_some() {
-                return Ok(Self::Remote(AndroidRemoteDedicatedSceneRuntime::new(
-                    options,
-                )?));
-            }
-            Ok(Self::Local(LocalSingleViewSceneRuntime::new(
-                options.local_options(),
-            )?))
-        }
-
-        fn host_mode(&self) -> SingleViewHostMode {
-            match self {
-                Self::Local(_) => SingleViewHostMode::LocalIntegrated,
-                Self::Remote(_) => SingleViewHostMode::RemoteDedicated,
-            }
-        }
-
-        fn host_label(&self) -> &'static str {
-            match self.host_mode() {
-                SingleViewHostMode::LocalIntegrated => "local integrated",
-                SingleViewHostMode::RemoteDedicated => "remote dedicated",
-            }
-        }
-
-        fn mesh_assets(&self) -> &TexturedMeshAssets {
-            match self {
-                Self::Local(scene) => scene.mesh_assets(),
-                Self::Remote(scene) => scene.mesh_assets(),
-            }
-        }
-
-        fn render_distance(&self) -> u32 {
-            match self {
-                Self::Local(scene) => scene.render_distance(),
-                Self::Remote(scene) => scene.render_distance(),
-            }
-        }
-
-        fn loaded_chunk_count(&self) -> usize {
-            match self {
-                Self::Local(scene) => scene.loaded_chunk_count(),
-                Self::Remote(scene) => scene.loaded_chunk_count(),
-            }
-        }
-
-        fn poll(&mut self) -> Result<bool> {
-            match self {
-                Self::Local(scene) => scene.poll(),
-                Self::Remote(scene) => scene.poll(),
-            }
-        }
-
-        fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
-            match self {
-                Self::Local(scene) => scene.poll_until_idle(),
-                Self::Remote(scene) => scene.poll_until_idle(),
-            }
-        }
-
-        fn sync_render_sections(
-            &mut self,
-            camera_position: Vec3,
-        ) -> Result<RenderSectionCacheUpdate> {
-            match self {
-                Self::Local(scene) => scene.sync_render_sections(camera_position),
-                Self::Remote(scene) => scene.sync_render_sections(camera_position),
-            }
-        }
-
-        fn sync_all_render_sections(
-            &mut self,
-            camera_position: Vec3,
-        ) -> Result<RenderSectionCacheUpdate> {
-            match self {
-                Self::Local(scene) => scene.sync_all_render_sections(camera_position),
-                Self::Remote(scene) => scene.sync_all_render_sections(camera_position),
-            }
-        }
-
-        fn cached_sections(&self) -> Vec<mclone_mesh::TexturedRenderSectionMesh> {
-            match self {
-                Self::Local(scene) => scene.cached_sections(),
-                Self::Remote(scene) => scene.cached_sections(),
-            }
-        }
-
-        fn traversal_ready_render_section_keys(
-            &self,
-            camera_position: Vec3,
-        ) -> std::collections::BTreeSet<mclone_mesh::RenderSectionKey> {
-            match self {
-                Self::Local(scene) => scene.traversal_ready_render_section_keys(camera_position),
-                Self::Remote(scene) => scene.traversal_ready_render_section_keys(camera_position),
-            }
-        }
-
-        fn sky_clear_color(&self) -> wgpu::Color {
-            match self {
-                Self::Local(scene) => scene.sky_clear_color(),
-                Self::Remote(scene) => scene.sky_clear_color(),
-            }
-        }
-
-        fn time_of_day(&self) -> f32 {
-            match self {
-                Self::Local(scene) => scene.time_of_day(),
-                Self::Remote(scene) => scene.time_of_day(),
-            }
-        }
-
-        fn sun_angle(&self) -> f32 {
-            match self {
-                Self::Local(scene) => scene.sun_angle(),
-                Self::Remote(scene) => scene.sun_angle(),
-            }
-        }
-    }
-
-    struct AndroidRemoteDedicatedSceneRuntime {
-        core: SingleViewRuntime,
-        session: AndroidRemoteServerSession,
-        mesh_assets: TexturedMeshAssets,
-        render_compile_worker: RenderSectionCompileWorker,
-    }
-
-    impl AndroidRemoteDedicatedSceneRuntime {
-        fn new(options: AndroidSceneOptions) -> Result<Self> {
-            let remote_addr = options
-                .remote_addr
-                .as_ref()
-                .context("remote dedicated Android scene requires a remote address")?
-                .clone();
-            let mesh_assets = load_textured_mesh_assets()?;
-            let render_compile_worker =
-                RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
-            let mut session = AndroidRemoteServerSession::connect(remote_addr.as_str())?;
-            let host_options = options.host_options();
-            let mut core = SingleViewRuntime::remote_dedicated(
-                host_options.center,
-                host_options.render_distance,
-                host_options.chunk_tracking_radius,
-            );
-            if let Some(command) = core.set_chunk_view_command(
-                host_options.center,
-                host_options.render_distance,
-                host_options.chunk_tracking_radius,
-            ) {
-                dispatch_remote_dedicated_command(&mut core, &mut session, command).with_context(
-                    || format!("failed to initialize Android remote dedicated runtime from {remote_addr}"),
-                )?;
-            }
-            Ok(Self {
-                core,
+    fn android_single_view_scene_runtime(
+        options: AndroidSceneOptions,
+    ) -> Result<AndroidSingleViewSceneRuntime> {
+        if let Some(remote_addr) = &options.remote_addr {
+            let session = AndroidRemoteServerSession::connect(remote_addr.as_str())?;
+            return AndroidSingleViewSceneRuntime::remote_dedicated(
+                options.host_options(),
                 session,
-                mesh_assets,
-                render_compile_worker,
-            })
-        }
-
-        fn mesh_assets(&self) -> &TexturedMeshAssets {
-            &self.mesh_assets
-        }
-
-        fn render_distance(&self) -> u32 {
-            self.core.render_distance()
-        }
-
-        fn loaded_chunk_count(&self) -> usize {
-            self.core.client().loaded_chunk_count()
-        }
-
-        fn poll(&mut self) -> Result<bool> {
-            // Remote dedicated is request/response today. Keep the session
-            // resident so future Android gameplay commands reuse this
-            // connection instead of reconnecting per frame.
-            let _keep_session_open = &mut self.session;
-            Ok(false)
-        }
-
-        fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
-            Ok((0, 0.0))
-        }
-
-        fn sync_render_sections(
-            &mut self,
-            camera_position: Vec3,
-        ) -> Result<RenderSectionCacheUpdate> {
-            self.core.sync_render_sections(
-                &mut self.render_compile_worker,
-                camera_position,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
             )
+            .with_context(|| {
+                format!("failed to initialize Android remote dedicated runtime from {remote_addr}")
+            });
         }
-
-        fn sync_all_render_sections(
-            &mut self,
-            camera_position: Vec3,
-        ) -> Result<RenderSectionCacheUpdate> {
-            self.core.sync_all_render_sections(
-                &mut self.render_compile_worker,
-                camera_position,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
-            )
-        }
-
-        fn cached_sections(&self) -> Vec<mclone_mesh::TexturedRenderSectionMesh> {
-            self.core.cached_sections()
-        }
-
-        fn traversal_ready_render_section_keys(
-            &self,
-            camera_position: Vec3,
-        ) -> std::collections::BTreeSet<mclone_mesh::RenderSectionKey> {
-            self.core
-                .traversal_ready_render_section_keys(camera_position)
-        }
-
-        fn sky_clear_color(&self) -> wgpu::Color {
-            mclone_render::sky::overworld_clear_color(self.core.time_of_day())
-        }
-
-        fn time_of_day(&self) -> f32 {
-            self.core.time_of_day()
-        }
-
-        fn sun_angle(&self) -> f32 {
-            self.core.sun_angle()
-        }
+        AndroidSingleViewSceneRuntime::local(options.local_options())
     }
 
     #[derive(Debug)]

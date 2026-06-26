@@ -6,13 +6,17 @@ use glam::Vec3;
 use mclone_client::ClientRuntime;
 use mclone_core::ChunkPos;
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
-use mclone_protocol::ServerUpdate;
+use mclone_protocol::{ClientCommand, ServerUpdate};
 use mclone_render_session::RenderSectionCacheUpdate;
 use mclone_server::{
     IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
     ServerRunnerDiagnostics,
 };
 
+use crate::host_mode::{
+    RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions,
+    dispatch_remote_dedicated_command,
+};
 use crate::render_assets::{
     RenderSectionCompileWorker, TexturedMeshAssets, load_textured_mesh_assets,
 };
@@ -148,6 +152,14 @@ impl LocalSingleViewSceneRuntime {
         Ok(true)
     }
 
+    pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
+        self.server_runner
+            .send_command(command)
+            .context("failed to send local single-view gameplay command")?;
+        let _ = self.drain_runner_updates_report()?;
+        Ok(true)
+    }
+
     pub fn poll(&mut self) -> Result<bool> {
         let flush_start = Instant::now();
         let apply_report = self.drain_runner_updates_report()?;
@@ -248,6 +260,277 @@ impl LocalSingleViewSceneRuntime {
             return Ok(RuntimeUpdateApplyReport::default());
         }
         Ok(self.core.apply_server_updates_report(updates))
+    }
+}
+
+#[derive(Debug)]
+pub enum NativeSingleViewSceneRuntime<S> {
+    Local(LocalSingleViewSceneRuntime),
+    RemoteDedicated(RemoteDedicatedSingleViewSceneRuntime<S>),
+}
+
+impl<S> NativeSingleViewSceneRuntime<S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    pub fn local(options: LocalSingleViewSceneOptions) -> Result<Self> {
+        Ok(Self::Local(LocalSingleViewSceneRuntime::new(options)?))
+    }
+
+    pub fn remote_dedicated(options: SingleViewHostOptions, session: S) -> Result<Self> {
+        Ok(Self::RemoteDedicated(
+            RemoteDedicatedSingleViewSceneRuntime::new(options, session)?,
+        ))
+    }
+
+    pub const fn host_mode(&self) -> SingleViewHostMode {
+        match self {
+            Self::Local(_) => SingleViewHostMode::LocalIntegrated,
+            Self::RemoteDedicated(_) => SingleViewHostMode::RemoteDedicated,
+        }
+    }
+
+    pub const fn host_label(&self) -> &'static str {
+        match self.host_mode() {
+            SingleViewHostMode::LocalIntegrated => "local integrated",
+            SingleViewHostMode::RemoteDedicated => "remote dedicated",
+        }
+    }
+
+    pub fn client(&self) -> &ClientRuntime {
+        match self {
+            Self::Local(scene) => scene.client(),
+            Self::RemoteDedicated(scene) => scene.client(),
+        }
+    }
+
+    pub fn mesh_assets(&self) -> &TexturedMeshAssets {
+        match self {
+            Self::Local(scene) => scene.mesh_assets(),
+            Self::RemoteDedicated(scene) => scene.mesh_assets(),
+        }
+    }
+
+    pub fn render_distance(&self) -> u32 {
+        match self {
+            Self::Local(scene) => scene.render_distance(),
+            Self::RemoteDedicated(scene) => scene.render_distance(),
+        }
+    }
+
+    pub fn loaded_chunk_count(&self) -> usize {
+        match self {
+            Self::Local(scene) => scene.loaded_chunk_count(),
+            Self::RemoteDedicated(scene) => scene.loaded_chunk_count(),
+        }
+    }
+
+    pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
+        match self {
+            Self::Local(scene) => scene.send_gameplay_command(command),
+            Self::RemoteDedicated(scene) => scene.send_gameplay_command(command),
+        }
+    }
+
+    pub fn poll(&mut self) -> Result<bool> {
+        match self {
+            Self::Local(scene) => scene.poll(),
+            Self::RemoteDedicated(scene) => scene.poll(),
+        }
+    }
+
+    pub fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
+        match self {
+            Self::Local(scene) => scene.poll_until_idle(),
+            Self::RemoteDedicated(scene) => scene.poll_until_idle(),
+        }
+    }
+
+    pub fn sync_render_sections(
+        &mut self,
+        camera_position: Vec3,
+    ) -> Result<RenderSectionCacheUpdate> {
+        match self {
+            Self::Local(scene) => scene.sync_render_sections(camera_position),
+            Self::RemoteDedicated(scene) => scene.sync_render_sections(camera_position),
+        }
+    }
+
+    pub fn sync_all_render_sections(
+        &mut self,
+        camera_position: Vec3,
+    ) -> Result<RenderSectionCacheUpdate> {
+        match self {
+            Self::Local(scene) => scene.sync_all_render_sections(camera_position),
+            Self::RemoteDedicated(scene) => scene.sync_all_render_sections(camera_position),
+        }
+    }
+
+    pub fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
+        match self {
+            Self::Local(scene) => scene.cached_sections(),
+            Self::RemoteDedicated(scene) => scene.cached_sections(),
+        }
+    }
+
+    pub fn traversal_ready_render_section_keys(
+        &self,
+        camera_position: Vec3,
+    ) -> BTreeSet<RenderSectionKey> {
+        match self {
+            Self::Local(scene) => scene.traversal_ready_render_section_keys(camera_position),
+            Self::RemoteDedicated(scene) => {
+                scene.traversal_ready_render_section_keys(camera_position)
+            }
+        }
+    }
+
+    pub fn sky_clear_color(&self) -> wgpu::Color {
+        match self {
+            Self::Local(scene) => scene.sky_clear_color(),
+            Self::RemoteDedicated(scene) => scene.sky_clear_color(),
+        }
+    }
+
+    pub fn time_of_day(&self) -> f32 {
+        match self {
+            Self::Local(scene) => scene.time_of_day(),
+            Self::RemoteDedicated(scene) => scene.time_of_day(),
+        }
+    }
+
+    pub fn sun_angle(&self) -> f32 {
+        match self {
+            Self::Local(scene) => scene.sun_angle(),
+            Self::RemoteDedicated(scene) => scene.sun_angle(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct RemoteDedicatedSingleViewSceneRuntime<S> {
+    core: SingleViewRuntime,
+    session: S,
+    mesh_assets: TexturedMeshAssets,
+    render_compile_worker: RenderSectionCompileWorker,
+}
+
+impl<S> RemoteDedicatedSingleViewSceneRuntime<S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    pub fn new(options: SingleViewHostOptions, session: S) -> Result<Self> {
+        let mesh_assets = load_textured_mesh_assets()?;
+        Self::with_mesh_assets(options, session, mesh_assets)
+    }
+
+    pub fn with_mesh_assets(
+        options: SingleViewHostOptions,
+        mut session: S,
+        mesh_assets: TexturedMeshAssets,
+    ) -> Result<Self> {
+        let render_compile_worker = RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
+        let mut core = SingleViewRuntime::remote_dedicated(
+            options.center,
+            options.render_distance,
+            options.chunk_tracking_radius,
+        );
+        if let Some(command) = core.set_chunk_view_command(
+            options.center,
+            options.render_distance,
+            options.chunk_tracking_radius,
+        ) {
+            dispatch_remote_dedicated_command(&mut core, &mut session, command)
+                .context("failed to initialize remote dedicated single-view runtime")?;
+        }
+        Ok(Self {
+            core,
+            session,
+            mesh_assets,
+            render_compile_worker,
+        })
+    }
+
+    pub const fn core(&self) -> &SingleViewRuntime {
+        &self.core
+    }
+
+    pub const fn core_mut(&mut self) -> &mut SingleViewRuntime {
+        &mut self.core
+    }
+
+    pub const fn client(&self) -> &ClientRuntime {
+        self.core.client()
+    }
+
+    pub const fn mesh_assets(&self) -> &TexturedMeshAssets {
+        &self.mesh_assets
+    }
+
+    pub fn render_distance(&self) -> u32 {
+        self.core.render_distance()
+    }
+
+    pub fn loaded_chunk_count(&self) -> usize {
+        self.core.client().loaded_chunk_count()
+    }
+
+    pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
+        dispatch_remote_dedicated_command(&mut self.core, &mut self.session, command)
+    }
+
+    pub fn poll(&mut self) -> Result<bool> {
+        Ok(false)
+    }
+
+    pub fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
+        Ok((0, 0.0))
+    }
+
+    pub fn sync_render_sections(
+        &mut self,
+        camera_position: Vec3,
+    ) -> Result<RenderSectionCacheUpdate> {
+        self.core.sync_render_sections(
+            &mut self.render_compile_worker,
+            camera_position,
+            |client, _compiler| client.chunk_snapshots().cloned().collect(),
+        )
+    }
+
+    pub fn sync_all_render_sections(
+        &mut self,
+        camera_position: Vec3,
+    ) -> Result<RenderSectionCacheUpdate> {
+        self.core.sync_all_render_sections(
+            &mut self.render_compile_worker,
+            camera_position,
+            |client, _compiler| client.chunk_snapshots().cloned().collect(),
+        )
+    }
+
+    pub fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
+        self.core.cached_sections()
+    }
+
+    pub fn traversal_ready_render_section_keys(
+        &self,
+        camera_position: Vec3,
+    ) -> BTreeSet<RenderSectionKey> {
+        self.core
+            .traversal_ready_render_section_keys(camera_position)
+    }
+
+    pub fn sky_clear_color(&self) -> wgpu::Color {
+        mclone_render::sky::overworld_clear_color(self.core.time_of_day())
+    }
+
+    pub fn time_of_day(&self) -> f32 {
+        self.core.time_of_day()
+    }
+
+    pub fn sun_angle(&self) -> f32 {
+        self.core.sun_angle()
     }
 }
 
