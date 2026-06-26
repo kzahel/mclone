@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/mclone-audio",
   "crates/mclone-assets",
   "crates/mclone-app-runtime",
   "crates/mclone-client",
@@ -33,6 +34,7 @@ publish = false
 android-activity = { version = "=0.6.0", features = ["native-activity"] }
 anyhow = "1"
 ash = "0.38"
+cpal = "0.18"
 env_logger = "0.11"
 crc32fast = "1"
 flate2 = "1"
@@ -40,8 +42,10 @@ glam = "0.30"
 image = { version = "0.25", default-features = false, features = ["png"] }
 jni = "0.22"
 js-sys = "0.3.102"
+lewton = "0.10"
 libloading = "0.8"
 log = "0.4"
+mclone-audio = { path = "crates/mclone-audio" }
 mclone-assets = { path = "crates/mclone-assets" }
 mclone-app-runtime = { path = "crates/mclone-app-runtime" }
 mclone-client = { path = "crates/mclone-client" }

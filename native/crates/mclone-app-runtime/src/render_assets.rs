@@ -219,6 +219,12 @@ pub fn default_android_external_files_dir() -> PathBuf {
     ))
 }
 
+pub fn default_sound_overlay_root() -> PathBuf {
+    repo_root().join(format!(
+        "reference/minecraft-{DEFAULT_REFERENCE_ASSET_VERSION}/sound-overlay"
+    ))
+}
+
 pub fn load_asset_source() -> Result<AssetSourceChain> {
     let mode = AssetMode::from_env()?;
     let mut source = AssetSourceChain::new();
@@ -261,6 +267,9 @@ pub fn load_asset_source() -> Result<AssetSourceChain> {
         bail!(
             "missing Minecraft assets; run ./scripts/decompile-mc.sh and `pnpm assets:pack` from the repository root"
         );
+    }
+    if let Some(sound_overlay) = load_sound_overlay_asset_source()? {
+        source.push(sound_overlay);
     }
     Ok(source)
 }
@@ -343,6 +352,26 @@ fn load_pack_asset_source(required: bool) -> Result<Option<PackedAssetSource>> {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
+    }
+    Ok(None)
+}
+
+fn load_sound_overlay_asset_source() -> Result<Option<FilesystemAssetSource>> {
+    if let Some(root) = env_path("MCLONE_SOUND_ASSET_ROOT") {
+        if root.join("assets").is_dir() {
+            log::info!("loaded sound asset overlay {}", root.display());
+            return Ok(Some(FilesystemAssetSource::new(root)));
+        }
+        bail!(
+            "MCLONE_SOUND_ASSET_ROOT points to {}, but it does not contain an assets/ directory",
+            root.display()
+        );
+    }
+
+    let root = default_sound_overlay_root();
+    if root.join("assets").is_dir() {
+        log::info!("loaded sound asset overlay {}", root.display());
+        return Ok(Some(FilesystemAssetSource::new(root)));
     }
     Ok(None)
 }

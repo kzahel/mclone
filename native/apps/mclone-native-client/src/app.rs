@@ -41,6 +41,7 @@ use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 use mclone_app_runtime::frame_render::{
     FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame_for_view,
 };
+use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraMovementMode, EngineCameraSnapshot,
     RenderSectionCacheUpdate, actor_instances_from_presentations, render_camera_from_snapshot,
@@ -158,6 +159,7 @@ struct ChunkApp {
     actors: Option<ActorDrawResources>,
     screen_effects: Option<ScreenEffectsRenderer>,
     gui: Option<GuiRenderer>,
+    audio: Option<AudioEngine>,
     mouse_locked: bool,
     mouse_lock_requested: bool,
     last_cursor: Option<(f64, f64)>,
@@ -192,6 +194,7 @@ impl ChunkApp {
             actors: None,
             screen_effects: None,
             gui: None,
+            audio: None,
             mouse_locked: false,
             mouse_lock_requested: false,
             last_cursor: None,
@@ -260,7 +263,10 @@ impl ChunkApp {
             .camera
             .tick_movement(self.runtime.client(), f64::from(movement_dt))
         {
+            self.play_landing_events();
             self.commit_player_pose_change()?;
+        } else {
+            self.play_landing_events();
         }
         Ok(())
     }
@@ -587,6 +593,17 @@ impl ChunkApp {
         Ok(changed)
     }
 
+    fn play_landing_events(&mut self) {
+        let events = self.camera.take_landing_events();
+        let Some(audio) = &self.audio else {
+            return;
+        };
+        for event in events {
+            let (sound, gain) = landing_playback_for_impact(event.impact_speed);
+            audio.play(sound, gain);
+        }
+    }
+
     fn interpolated_actor_instances(&mut self) -> Vec<ActorInstance> {
         self.actor_interpolation
             .reconcile_authoritative(self.runtime.client().actor_presentations());
@@ -821,6 +838,13 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
+        let audio = match AudioEngine::new(&asset_source, AudioSettings::default()) {
+            Ok(audio) => Some(audio),
+            Err(err) => {
+                log::warn!("audio disabled: {err:#}");
+                None
+            }
+        };
         self.ui.set_scale(GuiScale::from_pixels(
             surface.config.width,
             surface.config.height,
@@ -860,6 +884,7 @@ impl ApplicationHandler for ChunkApp {
         self.actors = Some(actors);
         self.screen_effects = Some(screen_effects);
         self.gui = Some(gui);
+        self.audio = audio;
         self.surface = Some(surface);
         self.window = Some(window);
         self.last_frame = Instant::now();

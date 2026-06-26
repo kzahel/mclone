@@ -25,6 +25,7 @@ glam.workspace = true
 image.workspace = true
 libloading = { workspace = true, optional = true }
 log.workspace = true
+mclone-audio.workspace = true
 mclone-assets.workspace = true
 mclone-app-runtime.workspace = true
 mclone-client.workspace = true

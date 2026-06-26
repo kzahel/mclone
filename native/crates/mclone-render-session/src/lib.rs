@@ -6,8 +6,8 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_client::{
     ActorPresentation, ActorPresentationKind, ClientInteractionController, ClientRuntime,
-    LOCAL_PLAYER_STANDING_EYE_HEIGHT, LocalPlayerController, LocalPlayerPose, NoClipMovementStep,
-    PlayerInputKey, WalkingMovementStep,
+    LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_TICKS_PER_SECOND, LocalPlayerController,
+    LocalPlayerPose, NoClipMovementStep, PlayerInputKey, WalkingMovementStep,
 };
 use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockHitResult, BlockPos, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos,
@@ -27,6 +27,7 @@ use mclone_protocol::{
 use mclone_render::entity::ActorInstance;
 
 const PACKED_BUILD_REPORT_MAGIC: &[u8; 8] = b"MCRSBR1\0";
+pub const LANDING_MIN_IMPACT_SPEED: f64 = 0.5;
 
 pub fn build_client_textured_sections(
     client: &ClientRuntime,
@@ -1055,11 +1056,18 @@ pub struct EngineRenderCamera {
     pub z_far: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LandingEvent {
+    pub impact_speed: f64,
+    pub position: Vec3d,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct EngineCameraController {
     player: LocalPlayerController,
     movement_mode: EngineCameraMovementMode,
     speed_blocks_per_second: f64,
+    landing_events: Vec<LandingEvent>,
 }
 
 impl EngineCameraController {
@@ -1094,6 +1102,7 @@ impl EngineCameraController {
             player,
             movement_mode: EngineCameraMovementMode::Walking,
             speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
+            landing_events: Vec::new(),
         }
     }
 
@@ -1144,6 +1153,10 @@ impl EngineCameraController {
 
     pub fn pos_rot_move_player_command(&mut self) -> ClientCommand {
         self.player.pos_rot_move_player_command()
+    }
+
+    pub fn take_landing_events(&mut self) -> Vec<LandingEvent> {
+        std::mem::take(&mut self.landing_events)
     }
 
     pub fn apply_player_position_update(&mut self, update: PlayerPositionUpdate) -> ClientCommand {
@@ -1352,7 +1365,10 @@ impl EngineCameraController {
     fn tick_walking(&mut self, client: &ClientRuntime, input: EngineCameraInput) -> bool {
         let pose = self.player.pose();
         let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
-        self.player
+        let was_on_ground = self.player.on_ground();
+        let pre_move_fall_speed = (-self.player.delta_movement().y).max(0.0);
+        let moved = self
+            .player
             .tick_walking_movement_with_impulse(
                 client,
                 WalkingMovementStep {
@@ -1363,7 +1379,17 @@ impl EngineCameraController {
                     .movement_impulse
                     .map(EngineCameraMovementImpulse::as_player_impulse),
             )
-            .is_some()
+            .is_some();
+        if moved && !was_on_ground && self.player.on_ground() {
+            let impact_speed = pre_move_fall_speed * LOCAL_PLAYER_TICKS_PER_SECOND;
+            if impact_speed >= LANDING_MIN_IMPACT_SPEED {
+                self.landing_events.push(LandingEvent {
+                    impact_speed,
+                    position: self.player.pose().position,
+                });
+            }
+        }
+        moved
     }
 
     pub fn render_camera(&self, render_distance: u32) -> EngineRenderCamera {
@@ -3310,6 +3336,50 @@ mod tests {
         assert_eq!(camera.movement_mode(), EngineCameraMovementMode::Walking);
         assert!(after.eye.z > before.eye.z);
         assert!(camera.player().delta_movement().y < 0.0);
+    }
+
+    #[test]
+    fn engine_camera_controller_queues_landing_event_once_on_airborne_to_ground() {
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(test_snapshot_with_block(
+            ChunkPos::new(0, 0),
+            BlockPos::new(0, 0, 0),
+            BlockStateId(7),
+        )));
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(0.5, 2.63, 0.5), 0.0, 0.0, 32.0);
+        let tick_dt = 1.0 / LOCAL_PLAYER_TICKS_PER_SECOND;
+
+        assert!(camera.tick_movement(&client, tick_dt));
+        assert!(camera.take_landing_events().is_empty());
+
+        assert!(camera.tick_movement(&client, tick_dt));
+        let events = camera.take_landing_events();
+
+        assert_eq!(events.len(), 1);
+        assert!(events[0].impact_speed >= LANDING_MIN_IMPACT_SPEED);
+        assert!((events[0].position.y - 1.0).abs() < 1.0e-9);
+        assert!(camera.take_landing_events().is_empty());
+
+        assert!(camera.tick_movement(&client, tick_dt));
+        assert!(camera.take_landing_events().is_empty());
+    }
+
+    #[test]
+    fn engine_camera_controller_probe_ground_does_not_queue_landing_event() {
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(test_snapshot_with_block(
+            ChunkPos::new(0, 0),
+            BlockPos::new(0, 0, 0),
+            BlockStateId(7),
+        )));
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(0.5, 2.62, 0.5), 0.0, 0.0, 32.0);
+
+        camera.probe_ground(&client, 0.02);
+
+        assert!(camera.on_ground());
+        assert!(camera.take_landing_events().is_empty());
     }
 
     #[test]
