@@ -372,8 +372,38 @@ mclone_stage_local_sound_assets() {
     fi
 
     mclone_note "Staging local sound assets $source_dir to $remote_dir"
-    "$ADB" -s "$serial" shell "rm -rf '$remote_dir' && mkdir -p '$remote_dir'" >/dev/null
-    "$ADB" -s "$serial" push "$source_dir/." "$remote_dir" >/dev/null
+    "$ADB" -s "$serial" shell rm -rf "$remote_dir" >/dev/null
+    "$ADB" -s "$serial" shell mkdir -p "$remote_dir" >/dev/null
+    mclone_push_asset_tree "$serial" "$source_dir" "$remote_dir"
+}
+
+mclone_push_asset_tree() {
+    local serial="$1"
+    local source_dir="$2"
+    local remote_dir="$3"
+    local source_prefix="$source_dir/"
+    local local_dir
+    local local_file
+    local rel_path
+    local remote_path
+
+    while IFS= read -r -d '' local_dir; do
+        rel_path="${local_dir#"$source_prefix"}"
+        if [[ "$rel_path" == "$local_dir" ]]; then
+            rel_path=""
+        fi
+        remote_path="$remote_dir"
+        if [[ -n "$rel_path" ]]; then
+            remote_path="$remote_path/$rel_path"
+        fi
+        "$ADB" -s "$serial" shell mkdir -p "$remote_path" </dev/null >/dev/null
+    done < <(find "$source_dir" -type d -print0)
+
+    while IFS= read -r -d '' local_file; do
+        rel_path="${local_file#"$source_prefix"}"
+        [[ "$rel_path" != "$local_file" ]] || mclone_die "failed to derive relative asset path for $local_file"
+        "$ADB" -s "$serial" push "$local_file" "$remote_dir/$rel_path" </dev/null >/dev/null
+    done < <(find "$source_dir" -type f -print0)
 }
 
 mclone_repair_emulator_asset_permissions() {

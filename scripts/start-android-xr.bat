@@ -110,7 +110,7 @@ goto exit_with_status
 if "%STATUS%"=="" set "STATUS=1"
 if not "%STATUS%"=="0" (
     echo.
-    echo Android XR Quest launch failed with status %STATUS%.
+    echo Android XR Quest setup or launch failed with status %STATUS%.
     echo If the headset is not connected or authorized, connect it, accept USB debugging in-headset, and retry.
     if not "%PAUSE_ON_ERROR%"=="0" (
         echo.
