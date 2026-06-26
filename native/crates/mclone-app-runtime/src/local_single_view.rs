@@ -6,6 +6,7 @@ use glam::Vec3;
 use mclone_client::ClientRuntime;
 use mclone_core::ChunkPos;
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
+use mclone_protocol::ServerUpdate;
 use mclone_render_session::RenderSectionCacheUpdate;
 use mclone_server::{
     IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
@@ -273,6 +274,62 @@ impl LocalSingleViewSceneRuntime {
     }
 }
 
+pub fn build_local_single_view_client_runtime(
+    options: LocalSingleViewSceneOptions,
+) -> Result<ClientRuntime> {
+    let mut runtime = SingleViewRuntime::local_integrated(
+        options.center,
+        options.render_distance,
+        options.chunk_tracking_radius(),
+    );
+    let mut runner = NativeIntegratedServerRunner::new(native_runner_config(&options))
+        .context("failed to start local single-view integrated server runner")?;
+    if let Some(day_time) = options.day_time_override {
+        runtime.force_day_time(day_time);
+    }
+    if let Some(command) = runtime.set_chunk_view_command(
+        options.center,
+        options.render_distance,
+        options.chunk_tracking_radius(),
+    ) {
+        runner
+            .send_command(command)
+            .context("failed to send local single-view chunk view command")?;
+        runtime.apply_server_updates(drain_integrated_server_runner_until_idle(&mut runner)?);
+    }
+    runner
+        .join_shutdown()
+        .context("failed to stop local single-view integrated server runner")?;
+    Ok(runtime.client().clone())
+}
+
+pub fn drain_integrated_server_runner_until_idle(
+    runner: &mut NativeIntegratedServerRunner,
+) -> Result<Vec<ServerUpdate>> {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let mut updates = Vec::new();
+
+    loop {
+        updates.extend(
+            runner
+                .drain_updates()
+                .context("failed to drain local single-view integrated server updates")?,
+        );
+        let diagnostics = runner
+            .poll_diagnostics()
+            .context("failed to poll local single-view integrated server diagnostics")?;
+        if runner_idle(&diagnostics) {
+            return Ok(updates);
+        }
+        if Instant::now() >= deadline {
+            bail!("timed out waiting for local single-view integrated server jobs");
+        }
+        if diagnostics.update_queue_depth == 0 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
 fn native_runner_config(
     options: &LocalSingleViewSceneOptions,
 ) -> NativeIntegratedServerRunnerConfig {
@@ -300,6 +357,19 @@ mod tests {
         let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2);
 
         assert_eq!(options.chunk_tracking_radius(), 3);
+    }
+
+    #[test]
+    fn build_local_single_view_client_runtime_loads_center_chunk_without_assets() {
+        let client = build_local_single_view_client_runtime(LocalSingleViewSceneOptions::new(
+            12345,
+            ChunkPos::new(0, 0),
+            0,
+        ))
+        .unwrap();
+
+        assert_eq!(client.loaded_chunk_count(), 1);
+        assert!(client.chunk_snapshot(ChunkPos::new(0, 0)).is_some());
     }
 
     #[test]

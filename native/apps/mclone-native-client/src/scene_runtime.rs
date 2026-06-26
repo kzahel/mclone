@@ -3,6 +3,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
+use mclone_app_runtime::local_single_view::{
+    LocalSingleViewSceneOptions, build_local_single_view_client_runtime,
+};
 use mclone_app_runtime::{
     RuntimeExchange, RuntimePollDiagnostics, RuntimeUpdateApplyReport, SingleViewRuntime,
     SingleViewRuntimeStats, elapsed_ms,
@@ -64,30 +67,33 @@ pub(crate) fn build_scene_textured_sections(scene: &SceneOptions) -> Result<Scen
 }
 
 fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
-    let mut client = if scene.remote_addr.is_some() {
-        ClientRuntime::new(ClientHost::RemoteDedicated)
-    } else {
-        ClientRuntime::local_integrated()
-    };
     let render_distance = scene_render_distance(scene)?;
+    let center = ChunkPos::new(scene.chunk_x, scene.chunk_z);
+    let Some(remote_addr) = &scene.remote_addr else {
+        return build_local_single_view_client_runtime(local_single_view_options(scene)?);
+    };
 
+    let mut client = ClientRuntime::new(ClientHost::RemoteDedicated);
     let command = client.set_chunk_view(mclone_app_runtime::chunk_view(
-        ChunkPos::new(scene.chunk_x, scene.chunk_z),
+        center,
         render_distance,
         chunk_tracking_radius_for_render_distance(render_distance),
     ));
-
-    if let Some(remote_addr) = &scene.remote_addr {
-        let mut session = RemoteServerSession::connect(remote_addr.as_str())?;
-        let updates = session.send_command(command)?;
-        client.apply_updates(updates);
-    } else {
-        let mut runner = NativeIntegratedServerRunner::new(native_runner_config(scene))?;
-        runner.send_command(command)?;
-        client.apply_updates(drain_integrated_server_runner_until_idle(&mut runner)?);
-        runner.join_shutdown()?;
-    }
+    let mut session = RemoteServerSession::connect(remote_addr.as_str())?;
+    let updates = session.send_command(command)?;
+    client.apply_updates(updates);
     Ok(client)
+}
+
+fn local_single_view_options(scene: &SceneOptions) -> Result<LocalSingleViewSceneOptions> {
+    Ok(LocalSingleViewSceneOptions::new(
+        scene.seed,
+        ChunkPos::new(scene.chunk_x, scene.chunk_z),
+        scene_render_distance(scene)?,
+    )
+    .with_day_time(scene.day_time_override)
+    .with_freeze_time(scene.freeze_time)
+    .with_lighting_enabled(scene.lighting_enabled))
 }
 
 fn native_runner_config(scene: &SceneOptions) -> NativeIntegratedServerRunnerConfig {
@@ -563,38 +569,6 @@ fn poll_integrated_server_until_idle(server: &mut IntegratedServer) -> Result<Ve
             bail!("timed out waiting for integrated server worldgen jobs");
         }
         if server.pending_publication_count() == 0 {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
-}
-
-fn drain_integrated_server_runner_until_idle(
-    runner: &mut NativeIntegratedServerRunner,
-) -> Result<Vec<ServerUpdate>> {
-    let deadline = Instant::now() + Duration::from_secs(120);
-    let mut updates = Vec::new();
-
-    loop {
-        updates.extend(
-            runner
-                .drain_updates()
-                .context("failed to drain integrated server runner updates")?,
-        );
-        let diagnostics = runner
-            .poll_diagnostics()
-            .context("failed to poll integrated server runner diagnostics")?;
-        if diagnostics.command_queue_depth == 0
-            && diagnostics.update_queue_depth == 0
-            && !diagnostics.awaiting_tick
-            && diagnostics.pending_jobs == 0
-            && diagnostics.pending_publications == 0
-        {
-            return Ok(updates);
-        }
-        if Instant::now() >= deadline {
-            bail!("timed out waiting for integrated server runner jobs");
-        }
-        if diagnostics.update_queue_depth == 0 {
             std::thread::sleep(Duration::from_millis(1));
         }
     }

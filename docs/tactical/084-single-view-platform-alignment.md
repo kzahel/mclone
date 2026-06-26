@@ -1,9 +1,9 @@
 # 084: Single-View Platform Alignment
 
-Status: active. Slice 1 is complete: flat Android now consumes
-`mclone-app-runtime::local_single_view::LocalSingleViewSceneRuntime` for local
-integrated-server setup, polling, idle wait, render-section sync, and
-render-facing scene facts.
+Status: active. Slice 1 is complete. Slice 2 has its first chunk landed:
+desktop's local static client-runtime construction now uses shared
+`mclone-app-runtime::local_single_view` helpers, while live
+`WindowSceneRuntime` convergence remains next.
 
 ## Purpose
 
@@ -91,12 +91,39 @@ git diff --check
 
 ### Slice 2 - Desktop Single-View Convergence Audit
 
-- [ ] Compare `WindowSceneRuntime` with the new shared helper.
+- [x] Move desktop's local static client-runtime construction onto shared
+  local single-view helpers without changing remote-session behavior.
+- [ ] Compare live `WindowSceneRuntime` with the new shared helper.
 - [ ] Move local-only desktop code that does not involve remote sessions,
   desktop CLI, actor resources, or app-specific diagnostics into shared
   helpers.
 - [ ] Keep remote dedicated session recovery and desktop-specific UI/debug
   ownership app-local.
+
+Recorded Slice 2 first-chunk result:
+
+- Added `build_local_single_view_client_runtime(...)` to
+  `mclone-app-runtime::local_single_view`.
+- Added shared `drain_integrated_server_runner_until_idle(...)` for native
+  integrated-server runner jobs.
+- Rewired desktop `build_scene_client_runtime(...)` so the local integrated
+  branch uses the shared helper.
+- Left the remote branch in `mclone-native-client` so remote session transport
+  and recovery stay app-local.
+- Added an asset-independent app-runtime unit test proving the shared helper
+  loads the center chunk through the local integrated server.
+
+Validation after Slice 2 first chunk:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client scene_client_runtime_loads_center_chunk
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+pnpm native:web:build
+git diff --check
+```
 
 ### Slice 3 - Contract Matrix
 
