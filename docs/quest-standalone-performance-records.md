@@ -73,6 +73,75 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-27 - Standalone Quest 3 Frozen Render Sweep
+
+Benchmarked code commit: `2d200e18d35ab22273b50ce13c5f47d1f992b56b`
+(`Set Quest XR frozen benchmark view height`).
+
+Capture note: captured from a detached clean worktree at the commit above, with
+the local ignored `reference/` assets junctioned in for APK asset staging. This
+is the standalone Quest lane, not desktop-hosted streaming to a Quest client.
+The frozen probe waits for the settled-stationary gate, then renders cached
+terrain buffers from startup `--view-pose 0,80,-96,180`; live headset movement
+does not affect terrain culling or draw counts during the measured window. A
+prior `Y=120` attempt is intentionally not recorded because RD1 drew zero
+terrain sections, and an earlier moved-headset attempt was invalid for the old
+live-pose culling path. The validator cleanup slept the headset after each leg;
+final `dumpsys power` reported `mWakefulness=Asleep` and
+`mHoldingDisplaySuspendBlocker=false`.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 |
+| Android API | 34 |
+| OpenXR runtime | Oculus `v204.201.0` |
+| Stereo view config | `1680x1760` recommended per eye, `1x` sample |
+| Supported refresh | `72.0,80.0,90.0,120.0 Hz` |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| Lane | stationary frozen render, locomotion disabled, fixed render view pose `0,80,-96,180` |
+
+Summary:
+
+| Date | Commit | Lane | RD | Settle | Sample | FPS | Frames | Skipped | Avg | p50 | p95 | p99 | Max | Max render | Over 1x | Over 2x | Work frames | Sections | Drawn sections | Indices | Drawn indices |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2026-06-27 | `2d200e1` | `native:android-xr:perf:frozen:rd1` | 1 | `5.007s` | `20.012s` | `72.0` | 1,441 | 0 | `13.839ms` | `13.852ms` | `14.431ms` | `14.710ms` | `15.430ms` | `5.084ms` | 659 | 0 | 0 | 21 | 4 | 120,024 | 43,452 |
+| 2026-06-27 | `2d200e1` | `native:android-xr:perf:frozen:rd5` | 5 | `5.008s` | `20.013s` | `72.0` | 1,441 | 0 | `13.835ms` | `13.817ms` | `14.989ms` | `15.486ms` | `16.308ms` | `13.883ms` | 659 | 0 | 0 | 409 | 66 | 1,929,372 | 562,698 |
+| 2026-06-27 | `2d200e1` | `native:android-xr:perf:frozen:rd10` | 10 | `5.364s` | `20.001s` | `62.2` | 1,244 | 0 | `16.031ms` | `16.089ms` | `17.673ms` | `18.523ms` | `20.034ms` | `19.827ms` | 1,217 | 0 | 0 | 1,133 | 179 | 5,308,362 | 1,352,142 |
+
+Terrain timing maxima:
+
+| RD | Terrain frame | Runtime total | Runtime poll | Sync sections | GPU upload | Ready refresh | Left eye | Right eye |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `4.716ms` | `0.000ms` | `0.000ms` | `0.000ms` | `0.000ms` | `0.000ms` | `2.667ms` | `2.328ms` |
+| 5 | `11.815ms` | `0.000ms` | `0.000ms` | `0.000ms` | `0.000ms` | `0.000ms` | `7.448ms` | `5.574ms` |
+| 10 | `19.504ms` | `0.000ms` | `0.000ms` | `0.000ms` | `0.000ms` | `0.000ms` | `9.962ms` | `10.569ms` |
+
+Runtime and compile maxima:
+
+| RD | Poll total | Server tick | Scheduler tick | Updates | Section updates | Pending chunks | Pending jobs | Deferred sections | Submitted | Completed | Ready sections |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `0.000ms` | `0.000ms` | `0.000ms` | 0 | 0 | 5 | 0 | 0 | 0 | 0 | 64 |
+| 5 | `0.000ms` | `0.000ms` | `0.000ms` | 0 | 0 | 40 | 0 | 0 | 0 | 0 | 1,296 |
+| 10 | `0.000ms` | `0.000ms` | `0.000ms` | 0 | 0 | 64 | 0 | 0 | 0 | 0 | 3,600 |
+
+Interpretation:
+
+- The frozen lane is now a true static terrain-render sample: no runtime poll,
+  section sync, traversal refresh, GPU upload, server tick, scheduler tick, or
+  compile work occurs during the measured window.
+- RD1 and RD5 sustain the 72 Hz cadence with zero skipped frames. Their
+  over-budget counts are near the 13.889 ms vsync threshold rather than
+  evidence of generation or upload stalls.
+- RD10 still misses 72 Hz with generation fully removed: p50 is `16.089ms`,
+  effective throughput is about `62.2 FPS`, and the terrain pass peaks at
+  `19.504ms` while drawing `179` sections and `1.35M` indices.
+- The next high-value measurement is a profiler/GPU timestamp split for RD10:
+  decide whether the remaining cost is CPU culling/draw submission, shader and
+  raster work, depth/fill pressure, or compositor/GPU wait.
+
 ### 2026-06-27 - Standalone Quest 3 Settled Stationary Sweep
 
 Benchmarked code commit: `65aa5121b9190538d97fd2043b4651ab61cd87ce`
