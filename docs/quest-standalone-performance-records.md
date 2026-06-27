@@ -58,6 +58,76 @@ The validator force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-27 - Standalone Quest 3 Settled Stationary Sweep
+
+Benchmarked code commit: `65aa5121b9190538d97fd2043b4651ab61cd87ce`
+(`Require minimum Quest XR stationary settle time`).
+
+Capture note: captured from a detached clean worktree at the commit above, with
+the local ignored `reference/` assets junctioned in for APK asset staging. This
+is the standalone Quest lane, not desktop-hosted streaming to a Quest client.
+The stationary probe disables locomotion, requires a `5.000s` minimum settle
+window plus quiet frames, and records `settle_min_seconds` in the summary. The
+validator cleanup slept the headset after each leg; final `dumpsys power`
+reported `mWakefulness=Asleep` and `mHoldingDisplaySuspendBlocker=false`.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 |
+| Android API | 34 |
+| OpenXR runtime | Oculus `v204.201.0` |
+| Stereo view config | `1680x1760` recommended per eye, `1x` sample |
+| Supported refresh | `72.0,80.0,90.0,120.0 Hz` |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| Lane | stationary, locomotion disabled, startup view pose `0,120,-96,180` |
+
+Summary:
+
+| Date | Commit | Lane | RD | Settle | Sample | FPS | Frames | Skipped | Avg | p50 | p95 | p99 | Max | Max render | Over 1x | Over 2x | Work frames | Sections | Drawn sections | Indices | Drawn indices |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2026-06-27 | `65aa512` | `native:android-xr:perf:stationary:rd1` | 1 | `5.009s` | `20.012s` | `72.0` | 1,441 | 0 | `13.845ms` | `13.852ms` | `14.346ms` | `14.658ms` | `15.525ms` | `3.801ms` | 654 | 0 | 0 | 21 | 4 | 119,706 | 43,452 |
+| 2026-06-27 | `65aa512` | `native:android-xr:perf:stationary:rd5` | 5 | `5.008s` | `20.013s` | `72.0` | 1,441 | 0 | `13.840ms` | `13.850ms` | `14.699ms` | `15.139ms` | `15.822ms` | `10.851ms` | 675 | 0 | 0 | 407 | 70 | 1,920,834 | 600,876 |
+| 2026-06-27 | `65aa512` | `native:android-xr:perf:stationary:rd10` | 10 | `5.681s` | `20.004s` | `49.4` | 989 | 0 | `20.188ms` | `20.209ms` | `21.399ms` | `21.855ms` | `22.942ms` | `22.792ms` | 989 | 0 | 9 | 1,131 | 203 | 5,288,154 | 1,553,424 |
+
+Terrain timing maxima:
+
+| RD | Terrain frame | Runtime total | Runtime poll | Sync sections | GPU upload | Ready refresh | Left eye | Right eye |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `3.504ms` | `0.167ms` | `0.062ms` | `0.000ms` | `0.000ms` | `0.071ms` | `1.922ms` | `1.680ms` |
+| 5 | `10.559ms` | `1.282ms` | `0.101ms` | `0.000ms` | `0.000ms` | `0.639ms` | `5.643ms` | `4.959ms` |
+| 10 | `22.384ms` | `7.911ms` | `0.415ms` | `6.557ms` | `0.176ms` | `1.210ms` | `9.086ms` | `8.602ms` |
+
+Runtime and compile maxima:
+
+| RD | Poll total | Server tick | Scheduler tick | Updates | Section updates | Pending chunks | Pending jobs | Deferred sections | Submitted | Completed |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `0.046ms` | `1.575ms` | `1.561ms` | 1 | 0 | 5 | 0 | 0 | 0 | 0 |
+| 5 | `0.098ms` | `9.688ms` | `9.659ms` | 2 | 0 | 40 | 0 | 0 | 0 | 0 |
+| 10 | `0.414ms` | `15.126ms` | `15.070ms` | 4 | 2 | 68 | 1 | 16 | 1 | 1 |
+
+Interpretation:
+
+- RD1 and RD5 are viable 72 Hz stationary lanes after the 5 second settle gate.
+  Both recorded zero work frames, zero skipped frames, and no over-2x-budget
+  frames.
+- RD10 misses the 72 Hz budget even while stationary: p50 is `20.209ms`, every
+  sampled frame is over budget, and effective throughput is about `49.4 FPS`.
+  This reproduces the high-distance problem without joystick motion, network
+  interpolation, or player movement as the primary cause.
+- RD10 is still not a perfectly pure render-only sample: it records `9` work
+  frames, one submitted/completed section, and `16` deferred sections. The last
+  frame is quiet, and the p50/p95 cost cannot be explained by a single late
+  upload, but the next benchmark refinement should either eliminate the
+  persistent deferred-section churn or add an explicit frozen-mesh render-only
+  mode.
+- The high-value target is RD10 render/runtime cost: `203` drawn sections,
+  `1.55M` drawn indices, `9.086ms` left eye, `8.602ms` right eye, and a
+  `6.557ms` max section-sync pass. GPU timestamps or Quest profiler capture
+  should split shader/raster/GPU wait from CPU section traversal and culling.
+
 ### 2026-06-27 - Standalone Quest 3 Flight Sweep After Non-Invasive Diagnostics
 
 Benchmarked code commit: `4cf97f97f3ea332984f93d2734f98daef93fbd0a`
