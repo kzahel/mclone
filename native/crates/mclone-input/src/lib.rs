@@ -320,7 +320,12 @@ pub struct LookDelta {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FlatInputFrame {
+    pub forward: bool,
+    pub backward: bool,
+    pub left: bool,
+    pub right: bool,
     pub movement: MovementImpulse,
+    pub analog_movement: Option<MovementImpulse>,
     pub look_delta: LookDelta,
     pub jump: bool,
     pub sprint: bool,
@@ -346,7 +351,7 @@ impl FlatInputFrame {
                 }
             }
             FlatInputIntent::MoveAnalog { left, forward } => {
-                self.add_movement_impulse(left, forward);
+                self.set_analog_movement_impulse(left, forward);
             }
             FlatInputIntent::LookDelta { x, y } => self.add_look_delta(x, y),
             FlatInputIntent::Action { action, pressed } => {
@@ -363,12 +368,33 @@ impl FlatInputFrame {
 
     pub fn add_movement_direction(&mut self, direction: MovementDirection) {
         let (left, forward) = match direction {
-            MovementDirection::Forward => (0.0, 1.0),
-            MovementDirection::Backward => (0.0, -1.0),
-            MovementDirection::Left => (1.0, 0.0),
-            MovementDirection::Right => (-1.0, 0.0),
+            MovementDirection::Forward => {
+                self.forward = true;
+                (0.0, 1.0)
+            }
+            MovementDirection::Backward => {
+                self.backward = true;
+                (0.0, -1.0)
+            }
+            MovementDirection::Left => {
+                self.left = true;
+                (1.0, 0.0)
+            }
+            MovementDirection::Right => {
+                self.right = true;
+                (-1.0, 0.0)
+            }
         };
         self.add_movement_impulse(left, forward);
+    }
+
+    pub fn set_analog_movement_impulse(&mut self, left: f32, forward: f32) {
+        let movement = MovementImpulse {
+            left: clamp_axis(finite_axis(left)),
+            forward: clamp_axis(finite_axis(forward)),
+        };
+        self.analog_movement = Some(movement);
+        self.add_movement_impulse(movement.left, movement.forward);
     }
 
     pub fn add_movement_impulse(&mut self, left: f32, forward: f32) {
@@ -931,6 +957,17 @@ mod tests {
                 left: 0.75,
                 forward: 1.0
             }
+        );
+        assert!(frame.forward);
+        assert!(!frame.backward);
+        assert!(frame.left);
+        assert!(!frame.right);
+        assert_eq!(
+            frame.analog_movement,
+            Some(MovementImpulse {
+                left: -0.25,
+                forward: 0.0
+            })
         );
         assert_eq!(frame.look_delta, LookDelta { x: 3.5, y: -2.0 });
         assert!(frame.attack);

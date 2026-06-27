@@ -1327,6 +1327,7 @@ dependencies = [
  "mclone-audio",
  "mclone-client",
  "mclone-core",
+ "mclone-input",
  "mclone-mesh",
  "mclone-net",
  "mclone-protocol",

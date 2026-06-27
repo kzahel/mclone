@@ -30,6 +30,7 @@ mclone-assets.workspace = true
 mclone-app-runtime.workspace = true
 mclone-client.workspace = true
 mclone-core.workspace = true
+mclone-input.workspace = true
 mclone-mesh.workspace = true
 mclone-net.workspace = true
 mclone-protocol.workspace = true

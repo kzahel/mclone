@@ -1,7 +1,8 @@
 # 098: Flat Input Capability Convergence
 
-Status: active; Slice 1 shared input contract is implemented and validated.
-This splits the remaining flat Android input/HUD parity work out of
+Status: active; Slices 1-2 shared input contract and desktop adapter
+convergence are implemented and validated. This splits the remaining flat
+Android input/HUD parity work out of
 [`090-flat-android-client-parity.md`](090-flat-android-client-parity.md) into a
 shared flat-client capability contract for desktop, flat Android, and web.
 
@@ -149,7 +150,7 @@ intents; preferences decide presentation defaults.
     touch-only Android, Android with keyboard/mouse, and gamepad-present cases.
   - Do not move platform raw event types into the crate.
 
-- [ ] **Slice 2: desktop adapter convergence.**
+- [x] **Slice 2: desktop adapter convergence.**
   - Replace desktop app-local gameplay key/mouse dispatch with an adapter that
     emits shared flat input intents.
   - Keep cursor-lock and window focus policy in the desktop app.
@@ -260,3 +261,11 @@ Manual/device validation to record before closing this tactical:
   touch, and gamepad binding tables, per-frame flat input intent accumulation,
   and unit tests for touch-only, desktop touchscreen, Android keyboard/mouse
   plus touch, explicit preference, gamepad, and hotbar/frame behavior.
+- Slice 2 landed: desktop flat now owns a small `mclone-native-client` raw-event
+  adapter that converts `winit` keyboard/mouse/touch events into `mclone-input`
+  capability state and `FlatInputFrame` intents before applying movement, look,
+  hotbar, menu, attack, and use through existing shared camera/interaction
+  paths. Cursor lock, focus, debug shortcuts, and UI pointer handling remain in
+  the desktop app. Desktop `WindowEvent::Touch` now records touch capability
+  state for future shared touch HUD work; it does not yet add desktop touch
+  gameplay controls.

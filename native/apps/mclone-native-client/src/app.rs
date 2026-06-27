@@ -5,9 +5,13 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ClientInteractionController,
-    LOCAL_PLAYER_STANDING_EYE_HEIGHT, PlayerInputKey,
+    LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
 use mclone_core::Vec3d;
+use mclone_input::{
+    FlatInputAction, FlatInputFrame, FlatInputIntent, InputCapabilities, InputCapabilityState,
+    InputDeviceKind, MovementDirection,
+};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
@@ -51,8 +55,9 @@ use mclone_app_runtime::session::{
 use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 use mclone_render_session::{
     ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
-    EngineCameraController, EngineCameraFrameState, EngineCameraMovementMode, EngineCameraSnapshot,
-    RenderSectionCacheUpdate, actor_instances_from_presentations, render_camera_from_snapshot,
+    EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
+    EngineCameraMovementMode, EngineCameraSnapshot, RenderSectionCacheUpdate,
+    actor_instances_from_presentations, render_camera_from_snapshot,
 };
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
@@ -153,6 +158,193 @@ impl WindowCameraView {
     }
 }
 
+#[derive(Clone, Debug)]
+struct DesktopFlatInputAdapter {
+    capability_state: InputCapabilityState,
+    held: DesktopHeldInput,
+}
+
+impl Default for DesktopFlatInputAdapter {
+    fn default() -> Self {
+        Self {
+            capability_state: InputCapabilityState::new(InputCapabilities::NONE),
+            held: DesktopHeldInput::default(),
+        }
+    }
+}
+
+impl DesktopFlatInputAdapter {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn clear_held(&mut self) {
+        self.held = DesktopHeldInput::default();
+    }
+
+    fn note_keyboard_activity(&mut self) {
+        self.capability_state
+            .note_activity(InputDeviceKind::Keyboard);
+    }
+
+    fn note_mouse_activity(&mut self) {
+        self.capability_state.note_activity(InputDeviceKind::Mouse);
+    }
+
+    fn note_touch_activity(&mut self) {
+        self.capability_state.note_activity(InputDeviceKind::Touch);
+    }
+
+    fn handle_keyboard_input(
+        &mut self,
+        key_code: KeyCode,
+        state: ElementState,
+        repeat: bool,
+    ) -> Option<FlatInputFrame> {
+        self.note_keyboard_activity();
+        let pressed = state == ElementState::Pressed;
+        if let Some(direction) = desktop_movement_direction_from_key_code(key_code) {
+            self.held.set_direction(direction, pressed);
+            return None;
+        }
+        if let Some(action) = desktop_held_action_from_key_code(key_code) {
+            self.held.set_action(action, pressed);
+            return None;
+        }
+        if !pressed || repeat {
+            return None;
+        }
+        if key_code == KeyCode::Escape {
+            let mut frame = FlatInputFrame::default();
+            frame.apply_intent(FlatInputIntent::Action {
+                action: FlatInputAction::OpenMenu,
+                pressed: true,
+            });
+            return Some(frame);
+        }
+        if let Some(slot) = desktop_hotbar_slot_from_key_code(key_code) {
+            let mut frame = FlatInputFrame::default();
+            frame.apply_intent(FlatInputIntent::SelectHotbarSlot(slot));
+            return Some(frame);
+        }
+        None
+    }
+
+    fn handle_mouse_button(
+        &mut self,
+        button: MouseButton,
+        state: ElementState,
+    ) -> Option<FlatInputFrame> {
+        self.note_mouse_activity();
+        if state != ElementState::Pressed {
+            return None;
+        }
+        let action = match button {
+            MouseButton::Left => FlatInputAction::Attack,
+            MouseButton::Right => FlatInputAction::Use,
+            _ => return None,
+        };
+        let mut frame = FlatInputFrame::default();
+        frame.apply_intent(FlatInputIntent::Action {
+            action,
+            pressed: true,
+        });
+        Some(frame)
+    }
+
+    fn mouse_look_frame(&mut self, delta_x: f32, delta_y: f32) -> Option<FlatInputFrame> {
+        self.note_mouse_activity();
+        if (!delta_x.is_finite() || delta_x == 0.0) && (!delta_y.is_finite() || delta_y == 0.0) {
+            return None;
+        }
+        let mut frame = FlatInputFrame::default();
+        frame.apply_intent(FlatInputIntent::LookDelta {
+            x: delta_x,
+            y: delta_y,
+        });
+        Some(frame)
+    }
+
+    fn held_frame(&self) -> FlatInputFrame {
+        let mut frame = FlatInputFrame::default();
+        if self.held.forward {
+            frame.apply_intent(FlatInputIntent::MoveDirection {
+                direction: MovementDirection::Forward,
+                pressed: true,
+            });
+        }
+        if self.held.backward {
+            frame.apply_intent(FlatInputIntent::MoveDirection {
+                direction: MovementDirection::Backward,
+                pressed: true,
+            });
+        }
+        if self.held.left {
+            frame.apply_intent(FlatInputIntent::MoveDirection {
+                direction: MovementDirection::Left,
+                pressed: true,
+            });
+        }
+        if self.held.right {
+            frame.apply_intent(FlatInputIntent::MoveDirection {
+                direction: MovementDirection::Right,
+                pressed: true,
+            });
+        }
+        for action in self.held.actions() {
+            frame.apply_intent(FlatInputIntent::Action {
+                action,
+                pressed: true,
+            });
+        }
+        frame
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct DesktopHeldInput {
+    forward: bool,
+    backward: bool,
+    left: bool,
+    right: bool,
+    jump: bool,
+    descend: bool,
+    sneak: bool,
+    sprint: bool,
+}
+
+impl DesktopHeldInput {
+    fn set_direction(&mut self, direction: MovementDirection, pressed: bool) {
+        match direction {
+            MovementDirection::Forward => self.forward = pressed,
+            MovementDirection::Backward => self.backward = pressed,
+            MovementDirection::Left => self.left = pressed,
+            MovementDirection::Right => self.right = pressed,
+        }
+    }
+
+    fn set_action(&mut self, action: FlatInputAction, pressed: bool) {
+        match action {
+            FlatInputAction::Jump => self.jump = pressed,
+            FlatInputAction::Descend => self.descend = pressed,
+            FlatInputAction::Sneak => self.sneak = pressed,
+            FlatInputAction::Sprint => self.sprint = pressed,
+            FlatInputAction::Attack | FlatInputAction::Use | FlatInputAction::OpenMenu => {}
+        }
+    }
+
+    fn actions(self) -> impl Iterator<Item = FlatInputAction> {
+        [
+            (self.jump, FlatInputAction::Jump),
+            (self.descend, FlatInputAction::Descend),
+            (self.sneak, FlatInputAction::Sneak),
+            (self.sprint, FlatInputAction::Sprint),
+        ]
+        .into_iter()
+        .filter_map(|(pressed, action)| pressed.then_some(action))
+    }
+}
+
 struct ChunkApp {
     scene: SceneOptions,
     assets: WindowSceneAssets,
@@ -162,6 +354,7 @@ struct ChunkApp {
     camera: EngineCameraController,
     actor_interpolation: ActorInterpolationState,
     interaction: ClientInteractionController,
+    flat_input: DesktopFlatInputAdapter,
     render_options: TexturedSectionRenderOptions,
     frame_pacing: FramePacing,
     ui: GameUi,
@@ -221,6 +414,7 @@ impl ChunkApp {
             camera,
             actor_interpolation: ActorInterpolationState::new(),
             interaction: ClientInteractionController::new(),
+            flat_input: DesktopFlatInputAdapter::new(),
             render_options,
             frame_pacing: FramePacing::default(),
             ui,
@@ -310,16 +504,67 @@ impl ChunkApp {
             return Ok(());
         };
 
-        if self
-            .camera
-            .tick_movement(runtime.client(), f64::from(movement_dt))
-        {
+        let frame = self.flat_input.held_frame();
+        let input = engine_camera_input_from_flat_frame(frame, f64::from(movement_dt));
+        let before = self.camera.snapshot();
+        let after = self.camera.apply_movement_input(runtime.client(), input);
+
+        if after != before {
             self.play_landing_events();
             self.commit_player_pose_change()?;
         } else {
             self.play_landing_events();
         }
         Ok(())
+    }
+
+    fn clear_flat_gameplay_input(&mut self) {
+        self.flat_input.clear_held();
+        self.camera.clear_keys();
+    }
+
+    fn apply_flat_keyboard_frame(
+        &mut self,
+        frame: FlatInputFrame,
+        event_loop: &ActiveEventLoop,
+    ) -> bool {
+        if frame.open_menu {
+            self.mouse_lock_requested = false;
+            self.ui.open_pause();
+            self.clear_flat_gameplay_input();
+            self.last_cursor = None;
+            self.sync_mouse_lock();
+            self.schedule_next_redraw(event_loop);
+            return true;
+        }
+        if let Some(slot) = frame.selected_hotbar_slot {
+            if self.interaction.select_hotbar_slot(slot) {
+                log::info!("selected hotbar slot {}", slot + 1);
+            }
+            self.schedule_next_redraw(event_loop);
+            return true;
+        }
+        false
+    }
+
+    fn apply_flat_world_action_frame(&mut self, frame: FlatInputFrame) -> Result<()> {
+        if frame.attack {
+            self.handle_world_flat_action(FlatInputAction::Attack)?;
+        }
+        if frame.use_item {
+            self.handle_world_flat_action(FlatInputAction::Use)?;
+        }
+        Ok(())
+    }
+
+    fn apply_flat_look_frame(&mut self, frame: FlatInputFrame, event_loop: &ActiveEventLoop) {
+        if frame.look_delta.x == 0.0 && frame.look_delta.y == 0.0 {
+            return;
+        }
+        self.camera
+            .turn_mouse_delta(f64::from(frame.look_delta.x), f64::from(frame.look_delta.y));
+        sync_spectator_from_camera(&mut self.spectator, &self.camera);
+        self.schedule_next_redraw(event_loop);
     }
 
     fn gui_scale(&self) -> Option<GuiScale> {
@@ -386,7 +631,7 @@ impl ChunkApp {
             },
         );
         self.mouse_lock_requested = false;
-        self.camera.clear_keys();
+        self.clear_flat_gameplay_input();
         self.ui.clear_input();
         self.sync_mouse_lock();
     }
@@ -403,7 +648,7 @@ impl ChunkApp {
             },
         );
         self.mouse_lock_requested = false;
-        self.camera.clear_keys();
+        self.clear_flat_gameplay_input();
         self.ui.clear_input();
         self.sync_mouse_lock();
     }
@@ -633,7 +878,7 @@ impl ChunkApp {
         if should_arm_mouse_lock {
             self.mouse_lock_requested = true;
         }
-        self.camera.clear_keys();
+        self.clear_flat_gameplay_input();
         if !preserve_pointer_state {
             self.last_cursor = None;
         }
@@ -657,6 +902,7 @@ impl ChunkApp {
         self.camera = engine_camera_controller_from_spectator(&self.spectator);
         self.actor_interpolation = ActorInterpolationState::new();
         self.interaction = ClientInteractionController::new();
+        self.flat_input.clear_held();
         self.render_stats = RenderStreamStats::default();
         self.frame_timing = FrameTimingStats::default();
         self.last_cursor = None;
@@ -1071,7 +1317,7 @@ impl ChunkApp {
             .context("failed to sync carried item to server")
     }
 
-    fn handle_world_mouse_pressed(&mut self, button: MouseButton) -> Result<()> {
+    fn handle_world_flat_action(&mut self, action: FlatInputAction) -> Result<()> {
         if self.runtime.is_none() {
             return Ok(());
         }
@@ -1081,9 +1327,9 @@ impl ChunkApp {
             return Ok(());
         };
         let hit = self.camera.pick_block(runtime.client(), &self.interaction);
-        let command = match button {
-            MouseButton::Left => self.interaction.debug_instant_break_command(hit),
-            MouseButton::Right => self.interaction.use_item_on_command(hit),
+        let command = match action {
+            FlatInputAction::Attack => self.interaction.debug_instant_break_command(hit),
+            FlatInputAction::Use => self.interaction.use_item_on_command(hit),
             _ => None,
         };
         let Some(command) = command else {
@@ -1097,7 +1343,7 @@ impl ChunkApp {
             .context("failed to send gameplay interaction command")?;
         log::info!(
             "gameplay interaction {:?} at ({}, {}, {}) face={:?} changed={}",
-            button,
+            action,
             hit.block_pos.x,
             hit.block_pos.y,
             hit.block_pos.z,
@@ -1157,6 +1403,29 @@ fn sync_spectator_from_camera(spectator: &mut SpectatorCamera, camera: &EngineCa
     spectator.yaw = snapshot.yaw_radians as f32;
     spectator.pitch = snapshot.pitch_radians as f32;
     spectator.speed = snapshot.speed_blocks_per_second as f32;
+}
+
+fn engine_camera_input_from_flat_frame(
+    frame: FlatInputFrame,
+    dt_seconds: f64,
+) -> EngineCameraInput {
+    EngineCameraInput {
+        dt_seconds,
+        mouse_delta_x: f64::from(frame.look_delta.x),
+        mouse_delta_y: f64::from(frame.look_delta.y),
+        forward: frame.forward,
+        backward: frame.backward,
+        left: frame.left,
+        right: frame.right,
+        jump: frame.jump,
+        descend: frame.descend,
+        shift: frame.sneak,
+        sprint: frame.sprint,
+        movement_impulse: frame
+            .analog_movement
+            .map(|movement| EngineCameraMovementImpulse::new(movement.left, movement.forward)),
+        movement_yaw_radians: None,
+    }
 }
 
 impl ApplicationHandler for ChunkApp {
@@ -1296,6 +1565,7 @@ impl ApplicationHandler for ChunkApp {
                     if let Some(scale) = self.gui_scale() {
                         self.ui.set_scale(scale);
                     }
+                    self.flat_input.note_keyboard_activity();
                     if key_code == KeyCode::Backquote
                         && event.state == ElementState::Pressed
                         && !event.repeat
@@ -1313,18 +1583,6 @@ impl ApplicationHandler for ChunkApp {
                                 self.schedule_next_redraw(event_loop);
                             }
                         }
-                        return;
-                    }
-                    if key_code == KeyCode::Escape
-                        && event.state == ElementState::Pressed
-                        && !event.repeat
-                    {
-                        self.mouse_lock_requested = false;
-                        self.ui.open_pause();
-                        self.camera.clear_keys();
-                        self.last_cursor = None;
-                        self.sync_mouse_lock();
-                        self.schedule_next_redraw(event_loop);
                         return;
                     }
                     if key_code == KeyCode::KeyO
@@ -1369,24 +1627,18 @@ impl ApplicationHandler for ChunkApp {
                         self.schedule_next_redraw(event_loop);
                         return;
                     }
-                    if event.state == ElementState::Pressed
-                        && !event.repeat
-                        && let Some(slot) = hotbar_slot_from_key_code(key_code)
+                    if let Some(frame) =
+                        self.flat_input
+                            .handle_keyboard_input(key_code, event.state, event.repeat)
+                        && self.apply_flat_keyboard_frame(frame, event_loop)
                     {
-                        if self.interaction.select_hotbar_slot(slot) {
-                            log::info!("selected hotbar slot {}", slot + 1);
-                        }
-                        self.schedule_next_redraw(event_loop);
                         return;
-                    }
-                    if let Some(input_key) = player_input_key_from_key_code(key_code) {
-                        self.camera
-                            .set_key(input_key, event.state == ElementState::Pressed);
                     }
                     self.schedule_next_redraw(event_loop);
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
+                let input_frame = self.flat_input.handle_mouse_button(button, state);
                 if self.ui.is_active() {
                     if button == MouseButton::Left {
                         if let Some((x, y)) = self.last_cursor
@@ -1422,13 +1674,12 @@ impl ApplicationHandler for ChunkApp {
                     self.mouse_lock_requested = true;
                     self.last_cursor = None;
                     self.sync_mouse_lock();
-                    if was_locked
-                        && matches!(button, MouseButton::Left | MouseButton::Right)
-                        && let Err(err) = self.handle_world_mouse_pressed(button)
-                    {
-                        log::error!("failed to handle world mouse input: {err:#}");
-                        event_loop.exit();
-                        return;
+                    if was_locked && let Some(frame) = input_frame {
+                        if let Err(err) = self.apply_flat_world_action_frame(frame) {
+                            log::error!("failed to handle world mouse input: {err:#}");
+                            event_loop.exit();
+                            return;
+                        }
                     }
                     self.schedule_next_redraw(event_loop);
                 } else if button == MouseButton::Left || button == MouseButton::Right {
@@ -1436,6 +1687,7 @@ impl ApplicationHandler for ChunkApp {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
+                self.flat_input.note_mouse_activity();
                 let cursor = (position.x, position.y);
                 if self.ui.is_active() {
                     self.last_cursor = Some(cursor);
@@ -1454,14 +1706,15 @@ impl ApplicationHandler for ChunkApp {
                     if let Some(previous) = self.last_cursor {
                         let dx = (cursor.0 - previous.0) as f32;
                         let dy = (cursor.1 - previous.1) as f32;
-                        self.camera.turn_mouse_delta(f64::from(dx), f64::from(dy));
-                        sync_spectator_from_camera(&mut self.spectator, &self.camera);
-                        self.schedule_next_redraw(event_loop);
+                        if let Some(frame) = self.flat_input.mouse_look_frame(dx, dy) {
+                            self.apply_flat_look_frame(frame, event_loop);
+                        }
                     }
                 }
                 self.last_cursor = Some(cursor);
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                self.flat_input.note_mouse_activity();
                 if self.ui.is_active() {
                     return;
                 }
@@ -1477,9 +1730,13 @@ impl ApplicationHandler for ChunkApp {
                 );
                 self.schedule_next_redraw(event_loop);
             }
+            WindowEvent::Touch(_touch) => {
+                self.flat_input.note_touch_activity();
+                self.schedule_next_redraw(event_loop);
+            }
             WindowEvent::Focused(false) => {
                 self.mouse_lock_requested = false;
-                self.camera.clear_keys();
+                self.clear_flat_gameplay_input();
                 self.last_cursor = None;
                 self.ui.clear_input();
                 self.set_mouse_lock(false);
@@ -1645,9 +1902,9 @@ impl ApplicationHandler for ChunkApp {
         if let DeviceEvent::MouseMotion { delta } = event {
             let dx = delta.0 as f32;
             let dy = delta.1 as f32;
-            self.camera.turn_mouse_delta(f64::from(dx), f64::from(dy));
-            sync_spectator_from_camera(&mut self.spectator, &self.camera);
-            self.schedule_next_redraw(event_loop);
+            if let Some(frame) = self.flat_input.mouse_look_frame(dx, dy) {
+                self.apply_flat_look_frame(frame, event_loop);
+            }
         }
     }
 
@@ -1656,21 +1913,27 @@ impl ApplicationHandler for ChunkApp {
     }
 }
 
-fn player_input_key_from_key_code(key_code: KeyCode) -> Option<PlayerInputKey> {
+fn desktop_movement_direction_from_key_code(key_code: KeyCode) -> Option<MovementDirection> {
     match key_code {
-        KeyCode::KeyW => Some(PlayerInputKey::Forward),
-        KeyCode::KeyS => Some(PlayerInputKey::Backward),
-        KeyCode::KeyA => Some(PlayerInputKey::Left),
-        KeyCode::KeyD => Some(PlayerInputKey::Right),
-        KeyCode::Space => Some(PlayerInputKey::Jump),
-        KeyCode::KeyX => Some(PlayerInputKey::Descend),
-        KeyCode::ShiftLeft | KeyCode::ShiftRight => Some(PlayerInputKey::Shift),
-        KeyCode::ControlLeft | KeyCode::ControlRight => Some(PlayerInputKey::Sprint),
+        KeyCode::KeyW => Some(MovementDirection::Forward),
+        KeyCode::KeyS => Some(MovementDirection::Backward),
+        KeyCode::KeyA => Some(MovementDirection::Left),
+        KeyCode::KeyD => Some(MovementDirection::Right),
         _ => None,
     }
 }
 
-fn hotbar_slot_from_key_code(key_code: KeyCode) -> Option<u8> {
+fn desktop_held_action_from_key_code(key_code: KeyCode) -> Option<FlatInputAction> {
+    match key_code {
+        KeyCode::Space => Some(FlatInputAction::Jump),
+        KeyCode::KeyX => Some(FlatInputAction::Descend),
+        KeyCode::ShiftLeft | KeyCode::ShiftRight => Some(FlatInputAction::Sneak),
+        KeyCode::ControlLeft | KeyCode::ControlRight => Some(FlatInputAction::Sprint),
+        _ => None,
+    }
+}
+
+fn desktop_hotbar_slot_from_key_code(key_code: KeyCode) -> Option<u8> {
     match key_code {
         KeyCode::Digit1 => Some(0),
         KeyCode::Digit2 => Some(1),
@@ -1987,50 +2250,170 @@ mod tests {
     }
 
     #[test]
-    fn native_keys_map_to_platform_neutral_player_input() {
+    fn native_key_codes_map_to_shared_flat_input_controls() {
         assert_eq!(
-            player_input_key_from_key_code(KeyCode::KeyW),
-            Some(PlayerInputKey::Forward)
+            desktop_movement_direction_from_key_code(KeyCode::KeyW),
+            Some(MovementDirection::Forward)
         );
         assert_eq!(
-            player_input_key_from_key_code(KeyCode::KeyS),
-            Some(PlayerInputKey::Backward)
+            desktop_movement_direction_from_key_code(KeyCode::KeyS),
+            Some(MovementDirection::Backward)
         );
         assert_eq!(
-            player_input_key_from_key_code(KeyCode::KeyA),
-            Some(PlayerInputKey::Left)
+            desktop_movement_direction_from_key_code(KeyCode::KeyA),
+            Some(MovementDirection::Left)
         );
         assert_eq!(
-            player_input_key_from_key_code(KeyCode::KeyD),
-            Some(PlayerInputKey::Right)
+            desktop_movement_direction_from_key_code(KeyCode::KeyD),
+            Some(MovementDirection::Right)
         );
         assert_eq!(
-            player_input_key_from_key_code(KeyCode::Space),
-            Some(PlayerInputKey::Jump)
+            desktop_held_action_from_key_code(KeyCode::Space),
+            Some(FlatInputAction::Jump)
         );
         assert_eq!(
-            player_input_key_from_key_code(KeyCode::KeyX),
-            Some(PlayerInputKey::Descend)
+            desktop_held_action_from_key_code(KeyCode::KeyX),
+            Some(FlatInputAction::Descend)
         );
         assert_eq!(
-            player_input_key_from_key_code(KeyCode::ShiftLeft),
-            Some(PlayerInputKey::Shift)
+            desktop_held_action_from_key_code(KeyCode::ShiftLeft),
+            Some(FlatInputAction::Sneak)
         );
         assert_eq!(
-            player_input_key_from_key_code(KeyCode::ControlLeft),
-            Some(PlayerInputKey::Sprint)
+            desktop_held_action_from_key_code(KeyCode::ControlLeft),
+            Some(FlatInputAction::Sprint)
         );
-        assert_eq!(player_input_key_from_key_code(NO_CLIP_TOGGLE_KEY), None);
-        assert_eq!(player_input_key_from_key_code(KeyCode::KeyO), None);
-        assert_eq!(player_input_key_from_key_code(KeyCode::Digit1), None);
+        assert_eq!(
+            desktop_movement_direction_from_key_code(NO_CLIP_TOGGLE_KEY),
+            None
+        );
+        assert_eq!(desktop_held_action_from_key_code(KeyCode::KeyO), None);
+        assert_eq!(desktop_hotbar_slot_from_key_code(KeyCode::Digit1), Some(0));
+        assert_eq!(desktop_hotbar_slot_from_key_code(KeyCode::Digit5), Some(4));
+        assert_eq!(desktop_hotbar_slot_from_key_code(KeyCode::Digit9), Some(8));
+        assert_eq!(desktop_hotbar_slot_from_key_code(KeyCode::KeyW), None);
     }
 
     #[test]
-    fn native_number_keys_map_to_hotbar_slots() {
-        assert_eq!(hotbar_slot_from_key_code(KeyCode::Digit1), Some(0));
-        assert_eq!(hotbar_slot_from_key_code(KeyCode::Digit5), Some(4));
-        assert_eq!(hotbar_slot_from_key_code(KeyCode::Digit9), Some(8));
-        assert_eq!(hotbar_slot_from_key_code(KeyCode::KeyW), None);
+    fn desktop_adapter_builds_shared_frame_from_held_keys() {
+        let mut input = DesktopFlatInputAdapter::new();
+
+        assert_eq!(
+            input.handle_keyboard_input(KeyCode::KeyW, ElementState::Pressed, false),
+            None
+        );
+        assert_eq!(
+            input.handle_keyboard_input(KeyCode::KeyS, ElementState::Pressed, false),
+            None
+        );
+        assert_eq!(
+            input.handle_keyboard_input(KeyCode::Space, ElementState::Pressed, false),
+            None
+        );
+        assert_eq!(
+            input.handle_keyboard_input(KeyCode::ShiftLeft, ElementState::Pressed, false),
+            None
+        );
+
+        let frame = input.held_frame();
+        assert!(frame.forward);
+        assert!(frame.backward);
+        assert!(!frame.left);
+        assert!(!frame.right);
+        assert_eq!(frame.movement.forward, 0.0);
+        assert!(frame.jump);
+        assert!(frame.sneak);
+        assert!(input.capability_state.capabilities.keyboard);
+
+        let camera_input = engine_camera_input_from_flat_frame(frame, 0.016);
+        assert_eq!(camera_input.dt_seconds, 0.016);
+        assert!(camera_input.forward);
+        assert!(camera_input.backward);
+        assert!(camera_input.jump);
+        assert!(camera_input.shift);
+
+        input.handle_keyboard_input(KeyCode::KeyW, ElementState::Released, false);
+        let frame = input.held_frame();
+        assert!(!frame.forward);
+        assert!(frame.backward);
+    }
+
+    #[test]
+    fn desktop_adapter_emits_menu_and_hotbar_one_shots_without_repeat() {
+        let mut input = DesktopFlatInputAdapter::new();
+
+        let escape = input
+            .handle_keyboard_input(KeyCode::Escape, ElementState::Pressed, false)
+            .expect("escape should emit open-menu frame");
+        assert!(escape.open_menu);
+
+        let slot = input
+            .handle_keyboard_input(KeyCode::Digit5, ElementState::Pressed, false)
+            .expect("digit should emit hotbar frame");
+        assert_eq!(slot.selected_hotbar_slot, Some(4));
+
+        assert_eq!(
+            input.handle_keyboard_input(KeyCode::Digit5, ElementState::Pressed, true),
+            None
+        );
+    }
+
+    #[test]
+    fn desktop_adapter_emits_mouse_action_and_look_frames() {
+        let mut input = DesktopFlatInputAdapter::new();
+
+        let attack = input
+            .handle_mouse_button(MouseButton::Left, ElementState::Pressed)
+            .expect("left click should emit attack frame");
+        assert!(attack.attack);
+        assert!(!attack.use_item);
+
+        let use_item = input
+            .handle_mouse_button(MouseButton::Right, ElementState::Pressed)
+            .expect("right click should emit use frame");
+        assert!(use_item.use_item);
+        assert!(input.capability_state.capabilities.mouse);
+
+        let look = input
+            .mouse_look_frame(4.0, -2.0)
+            .expect("finite mouse delta should emit look frame");
+        assert_eq!(look.look_delta.x, 4.0);
+        assert_eq!(look.look_delta.y, -2.0);
+        assert!(input.mouse_look_frame(0.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn desktop_touch_events_feed_shared_capability_resolution() {
+        let mut input = DesktopFlatInputAdapter::new();
+
+        input.note_touch_activity();
+        let resolved = input
+            .capability_state
+            .resolve(mclone_input::InputPreferences::AUTO);
+        assert_eq!(
+            resolved.preferred_prompt,
+            Some(mclone_input::InputPromptKind::Touch)
+        );
+        assert!(resolved.touch_controls_visible);
+        assert!(resolved.accepts_touch);
+
+        input.note_keyboard_activity();
+        let resolved = input
+            .capability_state
+            .resolve(mclone_input::InputPreferences::AUTO);
+        assert_eq!(
+            resolved.preferred_prompt,
+            Some(mclone_input::InputPromptKind::KeyboardMouse)
+        );
+        assert!(!resolved.touch_controls_visible);
+
+        input.note_touch_activity();
+        assert!(
+            input
+                .capability_state
+                .resolve(mclone_input::InputPreferences::AUTO)
+                .touch_controls_visible
+        );
     }
 
     #[test]
