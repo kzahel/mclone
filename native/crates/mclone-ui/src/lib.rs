@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, ResolvedFlatInput};
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GuiScale {
     pub scale: u32,
@@ -812,6 +814,89 @@ pub struct TouchJoystickOverlay {
     pub active: bool,
     pub base: Point,
     pub thumb: Point,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FlatHotbarOverlay {
+    pub visible: bool,
+    pub selected_slot: u8,
+}
+
+impl FlatHotbarOverlay {
+    pub fn hidden() -> Self {
+        Self {
+            visible: false,
+            selected_slot: 0,
+        }
+    }
+
+    pub fn selected(selected_slot: u8) -> Self {
+        Self {
+            visible: true,
+            selected_slot,
+        }
+    }
+}
+
+impl Default for FlatHotbarOverlay {
+    fn default() -> Self {
+        Self::hidden()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlatHud {
+    pub input: ResolvedFlatInput,
+    pub world_hud_visible: bool,
+    pub crosshair_visible: bool,
+    pub hotbar: FlatHotbarOverlay,
+    pub touch: TouchOverlay,
+    pub status: StatusOverlay,
+}
+
+impl FlatHud {
+    pub fn new(input: ResolvedFlatInput) -> Self {
+        Self {
+            input,
+            world_hud_visible: true,
+            crosshair_visible: true,
+            hotbar: FlatHotbarOverlay::hidden(),
+            touch: TouchOverlay::hidden(),
+            status: StatusOverlay::hidden(),
+        }
+    }
+
+    pub fn has_visible_commands(&self) -> bool {
+        (self.world_hud_visible && self.crosshair_visible)
+            || (self.world_hud_visible && self.should_render_flat_hotbar())
+            || self.effective_touch_overlay().visible
+            || self.status.visible
+    }
+
+    fn should_render_flat_hotbar(&self) -> bool {
+        let touch = self.effective_touch_overlay();
+        self.hotbar.visible && !(touch.visible && touch.hotbar_visible)
+    }
+
+    fn effective_touch_overlay(&self) -> TouchOverlay {
+        let mut touch = self.touch;
+        touch.visible &= self.world_hud_visible && self.input.touch_controls_visible;
+        touch
+    }
+}
+
+pub fn render_flat_hud(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
+    let touch = hud.effective_touch_overlay();
+    if hud.world_hud_visible {
+        if hud.crosshair_visible {
+            render_crosshair(scale, draw);
+        }
+        if hud.should_render_flat_hotbar() {
+            render_flat_hotbar(draw, &Font::default(), scale, hud.hotbar);
+        }
+    }
+    render_touch_overlay(scale, draw, &touch);
+    render_status_overlay(scale, draw, &hud.status);
 }
 
 pub fn render_debug_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &DebugOverlay) {
@@ -1734,6 +1819,15 @@ pub fn touch_hotbar_slot_rects(scale: GuiScale) -> [Rect; 9] {
     std::array::from_fn(|index| Rect::new(x0 + index as f32 * (slot + gap), y, slot, slot))
 }
 
+pub fn flat_hotbar_slot_rects(scale: GuiScale) -> [Rect; 9] {
+    let slot = 22.0;
+    let gap = 3.0;
+    let total_width = slot * 9.0 + gap * 8.0;
+    let x0 = ((scale.width - total_width) * 0.5).max(4.0);
+    let y = (scale.height - 34.0).max(58.0);
+    std::array::from_fn(|index| Rect::new(x0 + index as f32 * (slot + gap), y, slot, slot))
+}
+
 fn render_touch_menu_button(draw: &mut GuiDrawList, rect: Rect, pressed: bool) {
     render_touch_panel(draw, rect, pressed);
     let color = if pressed {
@@ -1793,6 +1887,31 @@ fn render_touch_hotbar(
         render_touch_panel(draw, rect, pressed);
         if overlay.selected_hotbar_slot == slot {
             draw.outline(rect.inset(-2.0), Color::rgba(245, 250, 255, 215));
+        }
+        font.draw_centered(
+            draw,
+            &(index + 1).to_string(),
+            rect.center_x(),
+            rect.y + ((rect.height - font.line_height()) * 0.5).floor(),
+            Color::rgba(245, 250, 255, 210),
+        );
+    }
+}
+
+fn render_flat_hotbar(
+    draw: &mut GuiDrawList,
+    font: &Font,
+    scale: GuiScale,
+    hotbar: FlatHotbarOverlay,
+) {
+    let selected_slot = hotbar
+        .selected_slot
+        .min(FLAT_HOTBAR_SLOT_COUNT.saturating_sub(1));
+    for (index, rect) in flat_hotbar_slot_rects(scale).into_iter().enumerate() {
+        let slot = index as u8;
+        render_touch_panel(draw, rect, false);
+        if selected_slot == slot {
+            draw.outline(rect.inset(-2.0), Color::rgba(245, 250, 255, 225));
         }
         font.draw_centered(
             draw,
@@ -2030,6 +2149,22 @@ fn glyph_rows(ch: char) -> [u8; 7] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_input::InputPromptKind;
+
+    fn resolved_flat_input(touch_controls_visible: bool) -> ResolvedFlatInput {
+        ResolvedFlatInput {
+            preferred_prompt: Some(if touch_controls_visible {
+                InputPromptKind::Touch
+            } else {
+                InputPromptKind::KeyboardMouse
+            }),
+            touch_controls_visible,
+            accepts_keyboard_mouse: true,
+            accepts_touch: true,
+            accepts_gamepad: false,
+            accepts_xr_controller: false,
+        }
+    }
 
     #[test]
     fn gui_scale_matches_minecraft_style_thresholds() {
@@ -2195,6 +2330,53 @@ mod tests {
         render_crosshair(GuiScale::from_pixels(960, 540), &mut draw);
 
         assert_eq!(draw.commands().len(), 4);
+    }
+
+    #[test]
+    fn flat_hud_renders_crosshair_hotbar_touch_and_status() {
+        let scale = GuiScale::from_pixels(960, 540);
+        let mut draw = GuiDrawList::new();
+        let mut hud = FlatHud::new(resolved_flat_input(true));
+        hud.hotbar = FlatHotbarOverlay::selected(2);
+        hud.touch = TouchOverlay {
+            visible: true,
+            menu_pressed: false,
+            movement: TouchJoystickOverlay::default(),
+            jump_pressed: false,
+            sprint_pressed: false,
+            descend_pressed: false,
+            interaction_visible: true,
+            attack_pressed: false,
+            use_pressed: false,
+            hotbar_visible: true,
+            selected_hotbar_slot: 2,
+            hotbar_pressed_slot: None,
+        };
+        hud.status = StatusOverlay::new("ready", true);
+
+        assert!(hud.has_visible_commands());
+        assert!(!hud.should_render_flat_hotbar());
+        render_flat_hud(scale, &mut draw, &hud);
+
+        assert!(!draw.commands().is_empty());
+    }
+
+    #[test]
+    fn flat_hud_uses_flat_hotbar_when_touch_controls_are_hidden() {
+        let mut draw = GuiDrawList::new();
+        let mut hud = FlatHud::new(resolved_flat_input(false));
+        hud.hotbar = FlatHotbarOverlay::selected(4);
+        hud.touch = TouchOverlay {
+            visible: true,
+            hotbar_visible: true,
+            selected_hotbar_slot: 4,
+            ..TouchOverlay::hidden()
+        };
+
+        assert!(hud.should_render_flat_hotbar());
+        render_flat_hud(GuiScale::from_pixels(960, 540), &mut draw, &hud);
+
+        assert!(draw.commands().len() > 4);
     }
 
     #[test]

@@ -1,8 +1,10 @@
 # 098: Flat Input Capability Convergence
 
 Status: active; Slices 1-3 shared input contract, desktop adapter, and flat
-Android capability convergence are implemented and validated. This splits the
-remaining flat Android input/HUD parity work out of
+Android capability convergence are implemented and validated. Slice 4 has a
+first shared flat HUD composer in place across desktop, flat Android, and web,
+with preference/options follow-up still open. This splits the remaining flat
+Android input/HUD parity work out of
 [`090-flat-android-client-parity.md`](090-flat-android-client-parity.md) into a
 shared flat-client capability contract for desktop, flat Android, and web.
 
@@ -55,9 +57,11 @@ intents where the semantics match.
 - Native web has separate browser keyboard/mouse/touch glue. It should converge
   on the same intent and preference contracts while keeping browser event,
   worker, and storage mechanics web-local.
-- `mclone-ui` owns shared menu rendering and the current touch movement plus
-  touch interaction overlay, but it does not yet own a shared flat gameplay
-  HUD/hotbar across desktop, Android, and web.
+- `mclone-ui` owns shared menu rendering, touch movement/interaction overlays,
+  and the first shared flat gameplay HUD composer for crosshair, status,
+  touch controls, and the non-touch hotbar across desktop, Android, and web.
+  Touch-control preference persistence/options and gamepad/debug-palette
+  affordances remain open.
 
 ## Target Shape
 
@@ -169,11 +173,15 @@ intents; preferences decide presentation defaults.
     Android app crate.
 
 - [ ] **Slice 4: shared flat HUD and touch controls.**
-  - Move crosshair, hotbar/debug palette, selected-slot display, and remaining
-    cross-platform touch-control policy into shared `mclone-ui` presentation.
-  - Let `mclone-ui` consume resolved overlay state from `mclone-input`; keep
-    gameplay command semantics outside the UI crate.
-  - Support `Touch Controls: Auto / On / Off` across desktop, Android, and web.
+  - [x] Add shared `mclone-ui` flat HUD composition for crosshair, status,
+    touch controls, selected-slot display, and the non-touch flat hotbar.
+  - [x] Let `mclone-ui` consume resolved overlay state from `mclone-input`;
+    keep gameplay command semantics outside the UI crate.
+  - [x] Wire desktop, flat Android, and native web through the shared HUD
+    composer, with Android touch retaining touch-owned hotbar rendering.
+  - [ ] Move any remaining debug palette/gamepad-friendly HUD affordances into
+    the same shared presentation boundary.
+  - [ ] Support `Touch Controls: Auto / On / Off` across desktop, Android, and web.
 
 - [ ] **Slice 5: gamepad capability foundation.**
   - Add a platform-neutral gamepad intent mapping to `mclone-input`.
@@ -284,3 +292,11 @@ Manual/device validation to record before closing this tactical:
   lifecycle/surface/APK concerns local and routes attached keyboard/mouse
   movement, look, attack/use, hotbar, and menu input through the same camera,
   UI, interaction, and gameplay-command paths as touch.
+- Slice 4 first HUD pass landed: `mclone-ui` now owns `FlatHud` /
+  `FlatHotbarOverlay` and `render_flat_hud`, consuming
+  `ResolvedFlatInput` to decide whether touch controls or the shared flat
+  hotbar should render. Desktop, flat Android, and native web all route
+  crosshair/status/hotbar/touch overlay drawing through that shared composer.
+  Native web currently builds a local temporary resolved-input fact from
+  browser-visible touch overlay state until Slice 6 moves its event adapter
+  fully onto `mclone-input`.

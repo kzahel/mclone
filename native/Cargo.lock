@@ -1410,6 +1410,9 @@ dependencies = [
 [[package]]
 name = "mclone-ui"
 version = "0.0.0"
+dependencies = [
+ "mclone-input",
+]
 
 [[package]]
 name = "mclone-web-client"
@@ -1422,6 +1425,7 @@ dependencies = [
  "mclone-assets",
  "mclone-client",
  "mclone-core",
+ "mclone-input",
  "mclone-mesh",
  "mclone-net",
  "mclone-protocol",

@@ -23,6 +23,7 @@ use mclone_core::{
     BlockHitResult, BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, Direction, HitResultType,
     Vec3d, chunk_middle_block_coord,
 };
+use mclone_input::{InputCapabilities, InputCapabilityState, InputDeviceKind, InputPreferences};
 use mclone_mesh::{
     RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
     load_textured_terrain_assets,
@@ -51,10 +52,9 @@ use mclone_render_session::{
 };
 use mclone_server::ServerRunnerKind;
 use mclone_ui::{
-    DebugOverlay, GameFramePacingMode, GameOptionsParent, GameScreen, GameTouchSettings, GameUi,
-    GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay,
-    TouchOverlay, render_crosshair, render_debug_overlay_at, render_status_overlay,
-    render_touch_overlay,
+    DebugOverlay, FlatHotbarOverlay, FlatHud, GameFramePacingMode, GameOptionsParent, GameScreen,
+    GameTouchSettings, GameUi, GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point,
+    StatusOverlay, TouchJoystickOverlay, TouchOverlay, render_debug_overlay_at, render_flat_hud,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -2973,6 +2973,19 @@ impl WebChunkRenderSession {
         )
     }
 
+    fn resolved_flat_input_for_hud(&self) -> mclone_input::ResolvedFlatInput {
+        let mut state = InputCapabilityState::new(InputCapabilities {
+            keyboard: true,
+            mouse: true,
+            touch: self.touch_overlay.visible,
+            ..InputCapabilities::NONE
+        });
+        if self.touch_overlay.visible {
+            state.note_activity(InputDeviceKind::Touch);
+        }
+        state.resolve(InputPreferences::AUTO)
+    }
+
     fn install_started_runtime(
         &mut self,
         request: SessionStartRequest,
@@ -3792,7 +3805,6 @@ impl WebChunkRenderSession {
         };
         let mut ui_draw = self.ui.render_draw_list(ui_render_state);
         if !ui_active {
-            render_crosshair(self.ui.scale(), &mut ui_draw);
             if self.debug_overlay_visible {
                 let overlay = self.debug_overlay(
                     center,
@@ -3812,12 +3824,13 @@ impl WebChunkRenderSession {
                 );
             }
         }
-        render_status_overlay(
-            self.ui.scale(),
-            &mut ui_draw,
-            &self.effective_status_overlay(),
-        );
-        render_touch_overlay(self.ui.scale(), &mut ui_draw, &self.touch_overlay);
+        let mut hud = FlatHud::new(self.resolved_flat_input_for_hud());
+        hud.world_hud_visible = !ui_active;
+        hud.crosshair_visible = !ui_active;
+        hud.hotbar = FlatHotbarOverlay::selected(self.interaction.selected_hotbar_slot());
+        hud.touch = self.touch_overlay;
+        hud.status = self.effective_status_overlay();
+        render_flat_hud(self.ui.scale(), &mut ui_draw, &hud);
         let gui_command_count = ui_draw.commands().len();
         if gui_command_count > 0 {
             self.gui

@@ -10,7 +10,7 @@ use mclone_client::{
 use mclone_core::Vec3d;
 use mclone_input::{
     FlatInputAction, FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind,
-    KeyboardKey, KeyboardMouseInputAdapter, PointerButton,
+    InputPreferences, KeyboardKey, KeyboardMouseInputAdapter, PointerButton,
 };
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
@@ -23,8 +23,8 @@ use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameScreen, GameUi, GameUiAction,
-    GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, render_status_overlay,
+    DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameFramePacingMode, GameScreen, GameUi,
+    GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, render_flat_hud,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -470,6 +470,19 @@ impl ChunkApp {
             self.camera.movement_mode() == EngineCameraMovementMode::NoClip,
             self.camera.fly_speed_multiplier() as f32,
         )
+    }
+
+    fn current_flat_hud(&self, status: StatusOverlay, ui_active: bool) -> FlatHud {
+        let mut hud = FlatHud::new(
+            self.flat_input
+                .capability_state
+                .resolve(InputPreferences::AUTO),
+        );
+        hud.world_hud_visible = !ui_active && self.runtime.is_some();
+        hud.crosshair_visible = hud.world_hud_visible;
+        hud.hotbar = FlatHotbarOverlay::selected(self.interaction.selected_hotbar_slot());
+        hud.status = status;
+        hud
     }
 
     fn next_new_world_seed(&mut self) -> i64 {
@@ -1672,7 +1685,9 @@ impl ApplicationHandler for ChunkApp {
                 let ui_covers_world = self.ui.covers_world();
                 let debug_stats = (!ui_active).then_some(debug_stats).flatten();
                 let status_overlay = self.session_status_overlay();
-                let gui_active = ui_active || debug_stats.is_some() || status_overlay.visible;
+                let flat_hud = self.current_flat_hud(status_overlay, ui_active);
+                let gui_active =
+                    ui_active || debug_stats.is_some() || flat_hud.has_visible_commands();
                 let gui_scale = self.ui.scale();
                 let base_ui_draw = self.ui.render_draw_list(ui_render_state);
                 let gui_state = FullFrameGui::new(
@@ -1730,7 +1745,7 @@ impl ApplicationHandler for ChunkApp {
                             gui_state,
                             |stats| {
                                 let mut ui_draw = base_ui_draw;
-                                render_status_overlay(gui_scale, &mut ui_draw, &status_overlay);
+                                render_flat_hud(gui_scale, &mut ui_draw, &flat_hud);
                                 if let Some(mut debug_stats) = debug_stats {
                                     debug_stats.render = *stats;
                                     render_debug_pane(gui_scale, &mut ui_draw, &debug_stats);

@@ -45,9 +45,9 @@ mod android {
         EngineCameraMovementImpulse, EngineCameraMovementMode, EngineRenderCamera,
     };
     use mclone_ui::{
-        DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState,
-        GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
-        render_status_overlay, render_touch_overlay, touch_action_button_rects,
+        DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameFramePacingMode, GameUi,
+        GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay,
+        TouchJoystickOverlay, TouchOverlay, render_flat_hud, touch_action_button_rects,
         touch_hotbar_slot_rects, touch_menu_button_rect, touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
@@ -1282,22 +1282,23 @@ mod android {
         fn gui_draw_list(&self, gui_scale: GuiScale, ui_state: GameUiRenderState) -> GuiDrawList {
             if self.ui.is_active() {
                 let mut draw = self.ui.render_draw_list(ui_state);
-                render_status_overlay(gui_scale, &mut draw, &self.session_status);
+                let mut hud = FlatHud::new(self.input_capabilities.resolve(InputPreferences::AUTO));
+                hud.world_hud_visible = false;
+                hud.crosshair_visible = false;
+                hud.status = self.session_status.clone();
+                render_flat_hud(gui_scale, &mut draw, &hud);
                 return draw;
             }
             let mut draw = GuiDrawList::new();
-            if self
-                .input_capabilities
-                .resolve(InputPreferences::AUTO)
-                .touch_controls_visible
-            {
-                let mut overlay = self
-                    .touch_controls
-                    .overlay(self.interaction.selected_hotbar_slot());
-                overlay.menu_pressed = self.touch_menu_pressed;
-                render_touch_overlay(gui_scale, &mut draw, &overlay);
-            }
-            render_status_overlay(gui_scale, &mut draw, &self.session_status);
+            let mut touch = self
+                .touch_controls
+                .overlay(self.interaction.selected_hotbar_slot());
+            touch.menu_pressed = self.touch_menu_pressed;
+            let mut hud = FlatHud::new(self.input_capabilities.resolve(InputPreferences::AUTO));
+            hud.hotbar = FlatHotbarOverlay::selected(self.interaction.selected_hotbar_slot());
+            hud.touch = touch;
+            hud.status = self.session_status.clone();
+            render_flat_hud(gui_scale, &mut draw, &hud);
             draw
         }
 

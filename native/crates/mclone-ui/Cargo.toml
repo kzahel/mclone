@@ -8,3 +8,6 @@ publish.workspace = true
 [lib]
 name = "mclone_ui"
 path = "src/lib.rs"
+
+[dependencies]
+mclone-input.workspace = true
