@@ -149,6 +149,33 @@ the test, and sends `KEYCODE_SLEEP` so the headset screen turns off. The last
 /tmp/mclone-quest-openxr-perf-summary.txt
 ```
 
+For a deterministic moving probe, use the automated flight samples:
+
+```bash
+pnpm native:android-xr:perf:flight:rd1
+pnpm native:android-xr:perf:flight:rd5
+pnpm native:android-xr:perf:flight:rd10
+```
+
+or run the three-distance sweep:
+
+```bash
+pnpm native:android-xr:perf:flight:sweep
+```
+
+These start sampling after the first submitted terrain frame, switch to no-clip
+flight at 4.3 blocks/second, and move forward using the same engine camera pose
+sync and chunk-interest path as XR locomotion. Summary files are written to:
+
+```text
+/tmp/mclone-quest-openxr-perf-flight-rd1.txt
+/tmp/mclone-quest-openxr-perf-flight-rd5.txt
+/tmp/mclone-quest-openxr-perf-flight-rd10.txt
+```
+
+The summary includes `mode=flight`, `render_distance`,
+`flight_speed_blocks_per_second`, and actual `flight_distance_blocks`.
+
 For remote dedicated validation, either start `mclone-dedicated-server` on a
 host the headset can reach and pass `--remote-addr`, or let the validator build
 and start the server locally. For USB-attached validation, use `--adb-reverse`;

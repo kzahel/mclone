@@ -1,6 +1,7 @@
 # 096: Android XR Quest Performance
 
-Status: active; Slice 1 logcat perf probe landed on 2026-06-27.
+Status: active; Slice 1 logcat perf probe and automated flight sample landed
+on 2026-06-27.
 
 ## Purpose
 
@@ -71,6 +72,9 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
 - The Quest validator can run a repeatable performance sample, write a compact
   JSON summary under `/tmp`, and check for a logcat marker such as
   `MCLONE_ANDROID_XR_PERF_SUMMARY`.
+- The first moving Quest sample should fly rather than walk. Terrain collision
+  can block a walking probe and turn it into a physics/collision sample instead
+  of a chunk-streaming sample.
 - A headset-visible performance overlay can be toggled from the XR menu and
   can stay visible while walking.
 - The first pass is diagnostic. Do not change chunk scheduling, render
@@ -83,6 +87,8 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
 
 - [x] Add launch-scoped Android XR perf options:
   - `--perf-seconds N`
+  - `--perf-flight`
+  - `--perf-flight-speed N`
 - [x] Extend `android-xr/validate-quest-openxr.sh` with a
   `--perf-seconds N` mode that waits for ready, samples post-ready frames, then
   keeps normal force-stop/restore cleanup behavior.
@@ -94,8 +100,12 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
   - render-section counts, drawn indices, and actor draw counts.
 - [x] Keep initial output logcat-first and write the final summary line to
   `/tmp/mclone-quest-openxr-perf-summary.txt` by default.
-- [ ] Add `--perf-walk` or a deterministic synthetic stick input path after the
-  passive post-ready sample is proven on headset.
+- [x] Add a deterministic automated flight path that starts after the ready
+  frame, switches to no-clip, flies forward at walking-like speed, uses the
+  same engine camera pose-sync/chunk-interest path as XR locomotion, and
+  records actual flight distance in the summary.
+- [x] Add render-distance flight scripts for radius 1, 5, and 10 plus a
+  three-run sweep.
 - [ ] Add current/requested/supported refresh state after Slice 2 lands.
 - [ ] Split `render_mclone_frame` into narrower locate/locomotion/acquire/
   per-eye/end-frame timings after the coarse probe proves useful.
@@ -127,6 +137,12 @@ Recorded first-pass implementation:
   settings, re-enables proximity, and sends `KEYCODE_SLEEP`.
 - `package.json` includes `native:android-xr:perf` with a fixed seed, center
   chunk, render distance 2, noon, frozen time, and startup view pose.
+- `package.json` includes `native:android-xr:perf:flight:rd1`,
+  `native:android-xr:perf:flight:rd5`,
+  `native:android-xr:perf:flight:rd10`, and
+  `native:android-xr:perf:flight:sweep`. The flight summaries include
+  `mode=flight`, `render_distance`, `flight_speed_blocks_per_second`, and
+  `flight_distance_blocks`.
 
 ### Slice 2 - Real OpenXR Display Refresh State
 
@@ -259,6 +275,10 @@ Planned headset perf lanes after Slice 1:
 
 ```bash
 pnpm native:android-xr:perf
+pnpm native:android-xr:perf:flight:rd1
+pnpm native:android-xr:perf:flight:rd5
+pnpm native:android-xr:perf:flight:rd10
+pnpm native:android-xr:perf:flight:sweep
 pnpm native:android-xr:perf -- --refresh 72
 pnpm native:android-xr:perf -- --refresh 90
 pnpm native:android-xr:perf -- --refresh 120

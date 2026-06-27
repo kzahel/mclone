@@ -396,6 +396,10 @@ where
         self.locomotion_mode
     }
 
+    pub fn camera_snapshot(&self) -> EngineCameraSnapshot {
+        self.camera.snapshot()
+    }
+
     pub fn apply_locomotion_input(
         &mut self,
         controllers: &[XrControllerSnapshot],
@@ -423,6 +427,38 @@ where
         self.play_landing_events();
         self.commit_engine_camera_player_pose()
             .context("sync XR locomotion player pose")?;
+        Ok(())
+    }
+
+    pub fn apply_automated_flight_input(
+        &mut self,
+        views: [xr::View; 2],
+        speed_blocks_per_second: f64,
+    ) -> Result<()> {
+        self.latest_controllers.clear();
+        self.ui.close();
+        self.ui.clear_input();
+        self.menu_pointer_down = false;
+        self.menu_panel_pose = None;
+        self.menu_panel_recenter_pending = false;
+        let now = Instant::now();
+        let dt_seconds = self
+            .last_locomotion_update
+            .replace(now)
+            .map(|last| now.duration_since(last).as_secs_f64())
+            .unwrap_or(0.0);
+        self.camera
+            .set_movement_mode(EngineCameraMovementMode::NoClip);
+        self.camera
+            .set_speed_blocks_per_second(speed_blocks_per_second);
+        let movement_yaw_radians = self
+            .locomotion_movement_yaw_radians(&views)
+            .context("resolve XR automated flight locomotion frame")?;
+        let input = xr_automated_flight_input(dt_seconds, movement_yaw_radians);
+        self.camera
+            .apply_movement_input(self.runtime.client(), input);
+        self.commit_engine_camera_player_pose()
+            .context("sync XR automated flight player pose")?;
         Ok(())
     }
 
@@ -1498,6 +1534,23 @@ pub fn xr_locomotion_input_from_controllers(
     }
 }
 
+pub fn xr_automated_flight_input(
+    dt_seconds: f64,
+    movement_yaw_radians: Option<f64>,
+) -> EngineCameraInput {
+    let dt_seconds = if dt_seconds.is_finite() {
+        dt_seconds.clamp(0.0, XR_LOCOMOTION_MAX_FRAME_SECONDS)
+    } else {
+        0.0
+    };
+    EngineCameraInput {
+        dt_seconds,
+        movement_impulse: Some(EngineCameraMovementImpulse::new(0.0, 1.0)),
+        movement_yaw_radians,
+        ..EngineCameraInput::default()
+    }
+}
+
 pub fn xr_menu_toggle_pressed(controllers: &[XrControllerSnapshot]) -> bool {
     controllers
         .iter()
@@ -1876,6 +1929,20 @@ mod tests {
         let right = test_controller(XrHand::Right, Vec2::new(1.0, 0.0), false);
         let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
 
+        assert!(!input.jump);
+        assert!(!input.descend);
+    }
+
+    #[test]
+    fn xr_automated_flight_moves_forward_without_vertical_input() {
+        let input = xr_automated_flight_input(1.0 / 72.0, Some(0.25));
+
+        assert_eq!(input.dt_seconds, 1.0 / 72.0);
+        assert_eq!(
+            input.movement_impulse,
+            Some(EngineCameraMovementImpulse::new(0.0, 1.0))
+        );
+        assert_eq!(input.movement_yaw_radians, Some(0.25));
         assert!(!input.jump);
         assert!(!input.descend);
     }

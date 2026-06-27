@@ -1209,6 +1209,7 @@ dependencies = [
  "mclone-net",
  "mclone-protocol",
  "mclone-render",
+ "mclone-render-session",
  "mclone-xr-graphics",
  "mclone-xr-host",
  "mclone-xr-scene",

@@ -25,6 +25,7 @@ mod android {
     use mclone_net::NativeClientSession;
     use mclone_protocol::{ClientCommand, ServerUpdate};
     use mclone_render::chunk::TexturedSectionRenderOptions;
+    use mclone_render_session::EngineCameraSnapshot;
     use mclone_xr_host::{
         OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
         XrControllerSnapshot, XrFrameStats,
@@ -57,6 +58,7 @@ mod android {
     const SESSION_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(25);
     const ANDROID_XR_SESSION_SMOKE_SEED: i64 = 246_813_579;
     const ANDROID_XR_PERF_FALLBACK_TARGET_HZ: f64 = 72.0;
+    const ANDROID_XR_PERF_DEFAULT_FLIGHT_SPEED_BLOCKS_PER_SECOND: f64 = 4.3;
 
     #[allow(unsafe_code)]
     #[link(name = "log")]
@@ -198,12 +200,13 @@ mod android {
         Ok(assets)
     }
 
-    #[derive(Clone, Debug, PartialEq, Eq)]
+    #[derive(Clone, Debug, PartialEq)]
     struct AndroidXrStartupOptions {
         scene: XrSceneOptions,
         remote_addr: Option<String>,
         session_smoke: Option<AndroidXrSessionSmoke>,
         perf_seconds: Option<u64>,
+        perf_flight: Option<AndroidXrPerfFlight>,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -213,8 +216,14 @@ mod android {
                 remote_addr: None,
                 session_smoke: None,
                 perf_seconds: None,
+                perf_flight: None,
             }
         }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct AndroidXrPerfFlight {
+        speed_blocks_per_second: f64,
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -280,6 +289,20 @@ mod android {
                     }
                     options.perf_seconds = Some(seconds);
                 }
+                "--perf-flight" => {
+                    if options.perf_flight.is_none() {
+                        options.perf_flight = Some(AndroidXrPerfFlight {
+                            speed_blocks_per_second:
+                                ANDROID_XR_PERF_DEFAULT_FLIGHT_SPEED_BLOCKS_PER_SECOND,
+                        });
+                    }
+                }
+                "--perf-flight-speed" => {
+                    let speed = parse_next::<f64>(&argv, &mut index, "--perf-flight-speed")?;
+                    options.perf_flight = Some(AndroidXrPerfFlight {
+                        speed_blocks_per_second: validate_perf_flight_speed(speed)?,
+                    });
+                }
                 "--freeze-time" => {}
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
@@ -288,8 +311,18 @@ mod android {
             }
             index += 1;
         }
+        if options.perf_flight.is_some() && options.perf_seconds.is_none() {
+            bail!("--perf-flight requires --perf-seconds");
+        }
         options.scene = options.scene.validated()?;
         Ok(options)
+    }
+
+    fn validate_perf_flight_speed(speed_blocks_per_second: f64) -> Result<f64> {
+        if !speed_blocks_per_second.is_finite() || speed_blocks_per_second <= 0.0 {
+            bail!("--perf-flight-speed must be a finite positive number");
+        }
+        Ok(speed_blocks_per_second)
     }
 
     fn parse_session_smoke_arg(value: String) -> Result<AndroidXrSessionSmoke> {
@@ -491,6 +524,14 @@ mod android {
         } else {
             log::info!("Android XR performance probe: <none>");
         }
+        if let Some(flight) = startup_options.perf_flight {
+            log::info!(
+                "Android XR performance flight: speed={:.3} blocks/s",
+                flight.speed_blocks_per_second
+            );
+        } else {
+            log::info!("Android XR performance flight: <none>");
+        }
         log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
@@ -519,6 +560,7 @@ mod android {
             remote_addr,
             startup_options.session_smoke,
             startup_options.perf_seconds,
+            startup_options.perf_flight,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -533,6 +575,7 @@ mod android {
         remote_addr: Option<String>,
         session_smoke: Option<AndroidXrSessionSmoke>,
         perf_seconds: Option<u64>,
+        perf_flight: Option<AndroidXrPerfFlight>,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -794,6 +837,8 @@ mod android {
             &controller_actions,
             session_smoke,
             perf_seconds,
+            perf_flight,
+            scene_options.render_distance,
         )
     }
 
@@ -946,11 +991,13 @@ mod android {
         controller_actions: &OpenXrControllerActions,
         session_smoke: Option<AndroidXrSessionSmoke>,
         perf_seconds: Option<u64>,
+        perf_flight: Option<AndroidXrPerfFlight>,
+        render_distance: u32,
     ) -> Result<()> {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
         let mut frame_stats = XrFrameStats::default();
-        let mut perf_probe = AndroidXrPerfProbe::new(perf_seconds);
+        let mut perf_probe = AndroidXrPerfProbe::new(perf_seconds, perf_flight, render_distance);
         let mut logged_ready = false;
         let mut logged_controller_activity = false;
         let mut session_smoke_pending_start = false;
@@ -1022,7 +1069,7 @@ mod android {
             )?;
             frame_timing.wait_begin_ms = elapsed_ms(wait_begin_start);
 
-            let mut frame_summary = None;
+            let mut rendered_frame = None;
             let mut perf_started_after_ready = false;
             let frame_result = if frame_state.should_render {
                 let controller_poll_start = Instant::now();
@@ -1050,6 +1097,7 @@ mod android {
                             right_eye,
                             terrain,
                             &controllers,
+                            perf_probe.automated_flight_speed(),
                         );
                         frame_timing.render_mclone_frame_ms = elapsed_ms(render_start);
                         result
@@ -1060,9 +1108,10 @@ mod android {
                     }
                 };
                 match render_result {
-                    Ok(summary) => {
+                    Ok(rendered) => {
                         frame_stats.record_submitted_frame();
-                        frame_summary = Some(summary);
+                        rendered_frame = Some(rendered);
+                        let summary = rendered.summary;
                         if !logged_ready {
                             logged_ready = true;
                             log::info!(
@@ -1077,7 +1126,7 @@ mod android {
                             );
                             log::info!("MCLONE_ANDROID_XR_READY");
                             perf_started_after_ready =
-                                perf_probe.start_after_ready(frame_stats, summary);
+                                perf_probe.start_after_ready(frame_stats, rendered);
                             if session_smoke.is_some() {
                                 session_smoke_pending_start = true;
                             }
@@ -1120,7 +1169,7 @@ mod android {
             }
             frame_timing.frame_wall_ms = elapsed_ms(frame_wall_start);
             if !perf_started_after_ready {
-                perf_probe.record_frame(frame_timing, frame_stats, frame_summary);
+                perf_probe.record_frame(frame_timing, frame_stats, rendered_frame);
             }
 
             if frame_stats.submitted_frames == 1 {
@@ -1142,25 +1191,47 @@ mod android {
         render_mclone_frame_ms: f64,
     }
 
+    #[derive(Clone, Copy, Debug)]
+    struct AndroidXrRenderedFrame {
+        summary: mclone_xr_scene::XrTerrainFrameSummary,
+        camera: EngineCameraSnapshot,
+    }
+
     struct AndroidXrPerfProbe {
         requested_seconds: Option<u64>,
+        flight: Option<AndroidXrPerfFlight>,
+        render_distance: u32,
         active: Option<AndroidXrActivePerfProbe>,
         completed: bool,
     }
 
     impl AndroidXrPerfProbe {
-        fn new(requested_seconds: Option<u64>) -> Self {
+        fn new(
+            requested_seconds: Option<u64>,
+            flight: Option<AndroidXrPerfFlight>,
+            render_distance: u32,
+        ) -> Self {
             Self {
                 requested_seconds,
+                flight,
+                render_distance,
                 active: None,
                 completed: false,
+            }
+        }
+
+        fn automated_flight_speed(&self) -> Option<f64> {
+            if self.active.is_some() {
+                self.flight.map(|flight| flight.speed_blocks_per_second)
+            } else {
+                None
             }
         }
 
         fn start_after_ready(
             &mut self,
             frame_stats: XrFrameStats,
-            summary: mclone_xr_scene::XrTerrainFrameSummary,
+            rendered: AndroidXrRenderedFrame,
         ) -> bool {
             let Some(seconds) = self.requested_seconds else {
                 return false;
@@ -1168,9 +1239,17 @@ mod android {
             if self.completed || self.active.is_some() {
                 return false;
             }
+            let mode = android_xr_perf_mode_label(self.flight);
+            let flight_speed = self
+                .flight
+                .map(|flight| flight.speed_blocks_per_second)
+                .unwrap_or(0.0);
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_START seconds={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_distance={} flight_speed_blocks_per_second={:.3} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
                 seconds,
+                mode,
+                self.render_distance,
+                flight_speed,
                 ANDROID_XR_PERF_FALLBACK_TARGET_HZ,
                 perf_budget_ms(),
                 frame_stats.submitted_frames,
@@ -1188,7 +1267,13 @@ mod android {
                 over_budget_frames: 0,
                 over_2x_budget_frames: 0,
                 over_4x_budget_frames: 0,
-                latest_summary: summary,
+                render_distance: self.render_distance,
+                flight_speed_blocks_per_second: self
+                    .flight
+                    .map(|flight| flight.speed_blocks_per_second),
+                start_camera: rendered.camera,
+                latest_camera: rendered.camera,
+                latest_summary: rendered.summary,
             });
             true
         }
@@ -1197,12 +1282,12 @@ mod android {
             &mut self,
             timing: AndroidXrFrameTiming,
             frame_stats: XrFrameStats,
-            summary: Option<mclone_xr_scene::XrTerrainFrameSummary>,
+            rendered: Option<AndroidXrRenderedFrame>,
         ) {
             let Some(active) = self.active.as_mut() else {
                 return;
             };
-            active.record_frame(timing, summary);
+            active.record_frame(timing, rendered);
             if active.started.elapsed() >= active.requested {
                 active.log_summary(frame_stats);
                 self.completed = true;
@@ -1222,6 +1307,10 @@ mod android {
         over_budget_frames: u64,
         over_2x_budget_frames: u64,
         over_4x_budget_frames: u64,
+        render_distance: u32,
+        flight_speed_blocks_per_second: Option<f64>,
+        start_camera: EngineCameraSnapshot,
+        latest_camera: EngineCameraSnapshot,
         latest_summary: mclone_xr_scene::XrTerrainFrameSummary,
     }
 
@@ -1229,7 +1318,7 @@ mod android {
         fn record_frame(
             &mut self,
             timing: AndroidXrFrameTiming,
-            summary: Option<mclone_xr_scene::XrTerrainFrameSummary>,
+            rendered: Option<AndroidXrRenderedFrame>,
         ) {
             let budget_ms = perf_budget_ms();
             self.frame_wall_ms.push(timing.frame_wall_ms);
@@ -1248,8 +1337,9 @@ mod android {
             self.max_render_mclone_frame_ms = self
                 .max_render_mclone_frame_ms
                 .max(timing.render_mclone_frame_ms);
-            if let Some(summary) = summary {
-                self.latest_summary = summary;
+            if let Some(rendered) = rendered {
+                self.latest_summary = rendered.summary;
+                self.latest_camera = rendered.camera;
             }
         }
 
@@ -1268,9 +1358,16 @@ mod android {
             };
             let min_frame_ms = sorted.first().copied().unwrap_or(0.0);
             let max_frame_ms = sorted.last().copied().unwrap_or(0.0);
+            let flight_speed = self.flight_speed_blocks_per_second.unwrap_or(0.0);
+            let flight_distance_blocks =
+                camera_distance_blocks(self.start_camera, self.latest_camera);
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} max_wait_begin_ms={:.3} max_controller_poll_ms={:.3} max_render_mclone_frame_ms={:.3} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} max_wait_begin_ms={:.3} max_controller_poll_ms={:.3} max_render_mclone_frame_ms={:.3} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
                 sample_seconds,
+                android_xr_perf_mode_label_for_speed(self.flight_speed_blocks_per_second),
+                self.render_distance,
+                flight_speed,
+                flight_distance_blocks,
                 ANDROID_XR_PERF_FALLBACK_TARGET_HZ,
                 perf_budget_ms(),
                 frame_count,
@@ -1301,6 +1398,25 @@ mod android {
 
     fn perf_budget_ms() -> f64 {
         1000.0 / ANDROID_XR_PERF_FALLBACK_TARGET_HZ
+    }
+
+    fn android_xr_perf_mode_label(flight: Option<AndroidXrPerfFlight>) -> &'static str {
+        android_xr_perf_mode_label_for_speed(flight.map(|flight| flight.speed_blocks_per_second))
+    }
+
+    fn android_xr_perf_mode_label_for_speed(speed_blocks_per_second: Option<f64>) -> &'static str {
+        if speed_blocks_per_second.is_some() {
+            "flight"
+        } else {
+            "steady"
+        }
+    }
+
+    fn camera_distance_blocks(start: EngineCameraSnapshot, end: EngineCameraSnapshot) -> f64 {
+        let dx = end.eye.x - start.eye.x;
+        let dy = end.eye.y - start.eye.y;
+        let dz = end.eye.z - start.eye.z;
+        (dx * dx + dy * dy + dz * dz).sqrt()
     }
 
     fn elapsed_ms(start: Instant) -> f64 {
@@ -1340,12 +1456,19 @@ mod android {
         right_eye: &mut graphics_vulkan::OpenXrEyeState,
         terrain: &mut AndroidXrTerrainState,
         controllers: &[XrControllerSnapshot],
-    ) -> Result<mclone_xr_scene::XrTerrainFrameSummary> {
+        automated_flight_speed_blocks_per_second: Option<f64>,
+    ) -> Result<AndroidXrRenderedFrame> {
         let stereo_views =
             mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
-        terrain
-            .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
-            .context("apply Android XR controller locomotion")?;
+        if let Some(speed) = automated_flight_speed_blocks_per_second {
+            terrain
+                .apply_automated_flight_input([stereo_views.left, stereo_views.right], speed)
+                .context("apply Android XR automated flight locomotion")?;
+        } else {
+            terrain
+                .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
+                .context("apply Android XR controller locomotion")?;
+        }
 
         let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
         let right_target =
@@ -1386,7 +1509,10 @@ mod android {
             left_eye,
             right_eye,
         )?;
-        Ok(frame_summary)
+        Ok(AndroidXrRenderedFrame {
+            summary: frame_summary,
+            camera: terrain.camera_snapshot(),
+        })
     }
 
     fn acquire_eye_target(

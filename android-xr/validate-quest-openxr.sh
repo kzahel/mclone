@@ -38,6 +38,8 @@ ADB_REVERSE_INSTALLED=0
 STARTUP_ARGV=()
 SESSION_SMOKE="${MCLONE_ANDROID_XR_SESSION_SMOKE:-}"
 PERF_SECONDS="${MCLONE_ANDROID_XR_PERF_SECONDS:-}"
+PERF_FLIGHT="${MCLONE_ANDROID_XR_PERF_FLIGHT:-0}"
+PERF_FLIGHT_SPEED="${MCLONE_ANDROID_XR_PERF_FLIGHT_SPEED:-}"
 
 usage() {
     cat <<'USAGE'
@@ -91,6 +93,11 @@ Options:
   --perf-seconds N  After the first submitted terrain frame, sample N seconds
                      of headset frame timing and wait for
                      MCLONE_ANDROID_XR_PERF_SUMMARY.
+  --perf-flight      During --perf-seconds, fly forward in no-clip at about
+                     walking speed instead of sampling a passive headset view.
+  --perf-flight-speed N
+                     Flight speed in blocks/second. Implies --perf-flight.
+                     Default: 4.3.
   --perf-summary PATH
                      Local file for the last perf summary line. Default:
                      /tmp/mclone-quest-openxr-perf-summary.txt.
@@ -122,6 +129,13 @@ validate_positive_integer() {
     local value="$2"
     [[ "$value" =~ ^[0-9]+$ ]] || mclone_die "$label must be a positive integer, got '$value'"
     (( 10#$value > 0 )) || mclone_die "$label must be greater than zero"
+}
+
+validate_positive_number() {
+    local label="$1"
+    local value="$2"
+    [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]] || mclone_die "$label must be a positive number, got '$value'"
+    awk -v value="$value" 'BEGIN { exit !(value > 0) }' || mclone_die "$label must be greater than zero"
 }
 
 derive_adb_reverse_port() {
@@ -351,6 +365,16 @@ while [[ $# -gt 0 ]]; do
             PERF_SECONDS="$2"
             shift 2
             ;;
+        --perf-flight)
+            PERF_FLIGHT=1
+            shift
+            ;;
+        --perf-flight-speed)
+            require_arg "$1" "${2:-}"
+            PERF_FLIGHT=1
+            PERF_FLIGHT_SPEED="$2"
+            shift 2
+            ;;
         --perf-summary)
             require_arg "$1" "${2:-}"
             PERF_SUMMARY_PATH="$2"
@@ -401,6 +425,12 @@ if [[ -n "$PERF_SECONDS" ]]; then
     if [[ -z "$WAIT_SECONDS_EXPLICIT" ]]; then
         WAIT_SECONDS=$((10#$PERF_SECONDS + 30))
     fi
+fi
+if [[ "$PERF_FLIGHT" == "1" && -z "$PERF_SECONDS" ]]; then
+    mclone_die "--perf-flight requires --perf-seconds"
+fi
+if [[ -n "$PERF_FLIGHT_SPEED" ]]; then
+    validate_positive_number "--perf-flight-speed" "$PERF_FLIGHT_SPEED"
 fi
 
 cd "$REPO_ROOT"
@@ -455,6 +485,12 @@ if [[ -n "$SESSION_SMOKE" ]]; then
 fi
 if [[ -n "$PERF_SECONDS" ]]; then
     STARTUP_ARGV+=(--perf-seconds "$PERF_SECONDS")
+fi
+if [[ "$PERF_FLIGHT" == "1" ]]; then
+    STARTUP_ARGV+=(--perf-flight)
+    if [[ -n "$PERF_FLIGHT_SPEED" ]]; then
+        STARTUP_ARGV+=(--perf-flight-speed "$PERF_FLIGHT_SPEED")
+    fi
 fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"
@@ -558,6 +594,14 @@ if [[ -n "$PERF_SECONDS" ]]; then
     fi
     if ! grep -F "MCLONE_ANDROID_XR_PERF_SUMMARY" "$LOG_PATH" >/dev/null 2>&1; then
         mclone_die "Android XR perf-summary marker was not seen; see $LOG_PATH"
+    fi
+    if [[ "$PERF_FLIGHT" == "1" ]]; then
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_START .*mode=flight" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR perf flight start marker was not seen; see $LOG_PATH"
+        fi
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*mode=flight .*flight_distance_blocks=" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR perf flight summary marker was not seen; see $LOG_PATH"
+        fi
     fi
     mkdir -p "$(dirname "$PERF_SUMMARY_PATH")"
     grep -F "MCLONE_ANDROID_XR_PERF_SUMMARY" "$LOG_PATH" | tail -1 > "$PERF_SUMMARY_PATH"

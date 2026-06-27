@@ -65,7 +65,9 @@ For durable historical trends, use [`../performance-records.md`](../performance-
 Quest Android XR is not covered by the desktop/headless movement-frame and
 timedemo baselines. Track headset frame pacing, real OpenXR refresh state,
 overlay diagnostics, and Quest-specific baseline work in
-[`096`](../tactical/096-android-xr-quest-performance.md).
+[`096`](../tactical/096-android-xr-quest-performance.md). The first moving
+Quest probe is automated no-clip flight at walking-like speed, with
+render-distance scripts for 1, 5, and 10.
 
 ## Priority Queue
 
