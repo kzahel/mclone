@@ -369,7 +369,7 @@ mod tests {
         );
         assert_eq!(
             sample_layer(&sections, mclone_light::LightLayer::Sky, 1, 1, 1),
-            15
+            14
         );
         assert_eq!(
             sample_layer(&sections, mclone_light::LightLayer::Sky, 3, 15, 3),

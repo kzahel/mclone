@@ -397,6 +397,58 @@ mod tests {
     }
 
     #[test]
+    fn generated_ocean_chunk_light_matches_persisted_java_oracle_fixture() {
+        let fixture = serde_json::from_str::<Value>(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks-5-115.json"
+        ))
+        .expect("valid full integration fixture");
+        assert_eq!(fixture["module"], "integration");
+        assert_eq!(fixture["minecraftVersion"], "1.17.1");
+
+        let chunks = fixture["chunks"]
+            .as_array()
+            .expect("integration fixture chunks must be an array");
+        assert_eq!(chunks.len(), 1);
+        let chunk = &chunks[0];
+        assert_eq!(chunk["status"], "full");
+        assert_eq!(chunk["isLightOn"], true);
+        let target = ChunkPos::new(fixture_i32(chunk, "chunkX"), fixture_i32(chunk, "chunkZ"));
+        let seed = fixture["seed"]
+            .as_str()
+            .expect("integration fixture seed must be a string")
+            .parse::<i64>()
+            .expect("integration fixture seed must fit i64");
+
+        let mut server = IntegratedServer::new(seed);
+        let updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkView(ChunkView {
+                center: target,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }),
+        );
+        let snapshot = snapshot_update_for(&updates, target)
+            .expect("native server should publish oracle target snapshot");
+
+        assert_eq!(snapshot.status, ChunkStatus::Light);
+        assert!(
+            snapshot.light_correct,
+            "generated oracle target snapshot must publish light-correct data"
+        );
+        assert_persisted_light_layer_matches_fixture(
+            "sky",
+            fixture_light_layer(chunk, "sky"),
+            packed_light_layer(&snapshot.light_sections, LightLayer::Sky),
+        );
+        assert_persisted_light_layer_matches_fixture(
+            "block",
+            fixture_light_layer(chunk, "block"),
+            packed_light_layer(&snapshot.light_sections, LightLayer::Block),
+        );
+    }
+
+    #[test]
     fn snapshot_with_provisional_lighting_packs_block_light_layer() {
         let min_y = -SECTION_HEIGHT;
         let height = SECTION_HEIGHT * 3;
@@ -1188,6 +1240,136 @@ mod tests {
         value[key]
             .as_i64()
             .unwrap_or_else(|| panic!("fixture field `{key}` must be an integer")) as i32
+    }
+
+    fn fixture_light_layer(chunk: &Value, layer: &str) -> BTreeMap<i32, Vec<u8>> {
+        chunk["light"][layer]
+            .as_array()
+            .unwrap_or_else(|| panic!("integration fixture light.{layer} must be an array"))
+            .iter()
+            .map(|section| {
+                let section_y = fixture_i32(section, "y");
+                let data = section["dataBase64"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("light.{layer}[Y={section_y}] needs dataBase64"));
+                (section_y, decode_base64_light_data(data))
+            })
+            .collect()
+    }
+
+    fn packed_light_layer(
+        sections: &[PackedLightSection],
+        layer: LightLayer,
+    ) -> BTreeMap<i32, Vec<u8>> {
+        sections
+            .iter()
+            .filter_map(|section| {
+                let bytes = match layer {
+                    LightLayer::Sky => section.sky.as_ref(),
+                    LightLayer::Block => section.block.as_ref(),
+                }?;
+                Some((section.section_y, bytes.clone()))
+            })
+            .collect()
+    }
+
+    fn assert_persisted_light_layer_matches_fixture(
+        layer_name: &str,
+        expected: BTreeMap<i32, Vec<u8>>,
+        actual: BTreeMap<i32, Vec<u8>>,
+    ) {
+        let expected = normalize_persisted_light_layer(layer_name, expected);
+        let actual = normalize_persisted_light_layer(layer_name, actual);
+        let expected_ys = expected.keys().copied().collect::<Vec<_>>();
+        let actual_ys = actual.keys().copied().collect::<Vec<_>>();
+        for (section_y, expected_bytes) in &expected {
+            let Some(actual_bytes) = actual.get(section_y) else {
+                continue;
+            };
+            assert_eq!(
+                actual_bytes.len(),
+                mclone_core::LIGHT_DATA_LAYER_BYTE_COUNT,
+                "{layer_name} light section {section_y} has invalid native byte length",
+            );
+            let mismatch = expected_bytes
+                .iter()
+                .zip(actual_bytes.iter())
+                .position(|(expected, actual)| expected != actual);
+            if let Some(offset) = mismatch {
+                panic!(
+                    "{layer_name} light section {section_y} byte {offset} mismatch: expected 0x{:02x}, got 0x{:02x}",
+                    expected_bytes[offset], actual_bytes[offset]
+                );
+            }
+        }
+        assert_eq!(
+            actual_ys, expected_ys,
+            "{layer_name} light section set mismatch"
+        );
+    }
+
+    fn normalize_persisted_light_layer(
+        layer_name: &str,
+        sections: BTreeMap<i32, Vec<u8>>,
+    ) -> BTreeMap<i32, Vec<u8>> {
+        sections
+            .into_iter()
+            .filter(|(_, bytes)| {
+                !bytes.iter().all(|byte| *byte == 0)
+                    && (layer_name != "sky" || !bytes.iter().all(|byte| *byte == 0xFF))
+            })
+            .collect()
+    }
+
+    fn decode_base64_light_data(value: &str) -> Vec<u8> {
+        let bytes = value.as_bytes();
+        assert_eq!(
+            bytes.len() % 4,
+            0,
+            "base64 light data length must be divisible by 4"
+        );
+        let mut out = Vec::with_capacity(mclone_core::LIGHT_DATA_LAYER_BYTE_COUNT);
+        for quartet in bytes.chunks_exact(4) {
+            let pad = quartet.iter().filter(|byte| **byte == b'=').count();
+            assert!(pad <= 2, "base64 light data has too much padding");
+            let a = base64_digit(quartet[0]);
+            let b = base64_digit(quartet[1]);
+            let c = if quartet[2] == b'=' {
+                0
+            } else {
+                base64_digit(quartet[2])
+            };
+            let d = if quartet[3] == b'=' {
+                0
+            } else {
+                base64_digit(quartet[3])
+            };
+            let combined = (a << 18) | (b << 12) | (c << 6) | d;
+            out.push((combined >> 16) as u8);
+            if pad < 2 {
+                out.push((combined >> 8) as u8);
+            }
+            if pad < 1 {
+                out.push(combined as u8);
+            }
+        }
+        assert_eq!(
+            out.len(),
+            mclone_core::LIGHT_DATA_LAYER_BYTE_COUNT,
+            "decoded light data must be exactly one DataLayer"
+        );
+        out
+    }
+
+    fn base64_digit(byte: u8) -> u32 {
+        match byte {
+            b'A'..=b'Z' => u32::from(byte - b'A'),
+            b'a'..=b'z' => u32::from(byte - b'a' + 26),
+            b'0'..=b'9' => u32::from(byte - b'0' + 52),
+            b'+' => 62,
+            b'/' => 63,
+            _ => panic!("invalid base64 byte 0x{byte:02x} in light data"),
+        }
     }
 
     fn fixture_palette_block_id(entry: &Value) -> RawBlockId {
