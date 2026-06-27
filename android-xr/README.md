@@ -143,7 +143,7 @@ pnpm native:android-xr:perf
 This runs the normal validator cleanup path. On success or failure it
 force-stops Mclone XR, restores the headset wake/proximity settings changed for
 the test, and sends `KEYCODE_SLEEP` so the headset screen turns off. The last
-`MCLONE_ANDROID_XR_PERF_SUMMARY` line is written to:
+compact `MCLONE_ANDROID_XR_PERF_*` marker block is written to:
 
 ```text
 /tmp/mclone-quest-openxr-perf-summary.txt
@@ -173,11 +173,12 @@ sync and chunk-interest path as XR locomotion. Summary files are written to:
 /tmp/mclone-quest-openxr-perf-flight-rd10.txt
 ```
 
-The summary includes `mode=flight`, `render_distance`,
-`flight_speed_blocks_per_second`, actual `flight_distance_blocks`, current and
-supported display refresh when `XR_FB_display_refresh_rate` is available, and
-max timing buckets for locate views, locomotion, eye acquire, terrain
-render/update, eye release, and OpenXR end-frame.
+The marker block includes `SUMMARY`, `STAGES`, `TERRAIN`, `UPLOAD_MAX`,
+`COMPILE_MAX`, `UPLOAD_LAST`, and `DRAW` lines. It records `mode=flight`,
+`render_distance`, `flight_speed_blocks_per_second`, actual
+`flight_distance_blocks`, current/supported display refresh when
+`XR_FB_display_refresh_rate` is available, max timing buckets, terrain
+poll/sync/GPU-upload timing, compile/upload workload counters, and draw counts.
 
 For remote dedicated validation, either start `mclone-dedicated-server` on a
 host the headset can reach and pass `--remote-addr`, or let the validator build

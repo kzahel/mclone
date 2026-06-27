@@ -73,7 +73,7 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
 - `mclone-ui` gets an XR-specific options/performance section instead of
   reusing desktop-only frame pacing labels.
 - The Quest validator can run a repeatable performance sample, write a compact
-  JSON summary under `/tmp`, and check for a logcat marker such as
+  marker block under `/tmp`, and check for logcat markers such as
   `MCLONE_ANDROID_XR_PERF_SUMMARY`.
 - The first moving Quest sample should fly rather than walk. Terrain collision
   can block a walking probe and turn it into a physics/collision sample instead
@@ -105,8 +105,8 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
     eye acquire, scene update/upload, per-eye render, eye release, OpenXR
     end-frame, and full mclone render frame,
   - render-section counts, drawn indices, and actor draw counts.
-- [x] Keep initial output logcat-first and write the final summary line to
-  `/tmp/mclone-quest-openxr-perf-summary.txt` by default.
+- [x] Keep initial output logcat-first and write the final summary marker block
+  to `/tmp/mclone-quest-openxr-perf-summary.txt` by default.
 - [x] Add a deterministic automated flight path that starts after the ready
   frame, switches to no-clip, flies forward at walking-like speed, uses the
   same engine camera pose-sync/chunk-interest path as XR locomotion, and
@@ -116,8 +116,11 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
 - [x] Add current/supported refresh state after Slice 2's first pass.
 - [x] Split `render_mclone_frame` into narrower locate/locomotion/acquire/
   per-eye/end-frame timings after the coarse probe proved useful.
-- [ ] Add pending compile/streaming counters to the summary once the shared XR
-  scene exposes them directly.
+- [x] Split the perf output into compact `SUMMARY`, `STAGES`, `TERRAIN`,
+  `UPLOAD_MAX`, `COMPILE_MAX`, `UPLOAD_LAST`, and `DRAW` markers so logcat does
+  not truncate draw fields.
+- [x] Add pending compile/streaming counters and upload workload counters to
+  the saved summary block once the shared XR scene exposes them directly.
 
 Validation target:
 
@@ -138,10 +141,10 @@ Recorded first-pass implementation:
   ready frame itself.
 - The budget uses the runtime's current OpenXR display refresh when
   `XR_FB_display_refresh_rate` is available, falling back to `72 Hz` otherwise.
-- The validator waits for `MCLONE_ANDROID_XR_PERF_SUMMARY`, writes the last
-  summary line to `/tmp/mclone-quest-openxr-perf-summary.txt`, and still runs
-  the existing cleanup trap that force-stops the app, restores headset power
-  settings, re-enables proximity, and sends `KEYCODE_SLEEP`.
+- The validator waits for `MCLONE_ANDROID_XR_PERF_SUMMARY`, writes the compact
+  seven-line marker block to `/tmp/mclone-quest-openxr-perf-summary.txt`, and
+  still runs the existing cleanup trap that force-stops the app, restores
+  headset power settings, re-enables proximity, and sends `KEYCODE_SLEEP`.
 - `package.json` includes `native:android-xr:perf` with a fixed seed, center
   chunk, render distance 2, noon, frozen time, and startup view pose.
 - `package.json` includes `native:android-xr:perf:flight:rd1`,
@@ -150,6 +153,11 @@ Recorded first-pass implementation:
   `native:android-xr:perf:flight:sweep`. The flight summaries include
   `mode=flight`, `render_distance`, `flight_speed_blocks_per_second`, and
   `flight_distance_blocks`, plus refresh state and max stage timings.
+- The marker block now includes terrain runtime sub-timings for poll, section
+  sync, GPU upload, and traversal-ready refresh. It also includes max and latest
+  pending render chunks, pending compile jobs, submitted/completed/stale compile
+  sections, deferred sections, uploaded sections/vertices/indices, and draw
+  counts.
 
 ### Slice 2 - Real OpenXR Display Refresh State
 

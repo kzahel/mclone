@@ -157,6 +157,7 @@ pub struct XrTerrainFrameSummary {
     pub actor_count: usize,
     pub drawn_actor_count: usize,
     pub timing: XrTerrainFrameTiming,
+    pub upload: XrTerrainUploadSummary,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -164,8 +165,39 @@ pub struct XrTerrainFrameTiming {
     pub render_views_ms: f64,
     pub menu_pointer_ms: f64,
     pub runtime_upload_ms: f64,
+    pub runtime_poll_ms: f64,
+    pub runtime_sync_ms: f64,
+    pub runtime_gpu_upload_ms: f64,
+    pub runtime_ready_sections_ms: f64,
     pub left_eye_ms: f64,
     pub right_eye_ms: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct XrTerrainUploadSummary {
+    pub poll_changed: bool,
+    pub pending_render_chunks_before: usize,
+    pub pending_render_chunks_after: usize,
+    pub pending_compile_jobs_before: usize,
+    pub pending_compile_jobs_after: usize,
+    pub rebuilt_section_count: usize,
+    pub removed_section_count: usize,
+    pub rebuilt_vertex_count: u32,
+    pub rebuilt_index_count: u32,
+    pub neighbor_ready_section_count: usize,
+    pub near_exception_section_count: usize,
+    pub deferred_section_count: usize,
+    pub submitted_compile_section_count: usize,
+    pub completed_compile_section_count: usize,
+    pub stale_compile_section_count: usize,
+    pub uploaded_section_count: usize,
+    pub upload_removed_section_count: usize,
+    pub uploaded_vertex_count: u32,
+    pub uploaded_index_count: u32,
+    pub traversal_ready_section_count: usize,
+    pub visibility_graph_build_count: usize,
+    pub visibility_graph_total_ms: f64,
+    pub visibility_graph_worst_ms: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -373,7 +405,7 @@ where
             timing.menu_pointer_ms += elapsed_ms(menu_pointer_start.elapsed());
         }
         let runtime_upload_start = Instant::now();
-        self.poll_runtime_and_upload(device, center_position)?;
+        let upload = self.poll_runtime_and_upload(device, center_position, &mut timing)?;
         timing.runtime_upload_ms = elapsed_ms(runtime_upload_start.elapsed());
         let render_options = self.effective_render_options(center_position);
         let sky_clear_color = self.sky_clear_color();
@@ -412,7 +444,7 @@ where
         )?;
         timing.right_eye_ms = elapsed_ms(right_eye_start.elapsed());
         self.record_eye0_summary(left_summary);
-        Ok(self.frame_summary_with_timing(timing))
+        Ok(self.frame_summary_with_timing(timing, upload))
     }
 
     pub fn set_locomotion_mode(&mut self, locomotion_mode: XrLocomotionMode) {
@@ -494,10 +526,17 @@ where
     }
 
     pub fn frame_summary(&self) -> XrTerrainFrameSummary {
-        self.frame_summary_with_timing(XrTerrainFrameTiming::default())
+        self.frame_summary_with_timing(
+            XrTerrainFrameTiming::default(),
+            XrTerrainUploadSummary::default(),
+        )
     }
 
-    fn frame_summary_with_timing(&self, timing: XrTerrainFrameTiming) -> XrTerrainFrameSummary {
+    fn frame_summary_with_timing(
+        &self,
+        timing: XrTerrainFrameTiming,
+        upload: XrTerrainUploadSummary,
+    ) -> XrTerrainFrameSummary {
         if let Some(summary) = self.first_eye_summary {
             return XrTerrainFrameSummary {
                 rendered_frames: self.rendered_frames,
@@ -510,6 +549,7 @@ where
                 actor_count: summary.actor_count,
                 drawn_actor_count: summary.drawn_actor_count,
                 timing,
+                upload,
             };
         }
         XrTerrainFrameSummary {
@@ -523,6 +563,7 @@ where
             actor_count: self.render_stats.actor_count,
             drawn_actor_count: self.render_stats.drawn_actor_count,
             timing,
+            upload,
         }
     }
 
@@ -591,19 +632,37 @@ where
         &mut self,
         device: &wgpu::Device,
         camera_position: Vec3,
-    ) -> Result<()> {
-        let changed = self.poll().context("poll XR terrain runtime")?;
-        if !changed && !self.has_pending_render_work(camera_position) {
-            self.draw.set_traversal_ready_sections(
-                &self
-                    .runtime
-                    .traversal_ready_render_section_keys(camera_position),
-            );
-            return Ok(());
+        timing: &mut XrTerrainFrameTiming,
+    ) -> Result<XrTerrainUploadSummary> {
+        let pending_render_chunks_before = self.runtime.pending_render_chunk_count();
+        let pending_compile_jobs_before = self.runtime.render_compile_pending_job_count();
+        let poll_start = Instant::now();
+        let poll_changed = self.poll().context("poll XR terrain runtime")?;
+        timing.runtime_poll_ms = elapsed_ms(poll_start.elapsed());
+        if !poll_changed && !self.has_pending_render_work(camera_position) {
+            let ready_start = Instant::now();
+            let ready_sections = self
+                .runtime
+                .traversal_ready_render_section_keys(camera_position);
+            timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
+            let traversal_ready_section_count = ready_sections.len();
+            self.draw.set_traversal_ready_sections(&ready_sections);
+            return Ok(XrTerrainUploadSummary {
+                poll_changed,
+                pending_render_chunks_before,
+                pending_render_chunks_after: self.runtime.pending_render_chunk_count(),
+                pending_compile_jobs_before,
+                pending_compile_jobs_after: self.runtime.render_compile_pending_job_count(),
+                traversal_ready_section_count,
+                ..XrTerrainUploadSummary::default()
+            });
         }
+        let sync_start = Instant::now();
         let section_update = self
             .sync_render_sections(camera_position)
             .context("sync XR terrain render sections")?;
+        timing.runtime_sync_ms = elapsed_ms(sync_start.elapsed());
+        let upload_start = Instant::now();
         let upload_report = self
             .draw
             .apply_section_updates(
@@ -612,16 +671,43 @@ where
                 &section_update.removed_section_keys,
             )
             .context("upload XR terrain render section updates")?;
-        self.draw.set_traversal_ready_sections(
-            &self
-                .runtime
-                .traversal_ready_render_section_keys(camera_position),
-        );
+        timing.runtime_gpu_upload_ms = elapsed_ms(upload_start.elapsed());
+        let ready_start = Instant::now();
+        let ready_sections = self
+            .runtime
+            .traversal_ready_render_section_keys(camera_position);
+        timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
+        let traversal_ready_section_count = ready_sections.len();
+        self.draw.set_traversal_ready_sections(&ready_sections);
         self.render_stats.section_count = self.draw.section_count();
         self.render_stats.index_count = self.draw.index_count();
         self.render_stats.face_count = quad_face_count_from_indices(self.render_stats.index_count);
         record_render_section_update_stats(&mut self.render_stats, &section_update, upload_report);
-        Ok(())
+        Ok(XrTerrainUploadSummary {
+            poll_changed,
+            pending_render_chunks_before,
+            pending_render_chunks_after: self.runtime.pending_render_chunk_count(),
+            pending_compile_jobs_before,
+            pending_compile_jobs_after: self.runtime.render_compile_pending_job_count(),
+            rebuilt_section_count: section_update.rebuilt_section_count(),
+            removed_section_count: section_update.removed_section_count(),
+            rebuilt_vertex_count: section_update.rebuilt_vertex_count,
+            rebuilt_index_count: section_update.rebuilt_index_count,
+            neighbor_ready_section_count: section_update.neighbor_ready_section_count,
+            near_exception_section_count: section_update.near_exception_section_count,
+            deferred_section_count: section_update.deferred_section_count,
+            submitted_compile_section_count: section_update.submitted_compile_section_count,
+            completed_compile_section_count: section_update.completed_compile_section_count,
+            stale_compile_section_count: section_update.stale_compile_section_count,
+            uploaded_section_count: upload_report.uploaded_section_count,
+            upload_removed_section_count: upload_report.removed_section_count,
+            uploaded_vertex_count: upload_report.uploaded_vertex_count,
+            uploaded_index_count: upload_report.uploaded_index_count,
+            traversal_ready_section_count,
+            visibility_graph_build_count: section_update.visibility_graph_stats.build_count,
+            visibility_graph_total_ms: section_update.visibility_graph_stats.total_ms,
+            visibility_graph_worst_ms: section_update.visibility_graph_stats.worst_ms,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]

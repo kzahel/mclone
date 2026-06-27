@@ -1230,6 +1230,10 @@ mod android {
         terrain_render_views_ms: f64,
         terrain_menu_pointer_ms: f64,
         terrain_runtime_upload_ms: f64,
+        terrain_runtime_poll_ms: f64,
+        terrain_runtime_sync_ms: f64,
+        terrain_runtime_gpu_upload_ms: f64,
+        terrain_runtime_ready_sections_ms: f64,
         terrain_left_eye_ms: f64,
         terrain_right_eye_ms: f64,
         release_eyes_ms: f64,
@@ -1317,6 +1321,8 @@ mod android {
                 max_controller_poll_ms: 0.0,
                 max_render_mclone_frame_ms: 0.0,
                 max_render: AndroidXrRenderFrameTiming::default(),
+                max_upload: mclone_xr_scene::XrTerrainUploadSummary::default(),
+                upload_work_frames: 0,
                 over_budget_frames: 0,
                 over_2x_budget_frames: 0,
                 over_4x_budget_frames: 0,
@@ -1360,6 +1366,8 @@ mod android {
         max_controller_poll_ms: f64,
         max_render_mclone_frame_ms: f64,
         max_render: AndroidXrRenderFrameTiming,
+        max_upload: mclone_xr_scene::XrTerrainUploadSummary,
+        upload_work_frames: u64,
         over_budget_frames: u64,
         over_2x_budget_frames: u64,
         over_4x_budget_frames: u64,
@@ -1397,6 +1405,10 @@ mod android {
                 .max(timing.render_mclone_frame_ms);
             self.max_render = max_render_timing(self.max_render, timing.render);
             if let Some(rendered) = rendered {
+                if terrain_upload_summary_has_work(rendered.summary.upload) {
+                    self.upload_work_frames += 1;
+                }
+                self.max_upload = max_upload_summary(self.max_upload, rendered.summary.upload);
                 self.latest_summary = rendered.summary;
                 self.latest_camera = rendered.camera;
             }
@@ -1420,8 +1432,9 @@ mod android {
             let flight_speed = self.flight_speed_blocks_per_second.unwrap_or(0.0);
             let flight_distance_blocks =
                 camera_distance_blocks(self.start_camera, self.latest_camera);
+            let latest_upload = self.latest_summary.upload;
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} max_wait_begin_ms={:.3} max_controller_poll_ms={:.3} max_render_mclone_frame_ms={:.3} max_locate_views_ms={:.3} max_locomotion_ms={:.3} max_acquire_left_ms={:.3} max_acquire_right_ms={:.3} max_terrain_render_frame_ms={:.3} max_terrain_render_views_ms={:.3} max_terrain_menu_pointer_ms={:.3} max_terrain_runtime_upload_ms={:.3} max_terrain_left_eye_ms={:.3} max_terrain_right_eye_ms={:.3} max_release_eyes_ms={:.3} max_end_frame_ms={:.3} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={}",
                 sample_seconds,
                 android_xr_perf_mode_label_for_speed(self.flight_speed_blocks_per_second),
                 self.render_distance,
@@ -1444,7 +1457,10 @@ mod android {
                 max_frame_ms,
                 self.over_budget_frames,
                 self.over_2x_budget_frames,
-                self.over_4x_budget_frames,
+                self.over_4x_budget_frames
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_STAGES max_wait_begin_ms={:.3} max_controller_poll_ms={:.3} max_render_mclone_frame_ms={:.3} max_locate_views_ms={:.3} max_locomotion_ms={:.3} max_acquire_left_ms={:.3} max_acquire_right_ms={:.3} max_release_eyes_ms={:.3} max_end_frame_ms={:.3}",
                 self.max_wait_begin_ms,
                 self.max_controller_poll_ms,
                 self.max_render_mclone_frame_ms,
@@ -1452,14 +1468,67 @@ mod android {
                 self.max_render.locomotion_ms,
                 self.max_render.acquire_left_ms,
                 self.max_render.acquire_right_ms,
+                self.max_render.release_eyes_ms,
+                self.max_render.end_frame_ms
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_render_frame_ms={:.3} max_terrain_render_views_ms={:.3} max_terrain_menu_pointer_ms={:.3} max_terrain_runtime_upload_ms={:.3} max_runtime_poll_ms={:.3} max_runtime_sync_ms={:.3} max_runtime_gpu_upload_ms={:.3} max_runtime_ready_sections_ms={:.3} max_terrain_left_eye_ms={:.3} max_terrain_right_eye_ms={:.3}",
                 self.max_render.terrain_render_frame_ms,
                 self.max_render.terrain_render_views_ms,
                 self.max_render.terrain_menu_pointer_ms,
                 self.max_render.terrain_runtime_upload_ms,
+                self.max_render.terrain_runtime_poll_ms,
+                self.max_render.terrain_runtime_sync_ms,
+                self.max_render.terrain_runtime_gpu_upload_ms,
+                self.max_render.terrain_runtime_ready_sections_ms,
                 self.max_render.terrain_left_eye_ms,
-                self.max_render.terrain_right_eye_ms,
-                self.max_render.release_eyes_ms,
-                self.max_render.end_frame_ms,
+                self.max_render.terrain_right_eye_ms
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_UPLOAD_MAX work_frames={} rebuilt_sections={} removed_sections={} rebuilt_vertices={} rebuilt_indices={} uploaded_sections={} upload_removed_sections={} uploaded_vertices={} uploaded_indices={} ready_sections={}",
+                self.upload_work_frames,
+                self.max_upload.rebuilt_section_count,
+                self.max_upload.removed_section_count,
+                self.max_upload.rebuilt_vertex_count,
+                self.max_upload.rebuilt_index_count,
+                self.max_upload.uploaded_section_count,
+                self.max_upload.upload_removed_section_count,
+                self.max_upload.uploaded_vertex_count,
+                self.max_upload.uploaded_index_count,
+                self.max_upload.traversal_ready_section_count
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_COMPILE_MAX pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} neighbor_ready_sections={} near_exception_sections={} deferred_sections={} submitted_sections={} completed_sections={} stale_sections={} visibility_graph_builds={} visibility_graph_total_ms={:.3} visibility_graph_worst_ms={:.3}",
+                self.max_upload.pending_render_chunks_before,
+                self.max_upload.pending_render_chunks_after,
+                self.max_upload.pending_compile_jobs_before,
+                self.max_upload.pending_compile_jobs_after,
+                self.max_upload.neighbor_ready_section_count,
+                self.max_upload.near_exception_section_count,
+                self.max_upload.deferred_section_count,
+                self.max_upload.submitted_compile_section_count,
+                self.max_upload.completed_compile_section_count,
+                self.max_upload.stale_compile_section_count,
+                self.max_upload.visibility_graph_build_count,
+                self.max_upload.visibility_graph_total_ms,
+                self.max_upload.visibility_graph_worst_ms
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_UPLOAD_LAST poll_changed={} pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} rebuilt_sections={} removed_sections={} uploaded_sections={} upload_removed_sections={} uploaded_indices={} ready_sections={}",
+                latest_upload.poll_changed,
+                latest_upload.pending_render_chunks_before,
+                latest_upload.pending_render_chunks_after,
+                latest_upload.pending_compile_jobs_before,
+                latest_upload.pending_compile_jobs_after,
+                latest_upload.rebuilt_section_count,
+                latest_upload.removed_section_count,
+                latest_upload.uploaded_section_count,
+                latest_upload.upload_removed_section_count,
+                latest_upload.uploaded_index_count,
+                latest_upload.traversal_ready_section_count
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_DRAW sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
                 self.latest_summary.section_count,
                 self.latest_summary.drawn_section_count,
                 self.latest_summary.index_count,
@@ -1503,10 +1572,85 @@ mod android {
             terrain_render_views_ms: a.terrain_render_views_ms.max(b.terrain_render_views_ms),
             terrain_menu_pointer_ms: a.terrain_menu_pointer_ms.max(b.terrain_menu_pointer_ms),
             terrain_runtime_upload_ms: a.terrain_runtime_upload_ms.max(b.terrain_runtime_upload_ms),
+            terrain_runtime_poll_ms: a.terrain_runtime_poll_ms.max(b.terrain_runtime_poll_ms),
+            terrain_runtime_sync_ms: a.terrain_runtime_sync_ms.max(b.terrain_runtime_sync_ms),
+            terrain_runtime_gpu_upload_ms: a
+                .terrain_runtime_gpu_upload_ms
+                .max(b.terrain_runtime_gpu_upload_ms),
+            terrain_runtime_ready_sections_ms: a
+                .terrain_runtime_ready_sections_ms
+                .max(b.terrain_runtime_ready_sections_ms),
             terrain_left_eye_ms: a.terrain_left_eye_ms.max(b.terrain_left_eye_ms),
             terrain_right_eye_ms: a.terrain_right_eye_ms.max(b.terrain_right_eye_ms),
             release_eyes_ms: a.release_eyes_ms.max(b.release_eyes_ms),
             end_frame_ms: a.end_frame_ms.max(b.end_frame_ms),
+        }
+    }
+
+    fn terrain_upload_summary_has_work(summary: mclone_xr_scene::XrTerrainUploadSummary) -> bool {
+        summary.poll_changed
+            || summary.rebuilt_section_count > 0
+            || summary.removed_section_count > 0
+            || summary.deferred_section_count > 0
+            || summary.submitted_compile_section_count > 0
+            || summary.completed_compile_section_count > 0
+            || summary.stale_compile_section_count > 0
+            || summary.uploaded_section_count > 0
+            || summary.upload_removed_section_count > 0
+    }
+
+    fn max_upload_summary(
+        a: mclone_xr_scene::XrTerrainUploadSummary,
+        b: mclone_xr_scene::XrTerrainUploadSummary,
+    ) -> mclone_xr_scene::XrTerrainUploadSummary {
+        mclone_xr_scene::XrTerrainUploadSummary {
+            poll_changed: a.poll_changed || b.poll_changed,
+            pending_render_chunks_before: a
+                .pending_render_chunks_before
+                .max(b.pending_render_chunks_before),
+            pending_render_chunks_after: a
+                .pending_render_chunks_after
+                .max(b.pending_render_chunks_after),
+            pending_compile_jobs_before: a
+                .pending_compile_jobs_before
+                .max(b.pending_compile_jobs_before),
+            pending_compile_jobs_after: a
+                .pending_compile_jobs_after
+                .max(b.pending_compile_jobs_after),
+            rebuilt_section_count: a.rebuilt_section_count.max(b.rebuilt_section_count),
+            removed_section_count: a.removed_section_count.max(b.removed_section_count),
+            rebuilt_vertex_count: a.rebuilt_vertex_count.max(b.rebuilt_vertex_count),
+            rebuilt_index_count: a.rebuilt_index_count.max(b.rebuilt_index_count),
+            neighbor_ready_section_count: a
+                .neighbor_ready_section_count
+                .max(b.neighbor_ready_section_count),
+            near_exception_section_count: a
+                .near_exception_section_count
+                .max(b.near_exception_section_count),
+            deferred_section_count: a.deferred_section_count.max(b.deferred_section_count),
+            submitted_compile_section_count: a
+                .submitted_compile_section_count
+                .max(b.submitted_compile_section_count),
+            completed_compile_section_count: a
+                .completed_compile_section_count
+                .max(b.completed_compile_section_count),
+            stale_compile_section_count: a
+                .stale_compile_section_count
+                .max(b.stale_compile_section_count),
+            uploaded_section_count: a.uploaded_section_count.max(b.uploaded_section_count),
+            upload_removed_section_count: a
+                .upload_removed_section_count
+                .max(b.upload_removed_section_count),
+            uploaded_vertex_count: a.uploaded_vertex_count.max(b.uploaded_vertex_count),
+            uploaded_index_count: a.uploaded_index_count.max(b.uploaded_index_count),
+            traversal_ready_section_count: a
+                .traversal_ready_section_count
+                .max(b.traversal_ready_section_count),
+            visibility_graph_build_count: a
+                .visibility_graph_build_count
+                .max(b.visibility_graph_build_count),
+            visibility_graph_total_ms: a.visibility_graph_total_ms.max(b.visibility_graph_total_ms),
+            visibility_graph_worst_ms: a.visibility_graph_worst_ms.max(b.visibility_graph_worst_ms),
         }
     }
 
@@ -1625,6 +1769,10 @@ mod android {
         timing.terrain_render_views_ms = frame_summary.timing.render_views_ms;
         timing.terrain_menu_pointer_ms = frame_summary.timing.menu_pointer_ms;
         timing.terrain_runtime_upload_ms = frame_summary.timing.runtime_upload_ms;
+        timing.terrain_runtime_poll_ms = frame_summary.timing.runtime_poll_ms;
+        timing.terrain_runtime_sync_ms = frame_summary.timing.runtime_sync_ms;
+        timing.terrain_runtime_gpu_upload_ms = frame_summary.timing.runtime_gpu_upload_ms;
+        timing.terrain_runtime_ready_sections_ms = frame_summary.timing.runtime_ready_sections_ms;
         timing.terrain_left_eye_ms = frame_summary.timing.left_eye_ms;
         timing.terrain_right_eye_ms = frame_summary.timing.right_eye_ms;
         left_release_result?;

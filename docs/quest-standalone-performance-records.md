@@ -13,17 +13,18 @@ through VirtualDesktopXR, WiVRn, Link, SteamVR, or similar runtimes.
 1. Commit the runtime code you want to benchmark.
 2. Run one or more Quest benchmark scripts.
 3. Add rows below with the benchmarked commit hash, device/runtime details, and
-   the compact `MCLONE_ANDROID_XR_PERF_SUMMARY` numbers.
+   the compact `MCLONE_ANDROID_XR_PERF_*` marker-block numbers.
 
 If a benchmark is captured from an uncommitted worktree, record that explicitly
 and name the later commit that contains the same runtime code.
 
-Current summaries include refresh fields (`refresh_supported`, `current_hz`,
-`supported_hz`, `target_hz`, `budget_ms`) and max stage timings
-(`max_locate_views_ms`, `max_locomotion_ms`, `max_acquire_*`,
-`max_terrain_*`, `max_release_eyes_ms`, `max_end_frame_ms`). Add extra columns
-or a secondary detail table when those fields are relevant to the change being
-tracked.
+Current summaries are saved as a compact marker block:
+`MCLONE_ANDROID_XR_PERF_SUMMARY`, `STAGES`, `TERRAIN`, `UPLOAD_MAX`,
+`COMPILE_MAX`, `UPLOAD_LAST`, and `DRAW`. They include refresh fields
+(`refresh_supported`, `current_hz`, `supported_hz`, `target_hz`, `budget_ms`),
+max stage timings, terrain runtime poll/sync/GPU-upload timings, compile/upload
+workload counters, and draw counts. Add extra columns or a secondary detail
+table when those fields are relevant to the change being tracked.
 
 ## Current Standalone Quest Lanes
 
@@ -46,9 +47,10 @@ frame. The validator force-stops the app and sleeps the headset during cleanup.
 Benchmarked code commit: `518d21da92b3850f9b8b9d75bad6c7cf1318fb49`
 (`Add Quest XR perf timing attribution`).
 
-Capture note: captured from a clean worktree at the commit above. The summary
-line is now long enough that logcat truncated the trailing draw-count fields
-after `indices`; record those fields as missing for this run.
+Capture note: captured from a clean worktree at the commit above. This run used
+the pre-split single summary line, which was long enough that logcat truncated
+the trailing draw-count fields after `indices`; record those fields as missing
+for this run. Later captures use the split marker block described above.
 
 Device/runtime:
 

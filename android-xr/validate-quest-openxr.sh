@@ -91,15 +91,15 @@ Options:
                      Run a launch-scoped in-headset session replacement smoke.
                      MODE is new-world.
   --perf-seconds N  After the first submitted terrain frame, sample N seconds
-                     of headset frame timing and wait for
-                     MCLONE_ANDROID_XR_PERF_SUMMARY.
+                     of headset frame timing and wait for the
+                     MCLONE_ANDROID_XR_PERF_SUMMARY marker block.
   --perf-flight      During --perf-seconds, fly forward in no-clip at about
                      walking speed instead of sampling a passive headset view.
   --perf-flight-speed N
                      Flight speed in blocks/second. Implies --perf-flight.
                      Default: 4.3.
   --perf-summary PATH
-                     Local file for the last perf summary line. Default:
+                     Local file for the compact perf marker block. Default:
                      /tmp/mclone-quest-openxr-perf-summary.txt.
   -h, --help         Show this help.
 USAGE
@@ -592,9 +592,19 @@ if [[ -n "$PERF_SECONDS" ]]; then
     if ! grep -F "MCLONE_ANDROID_XR_PERF_START" "$LOG_PATH" >/dev/null 2>&1; then
         mclone_die "Android XR perf-start marker was not seen; see $LOG_PATH"
     fi
-    if ! grep -F "MCLONE_ANDROID_XR_PERF_SUMMARY" "$LOG_PATH" >/dev/null 2>&1; then
-        mclone_die "Android XR perf-summary marker was not seen; see $LOG_PATH"
-    fi
+    for marker in \
+        MCLONE_ANDROID_XR_PERF_SUMMARY \
+        MCLONE_ANDROID_XR_PERF_STAGES \
+        MCLONE_ANDROID_XR_PERF_TERRAIN \
+        MCLONE_ANDROID_XR_PERF_UPLOAD_MAX \
+        MCLONE_ANDROID_XR_PERF_COMPILE_MAX \
+        MCLONE_ANDROID_XR_PERF_UPLOAD_LAST \
+        MCLONE_ANDROID_XR_PERF_DRAW
+    do
+        if ! grep -F "$marker" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR perf marker $marker was not seen; see $LOG_PATH"
+        fi
+    done
     if [[ "$PERF_FLIGHT" == "1" ]]; then
         if ! grep -E "MCLONE_ANDROID_XR_PERF_START .*mode=flight" "$LOG_PATH" >/dev/null 2>&1; then
             mclone_die "Android XR perf flight start marker was not seen; see $LOG_PATH"
@@ -604,7 +614,8 @@ if [[ -n "$PERF_SECONDS" ]]; then
         fi
     fi
     mkdir -p "$(dirname "$PERF_SUMMARY_PATH")"
-    grep -F "MCLONE_ANDROID_XR_PERF_SUMMARY" "$LOG_PATH" | tail -1 > "$PERF_SUMMARY_PATH"
+    grep -E "MCLONE_ANDROID_XR_PERF_(SUMMARY|STAGES|TERRAIN|UPLOAD_MAX|COMPILE_MAX|UPLOAD_LAST|DRAW)" "$LOG_PATH" \
+        | tail -n 7 > "$PERF_SUMMARY_PATH"
     mclone_note "Perf summary: $PERF_SUMMARY_PATH"
 fi
 
