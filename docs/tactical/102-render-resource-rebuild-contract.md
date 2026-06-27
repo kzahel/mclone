@@ -1,8 +1,8 @@
 # 102: Render Resource Rebuild Contract
 
-Status: active. Slice 2 landed first on 2026-06-27 as the shared
-`RenderConfig` contract; ownership inventory and actual runtime rebuild remain
-pending.
+Status: active. Shared `RenderConfig` and `FlatRenderResources` bundle landed
+on 2026-06-27; developer-triggered runtime rebuild validation and broader
+platform adoption remain pending.
 
 ## Purpose
 
@@ -178,6 +178,24 @@ Do not make the only valid copy of a gameplay-visible asset live in GPU memory.
 - [ ] Record any platform-only ownership that must remain outside the shared
   rebuild path.
 
+Desktop flat inventory recorded on 2026-06-27:
+
+- Platform-owned and preserved for Tier 2: `NativeSurfaceContext` owns
+  `wgpu::Surface`, `wgpu::Device`, `wgpu::Queue`, `wgpu::SurfaceConfiguration`,
+  present-mode support, and the current `RenderConfig`.
+- Shared renderer-owned and disposable for Tier 2: `FlatRenderResources` owns
+  the depth target, sky renderer, terrain draw resources, actor draw resources,
+  screen effects renderer, and flat GUI renderer.
+- Frame-sized: `ChunkDepthTarget`.
+- Format-dependent: sky, terrain, actor, screen-effect, and GUI pipelines.
+- Asset-dependent GPU uploads: terrain atlas, actor atlas, underwater overlay
+  texture, and section vertex/index buffers.
+- CPU sources of truth retained outside the bundle: decoded mesh/actor assets,
+  asset source chain, runtime render-section cache, actor presentations, camera,
+  session/coordinator, UI state, and input state.
+- Platform-only ownership still outside the shared rebuild path:
+  window/surface lifecycle, surface resize/configure, present mode, and audio.
+
 ### Slice 2: Shared Config Types
 
 - [x] Add `RenderConfig` and small helper types in `mclone-render` or a shared
@@ -210,16 +228,40 @@ Slice 2 validation on 2026-06-27:
 
 ### Slice 3: Desktop Flat Resource Bundle
 
-- [ ] Group desktop flat renderer resources behind a rebuildable bundle:
+- [x] Group desktop flat renderer resources behind a rebuildable bundle:
   depth target, sky, terrain draw resources, actors, GUI, screen effects, and
   any frame-sized attachments.
-- [ ] Add `rebuild_render_resources(...)` that preserves scene/runtime/camera/UI
+- [x] Add `rebuild_render_resources(...)` that preserves scene/runtime/camera/UI
   state and recreates only GPU resources.
-- [ ] Keep `NativeSurfaceContext` responsible for `wgpu::Surface` and
+- [x] Keep `NativeSurfaceContext` responsible for `wgpu::Surface` and
   `SurfaceConfiguration`; it should pass `RenderConfig` into the shared rebuild
   path instead of owning renderer policy.
 - [ ] Add a developer-only trigger or CLI/test path that performs a no-op
   rebuild and a config-changing rebuild while the world stays active.
+
+Slice 3 partial result:
+
+- `native/crates/mclone-app-runtime/src/frame_render.rs` now owns shared
+  `FlatRenderResources`, which groups depth, sky, terrain, actor,
+  screen-effect, and GUI resources behind one config-validated constructor.
+- The bundle currently accepts only the renderer shape we actually support:
+  `Depth24Plus`, sample count 1, render scale 1.0, and non-HDR direct targets.
+  MSAA, HDR, render-scale, and alternate depth formats fail early instead of
+  being silently ignored.
+- `native/apps/mclone-native-client/src/app.rs` now stores one
+  `Option<FlatRenderResources>` instead of separate depth/sky/draw/actor/effect
+  GUI options.
+- `ChunkApp::rebuild_render_resources(...)` recreates the bundle from the
+  current `NativeSurfaceContext` and reuploads CPU-owned runtime sections when
+  a world is active. It is currently used for initial construction; the
+  developer no-op/config-changing runtime trigger is still pending.
+
+Slice 3 partial validation on 2026-06-27:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+- `pnpm native:web:build`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-client`
 
 ### Slice 4: Rebuild-Safe Dynamic Profile Toggle
 

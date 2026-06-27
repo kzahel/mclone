@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use mclone_assets::AssetSource;
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ClientInteractionController,
     LOCAL_PLAYER_STANDING_EYE_HEIGHT,
@@ -14,14 +15,11 @@ use mclone_input::{
 };
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
-    ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
-    TexturedSectionUploadReport,
+    ChunkCamera, TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
-use mclone_render::entity::{ActorDrawResources, ActorInstance};
-use mclone_render::gui::GuiRenderer;
+use mclone_render::entity::ActorInstance;
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
-use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
-use mclone_render::sky_render::SkyRenderer;
+use mclone_render::screen_effect::UnderwaterOverlay;
 use mclone_ui::{
     DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameFramePacingMode, GameScreen, GameUi,
     GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, render_flat_hud,
@@ -48,7 +46,8 @@ use crate::scene_runtime::{
 use crate::ui::{DebugPaneStats, render_debug_pane};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 use mclone_app_runtime::frame_render::{
-    FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame_for_view,
+    FlatRenderResources, FullFrameGui, RenderStreamStats, record_render_section_update_stats,
+    render_full_frame_for_view,
 };
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
@@ -257,12 +256,7 @@ struct ChunkApp {
     ui: GameUi,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
-    depth: Option<ChunkDepthTarget>,
-    sky: Option<SkyRenderer>,
-    draw: Option<TexturedSectionDrawResources>,
-    actors: Option<ActorDrawResources>,
-    screen_effects: Option<ScreenEffectsRenderer>,
-    gui: Option<GuiRenderer>,
+    render_resources: Option<FlatRenderResources>,
     audio: Option<AudioEngine>,
     mouse_locked: bool,
     mouse_lock_requested: bool,
@@ -329,12 +323,7 @@ impl ChunkApp {
             ui,
             window: None,
             surface: None,
-            depth: None,
-            sky: None,
-            draw: None,
-            actors: None,
-            screen_effects: None,
-            gui: None,
+            render_resources: None,
             audio: None,
             mouse_locked: false,
             mouse_lock_requested: false,
@@ -1022,11 +1011,62 @@ impl ChunkApp {
         self.last_cursor = None;
     }
 
+    fn rebuild_render_resources(&mut self, asset_source: &impl AssetSource) -> Result<()> {
+        let previous_config = self
+            .render_resources
+            .as_ref()
+            .map(FlatRenderResources::render_config);
+        let resources = {
+            let Some(surface) = self.surface.as_ref() else {
+                return Ok(());
+            };
+            FlatRenderResources::new(
+                &surface.device,
+                &surface.queue,
+                [surface.config.width, surface.config.height],
+                surface.render_config,
+                self.assets.mesh_assets.atlas.as_upload(),
+                self.assets.actor_textures.atlas.as_upload(),
+                asset_source,
+            )?
+        };
+        let next_config = resources.render_config();
+        self.render_resources = Some(resources);
+        if self.runtime.is_some() {
+            self.upload_all_runtime_sections()
+                .context("failed to restore runtime sections after render resource rebuild")?;
+        }
+        match previous_config {
+            Some(previous) if previous == next_config => {
+                log::info!(
+                    "rebuilt desktop flat render resources with unchanged config: {}",
+                    next_config.diagnostic_label()
+                );
+            }
+            Some(previous) => {
+                log::info!(
+                    "rebuilt desktop flat render resources: {} -> {}",
+                    previous.diagnostic_label(),
+                    next_config.diagnostic_label()
+                );
+            }
+            None => {
+                log::info!(
+                    "initialized desktop flat render resources: {}",
+                    next_config.diagnostic_label()
+                );
+            }
+        }
+        Ok(())
+    }
+
     fn clear_draw_sections(&mut self) -> Result<()> {
-        let (Some(surface), Some(draw)) = (&self.surface, &mut self.draw) else {
+        let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
+        else {
             return Ok(());
         };
-        let report = draw
+        let report = render_resources
+            .draw_mut()
             .update_sections(&surface.device, &[])
             .context("failed to clear world render sections")?;
         if report.removed_section_count > 0 {
@@ -1207,14 +1247,16 @@ impl ChunkApp {
         let Some(runtime) = &mut self.runtime else {
             return Ok(());
         };
-        let (Some(surface), Some(draw)) = (&self.surface, &mut self.draw) else {
+        let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
+        else {
             return Ok(());
         };
         let remesh_start = Instant::now();
         let section_update = runtime.sync_render_sections(camera_view.eye)?;
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let upload_start = Instant::now();
-        let upload_report = draw
+        let upload_report = render_resources
+            .draw_mut()
             .apply_section_updates(
                 &surface.device,
                 &section_update.rebuilt_sections,
@@ -1222,8 +1264,8 @@ impl ChunkApp {
             )
             .context("failed to upload streamed chunk section updates")?;
         let upload_ms = elapsed_ms(upload_start.elapsed());
-        let section_count = draw.section_count();
-        let index_count = draw.index_count();
+        let section_count = render_resources.section_count();
+        let index_count = render_resources.index_count();
         let face_count = quad_face_count_from_indices(index_count);
         let loaded_chunk_count = runtime.client().loaded_chunk_count();
         self.render_stats.section_count = section_count;
@@ -1262,7 +1304,8 @@ impl ChunkApp {
         let Some(runtime) = &mut self.runtime else {
             return Ok(());
         };
-        let (Some(surface), Some(draw)) = (&self.surface, &mut self.draw) else {
+        let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
+        else {
             return Ok(());
         };
         let remesh_start = Instant::now();
@@ -1279,15 +1322,16 @@ impl ChunkApp {
         }
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let upload_start = Instant::now();
-        let upload_report = draw
+        let upload_report = render_resources
+            .draw_mut()
             .update_sections(&surface.device, &sections)
             .context("failed to upload world chunk section resources")?;
-        draw.set_traversal_ready_sections(
+        render_resources.draw_mut().set_traversal_ready_sections(
             &runtime.traversal_ready_render_section_keys(camera_view.eye),
         );
         let upload_ms = elapsed_ms(upload_start.elapsed());
-        let section_count = draw.section_count();
-        let index_count = draw.index_count();
+        let section_count = render_resources.section_count();
+        let index_count = render_resources.index_count();
         let face_count = quad_face_count_from_indices(index_count);
         self.render_stats.section_count = section_count;
         self.render_stats.index_count = index_count;
@@ -1328,19 +1372,21 @@ impl ChunkApp {
                 self.scene.render_distance
             );
         }
-        let (Some(surface), Some(draw)) = (&self.surface, &mut self.draw) else {
+        let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
+        else {
             return Ok(());
         };
         let upload_start = Instant::now();
-        let upload_report = draw
+        let upload_report = render_resources
+            .draw_mut()
             .update_sections(&surface.device, &sections)
             .context("failed to upload cached startup chunk section resources")?;
-        draw.set_traversal_ready_sections(
+        render_resources.draw_mut().set_traversal_ready_sections(
             &runtime.traversal_ready_render_section_keys(camera_view.eye),
         );
         let upload_ms = elapsed_ms(upload_start.elapsed());
-        let section_count = draw.section_count();
-        let index_count = draw.index_count();
+        let section_count = render_resources.section_count();
+        let index_count = render_resources.index_count();
         let face_count = quad_face_count_from_indices(index_count);
         self.render_stats.section_count = section_count;
         self.render_stats.index_count = index_count;
@@ -1632,41 +1678,6 @@ impl ApplicationHandler for ChunkApp {
         };
         self.frame_pacing.update_monitor(&window);
         self.frame_pacing.apply_to_surface(&mut surface);
-        let depth =
-            ChunkDepthTarget::new(&surface.device, surface.config.width, surface.config.height);
-        let draw = match TexturedSectionDrawResources::new(
-            &surface.device,
-            &surface.queue,
-            surface.config.format,
-            &[],
-            self.assets.mesh_assets.atlas.as_upload(),
-        ) {
-            Ok(draw) => draw,
-            Err(err) => {
-                log::error!("failed to initialize chunk draw resources: {err:#}");
-                event_loop.exit();
-                return;
-            }
-        };
-        let sky = SkyRenderer::new_with_color_profile(
-            &surface.device,
-            surface.config.format,
-            self.render_options.color_profile,
-        );
-        let actors = match ActorDrawResources::new(
-            &surface.device,
-            &surface.queue,
-            surface.config.format,
-            self.assets.actor_textures.atlas.as_upload(),
-        ) {
-            Ok(actors) => actors,
-            Err(err) => {
-                log::error!("failed to initialize actor draw resources: {err:#}");
-                event_loop.exit();
-                return;
-            }
-        };
-        let gui = GuiRenderer::new(&surface.device, surface.config.format);
         let asset_source = match load_asset_source() {
             Ok(source) => source,
             Err(err) => {
@@ -1675,19 +1686,17 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
-        let screen_effects = match ScreenEffectsRenderer::new(
-            &surface.device,
-            &surface.queue,
-            surface.config.format,
-            &asset_source,
-        ) {
-            Ok(screen_effects) => screen_effects,
-            Err(err) => {
-                log::error!("failed to initialize screen effects renderer: {err:#}");
-                event_loop.exit();
-                return;
-            }
-        };
+        self.ui.set_scale(GuiScale::from_pixels(
+            surface.config.width,
+            surface.config.height,
+        ));
+        self.surface = Some(surface);
+        if let Err(err) = self.rebuild_render_resources(&asset_source) {
+            log::error!("failed to initialize desktop render resources: {err:#}");
+            self.surface = None;
+            event_loop.exit();
+            return;
+        }
         let audio = match AudioEngine::new(&asset_source, AudioSettings::default()) {
             Ok(audio) => Some(audio),
             Err(err) => {
@@ -1695,18 +1704,7 @@ impl ApplicationHandler for ChunkApp {
                 None
             }
         };
-        self.ui.set_scale(GuiScale::from_pixels(
-            surface.config.width,
-            surface.config.height,
-        ));
-        self.depth = Some(depth);
-        self.sky = Some(sky);
-        self.draw = Some(draw);
-        self.actors = Some(actors);
-        self.screen_effects = Some(screen_effects);
-        self.gui = Some(gui);
         self.audio = audio;
-        self.surface = Some(surface);
         self.window = Some(window);
         self.last_frame = Instant::now();
         self.frame_timing = FrameTimingStats::default();
@@ -1735,8 +1733,13 @@ impl ApplicationHandler for ChunkApp {
                 if let Some(surface) = &mut self.surface {
                     surface.resize(size);
                 }
-                if let (Some(surface), Some(depth)) = (&self.surface, &mut self.depth) {
-                    depth.resize(&surface.device, surface.config.width, surface.config.height);
+                if let (Some(surface), Some(render_resources)) =
+                    (&self.surface, &mut self.render_resources)
+                {
+                    render_resources.resize_frame_targets(
+                        &surface.device,
+                        [surface.config.width, surface.config.height],
+                    );
                     self.ui.set_scale(GuiScale::from_pixels(
                         surface.config.width,
                         surface.config.height,
@@ -1995,39 +1998,27 @@ impl ApplicationHandler for ChunkApp {
                 let mut render_stats = self.render_stats;
                 let render_start = Instant::now();
                 let result = {
-                    let (
-                        Some(surface),
-                        Some(depth),
-                        Some(sky),
-                        Some(draw),
-                        Some(actors),
-                        Some(screen_effects),
-                        Some(gui),
-                    ) = (
-                        &mut self.surface,
-                        &self.depth,
-                        &self.sky,
-                        &mut self.draw,
-                        &mut self.actors,
-                        &mut self.screen_effects,
-                        &mut self.gui,
-                    )
+                    let (Some(surface), Some(render_resources)) =
+                        (&mut self.surface, &mut self.render_resources)
                     else {
                         return;
                     };
-                    draw.set_traversal_ready_sections(&traversal_ready_sections);
+                    let parts = render_resources.parts_mut();
+                    parts
+                        .draw
+                        .set_traversal_ready_sections(&traversal_ready_sections);
                     self.frame_pacing.apply_to_surface(surface);
                     surface.render_with_report(|frame| {
                         let render_view =
                             camera.render_view(frame.target.size[0], frame.target.size[1]);
                         render_full_frame_for_view(
                             frame,
-                            depth,
-                            sky,
-                            draw,
-                            Some(actors),
-                            Some(screen_effects),
-                            Some(gui),
+                            parts.depth,
+                            parts.sky,
+                            parts.draw,
+                            Some(parts.actors),
+                            Some(parts.screen_effects),
+                            Some(parts.gui),
                             render_view,
                             &actor_instances,
                             underwater_overlay,

@@ -1,10 +1,14 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
+use mclone_assets::AssetSource;
 use mclone_render::chunk::{
-    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView,
-    PreparedTexturedSectionRecords, TexturedSectionDrawResources, TexturedSectionRenderOptions,
-    TexturedSectionUploadReport,
+    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
+    DEPTH_FORMAT, PreparedTexturedSectionRecords, TexturedSectionDrawResources,
+    TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
-use mclone_render::entity::{ActorDrawResources, ActorInstance, ActorRenderStats};
+use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
+use mclone_render::entity::{
+    ActorDrawResources, ActorInstance, ActorRenderStats, ActorTextureAtlas,
+};
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
@@ -84,6 +88,122 @@ impl FullFrameGui {
             active,
             covers_world,
             scale,
+        }
+    }
+}
+
+pub struct FlatRenderResources {
+    render_config: RenderConfig,
+    depth: ChunkDepthTarget,
+    sky: SkyRenderer,
+    draw: TexturedSectionDrawResources,
+    actors: ActorDrawResources,
+    screen_effects: ScreenEffectsRenderer,
+    gui: GuiRenderer,
+}
+
+pub struct FlatRenderResourcePartsMut<'a> {
+    pub depth: &'a ChunkDepthTarget,
+    pub sky: &'a SkyRenderer,
+    pub draw: &'a mut TexturedSectionDrawResources,
+    pub actors: &'a mut ActorDrawResources,
+    pub screen_effects: &'a mut ScreenEffectsRenderer,
+    pub gui: &'a mut GuiRenderer,
+}
+
+impl FlatRenderResources {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target_size: [u32; 2],
+        render_config: RenderConfig,
+        chunk_atlas: ChunkTextureAtlas<'_>,
+        actor_atlas: ActorTextureAtlas<'_>,
+        asset_source: &impl AssetSource,
+    ) -> Result<Self> {
+        let render_config = Self::validate_supported_config(render_config)?;
+        let depth = ChunkDepthTarget::new(device, target_size[0], target_size[1]);
+        let draw = TexturedSectionDrawResources::new(
+            device,
+            queue,
+            render_config.color_format,
+            &[],
+            chunk_atlas,
+        )
+        .context("failed to initialize chunk draw resources")?;
+        let sky = SkyRenderer::new_with_config(device, render_config);
+        let actors =
+            ActorDrawResources::new(device, queue, render_config.color_format, actor_atlas)
+                .context("failed to initialize actor draw resources")?;
+        let screen_effects =
+            ScreenEffectsRenderer::new(device, queue, render_config.color_format, asset_source)
+                .context("failed to initialize screen effects renderer")?;
+        let gui = GuiRenderer::new(device, render_config.color_format);
+        Ok(Self {
+            render_config,
+            depth,
+            sky,
+            draw,
+            actors,
+            screen_effects,
+            gui,
+        })
+    }
+
+    pub fn validate_supported_config(render_config: RenderConfig) -> Result<RenderConfig> {
+        let render_config = render_config.validate()?;
+        ensure!(
+            render_config.depth_format == DEPTH_FORMAT,
+            "flat render resources require depth format {:?}, got {:?}",
+            DEPTH_FORMAT,
+            render_config.depth_format
+        );
+        ensure!(
+            render_config.sample_count == 1,
+            "flat render resources require sample_count=1, got {}",
+            render_config.sample_count
+        );
+        ensure!(
+            (render_config.render_scale - DEFAULT_RENDER_SCALE).abs() <= f32::EPSILON,
+            "flat render resources require render_scale={:.3}, got {:.3}",
+            DEFAULT_RENDER_SCALE,
+            render_config.render_scale
+        );
+        ensure!(
+            !render_config.hdr,
+            "flat render resources do not support HDR targets yet"
+        );
+        Ok(render_config)
+    }
+
+    pub const fn render_config(&self) -> RenderConfig {
+        self.render_config
+    }
+
+    pub fn resize_frame_targets(&mut self, device: &wgpu::Device, size: [u32; 2]) {
+        self.depth.resize(device, size[0], size[1]);
+    }
+
+    pub fn draw_mut(&mut self) -> &mut TexturedSectionDrawResources {
+        &mut self.draw
+    }
+
+    pub fn section_count(&self) -> usize {
+        self.draw.section_count()
+    }
+
+    pub fn index_count(&self) -> u32 {
+        self.draw.index_count()
+    }
+
+    pub fn parts_mut(&mut self) -> FlatRenderResourcePartsMut<'_> {
+        FlatRenderResourcePartsMut {
+            depth: &self.depth,
+            sky: &self.sky,
+            draw: &mut self.draw,
+            actors: &mut self.actors,
+            screen_effects: &mut self.screen_effects,
+            gui: &mut self.gui,
         }
     }
 }
@@ -546,4 +666,44 @@ fn clear_frame_color(
         depth_stencil_attachment: None,
         ..Default::default()
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flat_render_resources_accept_default_supported_config() {
+        assert!(FlatRenderResources::validate_supported_config(RenderConfig::default()).is_ok());
+    }
+
+    #[test]
+    fn flat_render_resources_reject_unsupported_rebuild_config() {
+        let sample_error = FlatRenderResources::validate_supported_config(
+            RenderConfig::default().with_sample_count(4),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(sample_error.contains("sample_count=1"));
+
+        let depth_error = FlatRenderResources::validate_supported_config(
+            RenderConfig::default().with_depth_format(wgpu::TextureFormat::Depth32Float),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(depth_error.contains("depth format"));
+
+        let scale_error = FlatRenderResources::validate_supported_config(
+            RenderConfig::default().with_render_scale(0.75),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(scale_error.contains("render_scale"));
+
+        let hdr_error =
+            FlatRenderResources::validate_supported_config(RenderConfig::default().with_hdr(true))
+                .unwrap_err()
+                .to_string();
+        assert!(hdr_error.contains("HDR"));
+    }
 }
