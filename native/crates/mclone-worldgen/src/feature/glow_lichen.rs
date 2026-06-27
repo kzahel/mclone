@@ -141,7 +141,8 @@ pub(super) fn spread_glow_lichen_from_face_toward_direction<W: FeatureWorld>(
     if toward.axis() == source_face.axis() {
         return false;
     }
-    if world.glow_lichen_faces_world(pos) & source_face.bit() == 0 {
+    let current_faces = world.glow_lichen_faces_world(pos);
+    if current_faces & source_face.bit() == 0 || current_faces & toward.bit() != 0 {
         return false;
     }
 

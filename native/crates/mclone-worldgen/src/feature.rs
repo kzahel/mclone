@@ -443,6 +443,25 @@ mod tests {
     }
 
     #[test]
+    fn glow_lichen_spread_stops_when_toward_face_already_exists() {
+        let mut chunk = MutableChunkBlockBuffer::new(0, 0, 0, 16);
+        chunk.set_glow_lichen_faces_at_y(8, 8, 8, Direction::North.bit() | Direction::East.bit());
+        chunk.set_block_at_y(9, 8, 7, STONE);
+
+        assert!(!glow_lichen::spread_glow_lichen_from_face_toward_direction(
+            &mut chunk,
+            BlockPos::new(8, 8, 8),
+            Direction::North,
+            Direction::East,
+        ));
+        assert_eq!(chunk.get_block_at_y(9, 8, 8), AIR);
+        assert_eq!(
+            chunk.glow_lichen_faces_at_y(8, 8, 8),
+            Direction::North.bit() | Direction::East.bit(),
+        );
+    }
+
+    #[test]
     fn lake_feature_uses_cave_air_for_upper_cavity() {
         let mut chunk = solid_stone_chunk();
         let mut random = WorldgenRandom::new(12_345);
