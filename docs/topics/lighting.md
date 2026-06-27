@@ -128,6 +128,11 @@ Known gaps:
   it still uses reduced generated-block metadata beyond the current leaf
   opacity special case rather than full vanilla `BlockState.getLightBlock(...)`
   tables.
+- Scheduler `LIGHT` strict block-light parity for seed `12345`, chunk `(0,0)`
+  is guarded at one known edge nibble delta: section `1`, byte `1784`,
+  expected `0x10`, native `0x00`. Current evidence points to missing/inexact
+  neighbor decoration parity, likely glow-lichen source placement around the
+  southern edge, rather than block-light solver math or render gamma.
 - Light sections are attached to chunk snapshots, but native does not yet model
   Java's padded light-section lifecycle as solver-owned storage.
 - Provisional opacity is coarse (`material_blocks_motion`) and does not use
