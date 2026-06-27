@@ -62,6 +62,18 @@ impl SkyLightSectionStorage {
         change
     }
 
+    pub fn activate_data_section(&mut self, section: SectionPosKey) -> crate::SectionLevelChange {
+        let change = self.inner.apply_graph_level(section, crate::LIGHT_AND_DATA);
+        if change.added || change.unmarked_for_removal {
+            self.on_node_added(section);
+        }
+        change
+    }
+
+    pub fn section_level(&self, section: SectionPosKey) -> u8 {
+        self.inner.section_level(section)
+    }
+
     pub fn get_data_layer_data(&self, section: SectionPosKey) -> Option<&DataLayer> {
         self.inner.get_data_layer_data(section)
     }
@@ -80,6 +92,10 @@ impl SkyLightSectionStorage {
 
     pub fn set_stored_level(&mut self, block: BlockPosKey, level: u8) {
         self.inner.set_stored_level(block, level);
+    }
+
+    pub fn fill_stored_section(&mut self, section: SectionPosKey, level: u8) {
+        self.inner.fill_stored_section(section, level);
     }
 
     pub fn swap_section_map(&mut self) -> Vec<SectionPosKey> {
@@ -167,6 +183,11 @@ impl SkyLightSectionStorage {
     pub fn light_on_in_section(&self, section: SectionPosKey) -> bool {
         self.columns_with_sky_sources
             .contains(&section_get_zero_node(section))
+    }
+
+    pub fn section_has_source(&self, section: SectionPosKey) -> bool {
+        self.sections_with_sources.contains(&section)
+            || self.sections_to_add_sources_to.contains(&section)
     }
 
     pub fn top_section(&self, column: SectionPosKey) -> i32 {

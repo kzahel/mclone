@@ -117,6 +117,18 @@ impl LayerLightSectionStorage {
         self.mark_block_neighbor_sections_affected(block);
     }
 
+    pub fn fill_stored_section(&mut self, section: SectionPosKey, level: u8) {
+        if self.changed_sections.insert(section) {
+            self.updating_section_data.copy_data_layer(section);
+        }
+        let data_layer = self
+            .updating_section_data
+            .get_layer_mut(section)
+            .unwrap_or_else(|| panic!("section {section} is unlit"));
+        data_layer.fill(level);
+        self.mark_section_and_neighbor_sections_affected(section);
+    }
+
     pub fn section_level(&self, section: SectionPosKey) -> u8 {
         if section == SectionPosKey::MAX {
             EMPTY

@@ -350,7 +350,7 @@ mod tests {
         let height = SECTION_HEIGHT;
         let mut blocks = vec![AIR; (CHUNK_WIDTH * height * CHUNK_WIDTH) as usize];
         blocks[chunk_block_index(1, 1, 1)] = LAVA;
-        blocks[chunk_block_index(3, 15, 3)] = STONE;
+        blocks[chunk_block_index(3, 14, 3)] = STONE;
 
         let sections = graph_level_light_sections_for_chunk(
             ChunkPos::new(0, 0),
@@ -372,7 +372,7 @@ mod tests {
             14
         );
         assert_eq!(
-            sample_layer(&sections, mclone_light::LightLayer::Sky, 3, 15, 3),
+            sample_layer(&sections, mclone_light::LightLayer::Sky, 3, 14, 3),
             0
         );
     }

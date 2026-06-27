@@ -402,6 +402,22 @@ mod tests {
             "../../../../test/fixtures/integration/overworld-seed-12345-chunks-5-115.json"
         ))
         .expect("valid full integration fixture");
+        assert_generated_chunk_light_matches_persisted_fixture(fixture, true);
+    }
+
+    #[test]
+    fn generated_origin_chunk_sky_light_matches_persisted_java_oracle_fixture() {
+        let fixture = serde_json::from_str::<Value>(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks-0-0.json"
+        ))
+        .expect("valid full integration fixture");
+        assert_generated_chunk_light_matches_persisted_fixture(fixture, false);
+    }
+
+    fn assert_generated_chunk_light_matches_persisted_fixture(
+        fixture: Value,
+        compare_block_light: bool,
+    ) {
         assert_eq!(fixture["module"], "integration");
         assert_eq!(fixture["minecraftVersion"], "1.17.1");
 
@@ -441,11 +457,13 @@ mod tests {
             fixture_light_layer(chunk, "sky"),
             packed_light_layer(&snapshot.light_sections, LightLayer::Sky),
         );
-        assert_persisted_light_layer_matches_fixture(
-            "block",
-            fixture_light_layer(chunk, "block"),
-            packed_light_layer(&snapshot.light_sections, LightLayer::Block),
-        );
+        if compare_block_light {
+            assert_persisted_light_layer_matches_fixture(
+                "block",
+                fixture_light_layer(chunk, "block"),
+                packed_light_layer(&snapshot.light_sections, LightLayer::Block),
+            );
+        }
     }
 
     #[test]

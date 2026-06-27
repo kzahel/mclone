@@ -1,6 +1,6 @@
 # Native Lighting Leakage Hardening
 
-Status: active; slices 1-2 first pass landed.
+Status: active; slices 1-3 first pass landed.
 
 ## Context
 
@@ -44,6 +44,13 @@ Rendering and client hydration must treat the second case as real data. It is di
    - Publish light deltas separately from section block deltas.
    - Dirty render sections affected by changed light, not only changed block states.
 
+4. Match Java sky source-section propagation.
+   - Keep non-empty sky sections as `LIGHT_AND_DATA` instead of `LIGHT_ONLY` so block opacity participates in source updates.
+   - Preserve `LIGHT_ONLY` source behavior for empty sections: fill fullbright, then check horizontal and bottom edges.
+   - Mirror Java sky neighbor skip-through across missing vertical sections.
+   - Recheck changed retained blocks and make target chunk blocks override stale neighbor dependency snapshots.
+   - Approximate Java face occlusion for full-opaque sky source blocks so source-row solid blocks do not leak light through their opaque face.
+
 ## First Slice Acceptance
 
 - Packed snapshots preserve explicit zero sky/block layers when the light engine has a visible `DataLayer`.
@@ -54,5 +61,6 @@ Rendering and client hydration must treat the second case as real data. It is di
 ## Current Gaps
 
 - The persisted-light gate is not yet a full packet-mask parity fixture. Vanilla Anvil omits explicit all-zero layers and may persist full-sky layers that native currently represents through sky fallback.
-- Seed `12345`, chunk `(0,0)` still has a nontrivial sky byte mismatch in section `5` after liquid opacity is corrected. That points at the remaining Java sky source/neighbor skip-through behavior around terrain/tree boundaries, not at the packed empty-section leak fixed in slice 1.
+- Seed `12345`, chunk `(0,0)` now matches the persisted Java oracle for sky light. The ocean fixture at chunk `(5,115)` remains strict for sky and block light.
+- Seed `12345`, chunk `(0,0)` still has a small block-light byte mismatch if block comparison is enabled for that fixture. Keep the origin fixture sky-only until the block-light follow-up lands.
 - Live block edits still publish block-state deltas without light deltas.

@@ -8,7 +8,7 @@ use mclone_light::{
     BlockPosKey, SkyLightEngine, SkyLightWorld, block_pos_as_long, block_pos_get_x,
     block_pos_get_y, block_pos_get_z, section_as_long,
 };
-use mclone_worldgen::block::{RawBlockId, block_light_opacity};
+use mclone_worldgen::block::{RawBlockId, block_light_opacity, is_air_like};
 
 pub(crate) fn graph_sky_light_sections_for_chunk<'a>(
     target_pos: ChunkPos,
@@ -17,12 +17,16 @@ pub(crate) fn graph_sky_light_sections_for_chunk<'a>(
     chunks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
 ) -> Vec<PackedLightSection> {
     let world = RawChunkSkyLightWorld::new(target_pos, min_y, height, chunks);
-    let active_sections = world.active_sections();
+    let section_statuses = world.section_statuses();
     let source_blocks = world.source_blocks();
     let mut engine = SkyLightEngine::new(world);
 
-    for section in active_sections {
-        engine.activate_section(section);
+    for (section, is_empty) in section_statuses {
+        if is_empty {
+            engine.activate_section(section);
+        } else {
+            engine.update_section_status(section, false);
+        }
         engine.enable_light_sources(section, true);
     }
     for source in source_blocks {
@@ -101,14 +105,17 @@ impl<'a> RawChunkSkyLightWorld<'a> {
         }
     }
 
-    fn active_sections(&self) -> Vec<i64> {
+    fn section_statuses(&self) -> Vec<(i64, bool)> {
         let min_section_y = block_to_section_coord(self.min_y);
         let section_count = self.height / SECTION_HEIGHT;
         self.chunks
-            .keys()
-            .flat_map(|chunk_pos| {
+            .iter()
+            .flat_map(|(chunk_pos, blocks)| {
                 (0..section_count).map(move |section_offset| {
-                    section_as_long(chunk_pos.x, min_section_y + section_offset, chunk_pos.z)
+                    (
+                        section_as_long(chunk_pos.x, min_section_y + section_offset, chunk_pos.z),
+                        section_is_empty(blocks, section_offset),
+                    )
                 })
             })
             .collect()
@@ -147,6 +154,17 @@ impl<'a> RawChunkSkyLightWorld<'a> {
     }
 }
 
+fn section_is_empty(blocks: &[RawBlockId], section_offset: i32) -> bool {
+    let base_y = section_offset * SECTION_HEIGHT;
+    (0..SECTION_HEIGHT).all(|dy| {
+        (0..CHUNK_WIDTH).all(|local_z| {
+            (0..CHUNK_WIDTH).all(|local_x| {
+                is_air_like(blocks[chunk_block_index(local_x, base_y + dy, local_z)])
+            })
+        })
+    })
+}
+
 impl SkyLightWorld for RawChunkSkyLightWorld<'_> {
     fn light_opacity(&self, pos: BlockPosKey) -> Option<u8> {
         self.block_at(pos).map(block_light_opacity)
@@ -181,7 +199,7 @@ mod tests {
         let min_y = 0;
         let height = SECTION_HEIGHT;
         let mut blocks = vec![AIR; (CHUNK_WIDTH * height * CHUNK_WIDTH) as usize];
-        blocks[chunk_block_index(1, 15, 1)] = STONE;
+        blocks[chunk_block_index(1, 14, 1)] = STONE;
 
         let sections = graph_sky_light_sections_for_chunk(
             ChunkPos::new(0, 0),
@@ -190,18 +208,18 @@ mod tests {
             [(ChunkPos::new(0, 0), blocks.as_slice())],
         );
 
-        assert_eq!(sample_sky_light(&sections, 1, 15, 1), 0);
+        assert_eq!(sample_sky_light(&sections, 1, 14, 1), 0);
         assert_eq!(sample_sky_light(&sections, 1, 1, 1), 14);
     }
 
     #[test]
     fn graph_sky_light_can_enter_from_neighbor_chunk() {
         let min_y = 0;
-        let height = SECTION_HEIGHT;
+        let height = SECTION_HEIGHT * 2;
         let mut target = vec![AIR; (CHUNK_WIDTH * height * CHUNK_WIDTH) as usize];
         for z in 0..CHUNK_WIDTH {
             for x in 0..CHUNK_WIDTH {
-                target[chunk_block_index(x, 15, z)] = STONE;
+                target[chunk_block_index(x, 14, z)] = STONE;
             }
         }
         let neighbor = vec![AIR; (CHUNK_WIDTH * height * CHUNK_WIDTH) as usize];
@@ -216,7 +234,7 @@ mod tests {
             ],
         );
 
-        assert_eq!(sample_sky_light(&sections, 15, 14, 1), 14);
+        assert_eq!(sample_sky_light(&sections, 15, 13, 1), 14);
     }
 
     fn sample_sky_light(sections: &[PackedLightSection], x: i32, y: i32, z: i32) -> u8 {

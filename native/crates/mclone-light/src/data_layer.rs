@@ -61,6 +61,11 @@ impl DataLayer {
         self.set_index(data_layer_index(x, y, z), value);
     }
 
+    pub fn fill(&mut self, value: u8) {
+        assert!(value <= 15, "DataLayer value {value} out of bounds");
+        self.data = Some(Box::new([value | (value << 4); DATA_LAYER_SIZE]));
+    }
+
     pub fn get_index(&self, index: usize) -> u8 {
         assert!(
             index < DATA_LAYER_VALUE_COUNT,
