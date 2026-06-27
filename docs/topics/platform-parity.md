@@ -22,8 +22,8 @@ boundary; this doc owns the per-feature and per-contract grids and the rule that
 keeps new features from re-forking.
 
 > Status note: the current-state cells below were derived from a code audit on
-> 2026-06-26 and refreshed on 2026-06-27 after tactical 095 Slice 4c's native
-> session-wrapper adoption.
+> 2026-06-26 and refreshed on 2026-06-27 after tactical 095 Slice 4d's flat
+> Android dynamic session replacement.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -134,7 +134,7 @@ use (and should) · — n/a.
 | `app-runtime::frame_render` | ✅ | ⚑ (inline reimpl) | ✅ | ✅ (via xr-scene) | `native:desktop-chunk:smoke`; `native:web:smoke` |
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
-| `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR initial session via xr-scene) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ◐ (initial local/remote session descriptor; dynamic menu replacement pending) | ◐ (initial local/remote session descriptor via xr-scene; dynamic menu replacement pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-xr-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; Android APK gates |
+| `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR initial session via xr-scene) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (initial local/remote plus app-owned New World / Join Remote replacement) | ◐ (initial local/remote session descriptor via xr-scene; dynamic menu replacement pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-xr-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; Android APK gates |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ◐ (shared touch menu+controls, device pending) | ◐ (XR world panel + pointer, unvalidated) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene` |
 | `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
@@ -166,13 +166,15 @@ Concretely:
   join a dedicated WebSocket server through `?remoteWsUrl=...`, covered by
   `native:web:remote-smoke` (see blockers #1 and #2).
 - flat Android has a TCP remote-dedicated path through
-  `debug.mclone.remote_addr` and now constructs local/remote startup through
-  `NativeSingleViewSessionRuntime<S>`. Android XR now uses launch-scoped
-  `mclone.startup.argv --remote-addr HOST:PORT`, can have the validator start a
-  local dedicated server, and also reports the initial local/remote session
-  descriptor through the shared XR scene wrapper. Android XR reached
-  `MCLONE_ANDROID_XR_READY` against a dedicated server over direct LAN and
-  through `--adb-reverse`.
+  `debug.mclone.remote_addr`, constructs local/remote startup through
+  `NativeSingleViewSessionRuntime<S>`, and now replaces the current native scene
+  from shared New World / Join Remote menu actions while retaining Android
+  activity, touch, surface, and TCP ownership in the app crate. Android XR now
+  uses launch-scoped `mclone.startup.argv --remote-addr HOST:PORT`, can have the
+  validator start a local dedicated server, and also reports the initial
+  local/remote session descriptor through the shared XR scene wrapper. Android
+  XR reached `MCLONE_ANDROID_XR_READY` against a dedicated server over direct
+  LAN and through `--adb-reverse`.
 
 ## Whole Systems That Do Not Exist Yet
 
@@ -206,10 +208,10 @@ these first:
 
 1. **Finish dynamic session replacement on the native scene lanes.** Every lane
    now has a shared session descriptor for initial local/remote startup, and
-   desktop flat plus web can replace sessions from menu actions. Flat Android,
-   desktop XR, and Android XR still need app-owned teardown/rebuild paths for
-   New World and Join Remote on top of `NativeSingleViewSessionRuntime<S>`,
-   without moving Android activity or OpenXR ownership into the common library.
+   desktop flat, web, and flat Android can replace sessions from menu actions.
+   Desktop XR and Android XR still need app-owned scene replacement for New
+   World and Join Remote on top of `NativeSingleViewSessionRuntime<S>`, without
+   moving OpenXR session/swapchain/action ownership into the common library.
    (tactical 095)
 2. **Finish the host-mode async/sync cleanup.** Native desktop, flat Android,
    and XR app shells use blocking TCP/session adapters, while browser

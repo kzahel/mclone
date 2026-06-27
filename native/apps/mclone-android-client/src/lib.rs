@@ -18,7 +18,9 @@ mod android {
         LocalSingleViewSceneOptions, NativeSingleViewSessionRuntime,
     };
     use mclone_app_runtime::render_assets::load_asset_source;
-    use mclone_app_runtime::session::{ActiveSessionDescriptor, RemoteSessionEndpoint};
+    use mclone_app_runtime::session::{
+        ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
+    };
     use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
     use mclone_core::{ChunkPos, Vec3d};
     use mclone_mesh::quad_face_count_from_indices;
@@ -37,8 +39,9 @@ mod android {
         EngineCameraMovementImpulse, EngineCameraMovementMode, EngineRenderCamera,
     };
     use mclone_ui::{
-        GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiScale, Point,
-        TouchJoystickOverlay, TouchOverlay, render_touch_overlay, touch_action_button_rects,
+        DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState,
+        GuiDrawList, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
+        render_status_overlay, render_touch_overlay, touch_action_button_rects,
         touch_menu_button_rect, touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
@@ -157,10 +160,12 @@ mod android {
         sky: SkyRenderer,
         draw: TexturedSectionDrawResources,
         gui: GuiRenderer,
+        scene_options: AndroidSceneOptions,
         scene: AndroidSingleViewSceneRuntime,
         camera: EngineCameraController,
         render_options: TexturedSectionRenderOptions,
         ui: GameUi,
+        session_status: StatusOverlay,
         touch_menu_touch_id: Option<u64>,
         touch_menu_pressed: bool,
         touch_controls: AndroidTouchControls,
@@ -169,6 +174,14 @@ mod android {
         frame_index: u64,
         last_movement_update: Option<Instant>,
         audio: Option<AudioEngine>,
+        seed_reroll_state: u64,
+    }
+
+    struct StartedAndroidRenderScene {
+        scene: AndroidSingleViewSceneRuntime,
+        camera: EngineCameraController,
+        draw: TexturedSectionDrawResources,
+        render_stats: RenderStreamStats,
     }
 
     enum AndroidRenderError {
@@ -368,8 +381,14 @@ mod android {
         }
 
         fn handle_ui_touch(&mut self, touch: &Touch) -> Result<AndroidUiTouchResult> {
-            self.renderer
-                .handle_touch(touch, self.config.width, self.config.height)
+            self.renderer.handle_touch(
+                touch,
+                self.config.width,
+                self.config.height,
+                &self.device,
+                &self.queue,
+                self.config.format,
+            )
         }
 
         fn wants_continuous_redraw(&self) -> bool {
@@ -413,76 +432,9 @@ mod android {
             height: u32,
         ) -> Result<Self> {
             let scene_options = android_scene_options();
-            let mut scene = android_single_view_scene_runtime(scene_options)?;
-            let host_label = scene.host_label();
-            let session_label = active_session_label(scene.active_session());
-            let mut camera = EngineCameraController::spawn_for_chunk(scene.interest_center());
-            let (poll_count, poll_ms) = scene.poll_until_idle()?;
-            log::info!(
-                "Mclone Android {host_label} runtime idle: session={} polls={} poll_ms={:.1} loaded_chunks={}",
-                session_label,
-                poll_count,
-                poll_ms,
-                scene.loaded_chunk_count()
-            );
-            if commit_engine_camera_player_pose(&mut scene, &mut camera)? {
-                let (pose_poll_count, pose_poll_ms) = scene.poll_until_idle()?;
-                log::info!(
-                    "Mclone Android {host_label} player pose synced: polls={} poll_ms={:.1}",
-                    pose_poll_count,
-                    pose_poll_ms
-                );
-                apply_pending_engine_camera_position_updates(&mut scene, &mut camera)?;
-            }
-            let camera_position = camera_position(&camera);
-            let section_update = scene.sync_all_render_sections(camera_position)?;
-            let sections = scene.cached_sections();
-            if sections.is_empty() {
-                bail!(
-                    "Android {host_label} runtime produced no render sections: loaded_chunks={} rebuilt_sections={} submitted_compile_sections={} completed_compile_sections={} pending_compile_jobs={}",
-                    scene.loaded_chunk_count(),
-                    section_update.rebuilt_section_count(),
-                    section_update.submitted_compile_section_count,
-                    section_update.completed_compile_section_count,
-                    section_update.pending_compile_jobs
-                );
-            }
-
+            let started = start_android_render_scene(device, queue, format, scene_options.clone())?;
             let depth = ChunkDepthTarget::new(device, width, height);
             let sky = SkyRenderer::new(device, format);
-            let upload_report = TexturedSectionUploadReport {
-                uploaded_section_count: section_update.rebuilt_section_count(),
-                removed_section_count: section_update.removed_section_count(),
-                uploaded_vertex_count: section_update.rebuilt_vertex_count,
-                uploaded_index_count: section_update.rebuilt_index_count,
-            };
-            let mut draw = TexturedSectionDrawResources::new(
-                device,
-                queue,
-                format,
-                &sections,
-                scene.mesh_assets().atlas.as_upload(),
-            )?;
-            draw.set_traversal_ready_sections(
-                &scene.traversal_ready_render_section_keys(camera_position),
-            );
-
-            let index_count = draw.index_count();
-            let mut render_stats = RenderStreamStats {
-                section_count: draw.section_count(),
-                face_count: quad_face_count_from_indices(index_count),
-                index_count,
-                ..RenderStreamStats::default()
-            };
-            record_render_section_update_stats(&mut render_stats, &section_update, upload_report);
-            log::info!(
-                "Mclone Android uploaded {host_label} render sections: sections={} faces={} indices={} rebuilt_sections={} visibility_graph_count={}",
-                render_stats.section_count,
-                render_stats.face_count,
-                render_stats.index_count,
-                section_update.rebuilt_section_count(),
-                section_update.visibility_graph_stats.build_count
-            );
             let audio = match load_asset_source()
                 .context("load Android sound assets")
                 .and_then(|source| AudioEngine::new(&source, AudioSettings::default()))
@@ -497,20 +449,23 @@ mod android {
             Ok(Self {
                 depth,
                 sky,
-                draw,
+                draw: started.draw,
                 gui: GuiRenderer::new(device, format),
-                scene,
-                camera,
+                scene_options: scene_options.clone(),
+                scene: started.scene,
+                camera: started.camera,
                 render_options: TexturedSectionRenderOptions::default(),
-                ui: GameUi::new_ingame(),
+                ui: android_game_ui_for_scene(&scene_options),
+                session_status: StatusOverlay::hidden(),
                 touch_menu_touch_id: None,
                 touch_menu_pressed: false,
                 touch_controls: AndroidTouchControls::default(),
                 ui_touch_id: None,
-                render_stats,
+                render_stats: started.render_stats,
                 frame_index: 0,
                 last_movement_update: None,
                 audio,
+                seed_reroll_state: initial_android_seed_reroll_state(scene_options.seed),
             })
         }
 
@@ -542,6 +497,9 @@ mod android {
             touch: &Touch,
             width: u32,
             height: u32,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            format: wgpu::TextureFormat,
         ) -> Result<AndroidUiTouchResult> {
             let gui_scale = GuiScale::from_pixels(width.max(1), height.max(1));
             self.ui.set_scale(gui_scale);
@@ -550,7 +508,7 @@ mod android {
                 self.touch_controls.clear();
                 self.touch_menu_touch_id = None;
                 self.touch_menu_pressed = false;
-                return self.handle_active_ui_touch(touch, point);
+                return self.handle_active_ui_touch(touch, point, device, queue, format);
             }
             Ok(self.handle_closed_gameplay_touch(touch, point, gui_scale))
         }
@@ -690,6 +648,9 @@ mod android {
             &mut self,
             touch: &Touch,
             point: Point,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            format: wgpu::TextureFormat,
         ) -> Result<AndroidUiTouchResult> {
             let ui_state = self.current_ui_render_state();
             match touch.phase {
@@ -707,7 +668,7 @@ mod android {
                     if self.ui_touch_id == Some(touch.id) {
                         let (_handled, action) = self.ui.pointer_move(point, ui_state);
                         if let Some(action) = action {
-                            return self.apply_ui_action(action);
+                            return self.apply_ui_action(action, device, queue, format);
                         }
                     }
                     Ok(AndroidUiTouchResult {
@@ -720,7 +681,7 @@ mod android {
                         self.ui_touch_id = None;
                         let (_handled, action) = self.ui.pointer_up(point, ui_state);
                         if let Some(action) = action {
-                            return self.apply_ui_action(action);
+                            return self.apply_ui_action(action, device, queue, format);
                         }
                     }
                     Ok(AndroidUiTouchResult {
@@ -741,7 +702,89 @@ mod android {
             }
         }
 
-        fn apply_ui_action(&mut self, action: GameUiAction) -> Result<AndroidUiTouchResult> {
+        fn next_new_world_seed(&mut self) -> i64 {
+            self.seed_reroll_state = self
+                .seed_reroll_state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            self.seed_reroll_state as i64
+        }
+
+        fn local_world_options(&self, seed: i64) -> AndroidSceneOptions {
+            let mut options = self.scene_options.clone();
+            options.seed = seed;
+            options.render_distance = self.scene.render_distance();
+            options.remote_addr = None;
+            options
+        }
+
+        fn remote_session_options(&self, remote_addr: String) -> AndroidSceneOptions {
+            let mut options = self.scene_options.clone();
+            options.render_distance = self.scene.render_distance();
+            options.remote_addr = Some(remote_addr);
+            options
+        }
+
+        fn clear_touch_state(&mut self) {
+            self.touch_menu_touch_id = None;
+            self.touch_menu_pressed = false;
+            self.touch_controls.clear();
+            self.ui_touch_id = None;
+            self.last_movement_update = None;
+        }
+
+        fn start_replacement_session(
+            &mut self,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            format: wgpu::TextureFormat,
+            request: SessionStartRequest,
+            options: AndroidSceneOptions,
+        ) -> Result<()> {
+            self.session_status = StatusOverlay::new(request.starting_message(), true);
+            let descriptor = request.active_descriptor().with_context(|| {
+                format!(
+                    "Android replacement request did not describe an active session: {request:?}"
+                )
+            })?;
+            let started = match start_android_render_scene(device, queue, format, options.clone()) {
+                Ok(started) => started,
+                Err(error) => {
+                    log::error!("failed to start Android session {request:?}: {error:#}");
+                    self.session_status =
+                        StatusOverlay::new(request.default_failure_message(), false);
+                    return Err(error);
+                }
+            };
+
+            self.scene_options = options;
+            self.scene = started.scene;
+            self.camera = started.camera;
+            self.draw = started.draw;
+            self.render_stats = started.render_stats;
+            self.frame_index = 0;
+            self.clear_touch_state();
+            self.session_status = StatusOverlay::hidden();
+            match descriptor {
+                ActiveSessionDescriptor::LocalWorld { seed } => {
+                    self.ui.set_new_world_seed(seed);
+                    log::info!("Mclone Android created local world seed={seed}");
+                }
+                ActiveSessionDescriptor::Remote { endpoint } => {
+                    self.ui.set_join_remote_addr(endpoint.address.clone());
+                    log::info!("Mclone Android joined remote session {}", endpoint.address);
+                }
+            }
+            Ok(())
+        }
+
+        fn apply_ui_action(
+            &mut self,
+            action: GameUiAction,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            format: wgpu::TextureFormat,
+        ) -> Result<AndroidUiTouchResult> {
             let mut result = AndroidUiTouchResult {
                 handled: true,
                 quit: false,
@@ -786,6 +829,7 @@ mod android {
                             self.scene.chunk_tracking_radius()
                         );
                     }
+                    self.scene_options.render_distance = render_distance as u32;
                 }
                 GameUiAction::ToggleFly => {
                     let movement_mode = self.camera.toggle_movement_mode();
@@ -805,20 +849,59 @@ mod android {
                 GameUiAction::Quit => {
                     result.quit = true;
                 }
+                GameUiAction::OpenNewWorld => {
+                    let seed = self.next_new_world_seed();
+                    self.ui.set_new_world_seed(seed);
+                    self.session_status = StatusOverlay::hidden();
+                }
+                GameUiAction::OpenJoinRemote => {
+                    let remote_addr = self.scene_options.remote_addr.clone().unwrap_or_else(|| {
+                        normalized_android_remote_addr(self.ui.join_remote_addr())
+                    });
+                    self.ui.set_join_remote_addr(remote_addr);
+                    self.session_status = StatusOverlay::hidden();
+                }
+                GameUiAction::RerollSeed => {
+                    let seed = self.next_new_world_seed();
+                    self.ui.set_new_world_seed(seed);
+                    self.session_status = StatusOverlay::hidden();
+                    log::info!("Mclone Android new-world seed rerolled to {seed}");
+                }
+                GameUiAction::CreateWorld(seed) => {
+                    let request = SessionStartRequest::NewLocalWorld { seed };
+                    let options = self.local_world_options(seed);
+                    if self
+                        .start_replacement_session(device, queue, format, request, options)
+                        .is_err()
+                    {
+                        self.ui.set_new_world_seed(seed);
+                        return Ok(result);
+                    }
+                }
+                GameUiAction::JoinRemote => {
+                    let remote_addr = normalized_android_remote_addr(self.ui.join_remote_addr());
+                    self.ui.set_join_remote_addr(remote_addr.clone());
+                    let request = SessionStartRequest::JoinRemote {
+                        endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
+                    };
+                    let options = self.remote_session_options(remote_addr);
+                    if self
+                        .start_replacement_session(device, queue, format, request, options)
+                        .is_err()
+                    {
+                        return Ok(result);
+                    }
+                }
                 GameUiAction::CycleFramePacing
                 | GameUiAction::CycleFpsCap
                 | GameUiAction::SetTouchLookSensitivity(_) => {}
+                GameUiAction::BackToTitle | GameUiAction::QuitToTitle => {
+                    self.session_status = StatusOverlay::hidden();
+                }
                 GameUiAction::StartWorld
-                | GameUiAction::OpenNewWorld
-                | GameUiAction::OpenJoinRemote
-                | GameUiAction::RerollSeed
-                | GameUiAction::CreateWorld(_)
-                | GameUiAction::JoinRemote
                 | GameUiAction::Resume
                 | GameUiAction::OpenOptions(_)
-                | GameUiAction::BackToTitle
-                | GameUiAction::BackToPause
-                | GameUiAction::QuitToTitle => {}
+                | GameUiAction::BackToPause => {}
             }
             self.ui.apply_action(action);
             if !self.ui.is_active() {
@@ -848,12 +931,15 @@ mod android {
 
         fn gui_draw_list(&self, gui_scale: GuiScale, ui_state: GameUiRenderState) -> GuiDrawList {
             if self.ui.is_active() {
-                return self.ui.render_draw_list(ui_state);
+                let mut draw = self.ui.render_draw_list(ui_state);
+                render_status_overlay(gui_scale, &mut draw, &self.session_status);
+                return draw;
             }
             let mut draw = GuiDrawList::new();
             let mut overlay = self.touch_controls.overlay();
             overlay.menu_pressed = self.touch_menu_pressed;
             render_touch_overlay(gui_scale, &mut draw, &overlay);
+            render_status_overlay(gui_scale, &mut draw, &self.session_status);
             draw
         }
 
@@ -983,6 +1069,89 @@ mod android {
         }
     }
 
+    fn start_android_render_scene(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        options: AndroidSceneOptions,
+    ) -> Result<StartedAndroidRenderScene> {
+        let mut scene = android_single_view_scene_runtime(options)?;
+        let host_label = scene.host_label();
+        let session_label = active_session_label(scene.active_session());
+        let mut camera = EngineCameraController::spawn_for_chunk(scene.interest_center());
+        let (poll_count, poll_ms) = scene.poll_until_idle()?;
+        log::info!(
+            "Mclone Android {host_label} runtime idle: session={} polls={} poll_ms={:.1} loaded_chunks={}",
+            session_label,
+            poll_count,
+            poll_ms,
+            scene.loaded_chunk_count()
+        );
+        if commit_engine_camera_player_pose(&mut scene, &mut camera)? {
+            let (pose_poll_count, pose_poll_ms) = scene.poll_until_idle()?;
+            log::info!(
+                "Mclone Android {host_label} player pose synced: polls={} poll_ms={:.1}",
+                pose_poll_count,
+                pose_poll_ms
+            );
+            apply_pending_engine_camera_position_updates(&mut scene, &mut camera)?;
+        }
+        let camera_position = camera_position(&camera);
+        let section_update = scene.sync_all_render_sections(camera_position)?;
+        let sections = scene.cached_sections();
+        if sections.is_empty() {
+            bail!(
+                "Android {host_label} runtime produced no render sections: loaded_chunks={} rebuilt_sections={} submitted_compile_sections={} completed_compile_sections={} pending_compile_jobs={}",
+                scene.loaded_chunk_count(),
+                section_update.rebuilt_section_count(),
+                section_update.submitted_compile_section_count,
+                section_update.completed_compile_section_count,
+                section_update.pending_compile_jobs
+            );
+        }
+
+        let upload_report = TexturedSectionUploadReport {
+            uploaded_section_count: section_update.rebuilt_section_count(),
+            removed_section_count: section_update.removed_section_count(),
+            uploaded_vertex_count: section_update.rebuilt_vertex_count,
+            uploaded_index_count: section_update.rebuilt_index_count,
+        };
+        let mut draw = TexturedSectionDrawResources::new(
+            device,
+            queue,
+            format,
+            &sections,
+            scene.mesh_assets().atlas.as_upload(),
+        )?;
+        draw.set_traversal_ready_sections(
+            &scene.traversal_ready_render_section_keys(camera_position),
+        );
+
+        let index_count = draw.index_count();
+        let mut render_stats = RenderStreamStats {
+            section_count: draw.section_count(),
+            face_count: quad_face_count_from_indices(index_count),
+            index_count,
+            ..RenderStreamStats::default()
+        };
+        record_render_section_update_stats(&mut render_stats, &section_update, upload_report);
+        log::info!(
+            "Mclone Android uploaded {host_label} render sections: sections={} faces={} indices={} rebuilt_sections={} visibility_graph_count={}",
+            render_stats.section_count,
+            render_stats.face_count,
+            render_stats.index_count,
+            section_update.rebuilt_section_count(),
+            section_update.visibility_graph_stats.build_count
+        );
+
+        Ok(StartedAndroidRenderScene {
+            scene,
+            camera,
+            draw,
+            render_stats,
+        })
+    }
+
     #[derive(Clone, Debug)]
     struct AndroidSceneOptions {
         seed: i64,
@@ -1003,6 +1172,34 @@ mod android {
         fn host_options(&self) -> SingleViewHostOptions {
             SingleViewHostOptions::new(self.center, self.render_distance)
         }
+    }
+
+    fn android_game_ui_for_scene(options: &AndroidSceneOptions) -> GameUi {
+        let mut ui = GameUi::new_ingame();
+        ui.set_new_world_seed(options.seed);
+        ui.set_join_remote_addr(
+            options
+                .remote_addr
+                .clone()
+                .unwrap_or_else(|| DEFAULT_JOIN_REMOTE_ADDR.to_owned()),
+        );
+        ui
+    }
+
+    fn normalized_android_remote_addr(addr: &str) -> String {
+        let addr = addr.trim();
+        if addr.is_empty() {
+            DEFAULT_JOIN_REMOTE_ADDR.to_owned()
+        } else {
+            addr.to_owned()
+        }
+    }
+
+    fn initial_android_seed_reroll_state(seed: i64) -> u64 {
+        (seed as u64)
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add(0xD1B5_4A32_D192_ED03)
+            .max(1)
     }
 
     fn android_scene_options() -> AndroidSceneOptions {

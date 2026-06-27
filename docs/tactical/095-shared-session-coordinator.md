@@ -1,6 +1,6 @@
 # 095: Shared Session Coordinator
 
-Status: active; Slices 1-4c landed on 2026-06-27. `mclone-app-runtime` now owns
+Status: active; Slices 1-4d landed on 2026-06-27. `mclone-app-runtime` now owns
 the platform-neutral session request/state vocabulary and shared start-result
 boundary, including local-world start, remote-join start, active session
 descriptors, pending starts, failure state, status text, and success/failure
@@ -10,10 +10,12 @@ the same coordinator vocabulary for initial local-worker and remote WebSocket
 starts, browser diagnostics, and menu-driven async local-world restart. Web
 Join Remote async reconnect is wired through the same path, but still needs a
 dedicated connect-screen smoke once endpoint editing/input is real. Flat
-Android, desktop XR, and Android XR now consume the same coordinator for initial
-local/remote native single-view session construction. Manual remote address
-entry plus dynamic New World/Join Remote replacement on flat Android and XR
-remain follow-ups.
+Android now consumes the same request vocabulary for initial local/remote
+startup and menu-driven New World / Join Remote replacement while keeping
+Android activity, touch, `wgpu` surface, and TCP adapter ownership in the app
+crate. Desktop XR and Android XR consume the same coordinator for initial
+local/remote native single-view session construction; dynamic XR replacement
+remains the next native scene follow-up.
 
 ## Purpose
 
@@ -220,6 +222,8 @@ without blank output or overlapping UI.
   async restart/reconnect factory instead of only publishing the UI intent.
 - [x] Flat Android consumes the common coordinator for initial local and remote
   starts.
+- [x] Flat Android routes menu-driven New World and Join Remote through an
+  app-owned native scene replacement path.
 - [x] Desktop XR and Android XR consume the same request/status model for
   initial local/remote starts while keeping OpenXR scene/session ownership in XR
   adapters.
@@ -343,6 +347,42 @@ git diff --check
 Note: `pnpm native:xr:check` was not used for validation on this Windows run
 because it invoked a `bash` without the Windows Rust toolchain on `PATH`
 (`cargo` missing). The equivalent PowerShell `cargo check --features xr` passed.
+
+Recorded Slice 4d result:
+
+- Flat Android now keeps current `AndroidSceneOptions`, deterministic New World
+  reroll state, and a shared-style session status overlay in
+  `AndroidFrameRenderer`.
+- The Android scene startup path was factored into `start_android_render_scene`,
+  so initial startup and runtime replacement both create the native
+  `NativeSingleViewSessionRuntime`, sync the first player pose, build all render
+  sections, upload the chunk draw resources, and mark traversal-ready sections
+  through the same code path.
+- `GameUiAction::CreateWorld(seed)` now starts
+  `SessionStartRequest::NewLocalWorld { seed }`, drops the previous Android
+  scene only after the replacement scene and GPU draw resources are ready, then
+  closes the menu. If creation fails, the New World screen stays open and the
+  old session remains live.
+- `GameUiAction::JoinRemote` now normalizes the displayed endpoint, starts
+  `SessionStartRequest::JoinRemote`, swaps to the remote TCP-backed native scene
+  on success, and preserves the old session plus a visible failure status on
+  connection/setup failure.
+- The Android path remains app-owned and synchronous for now. It does not move
+  Android activity lifecycle, touch handling, `wgpu` surface ownership, or TCP
+  socket construction into `mclone-app-runtime`.
+- Manual endpoint editing is still absent because `mclone-ui` has no text input
+  widget. The Join Remote screen connects to the existing/default endpoint.
+
+Validation after Slice 4d on 2026-06-27:
+
+```bash
+cargo fmt
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
+pnpm native:android:apk:avd
+```
+
+The Android APK lane compiled the edited `#[cfg(target_os = "android")]` module
+for `x86_64-linux-android`.
 
 ## Open Questions
 

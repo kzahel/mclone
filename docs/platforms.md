@@ -18,7 +18,7 @@ Mclone currently has five supported client/platform validation lanes:
 | Desktop flat | primary development lane | `native/apps/mclone-native-client` owns desktop `winit`, surface acquisition, keyboard/mouse input, frame pacing, and headless screenshots. Basics validated: integrated runtime, locomotion, world rendering, chunk loading/generation. |
 | Desktop OpenXR | active XR lane | `mclone-native-client --features xr` owns desktop runtime selection and OpenXR startup. Shared XR crates provide host/session helpers, graphics wrapping, scene alignment, and controller locomotion. Validated with real stereo mclone terrain on Quest 3 through VirtualDesktopXR. |
 | Android XR / Quest standalone | active XR lane | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, launch-scoped remote-address argv, and validation. Validated with staged assets, stereo terrain, controller actions, basic locomotion, and remote-dedicated play over direct LAN and through the `--adb-reverse` USB tunnel path. |
-| Flat Android | active mobile lane | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity` package. Validated on x86_64 AVD with Vulkan-backed `wgpu`, real terrain pixels, staged assets, rendered-frame log marker, and touch smoke; arm64 remains the physical device / Quest-flat ABI. |
+| Flat Android | active mobile lane | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity` package. Validated on x86_64 AVD with Vulkan-backed `wgpu`, real terrain pixels, staged assets, rendered-frame log marker, touch smoke, and app-owned New World / Join Remote scene replacement; arm64 remains the physical device / Quest-flat ABI. |
 | Web/WASM | active browser lane | `native/apps/mclone-web-client` builds for `wasm32-unknown-unknown`, uses WebGPU through `wgpu`, and keeps browser workers, TypeScript glue, mobile web controls, shared Rust/WebGPU UI, and deployment alive. |
 
 Additional host lane:
@@ -239,11 +239,11 @@ manual checks:
 2. **Make the contract matrix more executable.** For each shared crate boundary,
    keep the sentinel smoke/test close to scripts so platform coverage is
    deliberate instead of remembered manually.
-3. **Finish dynamic session replacement on native scene lanes.** All display
+3. **Finish dynamic session replacement on native XR scene lanes.** All display
    lanes now have shared initial local/remote session identity through
-   `mclone-app-runtime::session`; desktop flat and web also restart from menu
-   actions. Flat Android, desktop XR, and Android XR still need app-owned
-   teardown/rebuild paths for New World and Join Remote on top of
+   `mclone-app-runtime::session`; desktop flat, web, and flat Android also
+   restart from menu actions. Desktop XR and Android XR still need app-owned
+   scene replacement paths for New World and Join Remote on top of
    `NativeSingleViewSessionRuntime<S>`.
 4. **Finish host-mode convergence for web and make Android XR remote validation repeatable.**
    Native desktop, desktop XR, flat Android, and Android XR now share
