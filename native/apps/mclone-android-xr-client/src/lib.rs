@@ -1323,6 +1323,7 @@ mod android {
                 max_render: AndroidXrRenderFrameTiming::default(),
                 max_upload: mclone_xr_scene::XrTerrainUploadSummary::default(),
                 upload_work_frames: 0,
+                diagnostics_refresh_frames: 0,
                 over_budget_frames: 0,
                 over_2x_budget_frames: 0,
                 over_4x_budget_frames: 0,
@@ -1368,6 +1369,7 @@ mod android {
         max_render: AndroidXrRenderFrameTiming,
         max_upload: mclone_xr_scene::XrTerrainUploadSummary,
         upload_work_frames: u64,
+        diagnostics_refresh_frames: u64,
         over_budget_frames: u64,
         over_2x_budget_frames: u64,
         over_4x_budget_frames: u64,
@@ -1407,6 +1409,9 @@ mod android {
             if let Some(rendered) = rendered {
                 if terrain_upload_summary_has_work(rendered.summary.upload) {
                     self.upload_work_frames += 1;
+                }
+                if rendered.summary.upload.poll_diagnostics_refreshed {
+                    self.diagnostics_refresh_frames += 1;
                 }
                 self.max_upload = max_upload_summary(self.max_upload, rendered.summary.upload);
                 self.latest_summary = rendered.summary;
@@ -1498,13 +1503,18 @@ mod android {
                 self.max_upload.traversal_ready_section_count
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_RUNTIME_MAX poll_total_ms={:.3} drain_updates_ms={:.3} apply_updates_ms={:.3} dirty_mark_ms={:.3} client_apply_ms={:.3} poll_diagnostics_ms={:.3} server_tick_ms={:.3} scheduler_tick_ms={:.3} updates={} snapshot_updates={} section_updates={} unload_updates={}",
+                "MCLONE_ANDROID_XR_PERF_RUNTIME_MAX poll_total_ms={:.3} drain_updates_ms={:.3} apply_updates_ms={:.3} dirty_mark_ms={:.3} client_apply_ms={:.3} poll_diagnostics_ms={:.3} diagnostics_refresh_frames={} diagnostics_refreshed={} diagnostics_cache_age_ms={:.3} server_detail_refreshes={} server_detail_age_ms={:.3} server_tick_ms={:.3} scheduler_tick_ms={:.3} updates={} snapshot_updates={} section_updates={} unload_updates={}",
                 self.max_upload.poll_total_ms,
                 self.max_upload.poll_drain_updates_ms,
                 self.max_upload.poll_apply_updates_ms,
                 self.max_upload.poll_dirty_mark_ms,
                 self.max_upload.poll_client_apply_updates_ms,
                 self.max_upload.poll_diagnostics_ms,
+                self.diagnostics_refresh_frames,
+                self.max_upload.poll_diagnostics_refreshed,
+                self.max_upload.poll_diagnostics_cache_age_ms,
+                self.max_upload.server_diagnostics_detail_refreshes,
+                self.max_upload.server_diagnostics_detail_age_ms,
                 self.max_upload.poll_server_tick_ms,
                 self.max_upload.poll_scheduler_tick_ms,
                 self.max_upload.poll_updates,
@@ -1643,6 +1653,17 @@ mod android {
                 .poll_client_apply_updates_ms
                 .max(b.poll_client_apply_updates_ms),
             poll_diagnostics_ms: a.poll_diagnostics_ms.max(b.poll_diagnostics_ms),
+            poll_diagnostics_refreshed: a.poll_diagnostics_refreshed
+                || b.poll_diagnostics_refreshed,
+            poll_diagnostics_cache_age_ms: a
+                .poll_diagnostics_cache_age_ms
+                .max(b.poll_diagnostics_cache_age_ms),
+            server_diagnostics_detail_refreshes: a
+                .server_diagnostics_detail_refreshes
+                .max(b.server_diagnostics_detail_refreshes),
+            server_diagnostics_detail_age_ms: a
+                .server_diagnostics_detail_age_ms
+                .max(b.server_diagnostics_detail_age_ms),
             poll_server_tick_ms: a.poll_server_tick_ms.max(b.poll_server_tick_ms),
             poll_server_reported_total_ms: a
                 .poll_server_reported_total_ms

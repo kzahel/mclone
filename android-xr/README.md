@@ -178,8 +178,9 @@ The marker block includes `SUMMARY`, `STAGES`, `TERRAIN`, `UPLOAD_MAX`,
 records `mode=flight`, `render_distance`, `flight_speed_blocks_per_second`,
 actual `flight_distance_blocks`, current/supported display refresh when
 `XR_FB_display_refresh_rate` is available, max timing buckets, terrain
-poll/sync/GPU-upload timing, runtime poll sub-buckets, server/scheduler queue
-counters, compile/upload workload counters, and draw counts.
+poll/sync/GPU-upload timing, runtime poll sub-buckets, diagnostics
+refresh/cache-age fields, server/scheduler queue counters, compile/upload
+workload counters, and draw counts.
 
 For remote dedicated validation, either start `mclone-dedicated-server` on a
 host the headset can reach and pass `--remote-addr`, or let the validator build

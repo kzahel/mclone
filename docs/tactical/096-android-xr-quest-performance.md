@@ -124,6 +124,10 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
 - [x] Split `runtime.poll()` diagnostics into local drain/apply/diagnostics
   sub-buckets plus server/scheduler queue counters after the first
   upload-attributed sweep showed RD5/RD10 spikes dominated by runtime polling.
+- [x] Make runtime diagnostics non-invasive for headset frames: cache full
+  runner diagnostics at a low rate, keep atomic queue depths cheap per frame,
+  move server detail snapshot construction outside the diagnostics mutex, and
+  expose diagnostic refresh/cache-age fields in `RUNTIME_MAX`.
 
 Validation target:
 
@@ -163,6 +167,7 @@ Recorded first-pass implementation:
   counts.
 - The marker block also includes runtime poll sub-timings (`drain_updates`,
   `apply_updates`, dirty marking, client application, diagnostics snapshot),
+  diagnostic refresh/cache age, server detail snapshot age,
   server-reported tick/scheduler timing, update counts, and queue/visibility
   counters from the integrated server runner.
 

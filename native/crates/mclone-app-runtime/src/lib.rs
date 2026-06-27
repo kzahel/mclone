@@ -125,6 +125,8 @@ pub struct RuntimePollTiming {
     pub total_ms: f64,
     pub drain_updates_ms: f64,
     pub poll_diagnostics_ms: f64,
+    pub diagnostics_refreshed: bool,
+    pub diagnostics_cache_age_ms: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -144,6 +146,10 @@ pub struct RuntimePollDiagnostics {
     pub poll_total_ms: f64,
     pub drain_updates_ms: f64,
     pub poll_diagnostics_ms: f64,
+    pub diagnostics_refreshed: bool,
+    pub diagnostics_cache_age_ms: f64,
+    pub server_diagnostics_detail_refreshes: u64,
+    pub server_diagnostics_detail_age_ms: f64,
     pub server_tick_ms: f64,
     pub server_reported_total_ms: f64,
     pub scheduler_tick_ms: f64,
@@ -476,6 +482,8 @@ impl SingleViewRuntime {
             poll_total_ms: timing.total_ms,
             drain_updates_ms: timing.drain_updates_ms,
             poll_diagnostics_ms: timing.poll_diagnostics_ms,
+            diagnostics_refreshed: timing.diagnostics_refreshed,
+            diagnostics_cache_age_ms: timing.diagnostics_cache_age_ms,
             apply_updates_ms: apply_report.total_ms,
             dirty_mark_ms: apply_report.dirty_mark_ms,
             client_apply_updates_ms: apply_report.client_apply_updates_ms,
@@ -807,6 +815,9 @@ impl SingleViewRuntime {
         diagnostics.server_update_queue_depth = runner_diagnostics.update_queue_depth;
         diagnostics.server_pending_jobs = runner_diagnostics.pending_jobs;
         diagnostics.server_pending_publications = runner_diagnostics.pending_publications;
+        diagnostics.server_diagnostics_detail_refreshes =
+            runner_diagnostics.diagnostics_detail_refreshes;
+        diagnostics.server_diagnostics_detail_age_ms = runner_diagnostics.diagnostics_detail_age_ms;
         diagnostics.server_tick_ms = micros_to_ms(tick.wall_us);
         diagnostics.server_reported_total_ms = micros_to_ms(tick.timing.total_us);
         diagnostics.scheduler_tick_ms = micros_to_ms(tick.timing.scheduler_tick_us);

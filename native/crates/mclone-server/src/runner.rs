@@ -265,8 +265,11 @@ pub struct ServerRunnerDiagnostics {
     pub light_status_job_frame_metrics: WorkerFrameMetrics,
     pub scheduler_metrics: ChunkSchedulerMetrics,
     pub chunk_tracking: PlayerChunkTrackingDiagnostics,
+    pub diagnostics_detail_refreshes: u64,
+    pub diagnostics_detail_age_ms: f64,
     pub last_tick: ServerRunnerTickDiagnostics,
     pub last_error: Option<String>,
+    diagnostics_detail_refreshed_at: Option<std::time::Instant>,
 }
 
 impl ServerRunnerDiagnostics {
@@ -290,8 +293,11 @@ impl ServerRunnerDiagnostics {
             light_status_job_frame_metrics: WorkerFrameMetrics::default(),
             scheduler_metrics: ChunkSchedulerMetrics::default(),
             chunk_tracking: PlayerChunkTrackingDiagnostics::default(),
+            diagnostics_detail_refreshes: 0,
+            diagnostics_detail_age_ms: 0.0,
             last_tick: ServerRunnerTickDiagnostics::default(),
             last_error: None,
+            diagnostics_detail_refreshed_at: None,
         }
     }
 }
@@ -381,6 +387,66 @@ mod native {
 
     use super::*;
     use crate::INITIAL_DAY_TIME;
+
+    const DIAGNOSTICS_DETAIL_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
+
+    fn duration_ms(duration: Duration) -> f64 {
+        duration.as_secs_f64() * 1000.0
+    }
+
+    #[derive(Debug, Default)]
+    struct DiagnosticsDetailSampler {
+        last_refresh: Option<Instant>,
+    }
+
+    impl DiagnosticsDetailSampler {
+        fn should_refresh(&self, now: Instant, force: bool) -> bool {
+            if force {
+                return true;
+            }
+            match self.last_refresh {
+                Some(last_refresh) => {
+                    now.duration_since(last_refresh) >= DIAGNOSTICS_DETAIL_REFRESH_INTERVAL
+                }
+                None => true,
+            }
+        }
+
+        fn mark_refreshed(&mut self, refreshed_at: Instant) {
+            self.last_refresh = Some(refreshed_at);
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct DiagnosticsDetailSnapshot {
+        worldgen_mailbox_kind: WorldgenMailboxKind,
+        light_status_mailbox_kind: LightStatusMailboxKind,
+        worldgen_mailbox_pending_jobs: usize,
+        light_status_mailbox_pending_statuses: usize,
+        worldgen_job_frame_metrics: WorkerFrameMetrics,
+        light_status_job_frame_metrics: WorkerFrameMetrics,
+        scheduler_metrics: ChunkSchedulerMetrics,
+        chunk_tracking: PlayerChunkTrackingDiagnostics,
+    }
+
+    impl DiagnosticsDetailSnapshot {
+        fn from_server(server: &IntegratedServer) -> Self {
+            Self {
+                worldgen_mailbox_kind: server.scheduler().worldgen_mailbox_kind(),
+                light_status_mailbox_kind: server.scheduler().light_status_mailbox_kind(),
+                worldgen_mailbox_pending_jobs: server.scheduler().worldgen_mailbox_pending_count(),
+                light_status_mailbox_pending_statuses: server
+                    .scheduler()
+                    .light_status_mailbox_pending_count(),
+                worldgen_job_frame_metrics: server.scheduler().worldgen_mailbox_frame_metrics(),
+                light_status_job_frame_metrics: server
+                    .scheduler()
+                    .light_status_mailbox_frame_metrics(),
+                scheduler_metrics: server.scheduler().metrics(),
+                chunk_tracking: server.chunk_tracking_diagnostics(),
+            }
+        }
+    }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct NativeIntegratedServerRunnerConfig {
@@ -503,6 +569,14 @@ mod native {
                 shutdown_requested: false,
             })
         }
+
+        pub fn refresh_fast_diagnostics(&self, diagnostics: &mut ServerRunnerDiagnostics) {
+            diagnostics.command_queue_depth = self.command_queue_depth.load(Ordering::SeqCst);
+            diagnostics.update_queue_depth = self.update_queue_depth.load(Ordering::SeqCst);
+            if let Some(refreshed_at) = diagnostics.diagnostics_detail_refreshed_at {
+                diagnostics.diagnostics_detail_age_ms = duration_ms(refreshed_at.elapsed());
+            }
+        }
     }
 
     impl IntegratedServerRunner for NativeIntegratedServerRunner {
@@ -549,8 +623,7 @@ mod native {
                 .lock()
                 .map_err(|_| ServerRunnerError::DiagnosticsPoisoned)?
                 .clone();
-            diagnostics.command_queue_depth = self.command_queue_depth.load(Ordering::SeqCst);
-            diagnostics.update_queue_depth = self.update_queue_depth.load(Ordering::SeqCst);
+            self.refresh_fast_diagnostics(&mut diagnostics);
             Ok(diagnostics)
         }
 
@@ -598,15 +671,18 @@ mod native {
         if let Some(day_time) = config.day_time {
             server.set_day_time(day_time);
         }
+        let mut diagnostics_detail_sampler = DiagnosticsDetailSampler::default();
         refresh_diagnostics(
             &diagnostics,
             &server,
             &command_queue_depth,
             &update_queue_depth,
+            &mut diagnostics_detail_sampler,
             None,
             true,
             Some(false),
             None,
+            true,
         );
         let _ = ready_tx.send(Ok(()));
 
@@ -618,16 +694,19 @@ mod native {
             &command_queue_depth,
             &update_queue_depth,
             &diagnostics,
+            &mut diagnostics_detail_sampler,
         );
         refresh_diagnostics(
             &diagnostics,
             &server,
             &command_queue_depth,
             &update_queue_depth,
+            &mut diagnostics_detail_sampler,
             None,
             false,
             Some(false),
             result.as_ref().err().map(ToString::to_string),
+            true,
         );
         result
     }
@@ -640,6 +719,7 @@ mod native {
         command_queue_depth: &AtomicUsize,
         update_queue_depth: &AtomicUsize,
         diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
+        diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
     ) -> ServerRunnerResult<()> {
         let mut next_tick = Instant::now();
         loop {
@@ -652,6 +732,7 @@ mod native {
                     command_queue_depth,
                     update_queue_depth,
                     diagnostics,
+                    diagnostics_detail_sampler,
                     next_tick - now,
                 )? {
                     return Ok(());
@@ -666,6 +747,7 @@ mod native {
                 command_queue_depth,
                 update_queue_depth,
                 diagnostics,
+                diagnostics_detail_sampler,
             )? {
                 return Ok(());
             }
@@ -679,10 +761,12 @@ mod native {
                 server,
                 command_queue_depth,
                 update_queue_depth,
+                diagnostics_detail_sampler,
                 Some(ServerRunnerTickDiagnostics::from_report(&report, wall_us)),
                 true,
                 Some(false),
                 None,
+                false,
             );
 
             next_tick += tick_interval;
@@ -699,6 +783,7 @@ mod native {
         command_queue_depth: &AtomicUsize,
         update_queue_depth: &AtomicUsize,
         diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
+        diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
         timeout: Duration,
     ) -> ServerRunnerResult<bool> {
         match command_rx.recv_timeout(timeout) {
@@ -709,6 +794,7 @@ mod native {
                 command_queue_depth,
                 update_queue_depth,
                 diagnostics,
+                diagnostics_detail_sampler,
             ),
             Err(mpsc::RecvTimeoutError::Timeout) => Ok(true),
             Err(mpsc::RecvTimeoutError::Disconnected) => Ok(false),
@@ -722,6 +808,7 @@ mod native {
         command_queue_depth: &AtomicUsize,
         update_queue_depth: &AtomicUsize,
         diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
+        diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
     ) -> ServerRunnerResult<bool> {
         loop {
             match command_rx.try_recv() {
@@ -733,6 +820,7 @@ mod native {
                         command_queue_depth,
                         update_queue_depth,
                         diagnostics,
+                        diagnostics_detail_sampler,
                     )? {
                         return Ok(false);
                     }
@@ -750,6 +838,7 @@ mod native {
         command_queue_depth: &AtomicUsize,
         update_queue_depth: &AtomicUsize,
         diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
+        diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
     ) -> ServerRunnerResult<bool> {
         match control {
             NativeRunnerControl::Shutdown => Ok(false),
@@ -759,14 +848,18 @@ mod native {
                     server,
                     command_queue_depth,
                     update_queue_depth,
+                    diagnostics_detail_sampler,
                     None,
                     true,
                     Some(true),
                     None,
+                    false,
                 );
-                let result = decode_client_command(&frame)
-                    .map_err(ServerRunnerError::from)
-                    .and_then(|command| server.try_handle_command(command).map_err(Into::into));
+                let command = decode_client_command(&frame).map_err(ServerRunnerError::from)?;
+                let force_detail_after_command = matches!(command, ClientCommand::SetChunkView(_));
+                let result = server
+                    .try_handle_command(command)
+                    .map_err(ServerRunnerError::from);
                 command_queue_depth.fetch_sub(1, Ordering::SeqCst);
                 let updates = result?;
                 publish_updates(update_tx, update_queue_depth, &updates)?;
@@ -775,10 +868,12 @@ mod native {
                     server,
                     command_queue_depth,
                     update_queue_depth,
+                    diagnostics_detail_sampler,
                     None,
                     true,
                     Some(true),
                     None,
+                    force_detail_after_command,
                 );
                 Ok(true)
             }
@@ -806,32 +901,52 @@ mod native {
         server: &IntegratedServer,
         command_queue_depth: &AtomicUsize,
         update_queue_depth: &AtomicUsize,
+        diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
         tick: Option<ServerRunnerTickDiagnostics>,
         running: bool,
         awaiting_tick: Option<bool>,
         last_error: Option<String>,
+        force_detail: bool,
     ) {
+        let now = Instant::now();
+        let day_time = server.day_time();
+        let command_queue_depth = command_queue_depth.load(Ordering::SeqCst);
+        let update_queue_depth = update_queue_depth.load(Ordering::SeqCst);
+        let pending_jobs = server.pending_job_count();
+        let pending_publications = server.pending_publication_count();
+        let detail_snapshot = diagnostics_detail_sampler
+            .should_refresh(now, force_detail)
+            .then(|| DiagnosticsDetailSnapshot::from_server(server));
+        if detail_snapshot.is_some() {
+            diagnostics_detail_sampler.mark_refreshed(now);
+        }
         let Ok(mut diagnostics) = diagnostics.lock() else {
             return;
         };
         diagnostics.running = running;
-        diagnostics.day_time = server.day_time();
-        diagnostics.command_queue_depth = command_queue_depth.load(Ordering::SeqCst);
-        diagnostics.update_queue_depth = update_queue_depth.load(Ordering::SeqCst);
-        diagnostics.pending_jobs = server.pending_job_count();
-        diagnostics.pending_publications = server.pending_publication_count();
-        diagnostics.worldgen_mailbox_kind = server.scheduler().worldgen_mailbox_kind();
-        diagnostics.light_status_mailbox_kind = server.scheduler().light_status_mailbox_kind();
-        diagnostics.worldgen_mailbox_pending_jobs =
-            server.scheduler().worldgen_mailbox_pending_count();
-        diagnostics.light_status_mailbox_pending_statuses =
-            server.scheduler().light_status_mailbox_pending_count();
-        diagnostics.worldgen_job_frame_metrics =
-            server.scheduler().worldgen_mailbox_frame_metrics();
-        diagnostics.light_status_job_frame_metrics =
-            server.scheduler().light_status_mailbox_frame_metrics();
-        diagnostics.scheduler_metrics = server.scheduler().metrics();
-        diagnostics.chunk_tracking = server.chunk_tracking_diagnostics();
+        diagnostics.day_time = day_time;
+        diagnostics.command_queue_depth = command_queue_depth;
+        diagnostics.update_queue_depth = update_queue_depth;
+        diagnostics.pending_jobs = pending_jobs;
+        diagnostics.pending_publications = pending_publications;
+        if let Some(detail_snapshot) = detail_snapshot {
+            diagnostics.worldgen_mailbox_kind = detail_snapshot.worldgen_mailbox_kind;
+            diagnostics.light_status_mailbox_kind = detail_snapshot.light_status_mailbox_kind;
+            diagnostics.worldgen_mailbox_pending_jobs =
+                detail_snapshot.worldgen_mailbox_pending_jobs;
+            diagnostics.light_status_mailbox_pending_statuses =
+                detail_snapshot.light_status_mailbox_pending_statuses;
+            diagnostics.worldgen_job_frame_metrics = detail_snapshot.worldgen_job_frame_metrics;
+            diagnostics.light_status_job_frame_metrics =
+                detail_snapshot.light_status_job_frame_metrics;
+            diagnostics.scheduler_metrics = detail_snapshot.scheduler_metrics;
+            diagnostics.chunk_tracking = detail_snapshot.chunk_tracking;
+            diagnostics.diagnostics_detail_refreshes += 1;
+            diagnostics.diagnostics_detail_age_ms = 0.0;
+            diagnostics.diagnostics_detail_refreshed_at = Some(now);
+        } else if let Some(refreshed_at) = diagnostics.diagnostics_detail_refreshed_at {
+            diagnostics.diagnostics_detail_age_ms = duration_ms(refreshed_at.elapsed());
+        }
         if let Some(awaiting_tick) = awaiting_tick {
             diagnostics.awaiting_tick = awaiting_tick;
         }

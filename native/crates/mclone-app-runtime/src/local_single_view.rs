@@ -30,6 +30,8 @@ use crate::{
     SingleViewRuntimeStats, chunk_tracking_radius_for_render_distance, elapsed_ms,
 };
 
+const RUNTIME_DIAGNOSTICS_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalSingleViewSceneOptions {
     pub seed: i64,
@@ -78,6 +80,8 @@ pub struct LocalSingleViewSceneRuntime {
     server_runner: NativeIntegratedServerRunner,
     mesh_assets: TexturedMeshAssets,
     render_compile_worker: RenderSectionCompileWorker,
+    last_runner_diagnostics: Option<ServerRunnerDiagnostics>,
+    last_runner_diagnostics_poll_at: Option<Instant>,
 }
 
 impl LocalSingleViewSceneRuntime {
@@ -102,6 +106,8 @@ impl LocalSingleViewSceneRuntime {
             server_runner,
             mesh_assets,
             render_compile_worker,
+            last_runner_diagnostics: None,
+            last_runner_diagnostics_poll_at: None,
         };
         if let Some(day_time) = options.day_time_override {
             scene.core.force_day_time(day_time);
@@ -179,22 +185,58 @@ impl LocalSingleViewSceneRuntime {
             self.core.apply_server_updates_report(updates)
         };
         let changed = apply_report.changed;
-        let diagnostics_start = Instant::now();
-        let runner_diagnostics = self
-            .server_runner
-            .poll_diagnostics()
-            .context("failed to poll local single-view integrated server diagnostics")?;
-        let poll_diagnostics_ms = elapsed_ms(diagnostics_start.elapsed());
+        let (
+            runner_diagnostics,
+            poll_diagnostics_ms,
+            diagnostics_refreshed,
+            diagnostics_cache_age_ms,
+        ) = self.poll_runner_diagnostics_for_frame()?;
         self.core.finish_poll_diagnostics(
             RuntimePollTiming {
                 total_ms: elapsed_ms(poll_start.elapsed()),
                 drain_updates_ms,
                 poll_diagnostics_ms,
+                diagnostics_refreshed,
+                diagnostics_cache_age_ms,
             },
             apply_report,
-            Some(&runner_diagnostics),
+            runner_diagnostics.as_ref(),
         );
         Ok(changed)
+    }
+
+    fn poll_runner_diagnostics_for_frame(
+        &mut self,
+    ) -> Result<(Option<ServerRunnerDiagnostics>, f64, bool, f64)> {
+        let should_poll = self
+            .last_runner_diagnostics_poll_at
+            .is_none_or(|last_poll| last_poll.elapsed() >= RUNTIME_DIAGNOSTICS_POLL_INTERVAL);
+        let mut poll_diagnostics_ms = 0.0;
+        let mut diagnostics_refreshed = false;
+        if should_poll {
+            let diagnostics_start = Instant::now();
+            let runner_diagnostics = self
+                .server_runner
+                .poll_diagnostics()
+                .context("failed to poll local single-view integrated server diagnostics")?;
+            poll_diagnostics_ms = elapsed_ms(diagnostics_start.elapsed());
+            self.last_runner_diagnostics = Some(runner_diagnostics);
+            self.last_runner_diagnostics_poll_at = Some(Instant::now());
+            diagnostics_refreshed = true;
+        } else if let Some(runner_diagnostics) = self.last_runner_diagnostics.as_mut() {
+            self.server_runner
+                .refresh_fast_diagnostics(runner_diagnostics);
+        }
+
+        let diagnostics_cache_age_ms = self
+            .last_runner_diagnostics_poll_at
+            .map_or(0.0, |last_poll| elapsed_ms(last_poll.elapsed()));
+        Ok((
+            self.last_runner_diagnostics.clone(),
+            poll_diagnostics_ms,
+            diagnostics_refreshed,
+            diagnostics_cache_age_ms,
+        ))
     }
 
     pub fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
