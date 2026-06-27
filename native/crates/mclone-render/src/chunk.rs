@@ -267,6 +267,7 @@ pub struct TexturedSectionRenderStats {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TexturedSectionRenderTiming {
+    pub records_ms: f64,
     pub prepare_ms: f64,
     pub encode_ms: f64,
 }
@@ -392,6 +393,11 @@ struct TexturedSectionCullingRecord {
     visibility: VisibilitySet,
     drawable: bool,
     traversal_ready: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PreparedTexturedSectionRecords {
+    records: BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
 }
 
 #[derive(Clone, Debug)]
@@ -1544,7 +1550,7 @@ impl TexturedSectionDrawResources {
         render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
     ) -> Result<TexturedSectionRenderStats> {
-        self.render_with_options_inner(queue, encoder, target, render_view, options, None)
+        self.render_with_options_inner(queue, encoder, target, render_view, options, None, None)
     }
 
     pub fn render_with_options_timed(
@@ -1562,6 +1568,55 @@ impl TexturedSectionDrawResources {
             target,
             render_view,
             options,
+            None,
+            Some(&mut timing),
+        )?;
+        Ok((stats, timing))
+    }
+
+    pub fn prepare_render_records(&self) -> PreparedTexturedSectionRecords {
+        PreparedTexturedSectionRecords {
+            records: self.collect_render_records(),
+        }
+    }
+
+    pub fn render_prepared_with_options(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+    ) -> Result<TexturedSectionRenderStats> {
+        self.render_with_options_inner(
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            Some(records),
+            None,
+        )
+    }
+
+    pub fn render_prepared_with_options_timed(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+    ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
+        let mut timing = TexturedSectionRenderTiming::default();
+        let stats = self.render_with_options_inner(
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            Some(records),
             Some(&mut timing),
         )?;
         Ok((stats, timing))
@@ -1574,26 +1629,23 @@ impl TexturedSectionDrawResources {
         target: ChunkRenderTarget<'_>,
         render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
+        prepared_records: Option<&PreparedTexturedSectionRecords>,
         mut timing: Option<&mut TexturedSectionRenderTiming>,
     ) -> Result<TexturedSectionRenderStats> {
         let prepare_start = timing.as_ref().map(|_| Instant::now());
-        let records = self
-            .visibility_sections
-            .iter()
-            .map(|(key, visibility)| {
-                let mesh = self.sections.get(key);
-                (
-                    *key,
-                    TexturedSectionCullingRecord {
-                        index_count: mesh.map_or(0, GpuTexturedChunkMesh::index_count),
-                        visibility: *visibility,
-                        drawable: mesh.is_some(),
-                        traversal_ready: self.traversal_ready_sections.contains(key),
-                    },
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        let culling = cull_textured_sections(&records, render_view, options);
+        let records_storage;
+        let records = match prepared_records {
+            Some(records) => &records.records,
+            None => {
+                let records_start = timing.as_ref().map(|_| Instant::now());
+                records_storage = self.collect_render_records();
+                if let (Some(timing), Some(records_start)) = (&mut timing, records_start) {
+                    timing.records_ms = elapsed_ms(records_start.elapsed());
+                }
+                &records_storage
+            }
+        };
+        let culling = cull_textured_sections(records, render_view, options);
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
@@ -1653,6 +1705,24 @@ impl TexturedSectionDrawResources {
             timing.encode_ms = elapsed_ms(encode_start.elapsed());
         }
         Ok(culling.stats)
+    }
+
+    fn collect_render_records(&self) -> BTreeMap<RenderSectionKey, TexturedSectionCullingRecord> {
+        self.visibility_sections
+            .iter()
+            .map(|(key, visibility)| {
+                let mesh = self.sections.get(key);
+                (
+                    *key,
+                    TexturedSectionCullingRecord {
+                        index_count: mesh.map_or(0, GpuTexturedChunkMesh::index_count),
+                        visibility: *visibility,
+                        drawable: mesh.is_some(),
+                        traversal_ready: self.traversal_ready_sections.contains(key),
+                    },
+                )
+            })
+            .collect()
     }
 }
 

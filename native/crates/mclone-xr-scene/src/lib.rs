@@ -6,7 +6,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
-    render_full_frame_for_view, render_full_frame_for_view_timed,
+    render_full_frame_for_view_with_prepared_records,
+    render_full_frame_for_view_with_prepared_records_timed,
 };
 use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
 use mclone_app_runtime::local_single_view::{
@@ -22,8 +23,8 @@ use mclone_core::{ChunkPos, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
-    ChunkDepthTarget, ChunkRenderView, TexturedSectionDrawResources, TexturedSectionRenderOptions,
-    TexturedSectionUploadReport,
+    ChunkDepthTarget, ChunkRenderView, PreparedTexturedSectionRecords,
+    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
 use mclone_render::entity::ActorDrawResources;
 use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiRenderer};
@@ -170,6 +171,7 @@ pub struct XrTerrainFrameTiming {
     pub runtime_sync_ms: f64,
     pub runtime_gpu_upload_ms: f64,
     pub runtime_ready_sections_ms: f64,
+    pub shared_records_ms: f64,
     pub left_eye_ms: f64,
     pub right_eye_ms: f64,
     pub left_eye_render: XrTerrainEyeRenderTiming,
@@ -559,6 +561,9 @@ where
             self.runtime.client(),
         );
         let collect_split_timing = self.render_split_timing_enabled;
+        let records_start = collect_split_timing.then(Instant::now);
+        let prepared_records = self.draw.prepare_render_records();
+        timing.shared_records_ms = records_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("mclone_xr_terrain_stereo_encoder"),
         });
@@ -567,6 +572,7 @@ where
             device,
             queue,
             &mut encoder,
+            &prepared_records,
             left_target,
             render_views[0],
             &actor_instances,
@@ -583,6 +589,7 @@ where
             device,
             queue,
             &mut encoder,
+            &prepared_records,
             right_target,
             render_views[1],
             &actor_instances,
@@ -908,6 +915,7 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
+        prepared_records: &PreparedTexturedSectionRecords,
         target: XrTerrainEyeTarget<'_>,
         render_view: ChunkRenderView,
         actor_instances: &[mclone_render::entity::ActorInstance],
@@ -934,11 +942,12 @@ where
         let summary_ui_draw = ui_draw.clone();
         let mut render_stats = self.render_stats;
         let (summary, frame_timing) = if collect_split_timing {
-            render_full_frame_for_view_timed(
+            render_full_frame_for_view_with_prepared_records_timed(
                 frame,
                 target.depth,
                 &self.sky,
                 &mut self.draw,
+                prepared_records,
                 Some(&mut self.actors),
                 None,
                 None,
@@ -954,11 +963,12 @@ where
                 &mut render_stats,
             )
         } else {
-            render_full_frame_for_view(
+            render_full_frame_for_view_with_prepared_records(
                 frame,
                 target.depth,
                 &self.sky,
                 &mut self.draw,
+                prepared_records,
                 Some(&mut self.actors),
                 None,
                 None,

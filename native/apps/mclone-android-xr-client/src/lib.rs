@@ -1333,6 +1333,7 @@ mod android {
         terrain_runtime_sync_ms: f64,
         terrain_runtime_gpu_upload_ms: f64,
         terrain_runtime_ready_sections_ms: f64,
+        terrain_shared_records_ms: f64,
         terrain_left_eye_ms: f64,
         terrain_right_eye_ms: f64,
         terrain_left_eye_prepare_ms: f64,
@@ -1693,7 +1694,7 @@ mod android {
                 self.max_render.end_frame_ms
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_render_frame_ms={:.3} max_terrain_render_views_ms={:.3} max_terrain_menu_pointer_ms={:.3} max_terrain_runtime_upload_ms={:.3} max_runtime_poll_ms={:.3} max_runtime_sync_ms={:.3} max_runtime_gpu_upload_ms={:.3} max_runtime_ready_sections_ms={:.3} max_terrain_left_eye_ms={:.3} max_terrain_right_eye_ms={:.3} max_terrain_left_eye_prepare_ms={:.3} max_terrain_left_eye_encode_ms={:.3} max_terrain_left_eye_section_encode_ms={:.3} max_terrain_left_eye_submit_ms={:.3} max_terrain_left_eye_poll_wait_ms={:.3} max_terrain_right_eye_prepare_ms={:.3} max_terrain_right_eye_encode_ms={:.3} max_terrain_right_eye_section_encode_ms={:.3} max_terrain_right_eye_submit_ms={:.3} max_terrain_right_eye_poll_wait_ms={:.3} max_terrain_stereo_finish_ms={:.3} max_terrain_stereo_submit_ms={:.3} max_terrain_stereo_poll_wait_ms={:.3}",
+                "MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_render_frame_ms={:.3} max_terrain_render_views_ms={:.3} max_terrain_menu_pointer_ms={:.3} max_terrain_runtime_upload_ms={:.3} max_runtime_poll_ms={:.3} max_runtime_sync_ms={:.3} max_runtime_gpu_upload_ms={:.3} max_runtime_ready_sections_ms={:.3} max_terrain_shared_records_ms={:.3} max_terrain_left_eye_ms={:.3} max_terrain_right_eye_ms={:.3} max_terrain_left_eye_prepare_ms={:.3} max_terrain_left_eye_encode_ms={:.3} max_terrain_left_eye_section_encode_ms={:.3} max_terrain_left_eye_submit_ms={:.3} max_terrain_left_eye_poll_wait_ms={:.3} max_terrain_right_eye_prepare_ms={:.3} max_terrain_right_eye_encode_ms={:.3} max_terrain_right_eye_section_encode_ms={:.3} max_terrain_right_eye_submit_ms={:.3} max_terrain_right_eye_poll_wait_ms={:.3} max_terrain_stereo_finish_ms={:.3} max_terrain_stereo_submit_ms={:.3} max_terrain_stereo_poll_wait_ms={:.3}",
                 self.max_render.terrain_render_frame_ms,
                 self.max_render.terrain_render_views_ms,
                 self.max_render.terrain_menu_pointer_ms,
@@ -1702,6 +1703,7 @@ mod android {
                 self.max_render.terrain_runtime_sync_ms,
                 self.max_render.terrain_runtime_gpu_upload_ms,
                 self.max_render.terrain_runtime_ready_sections_ms,
+                self.max_render.terrain_shared_records_ms,
                 self.max_render.terrain_left_eye_ms,
                 self.max_render.terrain_right_eye_ms,
                 self.max_render.terrain_left_eye_prepare_ms,
@@ -1849,6 +1851,7 @@ mod android {
             terrain_runtime_ready_sections_ms: a
                 .terrain_runtime_ready_sections_ms
                 .max(b.terrain_runtime_ready_sections_ms),
+            terrain_shared_records_ms: a.terrain_shared_records_ms.max(b.terrain_shared_records_ms),
             terrain_left_eye_ms: a.terrain_left_eye_ms.max(b.terrain_left_eye_ms),
             terrain_right_eye_ms: a.terrain_right_eye_ms.max(b.terrain_right_eye_ms),
             terrain_left_eye_prepare_ms: a
@@ -2176,6 +2179,7 @@ mod android {
         timing.terrain_runtime_sync_ms = frame_summary.timing.runtime_sync_ms;
         timing.terrain_runtime_gpu_upload_ms = frame_summary.timing.runtime_gpu_upload_ms;
         timing.terrain_runtime_ready_sections_ms = frame_summary.timing.runtime_ready_sections_ms;
+        timing.terrain_shared_records_ms = frame_summary.timing.shared_records_ms;
         timing.terrain_left_eye_ms = frame_summary.timing.left_eye_ms;
         timing.terrain_right_eye_ms = frame_summary.timing.right_eye_ms;
         timing.terrain_left_eye_prepare_ms = frame_summary.timing.left_eye_render.prepare_ms;

@@ -73,6 +73,56 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-27 - Standalone Quest 3 Frozen RD10 Shared Stereo Section Prep
+
+Benchmarked code commit: this shared-prep commit. The run was captured
+immediately before commit from the same implementation worktree, based on
+`264c723` (`Submit Quest XR stereo eyes together`).
+
+Capture note: captured from the implementation worktree carrying the Slice C1
+shared section-record prep path. The run used
+`native:android-xr:perf:frozen:rd10:metrics` with fixed render view pose
+`0,80,-96,180`, seed `12345`, center chunk `(0, 0)`, noon, frozen time, and
+RD10. Cleanup was run explicitly after the sample: `pidof
+com.kzahel.mclone.xr` was empty, `dumpsys power` reported
+`mWakefulness=Asleep`, and `mHoldingDisplaySuspendBlocker=false`.
+
+Summary:
+
+| Field | Value |
+|---|---:|
+| Sample | `20.001s`, `1353` frames |
+| Target | `72.0 Hz` / `13.889ms` |
+| Frame avg / p50 / p95 / p99 / max | `14.736ms` / `14.431ms` / `16.405ms` / `16.896ms` / `17.763ms` |
+| Terrain frame max | `17.192ms` |
+| Shared section records max | `1.195ms` |
+| Left / right eye max wall | `3.745ms` / `3.408ms` |
+| Drawn sections / indices | `179` / `1,352,142` |
+| Runtime work during sample | `0` upload work frames; runtime poll/sync/GPU upload all `0.000ms` |
+| Meta app GPU / GPU util | `7.033ms` / `60.853%` |
+| Meta compositor GPU / dropped frames | `1.559ms` / `59` cumulative |
+
+Render split maxima. The shared records bucket is built once per stereo frame;
+the per-eye prepare buckets still include view-dependent cull, uniform upload,
+and translucent sort:
+
+| Bucket | Value |
+|---|---:|
+| Shared section records | `1.195ms` |
+| Left prepare / encode / section encode | `2.330ms` / `1.724ms` / `1.209ms` |
+| Right prepare / encode / section encode | `2.134ms` / `1.506ms` / `0.993ms` |
+| Stereo finish / submit / poll wait | `0.035ms` / `0.511ms` / `10.298ms` |
+
+Interpretation:
+
+- Slice C1 removed duplicated section-record construction from each eye without
+  changing live XR culling semantics. Compared with Slice B, per-eye prepare
+  max dropped by about `1.1ms` per eye, and p50 improved from `15.609ms` to
+  `14.431ms`.
+- RD10 still misses the `13.889ms` 72 Hz budget. App GPU remains around
+  `7.0ms`, so the next CPU target is the remaining `2.1-2.3ms` per-eye prepare
+  bucket before draw-call batching/bundles.
+
 ### 2026-06-27 - Standalone Quest 3 Frozen RD10 Single-Submit Stereo
 
 Benchmarked code commit: this Slice B commit. The run was captured immediately

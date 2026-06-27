@@ -193,15 +193,31 @@ behind the shared XR contracts; do not fork mclone rendering for Quest.
   `screencap`, but Quest returned a zero-byte capture after the perf process
   had exited, so there is no visual screenshot artifact for this run.
 
-### Slice C - Cache the cull/draw set when the visible set is unchanged (next)
+### Slice C - Shared stereo section prep, then per-eye cull/sort
 
-- When the visible/section set and view are unchanged (always true in frozen
-  mode, frequently true while stationary), reuse the previous `drawn_keys` and
-  the sorted translucent order instead of rebuilding the 1,133-entry map and
-  re-sorting per eye per frame.
-- Mind the per-eye view frustum: the cull is view-dependent, so cache keyed on
-  (section-set-version, view). Frozen mode collapses both eyes' views to fixed
-  poses, so it is the easy first target.
+- Do **not** assume the live headset view is exactly unchanged. Even a still
+  headset has small pose jitter, so exact view/projection cache keys are only
+  reliable in the frozen perf lane.
+- First split the terrain CPU prep into shared stereo work and per-eye work:
+  build the section culling records once per frame from the current section set,
+  then run each eye's frustum/occlusion cull and translucent sort from that
+  shared record set.
+- Keep per-eye cull and translucent sort view-dependent. Later live-XR caching
+  can use conservative buckets/tolerances (section-set version, camera section
+  or small position cell, coarse yaw/pitch, expanded frustum), but the first
+  implementation should be exact and behavior-preserving.
+- Once the shared record set exists, left/right cull + translucent sort become
+  natural independent jobs for a later threading slice. Avoid threading first;
+  make the work separable and measurable before adding scheduling complexity
+  across desktop/Android/WASM.
+- Slice C1 landed: build the section culling records once per stereo frame and
+  reuse that record set for both eyes. Per-eye frustum/occlusion culling,
+  uniform upload, translucent sort, and draw encoding remain view-dependent.
+- Result on frozen RD10 metrics: `max_terrain_shared_records_ms=1.195`; per-eye
+  prepare dropped from Slice B's `3.476ms` / `3.181ms` maxima to `2.330ms` /
+  `2.134ms`; p50 improved from `15.609ms` to `14.431ms`. App GPU remained
+  about `7.0ms`, so the next useful split is inside the remaining per-eye
+  prepare bucket.
 
 ### Slice D - Cut per-draw CPU cost (batching or render bundles)
 
