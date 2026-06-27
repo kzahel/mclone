@@ -2,8 +2,8 @@
 
 Status: active. Shared `RenderConfig`, `FlatRenderResources`, desktop F8
 no-op rebuild trigger, headless before/after no-op rebuild smoke, and
-render-scale config-changing rebuild smoke landed on 2026-06-27; broader
-platform adoption remains pending.
+desktop F9/headless render-scale config-changing rebuild paths landed on
+2026-06-27; broader platform adoption remains pending.
 
 ## Purpose
 
@@ -240,7 +240,7 @@ Slice 2 validation on 2026-06-27:
 - [x] Add a developer-only trigger and CLI/test path that performs a no-op
   rebuild while the world stays active.
 - [x] Add a render-scale config-changing rebuild path while the world stays
-  active in the headless desktop validation lane.
+  active in the live desktop and headless desktop validation lanes.
 
 Slice 3 partial result:
 
@@ -257,10 +257,15 @@ Slice 3 partial result:
   GUI options.
 - `ChunkApp::rebuild_render_resources(...)` recreates the bundle from the
   current `NativeSurfaceContext` and reuploads CPU-owned runtime sections when
-  a world is active. It is currently used for initial construction and the
-  developer no-op trigger; config-changing runtime rebuild remains pending.
+  a world is active. It is currently used for initial construction, the
+  developer no-op trigger, and the desktop render-scale rebuild trigger.
 - Desktop flat has a hidden developer F8 trigger that rebuilds the current
   renderer resources in place and schedules a redraw.
+- Desktop flat has a hidden developer F9 trigger that cycles internal render
+  scale through `1.0 -> 0.5 -> 0.75 -> 1.5 -> 1.0`, rebuilds the same renderer
+  resource bundle, reuploads resident sections, and schedules a redraw.
+- The desktop debug pane reports the active internal render scale so live F9
+  rebuilds are visible without relying only on log output.
 - `--renderer-rebuild-smoke <directory>` runs a deterministic offscreen no-op
   rebuild smoke: render frame 0, rebuild/reupload on frame 1, render again,
   save `before.png`/`after.png`, compare pixels exactly, and assert stable
@@ -292,6 +297,7 @@ Slice 3 no-op rebuild validation on 2026-06-27:
 Slice 3 render-scale rebuild validation on 2026-06-27:
 
 - `cargo test --manifest-path native/Cargo.toml`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-ui`
 - `cargo test --manifest-path native/Cargo.toml -p mclone-render`
 - `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
 - `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
@@ -303,6 +309,8 @@ Slice 3 render-scale rebuild validation on 2026-06-27:
   sections, and preserved state. `/tmp/mclone-render-rebuild-scale-smoke/after.png`
   was visually inspected and showed the expected lower-resolution but correctly
   framed world render.
+- Unit coverage verifies the F9 desktop preset cycle and keeps F8/F9 out of the
+  gameplay input map.
 
 ### Slice 4: Rebuild-Safe Dynamic Profile Toggle
 

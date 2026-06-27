@@ -17,7 +17,7 @@ use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
     TexturedSectionUploadReport,
 };
-use mclone_render::color_profile::RenderConfig;
+use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::entity::ActorDrawResources;
 use mclone_render::gui::GuiRenderer;
 use mclone_render::headless::{
@@ -814,6 +814,7 @@ pub(crate) fn run_headless_screenshot(
                 section_occlusion: render_options.section_occlusion_culling,
                 force_fullbright: render_options.force_fullbright,
                 color_profile: render_options.color_profile.label(),
+                render_scale: DEFAULT_RENDER_SCALE,
             });
             let ui_active = ui.is_active();
             let ui_covers_world = ui.covers_world();

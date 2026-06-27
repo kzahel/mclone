@@ -17,6 +17,7 @@ use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
     ChunkCamera, TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
+use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::entity::ActorInstance;
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_render::screen_effect::UnderwaterOverlay;
@@ -64,6 +65,9 @@ use mclone_render_session::{
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
 const RENDER_RESOURCE_REBUILD_KEY: KeyCode = KeyCode::F8;
+const RENDER_SCALE_REBUILD_KEY: KeyCode = KeyCode::F9;
+const DESKTOP_RENDER_SCALE_PRESETS: [f32; 4] = [DEFAULT_RENDER_SCALE, 0.5, 0.75, 1.5];
+const RENDER_SCALE_PRESET_EPSILON: f32 = 0.000_1;
 const PLAYER_SURFACE_FEET_OFFSET: f64 = 1.0;
 const GROUND_PROBE_DISTANCE: f64 = 0.01;
 
@@ -96,6 +100,16 @@ pub(crate) fn run_window(
     let mut app = ChunkApp::new(scene, assets, render_options, start_intent);
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+fn next_desktop_render_scale(current: f32) -> f32 {
+    let Some(index) = DESKTOP_RENDER_SCALE_PRESETS
+        .iter()
+        .position(|scale| (current - *scale).abs() <= RENDER_SCALE_PRESET_EPSILON)
+    else {
+        return DEFAULT_RENDER_SCALE;
+    };
+    DESKTOP_RENDER_SCALE_PRESETS[(index + 1) % DESKTOP_RENDER_SCALE_PRESETS.len()]
 }
 
 pub(crate) fn game_ui_render_state(
@@ -381,6 +395,19 @@ impl ChunkApp {
         self.runtime.as_ref().map_or_else(
             || u32::try_from(self.scene.render_distance).unwrap_or(0),
             WindowSceneRuntime::render_distance,
+        )
+    }
+
+    fn current_render_scale(&self) -> f32 {
+        self.render_resources.as_ref().map_or_else(
+            || {
+                self.surface
+                    .as_ref()
+                    .map_or(DEFAULT_RENDER_SCALE, |surface| {
+                        surface.render_config.render_scale
+                    })
+            },
+            |resources| resources.render_config().render_scale,
         )
     }
 
@@ -1012,6 +1039,17 @@ impl ChunkApp {
     }
 
     fn rebuild_render_resources(&mut self, asset_source: &impl AssetSource) -> Result<()> {
+        let Some(render_config) = self.surface.as_ref().map(|surface| surface.render_config) else {
+            return Ok(());
+        };
+        self.rebuild_render_resources_with_config(asset_source, render_config)
+    }
+
+    fn rebuild_render_resources_with_config(
+        &mut self,
+        asset_source: &impl AssetSource,
+        render_config: RenderConfig,
+    ) -> Result<()> {
         let previous_config = self
             .render_resources
             .as_ref()
@@ -1024,13 +1062,16 @@ impl ChunkApp {
                 &surface.device,
                 &surface.queue,
                 [surface.config.width, surface.config.height],
-                surface.render_config,
+                render_config,
                 self.assets.mesh_assets.atlas.as_upload(),
                 self.assets.actor_textures.atlas.as_upload(),
                 asset_source,
             )?
         };
         let next_config = resources.render_config();
+        if let Some(surface) = &mut self.surface {
+            surface.render_config = next_config;
+        }
         self.render_resources = Some(resources);
         if self.runtime.is_some() {
             self.upload_all_runtime_sections()
@@ -1071,6 +1112,29 @@ impl ChunkApp {
             }
             Err(err) => {
                 log::error!("desktop flat render resource rebuild trigger failed: {err:#}");
+            }
+        }
+    }
+
+    fn trigger_render_scale_rebuild(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(current_config) = self.surface.as_ref().map(|surface| surface.render_config)
+        else {
+            return;
+        };
+        let next_scale = next_desktop_render_scale(current_config.render_scale);
+        let next_config = current_config.with_render_scale(next_scale);
+        let result = load_asset_source()
+            .context("failed to load assets for render-scale rebuild")
+            .and_then(|asset_source| {
+                self.rebuild_render_resources_with_config(&asset_source, next_config)
+            });
+        match result {
+            Ok(()) => {
+                log::info!("desktop flat render scale set to {next_scale:.2}");
+                self.schedule_next_redraw(event_loop);
+            }
+            Err(err) => {
+                log::error!("desktop flat render scale rebuild failed: {err:#}");
             }
         }
     }
@@ -1463,6 +1527,7 @@ impl ChunkApp {
             section_occlusion: render_options.section_occlusion_culling,
             force_fullbright: render_options.force_fullbright,
             color_profile: render_options.color_profile.label(),
+            render_scale: self.current_render_scale(),
         }
     }
 
@@ -1781,6 +1846,13 @@ impl ApplicationHandler for ChunkApp {
                         && !event.repeat
                     {
                         self.trigger_render_resource_rebuild(event_loop);
+                        return;
+                    }
+                    if key_code == RENDER_SCALE_REBUILD_KEY
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                    {
+                        self.trigger_render_scale_rebuild(event_loop);
                         return;
                     }
                     if event.state == ElementState::Pressed && self.ui.is_active() {
@@ -2207,6 +2279,15 @@ mod tests {
     }
 
     #[test]
+    fn desktop_render_scale_presets_cycle_from_default() {
+        assert_eq!(next_desktop_render_scale(1.0), 0.5);
+        assert_eq!(next_desktop_render_scale(0.5), 0.75);
+        assert_eq!(next_desktop_render_scale(0.75), 1.5);
+        assert_eq!(next_desktop_render_scale(1.5), 1.0);
+        assert_eq!(next_desktop_render_scale(1.25), 1.0);
+    }
+
+    #[test]
     fn actor_instances_follow_client_actor_presentations() {
         let integrated = mclone_client::ClientRuntime::local_integrated();
         assert!(integrated.actor_presentations().is_empty());
@@ -2519,6 +2600,14 @@ mod tests {
             Some(KeyboardKey::ControlLeft)
         );
         assert_eq!(desktop_keyboard_key_from_key_code(NO_CLIP_TOGGLE_KEY), None);
+        assert_eq!(
+            desktop_keyboard_key_from_key_code(RENDER_RESOURCE_REBUILD_KEY),
+            None
+        );
+        assert_eq!(
+            desktop_keyboard_key_from_key_code(RENDER_SCALE_REBUILD_KEY),
+            None
+        );
         assert_eq!(desktop_keyboard_key_from_key_code(KeyCode::KeyO), None);
         assert_eq!(
             desktop_keyboard_key_from_key_code(KeyCode::Digit1),

@@ -26,6 +26,7 @@ pub(crate) struct DebugPaneStats {
     pub(crate) section_occlusion: bool,
     pub(crate) force_fullbright: bool,
     pub(crate) color_profile: &'static str,
+    pub(crate) render_scale: f32,
 }
 
 impl DebugPaneStats {
@@ -91,6 +92,7 @@ impl DebugPaneStats {
             color_profile: self.color_profile,
         });
         overlay.extra_lines = vec![
+            format!("RENDER SCALE {:.2}", self.render_scale),
             format!(
                 "TICK {} SIM {}",
                 self.runtime.last_tick, self.runtime.last_simulation_tick
@@ -305,6 +307,7 @@ mod tests {
             section_occlusion: true,
             force_fullbright: false,
             color_profile: "VANILLA",
+            render_scale: 0.5,
         };
 
         let lines = stats.lines();
@@ -322,6 +325,7 @@ mod tests {
                 .iter()
                 .any(|line| line == "OCC ON  LIGHT  COLOR VANILLA")
         );
+        assert!(lines.iter().any(|line| line == "RENDER SCALE 0.50"));
         assert!(lines.iter().any(|line| line == "BUDGET 8.3MS FRAME 16.7MS"));
         assert!(lines.iter().any(|line| line == "OVER 3/1/0 WORST 33.4"));
 
