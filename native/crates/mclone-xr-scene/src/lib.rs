@@ -6,7 +6,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
-    render_full_frame_for_view,
+    render_full_frame_for_view, render_full_frame_for_view_timed,
 };
 use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
 use mclone_app_runtime::local_single_view::{
@@ -172,6 +172,17 @@ pub struct XrTerrainFrameTiming {
     pub runtime_ready_sections_ms: f64,
     pub left_eye_ms: f64,
     pub right_eye_ms: f64,
+    pub left_eye_render: XrTerrainEyeRenderTiming,
+    pub right_eye_render: XrTerrainEyeRenderTiming,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct XrTerrainEyeRenderTiming {
+    pub prepare_ms: f64,
+    pub encode_ms: f64,
+    pub section_encode_ms: f64,
+    pub submit_ms: f64,
+    pub poll_wait_ms: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -243,6 +254,11 @@ pub struct XrTerrainEyeTarget<'a> {
     pub size: [u32; 2],
 }
 
+struct XrRenderedEye {
+    summary: FullFrameRenderSummary,
+    timing: XrTerrainEyeRenderTiming,
+}
+
 type XrSessionRuntimeFactory<S> = Box<
     dyn FnMut(
         SessionStartRequest,
@@ -298,6 +314,7 @@ where
     tracking_origin: Option<XrTrackingOrigin>,
     locomotion_mode: XrLocomotionMode,
     display_refresh_hz: Option<f32>,
+    render_split_timing_enabled: bool,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
     menu_pointer_down: bool,
@@ -380,6 +397,7 @@ where
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),
             display_refresh_hz: None,
+            render_split_timing_enabled: false,
             last_locomotion_update: None,
             menu_toggle_down: false,
             menu_pointer_down: false,
@@ -538,7 +556,7 @@ where
             self.runtime.client(),
         );
         let left_eye_start = Instant::now();
-        let left_summary = self.render_eye_target(
+        let left_eye = self.render_eye_target(
             device,
             queue,
             left_target,
@@ -551,8 +569,9 @@ where
             "left",
         )?;
         timing.left_eye_ms = elapsed_ms(left_eye_start.elapsed());
+        timing.left_eye_render = left_eye.timing;
         let right_eye_start = Instant::now();
-        self.render_eye_target(
+        let right_eye = self.render_eye_target(
             device,
             queue,
             right_target,
@@ -565,7 +584,8 @@ where
             "right",
         )?;
         timing.right_eye_ms = elapsed_ms(right_eye_start.elapsed());
-        self.record_eye0_summary(left_summary);
+        timing.right_eye_render = right_eye.timing;
+        self.record_eye0_summary(left_eye.summary);
         Ok(self.frame_summary_with_timing(timing, upload))
     }
 
@@ -579,6 +599,10 @@ where
 
     pub fn set_display_refresh_hz(&mut self, display_refresh_hz: Option<f32>) {
         self.display_refresh_hz = display_refresh_hz.filter(|hz| hz.is_finite() && *hz > 0.0);
+    }
+
+    pub fn set_render_split_timing_enabled(&mut self, enabled: bool) {
+        self.render_split_timing_enabled = enabled;
     }
 
     pub fn camera_snapshot(&self) -> EngineCameraSnapshot {
@@ -870,7 +894,9 @@ where
         time_of_day: f32,
         sun_angle: f32,
         label: &'static str,
-    ) -> Result<FullFrameRenderSummary> {
+    ) -> Result<XrRenderedEye> {
+        let collect_split_timing = self.render_split_timing_enabled;
+        let encode_start = collect_split_timing.then(Instant::now);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some(match label {
                 "left" => "mclone_xr_terrain_left_eye_encoder",
@@ -892,25 +918,48 @@ where
         render_status_overlay(gui_scale, &mut ui_draw, &self.session_status);
         let summary_ui_draw = ui_draw.clone();
         let mut render_stats = self.render_stats;
-        let summary = render_full_frame_for_view(
-            frame,
-            target.depth,
-            &self.sky,
-            &mut self.draw,
-            Some(&mut self.actors),
-            None,
-            None,
-            render_view,
-            actor_instances,
-            None,
-            sky_clear_color,
-            time_of_day,
-            sun_angle,
-            render_options,
-            FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
-            |_| summary_ui_draw,
-            &mut render_stats,
-        )
+        let (summary, frame_timing) = if collect_split_timing {
+            render_full_frame_for_view_timed(
+                frame,
+                target.depth,
+                &self.sky,
+                &mut self.draw,
+                Some(&mut self.actors),
+                None,
+                None,
+                render_view,
+                actor_instances,
+                None,
+                sky_clear_color,
+                time_of_day,
+                sun_angle,
+                render_options,
+                FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
+                |_| summary_ui_draw,
+                &mut render_stats,
+            )
+        } else {
+            render_full_frame_for_view(
+                frame,
+                target.depth,
+                &self.sky,
+                &mut self.draw,
+                Some(&mut self.actors),
+                None,
+                None,
+                render_view,
+                actor_instances,
+                None,
+                sky_clear_color,
+                time_of_day,
+                sun_angle,
+                render_options,
+                FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
+                |_| summary_ui_draw,
+                &mut render_stats,
+            )
+            .map(|summary| (summary, Default::default()))
+        }
         .with_context(|| format!("render XR terrain {label} eye"))?;
         if ui_active {
             if let Some(panel) = self.menu_panel_pose {
@@ -933,7 +982,12 @@ where
                     .with_context(|| format!("render XR menu panel for {label} eye"))?;
             }
         }
-        let submission = queue.submit(Some(encoder.finish()));
+        let command_buffer = encoder.finish();
+        let encode_total_ms = encode_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        let submit_start = collect_split_timing.then(Instant::now);
+        let submission = queue.submit(Some(command_buffer));
+        let submit_ms = submit_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        let poll_start = collect_split_timing.then(Instant::now);
         device
             .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
             .map(|_| ())
@@ -942,10 +996,21 @@ where
             .poll(wgpu::PollType::Wait)
             .map(|_| ())
             .with_context(|| format!("wait for XR terrain {label}-eye render device idle"))?;
+        let poll_wait_ms = poll_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         if label == "left" {
             self.render_stats = render_stats;
         }
-        Ok(summary)
+        let prepare_ms = frame_timing.terrain_prepare_ms;
+        Ok(XrRenderedEye {
+            summary,
+            timing: XrTerrainEyeRenderTiming {
+                prepare_ms,
+                encode_ms: (encode_total_ms - prepare_ms).max(0.0),
+                section_encode_ms: frame_timing.terrain_encode_ms,
+                submit_ms,
+                poll_wait_ms,
+            },
+        })
     }
 
     fn sync_render_sections(
@@ -1011,8 +1076,8 @@ where
                 .display_refresh_hz
                 .map(|hz| hz.round().clamp(1.0, 999.0) as u32)
                 .unwrap_or(XR_UI_FPS_CAP),
-            touch_settings: None,
             touch_controls_mode: None,
+            touch_settings: None,
         }
     }
 

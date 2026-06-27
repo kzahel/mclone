@@ -1,7 +1,7 @@
 # 099: Android XR RD10 Render-Cost Attribution And CPU-Bound Submission
 
-Status: active; diagnostic landed (opt-in Meta performance-metrics probe,
-commit `0df8733`). This is the concrete continuation of
+Status: active; diagnostics landed (opt-in Meta performance-metrics probe,
+commit `0df8733`, and Slice A render split). This is the concrete continuation of
 [`096`](096-android-xr-quest-performance.md) Slice 5 (GPU timing / render-mode
 attribution). Future sessions should start here for standalone Quest render
 optimization.
@@ -32,16 +32,21 @@ On the frozen RD10 lane (fixed pose `0,80,-96,180`, 179 drawn sections,
 | GPU utilization | `57.6 %` | `device/gpu_utilization` |
 | Compositor GPU frametime | `1.561 ms` | `compositor/gpu_frametime` |
 | App per-eye CPU wall (left + right) | `10.570 + 10.420 = 20.99 ms` | `MCLONE_ANDROID_XR_PERF_TERRAIN` |
+| Slice A per-eye max poll wait | left `7.217 ms`, right `6.487 ms` | `MCLONE_ANDROID_XR_PERF_TERRAIN` |
+| Slice A per-eye max prepare | left `3.504 ms`, right `3.419 ms` | `MCLONE_ANDROID_XR_PERF_TERRAIN` |
+| Slice A per-eye max encode | left `1.638 ms`, right `1.621 ms` | `MCLONE_ANDROID_XR_PERF_TERRAIN` |
 | Compositor dropped frames (cumulative) | `103` | `compositor/dropped_frame_count` |
 | SpaceWarp | off (`0`) | `compositor/spacewarp_mode` |
 | Device CPU util avg / worst core | `35.7 %` / `~53 %` | `device/cpu_utilization_*` |
 
-The GPU draws both eyes in ~7 ms with ~42% headroom, yet the app burns ~21 ms
-of per-eye wall time. The compositor drops frames because the **CPU** frame
-exceeds the 13.889 ms budget, not because the GPU or compositor is saturated.
-The full record is in
+The GPU draws both eyes in ~7 ms with ~42% headroom, yet the app burns ~21 ms of
+per-eye wall time. Slice A shows the largest measured per-eye bucket is the
+blocking `device.poll` wait, with prepare still material and direct encode
+smaller. The compositor drops frames because the **CPU** frame exceeds the
+13.889 ms budget, not because the GPU or compositor is saturated. The full
+record is in
 [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md)
-under "2026-06-27 - Standalone Quest 3 Frozen RD10 Meta Performance Metrics".
+under the 2026-06-27 frozen RD10 Meta metrics and render-split records.
 
 ## What Landed (diagnostic only)
 
@@ -57,6 +62,9 @@ under "2026-06-27 - Standalone Quest 3 Frozen RD10 Meta Performance Metrics".
   frametime, utilization, dropped/stale frames, motion-to-photon) plus a
   per-counter `MCLONE_ANDROID_XR_PERF_METRICS_COUNTER` inventory. Off by
   default; degrades gracefully when the extension or counters are unavailable.
+- Slice A adds opt-in per-eye max fields to `MCLONE_ANDROID_XR_PERF_TERRAIN`:
+  prepare, encode, section encode, submit, and poll wait. It is enabled only for
+  Android XR perf runs, with no render-behavior change in normal rendering.
 - Commits: `0df8733` (probe), `4ffa99c` (record).
 
 The Oculus `v204.201.0` runtime enumerates 17 counters and returns valid data
@@ -132,7 +140,7 @@ encoding. Measure before assuming.
 | T0 | RD10 is **not** GPU-fill-bound; GPU has ~40% headroom | **High** | Runtime-measured `app/gpu_frametime` 7.04 ms and `gpu_utilization` 57.6% independently agree. Single mid-window sample; a few more samples for a distribution would make it airtight. |
 | T1 | Per-eye blocking submit/poll serializes eyes, blocks CPU on GPU, and hides GPU cost from the wait stage | **High** | Direct from code (`lib.rs:936-944`); Playbox removed the same pattern. |
 | T2 | mclone re-prepares (BTreeMap build + cull + translucent sort) and re-encodes ~358 unbatched draws per eye per frame, wasteful under a static view | **High** | Direct from code (`chunk.rs:1532-1607`). |
-| T3 | The ~14 ms residual (21 ms wall − 7 ms GPU) is dominated by CPU prepare/encode | **Medium** | Inferred by subtraction; **not yet split** into prepare vs encode vs poll-overhead. Playbox shows poll(Wait) overhead is real and mclone does it 2× more. The breakdown slice below resolves this. |
+| T3 | The ~14 ms residual (21 ms wall − 7 ms GPU) is dominated first by per-eye poll wait, with prepare as the next visible CPU bucket | **High** | Slice A measured max poll wait at left `7.217ms`, right `6.487ms`; prepare at left `3.504ms`, right `3.419ms`; encode at left `1.638ms`, right `1.621ms`; section encode at left `1.193ms`, right `1.061ms`. Max fields are independent, not one additive frame, but the ordering is clear. |
 | T4 | Batching draws and/or render bundles + single-submit will recover most of the budget | **Medium** | Follows from T2/T3 but magnitude depends on the T3 split. Playbox's batching path is proven; render bundles are an mclone-specific option Playbox did not need. |
 | T5 | "Keep it on the GPU / reuse last frame" by caching rendered pixels | **Low / rejected** | Unsafe in XR: each frame still submits its own layer and even a "static" headset has pose jitter. The correct reading of the intuition is *stop re-walking/re-culling/re-encoding on the CPU*, not *reuse the framebuffer*. Playbox does not cache pixels. |
 
@@ -141,18 +149,20 @@ encoding. Measure before assuming.
 Diagnostic-first, then the Playbox-proven structural fixes. Keep every change
 behind the shared XR contracts; do not fork mclone rendering for Quest.
 
-### Slice A - Split the per-eye wall into prepare / encode / submit / poll (do first)
+### Slice A - Split the per-eye wall into prepare / encode / submit / poll (done)
 
-- Bracket, per eye: prepare (records map + cull + translucent sort),
+- Landed. Bracket, per eye: prepare (records map + cull + translucent sort),
   render-pass encode (the draw loop), `queue.submit`, and the
   `device.poll(Wait)` block. Mirror Playbox's 046 breakdown table.
 - Surface as new max fields on the existing `MCLONE_ANDROID_XR_PERF_TERRAIN`
   marker (or a new `..._RENDER_SPLIT` line), same opt-in style as the metrics
   probe. ~Cheap, zero render-behavior change, no device feature.
-- Purpose: turn T3 from Medium to High and decide whether to chase poll
-  overhead (Slice B) or prepare/encode waste (Slices C/D) first.
-- Validation: `cargo check --target aarch64-linux-android`; run
-  `native:android-xr:perf:frozen:rd10:metrics` and read the split.
+- Result: poll wait is the largest max bucket, so chase Slice B first. Prepare
+  is still large enough to keep Slice C/D relevant after the per-eye GPU stall
+  is removed.
+- Validation passed: `cargo check --manifest-path native/Cargo.toml --target
+  aarch64-linux-android`; `pnpm native:android-xr:perf:frozen:rd10:metrics`;
+  explicit force-stop + headset sleep cleanup verified.
 
 ### Slice B - Single encoder, single submit, single poll for both eyes
 
@@ -223,8 +233,8 @@ behind the shared XR contracts; do not fork mclone rendering for Quest.
 
 ## Open questions
 
-- After Slice A: is the residual prepare-bound, encode-bound, or poll-bound?
-  That picks the order of B vs C vs D.
+- After Slice B: how much of the former poll-wait bucket disappears, and does
+  the remaining residual move to prepare, encode, or true GPU wait?
 - Does the live (non-frozen) RD10 lane share the same CPU-bound profile, or does
   streaming/upload re-enter as the limiter once the runtime is unfrozen?
 - Is fixed-foveated rendering actually applied to the eye swapchains? If not, it

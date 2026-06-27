@@ -73,6 +73,52 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-27 - Standalone Quest 3 Frozen RD10 Render Split
+
+Benchmarked code commit: this Slice A commit. The run was captured immediately
+before commit from the same implementation worktree, based on `f0b87bf` (`Wire
+touch controls mode preferences`).
+
+Capture note: captured from the implementation worktree carrying the Slice A
+render-split instrumentation. The run used
+`native:android-xr:perf:frozen:rd10:metrics` with fixed render view pose
+`0,80,-96,180`, seed `12345`, center chunk `(0, 0)`, noon, frozen time, and
+RD10. After the run, the app was explicitly force-stopped and the headset was
+slept; `pidof com.kzahel.mclone.xr` was empty, `dumpsys power` reported
+`mWakefulness=Asleep`, and `mHoldingDisplaySuspendBlocker=false`.
+
+Summary:
+
+| Field | Value |
+|---|---:|
+| Sample | `20.013s`, `1242` frames |
+| Target | `72.0 Hz` / `13.889ms` |
+| Frame avg / p50 / p95 / p99 / max | `16.068ms` / `16.165ms` / `17.763ms` / `18.575ms` / `25.119ms` |
+| Terrain frame max | `19.173ms` |
+| Left / right eye max wall | `10.622ms` / `10.465ms` |
+| Drawn sections / indices | `179` / `1,352,142` |
+| Runtime work during sample | `0` upload work frames; runtime poll/sync/GPU upload all `0.000ms` |
+| Meta app GPU / GPU util | `7.222ms` / `58.438%` |
+| Meta compositor GPU / dropped frames | `1.557ms` / `99` cumulative |
+
+Per-eye render split maxima. These are independent max fields from
+`MCLONE_ANDROID_XR_PERF_TERRAIN`, so each row is not necessarily a single
+frame's additive budget:
+
+| Eye | Wall | Prepare | Encode | Section encode | Submit | Poll wait |
+|---|---:|---:|---:|---:|---:|---:|
+| Left | `10.622ms` | `3.504ms` | `1.638ms` | `1.193ms` | `0.471ms` | `7.217ms` |
+| Right | `10.465ms` | `3.419ms` | `1.621ms` | `1.061ms` | `0.407ms` | `6.487ms` |
+
+Interpretation:
+
+- The largest measured bucket is still the per-eye blocking poll wait, which
+  supports doing Slice B (single encoder/submit/poll for both eyes) before
+  deeper draw-list caching or batching work.
+- Prepare is also material at ~`3.4-3.5ms` max per eye, while section draw-loop
+  encode is ~`1.1-1.2ms` max per eye. Slice C remains relevant after the
+  per-eye GPU stall is removed.
+
 ### 2026-06-27 - Standalone Quest 3 Frozen RD10 Meta Performance Metrics
 
 Benchmarked code commit: `0df8733` (`Add opt-in Quest XR Meta

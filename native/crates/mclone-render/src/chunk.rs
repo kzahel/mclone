@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Vec3, Vec4};
@@ -262,6 +263,12 @@ pub struct TexturedSectionRenderStats {
     pub frustum_index_count: u32,
     pub readiness_culled_index_count: u32,
     pub graph_culled_index_count: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TexturedSectionRenderTiming {
+    pub prepare_ms: f64,
+    pub encode_ms: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1537,6 +1544,39 @@ impl TexturedSectionDrawResources {
         render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
     ) -> Result<TexturedSectionRenderStats> {
+        self.render_with_options_inner(queue, encoder, target, render_view, options, None)
+    }
+
+    pub fn render_with_options_timed(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+    ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
+        let mut timing = TexturedSectionRenderTiming::default();
+        let stats = self.render_with_options_inner(
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            Some(&mut timing),
+        )?;
+        Ok((stats, timing))
+    }
+
+    fn render_with_options_inner(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        mut timing: Option<&mut TexturedSectionRenderTiming>,
+    ) -> Result<TexturedSectionRenderStats> {
+        let prepare_start = timing.as_ref().map(|_| Instant::now());
         let records = self
             .visibility_sections
             .iter()
@@ -1559,37 +1599,6 @@ impl TexturedSectionDrawResources {
             0,
             &uniform_bytes(render_view, options),
         );
-
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("mclone_textured_section_render_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target.color_view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: target.color_load_op(),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: target.depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(target.clear_depth),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            ..Default::default()
-        });
-        pass.set_bind_group(0, &self.renderer.bind_group, &[]);
-        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
-        pass.set_pipeline(&self.renderer.opaque_pipeline);
-        for (key, mesh) in &self.sections {
-            if !culling.drawn_keys.contains(key) {
-                continue;
-            }
-            draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
-        }
-        pass.set_pipeline(&self.renderer.translucent_pipeline);
         let mut translucent_sections = self
             .sections
             .iter()
@@ -1600,11 +1609,55 @@ impl TexturedSectionDrawResources {
         translucent_sections.sort_by(|(left_key, _), (right_key, _)| {
             compare_translucent_sections(**left_key, **right_key, render_view)
         });
-        for (_, mesh) in translucent_sections {
-            draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+        if let (Some(timing), Some(prepare_start)) = (&mut timing, prepare_start) {
+            timing.prepare_ms = elapsed_ms(prepare_start.elapsed());
+        }
+
+        let encode_start = timing.as_ref().map(|_| Instant::now());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mclone_textured_section_render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target.color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: target.color_load_op(),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: target.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(target.clear_depth),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_bind_group(0, &self.renderer.bind_group, &[]);
+            pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+            pass.set_pipeline(&self.renderer.opaque_pipeline);
+            for (key, mesh) in &self.sections {
+                if !culling.drawn_keys.contains(key) {
+                    continue;
+                }
+                draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
+            }
+            pass.set_pipeline(&self.renderer.translucent_pipeline);
+            for (_, mesh) in translucent_sections {
+                draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+            }
+        }
+        if let (Some(timing), Some(encode_start)) = (&mut timing, encode_start) {
+            timing.encode_ms = elapsed_ms(encode_start.elapsed());
         }
         Ok(culling.stats)
     }
+}
+
+fn elapsed_ms(duration: std::time::Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
 }
 
 fn compare_translucent_sections(

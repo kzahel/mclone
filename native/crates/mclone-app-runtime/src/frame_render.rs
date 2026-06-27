@@ -60,6 +60,12 @@ pub struct FullFrameRenderSummary {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FullFrameRenderTiming {
+    pub terrain_prepare_ms: f64,
+    pub terrain_encode_ms: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FullFrameGui {
     pub active: bool,
     pub covers_world: bool,
@@ -144,6 +150,99 @@ pub fn render_full_frame_for_view<BuildGuiDraw>(
 where
     BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
 {
+    render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        None,
+        render_stats,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_timed<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    render_stats: &mut RenderStreamStats,
+) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let mut timing = FullFrameRenderTiming::default();
+    let summary = render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        Some(&mut timing),
+        render_stats,
+    )?;
+    Ok((summary, timing))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_full_frame_for_view_inner<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    mut timing: Option<&mut FullFrameRenderTiming>,
+    render_stats: &mut RenderStreamStats,
+) -> Result<FullFrameRenderSummary>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
     let fog = underwater_overlay
         .is_some()
         .then(RenderFog::underwater)
@@ -175,13 +274,26 @@ where
             background_clear_color,
         )?
         .with_loaded_color();
-        let frame_stats = draw.render_with_options(
-            frame.queue,
-            frame.encoder,
-            render_target,
-            render_view,
-            render_options,
-        )?;
+        let frame_stats = if let Some(timing) = timing.as_deref_mut() {
+            let (frame_stats, terrain_timing) = draw.render_with_options_timed(
+                frame.queue,
+                frame.encoder,
+                render_target,
+                render_view,
+                render_options,
+            )?;
+            timing.terrain_prepare_ms += terrain_timing.prepare_ms;
+            timing.terrain_encode_ms += terrain_timing.encode_ms;
+            frame_stats
+        } else {
+            draw.render_with_options(
+                frame.queue,
+                frame.encoder,
+                render_target,
+                render_view,
+                render_options,
+            )?
+        };
         render_stats.drawn_section_count = frame_stats.drawn_section_count;
         render_stats.drawn_face_count = frame_stats.drawn_face_count();
         render_stats.drawn_index_count = frame_stats.drawn_index_count;
