@@ -42,6 +42,79 @@ frame. The validator force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-27 - Standalone Quest 3 Flight Sweep With Upload Attribution
+
+Benchmarked code commit: `2bd0e04b3e4ea64c8698b5e91571d40f19b1de39`
+(`Split Quest XR perf markers and add upload counters`).
+
+Capture note: captured from a clean worktree at the commit above. This run uses
+the split marker block, so draw counts and upload/compile counters are not
+truncated by logcat.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 |
+| Android API | 34 |
+| OpenXR runtime | Oculus `v204.201.0` |
+| Stereo view config | `1680x1760` recommended per eye, `1x` sample |
+| Supported refresh | `72.0,80.0,90.0,120.0 Hz` |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| Flight | no-clip, `4.3 blocks/s`, about `86 blocks` over the sample |
+
+Summary:
+
+| Date | Commit | Lane | RD | Sample | FPS | Frames | Skipped | p50 | p95 | p99 | Max | Max render | Over 1x | Over 2x | Over 4x | Sections | Drawn sections | Indices | Drawn indices | Distance |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2026-06-27 | `2bd0e04` | `native:android-xr:perf:flight:rd1` | 1 | `20.008s` | `72.0` | 1,441 | 0 | `13.868ms` | `15.055ms` | `15.749ms` | `29.670ms` | `10.575ms` | 701 | 1 | 0 | 47 | 11 | 247,308 | 65,868 | `86.048` |
+| 2026-06-27 | `2bd0e04` | `native:android-xr:perf:flight:rd5` | 5 | `20.026s` | `57.3` | 1,147 | 0 | `17.408ms` | `28.149ms` | `32.938ms` | `35.756ms` | `35.574ms` | 909 | 60 | 0 | 540 | 85 | 2,494,272 | 496,350 | `86.076` |
+| 2026-06-27 | `2bd0e04` | `native:android-xr:perf:flight:rd10` | 10 | `20.034s` | `21.0` | 421 | 0 | `51.212ms` | `58.602ms` | `80.605ms` | `83.147ms` | `82.974ms` | 419 | 366 | 59 | 1,242 | 194 | 5,565,192 | 1,199,940 | `86.191` |
+
+Terrain timing maxima:
+
+| RD | Terrain frame | Runtime total | Runtime poll | Sync sections | GPU upload | Ready refresh | Left eye | Right eye |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `10.238ms` | `5.900ms` | `2.309ms` | `5.857ms` | `2.916ms` | `0.057ms` | `6.084ms` | `3.984ms` |
+| 5 | `35.067ms` | `27.122ms` | `25.717ms` | `10.193ms` | `6.359ms` | `0.823ms` | `6.836ms` | `6.336ms` |
+| 10 | `82.663ms` | `68.483ms` | `63.248ms` | `4.978ms` | `3.255ms` | `13.320ms` | `11.817ms` | `10.389ms` |
+
+Upload maxima:
+
+| RD | Work frames | Rebuilt sections | Removed sections | Rebuilt indices | Uploaded sections | Upload removed | Uploaded indices | Ready sections |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 815 | 16 | 48 | 50,064 | 7 | 20 | 50,064 | 112 |
+| 5 | 196 | 16 | 160 | 42,588 | 8 | 50 | 42,588 | 1,296 |
+| 10 | 350 | 16 | 240 | 41,064 | 8 | 78 | 41,064 | 3,600 |
+
+Compile / streaming maxima:
+
+| RD | Pending chunks before | Pending chunks after | Pending jobs before | Pending jobs after | Deferred sections | Submitted sections | Completed sections | Stale sections | Visibility total | Visibility worst |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 12 | 9 | 1 | 1 | 16 | 16 | 16 | 1 | `0.861ms` | `0.230ms` |
+| 5 | 67 | 57 | 1 | 1 | 16 | 16 | 16 | 0 | `0.674ms` | `0.247ms` |
+| 10 | 96 | 81 | 1 | 1 | 16 | 16 | 16 | 1 | `0.881ms` | `0.515ms` |
+
+Interpretation:
+
+- Render distance 1 still tracks 72 Hz closely. It had one over-2x frame, but
+  p95/p99 are both close to budget and the app render bucket stays under
+  `11ms`.
+- Render distance 5 remains uneven at about `57 FPS`. The worst terrain frame
+  is mostly the runtime/poll side (`25.717ms`) rather than GPU buffer upload
+  (`6.359ms`) or per-eye drawing (`6-7ms`).
+- Render distance 10 remains a stress lane at about `21 FPS`. The dominant max
+  bucket is runtime polling (`63.248ms`), with traversal-ready refresh also
+  visible (`13.320ms`), while GPU upload is only `3.255ms`.
+- Max upload work is bounded to small batches (`7-8` uploaded non-empty
+  sections, `16` submitted/completed sections), so the first optimization target
+  is not raw `wgpu` upload bandwidth. The sharper target is runtime polling /
+  chunk-stream application and traversal-ready work while flying.
+- The last frame still had pending chunks (`4` / `40` / `71` for RD1/RD5/RD10)
+  with zero pending compile jobs, which suggests backlog outside active mesh
+  compilation.
+
 ### 2026-06-27 - Standalone Quest 3 Flight Sweep With Stage Attribution
 
 Benchmarked code commit: `518d21da92b3850f9b8b9d75bad6c7cf1318fb49`
