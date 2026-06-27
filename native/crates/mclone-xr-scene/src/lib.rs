@@ -229,6 +229,12 @@ pub struct XrTerrainUploadSummary {
     pub visibility_graph_worst_ms: f64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum XrTerrainRuntimeUpdateMode {
+    Live,
+    Frozen,
+}
+
 #[derive(Clone, Copy)]
 pub struct XrTerrainEyeTarget<'a> {
     pub color_view: &'a wgpu::TextureView,
@@ -411,6 +417,43 @@ where
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
     ) -> Result<XrTerrainFrameSummary> {
+        self.render_frame_inner(
+            device,
+            queue,
+            views,
+            left_target,
+            right_target,
+            XrTerrainRuntimeUpdateMode::Live,
+        )
+    }
+
+    pub fn render_frame_frozen_runtime(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        left_target: XrTerrainEyeTarget<'_>,
+        right_target: XrTerrainEyeTarget<'_>,
+    ) -> Result<XrTerrainFrameSummary> {
+        self.render_frame_inner(
+            device,
+            queue,
+            views,
+            left_target,
+            right_target,
+            XrTerrainRuntimeUpdateMode::Frozen,
+        )
+    }
+
+    fn render_frame_inner(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        left_target: XrTerrainEyeTarget<'_>,
+        right_target: XrTerrainEyeTarget<'_>,
+        runtime_mode: XrTerrainRuntimeUpdateMode,
+    ) -> Result<XrTerrainFrameSummary> {
         let mut timing = XrTerrainFrameTiming::default();
         let render_views_start = Instant::now();
         let mut render_views = self.render_views(&views)?;
@@ -433,9 +476,15 @@ where
         } else {
             timing.menu_pointer_ms += elapsed_ms(menu_pointer_start.elapsed());
         }
-        let runtime_upload_start = Instant::now();
-        let upload = self.poll_runtime_and_upload(device, center_position, &mut timing)?;
-        timing.runtime_upload_ms = elapsed_ms(runtime_upload_start.elapsed());
+        let upload = match runtime_mode {
+            XrTerrainRuntimeUpdateMode::Live => {
+                let runtime_upload_start = Instant::now();
+                let upload = self.poll_runtime_and_upload(device, center_position, &mut timing)?;
+                timing.runtime_upload_ms = elapsed_ms(runtime_upload_start.elapsed());
+                upload
+            }
+            XrTerrainRuntimeUpdateMode::Frozen => self.frozen_runtime_upload_summary(),
+        };
         let render_options = self.effective_render_options(center_position);
         let sky_clear_color = self.sky_clear_color();
         let time_of_day = self.runtime.time_of_day();
@@ -749,6 +798,19 @@ where
             visibility_graph_worst_ms: section_update.visibility_graph_stats.worst_ms,
             ..poll_summary
         })
+    }
+
+    fn frozen_runtime_upload_summary(&self) -> XrTerrainUploadSummary {
+        let pending_render_chunks = self.runtime.pending_render_chunk_count();
+        let pending_compile_jobs = self.runtime.render_compile_pending_job_count();
+        XrTerrainUploadSummary {
+            pending_render_chunks_before: pending_render_chunks,
+            pending_render_chunks_after: pending_render_chunks,
+            pending_compile_jobs_before: pending_compile_jobs,
+            pending_compile_jobs_after: pending_compile_jobs,
+            traversal_ready_section_count: self.draw.traversal_ready_section_count(),
+            ..XrTerrainUploadSummary::default()
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

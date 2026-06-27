@@ -189,13 +189,39 @@ pnpm native:android-xr:perf:stationary:sweep
 ```
 
 These disable locomotion during the probe, wait for consecutive quiet frames
-with no server/update backlog, no pending render chunks, no compile jobs, and no
-upload work, then record a 20 second sample. Summary files are written to:
+with no server/update backlog, no compile jobs, no rebuilds, no uploads, and no
+poll changes after a minimum 5 second settle window, then record a 20 second
+sample. Summary files are written to:
 
 ```text
 /tmp/mclone-quest-openxr-perf-stationary-rd1.txt
 /tmp/mclone-quest-openxr-perf-stationary-rd5.txt
 /tmp/mclone-quest-openxr-perf-stationary-rd10.txt
+```
+
+For frozen-mesh render isolation, use the frozen stationary samples:
+
+```bash
+pnpm native:android-xr:perf:frozen:rd1
+pnpm native:android-xr:perf:frozen:rd5
+pnpm native:android-xr:perf:frozen:rd10
+```
+
+or run the three-distance sweep:
+
+```bash
+pnpm native:android-xr:perf:frozen:sweep
+```
+
+These use the same stationary settle gate, then skip runtime polling, render
+section sync, traversal-ready refresh, and GPU section uploads during the timed
+sample. They render the cached mesh buffers and current headset view only.
+Summary files are written to:
+
+```text
+/tmp/mclone-quest-openxr-perf-frozen-rd1.txt
+/tmp/mclone-quest-openxr-perf-frozen-rd5.txt
+/tmp/mclone-quest-openxr-perf-frozen-rd10.txt
 ```
 
 The marker block includes `SUMMARY`, `STAGES`, `TERRAIN`, `UPLOAD_MAX`,

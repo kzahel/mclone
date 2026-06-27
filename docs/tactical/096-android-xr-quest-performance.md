@@ -132,6 +132,9 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
   waits for consecutive quiet frames with no server queues, compile jobs,
   rebuilds, uploads, or poll changes after a minimum 5 second settle window,
   records settle time, then samples steady-state frame/render cost.
+- [x] Add a frozen-mesh stationary lane that uses the same settle gate, then
+  skips runtime polling, render-section sync, traversal-ready refresh, and GPU
+  section uploads during the measured sample.
 
 Validation target:
 
@@ -175,6 +178,13 @@ Recorded first-pass implementation:
 - Stationary settle treats persistent deferred render sections as a reported
   steady-state condition, not as active generation/upload work. They remain
   visible in `COMPILE_MAX deferred_sections` and settle-progress log markers.
+- `package.json` also includes `native:android-xr:perf:frozen:rd1`,
+  `native:android-xr:perf:frozen:rd5`,
+  `native:android-xr:perf:frozen:rd10`, and
+  `native:android-xr:perf:frozen:sweep`. These pass `--perf-frozen-render`,
+  wait for the stationary settle gate, then write
+  `mode=stationary-frozen-render` while rendering cached mesh buffers without
+  runtime poll/sync/upload work during the measured window.
 - The marker block now includes terrain runtime sub-timings for poll, section
   sync, GPU upload, and traversal-ready refresh. It also includes max and latest
   pending render chunks, pending compile jobs, submitted/completed/stale compile

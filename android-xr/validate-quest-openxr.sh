@@ -41,6 +41,10 @@ PERF_SECONDS="${MCLONE_ANDROID_XR_PERF_SECONDS:-}"
 PERF_FLIGHT="${MCLONE_ANDROID_XR_PERF_FLIGHT:-0}"
 PERF_FLIGHT_SPEED="${MCLONE_ANDROID_XR_PERF_FLIGHT_SPEED:-}"
 PERF_SETTLED_STATIONARY="${MCLONE_ANDROID_XR_PERF_SETTLED_STATIONARY:-0}"
+PERF_FROZEN_RENDER="${MCLONE_ANDROID_XR_PERF_FROZEN_RENDER:-0}"
+if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
+    PERF_SETTLED_STATIONARY=1
+fi
 
 usage() {
     cat <<'USAGE'
@@ -103,6 +107,10 @@ Options:
                      During --perf-seconds, disable locomotion and start the
                      timed sample only after terrain generation, render
                      section compilation, and upload counters stay quiet.
+  --perf-frozen-render
+                     Like --perf-settled-stationary, but freezes runtime
+                     polling, section sync, and uploads during the timed
+                     sample so the cached mesh render cost can be isolated.
   --perf-summary PATH
                      Local file for the compact perf marker block. Default:
                      /tmp/mclone-quest-openxr-perf-summary.txt.
@@ -384,6 +392,11 @@ while [[ $# -gt 0 ]]; do
             PERF_SETTLED_STATIONARY=1
             shift
             ;;
+        --perf-frozen-render)
+            PERF_SETTLED_STATIONARY=1
+            PERF_FROZEN_RENDER=1
+            shift
+            ;;
         --perf-summary)
             require_arg "$1" "${2:-}"
             PERF_SUMMARY_PATH="$2"
@@ -447,6 +460,12 @@ if [[ "$PERF_SETTLED_STATIONARY" == "1" && -z "$PERF_SECONDS" ]]; then
 fi
 if [[ "$PERF_SETTLED_STATIONARY" == "1" && "$PERF_FLIGHT" == "1" ]]; then
     mclone_die "--perf-settled-stationary cannot be combined with --perf-flight"
+fi
+if [[ "$PERF_FROZEN_RENDER" == "1" && -z "$PERF_SECONDS" ]]; then
+    mclone_die "--perf-frozen-render requires --perf-seconds"
+fi
+if [[ "$PERF_FROZEN_RENDER" == "1" && "$PERF_FLIGHT" == "1" ]]; then
+    mclone_die "--perf-frozen-render cannot be combined with --perf-flight"
 fi
 if [[ -n "$PERF_FLIGHT_SPEED" ]]; then
     validate_positive_number "--perf-flight-speed" "$PERF_FLIGHT_SPEED"
@@ -513,6 +532,9 @@ if [[ "$PERF_FLIGHT" == "1" ]]; then
 fi
 if [[ "$PERF_SETTLED_STATIONARY" == "1" ]]; then
     STARTUP_ARGV+=(--perf-settled-stationary)
+fi
+if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
+    STARTUP_ARGV+=(--perf-frozen-render)
 fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"
@@ -638,13 +660,17 @@ if [[ -n "$PERF_SECONDS" ]]; then
         fi
     fi
     if [[ "$PERF_SETTLED_STATIONARY" == "1" ]]; then
-        if ! grep -E "MCLONE_ANDROID_XR_PERF_SETTLED .*mode=stationary-settled" "$LOG_PATH" >/dev/null 2>&1; then
+        perf_stationary_mode="stationary-settled"
+        if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
+            perf_stationary_mode="stationary-frozen-render"
+        fi
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_SETTLED .*mode=${perf_stationary_mode}" "$LOG_PATH" >/dev/null 2>&1; then
             mclone_die "Android XR perf settled marker was not seen; see $LOG_PATH"
         fi
-        if ! grep -E "MCLONE_ANDROID_XR_PERF_START .*mode=stationary-settled .*settle_seconds=" "$LOG_PATH" >/dev/null 2>&1; then
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_START .*mode=${perf_stationary_mode} .*settle_seconds=" "$LOG_PATH" >/dev/null 2>&1; then
             mclone_die "Android XR perf settled start marker was not seen; see $LOG_PATH"
         fi
-        if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*mode=stationary-settled .*settle_seconds=" "$LOG_PATH" >/dev/null 2>&1; then
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*mode=${perf_stationary_mode} .*settle_seconds=" "$LOG_PATH" >/dev/null 2>&1; then
             mclone_die "Android XR perf settled summary marker was not seen; see $LOG_PATH"
         fi
     fi

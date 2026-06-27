@@ -1501,6 +1501,10 @@ impl TexturedSectionDrawResources {
             .collect();
     }
 
+    pub fn traversal_ready_section_count(&self) -> usize {
+        self.traversal_ready_sections.len()
+    }
+
     pub fn section_count(&self) -> usize {
         self.sections.len()
     }

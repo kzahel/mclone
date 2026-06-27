@@ -48,13 +48,24 @@ pnpm native:android-xr:perf:stationary:rd10
 pnpm native:android-xr:perf:stationary:sweep
 ```
 
+Frozen-mesh stationary render isolation:
+
+```bash
+pnpm native:android-xr:perf:frozen:rd1
+pnpm native:android-xr:perf:frozen:rd5
+pnpm native:android-xr:perf:frozen:rd10
+pnpm native:android-xr:perf:frozen:sweep
+```
+
 Flight samples start after the first submitted terrain frame and stress
 movement, streaming, compile/upload, and rendering together. Stationary samples
 disable locomotion, wait for no server queues, no compile jobs, no rebuilds, no
 uploads, and no poll changes after a minimum 5 second settle window, then record
 a 20 second steady-state render sample. Persistent deferred render sections are
 recorded as a steady-state condition rather than blocking the sample forever.
-The validator force-stops the app and sleeps the headset during cleanup.
+Frozen samples use the same settle gate, then skip runtime polling, section
+sync, traversal-ready refresh, and GPU section uploads during the measured
+window. The validator force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
