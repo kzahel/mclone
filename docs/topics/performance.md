@@ -71,6 +71,13 @@ Quest probe is automated no-clip flight at walking-like speed, with
 render-distance scripts for 1, 5, and 10, current OpenXR refresh reporting,
 and max-stage timing attribution. Durable headset rows live in
 [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md).
+On-device `XR_META_performance_metrics` data shows the RD10 frozen lane has GPU
+headroom (`7ms` app GPU at `58%` utilization) while per-eye CPU wall is `~21ms`,
+so RD10 is CPU draw-submission / pacing bound, not GPU-bound. The attribution,
+confidence levels, Playbox cross-check, and the ordered fix plan
+(split per-eye prepare/encode/poll, then single-submit both eyes, cache the
+static draw set, batch/bundle draws) live in
+[`099`](../tactical/099-android-xr-rd10-render-cost-attribution.md).
 
 ## Priority Queue
 
@@ -83,6 +90,7 @@ and max-stage timing attribution. Durable headset rows live in
 | P4 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | deferred | Native now avoids stale queued backlog and accepts unchanged sections. This remains useful for stress-orbit streaming, but current radius-5 evidence no longer puts render compile cancellation ahead of startup presentation or lighting parity. |
 | P5 | GPU upload budgeting and buffer reuse | Broadly | [`024`](../tactical/024-render-section-dirty-cache-and-upload-diffs.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | conditional | Native uploads changed sections incrementally, and movement probes show upload cost is small. Do this when probes show upload/allocation cost is material again. |
 | P6 | Release perf budgets and durable records | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`../performance-records.md`](../performance-records.md) | ongoing | Once baselines stabilize, add budget thresholds that catch regressions without failing on normal host noise. |
+| PX | Quest RD10 CPU-bound render submission | Native policy | [`099`](../tactical/099-android-xr-rd10-render-cost-attribution.md) | active; diagnostic landed | Meta perf-metrics shows RD10 has GPU headroom but ~21ms per-eye CPU wall. Next: split per-eye prepare/encode/poll, then single-submit both eyes, cache the static draw set, and batch/bundle the ~358 unbatched section draws. Quest-only lane, separate from the desktop priority order above. |
 
 ## Java Reference Anchors
 
@@ -174,6 +182,7 @@ Primary performance tacticals:
 - [`033-native-async-render-section-compile-queue.md`](../tactical/033-native-async-render-section-compile-queue.md)
 - [`034-native-render-compile-revisions-and-priority.md`](../tactical/034-native-render-compile-revisions-and-priority.md)
 - [`096-android-xr-quest-performance.md`](../tactical/096-android-xr-quest-performance.md)
+- [`099-android-xr-rd10-render-cost-attribution.md`](../tactical/099-android-xr-rd10-render-cost-attribution.md)
 
 Related subsystem tacticals:
 

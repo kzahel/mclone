@@ -256,6 +256,12 @@ Recorded first-pass implementation:
 
 ### Slice 5 - GPU Timing And Render-Mode Attribution
 
+Continued in [`099`](099-android-xr-rd10-render-cost-attribution.md): the opt-in
+`XR_META_performance_metrics` probe landed there and already split RD10 into
+CPU/GPU/compositor buckets (GPU has headroom; RD10 is CPU draw-submission
+bound), so wgpu GPU timestamps and diagnostic render modes are now lower
+priority than the CPU-side submit/prepare fixes tracked in `099`.
+
 - Add opt-in GPU timestamp support only when the Quest Vulkan/wgpu device
   exposes the required feature. Keep it off by default.
 - Report unsupported GPU timing explicitly instead of leaving blanks.

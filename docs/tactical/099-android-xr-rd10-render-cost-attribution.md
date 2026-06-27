@@ -1,0 +1,248 @@
+# 099: Android XR RD10 Render-Cost Attribution And CPU-Bound Submission
+
+Status: active; diagnostic landed (opt-in Meta performance-metrics probe,
+commit `0df8733`). This is the concrete continuation of
+[`096`](096-android-xr-quest-performance.md) Slice 5 (GPU timing / render-mode
+attribution). Future sessions should start here for standalone Quest render
+optimization.
+
+## Purpose
+
+Render distance 10 (RD10) misses the 72 Hz budget on standalone Quest 3 even in
+the frozen-render lane where all chunk generation, runtime poll, section sync,
+traversal refresh, and GPU upload report `0.000ms`. The prior interpretation
+(see the `2d200e1` frozen sweep record) guessed RD10 was "render-bound or
+compositor/GPU-wait-bound." On-device Meta performance-metrics data overturns
+that guess: **RD10 has GPU headroom and is CPU draw-submission / frame-pacing
+bound.** This doc captures the evidence, the confidence level of each claim, the
+Playbox cross-check, and an ordered optimization plan so the next session does
+not re-derive it.
+
+Scope: standalone Quest / Android XR APK only, not desktop-hosted OpenXR
+streaming to a Quest client.
+
+## Headline Finding
+
+On the frozen RD10 lane (fixed pose `0,80,-96,180`, 179 drawn sections,
+1.35M drawn indices, ~62 FPS, p50 16.1ms):
+
+| Bucket | Measured | Source |
+|---|---:|---|
+| App GPU frametime (both eyes) | `7.040 ms` | `XR_META_performance_metrics` `app/gpu_frametime` |
+| GPU utilization | `57.6 %` | `device/gpu_utilization` |
+| Compositor GPU frametime | `1.561 ms` | `compositor/gpu_frametime` |
+| App per-eye CPU wall (left + right) | `10.570 + 10.420 = 20.99 ms` | `MCLONE_ANDROID_XR_PERF_TERRAIN` |
+| Compositor dropped frames (cumulative) | `103` | `compositor/dropped_frame_count` |
+| SpaceWarp | off (`0`) | `compositor/spacewarp_mode` |
+| Device CPU util avg / worst core | `35.7 %` / `~53 %` | `device/cpu_utilization_*` |
+
+The GPU draws both eyes in ~7 ms with ~42% headroom, yet the app burns ~21 ms
+of per-eye wall time. The compositor drops frames because the **CPU** frame
+exceeds the 13.889 ms budget, not because the GPU or compositor is saturated.
+The full record is in
+[`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md)
+under "2026-06-27 - Standalone Quest 3 Frozen RD10 Meta Performance Metrics".
+
+## What Landed (diagnostic only)
+
+- New opt-in `XR_META_performance_metrics` probe (the Meta/"Facebook"
+  perf-metrics extension), ported from the Playbox pattern:
+  `native/apps/mclone-android-xr-client/src/perf_metrics.rs`.
+- `meta_performance_metrics` enabled at instance creation when available.
+- `--perf-metrics` flag plumbed through startup options →
+  `run_android_openxr_mclone` → `run_mclone_frame_loop`, forwarded in
+  `android-xr/validate-quest-openxr.sh`, with a
+  `native:android-xr:perf:frozen:rd10:metrics` convenience lane.
+- Emits `MCLONE_ANDROID_XR_PERF_METRICS` (compact app/compositor GPU+CPU
+  frametime, utilization, dropped/stale frames, motion-to-photon) plus a
+  per-counter `MCLONE_ANDROID_XR_PERF_METRICS_COUNTER` inventory. Off by
+  default; degrades gracefully when the extension or counters are unavailable.
+- Commits: `0df8733` (probe), `4ffa99c` (record).
+
+The Oculus `v204.201.0` runtime enumerates 17 counters and returns valid data
+on the first attempt. It does **not** expose `app/cpu_frametime` or
+`compositor/cpu_frametime`, so those marker fields are `n/a`; CPU load is
+covered by `device/cpu_utilization_*` (average, worst, per-core 0..7).
+
+## mclone's current per-frame render path (the waste)
+
+Code facts a future session should not have to rediscover.
+
+- Each eye renders independently and serially in `render_prepared_frame`
+  (`native/crates/mclone-xr-scene/src/lib.rs:540-567`): left eye fully
+  completes before the right eye is even encoded.
+- `render_eye_target` (`native/crates/mclone-xr-scene/src/lib.rs:874-948`)
+  creates its **own** command encoder, records the pass, `queue.submit`s, then
+  **blocks** on `device.poll(WaitForSubmissionIndex)` + `device.poll(Wait)`
+  (`:936-944`). That is **two encoders, two submits, and four blocking polls
+  per frame**, with no CPU/GPU overlap and no eye parallelism. It is why the
+  per-eye wall time already includes GPU execution and why the compositor never
+  waits on our GPU (we drained it ourselves), so the existing `wait_begin`
+  stage cannot see GPU cost.
+- `TexturedSectionRenderer::render_with_options`
+  (`native/crates/mclone-render/src/chunk.rs:1532-1607`) runs in full **per eye,
+  per frame, even when frozen**:
+  - builds a fresh `BTreeMap` over **all** sections (1,133) — `:1540`,
+  - runs `cull_textured_sections` over all of them — `:1556`,
+  - `queue.write_buffer`s the camera uniform — `:1557`,
+  - issues **one `draw_indexed` per drawn section** (~179 opaque), unbatched,
+    instances `0..1` — `:1586-1591`,
+  - allocates a `Vec` and **sorts** the translucent set, one draw each —
+    `:1593-1605`.
+- In frozen mode the pose is fixed, so the cull result, draw list, and camera
+  uniform are **identical every frame**, yet all of it is rebuilt from scratch
+  twice per frame.
+
+## Playbox cross-check
+
+Playbox is a mature wgpu/OpenXR engine with extensive Quest iteration; its
+tactical `046-quest-hz-ramp-performance-baselines.md` tests these exact
+questions. Findings (Playbox file references are approximate; verify before
+porting):
+
+1. **Single encoder, single submit, single poll for both eyes.** Playbox
+   records both eyes into one encoder (`src/render/mod.rs` ~2964), submits once
+   (`~3279`), then polls **once after both eyes** (`src/xr/mod.rs` ~1632-1648).
+   Its 046 doc explicitly records a "stereo single-poll" optimization that moved
+   *from* per-eye polling *to* one poll and measured the win. mclone's per-eye
+   blocking poll is the anti-pattern Playbox already removed.
+2. **No wgpu `RenderBundle`s anywhere** (grep empty). Instead Playbox calls
+   `prepare_frame_scene` **once per frame and shares it across both eyes**
+   (`src/xr/mod.rs` ~3532) and **batches draws with instancing** — one
+   `draw_indexed` per batch, not per object (`src/render/mod.rs` ~3315;
+   `src/render/mesh_cache.rs` `DrawBatch`/`InstanceRaw`/`MAX_INSTANCES`).
+3. **For Playbox the residual is GPU-wait, not CPU.** Its instrumented table
+   shows `device.poll(Wait)` at ~60-70% of submit time and direct per-eye
+   encode under ~1 ms combined, and it concludes "more CPU prep refactors are
+   unlikely to help unless they reduce queued GPU work." **Critically, that
+   conclusion is conditional on Playbox having already batched draws and shared
+   prep.** mclone has done neither and issues ~358 unbatched draws with
+   duplicated per-eye prep, so mclone is in the CPU/submission-bound regime
+   Playbox had already left — consistent with the 7 ms GPU vs 21 ms wall gap.
+
+So Playbox both validates the direction (kill per-eye poll, share prep, batch
+draws) and warns: `device.poll(Wait)` overhead is itself non-trivial and mclone
+runs it twice as often, so part of mclone's residual is poll overhead, not draw
+encoding. Measure before assuming.
+
+## Theories and confidence
+
+| # | Claim | Confidence | Basis / what would raise it |
+|---|---|---|---|
+| T0 | RD10 is **not** GPU-fill-bound; GPU has ~40% headroom | **High** | Runtime-measured `app/gpu_frametime` 7.04 ms and `gpu_utilization` 57.6% independently agree. Single mid-window sample; a few more samples for a distribution would make it airtight. |
+| T1 | Per-eye blocking submit/poll serializes eyes, blocks CPU on GPU, and hides GPU cost from the wait stage | **High** | Direct from code (`lib.rs:936-944`); Playbox removed the same pattern. |
+| T2 | mclone re-prepares (BTreeMap build + cull + translucent sort) and re-encodes ~358 unbatched draws per eye per frame, wasteful under a static view | **High** | Direct from code (`chunk.rs:1532-1607`). |
+| T3 | The ~14 ms residual (21 ms wall − 7 ms GPU) is dominated by CPU prepare/encode | **Medium** | Inferred by subtraction; **not yet split** into prepare vs encode vs poll-overhead. Playbox shows poll(Wait) overhead is real and mclone does it 2× more. The breakdown slice below resolves this. |
+| T4 | Batching draws and/or render bundles + single-submit will recover most of the budget | **Medium** | Follows from T2/T3 but magnitude depends on the T3 split. Playbox's batching path is proven; render bundles are an mclone-specific option Playbox did not need. |
+| T5 | "Keep it on the GPU / reuse last frame" by caching rendered pixels | **Low / rejected** | Unsafe in XR: each frame still submits its own layer and even a "static" headset has pose jitter. The correct reading of the intuition is *stop re-walking/re-culling/re-encoding on the CPU*, not *reuse the framebuffer*. Playbox does not cache pixels. |
+
+## Recommended implementation slices (ordered)
+
+Diagnostic-first, then the Playbox-proven structural fixes. Keep every change
+behind the shared XR contracts; do not fork mclone rendering for Quest.
+
+### Slice A - Split the per-eye wall into prepare / encode / submit / poll (do first)
+
+- Bracket, per eye: prepare (records map + cull + translucent sort),
+  render-pass encode (the draw loop), `queue.submit`, and the
+  `device.poll(Wait)` block. Mirror Playbox's 046 breakdown table.
+- Surface as new max fields on the existing `MCLONE_ANDROID_XR_PERF_TERRAIN`
+  marker (or a new `..._RENDER_SPLIT` line), same opt-in style as the metrics
+  probe. ~Cheap, zero render-behavior change, no device feature.
+- Purpose: turn T3 from Medium to High and decide whether to chase poll
+  overhead (Slice B) or prepare/encode waste (Slices C/D) first.
+- Validation: `cargo check --target aarch64-linux-android`; run
+  `native:android-xr:perf:frozen:rd10:metrics` and read the split.
+
+### Slice B - Single encoder, single submit, single poll for both eyes
+
+- Acquire both eye swapchain images, record both eye render passes into one
+  encoder, `queue.submit` once, `device.poll` once after both, then release
+  both images and `xrEndFrame`. Remove the per-eye blocking poll.
+- Playbox-proven; removes 3 of 4 polls and enables CPU(eye 2)/GPU(eye 1)
+  overlap. Refactors `render_prepared_frame` / `render_eye_target` ownership of
+  the encoder; keep `record_eye0_summary` semantics.
+- Risk: medium (touches the submit path shared with the live lane). Validate
+  pixels (capture/look) and re-run the frozen sweep for regression.
+
+### Slice C - Cache the cull/draw set when the visible set is unchanged
+
+- When the visible/section set and view are unchanged (always true in frozen
+  mode, frequently true while stationary), reuse the previous `drawn_keys` and
+  the sorted translucent order instead of rebuilding the 1,133-entry map and
+  re-sorting per eye per frame.
+- Mind the per-eye view frustum: the cull is view-dependent, so cache keyed on
+  (section-set-version, view). Frozen mode collapses both eyes' views to fixed
+  poses, so it is the easy first target.
+
+### Slice D - Cut per-draw CPU cost (batching or render bundles)
+
+- Option D1 (Playbox path): batch sections into fewer draws via a combined
+  vertex/index megabuffer + instancing or `multi_draw_indexed_indirect`.
+- Option D2 (mclone-specific): pre-record the opaque + translucent section draw
+  sequence into a wgpu `RenderBundle` and replay with `execute_bundles`; set the
+  camera bind group on the pass outside the bundle so one bundle serves both
+  eyes and survives across frames while the section set is stable. Good fit for
+  heterogeneous per-section meshes and the frozen/static case.
+- Choose D1 vs D2 after Slice A shows how much is encode vs prepare.
+
+### Slice E (lower priority) - GPU timestamps / diagnostic render modes
+
+- wgpu `TIMESTAMP_QUERY` per pass or a flat/cheap-material diagnostic mode
+  (Playbox `RenderMode`) is now **lower priority**: the GPU bucket is already
+  known small. Revisit only if Slices A-D close the CPU gap and GPU becomes the
+  limiter, or to confirm fixed-foveated rendering is actually applied (the
+  instance enables `fb_foveation*` but the applied level is unverified).
+
+## Methodology caveats (carry forward)
+
+- The frozen lane's per-eye timers fuse CPU + GPU because of the blocking poll,
+  and zero out compositor wait. Use the Meta counters (or Slice A) for the real
+  split, not `frame_wall` percentiles (which include xrWaitFrame pacing).
+- The Meta sample is one steady-state read (frame-count warmup ~720), not a
+  max/percentile. Fine for a constant frozen load; sample a few times if a
+  distribution is needed.
+- The validated APK was built from a worktree carrying an unrelated uncommitted
+  `mclone-ui` change (links in transitively); it does not change terrain draw
+  behavior but is noted in the record for honesty.
+- Thermals/clocks can drift over long runs; `gpu_utilization` alongside
+  frametime guards against misreading throttle as work.
+
+## Guardrails
+
+- Keep diagnostics opt-in (`--perf-metrics`, future `--perf-render-split`);
+  never add always-on per-frame diagnostic cost to the headset loop (the prior
+  76 ms diagnostics regression is the cautionary tale).
+- Do not fork mclone rendering, chunk streaming, or session runtime for Quest;
+  add platform adapters/diagnostics around the shared contracts.
+- Always run the validator cleanup (force-stop, sleep headset) and verify
+  `pidof com.kzahel.mclone.xr` empty, `mWakefulness=Asleep`,
+  `mHoldingDisplaySuspendBlocker=false` after on-device runs.
+- For pixel-affecting slices (B, D), capture a screenshot and look before
+  moving on.
+
+## Open questions
+
+- After Slice A: is the residual prepare-bound, encode-bound, or poll-bound?
+  That picks the order of B vs C vs D.
+- Does the live (non-frozen) RD10 lane share the same CPU-bound profile, or does
+  streaming/upload re-enter as the limiter once the runtime is unfrozen?
+- Is fixed-foveated rendering actually applied to the eye swapchains? If not, it
+  is a cheap GPU win even though GPU is not the current limiter.
+- What is the right Quest default render distance once Slices A-D land and a
+  CPU-side budget exists?
+
+## References
+
+- Records: `../quest-standalone-performance-records.md` (frozen RD10 Meta
+  metrics row, and the `2d200e1` frozen sweep it supersedes in interpretation).
+- Parent perf tactical: [`096`](096-android-xr-quest-performance.md).
+- Probe: `native/apps/mclone-android-xr-client/src/perf_metrics.rs`; flag wiring
+  in the same crate's `lib.rs`; forwarding in
+  `android-xr/validate-quest-openxr.sh`.
+- Hot path: `native/crates/mclone-xr-scene/src/lib.rs:540-567,874-948`;
+  `native/crates/mclone-render/src/chunk.rs:1532-1607`.
+- Playbox: `docs/tactical/046-quest-hz-ramp-performance-baselines.md`,
+  `src/xr/mod.rs`, `src/render/mod.rs`, `src/render/mesh_cache.rs`,
+  `src/xr/performance_metrics.rs` (the probe pattern).
+- Commits: `0df8733` (probe), `4ffa99c` (record).
