@@ -1071,6 +1071,7 @@ impl FlatDebugTarget {
 pub struct FlatDebugRenderOptions {
     pub section_occlusion_culling: bool,
     pub force_fullbright: bool,
+    pub color_profile: &'static str,
 }
 
 impl FlatDebugRenderOptions {
@@ -1085,7 +1086,7 @@ impl FlatDebugRenderOptions {
         } else {
             "LIGHT"
         };
-        format!("OCC {occlusion}  {lighting}")
+        format!("OCC {occlusion}  {lighting}  COLOR {}", self.color_profile)
     }
 }
 
@@ -2816,6 +2817,7 @@ mod tests {
         overlay.render_options = Some(FlatDebugRenderOptions {
             section_occlusion_culling: true,
             force_fullbright: false,
+            color_profile: "VANILLA",
         });
 
         let lines = overlay.lines();
@@ -2832,7 +2834,11 @@ mod tests {
         assert!(lines.iter().any(|line| line == "TIME 1200 0.250"));
         assert!(lines.iter().any(|line| line == "SLOT 5"));
         assert!(lines.iter().any(|line| line == "TARGET 1 2 3"));
-        assert!(lines.iter().any(|line| line == "OCC ON  LIGHT"));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line == "OCC ON  LIGHT  COLOR VANILLA")
+        );
         assert_eq!(overlay.to_debug_overlay().title, "DEBUG");
     }
 

@@ -5,6 +5,7 @@ mod gpu_util;
 
 pub mod actor_assets;
 pub mod chunk;
+pub mod color_profile;
 pub mod entity;
 pub mod fog;
 pub mod gui;

@@ -150,7 +150,11 @@ fn write_headless_dual_view_frame(
             draw.set_traversal_ready_sections(
                 &runtime.traversal_ready_render_section_keys(render_view.camera_position),
             );
-            let sky = SkyRenderer::new(frame.device, HEADLESS_FORMAT);
+            let sky = SkyRenderer::new_with_color_profile(
+                frame.device,
+                HEADLESS_FORMAT,
+                render_options.color_profile,
+            );
             let mut render_stats = RenderStreamStats {
                 section_count: draw.section_count(),
                 index_count: draw.index_count(),
@@ -373,7 +377,11 @@ pub(crate) fn run_headless_screenshot(
             draw.set_traversal_ready_sections(
                 &runtime.traversal_ready_render_section_keys(spectator.position),
             );
-            let sky = SkyRenderer::new(frame.device, HEADLESS_FORMAT);
+            let sky = SkyRenderer::new_with_color_profile(
+                frame.device,
+                HEADLESS_FORMAT,
+                render_options.color_profile,
+            );
             let mut actors = ActorDrawResources::new(
                 frame.device,
                 frame.queue,
@@ -405,6 +413,7 @@ pub(crate) fn run_headless_screenshot(
                 pacing: FramePacingDebugStats::default(),
                 section_occlusion: render_options.section_occlusion_culling,
                 force_fullbright: render_options.force_fullbright,
+                color_profile: render_options.color_profile.label(),
             });
             let ui_active = ui.is_active();
             let ui_covers_world = ui.covers_world();

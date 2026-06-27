@@ -36,6 +36,7 @@ mod android {
         ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
         TexturedSectionUploadReport,
     };
+    use mclone_render::color_profile::{RenderColorProfile, preferred_surface_format_for_profile};
     use mclone_render::gui::GuiRenderer;
     use mclone_render::sky_render::SkyRenderer;
     use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
@@ -536,7 +537,9 @@ mod android {
             let scene_options = android_scene_options();
             let started = start_android_render_scene(device, queue, format, scene_options.clone())?;
             let depth = ChunkDepthTarget::new(device, width, height);
-            let sky = SkyRenderer::new(device, format);
+            let render_options = TexturedSectionRenderOptions::default();
+            let sky =
+                SkyRenderer::new_with_color_profile(device, format, render_options.color_profile);
             let audio = match load_asset_source()
                 .context("load Android sound assets")
                 .and_then(|source| AudioEngine::new(&source, AudioSettings::default()))
@@ -563,7 +566,7 @@ mod android {
                 }),
                 input_preferences: InputPreferences::AUTO,
                 keyboard_mouse: KeyboardMouseInputAdapter::new(),
-                render_options: TexturedSectionRenderOptions::default(),
+                render_options,
                 ui: android_game_ui_for_scene(&scene_options),
                 session_status: StatusOverlay::hidden(),
                 touch_menu_touch_id: None,
@@ -2328,9 +2331,6 @@ pub fn host_placeholder() {}
 
 #[cfg(target_os = "android")]
 fn preferred_surface_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
-    caps.formats
-        .iter()
-        .copied()
-        .find(wgpu::TextureFormat::is_srgb)
+    preferred_surface_format_for_profile(caps, RenderColorProfile::default())
         .unwrap_or(caps.formats[0])
 }

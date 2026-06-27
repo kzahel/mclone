@@ -13,6 +13,9 @@
 use glam::{Mat4, Quat, Vec3};
 use wgpu::util::DeviceExt;
 
+use crate::color_profile::{
+    RenderColorProfile, RenderTargetColorTransform, color_transform_rgb, color_transform_wgpu,
+};
 use crate::sky::sunrise_color;
 
 const SKY_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = 64;
@@ -46,10 +49,19 @@ pub struct SkyRenderer {
     glow_vertex_buffer: wgpu::Buffer,
     glow_index_buffer: wgpu::Buffer,
     glow_index_count: u32,
+    color_transform: RenderTargetColorTransform,
 }
 
 impl SkyRenderer {
     pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        Self::new_with_color_profile(device, color_format, RenderColorProfile::default())
+    }
+
+    pub fn new_with_color_profile(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        color_profile: RenderColorProfile,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_sky_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sky.wgsl").into()),
@@ -195,6 +207,7 @@ impl SkyRenderer {
             glow_vertex_buffer,
             glow_index_buffer,
             glow_index_count,
+            color_transform: color_profile.target_color_transform(color_format),
         }
     }
 
@@ -212,6 +225,7 @@ impl SkyRenderer {
         time_of_day: f32,
         sun_angle: f32,
     ) {
+        let clear_color = color_transform_wgpu(clear_color, self.color_transform);
         let sky_color = [
             clear_color.r as f32,
             clear_color.g as f32,
@@ -232,7 +246,10 @@ impl SkyRenderer {
             queue.write_buffer(
                 &self.glow_vertex_buffer,
                 0,
-                &vertex_bytes(&glow_vertices(color, sun_angle)),
+                &vertex_bytes(&glow_vertices(
+                    color_transform_rgba(color, self.color_transform),
+                    sun_angle,
+                )),
             );
         }
 
@@ -261,6 +278,11 @@ impl SkyRenderer {
             pass.draw_indexed(0..self.glow_index_count, 0, 0..1);
         }
     }
+}
+
+fn color_transform_rgba(color: [f32; 4], transform: RenderTargetColorTransform) -> [f32; 4] {
+    let [r, g, b] = color_transform_rgb([color[0], color[1], color[2]], transform);
+    [r, g, b, color[3]]
 }
 
 /// Triangle-list indices for a fan with vertex 0 at the center and the remainder

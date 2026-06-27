@@ -25,6 +25,7 @@ pub(crate) struct DebugPaneStats {
     pub(crate) pacing: FramePacingDebugStats,
     pub(crate) section_occlusion: bool,
     pub(crate) force_fullbright: bool,
+    pub(crate) color_profile: &'static str,
 }
 
 impl DebugPaneStats {
@@ -87,6 +88,7 @@ impl DebugPaneStats {
         overlay.render_options = Some(FlatDebugRenderOptions {
             section_occlusion_culling: self.section_occlusion,
             force_fullbright: self.force_fullbright,
+            color_profile: self.color_profile,
         });
         overlay.extra_lines = vec![
             format!(
@@ -301,6 +303,7 @@ mod tests {
             },
             section_occlusion: true,
             force_fullbright: false,
+            color_profile: "VANILLA",
         };
 
         let lines = stats.lines();
@@ -313,7 +316,11 @@ mod tests {
         assert_eq!(lines[6], "CHUNKS L9 V8 P1");
         assert!(lines.iter().any(|line| line == "TRACK P1 V8 A8 Q0"));
         assert!(lines.iter().any(|line| line == "ACTOR R 1/2 I180"));
-        assert!(lines.iter().any(|line| line == "OCC ON  LIGHT"));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line == "OCC ON  LIGHT  COLOR VANILLA")
+        );
         assert!(lines.iter().any(|line| line == "BUDGET 8.3MS FRAME 16.7MS"));
         assert!(lines.iter().any(|line| line == "OVER 3/1/0 WORST 33.4"));
 

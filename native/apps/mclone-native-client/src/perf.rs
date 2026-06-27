@@ -185,6 +185,10 @@ impl MovementPerfReport {
             self.options.render_options.force_fullbright
         );
         println!(
+            "  \"render_color_profile\": \"{}\",",
+            self.options.render_options.color_profile.as_str()
+        );
+        println!(
             "  \"path_radius_chunks\": {},",
             self.options.path_radius_chunks
         );
@@ -571,6 +575,10 @@ impl TimedemoReport {
             self.options.render_options.force_fullbright
         );
         println!(
+            "  \"render_color_profile\": \"{}\",",
+            self.options.render_options.color_profile.as_str()
+        );
+        println!(
             "  \"path_radius_chunks\": {},",
             self.options.path_radius_chunks
         );
@@ -725,6 +733,10 @@ impl FrameBudgetProbeReport {
         println!(
             "  \"force_fullbright\": {},",
             self.options.render_options.force_fullbright
+        );
+        println!(
+            "  \"render_color_profile\": \"{}\",",
+            self.options.render_options.color_profile.as_str()
         );
         println!(
             "  \"path_radius_chunks\": {},",
@@ -1271,7 +1283,8 @@ pub(crate) fn run_frame_budget_probe(
             draw.set_traversal_ready_sections(
                 &runtime.traversal_ready_render_section_keys(initial_spectator.position),
             );
-            let sky = SkyRenderer::new(device, format);
+            let sky =
+                SkyRenderer::new_with_color_profile(device, format, render_options.color_profile);
             let actors = ActorDrawResources::new(
                 device,
                 queue,

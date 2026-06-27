@@ -39,6 +39,49 @@ fn lerp_vec3(left: vec3<f32>, right: vec3<f32>, delta: f32) -> vec3<f32> {
     return left + (right - left) * delta;
 }
 
+fn srgb_decode_channel(value: f32) -> f32 {
+    let clamped = clamp(value, 0.0, 1.0);
+    if (clamped <= 0.04045) {
+        return clamped / 12.92;
+    }
+    return pow((clamped + 0.055) / 1.055, 2.4);
+}
+
+fn srgb_encode_channel(value: f32) -> f32 {
+    let clamped = clamp(value, 0.0, 1.0);
+    if (clamped <= 0.0031308) {
+        return clamped * 12.92;
+    }
+    return 1.055 * pow(clamped, 1.0 / 2.4) - 0.055;
+}
+
+fn srgb_decode(color: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(
+        srgb_decode_channel(color.r),
+        srgb_decode_channel(color.g),
+        srgb_decode_channel(color.b),
+    );
+}
+
+fn srgb_encode(color: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(
+        srgb_encode_channel(color.r),
+        srgb_encode_channel(color.g),
+        srgb_encode_channel(color.b),
+    );
+}
+
+fn apply_color_profile(color: vec4<f32>) -> vec4<f32> {
+    let mode = uniforms.render_options.w;
+    if (mode > 1.5) {
+        return vec4<f32>(srgb_encode(color.rgb), color.a);
+    }
+    if (mode > 0.5) {
+        return vec4<f32>(srgb_decode(color.rgb), color.a);
+    }
+    return color;
+}
+
 fn lightmap_color(block_light_level: f32, sky_light_level: f32, sky_darken_value: f32) -> vec3<f32> {
     let sky_darken = clamp(sky_darken_value, 0.0, 1.0);
     let sky = dimension_brightness(sky_light_level) * (sky_darken * 0.95 + 0.05);
@@ -88,5 +131,5 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let color = vec4<f32>(texel.rgb * input.color.rgb * input.light, texel.a * input.color.a);
-    return apply_fog(color, input.world_position);
+    return apply_color_profile(apply_fog(color, input.world_position));
 }

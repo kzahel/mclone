@@ -106,8 +106,12 @@ pub struct WebRuntime {
 
 impl WebRuntime {
     pub fn local_integrated(seed: i64) -> Self {
+        Self::local_integrated_at(seed, SMOKE_INITIAL_CENTER)
+    }
+
+    pub fn local_integrated_at(seed: i64, initial_center: ChunkPos) -> Self {
         let host = WebLoopbackHost::new(seed);
-        let mut core = SingleViewRuntime::local_integrated(SMOKE_INITIAL_CENTER, 0, 0);
+        let mut core = SingleViewRuntime::local_integrated(initial_center, 0, 0);
         core.force_day_time(host.day_time());
         Self {
             core,
@@ -119,9 +123,17 @@ impl WebRuntime {
     pub async fn web_worker_integrated(
         config: WebIntegratedServerRunnerConfig,
     ) -> Result<Self, String> {
+        Self::web_worker_integrated_at(config, SMOKE_INITIAL_CENTER).await
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn web_worker_integrated_at(
+        config: WebIntegratedServerRunnerConfig,
+        initial_center: ChunkPos,
+    ) -> Result<Self, String> {
         let runner = WebIntegratedServerRunner::new(config).await?;
         let diagnostics = runner.diagnostics();
-        let mut core = SingleViewRuntime::local_integrated(SMOKE_INITIAL_CENTER, 0, 0);
+        let mut core = SingleViewRuntime::local_integrated(initial_center, 0, 0);
         core.force_day_time(diagnostics.day_time);
         Ok(Self {
             core,
@@ -131,9 +143,17 @@ impl WebRuntime {
 
     #[cfg(target_arch = "wasm32")]
     pub async fn websocket_remote(url: impl Into<String>) -> Result<Self, String> {
+        Self::websocket_remote_at(url, SMOKE_INITIAL_CENTER).await
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn websocket_remote_at(
+        url: impl Into<String>,
+        initial_center: ChunkPos,
+    ) -> Result<Self, String> {
         let session = WebSocketServerSession::connect(url).await?;
         Ok(Self {
-            core: SingleViewRuntime::remote_dedicated(SMOKE_INITIAL_CENTER, 0, 0),
+            core: SingleViewRuntime::remote_dedicated(initial_center, 0, 0),
             host: WebRuntimeHost::RemoteWebSocket(session),
         })
     }

@@ -39,6 +39,8 @@ use anyhow::Result;
 use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, ChunkPos, ChunkSnapshot};
 #[cfg(test)]
 use mclone_render::chunk::TexturedSectionRenderOptions;
+#[cfg(test)]
+use mclone_render::color_profile::RenderColorProfile;
 use mclone_render::headless::{
     HeadlessClearOptions, HeadlessUiOptions, write_headless_clear_png, write_headless_ui_png,
 };
@@ -844,6 +846,36 @@ mod tests {
                 start_intent: WindowStartIntent::InWorld,
             }
         );
+    }
+
+    #[test]
+    fn cli_parses_render_color_profile() {
+        let cli = Cli::parse([
+            "--headless-chunk".to_owned(),
+            "/tmp/mclone-chunk.png".to_owned(),
+            "--render-color-profile".to_owned(),
+            "stylized-bright".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::HeadlessChunk {
+                path: PathBuf::from("/tmp/mclone-chunk.png"),
+                width: 640,
+                height: 480,
+                scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions {
+                    color_profile: RenderColorProfile::StylizedBright,
+                    ..TexturedSectionRenderOptions::default()
+                },
+            }
+        );
+
+        let err = Cli::parse(["--render-color-profile".to_owned(), "neon".to_owned()])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("expected vanilla"));
     }
 
     #[test]

@@ -77,7 +77,7 @@ const VIEW_TYPE: xr::ViewConfigurationType = PRIMARY_STEREO_VIEW_TYPE;
 #[cfg(all(not(target_os = "android"), target_vendor = "apple"))]
 const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 #[cfg(all(not(target_os = "android"), not(target_vendor = "apple")))]
-const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 #[cfg(not(target_os = "android"))]
 const XR_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 #[cfg(not(target_os = "android"))]

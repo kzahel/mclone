@@ -401,7 +401,11 @@ where
             world_gui_renderer: WorldGuiRenderer::new(device, color_format),
             ui,
             session_status: StatusOverlay::hidden(),
-            sky: SkyRenderer::new(device, color_format),
+            sky: SkyRenderer::new_with_color_profile(
+                device,
+                color_format,
+                render_options.color_profile,
+            ),
             render_stats: started.render_stats,
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),

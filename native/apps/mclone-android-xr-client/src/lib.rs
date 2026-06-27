@@ -60,7 +60,7 @@ mod android {
     const ANDROID_ASSET_ROOT_ENV: &str = "MCLONE_ANDROID_ASSET_ROOT";
     const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
     const VIEW_TYPE: xr::ViewConfigurationType = PRIMARY_STEREO_VIEW_TYPE;
-    const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+    const XR_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
     const XR_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
     const XR_SAMPLE_COUNT: u32 = 1;
     const SESSION_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -593,9 +593,10 @@ mod android {
             scene_options.lighting_enabled
         );
         log::info!(
-            "Android XR render options: section_occlusion={} fullbright={}",
+            "Android XR render options: section_occlusion={} fullbright={} color_profile={}",
             startup_options.render_options.section_occlusion_culling,
-            startup_options.render_options.force_fullbright
+            startup_options.render_options.force_fullbright,
+            startup_options.render_options.color_profile.as_str()
         );
 
         let runtime_assets = match load_android_xr_runtime_assets() {

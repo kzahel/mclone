@@ -43,6 +43,17 @@ interface PendingCompile {
   workerError: string | null;
 }
 
+interface WebStartupOptions extends WasmReport {
+  seedText: string;
+  chunkX: number;
+  chunkZ: number;
+  renderDistance: number;
+  remoteWebSocketUrl?: string;
+  sectionOcclusionCulling: boolean;
+  forceFullbright: boolean;
+  renderColorProfile: string;
+}
+
 interface AppRuntimeState extends Record<string, any> {
   ok: boolean;
   ready: boolean;
@@ -90,7 +101,6 @@ const RENDER_COMPILER_WORKER_URL = versionedUrl("./mclone-render-compiler-worker
 const SERVER_WORKER_URL = versionedUrl("./mclone-integrated-server-worker.js");
 const SERVER_JOB_WORKER_URL = versionedUrl("./mclone-server-job-worker.js");
 const ASSET_PACK_URL = versionedUrl("/reference/minecraft-1.17.1/extracted.zip");
-const REMOTE_WS_URL = remoteWebSocketUrlFromLocation();
 
 const DEFAULT_RADIUS_CHUNKS = 1;
 const MIN_RADIUS_CHUNKS = 1;
@@ -171,6 +181,7 @@ const runtime: AppRuntime = {
     statusOverlayMessage: "",
     sectionOcclusionCulling: true,
     forceFullbright: false,
+    renderColorProfile: "vanilla",
     frameCount: 0,
     lastFrameGapMs: 0,
     maxFrameGapMs: 0,
@@ -203,8 +214,8 @@ const runtime: AppRuntime = {
     touchMovementForwardImpulse: 0,
     touchLookActive: false,
     touchButtonActiveCount: 0,
-    clientHost: REMOTE_WS_URL ? "remote-dedicated" : "worker-integrated",
-    remoteWebSocketUrl: REMOTE_WS_URL,
+    clientHost: "worker-integrated",
+    remoteWebSocketUrl: null,
     status: "booting",
   },
 };
@@ -340,15 +351,27 @@ class WebChunkApp {
     const module = await import(BINDGEN_JS_URL.href) as WasmModule;
     await module.default(BINDGEN_WASM_URL.href);
     this.module = module;
-    const requiredExports = ["mclone_web_create_worker_chunk_render_session"];
-    if (REMOTE_WS_URL) {
-      requiredExports.push("mclone_web_create_remote_chunk_render_session");
-    }
+    const requiredExports = [
+      "mclone_web_startup_options_from_query",
+      "mclone_web_create_worker_chunk_render_session_with_startup",
+      "mclone_web_create_remote_chunk_render_session_with_startup",
+    ];
     for (const name of requiredExports) {
       if (typeof (module as Record<string, any>)[name] !== "function") {
         throw new Error(`missing ${name} export`);
       }
     }
+    const startup = startupOptionsFromLocation(module);
+    const remoteWebSocketUrl = startupRemoteWebSocketUrl(startup);
+    this.radiusChunks = clampRadiusChunks(startup.renderDistance);
+    this.sectionOcclusionCulling = Boolean(startup.sectionOcclusionCulling);
+    this.forceFullbright = Boolean(startup.forceFullbright);
+    runtime.state.radiusChunks = this.radiusChunks;
+    runtime.state.clientHost = remoteWebSocketUrl ? "remote-dedicated" : "worker-integrated";
+    runtime.state.remoteWebSocketUrl = remoteWebSocketUrl;
+    runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
+    runtime.state.forceFullbright = this.forceFullbright;
+    runtime.state.renderColorProfile = startup.renderColorProfile;
 
     runtime.state.status = "loading assets";
     publishRuntimeState(runtime.state);
@@ -356,18 +379,33 @@ class WebChunkApp {
     this.assetPack = assetPack;
     runtime.state.status = "initializing webgpu";
     publishRuntimeState(runtime.state);
-    if (REMOTE_WS_URL) {
+    if (remoteWebSocketUrl) {
       runtime.state.status = "connecting remote websocket";
       publishRuntimeState(runtime.state);
-      this.session = await module.mclone_web_create_remote_chunk_render_session(
+      this.session = await module.mclone_web_create_remote_chunk_render_session_with_startup(
         this.canvas,
         assetPack,
-        REMOTE_WS_URL,
+        remoteWebSocketUrl,
+        startup.chunkX,
+        startup.chunkZ,
+        this.sectionOcclusionCulling,
+        this.forceFullbright,
+        startup.renderColorProfile,
       );
     } else {
-      this.session = await module.mclone_web_create_worker_chunk_render_session(
+      const seed = parseSeedBigInt(startup.seedText);
+      if (seed === null) {
+        throw new Error(`invalid startup seed ${JSON.stringify(startup.seedText)}`);
+      }
+      this.session = await module.mclone_web_create_worker_chunk_render_session_with_startup(
         this.canvas,
         assetPack,
+        seed,
+        startup.chunkX,
+        startup.chunkZ,
+        this.sectionOcclusionCulling,
+        this.forceFullbright,
+        startup.renderColorProfile,
         SERVER_WORKER_URL.href,
         SERVER_JOB_WORKER_URL.href,
         BINDGEN_JS_URL.href,
@@ -784,6 +822,9 @@ class WebChunkApp {
     }
     runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
     runtime.state.forceFullbright = this.forceFullbright;
+    if (typeof report.renderColorProfile !== "undefined") {
+      runtime.state.renderColorProfile = String(report.renderColorProfile);
+    }
     if (typeof report.debugOverlayVisible !== "undefined") {
       runtime.state.debugOverlayVisible = Boolean(report.debugOverlayVisible);
     }
@@ -1070,6 +1111,9 @@ class WebChunkApp {
     this.forceFullbright = Boolean(report.forceFullbright);
     runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
     runtime.state.forceFullbright = this.forceFullbright;
+    if (typeof report.renderColorProfile !== "undefined") {
+      runtime.state.renderColorProfile = String(report.renderColorProfile);
+    }
     if (typeof report.touchLookSensitivityAvailable !== "undefined") {
       runtime.state.touchLookSensitivityAvailable = Boolean(report.touchLookSensitivityAvailable);
     }
@@ -1493,6 +1537,36 @@ function parseSeedBigInt(value: unknown): bigint | null {
   return null;
 }
 
+function startupOptionsFromLocation(module: WasmModule): WebStartupOptions {
+  const raw = module.mclone_web_startup_options_from_query(globalThis.location.search) as WebStartupOptions;
+  if (!raw?.ok) {
+    throw new Error("failed to parse startup options");
+  }
+  return {
+    ...raw,
+    seedText: String(raw.seedText ?? "12345"),
+    chunkX: finiteInteger(raw.chunkX, 0),
+    chunkZ: finiteInteger(raw.chunkZ, 0),
+    renderDistance: clampRadiusChunks(raw.renderDistance),
+    sectionOcclusionCulling: Boolean(raw.sectionOcclusionCulling),
+    forceFullbright: Boolean(raw.forceFullbright),
+    renderColorProfile: String(raw.renderColorProfile ?? "vanilla"),
+  };
+}
+
+function startupRemoteWebSocketUrl(options: WebStartupOptions): string | null {
+  if (typeof options.remoteWebSocketUrl !== "string") {
+    return null;
+  }
+  const trimmed = options.remoteWebSocketUrl.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function finiteInteger(value: unknown, fallback: number): number {
+  const parsed = Math.trunc(Number(value));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function applySessionReport(report: WasmReport, state: AppRuntimeState): void {
   if (typeof report.sessionState !== "undefined") {
     state.sessionState = String(report.sessionState);
@@ -1574,15 +1648,6 @@ function versionedUrl(path: string): URL {
     url.searchParams.set("v", DEPLOY_ASSET_VERSION);
   }
   return url;
-}
-
-function remoteWebSocketUrlFromLocation(): string | null {
-  const value = new URL(globalThis.location.href).searchParams.get("remoteWsUrl");
-  if (value === null) {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 }
 
 function snapshotState(): WasmReport {

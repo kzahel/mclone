@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
+use crate::color_profile::{RenderColorProfile, preferred_surface_format_for_profile};
 use crate::gpu_util::{native_backends, optional_gpu_features};
 use crate::target::{RenderFrameContext, RenderFrameTarget};
 
@@ -21,6 +22,13 @@ pub struct NativeSurfaceContext {
 
 impl NativeSurfaceContext {
     pub fn new(window: Arc<Window>) -> Result<Self> {
+        Self::new_with_color_profile(window, RenderColorProfile::default())
+    }
+
+    pub fn new_with_color_profile(
+        window: Arc<Window>,
+        color_profile: RenderColorProfile,
+    ) -> Result<Self> {
         let size = window.inner_size();
         let backends = native_backends();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -52,7 +60,7 @@ impl NativeSurfaceContext {
         })?;
 
         let caps = surface.get_capabilities(&adapter);
-        let format = selected_surface_format(&caps);
+        let format = selected_surface_format(&caps, color_profile);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -75,11 +83,18 @@ impl NativeSurfaceContext {
             device.features()
         );
         log::info!(
-            "wgpu surface format={format:?} alpha_mode={:?} initial_present_mode={:?} present_modes={:?}",
+            "wgpu surface format={format:?} color_profile={} alpha_mode={:?} initial_present_mode={:?} present_modes={:?}",
+            color_profile.as_str(),
             config.alpha_mode,
             config.present_mode,
             caps.present_modes
         );
+        if format.is_srgb() {
+            log::warn!(
+                "wgpu surface format {format:?} is sRGB; renderer color profile {} will use a shader presentation transform where available",
+                color_profile.as_str()
+            );
+        }
 
         Ok(Self {
             surface,
@@ -266,27 +281,11 @@ fn elapsed_ms(start: Instant) -> f64 {
     start.elapsed().as_secs_f64() * 1000.0
 }
 
-fn preferred_surface_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
-    [
-        wgpu::TextureFormat::Bgra8UnormSrgb,
-        wgpu::TextureFormat::Rgba8UnormSrgb,
-    ]
-    .into_iter()
-    .find(|format| caps.formats.contains(format))
-    .or_else(|| caps.formats.iter().copied().find(|format| format.is_srgb()))
-    .or_else(|| {
-        [
-            wgpu::TextureFormat::Bgra8Unorm,
-            wgpu::TextureFormat::Rgba8Unorm,
-        ]
-        .into_iter()
-        .find(|format| caps.formats.contains(format))
-    })
-    .unwrap_or(caps.formats[0])
-}
-
-fn selected_surface_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
-    selected_surface_format_with_override(caps, surface_format_override())
+fn selected_surface_format(
+    caps: &wgpu::SurfaceCapabilities,
+    color_profile: RenderColorProfile,
+) -> wgpu::TextureFormat {
+    selected_surface_format_with_override(caps, color_profile, surface_format_override())
 }
 
 fn selected_present_mode(
@@ -317,6 +316,7 @@ fn selected_present_mode(
 
 fn selected_surface_format_with_override(
     caps: &wgpu::SurfaceCapabilities,
+    color_profile: RenderColorProfile,
     requested: Option<wgpu::TextureFormat>,
 ) -> wgpu::TextureFormat {
     if let Some(format) = requested {
@@ -331,7 +331,7 @@ fn selected_surface_format_with_override(
             caps.formats
         );
     }
-    preferred_surface_format(caps)
+    preferred_surface_format_for_profile(caps, color_profile).unwrap_or(caps.formats[0])
 }
 
 fn surface_format_override() -> Option<wgpu::TextureFormat> {
@@ -378,15 +378,15 @@ mod tests {
     }
 
     #[test]
-    fn surface_format_prefers_srgb() {
+    fn surface_format_prefers_non_srgb_for_vanilla() {
         let caps = caps(vec![
             wgpu::TextureFormat::Rgba8Unorm,
             wgpu::TextureFormat::Bgra8UnormSrgb,
         ]);
 
         assert_eq!(
-            selected_surface_format_with_override(&caps, None),
-            wgpu::TextureFormat::Bgra8UnormSrgb
+            selected_surface_format_with_override(&caps, RenderColorProfile::Vanilla, None),
+            wgpu::TextureFormat::Rgba8Unorm
         );
     }
 
@@ -398,7 +398,11 @@ mod tests {
         ]);
 
         assert_eq!(
-            selected_surface_format_with_override(&caps, Some(wgpu::TextureFormat::Rgba8Unorm)),
+            selected_surface_format_with_override(
+                &caps,
+                RenderColorProfile::Vanilla,
+                Some(wgpu::TextureFormat::Rgba8Unorm),
+            ),
             wgpu::TextureFormat::Rgba8Unorm
         );
     }
@@ -408,7 +412,11 @@ mod tests {
         let caps = caps(vec![wgpu::TextureFormat::Rgba8Unorm]);
 
         assert_eq!(
-            selected_surface_format_with_override(&caps, Some(wgpu::TextureFormat::Bgra8UnormSrgb)),
+            selected_surface_format_with_override(
+                &caps,
+                RenderColorProfile::Vanilla,
+                Some(wgpu::TextureFormat::Bgra8UnormSrgb),
+            ),
             wgpu::TextureFormat::Rgba8Unorm
         );
     }

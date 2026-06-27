@@ -71,7 +71,7 @@ pub(crate) fn run_window(
 ) -> Result<()> {
     let assets = WindowSceneAssets::load()?;
     log::info!(
-        "native window startup seed={} initial_center=({}, {}) render_distance={} lighting={} remote={:?} atlas={}x{} start={:?}",
+        "native window startup seed={} initial_center=({}, {}) render_distance={} lighting={} color_profile={} remote={:?} atlas={}x{} start={:?}",
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
@@ -81,6 +81,7 @@ pub(crate) fn run_window(
         } else {
             "disabled"
         },
+        render_options.color_profile.as_str(),
         scene.remote_addr,
         assets.mesh_assets.atlas.width,
         assets.mesh_assets.atlas.height,
@@ -1143,6 +1144,7 @@ impl ChunkApp {
             pacing: self.frame_pacing.debug_stats(),
             section_occlusion: render_options.section_occlusion_culling,
             force_fullbright: render_options.force_fullbright,
+            color_profile: render_options.color_profile.label(),
         }
     }
 
@@ -1355,7 +1357,10 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
-        let mut surface = match NativeSurfaceContext::new(window.clone()) {
+        let mut surface = match NativeSurfaceContext::new_with_color_profile(
+            window.clone(),
+            self.render_options.color_profile,
+        ) {
             Ok(surface) => surface,
             Err(err) => {
                 log::error!("failed to initialize native GPU: {err:#}");
@@ -1381,7 +1386,11 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
-        let sky = SkyRenderer::new(&surface.device, surface.config.format);
+        let sky = SkyRenderer::new_with_color_profile(
+            &surface.device,
+            surface.config.format,
+            self.render_options.color_profile,
+        );
         let actors = match ActorDrawResources::new(
             &surface.device,
             &surface.queue,

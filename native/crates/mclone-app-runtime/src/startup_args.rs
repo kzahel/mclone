@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use mclone_render::chunk::TexturedSectionRenderOptions;
+use mclone_render::color_profile::RenderColorProfile;
 
 pub const ARG_SEED: &str = "--seed";
 pub const ARG_CHUNK_X: &str = "--chunk-x";
@@ -11,6 +12,33 @@ pub const ARG_FREEZE_TIME: &str = "--freeze-time";
 pub const ARG_LIGHTING: &str = "--lighting";
 pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
 pub const ARG_FULLBRIGHT: &str = "--fullbright";
+pub const ARG_RENDER_COLOR_PROFILE: &str = "--render-color-profile";
+
+pub const QUERY_SEED: &str = "seed";
+pub const QUERY_CHUNK_X: &str = "chunkX";
+pub const QUERY_CHUNK_Z: &str = "chunkZ";
+pub const QUERY_RENDER_DISTANCE: &str = "renderDistance";
+pub const QUERY_REMOTE_WS_URL: &str = "remoteWsUrl";
+pub const QUERY_DAY_TIME: &str = "dayTime";
+pub const QUERY_FREEZE_TIME: &str = "freezeTime";
+pub const QUERY_LIGHTING: &str = "lighting";
+pub const QUERY_SECTION_OCCLUSION: &str = "sectionOcclusion";
+pub const QUERY_FULLBRIGHT: &str = "fullbright";
+pub const QUERY_RENDER_COLOR_PROFILE: &str = "renderColorProfile";
+
+pub const STARTUP_QUERY_KEYS: &[&str] = &[
+    QUERY_SEED,
+    QUERY_CHUNK_X,
+    QUERY_CHUNK_Z,
+    QUERY_RENDER_DISTANCE,
+    QUERY_REMOTE_WS_URL,
+    QUERY_DAY_TIME,
+    QUERY_FREEZE_TIME,
+    QUERY_LIGHTING,
+    QUERY_SECTION_OCCLUSION,
+    QUERY_FULLBRIGHT,
+    QUERY_RENDER_COLOR_PROFILE,
+];
 
 pub const DEFAULT_STARTUP_SEED: i64 = 12_345;
 pub const DEFAULT_STARTUP_CHUNK_X: i32 = 0;
@@ -121,6 +149,62 @@ impl StartupArgState {
                 self.render_options.force_fullbright = parse_bool_arg(ARG_FULLBRIGHT, args.next())?;
                 self.fullbright_explicit = true;
             }
+            ARG_RENDER_COLOR_PROFILE => {
+                self.render_options.color_profile =
+                    parse_render_color_profile_arg(ARG_RENDER_COLOR_PROFILE, args.next())?;
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    pub fn parse_query_param(
+        &mut self,
+        key: &str,
+        value: Option<String>,
+        render_distance_limits: RenderDistanceLimits,
+    ) -> Result<bool> {
+        match key {
+            QUERY_SEED => {
+                self.scene.seed = parse_i64_arg(QUERY_SEED, value)?;
+            }
+            QUERY_CHUNK_X => {
+                self.scene.chunk_x = parse_i32_arg(QUERY_CHUNK_X, value)?;
+            }
+            QUERY_CHUNK_Z => {
+                self.scene.chunk_z = parse_i32_arg(QUERY_CHUNK_Z, value)?;
+            }
+            QUERY_RENDER_DISTANCE => {
+                self.scene.render_distance = parse_render_distance_arg(
+                    QUERY_RENDER_DISTANCE,
+                    value,
+                    render_distance_limits,
+                )?;
+            }
+            QUERY_REMOTE_WS_URL => {
+                self.scene.remote_addr = parse_remote_addr_value(QUERY_REMOTE_WS_URL, value)?;
+            }
+            QUERY_DAY_TIME => {
+                self.scene.day_time_override = Some(parse_u64_arg(QUERY_DAY_TIME, value)?);
+            }
+            QUERY_FREEZE_TIME => {
+                self.scene.freeze_time = parse_query_presence_bool(QUERY_FREEZE_TIME, value)?;
+            }
+            QUERY_LIGHTING => {
+                self.scene.lighting_enabled = parse_bool_arg(QUERY_LIGHTING, value)?;
+            }
+            QUERY_SECTION_OCCLUSION => {
+                self.render_options.section_occlusion_culling =
+                    parse_bool_arg(QUERY_SECTION_OCCLUSION, value)?;
+            }
+            QUERY_FULLBRIGHT => {
+                self.render_options.force_fullbright = parse_bool_arg(QUERY_FULLBRIGHT, value)?;
+                self.fullbright_explicit = true;
+            }
+            QUERY_RENDER_COLOR_PROFILE => {
+                self.render_options.color_profile =
+                    parse_render_color_profile_arg(QUERY_RENDER_COLOR_PROFILE, value)?;
+            }
             _ => return Ok(false),
         }
         Ok(true)
@@ -191,6 +275,16 @@ pub fn parse_bool_arg(flag: &str, value: Option<String>) -> Result<bool> {
     }
 }
 
+pub fn parse_render_color_profile_arg(
+    flag: &str,
+    value: Option<String>,
+) -> Result<RenderColorProfile> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    value
+        .parse::<RenderColorProfile>()
+        .map_err(|message| anyhow::anyhow!("{flag} {message}"))
+}
+
 pub fn parse_render_distance_arg(
     flag: &str,
     value: Option<String>,
@@ -204,12 +298,25 @@ pub fn parse_render_distance_arg(
 }
 
 fn parse_remote_addr_arg(value: Option<String>) -> Result<Option<String>> {
-    let value = parse_string_arg(ARG_REMOTE_ADDR, value)?;
+    parse_remote_addr_value(ARG_REMOTE_ADDR, value)
+}
+
+fn parse_remote_addr_value(label: &str, value: Option<String>) -> Result<Option<String>> {
+    let value = parse_string_arg(label, value)?;
     let value = value.trim();
     if value.is_empty() || matches!(value, "default" | "off" | "none" | "false" | "0") {
         Ok(None)
     } else {
         Ok(Some(value.to_owned()))
+    }
+}
+
+fn parse_query_presence_bool(key: &str, value: Option<String>) -> Result<bool> {
+    let value = value.unwrap_or_default();
+    if value.trim().is_empty() {
+        Ok(true)
+    } else {
+        parse_bool_arg(key, Some(value))
     }
 }
 
@@ -293,16 +400,85 @@ mod tests {
             "false",
             ARG_FULLBRIGHT,
             "true",
+            ARG_RENDER_COLOR_PROFILE,
+            "stylized-bright",
         ]);
         assert!(!options.scene.lighting_enabled);
         assert!(!options.render_options.section_occlusion_culling);
         assert!(options.render_options.force_fullbright);
+        assert_eq!(
+            options.render_options.color_profile,
+            RenderColorProfile::StylizedBright
+        );
 
         let options = parse(&[ARG_LIGHTING, "false"]);
         assert!(options.render_options.force_fullbright);
 
         let options = parse(&[ARG_LIGHTING, "false", ARG_FULLBRIGHT, "false"]);
         assert!(!options.render_options.force_fullbright);
+    }
+
+    #[test]
+    fn parses_query_params() {
+        let mut state = StartupArgState::default();
+        for (key, value) in [
+            (QUERY_SEED, "-77"),
+            (QUERY_CHUNK_X, "4"),
+            (QUERY_CHUNK_Z, "-3"),
+            (QUERY_RENDER_DISTANCE, "6"),
+            (QUERY_REMOTE_WS_URL, "ws://127.0.0.1:25565"),
+            (QUERY_DAY_TIME, "6000"),
+            (QUERY_FREEZE_TIME, ""),
+            (QUERY_LIGHTING, "false"),
+            (QUERY_SECTION_OCCLUSION, "false"),
+            (QUERY_FULLBRIGHT, "true"),
+            (QUERY_RENDER_COLOR_PROFILE, "stylized-bright"),
+        ] {
+            assert!(
+                state
+                    .parse_query_param(
+                        key,
+                        Some(value.to_owned()),
+                        RenderDistanceLimits::new(1, 16)
+                    )
+                    .unwrap(),
+                "unexpected query key `{key}`"
+            );
+        }
+
+        let options = state.finish();
+        assert_eq!(
+            options.scene,
+            StartupSceneOptions {
+                seed: -77,
+                chunk_x: 4,
+                chunk_z: -3,
+                render_distance: 6,
+                remote_addr: Some("ws://127.0.0.1:25565".to_owned()),
+                day_time_override: Some(6000),
+                freeze_time: true,
+                lighting_enabled: false,
+            }
+        );
+        assert!(!options.render_options.section_occlusion_culling);
+        assert!(options.render_options.force_fullbright);
+        assert_eq!(
+            options.render_options.color_profile,
+            RenderColorProfile::StylizedBright
+        );
+    }
+
+    #[test]
+    fn parses_query_freeze_time_false() {
+        let mut state = StartupArgState::default();
+        state
+            .parse_query_param(
+                QUERY_FREEZE_TIME,
+                Some("false".to_owned()),
+                RenderDistanceLimits::new(1, 16),
+            )
+            .unwrap();
+        assert!(!state.finish().scene.freeze_time);
     }
 
     #[test]
@@ -323,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_tokens_are_left_to_platform_parsers() {
+    fn unknown_tokens_and_query_params_are_left_to_platform_parsers() {
         let mut state = StartupArgState::default();
         let mut args = std::iter::empty();
         assert!(
@@ -331,6 +507,15 @@ mod tests {
                 .parse_next_arg(
                     "--platform-only",
                     &mut args,
+                    RenderDistanceLimits::new(1, 16)
+                )
+                .unwrap()
+        );
+        assert!(
+            !state
+                .parse_query_param(
+                    "platformOnly",
+                    Some("1".to_owned()),
                     RenderDistanceLimits::new(1, 16)
                 )
                 .unwrap()

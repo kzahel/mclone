@@ -33,6 +33,7 @@ web-sys = { workspace = true, features = [
   "Event",
   "HtmlCanvasElement",
   "MessageEvent",
+  "UrlSearchParams",
   "WebSocket",
   "Worker",
   "WorkerOptions",

@@ -11,6 +11,9 @@ use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
     SessionFailure, SessionStartRequest, SessionStartResult, StartedGameSession,
 };
+use mclone_app_runtime::startup_args::{
+    RenderDistanceLimits, STARTUP_QUERY_KEYS, StartupArgState, StartupOptions, StartupSceneOptions,
+};
 use mclone_assets::PackedAssetSource;
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ClientInteractionController, ClientRuntime,
@@ -37,6 +40,7 @@ use mclone_render::chunk::{
     TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderStats,
     TexturedSectionUploadReport,
 };
+use mclone_render::color_profile::{RenderColorProfile, preferred_surface_format_for_profile};
 use mclone_render::entity::{ActorDrawResources, ActorInstance};
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::sky_render::SkyRenderer;
@@ -72,6 +76,7 @@ const WEB_GROUND_PROBE_DISTANCE: f64 = 0.01;
 const WEB_FRAME_UPDATE_DRAIN_BUDGET: usize = 1;
 const WEB_MIN_RENDER_DISTANCE: i32 = 1;
 const WEB_MAX_RENDER_DISTANCE: i32 = 16;
+const WEB_DEFAULT_RENDER_DISTANCE: u32 = 1;
 const WEB_FIXED_FPS_CAP: u32 = 60;
 const WEB_TOUCH_LOOK_SENSITIVITY_DEFAULT: f32 = 2.4;
 const WEB_TOUCH_LOOK_SENSITIVITY_MIN: f32 = 0.5;
@@ -197,6 +202,47 @@ pub async fn mclone_web_create_worker_chunk_render_session(
 }
 
 #[wasm_bindgen]
+pub async fn mclone_web_create_worker_chunk_render_session_with_startup(
+    canvas: HtmlCanvasElement,
+    asset_pack_bytes: js_sys::Uint8Array,
+    seed: i64,
+    initial_center_x: i32,
+    initial_center_z: i32,
+    section_occlusion_culling: bool,
+    force_fullbright: bool,
+    render_color_profile: String,
+    server_worker_url: String,
+    server_job_worker_url: String,
+    bindgen_js_url: String,
+    bindgen_wasm_url: String,
+) -> Result<WebChunkRenderSession, JsValue> {
+    let render_options = startup_render_options(
+        section_occlusion_culling,
+        force_fullbright,
+        &render_color_profile,
+    )
+    .map_err(JsValue::from)?;
+    WebChunkRenderSession::new_with_worker_at(
+        canvas,
+        asset_pack_bytes.to_vec(),
+        WebIntegratedServerRunnerConfig::new(
+            seed,
+            server_worker_url,
+            server_job_worker_url,
+            bindgen_js_url,
+            bindgen_wasm_url,
+        ),
+        ChunkPos {
+            x: initial_center_x,
+            z: initial_center_z,
+        },
+        render_options,
+    )
+    .await
+    .map_err(JsValue::from)
+}
+
+#[wasm_bindgen]
 pub async fn mclone_web_create_remote_chunk_render_session(
     canvas: HtmlCanvasElement,
     asset_pack_bytes: js_sys::Uint8Array,
@@ -209,6 +255,43 @@ pub async fn mclone_web_create_remote_chunk_render_session(
     )
     .await
     .map_err(JsValue::from)
+}
+
+#[wasm_bindgen]
+pub async fn mclone_web_create_remote_chunk_render_session_with_startup(
+    canvas: HtmlCanvasElement,
+    asset_pack_bytes: js_sys::Uint8Array,
+    websocket_url: String,
+    initial_center_x: i32,
+    initial_center_z: i32,
+    section_occlusion_culling: bool,
+    force_fullbright: bool,
+    render_color_profile: String,
+) -> Result<WebChunkRenderSession, JsValue> {
+    let render_options = startup_render_options(
+        section_occlusion_culling,
+        force_fullbright,
+        &render_color_profile,
+    )
+    .map_err(JsValue::from)?;
+    WebChunkRenderSession::new_with_remote_websocket_at(
+        canvas,
+        asset_pack_bytes.to_vec(),
+        websocket_url,
+        ChunkPos {
+            x: initial_center_x,
+            z: initial_center_z,
+        },
+        render_options,
+    )
+    .await
+    .map_err(JsValue::from)
+}
+
+#[wasm_bindgen]
+pub fn mclone_web_startup_options_from_query(search: String) -> Result<JsValue, JsValue> {
+    let options = parse_startup_options_from_query(&search)?;
+    startup_options_to_js_value(&options).map_err(JsValue::from)
 }
 
 #[wasm_bindgen]
@@ -871,6 +954,7 @@ struct GeneratedChunkRenderReport {
     status_overlay_visible: bool,
     section_occlusion_culling: bool,
     force_fullbright: bool,
+    render_color_profile: &'static str,
     compile_request_id: u32,
     pending_compile_job_count: usize,
     view_dirty_chunk_count: usize,
@@ -1052,6 +1136,7 @@ impl GeneratedChunkRenderReport {
             self.section_occlusion_culling,
         )?;
         set_bool(&object, "forceFullbright", self.force_fullbright)?;
+        set_string(&object, "renderColorProfile", self.render_color_profile)?;
         set_number(
             &object,
             "pendingCompileJobCount",
@@ -2239,6 +2324,7 @@ pub struct WebChunkRenderSession {
     status_overlay: StatusOverlay,
     section_occlusion_culling: bool,
     force_fullbright: bool,
+    render_color_profile: RenderColorProfile,
     input_preferences: InputPreferences,
     touch_look_sensitivity: f32,
     touch_settings_available: bool,
@@ -2694,6 +2780,11 @@ impl WebChunkRenderSession {
             self.section_occlusion_culling,
         )?;
         set_bool(object, "forceFullbright", self.force_fullbright)?;
+        set_string(
+            object,
+            "renderColorProfile",
+            self.render_color_profile.as_str(),
+        )?;
         set_bool(object, "debugOverlayVisible", self.debug_overlay_visible)?;
         let status_overlay = self.effective_status_overlay();
         set_bool(
@@ -2893,6 +2984,8 @@ impl WebChunkRenderSession {
             asset_pack_bytes,
             SessionStartRequest::NewLocalWorld { seed: SMOKE_SEED },
             WebRuntime::local_integrated(SMOKE_SEED),
+            SMOKE_INITIAL_CENTER,
+            TexturedSectionRenderOptions::default(),
         )
         .await
     }
@@ -2909,6 +3002,28 @@ impl WebChunkRenderSession {
             asset_pack_bytes,
             SessionStartRequest::NewLocalWorld { seed },
             runtime,
+            SMOKE_INITIAL_CENTER,
+            TexturedSectionRenderOptions::default(),
+        )
+        .await
+    }
+
+    async fn new_with_worker_at(
+        canvas: HtmlCanvasElement,
+        asset_pack_bytes: Vec<u8>,
+        config: WebIntegratedServerRunnerConfig,
+        initial_center: ChunkPos,
+        render_options: TexturedSectionRenderOptions,
+    ) -> Result<Self, String> {
+        let seed = config.seed;
+        let runtime = WebRuntime::web_worker_integrated_at(config, initial_center).await?;
+        Self::new_with_runtime(
+            canvas,
+            asset_pack_bytes,
+            SessionStartRequest::NewLocalWorld { seed },
+            runtime,
+            initial_center,
+            render_options,
         )
         .await
     }
@@ -2926,6 +3041,30 @@ impl WebChunkRenderSession {
                 endpoint: RemoteSessionEndpoint::new(websocket_url),
             },
             runtime,
+            SMOKE_INITIAL_CENTER,
+            TexturedSectionRenderOptions::default(),
+        )
+        .await
+    }
+
+    async fn new_with_remote_websocket_at(
+        canvas: HtmlCanvasElement,
+        asset_pack_bytes: Vec<u8>,
+        websocket_url: String,
+        initial_center: ChunkPos,
+        render_options: TexturedSectionRenderOptions,
+    ) -> Result<Self, String> {
+        let runtime =
+            WebRuntime::websocket_remote_at(websocket_url.clone(), initial_center).await?;
+        Self::new_with_runtime(
+            canvas,
+            asset_pack_bytes,
+            SessionStartRequest::JoinRemote {
+                endpoint: RemoteSessionEndpoint::new(websocket_url),
+            },
+            runtime,
+            initial_center,
+            render_options,
         )
         .await
     }
@@ -2935,11 +3074,19 @@ impl WebChunkRenderSession {
         asset_pack_bytes: Vec<u8>,
         session_request: SessionStartRequest,
         runtime: WebRuntime,
+        initial_center: ChunkPos,
+        render_options: TexturedSectionRenderOptions,
     ) -> Result<Self, String> {
         let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes)?;
-        let context = WebCanvasContext::new(canvas).await?;
+        let render_color_profile = render_options.color_profile;
+        let context =
+            WebCanvasContext::new_with_color_profile(canvas, render_color_profile).await?;
         let depth = ChunkDepthTarget::new(&context.device, context.width, context.height);
-        let sky = SkyRenderer::new(&context.device, context.format);
+        let sky = SkyRenderer::new_with_color_profile(
+            &context.device,
+            context.format,
+            render_color_profile,
+        );
         let actors = ActorDrawResources::new(
             &context.device,
             &context.queue,
@@ -2970,7 +3117,7 @@ impl WebChunkRenderSession {
             sky,
             runtime,
             session,
-            camera: EngineCameraController::spawn_for_chunk(SMOKE_INITIAL_CENTER),
+            camera: EngineCameraController::spawn_for_chunk(initial_center),
             interaction: ClientInteractionController::new(),
             actor_interpolation: ActorInterpolationState::new(),
             mesh_assets,
@@ -2980,8 +3127,9 @@ impl WebChunkRenderSession {
             ui,
             debug_overlay_visible: false,
             status_overlay: StatusOverlay::hidden(),
-            section_occlusion_culling: true,
-            force_fullbright: false,
+            section_occlusion_culling: render_options.section_occlusion_culling,
+            force_fullbright: render_options.force_fullbright,
+            render_color_profile,
             input_preferences: InputPreferences::AUTO,
             touch_look_sensitivity: WEB_TOUCH_LOOK_SENSITIVITY_DEFAULT,
             touch_settings_available: false,
@@ -3225,6 +3373,7 @@ impl WebChunkRenderSession {
         overlay.render_options = Some(FlatDebugRenderOptions {
             section_occlusion_culling: self.section_occlusion_culling,
             force_fullbright: self.force_fullbright,
+            color_profile: self.render_color_profile.label(),
         });
         overlay.to_debug_overlay()
     }
@@ -3827,7 +3976,8 @@ impl WebChunkRenderSession {
         let runner_diagnostics = self.runtime.runner_diagnostics();
         let sky_clear_color = mclone_render::sky::overworld_clear_color(time_of_day);
         let mut render_options = TexturedSectionRenderOptions::default()
-            .with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day));
+            .with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day))
+            .with_color_profile(self.render_color_profile);
         render_options.section_occlusion_culling = self.section_occlusion_culling;
         render_options.force_fullbright = self.force_fullbright;
         let actor_instances = self.interpolated_actor_instances();
@@ -4002,6 +4152,7 @@ impl WebChunkRenderSession {
                 && !effective_status_overlay.message.is_empty(),
             section_occlusion_culling: self.section_occlusion_culling,
             force_fullbright: self.force_fullbright,
+            render_color_profile: self.render_color_profile.as_str(),
             compile_request_id: acceptance_report.request_id,
             pending_compile_job_count: self.render_compiler.pending_job_count(),
             view_dirty_chunk_count: compile_scope.view_dirty_chunk_count,
@@ -4378,6 +4529,84 @@ fn touch_controls_mode_js_label(mode: TouchControlsMode) -> &'static str {
     }
 }
 
+fn parse_startup_options_from_query(search: &str) -> Result<StartupOptions, JsValue> {
+    let params = web_sys::UrlSearchParams::new_with_str(search).map_err(|error| {
+        JsValue::from_str(&format!("failed to parse startup query string: {error:?}"))
+    })?;
+    let mut scene = StartupSceneOptions::default();
+    scene.render_distance = WEB_DEFAULT_RENDER_DISTANCE;
+    let mut state = StartupArgState::new(scene, TexturedSectionRenderOptions::default());
+    for key in STARTUP_QUERY_KEYS {
+        if params.has(key) {
+            state
+                .parse_query_param(key, params.get(key), web_render_distance_limits())
+                .map_err(|error| JsValue::from_str(&format!("{error:#}")))?;
+        }
+    }
+    Ok(state.finish())
+}
+
+fn web_render_distance_limits() -> RenderDistanceLimits {
+    RenderDistanceLimits::new(
+        WEB_MIN_RENDER_DISTANCE as u32,
+        WEB_MAX_RENDER_DISTANCE as u32,
+    )
+}
+
+fn startup_render_options(
+    section_occlusion_culling: bool,
+    force_fullbright: bool,
+    render_color_profile: &str,
+) -> Result<TexturedSectionRenderOptions, String> {
+    let color_profile = render_color_profile
+        .parse::<RenderColorProfile>()
+        .map_err(|message| format!("renderColorProfile {message}"))?;
+    Ok(TexturedSectionRenderOptions {
+        section_occlusion_culling,
+        force_fullbright,
+        color_profile,
+        ..TexturedSectionRenderOptions::default()
+    })
+}
+
+fn startup_options_to_js_value(options: &StartupOptions) -> Result<JsValue, String> {
+    let object = js_sys::Object::new();
+    set_bool(&object, "ok", true)?;
+    set_string(&object, "seedText", &options.scene.seed.to_string())?;
+    set_number(&object, "seed", options.scene.seed as f64)?;
+    set_number(&object, "chunkX", f64::from(options.scene.chunk_x))?;
+    set_number(&object, "chunkZ", f64::from(options.scene.chunk_z))?;
+    set_number(
+        &object,
+        "renderDistance",
+        f64::from(options.scene.render_distance),
+    )?;
+    if let Some(remote_addr) = &options.scene.remote_addr {
+        set_string(&object, "remoteWebSocketUrl", remote_addr)?;
+    }
+    if let Some(day_time) = options.scene.day_time_override {
+        set_number(&object, "dayTime", day_time as f64)?;
+    }
+    set_bool(&object, "freezeTime", options.scene.freeze_time)?;
+    set_bool(&object, "lightingEnabled", options.scene.lighting_enabled)?;
+    set_bool(
+        &object,
+        "sectionOcclusionCulling",
+        options.render_options.section_occlusion_culling,
+    )?;
+    set_bool(
+        &object,
+        "forceFullbright",
+        options.render_options.force_fullbright,
+    )?;
+    set_string(
+        &object,
+        "renderColorProfile",
+        options.render_options.color_profile.as_str(),
+    )?;
+    Ok(object.into())
+}
+
 fn parse_touch_controls_mode(mode: &str) -> Option<TouchControlsMode> {
     match mode {
         "auto" => Some(TouchControlsMode::Auto),
@@ -4485,6 +4714,13 @@ struct WebCanvasContext {
 
 impl WebCanvasContext {
     async fn new(canvas: HtmlCanvasElement) -> Result<Self, String> {
+        Self::new_with_color_profile(canvas, RenderColorProfile::default()).await
+    }
+
+    async fn new_with_color_profile(
+        canvas: HtmlCanvasElement,
+        color_profile: RenderColorProfile,
+    ) -> Result<Self, String> {
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -4514,7 +4750,7 @@ impl WebCanvasContext {
             .map_err(|error| format!("failed to request WebGPU device: {error}"))?;
 
         let caps = surface.get_capabilities(&adapter);
-        let Some(format) = preferred_surface_format(&caps) else {
+        let Some(format) = preferred_surface_format_for_profile(&caps, color_profile) else {
             return Err("WebGPU canvas surface reported no supported formats".to_owned());
         };
         let alpha_mode = caps
@@ -4835,19 +5071,6 @@ mod tests {
         trailing.push(0);
         assert!(decode_web_render_compile_delta(&trailing).is_err());
     }
-}
-
-fn preferred_surface_format(caps: &wgpu::SurfaceCapabilities) -> Option<wgpu::TextureFormat> {
-    [
-        wgpu::TextureFormat::Bgra8UnormSrgb,
-        wgpu::TextureFormat::Rgba8UnormSrgb,
-        wgpu::TextureFormat::Bgra8Unorm,
-        wgpu::TextureFormat::Rgba8Unorm,
-    ]
-    .into_iter()
-    .find(|format| caps.formats.contains(format))
-    .or_else(|| caps.formats.iter().copied().find(|format| format.is_srgb()))
-    .or_else(|| caps.formats.first().copied())
 }
 
 fn selected_present_mode(supported: &[wgpu::PresentMode]) -> wgpu::PresentMode {

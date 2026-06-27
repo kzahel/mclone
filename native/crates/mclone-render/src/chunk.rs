@@ -15,6 +15,7 @@ use mclone_mesh::{
 };
 use wgpu::util::DeviceExt;
 
+use crate::color_profile::RenderColorProfile;
 use crate::fog::RenderFog;
 use crate::target::RenderFrameTarget;
 use crate::texture_mips::generate_rgba_mip_chain;
@@ -282,6 +283,7 @@ pub struct TexturedSectionRenderOptions {
     pub force_fullbright: bool,
     pub sky_darken: f32,
     pub fog: RenderFog,
+    pub color_profile: RenderColorProfile,
 }
 
 impl Default for TexturedSectionRenderOptions {
@@ -291,6 +293,7 @@ impl Default for TexturedSectionRenderOptions {
             force_fullbright: false,
             sky_darken: 1.0,
             fog: RenderFog::none(),
+            color_profile: RenderColorProfile::default(),
         }
     }
 }
@@ -303,6 +306,11 @@ impl TexturedSectionRenderOptions {
 
     pub fn with_fog(mut self, fog: RenderFog) -> Self {
         self.fog = fog;
+        self
+    }
+
+    pub fn with_color_profile(mut self, color_profile: RenderColorProfile) -> Self {
+        self.color_profile = color_profile;
         self
     }
 }
@@ -1097,6 +1105,7 @@ pub struct TexturedChunkRenderer {
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     texture_bind_group_layout: wgpu::BindGroupLayout,
+    color_format: wgpu::TextureFormat,
 }
 
 impl TexturedChunkRenderer {
@@ -1184,6 +1193,7 @@ impl TexturedChunkRenderer {
             uniform_buffer,
             bind_group,
             texture_bind_group_layout,
+            color_format,
         }
     }
 }
@@ -1305,7 +1315,11 @@ impl ChunkDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &uniform_bytes(render_view, TexturedSectionRenderOptions::default()),
+            &uniform_bytes(
+                render_view,
+                TexturedSectionRenderOptions::default(),
+                wgpu::TextureFormat::Rgba8Unorm,
+            ),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1387,7 +1401,11 @@ impl TexturedChunkDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &uniform_bytes(render_view, TexturedSectionRenderOptions::default()),
+            &uniform_bytes(
+                render_view,
+                TexturedSectionRenderOptions::default(),
+                self.renderer.color_format,
+            ),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1658,7 +1676,7 @@ impl TexturedSectionDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &uniform_bytes(render_view, options),
+            &uniform_bytes(render_view, options, self.renderer.color_format),
         );
         if let (Some(timing), Some(uniform_start)) = (&mut timing, uniform_start) {
             timing.uniform_write_ms = elapsed_ms(uniform_start.elapsed());
@@ -1818,9 +1836,17 @@ fn matrix_bytes(matrix: [[f32; 4]; 4]) -> [u8; 64] {
     bytes
 }
 
-fn uniform_bytes(render_view: ChunkRenderView, options: TexturedSectionRenderOptions) -> [u8; 128] {
+fn uniform_bytes(
+    render_view: ChunkRenderView,
+    options: TexturedSectionRenderOptions,
+    color_format: wgpu::TextureFormat,
+) -> [u8; 128] {
     let mut bytes = [0; UNIFORM_BYTE_LEN];
     bytes[..64].copy_from_slice(&matrix_bytes(render_view.uniform_matrix()));
+    let color_transform = options
+        .color_profile
+        .target_color_transform(color_format)
+        .shader_code();
     let render_options = [
         if options.force_fullbright {
             1.0_f32
@@ -1829,7 +1855,7 @@ fn uniform_bytes(render_view: ChunkRenderView, options: TexturedSectionRenderOpt
         },
         options.sky_darken.clamp(0.0, 1.0),
         if options.fog.enabled { 1.0 } else { 0.0 },
-        0.0,
+        color_transform,
     ];
     for (index, value) in render_options.into_iter().enumerate() {
         let start = 64 + index * 4;
@@ -1882,8 +1908,12 @@ mod tests {
         let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
         let matrix = render_view.uniform_matrix();
         assert_eq!(
-            uniform_bytes(render_view, TexturedSectionRenderOptions::default()).len()
-                as wgpu::BufferAddress,
+            uniform_bytes(
+                render_view,
+                TexturedSectionRenderOptions::default(),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .len() as wgpu::BufferAddress,
             UNIFORM_BYTE_SIZE
         );
         assert!(matrix.into_iter().flatten().all(f32::is_finite));
@@ -1929,10 +1959,31 @@ mod tests {
                 sky_darken: 0.25,
                 ..TexturedSectionRenderOptions::default()
             },
+            wgpu::TextureFormat::Rgba8Unorm,
         );
 
         assert_eq!(f32::from_ne_bytes(bytes[64..68].try_into().unwrap()), 1.0);
         assert_eq!(f32::from_ne_bytes(bytes[68..72].try_into().unwrap()), 0.25);
+        assert_eq!(f32::from_ne_bytes(bytes[76..80].try_into().unwrap()), 0.0);
+    }
+
+    #[test]
+    fn textured_render_options_serialize_color_profile_transform() {
+        let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
+        let bytes = uniform_bytes(
+            render_view,
+            TexturedSectionRenderOptions::default(),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        );
+        assert_eq!(f32::from_ne_bytes(bytes[76..80].try_into().unwrap()), 1.0);
+
+        let bytes = uniform_bytes(
+            render_view,
+            TexturedSectionRenderOptions::default()
+                .with_color_profile(RenderColorProfile::StylizedBright),
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        assert_eq!(f32::from_ne_bytes(bytes[76..80].try_into().unwrap()), 2.0);
     }
 
     #[test]
@@ -1949,6 +2000,7 @@ mod tests {
         let bytes = uniform_bytes(
             render_view,
             TexturedSectionRenderOptions::default().with_fog(RenderFog::underwater()),
+            wgpu::TextureFormat::Rgba8Unorm,
         );
 
         assert_eq!(f32::from_ne_bytes(bytes[72..76].try_into().unwrap()), 1.0);
