@@ -4,6 +4,9 @@
 mod graphics_vulkan;
 
 #[cfg(target_os = "android")]
+mod perf_metrics;
+
+#[cfg(target_os = "android")]
 mod android {
     use std::ffi::{CStr, CString, c_char, c_int};
     use std::sync::Once;
@@ -36,6 +39,7 @@ mod android {
     use openxr as xr;
 
     use super::graphics_vulkan;
+    use super::perf_metrics;
 
     type AcquiredEyeTarget<'a> = mclone_xr_host::XrAcquiredEyeTarget<
         'a,
@@ -212,6 +216,7 @@ mod android {
         perf_flight: Option<AndroidXrPerfFlight>,
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
+        perf_metrics: bool,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -224,6 +229,7 @@ mod android {
                 perf_flight: None,
                 perf_settled_stationary: false,
                 perf_frozen_render: false,
+                perf_metrics: false,
             }
         }
     }
@@ -316,6 +322,9 @@ mod android {
                 "--perf-frozen-render" => {
                     options.perf_settled_stationary = true;
                     options.perf_frozen_render = true;
+                }
+                "--perf-metrics" => {
+                    options.perf_metrics = true;
                 }
                 "--freeze-time" => {}
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
@@ -567,6 +576,10 @@ mod android {
             startup_options.perf_frozen_render
         );
         log::info!(
+            "Android XR performance metrics probe: {}",
+            startup_options.perf_metrics
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -597,6 +610,7 @@ mod android {
             startup_options.perf_flight,
             startup_options.perf_settled_stationary,
             startup_options.perf_frozen_render,
+            startup_options.perf_metrics,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -614,6 +628,7 @@ mod android {
         perf_flight: Option<AndroidXrPerfFlight>,
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
+        perf_metrics: bool,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -635,7 +650,7 @@ mod android {
         enabled_extensions.khr_android_create_instance = true;
         enabled_extensions.khr_vulkan_enable2 = true;
         log::info!(
-            "OpenXR extensions: android_create_instance=true vulkan_enable2=true fb_passthrough={} fb_alpha_blend={} fb_display_refresh_rate={} fb_swapchain_update_state={} fb_foveation={} fb_foveation_configuration={} fb_foveation_vulkan={} fb_render_model={} ext_hand_tracking={} fb_hand_tracking_mesh={} fb_hand_tracking_aim={} meta_virtual_keyboard={} fb_spatial_entity={} fb_spatial_entity_query={} fb_scene={} fb_scene_capture={} fb_spatial_entity_container={} meta_spatial_entity_mesh={} fb_body_tracking={} meta_body_tracking_full_body={} ext_debug_utils={}",
+            "OpenXR extensions: android_create_instance=true vulkan_enable2=true fb_passthrough={} fb_alpha_blend={} fb_display_refresh_rate={} fb_swapchain_update_state={} fb_foveation={} fb_foveation_configuration={} fb_foveation_vulkan={} fb_render_model={} ext_hand_tracking={} fb_hand_tracking_mesh={} fb_hand_tracking_aim={} meta_virtual_keyboard={} fb_spatial_entity={} fb_spatial_entity_query={} fb_scene={} fb_scene_capture={} fb_spatial_entity_container={} meta_spatial_entity_mesh={} fb_body_tracking={} meta_body_tracking_full_body={} meta_performance_metrics={} ext_debug_utils={}",
             available.fb_passthrough,
             available.fb_composition_layer_alpha_blend,
             available.fb_display_refresh_rate,
@@ -656,6 +671,7 @@ mod android {
             available.meta_spatial_entity_mesh,
             available.fb_body_tracking,
             available.meta_body_tracking_full_body,
+            available.meta_performance_metrics,
             available.ext_debug_utils,
         );
         if available.fb_passthrough {
@@ -735,6 +751,10 @@ mod android {
         if available.meta_body_tracking_full_body && available.fb_body_tracking {
             enabled_extensions.meta_body_tracking_full_body = true;
             log::info!("Enabling XR_META_body_tracking_full_body");
+        }
+        if available.meta_performance_metrics {
+            enabled_extensions.meta_performance_metrics = true;
+            log::info!("Enabling XR_META_performance_metrics");
         }
 
         let instance = entry
@@ -895,6 +915,7 @@ mod android {
             perf_flight,
             perf_settled_stationary,
             perf_frozen_render,
+            perf_metrics,
             startup_view_pose,
             scene_options.render_distance,
             display_refresh,
@@ -1053,6 +1074,7 @@ mod android {
         perf_flight: Option<AndroidXrPerfFlight>,
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
+        perf_metrics: bool,
         fixed_render_view_pose: Option<XrStartupViewPose>,
         render_distance: u32,
         display_refresh: XrDisplayRefreshSnapshot,
@@ -1068,6 +1090,20 @@ mod android {
             render_distance,
             display_refresh,
         );
+        let mut performance_metrics_probe = if perf_metrics {
+            let probe = perf_metrics::XrPerformanceMetricsProbe::new(
+                graphics.session.instance(),
+                &graphics.session,
+            );
+            if probe.is_none() {
+                log::warn!(
+                    "XR_META_performance_metrics requested via --perf-metrics but unavailable; continuing without GPU/compositor attribution"
+                );
+            }
+            probe
+        } else {
+            None
+        };
         let mut logged_ready = false;
         let mut logged_controller_activity = false;
         let mut session_smoke_pending_start = false;
@@ -1242,6 +1278,11 @@ mod android {
             frame_timing.frame_wall_ms = elapsed_ms(frame_wall_start);
             if !perf_started_after_ready {
                 perf_probe.record_frame(frame_timing, frame_stats, rendered_frame);
+            }
+            if rendered_frame.is_some() {
+                if let Some(probe) = performance_metrics_probe.as_mut() {
+                    probe.tick();
+                }
             }
 
             if frame_stats.submitted_frames == 1 {
