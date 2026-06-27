@@ -453,6 +453,12 @@ mod native {
         }
     }
 
+    fn should_force_detail_after_tick(report: &ServerSimulationTickReport) -> bool {
+        report.scheduler_event_count > 0
+            || report.pending_unloads_processed > 0
+            || report.fluid_event_count > 0
+    }
+
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct NativeIntegratedServerRunnerConfig {
         pub seed: i64,
@@ -761,6 +767,7 @@ mod native {
             let report = server.try_simulation_tick_report()?;
             let wall_us = wall_start.elapsed().as_micros();
             publish_updates(&update_tx, update_queue_depth, &report.updates)?;
+            let force_detail_after_tick = should_force_detail_after_tick(&report);
             refresh_diagnostics(
                 diagnostics,
                 server,
@@ -771,7 +778,7 @@ mod native {
                 true,
                 Some(false),
                 None,
-                false,
+                force_detail_after_tick,
             );
 
             next_tick += tick_interval;
@@ -1085,6 +1092,22 @@ mod native {
         }
 
         #[test]
+        fn diagnostics_detail_refresh_predicate_tracks_scheduler_visible_activity() {
+            assert!(!should_force_detail_after_tick(
+                &tick_report_for_detail_refresh(0, 0, 0)
+            ));
+            assert!(should_force_detail_after_tick(
+                &tick_report_for_detail_refresh(1, 0, 0)
+            ));
+            assert!(should_force_detail_after_tick(
+                &tick_report_for_detail_refresh(0, 1, 0)
+            ));
+            assert!(should_force_detail_after_tick(
+                &tick_report_for_detail_refresh(0, 0, 1)
+            ));
+        }
+
+        #[test]
         fn native_runner_shutdown_joins_cleanly() {
             let mut runner = NativeIntegratedServerRunner::new(test_runner_config(0)).unwrap();
             runner.request_shutdown();
@@ -1100,6 +1123,31 @@ mod native {
             NativeIntegratedServerRunnerConfig::new(seed)
                 .with_lighting_enabled(false)
                 .with_tick_interval(Duration::from_millis(1))
+        }
+
+        fn tick_report_for_detail_refresh(
+            scheduler_event_count: usize,
+            pending_unloads_processed: usize,
+            fluid_event_count: usize,
+        ) -> ServerSimulationTickReport {
+            ServerSimulationTickReport {
+                simulation_tick: 0,
+                chunk_tick: 0,
+                block_tick_chunks: 0,
+                fluid_ticks_executed: 0,
+                fluid_due_ticks: 0,
+                deferred_fluid_ticks: 0,
+                fluid_mutated_blocks: 0,
+                fluid_snapshot_events: 0,
+                fluid_event_count,
+                scheduled_fluid_ticks: 0,
+                entity_tick_chunks: 0,
+                pending_unloads_processed,
+                scheduler_event_count,
+                chunk_tracking: PlayerChunkTrackingDiagnostics::default(),
+                updates: Vec::new(),
+                timing: ServerSimulationTickTiming::default(),
+            }
         }
 
         fn drain_until(
