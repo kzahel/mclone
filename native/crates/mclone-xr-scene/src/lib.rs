@@ -554,6 +554,16 @@ where
         Ok(())
     }
 
+    pub fn apply_automated_stationary_input(&mut self) {
+        self.latest_controllers.clear();
+        self.ui.close();
+        self.ui.clear_input();
+        self.menu_pointer_down = false;
+        self.menu_panel_pose = None;
+        self.menu_panel_recenter_pending = false;
+        self.last_locomotion_update = Some(Instant::now());
+    }
+
     pub fn frame_summary(&self) -> XrTerrainFrameSummary {
         self.frame_summary_with_timing(
             XrTerrainFrameTiming::default(),

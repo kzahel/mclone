@@ -173,14 +173,39 @@ sync and chunk-interest path as XR locomotion. Summary files are written to:
 /tmp/mclone-quest-openxr-perf-flight-rd10.txt
 ```
 
+For steady-state render isolation after terrain generation and uploads settle,
+use the stationary samples:
+
+```bash
+pnpm native:android-xr:perf:stationary:rd1
+pnpm native:android-xr:perf:stationary:rd5
+pnpm native:android-xr:perf:stationary:rd10
+```
+
+or run the three-distance sweep:
+
+```bash
+pnpm native:android-xr:perf:stationary:sweep
+```
+
+These disable locomotion during the probe, wait for consecutive quiet frames
+with no server/update backlog, no pending render chunks, no compile jobs, and no
+upload work, then record a 20 second sample. Summary files are written to:
+
+```text
+/tmp/mclone-quest-openxr-perf-stationary-rd1.txt
+/tmp/mclone-quest-openxr-perf-stationary-rd5.txt
+/tmp/mclone-quest-openxr-perf-stationary-rd10.txt
+```
+
 The marker block includes `SUMMARY`, `STAGES`, `TERRAIN`, `UPLOAD_MAX`,
 `RUNTIME_MAX`, `QUEUE_MAX`, `COMPILE_MAX`, `UPLOAD_LAST`, and `DRAW` lines. It
-records `mode=flight`, `render_distance`, `flight_speed_blocks_per_second`,
-actual `flight_distance_blocks`, current/supported display refresh when
-`XR_FB_display_refresh_rate` is available, max timing buckets, terrain
-poll/sync/GPU-upload timing, runtime poll sub-buckets, diagnostics
-refresh/cache-age fields, server/scheduler queue counters, compile/upload
-workload counters, and draw counts.
+records `mode`, `render_distance`, `flight_speed_blocks_per_second`, actual
+`flight_distance_blocks`, settled-lane `settle_seconds`/`settle_frames`,
+current/supported display refresh when `XR_FB_display_refresh_rate` is
+available, max timing buckets, terrain poll/sync/GPU-upload timing, runtime
+poll sub-buckets, diagnostics refresh/cache-age fields, server/scheduler queue
+counters, compile/upload workload counters, and draw counts.
 
 For remote dedicated validation, either start `mclone-dedicated-server` on a
 host the headset can reach and pass `--remote-addr`, or let the validator build

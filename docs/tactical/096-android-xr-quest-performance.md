@@ -128,6 +128,9 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
   runner diagnostics at a low rate, keep atomic queue depths cheap per frame,
   move server detail snapshot construction outside the diagnostics mutex, and
   expose diagnostic refresh/cache-age fields in `RUNTIME_MAX`.
+- [x] Add a settled stationary render-isolation lane that disables locomotion,
+  waits for consecutive quiet frames with no server/render/compile/upload
+  backlog, records settle time, then samples steady-state frame/render cost.
 
 Validation target:
 
@@ -160,6 +163,13 @@ Recorded first-pass implementation:
   `native:android-xr:perf:flight:sweep`. The flight summaries include
   `mode=flight`, `render_distance`, `flight_speed_blocks_per_second`, and
   `flight_distance_blocks`, plus refresh state and max stage timings.
+- `package.json` also includes `native:android-xr:perf:stationary:rd1`,
+  `native:android-xr:perf:stationary:rd5`,
+  `native:android-xr:perf:stationary:rd10`, and
+  `native:android-xr:perf:stationary:sweep`. These pass
+  `--perf-settled-stationary`, wait for quiet frames before starting the timed
+  sample, and write `mode=stationary-settled` plus `settle_seconds`,
+  `settle_frames`, and `settle_quiet_frames` in the summary.
 - The marker block now includes terrain runtime sub-timings for poll, section
   sync, GPU upload, and traversal-ready refresh. It also includes max and latest
   pending render chunks, pending compile jobs, submitted/completed/stale compile
@@ -307,6 +317,10 @@ pnpm native:android-xr:perf:flight:rd1
 pnpm native:android-xr:perf:flight:rd5
 pnpm native:android-xr:perf:flight:rd10
 pnpm native:android-xr:perf:flight:sweep
+pnpm native:android-xr:perf:stationary:rd1
+pnpm native:android-xr:perf:stationary:rd5
+pnpm native:android-xr:perf:stationary:rd10
+pnpm native:android-xr:perf:stationary:sweep
 pnpm native:android-xr:perf -- --refresh 72
 pnpm native:android-xr:perf -- --refresh 90
 pnpm native:android-xr:perf -- --refresh 120

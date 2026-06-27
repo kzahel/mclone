@@ -39,8 +39,20 @@ pnpm native:android-xr:perf:flight:rd10
 pnpm native:android-xr:perf:flight:sweep
 ```
 
-These run a 20 second local integrated sample after the first submitted terrain
-frame. The validator force-stops the app and sleeps the headset during cleanup.
+Settled stationary render isolation:
+
+```bash
+pnpm native:android-xr:perf:stationary:rd1
+pnpm native:android-xr:perf:stationary:rd5
+pnpm native:android-xr:perf:stationary:rd10
+pnpm native:android-xr:perf:stationary:sweep
+```
+
+Flight samples start after the first submitted terrain frame and stress
+movement, streaming, compile/upload, and rendering together. Stationary samples
+disable locomotion, wait for quiet server/render/compile/upload counters, then
+record a 20 second steady-state render sample. The validator force-stops the app
+and sleeps the headset during cleanup.
 
 ## Records
 
