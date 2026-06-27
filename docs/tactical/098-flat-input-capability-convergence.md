@@ -61,9 +61,10 @@ intents where the semantics match.
   worker, and storage mechanics web-local.
 - `mclone-ui` owns shared menu rendering, touch movement/interaction overlays,
   and the first shared flat gameplay HUD composer for crosshair, status,
-  touch controls, the non-touch hotbar, and the touch-controls mode option
-  across desktop, Android, and web. Preferred-input options, full platform
-  preference persistence, and gamepad/debug-palette affordances remain open.
+  touch controls, the non-touch hotbar, the touch-controls mode option, and a
+  shared flat debug overlay summary across desktop, Android, and web.
+  Preferred-input options, full platform preference persistence, and gamepad HUD
+  affordances remain open.
 
 ## Target Shape
 
@@ -182,8 +183,11 @@ intents; preferences decide presentation defaults.
   - [x] Wire desktop, flat Android, and native web through the shared HUD
     composer, with Android touch retaining touch-owned hotbar rendering.
   - [x] Support `Touch Controls: Auto / On / Off` across desktop, Android, and web.
-  - [ ] Move any remaining debug palette/gamepad-friendly HUD affordances into
-    the same shared presentation boundary.
+  - [x] Move the common flat debug overlay summary/line formatting into
+    `mclone-ui`, with desktop and native web feeding platform stats into that
+    shared presentation boundary.
+  - [ ] Move remaining gamepad-friendly HUD affordances into the same shared
+    presentation boundary.
 
 - [ ] **Slice 5: gamepad capability foundation.**
   - Add a platform-neutral gamepad intent mapping to `mclone-input`.
@@ -311,3 +315,10 @@ Manual/device validation to record before closing this tactical:
   mobile web smoke also exposed a shared render-section planner starvation case;
   deferred-only dirty chunks no longer consume the one-chunk streaming compile
   budget, so ready sections behind them can drain.
+- Slice 4 debug overlay sub-slice landed: `mclone-ui` now owns
+  `FlatDebugOverlay` and the reusable flat debug line schema for position,
+  chunk/speed, movement, view, runner queues, chunk/draw/actor counts, mesh
+  counts, selected slot, target, and render options. Desktop keeps its
+  app-specific runtime/frame timing lines as extras, while native web now uses
+  the same shared formatter for its debug HUD instead of rebuilding those lines
+  in browser-specific code.

@@ -781,6 +781,315 @@ impl DebugOverlay {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct FlatDebugOverlay {
+    pub position: [f32; 3],
+    pub chunk: [i32; 2],
+    pub speed: f32,
+    pub movement_mode: String,
+    pub on_ground: bool,
+    pub view: FlatDebugView,
+    pub runner: Option<FlatDebugRunner>,
+    pub chunks: Option<FlatDebugChunkCounts>,
+    pub draw: Option<FlatDebugDrawCounts>,
+    pub actors: Option<FlatDebugActorCounts>,
+    pub mesh: Option<FlatDebugMeshCounts>,
+    pub pending_compile_jobs: Option<usize>,
+    pub day_time: Option<u64>,
+    pub time_of_day: Option<f32>,
+    pub selected_hotbar_slot: Option<u8>,
+    pub target: Option<FlatDebugTarget>,
+    pub render_options: Option<FlatDebugRenderOptions>,
+    pub extra_lines: Vec<String>,
+}
+
+impl FlatDebugOverlay {
+    pub fn new(
+        position: [f32; 3],
+        chunk: [i32; 2],
+        speed: f32,
+        movement_mode: impl Into<String>,
+        on_ground: bool,
+        view: FlatDebugView,
+    ) -> Self {
+        Self {
+            position,
+            chunk,
+            speed,
+            movement_mode: movement_mode.into(),
+            on_ground,
+            view,
+            runner: None,
+            chunks: None,
+            draw: None,
+            actors: None,
+            mesh: None,
+            pending_compile_jobs: None,
+            day_time: None,
+            time_of_day: None,
+            selected_hotbar_slot: None,
+            target: None,
+            render_options: None,
+            extra_lines: Vec::new(),
+        }
+    }
+
+    pub fn lines(&self) -> Vec<String> {
+        let mut lines = vec![
+            format!(
+                "POS {:.1} {:.1} {:.1}",
+                self.position[0], self.position[1], self.position[2]
+            ),
+            format!(
+                "CHUNK {} {} SPEED {:.1}",
+                self.chunk[0], self.chunk[1], self.speed
+            ),
+            format!(
+                "MODE {} GROUND {}",
+                self.movement_mode,
+                if self.on_ground { "Y" } else { "N" }
+            ),
+            self.view.line(),
+        ];
+        if let Some(runner) = &self.runner {
+            lines.push(runner.line());
+        }
+        if let Some(chunks) = self.chunks {
+            lines.push(chunks.line());
+        }
+        if let Some(draw) = self.draw {
+            lines.push(draw.line());
+        }
+        if let Some(actors) = self.actors {
+            lines.push(actors.line());
+        }
+        if let Some(mesh) = self.mesh {
+            lines.push(mesh.line());
+        }
+        if let Some(pending_compile_jobs) = self.pending_compile_jobs {
+            lines.push(format!("PENDING {pending_compile_jobs}"));
+        }
+        if let (Some(day_time), Some(time_of_day)) = (self.day_time, self.time_of_day) {
+            lines.push(format!("TIME {day_time} {time_of_day:.3}"));
+        }
+        if let Some(selected_hotbar_slot) = self.selected_hotbar_slot {
+            lines.push(format!("SLOT {}", u16::from(selected_hotbar_slot) + 1));
+        }
+        if let Some(target) = self.target {
+            lines.push(target.line());
+        }
+        if let Some(render_options) = self.render_options {
+            lines.push(render_options.line());
+        }
+        lines.extend(self.extra_lines.iter().cloned());
+        lines
+    }
+
+    pub fn to_debug_overlay(&self) -> DebugOverlay {
+        DebugOverlay::new("DEBUG", self.lines())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FlatDebugView {
+    pub render_distance: i32,
+    pub tracking_radius: Option<i32>,
+    pub center: Option<[i32; 2]>,
+}
+
+impl FlatDebugView {
+    pub const fn render_distance(render_distance: i32) -> Self {
+        Self {
+            render_distance,
+            tracking_radius: None,
+            center: None,
+        }
+    }
+
+    pub const fn with_tracking_radius(render_distance: i32, tracking_radius: i32) -> Self {
+        Self {
+            render_distance,
+            tracking_radius: Some(tracking_radius),
+            center: None,
+        }
+    }
+
+    pub const fn with_center(render_distance: i32, center: [i32; 2]) -> Self {
+        Self {
+            render_distance,
+            tracking_radius: None,
+            center: Some(center),
+        }
+    }
+
+    fn line(self) -> String {
+        if let Some(center) = self.center {
+            format!(
+                "VIEW R{} CENTER {} {}",
+                self.render_distance, center[0], center[1]
+            )
+        } else if let Some(tracking_radius) = self.tracking_radius {
+            format!("VIEW R{} T{}", self.render_distance, tracking_radius)
+        } else {
+            format!("VIEW R{}", self.render_distance)
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FlatDebugRunner {
+    pub label: String,
+    pub command_queue_depth: usize,
+    pub update_queue_depth: usize,
+}
+
+impl FlatDebugRunner {
+    pub fn new(
+        label: impl Into<String>,
+        command_queue_depth: usize,
+        update_queue_depth: usize,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            command_queue_depth,
+            update_queue_depth,
+        }
+    }
+
+    fn line(&self) -> String {
+        format!(
+            "RUN {} CQ{} UQ{}",
+            self.label, self.command_queue_depth, self.update_queue_depth
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FlatDebugChunkCounts {
+    pub loaded: usize,
+    pub visible: usize,
+    pub pending_jobs: Option<usize>,
+}
+
+impl FlatDebugChunkCounts {
+    pub const fn loaded_visible(loaded: usize, visible: usize) -> Self {
+        Self {
+            loaded,
+            visible,
+            pending_jobs: None,
+        }
+    }
+
+    pub const fn loaded_visible_pending(
+        loaded: usize,
+        visible: usize,
+        pending_jobs: usize,
+    ) -> Self {
+        Self {
+            loaded,
+            visible,
+            pending_jobs: Some(pending_jobs),
+        }
+    }
+
+    fn line(self) -> String {
+        if let Some(pending_jobs) = self.pending_jobs {
+            format!(
+                "CHUNKS L{} V{} P{}",
+                self.loaded, self.visible, pending_jobs
+            )
+        } else {
+            format!("CHUNKS L{} V{}", self.loaded, self.visible)
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FlatDebugDrawCounts {
+    pub drawn_sections: usize,
+    pub section_count: usize,
+    pub drawn_faces: u32,
+    pub face_count: u32,
+}
+
+impl FlatDebugDrawCounts {
+    fn line(self) -> String {
+        format!(
+            "DRAW S {}/{} F {}/{}",
+            self.drawn_sections, self.section_count, self.drawn_faces, self.face_count
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FlatDebugActorCounts {
+    pub drawn_actors: usize,
+    pub actor_count: usize,
+    pub drawn_actor_indices: u32,
+}
+
+impl FlatDebugActorCounts {
+    fn line(self) -> String {
+        format!(
+            "ACTOR R {}/{} I{}",
+            self.drawn_actors, self.actor_count, self.drawn_actor_indices
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FlatDebugMeshCounts {
+    pub build_count: usize,
+    pub upload_count: usize,
+    pub render_count: usize,
+}
+
+impl FlatDebugMeshCounts {
+    fn line(self) -> String {
+        format!(
+            "MESH B{} U{} R{}",
+            self.build_count, self.upload_count, self.render_count
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlatDebugTarget {
+    Miss,
+    Block { x: i32, y: i32, z: i32 },
+}
+
+impl FlatDebugTarget {
+    fn line(self) -> String {
+        match self {
+            Self::Miss => "TARGET MISS".to_owned(),
+            Self::Block { x, y, z } => format!("TARGET {x} {y} {z}"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FlatDebugRenderOptions {
+    pub section_occlusion_culling: bool,
+    pub force_fullbright: bool,
+}
+
+impl FlatDebugRenderOptions {
+    fn line(self) -> String {
+        let occlusion = if self.section_occlusion_culling {
+            "ON"
+        } else {
+            "OFF"
+        };
+        let lighting = if self.force_fullbright {
+            "FULL"
+        } else {
+            "LIGHT"
+        };
+        format!("OCC {occlusion}  {lighting}")
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct StatusOverlay {
     pub message: String,
     pub ok: bool,
@@ -2352,6 +2661,62 @@ mod tests {
         render_debug_overlay(GuiScale::from_pixels(960, 540), &mut draw, &overlay);
 
         assert!(!draw.commands().is_empty());
+    }
+
+    #[test]
+    fn flat_debug_overlay_formats_common_flat_hud_lines() {
+        let mut overlay = FlatDebugOverlay::new(
+            [1.25, 64.0, -2.5],
+            [3, -4],
+            32.0,
+            "WALK",
+            true,
+            FlatDebugView::with_center(2, [3, -4]),
+        );
+        overlay.runner = Some(FlatDebugRunner::new("WEB-WORKER", 1, 2));
+        overlay.chunks = Some(FlatDebugChunkCounts::loaded_visible(9, 8));
+        overlay.draw = Some(FlatDebugDrawCounts {
+            drawn_sections: 10,
+            section_count: 16,
+            drawn_faces: 120,
+            face_count: 200,
+        });
+        overlay.actors = Some(FlatDebugActorCounts {
+            drawn_actors: 1,
+            actor_count: 2,
+            drawn_actor_indices: 180,
+        });
+        overlay.mesh = Some(FlatDebugMeshCounts {
+            build_count: 3,
+            upload_count: 4,
+            render_count: 5,
+        });
+        overlay.pending_compile_jobs = Some(6);
+        overlay.day_time = Some(1200);
+        overlay.time_of_day = Some(0.25);
+        overlay.selected_hotbar_slot = Some(4);
+        overlay.target = Some(FlatDebugTarget::Block { x: 1, y: 2, z: 3 });
+        overlay.render_options = Some(FlatDebugRenderOptions {
+            section_occlusion_culling: true,
+            force_fullbright: false,
+        });
+
+        let lines = overlay.lines();
+        assert_eq!(lines[0], "POS 1.2 64.0 -2.5");
+        assert_eq!(lines[1], "CHUNK 3 -4 SPEED 32.0");
+        assert_eq!(lines[2], "MODE WALK GROUND Y");
+        assert_eq!(lines[3], "VIEW R2 CENTER 3 -4");
+        assert_eq!(lines[4], "RUN WEB-WORKER CQ1 UQ2");
+        assert!(lines.iter().any(|line| line == "CHUNKS L9 V8"));
+        assert!(lines.iter().any(|line| line == "DRAW S 10/16 F 120/200"));
+        assert!(lines.iter().any(|line| line == "ACTOR R 1/2 I180"));
+        assert!(lines.iter().any(|line| line == "MESH B3 U4 R5"));
+        assert!(lines.iter().any(|line| line == "PENDING 6"));
+        assert!(lines.iter().any(|line| line == "TIME 1200 0.250"));
+        assert!(lines.iter().any(|line| line == "SLOT 5"));
+        assert!(lines.iter().any(|line| line == "TARGET 1 2 3"));
+        assert!(lines.iter().any(|line| line == "OCC ON  LIGHT"));
+        assert_eq!(overlay.to_debug_overlay().title, "DEBUG");
     }
 
     #[test]

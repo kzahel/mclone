@@ -3,8 +3,9 @@ use mclone_app_runtime::frame_render::RenderStreamStats;
 #[cfg(test)]
 use mclone_core::ChunkPos;
 use mclone_ui::{
-    DebugOverlay, GameOptionsParent, GameScreen, GameUi, GameUiRenderState, GuiDrawList, GuiScale,
-    render_debug_overlay,
+    FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts, FlatDebugOverlay,
+    FlatDebugRenderOptions, FlatDebugRunner, FlatDebugView, GameOptionsParent, GameScreen, GameUi,
+    GameUiRenderState, GuiDrawList, GuiScale, render_debug_overlay,
 };
 
 use crate::cli::HeadlessScreenshotUi;
@@ -27,13 +28,7 @@ pub(crate) struct DebugPaneStats {
 }
 
 impl DebugPaneStats {
-    pub(crate) fn lines(self) -> Vec<String> {
-        let occlusion = if self.section_occlusion { "ON" } else { "OFF" };
-        let lighting = if self.force_fullbright {
-            "FULL"
-        } else {
-            "LIGHT"
-        };
+    pub(crate) fn overlay(self) -> FlatDebugOverlay {
         let budget = self
             .pacing
             .target_frame_ms
@@ -53,41 +48,50 @@ impl DebugPaneStats {
             FramePacingMode::Capped => format!("{}FPS", self.pacing.fps_cap),
             FramePacingMode::Vsync | FramePacingMode::Uncapped => refresh,
         };
-        vec![
-            "DEBUG".to_string(),
-            format!(
-                "POS {:.1} {:.1} {:.1}",
-                self.position.x, self.position.y, self.position.z
+
+        let mut overlay = FlatDebugOverlay::new(
+            [self.position.x, self.position.y, self.position.z],
+            [
+                self.runtime.interest_center.x,
+                self.runtime.interest_center.z,
+            ],
+            self.speed,
+            self.movement_mode,
+            self.on_ground,
+            FlatDebugView::with_tracking_radius(
+                self.runtime.render_distance as i32,
+                self.runtime.chunk_tracking_radius as i32,
             ),
-            format!(
-                "CHUNK {} {} SPEED {:.1}",
-                self.runtime.interest_center.x, self.runtime.interest_center.z, self.speed
-            ),
-            format!(
-                "MODE {} GROUND {}",
-                self.movement_mode,
-                if self.on_ground { "Y" } else { "N" }
-            ),
-            format!(
-                "VIEW R{} T{}",
-                self.runtime.render_distance, self.runtime.chunk_tracking_radius
-            ),
-            format!(
-                "RUN {} CQ{} UQ{}",
-                runner,
-                self.runtime.server_command_queue_depth,
-                self.runtime.server_update_queue_depth
-            ),
-            format!("OCC {}  {}", occlusion, lighting),
+        );
+        overlay.runner = Some(FlatDebugRunner::new(
+            runner,
+            self.runtime.server_command_queue_depth,
+            self.runtime.server_update_queue_depth,
+        ));
+        overlay.chunks = Some(FlatDebugChunkCounts::loaded_visible_pending(
+            self.runtime.loaded_chunks,
+            self.runtime.client_visible_chunks,
+            self.runtime.pending_jobs,
+        ));
+        overlay.draw = Some(FlatDebugDrawCounts {
+            drawn_sections: self.render.drawn_section_count,
+            section_count: self.render.section_count,
+            drawn_faces: self.render.drawn_face_count,
+            face_count: self.render.face_count,
+        });
+        overlay.actors = Some(FlatDebugActorCounts {
+            drawn_actors: self.render.drawn_actor_count,
+            actor_count: self.render.actor_count,
+            drawn_actor_indices: self.render.drawn_actor_index_count,
+        });
+        overlay.render_options = Some(FlatDebugRenderOptions {
+            section_occlusion_culling: self.section_occlusion,
+            force_fullbright: self.force_fullbright,
+        });
+        overlay.extra_lines = vec![
             format!(
                 "TICK {} SIM {}",
                 self.runtime.last_tick, self.runtime.last_simulation_tick
-            ),
-            format!(
-                "CHUNKS L{} V{} P{}",
-                self.runtime.loaded_chunks,
-                self.runtime.client_visible_chunks,
-                self.runtime.pending_jobs
             ),
             format!("STREAM PUB{}", self.runtime.pending_publications),
             format!(
@@ -162,7 +166,15 @@ impl DebugPaneStats {
                 pacing_target,
                 self.pacing.active_present_mode_label.to_ascii_uppercase()
             ),
-        ]
+        ];
+        overlay
+    }
+
+    #[cfg(test)]
+    pub(crate) fn lines(self) -> Vec<String> {
+        let mut lines = vec!["DEBUG".to_string()];
+        lines.extend(self.overlay().lines());
+        lines
     }
 }
 
@@ -185,9 +197,7 @@ impl HeadlessScreenshotUi {
 }
 
 pub(crate) fn render_debug_pane(scale: GuiScale, draw: &mut GuiDrawList, stats: &DebugPaneStats) {
-    let lines = stats.lines();
-    let title = lines.first().cloned().unwrap_or_else(|| "DEBUG".to_owned());
-    let overlay = DebugOverlay::new(title, lines.into_iter().skip(1));
+    let overlay = stats.to_owned().overlay().to_debug_overlay();
     render_debug_overlay(scale, draw, &overlay);
 }
 
@@ -300,9 +310,10 @@ mod tests {
         assert_eq!(lines[3], "MODE WALK GROUND Y");
         assert_eq!(lines[4], "VIEW R2 T3");
         assert_eq!(lines[5], "RUN NATIVE-THREAD CQ1 UQ2");
-        assert_eq!(lines[6], "OCC ON  LIGHT");
+        assert_eq!(lines[6], "CHUNKS L9 V8 P1");
         assert!(lines.iter().any(|line| line == "TRACK P1 V8 A8 Q0"));
         assert!(lines.iter().any(|line| line == "ACTOR R 1/2 I180"));
+        assert!(lines.iter().any(|line| line == "OCC ON  LIGHT"));
         assert!(lines.iter().any(|line| line == "BUDGET 8.3MS FRAME 16.7MS"));
         assert!(lines.iter().any(|line| line == "OVER 3/1/0 WORST 33.4"));
 

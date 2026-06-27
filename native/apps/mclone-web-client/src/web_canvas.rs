@@ -55,9 +55,12 @@ use mclone_render_session::{
 };
 use mclone_server::ServerRunnerKind;
 use mclone_ui::{
-    DebugOverlay, FlatHotbarOverlay, FlatHud, GameFramePacingMode, GameOptionsParent, GameScreen,
-    GameTouchSettings, GameUi, GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point,
-    StatusOverlay, TouchJoystickOverlay, TouchOverlay, render_debug_overlay_at, render_flat_hud,
+    DebugOverlay, FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts,
+    FlatDebugMeshCounts, FlatDebugOverlay, FlatDebugRenderOptions, FlatDebugRunner,
+    FlatDebugTarget, FlatDebugView, FlatHotbarOverlay, FlatHud, GameFramePacingMode,
+    GameOptionsParent, GameScreen, GameTouchSettings, GameUi, GameUiAction, GameUiRenderState,
+    GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
+    render_debug_overlay_at, render_flat_hud,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -3167,75 +3170,63 @@ impl WebChunkRenderSession {
         let camera_state = self.camera.frame_state(&self.interaction);
         let camera = camera_state.camera;
         let target = self.preview_block_target_report();
-        let target_line = if target.hit.hit_type() == HitResultType::Block {
-            format!(
-                "TARGET {} {} {}",
-                target.hit.block_pos.x, target.hit.block_pos.y, target.hit.block_pos.z
-            )
+        let target = if target.hit.hit_type() == HitResultType::Block {
+            Some(FlatDebugTarget::Block {
+                x: target.hit.block_pos.x,
+                y: target.hit.block_pos.y,
+                z: target.hit.block_pos.z,
+            })
         } else {
-            "TARGET MISS".to_owned()
-        };
-        let occlusion = if self.section_occlusion_culling {
-            "ON"
-        } else {
-            "OFF"
-        };
-        let lighting = if self.force_fullbright {
-            "FULL"
-        } else {
-            "LIGHT"
+            Some(FlatDebugTarget::Miss)
         };
 
-        DebugOverlay::new(
-            "DEBUG",
+        let mut overlay = FlatDebugOverlay::new(
             [
-                format!(
-                    "POS {:.1} {:.1} {:.1}",
-                    camera.eye.x, camera.eye.y, camera.eye.z
-                ),
-                format!(
-                    "CHUNK {} {} SPEED {:.1}",
-                    camera.chunk_pos.x, camera.chunk_pos.z, camera.speed_blocks_per_second
-                ),
-                format!(
-                    "MODE {} GROUND {}",
-                    camera_state.movement_mode_label(),
-                    if camera_state.on_ground { "Y" } else { "N" }
-                ),
-                format!("VIEW R{} CENTER {} {}", radius_chunks, center.x, center.z),
-                format!(
-                    "RUN {} CQ{} UQ{}",
-                    runner_diagnostics.kind.label().to_ascii_uppercase(),
-                    runner_diagnostics.command_queue_depth,
-                    runner_diagnostics.update_queue_depth
-                ),
-                format!(
-                    "CHUNKS L{} V{}",
-                    self.runtime.client().loaded_chunk_count(),
-                    self.loaded_chunk_positions.len()
-                ),
-                format!(
-                    "DRAW S {}/{} F {}/{}",
-                    render_stats.drawn_section_count,
-                    render_stats.loaded_section_count,
-                    render_stats.drawn_face_count(),
-                    render_stats.loaded_face_count()
-                ),
-                format!(
-                    "ACTOR R {}/{} I{}",
-                    actor_stats.drawn_actor_count, actor_count, actor_stats.index_count
-                ),
-                format!(
-                    "MESH B{} U{} R{}",
-                    self.mesh_build_count, self.mesh_upload_count, self.render_count
-                ),
-                format!("PENDING {}", self.render_compiler.pending_job_count()),
-                format!("TIME {} {:.3}", day_time, time_of_day),
-                format!("SLOT {}", u16::from(camera_state.selected_hotbar_slot) + 1),
-                target_line,
-                format!("OCC {}  {}", occlusion, lighting),
+                camera.eye.x as f32,
+                camera.eye.y as f32,
+                camera.eye.z as f32,
             ],
-        )
+            [camera.chunk_pos.x, camera.chunk_pos.z],
+            camera.speed_blocks_per_second as f32,
+            camera_state.movement_mode_label(),
+            camera_state.on_ground,
+            FlatDebugView::with_center(radius_chunks as i32, [center.x, center.z]),
+        );
+        overlay.runner = Some(FlatDebugRunner::new(
+            runner_diagnostics.kind.label().to_ascii_uppercase(),
+            runner_diagnostics.command_queue_depth,
+            runner_diagnostics.update_queue_depth,
+        ));
+        overlay.chunks = Some(FlatDebugChunkCounts::loaded_visible(
+            self.runtime.client().loaded_chunk_count(),
+            self.loaded_chunk_positions.len(),
+        ));
+        overlay.draw = Some(FlatDebugDrawCounts {
+            drawn_sections: render_stats.drawn_section_count,
+            section_count: render_stats.loaded_section_count,
+            drawn_faces: render_stats.drawn_face_count(),
+            face_count: render_stats.loaded_face_count(),
+        });
+        overlay.actors = Some(FlatDebugActorCounts {
+            drawn_actors: actor_stats.drawn_actor_count,
+            actor_count,
+            drawn_actor_indices: actor_stats.index_count,
+        });
+        overlay.mesh = Some(FlatDebugMeshCounts {
+            build_count: self.mesh_build_count,
+            upload_count: self.mesh_upload_count,
+            render_count: self.render_count,
+        });
+        overlay.pending_compile_jobs = Some(self.render_compiler.pending_job_count());
+        overlay.day_time = Some(day_time);
+        overlay.time_of_day = Some(time_of_day);
+        overlay.selected_hotbar_slot = Some(camera_state.selected_hotbar_slot);
+        overlay.target = target;
+        overlay.render_options = Some(FlatDebugRenderOptions {
+            section_occlusion_culling: self.section_occlusion_culling,
+            force_fullbright: self.force_fullbright,
+        });
+        overlay.to_debug_overlay()
     }
 
     async fn sync_carried_item(&mut self) -> Result<bool, String> {
