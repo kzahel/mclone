@@ -234,6 +234,34 @@ are built, exactly as transport/storage were:
 - **Real inventory / items, crafting, mob AI / spawning, chat, settings
   persistence — absent.** Only a fixed 7-block debug hotbar exists.
 
+## Shared-First Feature Checklist
+
+Before adding a user-facing feature to one target, first decide where the
+shared contract lives. App crates should only collect platform facts, adapt
+them into shared contracts, and own platform resources. If a target needs a
+temporary app-local implementation, mark it as a fork in Matrix 2 and add a
+follow-up tactical to converge it.
+
+| Feature area | Shared owner / next shared owner | App crates may own only |
+|---|---|---|
+| Input capabilities, bindings, and gameplay intents | `mclone-input`; flat/XR split is allowed only at pose/ray/comfort boundaries | raw OS/browser/Android/XR events, focus, pointer lock, sensor/controller polling |
+| UI, HUD, menus, text widgets, and prompt presentation | `mclone-ui` | surface placement, world-space panel transforms, platform text/IME event capture |
+| Audio and sound events | `mclone-audio`, with gameplay sound event production outside app crates | device creation, platform audio permissions, web/native output adapters |
+| Network protocol and transport/session commands | `mclone-protocol`, `mclone-net`, `mclone-app-runtime` | socket/WebSocket construction, platform addresses, lifecycle reconnect triggers |
+| Client prediction, replica state, interaction, and presentation events | `mclone-client` / `mclone-render-session` | raw input collection, final platform dispatch, device-specific view ownership |
+| Authoritative simulation, world state, ticking, and scheduling | `mclone-server` plus domain crates (`mclone-worldgen`, `mclone-light`) | process/app startup, dedicated/integrated host construction |
+| Assets, content loading, registries, and resource-pack shape | `mclone-assets` plus future shared content registries | platform file/package/HTTP access adapters |
+| Rendering semantics and render-session data | `mclone-render-session`, `mclone-render` | swapchain/surface ownership, platform render target acquisition |
+| Persistence, saves, player data, and durable settings | future shared persistence/settings contract; do not hide this in one app | filesystem/localStorage/app-storage adapters and migration entrypoints |
+| Diagnostics, profiling, telemetry, and smoke reports | future shared diagnostics contract | platform counters that only exist in that backend, exported through shared report structs |
+| Jobs, workers, priorities, cancellation, and budgets | future shared job/scheduler contract | native thread/Web Worker/Android worker creation and platform wakeups |
+| Preferences/config, keybinds, graphics/audio/debug options | future shared preferences contract, consumed by `mclone-ui` and app adapters | platform persistence path and launch overrides |
+| Text input, IME, clipboard, chat/commands/signs/server address entry | `mclone-ui` text model plus platform text adapters | IME composition events, clipboard permissions, soft-keyboard visibility |
+| Inventory, items, crafting, containers, and item use | future shared gameplay/content contracts in client/server/content crates | platform input that selects or activates shared actions |
+| Particles, block damage, transient effects, and animation events | future shared presentation/event contracts | target-specific rendering of shared effect records |
+| Entity AI, spawning, pathing, damage, and interpolation policy | `mclone-server` for authority, `mclone-client`/`mclone-render-session` for presentation | platform-specific display/input only |
+| Localization and font/text layout data | future shared localization/text contract | platform locale discovery and font asset access |
+
 ## Cross-Cutting Blockers (do these before more content features)
 
 Every new feature added today gets forked across up to four app shells. The

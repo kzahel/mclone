@@ -40,6 +40,37 @@ Do not recreate or maintain the retired TypeScript engine surface. If a request 
 
 Before the first edit, identify the workstream being modified: `native Rust`, `native web/WASM`, `oracle/reference only`, or `documentation cleanup`.
 
+## Shared-first feature policy
+
+Before implementing any new user-facing engine or game feature, identify the
+shared owner first. App crates may own platform glue: OS/browser/Android/XR
+events, window/surface/session/swapchain ownership, platform storage adapters,
+native socket/browser transport setup, and lifecycle wiring. They should not own
+gameplay, rendering semantics, persistence rules, input semantics, UI behavior,
+or other engine policy just because one target needs the feature first.
+
+Do not start with a desktop-only, web-only, Android-only, or XR-only gameplay
+implementation unless the behavior is genuinely platform-specific. If no shared
+owner exists yet, create or extend the shared crate/contract first, or record an
+explicit tactical explaining the temporary platform-local exception and the path
+back to a shared boundary.
+
+Default shared routing:
+
+- input/capabilities/bindings: `mclone-input`
+- UI/HUD/widgets/text model: `mclone-ui`
+- audio/sound events/mixing: `mclone-audio`
+- protocol/transport/session commands: `mclone-protocol`, `mclone-net`, `mclone-app-runtime`
+- gameplay/client replica/prediction: `mclone-client`
+- authoritative simulation/world state: `mclone-server`
+- assets/content loading: `mclone-assets`
+- rendering contracts: `mclone-render-session`, `mclone-render`
+- XR pose/session/swapchain specifics: `mclone-xr-*`
+- persistence, diagnostics/profiling, job scheduling, preferences/config, text
+  input/IME/clipboard, content registries, inventory/items/crafting, particles
+  and transient effects, entity AI/spawning, localization: define or extend a
+  shared contract before adding app-local behavior.
+
 ## Reference-porting policy
 
 For vanilla parity ports, every class or system has a 1:1 counterpart in `reference/minecraft-1.17.1/src/`. **Always read the source file before writing the port.** The default is direct translation: same field names where practical, same method names where practical, same logic flow. This applies to client graphics behavior as well as simulation and content systems. Diverge only when the target platform, runtime ownership, or Rust type system forces it.
