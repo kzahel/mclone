@@ -44,6 +44,97 @@ frame. The validator force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-27 - Standalone Quest 3 Flight Sweep With Runtime Poll Attribution
+
+Benchmarked code commit: `320bdd2610b45b9e9947f916f75db1cf84b96fd5`
+(`Fix explicit empty light section packing`).
+
+Capture note: captured from a detached clean worktree at the commit above, with
+the local ignored `reference/` assets junctioned in for APK asset staging. The
+marker block includes `RUNTIME_MAX` and `QUEUE_MAX`.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 |
+| Android API | 34 |
+| OpenXR runtime | Oculus `v204.201.0` |
+| Stereo view config | `1680x1760` recommended per eye, `1x` sample |
+| Supported refresh | `72.0,80.0,90.0,120.0 Hz` |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| Flight | no-clip, `4.3 blocks/s`, about `86 blocks` over the sample |
+
+Summary:
+
+| Date | Commit | Lane | RD | Sample | FPS | Frames | Skipped | p50 | p95 | p99 | Max | Max render | Over 1x | Over 2x | Over 4x | Sections | Drawn sections | Indices | Drawn indices | Distance |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2026-06-27 | `320bdd2` | `native:android-xr:perf:flight:rd1` | 1 | `20.007s` | `72.0` | 1,441 | 0 | `13.881ms` | `14.967ms` | `15.738ms` | `27.327ms` | `11.883ms` | 713 | 0 | 0 | 47 | 11 | 247,308 | 65,868 | `86.048` |
+| 2026-06-27 | `320bdd2` | `native:android-xr:perf:flight:rd5` | 5 | `20.017s` | `56.6` | 1,132 | 0 | `17.480ms` | `27.737ms` | `33.756ms` | `44.455ms` | `40.183ms` | 909 | 56 | 0 | 538 | 89 | 2,531,364 | 537,858 | `86.040` |
+| 2026-06-27 | `320bdd2` | `native:android-xr:perf:flight:rd10` | 10 | `20.047s` | `21.0` | 421 | 0 | `51.758ms` | `65.606ms` | `78.369ms` | `109.878ms` | `109.726ms` | 421 | 361 | 71 | 1,276 | 185 | 5,681,634 | 1,131,312 | `86.134` |
+
+Terrain timing maxima:
+
+| RD | Terrain frame | Runtime total | Runtime poll | Sync sections | GPU upload | Ready refresh | Left eye | Right eye |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `11.536ms` | `5.648ms` | `2.412ms` | `5.601ms` | `1.813ms` | `0.113ms` | `5.241ms` | `4.484ms` |
+| 5 | `38.065ms` | `31.360ms` | `28.122ms` | `18.350ms` | `6.349ms` | `0.496ms` | `15.867ms` | `6.588ms` |
+| 10 | `98.805ms` | `84.650ms` | `76.535ms` | `18.895ms` | `3.005ms` | `1.253ms` | `10.557ms` | `20.844ms` |
+
+Runtime poll maxima:
+
+| RD | Poll total | Drain updates | Apply updates | Dirty mark | Client apply | Diagnostics | Server tick | Scheduler tick | Updates | Snapshot | Section | Unload |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `2.410ms` | `0.004ms` | `0.003ms` | `0.001ms` | `0.002ms` | `2.409ms` | `3.684ms` | `3.670ms` | 2 | 0 | 0 | 0 |
+| 5 | `28.120ms` | `0.004ms` | `0.002ms` | `0.001ms` | `0.001ms` | `28.119ms` | `12.494ms` | `12.471ms` | 2 | 0 | 0 | 0 |
+| 10 | `76.533ms` | `0.002ms` | `0.002ms` | `0.001ms` | `0.001ms` | `76.531ms` | `29.737ms` | `29.693ms` | 2 | 0 | 0 | 0 |
+
+Queue maxima:
+
+| RD | Server cmd q | Server update q | Server jobs | Publications | Scheduler jobs | Completed jobs | Dirty chunks | Loaded chunks | Visible chunks | Ticket chunks | Player visible | Player outbound |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1 | 0 | 5 | 4 | 5 | 5 | 65 | 65 | 9 | 841 | 9 | 0 |
+| 5 | 4 | 0 | 5 | 4 | 5 | 4 | 265 | 265 | 121 | 1,369 | 121 | 0 |
+| 10 | 3 | 0 | 5 | 4 | 5 | 4 | 499 | 499 | 289 | 1,849 | 289 | 0 |
+
+Upload maxima:
+
+| RD | Work frames | Rebuilt sections | Removed sections | Rebuilt indices | Uploaded sections | Upload removed | Uploaded indices | Ready sections |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 825 | 16 | 48 | 50,064 | 7 | 20 | 50,064 | 112 |
+| 5 | 188 | 16 | 160 | 42,588 | 8 | 50 | 42,588 | 1,296 |
+| 10 | 348 | 16 | 240 | 41,064 | 8 | 78 | 41,064 | 3,600 |
+
+Compile / streaming maxima:
+
+| RD | Pending chunks before | Pending chunks after | Pending jobs before | Pending jobs after | Deferred sections | Submitted sections | Completed sections | Stale sections | Visibility total | Visibility worst |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 12 | 9 | 1 | 1 | 16 | 16 | 16 | 1 | `0.890ms` | `0.286ms` |
+| 5 | 59 | 49 | 1 | 1 | 16 | 16 | 16 | 16 | `0.703ms` | `0.394ms` |
+| 10 | 98 | 85 | 1 | 1 | 16 | 16 | 16 | 16 | `0.732ms` | `0.327ms` |
+
+Interpretation:
+
+- Render distance 1 remains a viable 72 Hz lane. p95/p99 are close to budget
+  and there are no over-2x frames.
+- Render distance 5 remains uneven at about `56.6 FPS`. The worst app frame is
+  dominated by runtime polling (`28.122ms`) and section sync (`18.350ms`), not
+  raw GPU upload (`6.349ms`).
+- Render distance 10 remains a stress lane at about `21 FPS`, with a worst
+  frame over `100ms`. Runtime polling (`76.535ms`) dominates the terrain update
+  bucket.
+- The runtime poll split points at diagnostics collection: `poll_diagnostics_ms`
+  is effectively equal to `poll_total_ms` in all three lanes, while
+  `drain_updates_ms`, `apply_updates_ms`, dirty marking, and client application
+  are near zero. The update payload was tiny (`2` updates, no snapshot or unload
+  updates).
+- The expensive diagnostics path scales with scheduler state: dirty/loaded
+  chunks increase from `65` to `265` to `499`, and ticket chunks from `841` to
+  `1,369` to `1,849`. The next optimization should make the diagnostics
+  snapshot cheaper or less frequent on headset frames before changing mesh
+  upload policy.
+
 ### 2026-06-27 - Standalone Quest 3 Flight Sweep With Upload Attribution
 
 Benchmarked code commit: `2bd0e04b3e4ea64c8698b5e91571d40f19b1de39`
