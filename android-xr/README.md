@@ -174,11 +174,12 @@ sync and chunk-interest path as XR locomotion. Summary files are written to:
 ```
 
 The marker block includes `SUMMARY`, `STAGES`, `TERRAIN`, `UPLOAD_MAX`,
-`COMPILE_MAX`, `UPLOAD_LAST`, and `DRAW` lines. It records `mode=flight`,
-`render_distance`, `flight_speed_blocks_per_second`, actual
-`flight_distance_blocks`, current/supported display refresh when
+`RUNTIME_MAX`, `QUEUE_MAX`, `COMPILE_MAX`, `UPLOAD_LAST`, and `DRAW` lines. It
+records `mode=flight`, `render_distance`, `flight_speed_blocks_per_second`,
+actual `flight_distance_blocks`, current/supported display refresh when
 `XR_FB_display_refresh_rate` is available, max timing buckets, terrain
-poll/sync/GPU-upload timing, compile/upload workload counters, and draw counts.
+poll/sync/GPU-upload timing, runtime poll sub-buckets, server/scheduler queue
+counters, compile/upload workload counters, and draw counts.
 
 For remote dedicated validation, either start `mclone-dedicated-server` on a
 host the headset can reach and pass `--remote-addr`, or let the validator build

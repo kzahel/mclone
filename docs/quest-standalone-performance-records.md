@@ -20,11 +20,13 @@ and name the later commit that contains the same runtime code.
 
 Current summaries are saved as a compact marker block:
 `MCLONE_ANDROID_XR_PERF_SUMMARY`, `STAGES`, `TERRAIN`, `UPLOAD_MAX`,
-`COMPILE_MAX`, `UPLOAD_LAST`, and `DRAW`. They include refresh fields
-(`refresh_supported`, `current_hz`, `supported_hz`, `target_hz`, `budget_ms`),
-max stage timings, terrain runtime poll/sync/GPU-upload timings, compile/upload
-workload counters, and draw counts. Add extra columns or a secondary detail
-table when those fields are relevant to the change being tracked.
+`RUNTIME_MAX`, `QUEUE_MAX`, `COMPILE_MAX`, `UPLOAD_LAST`, and `DRAW`. They
+include refresh fields (`refresh_supported`, `current_hz`, `supported_hz`,
+`target_hz`, `budget_ms`), max stage timings, terrain runtime
+poll/sync/GPU-upload timings, runtime poll sub-buckets, server/scheduler queue
+state, compile/upload workload counters, and draw counts. Add extra columns or
+a secondary detail table when those fields are relevant to the change being
+tracked.
 
 ## Current Standalone Quest Lanes
 

@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
-use mclone_app_runtime::elapsed_ms;
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
     render_full_frame_for_view,
@@ -17,6 +16,7 @@ use mclone_app_runtime::render_assets::TexturedMeshAssets;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
 };
+use mclone_app_runtime::{RuntimePollDiagnostics, elapsed_ms};
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
 use mclone_core::{ChunkPos, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
@@ -176,6 +176,31 @@ pub struct XrTerrainFrameTiming {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct XrTerrainUploadSummary {
     pub poll_changed: bool,
+    pub poll_total_ms: f64,
+    pub poll_drain_updates_ms: f64,
+    pub poll_apply_updates_ms: f64,
+    pub poll_dirty_mark_ms: f64,
+    pub poll_client_apply_updates_ms: f64,
+    pub poll_diagnostics_ms: f64,
+    pub poll_server_tick_ms: f64,
+    pub poll_server_reported_total_ms: f64,
+    pub poll_scheduler_tick_ms: f64,
+    pub poll_updates: usize,
+    pub poll_snapshot_updates: usize,
+    pub poll_section_block_updates: usize,
+    pub poll_unload_updates: usize,
+    pub server_command_queue_depth: usize,
+    pub server_update_queue_depth: usize,
+    pub server_pending_jobs: usize,
+    pub server_pending_publications: usize,
+    pub scheduler_pending_jobs: usize,
+    pub scheduler_completed_jobs: usize,
+    pub scheduler_dirty_chunks: usize,
+    pub scheduler_loaded_snapshot_chunks: usize,
+    pub scheduler_client_visible_chunks: usize,
+    pub scheduler_active_ticket_chunks: usize,
+    pub player_visible_chunks: usize,
+    pub player_outbound_queue_depth: usize,
     pub pending_render_chunks_before: usize,
     pub pending_render_chunks_after: usize,
     pub pending_compile_jobs_before: usize,
@@ -639,6 +664,7 @@ where
         let poll_start = Instant::now();
         let poll_changed = self.poll().context("poll XR terrain runtime")?;
         timing.runtime_poll_ms = elapsed_ms(poll_start.elapsed());
+        let poll_summary = xr_poll_diagnostics_upload_summary(self.runtime.last_poll_diagnostics());
         if !poll_changed && !self.has_pending_render_work(camera_position) {
             let ready_start = Instant::now();
             let ready_sections = self
@@ -654,7 +680,7 @@ where
                 pending_compile_jobs_before,
                 pending_compile_jobs_after: self.runtime.render_compile_pending_job_count(),
                 traversal_ready_section_count,
-                ..XrTerrainUploadSummary::default()
+                ..poll_summary
             });
         }
         let sync_start = Instant::now();
@@ -707,6 +733,7 @@ where
             visibility_graph_build_count: section_update.visibility_graph_stats.build_count,
             visibility_graph_total_ms: section_update.visibility_graph_stats.total_ms,
             visibility_graph_worst_ms: section_update.visibility_graph_stats.worst_ms,
+            ..poll_summary
         })
     }
 
@@ -1200,6 +1227,39 @@ where
     fn record_eye0_summary(&mut self, summary: FullFrameRenderSummary) {
         self.first_eye_summary = Some(summary);
         self.rendered_frames += 1;
+    }
+}
+
+fn xr_poll_diagnostics_upload_summary(
+    diagnostics: RuntimePollDiagnostics,
+) -> XrTerrainUploadSummary {
+    XrTerrainUploadSummary {
+        poll_total_ms: diagnostics.poll_total_ms,
+        poll_drain_updates_ms: diagnostics.drain_updates_ms,
+        poll_apply_updates_ms: diagnostics.apply_updates_ms,
+        poll_dirty_mark_ms: diagnostics.dirty_mark_ms,
+        poll_client_apply_updates_ms: diagnostics.client_apply_updates_ms,
+        poll_diagnostics_ms: diagnostics.poll_diagnostics_ms,
+        poll_server_tick_ms: diagnostics.server_tick_ms,
+        poll_server_reported_total_ms: diagnostics.server_reported_total_ms,
+        poll_scheduler_tick_ms: diagnostics.scheduler_tick_ms,
+        poll_updates: diagnostics.updates,
+        poll_snapshot_updates: diagnostics.snapshot_updates,
+        poll_section_block_updates: diagnostics.section_block_updates,
+        poll_unload_updates: diagnostics.unload_updates,
+        server_command_queue_depth: diagnostics.server_command_queue_depth,
+        server_update_queue_depth: diagnostics.server_update_queue_depth,
+        server_pending_jobs: diagnostics.server_pending_jobs,
+        server_pending_publications: diagnostics.server_pending_publications,
+        scheduler_pending_jobs: diagnostics.scheduler_pending_jobs,
+        scheduler_completed_jobs: diagnostics.scheduler_completed_jobs,
+        scheduler_dirty_chunks: diagnostics.scheduler_dirty_chunks,
+        scheduler_loaded_snapshot_chunks: diagnostics.scheduler_loaded_snapshot_chunks,
+        scheduler_client_visible_chunks: diagnostics.scheduler_client_visible_chunks,
+        scheduler_active_ticket_chunks: diagnostics.scheduler_active_ticket_chunks,
+        player_visible_chunks: diagnostics.player_visible_chunks,
+        player_outbound_queue_depth: diagnostics.player_outbound_queue_depth,
+        ..XrTerrainUploadSummary::default()
     }
 }
 

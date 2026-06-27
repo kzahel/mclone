@@ -117,10 +117,13 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
 - [x] Split `render_mclone_frame` into narrower locate/locomotion/acquire/
   per-eye/end-frame timings after the coarse probe proved useful.
 - [x] Split the perf output into compact `SUMMARY`, `STAGES`, `TERRAIN`,
-  `UPLOAD_MAX`, `COMPILE_MAX`, `UPLOAD_LAST`, and `DRAW` markers so logcat does
-  not truncate draw fields.
+  `UPLOAD_MAX`, `RUNTIME_MAX`, `QUEUE_MAX`, `COMPILE_MAX`, `UPLOAD_LAST`, and
+  `DRAW` markers so logcat does not truncate draw fields.
 - [x] Add pending compile/streaming counters and upload workload counters to
   the saved summary block once the shared XR scene exposes them directly.
+- [x] Split `runtime.poll()` diagnostics into local drain/apply/diagnostics
+  sub-buckets plus server/scheduler queue counters after the first
+  upload-attributed sweep showed RD5/RD10 spikes dominated by runtime polling.
 
 Validation target:
 
@@ -142,7 +145,7 @@ Recorded first-pass implementation:
 - The budget uses the runtime's current OpenXR display refresh when
   `XR_FB_display_refresh_rate` is available, falling back to `72 Hz` otherwise.
 - The validator waits for `MCLONE_ANDROID_XR_PERF_SUMMARY`, writes the compact
-  seven-line marker block to `/tmp/mclone-quest-openxr-perf-summary.txt`, and
+  nine-line marker block to `/tmp/mclone-quest-openxr-perf-summary.txt`, and
   still runs the existing cleanup trap that force-stops the app, restores
   headset power settings, re-enables proximity, and sends `KEYCODE_SLEEP`.
 - `package.json` includes `native:android-xr:perf` with a fixed seed, center
@@ -158,6 +161,10 @@ Recorded first-pass implementation:
   pending render chunks, pending compile jobs, submitted/completed/stale compile
   sections, deferred sections, uploaded sections/vertices/indices, and draw
   counts.
+- The marker block also includes runtime poll sub-timings (`drain_updates`,
+  `apply_updates`, dirty marking, client application, diagnostics snapshot),
+  server-reported tick/scheduler timing, update counts, and queue/visibility
+  counters from the integrated server runner.
 
 ### Slice 2 - Real OpenXR Display Refresh State
 

@@ -121,6 +121,13 @@ pub struct RuntimeUpdateApplyReport {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RuntimePollTiming {
+    pub total_ms: f64,
+    pub drain_updates_ms: f64,
+    pub poll_diagnostics_ms: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RuntimeExchangeApplyReport {
     pub step: RuntimeStepReport,
     pub update_apply: RuntimeUpdateApplyReport,
@@ -131,7 +138,12 @@ pub struct RuntimePollDiagnostics {
     pub server_runner_kind: Option<ServerRunnerKind>,
     pub server_command_queue_depth: usize,
     pub server_update_queue_depth: usize,
+    pub server_pending_jobs: usize,
+    pub server_pending_publications: usize,
     pub flush_commands_ms: f64,
+    pub poll_total_ms: f64,
+    pub drain_updates_ms: f64,
+    pub poll_diagnostics_ms: f64,
     pub server_tick_ms: f64,
     pub server_reported_total_ms: f64,
     pub scheduler_tick_ms: f64,
@@ -152,6 +164,14 @@ pub struct RuntimePollDiagnostics {
     pub apply_updates_ms: f64,
     pub dirty_mark_ms: f64,
     pub client_apply_updates_ms: f64,
+    pub scheduler_pending_jobs: usize,
+    pub scheduler_completed_jobs: usize,
+    pub scheduler_dirty_chunks: usize,
+    pub scheduler_loaded_snapshot_chunks: usize,
+    pub scheduler_client_visible_chunks: usize,
+    pub scheduler_active_ticket_chunks: usize,
+    pub player_visible_chunks: usize,
+    pub player_outbound_queue_depth: usize,
     pub scheduler_events: usize,
     pub updates: usize,
     pub snapshot_updates: usize,
@@ -447,12 +467,15 @@ impl SingleViewRuntime {
 
     pub fn finish_poll_diagnostics(
         &mut self,
-        flush_commands_ms: f64,
+        timing: RuntimePollTiming,
         apply_report: RuntimeUpdateApplyReport,
         runner_diagnostics: Option<&ServerRunnerDiagnostics>,
     ) -> RuntimePollDiagnostics {
         let mut diagnostics = RuntimePollDiagnostics {
-            flush_commands_ms,
+            flush_commands_ms: timing.total_ms,
+            poll_total_ms: timing.total_ms,
+            drain_updates_ms: timing.drain_updates_ms,
+            poll_diagnostics_ms: timing.poll_diagnostics_ms,
             apply_updates_ms: apply_report.total_ms,
             dirty_mark_ms: apply_report.dirty_mark_ms,
             client_apply_updates_ms: apply_report.client_apply_updates_ms,
@@ -782,6 +805,8 @@ impl SingleViewRuntime {
         diagnostics.server_runner_kind = Some(runner_diagnostics.kind);
         diagnostics.server_command_queue_depth = runner_diagnostics.command_queue_depth;
         diagnostics.server_update_queue_depth = runner_diagnostics.update_queue_depth;
+        diagnostics.server_pending_jobs = runner_diagnostics.pending_jobs;
+        diagnostics.server_pending_publications = runner_diagnostics.pending_publications;
         diagnostics.server_tick_ms = micros_to_ms(tick.wall_us);
         diagnostics.server_reported_total_ms = micros_to_ms(tick.timing.total_us);
         diagnostics.scheduler_tick_ms = micros_to_ms(tick.timing.scheduler_tick_us);
@@ -803,6 +828,20 @@ impl SingleViewRuntime {
         diagnostics.fluid_tick_fluid_ms = micros_to_ms(tick.timing.fluid_tick_fluid_us);
         diagnostics.fluid_set_block_ms = micros_to_ms(tick.timing.fluid_set_block_us);
         diagnostics.entity_tick_ms = micros_to_ms(tick.timing.entity_tick_us);
+        diagnostics.scheduler_pending_jobs = runner_diagnostics.scheduler_metrics.pending_jobs;
+        diagnostics.scheduler_completed_jobs = runner_diagnostics.scheduler_metrics.completed_jobs;
+        diagnostics.scheduler_dirty_chunks = runner_diagnostics.scheduler_metrics.dirty_chunks;
+        diagnostics.scheduler_loaded_snapshot_chunks =
+            runner_diagnostics.scheduler_metrics.loaded_snapshot_chunks;
+        diagnostics.scheduler_client_visible_chunks =
+            runner_diagnostics.scheduler_metrics.client_visible_chunks;
+        diagnostics.scheduler_active_ticket_chunks =
+            runner_diagnostics.scheduler_metrics.active_ticket_chunks;
+        diagnostics.player_visible_chunks = runner_diagnostics
+            .chunk_tracking
+            .total_player_visible_chunks;
+        diagnostics.player_outbound_queue_depth =
+            runner_diagnostics.chunk_tracking.total_outbound_queue_depth;
         diagnostics.scheduler_events = tick.scheduler_event_count;
         diagnostics.pending_unloads_processed = tick.pending_unloads_processed;
         diagnostics.fluid_due_ticks = tick.fluid_due_ticks;

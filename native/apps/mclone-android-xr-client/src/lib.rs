@@ -1498,6 +1498,36 @@ mod android {
                 self.max_upload.traversal_ready_section_count
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_RUNTIME_MAX poll_total_ms={:.3} drain_updates_ms={:.3} apply_updates_ms={:.3} dirty_mark_ms={:.3} client_apply_ms={:.3} poll_diagnostics_ms={:.3} server_tick_ms={:.3} scheduler_tick_ms={:.3} updates={} snapshot_updates={} section_updates={} unload_updates={}",
+                self.max_upload.poll_total_ms,
+                self.max_upload.poll_drain_updates_ms,
+                self.max_upload.poll_apply_updates_ms,
+                self.max_upload.poll_dirty_mark_ms,
+                self.max_upload.poll_client_apply_updates_ms,
+                self.max_upload.poll_diagnostics_ms,
+                self.max_upload.poll_server_tick_ms,
+                self.max_upload.poll_scheduler_tick_ms,
+                self.max_upload.poll_updates,
+                self.max_upload.poll_snapshot_updates,
+                self.max_upload.poll_section_block_updates,
+                self.max_upload.poll_unload_updates
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_QUEUE_MAX server_cmd_q={} server_update_q={} server_pending_jobs={} server_pending_publications={} scheduler_pending_jobs={} scheduler_completed_jobs={} scheduler_dirty_chunks={} scheduler_loaded_chunks={} scheduler_visible_chunks={} scheduler_ticket_chunks={} player_visible_chunks={} player_outbound_q={}",
+                self.max_upload.server_command_queue_depth,
+                self.max_upload.server_update_queue_depth,
+                self.max_upload.server_pending_jobs,
+                self.max_upload.server_pending_publications,
+                self.max_upload.scheduler_pending_jobs,
+                self.max_upload.scheduler_completed_jobs,
+                self.max_upload.scheduler_dirty_chunks,
+                self.max_upload.scheduler_loaded_snapshot_chunks,
+                self.max_upload.scheduler_client_visible_chunks,
+                self.max_upload.scheduler_active_ticket_chunks,
+                self.max_upload.player_visible_chunks,
+                self.max_upload.player_outbound_queue_depth
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_COMPILE_MAX pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} neighbor_ready_sections={} near_exception_sections={} deferred_sections={} submitted_sections={} completed_sections={} stale_sections={} visibility_graph_builds={} visibility_graph_total_ms={:.3} visibility_graph_worst_ms={:.3}",
                 self.max_upload.pending_render_chunks_before,
                 self.max_upload.pending_render_chunks_after,
@@ -1605,6 +1635,49 @@ mod android {
     ) -> mclone_xr_scene::XrTerrainUploadSummary {
         mclone_xr_scene::XrTerrainUploadSummary {
             poll_changed: a.poll_changed || b.poll_changed,
+            poll_total_ms: a.poll_total_ms.max(b.poll_total_ms),
+            poll_drain_updates_ms: a.poll_drain_updates_ms.max(b.poll_drain_updates_ms),
+            poll_apply_updates_ms: a.poll_apply_updates_ms.max(b.poll_apply_updates_ms),
+            poll_dirty_mark_ms: a.poll_dirty_mark_ms.max(b.poll_dirty_mark_ms),
+            poll_client_apply_updates_ms: a
+                .poll_client_apply_updates_ms
+                .max(b.poll_client_apply_updates_ms),
+            poll_diagnostics_ms: a.poll_diagnostics_ms.max(b.poll_diagnostics_ms),
+            poll_server_tick_ms: a.poll_server_tick_ms.max(b.poll_server_tick_ms),
+            poll_server_reported_total_ms: a
+                .poll_server_reported_total_ms
+                .max(b.poll_server_reported_total_ms),
+            poll_scheduler_tick_ms: a.poll_scheduler_tick_ms.max(b.poll_scheduler_tick_ms),
+            poll_updates: a.poll_updates.max(b.poll_updates),
+            poll_snapshot_updates: a.poll_snapshot_updates.max(b.poll_snapshot_updates),
+            poll_section_block_updates: a
+                .poll_section_block_updates
+                .max(b.poll_section_block_updates),
+            poll_unload_updates: a.poll_unload_updates.max(b.poll_unload_updates),
+            server_command_queue_depth: a
+                .server_command_queue_depth
+                .max(b.server_command_queue_depth),
+            server_update_queue_depth: a.server_update_queue_depth.max(b.server_update_queue_depth),
+            server_pending_jobs: a.server_pending_jobs.max(b.server_pending_jobs),
+            server_pending_publications: a
+                .server_pending_publications
+                .max(b.server_pending_publications),
+            scheduler_pending_jobs: a.scheduler_pending_jobs.max(b.scheduler_pending_jobs),
+            scheduler_completed_jobs: a.scheduler_completed_jobs.max(b.scheduler_completed_jobs),
+            scheduler_dirty_chunks: a.scheduler_dirty_chunks.max(b.scheduler_dirty_chunks),
+            scheduler_loaded_snapshot_chunks: a
+                .scheduler_loaded_snapshot_chunks
+                .max(b.scheduler_loaded_snapshot_chunks),
+            scheduler_client_visible_chunks: a
+                .scheduler_client_visible_chunks
+                .max(b.scheduler_client_visible_chunks),
+            scheduler_active_ticket_chunks: a
+                .scheduler_active_ticket_chunks
+                .max(b.scheduler_active_ticket_chunks),
+            player_visible_chunks: a.player_visible_chunks.max(b.player_visible_chunks),
+            player_outbound_queue_depth: a
+                .player_outbound_queue_depth
+                .max(b.player_outbound_queue_depth),
             pending_render_chunks_before: a
                 .pending_render_chunks_before
                 .max(b.pending_render_chunks_before),

@@ -26,8 +26,8 @@ use crate::session::{
     SessionFailure, SessionStartRequest, SessionStartResult, SessionStatus, StartedGameSession,
 };
 use crate::{
-    RuntimePollDiagnostics, RuntimeUpdateApplyReport, SingleViewRuntime, SingleViewRuntimeStats,
-    chunk_tracking_radius_for_render_distance, elapsed_ms,
+    RuntimePollDiagnostics, RuntimePollTiming, RuntimeUpdateApplyReport, SingleViewRuntime,
+    SingleViewRuntimeStats, chunk_tracking_radius_for_render_distance, elapsed_ms,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -166,15 +166,31 @@ impl LocalSingleViewSceneRuntime {
     }
 
     pub fn poll(&mut self) -> Result<bool> {
-        let flush_start = Instant::now();
-        let apply_report = self.drain_runner_updates_report()?;
+        let poll_start = Instant::now();
+        let drain_start = Instant::now();
+        let updates = self
+            .server_runner
+            .drain_updates()
+            .context("failed to drain local single-view integrated server updates")?;
+        let drain_updates_ms = elapsed_ms(drain_start.elapsed());
+        let apply_report = if updates.is_empty() {
+            RuntimeUpdateApplyReport::default()
+        } else {
+            self.core.apply_server_updates_report(updates)
+        };
         let changed = apply_report.changed;
+        let diagnostics_start = Instant::now();
         let runner_diagnostics = self
             .server_runner
             .poll_diagnostics()
             .context("failed to poll local single-view integrated server diagnostics")?;
+        let poll_diagnostics_ms = elapsed_ms(diagnostics_start.elapsed());
         self.core.finish_poll_diagnostics(
-            elapsed_ms(flush_start.elapsed()),
+            RuntimePollTiming {
+                total_ms: elapsed_ms(poll_start.elapsed()),
+                drain_updates_ms,
+                poll_diagnostics_ms,
+            },
             apply_report,
             Some(&runner_diagnostics),
         );
