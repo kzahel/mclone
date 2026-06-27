@@ -7,6 +7,10 @@ use super::{
     SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED,
     WebIntegratedServerRunnerConfig, WebRuntime,
 };
+use mclone_app_runtime::session::{
+    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
+    SessionStartRequest, SessionStartResult, StartedGameSession,
+};
 use mclone_assets::PackedAssetSource;
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ClientInteractionController, ClientRuntime,
@@ -2216,6 +2220,7 @@ pub struct WebChunkRenderSession {
     depth: ChunkDepthTarget,
     sky: SkyRenderer,
     runtime: WebRuntime,
+    session: GameSessionCoordinator<()>,
     camera: EngineCameraController,
     interaction: ClientInteractionController,
     actor_interpolation: ActorInterpolationState,
@@ -2618,11 +2623,17 @@ impl WebChunkRenderSession {
         )?;
         set_bool(object, "forceFullbright", self.force_fullbright)?;
         set_bool(object, "debugOverlayVisible", self.debug_overlay_visible)?;
+        let status_overlay = self.effective_status_overlay();
         set_bool(
             object,
             "statusOverlayVisible",
-            self.status_overlay.visible && !self.status_overlay.message.is_empty(),
+            status_overlay.visible && !status_overlay.message.is_empty(),
         )?;
+        set_bool(object, "statusOverlayOk", status_overlay.ok)?;
+        if status_overlay.visible && !status_overlay.message.is_empty() {
+            set_string(object, "statusOverlayMessage", &status_overlay.message)?;
+        }
+        write_web_session_status_to_js_object(object, &self.session)?;
         set_bool(
             object,
             "touchLookSensitivityAvailable",
@@ -2773,6 +2784,7 @@ impl WebChunkRenderSession {
         Self::new_with_runtime(
             canvas,
             asset_pack_bytes,
+            SessionStartRequest::NewLocalWorld { seed: SMOKE_SEED },
             WebRuntime::local_integrated(SMOKE_SEED),
         )
         .await
@@ -2783,8 +2795,15 @@ impl WebChunkRenderSession {
         asset_pack_bytes: Vec<u8>,
         config: WebIntegratedServerRunnerConfig,
     ) -> Result<Self, String> {
+        let seed = config.seed;
         let runtime = WebRuntime::web_worker_integrated(config).await?;
-        Self::new_with_runtime(canvas, asset_pack_bytes, runtime).await
+        Self::new_with_runtime(
+            canvas,
+            asset_pack_bytes,
+            SessionStartRequest::NewLocalWorld { seed },
+            runtime,
+        )
+        .await
     }
 
     async fn new_with_remote_websocket(
@@ -2792,13 +2811,22 @@ impl WebChunkRenderSession {
         asset_pack_bytes: Vec<u8>,
         websocket_url: String,
     ) -> Result<Self, String> {
-        let runtime = WebRuntime::websocket_remote(websocket_url).await?;
-        Self::new_with_runtime(canvas, asset_pack_bytes, runtime).await
+        let runtime = WebRuntime::websocket_remote(websocket_url.clone()).await?;
+        Self::new_with_runtime(
+            canvas,
+            asset_pack_bytes,
+            SessionStartRequest::JoinRemote {
+                endpoint: RemoteSessionEndpoint::new(websocket_url),
+            },
+            runtime,
+        )
+        .await
     }
 
     async fn new_with_runtime(
         canvas: HtmlCanvasElement,
         asset_pack_bytes: Vec<u8>,
+        session_request: SessionStartRequest,
         runtime: WebRuntime,
     ) -> Result<Self, String> {
         let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes)?;
@@ -2814,13 +2842,18 @@ impl WebChunkRenderSession {
         .map_err(|error| format!("failed to upload packed actor textures: {error:#}"))?;
         let gui = GuiRenderer::new(&context.device, context.format);
         let mut ui = GameUi::new_ingame();
+        if let SessionStartRequest::JoinRemote { endpoint } = &session_request {
+            ui.set_join_remote_addr(endpoint.address.clone());
+        }
         ui.set_scale(GuiScale::from_pixels(context.width, context.height));
+        let session = started_web_session_coordinator(session_request)?;
 
         Ok(Self {
             context,
             depth,
             sky,
             runtime,
+            session,
             camera: EngineCameraController::spawn_for_chunk(SMOKE_INITIAL_CENTER),
             interaction: ClientInteractionController::new(),
             actor_interpolation: ActorInterpolationState::new(),
@@ -2850,6 +2883,13 @@ impl WebChunkRenderSession {
 
     fn is_remote_websocket_runtime(&self) -> bool {
         self.runtime.runner_kind() == ServerRunnerKind::RemoteWebSocket
+    }
+
+    fn effective_status_overlay(&self) -> StatusOverlay {
+        self.session.status().map_or_else(
+            || self.status_overlay.clone(),
+            |status| StatusOverlay::new(status.message, status.ok),
+        )
     }
 
     async fn interact_block_with_kind(
@@ -3644,7 +3684,11 @@ impl WebChunkRenderSession {
                 );
             }
         }
-        render_status_overlay(self.ui.scale(), &mut ui_draw, &self.status_overlay);
+        render_status_overlay(
+            self.ui.scale(),
+            &mut ui_draw,
+            &self.effective_status_overlay(),
+        );
         render_touch_overlay(self.ui.scale(), &mut ui_draw, &self.touch_overlay);
         let gui_command_count = ui_draw.commands().len();
         if gui_command_count > 0 {
@@ -3668,6 +3712,7 @@ impl WebChunkRenderSession {
         frame.present();
         self.render_count += 1;
         self.loaded_chunk_positions = current_loaded_chunks;
+        let effective_status_overlay = self.effective_status_overlay();
 
         Ok(GeneratedChunkRenderReport {
             center,
@@ -3715,8 +3760,8 @@ impl WebChunkRenderSession {
                 _ => None,
             },
             debug_overlay_visible: self.debug_overlay_visible,
-            status_overlay_visible: self.status_overlay.visible
-                && !self.status_overlay.message.is_empty(),
+            status_overlay_visible: effective_status_overlay.visible
+                && !effective_status_overlay.message.is_empty(),
             section_occlusion_culling: self.section_occlusion_culling,
             force_fullbright: self.force_fullbright,
             compile_request_id: acceptance_report.request_id,
@@ -4023,6 +4068,19 @@ fn load_textured_mesh_assets_from_pack(bytes: Vec<u8>) -> Result<WebTexturedMesh
     })
 }
 
+fn started_web_session_coordinator(
+    request: SessionStartRequest,
+) -> Result<GameSessionCoordinator<()>, String> {
+    let descriptor = request
+        .active_descriptor()
+        .ok_or_else(|| "web session request did not describe an active session".to_owned())?;
+    let result: SessionStartResult<()> = Ok(StartedGameSession::new(descriptor, ()));
+    let mut coordinator = GameSessionCoordinator::new();
+    coordinator.begin_start(request);
+    coordinator.apply_start_result(&result);
+    Ok(coordinator)
+}
+
 fn gui_key_from_label(label: &str) -> Option<GuiKey> {
     match label {
         "escape" | "Escape" => Some(GuiKey::Escape),
@@ -4071,6 +4129,77 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::SetTouchLookSensitivity(_) => "setTouchLookSensitivity",
         GameUiAction::Quit => "quit",
     }
+}
+
+fn write_web_session_status_to_js_object(
+    object: &js_sys::Object,
+    coordinator: &GameSessionCoordinator<()>,
+) -> Result<(), String> {
+    match coordinator.state() {
+        GameSessionState::NoSession => {
+            set_string(object, "sessionState", "none")?;
+        }
+        GameSessionState::Starting { request } => {
+            set_string(object, "sessionState", "starting")?;
+            write_session_request_to_js_object(object, request)?;
+        }
+        GameSessionState::Active { session } => {
+            set_string(object, "sessionState", "active")?;
+            write_active_session_to_js_object(object, session)?;
+        }
+        GameSessionState::Failed { request, error } => {
+            set_string(object, "sessionState", "failed")?;
+            write_session_request_to_js_object(object, request)?;
+            set_string(object, "sessionFailureMessage", &error.message)?;
+        }
+    }
+
+    if let Some(status) = coordinator.status() {
+        set_bool(object, "sessionStatusVisible", true)?;
+        set_bool(object, "sessionStatusOk", status.ok)?;
+        set_string(object, "sessionStatusMessage", &status.message)?;
+    } else {
+        set_bool(object, "sessionStatusVisible", false)?;
+        set_bool(object, "sessionStatusOk", true)?;
+    }
+    Ok(())
+}
+
+fn write_session_request_to_js_object(
+    object: &js_sys::Object,
+    request: &SessionStartRequest,
+) -> Result<(), String> {
+    match request {
+        SessionStartRequest::NewLocalWorld { seed } => {
+            set_string(object, "sessionKind", "localWorld")?;
+            set_number(object, "sessionSeed", *seed as f64)?;
+        }
+        SessionStartRequest::JoinRemote { endpoint } => {
+            set_string(object, "sessionKind", "remote")?;
+            set_string(object, "sessionRemoteEndpoint", &endpoint.address)?;
+        }
+        SessionStartRequest::Unknown => {
+            set_string(object, "sessionKind", "unknown")?;
+        }
+    }
+    Ok(())
+}
+
+fn write_active_session_to_js_object(
+    object: &js_sys::Object,
+    session: &ActiveSessionDescriptor,
+) -> Result<(), String> {
+    match session {
+        ActiveSessionDescriptor::LocalWorld { seed } => {
+            set_string(object, "sessionKind", "localWorld")?;
+            set_number(object, "sessionSeed", *seed as f64)?;
+        }
+        ActiveSessionDescriptor::Remote { endpoint } => {
+            set_string(object, "sessionKind", "remote")?;
+            set_string(object, "sessionRemoteEndpoint", &endpoint.address)?;
+        }
+    }
+    Ok(())
 }
 
 fn clamp_touch_look_sensitivity(value: f32) -> f32 {

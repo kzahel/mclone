@@ -154,6 +154,17 @@ const runtime: AppRuntime = {
     nativeUiScreen: "none",
     nativeUiOptionsParent: null,
     lastUiAction: null,
+    sessionState: "none",
+    sessionKind: "unknown",
+    sessionSeed: null,
+    sessionRemoteEndpoint: null,
+    sessionFailureMessage: null,
+    sessionStatusVisible: false,
+    sessionStatusOk: true,
+    sessionStatusMessage: "",
+    statusOverlayVisible: false,
+    statusOverlayOk: true,
+    statusOverlayMessage: "",
     sectionOcclusionCulling: true,
     forceFullbright: false,
     frameCount: 0,
@@ -750,6 +761,7 @@ class WebChunkApp {
     runtime.state.uiCoversWorld = Boolean(report.uiCoversWorld);
     runtime.state.nativeUiScreen = String(report.uiScreen ?? runtime.state.nativeUiScreen ?? "none");
     runtime.state.nativeUiOptionsParent = report.uiOptionsParent ?? null;
+    applySessionReport(report, runtime.state);
     if (typeof report.sectionOcclusionCulling !== "undefined") {
       this.sectionOcclusionCulling = Boolean(report.sectionOcclusionCulling);
     }
@@ -1020,6 +1032,7 @@ class WebChunkApp {
     runtime.state.uiCoversWorld = Boolean(report.coversWorld ?? report.uiCoversWorld);
     runtime.state.nativeUiScreen = String(report.screen ?? report.uiScreen ?? "none");
     runtime.state.nativeUiOptionsParent = report.optionsParent ?? report.uiOptionsParent ?? null;
+    applySessionReport(report, runtime.state);
     this.sectionOcclusionCulling = Boolean(report.sectionOcclusionCulling);
     this.forceFullbright = Boolean(report.forceFullbright);
     runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
@@ -1264,6 +1277,55 @@ function recordCompileTiming(timing: WebCompileTiming): void {
 
 function defaultDebugOverlayVisible(): boolean {
   return !hasTouchInput() && window.matchMedia("(min-width: 681px)").matches;
+}
+
+function applySessionReport(report: WasmReport, state: AppRuntimeState): void {
+  if (typeof report.sessionState !== "undefined") {
+    state.sessionState = String(report.sessionState);
+  }
+  if (typeof report.sessionKind !== "undefined") {
+    const kind = String(report.sessionKind);
+    state.sessionKind = kind;
+    if (kind !== "localWorld") {
+      state.sessionSeed = null;
+    }
+    if (kind !== "remote") {
+      state.sessionRemoteEndpoint = null;
+    }
+  }
+  if (typeof report.sessionSeed !== "undefined") {
+    state.sessionSeed = Number(report.sessionSeed);
+  }
+  if (typeof report.sessionRemoteEndpoint !== "undefined") {
+    state.sessionRemoteEndpoint = String(report.sessionRemoteEndpoint);
+  }
+  if (typeof report.sessionFailureMessage !== "undefined") {
+    state.sessionFailureMessage = String(report.sessionFailureMessage);
+  } else if (report.sessionState !== "failed") {
+    state.sessionFailureMessage = null;
+  }
+  if (typeof report.sessionStatusVisible !== "undefined") {
+    state.sessionStatusVisible = Boolean(report.sessionStatusVisible);
+  }
+  if (typeof report.sessionStatusOk !== "undefined") {
+    state.sessionStatusOk = Boolean(report.sessionStatusOk);
+  }
+  if (typeof report.sessionStatusMessage !== "undefined") {
+    state.sessionStatusMessage = String(report.sessionStatusMessage);
+  } else if (report.sessionStatusVisible === false) {
+    state.sessionStatusMessage = "";
+  }
+  if (typeof report.statusOverlayVisible !== "undefined") {
+    state.statusOverlayVisible = Boolean(report.statusOverlayVisible);
+  }
+  if (typeof report.statusOverlayOk !== "undefined") {
+    state.statusOverlayOk = Boolean(report.statusOverlayOk);
+  }
+  if (typeof report.statusOverlayMessage !== "undefined") {
+    state.statusOverlayMessage = String(report.statusOverlayMessage);
+  } else if (report.statusOverlayVisible === false) {
+    state.statusOverlayMessage = "";
+  }
 }
 
 function publishRuntimeState(_state: AppRuntimeState): void {

@@ -1,13 +1,15 @@
 # 095: Shared Session Coordinator
 
-Status: active; Slices 1-3 landed on 2026-06-27. `mclone-app-runtime` now owns
+Status: active; Slices 1-4a landed on 2026-06-27. `mclone-app-runtime` now owns
 the platform-neutral session request/state vocabulary and shared start-result
 boundary, including local-world start, remote-join start, active session
 descriptors, pending starts, failure state, status text, and success/failure
 transition policy. Desktop flat consumes that coordinator for initial startup,
-queued New World creation, and the first Join Remote menu flow. Runtime
-construction is still desktop-local; manual remote address entry and
-web/XR/Android coordinator adoption remain follow-ups.
+queued New World creation, and the first Join Remote menu flow. Web/WASM now
+uses the same coordinator vocabulary for initial local-worker and remote
+WebSocket starts and publishes shared session state to the browser diagnostics
+surface. Dynamic web menu-driven New World/Join Remote replacement, manual
+remote address entry, and XR/Android coordinator adoption remain follow-ups.
 
 ## Purpose
 
@@ -208,11 +210,47 @@ without blank output or overlapping UI.
 
 ### Slice 4 - Platform Adoption
 
-- [ ] Web/WASM consumes the common coordinator for local integrated and remote
-  WebSocket starts while preserving browser async startup.
+- [x] Web/WASM consumes the common coordinator for initial local integrated and
+  remote WebSocket starts while preserving browser async startup.
+- [ ] Web/WASM routes menu-driven New World and Join Remote actions through an
+  async restart/reconnect factory instead of only publishing the UI intent.
 - [ ] Flat Android consumes the common coordinator for local and remote starts.
 - [ ] Desktop XR and Android XR consume the same request/status model while
   keeping OpenXR scene/session ownership in XR adapters.
+
+Recorded Slice 4a result:
+
+- `WebChunkRenderSession` now owns a `GameSessionCoordinator<()>` and initializes
+  it from `SessionStartRequest::NewLocalWorld` for local-worker startup or
+  `SessionStartRequest::JoinRemote` for remote WebSocket startup.
+- Web UI status reports now include shared session fields:
+  `sessionState`, `sessionKind`, `sessionSeed`, `sessionRemoteEndpoint`,
+  `sessionStatusVisible`, `sessionStatusOk`, and `sessionStatusMessage`.
+- The browser app mirrors those fields into `globalThis.__mcloneWebApp.state`,
+  so smoke tests and diagnostics see the same common session state as Rust.
+- The browser app-loop smoke now asserts that local-worker mode publishes an
+  active `localWorld` session and remote WebSocket mode publishes an active
+  `remote` session with the requested endpoint.
+- The Playwright native UI probe now clicks shared-menu button centers derived
+  from the Rust GUI scale rules and exercises the current Title -> New World ->
+  Create World intent flow. Actual web runtime teardown/replacement from that
+  menu action is intentionally still deferred to the next web slice.
+
+Validation after Slice 4a on 2026-06-27:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+pnpm native:web:typecheck
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+pnpm native:web:app-smoke
+pnpm native:web:remote-smoke
+git diff --check
+```
+
+The web native UI screenshot at `/tmp/mclone-native-web-ui-canvas.png` was
+inspected after the remote WebSocket smoke and showed the shared title UI
+rendering nonblank without central menu overlap.
 
 ## Open Questions
 

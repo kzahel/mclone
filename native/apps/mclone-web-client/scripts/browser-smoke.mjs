@@ -688,7 +688,7 @@ async function captureNativeUiProbe(page, canvas) {
   });
   const canvasPixels = analyzePng(canvasPng);
 
-  await clickCanvasFraction(canvas, 0.5, 0.55);
+  await clickNativeMenuButton(canvas, "title", 2);
   await page.waitForFunction(
     () => {
       const state = globalThis.__mcloneWebApp?.state;
@@ -714,18 +714,31 @@ async function captureNativeUiProbe(page, canvas) {
   );
   const backedToTitle = await readNativeUiState(page);
 
-  await clickCanvasFraction(canvas, 0.5, 0.45);
+  await clickNativeMenuButton(canvas, "title", 0);
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.uiActive === true
+        && state.nativeUiScreen === "newWorld"
+        && state.lastUiAction?.action === "openNewWorld";
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
+  const openedNewWorld = await readNativeUiState(page);
+
+  await clickNativeMenuButton(canvas, "newWorld", 1);
   await page.waitForFunction(
     () => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.uiActive === false
         && state.nativeUiScreen === "none"
-        && state.lastUiAction?.action === "startWorld";
+        && state.lastUiAction?.action === "createWorld";
     },
     undefined,
     { timeout: 10_000 },
   );
-  const startedWorld = await readNativeUiState(page);
+  const createdWorld = await readNativeUiState(page);
   return {
     ok: state.uiActive === true
       && state.uiCoversWorld === true
@@ -734,12 +747,14 @@ async function captureNativeUiProbe(page, canvas) {
       && canvasPixels.distinctInteriorColorCount > 2
       && openedOptions.nativeUiScreen === "options"
       && backedToTitle.nativeUiScreen === "title"
-      && startedWorld.uiActive === false,
+      && openedNewWorld.nativeUiScreen === "newWorld"
+      && createdWorld.uiActive === false,
     requestedStatus,
     state,
     openedOptions,
     backedToTitle,
-    startedWorld,
+    openedNewWorld,
+    createdWorld,
     canvasScreenshotPath: nativeUiCanvasScreenshotPath,
     canvasPixels,
   };
@@ -1127,9 +1142,55 @@ async function readNativeUiState(page) {
       nativeUiScreen: state.nativeUiScreen,
       nativeUiOptionsParent: state.nativeUiOptionsParent,
       lastUiAction: state.lastUiAction,
+      sessionState: state.sessionState,
+      sessionKind: state.sessionKind,
+      sessionSeed: state.sessionSeed,
+      sessionRemoteEndpoint: state.sessionRemoteEndpoint,
+      sessionStatusVisible: state.sessionStatusVisible,
+      sessionStatusOk: state.sessionStatusOk,
+      sessionStatusMessage: state.sessionStatusMessage,
       menuHidden: menu?.hidden ?? null,
     };
   });
+}
+
+/**
+ * @param {Locator} canvas
+ * @param {"title" | "newWorld"} menu
+ * @param {number} buttonIndex
+ */
+async function clickNativeMenuButton(canvas, menu, buttonIndex) {
+  const position = await canvas.evaluate(
+    (element, { menu, buttonIndex }) => {
+      if (!(element instanceof HTMLCanvasElement)) {
+        throw new Error("native menu target is not a canvas");
+      }
+      const pixelWidth = Math.max(1, Number(element.width) || 1);
+      const pixelHeight = Math.max(1, Number(element.height) || 1);
+      let scale = 1;
+      while (
+        scale < 4
+        && Math.floor(pixelWidth / (scale + 1)) >= 320
+        && Math.floor(pixelHeight / (scale + 1)) >= 240
+      ) {
+        scale += 1;
+      }
+      const guiWidth = Math.ceil(pixelWidth / scale);
+      const guiHeight = Math.ceil(pixelHeight / scale);
+      const menuTop = menu === "title"
+        ? guiHeight * 0.5 - 34.0
+        : guiHeight * 0.5 - 4.0;
+      const guiX = guiWidth * 0.5;
+      const guiY = menuTop + buttonIndex * 24.0 + 10.0;
+      const rect = element.getBoundingClientRect();
+      return {
+        x: (guiX * scale * rect.width) / pixelWidth,
+        y: (guiY * scale * rect.height) / pixelHeight,
+      };
+    },
+    { menu, buttonIndex },
+  );
+  await canvas.click({ position });
 }
 
 /**
@@ -1856,6 +1917,15 @@ function assertAppLoopResult(
   }
   if (remoteWebSocketUrl && result.remoteWebSocketUrl !== remoteWebSocketUrl) {
     throw new Error(`native web app did not preserve the requested remote websocket URL:\n${JSON.stringify({ remoteWebSocketUrl, result }, null, 2)}`);
+  }
+  const expectedSessionKind = remoteWebSocketUrl ? "remote" : "localWorld";
+  if (
+    result.sessionState !== "active"
+    || result.sessionKind !== expectedSessionKind
+    || (remoteWebSocketUrl && result.sessionRemoteEndpoint !== remoteWebSocketUrl)
+    || (!remoteWebSocketUrl && !Number.isFinite(Number(result.sessionSeed)))
+  ) {
+    throw new Error(`native web app did not publish the expected shared session state:\n${JSON.stringify({ remoteWebSocketUrl, result }, null, 2)}`);
   }
   if (
     result.runnerCommandQueueDepth !== 0
