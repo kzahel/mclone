@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
+use mclone_app_runtime::frame_render::{MAX_FLAT_RENDER_SCALE, MIN_FLAT_RENDER_SCALE};
 use mclone_app_runtime::startup_args::{
     RenderDistanceLimits, StartupArgState, StartupSceneOptions, parse_bool_arg, parse_i32_arg,
     parse_u32_arg, parse_u64_arg,
@@ -125,6 +126,7 @@ pub(crate) struct RendererRebuildSmokeOptions {
     pub(crate) height: u32,
     pub(crate) scene: SceneOptions,
     pub(crate) render_options: TexturedSectionRenderOptions,
+    pub(crate) rebuild_render_scale: Option<f32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -356,6 +358,7 @@ impl Cli {
         let mut xr_frame_limit = Some(DEFAULT_XR_CLEAR_SMOKE_FRAMES);
         let mut xr_view_pose_explicit = false;
         let mut xr_view_pose = None;
+        let mut rebuild_render_scale = None;
         let mut args = args.into_iter();
 
         while let Some(arg) = args.next() {
@@ -500,6 +503,9 @@ impl Cli {
                     }
                     set_headless_mode(&mut mode, HeadlessMode::RendererRebuildSmoke(path))?;
                 }
+                "--rebuild-render-scale" => {
+                    rebuild_render_scale = Some(parse_rebuild_render_scale_arg(&arg, args.next())?);
+                }
                 "--screenshot-ui" => {
                     screenshot_ui = parse_screenshot_ui_arg("--screenshot-ui", args.next())?;
                 }
@@ -626,6 +632,11 @@ impl Cli {
         if xr_view_pose_explicit && !xr_mclone_smoke {
             bail!("--view-pose requires --xr-mclone-smoke");
         }
+        if rebuild_render_scale.is_some()
+            && !matches!(mode, Some(HeadlessMode::RendererRebuildSmoke(_)))
+        {
+            bail!("--rebuild-render-scale requires --renderer-rebuild-smoke");
+        }
         let startup_options = startup_args.finish();
         let scene = SceneOptions::from_startup_scene(startup_options.scene)?;
         let render_options = startup_options.render_options;
@@ -684,6 +695,7 @@ impl Cli {
                     height: height.unwrap_or(540),
                     scene,
                     render_options,
+                    rebuild_render_scale,
                 },
             }),
             None if movement_perf => Ok(Self::MovementPerf {
@@ -853,6 +865,17 @@ fn parse_movement_speed_arg(flag: &str, value: Option<String>) -> Result<f32> {
     Ok(parsed)
 }
 
+fn parse_rebuild_render_scale_arg(flag: &str, value: Option<String>) -> Result<f32> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    let parsed = value
+        .parse::<f32>()
+        .with_context(|| format!("{flag} requires a positive number, got `{value}`"))?;
+    if !parsed.is_finite() || !(MIN_FLAT_RENDER_SCALE..=MAX_FLAT_RENDER_SCALE).contains(&parsed) {
+        bail!("{flag} must be between {MIN_FLAT_RENDER_SCALE:.2} and {MAX_FLAT_RENDER_SCALE:.2}");
+    }
+    Ok(parsed)
+}
+
 fn parse_path_radius_arg(flag: &str, value: Option<String>) -> Result<i32> {
     let parsed = parse_i32_arg(flag, value)?;
     if !(1..=MAX_MOVEMENT_PERF_PATH_RADIUS).contains(&parsed) {
@@ -933,7 +956,7 @@ fn print_help() {
            mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
-           mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
+           mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\

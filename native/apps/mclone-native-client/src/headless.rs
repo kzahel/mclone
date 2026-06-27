@@ -88,6 +88,9 @@ pub(crate) struct RendererRebuildSmokeReport {
     pub(crate) pixel_mismatch_count: usize,
     pub(crate) reuploaded_section_count: usize,
     pub(crate) state_preserved: bool,
+    pub(crate) config_changed: bool,
+    pub(crate) before_render_size: [u32; 2],
+    pub(crate) after_render_size: [u32; 2],
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -135,6 +138,10 @@ struct RendererRebuildSmokeState {
     actor_interpolation: ActorInterpolationState,
     render_stats: RenderStreamStats,
     render_options: TexturedSectionRenderOptions,
+    next_render_config: Option<RenderConfig>,
+    config_changed: bool,
+    before_render_size: [u32; 2],
+    after_render_size: [u32; 2],
     reuploaded_section_count: usize,
     state_preserved: bool,
     summary: Option<FullFrameRenderSummary>,
@@ -341,6 +348,7 @@ pub(crate) fn run_renderer_rebuild_smoke(
     };
     let asset_source = load_asset_source()?;
     let render_options = options.render_options;
+    let rebuild_render_scale = options.rebuild_render_scale;
 
     let (loop_report, frame_pixels, state) = run_headless_capture_loop(
         HeadlessFrameLoopOptions {
@@ -351,6 +359,11 @@ pub(crate) fn run_renderer_rebuild_smoke(
         move |device, queue, format, size| {
             let render_config =
                 RenderConfig::for_color_target(render_options.color_profile, format);
+            let next_render_config = rebuild_render_scale
+                .map(|render_scale| render_config.with_render_scale(render_scale));
+            let config_changed = next_render_config
+                .map(|next_render_config| next_render_config != render_config)
+                .unwrap_or(false);
             let mut resources = FlatRenderResources::new(
                 device,
                 queue,
@@ -378,6 +391,7 @@ pub(crate) fn run_renderer_rebuild_smoke(
 
             let mut ui = GameUi::new_ingame();
             ui.set_scale(GuiScale::from_pixels(size[0], size[1]));
+            let before_render_size = resources.render_size();
 
             Ok(RendererRebuildSmokeState {
                 runtime,
@@ -389,6 +403,10 @@ pub(crate) fn run_renderer_rebuild_smoke(
                 actor_interpolation: ActorInterpolationState::new(),
                 render_stats,
                 render_options,
+                next_render_config,
+                config_changed,
+                before_render_size,
+                after_render_size: before_render_size,
                 reuploaded_section_count: 0,
                 state_preserved: false,
                 summary: None,
@@ -426,8 +444,14 @@ pub(crate) fn run_renderer_rebuild_smoke(
     )?;
 
     let pixel_mismatch_count = count_pixel_mismatches(before_pixels, after_pixels);
-    if pixel_mismatch_count > 0 {
+    if !state.config_changed && pixel_mismatch_count > 0 {
         bail!("renderer rebuild smoke before/after pixels differ in {pixel_mismatch_count} pixels");
+    }
+    if state.config_changed && state.before_render_size == state.after_render_size {
+        bail!(
+            "renderer rebuild smoke expected render size to change for config-changing run, got {:?}",
+            state.after_render_size
+        );
     }
     let before_non_clear_rgb_pixel_count = count_non_clear_rgb_pixels(before_pixels);
     let after_non_clear_rgb_pixel_count = count_non_clear_rgb_pixels(after_pixels);
@@ -457,6 +481,9 @@ pub(crate) fn run_renderer_rebuild_smoke(
         pixel_mismatch_count,
         reuploaded_section_count: state.reuploaded_section_count,
         state_preserved: state.state_preserved,
+        config_changed: state.config_changed,
+        before_render_size: state.before_render_size,
+        after_render_size: state.after_render_size,
     })
 }
 
@@ -466,7 +493,10 @@ fn rebuild_renderer_rebuild_smoke_resources(
 ) -> Result<()> {
     let preserved_before =
         RendererRebuildSmokePreservedState::capture(&state.runtime, state.camera, &state.ui);
-    let render_config = state.resources.render_config();
+    let render_config = state
+        .next_render_config
+        .take()
+        .unwrap_or_else(|| state.resources.render_config());
     let mut resources = FlatRenderResources::new(
         frame.device,
         frame.queue,
@@ -494,6 +524,7 @@ fn rebuild_renderer_rebuild_smoke_resources(
     state.render_stats.last_uploaded_face_count = upload_report.uploaded_face_count();
     state.render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
     state.reuploaded_section_count = upload_report.uploaded_section_count;
+    state.after_render_size = resources.render_size();
     state.resources = resources;
 
     let preserved_after =
@@ -558,19 +589,9 @@ fn render_renderer_rebuild_smoke_frame(
         [gui_scale.width, gui_scale.height],
     );
     let ui_draw = state.ui.render_draw_list(ui_render_state);
-    let render_view = state
-        .camera
-        .render_view(frame.target.size[0], frame.target.size[1]);
-    let parts = state.resources.parts_mut();
-    render_full_frame_for_view(
+    state.resources.render_full_frame(
         frame,
-        parts.depth,
-        parts.sky,
-        parts.draw,
-        Some(parts.actors),
-        Some(parts.screen_effects),
-        Some(parts.gui),
-        render_view,
+        state.camera,
         &actor_instances,
         underwater_overlay,
         sky_clear_color,

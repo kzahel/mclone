@@ -17,6 +17,47 @@ use mclone_render::target::RenderFrameContext;
 use mclone_render_session::RenderSectionCacheUpdate;
 use mclone_ui::GuiDrawList;
 
+pub const MIN_FLAT_RENDER_SCALE: f32 = 0.25;
+pub const MAX_FLAT_RENDER_SCALE: f32 = 2.0;
+const SCALE_EPSILON: f32 = 0.000_1;
+
+const FLAT_SCALE_PRESENT_WGSL: &str = r#"
+@group(0) @binding(0)
+var source_texture: texture_2d<f32>;
+
+@group(0) @binding(1)
+var source_sampler: sampler;
+
+struct VertexOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOut {
+    var positions = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0),
+    );
+    var uvs = array<vec2<f32>, 3>(
+        vec2<f32>(0.0, 1.0),
+        vec2<f32>(2.0, 1.0),
+        vec2<f32>(0.0, -1.0),
+    );
+
+    var out: VertexOut;
+    out.position = vec4<f32>(positions[vertex_index], 0.0, 1.0);
+    out.uv = uvs[vertex_index];
+    return out;
+}
+
+@fragment
+fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
+    return textureSample(source_texture, source_sampler, input.uv);
+}
+"#;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RenderStreamStats {
     pub section_count: usize,
@@ -95,6 +136,8 @@ impl FullFrameGui {
 pub struct FlatRenderResources {
     render_config: RenderConfig,
     depth: ChunkDepthTarget,
+    scaled_color: Option<FlatScaledColorTarget>,
+    scale_presenter: Option<FlatScalePresenter>,
     sky: SkyRenderer,
     draw: TexturedSectionDrawResources,
     actors: ActorDrawResources,
@@ -122,7 +165,19 @@ impl FlatRenderResources {
         asset_source: &impl AssetSource,
     ) -> Result<Self> {
         let render_config = Self::validate_supported_config(render_config)?;
-        let depth = ChunkDepthTarget::new(device, target_size[0], target_size[1]);
+        let render_size = flat_render_size(target_size, render_config);
+        let depth = ChunkDepthTarget::new(device, render_size[0], render_size[1]);
+        let scale_presenter = needs_scaled_target(render_config)
+            .then(|| FlatScalePresenter::new(device, render_config.color_format));
+        let scaled_color = scale_presenter.as_ref().map(|presenter| {
+            FlatScaledColorTarget::new(
+                device,
+                render_size,
+                render_config.color_format,
+                &presenter.bind_group_layout,
+                &presenter.sampler,
+            )
+        });
         let draw = TexturedSectionDrawResources::new(
             device,
             queue,
@@ -142,6 +197,8 @@ impl FlatRenderResources {
         Ok(Self {
             render_config,
             depth,
+            scaled_color,
+            scale_presenter,
             sky,
             draw,
             actors,
@@ -164,9 +221,10 @@ impl FlatRenderResources {
             render_config.sample_count
         );
         ensure!(
-            (render_config.render_scale - DEFAULT_RENDER_SCALE).abs() <= f32::EPSILON,
-            "flat render resources require render_scale={:.3}, got {:.3}",
-            DEFAULT_RENDER_SCALE,
+            (MIN_FLAT_RENDER_SCALE..=MAX_FLAT_RENDER_SCALE).contains(&render_config.render_scale),
+            "flat render resources require render_scale between {:.3} and {:.3}, got {:.3}",
+            MIN_FLAT_RENDER_SCALE,
+            MAX_FLAT_RENDER_SCALE,
             render_config.render_scale
         );
         ensure!(
@@ -180,8 +238,24 @@ impl FlatRenderResources {
         self.render_config
     }
 
+    pub fn render_size(&self) -> [u32; 2] {
+        [self.depth.width, self.depth.height]
+    }
+
     pub fn resize_frame_targets(&mut self, device: &wgpu::Device, size: [u32; 2]) {
-        self.depth.resize(device, size[0], size[1]);
+        let render_size = flat_render_size(size, self.render_config);
+        self.depth.resize(device, render_size[0], render_size[1]);
+        match (&mut self.scaled_color, &self.scale_presenter) {
+            (Some(scaled_color), Some(presenter)) => scaled_color.resize(
+                device,
+                render_size,
+                self.render_config.color_format,
+                &presenter.bind_group_layout,
+                &presenter.sampler,
+            ),
+            (None, _) => {}
+            (Some(_), None) => unreachable!("scaled color target requires a presenter"),
+        }
     }
 
     pub fn draw_mut(&mut self) -> &mut TexturedSectionDrawResources {
@@ -206,6 +280,266 @@ impl FlatRenderResources {
             gui: &mut self.gui,
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_full_frame<BuildGuiDraw>(
+        &mut self,
+        frame: RenderFrameContext<'_>,
+        camera: ChunkCamera,
+        actor_instances: &[ActorInstance],
+        underwater_overlay: Option<UnderwaterOverlay>,
+        sky_clear_color: wgpu::Color,
+        time_of_day: f32,
+        sun_angle: f32,
+        render_options: TexturedSectionRenderOptions,
+        gui: FullFrameGui,
+        build_gui_draw: BuildGuiDraw,
+        render_stats: &mut RenderStreamStats,
+    ) -> Result<FullFrameRenderSummary>
+    where
+        BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+    {
+        let RenderFrameContext {
+            device,
+            queue,
+            encoder,
+            target,
+        } = frame;
+        let render_target = self
+            .scaled_color
+            .as_ref()
+            .map_or(target, |scaled| scaled.render_target());
+        let render_view = camera.render_view(render_target.size[0], render_target.size[1]);
+        let render_frame = RenderFrameContext::new(device, queue, encoder, render_target);
+        let summary = render_full_frame_for_view(
+            render_frame,
+            &self.depth,
+            &self.sky,
+            &mut self.draw,
+            Some(&mut self.actors),
+            Some(&mut self.screen_effects),
+            Some(&mut self.gui),
+            render_view,
+            actor_instances,
+            underwater_overlay,
+            sky_clear_color,
+            time_of_day,
+            sun_angle,
+            render_options,
+            gui,
+            build_gui_draw,
+            render_stats,
+        )?;
+        if let (Some(scaled), Some(presenter)) = (&self.scaled_color, &self.scale_presenter) {
+            presenter.present(encoder, scaled, target.color_view);
+        }
+        Ok(summary)
+    }
+}
+
+struct FlatScaledColorTarget {
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    bind_group: wgpu::BindGroup,
+    size: [u32; 2],
+}
+
+impl FlatScaledColorTarget {
+    fn new(
+        device: &wgpu::Device,
+        size: [u32; 2],
+        format: wgpu::TextureFormat,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        sampler: &wgpu::Sampler,
+    ) -> Self {
+        let size = [size[0].max(1), size[1].max(1)];
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_flat_scaled_color"),
+            size: wgpu::Extent3d {
+                width: size[0],
+                height: size[1],
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_flat_scaled_color_bind_group"),
+            layout: bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+        Self {
+            _texture: texture,
+            view,
+            bind_group,
+            size,
+        }
+    }
+
+    fn resize(
+        &mut self,
+        device: &wgpu::Device,
+        size: [u32; 2],
+        format: wgpu::TextureFormat,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        sampler: &wgpu::Sampler,
+    ) {
+        let size = [size[0].max(1), size[1].max(1)];
+        if self.size == size {
+            return;
+        }
+        *self = Self::new(device, size, format, bind_group_layout, sampler);
+    }
+
+    fn render_target(&self) -> mclone_render::target::RenderFrameTarget<'_> {
+        mclone_render::target::RenderFrameTarget::color(&self.view, self.size)
+    }
+}
+
+struct FlatScalePresenter {
+    pipeline: wgpu::RenderPipeline,
+    bind_group_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+}
+
+impl FlatScalePresenter {
+    fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_flat_scale_present_shader"),
+            source: wgpu::ShaderSource::Wgsl(FLAT_SCALE_PRESENT_WGSL.into()),
+        });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("mclone_flat_scale_present_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_flat_scale_present_pipeline_layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mclone_flat_scale_present_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("mclone_flat_scale_present_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        Self {
+            pipeline,
+            bind_group_layout,
+            sampler,
+        }
+    }
+
+    fn present(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        scaled: &FlatScaledColorTarget,
+        output_view: &wgpu::TextureView,
+    ) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_flat_scale_present_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: output_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &scaled.bind_group, &[]);
+        pass.draw(0..3, 0..1);
+    }
+}
+
+pub fn scaled_frame_size(target_size: [u32; 2], render_scale: f32) -> [u32; 2] {
+    [
+        ((target_size[0].max(1) as f32) * render_scale)
+            .round()
+            .max(1.0) as u32,
+        ((target_size[1].max(1) as f32) * render_scale)
+            .round()
+            .max(1.0) as u32,
+    ]
+}
+
+fn flat_render_size(target_size: [u32; 2], render_config: RenderConfig) -> [u32; 2] {
+    if needs_scaled_target(render_config) {
+        scaled_frame_size(target_size, render_config.render_scale)
+    } else {
+        [target_size[0].max(1), target_size[1].max(1)]
+    }
+}
+
+fn needs_scaled_target(render_config: RenderConfig) -> bool {
+    (render_config.render_scale - DEFAULT_RENDER_SCALE).abs() > SCALE_EPSILON
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -693,17 +1027,38 @@ mod tests {
         .to_string();
         assert!(depth_error.contains("depth format"));
 
+        assert!(
+            FlatRenderResources::validate_supported_config(
+                RenderConfig::default().with_render_scale(0.75),
+            )
+            .is_ok()
+        );
+
         let scale_error = FlatRenderResources::validate_supported_config(
-            RenderConfig::default().with_render_scale(0.75),
+            RenderConfig::default().with_render_scale(2.5),
         )
         .unwrap_err()
         .to_string();
-        assert!(scale_error.contains("render_scale"));
+        assert!(scale_error.contains("render_scale between"));
 
         let hdr_error =
             FlatRenderResources::validate_supported_config(RenderConfig::default().with_hdr(true))
                 .unwrap_err()
                 .to_string();
         assert!(hdr_error.contains("HDR"));
+    }
+
+    #[test]
+    fn scaled_frame_size_rounds_and_clamps() {
+        assert_eq!(scaled_frame_size([320, 180], 0.5), [160, 90]);
+        assert_eq!(scaled_frame_size([321, 181], 0.5), [161, 91]);
+        assert_eq!(scaled_frame_size([0, 0], 0.25), [1, 1]);
+        assert_eq!(
+            flat_render_size(
+                [16_384, 16_384],
+                RenderConfig::default().with_render_scale(1.0)
+            ),
+            [16_384, 16_384]
+        );
     }
 }

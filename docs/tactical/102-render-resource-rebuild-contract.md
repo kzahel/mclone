@@ -1,9 +1,9 @@
 # 102: Render Resource Rebuild Contract
 
 Status: active. Shared `RenderConfig`, `FlatRenderResources`, desktop F8
-no-op rebuild trigger, and headless before/after rebuild smoke landed on
-2026-06-27; config-changing runtime rebuild validation and broader platform
-adoption remain pending.
+no-op rebuild trigger, headless before/after no-op rebuild smoke, and
+render-scale config-changing rebuild smoke landed on 2026-06-27; broader
+platform adoption remains pending.
 
 ## Purpose
 
@@ -239,7 +239,8 @@ Slice 2 validation on 2026-06-27:
   path instead of owning renderer policy.
 - [x] Add a developer-only trigger and CLI/test path that performs a no-op
   rebuild while the world stays active.
-- [ ] Add a config-changing rebuild path while the world stays active.
+- [x] Add a render-scale config-changing rebuild path while the world stays
+  active in the headless desktop validation lane.
 
 Slice 3 partial result:
 
@@ -247,9 +248,10 @@ Slice 3 partial result:
   `FlatRenderResources`, which groups depth, sky, terrain, actor,
   screen-effect, and GUI resources behind one config-validated constructor.
 - The bundle currently accepts only the renderer shape we actually support:
-  `Depth24Plus`, sample count 1, render scale 1.0, and non-HDR direct targets.
-  MSAA, HDR, render-scale, and alternate depth formats fail early instead of
-  being silently ignored.
+  `Depth24Plus`, sample count 1, render scale `0.25..=2.0`, and non-HDR
+  targets. Non-1.0 render scale renders into a renderer-owned color/depth target
+  and presents it back to the platform target; MSAA, HDR, and alternate depth
+  formats fail early instead of being silently ignored.
 - `native/apps/mclone-native-client/src/app.rs` now stores one
   `Option<FlatRenderResources>` instead of separate depth/sky/draw/actor/effect
   GUI options.
@@ -263,6 +265,10 @@ Slice 3 partial result:
   rebuild smoke: render frame 0, rebuild/reupload on frame 1, render again,
   save `before.png`/`after.png`, compare pixels exactly, and assert stable
   runtime/camera/UI state across the rebuild.
+- `--renderer-rebuild-smoke <directory> --rebuild-render-scale <scale>` rebuilds
+  the same desktop flat resource bundle with a different internal render size,
+  keeps the gameplay/session/UI state stable, and allows the expected output
+  pixel differences from resampling.
 
 Slice 3 partial validation on 2026-06-27:
 
@@ -280,7 +286,23 @@ Slice 3 no-op rebuild validation on 2026-06-27:
 - `cargo check --manifest-path native/Cargo.toml -p mclone-android-client`
 - `cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --renderer-rebuild-smoke /tmp/mclone-render-rebuild-smoke --width 320 --height 180 --render-distance 2 --day-time 6000 --freeze-time --section-occlusion true`
   produced exact pixel match (`mismatch_pixels=0`), reuploaded 166 sections,
-  and preserved state.
+  preserved state, reported `config_changed=false`, and kept
+  `before_render_size=[320, 180] after_render_size=[320, 180]`.
+
+Slice 3 render-scale rebuild validation on 2026-06-27:
+
+- `cargo test --manifest-path native/Cargo.toml`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+- `pnpm native:web:build`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-client`
+- `cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --renderer-rebuild-smoke /tmp/mclone-render-rebuild-scale-smoke --width 320 --height 180 --render-distance 2 --day-time 6000 --freeze-time --section-occlusion true --rebuild-render-scale 0.5`
+  produced `config_changed=true`, `before_render_size=[320, 180]`,
+  `after_render_size=[160, 90]`, `mismatch_pixels=40922`, reuploaded 166
+  sections, and preserved state. `/tmp/mclone-render-rebuild-scale-smoke/after.png`
+  was visually inspected and showed the expected lower-resolution but correctly
+  framed world render.
 
 ### Slice 4: Rebuild-Safe Dynamic Profile Toggle
 
@@ -296,8 +318,8 @@ Slice 3 no-op rebuild validation on 2026-06-27:
 
 - [x] Add a no-op rebuild test that renders before/after images and verifies no
   meaningful pixel drift.
-- [ ] Add a config-changing rebuild smoke that proves camera position, selected
-  session, UI state, and resident sections survive.
+- [x] Add a render-scale config-changing rebuild smoke that proves camera
+  position, selected session, UI state, and resident sections survive.
 - [x] Save validation captures to `/tmp`, not the repo.
 - [ ] Expose rebuild counts/timing in debug or perf diagnostics.
 

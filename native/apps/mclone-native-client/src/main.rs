@@ -194,7 +194,7 @@ fn main() -> Result<()> {
         Cli::RendererRebuildSmoke { options } => {
             let report = run_renderer_rebuild_smoke(&options)?;
             println!(
-                "renderer rebuild smoke saved before={} after={} ({}x{}, {} bytes, sections={}, drawn_sections={}, indices={}, drawn_indices={}, mismatch_pixels={}, reuploaded_sections={}, state_preserved={})",
+                "renderer rebuild smoke saved before={} after={} ({}x{}, {} bytes, sections={}, drawn_sections={}, indices={}, drawn_indices={}, mismatch_pixels={}, reuploaded_sections={}, state_preserved={}, config_changed={}, before_render_size={:?}, after_render_size={:?})",
                 report.before_path.display(),
                 report.after_path.display(),
                 report.width,
@@ -206,7 +206,10 @@ fn main() -> Result<()> {
                 report.drawn_index_count,
                 report.pixel_mismatch_count,
                 report.reuploaded_section_count,
-                report.state_preserved
+                report.state_preserved,
+                report.config_changed,
+                report.before_render_size,
+                report.after_render_size
             );
             Ok(())
         }
@@ -399,6 +402,8 @@ mod tests {
             "99".to_owned(),
             "--render-color-profile".to_owned(),
             "stylized-bright".to_owned(),
+            "--rebuild-render-scale".to_owned(),
+            "0.5".to_owned(),
         ])
         .unwrap();
 
@@ -417,6 +422,7 @@ mod tests {
                         color_profile: RenderColorProfile::StylizedBright,
                         ..TexturedSectionRenderOptions::default()
                     },
+                    rebuild_render_scale: Some(0.5),
                 },
             }
         );
