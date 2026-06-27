@@ -13,6 +13,7 @@ use mclone_server::{
     IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
     ServerRunnerDiagnostics,
 };
+use mclone_ui::LoadingProgressOverlay;
 
 use crate::host_mode::{
     RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions,
@@ -28,6 +29,7 @@ use crate::session::{
 use crate::{
     RuntimePollDiagnostics, RuntimePollTiming, RuntimeUpdateApplyReport, SingleViewRuntime,
     SingleViewRuntimeStats, chunk_tracking_radius_for_render_distance, elapsed_ms,
+    loading_progress_overlay_from_diagnostics,
 };
 
 const RUNTIME_DIAGNOSTICS_POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -82,6 +84,113 @@ pub struct LocalSingleViewSceneRuntime {
     render_compile_worker: RenderSectionCompileWorker,
     last_runner_diagnostics: Option<ServerRunnerDiagnostics>,
     last_runner_diagnostics_poll_at: Option<Instant>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LocalSingleViewStartupStep {
+    pub poll_count: usize,
+    pub poll_ms: f64,
+    pub changed: bool,
+    pub playable_ready: bool,
+    pub cached_section_count: usize,
+    pub rebuilt_section_count: usize,
+    pub submitted_compile_section_count: usize,
+    pub completed_compile_section_count: usize,
+    pub pending_compile_jobs: usize,
+    pub progress: Option<LoadingProgressOverlay>,
+}
+
+#[derive(Debug)]
+pub struct LocalSingleViewStartupPump {
+    runtime: LocalSingleViewSceneRuntime,
+    poll_count: usize,
+    poll_ms: f64,
+}
+
+impl LocalSingleViewStartupPump {
+    pub fn with_mesh_assets(
+        options: LocalSingleViewSceneOptions,
+        mesh_assets: TexturedMeshAssets,
+    ) -> Result<Self> {
+        Ok(Self {
+            runtime: LocalSingleViewSceneRuntime::with_mesh_assets(options, mesh_assets)?,
+            poll_count: 0,
+            poll_ms: 0.0,
+        })
+    }
+
+    pub fn step(&mut self, camera_position: Vec3) -> Result<LocalSingleViewStartupStep> {
+        let poll_start = Instant::now();
+        let mut changed = self.runtime.poll()?;
+        let poll_ms = elapsed_ms(poll_start.elapsed());
+        self.poll_count += 1;
+        self.poll_ms += poll_ms;
+        let diagnostics = self.runtime.server_runner_diagnostics()?;
+        self.runtime.last_runner_diagnostics = Some(diagnostics);
+        self.runtime.last_runner_diagnostics_poll_at = Some(Instant::now());
+
+        let section_update = self.runtime.sync_render_sections(camera_position)?;
+        let render_changed = section_update.rebuilt_section_count() > 0
+            || section_update.removed_section_count() > 0
+            || section_update.submitted_compile_section_count > 0
+            || section_update.completed_compile_section_count > 0;
+        changed |= render_changed;
+        let progress = self.progress_overlay();
+        let playable_ready = self.playable_ready();
+        Ok(LocalSingleViewStartupStep {
+            poll_count: self.poll_count,
+            poll_ms: self.poll_ms,
+            changed,
+            playable_ready,
+            cached_section_count: self.runtime.cached_sections().len(),
+            rebuilt_section_count: section_update.rebuilt_section_count(),
+            submitted_compile_section_count: section_update.submitted_compile_section_count,
+            completed_compile_section_count: section_update.completed_compile_section_count,
+            pending_compile_jobs: section_update.pending_compile_jobs,
+            progress,
+        })
+    }
+
+    pub fn progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        self.runtime
+            .last_runner_diagnostics
+            .as_ref()
+            .and_then(loading_progress_overlay_from_diagnostics)
+    }
+
+    pub fn playable_ready(&self) -> bool {
+        let Some(progress) = self
+            .runtime
+            .last_runner_diagnostics
+            .as_ref()
+            .and_then(|diagnostics| diagnostics.loading_progress)
+        else {
+            return false;
+        };
+        progress.playable_chunk_ready
+            && self
+                .runtime
+                .client()
+                .chunk_snapshot(progress.playable_chunk)
+                .is_some()
+            && !self.runtime.cached_sections().is_empty()
+    }
+
+    pub const fn poll_count(&self) -> usize {
+        self.poll_count
+    }
+
+    pub const fn poll_ms(&self) -> f64 {
+        self.poll_ms
+    }
+
+    pub fn runtime(&self) -> &LocalSingleViewSceneRuntime {
+        &self.runtime
+    }
+
+    pub fn into_runtime(self) -> LocalSingleViewSceneRuntime {
+        self.runtime
+    }
 }
 
 impl LocalSingleViewSceneRuntime {
@@ -975,6 +1084,42 @@ mod tests {
                 .chunk_snapshot(ChunkPos::new(0, 0))
                 .is_some()
         );
+    }
+
+    #[test]
+    fn local_startup_pump_reaches_playable_center() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let mesh_assets = load_textured_mesh_assets().unwrap();
+        let mut pump = LocalSingleViewStartupPump::with_mesh_assets(
+            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+                .with_lighting_enabled(false),
+            mesh_assets,
+        )
+        .unwrap();
+        let camera_position = Vec3::new(8.0, 80.0, 8.0);
+
+        for _ in 0..2_000 {
+            let step = pump.step(camera_position).unwrap();
+            if step.playable_ready {
+                assert!(step.cached_section_count > 0);
+                assert!(step.progress.unwrap().playable_ready);
+                let runtime = pump.into_runtime();
+                assert_eq!(runtime.loaded_chunk_count(), 1);
+                assert!(
+                    runtime
+                        .client()
+                        .chunk_snapshot(ChunkPos::new(0, 0))
+                        .is_some()
+                );
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        panic!("startup pump did not reach playable center");
     }
 
     #[test]

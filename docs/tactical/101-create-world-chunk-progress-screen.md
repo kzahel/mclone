@@ -7,8 +7,10 @@ beachball. Slice 0 landed on 2026-06-27: local integrated-server status events
 now feed compact loading-progress diagnostics. Slice 3's shared `mclone-ui`
 render model also landed on 2026-06-27. Slice 1 landed on 2026-06-27: server
 diagnostics now carry real per-cell progress snapshots and app-runtime can
-convert them into the shared overlay. The shared non-blocking startup pump is
-not implemented yet.
+convert them into the shared overlay. Slice 4's first landing on 2026-06-27
+added the shared local startup pump and wired desktop flat Create World and
+boot-to-world startup through it. Platform adoption and conservative
+unknown-neighbor gameplay hardening remain open.
 
 ## Purpose
 
@@ -252,20 +254,43 @@ Slice 3 result:
 
 ### Slice 4 - Shared Non-Blocking Startup Pump
 
-- [ ] Replace blocking Create World startup drains with shared app-runtime
+- [x] Replace blocking Create World startup drains with shared app-runtime
   startup state that advances work over frames.
 - [ ] Keep the previous world/session alive until the replacement has either
   succeeded or intentionally crossed the teardown point. Preserve the current
   failure behavior where practical.
-- [ ] Apply the same progress model to initial boot-to-world, not only menu
+- [x] Apply the same progress model to initial boot-to-world, not only menu
   Create World.
-- [ ] Close the New World screen / arm mouse lock when the playable threshold is
+- [x] Close the New World screen / arm mouse lock when the playable threshold is
   reached, even if broader warm-region progress is still incomplete.
-- [ ] Keep warm-region loading active after gameplay starts. The grid can either
+- [x] Keep warm-region loading active after gameplay starts. The grid can either
   fade into a small status overlay or remain available through debug UI.
 - [ ] Treat missing neighboring chunks conservatively for collision and
   interaction until they arrive, so early entry never allows movement through
   unknown solid terrain.
+
+Slice 4 result:
+
+- `LocalSingleViewStartupPump` in
+  `native/crates/mclone-app-runtime/src/local_single_view.rs` owns the shared
+  per-step local startup contract. Each step drains server updates, refreshes
+  progress diagnostics, incrementally syncs render sections, and reports when
+  the playable chunk plus first cached mesh are ready.
+- `WindowSceneStartupPump` in
+  `native/apps/mclone-native-client/src/scene_runtime.rs` adapts that shared
+  pump to desktop assets without changing the underlying readiness policy.
+- Desktop flat Create World and initial boot-to-world now create the pump after
+  the first status/loading frame, render the shared Java-style progress overlay
+  while startup advances, and complete the session as soon as the playable
+  threshold is reached. The previous `poll_until_idle` full-startup path remains
+  for existing synchronous/headless helper paths.
+- The first desktop landing intentionally tears down the old world at confirmed
+  local-start time instead of preserving it behind the overlay. Revisit this if
+  replacement failure UX becomes a priority.
+- Warm-region loading continues through the normal runtime streaming path after
+  gameplay starts. The next correctness slice should harden collision and
+  interaction behavior around not-yet-loaded neighboring chunks before relying
+  heavily on very early entry at larger render distances.
 
 ### Slice 5 - Platform Adoption
 

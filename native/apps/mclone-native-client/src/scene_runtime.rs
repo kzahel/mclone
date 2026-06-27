@@ -6,7 +6,8 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_app_runtime::host_mode::{SingleViewHostOptions, build_remote_dedicated_client_runtime};
 use mclone_app_runtime::local_single_view::{
-    LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime,
+    LocalSingleViewSceneOptions, LocalSingleViewSceneRuntime, LocalSingleViewStartupPump,
+    LocalSingleViewStartupStep, NativeSingleViewSceneRuntime,
     build_local_single_view_client_runtime,
 };
 use mclone_app_runtime::{RuntimePollDiagnostics, SingleViewRuntimeStats};
@@ -25,6 +26,7 @@ use mclone_protocol::ServerUpdate;
 use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
 #[cfg(test)]
 use mclone_server::{IntegratedServer, ServerRunnerKind};
+use mclone_ui::LoadingProgressOverlay;
 
 use crate::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
 use crate::cli::SceneOptions;
@@ -140,6 +142,37 @@ pub(crate) struct WindowSceneRuntime {
     pub(crate) actor_textures: ActorTextureAssets,
 }
 
+#[derive(Debug)]
+pub(crate) struct WindowSceneStartupPump {
+    pump: LocalSingleViewStartupPump,
+    actor_textures: ActorTextureAssets,
+}
+
+impl WindowSceneStartupPump {
+    pub(crate) fn new_local(scene: &SceneOptions, assets: &WindowSceneAssets) -> Result<Self> {
+        Ok(Self {
+            pump: LocalSingleViewStartupPump::with_mesh_assets(
+                local_single_view_options(scene)?,
+                assets.mesh_assets.clone(),
+            )
+            .context("failed to create local world startup pump")?,
+            actor_textures: assets.actor_textures.clone(),
+        })
+    }
+
+    pub(crate) fn step(&mut self, camera_position: Vec3) -> Result<LocalSingleViewStartupStep> {
+        self.pump.step(camera_position)
+    }
+
+    pub(crate) fn progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        self.pump.progress_overlay()
+    }
+
+    pub(crate) fn into_runtime(self) -> WindowSceneRuntime {
+        WindowSceneRuntime::from_local_runtime(self.pump.into_runtime(), self.actor_textures)
+    }
+}
+
 impl WindowSceneRuntime {
     pub(crate) fn new(scene: &SceneOptions) -> Result<Self> {
         Self::with_assets(scene, &WindowSceneAssets::load()?)
@@ -150,6 +183,16 @@ impl WindowSceneRuntime {
             scene: native_window_scene_runtime_with_mesh_assets(scene, assets.mesh_assets.clone())?,
             actor_textures: assets.actor_textures.clone(),
         })
+    }
+
+    fn from_local_runtime(
+        runtime: LocalSingleViewSceneRuntime,
+        actor_textures: ActorTextureAssets,
+    ) -> Self {
+        Self {
+            scene: NativeWindowSceneRuntime::Local(runtime),
+            actor_textures,
+        }
     }
 
     pub(crate) fn client(&self) -> &ClientRuntime {
