@@ -10,7 +10,9 @@ diagnostics now carry real per-cell progress snapshots and app-runtime can
 convert them into the shared overlay. Slice 4's first landing on 2026-06-27
 added the shared local startup pump and wired desktop flat Create World and
 boot-to-world startup through it. Platform adoption and conservative
-unknown-neighbor gameplay hardening remain open.
+unknown-neighbor gameplay hardening remain open. The first XR prerequisite also
+landed on 2026-06-27: shared XR scenes now start with the title/menu panel open
+so a later XR startup pump can render the loader on that surface.
 
 ## Purpose
 
@@ -301,6 +303,14 @@ Slice 4 result:
   model while keeping activity/OpenXR ownership in app crates.
 - [ ] Leave remote dedicated joins with a simple connection/loading overlay until
   protocol-level remote progress is explicitly designed.
+
+Slice 5 partial result:
+
+- Shared XR scene initialization now uses the title/menu UI instead of closed
+  in-game UI, so both desktop OpenXR and Android XR have a flat menu panel on
+  their first rendered frame. This is only the menu-surface prerequisite: XR
+  still eagerly warms the terrain runtime before that first frame, so the actual
+  XR loading grid requires a later startup-pump adoption slice.
 
 ### Slice 6 - Finer Java Parity Follow-Up
 

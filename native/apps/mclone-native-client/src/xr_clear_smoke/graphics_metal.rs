@@ -43,6 +43,12 @@ pub(super) struct OpenXrEyeState {
     pub(super) height: u32,
 }
 
+impl OpenXrEyeState {
+    pub(super) fn texture_count(&self) -> usize {
+        self.textures.len()
+    }
+}
+
 impl mclone_xr_host::XrEyeSwapchain<AppGraphics> for OpenXrEyeState {
     fn swapchain(&self) -> &xr::Swapchain<AppGraphics> {
         &self.swapchain

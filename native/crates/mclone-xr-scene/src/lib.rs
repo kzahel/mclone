@@ -1709,7 +1709,7 @@ where
 }
 
 fn xr_game_ui_for_session(session: Option<&ActiveSessionDescriptor>, seed: i64) -> GameUi {
-    let mut ui = GameUi::new_ingame();
+    let mut ui = GameUi::new();
     ui.set_new_world_seed(match session {
         Some(ActiveSessionDescriptor::LocalWorld { seed }) => *seed,
         Some(ActiveSessionDescriptor::Remote { .. }) | None => seed,
@@ -2316,6 +2316,34 @@ mod tests {
         assert_eq!(XrLocomotionMode::default(), XrLocomotionMode::HeadsetYaw);
         assert_eq!(XrLocomotionMode::HeadsetYaw.label(), "headset-yaw");
         assert_eq!(XrLocomotionMode::PlayerYaw.label(), "player-yaw");
+    }
+
+    #[test]
+    fn xr_game_ui_starts_with_menu_open_for_local_session() {
+        let ui = xr_game_ui_for_session(
+            Some(&ActiveSessionDescriptor::LocalWorld { seed: 44 }),
+            12_345,
+        );
+
+        assert!(ui.is_active());
+        assert_eq!(ui.screen(), Some(mclone_ui::GameScreen::Title));
+        assert_eq!(ui.new_world_seed(), 44);
+        assert_eq!(ui.join_remote_addr(), DEFAULT_JOIN_REMOTE_ADDR);
+    }
+
+    #[test]
+    fn xr_game_ui_starts_with_menu_open_for_remote_session() {
+        let ui = xr_game_ui_for_session(
+            Some(&ActiveSessionDescriptor::Remote {
+                endpoint: RemoteSessionEndpoint::new("10.0.0.5:25565"),
+            }),
+            12_345,
+        );
+
+        assert!(ui.is_active());
+        assert_eq!(ui.screen(), Some(mclone_ui::GameScreen::Title));
+        assert_eq!(ui.new_world_seed(), 12_345);
+        assert_eq!(ui.join_remote_addr(), "10.0.0.5:25565");
     }
 
     #[test]
