@@ -9,8 +9,8 @@ use mclone_client::{
 };
 use mclone_core::Vec3d;
 use mclone_input::{
-    FlatInputAction, FlatInputFrame, FlatInputIntent, InputCapabilities, InputCapabilityState,
-    InputDeviceKind, MovementDirection,
+    FlatInputAction, FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind,
+    KeyboardKey, KeyboardMouseInputAdapter, PointerButton,
 };
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
@@ -161,14 +161,14 @@ impl WindowCameraView {
 #[derive(Clone, Debug)]
 struct DesktopFlatInputAdapter {
     capability_state: InputCapabilityState,
-    held: DesktopHeldInput,
+    keyboard_mouse: KeyboardMouseInputAdapter,
 }
 
 impl Default for DesktopFlatInputAdapter {
     fn default() -> Self {
         Self {
             capability_state: InputCapabilityState::new(InputCapabilities::NONE),
-            held: DesktopHeldInput::default(),
+            keyboard_mouse: KeyboardMouseInputAdapter::new(),
         }
     }
 }
@@ -179,7 +179,7 @@ impl DesktopFlatInputAdapter {
     }
 
     fn clear_held(&mut self) {
-        self.held = DesktopHeldInput::default();
+        self.keyboard_mouse.clear_held();
     }
 
     fn note_keyboard_activity(&mut self) {
@@ -202,32 +202,10 @@ impl DesktopFlatInputAdapter {
         repeat: bool,
     ) -> Option<FlatInputFrame> {
         self.note_keyboard_activity();
-        let pressed = state == ElementState::Pressed;
-        if let Some(direction) = desktop_movement_direction_from_key_code(key_code) {
-            self.held.set_direction(direction, pressed);
-            return None;
-        }
-        if let Some(action) = desktop_held_action_from_key_code(key_code) {
-            self.held.set_action(action, pressed);
-            return None;
-        }
-        if !pressed || repeat {
-            return None;
-        }
-        if key_code == KeyCode::Escape {
-            let mut frame = FlatInputFrame::default();
-            frame.apply_intent(FlatInputIntent::Action {
-                action: FlatInputAction::OpenMenu,
-                pressed: true,
-            });
-            return Some(frame);
-        }
-        if let Some(slot) = desktop_hotbar_slot_from_key_code(key_code) {
-            let mut frame = FlatInputFrame::default();
-            frame.apply_intent(FlatInputIntent::SelectHotbarSlot(slot));
-            return Some(frame);
-        }
-        None
+        let key = desktop_keyboard_key_from_key_code(key_code)?;
+        self.keyboard_mouse
+            .handle_key(key, state == ElementState::Pressed, repeat)
+            .frame
     }
 
     fn handle_mouse_button(
@@ -236,112 +214,19 @@ impl DesktopFlatInputAdapter {
         state: ElementState,
     ) -> Option<FlatInputFrame> {
         self.note_mouse_activity();
-        if state != ElementState::Pressed {
-            return None;
-        }
-        let action = match button {
-            MouseButton::Left => FlatInputAction::Attack,
-            MouseButton::Right => FlatInputAction::Use,
-            _ => return None,
-        };
-        let mut frame = FlatInputFrame::default();
-        frame.apply_intent(FlatInputIntent::Action {
-            action,
-            pressed: true,
-        });
-        Some(frame)
+        let button = desktop_pointer_button_from_mouse_button(button)?;
+        self.keyboard_mouse
+            .handle_mouse_button(button, state == ElementState::Pressed)
+            .frame
     }
 
     fn mouse_look_frame(&mut self, delta_x: f32, delta_y: f32) -> Option<FlatInputFrame> {
         self.note_mouse_activity();
-        if (!delta_x.is_finite() || delta_x == 0.0) && (!delta_y.is_finite() || delta_y == 0.0) {
-            return None;
-        }
-        let mut frame = FlatInputFrame::default();
-        frame.apply_intent(FlatInputIntent::LookDelta {
-            x: delta_x,
-            y: delta_y,
-        });
-        Some(frame)
+        self.keyboard_mouse.mouse_motion_frame(delta_x, delta_y)
     }
 
     fn held_frame(&self) -> FlatInputFrame {
-        let mut frame = FlatInputFrame::default();
-        if self.held.forward {
-            frame.apply_intent(FlatInputIntent::MoveDirection {
-                direction: MovementDirection::Forward,
-                pressed: true,
-            });
-        }
-        if self.held.backward {
-            frame.apply_intent(FlatInputIntent::MoveDirection {
-                direction: MovementDirection::Backward,
-                pressed: true,
-            });
-        }
-        if self.held.left {
-            frame.apply_intent(FlatInputIntent::MoveDirection {
-                direction: MovementDirection::Left,
-                pressed: true,
-            });
-        }
-        if self.held.right {
-            frame.apply_intent(FlatInputIntent::MoveDirection {
-                direction: MovementDirection::Right,
-                pressed: true,
-            });
-        }
-        for action in self.held.actions() {
-            frame.apply_intent(FlatInputIntent::Action {
-                action,
-                pressed: true,
-            });
-        }
-        frame
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct DesktopHeldInput {
-    forward: bool,
-    backward: bool,
-    left: bool,
-    right: bool,
-    jump: bool,
-    descend: bool,
-    sneak: bool,
-    sprint: bool,
-}
-
-impl DesktopHeldInput {
-    fn set_direction(&mut self, direction: MovementDirection, pressed: bool) {
-        match direction {
-            MovementDirection::Forward => self.forward = pressed,
-            MovementDirection::Backward => self.backward = pressed,
-            MovementDirection::Left => self.left = pressed,
-            MovementDirection::Right => self.right = pressed,
-        }
-    }
-
-    fn set_action(&mut self, action: FlatInputAction, pressed: bool) {
-        match action {
-            FlatInputAction::Jump => self.jump = pressed,
-            FlatInputAction::Descend => self.descend = pressed,
-            FlatInputAction::Sneak => self.sneak = pressed,
-            FlatInputAction::Sprint => self.sprint = pressed,
-            FlatInputAction::Attack | FlatInputAction::Use | FlatInputAction::OpenMenu => {}
-        }
-    }
-
-    fn actions(self) -> impl Iterator<Item = FlatInputAction> {
-        [
-            (self.jump, FlatInputAction::Jump),
-            (self.descend, FlatInputAction::Descend),
-            (self.sneak, FlatInputAction::Sneak),
-            (self.sprint, FlatInputAction::Sprint),
-        ]
-        .into_iter()
-        .filter_map(|(pressed, action)| pressed.then_some(action))
+        self.keyboard_mouse.held_frame().unwrap_or_default()
     }
 }
 
@@ -1913,37 +1798,37 @@ impl ApplicationHandler for ChunkApp {
     }
 }
 
-fn desktop_movement_direction_from_key_code(key_code: KeyCode) -> Option<MovementDirection> {
+fn desktop_keyboard_key_from_key_code(key_code: KeyCode) -> Option<KeyboardKey> {
     match key_code {
-        KeyCode::KeyW => Some(MovementDirection::Forward),
-        KeyCode::KeyS => Some(MovementDirection::Backward),
-        KeyCode::KeyA => Some(MovementDirection::Left),
-        KeyCode::KeyD => Some(MovementDirection::Right),
+        KeyCode::KeyW => Some(KeyboardKey::KeyW),
+        KeyCode::KeyA => Some(KeyboardKey::KeyA),
+        KeyCode::KeyS => Some(KeyboardKey::KeyS),
+        KeyCode::KeyD => Some(KeyboardKey::KeyD),
+        KeyCode::KeyX => Some(KeyboardKey::KeyX),
+        KeyCode::Space => Some(KeyboardKey::Space),
+        KeyCode::ShiftLeft => Some(KeyboardKey::ShiftLeft),
+        KeyCode::ShiftRight => Some(KeyboardKey::ShiftRight),
+        KeyCode::ControlLeft => Some(KeyboardKey::ControlLeft),
+        KeyCode::ControlRight => Some(KeyboardKey::ControlRight),
+        KeyCode::Escape => Some(KeyboardKey::Escape),
+        KeyCode::Digit1 => Some(KeyboardKey::Digit1),
+        KeyCode::Digit2 => Some(KeyboardKey::Digit2),
+        KeyCode::Digit3 => Some(KeyboardKey::Digit3),
+        KeyCode::Digit4 => Some(KeyboardKey::Digit4),
+        KeyCode::Digit5 => Some(KeyboardKey::Digit5),
+        KeyCode::Digit6 => Some(KeyboardKey::Digit6),
+        KeyCode::Digit7 => Some(KeyboardKey::Digit7),
+        KeyCode::Digit8 => Some(KeyboardKey::Digit8),
+        KeyCode::Digit9 => Some(KeyboardKey::Digit9),
         _ => None,
     }
 }
 
-fn desktop_held_action_from_key_code(key_code: KeyCode) -> Option<FlatInputAction> {
-    match key_code {
-        KeyCode::Space => Some(FlatInputAction::Jump),
-        KeyCode::KeyX => Some(FlatInputAction::Descend),
-        KeyCode::ShiftLeft | KeyCode::ShiftRight => Some(FlatInputAction::Sneak),
-        KeyCode::ControlLeft | KeyCode::ControlRight => Some(FlatInputAction::Sprint),
-        _ => None,
-    }
-}
-
-fn desktop_hotbar_slot_from_key_code(key_code: KeyCode) -> Option<u8> {
-    match key_code {
-        KeyCode::Digit1 => Some(0),
-        KeyCode::Digit2 => Some(1),
-        KeyCode::Digit3 => Some(2),
-        KeyCode::Digit4 => Some(3),
-        KeyCode::Digit5 => Some(4),
-        KeyCode::Digit6 => Some(5),
-        KeyCode::Digit7 => Some(6),
-        KeyCode::Digit8 => Some(7),
-        KeyCode::Digit9 => Some(8),
+fn desktop_pointer_button_from_mouse_button(button: MouseButton) -> Option<PointerButton> {
+    match button {
+        MouseButton::Left => Some(PointerButton::Primary),
+        MouseButton::Right => Some(PointerButton::Secondary),
+        MouseButton::Middle => Some(PointerButton::Middle),
         _ => None,
     }
 }
@@ -2252,46 +2137,55 @@ mod tests {
     #[test]
     fn native_key_codes_map_to_shared_flat_input_controls() {
         assert_eq!(
-            desktop_movement_direction_from_key_code(KeyCode::KeyW),
-            Some(MovementDirection::Forward)
+            desktop_keyboard_key_from_key_code(KeyCode::KeyW),
+            Some(KeyboardKey::KeyW)
         );
         assert_eq!(
-            desktop_movement_direction_from_key_code(KeyCode::KeyS),
-            Some(MovementDirection::Backward)
+            desktop_keyboard_key_from_key_code(KeyCode::KeyS),
+            Some(KeyboardKey::KeyS)
         );
         assert_eq!(
-            desktop_movement_direction_from_key_code(KeyCode::KeyA),
-            Some(MovementDirection::Left)
+            desktop_keyboard_key_from_key_code(KeyCode::KeyA),
+            Some(KeyboardKey::KeyA)
         );
         assert_eq!(
-            desktop_movement_direction_from_key_code(KeyCode::KeyD),
-            Some(MovementDirection::Right)
+            desktop_keyboard_key_from_key_code(KeyCode::KeyD),
+            Some(KeyboardKey::KeyD)
         );
         assert_eq!(
-            desktop_held_action_from_key_code(KeyCode::Space),
-            Some(FlatInputAction::Jump)
+            desktop_keyboard_key_from_key_code(KeyCode::Space),
+            Some(KeyboardKey::Space)
         );
         assert_eq!(
-            desktop_held_action_from_key_code(KeyCode::KeyX),
-            Some(FlatInputAction::Descend)
+            desktop_keyboard_key_from_key_code(KeyCode::KeyX),
+            Some(KeyboardKey::KeyX)
         );
         assert_eq!(
-            desktop_held_action_from_key_code(KeyCode::ShiftLeft),
-            Some(FlatInputAction::Sneak)
+            desktop_keyboard_key_from_key_code(KeyCode::ShiftLeft),
+            Some(KeyboardKey::ShiftLeft)
         );
         assert_eq!(
-            desktop_held_action_from_key_code(KeyCode::ControlLeft),
-            Some(FlatInputAction::Sprint)
+            desktop_keyboard_key_from_key_code(KeyCode::ControlLeft),
+            Some(KeyboardKey::ControlLeft)
+        );
+        assert_eq!(desktop_keyboard_key_from_key_code(NO_CLIP_TOGGLE_KEY), None);
+        assert_eq!(desktop_keyboard_key_from_key_code(KeyCode::KeyO), None);
+        assert_eq!(
+            desktop_keyboard_key_from_key_code(KeyCode::Digit1),
+            Some(KeyboardKey::Digit1)
         );
         assert_eq!(
-            desktop_movement_direction_from_key_code(NO_CLIP_TOGGLE_KEY),
-            None
+            desktop_keyboard_key_from_key_code(KeyCode::Digit5),
+            Some(KeyboardKey::Digit5)
         );
-        assert_eq!(desktop_held_action_from_key_code(KeyCode::KeyO), None);
-        assert_eq!(desktop_hotbar_slot_from_key_code(KeyCode::Digit1), Some(0));
-        assert_eq!(desktop_hotbar_slot_from_key_code(KeyCode::Digit5), Some(4));
-        assert_eq!(desktop_hotbar_slot_from_key_code(KeyCode::Digit9), Some(8));
-        assert_eq!(desktop_hotbar_slot_from_key_code(KeyCode::KeyW), None);
+        assert_eq!(
+            desktop_keyboard_key_from_key_code(KeyCode::Digit9),
+            Some(KeyboardKey::Digit9)
+        );
+        assert_eq!(
+            desktop_pointer_button_from_mouse_button(MouseButton::Left),
+            Some(PointerButton::Primary)
+        );
     }
 
     #[test]

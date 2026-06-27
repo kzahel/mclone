@@ -627,6 +627,274 @@ pub enum PointerButton {
     Middle,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MouseWheelDirection {
+    Up,
+    Down,
+}
+
+impl MouseWheelDirection {
+    const fn control(self) -> KeyboardMouseControl {
+        match self {
+            Self::Up => KeyboardMouseControl::MouseWheelUp,
+            Self::Down => KeyboardMouseControl::MouseWheelDown,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyboardMouseInputAdapter {
+    pub bindings: KeyboardMouseBindings,
+    held: KeyboardMouseHeldState,
+}
+
+impl Default for KeyboardMouseInputAdapter {
+    fn default() -> Self {
+        Self {
+            bindings: KeyboardMouseBindings::default(),
+            held: KeyboardMouseHeldState::default(),
+        }
+    }
+}
+
+impl KeyboardMouseInputAdapter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_bindings(bindings: KeyboardMouseBindings) -> Self {
+        Self {
+            bindings,
+            held: KeyboardMouseHeldState::default(),
+        }
+    }
+
+    pub fn clear_held(&mut self) {
+        self.held = KeyboardMouseHeldState::default();
+    }
+
+    pub fn has_continuous_movement_input(&self) -> bool {
+        self.held.has_continuous_movement_input()
+    }
+
+    pub fn handle_key(
+        &mut self,
+        key: KeyboardKey,
+        pressed: bool,
+        repeat: bool,
+    ) -> KeyboardMouseInputEvent {
+        let Some(action) = self.binding_action(KeyboardMouseControl::Key(key)) else {
+            return KeyboardMouseInputEvent::default();
+        };
+        self.handle_binary_action(action, pressed, repeat)
+    }
+
+    pub fn handle_mouse_button(
+        &mut self,
+        button: PointerButton,
+        pressed: bool,
+    ) -> KeyboardMouseInputEvent {
+        let Some(action) = self.binding_action(KeyboardMouseControl::MouseButton(button)) else {
+            return KeyboardMouseInputEvent::default();
+        };
+        self.handle_binary_action(action, pressed, false)
+    }
+
+    pub fn mouse_motion_frame(&self, delta_x: f32, delta_y: f32) -> Option<FlatInputFrame> {
+        let Some(InputBindingAction::Look) = self.binding_action(KeyboardMouseControl::MouseMotion)
+        else {
+            return None;
+        };
+        if (!delta_x.is_finite() || delta_x == 0.0) && (!delta_y.is_finite() || delta_y == 0.0) {
+            return None;
+        }
+        let mut frame = FlatInputFrame::default();
+        frame.apply_intent(FlatInputIntent::LookDelta {
+            x: delta_x,
+            y: delta_y,
+        });
+        Some(frame)
+    }
+
+    pub fn handle_mouse_wheel(&self, direction: MouseWheelDirection) -> KeyboardMouseInputEvent {
+        let Some(action) = self.binding_action(direction.control()) else {
+            return KeyboardMouseInputEvent::default();
+        };
+        Self::binary_action_frame(action)
+            .map(KeyboardMouseInputEvent::frame)
+            .unwrap_or_else(KeyboardMouseInputEvent::handled)
+    }
+
+    pub fn held_frame(&self) -> Option<FlatInputFrame> {
+        self.has_continuous_movement_input().then(|| {
+            let mut frame = FlatInputFrame::default();
+            for direction in self.held.directions() {
+                frame.apply_intent(FlatInputIntent::MoveDirection {
+                    direction,
+                    pressed: true,
+                });
+            }
+            for action in self.held.actions() {
+                frame.apply_intent(FlatInputIntent::Action {
+                    action,
+                    pressed: true,
+                });
+            }
+            frame
+        })
+    }
+
+    fn binding_action(&self, control: KeyboardMouseControl) -> Option<InputBindingAction> {
+        self.bindings
+            .bindings
+            .iter()
+            .find_map(|binding| (binding.control == control).then_some(binding.action))
+    }
+
+    fn handle_binary_action(
+        &mut self,
+        action: InputBindingAction,
+        pressed: bool,
+        repeat: bool,
+    ) -> KeyboardMouseInputEvent {
+        if self.held.set_binding_action(action, pressed) {
+            return KeyboardMouseInputEvent::handled();
+        }
+        if !pressed || repeat {
+            return KeyboardMouseInputEvent::handled();
+        }
+        Self::binary_action_frame(action)
+            .map(KeyboardMouseInputEvent::frame)
+            .unwrap_or_else(KeyboardMouseInputEvent::handled)
+    }
+
+    fn binary_action_frame(action: InputBindingAction) -> Option<FlatInputFrame> {
+        match action {
+            InputBindingAction::MoveAnalog | InputBindingAction::Look => None,
+            _ => {
+                let mut frame = FlatInputFrame::default();
+                frame.apply_binary_binding_action(action, true);
+                Some(frame)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyboardMouseInputEvent {
+    pub handled: bool,
+    pub frame: Option<FlatInputFrame>,
+}
+
+impl KeyboardMouseInputEvent {
+    pub const fn handled() -> Self {
+        Self {
+            handled: true,
+            frame: None,
+        }
+    }
+
+    pub const fn frame(frame: FlatInputFrame) -> Self {
+        Self {
+            handled: true,
+            frame: Some(frame),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KeyboardMouseHeldState {
+    forward: bool,
+    backward: bool,
+    left: bool,
+    right: bool,
+    jump: bool,
+    descend: bool,
+    sneak: bool,
+    sprint: bool,
+}
+
+impl KeyboardMouseHeldState {
+    const fn has_continuous_movement_input(self) -> bool {
+        self.forward
+            || self.backward
+            || self.left
+            || self.right
+            || self.jump
+            || self.descend
+            || self.sneak
+            || self.sprint
+    }
+
+    fn set_binding_action(&mut self, action: InputBindingAction, pressed: bool) -> bool {
+        match action {
+            InputBindingAction::Move(direction) => {
+                self.set_direction(direction, pressed);
+                true
+            }
+            InputBindingAction::Jump => {
+                self.jump = pressed;
+                true
+            }
+            InputBindingAction::Descend => {
+                self.descend = pressed;
+                true
+            }
+            InputBindingAction::Sneak => {
+                self.sneak = pressed;
+                true
+            }
+            InputBindingAction::Sprint => {
+                self.sprint = pressed;
+                true
+            }
+            InputBindingAction::MoveAnalog
+            | InputBindingAction::Look
+            | InputBindingAction::Attack
+            | InputBindingAction::Use
+            | InputBindingAction::SelectHotbarSlot(_)
+            | InputBindingAction::NextHotbarSlot
+            | InputBindingAction::PreviousHotbarSlot
+            | InputBindingAction::OpenMenu => false,
+        }
+    }
+
+    fn set_direction(&mut self, direction: MovementDirection, pressed: bool) {
+        match direction {
+            MovementDirection::Forward => self.forward = pressed,
+            MovementDirection::Backward => self.backward = pressed,
+            MovementDirection::Left => self.left = pressed,
+            MovementDirection::Right => self.right = pressed,
+        }
+    }
+
+    fn directions(self) -> impl Iterator<Item = MovementDirection> {
+        [
+            (self.forward, MovementDirection::Forward),
+            (self.backward, MovementDirection::Backward),
+            (self.left, MovementDirection::Left),
+            (self.right, MovementDirection::Right),
+        ]
+        .into_iter()
+        .filter_map(|(pressed, direction)| pressed.then_some(direction))
+    }
+
+    fn actions(self) -> impl Iterator<Item = FlatInputAction> {
+        [
+            (self.jump, FlatInputAction::Jump),
+            (self.descend, FlatInputAction::Descend),
+            (self.sneak, FlatInputAction::Sneak),
+            (self.sprint, FlatInputAction::Sprint),
+        ]
+        .into_iter()
+        .filter_map(|(pressed, action)| pressed.then_some(action))
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TouchBindings {
@@ -1020,6 +1288,104 @@ mod tests {
             KeyboardKey::Digit9,
             InputBindingAction::SelectHotbarSlot(8)
         )));
+    }
+
+    #[test]
+    fn keyboard_mouse_adapter_builds_shared_frames_from_default_bindings() {
+        let mut adapter = KeyboardMouseInputAdapter::new();
+
+        let w = adapter.handle_key(KeyboardKey::KeyW, true, false);
+        assert!(w.handled);
+        assert!(w.frame.is_none());
+        adapter.handle_key(KeyboardKey::KeyA, true, false);
+        adapter.handle_key(KeyboardKey::Space, true, false);
+        adapter.handle_key(KeyboardKey::ShiftLeft, true, false);
+
+        let held = adapter
+            .held_frame()
+            .expect("held keys should produce frame");
+        assert!(held.forward);
+        assert!(held.left);
+        assert!(held.jump);
+        assert!(held.sneak);
+        assert_eq!(
+            held.movement,
+            MovementImpulse {
+                left: 1.0,
+                forward: 1.0
+            }
+        );
+
+        adapter.handle_key(KeyboardKey::KeyW, false, false);
+        let held = adapter.held_frame().expect("left key should remain held");
+        assert!(!held.forward);
+        assert!(held.left);
+
+        adapter.clear_held();
+        assert!(adapter.held_frame().is_none());
+    }
+
+    #[test]
+    fn keyboard_mouse_adapter_emits_one_shot_frames() {
+        let mut adapter = KeyboardMouseInputAdapter::new();
+
+        let menu = adapter
+            .handle_key(KeyboardKey::Escape, true, false)
+            .frame
+            .expect("escape should emit frame");
+        assert!(menu.open_menu);
+
+        let repeat = adapter.handle_key(KeyboardKey::Escape, true, true);
+        assert!(repeat.handled);
+        assert!(repeat.frame.is_none());
+
+        let slot = adapter
+            .handle_key(KeyboardKey::Digit5, true, false)
+            .frame
+            .expect("digit should emit frame");
+        assert_eq!(slot.selected_hotbar_slot, Some(4));
+
+        let attack = adapter
+            .handle_mouse_button(PointerButton::Primary, true)
+            .frame
+            .expect("primary button should emit frame");
+        assert!(attack.attack);
+
+        let use_item = adapter
+            .handle_mouse_button(PointerButton::Secondary, true)
+            .frame
+            .expect("secondary button should emit frame");
+        assert!(use_item.use_item);
+
+        let previous = adapter
+            .handle_mouse_wheel(MouseWheelDirection::Up)
+            .frame
+            .expect("wheel up should emit frame");
+        assert_eq!(previous.hotbar_step, -1);
+
+        let next = adapter
+            .handle_mouse_wheel(MouseWheelDirection::Down)
+            .frame
+            .expect("wheel down should emit frame");
+        assert_eq!(next.hotbar_step, 1);
+    }
+
+    #[test]
+    fn keyboard_mouse_adapter_emits_look_frames() {
+        let adapter = KeyboardMouseInputAdapter::new();
+
+        let look = adapter
+            .mouse_motion_frame(4.0, -2.0)
+            .expect("finite mouse motion should emit frame");
+        assert_eq!(look.look_delta, LookDelta { x: 4.0, y: -2.0 });
+        assert!(adapter.mouse_motion_frame(0.0, 0.0).is_none());
+        assert_eq!(
+            adapter
+                .mouse_motion_frame(f32::INFINITY, 3.0)
+                .expect("finite y should still emit frame")
+                .look_delta,
+            LookDelta { x: 0.0, y: 3.0 }
+        );
     }
 
     #[test]

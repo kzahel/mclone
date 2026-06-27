@@ -25,8 +25,9 @@ mod android {
     use mclone_client::ClientInteractionController;
     use mclone_core::{ChunkPos, Vec3d};
     use mclone_input::{
-        FlatInputAction, FlatInputFrame, FlatInputIntent, InputCapabilities, InputCapabilityState,
-        InputDeviceKind, InputPreferences,
+        FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, FlatInputIntent,
+        InputCapabilities, InputCapabilityState, InputDeviceKind, InputPreferences, KeyboardKey,
+        KeyboardMouseInputAdapter, MouseWheelDirection, MovementDirection, PointerButton,
     };
     use mclone_mesh::quad_face_count_from_indices;
     use mclone_net::NativeClientSession;
@@ -45,14 +46,18 @@ mod android {
     };
     use mclone_ui::{
         DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState,
-        GuiDrawList, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
+        GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
         render_status_overlay, render_touch_overlay, touch_action_button_rects,
         touch_hotbar_slot_rects, touch_menu_button_rect, touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
-    use winit::event::{Touch, TouchPhase, WindowEvent};
-    use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+    use winit::event::{
+        DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase,
+        WindowEvent,
+    };
+    use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
+    use winit::keyboard::{KeyCode, PhysicalKey};
     use winit::platform::android::EventLoopBuilderExtAndroid;
     use winit::platform::android::activity::AndroidApp;
     use winit::window::{Window, WindowAttributes, WindowId};
@@ -170,6 +175,7 @@ mod android {
         camera: EngineCameraController,
         interaction: ClientInteractionController,
         input_capabilities: InputCapabilityState,
+        keyboard_mouse: KeyboardMouseInputAdapter,
         render_options: TexturedSectionRenderOptions,
         ui: GameUi,
         session_status: StatusOverlay,
@@ -426,6 +432,66 @@ mod android {
             )
         }
 
+        fn handle_keyboard_input(
+            &mut self,
+            key_code: KeyCode,
+            state: ElementState,
+            repeat: bool,
+        ) -> Result<AndroidUiTouchResult> {
+            self.renderer.handle_keyboard_input(
+                key_code,
+                state,
+                repeat,
+                &self.device,
+                &self.queue,
+                self.config.format,
+            )
+        }
+
+        fn handle_cursor_move(
+            &mut self,
+            position: PhysicalPosition<f64>,
+        ) -> Result<AndroidUiTouchResult> {
+            self.renderer.handle_cursor_move(
+                position,
+                self.config.width,
+                self.config.height,
+                &self.device,
+                &self.queue,
+                self.config.format,
+            )
+        }
+
+        fn handle_mouse_input(
+            &mut self,
+            cursor: Option<PhysicalPosition<f64>>,
+            state: ElementState,
+            button: MouseButton,
+        ) -> Result<AndroidUiTouchResult> {
+            self.renderer.handle_mouse_input(
+                cursor,
+                state,
+                button,
+                self.config.width,
+                self.config.height,
+                &self.device,
+                &self.queue,
+                self.config.format,
+            )
+        }
+
+        fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) -> Result<AndroidUiTouchResult> {
+            self.renderer.handle_mouse_wheel(delta)
+        }
+
+        fn handle_mouse_motion(&mut self, delta: (f64, f64)) -> Result<bool> {
+            self.renderer.handle_mouse_motion(delta)
+        }
+
+        fn clear_flat_gameplay_input(&mut self) {
+            self.renderer.clear_flat_gameplay_input();
+        }
+
         fn wants_continuous_redraw(&self) -> bool {
             self.renderer.wants_continuous_redraw()
         }
@@ -494,6 +560,7 @@ mod android {
                     touch: true,
                     ..InputCapabilities::NONE
                 }),
+                keyboard_mouse: KeyboardMouseInputAdapter::new(),
                 render_options: TexturedSectionRenderOptions::default(),
                 ui: android_game_ui_for_scene(&scene_options),
                 session_status: StatusOverlay::hidden(),
@@ -553,6 +620,174 @@ mod android {
                 return self.handle_active_ui_touch(touch, point, device, queue, format);
             }
             self.handle_closed_gameplay_touch(touch, point, gui_scale)
+        }
+
+        fn handle_keyboard_input(
+            &mut self,
+            key_code: KeyCode,
+            state: ElementState,
+            repeat: bool,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            format: wgpu::TextureFormat,
+        ) -> Result<AndroidUiTouchResult> {
+            self.input_capabilities
+                .note_activity(InputDeviceKind::Keyboard);
+            if self.ui.is_active() {
+                self.keyboard_mouse.clear_held();
+                if state == ElementState::Pressed
+                    && let Some(gui_key) = gui_key_from_key_code(key_code)
+                {
+                    let (handled, action) = self.ui.key_pressed(gui_key);
+                    if let Some(action) = action {
+                        return self.apply_ui_action(action, device, queue, format);
+                    }
+                    if handled {
+                        return Ok(AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        });
+                    }
+                }
+                return Ok(AndroidUiTouchResult::default());
+            }
+            let Some(key) = android_keyboard_key_from_key_code(key_code) else {
+                return Ok(AndroidUiTouchResult::default());
+            };
+            let event = self
+                .keyboard_mouse
+                .handle_key(key, state == ElementState::Pressed, repeat);
+            if let Some(frame) = event.frame {
+                return self.apply_flat_keyboard_mouse_frame(frame);
+            }
+            Ok(AndroidUiTouchResult {
+                handled: event.handled,
+                quit: false,
+            })
+        }
+
+        fn handle_cursor_move(
+            &mut self,
+            position: PhysicalPosition<f64>,
+            width: u32,
+            height: u32,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            format: wgpu::TextureFormat,
+        ) -> Result<AndroidUiTouchResult> {
+            self.input_capabilities
+                .note_activity(InputDeviceKind::Mouse);
+            let gui_scale = GuiScale::from_pixels(width.max(1), height.max(1));
+            self.ui.set_scale(gui_scale);
+            if !self.ui.is_active() {
+                return Ok(AndroidUiTouchResult::default());
+            }
+            let point = gui_scale.client_to_gui(position.x, position.y);
+            let ui_state = self.current_ui_render_state();
+            let (handled, action) = self.ui.pointer_move(point, ui_state);
+            if let Some(action) = action {
+                return self.apply_ui_action(action, device, queue, format);
+            }
+            Ok(AndroidUiTouchResult {
+                handled,
+                quit: false,
+            })
+        }
+
+        fn handle_mouse_input(
+            &mut self,
+            cursor: Option<PhysicalPosition<f64>>,
+            state: ElementState,
+            button: MouseButton,
+            width: u32,
+            height: u32,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            format: wgpu::TextureFormat,
+        ) -> Result<AndroidUiTouchResult> {
+            self.input_capabilities
+                .note_activity(InputDeviceKind::Mouse);
+            if self.ui.is_active() {
+                self.keyboard_mouse.clear_held();
+                if button != MouseButton::Left {
+                    return Ok(AndroidUiTouchResult::default());
+                }
+                let Some(cursor) = cursor else {
+                    return Ok(AndroidUiTouchResult::default());
+                };
+                let gui_scale = GuiScale::from_pixels(width.max(1), height.max(1));
+                self.ui.set_scale(gui_scale);
+                let point = gui_scale.client_to_gui(cursor.x, cursor.y);
+                let ui_state = self.current_ui_render_state();
+                match state {
+                    ElementState::Pressed => {
+                        let handled = self.ui.pointer_down(point, ui_state);
+                        Ok(AndroidUiTouchResult {
+                            handled,
+                            quit: false,
+                        })
+                    }
+                    ElementState::Released => {
+                        let (handled, action) = self.ui.pointer_up(point, ui_state);
+                        if let Some(action) = action {
+                            return self.apply_ui_action(action, device, queue, format);
+                        }
+                        Ok(AndroidUiTouchResult {
+                            handled,
+                            quit: false,
+                        })
+                    }
+                }
+            } else {
+                let Some(button) = android_pointer_button_from_mouse_button(button) else {
+                    return Ok(AndroidUiTouchResult::default());
+                };
+                let event = self
+                    .keyboard_mouse
+                    .handle_mouse_button(button, state == ElementState::Pressed);
+                if let Some(frame) = event.frame {
+                    return self.apply_flat_keyboard_mouse_frame(frame);
+                }
+                Ok(AndroidUiTouchResult {
+                    handled: event.handled,
+                    quit: false,
+                })
+            }
+        }
+
+        fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) -> Result<AndroidUiTouchResult> {
+            self.input_capabilities
+                .note_activity(InputDeviceKind::Mouse);
+            if self.ui.is_active() {
+                return Ok(AndroidUiTouchResult::default());
+            }
+            let Some(direction) = android_mouse_wheel_direction(delta) else {
+                return Ok(AndroidUiTouchResult::default());
+            };
+            let event = self.keyboard_mouse.handle_mouse_wheel(direction);
+            if let Some(frame) = event.frame {
+                return self.apply_flat_keyboard_mouse_frame(frame);
+            }
+            Ok(AndroidUiTouchResult {
+                handled: event.handled,
+                quit: false,
+            })
+        }
+
+        fn handle_mouse_motion(&mut self, delta: (f64, f64)) -> Result<bool> {
+            self.input_capabilities
+                .note_activity(InputDeviceKind::Mouse);
+            if self.ui.is_active() {
+                return Ok(false);
+            }
+            let Some(frame) = self
+                .keyboard_mouse
+                .mouse_motion_frame(delta.0 as f32, delta.1 as f32)
+            else {
+                return Ok(false);
+            };
+            self.apply_flat_look_frame(frame)
+                .context("apply Android mouse-look frame")
         }
 
         fn handle_closed_gameplay_touch(
@@ -677,8 +912,8 @@ mod android {
                         self.touch_menu_touch_id = None;
                         self.touch_menu_pressed = false;
                         if should_open {
-                            self.touch_controls.clear();
                             self.ui.open_pause();
+                            self.clear_flat_gameplay_input();
                             self.ui.clear_input();
                             log::info!("Mclone Android shared menu opened");
                         }
@@ -835,6 +1070,17 @@ mod android {
             self.last_movement_update = None;
         }
 
+        fn clear_keyboard_mouse_state(&mut self) {
+            self.keyboard_mouse.clear_held();
+            self.camera.clear_keys();
+            self.last_movement_update = None;
+        }
+
+        fn clear_flat_gameplay_input(&mut self) {
+            self.clear_touch_state();
+            self.clear_keyboard_mouse_state();
+        }
+
         fn start_replacement_session(
             &mut self,
             device: &wgpu::Device,
@@ -867,6 +1113,7 @@ mod android {
             self.render_stats = started.render_stats;
             self.frame_index = 0;
             self.clear_touch_state();
+            self.clear_keyboard_mouse_state();
             self.session_status = StatusOverlay::hidden();
             match descriptor {
                 ActiveSessionDescriptor::LocalWorld { seed } => {
@@ -1055,10 +1302,11 @@ mod android {
         }
 
         fn apply_flat_touch_frame(&mut self, frame: FlatInputFrame) -> Result<()> {
-            if let Some(slot) = frame.selected_hotbar_slot
-                && self.interaction.select_hotbar_slot(slot)
-            {
-                log::info!("Mclone Android selected hotbar slot {}", slot + 1);
+            if let Some(slot) = frame.selected_hotbar_slot {
+                self.select_hotbar_slot(slot);
+            }
+            if frame.hotbar_step != 0 {
+                self.step_hotbar_slot(frame.hotbar_step);
             }
             if frame.attack {
                 self.handle_world_flat_action(FlatInputAction::Attack)?;
@@ -1067,6 +1315,57 @@ mod android {
                 self.handle_world_flat_action(FlatInputAction::Use)?;
             }
             Ok(())
+        }
+
+        fn apply_flat_keyboard_mouse_frame(
+            &mut self,
+            frame: FlatInputFrame,
+        ) -> Result<AndroidUiTouchResult> {
+            if frame.open_menu {
+                self.ui.open_pause();
+                self.clear_flat_gameplay_input();
+                self.ui.clear_input();
+                log::info!("Mclone Android shared menu opened from keyboard");
+                return Ok(AndroidUiTouchResult {
+                    handled: true,
+                    quit: false,
+                });
+            }
+            self.apply_flat_touch_frame(frame)?;
+            Ok(AndroidUiTouchResult {
+                handled: true,
+                quit: false,
+            })
+        }
+
+        fn apply_flat_look_frame(&mut self, frame: FlatInputFrame) -> Result<bool> {
+            if frame.look_delta.x == 0.0 && frame.look_delta.y == 0.0 {
+                return Ok(false);
+            }
+            self.camera
+                .turn_mouse_delta(f64::from(frame.look_delta.x), f64::from(frame.look_delta.y));
+            self.commit_engine_camera_player_pose()
+                .context("sync Android mouse-look player pose")?;
+            Ok(true)
+        }
+
+        fn select_hotbar_slot(&mut self, slot: u8) -> bool {
+            if self.interaction.select_hotbar_slot(slot) {
+                log::info!("Mclone Android selected hotbar slot {}", slot + 1);
+                true
+            } else {
+                false
+            }
+        }
+
+        fn step_hotbar_slot(&mut self, step: i8) -> bool {
+            if step == 0 {
+                return false;
+            }
+            let slot_count = i16::from(FLAT_HOTBAR_SLOT_COUNT);
+            let slot = (i16::from(self.interaction.selected_hotbar_slot()) + i16::from(step))
+                .rem_euclid(slot_count) as u8;
+            self.select_hotbar_slot(slot)
         }
 
         fn sync_carried_item(&mut self) -> Result<bool> {
@@ -1109,9 +1408,9 @@ mod android {
             Ok(())
         }
 
-        fn apply_touch_movement(&mut self) -> Result<()> {
+        fn apply_flat_movement(&mut self) -> Result<()> {
             let now = Instant::now();
-            if self.ui.is_active() || !self.touch_controls.has_continuous_movement_input() {
+            if self.ui.is_active() || !self.has_continuous_flat_movement_input() {
                 self.last_movement_update = Some(now);
                 return Ok(());
             }
@@ -1121,15 +1420,24 @@ mod android {
                 .map(|last| now.duration_since(last).as_secs_f64())
                 .unwrap_or(0.0)
                 .clamp(0.0, TOUCH_MOVEMENT_MAX_FRAME_SECONDS);
-            let Some(frame) = self.touch_controls.held_frame() else {
-                return Ok(());
-            };
+            let mut frame = FlatInputFrame::default();
+            if let Some(keyboard_mouse_frame) = self.keyboard_mouse.held_frame() {
+                merge_flat_input_frame(&mut frame, keyboard_mouse_frame);
+            }
+            if let Some(touch_frame) = self.touch_controls.held_frame() {
+                merge_flat_input_frame(&mut frame, touch_frame);
+            }
             let input = engine_camera_input_from_flat_frame(frame, dt_seconds);
             self.camera.apply_movement_input(self.scene.client(), input);
             self.play_landing_events();
             self.commit_engine_camera_player_pose()
-                .context("sync Android touch-movement player pose")?;
+                .context("sync Android flat-input player pose")?;
             Ok(())
+        }
+
+        fn has_continuous_flat_movement_input(&self) -> bool {
+            self.touch_controls.has_continuous_movement_input()
+                || self.keyboard_mouse.has_continuous_movement_input()
         }
 
         fn play_landing_events(&mut self) {
@@ -1152,15 +1460,15 @@ mod android {
         }
 
         fn wants_continuous_redraw(&self) -> bool {
-            !self.ui.is_active() && self.touch_controls.has_continuous_movement_input()
+            !self.ui.is_active() && self.has_continuous_flat_movement_input()
         }
 
         fn render(&mut self, frame: RenderFrameContext<'_>) -> Result<()> {
             let _ = self.scene.poll()?;
             self.apply_pending_engine_camera_position_updates()
                 .context("apply Android player position corrections")?;
-            self.apply_touch_movement()
-                .context("apply Android touch movement")?;
+            self.apply_flat_movement()
+                .context("apply Android flat movement")?;
             let camera_position = camera_position(&self.camera);
             let section_update = self.scene.sync_render_sections(camera_position)?;
             if section_update.rebuilt_section_count() > 0
@@ -1478,6 +1786,7 @@ mod android {
         window: Option<Arc<Window>>,
         gpu: Option<AndroidGpuState>,
         active_touch: Option<ActiveTouch>,
+        last_cursor: Option<PhysicalPosition<f64>>,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -1514,6 +1823,7 @@ mod android {
                         }
                     }
                 }
+                event_loop.listen_device_events(DeviceEvents::WhenFocused);
                 window.request_redraw();
             }
         }
@@ -1523,6 +1833,7 @@ mod android {
             self.gpu = None;
             self.window = None;
             self.active_touch = None;
+            self.last_cursor = None;
         }
 
         fn window_event(
@@ -1582,12 +1893,100 @@ mod android {
                     );
                 }
                 WindowEvent::Touch(touch) => self.handle_touch(event_loop, &window, touch),
+                WindowEvent::KeyboardInput { event, .. } => {
+                    let PhysicalKey::Code(key_code) = event.physical_key else {
+                        return;
+                    };
+                    let Some(gpu) = self.gpu.as_mut() else {
+                        return;
+                    };
+                    let result = gpu.handle_keyboard_input(key_code, event.state, event.repeat);
+                    self.handle_gpu_input_result(event_loop, &window, "keyboard input", result);
+                }
+                WindowEvent::CursorMoved { position, .. } => {
+                    self.last_cursor = Some(position);
+                    let Some(gpu) = self.gpu.as_mut() else {
+                        return;
+                    };
+                    let result = gpu.handle_cursor_move(position);
+                    self.handle_gpu_input_result(event_loop, &window, "cursor move", result);
+                }
+                WindowEvent::MouseInput { state, button, .. } => {
+                    let Some(gpu) = self.gpu.as_mut() else {
+                        return;
+                    };
+                    let result = gpu.handle_mouse_input(self.last_cursor, state, button);
+                    self.handle_gpu_input_result(event_loop, &window, "mouse input", result);
+                }
+                WindowEvent::MouseWheel { delta, .. } => {
+                    let Some(gpu) = self.gpu.as_mut() else {
+                        return;
+                    };
+                    let result = gpu.handle_mouse_wheel(delta);
+                    self.handle_gpu_input_result(event_loop, &window, "mouse wheel", result);
+                }
+                WindowEvent::Focused(false) => {
+                    self.active_touch = None;
+                    self.last_cursor = None;
+                    if let Some(gpu) = self.gpu.as_mut() {
+                        gpu.clear_flat_gameplay_input();
+                    }
+                }
                 _ => {}
+            }
+        }
+
+        fn device_event(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            _device_id: DeviceId,
+            event: DeviceEvent,
+        ) {
+            let DeviceEvent::MouseMotion { delta } = event else {
+                return;
+            };
+            let Some(gpu) = self.gpu.as_mut() else {
+                return;
+            };
+            match gpu.handle_mouse_motion(delta) {
+                Ok(true) => {
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    log::error!("failed to handle Mclone Android mouse look: {error:#}");
+                    event_loop.exit();
+                }
             }
         }
     }
 
     impl McloneAndroidApp {
+        fn handle_gpu_input_result(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            window: &Window,
+            context: &str,
+            result: Result<AndroidUiTouchResult>,
+        ) {
+            match result {
+                Ok(result) if result.handled => {
+                    if result.quit {
+                        event_loop.exit();
+                    } else {
+                        window.request_redraw();
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    log::error!("failed to handle Mclone Android {context}: {error:#}");
+                    event_loop.exit();
+                }
+            }
+        }
+
         fn handle_touch(&mut self, event_loop: &ActiveEventLoop, window: &Window, touch: Touch) {
             if let Some(gpu) = self.gpu.as_mut() {
                 match gpu.handle_ui_touch(&touch) {
@@ -1751,6 +2150,63 @@ mod android {
         Ok(false)
     }
 
+    fn gui_key_from_key_code(key_code: KeyCode) -> Option<GuiKey> {
+        match key_code {
+            KeyCode::Escape => Some(GuiKey::Escape),
+            _ => None,
+        }
+    }
+
+    fn android_keyboard_key_from_key_code(key_code: KeyCode) -> Option<KeyboardKey> {
+        match key_code {
+            KeyCode::KeyW => Some(KeyboardKey::KeyW),
+            KeyCode::KeyA => Some(KeyboardKey::KeyA),
+            KeyCode::KeyS => Some(KeyboardKey::KeyS),
+            KeyCode::KeyD => Some(KeyboardKey::KeyD),
+            KeyCode::KeyX => Some(KeyboardKey::KeyX),
+            KeyCode::Space => Some(KeyboardKey::Space),
+            KeyCode::ShiftLeft => Some(KeyboardKey::ShiftLeft),
+            KeyCode::ShiftRight => Some(KeyboardKey::ShiftRight),
+            KeyCode::ControlLeft => Some(KeyboardKey::ControlLeft),
+            KeyCode::ControlRight => Some(KeyboardKey::ControlRight),
+            KeyCode::Escape => Some(KeyboardKey::Escape),
+            KeyCode::Digit1 => Some(KeyboardKey::Digit1),
+            KeyCode::Digit2 => Some(KeyboardKey::Digit2),
+            KeyCode::Digit3 => Some(KeyboardKey::Digit3),
+            KeyCode::Digit4 => Some(KeyboardKey::Digit4),
+            KeyCode::Digit5 => Some(KeyboardKey::Digit5),
+            KeyCode::Digit6 => Some(KeyboardKey::Digit6),
+            KeyCode::Digit7 => Some(KeyboardKey::Digit7),
+            KeyCode::Digit8 => Some(KeyboardKey::Digit8),
+            KeyCode::Digit9 => Some(KeyboardKey::Digit9),
+            _ => None,
+        }
+    }
+
+    fn android_pointer_button_from_mouse_button(button: MouseButton) -> Option<PointerButton> {
+        match button {
+            MouseButton::Left => Some(PointerButton::Primary),
+            MouseButton::Right => Some(PointerButton::Secondary),
+            MouseButton::Middle => Some(PointerButton::Middle),
+            _ => None,
+        }
+    }
+
+    fn android_mouse_wheel_direction(delta: MouseScrollDelta) -> Option<MouseWheelDirection> {
+        let y = match delta {
+            MouseScrollDelta::LineDelta(_, y) => y,
+            MouseScrollDelta::PixelDelta(position) => position.y as f32,
+        };
+        if !y.is_finite() || y.abs() <= f32::EPSILON {
+            return None;
+        }
+        Some(if y > 0.0 {
+            MouseWheelDirection::Up
+        } else {
+            MouseWheelDirection::Down
+        })
+    }
+
     fn flat_action_frame(action: FlatInputAction) -> FlatInputFrame {
         let mut frame = FlatInputFrame::default();
         frame.apply_intent(FlatInputIntent::Action {
@@ -1758,6 +2214,61 @@ mod android {
             pressed: true,
         });
         frame
+    }
+
+    fn merge_flat_input_frame(target: &mut FlatInputFrame, source: FlatInputFrame) {
+        if source.forward {
+            target.apply_intent(FlatInputIntent::MoveDirection {
+                direction: MovementDirection::Forward,
+                pressed: true,
+            });
+        }
+        if source.backward {
+            target.apply_intent(FlatInputIntent::MoveDirection {
+                direction: MovementDirection::Backward,
+                pressed: true,
+            });
+        }
+        if source.left {
+            target.apply_intent(FlatInputIntent::MoveDirection {
+                direction: MovementDirection::Left,
+                pressed: true,
+            });
+        }
+        if source.right {
+            target.apply_intent(FlatInputIntent::MoveDirection {
+                direction: MovementDirection::Right,
+                pressed: true,
+            });
+        }
+        if let Some(movement) = source.analog_movement {
+            target.apply_intent(FlatInputIntent::MoveAnalog {
+                left: movement.left,
+                forward: movement.forward,
+            });
+        }
+        for (pressed, action) in [
+            (source.jump, FlatInputAction::Jump),
+            (source.sprint, FlatInputAction::Sprint),
+            (source.sneak, FlatInputAction::Sneak),
+            (source.descend, FlatInputAction::Descend),
+            (source.attack, FlatInputAction::Attack),
+            (source.use_item, FlatInputAction::Use),
+            (source.open_menu, FlatInputAction::OpenMenu),
+        ] {
+            if pressed {
+                target.apply_intent(FlatInputIntent::Action {
+                    action,
+                    pressed: true,
+                });
+            }
+        }
+        if let Some(slot) = source.selected_hotbar_slot {
+            target.apply_intent(FlatInputIntent::SelectHotbarSlot(slot));
+        }
+        if source.hotbar_step != 0 {
+            target.apply_intent(FlatInputIntent::StepHotbar(source.hotbar_step));
+        }
     }
 
     fn engine_camera_input_from_flat_frame(

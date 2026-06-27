@@ -1,10 +1,8 @@
 # 098: Flat Input Capability Convergence
 
-Status: active; Slices 1-2 shared input contract and desktop adapter
-convergence are implemented and validated. Slice 3 Android touch
-interaction/hotbar convergence is implemented; attached Android
-keyboard/mouse routing remains. This splits the remaining flat Android
-input/HUD parity work out of
+Status: active; Slices 1-3 shared input contract, desktop adapter, and flat
+Android capability convergence are implemented and validated. This splits the
+remaining flat Android input/HUD parity work out of
 [`090-flat-android-client-parity.md`](090-flat-android-client-parity.md) into a
 shared flat-client capability contract for desktop, flat Android, and web.
 
@@ -44,15 +42,16 @@ intents where the semantics match.
 
 ## Current State
 
-- Desktop flat has the most complete keyboard/mouse gameplay path, but that
-  path is app-local in `mclone-native-client`.
+- Desktop flat routes keyboard/mouse gameplay through the shared
+  `mclone-input` keyboard/mouse adapter while keeping cursor/window policy in
+  `mclone-native-client`.
 - Desktop does not currently expose the touch-control path for touchscreen
   devices, even though `winit` can report touch events on desktop.
-- Flat Android has shared menu UI, touch movement/look, and touch
-  attack/use/hotbar routed through shared intents and the shared
-  `ClientInteractionController`.
-- Flat Android does not currently route attached keyboard/mouse/gamepad input
-  into the same gameplay path desktop uses.
+- Flat Android has shared menu UI, touch movement/look, touch
+  attack/use/hotbar, and attached keyboard/mouse routed through shared intents
+  and the shared `ClientInteractionController`.
+- Flat Android does not currently route gamepad input into the same gameplay
+  path desktop uses.
 - Native web has separate browser keyboard/mouse/touch glue. It should converge
   on the same intent and preference contracts while keeping browser event,
   worker, and storage mechanics web-local.
@@ -160,11 +159,11 @@ intents; preferences decide presentation defaults.
     by other flat clients.
   - Preserve current desktop keyboard/mouse behavior while changing ownership.
 
-- [ ] **Slice 3: flat Android capability convergence.**
+- [x] **Slice 3: flat Android capability convergence.**
   - [x] Add `ClientInteractionController` to flat Android.
   - [x] Route Android touch attack/use/hotbar through shared intents and the same
     block-pick / carried-item / gameplay-command path as desktop.
-  - [ ] Route attached Android keyboard/mouse events into the shared keyboard/mouse
+  - [x] Route attached Android keyboard/mouse events into the shared keyboard/mouse
     adapter when `winit` exposes them.
   - [x] Keep Android lifecycle, surface, property lookup, and APK validation in the
     Android app crate.
@@ -264,17 +263,24 @@ Manual/device validation to record before closing this tactical:
   and unit tests for touch-only, desktop touchscreen, Android keyboard/mouse
   plus touch, explicit preference, gamepad, and hotbar/frame behavior.
 - Slice 2 landed: desktop flat now owns a small `mclone-native-client` raw-event
-  adapter that converts `winit` keyboard/mouse/touch events into `mclone-input`
-  capability state and `FlatInputFrame` intents before applying movement, look,
-  hotbar, menu, attack, and use through existing shared camera/interaction
-  paths. Cursor lock, focus, debug shortcuts, and UI pointer handling remain in
-  the desktop app. Desktop `WindowEvent::Touch` now records touch capability
-  state for future shared touch HUD work; it does not yet add desktop touch
-  gameplay controls.
+  shim backed by the shared `mclone-input` keyboard/mouse adapter. It converts
+  `winit` keyboard/mouse/touch events into capability state and
+  `FlatInputFrame` intents before applying movement, look, hotbar, menu,
+  attack, and use through existing shared camera/interaction paths. Cursor
+  lock, focus, debug shortcuts, and UI pointer handling remain in the desktop
+  app. Desktop `WindowEvent::Touch` now records touch capability state for
+  future shared touch HUD work; it does not yet add desktop touch gameplay
+  controls.
 - Slice 3 Android touch sub-slice landed: flat Android now owns a
   `ClientInteractionController`, records touch capability through
   `mclone-input`, converts held touch movement into `FlatInputFrame`, and routes
   touch attack/use/hotbar selection through shared intents, block picking,
   carried-item sync, and gameplay command dispatch. `mclone-ui` can now draw the
-  native touch attack/use buttons and nine-slot touch hotbar. Attached Android
-  keyboard/mouse routing remains the open Slice 3 item.
+  native touch attack/use buttons and nine-slot touch hotbar.
+- Slice 3 completed: `mclone-input` now owns the reusable keyboard/mouse
+  adapter for held movement, one-shot menu/hotbar/action frames, mouse look, and
+  wheel hotbar steps. Desktop and flat Android both convert `winit` raw
+  key/button/motion facts into that shared adapter, while Android keeps
+  lifecycle/surface/APK concerns local and routes attached keyboard/mouse
+  movement, look, attack/use, hotbar, and menu input through the same camera,
+  UI, interaction, and gameplay-command paths as touch.
