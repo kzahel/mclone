@@ -73,6 +73,81 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-27 - Standalone Quest 3 Frozen RD10 Meta Performance Metrics
+
+Benchmarked code commit: `0df8733` (`Add opt-in Quest XR Meta
+performance-metrics probe`).
+
+Capture note: captured from the implementation worktree at the commit above.
+The worktree also carried unrelated uncommitted changes; of those, only
+`mclone-ui` links into the XR APK (transitively via `mclone-xr-scene`), and it
+does not change terrain draw behaviour. This is the standalone Quest lane. The
+run used the new opt-in `--perf-metrics` flag on the existing frozen RD10 lane
+(`native:android-xr:perf:frozen:rd10:metrics`), so the
+`XR_META_performance_metrics` sample is taken under the same frozen RD10 load
+as the `2d000e1`/`2d200e1` records. The validator force-stopped the app and
+slept the headset; post-run `dumpsys power` reported `mWakefulness=Asleep` and
+`mHoldingDisplaySuspendBlocker=false`, and `pidof com.kzahel.mclone.xr` was
+empty.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 |
+| Android API | 34 |
+| OpenXR runtime | Oculus `v204.201.0` |
+| Stereo view config | `1680x1760` recommended per eye, `1x` sample |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| Lane | stationary frozen render, fixed render view pose `0,80,-96,180`, RD10 |
+
+Frozen RD10 frame summary for this run (matches the prior frozen baseline):
+`72.0 Hz` target, `1240` frames in `20.002s` (~`62.0 FPS`), `p50 16.106ms`,
+`p95 17.839ms`, `max 19.738ms`, terrain frame max `19.268ms`, left eye
+`10.570ms`, right eye `10.420ms`, `179` drawn sections / `1.35M` drawn indices,
+`0` skipped frames.
+
+Meta performance metrics (`XR_META_performance_metrics`, opt-in via
+`--perf-metrics`). One steady-state sample inside the measured window;
+`17` counters enumerated, `any_valid=true` on the first attempt:
+
+| Counter | Value | Bucket |
+|---|---:|---|
+| `app/gpu_frametime` | `7.040 ms` | GPU shader/raster/fill/depth (both eyes) |
+| `device/gpu_utilization` | `57.636 %` | GPU headroom |
+| `compositor/gpu_frametime` | `1.561 ms` | compositor GPU pass |
+| `compositor/dropped_frame_count` | `103` (cumulative) | pacing / missed budget |
+| `compositor/spacewarp_mode` | `0` | ASW off |
+| `compositor/reprojection_latency` | `15.192 ms` | pacing |
+| `app/motion_to_photon_latency` | `39.376 ms` | pacing |
+| `device/cpu_utilization_average` | `35.661 %` | CPU headroom |
+| `device/cpu_utilization_worst` | `37.374 %` | CPU headroom |
+| busiest per-core CPU (`cpu2`) | `53.125 %` | CPU headroom |
+
+The runtime does not enumerate `app/cpu_frametime` or
+`compositor/cpu_frametime` on this Oculus build, so those marker fields report
+`n/a`; CPU load is covered by the device CPU-utilization counters.
+
+Interpretation:
+
+- RD10 is **not GPU-fill-bound**. The runtime reports the app drawing both eyes
+  in `7.040ms` of GPU time at `57.6%` GPU utilization, i.e. ~42% GPU headroom,
+  while the app's own per-eye wall-clock timers sum to `~20.99ms`
+  (`10.570 + 10.420`).
+- The gap between the `~21ms` measured per-eye CPU wall time and the `7ms` true
+  GPU time is CPU draw-submission for `179` sections across two eyes plus the
+  cost of the per-eye blocking `device.poll(Wait)` in `render_eye_target`, which
+  serializes the eyes and parks the CPU on GPU fences instead of overlapping
+  CPU and GPU work.
+- The compositor is dropping app frames (`103` cumulative, SpaceWarp off)
+  because the app CPU frame exceeds the `13.889ms` budget, not because the
+  compositor or GPU is saturated.
+- Next optimization target is therefore CPU draw submission / draw-call count
+  (batching, instancing, or indirect draws per render layer) and removing the
+  per-eye GPU stall so CPU and GPU overlap — not shader/fill cost. A wgpu
+  timestamp-query or diagnostic flat-material pass is now lower priority because
+  the GPU bucket is already known to be small.
+
 ### 2026-06-27 - Standalone Quest 3 Frozen Render Sweep
 
 Benchmarked code commit: `2d200e18d35ab22273b50ce13c5f47d1f992b56b`
