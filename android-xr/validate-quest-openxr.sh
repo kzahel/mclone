@@ -467,6 +467,9 @@ fi
 if [[ "$PERF_FROZEN_RENDER" == "1" && "$PERF_FLIGHT" == "1" ]]; then
     mclone_die "--perf-frozen-render cannot be combined with --perf-flight"
 fi
+if [[ "$PERF_FROZEN_RENDER" == "1" && "$START_VIEW_POSE" == "0" ]]; then
+    mclone_die "--perf-frozen-render requires --view-pose X,Y,Z,YAW_DEGREES"
+fi
 if [[ -n "$PERF_FLIGHT_SPEED" ]]; then
     validate_positive_number "--perf-flight-speed" "$PERF_FLIGHT_SPEED"
 fi

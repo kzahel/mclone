@@ -63,6 +63,7 @@ pub const XR_MENU_PANEL_WIDTH_BLOCKS: f32 = 1.75;
 pub const XR_MENU_CONTROLLER_RAY_LENGTH_BLOCKS: f32 = 6.0;
 pub const XR_MENU_POINTER_TRIGGER_PRESS: f32 = 0.55;
 pub const XR_MENU_POINTER_TRIGGER_RELEASE: f32 = 0.35;
+const XR_FIXED_RENDER_EYE_SEPARATION_BLOCKS: f32 = 0.064;
 const XR_MENU_LEFT_RAY_COLOR: [f32; 4] = [0.18, 0.85, 1.0, 0.95];
 const XR_MENU_RIGHT_RAY_COLOR: [f32; 4] = [0.2, 1.0, 0.45, 0.95];
 const XR_MENU_TRIGGER_RAY_COLOR: [f32; 4] = [1.0, 0.42, 0.12, 1.0];
@@ -445,6 +446,30 @@ where
         )
     }
 
+    pub fn render_frame_frozen_runtime_at_view_pose(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view_pose: XrStartupViewPose,
+        eye_fovs: [xr::Fovf; 2],
+        left_target: XrTerrainEyeTarget<'_>,
+        right_target: XrTerrainEyeTarget<'_>,
+    ) -> Result<XrTerrainFrameSummary> {
+        let mut timing = XrTerrainFrameTiming::default();
+        let render_views_start = Instant::now();
+        let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs)?;
+        timing.render_views_ms = elapsed_ms(render_views_start.elapsed());
+        self.render_prepared_frame(
+            device,
+            queue,
+            render_views,
+            left_target,
+            right_target,
+            XrTerrainRuntimeUpdateMode::Frozen,
+            timing,
+        )
+    }
+
     fn render_frame_inner(
         &mut self,
         device: &wgpu::Device,
@@ -458,8 +483,6 @@ where
         let render_views_start = Instant::now();
         let mut render_views = self.render_views(&views)?;
         timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
-        let mut center_position =
-            (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         self.update_menu_panel_pose(render_views);
         let menu_pointer_start = Instant::now();
         if self
@@ -470,12 +493,33 @@ where
             let render_views_start = Instant::now();
             render_views = self.render_views(&views)?;
             timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
-            center_position =
-                (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
             self.update_menu_panel_pose(render_views);
         } else {
             timing.menu_pointer_ms += elapsed_ms(menu_pointer_start.elapsed());
         }
+        self.render_prepared_frame(
+            device,
+            queue,
+            render_views,
+            left_target,
+            right_target,
+            runtime_mode,
+            timing,
+        )
+    }
+
+    fn render_prepared_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        render_views: [ChunkRenderView; 2],
+        left_target: XrTerrainEyeTarget<'_>,
+        right_target: XrTerrainEyeTarget<'_>,
+        runtime_mode: XrTerrainRuntimeUpdateMode,
+        mut timing: XrTerrainFrameTiming,
+    ) -> Result<XrTerrainFrameSummary> {
+        let center_position =
+            (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         let upload = match runtime_mode {
             XrTerrainRuntimeUpdateMode::Live => {
                 let runtime_upload_start = Instant::now();
@@ -1695,6 +1739,48 @@ pub fn xr_view_to_chunk_render_view(
     Ok(chunk_render_view_from_xr_render_view(render_view))
 }
 
+pub fn fixed_startup_view_pose_render_views(
+    view_pose: XrStartupViewPose,
+    eye_fovs: [xr::Fovf; 2],
+) -> Result<[ChunkRenderView; 2]> {
+    let yaw_radians = view_pose.yaw_degrees.to_radians();
+    if !yaw_radians.is_finite() {
+        bail!("invalid XR fixed render view yaw {}", view_pose.yaw_degrees);
+    }
+    let center = Vec3::from_array(view_pose.position);
+    if !center.is_finite() {
+        bail!(
+            "invalid XR fixed render view position {:?}",
+            view_pose.position
+        );
+    }
+    let orientation = Quat::from_rotation_y(yaw_radians);
+    let eye_right = orientation * Vec3::X;
+    let half_eye_offset = eye_right * (XR_FIXED_RENDER_EYE_SEPARATION_BLOCKS * 0.5);
+    let left =
+        fixed_startup_view_pose_render_view(center - half_eye_offset, orientation, eye_fovs[0])?;
+    let right =
+        fixed_startup_view_pose_render_view(center + half_eye_offset, orientation, eye_fovs[1])?;
+    Ok([left, right])
+}
+
+fn fixed_startup_view_pose_render_view(
+    position: Vec3,
+    orientation: Quat,
+    fov: xr::Fovf,
+) -> Result<ChunkRenderView> {
+    let render_view = mclone_xr_host::render_view_from_world_pose(
+        mclone_xr_host::XrViewPose {
+            position,
+            orientation,
+        },
+        fov,
+        XR_NEAR,
+        XR_FAR,
+    )?;
+    Ok(chunk_render_view_from_xr_render_view(render_view))
+}
+
 pub fn chunk_render_view_from_xr_render_view(
     view: mclone_xr_host::XrRenderView,
 ) -> ChunkRenderView {
@@ -2398,6 +2484,32 @@ mod tests {
         );
 
         assert!((world_position - Vec3::new(8.35, 72.0, -12.2)).length() < 1.0e-5);
+    }
+
+    #[test]
+    fn fixed_startup_render_views_pin_center_and_yaw() {
+        let view_pose = XrStartupViewPose {
+            position: [8.0, 72.0, -12.0],
+            yaw_degrees: 90.0,
+        };
+        let fov = xr::Fovf {
+            angle_left: -0.5,
+            angle_right: 0.5,
+            angle_up: 0.5,
+            angle_down: -0.5,
+        };
+
+        let render_views = fixed_startup_view_pose_render_views(view_pose, [fov, fov]).unwrap();
+        let center = (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+        let forward = average_unit_direction(
+            render_views[0].camera_forward,
+            render_views[1].camera_forward,
+            Vec3::NEG_Z,
+        );
+
+        assert!((center - Vec3::from_array(view_pose.position)).length() < 1.0e-6);
+        assert!((yaw_from_forward(forward).unwrap() - std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
+        assert!(forward.y.abs() < 1.0e-6);
     }
 
     #[test]

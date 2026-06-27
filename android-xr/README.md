@@ -215,7 +215,9 @@ pnpm native:android-xr:perf:frozen:sweep
 
 These use the same stationary settle gate, then skip runtime polling, render
 section sync, traversal-ready refresh, and GPU section uploads during the timed
-sample. They render the cached mesh buffers and current headset view only.
+sample. They render cached mesh buffers from the configured `--view-pose`, so
+physical headset movement during the measured window does not change culling or
+draw counts.
 Summary files are written to:
 
 ```text

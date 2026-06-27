@@ -895,6 +895,7 @@ mod android {
             perf_flight,
             perf_settled_stationary,
             perf_frozen_render,
+            startup_view_pose,
             scene_options.render_distance,
             display_refresh,
         )
@@ -1052,6 +1053,7 @@ mod android {
         perf_flight: Option<AndroidXrPerfFlight>,
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
+        fixed_render_view_pose: Option<XrStartupViewPose>,
         render_distance: u32,
         display_refresh: XrDisplayRefreshSnapshot,
     ) -> Result<()> {
@@ -1166,6 +1168,7 @@ mod android {
                             terrain,
                             &controllers,
                             perf_probe.automation(),
+                            fixed_render_view_pose,
                         );
                         frame_timing.render_mclone_frame_ms = elapsed_ms(render_start);
                         result
@@ -1976,6 +1979,7 @@ mod android {
         terrain: &mut AndroidXrTerrainState,
         controllers: &[XrControllerSnapshot],
         automation: Option<AndroidXrPerfAutomation>,
+        fixed_render_view_pose: Option<XrStartupViewPose>,
     ) -> Result<AndroidXrRenderedFrame> {
         let mut timing = AndroidXrRenderFrameTiming::default();
         let locate_views_start = Instant::now();
@@ -2036,10 +2040,14 @@ mod android {
             size: [right_target.eye().width, right_target.eye().height],
         };
         let frame_summary = if frozen_render {
-            terrain.render_frame_frozen_runtime(
+            let fixed_render_view_pose = fixed_render_view_pose.with_context(
+                || "Android XR frozen render probe requires a fixed startup view pose",
+            )?;
+            terrain.render_frame_frozen_runtime_at_view_pose(
                 &graphics.device,
                 &graphics.queue,
-                [stereo_views.left, stereo_views.right],
+                fixed_render_view_pose,
+                [stereo_views.left.fov, stereo_views.right.fov],
                 left_terrain_target,
                 right_terrain_target,
             )

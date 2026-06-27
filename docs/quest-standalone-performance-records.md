@@ -65,7 +65,10 @@ a 20 second steady-state render sample. Persistent deferred render sections are
 recorded as a steady-state condition rather than blocking the sample forever.
 Frozen samples use the same settle gate, then skip runtime polling, section
 sync, traversal-ready refresh, and GPU section uploads during the measured
-window. The validator force-stops the app and sleeps the headset during cleanup.
+window. They render from the configured startup `--view-pose`, not the live
+headset pose, so physical headset orientation cannot change terrain culling or
+draw counts during the measured window. The validator force-stops the app and
+sleeps the headset during cleanup.
 
 ## Records
 

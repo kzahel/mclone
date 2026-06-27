@@ -184,7 +184,9 @@ Recorded first-pass implementation:
   `native:android-xr:perf:frozen:sweep`. These pass `--perf-frozen-render`,
   wait for the stationary settle gate, then write
   `mode=stationary-frozen-render` while rendering cached mesh buffers without
-  runtime poll/sync/upload work during the measured window.
+  runtime poll/sync/upload work during the measured window. Frozen render uses
+  the configured startup `--view-pose` for terrain render views so headset
+  motion cannot change culling or draw counts.
 - The marker block now includes terrain runtime sub-timings for poll, section
   sync, GPU upload, and traversal-ready refresh. It also includes max and latest
   pending render chunks, pending compile jobs, submitted/completed/stale compile
