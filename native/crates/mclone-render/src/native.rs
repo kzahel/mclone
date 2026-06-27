@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
-use crate::color_profile::{RenderColorProfile, preferred_surface_format_for_profile};
+use crate::color_profile::{RenderColorProfile, RenderConfig};
 use crate::gpu_util::{native_backends, optional_gpu_features};
 use crate::target::{RenderFrameContext, RenderFrameTarget};
 
@@ -17,6 +17,7 @@ pub struct NativeSurfaceContext {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub config: wgpu::SurfaceConfiguration,
+    pub render_config: RenderConfig,
     supported_present_modes: Vec<wgpu::PresentMode>,
 }
 
@@ -61,6 +62,7 @@ impl NativeSurfaceContext {
 
         let caps = surface.get_capabilities(&adapter);
         let format = selected_surface_format(&caps, color_profile);
+        let render_config = RenderConfig::for_color_target(color_profile, format);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -84,7 +86,7 @@ impl NativeSurfaceContext {
         );
         log::info!(
             "wgpu surface format={format:?} color_profile={} alpha_mode={:?} initial_present_mode={:?} present_modes={:?}",
-            color_profile.as_str(),
+            render_config.color_profile.as_str(),
             config.alpha_mode,
             config.present_mode,
             caps.present_modes
@@ -92,15 +94,17 @@ impl NativeSurfaceContext {
         if format.is_srgb() {
             log::warn!(
                 "wgpu surface format {format:?} is sRGB; renderer color profile {} will use a shader presentation transform where available",
-                color_profile.as_str()
+                render_config.color_profile.as_str()
             );
         }
+        log::info!("wgpu render config: {}", render_config.diagnostic_label());
 
         Ok(Self {
             surface,
             device,
             queue,
             config,
+            render_config,
             supported_present_modes: caps.present_modes,
         })
     }
@@ -331,7 +335,8 @@ fn selected_surface_format_with_override(
             caps.formats
         );
     }
-    preferred_surface_format_for_profile(caps, color_profile).unwrap_or(caps.formats[0])
+    RenderConfig::preferred_surface_format_for_profile(caps, color_profile)
+        .unwrap_or(caps.formats[0])
 }
 
 fn surface_format_override() -> Option<wgpu::TextureFormat> {

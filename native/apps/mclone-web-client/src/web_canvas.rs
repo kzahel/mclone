@@ -40,7 +40,7 @@ use mclone_render::chunk::{
     TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderStats,
     TexturedSectionUploadReport,
 };
-use mclone_render::color_profile::{RenderColorProfile, preferred_surface_format_for_profile};
+use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
 use mclone_render::entity::{ActorDrawResources, ActorInstance};
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::sky_render::SkyRenderer;
@@ -4785,7 +4785,8 @@ impl WebCanvasContext {
             .map_err(|error| format!("failed to request WebGPU device: {error}"))?;
 
         let caps = surface.get_capabilities(&adapter);
-        let Some(format) = preferred_surface_format_for_profile(&caps, color_profile) else {
+        let Some(format) = RenderConfig::preferred_surface_format_for_profile(&caps, color_profile)
+        else {
             return Err("WebGPU canvas surface reported no supported formats".to_owned());
         };
         let alpha_mode = caps

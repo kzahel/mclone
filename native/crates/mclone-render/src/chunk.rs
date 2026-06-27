@@ -15,7 +15,7 @@ use mclone_mesh::{
 };
 use wgpu::util::DeviceExt;
 
-use crate::color_profile::RenderColorProfile;
+use crate::color_profile::{RenderColorProfile, RenderConfig};
 use crate::fog::RenderFog;
 use crate::target::RenderFrameTarget;
 use crate::texture_mips::generate_rgba_mip_chain;
@@ -1843,9 +1843,8 @@ fn uniform_bytes(
 ) -> [u8; 128] {
     let mut bytes = [0; UNIFORM_BYTE_LEN];
     bytes[..64].copy_from_slice(&matrix_bytes(render_view.uniform_matrix()));
-    let color_transform = options
-        .color_profile
-        .target_color_transform(color_format)
+    let color_transform = RenderConfig::for_color_target(options.color_profile, color_format)
+        .target_color_transform()
         .shader_code();
     let render_options = [
         if options.force_fullbright {

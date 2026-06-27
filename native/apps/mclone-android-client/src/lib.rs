@@ -1,7 +1,7 @@
 #![deny(unsafe_code)]
 
 #[cfg(target_os = "android")]
-use mclone_render::color_profile::{RenderColorProfile, preferred_surface_format_for_profile};
+use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
 
 #[cfg(target_os = "android")]
 mod android {
@@ -2540,6 +2540,6 @@ pub fn host_placeholder() {}
 
 #[cfg(target_os = "android")]
 fn preferred_surface_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
-    preferred_surface_format_for_profile(caps, RenderColorProfile::default())
+    RenderConfig::preferred_surface_format_for_profile(caps, RenderColorProfile::default())
         .unwrap_or(caps.formats[0])
 }

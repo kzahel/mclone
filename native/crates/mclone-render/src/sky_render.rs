@@ -14,7 +14,8 @@ use glam::{Mat4, Quat, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::color_profile::{
-    RenderColorProfile, RenderTargetColorTransform, color_transform_rgb, color_transform_wgpu,
+    RenderColorProfile, RenderConfig, RenderTargetColorTransform, color_transform_rgb,
+    color_transform_wgpu,
 };
 use crate::sky::sunrise_color;
 
@@ -62,6 +63,13 @@ impl SkyRenderer {
         color_format: wgpu::TextureFormat,
         color_profile: RenderColorProfile,
     ) -> Self {
+        Self::new_with_config(
+            device,
+            RenderConfig::for_color_target(color_profile, color_format),
+        )
+    }
+
+    pub fn new_with_config(device: &wgpu::Device, render_config: RenderConfig) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_sky_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sky.wgsl").into()),
@@ -131,7 +139,7 @@ impl SkyRenderer {
                     entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: color_format,
+                        format: render_config.color_format,
                         blend,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -207,7 +215,7 @@ impl SkyRenderer {
             glow_vertex_buffer,
             glow_index_buffer,
             glow_index_count,
-            color_transform: color_profile.target_color_transform(color_format),
+            color_transform: render_config.target_color_transform(),
         }
     }
 
