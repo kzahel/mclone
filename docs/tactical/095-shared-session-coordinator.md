@@ -18,8 +18,10 @@ actions through a shared XR scene replacement hook while keeping OpenXR
 session/swapchain/action ownership in the app hosts. Flat Android New World
 replacement now has an AVD touch-menu smoke, and Android XR New World
 replacement now has a Quest in-headset launch smoke against the same shared XR
-replacement method. Remaining gaps are physical XR controller menu-click
-validation, endpoint text editing, and a dedicated web connect-screen smoke.
+replacement method. User headset validation says the shared XR menu/pointer
+works mostly fine. Remaining gaps are automated XR controller-click
+replacement/menu smoke coverage, endpoint text editing, and a dedicated web
+connect-screen smoke.
 
 ## Purpose
 

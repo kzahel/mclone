@@ -22,8 +22,9 @@ boundary; this doc owns the per-feature and per-contract grids and the rule that
 keeps new features from re-forking.
 
 > Status note: the current-state cells below were derived from a code audit on
-> 2026-06-26 and refreshed on 2026-06-27 after tactical 095 Slice 4e's shared XR
-> dynamic session replacement code path.
+> 2026-06-26 and refreshed on 2026-06-27 after tactical 095 Slice 4f, the
+> existing audio foundation audit, and user headset validation of the shared XR
+> world-panel menu/pointer path.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -44,7 +45,7 @@ Target: **full game client.** Same player-facing feature set across all three.
 - HUD (crosshair, hotbar, debug/status overlay)
 - menus: title, pause, options, **server-connect, world/seed select**
 - local-integrated **and** remote-dedicated host modes
-- underwater/screen effects (desktop/web; mobile may stage later for perf)
+- underwater/camera screen effects for flat clients
 
 > **Confirmed:** flat Android is a full client, not a viewer. Its current
 > shared touch player-camera/movement shell is interim and must gain
@@ -62,7 +63,8 @@ and controller-ray pointer instead).
 - **controller block interaction** (ray pick, break, place)
 - **world-space HUD + menus** (crosshair reticle, options, server-connect). A
   shared pause/options menu now renders through a world-space panel path with a
-  controller-ray pointer; headset validation and tuning are still open.
+  controller-ray pointer; user headset validation says the current menu works
+  mostly fine, while automated smoke coverage and comfort tuning remain open.
 - local-integrated **and** remote-dedicated host modes
 
 XR controller interaction and world-space menus are now an active alignment
@@ -90,32 +92,43 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Remote-player rendering | ✅ | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ✅ |
 | Passive entities (cow/chicken) | ✅ | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ◐ (placeholder) |
 | Fluids (server sim, renders as terrain) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Underwater / screen effects | ✅ | ✗ | ✗ | ✗ | ✗ |
+| Underwater camera FX / screen effects | ✅ | ✗ (XR treatment TBD) | ✗ (wiring pending) | ✗ (XR treatment TBD) | ✗ (inline render fork) |
 | HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ✗ | ✗ | ✗ | ✅ |
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✅ |
-| Menus (title/pause/options) | ✅ | ◐ (world panel + pointer, physical click pending) | ✅ (shared touch menu, AVD session smoke) | ◐ (world panel + pointer, physical click pending) | ✅ |
+| Menus (title/pause/options) | ✅ | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ (shared touch menu, AVD session smoke) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ |
 | Connect / world-select UI | ✗ | ✗ | ✗ | ✗ | ✗ |
 | Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ✅ WebSocket query param |
 | Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ (cfg-excluded) |
-| Audio | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Basic audio (landing sound foundation) | ◐ (code; listen validation pending) | ◐ (code; listen validation pending) | ◐ (code; device audio pending) | ◐ (code; device audio pending) | ✗ |
 
 Reading the matrix:
 
-- **desktop-flat** is the reference; the only flat-class gaps are connect-UI,
-  persistence, audio, and an in-world crosshair.
-- **web** is near desktop parity; gaps are connect-UI, underwater FX,
-  persistence (structurally impossible on `wasm32` today), audio.
+- **desktop-flat** is the reference; the remaining flat-class gaps are
+  connect-UI, persistence, full audio validation/categories, and an in-world
+  crosshair.
+- **web** is near desktop parity; gaps are connect-UI, underwater FX wiring,
+  persistence (structurally impossible on `wasm32` today), and audio.
 - **desktop-XR** has render/locomotion parity and a shared pause/options
-  world-panel menu with controller-ray pointer, but no headset-validated menu
-  comfort or spawned actor scenarios.
+  world-panel menu with controller-ray pointer. User headset validation says the
+  menu works mostly fine; automated menu/replacement smoke, comfort tuning, and
+  spawned actor scenarios remain open.
 - **Android-XR** now has the same shared actor render path and pause-menu
-  world-panel/pointer path wired through `mclone-xr-scene`, but device visual
-  validation of menu presentation/interaction and actual spawned actor scenarios
-  remain pending.
+  world-panel/pointer path wired through `mclone-xr-scene`. User headset
+  validation says the menu works mostly fine; automated menu/replacement smoke,
+  comfort tuning, and actual spawned actor scenarios remain pending.
 - **flat-Android** is still the thinnest full-client lane: it has terrain,
   lighting, shared local/remote host wiring, shared menu/touch in code, and a
   shared touch player camera/movement path, but still lacks interaction,
-  actors, HUD/hotbar, device-validated menu UX, and an in-app connect flow.
+  actors, HUD/hotbar, underwater FX wiring, and an in-app connect flow.
+- **underwater camera effects** are not desktop-only by architecture. The shared
+  renderer/app-runtime path exists, but only the desktop native app/headless/perf
+  paths currently compute and pass the camera-water overlay/fog. Flat Android,
+  web, and XR still need app-lane wiring; XR may need a stereo-comfort-specific
+  treatment instead of copying the flat screen overlay verbatim.
+- **basic audio** exists through `mclone-audio` on native desktop, desktop XR,
+  flat Android, and Android XR. It is still a foundation slice: landing sounds
+  only, no web audio yet, no automated audible validation, and no step/break/
+  place/entity/music categories.
 
 ## Matrix 2 — Shared Contract × Consumer (reuse burn-down)
 
@@ -134,9 +147,10 @@ use (and should) · — n/a.
 | `app-runtime::frame_render` | ✅ | ⚑ (inline reimpl) | ✅ | ✅ (via xr-scene) | `native:desktop-chunk:smoke`; `native:web:smoke` |
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
-| `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via xr-scene, physical headset menu click pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (initial local/remote plus app-owned New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared XR scene replacement; Quest in-headset New World replacement smoke, physical controller menu click pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-xr-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
+| `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via xr-scene, automated XR replacement-click smoke pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (initial local/remote plus app-owned New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared XR scene replacement; Quest in-headset New World replacement smoke, automated controller replacement-click smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-xr-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
-| `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✅ (shared touch menu+controls, AVD touch/session smoke) | ◐ (XR world panel + pointer, controller menu-click validation pending) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene`; `native:android:avd-session-smoke` |
+| `mclone-audio` | ✅ (desktop flat + desktop XR code wired; listen validation pending) | ✗ (web deferred) | ✅ (code wired; device audio validation pending) | ✅ (code wired; device audio validation pending) | `cargo test -p mclone-audio`; tactical 091 build gates |
+| `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✅ (shared touch menu+controls, AVD touch/session smoke) | ✅ (XR world panel + pointer, user-validated; automation/tuning pending) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene`; `native:android:avd-session-smoke` |
 | `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
 The reuse story in one line: **desktop flat, flat Android, desktop XR, and
@@ -177,23 +191,32 @@ Concretely:
   `RemoteServerSession`, while Android XR maps launch-scoped options to
   `AndroidXrRemoteServerSession`. The code compiles through desktop XR and
   Android XR APK gates. Android XR New World replacement is covered on Quest by
-  `pnpm native:android-xr:session-smoke`; physical controller menu-click
-  validation of that replacement flow is still pending.
+  `pnpm native:android-xr:session-smoke`. User headset validation confirms the
+  shared XR menu/pointer is usable; an automated controller-click replacement
+  smoke is still pending.
 - Android XR uses launch-scoped
   `mclone.startup.argv --remote-addr HOST:PORT`, can have the validator start a
   local dedicated server, and reports the local/remote session descriptor
   through the shared XR scene wrapper. Android XR reached
   `MCLONE_ANDROID_XR_READY` against a dedicated server over direct LAN and
   through `--adb-reverse`.
+- `mclone-audio` is a real shared native/XR/Android foundation now, not a
+  placeholder. Native desktop, desktop XR, flat Android, and Android XR all
+  construct `AudioEngine` and drain shared landing events; web/WASM audio is the
+  remaining platform gap.
 
-## Whole Systems That Do Not Exist Yet
+## Whole Systems Missing Or Not At Par
 
-Parity for these is blocked because there is nothing to port. Several are
-host-adapter concerns that should be designed as interfaces *before* they are
-built, exactly as transport/storage were:
+Parity for these is blocked either because the system is absent, or because the
+shared foundation exists but is not yet product-complete on every lane. Several
+are host-adapter concerns that should be designed as interfaces *before* they
+are built, exactly as transport/storage were:
 
-- **Audio / sound — entirely absent.** No crate, no `play_sound`. A host-agnostic
-  audio interface (native vs Web Audio vs Android) is unplanned.
+- **Audio / sound — partial, not absent.** `mclone-audio` exists and native
+  desktop, desktop XR, flat Android, and Android XR are wired for landing
+  sample playback. Web/WASM audio remains deferred, audible/device validation is
+  still manual, and real sound parity still needs step/break/place/entity/music
+  categories.
 - **Persistence wiring — absent in every app.** Engine has
   `FilesystemSnapshotStore`; all apps use `NullChunkSnapshotStore`, and the
   dedicated server has no `--world-dir`. Every launch regenerates from seed.
@@ -205,8 +228,9 @@ built, exactly as transport/storage were:
 - **Stereo / world-space UI — partial.** Desktop XR and Android XR now share a
   `mclone-ui` pause/options panel through `mclone-xr-scene`, toggled by left-hand
   select, rendered by `mclone-render::gui::WorldGuiRenderer`, and driven by
-  controller-ray trigger clicks. The XR target still needs headset visual and
-  interaction validation.
+  controller-ray trigger clicks. User headset validation says the current menu
+  works mostly fine; the XR target still needs automated smoke coverage and
+  comfort tuning.
 - **Real inventory / items, crafting, mob AI / spawning, chat, settings
   persistence — absent.** Only a fixed 7-block debug hotbar exists.
 
@@ -216,15 +240,15 @@ Every new feature added today gets forked across up to four app shells. The
 highest-leverage work is the shared contracts that *stop* the forking. Land
 these first:
 
-1. **Close the connect-UI gap and finish physical XR menu validation.** Every
+1. **Close the connect-UI gap and automate XR replacement/menu smoke.** Every
    lane now has shared local/remote session identity and a replacement code
    path. Flat Android New World replacement is covered by AVD touch-menu smoke,
-   and Android XR New World replacement is covered by an in-headset launch
-   smoke against the same shared XR replacement method. Remaining work is
-   physical XR controller menu-click validation, a dedicated web Join Remote
-   connect-screen smoke, and the `mclone-ui` text-input/connect-world UI needed
-   to choose endpoints and worlds in app instead of via CLI/properties/query
-   params. (tactical 095)
+   Android XR New World replacement is covered by an in-headset launch smoke,
+   and user headset validation says the shared XR menu/pointer works mostly
+   fine. Remaining work is an automated XR controller-click replacement/menu
+   smoke, a dedicated web Join Remote connect-screen smoke, and the `mclone-ui`
+   text-input/connect-world UI needed to choose endpoints and worlds in app
+   instead of via CLI/properties/query params. (tactical 095)
 2. **Finish the host-mode async/sync cleanup.** Native desktop, flat Android,
    and XR app shells use blocking TCP/session adapters, while browser
    worker/WebSocket mechanics stay async and still sit behind `WebRuntimeHost`.
@@ -233,13 +257,12 @@ these first:
    cleanup plus clarifying the web render-section idle diagnostics. (tactical
    085)
 3. **Finish the shared menu surface before adding more menu features.** XR now
-   has a shared world-panel pause/options menu with pointer input, but it still
-   needs headset visual/interaction validation. Flat Android now consumes
+   has a shared world-panel pause/options menu with pointer input, and user
+   headset validation says it works mostly fine. Flat Android consumes
    `mclone-ui` in code for pause/options touch input and uses the shared touch
-   player movement path, but still needs device validation and broader
-   HUD/gameplay interaction controls. Connect/world-select UI
-   and `EditBox` should build on this surface later, not define the first slice.
-   (tactical 089, tactical 090)
+   player movement path. Remaining work is automated XR menu coverage, comfort
+   tuning, broader flat-Android HUD/gameplay interaction controls, and the
+   connect/world-select `EditBox` surface. (tactical 089, tactical 090)
 4. **Finish the shared input-intent layer.** Unify raw input → intent across
    keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
    pointer, and interact**, not just locomotion. Required for XR interaction and
@@ -249,10 +272,10 @@ these first:
    `mclone.startup.argv`), and Quest smokes passed over direct LAN and through
    the `--adb-reverse` validator path. Keep the LAN route documented as
    firewall-sensitive.
-6. **Validate and tune the stereo/world-space UI path** so XR can show a
+6. **Automate and tune the stereo/world-space UI path** so XR can keep a
    comfortable panel, reticle/pointer, and later a connect screen. The first
-   panel renderer and pointer path landed; headset validation remains open.
-   (tactical 089)
+   panel renderer and pointer path landed and have user headset validation;
+   automated coverage and comfort tuning remain open. (tactical 089)
 7. **Protocol: add server push and cross-version negotiation.** Today it is
    strict request/response (a client that stops polling stops seeing others move)
    with strict-equality version match (independently-deployed web/APK/desktop

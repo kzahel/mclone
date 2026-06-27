@@ -10,7 +10,8 @@ current scene/session from the shared New World menu while keeping the old
 session live on setup failure. Flat Android New World replacement is covered by
 an AVD touch-menu smoke, and Android XR New World replacement is covered by a
 Quest in-headset launch smoke through the same shared XR replacement method.
-Remaining work is manual desktop/XR controller menu-click validation plus
+User headset validation says the shared XR menu/pointer works mostly fine.
+Remaining work is an automated XR controller-click replacement/menu smoke plus
 Android no-world/Quit-to-Title parity if mobile UX needs that exact desktop
 state.
 
@@ -136,8 +137,9 @@ Open follow-ups for this doc:
   touch-menu smoke, and Android XR New World replacement now has a Quest
   in-headset launch smoke through the same shared XR replacement method. Flat
   Android still needs the desktop-style no-world/Quit-to-Title state if that
-  becomes required for mobile UX, and XR still needs physical controller
-  menu-click validation.
+  becomes required for mobile UX. User headset validation says the shared XR
+  menu/pointer works mostly fine; XR still needs automated controller-click
+  replacement/menu smoke coverage.
 
 ## Implementation Slices
 

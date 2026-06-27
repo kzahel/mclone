@@ -1,8 +1,9 @@
 # 089: Shared XR Menu Surface
 
-Status: active; shared XR menu state, first world-space panel renderer, and
-first controller-ray pointer interaction have landed. Headset visual validation
-and comfort tuning remain open.
+Status: active; shared XR menu state, world-space panel renderer, and
+controller-ray pointer interaction have landed. User headset validation says the
+menu works mostly fine. Remaining work is automated XR menu/replacement smoke
+coverage and comfort tuning.
 
 ## Purpose
 
@@ -14,8 +15,8 @@ controller input can land behind shared contracts.
 ## Current State
 
 - Desktop flat and web render the shared `mclone-ui` menu/HUD path.
-- Desktop XR and Android XR share `mclone-xr-scene`, but previously passed an
-  empty `GuiDrawList` through `app-runtime::frame_render`.
+- Desktop XR and Android XR share `mclone-xr-scene` and now render/interact with
+  the shared `mclone-ui` pause/options surface as a world-space panel.
 - `GuiRenderer` remains a flat NDC overlay renderer, but
   `mclone-render::gui::WorldGuiRenderer` can now rasterize a `GuiDrawList` to a
   texture and draw it as a 3D quad from a `ChunkRenderView`.
@@ -23,8 +24,8 @@ controller input can land behind shared contracts.
   aim-pose/trigger data for panel pointer input. On Touch controllers left
   select is bound to left X/Y; on simple controllers it is the left select
   click.
-- Flat Android still has an app-local empty UI path and should adopt
-  `mclone-ui` separately.
+- Flat Android adopted the shared `mclone-ui` menu/touch surface separately in
+  tactical 090.
 
 ## Target End State
 
@@ -54,7 +55,8 @@ controller input can land behind shared contracts.
     when the menu opens, then reuses the same world pose for both eyes.
   - Initial sizing is 1024x576 pixels, 1.75 blocks wide, and 2.2 blocks in front
     of the HMD.
-  - Headset visual readability and comfort validation are still pending.
+  - User headset validation says the panel is readable and works mostly fine;
+    comfort tuning and automated coverage remain pending.
 - [x] **Slice 3: XR pointer and menu actions.**
   - `XrControllerSnapshot` carries aim direction from the OpenXR aim pose.
   - `mclone-xr-scene` transforms controller aim rays into world space and
@@ -65,10 +67,11 @@ controller input can land behind shared contracts.
     section occlusion, and render distance.
   - App-owned actions such as quitting remain explicitly ignored by the shared
     scene.
-- [ ] **Slice 4: flat Android `mclone-ui` adoption.**
+- [x] **Slice 4: flat Android `mclone-ui` adoption.**
   - Ownership moved to
     [`090-flat-android-client-parity.md`](090-flat-android-client-parity.md)
-    so flat Android parity has its own tactical record.
+    so flat Android parity has its own tactical record. The shared menu/touch
+    slices landed there.
 - [ ] **Slice 5: shared input-intent contract.**
   - Factor raw input to menu/pointer/gameplay intentions across keyboard/mouse,
     touch, and XR controllers.
@@ -102,7 +105,8 @@ Slice 2 validation on 2026-06-26:
 - [x] `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`
 - [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
 - [x] `pnpm native:web:build`
-- [ ] Headset visual smoke of the world-space panel.
+- [x] Headset visual smoke of the world-space panel: user validation says the
+      panel is readable and works mostly fine. Automated coverage remains open.
 
 Slice 3 validation on 2026-06-26:
 
@@ -110,7 +114,16 @@ Slice 3 validation on 2026-06-26:
 - [x] `cargo test --manifest-path native/Cargo.toml -p mclone-xr-host -p mclone-xr-scene`
 - [x] `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`
 - [x] `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
-- [ ] Headset visual/interaction smoke of the world-space panel pointer.
+- [x] Headset visual/interaction smoke of the world-space panel pointer: user
+      validation says the XR menu/pointer works mostly fine. Automated coverage
+      remains open.
+
+Manual headset validation, 2026-06-27:
+
+- User validation confirmed the shared XR world-panel menu and controller
+  pointer work mostly fine.
+- Remaining work is comfort tuning plus an automated headset/device smoke that
+  exercises menu clicks and replacement/session actions repeatably.
 
 Device gates for Slices 2-3:
 
