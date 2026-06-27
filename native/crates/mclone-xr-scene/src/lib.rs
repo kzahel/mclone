@@ -156,6 +156,16 @@ pub struct XrTerrainFrameSummary {
     pub ui_active: bool,
     pub actor_count: usize,
     pub drawn_actor_count: usize,
+    pub timing: XrTerrainFrameTiming,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct XrTerrainFrameTiming {
+    pub render_views_ms: f64,
+    pub menu_pointer_ms: f64,
+    pub runtime_upload_ms: f64,
+    pub left_eye_ms: f64,
+    pub right_eye_ms: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -219,6 +229,7 @@ where
     render_stats: RenderStreamStats,
     tracking_origin: Option<XrTrackingOrigin>,
     locomotion_mode: XrLocomotionMode,
+    display_refresh_hz: Option<f32>,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
     menu_pointer_down: bool,
@@ -300,6 +311,7 @@ where
             render_stats: started.render_stats,
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),
+            display_refresh_hz: None,
             last_locomotion_update: None,
             menu_toggle_down: false,
             menu_pointer_down: false,
@@ -338,20 +350,31 @@ where
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
     ) -> Result<XrTerrainFrameSummary> {
+        let mut timing = XrTerrainFrameTiming::default();
+        let render_views_start = Instant::now();
         let mut render_views = self.render_views(&views)?;
+        timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
         let mut center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         self.update_menu_panel_pose(render_views);
+        let menu_pointer_start = Instant::now();
         if self
             .apply_menu_pointer_input(device, queue)
             .context("apply XR menu pointer input")?
         {
+            timing.menu_pointer_ms += elapsed_ms(menu_pointer_start.elapsed());
+            let render_views_start = Instant::now();
             render_views = self.render_views(&views)?;
+            timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
             center_position =
                 (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
             self.update_menu_panel_pose(render_views);
+        } else {
+            timing.menu_pointer_ms += elapsed_ms(menu_pointer_start.elapsed());
         }
+        let runtime_upload_start = Instant::now();
         self.poll_runtime_and_upload(device, center_position)?;
+        timing.runtime_upload_ms = elapsed_ms(runtime_upload_start.elapsed());
         let render_options = self.effective_render_options(center_position);
         let sky_clear_color = self.sky_clear_color();
         let time_of_day = self.runtime.time_of_day();
@@ -360,6 +383,7 @@ where
             &self.runtime.client().actor_presentations(),
             self.runtime.client(),
         );
+        let left_eye_start = Instant::now();
         let left_summary = self.render_eye_target(
             device,
             queue,
@@ -372,6 +396,8 @@ where
             sun_angle,
             "left",
         )?;
+        timing.left_eye_ms = elapsed_ms(left_eye_start.elapsed());
+        let right_eye_start = Instant::now();
         self.render_eye_target(
             device,
             queue,
@@ -384,8 +410,9 @@ where
             sun_angle,
             "right",
         )?;
+        timing.right_eye_ms = elapsed_ms(right_eye_start.elapsed());
         self.record_eye0_summary(left_summary);
-        Ok(self.frame_summary())
+        Ok(self.frame_summary_with_timing(timing))
     }
 
     pub fn set_locomotion_mode(&mut self, locomotion_mode: XrLocomotionMode) {
@@ -394,6 +421,10 @@ where
 
     pub fn locomotion_mode(&self) -> XrLocomotionMode {
         self.locomotion_mode
+    }
+
+    pub fn set_display_refresh_hz(&mut self, display_refresh_hz: Option<f32>) {
+        self.display_refresh_hz = display_refresh_hz.filter(|hz| hz.is_finite() && *hz > 0.0);
     }
 
     pub fn camera_snapshot(&self) -> EngineCameraSnapshot {
@@ -463,6 +494,10 @@ where
     }
 
     pub fn frame_summary(&self) -> XrTerrainFrameSummary {
+        self.frame_summary_with_timing(XrTerrainFrameTiming::default())
+    }
+
+    fn frame_summary_with_timing(&self, timing: XrTerrainFrameTiming) -> XrTerrainFrameSummary {
         if let Some(summary) = self.first_eye_summary {
             return XrTerrainFrameSummary {
                 rendered_frames: self.rendered_frames,
@@ -474,6 +509,7 @@ where
                 ui_active: self.ui.is_active(),
                 actor_count: summary.actor_count,
                 drawn_actor_count: summary.drawn_actor_count,
+                timing,
             };
         }
         XrTerrainFrameSummary {
@@ -486,6 +522,7 @@ where
             ui_active: self.ui.is_active(),
             actor_count: self.render_stats.actor_count,
             drawn_actor_count: self.render_stats.drawn_actor_count,
+            timing,
         }
     }
 
@@ -737,7 +774,10 @@ where
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
             max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
             frame_pacing_mode: GameFramePacingMode::Vsync,
-            fps_cap: XR_UI_FPS_CAP,
+            fps_cap: self
+                .display_refresh_hz
+                .map(|hz| hz.round().clamp(1.0, 999.0) as u32)
+                .unwrap_or(XR_UI_FPS_CAP),
             touch_settings: None,
         }
     }

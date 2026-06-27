@@ -28,7 +28,7 @@ mod android {
     use mclone_render_session::EngineCameraSnapshot;
     use mclone_xr_host::{
         OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
-        XrControllerSnapshot, XrFrameStats,
+        XrControllerSnapshot, XrDisplayRefreshSnapshot, XrFrameStats,
     };
     use mclone_xr_scene::{
         XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
@@ -764,6 +764,22 @@ mod android {
             graphics.physical_device_api_version,
             graphics.queue_family_index
         );
+        let display_refresh = mclone_xr_host::query_display_refresh_snapshot(
+            &graphics.session,
+            available.fb_display_refresh_rate,
+        );
+        if display_refresh.extension_supported {
+            log::info!(
+                "OpenXR display refresh rates: {}",
+                mclone_xr_host::display_refresh_rates_label(&display_refresh.supported_rates)
+            );
+            match display_refresh.current_rate {
+                Some(rate) => log::info!("OpenXR current display refresh: {rate:.1} Hz"),
+                None => log::info!("OpenXR current display refresh: unknown"),
+            }
+        } else {
+            log::info!("OpenXR display refresh extension unavailable");
+        }
         let stage = mclone_xr_host::create_stage_reference_space(&graphics.session)?;
         log::info!("OpenXR reference space: STAGE");
 
@@ -819,6 +835,7 @@ mod android {
         )
         .context("initialize Android XR terrain runtime")?;
         let terrain_summary = terrain.frame_summary();
+        terrain.set_display_refresh_hz(display_refresh.current_rate);
         log::info!(
             "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={} actors={}",
             terrain_summary.section_count,
@@ -839,6 +856,7 @@ mod android {
             perf_seconds,
             perf_flight,
             scene_options.render_distance,
+            display_refresh,
         )
     }
 
@@ -993,11 +1011,13 @@ mod android {
         perf_seconds: Option<u64>,
         perf_flight: Option<AndroidXrPerfFlight>,
         render_distance: u32,
+        display_refresh: XrDisplayRefreshSnapshot,
     ) -> Result<()> {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
         let mut frame_stats = XrFrameStats::default();
-        let mut perf_probe = AndroidXrPerfProbe::new(perf_seconds, perf_flight, render_distance);
+        let mut perf_probe =
+            AndroidXrPerfProbe::new(perf_seconds, perf_flight, render_distance, display_refresh);
         let mut logged_ready = false;
         let mut logged_controller_activity = false;
         let mut session_smoke_pending_start = false;
@@ -1110,6 +1130,7 @@ mod android {
                 match render_result {
                     Ok(rendered) => {
                         frame_stats.record_submitted_frame();
+                        frame_timing.render = rendered.timing;
                         rendered_frame = Some(rendered);
                         let summary = rendered.summary;
                         if !logged_ready {
@@ -1189,18 +1210,38 @@ mod android {
         wait_begin_ms: f64,
         controller_poll_ms: f64,
         render_mclone_frame_ms: f64,
+        render: AndroidXrRenderFrameTiming,
     }
 
     #[derive(Clone, Copy, Debug)]
     struct AndroidXrRenderedFrame {
         summary: mclone_xr_scene::XrTerrainFrameSummary,
         camera: EngineCameraSnapshot,
+        timing: AndroidXrRenderFrameTiming,
+    }
+
+    #[derive(Clone, Copy, Debug, Default)]
+    struct AndroidXrRenderFrameTiming {
+        locate_views_ms: f64,
+        locomotion_ms: f64,
+        acquire_left_ms: f64,
+        acquire_right_ms: f64,
+        terrain_render_frame_ms: f64,
+        terrain_render_views_ms: f64,
+        terrain_menu_pointer_ms: f64,
+        terrain_runtime_upload_ms: f64,
+        terrain_left_eye_ms: f64,
+        terrain_right_eye_ms: f64,
+        release_eyes_ms: f64,
+        end_frame_ms: f64,
     }
 
     struct AndroidXrPerfProbe {
         requested_seconds: Option<u64>,
         flight: Option<AndroidXrPerfFlight>,
         render_distance: u32,
+        display_refresh: XrDisplayRefreshSnapshot,
+        target_hz: f64,
         active: Option<AndroidXrActivePerfProbe>,
         completed: bool,
     }
@@ -1210,11 +1251,19 @@ mod android {
             requested_seconds: Option<u64>,
             flight: Option<AndroidXrPerfFlight>,
             render_distance: u32,
+            display_refresh: XrDisplayRefreshSnapshot,
         ) -> Self {
+            let target_hz = display_refresh
+                .current_rate
+                .map(f64::from)
+                .filter(|hz| hz.is_finite() && *hz > 0.0)
+                .unwrap_or(ANDROID_XR_PERF_FALLBACK_TARGET_HZ);
             Self {
                 requested_seconds,
                 flight,
                 render_distance,
+                display_refresh,
+                target_hz,
                 active: None,
                 completed: false,
             }
@@ -1245,13 +1294,16 @@ mod android {
                 .map(|flight| flight.speed_blocks_per_second)
                 .unwrap_or(0.0);
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_distance={} flight_speed_blocks_per_second={:.3} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_distance={} flight_speed_blocks_per_second={:.3} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
                 seconds,
                 mode,
                 self.render_distance,
                 flight_speed,
-                ANDROID_XR_PERF_FALLBACK_TARGET_HZ,
-                perf_budget_ms(),
+                self.display_refresh.extension_supported,
+                format_optional_hz(self.display_refresh.current_rate),
+                format_supported_hz(&self.display_refresh.supported_rates),
+                self.target_hz,
+                perf_budget_ms(self.target_hz),
                 frame_stats.submitted_frames,
                 frame_stats.runtime_frames,
                 frame_stats.skipped_frames
@@ -1264,10 +1316,13 @@ mod android {
                 max_wait_begin_ms: 0.0,
                 max_controller_poll_ms: 0.0,
                 max_render_mclone_frame_ms: 0.0,
+                max_render: AndroidXrRenderFrameTiming::default(),
                 over_budget_frames: 0,
                 over_2x_budget_frames: 0,
                 over_4x_budget_frames: 0,
                 render_distance: self.render_distance,
+                display_refresh: self.display_refresh.clone(),
+                target_hz: self.target_hz,
                 flight_speed_blocks_per_second: self
                     .flight
                     .map(|flight| flight.speed_blocks_per_second),
@@ -1304,10 +1359,13 @@ mod android {
         max_wait_begin_ms: f64,
         max_controller_poll_ms: f64,
         max_render_mclone_frame_ms: f64,
+        max_render: AndroidXrRenderFrameTiming,
         over_budget_frames: u64,
         over_2x_budget_frames: u64,
         over_4x_budget_frames: u64,
         render_distance: u32,
+        display_refresh: XrDisplayRefreshSnapshot,
+        target_hz: f64,
         flight_speed_blocks_per_second: Option<f64>,
         start_camera: EngineCameraSnapshot,
         latest_camera: EngineCameraSnapshot,
@@ -1320,7 +1378,7 @@ mod android {
             timing: AndroidXrFrameTiming,
             rendered: Option<AndroidXrRenderedFrame>,
         ) {
-            let budget_ms = perf_budget_ms();
+            let budget_ms = perf_budget_ms(self.target_hz);
             self.frame_wall_ms.push(timing.frame_wall_ms);
             if timing.frame_wall_ms > budget_ms {
                 self.over_budget_frames += 1;
@@ -1337,6 +1395,7 @@ mod android {
             self.max_render_mclone_frame_ms = self
                 .max_render_mclone_frame_ms
                 .max(timing.render_mclone_frame_ms);
+            self.max_render = max_render_timing(self.max_render, timing.render);
             if let Some(rendered) = rendered {
                 self.latest_summary = rendered.summary;
                 self.latest_camera = rendered.camera;
@@ -1362,14 +1421,17 @@ mod android {
             let flight_distance_blocks =
                 camera_distance_blocks(self.start_camera, self.latest_camera);
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} max_wait_begin_ms={:.3} max_controller_poll_ms={:.3} max_render_mclone_frame_ms={:.3} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} max_wait_begin_ms={:.3} max_controller_poll_ms={:.3} max_render_mclone_frame_ms={:.3} max_locate_views_ms={:.3} max_locomotion_ms={:.3} max_acquire_left_ms={:.3} max_acquire_right_ms={:.3} max_terrain_render_frame_ms={:.3} max_terrain_render_views_ms={:.3} max_terrain_menu_pointer_ms={:.3} max_terrain_runtime_upload_ms={:.3} max_terrain_left_eye_ms={:.3} max_terrain_right_eye_ms={:.3} max_release_eyes_ms={:.3} max_end_frame_ms={:.3} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
                 sample_seconds,
                 android_xr_perf_mode_label_for_speed(self.flight_speed_blocks_per_second),
                 self.render_distance,
                 flight_speed,
                 flight_distance_blocks,
-                ANDROID_XR_PERF_FALLBACK_TARGET_HZ,
-                perf_budget_ms(),
+                self.display_refresh.extension_supported,
+                format_optional_hz(self.display_refresh.current_rate),
+                format_supported_hz(&self.display_refresh.supported_rates),
+                self.target_hz,
+                perf_budget_ms(self.target_hz),
                 frame_count,
                 submitted_delta,
                 runtime_delta,
@@ -1386,6 +1448,18 @@ mod android {
                 self.max_wait_begin_ms,
                 self.max_controller_poll_ms,
                 self.max_render_mclone_frame_ms,
+                self.max_render.locate_views_ms,
+                self.max_render.locomotion_ms,
+                self.max_render.acquire_left_ms,
+                self.max_render.acquire_right_ms,
+                self.max_render.terrain_render_frame_ms,
+                self.max_render.terrain_render_views_ms,
+                self.max_render.terrain_menu_pointer_ms,
+                self.max_render.terrain_runtime_upload_ms,
+                self.max_render.terrain_left_eye_ms,
+                self.max_render.terrain_right_eye_ms,
+                self.max_render.release_eyes_ms,
+                self.max_render.end_frame_ms,
                 self.latest_summary.section_count,
                 self.latest_summary.drawn_section_count,
                 self.latest_summary.index_count,
@@ -1396,8 +1470,44 @@ mod android {
         }
     }
 
-    fn perf_budget_ms() -> f64 {
-        1000.0 / ANDROID_XR_PERF_FALLBACK_TARGET_HZ
+    fn perf_budget_ms(target_hz: f64) -> f64 {
+        1000.0 / target_hz.max(1.0)
+    }
+
+    fn format_optional_hz(rate: Option<f32>) -> String {
+        rate.map(|hz| format!("{hz:.1}"))
+            .unwrap_or_else(|| "unknown".to_owned())
+    }
+
+    fn format_supported_hz(rates: &[f32]) -> String {
+        if rates.is_empty() {
+            return "none".to_owned();
+        }
+        rates
+            .iter()
+            .map(|hz| format!("{hz:.1}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    fn max_render_timing(
+        a: AndroidXrRenderFrameTiming,
+        b: AndroidXrRenderFrameTiming,
+    ) -> AndroidXrRenderFrameTiming {
+        AndroidXrRenderFrameTiming {
+            locate_views_ms: a.locate_views_ms.max(b.locate_views_ms),
+            locomotion_ms: a.locomotion_ms.max(b.locomotion_ms),
+            acquire_left_ms: a.acquire_left_ms.max(b.acquire_left_ms),
+            acquire_right_ms: a.acquire_right_ms.max(b.acquire_right_ms),
+            terrain_render_frame_ms: a.terrain_render_frame_ms.max(b.terrain_render_frame_ms),
+            terrain_render_views_ms: a.terrain_render_views_ms.max(b.terrain_render_views_ms),
+            terrain_menu_pointer_ms: a.terrain_menu_pointer_ms.max(b.terrain_menu_pointer_ms),
+            terrain_runtime_upload_ms: a.terrain_runtime_upload_ms.max(b.terrain_runtime_upload_ms),
+            terrain_left_eye_ms: a.terrain_left_eye_ms.max(b.terrain_left_eye_ms),
+            terrain_right_eye_ms: a.terrain_right_eye_ms.max(b.terrain_right_eye_ms),
+            release_eyes_ms: a.release_eyes_ms.max(b.release_eyes_ms),
+            end_frame_ms: a.end_frame_ms.max(b.end_frame_ms),
+        }
     }
 
     fn android_xr_perf_mode_label(flight: Option<AndroidXrPerfFlight>) -> &'static str {
@@ -1458,8 +1568,12 @@ mod android {
         controllers: &[XrControllerSnapshot],
         automated_flight_speed_blocks_per_second: Option<f64>,
     ) -> Result<AndroidXrRenderedFrame> {
+        let mut timing = AndroidXrRenderFrameTiming::default();
+        let locate_views_start = Instant::now();
         let stereo_views =
             mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+        timing.locate_views_ms = elapsed_ms(locate_views_start);
+        let locomotion_start = Instant::now();
         if let Some(speed) = automated_flight_speed_blocks_per_second {
             terrain
                 .apply_automated_flight_input([stereo_views.left, stereo_views.right], speed)
@@ -1469,16 +1583,24 @@ mod android {
                 .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
                 .context("apply Android XR controller locomotion")?;
         }
+        timing.locomotion_ms = elapsed_ms(locomotion_start);
 
+        let acquire_left_start = Instant::now();
         let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
+        timing.acquire_left_ms = elapsed_ms(acquire_left_start);
+        let acquire_right_start = Instant::now();
         let right_target =
             match acquire_eye_target(right_eye).context("acquire right-eye OpenXR image") {
-                Ok(target) => target,
+                Ok(target) => {
+                    timing.acquire_right_ms = elapsed_ms(acquire_right_start);
+                    target
+                }
                 Err(err) => {
                     let _ = left_target.release();
                     return Err(err);
                 }
             };
+        let terrain_render_start = Instant::now();
         let frame_summary = terrain.render_frame(
             &graphics.device,
             &graphics.queue,
@@ -1494,12 +1616,21 @@ mod android {
                 size: [right_target.eye().width, right_target.eye().height],
             },
         );
+        timing.terrain_render_frame_ms = elapsed_ms(terrain_render_start);
+        let release_start = Instant::now();
         let left_release_result = left_target.release();
         let right_release_result = right_target.release();
+        timing.release_eyes_ms = elapsed_ms(release_start);
         let frame_summary = frame_summary?;
+        timing.terrain_render_views_ms = frame_summary.timing.render_views_ms;
+        timing.terrain_menu_pointer_ms = frame_summary.timing.menu_pointer_ms;
+        timing.terrain_runtime_upload_ms = frame_summary.timing.runtime_upload_ms;
+        timing.terrain_left_eye_ms = frame_summary.timing.left_eye_ms;
+        timing.terrain_right_eye_ms = frame_summary.timing.right_eye_ms;
         left_release_result?;
         right_release_result?;
 
+        let end_frame_start = Instant::now();
         mclone_xr_host::end_stereo_projection_frame(
             &mut graphics.frame_stream,
             predicted_display_time,
@@ -1509,9 +1640,11 @@ mod android {
             left_eye,
             right_eye,
         )?;
+        timing.end_frame_ms = elapsed_ms(end_frame_start);
         Ok(AndroidXrRenderedFrame {
             summary: frame_summary,
             camera: terrain.camera_snapshot(),
+            timing,
         })
     }
 

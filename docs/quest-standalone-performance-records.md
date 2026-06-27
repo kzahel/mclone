@@ -18,6 +18,13 @@ through VirtualDesktopXR, WiVRn, Link, SteamVR, or similar runtimes.
 If a benchmark is captured from an uncommitted worktree, record that explicitly
 and name the later commit that contains the same runtime code.
 
+Current summaries include refresh fields (`refresh_supported`, `current_hz`,
+`supported_hz`, `target_hz`, `budget_ms`) and max stage timings
+(`max_locate_views_ms`, `max_locomotion_ms`, `max_acquire_*`,
+`max_terrain_*`, `max_release_eyes_ms`, `max_end_frame_ms`). Add extra columns
+or a secondary detail table when those fields are relevant to the change being
+tracked.
+
 ## Current Standalone Quest Lanes
 
 Automated no-clip flight at walking-like speed:
@@ -54,6 +61,10 @@ Device/runtime:
 | Target used by probe | `72.0 Hz` / `13.889 ms` fallback |
 | World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
 | Flight | no-clip, `4.3 blocks/s`, about `86 blocks` over the sample |
+
+Schema note: this baseline predates the refresh/stage-attribution fields added
+after `446d473`, so it records only the coarse `max_render_mclone_frame_ms`
+bucket.
 
 Summary:
 

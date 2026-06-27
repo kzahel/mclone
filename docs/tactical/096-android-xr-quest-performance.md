@@ -99,7 +99,11 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
   - runtime frames, submitted frames, skipped frames,
   - frame wall p50/p95/p99/max,
   - frames over 1x/2x/4x budget,
-  - stage maxima for wait/begin, controller poll, and full mclone render frame,
+  - current/supported display refresh when the runtime exposes
+    `XR_FB_display_refresh_rate`,
+  - stage maxima for wait/begin, controller poll, locate views, locomotion,
+    eye acquire, scene update/upload, per-eye render, eye release, OpenXR
+    end-frame, and full mclone render frame,
   - render-section counts, drawn indices, and actor draw counts.
 - [x] Keep initial output logcat-first and write the final summary line to
   `/tmp/mclone-quest-openxr-perf-summary.txt` by default.
@@ -109,9 +113,9 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
   records actual flight distance in the summary.
 - [x] Add render-distance flight scripts for radius 1, 5, and 10 plus a
   three-run sweep.
-- [ ] Add current/requested/supported refresh state after Slice 2 lands.
-- [ ] Split `render_mclone_frame` into narrower locate/locomotion/acquire/
-  per-eye/end-frame timings after the coarse probe proves useful.
+- [x] Add current/supported refresh state after Slice 2's first pass.
+- [x] Split `render_mclone_frame` into narrower locate/locomotion/acquire/
+  per-eye/end-frame timings after the coarse probe proved useful.
 - [ ] Add pending compile/streaming counters to the summary once the shared XR
   scene exposes them directly.
 
@@ -132,8 +136,8 @@ Recorded first-pass implementation:
 - Android XR startup argv accepts `--perf-seconds N`.
 - The frame loop starts sampling after `MCLONE_ANDROID_XR_READY`, skipping the
   ready frame itself.
-- The first budget uses a conservative `72 Hz` fallback until real OpenXR
-  refresh state is plumbed in Slice 2.
+- The budget uses the runtime's current OpenXR display refresh when
+  `XR_FB_display_refresh_rate` is available, falling back to `72 Hz` otherwise.
 - The validator waits for `MCLONE_ANDROID_XR_PERF_SUMMARY`, writes the last
   summary line to `/tmp/mclone-quest-openxr-perf-summary.txt`, and still runs
   the existing cleanup trap that force-stops the app, restores headset power
@@ -145,25 +149,26 @@ Recorded first-pass implementation:
   `native:android-xr:perf:flight:rd10`, and
   `native:android-xr:perf:flight:sweep`. The flight summaries include
   `mode=flight`, `render_distance`, `flight_speed_blocks_per_second`, and
-  `flight_distance_blocks`.
+  `flight_distance_blocks`, plus refresh state and max stage timings.
 
 ### Slice 2 - Real OpenXR Display Refresh State
 
-- Enable and share `XR_FB_display_refresh_rate` when the runtime exposes it.
-- Query and log:
+- [x] Enable and share `XR_FB_display_refresh_rate` when the runtime exposes it.
+- [x] Query and log:
   - extension support,
   - supported refresh rates,
-  - current refresh rate,
-  - requested refresh rate if one is pending.
-- Add Android startup property/script support for
+  - current refresh rate.
+- [ ] Query and log requested refresh rate if one is pending.
+- [ ] Add Android startup property/script support for
   `debug.mclone.xr_display_refresh`, matching the shape already reserved in
   [`083`](083-android-xr-quest-standalone.md).
-- Add validator/install flags:
+- [ ] Add validator/install flags:
   - `--refresh HZ`
   - validation that the app logs the request and the current/applied rate, so a
     `72`/`90`/`120` comparison cannot silently run at the default rate.
-- Feed actual XR refresh into `GameUiRenderState` or a new XR UI state so the
-  menu no longer shows the fixed `XR_UI_FPS_CAP`.
+- [x] Feed actual XR refresh into `GameUiRenderState` for standalone Android
+  XR so the existing menu no longer shows the fixed `XR_UI_FPS_CAP` when the
+  runtime reports a current rate.
 
 ### Slice 3 - XR Menu Performance Section
 

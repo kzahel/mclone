@@ -174,7 +174,10 @@ sync and chunk-interest path as XR locomotion. Summary files are written to:
 ```
 
 The summary includes `mode=flight`, `render_distance`,
-`flight_speed_blocks_per_second`, and actual `flight_distance_blocks`.
+`flight_speed_blocks_per_second`, actual `flight_distance_blocks`, current and
+supported display refresh when `XR_FB_display_refresh_rate` is available, and
+max timing buckets for locate views, locomotion, eye acquire, terrain
+render/update, eye release, and OpenXR end-frame.
 
 For remote dedicated validation, either start `mclone-dedicated-server` on a
 host the headset can reach and pass `--remote-addr`, or let the validator build

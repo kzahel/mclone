@@ -68,7 +68,8 @@ frame pacing, real OpenXR refresh state, overlay diagnostics, and standalone
 Quest baseline work in
 [`096`](../tactical/096-android-xr-quest-performance.md). The first moving
 Quest probe is automated no-clip flight at walking-like speed, with
-render-distance scripts for 1, 5, and 10. Durable headset rows live in
+render-distance scripts for 1, 5, and 10, current OpenXR refresh reporting,
+and max-stage timing attribution. Durable headset rows live in
 [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md).
 
 ## Priority Queue

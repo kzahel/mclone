@@ -11,6 +11,7 @@ pub use actions::{OpenXrControllerActions, XrControllerSnapshot, XrHand};
 
 pub const PRIMARY_STEREO_VIEW_TYPE: xr::ViewConfigurationType =
     xr::ViewConfigurationType::PRIMARY_STEREO;
+pub const XR_REFRESH_RATE_MATCH_EPSILON_HZ: f32 = 0.05;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenXrPollStatus {
@@ -86,6 +87,13 @@ pub struct XrRenderView {
     pub fov_y_radians: f32,
     pub z_near: f32,
     pub z_far: f32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct XrDisplayRefreshSnapshot {
+    pub extension_supported: bool,
+    pub supported_rates: Vec<f32>,
+    pub current_rate: Option<f32>,
 }
 
 pub trait XrEyeSwapchain<G>
@@ -190,6 +198,66 @@ pub fn format_view_configurations(views: &[xr::ViewConfigurationView]) -> String
         })
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+pub fn query_display_refresh_snapshot<G>(
+    session: &xr::Session<G>,
+    extension_supported: bool,
+) -> XrDisplayRefreshSnapshot {
+    if !extension_supported {
+        return XrDisplayRefreshSnapshot::default();
+    }
+    XrDisplayRefreshSnapshot {
+        extension_supported,
+        supported_rates: query_supported_display_refresh_rates(session),
+        current_rate: query_current_display_refresh_rate(session),
+    }
+}
+
+pub fn query_supported_display_refresh_rates<G>(session: &xr::Session<G>) -> Vec<f32> {
+    match session.enumerate_display_refresh_rates() {
+        Ok(rates) => sorted_display_refresh_rates(rates),
+        Err(err) => {
+            log::warn!("OpenXR display refresh rate enumeration failed: {err:?}");
+            Vec::new()
+        }
+    }
+}
+
+pub fn query_current_display_refresh_rate<G>(session: &xr::Session<G>) -> Option<f32> {
+    match session.get_display_refresh_rate() {
+        Ok(rate) if rate.is_finite() && rate > 0.0 => Some(rate),
+        Ok(rate) => {
+            log::warn!("OpenXR runtime returned invalid display refresh rate: {rate:?}");
+            None
+        }
+        Err(err) => {
+            log::warn!("OpenXR current display refresh query failed: {err:?}");
+            None
+        }
+    }
+}
+
+pub fn sorted_display_refresh_rates(mut rates: Vec<f32>) -> Vec<f32> {
+    rates.retain(|rate| rate.is_finite() && *rate > 0.0);
+    rates.sort_by(|a, b| a.total_cmp(b));
+    rates.dedup_by(|a, b| refresh_rates_match(*a, *b));
+    rates
+}
+
+pub fn refresh_rates_match(a: f32, b: f32) -> bool {
+    (a - b).abs() <= XR_REFRESH_RATE_MATCH_EPSILON_HZ
+}
+
+pub fn display_refresh_rates_label(rates: &[f32]) -> String {
+    if rates.is_empty() {
+        return "none reported".to_owned();
+    }
+    rates
+        .iter()
+        .map(|rate| format!("{rate:.1} Hz"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn eye_config(view: xr::ViewConfigurationView) -> XrEyeConfig {
@@ -639,5 +707,19 @@ mod tests {
         assert!((view.camera_right - Vec3::X).length() < 1.0e-6);
         assert!((view.camera_up - Vec3::Y).length() < 1.0e-6);
         assert_mat4_close(view.view_projection, view.projection * view.view);
+    }
+
+    #[test]
+    fn display_refresh_rates_are_sorted_filtered_and_deduped() {
+        let rates = sorted_display_refresh_rates(vec![120.0, f32::NAN, 72.0, -1.0, 89.98, 90.0]);
+
+        assert_eq!(rates, vec![72.0, 89.98, 120.0]);
+        assert!(refresh_rates_match(89.98, 90.0));
+        assert!(!refresh_rates_match(89.9, 90.0));
+        assert_eq!(
+            display_refresh_rates_label(&rates),
+            "72.0 Hz, 90.0 Hz, 120.0 Hz"
+        );
+        assert_eq!(display_refresh_rates_label(&[]), "none reported");
     }
 }
