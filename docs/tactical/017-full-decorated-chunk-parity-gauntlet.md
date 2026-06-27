@@ -34,7 +34,7 @@ Read before implementation:
 
 ## Current Native Gap
 
-Native already has exact oracle coverage for terrain-only, surface/bedrock, biome/noise/PRNG, standalone air/liquid carver stages, and the clean scheduler `FEATURES` snapshot for seed `12345`, chunk `(0,0)`.
+Native already has exact oracle coverage for terrain-only, surface/bedrock, biome/noise/PRNG, standalone air/liquid carver stages, the clean scheduler `FEATURES` snapshot for seed `12345`, chunk `(0,0)`, and the scheduler `LIGHT` snapshot's sky/block light layers for the same chunk.
 
 Native does not yet have exact parity against the older full-server fixture for chunk `(0,0)`. That fixture includes runtime/post-generation tails outside the current clean `FEATURES` comparison:
 
@@ -44,6 +44,8 @@ Native does not yet have exact parity against the older full-server fixture for 
 ## Current Diagnostic
 
 After wiring air/liquid carvers into the native `Features` path, moving feature decoration onto a 3x3 region pass, correcting decorated-feature random interleaving, porting the first seven vanilla underground variety ore blobs, adding the active default ore block families, replacing the taiga placeholder with Java-shaped `TAIGA_VEGETATION` spruce/pine tree configs, switching trees onto the Java `HEIGHTMAP_WITH_TREE_THRESHOLD` path, enabling the Java taiga vegetal prefix (`PATCH_LARGE_FERN`, `GLOW_LICHEN`, then `TAIGA_VEGETATION`), adding Java-shaped `FLOWER_DEFAULT` and `PATCH_GRASS_TAIGA_2`, removing the erroneous nested `countExtra(6, 0.1, 1)` wrapper from the weighted `PINE` branch, adding default water/lava lakes, porting `FREEZE_TOP_LAYER`, switching `OreFeature`'s pre-placement height gate to Java's `OCEAN_FLOOR_WG`, preserving `CAVE_AIR` from `LakeFeature`, storing glow-lichen face state, using the overworld constant-column biome zoomer for feature biome checks, and matching Java's positive worldgen skylight behavior for lake grass restoration, the clean scheduler `FEATURES` fixture is exact.
+
+The earlier one-nibble block-light mismatch in the scheduler `LIGHT` fixture was not a light-solver leak. Java's expected block light at chunk `(0,0)` local `(1,29,15)` comes from a glow lichen in neighboring chunk `(0,1)` local `(2,30,3)`. Native missed that lichen because chunk `(0,1)` missed the air-carved cave pocket beneath it: `ChunkGenerator.applyCarvers(...)` scans source chunks in radius `8`, while native had reused the individual `WorldCarver.getRange()` geometry radius `4` as the source scan radius. Native now keeps geometry range `4` and scans source chunks in radius `8`, and the strict scheduler block-light oracle passes.
 
 The remaining ignored full-server fixture mismatch is now the expected gap between the clean `FEATURES` snapshot and the older full fixture, which includes post-generation runtime fluid results and the full-vs-clean glow-lichen tail:
 
@@ -113,7 +115,8 @@ Native now places the blocking snow with `FREEZE_TOP_LAYER`; a one-block Java pr
 - Native block/asset registries and `RandomPatchFeature` support lower/upper `large_fern` blocks, and the taiga table now enables Java's `PATCH_LARGE_FERN` prefix before trees.
 - Native block/asset registries include compact `glow_lichen` state support, and the taiga table now enables a Java-shaped `GLOW_LICHEN` feature before trees. The native block buffer still stores this as one compact state rather than full multiface/waterlogged state.
 - Native chunk buffers now store glow-lichen face bits during feature placement so the clean scheduler `FEATURES` fixture preserves the correct visible block while still using compact generated block IDs.
-- Native glow-lichen spread now mirrors `MultifaceBlock.getSpreadFromFaceTowardDirection(...)`'s early rejection when the source block already has the target face, preventing native-only side/corner propagation from that case. This kept the clean chunk `(0,0)` fixture and the known one-nibble block-light delta unchanged.
+- Native glow-lichen spread now mirrors `MultifaceBlock.getSpreadFromFaceTowardDirection(...)`'s early rejection when the source block already has the target face, preventing native-only side/corner propagation from that case.
+- Native carver orchestration now separates Java's `ChunkGenerator.applyCarvers(...)` source scan radius `8` from `WorldCarver.getRange()` geometry radius `4`. This fixed the missing neighbor cave in chunk `(0,1)` and brought seed `12345`, chunk `(0,0)` scheduler `LIGHT` block light into strict parity.
 - Native feature-center commit order now has a Rust test against the committed vanilla scheduler trace for seed `12345`, chunk `(0,0)`. The current order is z-major over the target 3x3: `(-1,-1)`, `(0,-1)`, `(1,-1)`, then the next rows.
 - Native test support can place only `TAIGA_VEGETATION` with a forced vegetal feature index. `taiga_vegetation_feature_index_shift_is_isolated_by_center` now guards that native's active taiga tree selector uses Java full-biome index `2`.
 - Native feature table selection now uses Java's primary chunk biome path (`BiomeSource.getPrimaryBiome`) instead of fuzzy block-position biome lookup at the chunk center.

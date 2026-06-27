@@ -32,16 +32,17 @@ These are the highest-signal gaps between the current native port and the 1.17.1
 - Underwater scheduled tick consequences are now captured and oracled at generation time, but the runtime still only records them; it does not execute the later fluid/block updates that a full server tick loop would consume.
 - The native replaceable-block set now covers the live desert/ocean/frozen/badlands/podzol/coarse-dirt/mycelium families that the repo can currently surface-build, but it is still narrower than full vanilla `WorldCarver`. The highest-signal remaining gaps are broader block-state distinctions and later families that the current 1.17.1 target still flattens or defers.
 - The numeric chunk/oracle palette now includes the current live surface families plus the earlier underwater-floor outputs (`obsidian`, `magma_block`), but it still intentionally collapses some vanilla block-state distinctions that exhaustive parity work would eventually have to separate.
-- The current carved-stage oracle matrix is broader, but it is still targeted coverage rather than exhaustive coverage.
+- The current carved-stage oracle matrix now includes a neighbor-cave regression for the carver source scan radius, but it is still targeted coverage rather than exhaustive coverage.
 - The native path still collapses some vanilla block-state distinctions in the carved-stage numeric model, which is acceptable for narrow chunk diffs but not the final form of exhaustive parity work.
 
 ## Current oracle coverage
 
 Current carver verification is real but still intentionally narrow:
 
-- seven committed AIR-only carved-stage oracle fixtures:
+- eight committed AIR-only carved-stage oracle fixtures:
   [`overworld-seed-12345-chunks-0-0-carved-only.json`](../test/fixtures/integration/overworld-seed-12345-chunks-0-0-carved-only.json)
-  , [`overworld-seed-12345-chunks-117--128-carved-only.json`](../test/fixtures/integration/overworld-seed-12345-chunks-117--128-carved-only.json),
+  , [`overworld-seed-12345-chunks-0-1-carved-only.json`](../test/fixtures/integration/overworld-seed-12345-chunks-0-1-carved-only.json),
+  [`overworld-seed-12345-chunks-117--128-carved-only.json`](../test/fixtures/integration/overworld-seed-12345-chunks-117--128-carved-only.json),
   [`overworld-seed-12345-chunks-96--64-carved-only.json`](../test/fixtures/integration/overworld-seed-12345-chunks-96--64-carved-only.json),
   [`overworld-seed-12345-chunks--320-99-carved-only.json`](../test/fixtures/integration/overworld-seed-12345-chunks--320-99-carved-only.json),
   [`overworld-seed-12345-chunks--9-68-carved-only.json`](../test/fixtures/integration/overworld-seed-12345-chunks--9-68-carved-only.json),

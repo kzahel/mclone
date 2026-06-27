@@ -7,7 +7,8 @@ use mclone_core::{
 };
 use std::sync::OnceLock;
 
-const CARVER_RANGE: i32 = 4;
+const CARVER_SOURCE_CHUNK_RANGE: i32 = 8;
+const CARVER_GEOMETRY_RANGE: i32 = 4;
 const SIN_TABLE_SIZE: usize = 65_536;
 const SIN_TABLE_MASK: i32 = 65_535;
 const SIN_SCALE: f32 = 10_430.378_f32;
@@ -399,8 +400,12 @@ fn apply_carvers(
     let mut random = WorldgenRandom::default();
     let mut mask = CarvingMask::new(chunk.min_y, chunk.height);
 
-    for source_chunk_x in chunk.chunk_x - CARVER_RANGE..=chunk.chunk_x + CARVER_RANGE {
-        for source_chunk_z in chunk.chunk_z - CARVER_RANGE..=chunk.chunk_z + CARVER_RANGE {
+    for source_chunk_x in
+        chunk.chunk_x - CARVER_SOURCE_CHUNK_RANGE..=chunk.chunk_x + CARVER_SOURCE_CHUNK_RANGE
+    {
+        for source_chunk_z in
+            chunk.chunk_z - CARVER_SOURCE_CHUNK_RANGE..=chunk.chunk_z + CARVER_SOURCE_CHUNK_RANGE
+        {
             let biome = biome_source.get_noise_biome_definition(
                 source_chunk_x << 2,
                 0,
@@ -1323,7 +1328,7 @@ fn can_reach(
 }
 
 fn get_range() -> i32 {
-    CARVER_RANGE
+    CARVER_GEOMETRY_RANGE
 }
 
 fn floor(value: f64) -> i32 {
@@ -1394,6 +1399,13 @@ mod tests {
         .expect("valid carved fixture")
     }
 
+    fn plains_neighbor_carved_fixture() -> ChunkFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks-0-1-carved-only.json"
+        ))
+        .expect("valid plains neighbor carved fixture")
+    }
+
     fn ocean_carved_fixture() -> ChunkFixture {
         serde_json::from_str(include_str!(
             "../../../../test/fixtures/integration/overworld-seed-12345-chunks-117--128-carved-only.json"
@@ -1455,6 +1467,14 @@ mod tests {
         let carved = plains_carved_fixture();
         assert_eq!(carved.chunk_x, 0);
         assert_eq!(carved.chunk_z, 0);
+        assert_air_carved_fixture_matches_native(carved);
+    }
+
+    #[test]
+    fn overworld_air_carvers_match_java_plains_neighbor_fixture_from_native_surface_stage() {
+        let carved = plains_neighbor_carved_fixture();
+        assert_eq!(carved.chunk_x, 0);
+        assert_eq!(carved.chunk_z, 1);
         assert_air_carved_fixture_matches_native(carved);
     }
 

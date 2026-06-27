@@ -424,60 +424,12 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "origin block light still has edge mismatches; run while closing strict block-light parity"]
     fn generated_origin_chunk_block_light_strict_matches_scheduler_light_oracle_fixture() {
         let fixture = serde_json::from_str::<Value>(include_str!(
             "../../../../test/fixtures/scheduler/vanilla-scheduler-light-snapshot-seed-12345-chunk-0-0.json"
         ))
         .expect("valid scheduler LIGHT fixture");
         assert_generated_chunk_light_matches_scheduler_fixture(fixture, true);
-    }
-
-    #[test]
-    fn generated_origin_chunk_block_light_scheduler_oracle_has_one_known_edge_delta() {
-        let fixture = serde_json::from_str::<Value>(include_str!(
-            "../../../../test/fixtures/scheduler/vanilla-scheduler-light-snapshot-seed-12345-chunk-0-0.json"
-        ))
-        .expect("valid scheduler LIGHT fixture");
-        let chunks = fixture["chunks"]
-            .as_array()
-            .expect("scheduler fixture chunks must be an array");
-        assert_eq!(chunks.len(), 1);
-        let chunk = &chunks[0];
-        let target = ChunkPos::new(fixture_i32(chunk, "chunkX"), fixture_i32(chunk, "chunkZ"));
-        let seed = fixture["seed"]
-            .as_str()
-            .expect("scheduler fixture seed must be a string")
-            .parse::<i64>()
-            .expect("scheduler fixture seed must fit i64");
-
-        let mut server = IntegratedServer::new(seed);
-        let updates = handle_command_and_poll(
-            &mut server,
-            ClientCommand::SetChunkView(ChunkView {
-                center: target,
-                render_distance: 0,
-                chunk_tracking_radius: 0,
-            }),
-        );
-        let snapshot = snapshot_update_for(&updates, target)
-            .expect("native server should publish oracle target snapshot");
-        let expected = fixture_light_layer(chunk, "block");
-        let actual = packed_light_layer(&snapshot.light_sections, LightLayer::Block);
-
-        assert_eq!(
-            actual.keys().copied().collect::<Vec<_>>(),
-            expected.keys().copied().collect::<Vec<_>>(),
-            "block light section set should already match the scheduler oracle"
-        );
-        assert_eq!(
-            light_layer_mismatch_report("block", &expected, &actual),
-            LightLayerMismatchReport {
-                byte_mismatches: 1,
-                nibble_mismatches: 1,
-                first_mismatch: Some((1, 1784, 0x10, 0x00)),
-            }
-        );
     }
 
     fn assert_generated_chunk_light_matches_persisted_fixture(
