@@ -17,17 +17,21 @@ use mclone_xr_host::{
     XrControllerSnapshot, XrFrameStats, XrHand, XrStereoConfig,
 };
 #[cfg(not(target_os = "android"))]
-use mclone_xr_scene::{XrMcloneTerrainState, XrStartupViewPose, XrTerrainEyeTarget};
+use mclone_xr_scene::{
+    XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
+};
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
 
-use crate::cli::{XrClearSmokeOptions, XrMcloneSmokeOptions};
+use crate::cli::{SceneOptions, XrClearSmokeOptions, XrMcloneSmokeOptions};
 #[cfg(not(target_os = "android"))]
 use crate::remote_session::RemoteServerSession;
 #[cfg(not(target_os = "android"))]
 use crate::render_cache::load_asset_source;
 #[cfg(not(target_os = "android"))]
-use crate::scene_runtime::native_window_scene_runtime;
+use crate::scene_runtime::{
+    native_window_scene_runtime, native_window_scene_runtime_with_mesh_assets,
+};
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::local_single_view::NativeSingleViewSessionRuntime;
 #[cfg(not(target_os = "android"))]
@@ -672,20 +676,17 @@ fn create_mclone_terrain_state(
             None
         }
     };
-    let runtime = native_window_scene_runtime(&options.scene)?;
-    let request = options.scene.remote_addr.as_ref().map_or(
-        SessionStartRequest::NewLocalWorld {
-            seed: options.scene.seed,
-        },
-        |remote_addr| SessionStartRequest::JoinRemote {
-            endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
-        },
-    );
-    let runtime = NativeSingleViewSessionRuntime::from_active_runtime(request, runtime)?;
+    let scene = xr_scene_options_from_desktop_scene(&options.scene)?;
+    let request = session_start_request_for_desktop_scene(&options.scene);
+    let runtime = NativeSingleViewSessionRuntime::from_active_runtime(
+        request,
+        native_window_scene_runtime(&options.scene)?,
+    )?;
     let mut state = XrMcloneTerrainState::with_runtime(
         device,
         queue,
         XR_COLOR_FORMAT,
+        scene,
         runtime,
         options.render_options,
         actor_assets.atlas,
@@ -696,7 +697,67 @@ fn create_mclone_terrain_state(
     )
     .context("initialize shared mclone XR terrain scene")?;
     state.set_audio_engine(audio);
+    state.set_session_runtime_factory(|request, scene, mesh_assets| {
+        let desktop_scene = desktop_scene_options_for_xr_request(&request, scene);
+        let runtime = native_window_scene_runtime_with_mesh_assets(&desktop_scene, mesh_assets)?;
+        NativeSingleViewSessionRuntime::from_active_runtime(request, runtime)
+    });
     Ok(state)
+}
+
+#[cfg(not(target_os = "android"))]
+fn session_start_request_for_desktop_scene(scene: &SceneOptions) -> SessionStartRequest {
+    scene.remote_addr.as_ref().map_or(
+        SessionStartRequest::NewLocalWorld { seed: scene.seed },
+        |remote_addr| SessionStartRequest::JoinRemote {
+            endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
+        },
+    )
+}
+
+#[cfg(not(target_os = "android"))]
+fn xr_scene_options_from_desktop_scene(scene: &SceneOptions) -> Result<XrSceneOptions> {
+    XrSceneOptions {
+        seed: scene.seed,
+        chunk_x: scene.chunk_x,
+        chunk_z: scene.chunk_z,
+        render_distance: u32::try_from(scene.render_distance)
+            .context("desktop XR render distance must fit u32")?,
+        day_time_override: scene.day_time_override,
+        freeze_time: scene.freeze_time,
+        lighting_enabled: scene.lighting_enabled,
+    }
+    .validated()
+}
+
+#[cfg(not(target_os = "android"))]
+fn desktop_scene_options_for_xr_request(
+    request: &SessionStartRequest,
+    scene: XrSceneOptions,
+) -> SceneOptions {
+    let mut seed = scene.seed;
+    let mut remote_addr = None;
+    match request {
+        SessionStartRequest::NewLocalWorld {
+            seed: requested_seed,
+        } => {
+            seed = *requested_seed;
+        }
+        SessionStartRequest::JoinRemote { endpoint } => {
+            remote_addr = Some(endpoint.address.clone());
+        }
+        SessionStartRequest::Unknown => {}
+    }
+    SceneOptions {
+        seed,
+        chunk_x: scene.chunk_x,
+        chunk_z: scene.chunk_z,
+        render_distance: scene.render_distance as i32,
+        remote_addr,
+        day_time_override: scene.day_time_override,
+        freeze_time: scene.freeze_time,
+        lighting_enabled: scene.lighting_enabled,
+    }
 }
 
 #[cfg(not(target_os = "android"))]

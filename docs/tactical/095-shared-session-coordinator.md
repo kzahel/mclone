@@ -1,6 +1,6 @@
 # 095: Shared Session Coordinator
 
-Status: active; Slices 1-4d landed on 2026-06-27. `mclone-app-runtime` now owns
+Status: active; Slices 1-4e landed on 2026-06-27. `mclone-app-runtime` now owns
 the platform-neutral session request/state vocabulary and shared start-result
 boundary, including local-world start, remote-join start, active session
 descriptors, pending starts, failure state, status text, and success/failure
@@ -13,9 +13,11 @@ dedicated connect-screen smoke once endpoint editing/input is real. Flat
 Android now consumes the same request vocabulary for initial local/remote
 startup and menu-driven New World / Join Remote replacement while keeping
 Android activity, touch, `wgpu` surface, and TCP adapter ownership in the app
-crate. Desktop XR and Android XR consume the same coordinator for initial
-local/remote native single-view session construction; dynamic XR replacement
-remains the next native scene follow-up.
+crate. Desktop XR and Android XR now route shared menu New World / Join Remote
+actions through a shared XR scene replacement hook while keeping OpenXR
+session/swapchain/action ownership in the app hosts. Remaining gaps are device
+validation of the replacement flows, endpoint text editing, and a dedicated web
+connect-screen smoke.
 
 ## Purpose
 
@@ -227,6 +229,9 @@ without blank output or overlapping UI.
 - [x] Desktop XR and Android XR consume the same request/status model for
   initial local/remote starts while keeping OpenXR scene/session ownership in XR
   adapters.
+- [x] Desktop XR and Android XR route menu-driven New World and Join Remote
+  through a shared XR scene replacement hook while keeping concrete runtime
+  factories in their app hosts.
 
 Recorded Slice 4a result:
 
@@ -383,6 +388,44 @@ pnpm native:android:apk:avd
 
 The Android APK lane compiled the edited `#[cfg(target_os = "android")]` module
 for `x86_64-linux-android`.
+
+Recorded Slice 4e result:
+
+- `mclone-xr-scene` now retains `XrSceneOptions`, the active color format, a
+  deterministic New World reroll state, and a headset-visible status overlay.
+- The shared XR scene exposes `set_session_runtime_factory(...)`, accepting
+  `SessionStartRequest`, `XrSceneOptions`, and cloned `TexturedMeshAssets`.
+  Desktop XR and Android XR install app-local factories so the common scene
+  coordinates replacement without owning desktop TCP adapters, Android TCP
+  adapters, or OpenXR host resources.
+- Initial XR startup and runtime replacement share `start_xr_terrain_runtime`,
+  which starts/polls the native session, syncs player pose, compiles all render
+  sections, uploads terrain draw resources, and records render stats before the
+  old runtime is replaced.
+- `GameUiAction::CreateWorld(seed)` and `GameUiAction::JoinRemote` now rebuild
+  the XR native scene through the shared hook. On success the menu closes and
+  XR tracking origin is cleared so the next frame aligns the new spawn to the
+  current headset pose. On failure, the old runtime remains live and the menu
+  displays the shared failure status.
+- Desktop XR maps the shared request back into desktop `SceneOptions` and uses
+  `native_window_scene_runtime_with_mesh_assets(...)`. Android XR maps the same
+  request into `AndroidXrSceneRuntime::local_with_mesh_assets(...)` or
+  `remote_dedicated_with_mesh_assets(...)`.
+- Manual endpoint editing is still absent because `mclone-ui` has no text input
+  widget. Join Remote connects to the existing/default endpoint.
+
+Validation after Slice 4e on 2026-06-27:
+
+```bash
+cargo fmt
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+pnpm native:android-xr:apk
+```
+
+The Android XR APK lane compiled the edited `#[cfg(target_os = "android")]`
+runtime factory path for `aarch64-linux-android`. Headset interaction validation
+of the replacement menu flow remains open.
 
 ## Open Questions
 

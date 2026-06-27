@@ -19,7 +19,7 @@ mod android {
         ActorTextureAssets, TexturedMeshAssets, load_actor_texture_assets_from_asset_source,
         load_asset_source, load_textured_mesh_assets_from_source,
     };
-    use mclone_app_runtime::session::RemoteSessionEndpoint;
+    use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
     use mclone_net::NativeClientSession;
@@ -785,13 +785,51 @@ mod android {
             device,
             queue,
             XR_COLOR_FORMAT,
+            scene_options,
             runtime,
             TexturedSectionRenderOptions::default(),
             actor_assets.atlas,
             startup_view_pose,
         )?;
         terrain.set_audio_engine(audio);
+        terrain.set_session_runtime_factory(|request, scene_options, mesh_assets| {
+            android_xr_scene_runtime_for_request(request, scene_options, mesh_assets)
+        });
         Ok(terrain)
+    }
+
+    fn android_xr_scene_runtime_for_request(
+        request: SessionStartRequest,
+        scene_options: XrSceneOptions,
+        mesh_assets: TexturedMeshAssets,
+    ) -> Result<AndroidXrSceneRuntime> {
+        match request {
+            SessionStartRequest::NewLocalWorld { seed } => {
+                let mut scene_options = scene_options;
+                scene_options.seed = seed;
+                AndroidXrSceneRuntime::local_with_mesh_assets(
+                    android_xr_local_options(scene_options),
+                    mesh_assets,
+                )
+                .context("failed to initialize Android XR replacement local runtime")
+            }
+            SessionStartRequest::JoinRemote { endpoint } => {
+                let session = AndroidXrRemoteServerSession::connect(endpoint.address.as_str())?;
+                AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
+                    endpoint.clone(),
+                    android_xr_host_options(scene_options),
+                    session,
+                    mesh_assets,
+                )
+                .with_context(|| {
+                    format!(
+                        "failed to initialize Android XR replacement remote runtime from {}",
+                        endpoint.address
+                    )
+                })
+            }
+            SessionStartRequest::Unknown => bail!("unsupported Android XR replacement session"),
+        }
     }
 
     fn android_xr_local_options(scene: XrSceneOptions) -> LocalSingleViewSceneOptions {

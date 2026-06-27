@@ -14,7 +14,9 @@ use mclone_app_runtime::local_single_view::{
     LocalSingleViewSceneOptions, NativeSingleViewSessionRuntime,
 };
 use mclone_app_runtime::render_assets::TexturedMeshAssets;
-use mclone_app_runtime::session::ActiveSessionDescriptor;
+use mclone_app_runtime::session::{
+    ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
+};
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
 use mclone_core::{ChunkPos, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
@@ -33,7 +35,10 @@ use mclone_render_session::{
     EngineCameraMovementImpulse, EngineCameraMovementMode, EngineCameraSnapshot,
     actor_instances_from_presentations,
 };
-use mclone_ui::{GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiScale, Point};
+use mclone_ui::{
+    DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState,
+    GuiScale, Point, StatusOverlay, render_status_overlay,
+};
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
 
@@ -157,6 +162,24 @@ pub struct XrTerrainEyeTarget<'a> {
     pub size: [u32; 2],
 }
 
+type XrSessionRuntimeFactory<S> = Box<
+    dyn FnMut(
+        SessionStartRequest,
+        XrSceneOptions,
+        TexturedMeshAssets,
+    ) -> Result<NativeSingleViewSessionRuntime<S>>,
+>;
+
+struct StartedXrTerrainRuntime<S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    runtime: NativeSingleViewSessionRuntime<S>,
+    camera: EngineCameraController,
+    draw: TexturedSectionDrawResources,
+    render_stats: RenderStreamStats,
+}
+
 #[derive(Debug)]
 pub enum XrLocalOnlyRemoteSession {}
 
@@ -177,7 +200,10 @@ pub struct XrMcloneTerrainState<S = XrLocalOnlyRemoteSession>
 where
     S: RemoteDedicatedServerSession,
 {
+    scene: XrSceneOptions,
+    color_format: wgpu::TextureFormat,
     runtime: NativeSingleViewSessionRuntime<S>,
+    session_runtime_factory: Option<XrSessionRuntimeFactory<S>>,
     camera: EngineCameraController,
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
@@ -185,6 +211,7 @@ where
     actors: ActorDrawResources,
     world_gui_renderer: WorldGuiRenderer,
     ui: GameUi,
+    session_status: StatusOverlay,
     sky: SkyRenderer,
     render_stats: RenderStreamStats,
     tracking_origin: Option<XrTrackingOrigin>,
@@ -198,6 +225,7 @@ where
     first_eye_summary: Option<FullFrameRenderSummary>,
     rendered_frames: u32,
     audio: Option<AudioEngine>,
+    seed_reroll_state: u64,
 }
 
 impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
@@ -220,6 +248,7 @@ impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
             device,
             queue,
             color_format,
+            scene,
             runtime.context("start XR local integrated scene runtime")?,
             render_options,
             actor_atlas,
@@ -236,39 +265,36 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
+        scene: XrSceneOptions,
         runtime: NativeSingleViewSessionRuntime<S>,
         render_options: TexturedSectionRenderOptions,
         actor_atlas: ActorTextureImage,
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
-        let center = runtime.interest_center();
-        let render_distance = runtime.render_distance();
-        let host_label = runtime.host_label();
-        let session_label = active_session_label(runtime.active_session());
-        let draw = TexturedSectionDrawResources::new(
-            device,
-            queue,
+        let scene = scene.validated()?;
+        let started =
+            start_xr_terrain_runtime(device, queue, color_format, runtime, startup_view_pose)?;
+        let ui = xr_game_ui_for_session(started.runtime.active_session(), scene.seed);
+        let state = Self {
+            scene,
             color_format,
-            &[],
-            runtime.mesh_assets().atlas.as_upload(),
-        )
-        .context("create empty XR terrain draw resources")?;
-        let mut state = Self {
-            runtime,
-            camera: EngineCameraController::spawn_for_chunk(center),
+            runtime: started.runtime,
+            session_runtime_factory: None,
+            camera: started.camera,
             initial_alignment_mode: if startup_view_pose.is_some() {
                 XrViewAlignmentMode::ViewPose
             } else {
                 XrViewAlignmentMode::PlayerSpawn
             },
             render_options,
-            draw,
+            draw: started.draw,
             actors: ActorDrawResources::new(device, queue, color_format, actor_atlas.as_upload())
                 .context("initialize XR terrain actor draw resources")?,
             world_gui_renderer: WorldGuiRenderer::new(device, color_format),
-            ui: GameUi::new_ingame(),
+            ui,
+            session_status: StatusOverlay::hidden(),
             sky: SkyRenderer::new(device, color_format),
-            render_stats: RenderStreamStats::default(),
+            render_stats: started.render_stats,
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),
             last_locomotion_update: None,
@@ -280,98 +306,25 @@ where
             first_eye_summary: None,
             rendered_frames: 0,
             audio: None,
+            seed_reroll_state: initial_xr_seed_reroll_state(scene.seed),
         };
-
-        let initial_poll_start = Instant::now();
-        let (initial_poll_count, initial_poll_ms) = state
-            .poll_until_idle()
-            .context("wait for initial XR terrain chunks")?;
-        let mut initial_pose_changed = state
-            .apply_pending_engine_camera_position_updates()
-            .context("accept initial XR terrain player pose")?;
-        if let Some(view_pose) = startup_view_pose {
-            state
-                .apply_startup_view_pose(view_pose)
-                .context("apply XR terrain startup view pose")?;
-            initial_pose_changed |= state
-                .commit_engine_camera_player_pose()
-                .context("sync XR terrain startup view pose")?;
-        } else {
-            initial_pose_changed |= state
-                .commit_engine_camera_player_pose()
-                .context("sync initial XR terrain player pose")?;
-        }
-        if initial_pose_changed {
-            let _ = state
-                .poll_until_idle()
-                .context("wait for XR terrain chunks after player pose")?;
-        }
-
-        let camera_position = glam_vec3_from_vec3d(state.camera.snapshot().eye);
-        let section_update = state
-            .sync_all_render_sections(camera_position)
-            .context("compile initial XR terrain render sections")?;
-        let sections = state.runtime.cached_sections();
-        if sections.is_empty() {
-            bail!(
-                "XR terrain host={} center=({}, {}) render_distance={} produced no render sections",
-                host_label,
-                center.x,
-                center.z,
-                render_distance
-            );
-        }
-        state.draw = TexturedSectionDrawResources::new(
-            device,
-            queue,
-            color_format,
-            &sections,
-            state.runtime.mesh_assets().atlas.as_upload(),
-        )
-        .context("upload initial XR terrain render sections")?;
-        state.draw.set_traversal_ready_sections(
-            &state
-                .runtime
-                .traversal_ready_render_section_keys(camera_position),
-        );
-
-        let initial_upload = TexturedSectionUploadReport {
-            uploaded_section_count: section_update.rebuilt_section_count(),
-            removed_section_count: section_update.removed_section_count(),
-            uploaded_vertex_count: section_update.rebuilt_vertex_count,
-            uploaded_index_count: section_update.rebuilt_index_count,
-        };
-        state.render_stats = RenderStreamStats {
-            section_count: state.draw.section_count(),
-            index_count: state.draw.index_count(),
-            face_count: quad_face_count_from_indices(state.draw.index_count()),
-            ..RenderStreamStats::default()
-        };
-        record_render_section_update_stats(
-            &mut state.render_stats,
-            &section_update,
-            initial_upload,
-        );
-        log::info!(
-            "mclone XR terrain runtime: host={} session={} center=({}, {}) render_distance={} chunks={} sections={} faces={} indices={} initial_polls={} poll_ms={:.3} elapsed_ms={:.3}",
-            host_label,
-            session_label,
-            center.x,
-            center.z,
-            render_distance,
-            state.runtime.loaded_chunk_count(),
-            state.render_stats.section_count,
-            state.render_stats.face_count,
-            state.render_stats.index_count,
-            initial_poll_count,
-            initial_poll_ms,
-            elapsed_ms(initial_poll_start.elapsed())
-        );
         Ok(state)
     }
 
     pub fn set_audio_engine(&mut self, audio: Option<AudioEngine>) {
         self.audio = audio;
+    }
+
+    pub fn set_session_runtime_factory<F>(&mut self, factory: F)
+    where
+        F: FnMut(
+                SessionStartRequest,
+                XrSceneOptions,
+                TexturedMeshAssets,
+            ) -> Result<NativeSingleViewSessionRuntime<S>>
+            + 'static,
+    {
+        self.session_runtime_factory = Some(Box::new(factory));
     }
 
     pub fn render_frame(
@@ -382,12 +335,19 @@ where
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
     ) -> Result<XrTerrainFrameSummary> {
-        let render_views = self.render_views(&views)?;
-        let center_position =
+        let mut render_views = self.render_views(&views)?;
+        let mut center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         self.update_menu_panel_pose(render_views);
-        self.apply_menu_pointer_input()
-            .context("apply XR menu pointer input")?;
+        if self
+            .apply_menu_pointer_input(device, queue)
+            .context("apply XR menu pointer input")?
+        {
+            render_views = self.render_views(&views)?;
+            center_position =
+                (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+            self.update_menu_panel_pose(render_views);
+        }
         self.poll_runtime_and_upload(device, center_position)?;
         let render_options = self.effective_render_options(center_position);
         let sky_clear_color = self.sky_clear_color();
@@ -605,7 +565,8 @@ where
         self.ui.set_scale(gui_scale);
         let ui_state = self.current_ui_render_state();
         let ui_active = self.ui.is_active();
-        let ui_draw = self.ui.render_draw_list(ui_state);
+        let mut ui_draw = self.ui.render_draw_list(ui_state);
+        render_status_overlay(gui_scale, &mut ui_draw, &self.session_status);
         let summary_ui_draw = ui_draw.clone();
         let mut render_stats = self.render_stats;
         let summary = render_full_frame_for_view(
@@ -671,87 +632,20 @@ where
         self.runtime.sync_render_sections(camera_position)
     }
 
-    fn sync_all_render_sections(
-        &mut self,
-        camera_position: Vec3,
-    ) -> Result<mclone_render_session::RenderSectionCacheUpdate> {
-        self.runtime.sync_all_render_sections(camera_position)
-    }
-
     fn poll(&mut self) -> Result<bool> {
         self.runtime.poll()
-    }
-
-    fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
-        self.runtime.poll_until_idle()
     }
 
     fn has_pending_render_work(&self, camera_position: Vec3) -> bool {
         self.runtime.has_pending_render_work(camera_position)
     }
 
-    fn apply_startup_view_pose(&mut self, view_pose: XrStartupViewPose) -> Result<()> {
-        apply_xr_startup_view_pose(&mut self.camera, view_pose.position, view_pose.yaw_degrees)
-    }
-
     fn commit_engine_camera_player_pose(&mut self) -> Result<bool> {
-        let server_changed = self.sync_engine_camera_player_pose()?;
-        let interest_changed = self.update_interest_from_engine_camera()?;
-        Ok(server_changed || interest_changed)
-    }
-
-    fn sync_engine_camera_player_pose(&mut self) -> Result<bool> {
-        let changed = if let Some(report) = self.camera.next_pose_sync_command() {
-            self.runtime
-                .send_gameplay_command(report.command)
-                .context("failed to sync XR terrain player pose to server")?
-        } else {
-            false
-        };
-        Ok(changed || self.apply_pending_engine_camera_position_updates()?)
-    }
-
-    fn apply_pending_engine_camera_position_updates(&mut self) -> Result<bool> {
-        let mut changed = false;
-        for update in self.runtime.drain_player_position_updates() {
-            let accepted = self.camera.accept_position_update(update);
-            self.runtime
-                .send_gameplay_command(accepted.accept_command)
-                .context("failed to acknowledge XR terrain player position correction")?;
-            let resync = self.camera.corrected_pose_sync_command();
-            self.runtime
-                .send_gameplay_command(resync.command)
-                .context("failed to sync corrected XR terrain player pose")?;
-            log::warn!(
-                "accepted XR terrain server player position correction id={} feet=({:.2}, {:.2}, {:.2})",
-                accepted.update.teleport_id,
-                accepted.feet_position.x,
-                accepted.feet_position.y,
-                accepted.feet_position.z
-            );
-            changed = true;
-        }
-        if changed {
-            changed |= self.update_interest_from_engine_camera()?;
-        }
-        Ok(changed)
-    }
-
-    fn update_interest_from_engine_camera(&mut self) -> Result<bool> {
-        let snapshot = self.camera.snapshot();
-        let center = snapshot.chunk_pos;
-        if self.runtime.set_interest_center(center)? {
-            log::info!(
-                "XR terrain chunk interest moved to ({}, {}) at camera position ({:.1}, {:.1}, {:.1})",
-                center.x,
-                center.z,
-                snapshot.eye.x,
-                snapshot.eye.y,
-                snapshot.eye.z
-            );
-            return Ok(true);
-        }
-        Ok(false)
+        commit_engine_camera_player_pose_for_runtime(
+            &mut self.runtime,
+            &mut self.camera,
+            "sync XR terrain player pose",
+        )
     }
 
     fn play_landing_events(&mut self) {
@@ -829,19 +723,23 @@ where
         self.menu_panel_recenter_pending = false;
     }
 
-    fn apply_menu_pointer_input(&mut self) -> Result<()> {
+    fn apply_menu_pointer_input(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<bool> {
         if !self.ui.is_active() {
             self.ui.clear_input();
             self.menu_pointer_down = false;
-            return Ok(());
+            return Ok(false);
         }
         let Some(panel) = self.menu_panel_pose else {
             self.ui.clear_input();
             self.menu_pointer_down = false;
-            return Ok(());
+            return Ok(false);
         };
         let Some(origin) = self.tracking_origin else {
-            return Ok(());
+            return Ok(false);
         };
         let transform = XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())?;
         let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
@@ -856,7 +754,7 @@ where
         let Some(hit) = hit else {
             self.ui.clear_input();
             self.menu_pointer_down = false;
-            return Ok(());
+            return Ok(false);
         };
         let trigger_down = xr_menu_pointer_trigger_down(hit.trigger, self.menu_pointer_down);
         let action = if trigger_down && !self.menu_pointer_down {
@@ -871,9 +769,9 @@ where
         };
         self.menu_pointer_down = trigger_down;
         if let Some(action) = action {
-            self.apply_xr_ui_action(action)?;
+            return self.apply_xr_ui_action(action, device, queue);
         }
-        Ok(())
+        Ok(false)
     }
 
     fn xr_menu_controller_ray_lines(&self, panel: WorldGuiPanel) -> Result<Vec<WorldGuiLine>> {
@@ -888,7 +786,108 @@ where
         ))
     }
 
-    fn apply_xr_ui_action(&mut self, action: GameUiAction) -> Result<()> {
+    fn next_new_world_seed(&mut self) -> i64 {
+        self.seed_reroll_state = self
+            .seed_reroll_state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        self.seed_reroll_state as i64
+    }
+
+    fn local_world_options(&self, seed: i64) -> XrSceneOptions {
+        let mut scene = self.scene;
+        scene.seed = seed;
+        scene.render_distance = self.runtime.render_distance();
+        scene
+    }
+
+    fn remote_session_options(&self) -> XrSceneOptions {
+        let mut scene = self.scene;
+        scene.render_distance = self.runtime.render_distance();
+        scene
+    }
+
+    fn clear_menu_input_state(&mut self) {
+        self.ui.clear_input();
+        self.menu_pointer_down = false;
+        self.menu_panel_pose = None;
+        self.menu_panel_recenter_pending = false;
+    }
+
+    fn clear_transient_world_state(&mut self) {
+        self.tracking_origin = None;
+        self.last_locomotion_update = None;
+        self.latest_controllers.clear();
+        self.first_eye_summary = None;
+        self.rendered_frames = 0;
+    }
+
+    fn start_replacement_session(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        request: SessionStartRequest,
+        scene: XrSceneOptions,
+    ) -> Result<()> {
+        self.session_status = StatusOverlay::new(request.starting_message(), true);
+        let descriptor = request.active_descriptor().with_context(|| {
+            format!("XR replacement request did not describe an active session: {request:?}")
+        })?;
+        let mesh_assets = self.runtime.mesh_assets().clone();
+        let Some(factory) = self.session_runtime_factory.as_mut() else {
+            let error = anyhow!("XR session runtime factory is not installed");
+            log::error!("{error:#}");
+            self.session_status = StatusOverlay::new(request.default_failure_message(), false);
+            return Err(error);
+        };
+        let scene = scene.validated()?;
+        let runtime = match factory(request.clone(), scene, mesh_assets) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                log::error!("failed to start XR session {request:?}: {error:#}");
+                self.session_status = StatusOverlay::new(request.default_failure_message(), false);
+                return Err(error);
+            }
+        };
+        let started =
+            match start_xr_terrain_runtime(device, queue, self.color_format, runtime, None) {
+                Ok(started) => started,
+                Err(error) => {
+                    log::error!("failed to warm XR session {request:?}: {error:#}");
+                    self.session_status =
+                        StatusOverlay::new(request.default_failure_message(), false);
+                    return Err(error);
+                }
+            };
+
+        self.scene = scene;
+        self.runtime = started.runtime;
+        self.camera = started.camera;
+        self.draw = started.draw;
+        self.render_stats = started.render_stats;
+        self.clear_transient_world_state();
+        self.clear_menu_input_state();
+        self.session_status = StatusOverlay::hidden();
+        match descriptor {
+            ActiveSessionDescriptor::LocalWorld { seed } => {
+                self.ui.set_new_world_seed(seed);
+                log::info!("XR created local world seed={seed}");
+            }
+            ActiveSessionDescriptor::Remote { endpoint } => {
+                self.ui.set_join_remote_addr(endpoint.address.clone());
+                log::info!("XR joined remote session {}", endpoint.address);
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_xr_ui_action(
+        &mut self,
+        action: GameUiAction,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<bool> {
+        let mut scene_replaced = false;
         match action {
             GameUiAction::ToggleSectionOcclusion => {
                 self.render_options.section_occlusion_culling =
@@ -927,6 +926,7 @@ where
                         self.runtime.chunk_tracking_radius()
                     );
                 }
+                self.scene.render_distance = render_distance;
             }
             GameUiAction::ToggleFly => {
                 let movement_mode = self.camera.toggle_movement_mode();
@@ -943,29 +943,74 @@ where
             GameUiAction::Quit => {
                 log::info!("XR menu quit action ignored by shared scene");
             }
+            GameUiAction::OpenNewWorld => {
+                let seed = self.next_new_world_seed();
+                self.ui.set_new_world_seed(seed);
+                self.session_status = StatusOverlay::hidden();
+            }
+            GameUiAction::OpenJoinRemote => {
+                let remote_addr = self
+                    .runtime
+                    .active_session()
+                    .and_then(|session| match session {
+                        ActiveSessionDescriptor::Remote { endpoint } => {
+                            Some(endpoint.address.clone())
+                        }
+                        ActiveSessionDescriptor::LocalWorld { .. } => None,
+                    })
+                    .unwrap_or_else(|| normalized_xr_remote_addr(self.ui.join_remote_addr()));
+                self.ui.set_join_remote_addr(remote_addr);
+                self.session_status = StatusOverlay::hidden();
+            }
+            GameUiAction::RerollSeed => {
+                let seed = self.next_new_world_seed();
+                self.ui.set_new_world_seed(seed);
+                self.session_status = StatusOverlay::hidden();
+                log::info!("XR new-world seed rerolled to {seed}");
+            }
+            GameUiAction::CreateWorld(seed) => {
+                let request = SessionStartRequest::NewLocalWorld { seed };
+                let scene = self.local_world_options(seed);
+                if self
+                    .start_replacement_session(device, queue, request, scene)
+                    .is_err()
+                {
+                    self.ui.set_new_world_seed(seed);
+                    return Ok(false);
+                }
+                scene_replaced = true;
+            }
+            GameUiAction::JoinRemote => {
+                let remote_addr = normalized_xr_remote_addr(self.ui.join_remote_addr());
+                self.ui.set_join_remote_addr(remote_addr.clone());
+                let request = SessionStartRequest::JoinRemote {
+                    endpoint: RemoteSessionEndpoint::new(remote_addr),
+                };
+                let scene = self.remote_session_options();
+                if self
+                    .start_replacement_session(device, queue, request, scene)
+                    .is_err()
+                {
+                    return Ok(false);
+                }
+                scene_replaced = true;
+            }
             GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetTouchLookSensitivity(_) => {}
+            GameUiAction::BackToTitle | GameUiAction::QuitToTitle => {
+                self.session_status = StatusOverlay::hidden();
+            }
             GameUiAction::StartWorld
-            | GameUiAction::OpenNewWorld
-            | GameUiAction::OpenJoinRemote
-            | GameUiAction::RerollSeed
-            | GameUiAction::CreateWorld(_)
-            | GameUiAction::JoinRemote
             | GameUiAction::Resume
             | GameUiAction::OpenOptions(_)
-            | GameUiAction::BackToTitle
-            | GameUiAction::BackToPause
-            | GameUiAction::QuitToTitle => {}
+            | GameUiAction::BackToPause => {}
         }
         self.ui.apply_action(action);
         if !self.ui.is_active() {
-            self.ui.clear_input();
-            self.menu_pointer_down = false;
-            self.menu_panel_pose = None;
-            self.menu_panel_recenter_pending = false;
+            self.clear_menu_input_state();
         }
-        Ok(())
+        Ok(scene_replaced)
     }
 
     fn camera_inside_occluding_block(&self, position: Vec3) -> bool {
@@ -979,6 +1024,228 @@ where
         self.first_eye_summary = Some(summary);
         self.rendered_frames += 1;
     }
+}
+
+fn start_xr_terrain_runtime<S>(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    color_format: wgpu::TextureFormat,
+    mut runtime: NativeSingleViewSessionRuntime<S>,
+    startup_view_pose: Option<XrStartupViewPose>,
+) -> Result<StartedXrTerrainRuntime<S>>
+where
+    S: RemoteDedicatedServerSession,
+{
+    let center = runtime.interest_center();
+    let render_distance = runtime.render_distance();
+    let host_label = runtime.host_label();
+    let session_label = active_session_label(runtime.active_session());
+    let mut camera = EngineCameraController::spawn_for_chunk(center);
+    let initial_poll_start = Instant::now();
+    let (initial_poll_count, initial_poll_ms) = runtime
+        .poll_until_idle()
+        .context("wait for initial XR terrain chunks")?;
+    let mut initial_pose_changed =
+        apply_pending_engine_camera_position_updates_for_runtime(&mut runtime, &mut camera)
+            .context("accept initial XR terrain player pose")?;
+    if let Some(view_pose) = startup_view_pose {
+        apply_xr_startup_view_pose(&mut camera, view_pose.position, view_pose.yaw_degrees)
+            .context("apply XR terrain startup view pose")?;
+        initial_pose_changed |= commit_engine_camera_player_pose_for_runtime(
+            &mut runtime,
+            &mut camera,
+            "sync XR terrain startup view pose",
+        )?;
+    } else {
+        initial_pose_changed |= commit_engine_camera_player_pose_for_runtime(
+            &mut runtime,
+            &mut camera,
+            "sync initial XR terrain player pose",
+        )?;
+    }
+    if initial_pose_changed {
+        let _ = runtime
+            .poll_until_idle()
+            .context("wait for XR terrain chunks after player pose")?;
+    }
+
+    let camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
+    let section_update = runtime
+        .sync_all_render_sections(camera_position)
+        .context("compile initial XR terrain render sections")?;
+    let sections = runtime.cached_sections();
+    if sections.is_empty() {
+        bail!(
+            "XR terrain host={} center=({}, {}) render_distance={} produced no render sections",
+            host_label,
+            center.x,
+            center.z,
+            render_distance
+        );
+    }
+    let mut draw = TexturedSectionDrawResources::new(
+        device,
+        queue,
+        color_format,
+        &sections,
+        runtime.mesh_assets().atlas.as_upload(),
+    )
+    .context("upload initial XR terrain render sections")?;
+    draw.set_traversal_ready_sections(
+        &runtime.traversal_ready_render_section_keys(camera_position),
+    );
+
+    let initial_upload = TexturedSectionUploadReport {
+        uploaded_section_count: section_update.rebuilt_section_count(),
+        removed_section_count: section_update.removed_section_count(),
+        uploaded_vertex_count: section_update.rebuilt_vertex_count,
+        uploaded_index_count: section_update.rebuilt_index_count,
+    };
+    let mut render_stats = RenderStreamStats {
+        section_count: draw.section_count(),
+        index_count: draw.index_count(),
+        face_count: quad_face_count_from_indices(draw.index_count()),
+        ..RenderStreamStats::default()
+    };
+    record_render_section_update_stats(&mut render_stats, &section_update, initial_upload);
+    log::info!(
+        "mclone XR terrain runtime: host={} session={} center=({}, {}) render_distance={} chunks={} sections={} faces={} indices={} initial_polls={} poll_ms={:.3} elapsed_ms={:.3}",
+        host_label,
+        session_label,
+        center.x,
+        center.z,
+        render_distance,
+        runtime.loaded_chunk_count(),
+        render_stats.section_count,
+        render_stats.face_count,
+        render_stats.index_count,
+        initial_poll_count,
+        initial_poll_ms,
+        elapsed_ms(initial_poll_start.elapsed())
+    );
+    Ok(StartedXrTerrainRuntime {
+        runtime,
+        camera,
+        draw,
+        render_stats,
+    })
+}
+
+fn commit_engine_camera_player_pose_for_runtime<S>(
+    runtime: &mut NativeSingleViewSessionRuntime<S>,
+    camera: &mut EngineCameraController,
+    context: &'static str,
+) -> Result<bool>
+where
+    S: RemoteDedicatedServerSession,
+{
+    let server_changed =
+        sync_engine_camera_player_pose_for_runtime(runtime, camera).context(context)?;
+    let interest_changed = update_interest_from_engine_camera_for_runtime(runtime, camera)?;
+    Ok(server_changed || interest_changed)
+}
+
+fn sync_engine_camera_player_pose_for_runtime<S>(
+    runtime: &mut NativeSingleViewSessionRuntime<S>,
+    camera: &mut EngineCameraController,
+) -> Result<bool>
+where
+    S: RemoteDedicatedServerSession,
+{
+    let changed = if let Some(report) = camera.next_pose_sync_command() {
+        runtime
+            .send_gameplay_command(report.command)
+            .context("failed to sync XR terrain player pose to server")?
+    } else {
+        false
+    };
+    Ok(changed || apply_pending_engine_camera_position_updates_for_runtime(runtime, camera)?)
+}
+
+fn apply_pending_engine_camera_position_updates_for_runtime<S>(
+    runtime: &mut NativeSingleViewSessionRuntime<S>,
+    camera: &mut EngineCameraController,
+) -> Result<bool>
+where
+    S: RemoteDedicatedServerSession,
+{
+    let mut changed = false;
+    for update in runtime.drain_player_position_updates() {
+        let accepted = camera.accept_position_update(update);
+        runtime
+            .send_gameplay_command(accepted.accept_command)
+            .context("failed to acknowledge XR terrain player position correction")?;
+        let resync = camera.corrected_pose_sync_command();
+        runtime
+            .send_gameplay_command(resync.command)
+            .context("failed to sync corrected XR terrain player pose")?;
+        log::warn!(
+            "accepted XR terrain server player position correction id={} feet=({:.2}, {:.2}, {:.2})",
+            accepted.update.teleport_id,
+            accepted.feet_position.x,
+            accepted.feet_position.y,
+            accepted.feet_position.z
+        );
+        changed = true;
+    }
+    if changed {
+        changed |= update_interest_from_engine_camera_for_runtime(runtime, camera)?;
+    }
+    Ok(changed)
+}
+
+fn update_interest_from_engine_camera_for_runtime<S>(
+    runtime: &mut NativeSingleViewSessionRuntime<S>,
+    camera: &EngineCameraController,
+) -> Result<bool>
+where
+    S: RemoteDedicatedServerSession,
+{
+    let snapshot = camera.snapshot();
+    let center = snapshot.chunk_pos;
+    if runtime.set_interest_center(center)? {
+        log::info!(
+            "XR terrain chunk interest moved to ({}, {}) at camera position ({:.1}, {:.1}, {:.1})",
+            center.x,
+            center.z,
+            snapshot.eye.x,
+            snapshot.eye.y,
+            snapshot.eye.z
+        );
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn xr_game_ui_for_session(session: Option<&ActiveSessionDescriptor>, seed: i64) -> GameUi {
+    let mut ui = GameUi::new_ingame();
+    ui.set_new_world_seed(match session {
+        Some(ActiveSessionDescriptor::LocalWorld { seed }) => *seed,
+        Some(ActiveSessionDescriptor::Remote { .. }) | None => seed,
+    });
+    ui.set_join_remote_addr(match session {
+        Some(ActiveSessionDescriptor::Remote { endpoint }) => endpoint.address.clone(),
+        Some(ActiveSessionDescriptor::LocalWorld { .. }) | None => {
+            DEFAULT_JOIN_REMOTE_ADDR.to_owned()
+        }
+    });
+    ui
+}
+
+fn normalized_xr_remote_addr(addr: &str) -> String {
+    let addr = addr.trim();
+    if addr.is_empty() {
+        DEFAULT_JOIN_REMOTE_ADDR.to_owned()
+    } else {
+        addr.to_owned()
+    }
+}
+
+fn initial_xr_seed_reroll_state(seed: i64) -> u64 {
+    (seed as u64)
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(0xD1B5_4A32_D192_ED03)
+        .max(1)
 }
 
 fn local_single_view_options(scene: XrSceneOptions) -> LocalSingleViewSceneOptions {

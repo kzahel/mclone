@@ -1,15 +1,15 @@
 # 094: Runtime World Teardown and New-World Menu
 
-Status: active; desktop runtime/menu path landed on 2026-06-26, and web plus
-flat Android New World replacement paths landed via tactical 095 on 2026-06-27.
-The desktop app can boot to a no-world Title menu, open a reroll-only New World
-screen, present loading/error status while creating a world, create a fresh
-local integrated world in-process, and tear the current world down back to
-Title. Web can start a fresh local worker session from the shared New World
-menu. Flat Android can replace the current native scene from the shared New
-World menu while keeping the old session live on setup failure. Remaining work
-is manual interactive desktop smoke plus XR app-owned parity and Android
-no-world/Quit-to-Title parity.
+Status: active; desktop runtime/menu path landed on 2026-06-26, and web, flat
+Android, desktop XR, and Android XR New World replacement paths landed via
+tactical 095 on 2026-06-27. The desktop app can boot to a no-world Title menu,
+open a reroll-only New World screen, present loading/error status while
+creating a world, create a fresh local integrated world in-process, and tear
+the current world down back to Title. Web, flat Android, and XR can replace the
+current scene/session from the shared New World menu while keeping the old
+session live on setup failure. Remaining work is manual/device validation of
+the interactive flows plus Android no-world/Quit-to-Title parity if mobile UX
+needs that exact desktop state.
 
 ## Purpose
 
@@ -127,11 +127,11 @@ Open follow-ups for this doc:
 
 - Run a manual interactive desktop smoke for Quit To Title -> New World ->
   Reroll -> Create, including the visible loading status frame.
-- Carry the app-owned new-world flow to XR host shells. Web local-world
-  replacement and flat Android scene replacement now live in tactical 095; web
+- Web, flat Android, and XR scene replacement now live in tactical 095; web
   Join Remote has a runtime reconnect path but still needs a connect-screen
   smoke and endpoint editing. Flat Android still needs the desktop-style
-  no-world/Quit-to-Title state if that becomes required for mobile UX.
+  no-world/Quit-to-Title state if that becomes required for mobile UX. XR and
+  Android replacement menu flows still need headset/device validation.
 
 ## Implementation Slices
 
