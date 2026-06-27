@@ -1,8 +1,10 @@
 # 098: Flat Input Capability Convergence
 
 Status: active; Slices 1-2 shared input contract and desktop adapter
-convergence are implemented and validated. This splits the remaining flat
-Android input/HUD parity work out of
+convergence are implemented and validated. Slice 3 Android touch
+interaction/hotbar convergence is implemented; attached Android
+keyboard/mouse routing remains. This splits the remaining flat Android
+input/HUD parity work out of
 [`090-flat-android-client-parity.md`](090-flat-android-client-parity.md) into a
 shared flat-client capability contract for desktop, flat Android, and web.
 
@@ -46,17 +48,17 @@ intents where the semantics match.
   path is app-local in `mclone-native-client`.
 - Desktop does not currently expose the touch-control path for touchscreen
   devices, even though `winit` can report touch events on desktop.
-- Flat Android has shared menu UI and touch movement/look, but its touch layer
-  lacks attack/use/hotbar and the app does not yet own the shared
+- Flat Android has shared menu UI, touch movement/look, and touch
+  attack/use/hotbar routed through shared intents and the shared
   `ClientInteractionController`.
 - Flat Android does not currently route attached keyboard/mouse/gamepad input
   into the same gameplay path desktop uses.
 - Native web has separate browser keyboard/mouse/touch glue. It should converge
   on the same intent and preference contracts while keeping browser event,
   worker, and storage mechanics web-local.
-- `mclone-ui` owns shared menu rendering and the current touch movement overlay,
-  but it does not yet own a shared flat gameplay HUD/hotbar or a platform-neutral
-  touch interaction overlay.
+- `mclone-ui` owns shared menu rendering and the current touch movement plus
+  touch interaction overlay, but it does not yet own a shared flat gameplay
+  HUD/hotbar across desktop, Android, and web.
 
 ## Target Shape
 
@@ -159,17 +161,17 @@ intents; preferences decide presentation defaults.
   - Preserve current desktop keyboard/mouse behavior while changing ownership.
 
 - [ ] **Slice 3: flat Android capability convergence.**
-  - Add `ClientInteractionController` to flat Android.
-  - Route Android touch attack/use/hotbar through shared intents and the same
+  - [x] Add `ClientInteractionController` to flat Android.
+  - [x] Route Android touch attack/use/hotbar through shared intents and the same
     block-pick / carried-item / gameplay-command path as desktop.
-  - Route attached Android keyboard/mouse events into the shared keyboard/mouse
+  - [ ] Route attached Android keyboard/mouse events into the shared keyboard/mouse
     adapter when `winit` exposes them.
-  - Keep Android lifecycle, surface, property lookup, and APK validation in the
+  - [x] Keep Android lifecycle, surface, property lookup, and APK validation in the
     Android app crate.
 
 - [ ] **Slice 4: shared flat HUD and touch controls.**
-  - Move crosshair, hotbar/debug palette, selected-slot display, and touch
-    attack/use/hotbar controls into shared `mclone-ui` presentation.
+  - Move crosshair, hotbar/debug palette, selected-slot display, and remaining
+    cross-platform touch-control policy into shared `mclone-ui` presentation.
   - Let `mclone-ui` consume resolved overlay state from `mclone-input`; keep
     gameplay command semantics outside the UI crate.
   - Support `Touch Controls: Auto / On / Off` across desktop, Android, and web.
@@ -269,3 +271,10 @@ Manual/device validation to record before closing this tactical:
   the desktop app. Desktop `WindowEvent::Touch` now records touch capability
   state for future shared touch HUD work; it does not yet add desktop touch
   gameplay controls.
+- Slice 3 Android touch sub-slice landed: flat Android now owns a
+  `ClientInteractionController`, records touch capability through
+  `mclone-input`, converts held touch movement into `FlatInputFrame`, and routes
+  touch attack/use/hotbar selection through shared intents, block picking,
+  carried-item sync, and gameplay command dispatch. `mclone-ui` can now draw the
+  native touch attack/use buttons and nine-slot touch hotbar. Attached Android
+  keyboard/mouse routing remains the open Slice 3 item.

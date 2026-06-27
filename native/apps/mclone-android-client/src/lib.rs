@@ -22,7 +22,12 @@ mod android {
         ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
     };
     use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
+    use mclone_client::ClientInteractionController;
     use mclone_core::{ChunkPos, Vec3d};
+    use mclone_input::{
+        FlatInputAction, FlatInputFrame, FlatInputIntent, InputCapabilities, InputCapabilityState,
+        InputDeviceKind, InputPreferences,
+    };
     use mclone_mesh::quad_face_count_from_indices;
     use mclone_net::NativeClientSession;
     use mclone_protocol::{ClientCommand, ServerUpdate};
@@ -42,7 +47,7 @@ mod android {
         DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState,
         GuiDrawList, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
         render_status_overlay, render_touch_overlay, touch_action_button_rects,
-        touch_menu_button_rect, touch_movement_zone_rect,
+        touch_hotbar_slot_rects, touch_menu_button_rect, touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -163,6 +168,8 @@ mod android {
         scene_options: AndroidSceneOptions,
         scene: AndroidSingleViewSceneRuntime,
         camera: EngineCameraController,
+        interaction: ClientInteractionController,
+        input_capabilities: InputCapabilityState,
         render_options: TexturedSectionRenderOptions,
         ui: GameUi,
         session_status: StatusOverlay,
@@ -245,6 +252,10 @@ mod android {
         jump_touch_id: Option<u64>,
         sprint_touch_id: Option<u64>,
         descend_touch_id: Option<u64>,
+        attack_touch_id: Option<u64>,
+        use_touch_id: Option<u64>,
+        hotbar_touch_id: Option<u64>,
+        hotbar_pressed_slot: Option<u8>,
     }
 
     impl AndroidTouchControls {
@@ -252,14 +263,14 @@ mod android {
             *self = Self::default();
         }
 
-        fn has_active_input(self) -> bool {
+        fn has_continuous_movement_input(self) -> bool {
             self.movement.is_some()
                 || self.jump_touch_id.is_some()
                 || self.sprint_touch_id.is_some()
                 || self.descend_touch_id.is_some()
         }
 
-        fn overlay(self) -> TouchOverlay {
+        fn overlay(self, selected_hotbar_slot: u8) -> TouchOverlay {
             TouchOverlay {
                 visible: true,
                 menu_pressed: false,
@@ -274,21 +285,45 @@ mod android {
                 jump_pressed: self.jump_touch_id.is_some(),
                 sprint_pressed: self.sprint_touch_id.is_some(),
                 descend_pressed: self.descend_touch_id.is_some(),
+                interaction_visible: true,
+                attack_pressed: self.attack_touch_id.is_some(),
+                use_pressed: self.use_touch_id.is_some(),
+                hotbar_visible: true,
+                selected_hotbar_slot,
+                hotbar_pressed_slot: self.hotbar_pressed_slot,
             }
         }
 
-        fn camera_input(self, dt_seconds: f64) -> Option<EngineCameraInput> {
-            if !self.has_active_input() {
+        fn held_frame(self) -> Option<FlatInputFrame> {
+            if !self.has_continuous_movement_input() {
                 return None;
             }
-            Some(EngineCameraInput {
-                dt_seconds,
-                jump: self.jump_touch_id.is_some(),
-                sprint: self.sprint_touch_id.is_some(),
-                descend: self.descend_touch_id.is_some(),
-                movement_impulse: self.movement.map(|movement| movement.impulse),
-                ..EngineCameraInput::default()
-            })
+            let mut frame = FlatInputFrame::default();
+            if let Some(movement) = self.movement {
+                frame.apply_intent(FlatInputIntent::MoveAnalog {
+                    left: movement.impulse.left,
+                    forward: movement.impulse.forward,
+                });
+            }
+            if self.jump_touch_id.is_some() {
+                frame.apply_intent(FlatInputIntent::Action {
+                    action: FlatInputAction::Jump,
+                    pressed: true,
+                });
+            }
+            if self.sprint_touch_id.is_some() {
+                frame.apply_intent(FlatInputIntent::Action {
+                    action: FlatInputAction::Sprint,
+                    pressed: true,
+                });
+            }
+            if self.descend_touch_id.is_some() {
+                frame.apply_intent(FlatInputIntent::Action {
+                    action: FlatInputAction::Descend,
+                    pressed: true,
+                });
+            }
+            Some(frame)
         }
     }
 
@@ -454,6 +489,11 @@ mod android {
                 scene_options: scene_options.clone(),
                 scene: started.scene,
                 camera: started.camera,
+                interaction: ClientInteractionController::new(),
+                input_capabilities: InputCapabilityState::new(InputCapabilities {
+                    touch: true,
+                    ..InputCapabilities::NONE
+                }),
                 render_options: TexturedSectionRenderOptions::default(),
                 ui: android_game_ui_for_scene(&scene_options),
                 session_status: StatusOverlay::hidden(),
@@ -501,6 +541,8 @@ mod android {
             queue: &wgpu::Queue,
             format: wgpu::TextureFormat,
         ) -> Result<AndroidUiTouchResult> {
+            self.input_capabilities
+                .note_activity(InputDeviceKind::Touch);
             let gui_scale = GuiScale::from_pixels(width.max(1), height.max(1));
             self.ui.set_scale(gui_scale);
             let point = gui_scale.client_to_gui(touch.location.x, touch.location.y);
@@ -510,7 +552,7 @@ mod android {
                 self.touch_menu_pressed = false;
                 return self.handle_active_ui_touch(touch, point, device, queue, format);
             }
-            Ok(self.handle_closed_gameplay_touch(touch, point, gui_scale))
+            self.handle_closed_gameplay_touch(touch, point, gui_scale)
         }
 
         fn handle_closed_gameplay_touch(
@@ -518,38 +560,73 @@ mod android {
             touch: &Touch,
             point: Point,
             gui_scale: GuiScale,
-        ) -> AndroidUiTouchResult {
+        ) -> Result<AndroidUiTouchResult> {
             match touch.phase {
                 TouchPhase::Started => {
                     if touch_menu_button_rect().contains(point) {
                         self.touch_menu_touch_id = Some(touch.id);
                         self.touch_menu_pressed = true;
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
                     }
                     let buttons = touch_action_button_rects(gui_scale);
                     if buttons.jump.contains(point) {
                         self.touch_controls.jump_touch_id = Some(touch.id);
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
                     }
                     if buttons.sprint.contains(point) {
                         self.touch_controls.sprint_touch_id = Some(touch.id);
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
                     }
                     if buttons.descend.contains(point) {
                         self.touch_controls.descend_touch_id = Some(touch.id);
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
+                    }
+                    if buttons.attack.contains(point) {
+                        self.touch_controls.attack_touch_id = Some(touch.id);
+                        self.apply_flat_touch_frame(flat_action_frame(FlatInputAction::Attack))
+                            .context("apply Android touch attack")?;
+                        return Ok(AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        });
+                    }
+                    if buttons.use_item.contains(point) {
+                        self.touch_controls.use_touch_id = Some(touch.id);
+                        self.apply_flat_touch_frame(flat_action_frame(FlatInputAction::Use))
+                            .context("apply Android touch use")?;
+                        return Ok(AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        });
+                    }
+                    if let Some((slot, _rect)) = touch_hotbar_slot_rects(gui_scale)
+                        .into_iter()
+                        .enumerate()
+                        .find(|(_slot, rect)| rect.contains(point))
+                    {
+                        let slot = slot as u8;
+                        self.touch_controls.hotbar_touch_id = Some(touch.id);
+                        self.touch_controls.hotbar_pressed_slot = Some(slot);
+                        let mut frame = FlatInputFrame::default();
+                        frame.apply_intent(FlatInputIntent::SelectHotbarSlot(slot));
+                        self.apply_flat_touch_frame(frame)
+                            .context("apply Android touch hotbar selection")?;
+                        return Ok(AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        });
                     }
                     if self.touch_controls.movement.is_none()
                         && touch_movement_zone_rect(gui_scale).contains(point)
@@ -557,37 +634,40 @@ mod android {
                         self.touch_controls.movement =
                             Some(AndroidMovementTouch::new(touch.id, point));
                         self.last_movement_update = Some(Instant::now());
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
                     }
                 }
                 TouchPhase::Moved => {
                     if self.touch_menu_touch_id == Some(touch.id) {
                         self.touch_menu_pressed = touch_menu_button_rect().contains(point);
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
                     }
                     if let Some(movement) = self.touch_controls.movement.as_mut()
                         && movement.id == touch.id
                     {
                         movement.move_to(point);
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
                     }
                     if self.touch_controls.jump_touch_id == Some(touch.id)
                         || self.touch_controls.sprint_touch_id == Some(touch.id)
                         || self.touch_controls.descend_touch_id == Some(touch.id)
+                        || self.touch_controls.attack_touch_id == Some(touch.id)
+                        || self.touch_controls.use_touch_id == Some(touch.id)
+                        || self.touch_controls.hotbar_touch_id == Some(touch.id)
                     {
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
                     }
                 }
                 TouchPhase::Ended | TouchPhase::Cancelled => {
@@ -602,10 +682,10 @@ mod android {
                             self.ui.clear_input();
                             log::info!("Mclone Android shared menu opened");
                         }
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
                     }
                     if self
                         .touch_controls
@@ -613,35 +693,57 @@ mod android {
                         .is_some_and(|movement| movement.id == touch.id)
                     {
                         self.touch_controls.movement = None;
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
                     }
                     if self.touch_controls.jump_touch_id == Some(touch.id) {
                         self.touch_controls.jump_touch_id = None;
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
                     }
                     if self.touch_controls.sprint_touch_id == Some(touch.id) {
                         self.touch_controls.sprint_touch_id = None;
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
                     }
                     if self.touch_controls.descend_touch_id == Some(touch.id) {
                         self.touch_controls.descend_touch_id = None;
-                        return AndroidUiTouchResult {
+                        return Ok(AndroidUiTouchResult {
                             handled: true,
                             quit: false,
-                        };
+                        });
+                    }
+                    if self.touch_controls.attack_touch_id == Some(touch.id) {
+                        self.touch_controls.attack_touch_id = None;
+                        return Ok(AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        });
+                    }
+                    if self.touch_controls.use_touch_id == Some(touch.id) {
+                        self.touch_controls.use_touch_id = None;
+                        return Ok(AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        });
+                    }
+                    if self.touch_controls.hotbar_touch_id == Some(touch.id) {
+                        self.touch_controls.hotbar_touch_id = None;
+                        self.touch_controls.hotbar_pressed_slot = None;
+                        return Ok(AndroidUiTouchResult {
+                            handled: true,
+                            quit: false,
+                        });
                     }
                 }
             }
-            AndroidUiTouchResult::default()
+            Ok(AndroidUiTouchResult::default())
         }
 
         fn handle_active_ui_touch(
@@ -760,6 +862,7 @@ mod android {
             self.scene_options = options;
             self.scene = started.scene;
             self.camera = started.camera;
+            self.interaction = ClientInteractionController::new();
             self.draw = started.draw;
             self.render_stats = started.render_stats;
             self.frame_index = 0;
@@ -936,16 +1039,79 @@ mod android {
                 return draw;
             }
             let mut draw = GuiDrawList::new();
-            let mut overlay = self.touch_controls.overlay();
-            overlay.menu_pressed = self.touch_menu_pressed;
-            render_touch_overlay(gui_scale, &mut draw, &overlay);
+            if self
+                .input_capabilities
+                .resolve(InputPreferences::AUTO)
+                .touch_controls_visible
+            {
+                let mut overlay = self
+                    .touch_controls
+                    .overlay(self.interaction.selected_hotbar_slot());
+                overlay.menu_pressed = self.touch_menu_pressed;
+                render_touch_overlay(gui_scale, &mut draw, &overlay);
+            }
             render_status_overlay(gui_scale, &mut draw, &self.session_status);
             draw
         }
 
+        fn apply_flat_touch_frame(&mut self, frame: FlatInputFrame) -> Result<()> {
+            if let Some(slot) = frame.selected_hotbar_slot
+                && self.interaction.select_hotbar_slot(slot)
+            {
+                log::info!("Mclone Android selected hotbar slot {}", slot + 1);
+            }
+            if frame.attack {
+                self.handle_world_flat_action(FlatInputAction::Attack)?;
+            }
+            if frame.use_item {
+                self.handle_world_flat_action(FlatInputAction::Use)?;
+            }
+            Ok(())
+        }
+
+        fn sync_carried_item(&mut self) -> Result<bool> {
+            let Some(command) = self.interaction.ensure_has_sent_carried_item() else {
+                return Ok(false);
+            };
+            self.scene
+                .send_gameplay_command(command)
+                .context("failed to sync Android carried item to server")
+        }
+
+        fn handle_world_flat_action(&mut self, action: FlatInputAction) -> Result<()> {
+            self.commit_engine_camera_player_pose()
+                .context("sync Android player pose before interaction")?;
+            self.sync_carried_item()?;
+            let hit = self
+                .camera
+                .pick_block(self.scene.client(), &self.interaction);
+            let command = match action {
+                FlatInputAction::Attack => self.interaction.debug_instant_break_command(hit),
+                FlatInputAction::Use => self.interaction.use_item_on_command(hit),
+                _ => None,
+            };
+            let Some(command) = command else {
+                return Ok(());
+            };
+            let changed = self
+                .scene
+                .send_gameplay_command(command)
+                .context("failed to send Android touch interaction command")?;
+            log::info!(
+                "Mclone Android touch interaction {:?} at ({}, {}, {}) face={:?} changed={}",
+                action,
+                hit.block_pos.x,
+                hit.block_pos.y,
+                hit.block_pos.z,
+                hit.direction,
+                changed
+            );
+            Ok(())
+        }
+
         fn apply_touch_movement(&mut self) -> Result<()> {
             let now = Instant::now();
-            if self.ui.is_active() || !self.touch_controls.has_active_input() {
+            if self.ui.is_active() || !self.touch_controls.has_continuous_movement_input() {
                 self.last_movement_update = Some(now);
                 return Ok(());
             }
@@ -955,9 +1121,10 @@ mod android {
                 .map(|last| now.duration_since(last).as_secs_f64())
                 .unwrap_or(0.0)
                 .clamp(0.0, TOUCH_MOVEMENT_MAX_FRAME_SECONDS);
-            let Some(input) = self.touch_controls.camera_input(dt_seconds) else {
+            let Some(frame) = self.touch_controls.held_frame() else {
                 return Ok(());
             };
+            let input = engine_camera_input_from_flat_frame(frame, dt_seconds);
             self.camera.apply_movement_input(self.scene.client(), input);
             self.play_landing_events();
             self.commit_engine_camera_player_pose()
@@ -985,7 +1152,7 @@ mod android {
         }
 
         fn wants_continuous_redraw(&self) -> bool {
-            !self.ui.is_active() && self.touch_controls.has_active_input()
+            !self.ui.is_active() && self.touch_controls.has_continuous_movement_input()
         }
 
         fn render(&mut self, frame: RenderFrameContext<'_>) -> Result<()> {
@@ -1582,6 +1749,36 @@ mod android {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    fn flat_action_frame(action: FlatInputAction) -> FlatInputFrame {
+        let mut frame = FlatInputFrame::default();
+        frame.apply_intent(FlatInputIntent::Action {
+            action,
+            pressed: true,
+        });
+        frame
+    }
+
+    fn engine_camera_input_from_flat_frame(
+        frame: FlatInputFrame,
+        dt_seconds: f64,
+    ) -> EngineCameraInput {
+        EngineCameraInput {
+            dt_seconds,
+            forward: frame.forward,
+            backward: frame.backward,
+            left: frame.left,
+            right: frame.right,
+            jump: frame.jump,
+            descend: frame.descend,
+            shift: frame.sneak,
+            sprint: frame.sprint,
+            movement_impulse: frame
+                .analog_movement
+                .map(|movement| EngineCameraMovementImpulse::new(movement.left, movement.forward)),
+            ..EngineCameraInput::default()
+        }
     }
 
     fn camera_position(camera: &EngineCameraController) -> Vec3 {

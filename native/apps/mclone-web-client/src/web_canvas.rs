@@ -2333,6 +2333,12 @@ impl WebChunkRenderSession {
             jump_pressed,
             sprint_pressed,
             descend_pressed,
+            interaction_visible: false,
+            attack_pressed: false,
+            use_pressed: false,
+            hotbar_visible: false,
+            selected_hotbar_slot: self.interaction.selected_hotbar_slot(),
+            hotbar_pressed_slot: None,
         };
         self.ui_status_to_js_value().map_err(JsValue::from)
     }

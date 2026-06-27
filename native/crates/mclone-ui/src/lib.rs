@@ -793,6 +793,12 @@ pub struct TouchOverlay {
     pub jump_pressed: bool,
     pub sprint_pressed: bool,
     pub descend_pressed: bool,
+    pub interaction_visible: bool,
+    pub attack_pressed: bool,
+    pub use_pressed: bool,
+    pub hotbar_visible: bool,
+    pub selected_hotbar_slot: u8,
+    pub hotbar_pressed_slot: Option<u8>,
 }
 
 impl TouchOverlay {
@@ -908,6 +914,13 @@ pub fn render_touch_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &T
     render_touch_action_button(draw, &font, buttons.jump, "UP", overlay.jump_pressed);
     render_touch_action_button(draw, &font, buttons.sprint, ">>", overlay.sprint_pressed);
     render_touch_action_button(draw, &font, buttons.descend, "DN", overlay.descend_pressed);
+    if overlay.interaction_visible {
+        render_touch_action_button(draw, &font, buttons.attack, "ATK", overlay.attack_pressed);
+        render_touch_action_button(draw, &font, buttons.use_item, "USE", overlay.use_pressed);
+    }
+    if overlay.hotbar_visible {
+        render_touch_hotbar(draw, &font, scale, overlay);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1676,6 +1689,8 @@ pub struct TouchActionButtonRects {
     pub jump: Rect,
     pub sprint: Rect,
     pub descend: Rect,
+    pub attack: Rect,
+    pub use_item: Rect,
 }
 
 pub fn touch_menu_button_rect() -> Rect {
@@ -1700,11 +1715,23 @@ pub fn touch_action_button_rects(scale: GuiScale) -> TouchActionButtonRects {
     let x0 = (x1 - gap - size).max(0.0);
     let y1 = (scale.height - bottom - size).max(0.0);
     let y0 = (y1 - gap - size).max(0.0);
+    let y_attack = (y0 - gap - size).max(0.0);
     TouchActionButtonRects {
         jump: Rect::new(x1, y0, size, size),
         sprint: Rect::new(x0, y1, size, size),
         descend: Rect::new(x1, y1, size, size),
+        attack: Rect::new(x1, y_attack, size, size),
+        use_item: Rect::new(x0, y_attack, size, size),
     }
+}
+
+pub fn touch_hotbar_slot_rects(scale: GuiScale) -> [Rect; 9] {
+    let slot = 28.0;
+    let gap = 4.0;
+    let total_width = slot * 9.0 + gap * 8.0;
+    let x0 = ((scale.width - total_width) * 0.5).max(4.0);
+    let y = (scale.height - 98.0).max(58.0);
+    std::array::from_fn(|index| Rect::new(x0 + index as f32 * (slot + gap), y, slot, slot))
 }
 
 fn render_touch_menu_button(draw: &mut GuiDrawList, rect: Rect, pressed: bool) {
@@ -1752,6 +1779,29 @@ fn render_touch_action_button(
         rect.y + ((rect.height - font.line_height()) * 0.5).floor(),
         color,
     );
+}
+
+fn render_touch_hotbar(
+    draw: &mut GuiDrawList,
+    font: &Font,
+    scale: GuiScale,
+    overlay: &TouchOverlay,
+) {
+    for (index, rect) in touch_hotbar_slot_rects(scale).into_iter().enumerate() {
+        let slot = index as u8;
+        let pressed = overlay.hotbar_pressed_slot == Some(slot);
+        render_touch_panel(draw, rect, pressed);
+        if overlay.selected_hotbar_slot == slot {
+            draw.outline(rect.inset(-2.0), Color::rgba(245, 250, 255, 215));
+        }
+        font.draw_centered(
+            draw,
+            &(index + 1).to_string(),
+            rect.center_x(),
+            rect.y + ((rect.height - font.line_height()) * 0.5).floor(),
+            Color::rgba(245, 250, 255, 210),
+        );
+    }
 }
 
 fn render_touch_panel(draw: &mut GuiDrawList, rect: Rect, pressed: bool) {
@@ -2161,6 +2211,12 @@ mod tests {
             jump_pressed: true,
             sprint_pressed: false,
             descend_pressed: false,
+            interaction_visible: true,
+            attack_pressed: false,
+            use_pressed: true,
+            hotbar_visible: true,
+            selected_hotbar_slot: 2,
+            hotbar_pressed_slot: Some(4),
         };
 
         render_touch_overlay(GuiScale::from_pixels(780, 1688), &mut draw, &overlay);
@@ -2173,13 +2229,27 @@ mod tests {
         let scale = GuiScale::from_pixels(780, 1688);
         let movement = touch_movement_zone_rect(scale);
         let actions = touch_action_button_rects(scale);
+        let hotbar = touch_hotbar_slot_rects(scale);
 
         assert_eq!(touch_menu_button_rect(), Rect::new(10.0, 10.0, 40.0, 40.0));
         assert!(movement.contains(Point {
             x: movement.x + 4.0,
             y: movement.y + 4.0,
         }));
-        for rect in [actions.jump, actions.sprint, actions.descend] {
+        for rect in [
+            actions.jump,
+            actions.sprint,
+            actions.descend,
+            actions.attack,
+            actions.use_item,
+        ] {
+            assert!(rect.x >= 0.0);
+            assert!(rect.y >= 0.0);
+            assert!(rect.right() <= scale.width);
+            assert!(rect.bottom() <= scale.height);
+        }
+        assert_eq!(hotbar.len(), 9);
+        for rect in hotbar {
             assert!(rect.x >= 0.0);
             assert!(rect.y >= 0.0);
             assert!(rect.right() <= scale.width);
