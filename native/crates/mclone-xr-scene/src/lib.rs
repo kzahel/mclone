@@ -184,6 +184,10 @@ pub struct XrTerrainFrameTiming {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct XrTerrainEyeRenderTiming {
     pub prepare_ms: f64,
+    pub cull_ms: f64,
+    pub uniform_write_ms: f64,
+    pub translucent_collect_ms: f64,
+    pub translucent_sort_ms: f64,
     pub encode_ms: f64,
     pub section_encode_ms: f64,
     pub submit_ms: f64,
@@ -1016,6 +1020,10 @@ where
             summary,
             timing: XrTerrainEyeRenderTiming {
                 prepare_ms,
+                cull_ms: frame_timing.terrain_cull_ms,
+                uniform_write_ms: frame_timing.terrain_uniform_write_ms,
+                translucent_collect_ms: frame_timing.terrain_translucent_collect_ms,
+                translucent_sort_ms: frame_timing.terrain_translucent_sort_ms,
                 encode_ms: (encode_total_ms - prepare_ms).max(0.0),
                 section_encode_ms: frame_timing.terrain_encode_ms,
                 submit_ms: 0.0,

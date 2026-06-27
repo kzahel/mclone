@@ -63,6 +63,10 @@ pub struct FullFrameRenderSummary {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FullFrameRenderTiming {
     pub terrain_records_ms: f64,
+    pub terrain_cull_ms: f64,
+    pub terrain_uniform_write_ms: f64,
+    pub terrain_translucent_collect_ms: f64,
+    pub terrain_translucent_sort_ms: f64,
     pub terrain_prepare_ms: f64,
     pub terrain_encode_ms: f64,
 }
@@ -386,6 +390,10 @@ where
                     render_options,
                 )?;
                 timing.terrain_records_ms += terrain_timing.records_ms;
+                timing.terrain_cull_ms += terrain_timing.cull_ms;
+                timing.terrain_uniform_write_ms += terrain_timing.uniform_write_ms;
+                timing.terrain_translucent_collect_ms += terrain_timing.translucent_collect_ms;
+                timing.terrain_translucent_sort_ms += terrain_timing.translucent_sort_ms;
                 timing.terrain_prepare_ms += terrain_timing.prepare_ms;
                 timing.terrain_encode_ms += terrain_timing.encode_ms;
                 frame_stats
@@ -399,6 +407,10 @@ where
                     render_options,
                 )?;
                 timing.terrain_records_ms += terrain_timing.records_ms;
+                timing.terrain_cull_ms += terrain_timing.cull_ms;
+                timing.terrain_uniform_write_ms += terrain_timing.uniform_write_ms;
+                timing.terrain_translucent_collect_ms += terrain_timing.translucent_collect_ms;
+                timing.terrain_translucent_sort_ms += terrain_timing.translucent_sort_ms;
                 timing.terrain_prepare_ms += terrain_timing.prepare_ms;
                 timing.terrain_encode_ms += terrain_timing.encode_ms;
                 frame_stats

@@ -218,6 +218,21 @@ behind the shared XR contracts; do not fork mclone rendering for Quest.
   `2.134ms`; p50 improved from `15.609ms` to `14.431ms`. App GPU remained
   about `7.0ms`, so the next useful split is inside the remaining per-eye
   prepare bucket.
+- Slice C2 is attribution-only: split each eye's prepare bucket into
+  `cull`, `uniform_write`, `translucent_collect`, and `translucent_sort` maxima
+  on an opt-in `MCLONE_ANDROID_XR_PERF_TERRAIN_PREP` line. Keep it separate
+  from the existing terrain line so Android logcat does not truncate the marker
+  before the stereo submit/poll fields. Use that measurement to choose between
+  exact cull/sort reuse, left/right prep jobs, or moving on to draw
+  encoding/bundles.
+- Slice C2 result on frozen RD10 metrics: p50 stayed at `14.414ms`; shared
+  records max `1.305ms`; prepare max left/right `2.324ms` / `2.291ms`; cull
+  max left/right `2.148ms` / `2.113ms`; translucent collect max `0.383ms` /
+  `0.296ms`; translucent sort max `0.046ms` / `0.028ms`. The remaining prepare
+  bucket is cull-dominated. The next behavior-preserving implementation should
+  extract a pure per-eye prepared-draw/cull result from command encoding so
+  left/right cull can either be cached under conservative keys or run as
+  independent jobs after shared records are built.
 
 ### Slice D - Cut per-draw CPU cost (batching or render bundles)
 

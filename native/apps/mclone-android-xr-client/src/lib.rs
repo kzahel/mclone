@@ -1337,11 +1337,19 @@ mod android {
         terrain_left_eye_ms: f64,
         terrain_right_eye_ms: f64,
         terrain_left_eye_prepare_ms: f64,
+        terrain_left_eye_cull_ms: f64,
+        terrain_left_eye_uniform_write_ms: f64,
+        terrain_left_eye_translucent_collect_ms: f64,
+        terrain_left_eye_translucent_sort_ms: f64,
         terrain_left_eye_encode_ms: f64,
         terrain_left_eye_section_encode_ms: f64,
         terrain_left_eye_submit_ms: f64,
         terrain_left_eye_poll_wait_ms: f64,
         terrain_right_eye_prepare_ms: f64,
+        terrain_right_eye_cull_ms: f64,
+        terrain_right_eye_uniform_write_ms: f64,
+        terrain_right_eye_translucent_collect_ms: f64,
+        terrain_right_eye_translucent_sort_ms: f64,
         terrain_right_eye_encode_ms: f64,
         terrain_right_eye_section_encode_ms: f64,
         terrain_right_eye_submit_ms: f64,
@@ -1721,6 +1729,17 @@ mod android {
                 self.max_render.terrain_stereo_poll_wait_ms
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_TERRAIN_PREP max_terrain_left_eye_cull_ms={:.3} max_terrain_left_eye_uniform_write_ms={:.3} max_terrain_left_eye_translucent_collect_ms={:.3} max_terrain_left_eye_translucent_sort_ms={:.3} max_terrain_right_eye_cull_ms={:.3} max_terrain_right_eye_uniform_write_ms={:.3} max_terrain_right_eye_translucent_collect_ms={:.3} max_terrain_right_eye_translucent_sort_ms={:.3}",
+                self.max_render.terrain_left_eye_cull_ms,
+                self.max_render.terrain_left_eye_uniform_write_ms,
+                self.max_render.terrain_left_eye_translucent_collect_ms,
+                self.max_render.terrain_left_eye_translucent_sort_ms,
+                self.max_render.terrain_right_eye_cull_ms,
+                self.max_render.terrain_right_eye_uniform_write_ms,
+                self.max_render.terrain_right_eye_translucent_collect_ms,
+                self.max_render.terrain_right_eye_translucent_sort_ms
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_UPLOAD_MAX work_frames={} rebuilt_sections={} removed_sections={} rebuilt_vertices={} rebuilt_indices={} uploaded_sections={} upload_removed_sections={} uploaded_vertices={} uploaded_indices={} ready_sections={}",
                 self.upload_work_frames,
                 self.max_upload.rebuilt_section_count,
@@ -1857,6 +1876,16 @@ mod android {
             terrain_left_eye_prepare_ms: a
                 .terrain_left_eye_prepare_ms
                 .max(b.terrain_left_eye_prepare_ms),
+            terrain_left_eye_cull_ms: a.terrain_left_eye_cull_ms.max(b.terrain_left_eye_cull_ms),
+            terrain_left_eye_uniform_write_ms: a
+                .terrain_left_eye_uniform_write_ms
+                .max(b.terrain_left_eye_uniform_write_ms),
+            terrain_left_eye_translucent_collect_ms: a
+                .terrain_left_eye_translucent_collect_ms
+                .max(b.terrain_left_eye_translucent_collect_ms),
+            terrain_left_eye_translucent_sort_ms: a
+                .terrain_left_eye_translucent_sort_ms
+                .max(b.terrain_left_eye_translucent_sort_ms),
             terrain_left_eye_encode_ms: a
                 .terrain_left_eye_encode_ms
                 .max(b.terrain_left_eye_encode_ms),
@@ -1872,6 +1901,16 @@ mod android {
             terrain_right_eye_prepare_ms: a
                 .terrain_right_eye_prepare_ms
                 .max(b.terrain_right_eye_prepare_ms),
+            terrain_right_eye_cull_ms: a.terrain_right_eye_cull_ms.max(b.terrain_right_eye_cull_ms),
+            terrain_right_eye_uniform_write_ms: a
+                .terrain_right_eye_uniform_write_ms
+                .max(b.terrain_right_eye_uniform_write_ms),
+            terrain_right_eye_translucent_collect_ms: a
+                .terrain_right_eye_translucent_collect_ms
+                .max(b.terrain_right_eye_translucent_collect_ms),
+            terrain_right_eye_translucent_sort_ms: a
+                .terrain_right_eye_translucent_sort_ms
+                .max(b.terrain_right_eye_translucent_sort_ms),
             terrain_right_eye_encode_ms: a
                 .terrain_right_eye_encode_ms
                 .max(b.terrain_right_eye_encode_ms),
@@ -2183,12 +2222,26 @@ mod android {
         timing.terrain_left_eye_ms = frame_summary.timing.left_eye_ms;
         timing.terrain_right_eye_ms = frame_summary.timing.right_eye_ms;
         timing.terrain_left_eye_prepare_ms = frame_summary.timing.left_eye_render.prepare_ms;
+        timing.terrain_left_eye_cull_ms = frame_summary.timing.left_eye_render.cull_ms;
+        timing.terrain_left_eye_uniform_write_ms =
+            frame_summary.timing.left_eye_render.uniform_write_ms;
+        timing.terrain_left_eye_translucent_collect_ms =
+            frame_summary.timing.left_eye_render.translucent_collect_ms;
+        timing.terrain_left_eye_translucent_sort_ms =
+            frame_summary.timing.left_eye_render.translucent_sort_ms;
         timing.terrain_left_eye_encode_ms = frame_summary.timing.left_eye_render.encode_ms;
         timing.terrain_left_eye_section_encode_ms =
             frame_summary.timing.left_eye_render.section_encode_ms;
         timing.terrain_left_eye_submit_ms = frame_summary.timing.left_eye_render.submit_ms;
         timing.terrain_left_eye_poll_wait_ms = frame_summary.timing.left_eye_render.poll_wait_ms;
         timing.terrain_right_eye_prepare_ms = frame_summary.timing.right_eye_render.prepare_ms;
+        timing.terrain_right_eye_cull_ms = frame_summary.timing.right_eye_render.cull_ms;
+        timing.terrain_right_eye_uniform_write_ms =
+            frame_summary.timing.right_eye_render.uniform_write_ms;
+        timing.terrain_right_eye_translucent_collect_ms =
+            frame_summary.timing.right_eye_render.translucent_collect_ms;
+        timing.terrain_right_eye_translucent_sort_ms =
+            frame_summary.timing.right_eye_render.translucent_sort_ms;
         timing.terrain_right_eye_encode_ms = frame_summary.timing.right_eye_render.encode_ms;
         timing.terrain_right_eye_section_encode_ms =
             frame_summary.timing.right_eye_render.section_encode_ms;

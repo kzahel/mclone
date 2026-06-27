@@ -19,8 +19,9 @@ If a benchmark is captured from an uncommitted worktree, record that explicitly
 and name the later commit that contains the same runtime code.
 
 Current summaries are saved as a compact marker block:
-`MCLONE_ANDROID_XR_PERF_SUMMARY`, `STAGES`, `TERRAIN`, `UPLOAD_MAX`,
-`RUNTIME_MAX`, `QUEUE_MAX`, `COMPILE_MAX`, `UPLOAD_LAST`, and `DRAW`. They
+`MCLONE_ANDROID_XR_PERF_SUMMARY`, `STAGES`, `TERRAIN`, `TERRAIN_PREP`,
+`UPLOAD_MAX`, `RUNTIME_MAX`, `QUEUE_MAX`, `COMPILE_MAX`, `UPLOAD_LAST`, and
+`DRAW`. They
 include refresh fields (`refresh_supported`, `current_hz`, `supported_hz`,
 `target_hz`, `budget_ms`), max stage timings, terrain runtime
 poll/sync/GPU-upload timings, runtime poll sub-buckets, diagnostics
@@ -72,6 +73,58 @@ draw counts during the measured window. Current frozen scripts use
 force-stops the app and sleeps the headset during cleanup.
 
 ## Records
+
+### 2026-06-27 - Standalone Quest 3 Frozen RD10 Prepare Sub-Buckets
+
+Benchmarked code commit: this prepare-sub-bucket commit. The run was captured
+immediately before commit from the same implementation worktree, based on
+`1534b34` (`Share Quest XR section prep across stereo eyes`).
+
+Capture note: captured from the implementation worktree carrying the Slice C2
+attribution-only prepare sub-buckets. The run used
+`native:android-xr:perf:frozen:rd10:metrics` with fixed render view pose
+`0,80,-96,180`, seed `12345`, center chunk `(0, 0)`, noon, frozen time, and
+RD10. Cleanup was run explicitly after the sample: `pidof
+com.kzahel.mclone.xr` was empty, `dumpsys power` reported
+`mWakefulness=Asleep`, and `mHoldingDisplaySuspendBlocker=false`.
+
+Summary:
+
+| Field | Value |
+|---|---:|
+| Sample | `20.013s`, `1355` frames |
+| Target | `72.0 Hz` / `13.889ms` |
+| Frame avg / p50 / p95 / p99 / max | `14.722ms` / `14.414ms` / `16.509ms` / `17.098ms` / `18.493ms` |
+| Terrain frame max | `17.951ms` |
+| Shared section records max | `1.305ms` |
+| Left / right eye max wall | `3.662ms` / `3.342ms` |
+| Drawn sections / indices | `179` / `1,352,142` |
+| Runtime work during sample | `0` upload work frames; runtime poll/sync/GPU upload all `0.000ms` |
+| Meta app GPU / GPU util | `6.901ms` / `60.537%` |
+| Meta compositor GPU / dropped frames | `1.546ms` / `56` cumulative |
+
+Prepare sub-bucket maxima. These are independent max fields, not necessarily
+one additive frame:
+
+| Bucket | Left | Right |
+|---|---:|---:|
+| Prepare total | `2.324ms` | `2.291ms` |
+| Cull | `2.148ms` | `2.113ms` |
+| Uniform write | `0.210ms` | `0.120ms` |
+| Translucent collect | `0.383ms` | `0.296ms` |
+| Translucent sort | `0.046ms` | `0.028ms` |
+| Encode / section encode | `1.693ms` / `1.171ms` | `1.288ms` / `0.900ms` |
+| Stereo finish / submit / poll wait | `0.046ms` / `0.585ms` / `10.199ms` | |
+
+Interpretation:
+
+- The remaining per-eye prepare cost is cull-dominated. Uniform writes and
+  translucent sort are small; translucent collection is visible but secondary.
+- Exact live-view caching remains unsafe because headset pose jitters, so the
+  next useful implementation is to extract a pure per-eye prepared-draw/cull
+  result from command encoding. That gives two options: conservative cull/result
+  reuse under coarse keys, or left/right cull jobs after shared records are
+  built.
 
 ### 2026-06-27 - Standalone Quest 3 Frozen RD10 Shared Stereo Section Prep
 

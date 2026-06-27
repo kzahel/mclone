@@ -268,6 +268,10 @@ pub struct TexturedSectionRenderStats {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TexturedSectionRenderTiming {
     pub records_ms: f64,
+    pub cull_ms: f64,
+    pub uniform_write_ms: f64,
+    pub translucent_collect_ms: f64,
+    pub translucent_sort_ms: f64,
     pub prepare_ms: f64,
     pub encode_ms: f64,
 }
@@ -1645,12 +1649,21 @@ impl TexturedSectionDrawResources {
                 &records_storage
             }
         };
+        let cull_start = timing.as_ref().map(|_| Instant::now());
         let culling = cull_textured_sections(records, render_view, options);
+        if let (Some(timing), Some(cull_start)) = (&mut timing, cull_start) {
+            timing.cull_ms = elapsed_ms(cull_start.elapsed());
+        }
+        let uniform_start = timing.as_ref().map(|_| Instant::now());
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
             &uniform_bytes(render_view, options),
         );
+        if let (Some(timing), Some(uniform_start)) = (&mut timing, uniform_start) {
+            timing.uniform_write_ms = elapsed_ms(uniform_start.elapsed());
+        }
+        let translucent_collect_start = timing.as_ref().map(|_| Instant::now());
         let mut translucent_sections = self
             .sections
             .iter()
@@ -1658,9 +1671,19 @@ impl TexturedSectionDrawResources {
                 culling.drawn_keys.contains(key) && !mesh.translucent_index_range().is_empty()
             })
             .collect::<Vec<_>>();
+        if let (Some(timing), Some(translucent_collect_start)) =
+            (&mut timing, translucent_collect_start)
+        {
+            timing.translucent_collect_ms = elapsed_ms(translucent_collect_start.elapsed());
+        }
+        let translucent_sort_start = timing.as_ref().map(|_| Instant::now());
         translucent_sections.sort_by(|(left_key, _), (right_key, _)| {
             compare_translucent_sections(**left_key, **right_key, render_view)
         });
+        if let (Some(timing), Some(translucent_sort_start)) = (&mut timing, translucent_sort_start)
+        {
+            timing.translucent_sort_ms = elapsed_ms(translucent_sort_start.elapsed());
+        }
         if let (Some(timing), Some(prepare_start)) = (&mut timing, prepare_start) {
             timing.prepare_ms = elapsed_ms(prepare_start.elapsed());
         }
