@@ -38,11 +38,8 @@ pub(crate) fn graph_block_light_sections_for_chunk<'a>(
             engine
                 .storage()
                 .get_visible_data_layer(section)
-                .and_then(|layer| {
-                    layer
-                        .clone()
-                        .into_bytes()
-                        .map(|bytes| PackedLightSection::new(section_y, None, Some(bytes)))
+                .map(|layer| {
+                    PackedLightSection::new(section_y, None, Some(layer.to_packed_bytes()))
                 })
         })
         .collect()

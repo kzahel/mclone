@@ -235,6 +235,42 @@ mod tests {
     }
 
     #[test]
+    fn provisional_sky_light_preserves_dark_section_below_lit_section() {
+        let height = SECTION_HEIGHT * 2;
+        let mut blocks = vec![AIR; (CHUNK_WIDTH * height * CHUNK_WIDTH) as usize];
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                blocks[chunk_block_index(local_x, SECTION_HEIGHT - 1, local_z)] = STONE;
+            }
+        }
+
+        let sections = provisional_sky_light_sections(0, height, &blocks);
+
+        assert!(
+            sections
+                .iter()
+                .any(|section| section.section_y == 0 && section.sky.is_some()),
+            "lower section should carry an explicit empty sky layer"
+        );
+        assert_eq!(
+            mclone_light::packed_sky_light(
+                mclone_light::packed_light_at_local_block_or_fullbright(
+                    &sections, 0, height, 8, 4, 8,
+                )
+            ),
+            0
+        );
+        assert_eq!(
+            mclone_light::packed_sky_light(
+                mclone_light::packed_light_at_local_block_or_fullbright(
+                    &sections, 0, height, 8, 20, 8,
+                )
+            ),
+            15
+        );
+    }
+
+    #[test]
     fn provisional_sky_light_matches_java_synthetic_fixture() {
         let fixture = serde_json::from_str::<Value>(include_str!(
             "../../../../test/fixtures/lighting/sky-synthetic.json"

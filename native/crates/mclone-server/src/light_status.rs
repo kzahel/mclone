@@ -152,8 +152,13 @@ pub(crate) fn hydrate_loaded_light_snapshot(
 
     engine.accept_queued_section_data();
     engine.retain_data(column, false);
-    snapshot.light_sections =
-        collect_hydrated_light_sections(&engine, snapshot.pos, min_section_y, section_count);
+    snapshot.light_sections = collect_hydrated_light_sections(
+        &engine,
+        snapshot.pos,
+        min_section_y,
+        section_count,
+        &snapshot.light_sections,
+    );
     Ok(snapshot)
 }
 
@@ -174,23 +179,31 @@ fn collect_hydrated_light_sections(
     pos: ChunkPos,
     min_section_y: i32,
     section_count: i32,
+    persisted_sections: &[PackedLightSection],
 ) -> Vec<PackedLightSection> {
     let mut sections = Vec::new();
-    for section_offset in 0..section_count {
-        let section_y = min_section_y + section_offset;
-        let section = section_as_long(pos.x, section_y, pos.z);
-        let sky = engine
-            .sky_engine()
-            .storage()
-            .get_visible_data_layer(section)
-            .and_then(|layer| layer.clone().into_bytes());
-        let block = engine
-            .block_engine()
-            .storage()
-            .get_visible_data_layer(section)
-            .and_then(|layer| layer.clone().into_bytes());
+    let max_section_y = min_section_y + section_count;
+    for persisted in persisted_sections {
+        if persisted.section_y < min_section_y || persisted.section_y >= max_section_y {
+            continue;
+        }
+        let section = section_as_long(pos.x, persisted.section_y, pos.z);
+        let sky = persisted.sky.as_ref().and_then(|_| {
+            engine
+                .sky_engine()
+                .storage()
+                .get_visible_data_layer(section)
+                .map(|layer| layer.to_packed_bytes())
+        });
+        let block = persisted.block.as_ref().and_then(|_| {
+            engine
+                .block_engine()
+                .storage()
+                .get_visible_data_layer(section)
+                .map(|layer| layer.to_packed_bytes())
+        });
         if sky.is_some() || block.is_some() {
-            sections.push(PackedLightSection::new(section_y, sky, block));
+            sections.push(PackedLightSection::new(persisted.section_y, sky, block));
         }
     }
     sections
@@ -245,6 +258,30 @@ mod tests {
 
         assert_eq!(hydrated.status, ChunkStatus::Light);
         assert!(hydrated.light_correct);
+        assert_eq!(hydrated.light_sections, snapshot.light_sections);
+    }
+
+    #[test]
+    fn loaded_light_hydration_does_not_manufacture_unpersisted_layers() {
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Light,
+            ChunkRevision(7),
+            0,
+            SECTION_HEIGHT * 2,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME * 2],
+        )
+        .with_light_sections(
+            true,
+            vec![PackedLightSection::new(
+                1,
+                Some(vec![0; LIGHT_DATA_LAYER_BYTE_COUNT]),
+                None,
+            )],
+        );
+
+        let hydrated = hydrate_loaded_light_snapshot(snapshot.clone()).unwrap();
+
         assert_eq!(hydrated.light_sections, snapshot.light_sections);
     }
 }

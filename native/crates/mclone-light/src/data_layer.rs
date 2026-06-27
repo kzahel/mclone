@@ -106,6 +106,13 @@ impl DataLayer {
         self.data.map(|data| Vec::from(*data))
     }
 
+    pub fn to_packed_bytes(&self) -> Vec<u8> {
+        self.data
+            .as_deref()
+            .map(|data| data.to_vec())
+            .unwrap_or_else(|| vec![0; DATA_LAYER_SIZE])
+    }
+
     pub fn is_empty(&self) -> bool {
         self.data.is_none()
     }
@@ -159,6 +166,19 @@ mod tests {
         assert_eq!(layer.get(0, 0, 0), 0x0A);
         assert_eq!(layer.get(1, 0, 0), 0x03);
         assert_eq!(layer.get(15, 15, 15), 0x0F);
+    }
+
+    #[test]
+    fn data_layer_packed_bytes_preserve_lazy_empty_layers() {
+        let mut layer = DataLayer::new();
+
+        assert_eq!(layer.to_packed_bytes(), vec![0; DATA_LAYER_SIZE]);
+        assert!(layer.is_empty());
+
+        layer.set(1, 2, 3, 12);
+        let bytes = layer.to_packed_bytes();
+
+        assert_eq!(bytes[data_layer_index(1, 2, 3) >> 1] >> 4 & 15, 12);
     }
 
     #[test]

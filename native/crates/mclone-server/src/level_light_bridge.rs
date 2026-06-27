@@ -174,12 +174,12 @@ pub(crate) fn graph_level_light_sections_for_chunks_timed<'a>(
                 .sky_engine()
                 .storage()
                 .get_visible_data_layer(section)
-                .and_then(|layer| layer.clone().into_bytes());
+                .map(|layer| layer.to_packed_bytes());
             let block = engine
                 .block_engine()
                 .storage()
                 .get_visible_data_layer(section)
-                .and_then(|layer| layer.clone().into_bytes());
+                .map(|layer| layer.to_packed_bytes());
             if sky.is_some() || block.is_some() {
                 sections.push(PackedLightSection::new(section_y, sky, block));
             }

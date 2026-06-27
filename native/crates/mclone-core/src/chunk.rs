@@ -499,4 +499,30 @@ mod tests {
         assert!(section.sky.is_some());
         assert!(section.block.is_none());
     }
+
+    #[test]
+    fn chunk_snapshot_preserves_explicit_empty_light_layers() {
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Light,
+            ChunkRevision(1),
+            0,
+            SECTION_HEIGHT,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        )
+        .with_light_sections(
+            true,
+            vec![PackedLightSection::new(
+                0,
+                Some(vec![0; LIGHT_DATA_LAYER_BYTE_COUNT]),
+                None,
+            )],
+        );
+
+        assert_eq!(snapshot.light_sections.len(), 1);
+        assert_eq!(snapshot.light_sections[0].section_y, 0);
+        let sky = snapshot.light_sections[0].sky.as_ref().unwrap();
+        assert_eq!(sky.len(), LIGHT_DATA_LAYER_BYTE_COUNT);
+        assert!(sky.iter().all(|value| *value == 0));
+    }
 }

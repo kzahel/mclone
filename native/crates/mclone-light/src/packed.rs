@@ -146,6 +146,20 @@ mod tests {
     }
 
     #[test]
+    fn packed_light_sampling_respects_explicit_empty_sky_layers() {
+        let index = chunk_section_index(2, 4, 3);
+        let sections = [
+            PackedLightSection::new(0, Some(vec![0; LIGHT_DATA_LAYER_BYTE_COUNT]), None),
+            PackedLightSection::new(1, Some(light_layer_with_value(index, 9)), None),
+        ];
+
+        assert_eq!(
+            packed_light_at_local_block_or_fullbright(&sections, 0, 32, 2, 4, 3),
+            pack_light(0, 0)
+        );
+    }
+
+    #[test]
     fn packed_light_sampling_falls_back_to_fullbright_without_light_payload() {
         assert_eq!(
             packed_light_at_local_block_or_fullbright(&[], 0, 16, 2, 4, 3),
