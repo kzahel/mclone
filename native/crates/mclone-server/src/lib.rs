@@ -433,6 +433,53 @@ mod tests {
         assert_generated_chunk_light_matches_scheduler_fixture(fixture, true);
     }
 
+    #[test]
+    fn generated_origin_chunk_block_light_scheduler_oracle_has_one_known_edge_delta() {
+        let fixture = serde_json::from_str::<Value>(include_str!(
+            "../../../../test/fixtures/scheduler/vanilla-scheduler-light-snapshot-seed-12345-chunk-0-0.json"
+        ))
+        .expect("valid scheduler LIGHT fixture");
+        let chunks = fixture["chunks"]
+            .as_array()
+            .expect("scheduler fixture chunks must be an array");
+        assert_eq!(chunks.len(), 1);
+        let chunk = &chunks[0];
+        let target = ChunkPos::new(fixture_i32(chunk, "chunkX"), fixture_i32(chunk, "chunkZ"));
+        let seed = fixture["seed"]
+            .as_str()
+            .expect("scheduler fixture seed must be a string")
+            .parse::<i64>()
+            .expect("scheduler fixture seed must fit i64");
+
+        let mut server = IntegratedServer::new(seed);
+        let updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkView(ChunkView {
+                center: target,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }),
+        );
+        let snapshot = snapshot_update_for(&updates, target)
+            .expect("native server should publish oracle target snapshot");
+        let expected = fixture_light_layer(chunk, "block");
+        let actual = packed_light_layer(&snapshot.light_sections, LightLayer::Block);
+
+        assert_eq!(
+            actual.keys().copied().collect::<Vec<_>>(),
+            expected.keys().copied().collect::<Vec<_>>(),
+            "block light section set should already match the scheduler oracle"
+        );
+        assert_eq!(
+            light_layer_mismatch_report("block", &expected, &actual),
+            LightLayerMismatchReport {
+                byte_mismatches: 1,
+                nibble_mismatches: 1,
+                first_mismatch: Some((1, 1784, 0x10, 0x00)),
+            }
+        );
+    }
+
     fn assert_generated_chunk_light_matches_persisted_fixture(
         fixture: Value,
         compare_block_light: bool,
@@ -1379,10 +1426,37 @@ mod tests {
     ) {
         let expected_ys = expected.keys().copied().collect::<Vec<_>>();
         let actual_ys = actual.keys().copied().collect::<Vec<_>>();
-        let mut byte_mismatches = 0usize;
-        let mut nibble_mismatches = 0usize;
-        let mut first_mismatch = None;
-        for (section_y, expected_bytes) in &expected {
+        let report = light_layer_mismatch_report(layer_name, &expected, &actual);
+        if let Some((section_y, offset, expected_byte, actual_byte)) = report.first_mismatch {
+            panic!(
+                "{layer_name} light mismatch: {} byte(s), {} nibble(s); first at section {section_y} byte {offset}: expected 0x{expected_byte:02x}, got 0x{actual_byte:02x}",
+                report.byte_mismatches, report.nibble_mismatches,
+            );
+        }
+        assert_eq!(
+            actual_ys, expected_ys,
+            "{layer_name} light section set mismatch"
+        );
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct LightLayerMismatchReport {
+        byte_mismatches: usize,
+        nibble_mismatches: usize,
+        first_mismatch: Option<(i32, usize, u8, u8)>,
+    }
+
+    fn light_layer_mismatch_report(
+        layer_name: &str,
+        expected: &BTreeMap<i32, Vec<u8>>,
+        actual: &BTreeMap<i32, Vec<u8>>,
+    ) -> LightLayerMismatchReport {
+        let mut report = LightLayerMismatchReport {
+            byte_mismatches: 0,
+            nibble_mismatches: 0,
+            first_mismatch: None,
+        };
+        for (section_y, expected_bytes) in expected {
             let Some(actual_bytes) = actual.get(section_y) else {
                 continue;
             };
@@ -1397,25 +1471,19 @@ mod tests {
                 if expected == actual {
                     continue;
                 }
-                byte_mismatches += 1;
+                report.byte_mismatches += 1;
                 if (expected & 0x0F) != (actual & 0x0F) {
-                    nibble_mismatches += 1;
+                    report.nibble_mismatches += 1;
                 }
                 if (expected >> 4) != (actual >> 4) {
-                    nibble_mismatches += 1;
+                    report.nibble_mismatches += 1;
                 }
-                first_mismatch.get_or_insert((*section_y, offset, *expected, *actual));
+                report
+                    .first_mismatch
+                    .get_or_insert((*section_y, offset, *expected, *actual));
             }
         }
-        if let Some((section_y, offset, expected_byte, actual_byte)) = first_mismatch {
-            panic!(
-                "{layer_name} light mismatch: {byte_mismatches} byte(s), {nibble_mismatches} nibble(s); first at section {section_y} byte {offset}: expected 0x{expected_byte:02x}, got 0x{actual_byte:02x}",
-            );
-        }
-        assert_eq!(
-            actual_ys, expected_ys,
-            "{layer_name} light section set mismatch"
-        );
+        report
     }
 
     fn normalize_persisted_light_layer(
