@@ -11,7 +11,8 @@ use mclone_app_runtime::frame_render::{
 };
 use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
 use mclone_app_runtime::local_single_view::{
-    LocalSingleViewSceneOptions, NativeSingleViewSessionRuntime,
+    LocalSingleViewSceneOptions, LocalSingleViewStartupPump, LocalSingleViewStartupStep,
+    NativeSingleViewSceneRuntime, NativeSingleViewSessionRuntime,
 };
 use mclone_app_runtime::render_assets::TexturedMeshAssets;
 use mclone_app_runtime::session::{
@@ -39,7 +40,7 @@ use mclone_render_session::{
 };
 use mclone_ui::{
     DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState,
-    GuiScale, Point, StatusOverlay, render_status_overlay,
+    GuiScale, Point, StatusOverlay, render_loading_progress_overlay, render_status_overlay,
 };
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
@@ -169,6 +170,7 @@ pub struct XrTerrainFrameSummary {
     pub drawn_index_count: u32,
     pub gui_command_count: usize,
     pub ui_active: bool,
+    pub local_startup_active: bool,
     pub actor_count: usize,
     pub drawn_actor_count: usize,
     pub timing: XrTerrainFrameTiming,
@@ -299,6 +301,13 @@ where
     render_stats: RenderStreamStats,
 }
 
+struct XrLocalStartup {
+    request: SessionStartRequest,
+    scene: XrSceneOptions,
+    pump: LocalSingleViewStartupPump,
+    camera: EngineCameraController,
+}
+
 #[derive(Debug)]
 pub enum XrLocalOnlyRemoteSession {}
 
@@ -322,6 +331,7 @@ where
     scene: XrSceneOptions,
     color_format: wgpu::TextureFormat,
     runtime: NativeSingleViewSessionRuntime<S>,
+    local_startup: Option<XrLocalStartup>,
     session_runtime_factory: Option<XrSessionRuntimeFactory<S>>,
     camera: EngineCameraController,
     initial_alignment_mode: XrViewAlignmentMode,
@@ -406,6 +416,7 @@ where
             scene,
             color_format,
             runtime: started.runtime,
+            local_startup: None,
             session_runtime_factory: None,
             camera: started.camera,
             initial_alignment_mode: if startup_view_pose.is_some() {
@@ -547,6 +558,12 @@ where
         } else {
             timing.menu_pointer_ms += elapsed_ms(menu_pointer_start.elapsed());
         }
+        if self.advance_local_startup(device, queue)? {
+            let render_views_start = Instant::now();
+            render_views = self.render_views(&views)?;
+            timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
+            self.update_menu_panel_pose(render_views);
+        }
         self.render_prepared_frame(
             device,
             queue,
@@ -571,13 +588,15 @@ where
         let center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         let upload = match runtime_mode {
-            XrTerrainRuntimeUpdateMode::Live => {
+            XrTerrainRuntimeUpdateMode::Live if self.local_startup.is_none() => {
                 let runtime_upload_start = Instant::now();
                 let upload = self.poll_runtime_and_upload(device, center_position, &mut timing)?;
                 timing.runtime_upload_ms = elapsed_ms(runtime_upload_start.elapsed());
                 upload
             }
-            XrTerrainRuntimeUpdateMode::Frozen => self.frozen_runtime_upload_summary(),
+            XrTerrainRuntimeUpdateMode::Live | XrTerrainRuntimeUpdateMode::Frozen => {
+                self.frozen_runtime_upload_summary()
+            }
         };
         let render_options = self.effective_render_options(center_position);
         let sky_clear_color = self.sky_clear_color();
@@ -757,6 +776,7 @@ where
                 drawn_index_count: summary.drawn_index_count,
                 gui_command_count: summary.gui_command_count,
                 ui_active: self.ui.is_active(),
+                local_startup_active: self.local_startup.is_some(),
                 actor_count: summary.actor_count,
                 drawn_actor_count: summary.drawn_actor_count,
                 timing,
@@ -771,6 +791,7 @@ where
             drawn_index_count: self.render_stats.drawn_index_count,
             gui_command_count: 0,
             ui_active: self.ui.is_active(),
+            local_startup_active: self.local_startup.is_some(),
             actor_count: self.render_stats.actor_count,
             drawn_actor_count: self.render_stats.drawn_actor_count,
             timing,
@@ -789,6 +810,9 @@ where
             SessionStartRequest::JoinRemote { .. } => self.remote_session_options(),
             SessionStartRequest::Unknown => bail!("unsupported unknown XR replacement session"),
         };
+        if matches!(request, SessionStartRequest::NewLocalWorld { .. }) {
+            return self.begin_local_replacement_start(request, scene);
+        }
         self.start_replacement_session(device, queue, request, scene)
     }
 
@@ -965,6 +989,13 @@ where
         let ui_state = self.current_ui_render_state();
         let ui_active = self.ui.is_active();
         let mut ui_draw = self.ui.render_draw_list(ui_state);
+        if let Some(progress) = self
+            .local_startup
+            .as_ref()
+            .and_then(|startup| startup.pump.progress_overlay())
+        {
+            render_loading_progress_overlay(gui_scale, &mut ui_draw, &progress);
+        }
         render_status_overlay(gui_scale, &mut ui_draw, &self.session_status);
         let summary_ui_draw = ui_draw.clone();
         let mut render_stats = self.render_stats;
@@ -1102,9 +1133,12 @@ where
     }
 
     fn current_ui_render_state(&self) -> GameUiRenderState {
+        let render_distance = self.local_startup.as_ref().map_or_else(
+            || self.runtime.render_distance(),
+            |startup| startup.scene.render_distance,
+        );
         GameUiRenderState {
-            render_distance: (self.runtime.render_distance() as i32)
-                .clamp(1, MAX_XR_RENDER_DISTANCE as i32),
+            render_distance: (render_distance as i32).clamp(1, MAX_XR_RENDER_DISTANCE as i32),
             min_render_distance: 1,
             max_render_distance: MAX_XR_RENDER_DISTANCE as i32,
             section_occlusion_culling: self.render_options.section_occlusion_culling,
@@ -1129,6 +1163,14 @@ where
     fn apply_menu_toggle_input(&mut self, controllers: &[XrControllerSnapshot]) {
         let toggle_down = xr_menu_toggle_pressed(controllers);
         if toggle_down && !self.menu_toggle_down {
+            if self.local_startup.is_some() {
+                if !self.ui.is_active() {
+                    self.ui.open_pause();
+                    self.menu_panel_recenter_pending = true;
+                }
+                self.menu_toggle_down = toggle_down;
+                return;
+            }
             if self.ui.is_active() {
                 self.ui.close();
                 self.ui.clear_input();
@@ -1244,6 +1286,207 @@ where
         scene
     }
 
+    fn begin_local_replacement_start(
+        &mut self,
+        request: SessionStartRequest,
+        scene: XrSceneOptions,
+    ) -> Result<()> {
+        let scene = scene.validated()?;
+        let mesh_assets = self.runtime.mesh_assets().clone();
+        let pump = LocalSingleViewStartupPump::with_mesh_assets(
+            local_single_view_options(scene),
+            mesh_assets,
+        )
+        .context("create XR local world startup pump")?;
+        let mut camera = EngineCameraController::spawn_for_chunk(scene.center());
+        camera.set_movement_speed_multiplier(f64::from(scene.movement_speed_multiplier));
+        self.local_startup = Some(XrLocalStartup {
+            request: request.clone(),
+            scene,
+            pump,
+            camera,
+        });
+        self.session_status = StatusOverlay::new(request.starting_message(), true);
+        self.ui.clear_input();
+        self.menu_pointer_down = false;
+        self.menu_panel_recenter_pending = true;
+        log::info!(
+            "XR local world startup queued seed={} center=({}, {}) render_distance={}",
+            scene.seed,
+            scene.chunk_x,
+            scene.chunk_z,
+            scene.render_distance
+        );
+        Ok(())
+    }
+
+    fn advance_local_startup(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<bool> {
+        if self.local_startup.is_none() {
+            return Ok(false);
+        }
+
+        let step = {
+            let startup = self
+                .local_startup
+                .as_mut()
+                .expect("startup presence checked");
+            let camera_position = glam_vec3_from_vec3d(startup.camera.snapshot().eye);
+            startup
+                .pump
+                .step(camera_position)
+                .context("advance XR local world startup pump")
+        };
+        let step = match step {
+            Ok(step) => step,
+            Err(error) => {
+                let startup = self
+                    .local_startup
+                    .take()
+                    .expect("startup must exist after failed pump step");
+                self.fail_local_startup(startup, error);
+                return Ok(false);
+            }
+        };
+
+        if !step.playable_ready {
+            return Ok(false);
+        }
+
+        let startup = self
+            .local_startup
+            .take()
+            .expect("startup must exist after playable step");
+        let failure_message = startup.request.default_failure_message();
+        let failure_seed = match &startup.request {
+            SessionStartRequest::NewLocalWorld { seed } => Some(*seed),
+            SessionStartRequest::JoinRemote { .. } | SessionStartRequest::Unknown => None,
+        };
+        match self.complete_local_startup(device, queue, startup, step) {
+            Ok(()) => Ok(true),
+            Err(error) => {
+                log::error!("failed to complete XR local world startup: {error:#}");
+                self.session_status = StatusOverlay::new(failure_message, false);
+                if let Some(seed) = failure_seed {
+                    self.ui.set_new_world_seed(seed);
+                }
+                self.menu_panel_recenter_pending = true;
+                Ok(false)
+            }
+        }
+    }
+
+    fn complete_local_startup(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        startup: XrLocalStartup,
+        step: LocalSingleViewStartupStep,
+    ) -> Result<()> {
+        let XrLocalStartup {
+            request,
+            scene,
+            pump,
+            mut camera,
+        } = startup;
+        let descriptor = request
+            .active_descriptor()
+            .context("XR local startup request did not describe an active session")?;
+        let mut runtime = NativeSingleViewSessionRuntime::<S>::from_active_runtime(
+            request.clone(),
+            NativeSingleViewSceneRuntime::Local(pump.into_runtime()),
+        )?;
+        let mut initial_pose_changed =
+            apply_pending_engine_camera_position_updates_for_runtime(&mut runtime, &mut camera)
+                .context("accept XR local startup player pose")?;
+        initial_pose_changed |= commit_engine_camera_player_pose_for_runtime(
+            &mut runtime,
+            &mut camera,
+            "sync XR local startup player pose",
+        )?;
+        if initial_pose_changed {
+            log::info!("XR local startup applied initial player pose correction");
+        }
+
+        let camera_position = glam_vec3_from_vec3d(camera.snapshot().eye);
+        let sections = runtime.cached_sections();
+        if sections.is_empty() {
+            bail!(
+                "XR local startup seed={} center=({}, {}) render_distance={} reached playable threshold without render sections",
+                scene.seed,
+                scene.chunk_x,
+                scene.chunk_z,
+                scene.render_distance
+            );
+        }
+        let mut draw = TexturedSectionDrawResources::new(
+            device,
+            queue,
+            self.color_format,
+            &sections,
+            runtime.mesh_assets().atlas.as_upload(),
+        )
+        .context("upload XR local startup render sections")?;
+        draw.set_traversal_ready_sections(
+            &runtime.traversal_ready_render_section_keys(camera_position),
+        );
+
+        let section_count = draw.section_count();
+        let index_count = draw.index_count();
+        let face_count = quad_face_count_from_indices(index_count);
+        self.scene = scene;
+        self.runtime = runtime;
+        self.camera = camera;
+        self.draw = draw;
+        self.render_stats = RenderStreamStats {
+            section_count,
+            index_count,
+            face_count,
+            ..RenderStreamStats::default()
+        };
+        self.clear_transient_world_state();
+        self.session_status = StatusOverlay::hidden();
+        match descriptor {
+            ActiveSessionDescriptor::LocalWorld { seed } => {
+                self.ui.set_new_world_seed(seed);
+                self.ui.apply_action(GameUiAction::CreateWorld(seed));
+                log::info!(
+                    "XR local world playable seed={} polls={} poll_ms={:.3} sections={} target_ready={}/{}",
+                    seed,
+                    step.poll_count,
+                    step.poll_ms,
+                    section_count,
+                    step.progress
+                        .as_ref()
+                        .map_or(0, |progress| progress.target_ready_chunks),
+                    step.progress
+                        .as_ref()
+                        .map_or(0, |progress| progress.target_chunk_count)
+                );
+            }
+            ActiveSessionDescriptor::Remote { .. } => {}
+        }
+        if !self.ui.is_active() {
+            self.clear_menu_input_state();
+        }
+        Ok(())
+    }
+
+    fn fail_local_startup(&mut self, startup: XrLocalStartup, error: anyhow::Error) {
+        log::error!(
+            "failed to start XR local world {:?}: {error:#}",
+            startup.request
+        );
+        self.session_status = StatusOverlay::new(startup.request.default_failure_message(), false);
+        if let SessionStartRequest::NewLocalWorld { seed } = startup.request {
+            self.ui.set_new_world_seed(seed);
+        }
+        self.menu_panel_recenter_pending = true;
+    }
+
     fn clear_menu_input_state(&mut self) {
         self.ui.clear_input();
         self.menu_pointer_down = false;
@@ -1330,6 +1573,9 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<bool> {
+        if self.local_startup.is_some() {
+            return Ok(false);
+        }
         let mut scene_replaced = false;
         match action {
             GameUiAction::ToggleSectionOcclusion => {
@@ -1430,7 +1676,7 @@ where
                     self.ui.set_new_world_seed(seed);
                     return Ok(false);
                 }
-                scene_replaced = true;
+                return Ok(false);
             }
             GameUiAction::JoinRemote => {
                 let remote_addr = normalized_xr_remote_addr(self.ui.join_remote_addr());

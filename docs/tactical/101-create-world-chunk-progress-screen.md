@@ -12,7 +12,12 @@ added the shared local startup pump and wired desktop flat Create World and
 boot-to-world startup through it. Platform adoption and conservative
 unknown-neighbor gameplay hardening remain open. The first XR prerequisite also
 landed on 2026-06-27: shared XR scenes now start with the title/menu panel open
-so a later XR startup pump can render the loader on that surface.
+so the loader can render on that surface. XR local Create World replacement then
+adopted the shared startup pump on 2026-06-27: the previous XR runtime stays
+frozen while the menu panel shows the chunk-status grid, and the scene swaps to
+the new local world as soon as the playable threshold is reached. Initial XR
+boot still eagerly warms terrain before the first frame; that is the next XR
+startup follow-up.
 
 ## Purpose
 
@@ -308,9 +313,16 @@ Slice 5 partial result:
 
 - Shared XR scene initialization now uses the title/menu UI instead of closed
   in-game UI, so both desktop OpenXR and Android XR have a flat menu panel on
-  their first rendered frame. This is only the menu-surface prerequisite: XR
-  still eagerly warms the terrain runtime before that first frame, so the actual
-  XR loading grid requires a later startup-pump adoption slice.
+  their first rendered frame.
+- XR local Create World replacement now queues `LocalSingleViewStartupPump`,
+  freezes old-runtime streaming while startup is active, renders the shared
+  `LoadingProgressOverlay` on the XR menu panel, and swaps runtime/draw resources
+  once the playable threshold is ready.
+- Android XR session smoke readiness now waits for `local_startup_active ==
+  false` so the replacement smoke does not report ready while the async local
+  startup overlay is still advancing.
+- Initial XR boot still eagerly warms the terrain runtime before the first
+  frame, so boot-to-world XR loading needs a later startup-pump adoption slice.
 
 ### Slice 6 - Finer Java Parity Follow-Up
 

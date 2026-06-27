@@ -1254,6 +1254,7 @@ mod android {
                             }
                         } else if session_smoke_started
                             && !session_smoke_ready
+                            && !summary.local_startup_active
                             && summary.rendered_frames > 0
                         {
                             session_smoke_ready = true;
