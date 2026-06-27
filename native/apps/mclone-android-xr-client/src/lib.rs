@@ -951,9 +951,9 @@ mod android {
             actor_assets,
             asset_source,
         } = runtime_assets;
-        let runtime = if let Some(remote_addr) = remote_addr {
+        let mut terrain = if let Some(remote_addr) = remote_addr {
             let session = AndroidXrRemoteServerSession::connect(remote_addr.as_str())?;
-            AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
+            let runtime = AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
                 RemoteSessionEndpoint::new(remote_addr.clone()),
                 android_xr_host_options(scene_options),
                 session,
@@ -963,13 +963,28 @@ mod android {
                 format!(
                     "failed to initialize Android XR remote dedicated runtime from {remote_addr}"
                 )
-            })?
+            })?;
+            XrMcloneTerrainState::with_runtime(
+                device,
+                queue,
+                XR_COLOR_FORMAT,
+                scene_options,
+                runtime,
+                render_options,
+                actor_assets.atlas,
+                startup_view_pose,
+            )?
         } else {
-            AndroidXrSceneRuntime::local_with_mesh_assets(
-                android_xr_local_options(scene_options),
+            XrMcloneTerrainState::start_local_async(
+                device,
+                queue,
+                XR_COLOR_FORMAT,
+                scene_options,
+                render_options,
                 mesh_assets,
-            )
-            .context("failed to initialize Android XR local integrated runtime")?
+                actor_assets.atlas,
+                startup_view_pose,
+            )?
         };
         let audio = match AudioEngine::new(&asset_source, AudioSettings::default()) {
             Ok(audio) => Some(audio),
@@ -978,16 +993,6 @@ mod android {
                 None
             }
         };
-        let mut terrain = XrMcloneTerrainState::with_runtime(
-            device,
-            queue,
-            XR_COLOR_FORMAT,
-            scene_options,
-            runtime,
-            render_options,
-            actor_assets.atlas,
-            startup_view_pose,
-        )?;
         terrain.set_audio_engine(audio);
         terrain.set_session_runtime_factory(|request, scene_options, mesh_assets| {
             android_xr_scene_runtime_for_request(request, scene_options, mesh_assets)
@@ -1120,6 +1125,7 @@ mod android {
         } else {
             None
         };
+        let mut logged_first_frame = false;
         let mut logged_ready = false;
         let mut logged_controller_activity = false;
         let mut session_smoke_pending_start = false;
@@ -1236,10 +1242,24 @@ mod android {
                         frame_timing.render = rendered.timing;
                         rendered_frame = Some(rendered);
                         let summary = rendered.summary;
-                        if !logged_ready {
+                        if !logged_first_frame {
+                            logged_first_frame = true;
+                            log::info!(
+                                "Android XR terrain first-frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={} local_startup_active={}",
+                                summary.rendered_frames,
+                                summary.section_count,
+                                summary.drawn_section_count,
+                                summary.index_count,
+                                summary.drawn_index_count,
+                                summary.actor_count,
+                                summary.drawn_actor_count,
+                                summary.local_startup_active
+                            );
+                        }
+                        if !logged_ready && !summary.local_startup_active {
                             logged_ready = true;
                             log::info!(
-                                "Android XR terrain first-frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+                                "Android XR terrain ready summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
                                 summary.rendered_frames,
                                 summary.section_count,
                                 summary.drawn_section_count,
@@ -1268,8 +1288,8 @@ mod android {
                                 summary.drawn_index_count
                             );
                         }
-                        perf_started_after_ready =
-                            perf_probe.maybe_start_after_rendered_frame(frame_stats, rendered);
+                        perf_started_after_ready = logged_ready
+                            && perf_probe.maybe_start_after_rendered_frame(frame_stats, rendered);
                         Ok(())
                     }
                     Err(error) => Err(error),

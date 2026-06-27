@@ -15,9 +15,10 @@ landed on 2026-06-27: shared XR scenes now start with the title/menu panel open
 so the loader can render on that surface. XR local Create World replacement then
 adopted the shared startup pump on 2026-06-27: the previous XR runtime stays
 frozen while the menu panel shows the chunk-status grid, and the scene swaps to
-the new local world as soon as the playable threshold is reached. Initial XR
-boot still eagerly warms terrain before the first frame; that is the next XR
-startup follow-up.
+the new local world as soon as the playable threshold is reached. A follow-up on
+2026-06-27 moved initial local XR boot-to-world onto the same pump: local XR
+startup can now render the menu/loader before terrain exists, then install the
+runtime/draw resources at the playable threshold.
 
 ## Purpose
 
@@ -301,11 +302,13 @@ Slice 4 result:
 
 ### Slice 5 - Platform Adoption
 
-- [ ] Validate desktop flat first because it exposes the beachball most clearly
+- [x] Validate desktop flat first because it exposes the beachball most clearly
   and is the fastest local feedback lane.
 - [ ] Wire native web/WASM local-world startup through the same progress model.
-- [ ] Wire flat Android and XR scene replacement overlays through the shared UI
-  model while keeping activity/OpenXR ownership in app crates.
+- [ ] Wire flat Android scene startup/replacement overlays through the shared UI
+  model while keeping activity ownership in app crates.
+- [x] Wire XR scene replacement and initial local boot overlays through the
+  shared UI model while keeping OpenXR ownership in app crates.
 - [ ] Leave remote dedicated joins with a simple connection/loading overlay until
   protocol-level remote progress is explicitly designed.
 
@@ -321,8 +324,14 @@ Slice 5 partial result:
 - Android XR session smoke readiness now waits for `local_startup_active ==
   false` so the replacement smoke does not report ready while the async local
   startup overlay is still advancing.
-- Initial XR boot still eagerly warms the terrain runtime before the first
-  frame, so boot-to-world XR loading needs a later startup-pump adoption slice.
+- Initial local XR boot-to-world now creates an empty terrain draw resource and
+  starts `LocalSingleViewStartupPump` immediately, so the first submitted XR
+  frames can show the menu panel plus progress overlay before active terrain
+  exists.
+- Android XR now separates first-frame logging from `MCLONE_ANDROID_XR_READY`;
+  replacement and perf smokes wait until `local_startup_active == false`.
+- Remote dedicated XR startup still uses the synchronous runtime path. Keep it
+  there until protocol-level remote progress is designed.
 
 ### Slice 6 - Finer Java Parity Follow-Up
 

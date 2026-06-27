@@ -27,7 +27,7 @@ use crate::cli::{SceneOptions, XrClearSmokeOptions, XrMcloneSmokeOptions};
 #[cfg(not(target_os = "android"))]
 use crate::remote_session::RemoteServerSession;
 #[cfg(not(target_os = "android"))]
-use crate::render_cache::load_asset_source;
+use crate::render_cache::{load_asset_source, load_textured_mesh_assets};
 #[cfg(not(target_os = "android"))]
 use crate::scene_runtime::{
     native_window_scene_runtime, native_window_scene_runtime_with_mesh_assets,
@@ -677,24 +677,38 @@ fn create_mclone_terrain_state(
         }
     };
     let scene = xr_scene_options_from_desktop_scene(&options.scene)?;
-    let request = session_start_request_for_desktop_scene(&options.scene);
-    let runtime = NativeSingleViewSessionRuntime::from_active_runtime(
-        request,
-        native_window_scene_runtime(&options.scene)?,
-    )?;
-    let mut state = XrMcloneTerrainState::with_runtime(
-        device,
-        queue,
-        XR_COLOR_FORMAT,
-        scene,
-        runtime,
-        options.render_options,
-        actor_assets.atlas,
-        options.view_pose.map(|view_pose| XrStartupViewPose {
-            position: view_pose.position,
-            yaw_degrees: view_pose.yaw_degrees,
-        }),
-    )
+    let startup_view_pose = options.view_pose.map(|view_pose| XrStartupViewPose {
+        position: view_pose.position,
+        yaw_degrees: view_pose.yaw_degrees,
+    });
+    let mut state = if options.scene.remote_addr.is_some() {
+        let request = session_start_request_for_desktop_scene(&options.scene);
+        let runtime = NativeSingleViewSessionRuntime::from_active_runtime(
+            request,
+            native_window_scene_runtime(&options.scene)?,
+        )?;
+        XrMcloneTerrainState::with_runtime(
+            device,
+            queue,
+            XR_COLOR_FORMAT,
+            scene,
+            runtime,
+            options.render_options,
+            actor_assets.atlas,
+            startup_view_pose,
+        )
+    } else {
+        XrMcloneTerrainState::start_local_async(
+            device,
+            queue,
+            XR_COLOR_FORMAT,
+            scene,
+            options.render_options,
+            load_textured_mesh_assets()?,
+            actor_assets.atlas,
+            startup_view_pose,
+        )
+    }
     .context("initialize shared mclone XR terrain scene")?;
     state.set_audio_engine(audio);
     state.set_session_runtime_factory(|request, scene, mesh_assets| {
@@ -766,14 +780,15 @@ fn desktop_scene_options_for_xr_request(
 fn print_mclone_summary(mclone: &DesktopXrMcloneTerrainState) {
     let summary = mclone.frame_summary();
     println!(
-        "mclone XR frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+        "mclone XR frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={} local_startup_active={}",
         summary.rendered_frames,
         summary.section_count,
         summary.drawn_section_count,
         summary.index_count,
         summary.drawn_index_count,
         summary.actor_count,
-        summary.drawn_actor_count
+        summary.drawn_actor_count,
+        summary.local_startup_active
     );
 }
 
