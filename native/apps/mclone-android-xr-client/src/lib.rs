@@ -59,6 +59,7 @@ mod android {
     const ANDROID_XR_SESSION_SMOKE_SEED: i64 = 246_813_579;
     const ANDROID_XR_PERF_FALLBACK_TARGET_HZ: f64 = 72.0;
     const ANDROID_XR_PERF_DEFAULT_FLIGHT_SPEED_BLOCKS_PER_SECOND: f64 = 4.3;
+    const ANDROID_XR_PERF_SETTLE_MIN_SECONDS: f64 = 5.0;
     const ANDROID_XR_PERF_SETTLE_QUIET_FRAMES: u64 = 45;
     const ANDROID_XR_PERF_SETTLE_PROGRESS_FRAMES: u64 = 120;
 
@@ -1351,9 +1352,10 @@ mod android {
                 .map_or(0.0, |started| started.elapsed().as_secs_f64());
             if self.settled_stationary {
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_SETTLED mode={} settle_seconds={:.3} settle_frames={} settle_quiet_frames={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={}",
+                    "MCLONE_ANDROID_XR_PERF_SETTLED mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={}",
                     mode,
                     settle_seconds,
+                    ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
                     self.settle_frames,
                     self.settle_quiet_frames,
                     rendered.summary.section_count,
@@ -1364,12 +1366,13 @@ mod android {
                 );
             }
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_distance={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_distance={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
                 seconds,
                 mode,
                 self.render_distance,
                 flight_speed,
                 settle_seconds,
+                ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
                 self.settle_frames,
                 self.settle_quiet_frames,
                 self.display_refresh.extension_supported,
@@ -1422,16 +1425,17 @@ mod android {
             } else {
                 self.settle_quiet_frames = 0;
             }
+            let settle_seconds = self
+                .settle_started
+                .map_or(0.0, |started| started.elapsed().as_secs_f64());
             if self.settle_frames == 1
                 || self.settle_frames % ANDROID_XR_PERF_SETTLE_PROGRESS_FRAMES == 0
             {
                 let upload = summary.upload;
-                let settle_seconds = self
-                    .settle_started
-                    .map_or(0.0, |started| started.elapsed().as_secs_f64());
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode=stationary-settled settle_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} sections={} drawn_sections={} drawn_indices={}",
+                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode=stationary-settled settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} sections={} drawn_sections={} drawn_indices={}",
                     settle_seconds,
+                    ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
                     self.settle_frames,
                     self.settle_quiet_frames,
                     quiet,
@@ -1453,6 +1457,7 @@ mod android {
                 );
             }
             self.settle_quiet_frames >= ANDROID_XR_PERF_SETTLE_QUIET_FRAMES
+                && settle_seconds >= ANDROID_XR_PERF_SETTLE_MIN_SECONDS
         }
 
         fn record_frame(
@@ -1558,13 +1563,14 @@ mod android {
                 camera_distance_blocks(self.start_camera, self.latest_camera);
             let latest_upload = self.latest_summary.upload;
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={}",
                 sample_seconds,
                 self.mode_label,
                 self.render_distance,
                 flight_speed,
                 flight_distance_blocks,
                 self.settle_seconds,
+                ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
                 self.settle_frames,
                 self.settle_quiet_frames,
                 self.display_refresh.extension_supported,

@@ -130,8 +130,8 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
   expose diagnostic refresh/cache-age fields in `RUNTIME_MAX`.
 - [x] Add a settled stationary render-isolation lane that disables locomotion,
   waits for consecutive quiet frames with no server queues, compile jobs,
-  rebuilds, uploads, or poll changes, records settle time, then samples
-  steady-state frame/render cost.
+  rebuilds, uploads, or poll changes after a minimum 5 second settle window,
+  records settle time, then samples steady-state frame/render cost.
 
 Validation target:
 
@@ -170,7 +170,8 @@ Recorded first-pass implementation:
   `native:android-xr:perf:stationary:sweep`. These pass
   `--perf-settled-stationary`, wait for quiet frames before starting the timed
   sample, and write `mode=stationary-settled` plus `settle_seconds`,
-  `settle_frames`, and `settle_quiet_frames` in the summary.
+  `settle_min_seconds`, `settle_frames`, and `settle_quiet_frames` in the
+  summary.
 - Stationary settle treats persistent deferred render sections as a reported
   steady-state condition, not as active generation/upload work. They remain
   visible in `COMPILE_MAX deferred_sections` and settle-progress log markers.
