@@ -33,8 +33,10 @@ helpers and fixtures remain active reference assets.
 
 ## Current Direction
 
-Desktop flat remains the fastest daily loop. That is an iteration choice, not
-permission to make shared engine APIs desktop-shaped.
+Desktop flat remains the fastest daily loop. That is an iteration and
+validation choice, not a feature target and not permission to make shared engine
+APIs desktop-shaped. For feature work that does not name a platform, use the
+default framing: **shared implementation, desktop validation first**.
 
 Client platform and server host mode are separate axes. Local integrated play
 is a useful default for bring-up and offline validation, but every supported
@@ -57,6 +59,10 @@ platform bring-up:
   each platform inventing its own surface
 - platform adapters should be thinner around shared runtime/render/session
   contracts
+- desktop app gravity should go down, not up: code that heavily grows
+  `mclone-native-client` should be treated as a refactor signal unless it is
+  genuinely `winit`, desktop surface, keyboard/mouse, CLI, headless capture,
+  perf harness, or desktop diagnostics glue
 - validation should move toward contract tests plus targeted platform smokes
   instead of broad manual matrix checks for every change
 
@@ -126,6 +132,13 @@ own simulation rules, chunk scheduler policy, private renderers, or platform
 activity/window glue. Android-specific activity/JNI/Horizon behavior stays in
 the Android XR app. Desktop runtime selection and launch helpers stay in the
 desktop app/scripts.
+
+`mclone-native-client` is allowed to be larger than other app crates because it
+owns the primary `winit` loop, desktop input, headless screenshots, perf
+harnesses, CLI options, and desktop diagnostics. Size alone is not a bug, but
+new desktop-local gameplay, renderer policy, runtime startup policy, UI state,
+session lifecycle policy, persistence behavior, or input semantics are bugs
+unless they are temporary forks tracked in the platform parity matrix.
 
 `mclone-render` may depend on `wgpu` and own GPU resources, but host-facing
 entry points should continue to accept explicit render target and view data.
@@ -229,19 +242,64 @@ Run the narrowest lane that can catch the bug class:
 - browser worker/ABI changes: web typecheck/smoke lanes before unrelated
   native device work
 
+## Adapter Footprint Audit
+
+The platform parity tracker owns the semantic truth, but a quick footprint
+audit helps catch desktop gravity before it becomes a design signal. Run this
+audit when a slice adds substantial app-local code, touches
+`mclone-native-client`, or introduces a temporary platform fork:
+
+```bash
+for d in \
+  native/apps/mclone-native-client/src \
+  native/apps/mclone-web-client/src \
+  native/apps/mclone-web-client/www \
+  native/apps/mclone-android-client/src \
+  native/apps/mclone-android-xr-client/src \
+  native/crates/mclone-app-runtime/src \
+  native/crates/mclone-render-session/src \
+  native/crates/mclone-xr-scene/src
+do
+  printf '%7s %s\n' \
+    "$(find "$d" -maxdepth 1 -type f \( -name '*.rs' -o -name '*.ts' -o -name '*.js' \) -print0 2>/dev/null | xargs -0 wc -l 2>/dev/null | tail -1 | awk '{print $1}')" \
+    "$d"
+done
+
+rg -n "poll_until_idle|sync_all_render_sections|std::thread::sleep|block_on" \
+  native/apps native/crates/mclone-app-runtime native/crates/mclone-xr-scene
+```
+
+Use the output as a prompt, not a hard budget. Escalate to shared-contract
+cleanup when:
+
+- a feature adds logic to `mclone-native-client` that another display lane will
+  need
+- desktop startup/render/input code owns policy instead of adapting platform
+  facts into shared contracts
+- a blocking desktop helper also exists in `mclone-app-runtime` or XR scene
+  startup and should become a shared progress/pump contract
+- Matrix 2 in [`topics/platform-parity.md`](topics/platform-parity.md) would
+  need a new `⚑` fork but no tactical records the convergence path
+
 ## Recommended Alignment Work
 
 Highest-value next steps to keep features from requiring constant full-matrix
 manual checks:
 
-1. **Keep the platform parity tracker current.** The feature/platform and
+1. **Reduce desktop app gravity before adding more desktop-local behavior.**
+   Treat new growth in `mclone-native-client` as suspicious unless it is true
+   `winit`/surface/input/CLI/headless/perf/diagnostic glue. Startup loops,
+   loading/progress state, session lifecycle, render policy, input semantics,
+   HUD/menu behavior, persistence, and gameplay should move into shared owners
+   before more features build on desktop-local versions.
+2. **Keep the platform parity tracker current.** The feature/platform and
    shared-contract matrices live in
    [`topics/platform-parity.md`](topics/platform-parity.md). Update those cells
    when a slice changes platform capability or shared-boundary ownership.
-2. **Make the contract matrix more executable.** For each shared crate boundary,
+3. **Make the contract matrix more executable.** For each shared crate boundary,
    keep the sentinel smoke/test close to scripts so platform coverage is
    deliberate instead of remembered manually.
-3. **Finish connect/world-select UI and automate XR replacement/menu smoke.**
+4. **Finish connect/world-select UI and automate XR replacement/menu smoke.**
    All display lanes now have shared initial local/remote session identity and
    replacement code paths through `mclone-app-runtime::session`. Flat Android
    New World replacement is covered by an AVD touch-menu smoke, and Android XR
@@ -251,25 +309,25 @@ manual checks:
    controller-click replacement/menu smoke, a web Join Remote connect-screen
    smoke, and shared `mclone-ui` text input so users can choose endpoints/worlds
    in app instead of through CLI/properties/query params.
-4. **Finish host-mode convergence for web and make Android XR remote validation repeatable.**
+5. **Finish host-mode convergence for web and make Android XR remote validation repeatable.**
    Native desktop, desktop XR, flat Android, and Android XR now share
    `mclone-app-runtime` host-mode and native scene-shell contracts where
    applicable. Web still has an async `WebRuntimeHost`; Android XR remote works
    over LAN after host firewall allow and through the first-class
    `--adb-reverse` validator path.
-5. **Keep XR scene convergence complete as features grow.** `mclone-xr-scene`
+6. **Keep XR scene convergence complete as features grow.** `mclone-xr-scene`
    now owns shared terrain/actor rendering, startup pose, locomotion, and
    local/remote-capable host shape. Keep future UI, comfort, and interaction
    work behind that shared scene boundary instead of reintroducing app-local XR
    forks.
-6. **Promote lighting and UI as shared feature contracts.** Lighting and
+7. **Promote lighting and UI as shared feature contracts.** Lighting and
    menus/HUD/options/loading UI are the next user-visible parity blockers.
    Land them once through shared data/UI/render contracts instead of per
    platform paths.
-7. **Add adapter conformance tests.** Prefer tests for render-target/view
+8. **Add adapter conformance tests.** Prefer tests for render-target/view
    descriptors, asset-source discovery, input intent mapping, and render-section
    compile contracts over running every device for every feature branch.
-8. **Keep device/headset smokes as boundary sentinels.** Run full Android,
+9. **Keep device/headset smokes as boundary sentinels.** Run full Android,
    Quest, and desktop XR validation when touching platform glue, packaging,
    OpenXR session/swapchain/action code, graphics wrapping, or shared contracts
    they uniquely exercise.

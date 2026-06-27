@@ -242,6 +242,13 @@ them into shared contracts, and own platform resources. If a target needs a
 temporary app-local implementation, mark it as a fork in Matrix 2 and add a
 follow-up tactical to converge it.
 
+Desktop flat is the fastest validation lane, not the default implementation
+target. New feature work should be described as "shared implementation, desktop
+validation first" unless the user explicitly asked for desktop platform glue.
+Treat substantial new `mclone-native-client` logic as a warning sign: if the
+same behavior will matter to flat Android, web/WASM, desktop XR, or Android XR,
+move or extend the shared owner before building more desktop-local surface area.
+
 | Feature area | Shared owner / next shared owner | App crates may own only |
 |---|---|---|
 | Input capabilities, bindings, and gameplay intents | `mclone-input`; flat/XR split is allowed only at pose/ray/comfort boundaries | raw OS/browser/Android/XR events, focus, pointer lock, sensor/controller polling |
@@ -262,13 +269,57 @@ follow-up tactical to converge it.
 | Entity AI, spawning, pathing, damage, and interpolation policy | `mclone-server` for authority, `mclone-client`/`mclone-render-session` for presentation | platform-specific display/input only |
 | Localization and font/text layout data | future shared localization/text contract | platform locale discovery and font asset access |
 
+## Desktop Gravity And Adapter Footprint Audit
+
+The matrices above are the source of truth, but this quick audit helps catch
+platform code that is becoming an architectural signal. Run it when a slice
+touches `mclone-native-client`, adds substantial app-local code, or introduces
+a temporary fork:
+
+```bash
+for d in \
+  native/apps/mclone-native-client/src \
+  native/apps/mclone-web-client/src \
+  native/apps/mclone-web-client/www \
+  native/apps/mclone-android-client/src \
+  native/apps/mclone-android-xr-client/src \
+  native/crates/mclone-app-runtime/src \
+  native/crates/mclone-render-session/src \
+  native/crates/mclone-xr-scene/src
+do
+  printf '%7s %s\n' \
+    "$(find "$d" -maxdepth 1 -type f \( -name '*.rs' -o -name '*.ts' -o -name '*.js' \) -print0 2>/dev/null | xargs -0 wc -l 2>/dev/null | tail -1 | awk '{print $1}')" \
+    "$d"
+done
+
+rg -n "poll_until_idle|sync_all_render_sections|std::thread::sleep|block_on" \
+  native/apps native/crates/mclone-app-runtime native/crates/mclone-xr-scene
+```
+
+Do not turn the counts into a hard budget. Use them to find cleanup candidates:
+
+- `mclone-native-client` growth outside `winit`, desktop surface/input, CLI,
+  headless capture, perf harnesses, or desktop diagnostics
+- startup/loading/progress policy that blocks a platform loop instead of
+  reporting incremental shared progress
+- app-local runtime/session/render/UI/input behavior that another platform
+  already needs or will obviously need
+- a Matrix 2 `⚑` fork without a tactical convergence path
+
 ## Cross-Cutting Blockers (do these before more content features)
 
 Every new feature added today gets forked across up to four app shells. The
 highest-leverage work is the shared contracts that *stop* the forking. Land
 these first:
 
-1. **Close the connect-UI gap and automate XR replacement/menu smoke.** Every
+1. **Reduce desktop app gravity before adding more desktop-local behavior.**
+   `mclone-native-client` can own `winit`, desktop surface/input, CLI,
+   headless capture, perf harnesses, and desktop diagnostics. It should not keep
+   accumulating startup-loop policy, loading/progress state, session lifecycle,
+   render policy, UI/HUD/menu behavior, input semantics, persistence, or
+   gameplay. Move those into the shared owners in the checklist above, then use
+   desktop flat as the first validation lane.
+2. **Close the connect-UI gap and automate XR replacement/menu smoke.** Every
    lane now has shared local/remote session identity and a replacement code
    path. Flat Android New World replacement is covered by AVD touch-menu smoke,
    Android XR New World replacement is covered by an in-headset launch smoke,
@@ -277,34 +328,34 @@ these first:
    smoke, a dedicated web Join Remote connect-screen smoke, and the `mclone-ui`
    text-input/connect-world UI needed to choose endpoints and worlds in app
    instead of via CLI/properties/query params. (tactical 095)
-2. **Finish the host-mode async/sync cleanup.** Native desktop, flat Android,
+3. **Finish the host-mode async/sync cleanup.** Native desktop, flat Android,
    and XR app shells use blocking TCP/session adapters, while browser
    worker/WebSocket mechanics stay async and still sit behind `WebRuntimeHost`.
    Shared exchange accounting, remote WebSocket reconnect/resync prep, and
    playable browser remote-connect wiring have landed; remaining work is naming
    cleanup plus clarifying the web render-section idle diagnostics. (tactical
    085)
-3. **Finish the shared menu surface before adding more menu features.** XR now
+4. **Finish the shared menu surface before adding more menu features.** XR now
    has a shared world-panel pause/options menu with pointer input, and user
    headset validation says it works mostly fine. Flat Android consumes
    `mclone-ui` in code for pause/options touch input and uses the shared touch
    player movement path. Remaining work is automated XR menu coverage, comfort
    tuning, broader flat-Android HUD/gameplay interaction controls, and the
    connect/world-select `EditBox` surface. (tactical 089, tactical 090)
-4. **Finish the shared input-intent layer.** Unify raw input → intent across
+5. **Finish the shared input-intent layer.** Unify raw input → intent across
    keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
    pointer, and interact**, not just locomotion. Required for XR interaction and
    for flat Android HUD/hotbar/block-interaction controls. (tactical 076 follow-up)
-5. **Keep Android XR remote validation first-class for both USB and LAN.** The
+6. **Keep Android XR remote validation first-class for both USB and LAN.** The
    adapter and Playbox-style launch argv option exist now (`--remote-addr` in
    `mclone.startup.argv`), and Quest smokes passed over direct LAN and through
    the `--adb-reverse` validator path. Keep the LAN route documented as
    firewall-sensitive.
-6. **Automate and tune the stereo/world-space UI path** so XR can keep a
+7. **Automate and tune the stereo/world-space UI path** so XR can keep a
    comfortable panel, reticle/pointer, and later a connect screen. The first
    panel renderer and pointer path landed and have user headset validation;
    automated coverage and comfort tuning remain open. (tactical 089)
-7. **Protocol: add server push and cross-version negotiation.** Today it is
+8. **Protocol: add server push and cross-version negotiation.** Today it is
    strict request/response (a client that stops polling stops seeing others move)
    with strict-equality version match (independently-deployed web/APK/desktop
    builds will skew). Real-time co-presence and mixed-build cross-play both
