@@ -1,15 +1,16 @@
 # 095: Shared Session Coordinator
 
-Status: active; Slices 1-4a landed on 2026-06-27. `mclone-app-runtime` now owns
+Status: active; Slices 1-4b landed on 2026-06-27. `mclone-app-runtime` now owns
 the platform-neutral session request/state vocabulary and shared start-result
 boundary, including local-world start, remote-join start, active session
 descriptors, pending starts, failure state, status text, and success/failure
 transition policy. Desktop flat consumes that coordinator for initial startup,
-queued New World creation, and the first Join Remote menu flow. Web/WASM now
-uses the same coordinator vocabulary for initial local-worker and remote
-WebSocket starts and publishes shared session state to the browser diagnostics
-surface. Dynamic web menu-driven New World/Join Remote replacement, manual
-remote address entry, and XR/Android coordinator adoption remain follow-ups.
+queued New World creation, and the first Join Remote menu flow. Web/WASM uses
+the same coordinator vocabulary for initial local-worker and remote WebSocket
+starts, browser diagnostics, and menu-driven async local-world restart. Web
+Join Remote async reconnect is wired through the same path, but still needs a
+dedicated connect-screen smoke once endpoint editing/input is real. Manual
+remote address entry and XR/Android coordinator adoption remain follow-ups.
 
 ## Purpose
 
@@ -212,7 +213,7 @@ without blank output or overlapping UI.
 
 - [x] Web/WASM consumes the common coordinator for initial local integrated and
   remote WebSocket starts while preserving browser async startup.
-- [ ] Web/WASM routes menu-driven New World and Join Remote actions through an
+- [x] Web/WASM routes menu-driven New World and Join Remote actions through an
   async restart/reconnect factory instead of only publishing the UI intent.
 - [ ] Flat Android consumes the common coordinator for local and remote starts.
 - [ ] Desktop XR and Android XR consume the same request/status model while
@@ -251,6 +252,50 @@ git diff --check
 The web native UI screenshot at `/tmp/mclone-native-web-ui-canvas.png` was
 inspected after the remote WebSocket smoke and showed the shared title UI
 rendering nonblank without central menu overlap.
+
+Recorded Slice 4b result:
+
+- Added async wasm exports on `WebChunkRenderSession`:
+  `startLocalWorld(seed, worker URLs...)` and `joinRemoteWebSocket(url)`.
+  Both enter `SessionStartRequest`, build the browser-local runtime adapter,
+  apply `StartedGameSession` on success, and record shared failure state on
+  setup error.
+- Web menu `CreateWorld` and `JoinRemote` actions now mark the coordinator
+  starting immediately and return exact request facts to TypeScript. Seeds are
+  reported as both numeric diagnostics and exact string fields
+  (`worldSeedText`, `sessionSeedText`) so JS does not lose `i64` identity.
+- The browser app handles those actions by clearing input/pointer state,
+  waiting for the current frame to go idle, awaiting the async factory, swapping
+  host mode, recreating the render compiler worker, resetting streaming
+  diagnostics, and warming the new session until the canvas is settled.
+- Browser app smoke now waits for the Title -> New World -> Create World path
+  to finish as an active `localWorld` session with `worker-integrated` host mode
+  and settled streaming, instead of stopping at the UI action event.
+- `pnpm native:web:remote-smoke` still validates initial remote WebSocket
+  coordinator state, then exercises remote -> local teardown/restart through
+  the shared New World path. A dedicated Join Remote connect-screen click smoke
+  remains the next web validation gap because manual endpoint editing is still
+  absent.
+
+Validation after Slice 4b on 2026-06-27:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo fmt --manifest-path native/Cargo.toml --all --check
+pnpm native:web:typecheck
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+pnpm native:web:app-smoke
+pnpm native:web:remote-smoke
+git diff --check
+```
+
+Screenshots inspected:
+
+- `/tmp/mclone-native-web-app-canvas.png` showed nonblank terrain after the
+  browser app smoke.
+- `/tmp/mclone-native-web-ui-canvas.png` showed the shared Rust title UI
+  nonblank and correctly framed.
 
 ## Open Questions
 

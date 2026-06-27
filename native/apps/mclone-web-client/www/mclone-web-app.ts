@@ -157,6 +157,7 @@ const runtime: AppRuntime = {
     sessionState: "none",
     sessionKind: "unknown",
     sessionSeed: null,
+    sessionSeedText: null,
     sessionRemoteEndpoint: null,
     sessionFailureMessage: null,
     sessionStatusVisible: false,
@@ -254,6 +255,7 @@ class WebChunkApp {
   module: WasmModule | null;
   session: WebChunkRenderSession | null;
   compiler: RenderCompiler | null;
+  assetPack: Uint8Array | null;
   keys: InputKeys;
   touchKeys: InputKeys;
   touchMovementImpulse: TouchMovementImpulse;
@@ -284,6 +286,7 @@ class WebChunkApp {
     this.module = null;
     this.session = null;
     this.compiler = null;
+    this.assetPack = null;
     this.keys = defaultInputKeys() as InputKeys;
     this.touchKeys = defaultInputKeys() as InputKeys;
     this.touchMovementImpulse = defaultMovementImpulse();
@@ -339,6 +342,7 @@ class WebChunkApp {
     runtime.state.status = "loading assets";
     publishRuntimeState(runtime.state);
     const assetPack = await fetchAssetPack(ASSET_PACK_URL);
+    this.assetPack = assetPack;
     runtime.state.status = "initializing webgpu";
     publishRuntimeState(runtime.state);
     if (REMOTE_WS_URL) {
@@ -377,6 +381,8 @@ class WebChunkApp {
       "handleUiPointerMove",
       "handleUiPointerDown",
       "handleUiPointerUp",
+      "startLocalWorld",
+      "joinRemoteWebSocket",
       "setDebugOverlayVisible",
       "setStatusOverlay",
       "setTouchLookSensitivity",
@@ -391,12 +397,7 @@ class WebChunkApp {
         "cross-origin isolation (SharedArrayBuffer/Atomics) is required for the streaming render loop",
       );
     }
-    this.compiler = new RenderSectionWorkerCompiler(assetPack, {
-      workerUrl: RENDER_COMPILER_WORKER_URL,
-      bindgenJsUrl: BINDGEN_JS_URL,
-      bindgenWasmUrl: BINDGEN_WASM_URL,
-      workerName: "mclone-render-compiler-app",
-    });
+    this.compiler = this.createRenderCompiler();
     this.setNativeDebugOverlay(defaultDebugOverlayVisible());
     bindInput(this, runtime.state, () => publishRuntimeState(runtime.state));
     this.touchControls = new TouchControls(this, runtime.state);
@@ -598,7 +599,7 @@ class WebChunkApp {
       && Number(frame.runnerUpdateQueueDepth) === 0
       && Number(frame.runnerPendingJobs) === 0
       && Number(frame.runnerPendingPublications) === 0;
-    const remoteVisibleSettled = REMOTE_WS_URL !== null
+    const remoteVisibleSettled = runtime.state.clientHost === "remote-dedicated"
       && !frame.doorbell
       && Number(frame.residentSectionCount) > 0
       && Number(frame.renderDirtyChunkCount) === 0
@@ -1072,6 +1073,154 @@ class WebChunkApp {
       this.requestPointerLock();
     }
     publishRuntimeState(runtime.state);
+    this.handleSessionStartAction(report, options);
+  }
+
+  handleSessionStartAction(
+    report: WasmReport,
+    options: { fromPointer?: boolean, pointerType?: string } = {},
+  ): void {
+    if (report.action === "createWorld") {
+      const seed = parseSeedBigInt(
+        report.worldSeedText
+          ?? report.sessionSeedText
+          ?? report.worldSeed
+          ?? report.sessionSeed,
+      );
+      if (seed !== null) {
+        void this.restartSessionFromUiAction(
+          "localWorld",
+          (session) => session.startLocalWorld(
+            seed,
+            SERVER_WORKER_URL.href,
+            SERVER_JOB_WORKER_URL.href,
+            BINDGEN_JS_URL.href,
+            BINDGEN_WASM_URL.href,
+          ),
+          options,
+        );
+      }
+    } else if (report.action === "joinRemote") {
+      const endpoint = String(report.remoteEndpoint ?? report.sessionRemoteEndpoint ?? "").trim();
+      if (endpoint.length > 0) {
+        void this.restartSessionFromUiAction(
+          "remote",
+          (session) => session.joinRemoteWebSocket(endpoint),
+          options,
+        );
+      }
+    }
+  }
+
+  async restartSessionFromUiAction(
+    requestedKind: "localWorld" | "remote",
+    start: (session: WebChunkRenderSession) => Promise<WasmReport>,
+    options: { fromPointer?: boolean, pointerType?: string } = {},
+  ): Promise<void> {
+    if (!this.session) {
+      return;
+    }
+    const session = this.session;
+    this.clearGameplayInput();
+    this.releasePointerLockForUi();
+    let startReport: WasmReport | null = null;
+    try {
+      await this.waitForSessionIdle();
+      this.sessionBusy = true;
+      startReport = await start(session);
+    } catch (error) {
+      runtime.state.ok = false;
+      runtime.state.status = stringifyError(error);
+      console.error(error);
+    } finally {
+      this.sessionBusy = false;
+      this.flushNativeTouchControlsOverlay();
+    }
+    if (!startReport?.ok) {
+      this.setNativeStatusOverlay(runtime.state.status, false, true);
+      publishRuntimeState(runtime.state);
+      return;
+    }
+
+    this.applyNativeUiReport(startReport);
+    if (startReport.sessionState !== "active") {
+      publishRuntimeState(runtime.state);
+      return;
+    }
+
+    this.applySessionHostMode(startReport);
+    this.resetStreamingStateForSessionRestart();
+    this.replaceRenderCompiler();
+    try {
+      this.syncCanvasSize();
+      this.applyCameraState(this.session.cameraFrameState());
+      this.applyTargetState(this.session.previewBlockTarget());
+      await this.warmUpStreamingToIdle();
+      if (options.fromPointer && options.pointerType !== "touch") {
+        this.requestPointerLock();
+      }
+    } catch (error) {
+      runtime.state.ok = false;
+      runtime.state.status = stringifyError(error);
+      this.setNativeStatusOverlay(runtime.state.status, false, true);
+      console.error(error);
+      publishRuntimeState(runtime.state);
+      return;
+    }
+    runtime.state.status = requestedKind === "remote" ? "remote session ready" : "world ready";
+    this.setNativeStatusOverlay("ready", true, false);
+    publishRuntimeState(runtime.state);
+  }
+
+  applySessionHostMode(report: WasmReport): void {
+    if (report.sessionKind === "remote") {
+      runtime.state.clientHost = "remote-dedicated";
+      runtime.state.remoteWebSocketUrl = String(report.sessionRemoteEndpoint ?? "");
+    } else if (report.sessionKind === "localWorld") {
+      runtime.state.clientHost = "worker-integrated";
+      runtime.state.remoteWebSocketUrl = null;
+    }
+  }
+
+  createRenderCompiler(): RenderCompiler {
+    if (!this.assetPack) {
+      throw new Error("asset pack is not loaded");
+    }
+    return new RenderSectionWorkerCompiler(this.assetPack, {
+      workerUrl: RENDER_COMPILER_WORKER_URL,
+      bindgenJsUrl: BINDGEN_JS_URL,
+      bindgenWasmUrl: BINDGEN_WASM_URL,
+      workerName: "mclone-render-compiler-app",
+    });
+  }
+
+  replaceRenderCompiler(): void {
+    this.compiler?.terminate();
+    this.compiler = this.createRenderCompiler();
+  }
+
+  resetStreamingStateForSessionRestart(): void {
+    this.hasRendered = false;
+    this.loadedCenter = null;
+    this.pendingTimings.clear();
+    this.finalizingCount = 0;
+    runtime.state.loadedCenterX = null;
+    runtime.state.loadedCenterZ = null;
+    runtime.state.pendingCompileJobCount = 0;
+    runtime.state.renderPendingWork = false;
+    runtime.state.renderDirtyChunkCount = 0;
+    runtime.state.renderDirtySectionCount = 0;
+    runtime.state.renderInflightSectionCount = 0;
+    runtime.state.compileInFlight = false;
+    runtime.state.compileInFlightCount = 0;
+    runtime.state.compileFinalizingCount = 0;
+    runtime.state.streamingSettled = false;
+    runtime.state.compileQueued = false;
+    runtime.state.compileTargetX = null;
+    runtime.state.compileTargetZ = null;
+    runtime.state.queuedCompileTargetX = null;
+    runtime.state.queuedCompileTargetZ = null;
+    runtime.state.activeCompileTiming = null;
   }
 
   canvasPixelPoint(clientX: number, clientY: number): { x: number, y: number } {
@@ -1279,6 +1428,24 @@ function defaultDebugOverlayVisible(): boolean {
   return !hasTouchInput() && window.matchMedia("(min-width: 681px)").matches;
 }
 
+function parseSeedBigInt(value: unknown): bigint | null {
+  if (typeof value === "bigint") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^-?\d+$/.test(trimmed)) {
+      return BigInt(trimmed);
+    }
+    return null;
+  }
+  const numberValue = Number(value);
+  if (Number.isSafeInteger(numberValue)) {
+    return BigInt(numberValue);
+  }
+  return null;
+}
+
 function applySessionReport(report: WasmReport, state: AppRuntimeState): void {
   if (typeof report.sessionState !== "undefined") {
     state.sessionState = String(report.sessionState);
@@ -1288,6 +1455,7 @@ function applySessionReport(report: WasmReport, state: AppRuntimeState): void {
     state.sessionKind = kind;
     if (kind !== "localWorld") {
       state.sessionSeed = null;
+      state.sessionSeedText = null;
     }
     if (kind !== "remote") {
       state.sessionRemoteEndpoint = null;
@@ -1295,6 +1463,9 @@ function applySessionReport(report: WasmReport, state: AppRuntimeState): void {
   }
   if (typeof report.sessionSeed !== "undefined") {
     state.sessionSeed = Number(report.sessionSeed);
+  }
+  if (typeof report.sessionSeedText !== "undefined") {
+    state.sessionSeedText = String(report.sessionSeedText);
   }
   if (typeof report.sessionRemoteEndpoint !== "undefined") {
     state.sessionRemoteEndpoint = String(report.sessionRemoteEndpoint);

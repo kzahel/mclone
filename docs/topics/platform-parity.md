@@ -22,7 +22,8 @@ boundary; this doc owns the per-feature and per-contract grids and the rule that
 keeps new features from re-forking.
 
 > Status note: the current-state cells below were derived from a code audit on
-> 2026-06-26 and refreshed after tactical 088's Android XR remote validation.
+> 2026-06-26 and refreshed on 2026-06-27 after tactical 095 Slice 4b's web
+> session-restart work.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -133,6 +134,7 @@ use (and should) · — n/a.
 | `app-runtime::frame_render` | ✅ | ⚑ (inline reimpl) | ✅ | ✅ (via xr-scene) | `native:desktop-chunk:smoke`; `native:web:smoke` |
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
+| `app-runtime::session` (world-session coordinator) | ◐ (desktop flat; desktop XR pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✗ | ✗ | `cargo test -p mclone-app-runtime`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke` |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ◐ (shared touch menu+controls, device pending) | ◐ (XR world panel + pointer, unvalidated) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene` |
 | `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
@@ -156,9 +158,12 @@ Concretely:
 - `web-client` re-inlines the whole sky→chunk→actor render sequence instead of
   calling `render_full_frame_for_view`. It still owns an async `WebRuntimeHost`
   enum, but command/update accounting and remote WebSocket reconnect/resync prep
-  now flow through `mclone-app-runtime::host_mode`. The playable browser app can
+  now flow through `mclone-app-runtime::host_mode`. Session request/state now
+  flows through `mclone-app-runtime::session` for initial local/remote starts
+  and menu-driven async New World restart; JoinRemote reconnect is wired, with
+  a dedicated connect-screen smoke still pending. The playable browser app can
   join a dedicated WebSocket server through `?remoteWsUrl=...`, covered by
-  `native:web:remote-smoke` (see blocker #1).
+  `native:web:remote-smoke` (see blockers #1 and #2).
 - flat Android has a TCP remote-dedicated path through
   `debug.mclone.remote_addr`; Android XR now uses launch-scoped
   `mclone.startup.argv --remote-addr HOST:PORT` and can have the validator start
@@ -195,14 +200,23 @@ Every new feature added today gets forked across up to four app shells. The
 highest-leverage work is the shared contracts that *stop* the forking. Land
 these first:
 
-1. **Finish the host-mode async/sync cleanup.** Native desktop, flat Android,
+1. **Finish shared session-coordinator adoption across the remaining platform
+   lanes.** Desktop flat and web now consume `mclone-app-runtime::session` for
+   local-world and remote-join request/status; web also restarts a local worker
+   from the shared New World menu. Flat Android, desktop XR, and Android XR
+   still need the same request/status model so New World, Join Remote, failure
+   text, and future P2P/session-host work do not re-fork by platform. The
+   likely next implementation step is to put a small coordinator adapter at the
+   shared native scene/session boundary, while keeping Android activity and
+   OpenXR ownership in app/platform crates. (tactical 095)
+2. **Finish the host-mode async/sync cleanup.** Native desktop, flat Android,
    and XR app shells use blocking TCP/session adapters, while browser
    worker/WebSocket mechanics stay async and still sit behind `WebRuntimeHost`.
    Shared exchange accounting, remote WebSocket reconnect/resync prep, and
    playable browser remote-connect wiring have landed; remaining work is naming
    cleanup plus clarifying the web render-section idle diagnostics. (tactical
    085)
-2. **Finish the shared menu surface before adding more menu features.** XR now
+3. **Finish the shared menu surface before adding more menu features.** XR now
    has a shared world-panel pause/options menu with pointer input, but it still
    needs headset visual/interaction validation. Flat Android now consumes
    `mclone-ui` in code for pause/options touch input and uses the shared touch
@@ -210,20 +224,20 @@ these first:
    HUD/gameplay interaction controls. Connect/world-select UI
    and `EditBox` should build on this surface later, not define the first slice.
    (tactical 089, tactical 090)
-3. **Finish the shared input-intent layer.** Unify raw input → intent across
+4. **Finish the shared input-intent layer.** Unify raw input → intent across
    keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
    pointer, and interact**, not just locomotion. Required for XR interaction and
    for flat Android HUD/hotbar/block-interaction controls. (tactical 076 follow-up)
-4. **Keep Android XR remote validation first-class for both USB and LAN.** The
+5. **Keep Android XR remote validation first-class for both USB and LAN.** The
    adapter and Playbox-style launch argv option exist now (`--remote-addr` in
    `mclone.startup.argv`), and Quest smokes passed over direct LAN and through
    the `--adb-reverse` validator path. Keep the LAN route documented as
    firewall-sensitive.
-5. **Validate and tune the stereo/world-space UI path** so XR can show a
+6. **Validate and tune the stereo/world-space UI path** so XR can show a
    comfortable panel, reticle/pointer, and later a connect screen. The first
    panel renderer and pointer path landed; headset validation remains open.
    (tactical 089)
-6. **Protocol: add server push and cross-version negotiation.** Today it is
+7. **Protocol: add server push and cross-version negotiation.** Today it is
    strict request/response (a client that stops polling stops seeing others move)
    with strict-equality version match (independently-deployed web/APK/desktop
    builds will skew). Real-time co-presence and mixed-build cross-play both

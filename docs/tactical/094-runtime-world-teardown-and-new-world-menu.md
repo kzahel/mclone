@@ -1,10 +1,13 @@
 # 094: Runtime World Teardown and New-World Menu
 
-Status: active; desktop runtime/menu path landed on 2026-06-26. The app can now
-boot to a no-world Title menu, open a reroll-only New World screen, present
-loading/error status while creating a world, create a fresh local integrated
-world in-process, and tear the current world down back to Title. Remaining work
-is manual interactive smoke and non-desktop app-owned parity.
+Status: active; desktop runtime/menu path landed on 2026-06-26, and the web
+local New World restart path landed via tactical 095 on 2026-06-27. The desktop
+app can boot to a no-world Title menu, open a reroll-only New World screen,
+present loading/error status while creating a world, create a fresh local
+integrated world in-process, and tear the current world down back to Title. Web
+can start a fresh local worker session from the shared New World menu. Remaining
+work is manual interactive desktop smoke plus flat Android and XR app-owned
+parity.
 
 ## Purpose
 
@@ -122,8 +125,10 @@ Open follow-ups for this doc:
 
 - Run a manual interactive desktop smoke for Quit To Title -> New World ->
   Reroll -> Create, including the visible loading status frame.
-- Carry the app-owned new-world flow to web and XR host shells; current web/XR
-  shared UI/action surfaces only compile and label/ignore the new app actions.
+- Carry the app-owned new-world flow to flat Android and XR host shells. Web
+  local-world replacement now lives in tactical 095; web Join Remote has a
+  runtime reconnect path but still needs a connect-screen smoke and endpoint
+  editing.
 
 ## Implementation Slices
 
@@ -221,8 +226,9 @@ Per-slice additions:
 - **First pass targets the desktop flat window path.** The shared XR scene only
   applies scene-local actions and ignores app-owned ones like quitting
   (`089-shared-xr-menu-surface.md`); `CreateWorld`/teardown is app-owned, so XR
-  and web (`085-web-host-mode-convergence.md`) parity for new-world is a separate
-  follow-up, not a blocker here.
+  and flat Android parity for new-world is a separate follow-up, not a blocker
+  here. Web parity for local New World restart moved under the shared session
+  coordinator in tactical 095.
 - **No world save/load selection here.** This is "discard and regenerate from a
   seed," not named-world management or persistence-directory selection.
 

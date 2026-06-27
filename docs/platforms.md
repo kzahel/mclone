@@ -239,25 +239,30 @@ manual checks:
 2. **Make the contract matrix more executable.** For each shared crate boundary,
    keep the sentinel smoke/test close to scripts so platform coverage is
    deliberate instead of remembered manually.
-3. **Finish host-mode convergence for web and make Android XR remote validation repeatable.**
+3. **Finish shared session-coordinator adoption.** Desktop flat and web now use
+   `mclone-app-runtime::session` for local-world and remote-join request/status,
+   with web local New World restart covered by browser smoke. Flat Android,
+   desktop XR, and Android XR still need the same coordinator at their native
+   scene/session boundary.
+4. **Finish host-mode convergence for web and make Android XR remote validation repeatable.**
    Native desktop, desktop XR, flat Android, and Android XR now share
    `mclone-app-runtime` host-mode and native scene-shell contracts where
    applicable. Web still has an async `WebRuntimeHost`; Android XR remote works
    over LAN after host firewall allow and through the first-class
    `--adb-reverse` validator path.
-4. **Keep XR scene convergence complete as features grow.** `mclone-xr-scene`
+5. **Keep XR scene convergence complete as features grow.** `mclone-xr-scene`
    now owns shared terrain/actor rendering, startup pose, locomotion, and
    local/remote-capable host shape. Keep future UI, comfort, and interaction
    work behind that shared scene boundary instead of reintroducing app-local XR
    forks.
-5. **Promote lighting and UI as shared feature contracts.** Lighting and
+6. **Promote lighting and UI as shared feature contracts.** Lighting and
    menus/HUD/options/loading UI are the next user-visible parity blockers.
    Land them once through shared data/UI/render contracts instead of per
    platform paths.
-6. **Add adapter conformance tests.** Prefer tests for render-target/view
+7. **Add adapter conformance tests.** Prefer tests for render-target/view
    descriptors, asset-source discovery, input intent mapping, and render-section
    compile contracts over running every device for every feature branch.
-7. **Keep device/headset smokes as boundary sentinels.** Run full Android,
+8. **Keep device/headset smokes as boundary sentinels.** Run full Android,
    Quest, and desktop XR validation when touching platform glue, packaging,
    OpenXR session/swapchain/action code, graphics wrapping, or shared contracts
    they uniquely exercise.
@@ -270,3 +275,4 @@ manual checks:
 - Multi-view render contract: [`tactical/077-multiview-render-contract.md`](tactical/077-multiview-render-contract.md)
 - Desktop OpenXR clear/frame/controller/locomotion: [`tactical/078-desktop-openxr-clear-smoke.md`](tactical/078-desktop-openxr-clear-smoke.md), [`tactical/079-desktop-openxr-mclone-frame.md`](tactical/079-desktop-openxr-mclone-frame.md), [`tactical/081-desktop-openxr-controller-actions.md`](tactical/081-desktop-openxr-controller-actions.md), [`tactical/082-desktop-xr-player-locomotion.md`](tactical/082-desktop-xr-player-locomotion.md)
 - Android XR / Quest standalone: [`tactical/083-android-xr-quest-standalone.md`](tactical/083-android-xr-quest-standalone.md)
+- Shared session coordinator: [`tactical/095-shared-session-coordinator.md`](tactical/095-shared-session-coordinator.md)

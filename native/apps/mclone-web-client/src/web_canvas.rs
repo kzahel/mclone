@@ -9,7 +9,7 @@ use super::{
 };
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
-    SessionStartRequest, SessionStartResult, StartedGameSession,
+    SessionFailure, SessionStartRequest, SessionStartResult, StartedGameSession,
 };
 use mclone_assets::PackedAssetSource;
 use mclone_client::{
@@ -2337,6 +2337,58 @@ impl WebChunkRenderSession {
         self.ui_status_to_js_value().map_err(JsValue::from)
     }
 
+    #[wasm_bindgen(js_name = startLocalWorld)]
+    pub async fn start_local_world(
+        &mut self,
+        seed: i64,
+        worker_url: String,
+        job_worker_url: String,
+        bindgen_js_url: String,
+        bindgen_wasm_url: String,
+    ) -> Result<JsValue, JsValue> {
+        let request = SessionStartRequest::NewLocalWorld { seed };
+        self.session.begin_start(request.clone());
+        let config = WebIntegratedServerRunnerConfig::new(
+            seed,
+            worker_url,
+            job_worker_url,
+            bindgen_js_url,
+            bindgen_wasm_url,
+        );
+        match WebRuntime::web_worker_integrated(config).await {
+            Ok(runtime) => {
+                self.install_started_runtime(request, runtime)
+                    .map_err(JsValue::from)?;
+            }
+            Err(error) => {
+                self.fail_session_start(request, error);
+            }
+        }
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = joinRemoteWebSocket)]
+    pub async fn join_remote_websocket(
+        &mut self,
+        websocket_url: String,
+    ) -> Result<JsValue, JsValue> {
+        let request = SessionStartRequest::JoinRemote {
+            endpoint: RemoteSessionEndpoint::new(websocket_url.clone()),
+        };
+        self.session.begin_start(request.clone());
+        self.ui.set_join_remote_addr(websocket_url.clone());
+        match WebRuntime::websocket_remote(websocket_url).await {
+            Ok(runtime) => {
+                self.install_started_runtime(request, runtime)
+                    .map_err(JsValue::from)?;
+            }
+            Err(error) => {
+                self.fail_session_start(request, error);
+            }
+        }
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
     #[wasm_bindgen(js_name = openTitleUi)]
     pub fn open_title_ui(&mut self) -> Result<JsValue, JsValue> {
         self.ui.set_screen(Some(GameScreen::Title));
@@ -2686,6 +2738,17 @@ impl WebChunkRenderSession {
             GameUiAction::SetFlySpeed(multiplier) => {
                 self.camera.set_fly_speed_multiplier(f64::from(multiplier));
             }
+            GameUiAction::CreateWorld(seed) => {
+                self.session
+                    .begin_start(SessionStartRequest::NewLocalWorld { seed });
+                self.status_overlay = StatusOverlay::hidden();
+            }
+            GameUiAction::JoinRemote => {
+                self.session.begin_start(SessionStartRequest::JoinRemote {
+                    endpoint: RemoteSessionEndpoint::new(self.ui.join_remote_addr().to_owned()),
+                });
+                self.status_overlay = StatusOverlay::hidden();
+            }
             GameUiAction::Quit => {
                 self.runtime.request_shutdown();
             }
@@ -2693,8 +2756,6 @@ impl WebChunkRenderSession {
             | GameUiAction::OpenNewWorld
             | GameUiAction::OpenJoinRemote
             | GameUiAction::RerollSeed
-            | GameUiAction::CreateWorld(_)
-            | GameUiAction::JoinRemote
             | GameUiAction::Resume
             | GameUiAction::OpenOptions(_)
             | GameUiAction::BackToTitle
@@ -2721,6 +2782,13 @@ impl WebChunkRenderSession {
                 GameUiAction::OpenOptions(parent) => {
                     set_string(&object, "actionParent", options_parent_label(parent))?;
                 }
+                GameUiAction::CreateWorld(seed) => {
+                    set_number(&object, "worldSeed", seed as f64)?;
+                    set_string(&object, "worldSeedText", &seed.to_string())?;
+                }
+                GameUiAction::JoinRemote => {
+                    set_string(&object, "remoteEndpoint", self.ui.join_remote_addr())?;
+                }
                 GameUiAction::SetRenderDistance(render_distance) => {
                     set_number(&object, "renderDistance", f64::from(render_distance))?;
                 }
@@ -2738,8 +2806,6 @@ impl WebChunkRenderSession {
                 | GameUiAction::OpenNewWorld
                 | GameUiAction::OpenJoinRemote
                 | GameUiAction::RerollSeed
-                | GameUiAction::CreateWorld(_)
-                | GameUiAction::JoinRemote
                 | GameUiAction::Resume
                 | GameUiAction::BackToTitle
                 | GameUiAction::BackToPause
@@ -2842,8 +2908,17 @@ impl WebChunkRenderSession {
         .map_err(|error| format!("failed to upload packed actor textures: {error:#}"))?;
         let gui = GuiRenderer::new(&context.device, context.format);
         let mut ui = GameUi::new_ingame();
-        if let SessionStartRequest::JoinRemote { endpoint } = &session_request {
-            ui.set_join_remote_addr(endpoint.address.clone());
+        match &session_request {
+            SessionStartRequest::NewLocalWorld { seed } => {
+                ui.set_new_world_seed(*seed);
+            }
+            SessionStartRequest::JoinRemote { endpoint } => {
+                ui.set_new_world_seed(SMOKE_SEED);
+                ui.set_join_remote_addr(endpoint.address.clone());
+            }
+            SessionStartRequest::Unknown => {
+                ui.set_new_world_seed(SMOKE_SEED);
+            }
         }
         ui.set_scale(GuiScale::from_pixels(context.width, context.height));
         let session = started_web_session_coordinator(session_request)?;
@@ -2890,6 +2965,53 @@ impl WebChunkRenderSession {
             || self.status_overlay.clone(),
             |status| StatusOverlay::new(status.message, status.ok),
         )
+    }
+
+    fn install_started_runtime(
+        &mut self,
+        request: SessionStartRequest,
+        runtime: WebRuntime,
+    ) -> Result<(), String> {
+        let descriptor = request
+            .active_descriptor()
+            .ok_or_else(|| "web session request did not describe an active session".to_owned())?;
+        self.runtime.request_shutdown();
+        self.runtime = runtime;
+        self.session
+            .apply_start_result(&Ok(StartedGameSession::new(descriptor, ())));
+        self.reset_runtime_view_state(&request);
+        Ok(())
+    }
+
+    fn fail_session_start(&mut self, request: SessionStartRequest, error: String) {
+        web_sys::console::error_1(
+            &format!("failed to start web session {request:?}: {error}").into(),
+        );
+        self.session
+            .fail_start(SessionFailure::new(request.default_failure_message()));
+    }
+
+    fn reset_runtime_view_state(&mut self, request: &SessionStartRequest) {
+        match request {
+            SessionStartRequest::NewLocalWorld { seed } => {
+                self.ui.set_new_world_seed(*seed);
+            }
+            SessionStartRequest::JoinRemote { endpoint } => {
+                self.ui.set_join_remote_addr(endpoint.address.clone());
+            }
+            SessionStartRequest::Unknown => {}
+        }
+        self.status_overlay = StatusOverlay::hidden();
+        self.camera = EngineCameraController::spawn_for_chunk(SMOKE_INITIAL_CENTER);
+        self.interaction = ClientInteractionController::new();
+        self.actor_interpolation = ActorInterpolationState::new();
+        self.draw = None;
+        self.loaded_chunk_positions.clear();
+        self.interest_center = None;
+        self.render_compiler = WebRenderSectionCompiler::new();
+        self.mesh_build_count = 0;
+        self.mesh_upload_count = 0;
+        self.render_count = 0;
     }
 
     async fn interact_block_with_kind(
@@ -4173,6 +4295,7 @@ fn write_session_request_to_js_object(
         SessionStartRequest::NewLocalWorld { seed } => {
             set_string(object, "sessionKind", "localWorld")?;
             set_number(object, "sessionSeed", *seed as f64)?;
+            set_string(object, "sessionSeedText", &seed.to_string())?;
         }
         SessionStartRequest::JoinRemote { endpoint } => {
             set_string(object, "sessionKind", "remote")?;
@@ -4193,6 +4316,7 @@ fn write_active_session_to_js_object(
         ActiveSessionDescriptor::LocalWorld { seed } => {
             set_string(object, "sessionKind", "localWorld")?;
             set_number(object, "sessionSeed", *seed as f64)?;
+            set_string(object, "sessionSeedText", &seed.to_string())?;
         }
         ActiveSessionDescriptor::Remote { endpoint } => {
             set_string(object, "sessionKind", "remote")?;

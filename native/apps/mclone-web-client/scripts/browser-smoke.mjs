@@ -733,10 +733,14 @@ async function captureNativeUiProbe(page, canvas) {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.uiActive === false
         && state.nativeUiScreen === "none"
-        && state.lastUiAction?.action === "createWorld";
+        && state.lastUiAction?.action === "createWorld"
+        && state.sessionState === "active"
+        && state.sessionKind === "localWorld"
+        && state.clientHost === "worker-integrated"
+        && state.streamingSettled === true;
     },
     undefined,
-    { timeout: 10_000 },
+    { timeout: 30_000 },
   );
   const createdWorld = await readNativeUiState(page);
   return {
@@ -748,7 +752,9 @@ async function captureNativeUiProbe(page, canvas) {
       && openedOptions.nativeUiScreen === "options"
       && backedToTitle.nativeUiScreen === "title"
       && openedNewWorld.nativeUiScreen === "newWorld"
-      && createdWorld.uiActive === false,
+      && createdWorld.uiActive === false
+      && createdWorld.sessionState === "active"
+      && createdWorld.sessionKind === "localWorld",
     requestedStatus,
     state,
     openedOptions,
@@ -1145,6 +1151,7 @@ async function readNativeUiState(page) {
       sessionState: state.sessionState,
       sessionKind: state.sessionKind,
       sessionSeed: state.sessionSeed,
+      sessionSeedText: state.sessionSeedText,
       sessionRemoteEndpoint: state.sessionRemoteEndpoint,
       sessionStatusVisible: state.sessionStatusVisible,
       sessionStatusOk: state.sessionStatusOk,
@@ -1924,6 +1931,7 @@ function assertAppLoopResult(
     || result.sessionKind !== expectedSessionKind
     || (remoteWebSocketUrl && result.sessionRemoteEndpoint !== remoteWebSocketUrl)
     || (!remoteWebSocketUrl && !Number.isFinite(Number(result.sessionSeed)))
+    || (!remoteWebSocketUrl && !/^-?\d+$/.test(String(result.sessionSeedText ?? "")))
   ) {
     throw new Error(`native web app did not publish the expected shared session state:\n${JSON.stringify({ remoteWebSocketUrl, result }, null, 2)}`);
   }
