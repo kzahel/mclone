@@ -232,7 +232,7 @@ Recorded first-pass implementation:
 ### Slice 7 - Baselines And Budgets
 
 - Record Quest 3 release baselines in
-  [`../performance-records.md`](../performance-records.md):
+  [`../quest-performance-records.md`](../quest-performance-records.md):
   - local integrated, render distance 2, default refresh,
   - local integrated at each supported requested refresh,
   - remote dedicated via LAN or `--adb-reverse`,
