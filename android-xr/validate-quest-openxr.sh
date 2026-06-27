@@ -93,6 +93,12 @@ Options:
                      Add --render-distance N to startup argv.
   --day-time T       Add --day-time T to startup argv.
   --freeze-time      Add --freeze-time to startup argv.
+  --lighting true|false
+                     Add --lighting VALUE to startup argv.
+  --section-occlusion true|false
+                     Add --section-occlusion VALUE to startup argv.
+  --fullbright true|false
+                     Add --fullbright VALUE to startup argv.
   --session-smoke MODE
                      Run a launch-scoped in-headset session replacement smoke.
                      MODE is new-world.
@@ -366,7 +372,7 @@ while [[ $# -gt 0 ]]; do
             fi
             shift 2
             ;;
-        --chunk-x|--chunk-z|--render-distance|--day-time)
+        --chunk-x|--chunk-z|--render-distance|--day-time|--lighting|--section-occlusion|--fullbright)
             require_arg "$1" "${2:-}"
             STARTUP_ARGV+=("$1" "$2")
             shift 2

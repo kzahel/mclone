@@ -401,8 +401,9 @@ mod tests {
             "--day-time".to_owned(),
             "6000".to_owned(),
             "--freeze-time".to_owned(),
-            "--force-fullbright".to_owned(),
-            "--xr-view-pose".to_owned(),
+            "--fullbright".to_owned(),
+            "true".to_owned(),
+            "--view-pose".to_owned(),
             "8,72,-12,180".to_owned(),
         ])
         .unwrap();
@@ -435,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_xr_view_pose_alias_and_default() {
+    fn cli_parses_xr_view_pose_default() {
         let cli = Cli::parse([
             "--xr-mclone-smoke".to_owned(),
             "--view-pose=default".to_owned(),
@@ -527,24 +528,24 @@ mod tests {
 
     #[test]
     fn cli_rejects_xr_view_pose_without_mclone_smoke() {
-        let err = Cli::parse(["--xr-view-pose".to_owned(), "0,64,0,0".to_owned()])
+        let err = Cli::parse(["--view-pose".to_owned(), "0,64,0,0".to_owned()])
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("--xr-view-pose requires --xr-mclone-smoke"));
+        assert!(err.contains("--view-pose requires --xr-mclone-smoke"));
     }
 
     #[test]
     fn cli_rejects_invalid_xr_view_pose() {
         let err = Cli::parse([
             "--xr-mclone-smoke".to_owned(),
-            "--xr-view-pose".to_owned(),
+            "--view-pose".to_owned(),
             "0,64,0".to_owned(),
         ])
         .unwrap_err()
         .to_string();
 
-        assert!(err.contains("--xr-view-pose expects X,Y,Z,YAW_DEGREES"));
+        assert!(err.contains("--view-pose expects X,Y,Z,YAW_DEGREES"));
     }
 
     #[test]
@@ -644,7 +645,8 @@ mod tests {
             "750".to_owned(),
             "--screenshot-eye".to_owned(),
             "1.5,62.25,-3".to_owned(),
-            "--force-fullbright".to_owned(),
+            "--fullbright".to_owned(),
+            "true".to_owned(),
             "--remote-addr".to_owned(),
             "127.0.0.1:25565".to_owned(),
         ])
@@ -802,20 +804,10 @@ mod tests {
             }
         );
 
-        let cli = Cli::parse([
-            "--disable-section-occlusion".to_owned(),
-            "--enable-section-occlusion".to_owned(),
-        ])
-        .unwrap();
-
-        assert_eq!(
-            cli,
-            Cli::Window {
-                scene: SceneOptions::default(),
-                render_options: TexturedSectionRenderOptions::default(),
-                start_intent: WindowStartIntent::InWorld,
-            }
-        );
+        let err = Cli::parse(["--disable-section-occlusion".to_owned()])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unknown argument"));
     }
 
     #[test]
@@ -842,11 +834,7 @@ mod tests {
             }
         );
 
-        let cli = Cli::parse([
-            "--force-fullbright".to_owned(),
-            "--disable-fullbright".to_owned(),
-        ])
-        .unwrap();
+        let cli = Cli::parse(["--fullbright".to_owned(), "false".to_owned()]).unwrap();
 
         assert_eq!(
             cli,
@@ -859,8 +847,8 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_disable_lighting_as_runtime_bypass() {
-        let cli = Cli::parse(["--disable-lighting".to_owned()]).unwrap();
+    fn cli_parses_lighting_false_as_runtime_bypass() {
+        let cli = Cli::parse(["--lighting".to_owned(), "false".to_owned()]).unwrap();
 
         assert_eq!(
             cli,
@@ -878,8 +866,10 @@ mod tests {
         );
 
         let cli = Cli::parse([
-            "--disable-lighting".to_owned(),
-            "--disable-fullbright".to_owned(),
+            "--lighting".to_owned(),
+            "false".to_owned(),
+            "--fullbright".to_owned(),
+            "false".to_owned(),
         ])
         .unwrap();
 

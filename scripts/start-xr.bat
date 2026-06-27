@@ -141,7 +141,6 @@ if /I "%~1"=="-Forever" (
     goto parse_args
 )
 if /I "%~1"=="--view-pose" goto parse_view_pose
-if /I "%~1"=="--xr-view-pose" goto parse_view_pose
 if /I "%~1"=="-ViewPose" goto parse_view_pose
 if /I "%~1"=="--no-quest-launch" (
     call :append_arg "-NoQuestLaunch"

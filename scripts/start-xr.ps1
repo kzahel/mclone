@@ -172,7 +172,7 @@ try {
         $appArgs += @("--frames", "$Frames")
     }
     if ($ViewPose) {
-        $appArgs += @("--xr-view-pose", $ViewPose)
+        $appArgs += @("--view-pose", $ViewPose)
     }
     $appArgs += $McloneArgs
     $runCommand = $cargoRun + @("--") + $appArgs

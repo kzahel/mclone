@@ -7,6 +7,7 @@ pub mod local_single_view;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod render_assets;
 pub mod session;
+pub mod startup_args;
 
 use std::collections::BTreeSet;
 #[cfg(not(target_arch = "wasm32"))]

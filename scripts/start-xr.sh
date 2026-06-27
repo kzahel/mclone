@@ -256,7 +256,7 @@ while [ "$#" -gt 0 ]; do
             runtime=json
             shift 2
             ;;
-        --view-pose|--xr-view-pose)
+        --view-pose)
             if [ "$#" -lt 2 ]; then
                 echo "$1 requires X,Y,Z,YAW_DEGREES" >&2
                 exit 1
@@ -376,7 +376,7 @@ if [ -n "${view_pose}" ]; then
         echo "--view-pose requires --smoke mclone" >&2
         exit 1
     fi
-    app_args=("${app_args[@]:0:3}" --xr-view-pose "${view_pose}" "${app_args[@]:3}")
+    app_args=("${app_args[@]:0:3}" --view-pose "${view_pose}" "${app_args[@]:3}")
 fi
 
 if [ "${check_only}" -eq 1 ]; then

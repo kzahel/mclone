@@ -1,6 +1,10 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
+use mclone_app_runtime::startup_args::{
+    RenderDistanceLimits, StartupArgState, StartupSceneOptions, parse_bool_arg, parse_i32_arg,
+    parse_u32_arg, parse_u64_arg,
+};
 use mclone_render::chunk::TexturedSectionRenderOptions;
 
 use crate::camera::{SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED};
@@ -207,6 +211,36 @@ impl Default for SceneOptions {
     }
 }
 
+impl SceneOptions {
+    fn to_startup_scene(&self) -> StartupSceneOptions {
+        StartupSceneOptions {
+            seed: self.seed,
+            chunk_x: self.chunk_x,
+            chunk_z: self.chunk_z,
+            render_distance: u32::try_from(self.render_distance)
+                .expect("desktop default render distance is non-negative"),
+            remote_addr: self.remote_addr.clone(),
+            day_time_override: self.day_time_override,
+            freeze_time: self.freeze_time,
+            lighting_enabled: self.lighting_enabled,
+        }
+    }
+
+    fn from_startup_scene(scene: StartupSceneOptions) -> Result<Self> {
+        Ok(Self {
+            seed: scene.seed,
+            chunk_x: scene.chunk_x,
+            chunk_z: scene.chunk_z,
+            render_distance: i32::try_from(scene.render_distance)
+                .context("desktop render distance does not fit i32")?,
+            remote_addr: scene.remote_addr,
+            day_time_override: scene.day_time_override,
+            freeze_time: scene.freeze_time,
+            lighting_enabled: scene.lighting_enabled,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Cli {
     Window {
@@ -276,9 +310,10 @@ impl Cli {
         let mut mode = None;
         let mut width = None;
         let mut height = None;
-        let mut scene = SceneOptions::default();
-        let mut render_options = TexturedSectionRenderOptions::default();
-        let mut fullbright_explicit = false;
+        let mut startup_args = StartupArgState::new(
+            SceneOptions::default().to_startup_scene(),
+            TexturedSectionRenderOptions::default(),
+        );
         let mut screenshot_ui = HeadlessScreenshotUi::None;
         let mut screenshot_debug_pane = false;
         let mut screenshot_scripted_interaction = false;
@@ -466,54 +501,6 @@ impl Cli {
                 }
                 "--width" => width = Some(parse_u32_arg("--width", args.next())?),
                 "--height" => height = Some(parse_u32_arg("--height", args.next())?),
-                "--seed" => scene.seed = parse_i64_arg("--seed", args.next())?,
-                "--day-time" => {
-                    scene.day_time_override = Some(parse_u64_arg("--day-time", args.next())?);
-                }
-                "--freeze-time" => {
-                    scene.freeze_time = true;
-                }
-                "--lighting" => {
-                    scene.lighting_enabled = parse_bool_arg("--lighting", args.next())?;
-                }
-                "--disable-lighting" => {
-                    scene.lighting_enabled = false;
-                }
-                "--enable-lighting" => {
-                    scene.lighting_enabled = true;
-                }
-                "--chunk-x" => scene.chunk_x = parse_i32_arg("--chunk-x", args.next())?,
-                "--chunk-z" => scene.chunk_z = parse_i32_arg("--chunk-z", args.next())?,
-                "--render-distance" => {
-                    scene.render_distance =
-                        parse_render_distance_arg("--render-distance", args.next())?
-                }
-                "--remote-addr" => {
-                    scene.remote_addr =
-                        Some(args.next().context("--remote-addr requires HOST:PORT")?);
-                }
-                "--section-occlusion" => {
-                    render_options.section_occlusion_culling =
-                        parse_bool_arg("--section-occlusion", args.next())?;
-                }
-                "--fullbright" => {
-                    render_options.force_fullbright = parse_bool_arg("--fullbright", args.next())?;
-                    fullbright_explicit = true;
-                }
-                "--disable-section-occlusion" => {
-                    render_options.section_occlusion_culling = false;
-                }
-                "--enable-section-occlusion" => {
-                    render_options.section_occlusion_culling = true;
-                }
-                "--force-fullbright" => {
-                    render_options.force_fullbright = true;
-                    fullbright_explicit = true;
-                }
-                "--disable-fullbright" => {
-                    render_options.force_fullbright = false;
-                    fullbright_explicit = true;
-                }
                 "--movement-steps" => {
                     movement_perf = true;
                     movement_steps = parse_movement_steps_arg("--movement-steps", args.next())?;
@@ -546,10 +533,6 @@ impl Cli {
                     movement_speed =
                         parse_movement_speed_arg("--movement-frame-speed", args.next())?;
                 }
-                "--movement-path-radius" => {
-                    movement_perf = true;
-                    path_radius = parse_path_radius_arg(&arg, args.next())?;
-                }
                 "--path-radius" => {
                     path_radius = parse_path_radius_arg(&arg, args.next())?;
                 }
@@ -557,24 +540,13 @@ impl Cli {
                     xr_frames_explicit = true;
                     xr_frame_limit = Some(parse_xr_smoke_frames_arg("--frames", args.next())?);
                 }
-                "--xr-frames" => {
-                    xr_frames_explicit = true;
-                    xr_frame_limit = Some(parse_xr_smoke_frames_arg("--xr-frames", args.next())?);
-                }
                 "--xr-forever" => {
                     xr_forever_explicit = true;
                     xr_frame_limit = None;
                 }
-                "--xr-view-pose" | "--view-pose" => {
+                "--view-pose" => {
                     xr_view_pose_explicit = true;
                     xr_view_pose = parse_xr_view_pose_arg(&arg, args.next())?;
-                }
-                _ if arg.starts_with("--xr-view-pose=") => {
-                    xr_view_pose_explicit = true;
-                    xr_view_pose = parse_xr_view_pose_value(
-                        "--xr-view-pose",
-                        &arg["--xr-view-pose=".len()..],
-                    )?;
                 }
                 _ if arg.starts_with("--view-pose=") => {
                     xr_view_pose_explicit = true;
@@ -585,7 +557,15 @@ impl Cli {
                     print_help();
                     std::process::exit(0);
                 }
-                _ => bail!("unknown argument `{arg}`; pass --help for usage"),
+                _ => {
+                    if !startup_args.parse_next_arg(
+                        &arg,
+                        &mut args,
+                        desktop_render_distance_limits(),
+                    )? {
+                        bail!("unknown argument `{arg}`; pass --help for usage");
+                    }
+                }
             }
         }
 
@@ -613,14 +593,14 @@ impl Cli {
             bail!("--xr-forever requires --xr-clear-smoke or --xr-mclone-smoke");
         }
         if xr_frames_explicit && xr_forever_explicit {
-            bail!("--xr-forever cannot be combined with --frames or --xr-frames");
+            bail!("--xr-forever cannot be combined with --frames");
         }
         if xr_view_pose_explicit && !xr_mclone_smoke {
-            bail!("--xr-view-pose requires --xr-mclone-smoke");
+            bail!("--view-pose requires --xr-mclone-smoke");
         }
-        if !scene.lighting_enabled && !fullbright_explicit {
-            render_options.force_fullbright = true;
-        }
+        let startup_options = startup_args.finish();
+        let scene = SceneOptions::from_startup_scene(startup_options.scene)?;
+        let render_options = startup_options.render_options;
         match mode {
             Some(HeadlessMode::Clear(path)) => Ok(Self::HeadlessClear {
                 path,
@@ -736,46 +716,6 @@ fn set_headless_mode(mode: &mut Option<HeadlessMode>, next: HeadlessMode) -> Res
     Ok(())
 }
 
-fn parse_u32_arg(flag: &str, value: Option<String>) -> Result<u32> {
-    let value = value.with_context(|| format!("{flag} requires a value"))?;
-    let parsed = value
-        .parse::<u32>()
-        .with_context(|| format!("{flag} requires an unsigned integer, got `{value}`"))?;
-    if parsed == 0 {
-        bail!("{flag} must be greater than zero");
-    }
-    Ok(parsed)
-}
-
-fn parse_i32_arg(flag: &str, value: Option<String>) -> Result<i32> {
-    let value = value.with_context(|| format!("{flag} requires a value"))?;
-    value
-        .parse::<i32>()
-        .with_context(|| format!("{flag} requires a signed integer, got `{value}`"))
-}
-
-fn parse_i64_arg(flag: &str, value: Option<String>) -> Result<i64> {
-    let value = value.with_context(|| format!("{flag} requires a value"))?;
-    value
-        .parse::<i64>()
-        .with_context(|| format!("{flag} requires a signed 64-bit integer, got `{value}`"))
-}
-
-fn parse_u64_arg(flag: &str, value: Option<String>) -> Result<u64> {
-    let value = value.with_context(|| format!("{flag} requires a value"))?;
-    value
-        .parse::<u64>()
-        .with_context(|| format!("{flag} requires an unsigned 64-bit integer, got `{value}`"))
-}
-
-fn parse_render_distance_arg(flag: &str, value: Option<String>) -> Result<i32> {
-    let parsed = parse_i32_arg(flag, value)?;
-    if !(MIN_RENDER_DISTANCE..=MAX_RENDER_DISTANCE).contains(&parsed) {
-        bail!("{flag} must be between {MIN_RENDER_DISTANCE} and {MAX_RENDER_DISTANCE}");
-    }
-    Ok(parsed)
-}
-
 fn parse_movement_steps_arg(flag: &str, value: Option<String>) -> Result<usize> {
     let value = value.with_context(|| format!("{flag} requires a value"))?;
     let parsed = value
@@ -884,15 +824,6 @@ fn parse_path_radius_arg(flag: &str, value: Option<String>) -> Result<i32> {
     Ok(parsed)
 }
 
-fn parse_bool_arg(flag: &str, value: Option<String>) -> Result<bool> {
-    let value = value.with_context(|| format!("{flag} requires true or false"))?;
-    match value.as_str() {
-        "true" | "1" | "yes" | "on" => Ok(true),
-        "false" | "0" | "no" | "off" => Ok(false),
-        _ => bail!("{flag} must be true or false, got `{value}`"),
-    }
-}
-
 fn parse_screenshot_remote_settle_ms_arg(flag: &str, value: Option<String>) -> Result<u64> {
     let parsed = parse_u64_arg(flag, value)?;
     if parsed > MAX_SCREENSHOT_REMOTE_SETTLE_MS {
@@ -945,6 +876,15 @@ pub(crate) fn parse_screenshot_ui_arg(
     }
 }
 
+fn desktop_render_distance_limits() -> RenderDistanceLimits {
+    RenderDistanceLimits::new(
+        u32::try_from(MIN_RENDER_DISTANCE)
+            .expect("desktop minimum render distance is non-negative"),
+        u32::try_from(MAX_RENDER_DISTANCE)
+            .expect("desktop maximum render distance is non-negative"),
+    )
+}
+
 fn print_help() {
     println!(
         "mclone-native-client\n\n\
@@ -961,7 +901,7 @@ fn print_help() {
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
-           mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--xr-view-pose X,Y,Z,YAW_DEGREES] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-         Window mode streams chunks around a collision-backed local player with WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane toggle, O section-occlusion toggle, and L fullbright toggle. Use --disable-lighting/--enable-lighting to bypass or restore server-side ChunkStatus::Light promotion; --disable-lighting defaults to fullbright unless --disable-fullbright is also passed. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
+           mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+         Window mode streams chunks around a collision-backed local player with WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane toggle, O section-occlusion toggle, and L fullbright toggle. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }

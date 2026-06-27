@@ -1,0 +1,339 @@
+use anyhow::{Context, Result, bail};
+use mclone_render::chunk::TexturedSectionRenderOptions;
+
+pub const ARG_SEED: &str = "--seed";
+pub const ARG_CHUNK_X: &str = "--chunk-x";
+pub const ARG_CHUNK_Z: &str = "--chunk-z";
+pub const ARG_RENDER_DISTANCE: &str = "--render-distance";
+pub const ARG_REMOTE_ADDR: &str = "--remote-addr";
+pub const ARG_DAY_TIME: &str = "--day-time";
+pub const ARG_FREEZE_TIME: &str = "--freeze-time";
+pub const ARG_LIGHTING: &str = "--lighting";
+pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
+pub const ARG_FULLBRIGHT: &str = "--fullbright";
+
+pub const DEFAULT_STARTUP_SEED: i64 = 12_345;
+pub const DEFAULT_STARTUP_CHUNK_X: i32 = 0;
+pub const DEFAULT_STARTUP_CHUNK_Z: i32 = 0;
+pub const DEFAULT_STARTUP_RENDER_DISTANCE: u32 = 2;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RenderDistanceLimits {
+    pub min: u32,
+    pub max: u32,
+}
+
+impl RenderDistanceLimits {
+    pub const fn new(min: u32, max: u32) -> Self {
+        Self { min, max }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StartupSceneOptions {
+    pub seed: i64,
+    pub chunk_x: i32,
+    pub chunk_z: i32,
+    pub render_distance: u32,
+    pub remote_addr: Option<String>,
+    pub day_time_override: Option<u64>,
+    pub freeze_time: bool,
+    pub lighting_enabled: bool,
+}
+
+impl Default for StartupSceneOptions {
+    fn default() -> Self {
+        Self {
+            seed: DEFAULT_STARTUP_SEED,
+            chunk_x: DEFAULT_STARTUP_CHUNK_X,
+            chunk_z: DEFAULT_STARTUP_CHUNK_Z,
+            render_distance: DEFAULT_STARTUP_RENDER_DISTANCE,
+            remote_addr: None,
+            day_time_override: None,
+            freeze_time: false,
+            lighting_enabled: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StartupOptions {
+    pub scene: StartupSceneOptions,
+    pub render_options: TexturedSectionRenderOptions,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StartupArgState {
+    scene: StartupSceneOptions,
+    render_options: TexturedSectionRenderOptions,
+    fullbright_explicit: bool,
+}
+
+impl StartupArgState {
+    pub fn new(scene: StartupSceneOptions, render_options: TexturedSectionRenderOptions) -> Self {
+        Self {
+            scene,
+            render_options,
+            fullbright_explicit: false,
+        }
+    }
+
+    pub fn parse_next_arg(
+        &mut self,
+        arg: &str,
+        args: &mut impl Iterator<Item = String>,
+        render_distance_limits: RenderDistanceLimits,
+    ) -> Result<bool> {
+        match arg {
+            ARG_SEED => {
+                self.scene.seed = parse_i64_arg(ARG_SEED, args.next())?;
+            }
+            ARG_CHUNK_X => {
+                self.scene.chunk_x = parse_i32_arg(ARG_CHUNK_X, args.next())?;
+            }
+            ARG_CHUNK_Z => {
+                self.scene.chunk_z = parse_i32_arg(ARG_CHUNK_Z, args.next())?;
+            }
+            ARG_RENDER_DISTANCE => {
+                self.scene.render_distance = parse_render_distance_arg(
+                    ARG_RENDER_DISTANCE,
+                    args.next(),
+                    render_distance_limits,
+                )?;
+            }
+            ARG_REMOTE_ADDR => {
+                self.scene.remote_addr = parse_remote_addr_arg(args.next())?;
+            }
+            ARG_DAY_TIME => {
+                self.scene.day_time_override = Some(parse_u64_arg(ARG_DAY_TIME, args.next())?);
+            }
+            ARG_FREEZE_TIME => {
+                self.scene.freeze_time = true;
+            }
+            ARG_LIGHTING => {
+                self.scene.lighting_enabled = parse_bool_arg(ARG_LIGHTING, args.next())?;
+            }
+            ARG_SECTION_OCCLUSION => {
+                self.render_options.section_occlusion_culling =
+                    parse_bool_arg(ARG_SECTION_OCCLUSION, args.next())?;
+            }
+            ARG_FULLBRIGHT => {
+                self.render_options.force_fullbright = parse_bool_arg(ARG_FULLBRIGHT, args.next())?;
+                self.fullbright_explicit = true;
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    pub fn finish(mut self) -> StartupOptions {
+        if !self.scene.lighting_enabled && !self.fullbright_explicit {
+            self.render_options.force_fullbright = true;
+        }
+        StartupOptions {
+            scene: self.scene,
+            render_options: self.render_options,
+        }
+    }
+}
+
+impl Default for StartupArgState {
+    fn default() -> Self {
+        Self::new(
+            StartupSceneOptions::default(),
+            TexturedSectionRenderOptions::default(),
+        )
+    }
+}
+
+pub fn parse_string_arg(flag: &str, value: Option<String>) -> Result<String> {
+    value.with_context(|| format!("{flag} requires a value"))
+}
+
+pub fn parse_u32_arg(flag: &str, value: Option<String>) -> Result<u32> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    let parsed = value
+        .parse::<u32>()
+        .with_context(|| format!("{flag} requires an unsigned integer, got `{value}`"))?;
+    if parsed == 0 {
+        bail!("{flag} must be greater than zero");
+    }
+    Ok(parsed)
+}
+
+pub fn parse_i32_arg(flag: &str, value: Option<String>) -> Result<i32> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    value
+        .parse::<i32>()
+        .with_context(|| format!("{flag} requires a signed integer, got `{value}`"))
+}
+
+pub fn parse_i64_arg(flag: &str, value: Option<String>) -> Result<i64> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    value
+        .parse::<i64>()
+        .with_context(|| format!("{flag} requires a signed 64-bit integer, got `{value}`"))
+}
+
+pub fn parse_u64_arg(flag: &str, value: Option<String>) -> Result<u64> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    value
+        .parse::<u64>()
+        .with_context(|| format!("{flag} requires an unsigned 64-bit integer, got `{value}`"))
+}
+
+pub fn parse_bool_arg(flag: &str, value: Option<String>) -> Result<bool> {
+    let value = value.with_context(|| format!("{flag} requires true or false"))?;
+    match value.as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => bail!("{flag} must be true or false, got `{value}`"),
+    }
+}
+
+pub fn parse_render_distance_arg(
+    flag: &str,
+    value: Option<String>,
+    limits: RenderDistanceLimits,
+) -> Result<u32> {
+    let parsed = parse_u32_arg(flag, value)?;
+    if parsed < limits.min || parsed > limits.max {
+        bail!("{flag} must be between {} and {}", limits.min, limits.max);
+    }
+    Ok(parsed)
+}
+
+fn parse_remote_addr_arg(value: Option<String>) -> Result<Option<String>> {
+    let value = parse_string_arg(ARG_REMOTE_ADDR, value)?;
+    let value = value.trim();
+    if value.is_empty() || matches!(value, "default" | "off" | "none" | "false" | "0") {
+        Ok(None)
+    } else {
+        Ok(Some(value.to_owned()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> StartupOptions {
+        let mut state = StartupArgState::default();
+        let mut args = args.iter().map(|arg| (*arg).to_owned());
+        while let Some(arg) = args.next() {
+            assert!(
+                state
+                    .parse_next_arg(&arg, &mut args, RenderDistanceLimits::new(1, 16))
+                    .unwrap(),
+                "unexpected arg `{arg}`"
+            );
+        }
+        state.finish()
+    }
+
+    #[test]
+    fn defaults_are_host_neutral() {
+        assert_eq!(
+            StartupSceneOptions::default(),
+            StartupSceneOptions {
+                seed: 12_345,
+                chunk_x: 0,
+                chunk_z: 0,
+                render_distance: 2,
+                remote_addr: None,
+                day_time_override: None,
+                freeze_time: false,
+                lighting_enabled: true,
+            }
+        );
+        assert_eq!(
+            StartupArgState::default().finish().render_options,
+            TexturedSectionRenderOptions::default()
+        );
+    }
+
+    #[test]
+    fn parses_scene_tokens() {
+        let options = parse(&[
+            ARG_SEED,
+            "-77",
+            ARG_CHUNK_X,
+            "4",
+            ARG_CHUNK_Z,
+            "-3",
+            ARG_RENDER_DISTANCE,
+            "5",
+            ARG_DAY_TIME,
+            "6000",
+            ARG_FREEZE_TIME,
+            ARG_REMOTE_ADDR,
+            "127.0.0.1:25565",
+        ]);
+        assert_eq!(
+            options.scene,
+            StartupSceneOptions {
+                seed: -77,
+                chunk_x: 4,
+                chunk_z: -3,
+                render_distance: 5,
+                remote_addr: Some("127.0.0.1:25565".to_owned()),
+                day_time_override: Some(6000),
+                freeze_time: true,
+                lighting_enabled: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_render_tokens_and_lighting_fullbright_default() {
+        let options = parse(&[
+            ARG_LIGHTING,
+            "false",
+            ARG_SECTION_OCCLUSION,
+            "false",
+            ARG_FULLBRIGHT,
+            "true",
+        ]);
+        assert!(!options.scene.lighting_enabled);
+        assert!(!options.render_options.section_occlusion_culling);
+        assert!(options.render_options.force_fullbright);
+
+        let options = parse(&[ARG_LIGHTING, "false"]);
+        assert!(options.render_options.force_fullbright);
+
+        let options = parse(&[ARG_LIGHTING, "false", ARG_FULLBRIGHT, "false"]);
+        assert!(!options.render_options.force_fullbright);
+    }
+
+    #[test]
+    fn rejects_render_distance_outside_configured_limits() {
+        let mut state = StartupArgState::default();
+        let mut args = ["1".to_owned()].into_iter();
+        let err = state
+            .parse_next_arg(
+                ARG_RENDER_DISTANCE,
+                &mut args,
+                RenderDistanceLimits::new(2, 16),
+            )
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("between 2 and 16"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn unknown_tokens_are_left_to_platform_parsers() {
+        let mut state = StartupArgState::default();
+        let mut args = std::iter::empty();
+        assert!(
+            !state
+                .parse_next_arg(
+                    "--platform-only",
+                    &mut args,
+                    RenderDistanceLimits::new(1, 16)
+                )
+                .unwrap()
+        );
+    }
+}

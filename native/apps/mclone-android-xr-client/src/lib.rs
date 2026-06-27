@@ -23,6 +23,9 @@ mod android {
         load_asset_source, load_textured_mesh_assets_from_source,
     };
     use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
+    use mclone_app_runtime::startup_args::{
+        RenderDistanceLimits, StartupArgState, StartupSceneOptions, parse_string_arg,
+    };
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
     use mclone_net::NativeClientSession;
@@ -34,7 +37,8 @@ mod android {
         XrControllerSnapshot, XrDisplayRefreshSnapshot, XrFrameStats,
     };
     use mclone_xr_scene::{
-        XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
+        MAX_XR_RENDER_DISTANCE, XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose,
+        XrTerrainEyeTarget,
     };
     use openxr as xr;
 
@@ -210,6 +214,7 @@ mod android {
     #[derive(Clone, Debug, PartialEq)]
     struct AndroidXrStartupOptions {
         scene: XrSceneOptions,
+        render_options: TexturedSectionRenderOptions,
         remote_addr: Option<String>,
         session_smoke: Option<AndroidXrSessionSmoke>,
         perf_seconds: Option<u64>,
@@ -223,6 +228,7 @@ mod android {
         fn default() -> Self {
             Self {
                 scene: XrSceneOptions::default(),
+                render_options: TexturedSectionRenderOptions::default(),
                 remote_addr: None,
                 session_smoke: None,
                 perf_seconds: None,
@@ -261,42 +267,28 @@ mod android {
         let argv = serde_json::from_str::<Vec<String>>(json)
             .context("parse Android XR startup argv JSON")?;
         let mut options = AndroidXrStartupOptions::default();
-        let mut index = 0;
-        while index < argv.len() {
-            match argv[index].as_str() {
-                "--seed" => {
-                    options.scene.seed = parse_next(&argv, &mut index, "--seed")?;
-                }
-                "--chunk-x" => {
-                    options.scene.chunk_x = parse_next(&argv, &mut index, "--chunk-x")?;
-                }
-                "--chunk-z" => {
-                    options.scene.chunk_z = parse_next(&argv, &mut index, "--chunk-z")?;
-                }
-                "--render-distance" => {
-                    options.scene.render_distance =
-                        parse_next(&argv, &mut index, "--render-distance")?;
-                }
-                "--day-time" => {
-                    options.scene.day_time_override =
-                        Some(parse_next(&argv, &mut index, "--day-time")?);
-                }
-                "--remote-addr" => {
-                    options.remote_addr = parse_remote_addr_arg(parse_next_string(
-                        &argv,
-                        &mut index,
-                        "--remote-addr",
-                    )?);
-                }
+        let mut shared_args = StartupArgState::new(
+            android_xr_startup_scene_defaults(),
+            TexturedSectionRenderOptions::default(),
+        );
+        let mut argv = argv.into_iter();
+        while let Some(arg) = argv.next() {
+            if shared_args.parse_next_arg(
+                &arg,
+                &mut argv,
+                RenderDistanceLimits::new(1, MAX_XR_RENDER_DISTANCE),
+            )? {
+                continue;
+            }
+            match arg.as_str() {
                 "--session-smoke" => {
                     options.session_smoke = Some(parse_session_smoke_arg(parse_next_string(
-                        &argv,
-                        &mut index,
+                        &mut argv,
                         "--session-smoke",
                     )?)?);
                 }
                 "--perf-seconds" => {
-                    let seconds = parse_next::<u64>(&argv, &mut index, "--perf-seconds")?;
+                    let seconds = parse_next::<u64>(&mut argv, "--perf-seconds")?;
                     if seconds == 0 {
                         bail!("--perf-seconds must be greater than zero");
                     }
@@ -311,7 +303,7 @@ mod android {
                     }
                 }
                 "--perf-flight-speed" => {
-                    let speed = parse_next::<f64>(&argv, &mut index, "--perf-flight-speed")?;
+                    let speed = parse_next::<f64>(&mut argv, "--perf-flight-speed")?;
                     options.perf_flight = Some(AndroidXrPerfFlight {
                         speed_blocks_per_second: validate_perf_flight_speed(speed)?,
                     });
@@ -326,14 +318,13 @@ mod android {
                 "--perf-metrics" => {
                     options.perf_metrics = true;
                 }
-                "--freeze-time" => {}
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
-            if argv[index] == "--freeze-time" {
-                options.scene.freeze_time = true;
-            }
-            index += 1;
         }
+        let shared_options = shared_args.finish();
+        options.remote_addr = shared_options.scene.remote_addr.clone();
+        options.scene = android_xr_scene_options_from_startup(shared_options.scene).validated()?;
+        options.render_options = shared_options.render_options;
         if options.perf_flight.is_some() && options.perf_seconds.is_none() {
             bail!("--perf-flight requires --perf-seconds");
         }
@@ -349,8 +340,33 @@ mod android {
         if options.perf_frozen_render && options.perf_flight.is_some() {
             bail!("--perf-frozen-render cannot be combined with --perf-flight");
         }
-        options.scene = options.scene.validated()?;
         Ok(options)
+    }
+
+    fn android_xr_startup_scene_defaults() -> StartupSceneOptions {
+        let scene = XrSceneOptions::default();
+        StartupSceneOptions {
+            seed: scene.seed,
+            chunk_x: scene.chunk_x,
+            chunk_z: scene.chunk_z,
+            render_distance: scene.render_distance,
+            remote_addr: None,
+            day_time_override: scene.day_time_override,
+            freeze_time: scene.freeze_time,
+            lighting_enabled: scene.lighting_enabled,
+        }
+    }
+
+    fn android_xr_scene_options_from_startup(scene: StartupSceneOptions) -> XrSceneOptions {
+        XrSceneOptions {
+            seed: scene.seed,
+            chunk_x: scene.chunk_x,
+            chunk_z: scene.chunk_z,
+            render_distance: scene.render_distance,
+            day_time_override: scene.day_time_override,
+            freeze_time: scene.freeze_time,
+            lighting_enabled: scene.lighting_enabled,
+        }
     }
 
     fn validate_perf_flight_speed(speed_blocks_per_second: f64) -> Result<f64> {
@@ -367,34 +383,21 @@ mod android {
         }
     }
 
-    fn parse_next_string(argv: &[String], index: &mut usize, flag: &str) -> Result<String> {
-        *index += 1;
-        argv.get(*index)
-            .cloned()
-            .with_context(|| format!("{flag} requires a value"))
+    fn parse_next_string(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String> {
+        parse_string_arg(flag, args.next())
     }
 
-    fn parse_next<T>(argv: &[String], index: &mut usize, flag: &str) -> Result<T>
+    fn parse_next<T>(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<T>
     where
         T: std::str::FromStr,
         T::Err: std::error::Error + Send + Sync + 'static,
     {
-        *index += 1;
-        let value = argv
-            .get(*index)
+        let value = args
+            .next()
             .with_context(|| format!("{flag} requires a value"))?;
         value
             .parse::<T>()
             .with_context(|| format!("{flag} has invalid value `{value}`"))
-    }
-
-    fn parse_remote_addr_arg(value: String) -> Option<String> {
-        let value = value.trim();
-        if value.is_empty() || matches!(value, "default" | "off" | "none" | "false" | "0") {
-            None
-        } else {
-            Some(value.to_owned())
-        }
     }
 
     fn parse_android_xr_startup_view_pose(
@@ -589,6 +592,11 @@ mod android {
             scene_options.freeze_time,
             scene_options.lighting_enabled
         );
+        log::info!(
+            "Android XR render options: section_occlusion={} fullbright={}",
+            startup_options.render_options.section_occlusion_culling,
+            startup_options.render_options.force_fullbright
+        );
 
         let runtime_assets = match load_android_xr_runtime_assets() {
             Ok(assets) => assets,
@@ -603,6 +611,7 @@ mod android {
             &app,
             runtime_assets,
             scene_options,
+            startup_options.render_options,
             startup_view_pose,
             remote_addr,
             startup_options.session_smoke,
@@ -621,6 +630,7 @@ mod android {
         app: &AndroidApp,
         runtime_assets: AndroidXrRuntimeAssets,
         scene_options: XrSceneOptions,
+        render_options: TexturedSectionRenderOptions,
         startup_view_pose: Option<XrStartupViewPose>,
         remote_addr: Option<String>,
         session_smoke: Option<AndroidXrSessionSmoke>,
@@ -889,6 +899,7 @@ mod android {
             runtime_assets,
             startup_view_pose,
             scene_options,
+            render_options,
             remote_addr,
         )
         .context("initialize Android XR terrain runtime")?;
@@ -929,6 +940,7 @@ mod android {
         runtime_assets: AndroidXrRuntimeAssets,
         startup_view_pose: Option<XrStartupViewPose>,
         scene_options: XrSceneOptions,
+        render_options: TexturedSectionRenderOptions,
         remote_addr: Option<String>,
     ) -> Result<AndroidXrTerrainState> {
         let AndroidXrRuntimeAssets {
@@ -969,7 +981,7 @@ mod android {
             XR_COLOR_FORMAT,
             scene_options,
             runtime,
-            TexturedSectionRenderOptions::default(),
+            render_options,
             actor_assets.atlas,
             startup_view_pose,
         )?;
