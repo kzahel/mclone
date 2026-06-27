@@ -51,6 +51,9 @@ pub const XR_NEAR: f32 = 0.05;
 pub const XR_FAR: f32 = 700.0;
 pub const XR_JOYPAD_DEAD_ZONE: f32 = 0.18;
 pub const XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND: f64 = 1.6;
+/// Minimum right-stick vertical deflection required to ascend/descend. Keeps the
+/// radial dead-zone cross-talk from nudging the player up/down while turning.
+pub const XR_JOYPAD_VERTICAL_THRESHOLD: f32 = 0.5;
 pub const XR_LOCOMOTION_MAX_FRAME_SECONDS: f64 = 0.1;
 pub const XR_MENU_TOGGLE_HAND: XrHand = XrHand::Left;
 pub const XR_UI_FPS_CAP: u32 = 90;
@@ -1471,12 +1474,10 @@ pub fn xr_locomotion_input_from_controllers(
         .find(|controller| controller.hand == XrHand::Right)
         .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
         .unwrap_or(Vec2::ZERO);
-    let jump = controllers
-        .iter()
-        .any(|controller| controller.hand == XrHand::Right && controller.a_pressed);
-    let descend = controllers
-        .iter()
-        .any(|controller| controller.hand == XrHand::Left && controller.y_pressed);
+    // Right stick: X turns (look left/right), Y flies up/down. Push up to ascend,
+    // pull down to descend.
+    let jump = right_axis.y > XR_JOYPAD_VERTICAL_THRESHOLD;
+    let descend = right_axis.y < -XR_JOYPAD_VERTICAL_THRESHOLD;
     let movement_impulse = (left_axis.length_squared() > f32::EPSILON)
         .then(|| xr_left_stick_movement_impulse(left_axis));
     let yaw_delta = f64::from(right_axis.x) * XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * dt_seconds;
@@ -1783,11 +1784,11 @@ mod tests {
     }
 
     #[test]
-    fn xr_locomotion_maps_left_stick_and_a_button_to_engine_input() {
+    fn xr_locomotion_maps_left_stick_and_right_stick_ascend_to_engine_input() {
         let input = xr_locomotion_input_from_controllers(
             &[
                 test_controller(XrHand::Left, Vec2::new(0.0, 1.0), false),
-                test_controller(XrHand::Right, Vec2::ZERO, true),
+                test_controller(XrHand::Right, Vec2::new(0.0, 1.0), false),
             ],
             1.0 / 72.0,
             Some(0.25),
@@ -1853,8 +1854,8 @@ mod tests {
     }
 
     #[test]
-    fn xr_locomotion_maps_right_a_button_to_jump() {
-        let right = test_controller(XrHand::Right, Vec2::ZERO, true);
+    fn xr_locomotion_maps_right_stick_up_to_jump() {
+        let right = test_controller(XrHand::Right, Vec2::new(0.0, 1.0), false);
         let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
 
         assert!(input.jump);
@@ -1862,13 +1863,21 @@ mod tests {
     }
 
     #[test]
-    fn xr_locomotion_maps_left_y_button_to_descend() {
-        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
-        left.y_pressed = true;
-        let input = xr_locomotion_input_from_controllers(&[left], 1.0 / 72.0, None);
+    fn xr_locomotion_maps_right_stick_down_to_descend() {
+        let right = test_controller(XrHand::Right, Vec2::new(0.0, -1.0), false);
+        let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
 
         assert!(input.descend);
         assert!(!input.jump);
+    }
+
+    #[test]
+    fn xr_locomotion_pure_yaw_does_not_trigger_vertical_movement() {
+        let right = test_controller(XrHand::Right, Vec2::new(1.0, 0.0), false);
+        let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
+
+        assert!(!input.jump);
+        assert!(!input.descend);
     }
 
     #[test]
