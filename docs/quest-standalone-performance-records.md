@@ -73,6 +73,55 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-27 - Standalone Quest 3 Frozen RD10 Single-Submit Stereo
+
+Benchmarked code commit: this Slice B commit. The run was captured immediately
+before commit from the same implementation worktree, based on `4797cdf` (`Add
+Quest XR render split metrics`).
+
+Capture note: captured from the implementation worktree carrying the Slice B
+single-encoder/single-submit/single-poll stereo path. The run used
+`native:android-xr:perf:frozen:rd10:metrics` with fixed render view pose
+`0,80,-96,180`, seed `12345`, center chunk `(0, 0)`, noon, frozen time, and
+RD10. After the run, an attempted `adb screencap` returned zero bytes because
+the perf process had already exited; log markers still show `MCLONE_ANDROID_XR_READY`
+and a successful 1,269 submitted-frame sample. Cleanup was run explicitly:
+`pidof com.kzahel.mclone.xr` was empty, `dumpsys power` reported
+`mWakefulness=Asleep`, and `mHoldingDisplaySuspendBlocker=false`.
+
+Summary:
+
+| Field | Value |
+|---|---:|
+| Sample | `20.011s`, `1269` frames |
+| Target | `72.0 Hz` / `13.889ms` |
+| Frame avg / p50 / p95 / p99 / max | `15.721ms` / `15.609ms` / `17.622ms` / `18.108ms` / `18.591ms` |
+| Terrain frame max | `18.102ms` |
+| Left / right eye max wall | `4.679ms` / `4.282ms` |
+| Drawn sections / indices | `179` / `1,352,142` |
+| Runtime work during sample | `0` upload work frames; runtime poll/sync/GPU upload all `0.000ms` |
+| Meta app GPU / GPU util | `7.145ms` / `58.342%` |
+| Meta compositor GPU / dropped frames | `1.557ms` / `77` cumulative |
+
+Render split maxima. Per-eye submit/poll are now intentionally `0.000ms`
+because submit and wait are shared by the stereo command buffer:
+
+| Bucket | Value |
+|---|---:|
+| Left prepare / encode / section encode | `3.476ms` / `1.625ms` / `1.023ms` |
+| Right prepare / encode / section encode | `3.181ms` / `1.388ms` / `1.073ms` |
+| Stereo finish / submit / poll wait | `0.042ms` / `0.398ms` / `10.092ms` |
+
+Interpretation:
+
+- Slice B removed per-eye submit/poll and cut per-eye wall from ~`10.6ms` to
+  `4.7ms`/`4.3ms`, improving RD10 p50 from ~`16.1ms` to `15.6ms`.
+- RD10 still misses 72 Hz. With app GPU time still ~`7.1ms`, the remaining
+  app-side stall is now one shared stereo poll, plus duplicated per-eye prepare
+  work. Slice C should target cull/draw-set reuse next; a later timestamp or
+  wait-mode probe can clarify the gap between app GPU time and the stereo poll
+  max.
+
 ### 2026-06-27 - Standalone Quest 3 Frozen RD10 Render Split
 
 Benchmarked code commit: this Slice A commit. The run was captured immediately

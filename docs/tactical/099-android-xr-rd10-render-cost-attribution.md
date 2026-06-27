@@ -1,10 +1,10 @@
 # 099: Android XR RD10 Render-Cost Attribution And CPU-Bound Submission
 
 Status: active; diagnostics landed (opt-in Meta performance-metrics probe,
-commit `0df8733`, and Slice A render split). This is the concrete continuation of
-[`096`](096-android-xr-quest-performance.md) Slice 5 (GPU timing / render-mode
-attribution). Future sessions should start here for standalone Quest render
-optimization.
+commit `0df8733`, and Slice A render split); Slice B single-submit stereo path
+landed. This is the concrete continuation of [`096`](096-android-xr-quest-performance.md)
+Slice 5 (GPU timing / render-mode attribution). Future sessions should start
+here for standalone Quest render optimization.
 
 ## Purpose
 
@@ -35,6 +35,9 @@ On the frozen RD10 lane (fixed pose `0,80,-96,180`, 179 drawn sections,
 | Slice A per-eye max poll wait | left `7.217 ms`, right `6.487 ms` | `MCLONE_ANDROID_XR_PERF_TERRAIN` |
 | Slice A per-eye max prepare | left `3.504 ms`, right `3.419 ms` | `MCLONE_ANDROID_XR_PERF_TERRAIN` |
 | Slice A per-eye max encode | left `1.638 ms`, right `1.621 ms` | `MCLONE_ANDROID_XR_PERF_TERRAIN` |
+| Slice B frozen RD10 p50 / avg | `15.609 ms` / `15.721 ms` | `MCLONE_ANDROID_XR_PERF_SUMMARY` |
+| Slice B single stereo poll wait max | `10.092 ms` | `MCLONE_ANDROID_XR_PERF_TERRAIN` |
+| Slice B per-eye encode wall max | left `4.679 ms`, right `4.282 ms` | `MCLONE_ANDROID_XR_PERF_TERRAIN` |
 | Compositor dropped frames (cumulative) | `103` | `compositor/dropped_frame_count` |
 | SpaceWarp | off (`0`) | `compositor/spacewarp_mode` |
 | Device CPU util avg / worst core | `35.7 %` / `~53 %` | `device/cpu_utilization_*` |
@@ -42,7 +45,9 @@ On the frozen RD10 lane (fixed pose `0,80,-96,180`, 179 drawn sections,
 The GPU draws both eyes in ~7 ms with ~42% headroom, yet the app burns ~21 ms of
 per-eye wall time. Slice A shows the largest measured per-eye bucket is the
 blocking `device.poll` wait, with prepare still material and direct encode
-smaller. The compositor drops frames because the **CPU** frame exceeds the
+smaller. Slice B removes per-eye submit/poll, improving frozen RD10 p50 from
+~`16.1ms` to `15.6ms`, but a single shared stereo poll still waits up to
+`10.1ms`. The compositor drops frames because the app frame exceeds the
 13.889 ms budget, not because the GPU or compositor is saturated. The full
 record is in
 [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md)
@@ -65,6 +70,9 @@ under the 2026-06-27 frozen RD10 Meta metrics and render-split records.
 - Slice A adds opt-in per-eye max fields to `MCLONE_ANDROID_XR_PERF_TERRAIN`:
   prepare, encode, section encode, submit, and poll wait. It is enabled only for
   Android XR perf runs, with no render-behavior change in normal rendering.
+- Slice B records both eyes into one encoder, submits once, and polls once after
+  both eyes. The same terrain marker now also carries stereo finish/submit/poll
+  max fields for the shared submission.
 - Commits: `0df8733` (probe), `4ffa99c` (record).
 
 The Oculus `v204.201.0` runtime enumerates 17 counters and returns valid data
@@ -72,14 +80,14 @@ on the first attempt. It does **not** expose `app/cpu_frametime` or
 `compositor/cpu_frametime`, so those marker fields are `n/a`; CPU load is
 covered by `device/cpu_utilization_*` (average, worst, per-core 0..7).
 
-## mclone's current per-frame render path (the waste)
+## mclone's render path findings
 
 Code facts a future session should not have to rediscover.
 
-- Each eye renders independently and serially in `render_prepared_frame`
+- Before Slice B, each eye rendered independently and serially in `render_prepared_frame`
   (`native/crates/mclone-xr-scene/src/lib.rs:540-567`): left eye fully
   completes before the right eye is even encoded.
-- `render_eye_target` (`native/crates/mclone-xr-scene/src/lib.rs:874-948`)
+- Before Slice B, `render_eye_target` (`native/crates/mclone-xr-scene/src/lib.rs:874-948`)
   creates its **own** command encoder, records the pass, `queue.submit`s, then
   **blocks** on `device.poll(WaitForSubmissionIndex)` + `device.poll(Wait)`
   (`:936-944`). That is **two encoders, two submits, and four blocking polls
@@ -87,6 +95,10 @@ Code facts a future session should not have to rediscover.
   per-eye wall time already includes GPU execution and why the compositor never
   waits on our GPU (we drained it ourselves), so the existing `wait_begin`
   stage cannot see GPU cost.
+- Slice B changed this to one stereo encoder, one submit, and one
+  `WaitForSubmissionIndex` poll after both eyes. It cut per-eye wall from
+  ~`10.6ms` to ~`4.7ms`/`4.3ms`, but the single stereo poll still reaches
+  `10.092ms` max.
 - `TexturedSectionRenderer::render_with_options`
   (`native/crates/mclone-render/src/chunk.rs:1532-1607`) runs in full **per eye,
   per frame, even when frozen**:
@@ -138,9 +150,9 @@ encoding. Measure before assuming.
 | # | Claim | Confidence | Basis / what would raise it |
 |---|---|---|---|
 | T0 | RD10 is **not** GPU-fill-bound; GPU has ~40% headroom | **High** | Runtime-measured `app/gpu_frametime` 7.04 ms and `gpu_utilization` 57.6% independently agree. Single mid-window sample; a few more samples for a distribution would make it airtight. |
-| T1 | Per-eye blocking submit/poll serializes eyes, blocks CPU on GPU, and hides GPU cost from the wait stage | **High** | Direct from code (`lib.rs:936-944`); Playbox removed the same pattern. |
+| T1 | Per-eye blocking submit/poll serialized eyes, blocked CPU on GPU, and hid GPU cost from the wait stage | **High / resolved by Slice B** | Direct from pre-Slice-B code (`lib.rs:936-944`); Playbox removed the same pattern. Slice B removed per-eye submit/poll and leaves one shared stereo wait. |
 | T2 | mclone re-prepares (BTreeMap build + cull + translucent sort) and re-encodes ~358 unbatched draws per eye per frame, wasteful under a static view | **High** | Direct from code (`chunk.rs:1532-1607`). |
-| T3 | The ~14 ms residual (21 ms wall − 7 ms GPU) is dominated first by per-eye poll wait, with prepare as the next visible CPU bucket | **High** | Slice A measured max poll wait at left `7.217ms`, right `6.487ms`; prepare at left `3.504ms`, right `3.419ms`; encode at left `1.638ms`, right `1.621ms`; section encode at left `1.193ms`, right `1.061ms`. Max fields are independent, not one additive frame, but the ordering is clear. |
+| T3 | The ~14 ms residual (21 ms wall − 7 ms GPU) was dominated first by per-eye poll wait; after Slice B the largest measured wait is one shared stereo poll | **High** | Slice A measured max poll wait at left `7.217ms`, right `6.487ms`. Slice B reports per-eye poll `0.000ms`, stereo poll `10.092ms`, and per-eye encode wall left/right `4.679ms`/`4.282ms`. Max fields are independent, not one additive frame. |
 | T4 | Batching draws and/or render bundles + single-submit will recover most of the budget | **Medium** | Follows from T2/T3 but magnitude depends on the T3 split. Playbox's batching path is proven; render bundles are an mclone-specific option Playbox did not need. |
 | T5 | "Keep it on the GPU / reuse last frame" by caching rendered pixels | **Low / rejected** | Unsafe in XR: each frame still submits its own layer and even a "static" headset has pose jitter. The correct reading of the intuition is *stop re-walking/re-culling/re-encoding on the CPU*, not *reuse the framebuffer*. Playbox does not cache pixels. |
 
@@ -164,18 +176,24 @@ behind the shared XR contracts; do not fork mclone rendering for Quest.
   aarch64-linux-android`; `pnpm native:android-xr:perf:frozen:rd10:metrics`;
   explicit force-stop + headset sleep cleanup verified.
 
-### Slice B - Single encoder, single submit, single poll for both eyes
+### Slice B - Single encoder, single submit, single poll for both eyes (done)
 
-- Acquire both eye swapchain images, record both eye render passes into one
+- Landed. Acquire both eye swapchain images, record both eye render passes into one
   encoder, `queue.submit` once, `device.poll` once after both, then release
   both images and `xrEndFrame`. Remove the per-eye blocking poll.
 - Playbox-proven; removes 3 of 4 polls and enables CPU(eye 2)/GPU(eye 1)
   overlap. Refactors `render_prepared_frame` / `render_eye_target` ownership of
   the encoder; keep `record_eye0_summary` semantics.
-- Risk: medium (touches the submit path shared with the live lane). Validate
-  pixels (capture/look) and re-run the frozen sweep for regression.
+- Result on frozen RD10 metrics: p50 improved to `15.609ms`, frame avg to
+  `15.721ms`, terrain frame max to `18.102ms`; per-eye wall max is now
+  left `4.679ms`, right `4.282ms`; shared stereo poll max is `10.092ms`.
+- Validation passed: `cargo check --manifest-path native/Cargo.toml --target
+  aarch64-linux-android`; `pnpm native:android-xr:perf:frozen:rd10:metrics`;
+  explicit force-stop + headset sleep cleanup verified. Attempted headset
+  `screencap`, but Quest returned a zero-byte capture after the perf process
+  had exited, so there is no visual screenshot artifact for this run.
 
-### Slice C - Cache the cull/draw set when the visible set is unchanged
+### Slice C - Cache the cull/draw set when the visible set is unchanged (next)
 
 - When the visible/section set and view are unchanged (always true in frozen
   mode, frequently true while stationary), reuse the previous `drawn_keys` and
@@ -233,8 +251,9 @@ behind the shared XR contracts; do not fork mclone rendering for Quest.
 
 ## Open questions
 
-- After Slice B: how much of the former poll-wait bucket disappears, and does
-  the remaining residual move to prepare, encode, or true GPU wait?
+- After Slice B: is the shared stereo poll mostly true GPU execution, wgpu wait
+  overhead, or frame-pacing interaction? Meta app GPU time remains about
+  `7.145ms`, while app-side stereo poll max is `10.092ms`.
 - Does the live (non-frozen) RD10 lane share the same CPU-bound profile, or does
   streaming/upload re-enter as the limiter once the runtime is unfrozen?
 - Is fixed-foveated rendering actually applied to the eye swapchains? If not, it

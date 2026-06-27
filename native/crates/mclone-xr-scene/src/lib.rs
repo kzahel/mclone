@@ -174,6 +174,9 @@ pub struct XrTerrainFrameTiming {
     pub right_eye_ms: f64,
     pub left_eye_render: XrTerrainEyeRenderTiming,
     pub right_eye_render: XrTerrainEyeRenderTiming,
+    pub stereo_finish_ms: f64,
+    pub stereo_submit_ms: f64,
+    pub stereo_poll_wait_ms: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -555,10 +558,15 @@ where
             &self.runtime.client().actor_presentations(),
             self.runtime.client(),
         );
+        let collect_split_timing = self.render_split_timing_enabled;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_xr_terrain_stereo_encoder"),
+        });
         let left_eye_start = Instant::now();
         let left_eye = self.render_eye_target(
             device,
             queue,
+            &mut encoder,
             left_target,
             render_views[0],
             &actor_instances,
@@ -574,6 +582,7 @@ where
         let right_eye = self.render_eye_target(
             device,
             queue,
+            &mut encoder,
             right_target,
             render_views[1],
             &actor_instances,
@@ -585,6 +594,18 @@ where
         )?;
         timing.right_eye_ms = elapsed_ms(right_eye_start.elapsed());
         timing.right_eye_render = right_eye.timing;
+        let finish_start = collect_split_timing.then(Instant::now);
+        let command_buffer = encoder.finish();
+        timing.stereo_finish_ms = finish_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        let submit_start = collect_split_timing.then(Instant::now);
+        let submission = queue.submit(Some(command_buffer));
+        timing.stereo_submit_ms = submit_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        let poll_start = collect_split_timing.then(Instant::now);
+        device
+            .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+            .map(|_| ())
+            .context("wait for XR terrain stereo render submission")?;
+        timing.stereo_poll_wait_ms = poll_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         self.record_eye0_summary(left_eye.summary);
         Ok(self.frame_summary_with_timing(timing, upload))
     }
@@ -886,6 +907,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
         target: XrTerrainEyeTarget<'_>,
         render_view: ChunkRenderView,
         actor_instances: &[mclone_render::entity::ActorInstance],
@@ -897,17 +919,10 @@ where
     ) -> Result<XrRenderedEye> {
         let collect_split_timing = self.render_split_timing_enabled;
         let encode_start = collect_split_timing.then(Instant::now);
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some(match label {
-                "left" => "mclone_xr_terrain_left_eye_encoder",
-                "right" => "mclone_xr_terrain_right_eye_encoder",
-                _ => "mclone_xr_terrain_eye_encoder",
-            }),
-        });
         let frame = RenderFrameContext::new(
             device,
             queue,
-            &mut encoder,
+            &mut *encoder,
             RenderFrameTarget::color(target.color_view, target.size),
         );
         let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
@@ -970,7 +985,7 @@ where
                     .render_panel(
                         device,
                         queue,
-                        &mut encoder,
+                        &mut *encoder,
                         RenderFrameTarget::color(target.color_view, target.size),
                         render_view,
                         XR_MENU_PANEL_PIXELS,
@@ -982,21 +997,7 @@ where
                     .with_context(|| format!("render XR menu panel for {label} eye"))?;
             }
         }
-        let command_buffer = encoder.finish();
         let encode_total_ms = encode_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
-        let submit_start = collect_split_timing.then(Instant::now);
-        let submission = queue.submit(Some(command_buffer));
-        let submit_ms = submit_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
-        let poll_start = collect_split_timing.then(Instant::now);
-        device
-            .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
-            .map(|_| ())
-            .with_context(|| format!("wait for XR terrain {label}-eye render submission"))?;
-        device
-            .poll(wgpu::PollType::Wait)
-            .map(|_| ())
-            .with_context(|| format!("wait for XR terrain {label}-eye render device idle"))?;
-        let poll_wait_ms = poll_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         if label == "left" {
             self.render_stats = render_stats;
         }
@@ -1007,8 +1008,8 @@ where
                 prepare_ms,
                 encode_ms: (encode_total_ms - prepare_ms).max(0.0),
                 section_encode_ms: frame_timing.terrain_encode_ms,
-                submit_ms,
-                poll_wait_ms,
+                submit_ms: 0.0,
+                poll_wait_ms: 0.0,
             },
         })
     }
