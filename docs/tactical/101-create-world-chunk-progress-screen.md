@@ -4,8 +4,9 @@ Status: in progress. Investigation on 2026-06-27 found the Java 1.17.1
 chunk-status loading screen, the native scheduler events we can reuse, and the
 desktop startup blocking point that currently makes Create World feel like a
 beachball. Slice 0 landed on 2026-06-27: local integrated-server status events
-now feed compact loading-progress diagnostics, but UI drawing and non-blocking
-startup are not implemented yet.
+now feed compact loading-progress diagnostics. Slice 3's shared `mclone-ui`
+render model also landed on 2026-06-27. Per-cell producer wiring and the shared
+non-blocking startup pump are not implemented yet.
 
 ## Purpose
 
@@ -23,7 +24,8 @@ instead of adding a desktop-only workaround:
 1. expose chunk generation/loading progress from the server scheduler,
 2. retain a shared UI-readable loading-progress model,
 3. draw a Java-style chunk grid on every relevant client lane,
-4. stop draining initial world startup synchronously on the desktop event loop.
+4. stop draining initial world startup synchronously through a shared runtime
+   startup pump that each platform adapter can host.
 
 ## Java Shape
 
@@ -135,8 +137,10 @@ waits for 441 ticking chunks.
     immediate area is ready enough to avoid a blank frame;
   - **warm-region threshold:** the broader spawn/view-distance region continues
     loading/generating after gameplay starts.
-- Desktop startup must advance in frame-budgeted steps or an explicit async
-  startup task so `winit` can keep presenting frames and processing OS events.
+- Startup must advance in frame-budgeted steps or an explicit async startup task
+  owned by shared runtime state. Desktop flat is the first validation lane
+  because it exposes the OS beachball most clearly, but the readiness policy is
+  not desktop-specific.
 - Reaching the playable threshold should close the blocking loading flow and
   enter gameplay. Reaching the warm-region threshold should only affect progress
   UI/debug state; it should not be required before the player can move.
@@ -213,16 +217,29 @@ Slice 0 result:
 
 ### Slice 3 - Shared UI Rendering
 
-- [ ] Add a `LoadingProgressOverlay` or equivalent to `mclone-ui`.
-- [ ] Render the Java-style centered percent text and 2 px cell grid using
+- [x] Add a `LoadingProgressOverlay` or equivalent to `mclone-ui`.
+- [x] Render the Java-style centered percent text and 2 px cell grid using
   `GuiDrawList` rectangles.
-- [ ] Keep dimensions stable across desktop, web, Android, and XR menu surfaces.
-- [ ] Add draw-list tests that verify expected cell count, placement, and palette
+- [x] Keep dimensions stable across desktop, web, Android, and XR menu surfaces.
+- [x] Add draw-list tests that verify expected cell count, placement, and palette
   colors without relying on platform GPU output.
 
-### Slice 4 - Non-Blocking Desktop Startup
+Slice 3 result:
 
-- [ ] Replace desktop `poll_window_runtime_until_idle` during Create World with a
+- `native/crates/mclone-ui/src/lib.rs` now defines `LoadingProgressOverlay`,
+  `LoadingProgressCell`, and `LoadingProgressCellStatus` as a platform-neutral
+  render input for the Java-style grid.
+- The palette maps native coarse statuses to the Java-inspired colors recorded
+  above: none, terrain/noise, surface, features, light, and target-ready.
+- `render_loading_progress_overlay` draws the centered percentage, status grid,
+  and playable-cell outline using `GuiDrawList` commands.
+- This slice intentionally does not invent per-cell data from aggregate runtime
+  diagnostics. The next producer slice should feed real status cells into the
+  shared overlay.
+
+### Slice 4 - Shared Non-Blocking Startup Pump
+
+- [ ] Replace blocking Create World startup drains with shared app-runtime
   startup state that advances work over frames.
 - [ ] Keep the previous world/session alive until the replacement has either
   succeeded or intentionally crossed the teardown point. Preserve the current
@@ -239,7 +256,8 @@ Slice 0 result:
 
 ### Slice 5 - Platform Adoption
 
-- [ ] Wire desktop flat first because it exposes the beachball most clearly.
+- [ ] Validate desktop flat first because it exposes the beachball most clearly
+  and is the fastest local feedback lane.
 - [ ] Wire native web/WASM local-world startup through the same progress model.
 - [ ] Wire flat Android and XR scene replacement overlays through the shared UI
   model while keeping activity/OpenXR ownership in app crates.

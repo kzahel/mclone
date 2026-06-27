@@ -1134,6 +1134,104 @@ impl StatusOverlay {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LoadingProgressCellStatus {
+    None,
+    Terrain,
+    Surface,
+    Features,
+    Light,
+    TargetReady,
+}
+
+impl LoadingProgressCellStatus {
+    pub const fn color(self) -> Color {
+        match self {
+            Self::None => Color::rgba(0, 0, 0, 255),
+            Self::Terrain => Color::rgba(209, 209, 209, 255),
+            Self::Surface => Color::rgba(114, 104, 9, 255),
+            Self::Features => Color::rgba(33, 198, 0, 255),
+            Self::Light => Color::rgba(204, 204, 204, 255),
+            Self::TargetReady => Color::WHITE,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LoadingProgressCell {
+    pub relative_x: i32,
+    pub relative_z: i32,
+    pub status: LoadingProgressCellStatus,
+    pub playable: bool,
+}
+
+impl LoadingProgressCell {
+    pub const fn new(relative_x: i32, relative_z: i32, status: LoadingProgressCellStatus) -> Self {
+        Self {
+            relative_x,
+            relative_z,
+            status,
+            playable: false,
+        }
+    }
+
+    pub const fn playable(mut self, playable: bool) -> Self {
+        self.playable = playable;
+        self
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoadingProgressOverlay {
+    pub display_radius: u32,
+    pub target_ready_chunks: usize,
+    pub target_chunk_count: usize,
+    pub playable_ready: bool,
+    pub cells: Vec<LoadingProgressCell>,
+}
+
+impl LoadingProgressOverlay {
+    pub fn new(
+        display_radius: u32,
+        target_ready_chunks: usize,
+        target_chunk_count: usize,
+        playable_ready: bool,
+        cells: impl IntoIterator<Item = LoadingProgressCell>,
+    ) -> Self {
+        Self {
+            display_radius,
+            target_ready_chunks,
+            target_chunk_count,
+            playable_ready,
+            cells: cells.into_iter().collect(),
+        }
+    }
+
+    pub fn grid_side(&self) -> usize {
+        self.display_radius as usize * 2 + 1
+    }
+
+    pub fn percent(&self) -> u8 {
+        if self.target_chunk_count == 0 {
+            return 0;
+        }
+        let ready = self.target_ready_chunks.min(self.target_chunk_count);
+        ((ready * 100) / self.target_chunk_count) as u8
+    }
+
+    pub fn status_at(&self, relative_x: i32, relative_z: i32) -> LoadingProgressCellStatus {
+        self.cells
+            .iter()
+            .rev()
+            .find(|cell| cell.relative_x == relative_x && cell.relative_z == relative_z)
+            .map_or(LoadingProgressCellStatus::None, |cell| cell.status)
+    }
+
+    pub fn playable_cell(&self) -> Option<LoadingProgressCell> {
+        self.cells.iter().rev().find(|cell| cell.playable).copied()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TouchOverlay {
     pub visible: bool,
@@ -1364,6 +1462,75 @@ pub fn render_status_overlay(scale: GuiScale, draw: &mut GuiDrawList, status: &S
     draw.push_clip(panel.inset(4.0));
     font.draw_shadow(draw, &status.message, panel.x + 7.0, panel.y + 7.0, text);
     draw.pop_clip();
+}
+
+pub fn render_loading_progress_overlay(
+    scale: GuiScale,
+    draw: &mut GuiDrawList,
+    progress: &LoadingProgressOverlay,
+) {
+    let side = progress.grid_side().max(1) as f32;
+    let max_grid = (scale.width - 32.0).min(scale.height - 64.0).max(1.0);
+    let cell_size = (max_grid / side).min(2.0).max(1.0);
+    let grid_size = side * cell_size;
+    let grid = Rect::new(
+        ((scale.width - grid_size) * 0.5).floor(),
+        ((scale.height - grid_size) * 0.5).floor(),
+        grid_size,
+        grid_size,
+    );
+    let font = Font::default();
+
+    draw.fill(
+        Rect::new(0.0, 0.0, scale.width, scale.height),
+        Color::rgba(0, 0, 0, 190),
+    );
+    font.draw_centered(
+        draw,
+        &format!("{}%", progress.percent()),
+        scale.width * 0.5,
+        (grid.y - font.line_height() - 8.0).max(8.0).floor(),
+        Color::WHITE,
+    );
+
+    let radius = progress.display_radius as i32;
+    for relative_z in -radius..=radius {
+        for relative_x in -radius..=radius {
+            let status = progress.status_at(relative_x, relative_z);
+            let col = (relative_x + radius) as f32;
+            let row = (relative_z + radius) as f32;
+            draw.fill(
+                Rect::new(
+                    grid.x + col * cell_size,
+                    grid.y + row * cell_size,
+                    cell_size,
+                    cell_size,
+                ),
+                status.color(),
+            );
+        }
+    }
+
+    if let Some(playable) = progress.playable_cell() {
+        let col = (playable.relative_x + radius) as f32;
+        let row = (playable.relative_z + radius) as f32;
+        if col >= 0.0 && row >= 0.0 && col < side && row < side {
+            let outline = if progress.playable_ready {
+                Color::WHITE
+            } else {
+                Color::rgba(242, 96, 96, 255)
+            };
+            draw.outline(
+                Rect::new(
+                    grid.x + col * cell_size,
+                    grid.y + row * cell_size,
+                    cell_size,
+                    cell_size,
+                ),
+                outline,
+            );
+        }
+    }
 }
 
 pub fn render_crosshair(scale: GuiScale, draw: &mut GuiDrawList) {
@@ -2746,6 +2913,117 @@ mod tests {
         assert!(button.contains(Point { x: 12.0, y: 21.0 }));
         assert!(!button.contains(Point { x: 5.0, y: 21.0 }));
         assert!(!button.enabled(false).contains(Point { x: 12.0, y: 21.0 }));
+    }
+
+    #[test]
+    fn loading_progress_palette_uses_java_inspired_colors() {
+        assert_eq!(
+            LoadingProgressCellStatus::None.color(),
+            Color::rgba(0, 0, 0, 255)
+        );
+        assert_eq!(
+            LoadingProgressCellStatus::Terrain.color(),
+            Color::rgba(209, 209, 209, 255)
+        );
+        assert_eq!(
+            LoadingProgressCellStatus::Surface.color(),
+            Color::rgba(114, 104, 9, 255)
+        );
+        assert_eq!(
+            LoadingProgressCellStatus::Features.color(),
+            Color::rgba(33, 198, 0, 255)
+        );
+        assert_eq!(
+            LoadingProgressCellStatus::Light.color(),
+            Color::rgba(204, 204, 204, 255)
+        );
+        assert_eq!(LoadingProgressCellStatus::TargetReady.color(), Color::WHITE);
+    }
+
+    #[test]
+    fn loading_progress_percent_uses_target_ready_chunks() {
+        let progress = LoadingProgressOverlay::new(1, 2, 9, false, []);
+        assert_eq!(progress.grid_side(), 3);
+        assert_eq!(progress.percent(), 22);
+
+        let over_complete = LoadingProgressOverlay::new(1, 12, 9, true, []);
+        assert_eq!(over_complete.percent(), 100);
+
+        let empty_target = LoadingProgressOverlay::new(0, 1, 0, false, []);
+        assert_eq!(empty_target.percent(), 0);
+    }
+
+    #[test]
+    fn loading_progress_status_lookup_uses_latest_cell() {
+        let progress = LoadingProgressOverlay::new(
+            1,
+            0,
+            9,
+            false,
+            [
+                LoadingProgressCell::new(0, 0, LoadingProgressCellStatus::Terrain),
+                LoadingProgressCell::new(0, 0, LoadingProgressCellStatus::Features).playable(true),
+            ],
+        );
+
+        assert_eq!(
+            progress.status_at(0, 0),
+            LoadingProgressCellStatus::Features
+        );
+        assert_eq!(progress.status_at(1, 1), LoadingProgressCellStatus::None);
+        assert_eq!(progress.playable_cell().unwrap().relative_x, 0);
+        assert!(!progress.playable_ready);
+    }
+
+    #[test]
+    fn loading_progress_overlay_draws_grid_cells_and_playable_outline() {
+        let progress = LoadingProgressOverlay::new(
+            1,
+            3,
+            9,
+            false,
+            [
+                LoadingProgressCell::new(-1, -1, LoadingProgressCellStatus::Terrain),
+                LoadingProgressCell::new(0, 0, LoadingProgressCellStatus::Features).playable(true),
+                LoadingProgressCell::new(1, 1, LoadingProgressCellStatus::TargetReady),
+            ],
+        );
+        let mut draw = GuiDrawList::new();
+
+        render_loading_progress_overlay(GuiScale::from_pixels(960, 540), &mut draw, &progress);
+
+        let cell_rects = draw
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                GuiDrawCommand::SolidRect { rect, color, .. }
+                    if rect.width == 2.0 && rect.height == 2.0 =>
+                {
+                    Some((*rect, *color))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(cell_rects.len(), 9);
+        assert!(
+            cell_rects
+                .iter()
+                .any(|(_, color)| { *color == LoadingProgressCellStatus::Terrain.color() })
+        );
+        assert!(
+            cell_rects
+                .iter()
+                .any(|(_, color)| { *color == LoadingProgressCellStatus::Features.color() })
+        );
+        assert!(cell_rects.iter().any(|(_, color)| *color == Color::WHITE));
+
+        let playable_outline_color = Color::rgba(242, 96, 96, 255);
+        assert!(draw.commands().iter().any(|command| {
+            matches!(
+                command,
+                GuiDrawCommand::SolidRect { color, .. } if *color == playable_outline_color
+            )
+        }));
     }
 
     #[test]
