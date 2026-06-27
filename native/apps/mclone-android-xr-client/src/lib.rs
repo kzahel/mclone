@@ -60,6 +60,7 @@ mod android {
     const ANDROID_XR_PERF_FALLBACK_TARGET_HZ: f64 = 72.0;
     const ANDROID_XR_PERF_DEFAULT_FLIGHT_SPEED_BLOCKS_PER_SECOND: f64 = 4.3;
     const ANDROID_XR_PERF_SETTLE_QUIET_FRAMES: u64 = 45;
+    const ANDROID_XR_PERF_SETTLE_PROGRESS_FRAMES: u64 = 120;
 
     #[allow(unsafe_code)]
     #[link(name = "log")]
@@ -1415,10 +1416,41 @@ mod android {
         fn record_settle_frame(&mut self, summary: mclone_xr_scene::XrTerrainFrameSummary) -> bool {
             let _ = self.settle_started.get_or_insert_with(Instant::now);
             self.settle_frames += 1;
-            if android_xr_perf_settle_frame_is_quiet(summary) {
+            let quiet = android_xr_perf_settle_frame_is_quiet(summary);
+            if quiet {
                 self.settle_quiet_frames += 1;
             } else {
                 self.settle_quiet_frames = 0;
+            }
+            if self.settle_frames == 1
+                || self.settle_frames % ANDROID_XR_PERF_SETTLE_PROGRESS_FRAMES == 0
+            {
+                let upload = summary.upload;
+                let settle_seconds = self
+                    .settle_started
+                    .map_or(0.0, |started| started.elapsed().as_secs_f64());
+                log::info!(
+                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode=stationary-settled settle_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} sections={} drawn_sections={} drawn_indices={}",
+                    settle_seconds,
+                    self.settle_frames,
+                    self.settle_quiet_frames,
+                    quiet,
+                    upload.poll_changed,
+                    upload.server_command_queue_depth,
+                    upload.server_update_queue_depth,
+                    upload.pending_compile_jobs_after,
+                    upload.pending_render_chunks_after,
+                    upload.deferred_section_count,
+                    upload.submitted_compile_section_count,
+                    upload.completed_compile_section_count,
+                    upload.stale_compile_section_count,
+                    upload.uploaded_section_count,
+                    upload.upload_removed_section_count,
+                    upload.traversal_ready_section_count,
+                    summary.section_count,
+                    summary.drawn_section_count,
+                    summary.drawn_index_count
+                );
             }
             self.settle_quiet_frames >= ANDROID_XR_PERF_SETTLE_QUIET_FRAMES
         }
