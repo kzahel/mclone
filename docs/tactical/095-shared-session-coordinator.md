@@ -1,6 +1,6 @@
 # 095: Shared Session Coordinator
 
-Status: active; Slices 1-4b landed on 2026-06-27. `mclone-app-runtime` now owns
+Status: active; Slices 1-4c landed on 2026-06-27. `mclone-app-runtime` now owns
 the platform-neutral session request/state vocabulary and shared start-result
 boundary, including local-world start, remote-join start, active session
 descriptors, pending starts, failure state, status text, and success/failure
@@ -9,8 +9,11 @@ queued New World creation, and the first Join Remote menu flow. Web/WASM uses
 the same coordinator vocabulary for initial local-worker and remote WebSocket
 starts, browser diagnostics, and menu-driven async local-world restart. Web
 Join Remote async reconnect is wired through the same path, but still needs a
-dedicated connect-screen smoke once endpoint editing/input is real. Manual
-remote address entry and XR/Android coordinator adoption remain follow-ups.
+dedicated connect-screen smoke once endpoint editing/input is real. Flat
+Android, desktop XR, and Android XR now consume the same coordinator for initial
+local/remote native single-view session construction. Manual remote address
+entry plus dynamic New World/Join Remote replacement on flat Android and XR
+remain follow-ups.
 
 ## Purpose
 
@@ -215,9 +218,11 @@ without blank output or overlapping UI.
   remote WebSocket starts while preserving browser async startup.
 - [x] Web/WASM routes menu-driven New World and Join Remote actions through an
   async restart/reconnect factory instead of only publishing the UI intent.
-- [ ] Flat Android consumes the common coordinator for local and remote starts.
-- [ ] Desktop XR and Android XR consume the same request/status model while
-  keeping OpenXR scene/session ownership in XR adapters.
+- [x] Flat Android consumes the common coordinator for initial local and remote
+  starts.
+- [x] Desktop XR and Android XR consume the same request/status model for
+  initial local/remote starts while keeping OpenXR scene/session ownership in XR
+  adapters.
 
 Recorded Slice 4a result:
 
@@ -296,6 +301,48 @@ Screenshots inspected:
   browser app smoke.
 - `/tmp/mclone-native-web-ui-canvas.png` showed the shared Rust title UI
   nonblank and correctly framed.
+
+Recorded Slice 4c result:
+
+- Added `NativeSingleViewSessionRuntime<S>` in
+  `mclone-app-runtime::local_single_view`. It wraps the existing
+  `NativeSingleViewSceneRuntime<S>`, owns `GameSessionCoordinator<()>`, exposes
+  the active `ActiveSessionDescriptor`, and derefs to the old runtime so render,
+  movement, and host-mode code keep using the same shared native scene API.
+- Flat Android now constructs `NativeSingleViewSessionRuntime` for both local
+  integrated and TCP remote-dedicated startup. The Android render startup log
+  records the active common session descriptor while Android activity, touch,
+  `wgpu` surface, and TCP adapter ownership remain in the app crate.
+- `mclone-xr-scene` now holds `NativeSingleViewSessionRuntime<S>` so desktop XR
+  and Android XR share the same active local/remote session descriptor in the
+  common XR scene. OpenXR session/swapchain/action ownership remains in the
+  platform host crates.
+- Android XR passes its launch-scoped or legacy remote address into
+  `RemoteSessionEndpoint` when constructing the wrapped remote runtime.
+- Desktop OpenXR wraps the existing desktop runtime with the appropriate
+  `SessionStartRequest` before giving it to the shared XR scene.
+- This slice intentionally does not make flat Android/XR `CreateWorld` or
+  `JoinRemote` menu actions destructive/dynamic yet. Those actions still need
+  platform-specific surface/session reset work on top of the now-common startup
+  session descriptor.
+
+Validation after Slice 4c on 2026-06-27:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+pnpm native:android:apk:avd
+pnpm native:android-xr:apk
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+git diff --check
+```
+
+Note: `pnpm native:xr:check` was not used for validation on this Windows run
+because it invoked a `bash` without the Windows Rust toolchain on `PATH`
+(`cargo` missing). The equivalent PowerShell `cargo check --features xr` passed.
 
 ## Open Questions
 

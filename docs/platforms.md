@@ -239,11 +239,12 @@ manual checks:
 2. **Make the contract matrix more executable.** For each shared crate boundary,
    keep the sentinel smoke/test close to scripts so platform coverage is
    deliberate instead of remembered manually.
-3. **Finish shared session-coordinator adoption.** Desktop flat and web now use
-   `mclone-app-runtime::session` for local-world and remote-join request/status,
-   with web local New World restart covered by browser smoke. Flat Android,
-   desktop XR, and Android XR still need the same coordinator at their native
-   scene/session boundary.
+3. **Finish dynamic session replacement on native scene lanes.** All display
+   lanes now have shared initial local/remote session identity through
+   `mclone-app-runtime::session`; desktop flat and web also restart from menu
+   actions. Flat Android, desktop XR, and Android XR still need app-owned
+   teardown/rebuild paths for New World and Join Remote on top of
+   `NativeSingleViewSessionRuntime<S>`.
 4. **Finish host-mode convergence for web and make Android XR remote validation repeatable.**
    Native desktop, desktop XR, flat Android, and Android XR now share
    `mclone-app-runtime` host-mode and native scene-shell contracts where

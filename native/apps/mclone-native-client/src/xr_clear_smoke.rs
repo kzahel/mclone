@@ -29,7 +29,11 @@ use crate::render_cache::load_asset_source;
 #[cfg(not(target_os = "android"))]
 use crate::scene_runtime::native_window_scene_runtime;
 #[cfg(not(target_os = "android"))]
+use mclone_app_runtime::local_single_view::NativeSingleViewSessionRuntime;
+#[cfg(not(target_os = "android"))]
 use mclone_app_runtime::render_assets::load_actor_texture_assets_from_asset_source;
+#[cfg(not(target_os = "android"))]
+use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 #[cfg(not(target_os = "android"))]
 use mclone_audio::{AudioEngine, AudioSettings};
 
@@ -669,6 +673,15 @@ fn create_mclone_terrain_state(
         }
     };
     let runtime = native_window_scene_runtime(&options.scene)?;
+    let request = options.scene.remote_addr.as_ref().map_or(
+        SessionStartRequest::NewLocalWorld {
+            seed: options.scene.seed,
+        },
+        |remote_addr| SessionStartRequest::JoinRemote {
+            endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
+        },
+    );
+    let runtime = NativeSingleViewSessionRuntime::from_active_runtime(request, runtime)?;
     let mut state = XrMcloneTerrainState::with_runtime(
         device,
         queue,

@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::ops::{Deref, DerefMut};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -19,6 +20,10 @@ use crate::host_mode::{
 };
 use crate::render_assets::{
     RenderSectionCompileWorker, TexturedMeshAssets, load_textured_mesh_assets,
+};
+use crate::session::{
+    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
+    SessionFailure, SessionStartRequest, SessionStartResult, SessionStatus, StartedGameSession,
 };
 use crate::{
     RuntimePollDiagnostics, RuntimeUpdateApplyReport, SingleViewRuntime, SingleViewRuntimeStats,
@@ -267,6 +272,12 @@ impl LocalSingleViewSceneRuntime {
 pub enum NativeSingleViewSceneRuntime<S> {
     Local(LocalSingleViewSceneRuntime),
     RemoteDedicated(RemoteDedicatedSingleViewSceneRuntime<S>),
+}
+
+#[derive(Debug)]
+pub struct NativeSingleViewSessionRuntime<S> {
+    session: GameSessionCoordinator<()>,
+    runtime: NativeSingleViewSceneRuntime<S>,
 }
 
 impl<S> NativeSingleViewSceneRuntime<S>
@@ -525,6 +536,128 @@ where
     }
 }
 
+impl<S> NativeSingleViewSessionRuntime<S>
+where
+    S: RemoteDedicatedServerSession,
+{
+    pub fn local(options: LocalSingleViewSceneOptions) -> Result<Self> {
+        let request = SessionStartRequest::NewLocalWorld { seed: options.seed };
+        Self::start_with(request, || NativeSingleViewSceneRuntime::local(options))
+    }
+
+    pub fn local_with_mesh_assets(
+        options: LocalSingleViewSceneOptions,
+        mesh_assets: TexturedMeshAssets,
+    ) -> Result<Self> {
+        let request = SessionStartRequest::NewLocalWorld { seed: options.seed };
+        Self::start_with(request, || {
+            NativeSingleViewSceneRuntime::local_with_mesh_assets(options, mesh_assets)
+        })
+    }
+
+    pub fn remote_dedicated(
+        endpoint: RemoteSessionEndpoint,
+        options: SingleViewHostOptions,
+        session: S,
+    ) -> Result<Self> {
+        let request = SessionStartRequest::JoinRemote { endpoint };
+        Self::start_with(request, || {
+            NativeSingleViewSceneRuntime::remote_dedicated(options, session)
+        })
+    }
+
+    pub fn remote_dedicated_with_mesh_assets(
+        endpoint: RemoteSessionEndpoint,
+        options: SingleViewHostOptions,
+        session: S,
+        mesh_assets: TexturedMeshAssets,
+    ) -> Result<Self> {
+        let request = SessionStartRequest::JoinRemote { endpoint };
+        Self::start_with(request, || {
+            NativeSingleViewSceneRuntime::remote_dedicated_with_mesh_assets(
+                options,
+                session,
+                mesh_assets,
+            )
+        })
+    }
+
+    pub fn from_active_runtime(
+        request: SessionStartRequest,
+        runtime: NativeSingleViewSceneRuntime<S>,
+    ) -> Result<Self> {
+        let descriptor = request
+            .active_descriptor()
+            .context("native single-view session request did not describe an active session")?;
+        let mut session = GameSessionCoordinator::new();
+        let result: SessionStartResult<()> = Ok(StartedGameSession::new(descriptor, ()));
+        session.apply_start_result(&result);
+        Ok(Self { session, runtime })
+    }
+
+    pub fn session(&self) -> &GameSessionCoordinator<()> {
+        &self.session
+    }
+
+    pub fn session_state(&self) -> &GameSessionState {
+        self.session.state()
+    }
+
+    pub fn active_session(&self) -> Option<&ActiveSessionDescriptor> {
+        match self.session.state() {
+            GameSessionState::Active { session } => Some(session),
+            GameSessionState::NoSession
+            | GameSessionState::Starting { .. }
+            | GameSessionState::Failed { .. } => None,
+        }
+    }
+
+    pub fn session_status(&self) -> Option<SessionStatus> {
+        self.session.status()
+    }
+
+    pub fn into_runtime(self) -> NativeSingleViewSceneRuntime<S> {
+        self.runtime
+    }
+
+    fn start_with(
+        request: SessionStartRequest,
+        start: impl FnOnce() -> Result<NativeSingleViewSceneRuntime<S>>,
+    ) -> Result<Self> {
+        let mut session = GameSessionCoordinator::new();
+        session.begin_start(request.clone());
+        let descriptor = request
+            .active_descriptor()
+            .context("native single-view session request did not describe an active session")?;
+        match start() {
+            Ok(runtime) => {
+                let result: SessionStartResult<()> = Ok(StartedGameSession::new(descriptor, ()));
+                session.apply_start_result(&result);
+                Ok(Self { session, runtime })
+            }
+            Err(error) => {
+                log::error!("failed to start native single-view session {request:?}: {error:#}");
+                session.fail_start(SessionFailure::new(request.default_failure_message()));
+                Err(error)
+            }
+        }
+    }
+}
+
+impl<S> Deref for NativeSingleViewSessionRuntime<S> {
+    type Target = NativeSingleViewSceneRuntime<S>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.runtime
+    }
+}
+
+impl<S> DerefMut for NativeSingleViewSessionRuntime<S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.runtime
+    }
+}
+
 #[derive(Debug)]
 pub struct RemoteDedicatedSingleViewSceneRuntime<S> {
     core: SingleViewRuntime,
@@ -730,6 +863,19 @@ mod tests {
     use super::*;
     use crate::render_assets::extracted_asset_root;
 
+    #[derive(Debug)]
+    enum NoRemoteSession {}
+
+    impl RemoteDedicatedServerSession for NoRemoteSession {
+        fn send_command(&mut self, _command: ClientCommand) -> Result<Vec<ServerUpdate>> {
+            match *self {}
+        }
+
+        fn reconnect(&mut self) -> Result<()> {
+            match *self {}
+        }
+    }
+
     #[test]
     fn local_single_view_options_apply_java_tracking_radius() {
         let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2);
@@ -771,5 +917,31 @@ mod tests {
                 .chunk_snapshot(ChunkPos::new(0, 0))
                 .is_some()
         );
+    }
+
+    #[test]
+    fn native_single_view_session_runtime_records_local_session() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let mut runtime = NativeSingleViewSessionRuntime::<NoRemoteSession>::local(
+            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 0),
+        )
+        .unwrap();
+        runtime.poll_until_idle().unwrap();
+
+        assert_eq!(
+            runtime.session_state(),
+            &GameSessionState::Active {
+                session: ActiveSessionDescriptor::LocalWorld { seed: 12345 }
+            }
+        );
+        assert_eq!(
+            runtime.active_session(),
+            Some(&ActiveSessionDescriptor::LocalWorld { seed: 12345 })
+        );
+        assert_eq!(runtime.session_status(), None);
+        assert_eq!(runtime.loaded_chunk_count(), 1);
     }
 }

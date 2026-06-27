@@ -13,12 +13,13 @@ mod android {
     use anyhow::{Context, Result, bail};
     use mclone_app_runtime::host_mode::{RemoteDedicatedServerSession, SingleViewHostOptions};
     use mclone_app_runtime::local_single_view::{
-        LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime,
+        LocalSingleViewSceneOptions, NativeSingleViewSessionRuntime,
     };
     use mclone_app_runtime::render_assets::{
         ActorTextureAssets, TexturedMeshAssets, load_actor_texture_assets_from_asset_source,
         load_asset_source, load_textured_mesh_assets_from_source,
     };
+    use mclone_app_runtime::session::RemoteSessionEndpoint;
     use mclone_assets::AssetSourceChain;
     use mclone_audio::{AudioEngine, AudioSettings};
     use mclone_net::NativeClientSession;
@@ -40,7 +41,7 @@ mod android {
         graphics_vulkan::AppGraphics,
         graphics_vulkan::OpenXrEyeState,
     >;
-    type AndroidXrSceneRuntime = NativeSingleViewSceneRuntime<AndroidXrRemoteServerSession>;
+    type AndroidXrSceneRuntime = NativeSingleViewSessionRuntime<AndroidXrRemoteServerSession>;
     type AndroidXrTerrainState = XrMcloneTerrainState<AndroidXrRemoteServerSession>;
 
     const LOG_TAG: &str = "mclone_android_xr";
@@ -756,6 +757,7 @@ mod android {
         let runtime = if let Some(remote_addr) = remote_addr {
             let session = AndroidXrRemoteServerSession::connect(remote_addr.as_str())?;
             AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
+                RemoteSessionEndpoint::new(remote_addr.clone()),
                 android_xr_host_options(scene_options),
                 session,
                 mesh_assets,

@@ -15,9 +15,10 @@ mod android {
     };
     use mclone_app_runtime::host_mode::{RemoteDedicatedServerSession, SingleViewHostOptions};
     use mclone_app_runtime::local_single_view::{
-        LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime,
+        LocalSingleViewSceneOptions, NativeSingleViewSessionRuntime,
     };
     use mclone_app_runtime::render_assets::load_asset_source;
+    use mclone_app_runtime::session::{ActiveSessionDescriptor, RemoteSessionEndpoint};
     use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
     use mclone_core::{ChunkPos, Vec3d};
     use mclone_mesh::quad_face_count_from_indices;
@@ -414,10 +415,12 @@ mod android {
             let scene_options = android_scene_options();
             let mut scene = android_single_view_scene_runtime(scene_options)?;
             let host_label = scene.host_label();
+            let session_label = active_session_label(scene.active_session());
             let mut camera = EngineCameraController::spawn_for_chunk(scene.interest_center());
             let (poll_count, poll_ms) = scene.poll_until_idle()?;
             log::info!(
-                "Mclone Android {host_label} runtime idle: polls={} poll_ms={:.1} loaded_chunks={}",
+                "Mclone Android {host_label} runtime idle: session={} polls={} poll_ms={:.1} loaded_chunks={}",
+                session_label,
                 poll_count,
                 poll_ms,
                 scene.loaded_chunk_count()
@@ -1044,7 +1047,7 @@ mod android {
         )
     }
 
-    type AndroidSingleViewSceneRuntime = NativeSingleViewSceneRuntime<AndroidRemoteServerSession>;
+    type AndroidSingleViewSceneRuntime = NativeSingleViewSessionRuntime<AndroidRemoteServerSession>;
 
     fn android_single_view_scene_runtime(
         options: AndroidSceneOptions,
@@ -1052,6 +1055,7 @@ mod android {
         if let Some(remote_addr) = &options.remote_addr {
             let session = AndroidRemoteServerSession::connect(remote_addr.as_str())?;
             return AndroidSingleViewSceneRuntime::remote_dedicated(
+                RemoteSessionEndpoint::new(remote_addr.clone()),
                 options.host_options(),
                 session,
             )
@@ -1060,6 +1064,16 @@ mod android {
             });
         }
         AndroidSingleViewSceneRuntime::local(options.local_options())
+    }
+
+    fn active_session_label(session: Option<&ActiveSessionDescriptor>) -> String {
+        match session {
+            Some(ActiveSessionDescriptor::LocalWorld { seed }) => format!("local-world:{seed}"),
+            Some(ActiveSessionDescriptor::Remote { endpoint }) => {
+                format!("remote:{}", endpoint.address)
+            }
+            None => "none".to_owned(),
+        }
     }
 
     #[derive(Debug)]

@@ -11,9 +11,10 @@ use mclone_app_runtime::frame_render::{
 };
 use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
 use mclone_app_runtime::local_single_view::{
-    LocalSingleViewSceneOptions, NativeSingleViewSceneRuntime,
+    LocalSingleViewSceneOptions, NativeSingleViewSessionRuntime,
 };
 use mclone_app_runtime::render_assets::TexturedMeshAssets;
+use mclone_app_runtime::session::ActiveSessionDescriptor;
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
 use mclone_core::{ChunkPos, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
@@ -176,7 +177,7 @@ pub struct XrMcloneTerrainState<S = XrLocalOnlyRemoteSession>
 where
     S: RemoteDedicatedServerSession,
 {
-    runtime: NativeSingleViewSceneRuntime<S>,
+    runtime: NativeSingleViewSessionRuntime<S>,
     camera: EngineCameraController,
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
@@ -211,7 +212,7 @@ impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
         let scene = scene.validated()?;
-        let runtime = NativeSingleViewSceneRuntime::local_with_mesh_assets(
+        let runtime = NativeSingleViewSessionRuntime::local_with_mesh_assets(
             local_single_view_options(scene),
             mesh_assets,
         );
@@ -235,7 +236,7 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
-        runtime: NativeSingleViewSceneRuntime<S>,
+        runtime: NativeSingleViewSessionRuntime<S>,
         render_options: TexturedSectionRenderOptions,
         actor_atlas: ActorTextureImage,
         startup_view_pose: Option<XrStartupViewPose>,
@@ -243,6 +244,7 @@ where
         let center = runtime.interest_center();
         let render_distance = runtime.render_distance();
         let host_label = runtime.host_label();
+        let session_label = active_session_label(runtime.active_session());
         let draw = TexturedSectionDrawResources::new(
             device,
             queue,
@@ -351,8 +353,9 @@ where
             initial_upload,
         );
         log::info!(
-            "mclone XR terrain runtime: host={} center=({}, {}) render_distance={} chunks={} sections={} faces={} indices={} initial_polls={} poll_ms={:.3} elapsed_ms={:.3}",
+            "mclone XR terrain runtime: host={} session={} center=({}, {}) render_distance={} chunks={} sections={} faces={} indices={} initial_polls={} poll_ms={:.3} elapsed_ms={:.3}",
             host_label,
+            session_label,
             center.x,
             center.z,
             render_distance,
@@ -983,6 +986,16 @@ fn local_single_view_options(scene: XrSceneOptions) -> LocalSingleViewSceneOptio
         .with_day_time(scene.day_time_override)
         .with_freeze_time(scene.freeze_time)
         .with_lighting_enabled(scene.lighting_enabled)
+}
+
+fn active_session_label(session: Option<&ActiveSessionDescriptor>) -> String {
+    match session {
+        Some(ActiveSessionDescriptor::LocalWorld { seed }) => format!("local-world:{seed}"),
+        Some(ActiveSessionDescriptor::Remote { endpoint }) => {
+            format!("remote:{}", endpoint.address)
+        }
+        None => "none".to_owned(),
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
