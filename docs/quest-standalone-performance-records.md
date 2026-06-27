@@ -41,6 +41,58 @@ frame. The validator force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-27 - Standalone Quest 3 Flight Sweep With Stage Attribution
+
+Benchmarked code commit: `518d21da92b3850f9b8b9d75bad6c7cf1318fb49`
+(`Add Quest XR perf timing attribution`).
+
+Capture note: captured from a clean worktree at the commit above. The summary
+line is now long enough that logcat truncated the trailing draw-count fields
+after `indices`; record those fields as missing for this run.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 |
+| Android API | 34 |
+| OpenXR runtime | Oculus `v204.201.0` |
+| Stereo view config | `1680x1760` recommended per eye, `1x` sample |
+| Supported refresh | `72.0,80.0,90.0,120.0 Hz` |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| Flight | no-clip, `4.3 blocks/s`, about `86 blocks` over the sample |
+
+Summary:
+
+| Date | Commit | Lane | RD | Sample | FPS | Frames | Skipped | p50 | p95 | p99 | Max | Max render | Over 1x | Over 2x | Over 4x | Sections | Drawn sections | Indices | Distance |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2026-06-27 | `518d21d` | `native:android-xr:perf:flight:rd1` | 1 | `20.005s` | `72.0` | 1,441 | 0 | `13.889ms` | `15.160ms` | `17.350ms` | `25.475ms` | `11.415ms` | 721 | 0 | 0 | 47 | 11 | 247,308 | `86.036` |
+| 2026-06-27 | `518d21d` | `native:android-xr:perf:flight:rd5` | 5 | `20.011s` | `56.8` | 1,137 | 0 | `17.348ms` | `27.437ms` | `31.546ms` | `44.264ms` | `36.108ms` | 933 | 50 | 0 | 538 | 89 | 2,531,418 | `86.043` |
+| 2026-06-27 | `518d21d` | `native:android-xr:perf:flight:rd10` | 10 | `20.005s` | `20.8` | 417 | 0 | `51.836ms` | `65.716ms` | `77.480ms` | `82.461ms` | `82.326ms` | 414 | 371 | 68 | 1,272 | 194 | 5,691,858 | `86.144` |
+
+Stage attribution:
+
+| RD | Max wait | Poll | Locate | Locomotion | Acquire L | Acquire R | Terrain frame | Render views | Upload | Left eye | Right eye | Release | End frame |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `22.087ms` | `0.429ms` | `0.078ms` | `1.524ms` | `4.848ms` | `0.040ms` | `11.182ms` | `0.045ms` | `4.561ms` | `6.731ms` | `4.315ms` | `0.141ms` | `0.594ms` |
+| 5 | `17.410ms` | `0.672ms` | `0.189ms` | `4.163ms` | `5.229ms` | `0.052ms` | `35.783ms` | `0.047ms` | `29.300ms` | `6.105ms` | `6.831ms` | `0.353ms` | `1.053ms` |
+| 10 | `0.388ms` | `0.832ms` | `0.181ms` | `4.504ms` | `15.198ms` | `0.078ms` | `79.015ms` | `0.077ms` | `66.443ms` | `13.458ms` | `10.015ms` | `0.170ms` | `0.931ms` |
+
+Interpretation:
+
+- Render distance 1 is still near the 72 Hz target. The app render bucket stays
+  under budget, with tail frame time mostly reflecting OpenXR pacing/wait.
+- Render distance 5 misses the 72 Hz budget often enough to feel uneven. The
+  worst app frame is dominated by `runtime_upload` (`29.300ms`) inside the
+  terrain frame, while per-eye rendering stays around `6-7ms`.
+- Render distance 10 is a stress lane. It is heavily app/render limited, with
+  `runtime_upload` peaking at `66.443ms` and terrain frame time at `79.015ms`.
+- `skipped_delta=0` across the sweep means the runtime did not report skipped
+  frames during the samples, but the app submitted far fewer frames at RD5/RD10.
+  The current data points more toward upload/chunk-stream stalls than joystick
+  motion or a simple 60 Hz vs 72 Hz interpolation mismatch.
+
 ### 2026-06-27 - Standalone Quest 3 Automated Flight Sweep
 
 Benchmarked code commit: `446d47349cdab2a84d2e7d05ccbf2516b496da21`
