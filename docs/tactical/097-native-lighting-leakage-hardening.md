@@ -15,6 +15,7 @@ Reference files:
 - `native/crates/mclone-light/src/packed.rs`
 - `native/crates/mclone-server/src/light_world.rs`
 - `oracle/lib/integration/light-fixture.ts`
+- `oracle/java/net/minecraft/world/level/chunk/McloneSchedulerTraceRecorder.java`
 
 ## Vanilla Shape
 
@@ -38,6 +39,7 @@ Rendering and client hydration must treat the second case as real data. It is di
    - Include an underground tunnel/cave case and a lava-lit cave case.
    - First pass landed against the existing persisted Anvil fixture for seed `12345`, chunk `(5,115)`: normalize Anvil-only representation differences, then compare nontrivial sky/block `DataLayer` bytes exactly.
    - This slice also fixed native liquid light opacity: Java `LiquidBlock` does not propagate skylight down, so water/lava attenuate sky by one instead of acting as fully transparent light media.
+   - The scheduler oracle now emits a status-aligned `LIGHT` snapshot with live Java light `DataLayer`s. The committed seed `12345`, chunk `(0,0)` fixture is the strict oracle for section masks and sky light.
 
 3. Add live light delta parity.
    - Wire block edits through Java-shaped `checkBlock`/light propagation.
@@ -62,5 +64,6 @@ Rendering and client hydration must treat the second case as real data. It is di
 
 - The persisted-light gate is not yet a full packet-mask parity fixture. Vanilla Anvil omits explicit all-zero layers and may persist full-sky layers that native currently represents through sky fallback.
 - Seed `12345`, chunk `(0,0)` now matches the persisted Java oracle for sky light. The ocean fixture at chunk `(5,115)` remains strict for sky and block light.
-- Seed `12345`, chunk `(0,0)` still has a small block-light byte mismatch if block comparison is enabled for that fixture. Keep the origin fixture sky-only until the block-light follow-up lands.
+- Seed `12345`, chunk `(0,0)` now matches the scheduler `LIGHT` fixture for strict sky bytes and the Java light-section envelope. Native synthesizes Java's visible envelope around generated data sections: one section below and two sections above the non-empty block-section range, preserving explicit zero block layers and full-sky upper layers.
+- Full strict block-light parity for scheduler `LIGHT` chunk `(0,0)` is one nibble away: section `1`, byte `1784`, expected `0x10`, got `0x00`. Decoded, that is local `(1,29,15)` in chunk `(0,0)`. Keep the ignored strict block gate until the edge-neighbor mismatch is closed.
 - Live block edits still publish block-state deltas without light deltas.

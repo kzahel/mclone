@@ -15,7 +15,7 @@ if [[ ! -f "${DEOBF_JAR}" ]]; then
   exit 1
 fi
 
-for bin in jq curl; do
+for bin in curl; do
   command -v "${bin}" >/dev/null 2>&1 || {
     echo "missing prereq: ${bin}" >&2
     exit 1
@@ -24,9 +24,27 @@ done
 
 mkdir -p "${LIBRARY_DIR}"
 
-mapfile -t LIBRARY_ROWS < <(
-  jq -r '.libraries[] | select(.downloads.artifact.url != null and .downloads.artifact.path != null) | [.downloads.artifact.url, .downloads.artifact.path] | @tsv' "${VERSION_JSON}"
-)
+if command -v jq >/dev/null 2>&1; then
+  mapfile -t LIBRARY_ROWS < <(
+    jq -r '.libraries[] | select(.downloads.artifact.url != null and .downloads.artifact.path != null) | [.downloads.artifact.url, .downloads.artifact.path] | @tsv' "${VERSION_JSON}"
+  )
+elif command -v node >/dev/null 2>&1; then
+  mapfile -t LIBRARY_ROWS < <(
+    node --input-type=module -e '
+      import fs from "node:fs";
+      const version = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      for (const library of version.libraries ?? []) {
+        const artifact = library.downloads?.artifact;
+        if (artifact?.url && artifact?.path) {
+          console.log(`${artifact.url}\t${artifact.path}`);
+        }
+      }
+    ' "${VERSION_JSON}"
+  )
+else
+  echo "missing prereq: jq or node" >&2
+  exit 1
+fi
 
 for row in "${LIBRARY_ROWS[@]}"; do
   IFS=$'\t' read -r url path <<< "${row}"

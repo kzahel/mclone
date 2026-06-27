@@ -414,6 +414,25 @@ mod tests {
         assert_generated_chunk_light_matches_persisted_fixture(fixture, false);
     }
 
+    #[test]
+    fn generated_origin_chunk_sky_light_matches_scheduler_light_oracle_fixture() {
+        let fixture = serde_json::from_str::<Value>(include_str!(
+            "../../../../test/fixtures/scheduler/vanilla-scheduler-light-snapshot-seed-12345-chunk-0-0.json"
+        ))
+        .expect("valid scheduler LIGHT fixture");
+        assert_generated_chunk_light_matches_scheduler_fixture(fixture, false);
+    }
+
+    #[test]
+    #[ignore = "origin block light still has edge mismatches; run while closing strict block-light parity"]
+    fn generated_origin_chunk_block_light_strict_matches_scheduler_light_oracle_fixture() {
+        let fixture = serde_json::from_str::<Value>(include_str!(
+            "../../../../test/fixtures/scheduler/vanilla-scheduler-light-snapshot-seed-12345-chunk-0-0.json"
+        ))
+        .expect("valid scheduler LIGHT fixture");
+        assert_generated_chunk_light_matches_scheduler_fixture(fixture, true);
+    }
+
     fn assert_generated_chunk_light_matches_persisted_fixture(
         fixture: Value,
         compare_block_light: bool,
@@ -459,6 +478,58 @@ mod tests {
         );
         if compare_block_light {
             assert_persisted_light_layer_matches_fixture(
+                "block",
+                fixture_light_layer(chunk, "block"),
+                packed_light_layer(&snapshot.light_sections, LightLayer::Block),
+            );
+        }
+    }
+
+    fn assert_generated_chunk_light_matches_scheduler_fixture(
+        fixture: Value,
+        compare_block_light: bool,
+    ) {
+        assert_eq!(fixture["module"], "scheduler-trace");
+        assert_eq!(fixture["minecraftVersion"], "1.17.1");
+        assert_eq!(fixture["stopStatus"], "LIGHT");
+
+        let chunks = fixture["chunks"]
+            .as_array()
+            .expect("scheduler fixture chunks must be an array");
+        assert_eq!(chunks.len(), 1);
+        let chunk = &chunks[0];
+        assert_eq!(chunk["lightCorrect"], true);
+        let target = ChunkPos::new(fixture_i32(chunk, "chunkX"), fixture_i32(chunk, "chunkZ"));
+        let seed = fixture["seed"]
+            .as_str()
+            .expect("scheduler fixture seed must be a string")
+            .parse::<i64>()
+            .expect("scheduler fixture seed must fit i64");
+
+        let mut server = IntegratedServer::new(seed);
+        let updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkView(ChunkView {
+                center: target,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }),
+        );
+        let snapshot = snapshot_update_for(&updates, target)
+            .expect("native server should publish oracle target snapshot");
+
+        assert_eq!(snapshot.status, ChunkStatus::Light);
+        assert!(
+            snapshot.light_correct,
+            "generated oracle target snapshot must publish light-correct data"
+        );
+        assert_light_layer_matches_fixture(
+            "sky",
+            fixture_light_layer(chunk, "sky"),
+            packed_light_layer(&snapshot.light_sections, LightLayer::Sky),
+        );
+        if compare_block_light {
+            assert_light_layer_matches_fixture(
                 "block",
                 fixture_light_layer(chunk, "block"),
                 packed_light_layer(&snapshot.light_sections, LightLayer::Block),
@@ -1298,8 +1369,19 @@ mod tests {
     ) {
         let expected = normalize_persisted_light_layer(layer_name, expected);
         let actual = normalize_persisted_light_layer(layer_name, actual);
+        assert_light_layer_matches_fixture(layer_name, expected, actual);
+    }
+
+    fn assert_light_layer_matches_fixture(
+        layer_name: &str,
+        expected: BTreeMap<i32, Vec<u8>>,
+        actual: BTreeMap<i32, Vec<u8>>,
+    ) {
         let expected_ys = expected.keys().copied().collect::<Vec<_>>();
         let actual_ys = actual.keys().copied().collect::<Vec<_>>();
+        let mut byte_mismatches = 0usize;
+        let mut nibble_mismatches = 0usize;
+        let mut first_mismatch = None;
         for (section_y, expected_bytes) in &expected {
             let Some(actual_bytes) = actual.get(section_y) else {
                 continue;
@@ -1309,16 +1391,26 @@ mod tests {
                 mclone_core::LIGHT_DATA_LAYER_BYTE_COUNT,
                 "{layer_name} light section {section_y} has invalid native byte length",
             );
-            let mismatch = expected_bytes
-                .iter()
-                .zip(actual_bytes.iter())
-                .position(|(expected, actual)| expected != actual);
-            if let Some(offset) = mismatch {
-                panic!(
-                    "{layer_name} light section {section_y} byte {offset} mismatch: expected 0x{:02x}, got 0x{:02x}",
-                    expected_bytes[offset], actual_bytes[offset]
-                );
+            for (offset, (expected, actual)) in
+                expected_bytes.iter().zip(actual_bytes.iter()).enumerate()
+            {
+                if expected == actual {
+                    continue;
+                }
+                byte_mismatches += 1;
+                if (expected & 0x0F) != (actual & 0x0F) {
+                    nibble_mismatches += 1;
+                }
+                if (expected >> 4) != (actual >> 4) {
+                    nibble_mismatches += 1;
+                }
+                first_mismatch.get_or_insert((*section_y, offset, *expected, *actual));
             }
+        }
+        if let Some((section_y, offset, expected_byte, actual_byte)) = first_mismatch {
+            panic!(
+                "{layer_name} light mismatch: {byte_mismatches} byte(s), {nibble_mismatches} nibble(s); first at section {section_y} byte {offset}: expected 0x{expected_byte:02x}, got 0x{actual_byte:02x}",
+            );
         }
         assert_eq!(
             actual_ys, expected_ys,

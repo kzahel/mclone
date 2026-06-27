@@ -173,6 +173,7 @@ The committed fixture is:
 
 - `test/fixtures/scheduler/vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json`
 - `test/fixtures/scheduler/vanilla-scheduler-features-snapshot-seed-12345-chunk-0-0.json` — generated with `--target-radius 1 --record-radius 1 --stop-status features --generate-structures false --dump-chunks true --dump-only-target-chunk true`; this is the clean apples-to-apples chunk-state oracle after the target 3x3 has reached `FEATURES`, but before runtime liquid ticks can spread fluids.
+- `test/fixtures/scheduler/vanilla-scheduler-light-snapshot-seed-12345-chunk-0-0.json` — generated with `--target-radius 1 --record-radius 1 --stop-status light --generate-structures false --dump-chunks true --dump-only-target-chunk true`; this adds status-aligned live Java light `DataLayer`s for strict light-section and byte parity without comparing against a later persisted Anvil snapshot.
 
 The fixture records dependency-ready, task-start, and task-complete events for the target 3x3. The observed `FEATURES` completion/commit order in that fixture is:
 
@@ -183,7 +184,8 @@ The fixture records dependency-ready, task-start, and task-complete events for t
 Options:
 
 - `--stop-status full` continues the run until the target 3x3 reaches `FULL`.
-- `--dump-chunks true` adds palette-compressed chunk sections plus pending block/liquid ticks captured at the requested stop status. Use this for generation-status block parity; the Anvil integration fixture is a broader server-startup snapshot and can include later runtime effects.
+- `--stop-status light` continues the run until the target 3x3 reaches `LIGHT`.
+- `--dump-chunks true` adds palette-compressed chunk sections, optional live light payloads when the dumped chunk is light-correct, plus pending block/liquid ticks captured at the requested stop status. Use this for generation-status block and light parity; the Anvil integration fixture is a broader server-startup snapshot and can include later runtime effects.
 - `--dump-only-target-chunk true` keeps `--target-radius` as the completion gate but stores only the requested center chunk in the snapshot.
 - `--record-radius 12` records the wider dependency-window event stream instead of only the target 3x3.
 - `--view-distance <n>` writes the temporary server `view-distance` property; default is `3`.

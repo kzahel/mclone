@@ -319,7 +319,7 @@ public class ChunkStatus {
 
       try {
          return McloneSchedulerTraceRecorder.watchTaskComplete(
-            this, var8, var7, this.generationTask.doWork(this, var1, var2, var3, var4, var5, var6, var7, var8)
+            this, var8, var7, var5, this.generationTask.doWork(this, var1, var2, var3, var4, var5, var6, var7, var8)
          );
       } catch (RuntimeException | Error var9) {
          McloneSchedulerTraceRecorder.recordTaskThrow(this, var8, var7, var9);

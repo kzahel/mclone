@@ -9,8 +9,8 @@ use mclone_core::{
     block_to_section_coord,
 };
 use mclone_light::{
-    BlockLightWorld, BlockPosKey, DataLayer, LevelLightEngine, LightLayer, SkyLightWorld,
-    section_as_long,
+    BlockLightWorld, BlockPosKey, DataLayer, LevelLightEngine, LightLayer, LightSectionRange,
+    SkyLightWorld, section_as_long,
 };
 use mclone_worldgen::block::RawBlockId;
 use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
@@ -182,9 +182,12 @@ fn collect_hydrated_light_sections(
     persisted_sections: &[PackedLightSection],
 ) -> Vec<PackedLightSection> {
     let mut sections = Vec::new();
-    let max_section_y = min_section_y + section_count;
+    let light_range = LightSectionRange::from_world(
+        min_section_y * SECTION_HEIGHT,
+        section_count * SECTION_HEIGHT,
+    );
     for persisted in persisted_sections {
-        if persisted.section_y < min_section_y || persisted.section_y >= max_section_y {
+        if !light_range.contains_light_section(persisted.section_y) {
             continue;
         }
         let section = section_as_long(pos.x, persisted.section_y, pos.z);
@@ -194,6 +197,7 @@ fn collect_hydrated_light_sections(
                 .storage()
                 .get_visible_data_layer(section)
                 .map(|layer| layer.to_packed_bytes())
+                .or_else(|| persisted.sky.clone())
         });
         let block = persisted.block.as_ref().and_then(|_| {
             engine
@@ -201,6 +205,7 @@ fn collect_hydrated_light_sections(
                 .storage()
                 .get_visible_data_layer(section)
                 .map(|layer| layer.to_packed_bytes())
+                .or_else(|| persisted.block.clone())
         });
         if sky.is_some() || block.is_some() {
             sections.push(PackedLightSection::new(persisted.section_y, sky, block));
@@ -278,6 +283,42 @@ mod tests {
                 Some(vec![0; LIGHT_DATA_LAYER_BYTE_COUNT]),
                 None,
             )],
+        );
+
+        let hydrated = hydrate_loaded_light_snapshot(snapshot.clone()).unwrap();
+
+        assert_eq!(hydrated.light_sections, snapshot.light_sections);
+    }
+
+    #[test]
+    fn loaded_light_hydration_preserves_persisted_boundary_layers() {
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Light,
+            ChunkRevision(7),
+            0,
+            SECTION_HEIGHT,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        )
+        .with_light_sections(
+            true,
+            vec![
+                PackedLightSection::new(
+                    -1,
+                    Some(vec![0; LIGHT_DATA_LAYER_BYTE_COUNT]),
+                    Some(vec![0; LIGHT_DATA_LAYER_BYTE_COUNT]),
+                ),
+                PackedLightSection::new(
+                    0,
+                    Some(vec![0x44; LIGHT_DATA_LAYER_BYTE_COUNT]),
+                    Some(vec![0x55; LIGHT_DATA_LAYER_BYTE_COUNT]),
+                ),
+                PackedLightSection::new(
+                    1,
+                    Some(vec![0xFF; LIGHT_DATA_LAYER_BYTE_COUNT]),
+                    Some(vec![0; LIGHT_DATA_LAYER_BYTE_COUNT]),
+                ),
+            ],
         );
 
         let hydrated = hydrate_loaded_light_snapshot(snapshot.clone()).unwrap();

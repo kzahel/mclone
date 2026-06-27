@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -19,12 +20,15 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.core.Registry;
+import net.minecraft.server.level.ThreadedLevelLightEngine;
 import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.ChunkTickList;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.TickList;
 import net.minecraft.world.level.TickPriority;
 import net.minecraft.world.level.block.Block;
@@ -74,28 +78,29 @@ public final class McloneSchedulerTraceRecorder {
    }
 
    static void recordDependencyReady(ChunkStatus status, ChunkAccess center, List<ChunkAccess> chunks) {
-      record("dependency_ready", status, center, chunks, null);
+      record("dependency_ready", status, center, chunks, null, null);
    }
 
    static void recordTaskStart(ChunkStatus status, ChunkAccess center, List<ChunkAccess> chunks) {
-      record("task_start", status, center, chunks, null);
+      record("task_start", status, center, chunks, null, null);
    }
 
    static CompletableFuture<Either<ChunkAccess, ChunkHolder.ChunkLoadingFailure>> watchTaskComplete(
       ChunkStatus status,
       ChunkAccess center,
       List<ChunkAccess> chunks,
+      ThreadedLevelLightEngine lightEngine,
       CompletableFuture<Either<ChunkAccess, ChunkHolder.ChunkLoadingFailure>> future
    ) {
       if (!ENABLED) {
          return future;
       }
 
-      return future.whenComplete((result, error) -> record(error == null ? "task_complete" : "task_failed", status, center, chunks, error));
+      return future.whenComplete((result, error) -> record(error == null ? "task_complete" : "task_failed", status, center, chunks, lightEngine, error));
    }
 
    static void recordTaskThrow(ChunkStatus status, ChunkAccess center, List<ChunkAccess> chunks, Throwable error) {
-      record("task_failed", status, center, chunks, error);
+      record("task_failed", status, center, chunks, null, error);
    }
 
    static boolean hasProbeBlocks() {
@@ -475,7 +480,14 @@ public final class McloneSchedulerTraceRecorder {
       return Integer.parseInt(value);
    }
 
-   private static synchronized void record(String phase, ChunkStatus status, ChunkAccess center, List<ChunkAccess> chunks, Throwable error) {
+   private static synchronized void record(
+      String phase,
+      ChunkStatus status,
+      ChunkAccess center,
+      List<ChunkAccess> chunks,
+      ThreadedLevelLightEngine lightEngine,
+      Throwable error
+   ) {
       if (!ENABLED || written) {
          return;
       }
@@ -512,7 +524,7 @@ public final class McloneSchedulerTraceRecorder {
          TARGET_STOP_COMPLETIONS.add(chunkKey(pos));
          if (TARGET_STOP_COMPLETIONS.size() == expectedTargetChunkCount()) {
             if (DUMP_CHUNKS) {
-               captureTargetChunkSnapshots(chunks);
+               captureTargetChunkSnapshots(chunks, lightEngine);
             }
             writeTrace();
          }
@@ -654,7 +666,7 @@ public final class McloneSchedulerTraceRecorder {
       return pos.x + "," + pos.z;
    }
 
-   private static void captureTargetChunkSnapshots(List<ChunkAccess> chunks) {
+   private static void captureTargetChunkSnapshots(List<ChunkAccess> chunks, ThreadedLevelLightEngine lightEngine) {
       CHUNK_SNAPSHOTS.clear();
       for (ChunkAccess chunk : chunks) {
          ChunkPos pos = chunk.getPos();
@@ -662,12 +674,12 @@ public final class McloneSchedulerTraceRecorder {
             continue;
          }
          if (isInTargetNeighborhood(pos)) {
-            CHUNK_SNAPSHOTS.put(chunkKey(pos), chunkSnapshot(chunk));
+            CHUNK_SNAPSHOTS.put(chunkKey(pos), chunkSnapshot(chunk, lightEngine));
          }
       }
    }
 
-   private static Map<String, Object> chunkSnapshot(ChunkAccess chunk) {
+   private static Map<String, Object> chunkSnapshot(ChunkAccess chunk, ThreadedLevelLightEngine lightEngine) {
       ChunkPos pos = chunk.getPos();
       Map<String, Object> snapshot = new LinkedHashMap<>();
       snapshot.put("chunkX", pos.x);
@@ -675,10 +687,38 @@ public final class McloneSchedulerTraceRecorder {
       snapshot.put("status", chunk.getStatus().getName());
       snapshot.put("minY", chunk.getMinBuildHeight());
       snapshot.put("height", chunk.getHeight());
+      snapshot.put("lightCorrect", chunk.isLightCorrect());
       snapshot.put("sections", collectChunkSections(chunk));
+      if (lightEngine != null && chunk.isLightCorrect()) {
+         snapshot.put("light", collectChunkLight(chunk, lightEngine));
+      }
       snapshot.put("blockTicks", collectScheduledBlockTicks(chunk));
       snapshot.put("liquidTicks", collectScheduledLiquidTicks(chunk));
       return snapshot;
+   }
+
+   private static Map<String, Object> collectChunkLight(ChunkAccess chunk, ThreadedLevelLightEngine lightEngine) {
+      Map<String, Object> light = new LinkedHashMap<>();
+      light.put("sky", collectLightLayer(chunk, lightEngine, LightLayer.SKY));
+      light.put("block", collectLightLayer(chunk, lightEngine, LightLayer.BLOCK));
+      return light;
+   }
+
+   private static List<Map<String, Object>> collectLightLayer(ChunkAccess chunk, ThreadedLevelLightEngine lightEngine, LightLayer layer) {
+      List<Map<String, Object>> sections = new ArrayList<>();
+      ChunkPos pos = chunk.getPos();
+      for (int sectionY = lightEngine.getMinLightSection(); sectionY < lightEngine.getMaxLightSection(); sectionY++) {
+         DataLayer data = lightEngine.getLayerListener(layer).getDataLayerData(SectionPos.of(pos, sectionY));
+         if (data == null) {
+            continue;
+         }
+
+         Map<String, Object> section = new LinkedHashMap<>();
+         section.put("y", sectionY);
+         section.put("dataBase64", Base64.getEncoder().encodeToString(data.getData()));
+         sections.add(section);
+      }
+      return sections;
    }
 
    private static List<Map<String, Object>> collectChunkSections(ChunkAccess chunk) {

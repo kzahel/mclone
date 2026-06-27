@@ -123,7 +123,13 @@ impl RetainedInitialLightState {
         for status in &statuses {
             sections_by_chunk.insert(
                 status.pos,
-                collect_light_sections(&self.engine, status.pos, min_section_y, section_count),
+                collect_light_sections(
+                    &self.engine,
+                    status.pos,
+                    min_section_y,
+                    section_count,
+                    status.raw_blocks(),
+                ),
             );
         }
         timing.collect_sections_us = timing_elapsed_us(start);
@@ -172,10 +178,15 @@ fn collect_light_sections(
     pos: ChunkPos,
     min_section_y: i32,
     section_count: i32,
+    raw_blocks: &[RawBlockId],
 ) -> Vec<PackedLightSection> {
     let mut sections = Vec::new();
-    for section_offset in 0..section_count {
-        let section_y = min_section_y + section_offset;
+    let envelope = light_section_envelope(min_section_y, section_count, raw_blocks);
+    let max_data_section_y = envelope.as_ref().map(|range| range.end - 3);
+    let section_range = envelope
+        .clone()
+        .unwrap_or(min_section_y..min_section_y + section_count);
+    for section_y in section_range {
         let section = section_as_long(pos.x, section_y, pos.z);
         let sky = engine
             .sky_engine()
@@ -187,7 +198,11 @@ fn collect_light_sections(
             .storage()
             .get_visible_data_layer(section)
             .map(|layer| layer.to_packed_bytes());
-        if sky.is_some() || block.is_some() {
+        if sky.is_some() || block.is_some() || max_data_section_y.is_some() {
+            let sky =
+                sky.or_else(|| synthetic_sky_layer_for_envelope(section_y, max_data_section_y));
+            let block = block
+                .or_else(|| max_data_section_y.map(|_| vec![0; mclone_light::DATA_LAYER_SIZE]));
             sections.push(PackedLightSection::new(section_y, sky, block));
         }
     }
@@ -199,6 +214,44 @@ fn collect_light_sections(
         ));
     }
     sections
+}
+
+fn light_section_envelope(
+    min_section_y: i32,
+    section_count: i32,
+    raw_blocks: &[RawBlockId],
+) -> Option<std::ops::Range<i32>> {
+    let mut min_data_section = None;
+    let mut max_data_section = None;
+    for section_offset in 0..section_count {
+        if section_is_empty(raw_blocks, section_offset) {
+            continue;
+        }
+        let section_y = min_section_y + section_offset;
+        min_data_section =
+            Some(min_data_section.map_or(section_y, |current: i32| current.min(section_y)));
+        max_data_section =
+            Some(max_data_section.map_or(section_y, |current: i32| current.max(section_y)));
+    }
+    let min_light_section = min_section_y - 1;
+    let max_light_section = min_section_y + section_count + 1;
+    Some(
+        (min_data_section? - 1).max(min_light_section)
+            ..(max_data_section? + 3).min(max_light_section),
+    )
+}
+
+fn synthetic_sky_layer_for_envelope(
+    section_y: i32,
+    max_data_section_y: Option<i32>,
+) -> Option<Vec<u8>> {
+    let max_data_section_y = max_data_section_y?;
+    let value = if section_y > max_data_section_y {
+        0xFF
+    } else {
+        0
+    };
+    Some(vec![value; mclone_light::DATA_LAYER_SIZE])
 }
 
 fn changed_block_positions(
