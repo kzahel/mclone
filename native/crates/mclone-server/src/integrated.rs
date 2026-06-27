@@ -27,10 +27,10 @@ use crate::remote_players::{RemotePlayerState, RemotePlayerTracking, RoutedRemot
 use crate::spawn::find_safe_surface_spawn;
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
-    ChunkScheduler, ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult,
-    FluidKind, FluidTickList, NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics,
-    ServerSimulationTickReport, ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
-    WorldBlockPos,
+    ChunkLoadingProgress, ChunkLoadingProgressStats, ChunkScheduler, ChunkSchedulerEvent,
+    ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, FluidKind, FluidTickList,
+    NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics, ServerSimulationTickReport,
+    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBlockPos,
 };
 
 #[derive(Debug)]
@@ -49,6 +49,7 @@ pub struct IntegratedServer {
     remote_players: RemotePlayerTracking,
     entities: ServerEntityStore,
     entity_tracking: EntityTracking,
+    loading_progress: ChunkLoadingProgress,
 }
 
 /// Vanilla overworld spawns at morning (`dayTime` 1000), not midnight.
@@ -84,6 +85,7 @@ impl IntegratedServer {
     fn with_scheduler(seed: i64, scheduler: ChunkScheduler) -> Self {
         let mut chunk_tracking = PlayerChunkTracking::new(PlayerChunkTrackingPolicy::default());
         chunk_tracking.add_player(ServerPlayerId::LOCAL);
+        let loading_progress = ChunkLoadingProgress::new(runtime_chunk_target_status(&scheduler));
         Self {
             seed,
             scheduler,
@@ -99,6 +101,7 @@ impl IntegratedServer {
             remote_players: RemotePlayerTracking::default(),
             entities: ServerEntityStore::default(),
             entity_tracking: EntityTracking::default(),
+            loading_progress,
         }
     }
 
@@ -135,12 +138,18 @@ impl IntegratedServer {
         self.liquid_ticks.size()
     }
 
+    pub fn loading_progress_stats(&self) -> Option<ChunkLoadingProgressStats> {
+        self.loading_progress.stats()
+    }
+
     pub fn lighting_enabled(&self) -> bool {
         self.scheduler.lighting_enabled()
     }
 
     pub fn set_lighting_enabled(&mut self, enabled: bool) {
         self.scheduler.set_lighting_enabled(enabled);
+        self.loading_progress
+            .set_target_status(runtime_chunk_target_status(&self.scheduler));
     }
 
     pub fn add_dedicated_player(&mut self) -> ServerPlayerId {
@@ -439,6 +448,9 @@ impl IntegratedServer {
         view: ChunkView,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         self.ensure_target_exists(target)?;
+        if target == CommandTarget::Local {
+            self.loading_progress.set_view(&view);
+        }
         self.set_initial_spawn_center_for_target(target, view.center)?;
         let player_id = target.player_id();
         let change = self.chunk_tracking.set_requested_view(player_id, view);
@@ -608,6 +620,7 @@ impl IntegratedServer {
                         .queue_snapshot_for_tracking_players(snapshot);
                 }
                 ChunkSchedulerEvent::Unloaded { pos } => {
+                    self.loading_progress.clear_chunk(pos);
                     self.chunk_tracking.queue_unload_for_tracking_players(pos);
                 }
                 ChunkSchedulerEvent::SectionBlockUpdates {
@@ -622,7 +635,10 @@ impl IntegratedServer {
                     self.liquid_ticks
                         .schedule_tick(pos, fluid, delay, self.simulation_tick);
                 }
-                ChunkSchedulerEvent::StatusChanged { .. } => {}
+                ChunkSchedulerEvent::StatusChanged { pos, status, step } => {
+                    self.loading_progress
+                        .record_status_change(pos, status, step);
+                }
             }
         }
     }
@@ -926,6 +942,14 @@ fn raw_block_id_from_block_state(block_state: BlockStateId) -> Option<RawBlockId
     RawBlockId::try_from(block_state.0).ok()
 }
 
+fn runtime_chunk_target_status(scheduler: &ChunkScheduler) -> mclone_core::ChunkStatus {
+    if scheduler.lighting_enabled() {
+        mclone_core::ChunkStatus::Light
+    } else {
+        mclone_core::ChunkStatus::Features
+    }
+}
+
 fn run_noop_simulation_phase(chunks: &[ChunkPos]) -> usize {
     chunks.iter().fold(0, |count, _pos| count + 1)
 }
@@ -976,6 +1000,35 @@ mod tests {
             }
         }
         panic!("timed out loading center chunk");
+    }
+
+    #[test]
+    fn local_chunk_view_routes_status_events_into_loading_progress() {
+        let mut server = IntegratedServer::new(0);
+        assert_eq!(server.loading_progress_stats(), None);
+
+        load_center_chunk(&mut server);
+        for _ in 0..4 {
+            if server
+                .loading_progress_stats()
+                .is_some_and(|stats| stats.playable_chunk_ready)
+            {
+                break;
+            }
+            let updates = server.try_poll().expect("poll");
+            accept_player_position_updates(&mut server, &updates);
+        }
+
+        let stats = server
+            .loading_progress_stats()
+            .expect("local chunk view should create loading progress stats");
+        assert_eq!(stats.center, ChunkPos::new(0, 0));
+        assert_eq!(stats.target_radius, 0);
+        assert_eq!(stats.target_status, mclone_core::ChunkStatus::Features);
+        assert_eq!(stats.target_chunk_count, 1);
+        assert_eq!(stats.target_ready_chunks, 1);
+        assert_eq!(stats.playable_chunk, ChunkPos::new(0, 0));
+        assert!(stats.playable_chunk_ready);
     }
 
     fn accept_player_position_updates(server: &mut IntegratedServer, updates: &[ServerUpdate]) {

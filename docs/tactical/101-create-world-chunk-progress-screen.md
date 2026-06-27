@@ -1,9 +1,11 @@
 # 101: Create-World Chunk Progress Screen
 
-Status: proposed. Investigation on 2026-06-27 found the Java 1.17.1
+Status: in progress. Investigation on 2026-06-27 found the Java 1.17.1
 chunk-status loading screen, the native scheduler events we can reuse, and the
 desktop startup blocking point that currently makes Create World feel like a
-beachball. No implementation has landed yet.
+beachball. Slice 0 landed on 2026-06-27: local integrated-server status events
+now feed compact loading-progress diagnostics, but UI drawing and non-blocking
+startup are not implemented yet.
 
 ## Purpose
 
@@ -164,34 +166,39 @@ If native later splits the status path, add direct mappings for Java
 
 ### Slice 0 - First Bounded Work Chunk
 
-- [ ] Add a shared loading-progress accumulator fed by existing scheduler
+- [x] Add a shared loading-progress accumulator fed by existing scheduler
   `StatusChanged` events in the local integrated server path.
-- [ ] Expose that progress through `mclone-app-runtime` diagnostics/state without
+- [x] Expose that progress through `mclone-app-runtime` diagnostics/state without
   changing startup behavior yet.
-- [ ] Add tests for status accumulation, target-status completion counts, and
+- [x] Add tests for status accumulation, target-status completion counts, and
   underfoot/playable chunk readiness derivation.
-- [ ] Keep UI drawing and non-blocking desktop startup out of this first chunk.
+- [x] Keep UI drawing and non-blocking desktop startup out of this first chunk.
 
-This first slice proves the data path and gives us something deterministic to
-assert before changing event-loop behavior. It should be small enough to land
-without risking world startup semantics.
+Slice 0 result:
+
+- `native/crates/mclone-server/src/loading_progress.rs` owns
+  `ChunkLoadingProgress` and compact `ChunkLoadingProgressStats`.
+- `IntegratedServer` records the local chunk view, treats `Ready` status events
+  as progress, clears unloaded chunks, and derives the current native target
+  from lighting mode (`Light` with lighting, `Features` without).
+- `ServerRunnerDiagnostics`, the web worker runner, and
+  `mclone-app-runtime` stats expose the compact snapshot for UI/debug consumers.
+- No UI drawing or desktop startup-loop behavior changed in this slice.
 
 ### Slice 1 - Shared Progress Model
 
-- [ ] Add a platform-neutral `ChunkLoadingProgress` model. Suggested fields:
-  spawn/center chunk, display radius, target radius/count, target status, percent
-  complete, latest status per relative or absolute chunk coordinate, and an
-  explicit playable-threshold fact for the current player/spawn chunk.
-- [ ] Add a compact progress event type derived from
-  `ChunkSchedulerEvent::StatusChanged`.
-- [ ] Decide whether `Scheduled` and `Ready` both update the grid. Conservative
-  first pass: record only `Ready`, optionally dim or outline `Scheduled` later.
-- [ ] Treat the native target status (`Light` with lighting, `Features` without)
+- [ ] Extend the compact diagnostics into a UI-ready snapshot with percent
+  complete and latest status per relative or absolute chunk coordinate.
+- [ ] Keep the server-owned compact accumulator as the source of truth; add
+  richer per-cell data only where the Java-style grid needs it.
+- [ ] Decide whether `Scheduled` should become visible as a dim/pending state.
+  Slice 0 records only `Ready`, matching the conservative first pass.
+- [ ] Keep the native target status (`Light` with lighting, `Features` without)
   as the warm-region progress target for current native gameplay.
-- [ ] Derive a separate playable target from the spawn/feet chunk, not from all
-  startup chunks being idle.
-- [ ] Unit-test status accumulation, radius indexing, unload clearing, and
-  percent/playable-threshold calculation.
+- [ ] Preserve the separate playable target from the spawn/feet chunk; do not
+  regress to waiting for the whole warm region before entering gameplay.
+- [ ] Unit-test radius indexing, percent calculation, and any per-cell palette
+  mapping added for the overlay.
 
 ### Slice 2 - Server/Event Routing
 

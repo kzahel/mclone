@@ -16,8 +16,9 @@ use mclone_protocol::{
 #[cfg(not(target_arch = "wasm32"))]
 use crate::IntegratedServer;
 use crate::{
-    ChunkSchedulerMetrics, ChunkStoreError, LightStatusMailboxKind, PlayerChunkTrackingDiagnostics,
-    ServerSimulationTickReport, ServerSimulationTickTiming, WorldgenMailboxKind,
+    ChunkLoadingProgressStats, ChunkSchedulerMetrics, ChunkStoreError, LightStatusMailboxKind,
+    PlayerChunkTrackingDiagnostics, ServerSimulationTickReport, ServerSimulationTickTiming,
+    WorldgenMailboxKind,
 };
 
 pub type ServerRunnerResult<T> = Result<T, ServerRunnerError>;
@@ -265,6 +266,7 @@ pub struct ServerRunnerDiagnostics {
     pub light_status_job_frame_metrics: WorkerFrameMetrics,
     pub scheduler_metrics: ChunkSchedulerMetrics,
     pub chunk_tracking: PlayerChunkTrackingDiagnostics,
+    pub loading_progress: Option<ChunkLoadingProgressStats>,
     pub diagnostics_detail_refreshes: u64,
     pub diagnostics_detail_age_ms: f64,
     pub last_tick: ServerRunnerTickDiagnostics,
@@ -293,6 +295,7 @@ impl ServerRunnerDiagnostics {
             light_status_job_frame_metrics: WorkerFrameMetrics::default(),
             scheduler_metrics: ChunkSchedulerMetrics::default(),
             chunk_tracking: PlayerChunkTrackingDiagnostics::default(),
+            loading_progress: None,
             diagnostics_detail_refreshes: 0,
             diagnostics_detail_age_ms: 0.0,
             last_tick: ServerRunnerTickDiagnostics::default(),
@@ -427,6 +430,7 @@ mod native {
         light_status_job_frame_metrics: WorkerFrameMetrics,
         scheduler_metrics: ChunkSchedulerMetrics,
         chunk_tracking: PlayerChunkTrackingDiagnostics,
+        loading_progress: Option<ChunkLoadingProgressStats>,
     }
 
     impl DiagnosticsDetailSnapshot {
@@ -444,6 +448,7 @@ mod native {
                     .light_status_mailbox_frame_metrics(),
                 scheduler_metrics: server.scheduler().metrics(),
                 chunk_tracking: server.chunk_tracking_diagnostics(),
+                loading_progress: server.loading_progress_stats(),
             }
         }
     }
@@ -941,6 +946,7 @@ mod native {
                 detail_snapshot.light_status_job_frame_metrics;
             diagnostics.scheduler_metrics = detail_snapshot.scheduler_metrics;
             diagnostics.chunk_tracking = detail_snapshot.chunk_tracking;
+            diagnostics.loading_progress = detail_snapshot.loading_progress;
             diagnostics.diagnostics_detail_refreshes += 1;
             diagnostics.diagnostics_detail_age_ms = 0.0;
             diagnostics.diagnostics_detail_refreshed_at = Some(now);

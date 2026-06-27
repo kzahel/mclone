@@ -31,7 +31,7 @@ use mclone_render_session::{
     render_section_neighbor_readiness, sort_chunk_positions_by_distance,
     sort_dirty_section_chunks_by_distance,
 };
-use mclone_server::{ServerRunnerDiagnostics, ServerRunnerKind};
+use mclone_server::{ChunkLoadingProgressStats, ServerRunnerDiagnostics, ServerRunnerKind};
 
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const JAVA_MIN_TRACKING_RENDER_DISTANCE: u32 = 2;
@@ -177,6 +177,7 @@ pub struct RuntimePollDiagnostics {
     pub scheduler_loaded_snapshot_chunks: usize,
     pub scheduler_client_visible_chunks: usize,
     pub scheduler_active_ticket_chunks: usize,
+    pub loading_progress: Option<ChunkLoadingProgressStats>,
     pub player_visible_chunks: usize,
     pub player_outbound_queue_depth: usize,
     pub scheduler_events: usize,
@@ -210,6 +211,7 @@ pub struct SingleViewRuntimeStats {
     pub inflight_render_sections: usize,
     pub client_visible_chunks: usize,
     pub active_ticket_chunks: usize,
+    pub loading_progress: Option<ChunkLoadingProgressStats>,
     pub tracked_players: usize,
     pub player_visible_chunks: usize,
     pub aggregate_player_ticket_chunks: usize,
@@ -758,6 +760,8 @@ impl SingleViewRuntime {
                 }),
             active_ticket_chunks: scheduler_metrics
                 .map_or(0, |metrics| metrics.active_ticket_chunks),
+            loading_progress: runner_diagnostics
+                .and_then(|diagnostics| diagnostics.loading_progress),
             tracked_players: chunk_tracking
                 .map_or(self.client().remote_player_count(), |diagnostics| {
                     diagnostics.player_count
@@ -849,6 +853,7 @@ impl SingleViewRuntime {
             runner_diagnostics.scheduler_metrics.client_visible_chunks;
         diagnostics.scheduler_active_ticket_chunks =
             runner_diagnostics.scheduler_metrics.active_ticket_chunks;
+        diagnostics.loading_progress = runner_diagnostics.loading_progress;
         diagnostics.player_visible_chunks = runner_diagnostics
             .chunk_tracking
             .total_player_visible_chunks;

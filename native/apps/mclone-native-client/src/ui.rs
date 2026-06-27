@@ -241,6 +241,7 @@ mod tests {
                 inflight_render_sections: 4,
                 client_visible_chunks: 8,
                 active_ticket_chunks: 9,
+                loading_progress: None,
                 tracked_players: 1,
                 player_visible_chunks: 8,
                 aggregate_player_ticket_chunks: 8,
