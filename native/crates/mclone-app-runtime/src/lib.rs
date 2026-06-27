@@ -20,7 +20,7 @@ use mclone_client::{
     block_facts::{BlockFluidKind, block_fluid_height, block_fluid_kind},
 };
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, BlockStateId, ChunkPos, ChunkSnapshot, block_to_section_coord,
+    AIR_BLOCK_STATE_ID, BlockStateId, ChunkPos, ChunkSnapshot, ChunkStatus, block_to_section_coord,
     local_block_coord, local_section_block_coord,
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
@@ -31,7 +31,11 @@ use mclone_render_session::{
     render_section_neighbor_readiness, sort_chunk_positions_by_distance,
     sort_dirty_section_chunks_by_distance,
 };
-use mclone_server::{ChunkLoadingProgressStats, ServerRunnerDiagnostics, ServerRunnerKind};
+use mclone_server::{
+    ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ServerRunnerDiagnostics,
+    ServerRunnerKind,
+};
+use mclone_ui::{LoadingProgressCell, LoadingProgressCellStatus, LoadingProgressOverlay};
 
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const JAVA_MIN_TRACKING_RENDER_DISTANCE: u32 = 2;
@@ -56,6 +60,51 @@ pub fn chunk_view(center: ChunkPos, render_distance: u32, chunk_tracking_radius:
         center,
         render_distance,
         chunk_tracking_radius,
+    }
+}
+
+pub fn loading_progress_overlay_from_diagnostics(
+    diagnostics: &ServerRunnerDiagnostics,
+) -> Option<LoadingProgressOverlay> {
+    diagnostics
+        .loading_progress_snapshot
+        .as_ref()
+        .map(loading_progress_overlay_from_snapshot)
+}
+
+pub fn loading_progress_overlay_from_snapshot(
+    snapshot: &ChunkLoadingProgressSnapshot,
+) -> LoadingProgressOverlay {
+    LoadingProgressOverlay::new(
+        snapshot.stats.target_radius,
+        snapshot.stats.target_ready_chunks,
+        snapshot.stats.target_chunk_count,
+        snapshot.stats.playable_chunk_ready,
+        snapshot.cells.iter().map(|cell| {
+            LoadingProgressCell::new(
+                cell.relative_x,
+                cell.relative_z,
+                loading_progress_cell_status(cell.status, cell.target_ready),
+            )
+            .playable(cell.playable)
+        }),
+    )
+}
+
+fn loading_progress_cell_status(
+    status: Option<ChunkStatus>,
+    target_ready: bool,
+) -> LoadingProgressCellStatus {
+    if target_ready {
+        return LoadingProgressCellStatus::TargetReady;
+    }
+    match status {
+        None => LoadingProgressCellStatus::None,
+        Some(ChunkStatus::Terrain) => LoadingProgressCellStatus::Terrain,
+        Some(ChunkStatus::Surface) => LoadingProgressCellStatus::Surface,
+        Some(ChunkStatus::Features) => LoadingProgressCellStatus::Features,
+        Some(ChunkStatus::Light) => LoadingProgressCellStatus::Light,
+        Some(ChunkStatus::Full) => LoadingProgressCellStatus::TargetReady,
     }
 }
 
@@ -966,6 +1015,7 @@ fn timing_elapsed_ms(_start: Option<RuntimeTimingSample>) -> f64 {
 mod tests {
     use super::*;
     use mclone_core::{CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
+    use mclone_server::{ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot};
 
     #[test]
     fn chunk_tracking_radius_derives_java_shaped_minimum() {
@@ -974,6 +1024,57 @@ mod tests {
         assert_eq!(chunk_tracking_radius_for_render_distance(2), 3);
         assert_eq!(chunk_tracking_radius_for_render_distance(3), 3);
         assert_eq!(chunk_tracking_radius_for_render_distance(4), 4);
+    }
+
+    #[test]
+    fn loading_progress_snapshot_maps_to_shared_overlay() {
+        let snapshot = ChunkLoadingProgressSnapshot {
+            stats: ChunkLoadingProgressStats {
+                center: ChunkPos::new(4, -3),
+                target_radius: 1,
+                target_status: ChunkStatus::Light,
+                target_chunk_count: 9,
+                target_ready_chunks: 2,
+                playable_chunk: ChunkPos::new(4, -3),
+                playable_chunk_ready: true,
+            },
+            cells: vec![
+                ChunkLoadingProgressCell {
+                    relative_x: 0,
+                    relative_z: 0,
+                    status: Some(ChunkStatus::Light),
+                    target_ready: true,
+                    playable: true,
+                },
+                ChunkLoadingProgressCell {
+                    relative_x: 1,
+                    relative_z: 0,
+                    status: Some(ChunkStatus::Features),
+                    target_ready: false,
+                    playable: false,
+                },
+                ChunkLoadingProgressCell {
+                    relative_x: -1,
+                    relative_z: 0,
+                    status: None,
+                    target_ready: false,
+                    playable: false,
+                },
+            ],
+        };
+
+        let overlay = loading_progress_overlay_from_snapshot(&snapshot);
+
+        assert_eq!(overlay.grid_side(), 3);
+        assert_eq!(overlay.percent(), 22);
+        assert!(overlay.playable_ready);
+        assert_eq!(
+            overlay.status_at(0, 0),
+            LoadingProgressCellStatus::TargetReady
+        );
+        assert_eq!(overlay.status_at(1, 0), LoadingProgressCellStatus::Features);
+        assert_eq!(overlay.status_at(-1, 0), LoadingProgressCellStatus::None);
+        assert!(overlay.playable_cell().unwrap().playable);
     }
 
     #[test]

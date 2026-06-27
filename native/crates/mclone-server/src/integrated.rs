@@ -27,10 +27,11 @@ use crate::remote_players::{RemotePlayerState, RemotePlayerTracking, RoutedRemot
 use crate::spawn::find_safe_surface_spawn;
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
-    ChunkLoadingProgress, ChunkLoadingProgressStats, ChunkScheduler, ChunkSchedulerEvent,
-    ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, FluidKind, FluidTickList,
-    NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics, ServerSimulationTickReport,
-    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBlockPos,
+    ChunkLoadingProgress, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkScheduler,
+    ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, FluidKind,
+    FluidTickList, NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics,
+    ServerSimulationTickReport, ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
+    WorldBlockPos,
 };
 
 #[derive(Debug)]
@@ -140,6 +141,10 @@ impl IntegratedServer {
 
     pub fn loading_progress_stats(&self) -> Option<ChunkLoadingProgressStats> {
         self.loading_progress.stats()
+    }
+
+    pub fn loading_progress_snapshot(&self) -> Option<ChunkLoadingProgressSnapshot> {
+        self.loading_progress.snapshot()
     }
 
     pub fn lighting_enabled(&self) -> bool {

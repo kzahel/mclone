@@ -45,7 +45,10 @@ pub use integrated::{INITIAL_DAY_TIME, IntegratedServer};
 pub use job_codec::{
     WorldgenJobSession, compute_light_status_job_frame, compute_worldgen_job_frame,
 };
-pub use loading_progress::{ChunkLoadingProgress, ChunkLoadingProgressStats};
+pub use loading_progress::{
+    ChunkLoadingProgress, ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot,
+    ChunkLoadingProgressStats,
+};
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
 };

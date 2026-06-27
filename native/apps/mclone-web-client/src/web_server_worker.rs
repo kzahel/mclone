@@ -1610,6 +1610,7 @@ impl McloneWebIntegratedServerWorker {
         self.diagnostics.scheduler_metrics = self.server.scheduler().metrics();
         self.diagnostics.chunk_tracking = self.server.chunk_tracking_diagnostics();
         self.diagnostics.loading_progress = self.server.loading_progress_stats();
+        self.diagnostics.loading_progress_snapshot = self.server.loading_progress_snapshot();
         self.diagnostics.awaiting_tick = awaiting_tick;
         if let Some(tick) = tick {
             self.diagnostics.last_tick = tick;

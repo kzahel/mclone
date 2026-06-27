@@ -5,8 +5,10 @@ chunk-status loading screen, the native scheduler events we can reuse, and the
 desktop startup blocking point that currently makes Create World feel like a
 beachball. Slice 0 landed on 2026-06-27: local integrated-server status events
 now feed compact loading-progress diagnostics. Slice 3's shared `mclone-ui`
-render model also landed on 2026-06-27. Per-cell producer wiring and the shared
-non-blocking startup pump are not implemented yet.
+render model also landed on 2026-06-27. Slice 1 landed on 2026-06-27: server
+diagnostics now carry real per-cell progress snapshots and app-runtime can
+convert them into the shared overlay. The shared non-blocking startup pump is
+not implemented yet.
 
 ## Purpose
 
@@ -191,28 +193,39 @@ Slice 0 result:
 
 ### Slice 1 - Shared Progress Model
 
-- [ ] Extend the compact diagnostics into a UI-ready snapshot with percent
+- [x] Extend the compact diagnostics into a UI-ready snapshot with percent
   complete and latest status per relative or absolute chunk coordinate.
-- [ ] Keep the server-owned compact accumulator as the source of truth; add
+- [x] Keep the server-owned compact accumulator as the source of truth; add
   richer per-cell data only where the Java-style grid needs it.
-- [ ] Decide whether `Scheduled` should become visible as a dim/pending state.
+- [x] Decide whether `Scheduled` should become visible as a dim/pending state.
   Slice 0 records only `Ready`, matching the conservative first pass.
-- [ ] Keep the native target status (`Light` with lighting, `Features` without)
+- [x] Keep the native target status (`Light` with lighting, `Features` without)
   as the warm-region progress target for current native gameplay.
-- [ ] Preserve the separate playable target from the spawn/feet chunk; do not
+- [x] Preserve the separate playable target from the spawn/feet chunk; do not
   regress to waiting for the whole warm region before entering gameplay.
-- [ ] Unit-test radius indexing, percent calculation, and any per-cell palette
+- [x] Unit-test radius indexing, percent calculation, and any per-cell palette
   mapping added for the overlay.
+
+Slice 1 result:
+
+- `ChunkLoadingProgressSnapshot` carries compact aggregate stats plus relative
+  `ChunkLoadingProgressCell` records for status-bearing chunks.
+- The playable cell is included even before its first ready status arrives, so
+  the shared UI can outline the underfoot chunk without inventing state.
+- `ServerRunnerDiagnostics` and the web worker runner expose the snapshot while
+  preserving existing `Copy` aggregate runtime stats.
+- `mclone-app-runtime` converts server snapshots into `mclone-ui`
+  `LoadingProgressOverlay` values with the native-to-Java-inspired palette.
 
 ### Slice 2 - Server/Event Routing
 
-- [ ] Stop discarding `StatusChanged` in `IntegratedServer::route_scheduler_events`.
-- [ ] Route progress updates to local single-view runtime diagnostics/state
+- [x] Stop discarding `StatusChanged` in `IntegratedServer::route_scheduler_events`.
+- [x] Route progress updates to local single-view runtime diagnostics/state
   without sending them as normal chunk snapshots.
-- [ ] Preserve dedicated-server compatibility. For remote clients, either expose
+- [x] Preserve dedicated-server compatibility. For remote clients, either expose
   optional protocol progress events later or show only local connection/loading
   status until real chunk snapshots arrive.
-- [ ] Keep status progress separate from `ServerUpdate::ChunkSnapshot` so visual
+- [x] Keep status progress separate from `ServerUpdate::ChunkSnapshot` so visual
   loading progress cannot accidentally publish not-ready chunks.
 
 ### Slice 3 - Shared UI Rendering

@@ -16,9 +16,9 @@ use mclone_protocol::{
 #[cfg(not(target_arch = "wasm32"))]
 use crate::IntegratedServer;
 use crate::{
-    ChunkLoadingProgressStats, ChunkSchedulerMetrics, ChunkStoreError, LightStatusMailboxKind,
-    PlayerChunkTrackingDiagnostics, ServerSimulationTickReport, ServerSimulationTickTiming,
-    WorldgenMailboxKind,
+    ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkSchedulerMetrics,
+    ChunkStoreError, LightStatusMailboxKind, PlayerChunkTrackingDiagnostics,
+    ServerSimulationTickReport, ServerSimulationTickTiming, WorldgenMailboxKind,
 };
 
 pub type ServerRunnerResult<T> = Result<T, ServerRunnerError>;
@@ -267,6 +267,7 @@ pub struct ServerRunnerDiagnostics {
     pub scheduler_metrics: ChunkSchedulerMetrics,
     pub chunk_tracking: PlayerChunkTrackingDiagnostics,
     pub loading_progress: Option<ChunkLoadingProgressStats>,
+    pub loading_progress_snapshot: Option<ChunkLoadingProgressSnapshot>,
     pub diagnostics_detail_refreshes: u64,
     pub diagnostics_detail_age_ms: f64,
     pub last_tick: ServerRunnerTickDiagnostics,
@@ -296,6 +297,7 @@ impl ServerRunnerDiagnostics {
             scheduler_metrics: ChunkSchedulerMetrics::default(),
             chunk_tracking: PlayerChunkTrackingDiagnostics::default(),
             loading_progress: None,
+            loading_progress_snapshot: None,
             diagnostics_detail_refreshes: 0,
             diagnostics_detail_age_ms: 0.0,
             last_tick: ServerRunnerTickDiagnostics::default(),
@@ -431,6 +433,7 @@ mod native {
         scheduler_metrics: ChunkSchedulerMetrics,
         chunk_tracking: PlayerChunkTrackingDiagnostics,
         loading_progress: Option<ChunkLoadingProgressStats>,
+        loading_progress_snapshot: Option<ChunkLoadingProgressSnapshot>,
     }
 
     impl DiagnosticsDetailSnapshot {
@@ -449,6 +452,7 @@ mod native {
                 scheduler_metrics: server.scheduler().metrics(),
                 chunk_tracking: server.chunk_tracking_diagnostics(),
                 loading_progress: server.loading_progress_stats(),
+                loading_progress_snapshot: server.loading_progress_snapshot(),
             }
         }
     }
@@ -954,6 +958,7 @@ mod native {
             diagnostics.scheduler_metrics = detail_snapshot.scheduler_metrics;
             diagnostics.chunk_tracking = detail_snapshot.chunk_tracking;
             diagnostics.loading_progress = detail_snapshot.loading_progress;
+            diagnostics.loading_progress_snapshot = detail_snapshot.loading_progress_snapshot;
             diagnostics.diagnostics_detail_refreshes += 1;
             diagnostics.diagnostics_detail_age_ms = 0.0;
             diagnostics.diagnostics_detail_refreshed_at = Some(now);

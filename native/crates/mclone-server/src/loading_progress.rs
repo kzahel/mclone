@@ -29,6 +29,21 @@ pub struct ChunkLoadingProgressStats {
     pub playable_chunk_ready: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ChunkLoadingProgressCell {
+    pub relative_x: i32,
+    pub relative_z: i32,
+    pub status: Option<ChunkStatus>,
+    pub target_ready: bool,
+    pub playable: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChunkLoadingProgressSnapshot {
+    pub stats: ChunkLoadingProgressStats,
+    pub cells: Vec<ChunkLoadingProgressCell>,
+}
+
 impl Default for ChunkLoadingProgress {
     fn default() -> Self {
         Self::new(ChunkStatus::Light)
@@ -76,6 +91,10 @@ impl ChunkLoadingProgress {
     }
 
     pub fn stats(&self) -> Option<ChunkLoadingProgressStats> {
+        self.snapshot().map(|snapshot| snapshot.stats)
+    }
+
+    pub fn snapshot(&self) -> Option<ChunkLoadingProgressSnapshot> {
         let view = self.view?;
         let target_ready_chunks = self
             .ready_statuses
@@ -89,8 +108,7 @@ impl ChunkLoadingProgress {
             .ready_statuses
             .get(&view.center)
             .is_some_and(|status| *status >= self.target_status);
-
-        Some(ChunkLoadingProgressStats {
+        let stats = ChunkLoadingProgressStats {
             center: view.center,
             target_radius: view.target_radius,
             target_status: self.target_status,
@@ -98,7 +116,35 @@ impl ChunkLoadingProgress {
             target_ready_chunks,
             playable_chunk: view.center,
             playable_chunk_ready,
-        })
+        };
+
+        let mut cells = self
+            .ready_statuses
+            .iter()
+            .filter_map(|(pos, status)| {
+                chunk_within_radius(*pos, view.center, view.target_radius).then_some(
+                    ChunkLoadingProgressCell {
+                        relative_x: pos.x - view.center.x,
+                        relative_z: pos.z - view.center.z,
+                        status: Some(*status),
+                        target_ready: *status >= self.target_status,
+                        playable: *pos == stats.playable_chunk,
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+
+        if !cells.iter().any(|cell| cell.playable) {
+            cells.push(ChunkLoadingProgressCell {
+                relative_x: stats.playable_chunk.x - view.center.x,
+                relative_z: stats.playable_chunk.z - view.center.z,
+                status: None,
+                target_ready: false,
+                playable: true,
+            });
+        }
+
+        Some(ChunkLoadingProgressSnapshot { stats, cells })
     }
 }
 
@@ -212,5 +258,67 @@ mod tests {
         progress.set_target_status(ChunkStatus::Features);
 
         assert!(progress.stats().unwrap().playable_chunk_ready);
+    }
+
+    #[test]
+    fn snapshot_includes_relative_cells_inside_radius() {
+        let mut progress = ChunkLoadingProgress::new(ChunkStatus::Light);
+        progress.set_view(&view(ChunkPos::new(4, -3), 1));
+        progress.record_status_change(
+            ChunkPos::new(4, -3),
+            ChunkStatus::Light,
+            ChunkStatusStep::Ready,
+        );
+        progress.record_status_change(
+            ChunkPos::new(5, -3),
+            ChunkStatus::Features,
+            ChunkStatusStep::Ready,
+        );
+        progress.record_status_change(
+            ChunkPos::new(7, -3),
+            ChunkStatus::Light,
+            ChunkStatusStep::Ready,
+        );
+
+        let snapshot = progress.snapshot().unwrap();
+        assert_eq!(snapshot.stats.target_ready_chunks, 1);
+        assert_eq!(
+            snapshot.cells,
+            vec![
+                ChunkLoadingProgressCell {
+                    relative_x: 0,
+                    relative_z: 0,
+                    status: Some(ChunkStatus::Light),
+                    target_ready: true,
+                    playable: true,
+                },
+                ChunkLoadingProgressCell {
+                    relative_x: 1,
+                    relative_z: 0,
+                    status: Some(ChunkStatus::Features),
+                    target_ready: false,
+                    playable: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn snapshot_marks_playable_cell_even_before_status_arrives() {
+        let mut progress = ChunkLoadingProgress::new(ChunkStatus::Features);
+        progress.set_view(&view(ChunkPos::new(2, 3), 0));
+
+        let snapshot = progress.snapshot().unwrap();
+
+        assert_eq!(
+            snapshot.cells,
+            vec![ChunkLoadingProgressCell {
+                relative_x: 0,
+                relative_z: 0,
+                status: None,
+                target_ready: false,
+                playable: true,
+            }]
+        );
     }
 }
