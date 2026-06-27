@@ -186,7 +186,8 @@ Recorded first-pass implementation:
   `mode=stationary-frozen-render` while rendering cached mesh buffers without
   runtime poll/sync/upload work during the measured window. Frozen render uses
   the configured startup `--view-pose` for terrain render views so headset
-  motion cannot change culling or draw counts.
+  motion cannot change culling or draw counts. The package scripts use
+  `--view-pose 0,80,-96,180` so the RD1 frozen lane still draws terrain.
 - The marker block now includes terrain runtime sub-timings for poll, section
   sync, GPU upload, and traversal-ready refresh. It also includes max and latest
   pending render chunks, pending compile jobs, submitted/completed/stale compile

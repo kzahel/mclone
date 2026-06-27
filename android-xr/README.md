@@ -217,7 +217,8 @@ These use the same stationary settle gate, then skip runtime polling, render
 section sync, traversal-ready refresh, and GPU section uploads during the timed
 sample. They render cached mesh buffers from the configured `--view-pose`, so
 physical headset movement during the measured window does not change culling or
-draw counts.
+draw counts. The npm scripts use `--view-pose 0,80,-96,180`, which keeps RD1
+low enough to draw nearby terrain while still being a flying camera.
 Summary files are written to:
 
 ```text
