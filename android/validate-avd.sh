@@ -46,6 +46,9 @@ Options:
   --skip-assets       Do not stage the packed Minecraft assets before launch.
   --remote-addr ADDR  Set debug.mclone.remote_addr before launch.
   --touch-swipe SPEC  Inject a touch swipe before capture: x1,y1,x2,y2,duration_ms.
+  --session-smoke MODE
+                      Inject a shared UI session flow before capture.
+                      MODE is new-world or join-remote.
   -h, --help          Show this help.
 USAGE
 }
@@ -110,6 +113,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --touch-swipe)
             MCLONE_ANDROID_TOUCH_SWIPE="$2"
+            shift 2
+            ;;
+        --session-smoke)
+            MCLONE_ANDROID_SESSION_SMOKE="$2"
             shift 2
             ;;
         --)

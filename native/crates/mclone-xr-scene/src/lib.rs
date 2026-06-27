@@ -450,6 +450,20 @@ where
         }
     }
 
+    pub fn replace_session_for_request(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        request: SessionStartRequest,
+    ) -> Result<()> {
+        let scene = match &request {
+            SessionStartRequest::NewLocalWorld { seed } => self.local_world_options(*seed),
+            SessionStartRequest::JoinRemote { .. } => self.remote_session_options(),
+            SessionStartRequest::Unknown => bail!("unsupported unknown XR replacement session"),
+        };
+        self.start_replacement_session(device, queue, request, scene)
+    }
+
     fn render_views(&mut self, views: &[xr::View]) -> Result<[ChunkRenderView; 2]> {
         if views.len() < 2 {
             bail!("OpenXR runtime returned fewer than two stereo views");
@@ -970,9 +984,8 @@ where
             }
             GameUiAction::CreateWorld(seed) => {
                 let request = SessionStartRequest::NewLocalWorld { seed };
-                let scene = self.local_world_options(seed);
                 if self
-                    .start_replacement_session(device, queue, request, scene)
+                    .replace_session_for_request(device, queue, request)
                     .is_err()
                 {
                     self.ui.set_new_world_seed(seed);
@@ -986,9 +999,8 @@ where
                 let request = SessionStartRequest::JoinRemote {
                     endpoint: RemoteSessionEndpoint::new(remote_addr),
                 };
-                let scene = self.remote_session_options();
                 if self
-                    .start_replacement_session(device, queue, request, scene)
+                    .replace_session_for_request(device, queue, request)
                     .is_err()
                 {
                     return Ok(false);

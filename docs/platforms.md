@@ -16,9 +16,9 @@ Mclone currently has five supported client/platform validation lanes:
 | Target | Status | Validation shape |
 |---|---|---|
 | Desktop flat | primary development lane | `native/apps/mclone-native-client` owns desktop `winit`, surface acquisition, keyboard/mouse input, frame pacing, and headless screenshots. Basics validated: integrated runtime, locomotion, world rendering, chunk loading/generation. |
-| Desktop OpenXR | active XR lane | `mclone-native-client --features xr` owns desktop runtime selection and OpenXR startup. Shared XR crates provide host/session helpers, graphics wrapping, scene alignment, controller locomotion, and shared New World / Join Remote scene replacement. Validated with real stereo mclone terrain on Quest 3 through VirtualDesktopXR; replacement-menu headset smoke remains pending. |
-| Android XR / Quest standalone | active XR lane | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, launch-scoped remote-address argv, and validation. Validated with staged assets, stereo terrain, controller actions, basic locomotion, and remote-dedicated play over direct LAN and through the `--adb-reverse` USB tunnel path; replacement-menu headset smoke remains pending. |
-| Flat Android | active mobile lane | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity` package. Validated on x86_64 AVD with Vulkan-backed `wgpu`, real terrain pixels, staged assets, rendered-frame log marker, touch smoke, and app-owned New World / Join Remote scene replacement; arm64 remains the physical device / Quest-flat ABI. |
+| Desktop OpenXR | active XR lane | `mclone-native-client --features xr` owns desktop runtime selection and OpenXR startup. Shared XR crates provide host/session helpers, graphics wrapping, scene alignment, controller locomotion, and shared New World / Join Remote scene replacement. Validated with real stereo mclone terrain on Quest 3 through VirtualDesktopXR; physical replacement-menu headset click smoke remains pending. |
+| Android XR / Quest standalone | active XR lane | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, launch-scoped remote-address argv, and validation. Validated with staged assets, stereo terrain, controller actions, basic locomotion, remote-dedicated play over direct LAN and through the `--adb-reverse` USB tunnel path, plus launch-scoped in-headset New World replacement smoke; physical controller menu-click replacement smoke remains pending. |
+| Flat Android | active mobile lane | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity` package. Validated on x86_64 AVD with Vulkan-backed `wgpu`, real terrain pixels, staged assets, rendered-frame log marker, touch smoke, and app-owned New World / Join Remote scene replacement. New World replacement is covered by `native:android:avd-session-smoke`; arm64 remains the physical device / Quest-flat ABI. |
 | Web/WASM | active browser lane | `native/apps/mclone-web-client` builds for `wasm32-unknown-unknown`, uses WebGPU through `wgpu`, and keeps browser workers, TypeScript glue, mobile web controls, shared Rust/WebGPU UI, and deployment alive. |
 
 Additional host lane:
@@ -199,10 +199,12 @@ pnpm native:android:apk
 pnpm native:android:apk:avd
 pnpm native:android:avd-smoke -- --skip-build
 pnpm native:android:avd-touch-smoke -- --skip-build
+pnpm native:android:avd-session-smoke -- --skip-build
 
 # Android XR / Quest, attached authorized Quest required
 pnpm native:android-xr:apk
 pnpm native:android-xr:validate -- --debug --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
+MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:validate -- --debug --skip-build --adb-reverse --start-server --view-pose 0,120,-96,180
 pnpm native:android-xr:validate -- --debug --skip-build --start-server --server-listen 0.0.0.0:25565 --remote-addr HOST:25565 --view-pose 0,120,-96,180
 
@@ -239,13 +241,15 @@ manual checks:
 2. **Make the contract matrix more executable.** For each shared crate boundary,
    keep the sentinel smoke/test close to scripts so platform coverage is
    deliberate instead of remembered manually.
-3. **Validate dynamic session replacement and build real connect/world-select UI.**
+3. **Finish connect/world-select UI and physical XR menu validation.**
    All display lanes now have shared initial local/remote session identity and
-   menu-driven replacement code paths through `mclone-app-runtime::session`.
-   Remaining work is headset/device validation of the XR/Android flows, a web
-   Join Remote connect-screen smoke, and shared `mclone-ui` text input so users
-   can choose endpoints/worlds in app instead of through CLI/properties/query
-   params.
+   replacement code paths through `mclone-app-runtime::session`. Flat Android
+   New World replacement is covered by an AVD touch-menu smoke, and Android XR
+   New World replacement is covered by an in-headset launch smoke against the
+   same shared XR replacement method. Remaining work is physical XR controller
+   menu-click validation, a web Join Remote connect-screen smoke, and shared
+   `mclone-ui` text input so users can choose endpoints/worlds in app instead
+   of through CLI/properties/query params.
 4. **Finish host-mode convergence for web and make Android XR remote validation repeatable.**
    Native desktop, desktop XR, flat Android, and Android XR now share
    `mclone-app-runtime` host-mode and native scene-shell contracts where

@@ -93,7 +93,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Underwater / screen effects | ✅ | ✗ | ✗ | ✗ | ✗ |
 | HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ✗ | ✗ | ✗ | ✅ |
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✅ |
-| Menus (title/pause/options) | ✅ | ◐ (world panel + pointer, unvalidated) | ◐ (shared touch menu, device pending) | ◐ (world panel + pointer, unvalidated) | ✅ |
+| Menus (title/pause/options) | ✅ | ◐ (world panel + pointer, physical click pending) | ✅ (shared touch menu, AVD session smoke) | ◐ (world panel + pointer, physical click pending) | ✅ |
 | Connect / world-select UI | ✗ | ✗ | ✗ | ✗ | ✗ |
 | Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ✅ WebSocket query param |
 | Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ (cfg-excluded) |
@@ -134,9 +134,9 @@ use (and should) · — n/a.
 | `app-runtime::frame_render` | ✅ | ⚑ (inline reimpl) | ✅ | ✅ (via xr-scene) | `native:desktop-chunk:smoke`; `native:web:smoke` |
 | `app-runtime::local_single_view` (native scene driver) | ✅ (WindowSceneRuntime + desktop XR compose) | — (wasm-gated) | ✅ | ✅ (via xr-scene) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::host_mode` (local vs remote) | ✅ | ◐ (async enum, shared exchange/resync policy) | ✅ | ✅ (local/remote via xr-scene) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build` |
-| `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via xr-scene, headset flow smoke pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (initial local/remote plus app-owned New World / Join Remote replacement) | ✅ (initial local/remote plus shared XR scene replacement code; headset flow smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-xr-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; Android APK gates |
+| `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via xr-scene, physical headset menu click pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (initial local/remote plus app-owned New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared XR scene replacement; Quest in-headset New World replacement smoke, physical controller menu click pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-xr-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
-| `mclone-ui` (GuiDrawList) | ✅ | ✅ | ◐ (shared touch menu+controls, device pending) | ◐ (XR world panel + pointer, unvalidated) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene` |
+| `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✅ (shared touch menu+controls, AVD touch/session smoke) | ◐ (XR world panel + pointer, controller menu-click validation pending) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene`; `native:android:avd-session-smoke` |
 | `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
 The reuse story in one line: **desktop flat, flat Android, desktop XR, and
@@ -169,14 +169,16 @@ Concretely:
   `debug.mclone.remote_addr`, constructs local/remote startup through
   `NativeSingleViewSessionRuntime<S>`, and now replaces the current native scene
   from shared New World / Join Remote menu actions while retaining Android
-  activity, touch, surface, and TCP ownership in the app crate.
+  activity, touch, surface, and TCP ownership in the app crate. New World
+  replacement is covered by `pnpm native:android:avd-session-smoke`.
 - Desktop XR and Android XR route New World / Join Remote menu actions through
   `mclone-xr-scene`'s shared session replacement hook. Each app host still owns
   its runtime factory: desktop maps back to `SceneOptions` and TCP
   `RemoteServerSession`, while Android XR maps launch-scoped options to
   `AndroidXrRemoteServerSession`. The code compiles through desktop XR and
-  Android XR APK gates; headset interaction validation of the replacement flow
-  is still pending.
+  Android XR APK gates. Android XR New World replacement is covered on Quest by
+  `pnpm native:android-xr:session-smoke`; physical controller menu-click
+  validation of that replacement flow is still pending.
 - Android XR uses launch-scoped
   `mclone.startup.argv --remote-addr HOST:PORT`, can have the validator start a
   local dedicated server, and reports the local/remote session descriptor
@@ -214,12 +216,15 @@ Every new feature added today gets forked across up to four app shells. The
 highest-leverage work is the shared contracts that *stop* the forking. Land
 these first:
 
-1. **Validate dynamic session replacement and close the connect-UI gap.** Every
-   lane now has shared local/remote session identity and a menu-driven
-   replacement code path. Remaining work is headset/device validation of the
-   XR and Android menu flows, a dedicated web Join Remote connect-screen smoke,
-   and the `mclone-ui` text-input/connect-world UI needed to choose endpoints
-   and worlds in app instead of via CLI/properties/query params. (tactical 095)
+1. **Close the connect-UI gap and finish physical XR menu validation.** Every
+   lane now has shared local/remote session identity and a replacement code
+   path. Flat Android New World replacement is covered by AVD touch-menu smoke,
+   and Android XR New World replacement is covered by an in-headset launch
+   smoke against the same shared XR replacement method. Remaining work is
+   physical XR controller menu-click validation, a dedicated web Join Remote
+   connect-screen smoke, and the `mclone-ui` text-input/connect-world UI needed
+   to choose endpoints and worlds in app instead of via CLI/properties/query
+   params. (tactical 095)
 2. **Finish the host-mode async/sync cleanup.** Native desktop, flat Android,
    and XR app shells use blocking TCP/session adapters, while browser
    worker/WebSocket mechanics stay async and still sit behind `WebRuntimeHost`.

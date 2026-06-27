@@ -55,6 +55,7 @@ mod android {
     const XR_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
     const XR_SAMPLE_COUNT: u32 = 1;
     const SESSION_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(25);
+    const ANDROID_XR_SESSION_SMOKE_SEED: i64 = 246_813_579;
 
     #[allow(unsafe_code)]
     #[link(name = "log")]
@@ -200,6 +201,7 @@ mod android {
     struct AndroidXrStartupOptions {
         scene: XrSceneOptions,
         remote_addr: Option<String>,
+        session_smoke: Option<AndroidXrSessionSmoke>,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -207,6 +209,20 @@ mod android {
             Self {
                 scene: XrSceneOptions::default(),
                 remote_addr: None,
+                session_smoke: None,
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum AndroidXrSessionSmoke {
+        NewWorld,
+    }
+
+    impl AndroidXrSessionSmoke {
+        fn label(self) -> &'static str {
+            match self {
+                Self::NewWorld => "new-world",
             }
         }
     }
@@ -247,6 +263,13 @@ mod android {
                         "--remote-addr",
                     )?);
                 }
+                "--session-smoke" => {
+                    options.session_smoke = Some(parse_session_smoke_arg(parse_next_string(
+                        &argv,
+                        &mut index,
+                        "--session-smoke",
+                    )?)?);
+                }
                 "--freeze-time" => {}
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
@@ -257,6 +280,13 @@ mod android {
         }
         options.scene = options.scene.validated()?;
         Ok(options)
+    }
+
+    fn parse_session_smoke_arg(value: String) -> Result<AndroidXrSessionSmoke> {
+        match value.trim() {
+            "new-world" => Ok(AndroidXrSessionSmoke::NewWorld),
+            value => bail!("unsupported Android XR session smoke `{value}`"),
+        }
     }
 
     fn parse_next_string(argv: &[String], index: &mut usize, flag: &str) -> Result<String> {
@@ -441,6 +471,11 @@ mod android {
         } else {
             log::info!("Android XR remote dedicated address: <none>");
         }
+        if let Some(smoke) = startup_options.session_smoke {
+            log::info!("Android XR session smoke: {}", smoke.label());
+        } else {
+            log::info!("Android XR session smoke: <none>");
+        }
         log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
@@ -467,6 +502,7 @@ mod android {
             scene_options,
             startup_view_pose,
             remote_addr,
+            startup_options.session_smoke,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -479,6 +515,7 @@ mod android {
         scene_options: XrSceneOptions,
         startup_view_pose: Option<XrStartupViewPose>,
         remote_addr: Option<String>,
+        session_smoke: Option<AndroidXrSessionSmoke>,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -738,6 +775,7 @@ mod android {
             &mut right_eye,
             &mut terrain,
             &controller_actions,
+            session_smoke,
         )
     }
 
@@ -888,12 +926,16 @@ mod android {
         right_eye: &mut graphics_vulkan::OpenXrEyeState,
         terrain: &mut AndroidXrTerrainState,
         controller_actions: &OpenXrControllerActions,
+        session_smoke: Option<AndroidXrSessionSmoke>,
     ) -> Result<()> {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
         let mut frame_stats = XrFrameStats::default();
         let mut logged_ready = false;
         let mut logged_controller_activity = false;
+        let mut session_smoke_pending_start = false;
+        let mut session_smoke_started = false;
+        let mut session_smoke_ready = false;
 
         loop {
             if !poll_android_events(app, Some(Duration::from_millis(0)))? {
@@ -929,6 +971,27 @@ mod android {
                 OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
             }
 
+            if matches!(session_smoke, Some(AndroidXrSessionSmoke::NewWorld))
+                && session_smoke_pending_start
+                && !session_smoke_started
+            {
+                log::info!(
+                    "MCLONE_ANDROID_XR_REPLACEMENT_STARTED new-world seed={}",
+                    ANDROID_XR_SESSION_SMOKE_SEED
+                );
+                terrain
+                    .replace_session_for_request(
+                        &graphics.device,
+                        &graphics.queue,
+                        SessionStartRequest::NewLocalWorld {
+                            seed: ANDROID_XR_SESSION_SMOKE_SEED,
+                        },
+                    )
+                    .context("run Android XR new-world session smoke replacement")?;
+                session_smoke_started = true;
+                session_smoke_pending_start = false;
+            }
+
             let frame_state = mclone_xr_host::wait_begin_frame(
                 &mut graphics.frame_wait,
                 &mut graphics.frame_stream,
@@ -936,12 +999,8 @@ mod android {
             )?;
 
             let frame_result = if frame_state.should_render {
-                controller_actions
-                    .poll(
-                        &graphics.session,
-                        stage,
-                        frame_state.predicted_display_time,
-                    )
+                let render_result = controller_actions
+                    .poll(&graphics.session, stage, frame_state.predicted_display_time)
                     .and_then(|controllers| {
                         if !logged_controller_activity && !controllers.is_empty() {
                             logged_controller_activity = true;
@@ -960,24 +1019,45 @@ mod android {
                             terrain,
                             &controllers,
                         )
-                    })
-                .map(|summary| {
-                    frame_stats.record_submitted_frame();
-                    if !logged_ready {
-                        logged_ready = true;
-                        log::info!(
-                            "Android XR terrain first-frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
-                            summary.rendered_frames,
-                            summary.section_count,
-                            summary.drawn_section_count,
-                            summary.index_count,
-                            summary.drawn_index_count,
-                            summary.actor_count,
-                            summary.drawn_actor_count
-                        );
-                        log::info!("MCLONE_ANDROID_XR_READY");
+                    });
+                match render_result {
+                    Ok(summary) => {
+                        frame_stats.record_submitted_frame();
+                        if !logged_ready {
+                            logged_ready = true;
+                            log::info!(
+                                "Android XR terrain first-frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+                                summary.rendered_frames,
+                                summary.section_count,
+                                summary.drawn_section_count,
+                                summary.index_count,
+                                summary.drawn_index_count,
+                                summary.actor_count,
+                                summary.drawn_actor_count
+                            );
+                            log::info!("MCLONE_ANDROID_XR_READY");
+                            if session_smoke.is_some() {
+                                session_smoke_pending_start = true;
+                            }
+                        } else if session_smoke_started
+                            && !session_smoke_ready
+                            && summary.rendered_frames > 0
+                        {
+                            session_smoke_ready = true;
+                            log::info!(
+                                "MCLONE_ANDROID_XR_REPLACEMENT_READY new-world seed={} frames={} sections={} drawn_sections={} indices={} drawn_indices={}",
+                                ANDROID_XR_SESSION_SMOKE_SEED,
+                                summary.rendered_frames,
+                                summary.section_count,
+                                summary.drawn_section_count,
+                                summary.index_count,
+                                summary.drawn_index_count
+                            );
+                        }
+                        Ok(())
                     }
-                })
+                    Err(error) => Err(error),
+                }
             } else {
                 mclone_xr_host::end_skipped_frame(
                     &mut graphics.frame_stream,

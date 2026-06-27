@@ -469,6 +469,102 @@ mclone_run_touch_swipe() {
     sleep "${MCLONE_ANDROID_AFTER_TOUCH_SECONDS:-1}"
 }
 
+mclone_android_display_size() {
+    local serial="$1"
+    local size
+
+    size="$("$ADB" -s "$serial" shell wm size 2>/dev/null \
+        | tr -d '\r' \
+        | sed -n 's/.*size: \([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' \
+        | tail -1)"
+    [[ -n "$size" ]] || mclone_die "could not determine Android display size with wm size"
+    printf '%s\n' "$size"
+}
+
+mclone_android_gui_scale() {
+    local width="$1"
+    local height="$2"
+    local scale=1
+    local next
+
+    while (( scale < 4 )); do
+        next=$((scale + 1))
+        if (( width / next >= 320 && height / next >= 240 )); then
+            scale="$next"
+        else
+            break
+        fi
+    done
+    printf '%s\n' "$scale"
+}
+
+mclone_android_tap_pixel() {
+    local serial="$1"
+    local x="$2"
+    local y="$3"
+    local label="$4"
+
+    mclone_note "Injecting Android tap for $label at ${x},${y}"
+    "$ADB" -s "$serial" shell input tap "$x" "$y" >/dev/null
+    sleep "${MCLONE_ANDROID_UI_TAP_SECONDS:-0.7}"
+}
+
+mclone_run_session_smoke() {
+    local serial="$1"
+    local smoke="${MCLONE_ANDROID_SESSION_SMOKE:-}"
+    local width
+    local height
+    local scale
+    local center_x
+    local center_y
+
+    [[ -n "$smoke" ]] || return 0
+    read -r width height <<<"$(mclone_android_display_size "$serial")"
+    scale="$(mclone_android_gui_scale "$width" "$height")"
+    center_x=$((width / 2))
+    center_y=$((height / 2))
+    mclone_note "Running Android session smoke '$smoke' on ${width}x${height} display at GUI scale $scale"
+
+    case "$smoke" in
+        new-world)
+            mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 24 * scale)) "title New World"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 30 * scale)) "new-world Create World"
+            ;;
+        join-remote)
+            mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title"
+            mclone_android_tap_pixel "$serial" "$center_x" "$center_y" "title Join Remote"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 30 * scale)) "join-remote Connect"
+            ;;
+        *)
+            mclone_die "unsupported Android session smoke '$smoke'; expected new-world or join-remote"
+            ;;
+    esac
+    sleep "${MCLONE_ANDROID_SESSION_SMOKE_SETTLE_SECONDS:-5}"
+}
+
+mclone_check_session_smoke_log() {
+    local log_path="$1"
+    local smoke="${MCLONE_ANDROID_SESSION_SMOKE:-}"
+
+    [[ -n "$smoke" ]] || return 0
+    case "$smoke" in
+        new-world)
+            grep -F "Mclone Android created local world seed=" "$log_path" >/dev/null 2>&1 \
+                || mclone_die "Android new-world session smoke marker was not found in $log_path"
+            ;;
+        join-remote)
+            grep -F "Mclone Android joined remote session" "$log_path" >/dev/null 2>&1 \
+                || mclone_die "Android join-remote session smoke marker was not found in $log_path"
+            ;;
+        *)
+            mclone_die "unsupported Android session smoke '$smoke'; expected new-world or join-remote"
+            ;;
+    esac
+}
+
 mclone_install_launch_smoke() {
     local serial="$1"
     local screenshot_path="$2"
@@ -535,6 +631,7 @@ mclone_install_launch_smoke() {
     fi
 
     mclone_run_touch_swipe "$serial"
+    mclone_run_session_smoke "$serial"
 
     mclone_collect_logcat "$serial" "$pid" "$log_path"
     if grep -E "FATAL EXCEPTION|Fatal signal|SIGSEGV|thread .* panicked|panicked at" "$log_path" >/dev/null 2>&1; then
@@ -544,6 +641,7 @@ mclone_install_launch_smoke() {
         && ! grep -E "Mclone Android rendered .* frame" "$log_path" >/dev/null 2>&1; then
         mclone_die "no Mclone rendered-frame marker found in $log_path"
     fi
+    mclone_check_session_smoke_log "$log_path"
 
     mclone_capture_screenshot "$serial" "$screenshot_path"
     mclone_note "Screenshot: $screenshot_path"

@@ -34,6 +34,7 @@ ADB_REVERSE=0
 ADB_REVERSE_PORT="${MCLONE_ANDROID_XR_ADB_REVERSE_PORT:-}"
 ADB_REVERSE_INSTALLED=0
 STARTUP_ARGV=()
+SESSION_SMOKE="${MCLONE_ANDROID_XR_SESSION_SMOKE:-}"
 
 usage() {
     cat <<'USAGE'
@@ -81,6 +82,9 @@ Options:
                      Add --render-distance N to startup argv.
   --day-time T       Add --day-time T to startup argv.
   --freeze-time      Add --freeze-time to startup argv.
+  --session-smoke MODE
+                     Run a launch-scoped in-headset session replacement smoke.
+                     MODE is new-world.
   -h, --help         Show this help.
 USAGE
 }
@@ -320,6 +324,11 @@ while [[ $# -gt 0 ]]; do
             STARTUP_ARGV+=("$1")
             shift
             ;;
+        --session-smoke)
+            require_arg "$1" "${2:-}"
+            SESSION_SMOKE="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -344,6 +353,16 @@ case "$BUILD_TYPE" in
         ;;
 esac
 APK_PATH="${APK_PATH:-$DEFAULT_APK_PATH}"
+case "$SESSION_SMOKE" in
+    ""|new-world)
+        ;;
+    *)
+        mclone_die "unsupported --session-smoke '$SESSION_SMOKE'; expected new-world"
+        ;;
+esac
+if [[ -n "$SESSION_SMOKE" && "$SESSION_ONLY" == "1" ]]; then
+    mclone_die "--session-smoke requires submitted-frame validation; remove --session-only"
+fi
 
 cd "$REPO_ROOT"
 ADB="$(mclone_android_tool adb platform-tools/adb)"
@@ -392,6 +411,9 @@ fi
 if [[ -n "$REMOTE_ADDR" ]]; then
     STARTUP_ARGV+=(--remote-addr "$REMOTE_ADDR")
 fi
+if [[ -n "$SESSION_SMOKE" ]]; then
+    STARTUP_ARGV+=(--session-smoke "$SESSION_SMOKE")
+fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"
 
@@ -427,7 +449,11 @@ deadline=$((SECONDS + WAIT_SECONDS))
 success=0
 failure=0
 while (( SECONDS < deadline )); do
-    if grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
+    if [[ -n "$SESSION_SMOKE" ]] && grep -F "MCLONE_ANDROID_XR_REPLACEMENT_READY" "$LOG_PATH" >/dev/null 2>&1; then
+        success=1
+        break
+    fi
+    if [[ -z "$SESSION_SMOKE" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
     fi
@@ -454,6 +480,8 @@ if [[ "$success" != "1" ]]; then
     fi
     if [[ "$SESSION_ONLY" == "1" ]]; then
         mclone_die "Android XR session-ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
+    elif [[ -n "$SESSION_SMOKE" ]]; then
+        mclone_die "Android XR replacement-ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     else
         mclone_die "Android XR submitted-frame ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     fi
@@ -467,6 +495,14 @@ if ! grep -F "MCLONE_ANDROID_XR_CONTROLLERS_READY" "$LOG_PATH" >/dev/null 2>&1; 
 fi
 if [[ "$SESSION_ONLY" != "1" ]] && ! grep -F "MCLONE_ANDROID_XR_TERRAIN_READY" "$LOG_PATH" >/dev/null 2>&1; then
     mclone_die "Android XR terrain-ready marker was not seen; see $LOG_PATH"
+fi
+if [[ -n "$SESSION_SMOKE" ]]; then
+    if ! grep -F "MCLONE_ANDROID_XR_REPLACEMENT_STARTED" "$LOG_PATH" >/dev/null 2>&1; then
+        mclone_die "Android XR replacement-started marker was not seen; see $LOG_PATH"
+    fi
+    if ! grep -F "MCLONE_ANDROID_XR_REPLACEMENT_READY" "$LOG_PATH" >/dev/null 2>&1; then
+        mclone_die "Android XR replacement-ready marker was not seen; see $LOG_PATH"
+    fi
 fi
 
 pid="$("$ADB" -s "$SERIAL" shell pidof "$MCLONE_ANDROID_XR_APP_ID" 2>/dev/null | tr -d '\r' || true)"

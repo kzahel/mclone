@@ -7,9 +7,12 @@ open a reroll-only New World screen, present loading/error status while
 creating a world, create a fresh local integrated world in-process, and tear
 the current world down back to Title. Web, flat Android, and XR can replace the
 current scene/session from the shared New World menu while keeping the old
-session live on setup failure. Remaining work is manual/device validation of
-the interactive flows plus Android no-world/Quit-to-Title parity if mobile UX
-needs that exact desktop state.
+session live on setup failure. Flat Android New World replacement is covered by
+an AVD touch-menu smoke, and Android XR New World replacement is covered by a
+Quest in-headset launch smoke through the same shared XR replacement method.
+Remaining work is manual desktop/XR controller menu-click validation plus
+Android no-world/Quit-to-Title parity if mobile UX needs that exact desktop
+state.
 
 ## Purpose
 
@@ -129,9 +132,12 @@ Open follow-ups for this doc:
   Reroll -> Create, including the visible loading status frame.
 - Web, flat Android, and XR scene replacement now live in tactical 095; web
   Join Remote has a runtime reconnect path but still needs a connect-screen
-  smoke and endpoint editing. Flat Android still needs the desktop-style
-  no-world/Quit-to-Title state if that becomes required for mobile UX. XR and
-  Android replacement menu flows still need headset/device validation.
+  smoke and endpoint editing. Flat Android New World replacement now has an AVD
+  touch-menu smoke, and Android XR New World replacement now has a Quest
+  in-headset launch smoke through the same shared XR replacement method. Flat
+  Android still needs the desktop-style no-world/Quit-to-Title state if that
+  becomes required for mobile UX, and XR still needs physical controller
+  menu-click validation.
 
 ## Implementation Slices
 
@@ -226,12 +232,10 @@ Per-slice additions:
 - **Do not conflate remote host mode with local new-world creation.** In this
   first pass, Create World always means a fresh local integrated world. Remote
   world/session selection belongs behind a later host-mode menu.
-- **First pass targets the desktop flat window path.** The shared XR scene only
-  applies scene-local actions and ignores app-owned ones like quitting
-  (`089-shared-xr-menu-surface.md`); `CreateWorld`/teardown is app-owned, so XR
-  and flat Android parity for new-world is a separate follow-up, not a blocker
-  here. Web parity for local New World restart moved under the shared session
-  coordinator in tactical 095.
+- **First pass targeted the desktop flat window path.** Flat Android, web, and
+  XR New World replacement parity moved under the shared session coordinator in
+  tactical 095; keep further platform validation and connect/world-select work
+  there instead of reopening this doc's desktop-first implementation shape.
 - **No world save/load selection here.** This is "discard and regenerate from a
   seed," not named-world management or persistence-directory selection.
 

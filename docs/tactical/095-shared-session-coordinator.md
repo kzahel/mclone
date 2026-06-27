@@ -1,6 +1,6 @@
 # 095: Shared Session Coordinator
 
-Status: active; Slices 1-4e landed on 2026-06-27. `mclone-app-runtime` now owns
+Status: active; Slices 1-4f landed on 2026-06-27. `mclone-app-runtime` now owns
 the platform-neutral session request/state vocabulary and shared start-result
 boundary, including local-world start, remote-join start, active session
 descriptors, pending starts, failure state, status text, and success/failure
@@ -15,9 +15,11 @@ startup and menu-driven New World / Join Remote replacement while keeping
 Android activity, touch, `wgpu` surface, and TCP adapter ownership in the app
 crate. Desktop XR and Android XR now route shared menu New World / Join Remote
 actions through a shared XR scene replacement hook while keeping OpenXR
-session/swapchain/action ownership in the app hosts. Remaining gaps are device
-validation of the replacement flows, endpoint text editing, and a dedicated web
-connect-screen smoke.
+session/swapchain/action ownership in the app hosts. Flat Android New World
+replacement now has an AVD touch-menu smoke, and Android XR New World
+replacement now has a Quest in-headset launch smoke against the same shared XR
+replacement method. Remaining gaps are physical XR controller menu-click
+validation, endpoint text editing, and a dedicated web connect-screen smoke.
 
 ## Purpose
 
@@ -426,6 +428,53 @@ pnpm native:android-xr:apk
 The Android XR APK lane compiled the edited `#[cfg(target_os = "android")]`
 runtime factory path for `aarch64-linux-android`. Headset interaction validation
 of the replacement menu flow remains open.
+
+Recorded Slice 4f result:
+
+- Flat Android validation gained `--session-smoke new-world|join-remote` in
+  `android/validate-avd.sh`. The smoke derives shared `mclone-ui` button
+  centers from the device display size and GUI scale, taps through
+  touch-menu -> Quit To Title -> New World -> Create World, then asserts the
+  `Mclone Android created local world seed=...` replacement marker.
+- `package.json` now exposes `pnpm native:android:avd-session-smoke` for that
+  AVD replacement flow.
+- `mclone-xr-scene` exposes `replace_session_for_request(...)`, and the XR menu
+  actions use that method. This gives platform validators a direct way to
+  exercise the same replacement path without duplicating the menu action
+  internals.
+- Android XR gained launch-scoped `--session-smoke new-world` parsing. The frame
+  loop waits for the first submitted terrain frame, starts a replacement
+  `SessionStartRequest::NewLocalWorld`, and logs
+  `MCLONE_ANDROID_XR_REPLACEMENT_READY` only after a submitted frame from the
+  replacement runtime.
+- `android-xr/validate-quest-openxr.sh --session-smoke new-world` now waits for
+  the replacement-ready marker and verifies both replacement-started and
+  replacement-ready markers before passing.
+
+Validation after Slice 4f on 2026-06-27:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
+pnpm native:android-xr:apk
+MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
+pnpm native:android:avd-session-smoke -- --skip-build
+git diff --check
+```
+
+Device results:
+
+- The Android XR session smoke passed on an attached Quest 3. The log showed
+  initial `local-world:12345`, `MCLONE_ANDROID_XR_REPLACEMENT_STARTED
+  new-world seed=246813579`, replacement runtime `local-world:246813579`, and
+  `MCLONE_ANDROID_XR_REPLACEMENT_READY ... frames=1`.
+- The flat Android AVD session smoke passed on `jstorrent-tablet`. The log
+  showed the initial rendered frame, `Mclone Android created local world
+  seed=-7079405151491724993`, and a rendered frame from the replacement local
+  integrated world. The screenshot at `/tmp/mclone-android-avd-session.png` was
+  inspected and showed nonblank terrain with the touch overlay after
+  replacement.
 
 ## Open Questions
 
