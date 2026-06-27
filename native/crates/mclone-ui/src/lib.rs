@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, ResolvedFlatInput, TouchControlsMode};
+use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, InputPromptKind, ResolvedFlatInput, TouchControlsMode};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GuiScale {
@@ -1172,12 +1172,44 @@ impl Default for FlatHotbarOverlay {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GamepadHudOverlay {
+    pub visible: bool,
+    pub hotbar_hints_visible: bool,
+    pub action_hints_visible: bool,
+}
+
+impl GamepadHudOverlay {
+    pub fn hidden() -> Self {
+        Self {
+            visible: false,
+            hotbar_hints_visible: false,
+            action_hints_visible: false,
+        }
+    }
+
+    pub fn visible() -> Self {
+        Self {
+            visible: true,
+            hotbar_hints_visible: true,
+            action_hints_visible: true,
+        }
+    }
+}
+
+impl Default for GamepadHudOverlay {
+    fn default() -> Self {
+        Self::hidden()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlatHud {
     pub input: ResolvedFlatInput,
     pub world_hud_visible: bool,
     pub crosshair_visible: bool,
     pub hotbar: FlatHotbarOverlay,
+    pub gamepad: GamepadHudOverlay,
     pub touch: TouchOverlay,
     pub status: StatusOverlay,
 }
@@ -1189,6 +1221,7 @@ impl FlatHud {
             world_hud_visible: true,
             crosshair_visible: true,
             hotbar: FlatHotbarOverlay::hidden(),
+            gamepad: GamepadHudOverlay::visible(),
             touch: TouchOverlay::hidden(),
             status: StatusOverlay::hidden(),
         }
@@ -1197,6 +1230,7 @@ impl FlatHud {
     pub fn has_visible_commands(&self) -> bool {
         (self.world_hud_visible && self.crosshair_visible)
             || (self.world_hud_visible && self.should_render_flat_hotbar())
+            || self.effective_gamepad_overlay().visible
             || self.effective_touch_overlay().visible
             || self.status.visible
     }
@@ -1211,10 +1245,19 @@ impl FlatHud {
         touch.visible &= self.world_hud_visible && self.input.touch_controls_visible;
         touch
     }
+
+    fn effective_gamepad_overlay(&self) -> GamepadHudOverlay {
+        let mut gamepad = self.gamepad;
+        gamepad.visible &= self.world_hud_visible
+            && self.input.accepts_gamepad
+            && self.input.preferred_prompt == Some(InputPromptKind::Gamepad);
+        gamepad
+    }
 }
 
 pub fn render_flat_hud(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
     let touch = hud.effective_touch_overlay();
+    let gamepad = hud.effective_gamepad_overlay();
     if hud.world_hud_visible {
         if hud.crosshair_visible {
             render_crosshair(scale, draw);
@@ -1223,6 +1266,7 @@ pub fn render_flat_hud(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
             render_flat_hotbar(draw, &Font::default(), scale, hud.hotbar);
         }
     }
+    render_gamepad_hud(scale, draw, gamepad, hud.should_render_flat_hotbar());
     render_touch_overlay(scale, draw, &touch);
     render_status_overlay(scale, draw, &hud.status);
 }
@@ -2275,6 +2319,68 @@ fn render_flat_hotbar(
     }
 }
 
+fn render_gamepad_hud(
+    scale: GuiScale,
+    draw: &mut GuiDrawList,
+    overlay: GamepadHudOverlay,
+    flat_hotbar_visible: bool,
+) {
+    if !overlay.visible {
+        return;
+    }
+    let font = Font::default();
+    if overlay.hotbar_hints_visible && flat_hotbar_visible {
+        let hotbar = flat_hotbar_slot_rects(scale);
+        let first = hotbar[0];
+        let last = hotbar[hotbar.len() - 1];
+        let y = first.y + ((first.height - 16.0) * 0.5).floor();
+        let left = Rect::new((first.x - 34.0).max(4.0), y, 28.0, 16.0);
+        let right = Rect::new(
+            (last.right() + 6.0).min(scale.width - 32.0).max(4.0),
+            y,
+            28.0,
+            16.0,
+        );
+        render_gamepad_prompt_chip(draw, &font, left, "LB");
+        render_gamepad_prompt_chip(draw, &font, right, "RB");
+    }
+    if overlay.action_hints_visible {
+        for (rect, label) in gamepad_action_prompt_rects(scale) {
+            render_gamepad_prompt_chip(draw, &font, rect, label);
+        }
+    }
+}
+
+fn render_gamepad_prompt_chip(draw: &mut GuiDrawList, font: &Font, rect: Rect, label: &str) {
+    draw.fill(rect, Color::rgba(0, 0, 0, 92));
+    draw.outline(rect, Color::rgba(210, 230, 244, 92));
+    draw.outline(rect.inset(1.0), Color::rgba(0, 0, 0, 72));
+    font.draw_centered(
+        draw,
+        label,
+        rect.center_x(),
+        rect.y + ((rect.height - font.line_height()) * 0.5).floor(),
+        Color::rgba(235, 244, 248, 220),
+    );
+}
+
+fn gamepad_action_prompt_rects(scale: GuiScale) -> [(Rect, &'static str); 4] {
+    let size = 18.0;
+    let gap = 4.0;
+    let right = 12.0;
+    let bottom = 46.0;
+    let x1 = (scale.width - right - size).max(4.0);
+    let x0 = (x1 - gap - size).max(4.0);
+    let y1 = (scale.height - bottom - size).max(4.0);
+    let y0 = (y1 - gap - size).max(4.0);
+    [
+        (Rect::new(x0, y0, size, size), "Y"),
+        (Rect::new(x0, y1, size, size), "X"),
+        (Rect::new(x1, y0, size, size), "B"),
+        (Rect::new(x1, y1, size, size), "A"),
+    ]
+}
+
 fn render_touch_panel(draw: &mut GuiDrawList, rect: Rect, pressed: bool) {
     let (fill, border) = if pressed {
         (
@@ -2514,6 +2620,17 @@ mod tests {
             accepts_keyboard_mouse: true,
             accepts_touch: true,
             accepts_gamepad: false,
+            accepts_xr_controller: false,
+        }
+    }
+
+    fn resolved_gamepad_input() -> ResolvedFlatInput {
+        ResolvedFlatInput {
+            preferred_prompt: Some(InputPromptKind::Gamepad),
+            touch_controls_visible: false,
+            accepts_keyboard_mouse: true,
+            accepts_touch: true,
+            accepts_gamepad: true,
             accepts_xr_controller: false,
         }
     }
@@ -2785,6 +2902,35 @@ mod tests {
         render_flat_hud(GuiScale::from_pixels(960, 540), &mut draw, &hud);
 
         assert!(draw.commands().len() > 4);
+    }
+
+    #[test]
+    fn flat_hud_renders_gamepad_prompt_affordances() {
+        let scale = GuiScale::from_pixels(960, 540);
+        let mut keyboard_draw = GuiDrawList::new();
+        let mut keyboard_hud = FlatHud::new(resolved_flat_input(false));
+        keyboard_hud.hotbar = FlatHotbarOverlay::selected(1);
+        render_flat_hud(scale, &mut keyboard_draw, &keyboard_hud);
+
+        let mut gamepad_draw = GuiDrawList::new();
+        let mut gamepad_hud = FlatHud::new(resolved_gamepad_input());
+        gamepad_hud.hotbar = FlatHotbarOverlay::selected(1);
+
+        assert!(gamepad_hud.effective_gamepad_overlay().visible);
+        render_flat_hud(scale, &mut gamepad_draw, &gamepad_hud);
+
+        assert!(gamepad_draw.commands().len() > keyboard_draw.commands().len());
+    }
+
+    #[test]
+    fn gamepad_prompt_rects_stay_inside_gui_space() {
+        let scale = GuiScale::from_pixels(640, 480);
+        for (rect, _) in gamepad_action_prompt_rects(scale) {
+            assert!(rect.x >= 0.0);
+            assert!(rect.y >= 0.0);
+            assert!(rect.right() <= scale.width);
+            assert!(rect.bottom() <= scale.height);
+        }
     }
 
     #[test]

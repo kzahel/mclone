@@ -1,12 +1,13 @@
 # 098: Flat Input Capability Convergence
 
-Status: active; Slices 1-3 shared input contract, desktop adapter, and flat
-Android capability convergence are implemented and validated. Slice 4 now has
-the shared flat HUD composer plus `Touch Controls: Auto / On / Off` wired
-across desktop, flat Android, and web. Web persists the touch-controls mode in
-localStorage; desktop and Android keep the mode session-local until Slice 7
-adds broader platform preference persistence. This splits the remaining flat
-Android input/HUD parity work out of
+Status: active; Slices 1-4 shared input contract, desktop adapter, flat Android
+capability convergence, shared flat HUD/touch controls, debug overlay, and
+gamepad HUD affordances are implemented and validated. Slice 5 now has the
+first platform-neutral `mclone-input` gamepad frame adapter, but desktop,
+Android, and web gamepad backend polling are not wired yet. Web persists the
+touch-controls mode in localStorage; desktop and Android keep the mode
+session-local until Slice 7 adds broader platform preference persistence. This
+splits the remaining flat Android input/HUD parity work out of
 [`090-flat-android-client-parity.md`](090-flat-android-client-parity.md) into a
 shared flat-client capability contract for desktop, flat Android, and web.
 
@@ -55,16 +56,17 @@ intents where the semantics match.
   attack/use/hotbar, and attached keyboard/mouse routed through shared intents
   and the shared `ClientInteractionController`.
 - Flat Android does not currently route gamepad input into the same gameplay
-  path desktop uses.
+  path desktop uses; `mclone-input` now has the platform-neutral adapter the
+  backend can feed once gamepad polling is chosen.
 - Native web has separate browser keyboard/mouse/touch glue. It should converge
   on the same intent and preference contracts while keeping browser event,
   worker, and storage mechanics web-local.
 - `mclone-ui` owns shared menu rendering, touch movement/interaction overlays,
   and the first shared flat gameplay HUD composer for crosshair, status,
   touch controls, the non-touch hotbar, the touch-controls mode option, and a
-  shared flat debug overlay summary across desktop, Android, and web.
-  Preferred-input options, full platform preference persistence, and gamepad HUD
-  affordances remain open.
+  shared flat debug overlay summary plus gamepad prompt affordances across
+  desktop, Android, and web. Preferred-input options, full platform preference
+  persistence, and platform gamepad backend wiring remain open.
 
 ## Target Shape
 
@@ -175,7 +177,7 @@ intents; preferences decide presentation defaults.
   - [x] Keep Android lifecycle, surface, property lookup, and APK validation in the
     Android app crate.
 
-- [ ] **Slice 4: shared flat HUD and touch controls.**
+- [x] **Slice 4: shared flat HUD and touch controls.**
   - [x] Add shared `mclone-ui` flat HUD composition for crosshair, status,
     touch controls, selected-slot display, and the non-touch flat hotbar.
   - [x] Let `mclone-ui` consume resolved overlay state from `mclone-input`;
@@ -186,16 +188,19 @@ intents; preferences decide presentation defaults.
   - [x] Move the common flat debug overlay summary/line formatting into
     `mclone-ui`, with desktop and native web feeding platform stats into that
     shared presentation boundary.
-  - [ ] Move remaining gamepad-friendly HUD affordances into the same shared
+  - [x] Move remaining gamepad-friendly HUD affordances into the same shared
     presentation boundary.
 
 - [ ] **Slice 5: gamepad capability foundation.**
-  - Add a platform-neutral gamepad intent mapping to `mclone-input`.
-  - Evaluate native gamepad backend ownership separately for desktop/Android
+  - [x] Add a platform-neutral gamepad intent mapping to `mclone-input`.
+  - [x] Add a first flat gamepad frame adapter: left stick move, right stick
+    look, held jump/sprint/descend actions, edge-triggered attack/use/menu, and
+    shoulders or d-pad hotbar steps.
+  - [ ] Evaluate native gamepad backend ownership separately for desktop/Android
     and browser Gamepad API ownership for web.
-  - Wire a first flat gamepad mapping: left stick move, right stick look,
-    face buttons jump/use/attack/menu, shoulders or d-pad hotbar.
-  - Keep XR controller pose/ray logic outside this flat gamepad slice.
+  - [ ] Wire platform gamepad backends to the shared adapter on desktop, flat
+    Android, and web.
+  - [ ] Keep XR controller pose/ray logic outside this flat gamepad slice.
 
 - [ ] **Slice 6: web adapter convergence.**
   - Rework native-web keyboard/mouse/touch/gamepad glue to emit the same shared
@@ -322,3 +327,11 @@ Manual/device validation to record before closing this tactical:
   app-specific runtime/frame timing lines as extras, while native web now uses
   the same shared formatter for its debug HUD instead of rebuilding those lines
   in browser-specific code.
+- Slice 4 completed and Slice 5 foundation started: `mclone-ui` now owns a
+  draw-only `GamepadHudOverlay` that renders compact shared gamepad prompt
+  affordances whenever `ResolvedFlatInput` prefers gamepad prompts, and
+  `mclone-input` now owns `GamepadInputAdapter` / `GamepadInputSettings` for
+  platform-neutral stick/button-to-`FlatInputFrame` conversion. The adapter keeps
+  stick movement/look and held jump/sprint/descend continuous, while keeping
+  attack/use/menu/hotbar-step actions edge-triggered for future desktop,
+  Android, and web gamepad backends.

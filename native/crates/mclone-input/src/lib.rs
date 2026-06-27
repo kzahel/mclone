@@ -1039,6 +1039,320 @@ pub enum InputBindingAction {
     OpenMenu,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GamepadInputSettings {
+    pub movement_deadzone: f32,
+    pub look_deadzone: f32,
+    pub look_sensitivity: f32,
+}
+
+impl GamepadInputSettings {
+    pub const DEFAULT_MOVEMENT_DEADZONE: f32 = 0.2;
+    pub const DEFAULT_LOOK_DEADZONE: f32 = 0.18;
+    pub const DEFAULT_LOOK_SENSITIVITY: f32 = 8.0;
+
+    fn normalized(self) -> Self {
+        Self {
+            movement_deadzone: normalized_deadzone(self.movement_deadzone),
+            look_deadzone: normalized_deadzone(self.look_deadzone),
+            look_sensitivity: normalized_sensitivity(self.look_sensitivity),
+        }
+    }
+}
+
+impl Default for GamepadInputSettings {
+    fn default() -> Self {
+        Self {
+            movement_deadzone: Self::DEFAULT_MOVEMENT_DEADZONE,
+            look_deadzone: Self::DEFAULT_LOOK_DEADZONE,
+            look_sensitivity: Self::DEFAULT_LOOK_SENSITIVITY,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GamepadInputAdapter {
+    pub bindings: GamepadBindings,
+    pub settings: GamepadInputSettings,
+    sticks: GamepadStickState,
+    pressed: GamepadPressedControls,
+}
+
+impl Default for GamepadInputAdapter {
+    fn default() -> Self {
+        Self {
+            bindings: GamepadBindings::default(),
+            settings: GamepadInputSettings::default(),
+            sticks: GamepadStickState::default(),
+            pressed: GamepadPressedControls::default(),
+        }
+    }
+}
+
+impl GamepadInputAdapter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_bindings(bindings: GamepadBindings) -> Self {
+        Self {
+            bindings,
+            ..Self::default()
+        }
+    }
+
+    pub fn with_settings(settings: GamepadInputSettings) -> Self {
+        Self {
+            settings,
+            ..Self::default()
+        }
+    }
+
+    pub fn clear_held(&mut self) {
+        self.sticks = GamepadStickState::default();
+        self.pressed = GamepadPressedControls::default();
+    }
+
+    pub fn set_left_stick(&mut self, x: f32, y: f32) -> GamepadInputEvent {
+        self.set_stick(GamepadControl::LeftStick, x, y)
+    }
+
+    pub fn set_right_stick(&mut self, x: f32, y: f32) -> GamepadInputEvent {
+        self.set_stick(GamepadControl::RightStick, x, y)
+    }
+
+    pub fn handle_button(&mut self, control: GamepadControl, pressed: bool) -> GamepadInputEvent {
+        if matches!(
+            control,
+            GamepadControl::LeftStick | GamepadControl::RightStick
+        ) {
+            return GamepadInputEvent::default();
+        }
+        let Some(action) = self.binding_action(control) else {
+            return GamepadInputEvent::default();
+        };
+        let changed = self.pressed.set(control, pressed);
+        if !pressed || !changed || is_continuous_binary_action(action) {
+            return GamepadInputEvent::handled();
+        }
+        Self::binary_action_frame(action)
+            .map(GamepadInputEvent::frame)
+            .unwrap_or_else(GamepadInputEvent::handled)
+    }
+
+    pub fn has_continuous_input(&self) -> bool {
+        self.sticks.left.is_some()
+            || self.sticks.right.is_some()
+            || self
+                .pressed
+                .controls
+                .iter()
+                .filter_map(|control| self.binding_action(*control))
+                .any(is_continuous_binary_action)
+    }
+
+    pub fn held_frame(&self) -> Option<FlatInputFrame> {
+        if !self.has_continuous_input() {
+            return None;
+        }
+        let settings = self.settings.normalized();
+        let mut frame = FlatInputFrame::default();
+        let mut emitted = false;
+        for binding in &self.bindings.bindings {
+            match (binding.control, binding.action) {
+                (GamepadControl::LeftStick, InputBindingAction::MoveAnalog) => {
+                    if let Some(stick) = self.sticks.left.adjusted(settings.movement_deadzone) {
+                        frame.apply_intent(FlatInputIntent::MoveAnalog {
+                            left: -stick.x,
+                            forward: stick.y,
+                        });
+                        emitted = true;
+                    }
+                }
+                (GamepadControl::RightStick, InputBindingAction::Look) => {
+                    if let Some(stick) = self.sticks.right.adjusted(settings.look_deadzone) {
+                        frame.apply_intent(FlatInputIntent::LookDelta {
+                            x: stick.x * settings.look_sensitivity,
+                            y: -stick.y * settings.look_sensitivity,
+                        });
+                        emitted = true;
+                    }
+                }
+                (control, action) if self.pressed.is_pressed(control) => {
+                    if is_continuous_binary_action(action) {
+                        frame.apply_binary_binding_action(action, true);
+                        emitted = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        emitted.then_some(frame)
+    }
+
+    fn set_stick(&mut self, control: GamepadControl, x: f32, y: f32) -> GamepadInputEvent {
+        let Some(action) = self.binding_action(control) else {
+            return GamepadInputEvent::default();
+        };
+        match (control, action) {
+            (GamepadControl::LeftStick, InputBindingAction::MoveAnalog) => {
+                self.sticks.left = GamepadStick::new(x, y);
+                GamepadInputEvent::handled()
+            }
+            (GamepadControl::RightStick, InputBindingAction::Look) => {
+                self.sticks.right = GamepadStick::new(x, y);
+                GamepadInputEvent::handled()
+            }
+            _ => GamepadInputEvent::default(),
+        }
+    }
+
+    fn binding_action(&self, control: GamepadControl) -> Option<InputBindingAction> {
+        self.bindings
+            .bindings
+            .iter()
+            .find_map(|binding| (binding.control == control).then_some(binding.action))
+    }
+
+    fn binary_action_frame(action: InputBindingAction) -> Option<FlatInputFrame> {
+        match action {
+            InputBindingAction::Move(_)
+            | InputBindingAction::MoveAnalog
+            | InputBindingAction::Look
+            | InputBindingAction::Jump
+            | InputBindingAction::Sprint
+            | InputBindingAction::Sneak
+            | InputBindingAction::Descend => None,
+            _ => {
+                let mut frame = FlatInputFrame::default();
+                frame.apply_binary_binding_action(action, true);
+                Some(frame)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GamepadInputEvent {
+    pub handled: bool,
+    pub frame: Option<FlatInputFrame>,
+}
+
+impl GamepadInputEvent {
+    pub const fn handled() -> Self {
+        Self {
+            handled: true,
+            frame: None,
+        }
+    }
+
+    pub const fn frame(frame: FlatInputFrame) -> Self {
+        Self {
+            handled: true,
+            frame: Some(frame),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GamepadStickState {
+    left: GamepadStick,
+    right: GamepadStick,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GamepadStick {
+    x: f32,
+    y: f32,
+}
+
+impl GamepadStick {
+    const fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+
+    fn is_some(self) -> bool {
+        self.x != 0.0 || self.y != 0.0
+    }
+
+    fn adjusted(self, deadzone: f32) -> Option<Self> {
+        let x = clamp_axis(finite_axis(self.x));
+        let y = clamp_axis(finite_axis(self.y));
+        let magnitude = (x * x + y * y).sqrt().min(1.0);
+        if magnitude <= deadzone || magnitude == 0.0 {
+            return None;
+        }
+        let scaled = ((magnitude - deadzone) / (1.0 - deadzone)).clamp(0.0, 1.0);
+        let scale = scaled / magnitude;
+        Some(Self {
+            x: x * scale,
+            y: y * scale,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GamepadPressedControls {
+    controls: Vec<GamepadControl>,
+}
+
+impl GamepadPressedControls {
+    fn set(&mut self, control: GamepadControl, pressed: bool) -> bool {
+        let index = self
+            .controls
+            .iter()
+            .position(|pressed_control| *pressed_control == control);
+        match (index, pressed) {
+            (Some(_), true) | (None, false) => false,
+            (None, true) => {
+                self.controls.push(control);
+                true
+            }
+            (Some(index), false) => {
+                self.controls.swap_remove(index);
+                true
+            }
+        }
+    }
+
+    fn is_pressed(&self, control: GamepadControl) -> bool {
+        self.controls.contains(&control)
+    }
+}
+
+fn is_continuous_binary_action(action: InputBindingAction) -> bool {
+    matches!(
+        action,
+        InputBindingAction::Move(_)
+            | InputBindingAction::Jump
+            | InputBindingAction::Sprint
+            | InputBindingAction::Sneak
+            | InputBindingAction::Descend
+    )
+}
+
+fn normalized_deadzone(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 0.99)
+    } else {
+        0.0
+    }
+}
+
+fn normalized_sensitivity(value: f32) -> f32 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        GamepadInputSettings::DEFAULT_LOOK_SENSITIVITY
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1385,6 +1699,118 @@ mod tests {
                 .expect("finite y should still emit frame")
                 .look_delta,
             LookDelta { x: 0.0, y: 3.0 }
+        );
+    }
+
+    #[test]
+    fn gamepad_adapter_builds_shared_frames_from_sticks_and_held_buttons() {
+        let mut adapter = GamepadInputAdapter::with_settings(GamepadInputSettings {
+            movement_deadzone: 0.0,
+            look_deadzone: 0.0,
+            look_sensitivity: 8.0,
+        });
+
+        assert!(adapter.set_left_stick(0.5, 1.0).handled);
+        assert!(adapter.set_right_stick(0.25, -0.5).handled);
+        assert!(
+            adapter
+                .handle_button(GamepadControl::SouthButton, true)
+                .handled
+        );
+        assert!(adapter.handle_button(GamepadControl::DPadUp, true).handled);
+
+        let held = adapter
+            .held_frame()
+            .expect("sticks and held buttons should produce a frame");
+        assert_eq!(
+            held.analog_movement,
+            Some(MovementImpulse {
+                left: -0.5,
+                forward: 1.0
+            })
+        );
+        assert_eq!(
+            held.movement,
+            MovementImpulse {
+                left: -0.5,
+                forward: 1.0
+            }
+        );
+        assert_eq!(held.look_delta, LookDelta { x: 2.0, y: 4.0 });
+        assert!(held.jump);
+        assert!(held.sprint);
+
+        adapter.clear_held();
+        assert!(adapter.held_frame().is_none());
+    }
+
+    #[test]
+    fn gamepad_adapter_emits_one_shot_button_frames_on_press_edges() {
+        let mut adapter = GamepadInputAdapter::new();
+
+        let attack = adapter
+            .handle_button(GamepadControl::WestButton, true)
+            .frame
+            .expect("west button should emit attack");
+        assert!(attack.attack);
+        assert!(
+            adapter
+                .handle_button(GamepadControl::WestButton, true)
+                .frame
+                .is_none()
+        );
+        assert!(
+            adapter
+                .handle_button(GamepadControl::WestButton, false)
+                .handled
+        );
+        let attack_again = adapter
+            .handle_button(GamepadControl::WestButton, true)
+            .frame
+            .expect("new press should emit attack again");
+        assert!(attack_again.attack);
+
+        let next = adapter
+            .handle_button(GamepadControl::RightShoulder, true)
+            .frame
+            .expect("right shoulder should step hotbar");
+        assert_eq!(next.hotbar_step, 1);
+
+        let previous = adapter
+            .handle_button(GamepadControl::DPadLeft, true)
+            .frame
+            .expect("d-pad left should step hotbar");
+        assert_eq!(previous.hotbar_step, -1);
+
+        let menu = adapter
+            .handle_button(GamepadControl::StartButton, true)
+            .frame
+            .expect("start should open menu");
+        assert!(menu.open_menu);
+    }
+
+    #[test]
+    fn gamepad_adapter_filters_deadzone_and_non_finite_axes() {
+        let mut adapter = GamepadInputAdapter::with_settings(GamepadInputSettings {
+            movement_deadzone: 0.25,
+            look_deadzone: 0.25,
+            look_sensitivity: 8.0,
+        });
+
+        adapter.set_left_stick(0.1, 0.0);
+        adapter.set_right_stick(f32::INFINITY, 0.1);
+        assert!(adapter.held_frame().is_none());
+
+        adapter.set_left_stick(0.625, 0.0);
+        let held = adapter
+            .held_frame()
+            .expect("stick outside the deadzone should produce a frame");
+        assert_eq!(
+            held.analog_movement,
+            Some(MovementImpulse {
+                left: -0.5,
+                forward: 0.0
+            })
         );
     }
 
