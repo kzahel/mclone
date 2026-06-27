@@ -62,6 +62,7 @@
     "native:android-xr:interactive": "node ./scripts/run-native-bash.mjs ./android-xr/start-quest-openxr.sh",
     "native:android-xr:validate": "node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh",
     "native:android-xr:session-smoke": "node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --debug --session-smoke new-world --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time",
+    "native:android-xr:perf": "node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --perf-seconds 10 --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time",
     "deploy": "pnpm native:web:deploy",
     "assets:pack": "node ./scripts/run-python.mjs ./tools/minecraft_assets/asset_pack.py",
     "assets:pack:check": "node ./scripts/run-python.mjs ./tools/minecraft_assets/asset_pack.py --check-lock",

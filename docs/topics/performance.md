@@ -62,6 +62,11 @@ baseline for Java-style leaf non-occlusion.
 
 For durable historical trends, use [`../performance-records.md`](../performance-records.md).
 
+Quest Android XR is not covered by the desktop/headless movement-frame and
+timedemo baselines. Track headset frame pacing, real OpenXR refresh state,
+overlay diagnostics, and Quest-specific baseline work in
+[`096`](../tactical/096-android-xr-quest-performance.md).
+
 ## Priority Queue
 
 | Priority | Work | Java-shaped | Tactical | Status | Why It Matters |
@@ -163,6 +168,7 @@ Primary performance tacticals:
 - [`032-native-neighbor-stable-render-boundaries.md`](../tactical/032-native-neighbor-stable-render-boundaries.md)
 - [`033-native-async-render-section-compile-queue.md`](../tactical/033-native-async-render-section-compile-queue.md)
 - [`034-native-render-compile-revisions-and-priority.md`](../tactical/034-native-render-compile-revisions-and-priority.md)
+- [`096-android-xr-quest-performance.md`](../tactical/096-android-xr-quest-performance.md)
 
 Related subsystem tacticals:
 

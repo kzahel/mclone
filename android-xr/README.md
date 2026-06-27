@@ -134,6 +134,21 @@ bash android-xr/validate-quest-openxr.sh --debug --skip-build --session-only --v
 `--session-only` accepts `MCLONE_ANDROID_XR_SESSION_READY` without requiring the
 terrain runtime or first submitted stereo frame.
 
+For the first Quest performance probe:
+
+```bash
+pnpm native:android-xr:perf
+```
+
+This runs the normal validator cleanup path. On success or failure it
+force-stops Mclone XR, restores the headset wake/proximity settings changed for
+the test, and sends `KEYCODE_SLEEP` so the headset screen turns off. The last
+`MCLONE_ANDROID_XR_PERF_SUMMARY` line is written to:
+
+```text
+/tmp/mclone-quest-openxr-perf-summary.txt
+```
+
 For remote dedicated validation, either start `mclone-dedicated-server` on a
 host the headset can reach and pass `--remote-addr`, or let the validator build
 and start the server locally. For USB-attached validation, use `--adb-reverse`;

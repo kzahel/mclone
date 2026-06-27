@@ -12,8 +12,10 @@ MCLONE_ANDROID_XR_ACTIVITY="${MCLONE_ANDROID_XR_ACTIVITY:-com.kzahel.mclone.xr.M
 APK_PATH="${MCLONE_ANDROID_XR_APK:-}"
 BUILD_TYPE="${MCLONE_ANDROID_XR_BUILD_TYPE:-release}"
 LOG_PATH="${MCLONE_ANDROID_XR_LOGCAT:-/tmp/mclone-quest-openxr-logcat.txt}"
+PERF_SUMMARY_PATH="${MCLONE_ANDROID_XR_PERF_SUMMARY:-/tmp/mclone-quest-openxr-perf-summary.txt}"
 ACTIVITY_PATH="${MCLONE_ANDROID_XR_ACTIVITY_DUMP:-/tmp/mclone-quest-openxr-activity.txt}"
 WAIT_SECONDS="${MCLONE_ANDROID_XR_WAIT_SECONDS:-20}"
+WAIT_SECONDS_EXPLICIT="${MCLONE_ANDROID_XR_WAIT_SECONDS:+1}"
 BOOT_TIMEOUT_SECONDS="${MCLONE_ANDROID_BOOT_TIMEOUT:-60}"
 STAGE_ASSETS="${MCLONE_ANDROID_XR_STAGE_ASSETS:-1}"
 ADB=""
@@ -35,6 +37,7 @@ ADB_REVERSE_PORT="${MCLONE_ANDROID_XR_ADB_REVERSE_PORT:-}"
 ADB_REVERSE_INSTALLED=0
 STARTUP_ARGV=()
 SESSION_SMOKE="${MCLONE_ANDROID_XR_SESSION_SMOKE:-}"
+PERF_SECONDS="${MCLONE_ANDROID_XR_PERF_SECONDS:-}"
 
 usage() {
     cat <<'USAGE'
@@ -85,6 +88,12 @@ Options:
   --session-smoke MODE
                      Run a launch-scoped in-headset session replacement smoke.
                      MODE is new-world.
+  --perf-seconds N  After the first submitted terrain frame, sample N seconds
+                     of headset frame timing and wait for
+                     MCLONE_ANDROID_XR_PERF_SUMMARY.
+  --perf-summary PATH
+                     Local file for the last perf summary line. Default:
+                     /tmp/mclone-quest-openxr-perf-summary.txt.
   -h, --help         Show this help.
 USAGE
 }
@@ -106,6 +115,13 @@ validate_tcp_port() {
     local port="$1"
     [[ "$port" =~ ^[0-9]+$ ]] || mclone_die "invalid TCP port: $port"
     (( 10#$port >= 1 && 10#$port <= 65535 )) || mclone_die "TCP port out of range: $port"
+}
+
+validate_positive_integer() {
+    local label="$1"
+    local value="$2"
+    [[ "$value" =~ ^[0-9]+$ ]] || mclone_die "$label must be a positive integer, got '$value'"
+    (( 10#$value > 0 )) || mclone_die "$label must be greater than zero"
 }
 
 derive_adb_reverse_port() {
@@ -251,6 +267,7 @@ while [[ $# -gt 0 ]]; do
         --wait-seconds)
             require_arg "$1" "${2:-}"
             WAIT_SECONDS="$2"
+            WAIT_SECONDS_EXPLICIT=1
             shift 2
             ;;
         --asset-pack)
@@ -329,6 +346,16 @@ while [[ $# -gt 0 ]]; do
             SESSION_SMOKE="$2"
             shift 2
             ;;
+        --perf-seconds)
+            require_arg "$1" "${2:-}"
+            PERF_SECONDS="$2"
+            shift 2
+            ;;
+        --perf-summary)
+            require_arg "$1" "${2:-}"
+            PERF_SUMMARY_PATH="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -362,6 +389,18 @@ case "$SESSION_SMOKE" in
 esac
 if [[ -n "$SESSION_SMOKE" && "$SESSION_ONLY" == "1" ]]; then
     mclone_die "--session-smoke requires submitted-frame validation; remove --session-only"
+fi
+if [[ -n "$PERF_SECONDS" ]]; then
+    validate_positive_integer "--perf-seconds" "$PERF_SECONDS"
+    if [[ "$SESSION_ONLY" == "1" ]]; then
+        mclone_die "--perf-seconds requires submitted-frame validation; remove --session-only"
+    fi
+    if [[ -n "$SESSION_SMOKE" ]]; then
+        mclone_die "--perf-seconds cannot be combined with --session-smoke in the first perf probe"
+    fi
+    if [[ -z "$WAIT_SECONDS_EXPLICIT" ]]; then
+        WAIT_SECONDS=$((10#$PERF_SECONDS + 30))
+    fi
 fi
 
 cd "$REPO_ROOT"
@@ -414,6 +453,9 @@ fi
 if [[ -n "$SESSION_SMOKE" ]]; then
     STARTUP_ARGV+=(--session-smoke "$SESSION_SMOKE")
 fi
+if [[ -n "$PERF_SECONDS" ]]; then
+    STARTUP_ARGV+=(--perf-seconds "$PERF_SECONDS")
+fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"
 
@@ -449,11 +491,15 @@ deadline=$((SECONDS + WAIT_SECONDS))
 success=0
 failure=0
 while (( SECONDS < deadline )); do
+    if [[ -n "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_PERF_SUMMARY" "$LOG_PATH" >/dev/null 2>&1; then
+        success=1
+        break
+    fi
     if [[ -n "$SESSION_SMOKE" ]] && grep -F "MCLONE_ANDROID_XR_REPLACEMENT_READY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
     fi
-    if [[ -z "$SESSION_SMOKE" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
+    if [[ -z "$SESSION_SMOKE" && -z "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
     fi
@@ -480,6 +526,8 @@ if [[ "$success" != "1" ]]; then
     fi
     if [[ "$SESSION_ONLY" == "1" ]]; then
         mclone_die "Android XR session-ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
+    elif [[ -n "$PERF_SECONDS" ]]; then
+        mclone_die "Android XR perf summary marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     elif [[ -n "$SESSION_SMOKE" ]]; then
         mclone_die "Android XR replacement-ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     else
@@ -503,6 +551,17 @@ if [[ -n "$SESSION_SMOKE" ]]; then
     if ! grep -F "MCLONE_ANDROID_XR_REPLACEMENT_READY" "$LOG_PATH" >/dev/null 2>&1; then
         mclone_die "Android XR replacement-ready marker was not seen; see $LOG_PATH"
     fi
+fi
+if [[ -n "$PERF_SECONDS" ]]; then
+    if ! grep -F "MCLONE_ANDROID_XR_PERF_START" "$LOG_PATH" >/dev/null 2>&1; then
+        mclone_die "Android XR perf-start marker was not seen; see $LOG_PATH"
+    fi
+    if ! grep -F "MCLONE_ANDROID_XR_PERF_SUMMARY" "$LOG_PATH" >/dev/null 2>&1; then
+        mclone_die "Android XR perf-summary marker was not seen; see $LOG_PATH"
+    fi
+    mkdir -p "$(dirname "$PERF_SUMMARY_PATH")"
+    grep -F "MCLONE_ANDROID_XR_PERF_SUMMARY" "$LOG_PATH" | tail -1 > "$PERF_SUMMARY_PATH"
+    mclone_note "Perf summary: $PERF_SUMMARY_PATH"
 fi
 
 pid="$("$ADB" -s "$SERIAL" shell pidof "$MCLONE_ANDROID_XR_APP_ID" 2>/dev/null | tr -d '\r' || true)"

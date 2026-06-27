@@ -56,6 +56,7 @@ mod android {
     const XR_SAMPLE_COUNT: u32 = 1;
     const SESSION_IDLE_POLL_INTERVAL: Duration = Duration::from_millis(25);
     const ANDROID_XR_SESSION_SMOKE_SEED: i64 = 246_813_579;
+    const ANDROID_XR_PERF_FALLBACK_TARGET_HZ: f64 = 72.0;
 
     #[allow(unsafe_code)]
     #[link(name = "log")]
@@ -202,6 +203,7 @@ mod android {
         scene: XrSceneOptions,
         remote_addr: Option<String>,
         session_smoke: Option<AndroidXrSessionSmoke>,
+        perf_seconds: Option<u64>,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -210,6 +212,7 @@ mod android {
                 scene: XrSceneOptions::default(),
                 remote_addr: None,
                 session_smoke: None,
+                perf_seconds: None,
             }
         }
     }
@@ -269,6 +272,13 @@ mod android {
                         &mut index,
                         "--session-smoke",
                     )?)?);
+                }
+                "--perf-seconds" => {
+                    let seconds = parse_next::<u64>(&argv, &mut index, "--perf-seconds")?;
+                    if seconds == 0 {
+                        bail!("--perf-seconds must be greater than zero");
+                    }
+                    options.perf_seconds = Some(seconds);
                 }
                 "--freeze-time" => {}
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
@@ -476,6 +486,11 @@ mod android {
         } else {
             log::info!("Android XR session smoke: <none>");
         }
+        if let Some(seconds) = startup_options.perf_seconds {
+            log::info!("Android XR performance probe: {seconds}s");
+        } else {
+            log::info!("Android XR performance probe: <none>");
+        }
         log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
@@ -503,6 +518,7 @@ mod android {
             startup_view_pose,
             remote_addr,
             startup_options.session_smoke,
+            startup_options.perf_seconds,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -516,6 +532,7 @@ mod android {
         startup_view_pose: Option<XrStartupViewPose>,
         remote_addr: Option<String>,
         session_smoke: Option<AndroidXrSessionSmoke>,
+        perf_seconds: Option<u64>,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -776,6 +793,7 @@ mod android {
             &mut terrain,
             &controller_actions,
             session_smoke,
+            perf_seconds,
         )
     }
 
@@ -927,10 +945,12 @@ mod android {
         terrain: &mut AndroidXrTerrainState,
         controller_actions: &OpenXrControllerActions,
         session_smoke: Option<AndroidXrSessionSmoke>,
+        perf_seconds: Option<u64>,
     ) -> Result<()> {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
         let mut frame_stats = XrFrameStats::default();
+        let mut perf_probe = AndroidXrPerfProbe::new(perf_seconds);
         let mut logged_ready = false;
         let mut logged_controller_activity = false;
         let mut session_smoke_pending_start = false;
@@ -971,6 +991,8 @@ mod android {
                 OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
             }
 
+            let frame_wall_start = Instant::now();
+            let mut frame_timing = AndroidXrFrameTiming::default();
             if matches!(session_smoke, Some(AndroidXrSessionSmoke::NewWorld))
                 && session_smoke_pending_start
                 && !session_smoke_started
@@ -992,16 +1014,25 @@ mod android {
                 session_smoke_pending_start = false;
             }
 
+            let wait_begin_start = Instant::now();
             let frame_state = mclone_xr_host::wait_begin_frame(
                 &mut graphics.frame_wait,
                 &mut graphics.frame_stream,
                 &mut frame_stats,
             )?;
+            frame_timing.wait_begin_ms = elapsed_ms(wait_begin_start);
 
+            let mut frame_summary = None;
+            let mut perf_started_after_ready = false;
             let frame_result = if frame_state.should_render {
-                let render_result = controller_actions
-                    .poll(&graphics.session, stage, frame_state.predicted_display_time)
-                    .and_then(|controllers| {
+                let controller_poll_start = Instant::now();
+                let render_result = match controller_actions.poll(
+                    &graphics.session,
+                    stage,
+                    frame_state.predicted_display_time,
+                ) {
+                    Ok(controllers) => {
+                        frame_timing.controller_poll_ms = elapsed_ms(controller_poll_start);
                         if !logged_controller_activity && !controllers.is_empty() {
                             logged_controller_activity = true;
                             log::info!(
@@ -1009,7 +1040,8 @@ mod android {
                                 controllers.len()
                             );
                         }
-                        render_mclone_frame(
+                        let render_start = Instant::now();
+                        let result = render_mclone_frame(
                             graphics,
                             stage,
                             environment_blend_mode,
@@ -1018,11 +1050,19 @@ mod android {
                             right_eye,
                             terrain,
                             &controllers,
-                        )
-                    });
+                        );
+                        frame_timing.render_mclone_frame_ms = elapsed_ms(render_start);
+                        result
+                    }
+                    Err(error) => {
+                        frame_timing.controller_poll_ms = elapsed_ms(controller_poll_start);
+                        Err(error)
+                    }
+                };
                 match render_result {
                     Ok(summary) => {
                         frame_stats.record_submitted_frame();
+                        frame_summary = Some(summary);
                         if !logged_ready {
                             logged_ready = true;
                             log::info!(
@@ -1036,6 +1076,8 @@ mod android {
                                 summary.drawn_actor_count
                             );
                             log::info!("MCLONE_ANDROID_XR_READY");
+                            perf_started_after_ready =
+                                perf_probe.start_after_ready(frame_stats, summary);
                             if session_smoke.is_some() {
                                 session_smoke_pending_start = true;
                             }
@@ -1076,6 +1118,10 @@ mod android {
                 );
                 return Err(error);
             }
+            frame_timing.frame_wall_ms = elapsed_ms(frame_wall_start);
+            if !perf_started_after_ready {
+                perf_probe.record_frame(frame_timing, frame_stats, frame_summary);
+            }
 
             if frame_stats.submitted_frames == 1 {
                 log::info!(
@@ -1086,6 +1132,189 @@ mod android {
                 );
             }
         }
+    }
+
+    #[derive(Clone, Copy, Debug, Default)]
+    struct AndroidXrFrameTiming {
+        frame_wall_ms: f64,
+        wait_begin_ms: f64,
+        controller_poll_ms: f64,
+        render_mclone_frame_ms: f64,
+    }
+
+    struct AndroidXrPerfProbe {
+        requested_seconds: Option<u64>,
+        active: Option<AndroidXrActivePerfProbe>,
+        completed: bool,
+    }
+
+    impl AndroidXrPerfProbe {
+        fn new(requested_seconds: Option<u64>) -> Self {
+            Self {
+                requested_seconds,
+                active: None,
+                completed: false,
+            }
+        }
+
+        fn start_after_ready(
+            &mut self,
+            frame_stats: XrFrameStats,
+            summary: mclone_xr_scene::XrTerrainFrameSummary,
+        ) -> bool {
+            let Some(seconds) = self.requested_seconds else {
+                return false;
+            };
+            if self.completed || self.active.is_some() {
+                return false;
+            }
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_START seconds={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                seconds,
+                ANDROID_XR_PERF_FALLBACK_TARGET_HZ,
+                perf_budget_ms(),
+                frame_stats.submitted_frames,
+                frame_stats.runtime_frames,
+                frame_stats.skipped_frames
+            );
+            self.active = Some(AndroidXrActivePerfProbe {
+                requested: Duration::from_secs(seconds),
+                started: Instant::now(),
+                start_stats: frame_stats,
+                frame_wall_ms: Vec::new(),
+                max_wait_begin_ms: 0.0,
+                max_controller_poll_ms: 0.0,
+                max_render_mclone_frame_ms: 0.0,
+                over_budget_frames: 0,
+                over_2x_budget_frames: 0,
+                over_4x_budget_frames: 0,
+                latest_summary: summary,
+            });
+            true
+        }
+
+        fn record_frame(
+            &mut self,
+            timing: AndroidXrFrameTiming,
+            frame_stats: XrFrameStats,
+            summary: Option<mclone_xr_scene::XrTerrainFrameSummary>,
+        ) {
+            let Some(active) = self.active.as_mut() else {
+                return;
+            };
+            active.record_frame(timing, summary);
+            if active.started.elapsed() >= active.requested {
+                active.log_summary(frame_stats);
+                self.completed = true;
+                self.active = None;
+            }
+        }
+    }
+
+    struct AndroidXrActivePerfProbe {
+        requested: Duration,
+        started: Instant,
+        start_stats: XrFrameStats,
+        frame_wall_ms: Vec<f64>,
+        max_wait_begin_ms: f64,
+        max_controller_poll_ms: f64,
+        max_render_mclone_frame_ms: f64,
+        over_budget_frames: u64,
+        over_2x_budget_frames: u64,
+        over_4x_budget_frames: u64,
+        latest_summary: mclone_xr_scene::XrTerrainFrameSummary,
+    }
+
+    impl AndroidXrActivePerfProbe {
+        fn record_frame(
+            &mut self,
+            timing: AndroidXrFrameTiming,
+            summary: Option<mclone_xr_scene::XrTerrainFrameSummary>,
+        ) {
+            let budget_ms = perf_budget_ms();
+            self.frame_wall_ms.push(timing.frame_wall_ms);
+            if timing.frame_wall_ms > budget_ms {
+                self.over_budget_frames += 1;
+            }
+            if timing.frame_wall_ms > budget_ms * 2.0 {
+                self.over_2x_budget_frames += 1;
+            }
+            if timing.frame_wall_ms > budget_ms * 4.0 {
+                self.over_4x_budget_frames += 1;
+            }
+            self.max_wait_begin_ms = self.max_wait_begin_ms.max(timing.wait_begin_ms);
+            self.max_controller_poll_ms =
+                self.max_controller_poll_ms.max(timing.controller_poll_ms);
+            self.max_render_mclone_frame_ms = self
+                .max_render_mclone_frame_ms
+                .max(timing.render_mclone_frame_ms);
+            if let Some(summary) = summary {
+                self.latest_summary = summary;
+            }
+        }
+
+        fn log_summary(&mut self, frame_stats: XrFrameStats) {
+            let mut sorted = self.frame_wall_ms.clone();
+            sorted.sort_by(|a, b| a.total_cmp(b));
+            let sample_seconds = self.started.elapsed().as_secs_f64();
+            let frame_count = self.frame_wall_ms.len() as u64;
+            let submitted_delta = frame_stats.submitted_frames - self.start_stats.submitted_frames;
+            let runtime_delta = frame_stats.runtime_frames - self.start_stats.runtime_frames;
+            let skipped_delta = frame_stats.skipped_frames - self.start_stats.skipped_frames;
+            let average_frame_ms = if self.frame_wall_ms.is_empty() {
+                0.0
+            } else {
+                self.frame_wall_ms.iter().sum::<f64>() / self.frame_wall_ms.len() as f64
+            };
+            let min_frame_ms = sorted.first().copied().unwrap_or(0.0);
+            let max_frame_ms = sorted.last().copied().unwrap_or(0.0);
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} max_wait_begin_ms={:.3} max_controller_poll_ms={:.3} max_render_mclone_frame_ms={:.3} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+                sample_seconds,
+                ANDROID_XR_PERF_FALLBACK_TARGET_HZ,
+                perf_budget_ms(),
+                frame_count,
+                submitted_delta,
+                runtime_delta,
+                skipped_delta,
+                average_frame_ms,
+                min_frame_ms,
+                percentile(&sorted, 0.50),
+                percentile(&sorted, 0.95),
+                percentile(&sorted, 0.99),
+                max_frame_ms,
+                self.over_budget_frames,
+                self.over_2x_budget_frames,
+                self.over_4x_budget_frames,
+                self.max_wait_begin_ms,
+                self.max_controller_poll_ms,
+                self.max_render_mclone_frame_ms,
+                self.latest_summary.section_count,
+                self.latest_summary.drawn_section_count,
+                self.latest_summary.index_count,
+                self.latest_summary.drawn_index_count,
+                self.latest_summary.actor_count,
+                self.latest_summary.drawn_actor_count
+            );
+        }
+    }
+
+    fn perf_budget_ms() -> f64 {
+        1000.0 / ANDROID_XR_PERF_FALLBACK_TARGET_HZ
+    }
+
+    fn elapsed_ms(start: Instant) -> f64 {
+        start.elapsed().as_secs_f64() * 1000.0
+    }
+
+    fn percentile(sorted: &[f64], percentile: f64) -> f64 {
+        if sorted.is_empty() {
+            return 0.0;
+        }
+        let index = ((sorted.len() as f64 * percentile).ceil() as usize)
+            .saturating_sub(1)
+            .min(sorted.len() - 1);
+        sorted[index]
     }
 
     fn log_openxr_host_event(event: OpenXrHostEvent) {
