@@ -1,8 +1,12 @@
-# Quest Performance Records
+# Standalone Quest Performance Records
 
-This file records physical Quest headset performance baselines by date and
-commit. Keep one row per benchmark lane so regressions and improvements are
-easy to compare over time.
+This file records standalone Quest / Android XR APK performance baselines by
+date and commit. Keep one row per benchmark lane so regressions and
+improvements are easy to compare over time.
+
+Scope: these records are for the app running on the headset itself. They do not
+cover desktop OpenXR hosted on the PC with Quest acting as a streaming client
+through VirtualDesktopXR, WiVRn, Link, SteamVR, or similar runtimes.
 
 ## How To Add A Row
 
@@ -14,7 +18,7 @@ easy to compare over time.
 If a benchmark is captured from an uncommitted worktree, record that explicitly
 and name the later commit that contains the same runtime code.
 
-## Current Quest Lanes
+## Current Standalone Quest Lanes
 
 Automated no-clip flight at walking-like speed:
 
@@ -30,7 +34,7 @@ frame. The validator force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
-### 2026-06-27 - Quest 3 Automated Flight Sweep
+### 2026-06-27 - Standalone Quest 3 Automated Flight Sweep
 
 Benchmarked code commit: `446d47349cdab2a84d2e7d05ccbf2516b496da21`
 (`Add Quest XR flight performance probe`).

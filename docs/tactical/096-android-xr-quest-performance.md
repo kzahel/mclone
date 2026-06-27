@@ -1,12 +1,13 @@
-# 096: Android XR Quest Performance
+# 096: Standalone Android XR Quest Performance
 
 Status: active; Slice 1 logcat perf probe and automated flight sample landed
 on 2026-06-27.
 
 ## Purpose
 
-Make Quest standalone performance visible enough to debug headset-visible
-jumpiness while walking. The symptom could come from several different layers:
+Make standalone Quest / Android XR APK performance visible enough to debug
+headset-visible jumpiness while walking. The symptom could come from several
+different layers:
 
 1. missed OpenXR frames or uneven runtime frame pacing,
 2. low/default headset refresh such as 72 Hz,
@@ -19,7 +20,9 @@ jumpiness while walking. The symptom could come from several different layers:
 7. remote-host correction/network behavior.
 
 The goal is to separate those causes with measured headset data instead of
-tuning locomotion feel blind.
+tuning locomotion feel blind. This tactical is not for desktop-hosted OpenXR
+where the Quest is only a streaming client; those lanes remain under the
+desktop OpenXR tacticals.
 
 ## Current Evidence
 
@@ -231,8 +234,8 @@ Recorded first-pass implementation:
 
 ### Slice 7 - Baselines And Budgets
 
-- Record Quest 3 release baselines in
-  [`../quest-performance-records.md`](../quest-performance-records.md):
+- Record standalone Quest 3 release baselines in
+  [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md):
   - local integrated, render distance 2, default refresh,
   - local integrated at each supported requested refresh,
   - remote dedicated via LAN or `--adb-reverse`,
