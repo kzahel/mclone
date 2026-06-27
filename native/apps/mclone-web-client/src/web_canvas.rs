@@ -23,7 +23,9 @@ use mclone_core::{
     BlockHitResult, BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, Direction, HitResultType,
     Vec3d, chunk_middle_block_coord,
 };
-use mclone_input::{InputCapabilities, InputCapabilityState, InputDeviceKind, InputPreferences};
+use mclone_input::{
+    InputCapabilities, InputCapabilityState, InputDeviceKind, InputPreferences, TouchControlsMode,
+};
 use mclone_mesh::{
     RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
     load_textured_terrain_assets,
@@ -48,6 +50,7 @@ use mclone_render_session::{
     RenderSectionSyncPlan, RenderSectionViewSync, actor_instances_from_presentations,
     build_client_textured_sections, build_render_sections_from_snapshots,
     decode_textured_render_section_build_report, encode_textured_render_section_build_report,
+    render_section_chunk_pos, render_section_neighbor_readiness, snapshot_contains_render_section,
     summarize_textured_render_section_build_report,
 };
 use mclone_server::ServerRunnerKind;
@@ -2233,6 +2236,7 @@ pub struct WebChunkRenderSession {
     status_overlay: StatusOverlay,
     section_occlusion_culling: bool,
     force_fullbright: bool,
+    input_preferences: InputPreferences,
     touch_look_sensitivity: f32,
     touch_settings_available: bool,
     touch_overlay: TouchOverlay,
@@ -2304,6 +2308,13 @@ impl WebChunkRenderSession {
     ) -> Result<JsValue, JsValue> {
         self.touch_look_sensitivity = clamp_touch_look_sensitivity(look_sensitivity);
         self.touch_settings_available = available;
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = setTouchControlsMode)]
+    pub fn set_touch_controls_mode(&mut self, mode: &str) -> Result<JsValue, JsValue> {
+        self.input_preferences.touch_controls = parse_touch_controls_mode(mode)
+            .ok_or_else(|| JsValue::from(format!("invalid touch controls mode: {mode}")))?;
         self.ui_status_to_js_value().map_err(JsValue::from)
     }
 
@@ -2702,6 +2713,16 @@ impl WebChunkRenderSession {
             "touchControlsOverlayVisible",
             self.touch_overlay.visible,
         )?;
+        set_string(
+            object,
+            "touchControlsMode",
+            touch_controls_mode_js_label(self.input_preferences.touch_controls),
+        )?;
+        set_bool(
+            object,
+            "touchControlsVisible",
+            self.resolved_flat_input_for_hud().touch_controls_visible,
+        )?;
         if self.touch_settings_available {
             set_number(
                 object,
@@ -2737,6 +2758,9 @@ impl WebChunkRenderSession {
             }
             GameUiAction::SetTouchLookSensitivity(look_sensitivity) => {
                 self.touch_look_sensitivity = clamp_touch_look_sensitivity(look_sensitivity);
+            }
+            GameUiAction::SetTouchControlsMode(mode) => {
+                self.input_preferences.touch_controls = mode;
             }
             GameUiAction::ToggleFly => {
                 self.camera.toggle_movement_mode();
@@ -2805,6 +2829,13 @@ impl WebChunkRenderSession {
                         f64::from(clamp_touch_look_sensitivity(look_sensitivity)),
                     )?;
                 }
+                GameUiAction::SetTouchControlsMode(mode) => {
+                    set_string(
+                        &object,
+                        "touchControlsMode",
+                        touch_controls_mode_js_label(mode),
+                    )?;
+                }
                 GameUiAction::Quit => {
                     set_bool(&object, "shutdownRequested", true)?;
                 }
@@ -2842,6 +2873,7 @@ impl WebChunkRenderSession {
             max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: WEB_FIXED_FPS_CAP,
+            touch_controls_mode: Some(self.input_preferences.touch_controls),
             touch_settings: self
                 .touch_settings_available
                 .then_some(GameTouchSettings::new(
@@ -2947,6 +2979,7 @@ impl WebChunkRenderSession {
             status_overlay: StatusOverlay::hidden(),
             section_occlusion_culling: true,
             force_fullbright: false,
+            input_preferences: InputPreferences::AUTO,
             touch_look_sensitivity: WEB_TOUCH_LOOK_SENSITIVITY_DEFAULT,
             touch_settings_available: false,
             touch_overlay: TouchOverlay::hidden(),
@@ -2983,7 +3016,7 @@ impl WebChunkRenderSession {
         if self.touch_overlay.visible {
             state.note_activity(InputDeviceKind::Touch);
         }
-        state.resolve(InputPreferences::AUTO)
+        state.resolve(self.input_preferences)
     }
 
     fn install_started_runtime(
@@ -3568,6 +3601,39 @@ impl WebChunkRenderSession {
         let render_dirty_chunk_count = dirty.dirty_chunks.len();
         let render_dirty_section_count = dirty.dirty_sections.len();
         let render_inflight_section_count = dirty.inflight_sections.len();
+        let dirty_work = {
+            let client = self.runtime.client();
+            let render_session = self.runtime.engine().render_session();
+            render_session.classify_dirty_work(
+                |pos| client.chunk_snapshot(pos).is_some(),
+                |pos| render_session.contains_chunk(pos),
+                |key| {
+                    let pos = render_section_chunk_pos(key);
+                    client
+                        .chunk_snapshot(pos)
+                        .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
+                },
+                |key| render_session.contains_section(key),
+            )
+        };
+        let loaded_dirty_section_count: usize = dirty_work
+            .loaded_dirty_sections_by_chunk
+            .values()
+            .map(BTreeSet::len)
+            .sum();
+        let (ready_dirty_section_count, deferred_dirty_section_count) = dirty_work
+            .loaded_dirty_sections_by_chunk
+            .values()
+            .flat_map(|keys| keys.iter().copied())
+            .fold((0usize, 0usize), |(ready, deferred), key| {
+                if render_section_neighbor_readiness(self.runtime.client(), key, camera_position)
+                    .is_ready()
+                {
+                    (ready + 1, deferred)
+                } else {
+                    (ready, deferred + 1)
+                }
+            });
 
         // 4. Synthesize this frame's compile diagnostics from the streaming cache update.
         let acceptance_report = RenderSectionCompileAcceptanceReport {
@@ -3635,6 +3701,46 @@ impl WebChunkRenderSession {
             &object,
             "renderInflightSectionCount",
             render_inflight_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "loadedDirtyChunkCount",
+            dirty_work.loaded_dirty_chunks.len() as f64,
+        )?;
+        set_number(
+            &object,
+            "removalDirtyChunkCount",
+            dirty_work.removal_dirty_chunks.len() as f64,
+        )?;
+        set_number(
+            &object,
+            "staleDirtyChunkCount",
+            dirty_work.stale_dirty_chunks.len() as f64,
+        )?;
+        set_number(
+            &object,
+            "loadedDirtySectionCount",
+            loaded_dirty_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "removalDirtySectionCount",
+            dirty_work.removal_dirty_sections.len() as f64,
+        )?;
+        set_number(
+            &object,
+            "staleDirtySectionCount",
+            dirty_work.stale_dirty_sections.len() as f64,
+        )?;
+        set_number(
+            &object,
+            "readyCompileSectionCount",
+            ready_dirty_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "deferredCompileSectionCount",
+            deferred_dirty_section_count as f64,
         )?;
         set_number(
             &object,
@@ -4268,7 +4374,25 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::SetRenderDistance(_) => "setRenderDistance",
         GameUiAction::SetFlySpeed(_) => "setFlySpeed",
         GameUiAction::SetTouchLookSensitivity(_) => "setTouchLookSensitivity",
+        GameUiAction::SetTouchControlsMode(_) => "setTouchControlsMode",
         GameUiAction::Quit => "quit",
+    }
+}
+
+fn touch_controls_mode_js_label(mode: TouchControlsMode) -> &'static str {
+    match mode {
+        TouchControlsMode::Auto => "auto",
+        TouchControlsMode::On => "on",
+        TouchControlsMode::Off => "off",
+    }
+}
+
+fn parse_touch_controls_mode(mode: &str) -> Option<TouchControlsMode> {
+    match mode {
+        "auto" => Some(TouchControlsMode::Auto),
+        "on" => Some(TouchControlsMode::On),
+        "off" => Some(TouchControlsMode::Off),
+        _ => None,
     }
 }
 

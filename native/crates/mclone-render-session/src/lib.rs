@@ -611,28 +611,14 @@ pub fn plan_ready_render_sections(
     inflight_sections: &BTreeSet<RenderSectionKey>,
     mut section_readiness: impl FnMut(RenderSectionKey) -> RenderSectionNeighborReadiness,
 ) -> RenderSectionReadyPlan {
-    let budgeted_loaded_chunks = sorted_loaded_dirty_chunks
-        .into_iter()
-        .take(chunk_budget)
-        .collect::<BTreeSet<_>>();
-    let remaining_chunk_budget = chunk_budget.saturating_sub(budgeted_loaded_chunks.len());
-    let budgeted_dirty_section_chunks = sorted_dirty_section_chunks
-        .into_iter()
-        .filter(|pos| !budgeted_loaded_chunks.contains(pos))
-        .take(remaining_chunk_budget)
-        .collect::<BTreeSet<_>>();
-    let mut plan = RenderSectionReadyPlan {
-        budgeted_loaded_chunks,
-        budgeted_dirty_section_chunks,
-        ..RenderSectionReadyPlan::default()
-    };
+    let mut plan = RenderSectionReadyPlan::default();
+    if chunk_budget == 0 {
+        return plan;
+    }
 
-    for pos in plan
-        .budgeted_loaded_chunks
-        .iter()
-        .copied()
-        .collect::<Vec<_>>()
-    {
+    let mut budgeted_chunk_count = 0usize;
+    for pos in sorted_loaded_dirty_chunks {
+        let ready_before = plan.ready_section_keys.len();
         for key in section_keys_for_chunk(pos) {
             plan_ready_render_section_key(
                 &mut plan,
@@ -641,14 +627,25 @@ pub fn plan_ready_render_sections(
                 &mut section_readiness,
             );
         }
+        if plan.ready_section_keys.len() > ready_before {
+            plan.budgeted_loaded_chunks.insert(pos);
+            budgeted_chunk_count += 1;
+            if budgeted_chunk_count >= chunk_budget {
+                break;
+            }
+        }
     }
-    for pos in plan
-        .budgeted_dirty_section_chunks
-        .iter()
-        .copied()
-        .collect::<Vec<_>>()
-    {
+
+    if budgeted_chunk_count >= chunk_budget {
+        return plan;
+    }
+
+    for pos in sorted_dirty_section_chunks {
+        if plan.budgeted_loaded_chunks.contains(&pos) {
+            continue;
+        }
         if let Some(keys) = loaded_dirty_sections_by_chunk.get(&pos) {
+            let ready_before = plan.ready_section_keys.len();
             for key in keys {
                 plan_ready_render_section_key(
                     &mut plan,
@@ -656,6 +653,13 @@ pub fn plan_ready_render_sections(
                     inflight_sections,
                     &mut section_readiness,
                 );
+            }
+            if plan.ready_section_keys.len() > ready_before {
+                plan.budgeted_dirty_section_chunks.insert(pos);
+                budgeted_chunk_count += 1;
+                if budgeted_chunk_count >= chunk_budget {
+                    break;
+                }
             }
         }
     }
@@ -3836,6 +3840,43 @@ mod tests {
     }
 
     #[test]
+    fn render_section_ready_plan_skips_deferred_only_chunks_for_budget() {
+        let deferred_chunk = ChunkPos::new(1, 0);
+        let ready_chunk = ChunkPos::new(2, 0);
+        let deferred = RenderSectionKey::new(1, 4, 0);
+        let ready = RenderSectionKey::new(2, 4, 0);
+        let sections_by_chunk = BTreeMap::from([
+            (deferred_chunk, BTreeSet::from([deferred])),
+            (ready_chunk, BTreeSet::from([ready])),
+        ]);
+
+        let plan = plan_ready_render_sections(
+            [],
+            [deferred_chunk, ready_chunk],
+            &sections_by_chunk,
+            1,
+            |_| Vec::new(),
+            &BTreeSet::new(),
+            |key| {
+                if key == ready {
+                    RenderSectionNeighborReadiness::ReadyWithNeighbors
+                } else {
+                    RenderSectionNeighborReadiness::DeferredMissingNeighbors
+                }
+            },
+        );
+
+        assert!(plan.budgeted_loaded_chunks.is_empty());
+        assert_eq!(
+            plan.budgeted_dirty_section_chunks,
+            BTreeSet::from([ready_chunk])
+        );
+        assert_eq!(plan.ready_section_keys, BTreeSet::from([ready]));
+        assert_eq!(plan.deferred_section_keys, BTreeSet::from([deferred]));
+        assert_eq!(plan.deferred_section_count, 1);
+    }
+
+    #[test]
     fn render_section_sync_plan_discards_stale_and_plans_ready_work() {
         let loaded_chunk = ChunkPos::new(0, 0);
         let stale_chunk = ChunkPos::new(1, 0);
@@ -4547,7 +4588,7 @@ mod tests {
         assert!(update.submission.is_none());
         assert_eq!(update.cache_update.submitted_compile_section_count, 0);
         assert_eq!(update.cache_update.deferred_section_count, 1);
-        assert!(session.dirty().dirty_chunks.is_empty());
+        assert_eq!(session.dirty().dirty_chunks, BTreeSet::from([chunk]));
         assert_eq!(session.dirty().dirty_sections, BTreeSet::from([deferred]));
         assert!(session.dirty().inflight_sections.is_empty());
     }

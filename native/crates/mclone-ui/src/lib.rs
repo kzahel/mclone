@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, ResolvedFlatInput};
+use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, ResolvedFlatInput, TouchControlsMode};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GuiScale {
@@ -625,6 +625,7 @@ pub enum GameUiAction {
     SetRenderDistance(i32),
     SetFlySpeed(f32),
     SetTouchLookSensitivity(f32),
+    SetTouchControlsMode(TouchControlsMode),
     Quit,
 }
 
@@ -643,6 +644,22 @@ impl GameFramePacingMode {
             Self::Capped => "Max FPS",
             Self::Uncapped => "Uncapped",
         }
+    }
+}
+
+pub fn touch_controls_mode_label(mode: TouchControlsMode) -> &'static str {
+    match mode {
+        TouchControlsMode::Auto => "Auto",
+        TouchControlsMode::On => "On",
+        TouchControlsMode::Off => "Off",
+    }
+}
+
+pub fn next_touch_controls_mode(mode: TouchControlsMode) -> TouchControlsMode {
+    match mode {
+        TouchControlsMode::Auto => TouchControlsMode::On,
+        TouchControlsMode::On => TouchControlsMode::Off,
+        TouchControlsMode::Off => TouchControlsMode::Auto,
     }
 }
 
@@ -691,6 +708,7 @@ pub struct GameUiRenderState {
     pub max_fly_speed_multiplier: f32,
     pub frame_pacing_mode: GameFramePacingMode,
     pub fps_cap: u32,
+    pub touch_controls_mode: Option<TouchControlsMode>,
     pub touch_settings: Option<GameTouchSettings>,
 }
 
@@ -708,6 +726,7 @@ impl Default for GameUiRenderState {
             max_fly_speed_multiplier: 8.0,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: 120,
+            touch_controls_mode: None,
             touch_settings: None,
         }
     }
@@ -1040,6 +1059,7 @@ const ID_NEW_WORLD_BACK: WidgetId = WidgetId(18);
 const ID_TITLE_JOIN_REMOTE: WidgetId = WidgetId(19);
 const ID_JOIN_REMOTE_CONNECT: WidgetId = WidgetId(20);
 const ID_JOIN_REMOTE_BACK: WidgetId = WidgetId(21);
+const ID_OPTIONS_TOUCH_CONTROLS: WidgetId = WidgetId(22);
 
 pub const DEFAULT_JOIN_REMOTE_ADDR: &str = "127.0.0.1:25565";
 
@@ -1183,7 +1203,7 @@ impl GameUi {
             (Some(ID_OPTIONS_TOUCH_LOOK), Some(ID_OPTIONS_TOUCH_LOOK)) => {
                 self.touch_look_action_at(point, state)
             }
-            (Some(id), Some(released)) if id == released => self.action_for(id),
+            (Some(id), Some(released)) if id == released => self.action_for(id, state),
             _ => None,
         };
         (true, action)
@@ -1242,6 +1262,7 @@ impl GameUi {
             | GameUiAction::SetRenderDistance(_)
             | GameUiAction::SetFlySpeed(_)
             | GameUiAction::SetTouchLookSensitivity(_)
+            | GameUiAction::SetTouchControlsMode(_)
             | GameUiAction::Quit => {}
         }
     }
@@ -1295,6 +1316,11 @@ impl GameUi {
                     Some(ID_OPTIONS_RADIUS)
                 } else if rects.fly_speed.contains(point) {
                     Some(ID_OPTIONS_FLY_SPEED)
+                } else if rects
+                    .touch_controls
+                    .is_some_and(|rect| rect.contains(point))
+                {
+                    Some(ID_OPTIONS_TOUCH_CONTROLS)
                 } else if rects.touch_look.is_some_and(|rect| rect.contains(point)) {
                     Some(ID_OPTIONS_TOUCH_LOOK)
                 } else if rects.back.contains(point) {
@@ -1306,7 +1332,7 @@ impl GameUi {
         }
     }
 
-    fn action_for(&self, id: WidgetId) -> Option<GameUiAction> {
+    fn action_for(&self, id: WidgetId, state: GameUiRenderState) -> Option<GameUiAction> {
         match id {
             ID_TITLE_START => Some(GameUiAction::OpenNewWorld),
             ID_TITLE_JOIN_REMOTE => Some(GameUiAction::OpenJoinRemote),
@@ -1325,6 +1351,10 @@ impl GameUi {
             ID_OPTIONS_FLY => Some(GameUiAction::ToggleFly),
             ID_OPTIONS_FRAME_PACING => Some(GameUiAction::CycleFramePacing),
             ID_OPTIONS_FPS_CAP => Some(GameUiAction::CycleFpsCap),
+            ID_OPTIONS_TOUCH_CONTROLS => state
+                .touch_controls_mode
+                .map(next_touch_controls_mode)
+                .map(GameUiAction::SetTouchControlsMode),
             ID_OPTIONS_BACK => match self.screen {
                 Some(GameScreen::Options {
                     parent: GameOptionsParent::Title,
@@ -1568,6 +1598,15 @@ impl GameUi {
             fly_speed_slider_value(state),
         )
         .render(draw, &self.font, self.interaction());
+        if let (Some(mode), Some(rect)) = (state.touch_controls_mode, widgets.touch_controls) {
+            CycleButton::new(
+                ID_OPTIONS_TOUCH_CONTROLS,
+                rect,
+                "Touch Controls",
+                touch_controls_mode_label(mode),
+            )
+            .render(draw, &self.font, self.interaction());
+        }
         if let (Some(settings), Some(rect)) = (state.touch_settings, widgets.touch_look) {
             Slider::new(
                 ID_OPTIONS_TOUCH_LOOK,
@@ -1598,6 +1637,7 @@ struct OptionWidgetRects {
     fps_cap: Rect,
     radius: Rect,
     fly_speed: Rect,
+    touch_controls: Option<Rect>,
     touch_look: Option<Rect>,
     back: Rect,
 }
@@ -1668,7 +1708,8 @@ fn pause_buttons(scale: GuiScale) -> [Button; 3] {
 
 fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRects {
     let panel = options_panel(scale, state);
-    let show_touch = state.touch_settings.is_some();
+    let show_touch_controls = state.touch_controls_mode.is_some();
+    let show_touch_look = state.touch_settings.is_some();
     let check_x = panel.x + 26.0;
     let row_x = panel.x + 25.0;
     let mut y = panel.y + 34.0;
@@ -1687,7 +1728,14 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
     y += 22.0;
     let fly_speed = Rect::new(row_x, y, 192.0, 20.0);
     y += 22.0;
-    let touch_look = if show_touch {
+    let touch_controls = if show_touch_controls {
+        let rect = Rect::new(row_x, y, 192.0, 20.0);
+        y += 22.0;
+        Some(rect)
+    } else {
+        None
+    };
+    let touch_look = if show_touch_look {
         let rect = Rect::new(row_x, y, 192.0, 20.0);
         y += 22.0;
         Some(rect)
@@ -1705,21 +1753,16 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
         fps_cap,
         radius,
         fly_speed,
+        touch_controls,
         touch_look,
         back,
     }
 }
 
 fn options_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
-    centered_panel(
-        scale,
-        242.0,
-        if state.touch_settings.is_some() {
-            244.0
-        } else {
-            222.0
-        },
-    )
+    let touch_rows =
+        u8::from(state.touch_controls_mode.is_some()) + u8::from(state.touch_settings.is_some());
+    centered_panel(scale, 242.0, 222.0 + f32::from(touch_rows) * 22.0)
 }
 
 fn render_distance_slider_value(state: GameUiRenderState) -> f32 {
@@ -2513,6 +2556,43 @@ mod tests {
         assert_eq!(action, Some(GameUiAction::SetTouchLookSensitivity(5.0)));
 
         let state = GameUiRenderState::default();
+        assert!(option_widgets(ui.scale(), state).touch_look.is_none());
+    }
+
+    #[test]
+    fn game_ui_options_touch_controls_cycle_emits_next_mode() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            touch_controls_mode: Some(TouchControlsMode::Auto),
+            ..GameUiRenderState::default()
+        };
+
+        let touch_controls = option_widgets(ui.scale(), state)
+            .touch_controls
+            .expect("touch controls mode should expose the cycle button");
+        let point = Point {
+            x: touch_controls.x + touch_controls.width * 0.5,
+            y: touch_controls.y + touch_controls.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(
+            action,
+            Some(GameUiAction::SetTouchControlsMode(TouchControlsMode::On))
+        );
+
+        let state = GameUiRenderState {
+            touch_controls_mode: Some(TouchControlsMode::On),
+            ..GameUiRenderState::default()
+        };
+        assert_eq!(
+            next_touch_controls_mode(TouchControlsMode::Off),
+            TouchControlsMode::Auto
+        );
         assert!(option_widgets(ui.scale(), state).touch_look.is_none());
     }
 

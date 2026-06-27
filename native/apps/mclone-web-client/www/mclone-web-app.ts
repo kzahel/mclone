@@ -13,7 +13,9 @@ import {
   formatInteractionStatus,
   loadStoredSettings,
   storeLookSensitivity,
+  storeTouchControlsMode,
 } from "./mclone-web-settings.js";
+import type { TouchControlsMode } from "./mclone-web-settings.js";
 import { TouchControls, hasTouchInput } from "./mclone-web-touch.js";
 import type { TouchOverlayState } from "./mclone-web-touch.js";
 import type { WebChunkRenderSession, WebCompileTiming } from "mclone-web-client-wasm";
@@ -71,6 +73,7 @@ interface AppRuntime {
   handleNativeUiPointerDown?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
   handleNativeUiPointerUp?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
   setNativeTouchLookSensitivity?: (value: number, available?: boolean, persist?: boolean) => WasmReport | null;
+  setNativeTouchControlsMode?: (mode: TouchControlsMode, persist?: boolean) => WasmReport | null;
   touchControlState?: () => any;
 }
 
@@ -190,7 +193,9 @@ const runtime: AppRuntime = {
     worldgenJobFrameMetrics: null,
     lightStatusJobFrameMetrics: null,
     debugOverlayVisible: false,
+    sessionBusy: false,
     lookSensitivity: DEFAULT_LOOK_SENSITIVITY,
+    touchControlsMode: "auto",
     touchLookSensitivityAvailable: false,
     touchControlsVisible: false,
     touchJoystickActive: false,
@@ -228,6 +233,9 @@ async function boot(): Promise<WasmReport> {
   runtime.setNativeTouchLookSensitivity = (value: number, available?: boolean, persist?: boolean) => (
     app.setNativeTouchLookSensitivity(value, available, persist)
   );
+  runtime.setNativeTouchControlsMode = (mode: TouchControlsMode, persist?: boolean) => (
+    app.setNativeTouchControlsMode(mode, persist)
+  );
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
   try {
     await app.init();
@@ -262,6 +270,7 @@ class WebChunkApp {
   touchControls: TouchControls | null;
   pendingTouchOverlay: TouchOverlayState | null;
   lookSensitivity: number;
+  touchControlsMode: TouchControlsMode;
   mouseDeltaX: number;
   mouseDeltaY: number;
   compileSequence: number;
@@ -294,7 +303,9 @@ class WebChunkApp {
     this.pendingTouchOverlay = null;
     const settings = loadStoredSettings();
     this.lookSensitivity = settings.lookSensitivity;
+    this.touchControlsMode = settings.touchControlsMode;
     runtime.state.lookSensitivity = this.lookSensitivity;
+    runtime.state.touchControlsMode = this.touchControlsMode;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
     this.compileSequence = 0;
@@ -386,6 +397,7 @@ class WebChunkApp {
       "setDebugOverlayVisible",
       "setStatusOverlay",
       "setTouchLookSensitivity",
+      "setTouchControlsMode",
       "setTouchControlsOverlay",
     ]) {
       if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
@@ -401,6 +413,7 @@ class WebChunkApp {
     this.setNativeDebugOverlay(defaultDebugOverlayVisible());
     bindInput(this, runtime.state, () => publishRuntimeState(runtime.state));
     this.touchControls = new TouchControls(this, runtime.state);
+    this.setNativeTouchControlsMode(this.touchControlsMode, false);
     this.flushNativeTouchControlsOverlay();
     this.setNativeTouchLookSensitivity(
       this.lookSensitivity,
@@ -996,6 +1009,25 @@ class WebChunkApp {
     return report;
   }
 
+  setNativeTouchControlsMode(mode: TouchControlsMode, persist = true): WasmReport | null {
+    this.touchControlsMode = mode;
+    runtime.state.touchControlsMode = mode;
+    if (persist) {
+      storeTouchControlsMode(mode);
+    }
+    this.touchControls?.setVisible(mode === "on" || hasTouchInput());
+    if (!this.session) {
+      return null;
+    }
+    if (this.sessionBusy) {
+      setTimeout(() => this.setNativeTouchControlsMode(mode, persist), 0);
+      return deferredUiReport();
+    }
+    const report = this.session.setTouchControlsMode(mode);
+    this.applyNativeUiReport(report);
+    return report;
+  }
+
   setNativeTouchControlsOverlay(overlay: TouchOverlayState): WasmReport | null {
     this.pendingTouchOverlay = overlay;
     return this.flushNativeTouchControlsOverlay();
@@ -1050,6 +1082,17 @@ class WebChunkApp {
       runtime.state.lookSensitivity = sensitivity;
       if (report.action === "setTouchLookSensitivity") {
         storeLookSensitivity(sensitivity);
+      }
+    }
+    if (typeof report.touchControlsMode !== "undefined") {
+      const mode = report.touchControlsMode === "on" || report.touchControlsMode === "off"
+        ? report.touchControlsMode
+        : "auto";
+      this.touchControlsMode = mode;
+      runtime.state.touchControlsMode = mode;
+      if (report.action === "setTouchControlsMode") {
+        storeTouchControlsMode(mode);
+        this.touchControls?.setVisible(mode === "on" || hasTouchInput());
       }
     }
     if (typeof report.renderDistance !== "undefined") {
@@ -1127,6 +1170,7 @@ class WebChunkApp {
     try {
       await this.waitForSessionIdle();
       this.sessionBusy = true;
+      runtime.state.sessionBusy = true;
       startReport = await start(session);
     } catch (error) {
       runtime.state.ok = false;
@@ -1134,6 +1178,7 @@ class WebChunkApp {
       console.error(error);
     } finally {
       this.sessionBusy = false;
+      runtime.state.sessionBusy = false;
       this.flushNativeTouchControlsOverlay();
     }
     if (!startReport?.ok) {
@@ -1267,10 +1312,12 @@ class WebChunkApp {
   async withSessionAsync<T>(operation: () => T | Promise<T>): Promise<Awaited<T>> {
     await this.waitForSessionIdle();
     this.sessionBusy = true;
+    runtime.state.sessionBusy = true;
     try {
       return await operation();
     } finally {
       this.sessionBusy = false;
+      runtime.state.sessionBusy = false;
       this.flushNativeTouchControlsOverlay();
     }
   }

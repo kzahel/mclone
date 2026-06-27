@@ -113,6 +113,7 @@ pub(crate) fn game_ui_render_state(
         max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
         frame_pacing_mode: game_frame_pacing_mode(frame_pacing.mode),
         fps_cap: frame_pacing.fps_cap,
+        touch_controls_mode: None,
         touch_settings: None,
     }
 }
@@ -240,6 +241,7 @@ struct ChunkApp {
     actor_interpolation: ActorInterpolationState,
     interaction: ClientInteractionController,
     flat_input: DesktopFlatInputAdapter,
+    input_preferences: InputPreferences,
     render_options: TexturedSectionRenderOptions,
     frame_pacing: FramePacing,
     ui: GameUi,
@@ -300,6 +302,7 @@ impl ChunkApp {
             actor_interpolation: ActorInterpolationState::new(),
             interaction: ClientInteractionController::new(),
             flat_input: DesktopFlatInputAdapter::new(),
+            input_preferences: InputPreferences::AUTO,
             render_options,
             frame_pacing: FramePacing::default(),
             ui,
@@ -463,20 +466,22 @@ impl ChunkApp {
     }
 
     fn current_ui_render_state(&self) -> GameUiRenderState {
-        game_ui_render_state(
+        let mut state = game_ui_render_state(
             i32::try_from(self.current_render_distance()).unwrap_or(MAX_RENDER_DISTANCE),
             self.render_options,
             self.frame_pacing.ui_state(),
             self.camera.movement_mode() == EngineCameraMovementMode::NoClip,
             self.camera.fly_speed_multiplier() as f32,
-        )
+        );
+        state.touch_controls_mode = Some(self.input_preferences.touch_controls);
+        state
     }
 
     fn current_flat_hud(&self, status: StatusOverlay, ui_active: bool) -> FlatHud {
         let mut hud = FlatHud::new(
             self.flat_input
                 .capability_state
-                .resolve(InputPreferences::AUTO),
+                .resolve(self.input_preferences),
         );
         hud.world_hud_visible = !ui_active && self.runtime.is_some();
         hud.crosshair_visible = hud.world_hud_visible;
@@ -637,6 +642,7 @@ impl ChunkApp {
             GameUiAction::SetRenderDistance(_)
                 | GameUiAction::SetFlySpeed(_)
                 | GameUiAction::SetTouchLookSensitivity(_)
+                | GameUiAction::SetTouchControlsMode(_)
         );
         match action {
             GameUiAction::ToggleSectionOcclusion => {
@@ -672,6 +678,13 @@ impl ChunkApp {
                     "fly speed set to {:.1}x ({:.0} blocks/s)",
                     self.camera.fly_speed_multiplier(),
                     self.camera.speed_blocks_per_second()
+                );
+            }
+            GameUiAction::SetTouchControlsMode(mode) => {
+                self.input_preferences.touch_controls = mode;
+                log::info!(
+                    "touch controls set to {}",
+                    mclone_ui::touch_controls_mode_label(mode)
                 );
             }
             GameUiAction::CycleFramePacing => {

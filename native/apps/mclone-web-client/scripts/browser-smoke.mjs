@@ -633,17 +633,70 @@ async function runMovementPerfProbe(page, canvas) {
  * @param {number} [timeout]
  */
 async function waitForWebAppStreamingSettled(page, timeout = 60_000) {
-  await page.waitForFunction(
-    () => {
+  try {
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.ok === true
+          && state.streamingSettled === true
+          && state.loadedCenterX === state.centerX
+          && state.loadedCenterZ === state.centerZ;
+      },
+      undefined,
+      { timeout },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => {
       const state = globalThis.__mcloneWebApp?.state;
-      return state?.ok === true
-        && state.streamingSettled === true
-        && state.loadedCenterX === state.centerX
-        && state.loadedCenterZ === state.centerZ;
-    },
-    undefined,
-    { timeout },
-  );
+      if (!state) {
+        return null;
+      }
+      return {
+        ok: state.ok,
+        status: state.status,
+        uiActive: state.uiActive,
+        nativeUiScreen: state.nativeUiScreen,
+        centerX: state.centerX,
+        centerZ: state.centerZ,
+        frameCount: state.frameCount,
+        renderCount: state.renderCount,
+        loadedCenterX: state.loadedCenterX,
+        loadedCenterZ: state.loadedCenterZ,
+        streamingSettled: state.streamingSettled,
+        pendingCompileJobCount: state.pendingCompileJobCount,
+        compileInFlight: state.compileInFlight,
+        renderPendingWork: state.renderPendingWork,
+        renderDirtyChunkCount: state.renderDirtyChunkCount,
+        renderDirtySectionCount: state.renderDirtySectionCount,
+        renderInflightSectionCount: state.renderInflightSectionCount,
+        compileRequestId: state.lastReport?.compileRequestId,
+        loadedDirtyChunkCount: state.lastReport?.loadedDirtyChunkCount,
+        loadedDirtySectionCount: state.lastReport?.loadedDirtySectionCount,
+        readyCompileSectionCount: state.lastReport?.readyCompileSectionCount,
+        deferredCompileSectionCount: state.lastReport?.deferredCompileSectionCount,
+        budgetedLoadedChunkCount: state.lastReport?.budgetedLoadedChunkCount,
+        budgetedDirtySectionChunkCount: state.lastReport?.budgetedDirtySectionChunkCount,
+        submittedCompileSectionCount: state.lastReport?.submittedCompileSectionCount,
+        acceptedCompileSectionCount: state.lastReport?.acceptedCompileSectionCount,
+        staleCompileSectionCount: state.lastReport?.staleCompileSectionCount,
+        streamingIdleReport: state.lastReport?.streamingIdle,
+        doorbellPresent: Boolean(state.lastReport?.doorbell),
+        tickFrameBusy: state.tickFrameBusy,
+        tickPhase: state.tickPhase,
+        sessionBusy: globalThis.__mcloneWebApp?.state?.sessionBusy,
+        movementMode: state.movementMode,
+        touchControlsMode: state.touchControlsMode,
+        touchControlsVisible: state.touchControlsVisible,
+        touchJoystickActive: state.touchJoystickActive,
+        touchMovementLeftImpulse: state.touchMovementLeftImpulse,
+        touchMovementForwardImpulse: state.touchMovementForwardImpulse,
+        touchLookActive: state.touchLookActive,
+        touchButtonActiveCount: state.touchButtonActiveCount,
+        lastUiAction: state.lastUiAction,
+      };
+    });
+    throw new Error(`web app streaming did not settle: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(state, null, 2)}`);
+  }
 }
 
 /**
@@ -1016,13 +1069,13 @@ async function exerciseMobileTouchControls(page, canvas) {
  */
 async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
   await dispatchCanvasPointerEvent(page, "pointerdown", {
-    pointerId: 51,
+    pointerId: 61,
     xFraction: 0.5,
     yFraction: 0.514,
     buttons: 1,
   });
   await dispatchCanvasPointerEvent(page, "pointerup", {
-    pointerId: 51,
+    pointerId: 61,
     xFraction: 0.5,
     yFraction: 0.514,
     buttons: 0,
@@ -1042,15 +1095,15 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
   const openedOptions = await readNativeUiState(page);
 
   await dispatchCanvasPointerEvent(page, "pointerdown", {
-    pointerId: 52,
+    pointerId: 62,
     xFraction: 0.744,
-    yFraction: 0.57,
+    yFraction: 0.601,
     buttons: 1,
   });
   await dispatchCanvasPointerEvent(page, "pointerup", {
-    pointerId: 52,
+    pointerId: 62,
     xFraction: 0.744,
-    yFraction: 0.57,
+    yFraction: 0.601,
     buttons: 0,
   });
   await page.waitForFunction(

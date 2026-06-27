@@ -1,9 +1,11 @@
 # 098: Flat Input Capability Convergence
 
 Status: active; Slices 1-3 shared input contract, desktop adapter, and flat
-Android capability convergence are implemented and validated. Slice 4 has a
-first shared flat HUD composer in place across desktop, flat Android, and web,
-with preference/options follow-up still open. This splits the remaining flat
+Android capability convergence are implemented and validated. Slice 4 now has
+the shared flat HUD composer plus `Touch Controls: Auto / On / Off` wired
+across desktop, flat Android, and web. Web persists the touch-controls mode in
+localStorage; desktop and Android keep the mode session-local until Slice 7
+adds broader platform preference persistence. This splits the remaining flat
 Android input/HUD parity work out of
 [`090-flat-android-client-parity.md`](090-flat-android-client-parity.md) into a
 shared flat-client capability contract for desktop, flat Android, and web.
@@ -59,9 +61,9 @@ intents where the semantics match.
   worker, and storage mechanics web-local.
 - `mclone-ui` owns shared menu rendering, touch movement/interaction overlays,
   and the first shared flat gameplay HUD composer for crosshair, status,
-  touch controls, and the non-touch hotbar across desktop, Android, and web.
-  Touch-control preference persistence/options and gamepad/debug-palette
-  affordances remain open.
+  touch controls, the non-touch hotbar, and the touch-controls mode option
+  across desktop, Android, and web. Preferred-input options, full platform
+  preference persistence, and gamepad/debug-palette affordances remain open.
 
 ## Target Shape
 
@@ -179,9 +181,9 @@ intents; preferences decide presentation defaults.
     keep gameplay command semantics outside the UI crate.
   - [x] Wire desktop, flat Android, and native web through the shared HUD
     composer, with Android touch retaining touch-owned hotbar rendering.
+  - [x] Support `Touch Controls: Auto / On / Off` across desktop, Android, and web.
   - [ ] Move any remaining debug palette/gamepad-friendly HUD affordances into
     the same shared presentation boundary.
-  - [ ] Support `Touch Controls: Auto / On / Off` across desktop, Android, and web.
 
 - [ ] **Slice 5: gamepad capability foundation.**
   - Add a platform-neutral gamepad intent mapping to `mclone-input`.
@@ -200,8 +202,8 @@ intents; preferences decide presentation defaults.
     input logic.
 
 - [ ] **Slice 7: preference persistence and options UI.**
-  - Add shared menu/options controls for preferred input scheme and touch
-    controls mode.
+  - Add remaining shared menu/options controls for preferred input scheme and
+    durable platform preference management.
   - Persist preferences through platform-local storage:
     - desktop config path
     - Android app storage or startup property bridge until persistent settings
@@ -300,3 +302,12 @@ Manual/device validation to record before closing this tactical:
   Native web currently builds a local temporary resolved-input fact from
   browser-visible touch overlay state until Slice 6 moves its event adapter
   fully onto `mclone-input`.
+- Slice 4 touch-controls options pass landed: `mclone-ui` now owns the
+  `Touch Controls: Auto / On / Off` options row and action, with desktop, flat
+  Android, XR scene no-op handling, and native web all applying
+  `InputPreferences.touch_controls` through the shared `mclone-input` resolver.
+  Native web persists the mode through localStorage and reports
+  `touchControlsMode` / `touchControlsVisible` to browser smoke tests. The
+  mobile web smoke also exposed a shared render-section planner starvation case;
+  deferred-only dirty chunks no longer consume the one-chunk streaming compile
+  budget, so ready sections behind them can drain.

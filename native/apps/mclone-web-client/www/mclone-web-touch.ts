@@ -37,6 +37,7 @@ export interface TouchOverlayState {
 export interface TouchControlApp {
   canvas: HTMLCanvasElement;
   lookSensitivity: number;
+  touchControlsMode: "auto" | "on" | "off";
   touchMovementImpulse: TouchMovementImpulse;
   touchKeys: Record<string, boolean>;
   setTouchKey(name: string, down: boolean): boolean;
@@ -338,7 +339,7 @@ export class TouchControls {
   }
 
   setVisible(visible: boolean): void {
-    this.visible = Boolean(visible);
+    this.visible = this.app.touchControlsMode !== "off" && Boolean(visible);
     this.runtimeState.touchControlsVisible = this.visible;
     this.runtimeState.touchLookSensitivityAvailable = this.visible;
     this.app.setNativeTouchLookSensitivity(this.app.lookSensitivity, this.visible, false);

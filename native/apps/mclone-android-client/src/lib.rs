@@ -175,6 +175,7 @@ mod android {
         camera: EngineCameraController,
         interaction: ClientInteractionController,
         input_capabilities: InputCapabilityState,
+        input_preferences: InputPreferences,
         keyboard_mouse: KeyboardMouseInputAdapter,
         render_options: TexturedSectionRenderOptions,
         ui: GameUi,
@@ -560,6 +561,7 @@ mod android {
                     touch: true,
                     ..InputCapabilities::NONE
                 }),
+                input_preferences: InputPreferences::AUTO,
                 keyboard_mouse: KeyboardMouseInputAdapter::new(),
                 render_options: TexturedSectionRenderOptions::default(),
                 ui: android_game_ui_for_scene(&scene_options),
@@ -1245,6 +1247,13 @@ mod android {
                 GameUiAction::CycleFramePacing
                 | GameUiAction::CycleFpsCap
                 | GameUiAction::SetTouchLookSensitivity(_) => {}
+                GameUiAction::SetTouchControlsMode(mode) => {
+                    self.input_preferences.touch_controls = mode;
+                    log::info!(
+                        "Mclone Android touch controls set to {}",
+                        mclone_ui::touch_controls_mode_label(mode)
+                    );
+                }
                 GameUiAction::BackToTitle | GameUiAction::QuitToTitle => {
                     self.session_status = StatusOverlay::hidden();
                 }
@@ -1275,6 +1284,7 @@ mod android {
                 max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
                 frame_pacing_mode: GameFramePacingMode::Vsync,
                 fps_cap: ANDROID_FIXED_FPS_CAP,
+                touch_controls_mode: Some(self.input_preferences.touch_controls),
                 touch_settings: None,
             }
         }
@@ -1282,7 +1292,7 @@ mod android {
         fn gui_draw_list(&self, gui_scale: GuiScale, ui_state: GameUiRenderState) -> GuiDrawList {
             if self.ui.is_active() {
                 let mut draw = self.ui.render_draw_list(ui_state);
-                let mut hud = FlatHud::new(self.input_capabilities.resolve(InputPreferences::AUTO));
+                let mut hud = FlatHud::new(self.input_capabilities.resolve(self.input_preferences));
                 hud.world_hud_visible = false;
                 hud.crosshair_visible = false;
                 hud.status = self.session_status.clone();
@@ -1294,7 +1304,7 @@ mod android {
                 .touch_controls
                 .overlay(self.interaction.selected_hotbar_slot());
             touch.menu_pressed = self.touch_menu_pressed;
-            let mut hud = FlatHud::new(self.input_capabilities.resolve(InputPreferences::AUTO));
+            let mut hud = FlatHud::new(self.input_capabilities.resolve(self.input_preferences));
             hud.hotbar = FlatHotbarOverlay::selected(self.interaction.selected_hotbar_slot());
             hud.touch = touch;
             hud.status = self.session_status.clone();

@@ -14,12 +14,15 @@ export const DEFAULT_LOOK_SENSITIVITY = 2.4;
 
 const SETTINGS_STORAGE_KEYS = {
   lookSensitivity: "mclone.web.lookSensitivity",
+  touchControlsMode: "mclone.web.touchControlsMode",
 };
 
 type WasmReport = Record<string, any>;
+export type TouchControlsMode = "auto" | "on" | "off";
 
 export interface StoredWebSettings {
   lookSensitivity: number;
+  touchControlsMode: TouchControlsMode;
 }
 
 export function clampLookSensitivity(value: unknown): number {
@@ -35,11 +38,22 @@ export function loadStoredSettings(): StoredWebSettings {
     lookSensitivity: clampLookSensitivity(
       readStoredSetting(SETTINGS_STORAGE_KEYS.lookSensitivity) ?? DEFAULT_LOOK_SENSITIVITY,
     ),
+    touchControlsMode: parseTouchControlsMode(
+      readStoredSetting(SETTINGS_STORAGE_KEYS.touchControlsMode),
+    ),
   };
 }
 
 export function storeLookSensitivity(value: number): void {
   storeSetting(SETTINGS_STORAGE_KEYS.lookSensitivity, String(clampLookSensitivity(value)));
+}
+
+export function parseTouchControlsMode(value: unknown): TouchControlsMode {
+  return value === "on" || value === "off" ? value : "auto";
+}
+
+export function storeTouchControlsMode(value: TouchControlsMode): void {
+  storeSetting(SETTINGS_STORAGE_KEYS.touchControlsMode, parseTouchControlsMode(value));
 }
 
 function readStoredSetting(key: string): string | null {

@@ -1012,6 +1012,7 @@ where
                 .map(|hz| hz.round().clamp(1.0, 999.0) as u32)
                 .unwrap_or(XR_UI_FPS_CAP),
             touch_settings: None,
+            touch_controls_mode: None,
         }
     }
 
@@ -1321,7 +1322,8 @@ where
             }
             GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
-            | GameUiAction::SetTouchLookSensitivity(_) => {}
+            | GameUiAction::SetTouchLookSensitivity(_)
+            | GameUiAction::SetTouchControlsMode(_) => {}
             GameUiAction::BackToTitle | GameUiAction::QuitToTitle => {
                 self.session_status = StatusOverlay::hidden();
             }
