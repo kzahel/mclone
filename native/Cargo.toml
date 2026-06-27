@@ -5,6 +5,7 @@ members = [
   "crates/mclone-app-runtime",
   "crates/mclone-client",
   "crates/mclone-core",
+  "crates/mclone-input",
   "crates/mclone-light",
   "crates/mclone-mesh",
   "crates/mclone-net",
@@ -50,6 +51,7 @@ mclone-assets = { path = "crates/mclone-assets" }
 mclone-app-runtime = { path = "crates/mclone-app-runtime" }
 mclone-client = { path = "crates/mclone-client" }
 mclone-core = { path = "crates/mclone-core" }
+mclone-input = { path = "crates/mclone-input" }
 mclone-light = { path = "crates/mclone-light" }
 mclone-mesh = { path = "crates/mclone-mesh" }
 mclone-net = { path = "crates/mclone-net" }

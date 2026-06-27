@@ -1,0 +1,13 @@
+[package]
+name = "mclone-input"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[lib]
+name = "mclone_input"
+path = "src/lib.rs"

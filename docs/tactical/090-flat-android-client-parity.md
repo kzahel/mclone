@@ -14,6 +14,10 @@ Move flat Android from an integrated render/runtime smoke shell toward the same
 client feature posture as desktop flat and web. The engine/runtime/network/render
 foundation is already shared; the remaining gap is the app/player layer:
 shared UI, touch input, player movement, HUD/hotbar, and gameplay interaction.
+The platform-wide input capability contract is now tracked in
+[`098-flat-input-capability-convergence.md`](098-flat-input-capability-convergence.md);
+new HUD/hotbar/interaction work should use that shared flat-client layer rather
+than adding Android-only gameplay controls.
 
 ## Current State
 
@@ -74,7 +78,9 @@ shared UI, touch input, player movement, HUD/hotbar, and gameplay interaction.
   - Device visual/touch validation is still pending.
 - [ ] **Slice 4: gameplay interaction parity.**
   - Route block raycast/break/place through the shared interaction controller.
-  - Add hotbar/debug palette presentation and touch selection.
+  - Add hotbar/debug palette presentation and touch selection through the
+    shared flat input capability layer tracked in
+    [`098-flat-input-capability-convergence.md`](098-flat-input-capability-convergence.md).
 - [x] **Slice 5a: first-class AVD validation lane.**
   - Make `android/build-apk.sh` ABI-selectable instead of hard-coding
     `arm64-v8a`.

@@ -1288,6 +1288,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-input"
+version = "0.0.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "mclone-light"
 version = "0.0.0"
 dependencies = [
