@@ -44,6 +44,93 @@ frame. The validator force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-27 - Standalone Quest 3 Flight Sweep After Non-Invasive Diagnostics
+
+Benchmarked code commit: `4cf97f97f3ea332984f93d2734f98daef93fbd0a`
+(`Make Quest XR diagnostics non-invasive`).
+
+Capture note: captured from a detached clean worktree at the commit above, with
+the local ignored `reference/` assets junctioned in for APK asset staging. The
+marker block includes diagnostics refresh/cache-age fields. The validator
+cleanup slept the headset after the sweep; `dumpsys power` reported
+`mWakefulness=Asleep` and `mHoldingDisplaySuspendBlocker=false`.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 |
+| Android API | 34 |
+| OpenXR runtime | Oculus `v204.201.0` |
+| Stereo view config | `1680x1760` recommended per eye, `1x` sample |
+| Supported refresh | `72.0,80.0,90.0,120.0 Hz` |
+| Current/target refresh | `72.0 Hz` / `13.889 ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+| Flight | no-clip, `4.3 blocks/s`, about `86 blocks` over the sample |
+
+Summary:
+
+| Date | Commit | Lane | RD | Sample | FPS | Frames | Skipped | p50 | p95 | p99 | Max | Max render | Over 1x | Over 2x | Over 4x | Sections | Drawn sections | Indices | Drawn indices | Distance |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2026-06-27 | `4cf97f9` | `native:android-xr:perf:flight:rd1` | 1 | `20.003s` | `72.0` | 1,441 | 0 | `13.855ms` | `15.544ms` | `18.250ms` | `22.128ms` | `9.852ms` | 661 | 0 | 0 | 47 | 11 | 248,940 | 65,868 | `86.023` |
+| 2026-06-27 | `4cf97f9` | `native:android-xr:perf:flight:rd5` | 5 | `20.004s` | `72.0` | 1,440 | 0 | `13.862ms` | `15.885ms` | `18.839ms` | `33.589ms` | `16.765ms` | 694 | 1 | 0 | 533 | 85 | 2,461,572 | 496,350 | `86.082` |
+| 2026-06-27 | `4cf97f9` | `native:android-xr:perf:flight:rd10` | 10 | `20.010s` | `54.8` | 1,096 | 0 | `18.788ms` | `21.479ms` | `24.212ms` | `41.438ms` | `37.100ms` | 1,020 | 3 | 0 | 1,257 | 201 | 5,582,682 | 1,222,158 | `86.259` |
+
+Terrain timing maxima:
+
+| RD | Terrain frame | Runtime total | Runtime poll | Sync sections | GPU upload | Ready refresh | Left eye | Right eye |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `9.441ms` | `2.535ms` | `0.048ms` | `0.720ms` | `1.838ms` | `0.124ms` | `6.596ms` | `5.675ms` |
+| 5 | `16.373ms` | `7.709ms` | `0.482ms` | `3.493ms` | `4.770ms` | `0.613ms` | `6.568ms` | `7.762ms` |
+| 10 | `30.428ms` | `9.896ms` | `0.088ms` | `6.202ms` | `3.482ms` | `1.432ms` | `13.175ms` | `10.705ms` |
+
+Runtime poll maxima:
+
+| RD | Poll total | Drain updates | Apply updates | Diagnostics | Refresh frames | Cache age | Server detail age | Server tick | Scheduler tick | Updates | Section |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `0.042ms` | `0.005ms` | `0.003ms` | `0.004ms` | 39 | `499.969ms` | `1000.143ms` | `2.577ms` | `1.841ms` | 2 | 0 |
+| 5 | `0.481ms` | `0.008ms` | `0.475ms` | `0.025ms` | 39 | `499.987ms` | `944.648ms` | `9.947ms` | `9.919ms` | 3 | 1 |
+| 10 | `0.052ms` | `0.003ms` | `0.002ms` | `0.007ms` | 39 | `499.969ms` | `976.835ms` | `27.183ms` | `27.141ms` | 2 | 0 |
+
+Queue maxima:
+
+| RD | Server cmd q | Server update q | Server jobs | Publications | Scheduler jobs | Completed jobs | Dirty chunks | Loaded chunks | Visible chunks | Ticket chunks | Player visible | Player outbound |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1 | 0 | 2 | 2 | 3 | 5 | 65 | 65 | 9 | 841 | 9 | 0 |
+| 5 | 2 | 0 | 3 | 3 | 1 | 4 | 265 | 265 | 121 | 1,369 | 121 | 0 |
+| 10 | 2 | 0 | 5 | 0 | 4 | 4 | 499 | 499 | 289 | 1,849 | 289 | 0 |
+
+Upload maxima:
+
+| RD | Work frames | Rebuilt sections | Removed sections | Rebuilt indices | Uploaded sections | Upload removed | Uploaded indices | Ready sections |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 805 | 16 | 48 | 50,064 | 7 | 20 | 50,064 | 112 |
+| 5 | 149 | 16 | 160 | 42,588 | 8 | 50 | 42,588 | 1,296 |
+| 10 | 799 | 16 | 240 | 41,064 | 8 | 78 | 41,064 | 3,600 |
+
+Compile / streaming maxima:
+
+| RD | Pending chunks before | Pending chunks after | Pending jobs before | Pending jobs after | Deferred sections | Submitted sections | Completed sections | Stale sections | Visibility total | Visibility worst |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 12 | 9 | 1 | 1 | 16 | 16 | 16 | 16 | `1.040ms` | `0.414ms` |
+| 5 | 59 | 49 | 1 | 1 | 16 | 16 | 16 | 0 | `0.917ms` | `0.222ms` |
+| 10 | 98 | 83 | 1 | 1 | 16 | 16 | 16 | 0 | `0.738ms` | `0.297ms` |
+
+Interpretation:
+
+- The diagnostics overhead was real and is now removed from the headset frame
+  loop. Max `poll_diagnostics_ms` dropped from the prior `2.409ms` / `28.119ms`
+  / `76.531ms` RD1/RD5/RD10 values to `0.004ms` / `0.025ms` / `0.007ms`.
+- Full diagnostics still refresh during the sample: `39` refresh frames over
+  the 20 second window, with cache age near the intended `500ms` runtime
+  cadence. Server detail snapshot age peaks near `1s` because server-side
+  detail is sampled rather than recomputed on every tick/command.
+- RD5 recovered to the 72 Hz lane. RD10 improved from the previous `21 FPS`
+  stress result to about `54.8 FPS`, but still exceeds the 72 Hz frame budget.
+- The remaining RD10 pressure is no longer runtime diagnostics. The next target
+  is terrain/render cost: `30.428ms` terrain frame max, `37.100ms` max mclone
+  render frame, 201 drawn sections, and a `27.141ms` scheduler tick max.
+
 ### 2026-06-27 - Standalone Quest 3 Flight Sweep With Runtime Poll Attribution
 
 Benchmarked code commit: `320bdd2610b45b9e9947f916f75db1cf84b96fd5`
