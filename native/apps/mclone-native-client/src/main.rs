@@ -24,13 +24,13 @@ use crate::cli::Cli;
 #[cfg(test)]
 use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessDualViewOptions,
-    HeadlessScreenshotOptions, HeadlessScreenshotUi, MovementPerfOptions, SceneOptions,
-    TimedemoOptions, WindowStartIntent, XrClearSmokeOptions, XrMcloneSmokeOptions, XrViewPose,
-    parse_screenshot_ui_arg,
+    HeadlessScreenshotOptions, HeadlessScreenshotUi, MovementPerfOptions,
+    RendererRebuildSmokeOptions, SceneOptions, TimedemoOptions, WindowStartIntent,
+    XrClearSmokeOptions, XrMcloneSmokeOptions, XrViewPose, parse_screenshot_ui_arg,
 };
 use crate::headless::{
-    run_headless_screenshot, write_headless_chunk_scenarios, write_headless_dual_view,
-    write_headless_runtime_chunk,
+    run_headless_screenshot, run_renderer_rebuild_smoke, write_headless_chunk_scenarios,
+    write_headless_dual_view, write_headless_runtime_chunk,
 };
 use crate::perf::{run_frame_budget_probe, run_movement_perf_smoke, run_timedemo};
 use crate::ui::render_static_title_ui;
@@ -189,6 +189,25 @@ fn main() -> Result<()> {
                     report.drawn_index_count
                 );
             }
+            Ok(())
+        }
+        Cli::RendererRebuildSmoke { options } => {
+            let report = run_renderer_rebuild_smoke(&options)?;
+            println!(
+                "renderer rebuild smoke saved before={} after={} ({}x{}, {} bytes, sections={}, drawn_sections={}, indices={}, drawn_indices={}, mismatch_pixels={}, reuploaded_sections={}, state_preserved={})",
+                report.before_path.display(),
+                report.after_path.display(),
+                report.width,
+                report.height,
+                report.byte_len,
+                report.section_count,
+                report.drawn_section_count,
+                report.index_count,
+                report.drawn_index_count,
+                report.pixel_mismatch_count,
+                report.reuploaded_section_count,
+                report.state_preserved
+            );
             Ok(())
         }
         Cli::MovementPerf { options } => {
@@ -362,6 +381,42 @@ mod tests {
                         ..SceneOptions::default()
                     },
                     render_options: TexturedSectionRenderOptions::default(),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_renderer_rebuild_smoke_options() {
+        let cli = Cli::parse([
+            "--renderer-rebuild-smoke".to_owned(),
+            "/tmp/mclone-render-rebuild".to_owned(),
+            "--width".to_owned(),
+            "640".to_owned(),
+            "--height".to_owned(),
+            "360".to_owned(),
+            "--seed".to_owned(),
+            "99".to_owned(),
+            "--render-color-profile".to_owned(),
+            "stylized-bright".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::RendererRebuildSmoke {
+                options: RendererRebuildSmokeOptions {
+                    directory: PathBuf::from("/tmp/mclone-render-rebuild"),
+                    width: 640,
+                    height: 360,
+                    scene: SceneOptions {
+                        seed: 99,
+                        ..SceneOptions::default()
+                    },
+                    render_options: TexturedSectionRenderOptions {
+                        color_profile: RenderColorProfile::StylizedBright,
+                        ..TexturedSectionRenderOptions::default()
+                    },
                 },
             }
         );

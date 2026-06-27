@@ -4,7 +4,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_app_runtime::frame_render::{
-    FullFrameGui, RenderStreamStats, record_render_section_update_stats, render_full_frame_for_view,
+    FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
+    record_render_section_update_stats, render_full_frame_for_view,
 };
 use mclone_client::{
     ActorInterpolationState, ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
@@ -16,10 +17,12 @@ use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
     TexturedSectionUploadReport,
 };
+use mclone_render::color_profile::RenderConfig;
 use mclone_render::entity::ActorDrawResources;
 use mclone_render::gui::GuiRenderer;
 use mclone_render::headless::{
-    HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessFrameOptions, write_headless_frame_png,
+    HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessFrameLoopOptions, HeadlessFrameOptions,
+    run_headless_capture_loop, save_rgba_png, write_headless_frame_png,
     write_headless_textured_sections_png_with_ready_sections,
 };
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
@@ -29,7 +32,9 @@ use mclone_ui::{GameUi, GuiDrawList, GuiScale};
 
 use crate::app::game_ui_render_state;
 use crate::camera::SpectatorCamera;
-use crate::cli::{HeadlessDualViewOptions, HeadlessScreenshotOptions, SceneOptions};
+use crate::cli::{
+    HeadlessDualViewOptions, HeadlessScreenshotOptions, RendererRebuildSmokeOptions, SceneOptions,
+};
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState, FrameTimingStats};
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
@@ -65,6 +70,74 @@ pub(crate) struct HeadlessDualViewReport {
     pub(crate) drawn_section_count: usize,
     pub(crate) index_count: u32,
     pub(crate) drawn_index_count: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RendererRebuildSmokeReport {
+    pub(crate) before_path: PathBuf,
+    pub(crate) after_path: PathBuf,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) byte_len: usize,
+    pub(crate) section_count: usize,
+    pub(crate) drawn_section_count: usize,
+    pub(crate) index_count: u32,
+    pub(crate) drawn_index_count: u32,
+    pub(crate) before_non_clear_rgb_pixel_count: usize,
+    pub(crate) after_non_clear_rgb_pixel_count: usize,
+    pub(crate) pixel_mismatch_count: usize,
+    pub(crate) reuploaded_section_count: usize,
+    pub(crate) state_preserved: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct RendererRebuildSmokePreservedState {
+    interest_center: mclone_core::ChunkPos,
+    render_distance: u32,
+    chunk_tracking_radius: u32,
+    loaded_chunks: usize,
+    client_visible_chunks: usize,
+    tracked_players: usize,
+    player_visible_chunks: usize,
+    camera: ChunkCamera,
+    ui_active: bool,
+    ui_covers_world: bool,
+    gui_scale: [f32; 2],
+}
+
+impl RendererRebuildSmokePreservedState {
+    fn capture(runtime: &WindowSceneRuntime, camera: ChunkCamera, ui: &GameUi) -> Self {
+        let runtime = runtime.stats();
+        let scale = ui.scale();
+        Self {
+            interest_center: runtime.interest_center,
+            render_distance: runtime.render_distance,
+            chunk_tracking_radius: runtime.chunk_tracking_radius,
+            loaded_chunks: runtime.loaded_chunks,
+            client_visible_chunks: runtime.client_visible_chunks,
+            tracked_players: runtime.tracked_players,
+            player_visible_chunks: runtime.player_visible_chunks,
+            camera,
+            ui_active: ui.is_active(),
+            ui_covers_world: ui.covers_world(),
+            gui_scale: [scale.width, scale.height],
+        }
+    }
+}
+
+struct RendererRebuildSmokeState {
+    runtime: WindowSceneRuntime,
+    resources: FlatRenderResources,
+    asset_source: mclone_assets::AssetSourceChain,
+    sections: Vec<mclone_mesh::TexturedRenderSectionMesh>,
+    camera: ChunkCamera,
+    ui: GameUi,
+    actor_interpolation: ActorInterpolationState,
+    render_stats: RenderStreamStats,
+    render_options: TexturedSectionRenderOptions,
+    reuploaded_section_count: usize,
+    state_preserved: bool,
+    summary: Option<FullFrameRenderSummary>,
 }
 
 pub(crate) fn write_headless_dual_view(
@@ -220,6 +293,312 @@ fn offset_camera(mut camera: ChunkCamera, offset: Vec3) -> ChunkCamera {
     camera.eye = (Vec3::from_array(camera.eye) + offset).to_array();
     camera.target = (Vec3::from_array(camera.target) + offset).to_array();
     camera
+}
+
+pub(crate) fn run_renderer_rebuild_smoke(
+    options: &RendererRebuildSmokeOptions,
+) -> Result<RendererRebuildSmokeReport> {
+    if options.scene.remote_addr.is_some() {
+        bail!("renderer rebuild smoke currently requires the local integrated server path");
+    }
+    std::fs::create_dir_all(&options.directory).with_context(|| {
+        format!(
+            "failed to create renderer rebuild smoke output directory {}",
+            options.directory.display()
+        )
+    })?;
+    let before_path = options.directory.join("before.png");
+    let after_path = options.directory.join("after.png");
+
+    let mut runtime = WindowSceneRuntime::new(&options.scene)?;
+    poll_window_runtime_until_idle(&mut runtime)?;
+    if let Some(day_time) = options.scene.day_time_override {
+        runtime.force_day_time(day_time);
+    }
+
+    let mut spectator = SpectatorCamera::spawn_for_scene(&options.scene);
+    let (world_x, world_z) = spectator.block_column();
+    if let Some(surface_y) = runtime.highest_non_air_block_y_at_world(world_x, world_z) {
+        spectator.place_above_surface(surface_y);
+    }
+    let camera = spectator.camera(runtime.render_distance());
+    let section_update = runtime.sync_all_render_sections(spectator.position)?;
+    let sections = runtime.cached_sections();
+    if sections.is_empty() {
+        bail!(
+            "renderer rebuild smoke seed={} center=({}, {}) render_distance={} produced no render sections",
+            options.scene.seed,
+            options.scene.chunk_x,
+            options.scene.chunk_z,
+            options.scene.render_distance
+        );
+    }
+    let initial_upload = TexturedSectionUploadReport {
+        uploaded_section_count: section_update.rebuilt_section_count(),
+        removed_section_count: section_update.removed_section_count(),
+        uploaded_vertex_count: section_update.rebuilt_vertex_count,
+        uploaded_index_count: section_update.rebuilt_index_count,
+    };
+    let asset_source = load_asset_source()?;
+    let render_options = options.render_options;
+
+    let (loop_report, frame_pixels, state) = run_headless_capture_loop(
+        HeadlessFrameLoopOptions {
+            width: options.width,
+            height: options.height,
+            frame_count: 2,
+        },
+        move |device, queue, format, size| {
+            let render_config =
+                RenderConfig::for_color_target(render_options.color_profile, format);
+            let mut resources = FlatRenderResources::new(
+                device,
+                queue,
+                size,
+                render_config,
+                runtime.mesh_assets().atlas.as_upload(),
+                runtime.actor_textures.atlas.as_upload(),
+                &asset_source,
+            )?;
+            resources
+                .draw_mut()
+                .update_sections(device, &sections)
+                .context("failed to upload initial renderer rebuild smoke sections")?;
+            resources.draw_mut().set_traversal_ready_sections(
+                &runtime.traversal_ready_render_section_keys(spectator.position),
+            );
+
+            let mut render_stats = RenderStreamStats {
+                section_count: resources.section_count(),
+                index_count: resources.index_count(),
+                face_count: quad_face_count_from_indices(resources.index_count()),
+                ..RenderStreamStats::default()
+            };
+            record_render_section_update_stats(&mut render_stats, &section_update, initial_upload);
+
+            let mut ui = GameUi::new_ingame();
+            ui.set_scale(GuiScale::from_pixels(size[0], size[1]));
+
+            Ok(RendererRebuildSmokeState {
+                runtime,
+                resources,
+                asset_source,
+                sections,
+                camera,
+                ui,
+                actor_interpolation: ActorInterpolationState::new(),
+                render_stats,
+                render_options,
+                reuploaded_section_count: 0,
+                state_preserved: false,
+                summary: None,
+            })
+        },
+        |index, frame, state| {
+            if index == 1 {
+                rebuild_renderer_rebuild_smoke_resources(&frame, state)?;
+            }
+            let summary = render_renderer_rebuild_smoke_frame(frame, state)?;
+            state.summary = Some(summary);
+            Ok(())
+        },
+    )?;
+
+    if frame_pixels.len() != 2 {
+        bail!(
+            "renderer rebuild smoke expected 2 captured frames, got {}",
+            frame_pixels.len()
+        );
+    }
+    let before_pixels = &frame_pixels[0];
+    let after_pixels = &frame_pixels[1];
+    save_rgba_png(
+        &before_path,
+        loop_report.width,
+        loop_report.height,
+        before_pixels,
+    )?;
+    save_rgba_png(
+        &after_path,
+        loop_report.width,
+        loop_report.height,
+        after_pixels,
+    )?;
+
+    let pixel_mismatch_count = count_pixel_mismatches(before_pixels, after_pixels);
+    if pixel_mismatch_count > 0 {
+        bail!("renderer rebuild smoke before/after pixels differ in {pixel_mismatch_count} pixels");
+    }
+    let before_non_clear_rgb_pixel_count = count_non_clear_rgb_pixels(before_pixels);
+    let after_non_clear_rgb_pixel_count = count_non_clear_rgb_pixels(after_pixels);
+    if before_non_clear_rgb_pixel_count == 0 || after_non_clear_rgb_pixel_count == 0 {
+        bail!("renderer rebuild smoke captured no world pixels");
+    }
+
+    let summary = state
+        .summary
+        .context("renderer rebuild smoke rendered no summary")?;
+    if !state.state_preserved {
+        bail!("renderer rebuild smoke did not perform the rebuild preservation check");
+    }
+
+    Ok(RendererRebuildSmokeReport {
+        before_path,
+        after_path,
+        width: loop_report.width,
+        height: loop_report.height,
+        byte_len: before_pixels.len(),
+        section_count: summary.section_count,
+        drawn_section_count: summary.drawn_section_count,
+        index_count: summary.index_count,
+        drawn_index_count: summary.drawn_index_count,
+        before_non_clear_rgb_pixel_count,
+        after_non_clear_rgb_pixel_count,
+        pixel_mismatch_count,
+        reuploaded_section_count: state.reuploaded_section_count,
+        state_preserved: state.state_preserved,
+    })
+}
+
+fn rebuild_renderer_rebuild_smoke_resources(
+    frame: &mclone_render::target::RenderFrameContext<'_>,
+    state: &mut RendererRebuildSmokeState,
+) -> Result<()> {
+    let preserved_before =
+        RendererRebuildSmokePreservedState::capture(&state.runtime, state.camera, &state.ui);
+    let render_config = state.resources.render_config();
+    let mut resources = FlatRenderResources::new(
+        frame.device,
+        frame.queue,
+        frame.target.size,
+        render_config,
+        state.runtime.mesh_assets().atlas.as_upload(),
+        state.runtime.actor_textures.atlas.as_upload(),
+        &state.asset_source,
+    )?;
+    let upload_report = resources
+        .draw_mut()
+        .update_sections(frame.device, &state.sections)
+        .context("failed to reupload renderer rebuild smoke sections")?;
+    resources.draw_mut().set_traversal_ready_sections(
+        &state
+            .runtime
+            .traversal_ready_render_section_keys(Vec3::from_array(state.camera.eye)),
+    );
+    state.render_stats.section_count = resources.section_count();
+    state.render_stats.index_count = resources.index_count();
+    state.render_stats.face_count = quad_face_count_from_indices(resources.index_count());
+    state.render_stats.last_uploaded_section_count = upload_report.uploaded_section_count;
+    state.render_stats.last_upload_removed_section_count = upload_report.removed_section_count;
+    state.render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;
+    state.render_stats.last_uploaded_face_count = upload_report.uploaded_face_count();
+    state.render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
+    state.reuploaded_section_count = upload_report.uploaded_section_count;
+    state.resources = resources;
+
+    let preserved_after =
+        RendererRebuildSmokePreservedState::capture(&state.runtime, state.camera, &state.ui);
+    if preserved_before != preserved_after {
+        bail!(
+            "renderer rebuild smoke changed preserved state: before={preserved_before:?} after={preserved_after:?}"
+        );
+    }
+    state.state_preserved = true;
+    Ok(())
+}
+
+fn render_renderer_rebuild_smoke_frame(
+    frame: mclone_render::target::RenderFrameContext<'_>,
+    state: &mut RendererRebuildSmokeState,
+) -> Result<FullFrameRenderSummary> {
+    let camera_position = Vec3::from_array(state.camera.eye);
+    state.resources.draw_mut().set_traversal_ready_sections(
+        &state
+            .runtime
+            .traversal_ready_render_section_keys(camera_position),
+    );
+    let underwater_overlay = state.runtime.camera_inside_water(camera_position).then(|| {
+        let eye = Vec3::from_array(state.camera.eye);
+        let target = Vec3::from_array(state.camera.target);
+        let forward = (target - eye).normalize_or_zero();
+        let forward = if forward.length_squared() > 0.0 {
+            forward
+        } else {
+            Vec3::NEG_Z
+        };
+        let yaw = forward.x.atan2(forward.z);
+        let pitch = forward.y.asin();
+        UnderwaterOverlay::vanilla_from_native_camera(yaw, pitch)
+    });
+    let sky_clear_color = state.runtime.sky_clear_color();
+    let time_of_day = state.runtime.time_of_day();
+    let sun_angle = state.runtime.sun_angle();
+    state
+        .actor_interpolation
+        .reconcile_authoritative(state.runtime.client().actor_presentations());
+    state
+        .actor_interpolation
+        .step(1.0 / 60.0, Default::default());
+    let actor_instances = actor_instances_from_presentations(
+        &state.actor_interpolation.presentations(),
+        state.runtime.client(),
+    );
+    let ui_render_state = game_ui_render_state(
+        state.runtime.render_distance() as i32,
+        state.render_options,
+        FramePacingUiState::default(),
+        false,
+        1.0,
+        1.0,
+    );
+    let gui_scale = state.ui.scale();
+    let gui_state = FullFrameGui::new(
+        state.ui.is_active(),
+        state.ui.covers_world(),
+        [gui_scale.width, gui_scale.height],
+    );
+    let ui_draw = state.ui.render_draw_list(ui_render_state);
+    let render_view = state
+        .camera
+        .render_view(frame.target.size[0], frame.target.size[1]);
+    let parts = state.resources.parts_mut();
+    render_full_frame_for_view(
+        frame,
+        parts.depth,
+        parts.sky,
+        parts.draw,
+        Some(parts.actors),
+        Some(parts.screen_effects),
+        Some(parts.gui),
+        render_view,
+        &actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        state.render_options,
+        gui_state,
+        |_| ui_draw,
+        &mut state.render_stats,
+    )
+}
+
+fn count_pixel_mismatches(left: &[u8], right: &[u8]) -> usize {
+    left.chunks_exact(4)
+        .zip(right.chunks_exact(4))
+        .filter(|(left, right)| left != right)
+        .count()
+        + left.len().abs_diff(right.len()).div_ceil(4)
+}
+
+fn count_non_clear_rgb_pixels(pixels: &[u8]) -> usize {
+    let Some(clear) = pixels.get(0..3) else {
+        return 0;
+    };
+    pixels
+        .chunks_exact(4)
+        .filter(|pixel| &pixel[0..3] != clear)
+        .count()
 }
 
 pub(crate) fn write_headless_chunk_scenarios(

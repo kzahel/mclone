@@ -1,8 +1,9 @@
 # 102: Render Resource Rebuild Contract
 
-Status: active. Shared `RenderConfig` and `FlatRenderResources` bundle landed
-on 2026-06-27; developer-triggered runtime rebuild validation and broader
-platform adoption remain pending.
+Status: active. Shared `RenderConfig`, `FlatRenderResources`, desktop F8
+no-op rebuild trigger, and headless before/after rebuild smoke landed on
+2026-06-27; config-changing runtime rebuild validation and broader platform
+adoption remain pending.
 
 ## Purpose
 
@@ -236,8 +237,9 @@ Slice 2 validation on 2026-06-27:
 - [x] Keep `NativeSurfaceContext` responsible for `wgpu::Surface` and
   `SurfaceConfiguration`; it should pass `RenderConfig` into the shared rebuild
   path instead of owning renderer policy.
-- [ ] Add a developer-only trigger or CLI/test path that performs a no-op
-  rebuild and a config-changing rebuild while the world stays active.
+- [x] Add a developer-only trigger and CLI/test path that performs a no-op
+  rebuild while the world stays active.
+- [ ] Add a config-changing rebuild path while the world stays active.
 
 Slice 3 partial result:
 
@@ -253,8 +255,14 @@ Slice 3 partial result:
   GUI options.
 - `ChunkApp::rebuild_render_resources(...)` recreates the bundle from the
   current `NativeSurfaceContext` and reuploads CPU-owned runtime sections when
-  a world is active. It is currently used for initial construction; the
-  developer no-op/config-changing runtime trigger is still pending.
+  a world is active. It is currently used for initial construction and the
+  developer no-op trigger; config-changing runtime rebuild remains pending.
+- Desktop flat has a hidden developer F8 trigger that rebuilds the current
+  renderer resources in place and schedules a redraw.
+- `--renderer-rebuild-smoke <directory>` runs a deterministic offscreen no-op
+  rebuild smoke: render frame 0, rebuild/reupload on frame 1, render again,
+  save `before.png`/`after.png`, compare pixels exactly, and assert stable
+  runtime/camera/UI state across the rebuild.
 
 Slice 3 partial validation on 2026-06-27:
 
@@ -262,6 +270,17 @@ Slice 3 partial validation on 2026-06-27:
 - `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
 - `pnpm native:web:build`
 - `cargo check --manifest-path native/Cargo.toml -p mclone-android-client`
+
+Slice 3 no-op rebuild validation on 2026-06-27:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+- `pnpm native:web:build`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-client`
+- `cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --renderer-rebuild-smoke /tmp/mclone-render-rebuild-smoke --width 320 --height 180 --render-distance 2 --day-time 6000 --freeze-time --section-occlusion true`
+  produced exact pixel match (`mismatch_pixels=0`), reuploaded 166 sections,
+  and preserved state.
 
 ### Slice 4: Rebuild-Safe Dynamic Profile Toggle
 
@@ -275,11 +294,11 @@ Slice 3 partial validation on 2026-06-27:
 
 ### Slice 5: Validation Harness
 
-- [ ] Add a no-op rebuild test that renders before/after images and verifies no
+- [x] Add a no-op rebuild test that renders before/after images and verifies no
   meaningful pixel drift.
 - [ ] Add a config-changing rebuild smoke that proves camera position, selected
   session, UI state, and resident sections survive.
-- [ ] Save validation captures to `/tmp`, not the repo.
+- [x] Save validation captures to `/tmp`, not the repo.
 - [ ] Expose rebuild counts/timing in debug or perf diagnostics.
 
 ### Slice 6: Web, Android, And XR Adoption

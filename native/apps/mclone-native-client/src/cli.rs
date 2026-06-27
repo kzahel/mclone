@@ -118,6 +118,15 @@ pub(crate) struct HeadlessDualViewOptions {
     pub(crate) render_options: TexturedSectionRenderOptions,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RendererRebuildSmokeOptions {
+    pub(crate) directory: PathBuf,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) scene: SceneOptions,
+    pub(crate) render_options: TexturedSectionRenderOptions,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct XrClearSmokeOptions {
     pub(crate) frame_limit: Option<u32>,
@@ -283,6 +292,9 @@ pub(crate) enum Cli {
     HeadlessDualView {
         options: HeadlessDualViewOptions,
     },
+    RendererRebuildSmoke {
+        options: RendererRebuildSmokeOptions,
+    },
     MovementPerf {
         options: MovementPerfOptions,
     },
@@ -308,6 +320,7 @@ enum HeadlessMode {
     DualView(PathBuf),
     Ui(PathBuf),
     Screenshot(PathBuf),
+    RendererRebuildSmoke(PathBuf),
 }
 
 impl Cli {
@@ -476,6 +489,16 @@ impl Cli {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Screenshot(path))?;
+                }
+                "--renderer-rebuild-smoke" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--renderer-rebuild-smoke requires an output directory")?;
+                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                        bail!("headless output modes cannot be combined with perf modes");
+                    }
+                    set_headless_mode(&mut mode, HeadlessMode::RendererRebuildSmoke(path))?;
                 }
                 "--screenshot-ui" => {
                     screenshot_ui = parse_screenshot_ui_arg("--screenshot-ui", args.next())?;
@@ -652,6 +675,15 @@ impl Cli {
                     scripted_interaction: screenshot_scripted_interaction,
                     remote_settle_ms: screenshot_remote_settle_ms,
                     eye: screenshot_eye,
+                },
+            }),
+            Some(HeadlessMode::RendererRebuildSmoke(directory)) => Ok(Self::RendererRebuildSmoke {
+                options: RendererRebuildSmokeOptions {
+                    directory,
+                    width: width.unwrap_or(960),
+                    height: height.unwrap_or(540),
+                    scene,
+                    render_options,
                 },
             }),
             None if movement_perf => Ok(Self::MovementPerf {
@@ -901,12 +933,13 @@ fn print_help() {
            mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
+           mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
            mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-         Window mode streams chunks around a collision-backed local player with WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane toggle, O section-occlusion toggle, and L fullbright toggle. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
+         Window mode streams chunks around a collision-backed local player with WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane toggle, O section-occlusion toggle, L fullbright toggle, and F8 developer renderer-resource rebuild. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }

@@ -64,6 +64,7 @@ use mclone_render_session::{
 };
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
+const RENDER_RESOURCE_REBUILD_KEY: KeyCode = KeyCode::F8;
 const PLAYER_SURFACE_FEET_OFFSET: f64 = 1.0;
 const GROUND_PROBE_DISTANCE: f64 = 0.01;
 
@@ -1060,6 +1061,21 @@ impl ChunkApp {
         Ok(())
     }
 
+    fn trigger_render_resource_rebuild(&mut self, event_loop: &ActiveEventLoop) {
+        let result = load_asset_source()
+            .context("failed to load assets for render resource rebuild")
+            .and_then(|asset_source| self.rebuild_render_resources(&asset_source));
+        match result {
+            Ok(()) => {
+                log::info!("desktop flat render resource rebuild trigger completed");
+                self.schedule_next_redraw(event_loop);
+            }
+            Err(err) => {
+                log::error!("desktop flat render resource rebuild trigger failed: {err:#}");
+            }
+        }
+    }
+
     fn clear_draw_sections(&mut self) -> Result<()> {
         let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
         else {
@@ -1759,6 +1775,13 @@ impl ApplicationHandler for ChunkApp {
                     {
                         self.debug_visible = !self.debug_visible;
                         self.schedule_next_redraw(event_loop);
+                        return;
+                    }
+                    if key_code == RENDER_RESOURCE_REBUILD_KEY
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                    {
+                        self.trigger_render_resource_rebuild(event_loop);
                         return;
                     }
                     if event.state == ElementState::Pressed && self.ui.is_active() {

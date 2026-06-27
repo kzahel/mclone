@@ -414,6 +414,18 @@ pub fn write_headless_frame_png<T, F>(
 where
     F: FnOnce(RenderFrameContext<'_>) -> Result<T>,
 {
+    let (report, pixels, render_output) = capture_headless_frame(options, render)?;
+    save_rgba_png(&report.path, report.width, report.height, &pixels)?;
+    Ok((report, render_output))
+}
+
+pub fn capture_headless_frame<T, F>(
+    options: HeadlessFrameOptions,
+    render: F,
+) -> Result<(HeadlessFrameReport, Vec<u8>, T)>
+where
+    F: FnOnce(RenderFrameContext<'_>) -> Result<T>,
+{
     let width = options.width.max(1);
     let height = options.height.max(1);
     let (device, queue) = create_headless_device()?;
@@ -429,7 +441,6 @@ where
     queue.submit(std::iter::once(encoder.finish()));
 
     let pixels = read_rgba8(&device, &queue, &target.texture, width, height)?;
-    save_rgba_png(&options.path, width, height, &pixels)?;
 
     Ok((
         HeadlessFrameReport {
@@ -439,6 +450,7 @@ where
             byte_len: pixels.len(),
             non_clear_rgb_pixel_count: count_non_clear_rgb_pixels(&pixels),
         },
+        pixels,
         render_output,
     ))
 }
@@ -669,6 +681,90 @@ where
     ))
 }
 
+pub fn run_headless_capture_loop<S, Init, Frame>(
+    options: HeadlessFrameLoopOptions,
+    init: Init,
+    mut render_frame: Frame,
+) -> Result<(HeadlessFrameLoopReport, Vec<Vec<u8>>, S)>
+where
+    Init: FnOnce(&wgpu::Device, &wgpu::Queue, wgpu::TextureFormat, [u32; 2]) -> Result<S>,
+    Frame: FnMut(usize, RenderFrameContext<'_>, &mut S) -> Result<()>,
+{
+    let setup_start = Instant::now();
+    let width = options.width.max(1);
+    let height = options.height.max(1);
+    let (device, queue) = create_headless_device()?;
+    let target = OffscreenTarget::new(&device, width, height, HEADLESS_FORMAT);
+    let mut state = init(&device, &queue, HEADLESS_FORMAT, [width, height])?;
+    let setup_ms = elapsed_ms(setup_start.elapsed());
+    let mut frames = Vec::with_capacity(options.frame_count);
+    let mut pixels = Vec::with_capacity(options.frame_count);
+    let mut total_frame_ms = 0.0;
+    let mut min_frame_ms = f64::INFINITY;
+    let mut max_frame_ms = 0.0_f64;
+
+    for index in 0..options.frame_count {
+        let frame_start = Instant::now();
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_headless_capture_loop_encoder"),
+        });
+        let encode_start = Instant::now();
+        {
+            let frame =
+                RenderFrameContext::new(&device, &queue, &mut encoder, target.render_target());
+            render_frame(index, frame, &mut state)?;
+        }
+        let encode_ms = elapsed_ms(encode_start.elapsed());
+
+        let submit_start = Instant::now();
+        queue.submit(std::iter::once(encoder.finish()));
+        let submit_ms = elapsed_ms(submit_start.elapsed());
+
+        let poll_start = Instant::now();
+        device
+            .poll(wgpu::PollType::Wait)
+            .context("device poll failed")?;
+        let device_poll_ms = elapsed_ms(poll_start.elapsed());
+
+        pixels.push(read_rgba8(&device, &queue, &target.texture, width, height)?);
+
+        let frame_ms = elapsed_ms(frame_start.elapsed());
+        total_frame_ms += frame_ms;
+        min_frame_ms = min_frame_ms.min(frame_ms);
+        max_frame_ms = max_frame_ms.max(frame_ms);
+        frames.push(HeadlessFrameLoopTiming {
+            frame_ms,
+            encode_ms,
+            submit_ms,
+            device_poll_ms,
+        });
+    }
+
+    let frame_count = frames.len();
+    let average_frame_ms = if frame_count == 0 {
+        0.0
+    } else {
+        total_frame_ms / frame_count as f64
+    };
+    let min_frame_ms = if frame_count == 0 { 0.0 } else { min_frame_ms };
+
+    Ok((
+        HeadlessFrameLoopReport {
+            width,
+            height,
+            frame_count,
+            setup_ms,
+            total_frame_ms,
+            average_frame_ms,
+            min_frame_ms,
+            max_frame_ms,
+            frames,
+        },
+        pixels,
+        state,
+    ))
+}
+
 fn create_headless_device() -> Result<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(async {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -807,7 +903,7 @@ fn read_rgba8(
     Ok(pixels)
 }
 
-fn save_rgba_png(path: &Path, width: u32, height: u32, pixels: &[u8]) -> Result<()> {
+pub fn save_rgba_png(path: &Path, width: u32, height: u32, pixels: &[u8]) -> Result<()> {
     ensure_parent_dir(path)?;
     let image =
         image::RgbaImage::from_raw(width, height, pixels.to_vec()).context("invalid image size")?;
