@@ -43,7 +43,23 @@ Options:
   --smoke-seconds N   Seconds to wait after launch before validation.
   --asset-pack PATH   Local packed assets file to stage before launch.
   --skip-assets       Do not stage the packed Minecraft assets before launch.
-  --remote-addr ADDR  Set debug.mclone.remote_addr before launch.
+  --remote-addr ADDR  Add --remote-addr ADDR to mclone.startup.argv.
+  --seed SEED         Add --seed SEED to startup argv.
+  --chunk-x X         Add --chunk-x X to startup argv.
+  --chunk-z Z         Add --chunk-z Z to startup argv.
+  --render-distance N Add --render-distance N to startup argv.
+  --movement-speed-multiplier N
+                      Add --movement-speed-multiplier N to startup argv.
+  --day-time T        Add --day-time T to startup argv.
+  --freeze-time       Add --freeze-time to startup argv.
+  --lighting true|false
+                      Add --lighting VALUE to startup argv.
+  --section-occlusion true|false
+                      Add --section-occlusion VALUE to startup argv.
+  --fullbright true|false
+                      Add --fullbright VALUE to startup argv.
+  --render-color-profile PROFILE
+                      Add --render-color-profile PROFILE to startup argv.
   --touch-swipe SPEC  Inject a touch swipe before capture: x1,y1,x2,y2,duration_ms.
   -h, --help          Show this help.
 USAGE
@@ -52,6 +68,7 @@ USAGE
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --serial)
+            mclone_require_arg "$1" "${2:-}"
             SERIAL="$2"
             shift 2
             ;;
@@ -60,22 +77,27 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --screenshot)
+            mclone_require_arg "$1" "${2:-}"
             SCREENSHOT_PATH="$2"
             shift 2
             ;;
         --log)
+            mclone_require_arg "$1" "${2:-}"
             LOG_PATH="$2"
             shift 2
             ;;
         --timeout)
+            mclone_require_arg "$1" "${2:-}"
             BOOT_TIMEOUT_SECONDS="$2"
             shift 2
             ;;
         --smoke-seconds)
+            mclone_require_arg "$1" "${2:-}"
             SMOKE_SECONDS="$2"
             shift 2
             ;;
         --asset-pack)
+            mclone_require_arg "$1" "${2:-}"
             MCLONE_ANDROID_ASSET_PACK="$2"
             shift 2
             ;;
@@ -84,10 +106,21 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --remote-addr)
+            mclone_require_arg "$1" "${2:-}"
             MCLONE_ANDROID_REMOTE_ADDR="$2"
             shift 2
             ;;
+        --seed|--chunk-x|--chunk-z|--render-distance|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--render-color-profile)
+            mclone_require_arg "$1" "${2:-}"
+            MCLONE_ANDROID_STARTUP_ARGV+=("$1" "$2")
+            shift 2
+            ;;
+        --freeze-time)
+            MCLONE_ANDROID_STARTUP_ARGV+=("$1")
+            shift
+            ;;
         --touch-swipe)
+            mclone_require_arg "$1" "${2:-}"
             MCLONE_ANDROID_TOUCH_SWIPE="$2"
             shift 2
             ;;

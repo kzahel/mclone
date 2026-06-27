@@ -624,6 +624,7 @@ pub enum GameUiAction {
     CycleFpsCap,
     SetRenderDistance(i32),
     SetFlySpeed(f32),
+    SetMovementSpeed(f32),
     SetTouchLookSensitivity(f32),
     SetTouchControlsMode(TouchControlsMode),
     Quit,
@@ -706,6 +707,9 @@ pub struct GameUiRenderState {
     pub fly_speed_multiplier: f32,
     pub min_fly_speed_multiplier: f32,
     pub max_fly_speed_multiplier: f32,
+    pub movement_speed_multiplier: f32,
+    pub min_movement_speed_multiplier: f32,
+    pub max_movement_speed_multiplier: f32,
     pub frame_pacing_mode: GameFramePacingMode,
     pub fps_cap: u32,
     pub touch_controls_mode: Option<TouchControlsMode>,
@@ -724,6 +728,9 @@ impl Default for GameUiRenderState {
             fly_speed_multiplier: 1.0,
             min_fly_speed_multiplier: 0.5,
             max_fly_speed_multiplier: 8.0,
+            movement_speed_multiplier: 1.0,
+            min_movement_speed_multiplier: 0.125,
+            max_movement_speed_multiplier: 8.0,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: 120,
             touch_controls_mode: None,
@@ -754,6 +761,17 @@ impl GameUiRenderState {
     pub fn clamped_fly_speed_multiplier(self) -> f32 {
         let (min, max) = self.fly_speed_multiplier_limits();
         finite_or(self.fly_speed_multiplier, min).clamp(min, max)
+    }
+
+    pub fn movement_speed_multiplier_limits(self) -> (f32, f32) {
+        let min = finite_or(self.min_movement_speed_multiplier, 0.5);
+        let max = finite_or(self.max_movement_speed_multiplier, min);
+        (min.min(max), min.max(max))
+    }
+
+    pub fn clamped_movement_speed_multiplier(self) -> f32 {
+        let (min, max) = self.movement_speed_multiplier_limits();
+        finite_or(self.movement_speed_multiplier, min).clamp(min, max)
     }
 }
 
@@ -1414,6 +1432,7 @@ const ID_TITLE_JOIN_REMOTE: WidgetId = WidgetId(19);
 const ID_JOIN_REMOTE_CONNECT: WidgetId = WidgetId(20);
 const ID_JOIN_REMOTE_BACK: WidgetId = WidgetId(21);
 const ID_OPTIONS_TOUCH_CONTROLS: WidgetId = WidgetId(22);
+const ID_OPTIONS_MOVEMENT_SPEED: WidgetId = WidgetId(23);
 
 pub const DEFAULT_JOIN_REMOTE_ADDR: &str = "127.0.0.1:25565";
 
@@ -1521,6 +1540,7 @@ impl GameUi {
         let action = match self.pressed {
             Some(ID_OPTIONS_RADIUS) => Some(self.render_distance_action_at(point, state)),
             Some(ID_OPTIONS_FLY_SPEED) => Some(self.fly_speed_action_at(point, state)),
+            Some(ID_OPTIONS_MOVEMENT_SPEED) => Some(self.movement_speed_action_at(point, state)),
             Some(ID_OPTIONS_TOUCH_LOOK) => self.touch_look_action_at(point, state),
             _ => None,
         };
@@ -1553,6 +1573,9 @@ impl GameUi {
             }
             (Some(ID_OPTIONS_FLY_SPEED), Some(ID_OPTIONS_FLY_SPEED)) => {
                 Some(self.fly_speed_action_at(point, state))
+            }
+            (Some(ID_OPTIONS_MOVEMENT_SPEED), Some(ID_OPTIONS_MOVEMENT_SPEED)) => {
+                Some(self.movement_speed_action_at(point, state))
             }
             (Some(ID_OPTIONS_TOUCH_LOOK), Some(ID_OPTIONS_TOUCH_LOOK)) => {
                 self.touch_look_action_at(point, state)
@@ -1615,6 +1638,7 @@ impl GameUi {
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetRenderDistance(_)
             | GameUiAction::SetFlySpeed(_)
+            | GameUiAction::SetMovementSpeed(_)
             | GameUiAction::SetTouchLookSensitivity(_)
             | GameUiAction::SetTouchControlsMode(_)
             | GameUiAction::Quit => {}
@@ -1670,6 +1694,8 @@ impl GameUi {
                     Some(ID_OPTIONS_RADIUS)
                 } else if rects.fly_speed.contains(point) {
                     Some(ID_OPTIONS_FLY_SPEED)
+                } else if rects.movement_speed.contains(point) {
+                    Some(ID_OPTIONS_MOVEMENT_SPEED)
                 } else if rects
                     .touch_controls
                     .is_some_and(|rect| rect.contains(point))
@@ -1743,6 +1769,19 @@ impl GameUi {
             fly_speed_slider_value(state),
         );
         GameUiAction::SetFlySpeed(fly_speed_from_slider_value(
+            slider.value_from_point(point),
+            state,
+        ))
+    }
+
+    fn movement_speed_action_at(&self, point: Point, state: GameUiRenderState) -> GameUiAction {
+        let slider = Slider::new(
+            ID_OPTIONS_MOVEMENT_SPEED,
+            option_widgets(self.scale, state).movement_speed,
+            "",
+            movement_speed_slider_value(state),
+        );
+        GameUiAction::SetMovementSpeed(movement_speed_from_slider_value(
             slider.value_from_point(point),
             state,
         ))
@@ -1952,6 +1991,13 @@ impl GameUi {
             fly_speed_slider_value(state),
         )
         .render(draw, &self.font, self.interaction());
+        Slider::new(
+            ID_OPTIONS_MOVEMENT_SPEED,
+            widgets.movement_speed,
+            movement_speed_label(state),
+            movement_speed_slider_value(state),
+        )
+        .render(draw, &self.font, self.interaction());
         if let (Some(mode), Some(rect)) = (state.touch_controls_mode, widgets.touch_controls) {
             CycleButton::new(
                 ID_OPTIONS_TOUCH_CONTROLS,
@@ -1991,6 +2037,7 @@ struct OptionWidgetRects {
     fps_cap: Rect,
     radius: Rect,
     fly_speed: Rect,
+    movement_speed: Rect,
     touch_controls: Option<Rect>,
     touch_look: Option<Rect>,
     back: Rect,
@@ -2082,6 +2129,8 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
     y += 22.0;
     let fly_speed = Rect::new(row_x, y, 192.0, 20.0);
     y += 22.0;
+    let movement_speed = Rect::new(row_x, y, 192.0, 20.0);
+    y += 22.0;
     let touch_controls = if show_touch_controls {
         let rect = Rect::new(row_x, y, 192.0, 20.0);
         y += 22.0;
@@ -2107,6 +2156,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
         fps_cap,
         radius,
         fly_speed,
+        movement_speed,
         touch_controls,
         touch_look,
         back,
@@ -2116,7 +2166,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
 fn options_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
     let touch_rows =
         u8::from(state.touch_controls_mode.is_some()) + u8::from(state.touch_settings.is_some());
-    centered_panel(scale, 242.0, 222.0 + f32::from(touch_rows) * 22.0)
+    centered_panel(scale, 242.0, 244.0 + f32::from(touch_rows) * 22.0)
 }
 
 fn render_distance_slider_value(state: GameUiRenderState) -> f32 {
@@ -2164,6 +2214,32 @@ fn fly_speed_from_slider_value(value: f32, state: GameUiRenderState) -> f32 {
 
 fn fly_speed_label(state: GameUiRenderState) -> String {
     format!("Fly Speed: {:.1}x", state.clamped_fly_speed_multiplier())
+}
+
+fn movement_speed_slider_value(state: GameUiRenderState) -> f32 {
+    let (min, max) = state.movement_speed_multiplier_limits();
+    if max <= min || min <= 0.0 {
+        0.0
+    } else {
+        (state.clamped_movement_speed_multiplier().ln() - min.ln()) / (max.ln() - min.ln())
+    }
+}
+
+fn movement_speed_from_slider_value(value: f32, state: GameUiRenderState) -> f32 {
+    let (min, max) = state.movement_speed_multiplier_limits();
+    if max <= min || min <= 0.0 {
+        min
+    } else {
+        let raw = (min.ln() + value.clamp(0.0, 1.0) * (max.ln() - min.ln())).exp();
+        ((raw * 10.0).round() / 10.0).clamp(min, max)
+    }
+}
+
+fn movement_speed_label(state: GameUiRenderState) -> String {
+    format!(
+        "Movement Speed: {:.1}x",
+        state.clamped_movement_speed_multiplier()
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -3162,5 +3238,37 @@ mod tests {
         assert!(ui.pointer_down(point, state));
         let (_handled, action) = ui.pointer_up(point, state);
         assert_eq!(action, Some(GameUiAction::SetFlySpeed(0.5)));
+    }
+
+    #[test]
+    fn game_ui_options_movement_speed_slider_emits_movement_speed_action() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            movement_speed_multiplier: 1.0,
+            min_movement_speed_multiplier: 0.125,
+            max_movement_speed_multiplier: 8.0,
+            ..GameUiRenderState::default()
+        };
+
+        let movement_speed = option_widgets(ui.scale(), state).movement_speed;
+        let point = Point {
+            x: movement_speed.right() - 0.1,
+            y: movement_speed.y + movement_speed.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(action, Some(GameUiAction::SetMovementSpeed(8.0)));
+
+        let point = Point {
+            x: movement_speed.x,
+            y: movement_speed.y + movement_speed.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(action, Some(GameUiAction::SetMovementSpeed(0.125)));
     }
 }

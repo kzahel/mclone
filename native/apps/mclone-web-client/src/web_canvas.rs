@@ -46,15 +46,17 @@ use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameTarget;
 use mclone_render_session::{
-    ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
-    EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
-    EngineCameraMovementMode, EngineRenderCamera, RenderSectionCacheUpdate,
-    RenderSectionCompileAcceptanceReport, RenderSectionCompileRequest, RenderSectionCompileResult,
-    RenderSectionCompiler, RenderSectionNeighborReadiness, RenderSectionRemovalMode,
-    RenderSectionSyncPlan, RenderSectionViewSync, actor_instances_from_presentations,
-    build_client_textured_sections, build_render_sections_from_snapshots,
-    decode_textured_render_section_build_report, encode_textured_render_section_build_report,
-    render_section_chunk_pos, render_section_neighbor_readiness, snapshot_contains_render_section,
+    ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER,
+    ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
+    ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, EngineCameraController, EngineCameraFrameState,
+    EngineCameraInput, EngineCameraMovementImpulse, EngineCameraMovementMode, EngineRenderCamera,
+    RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport, RenderSectionCompileRequest,
+    RenderSectionCompileResult, RenderSectionCompiler, RenderSectionNeighborReadiness,
+    RenderSectionRemovalMode, RenderSectionSyncPlan, RenderSectionViewSync,
+    actor_instances_from_presentations, build_client_textured_sections,
+    build_render_sections_from_snapshots, decode_textured_render_section_build_report,
+    encode_textured_render_section_build_report, render_section_chunk_pos,
+    render_section_neighbor_readiness, snapshot_contains_render_section,
     summarize_textured_render_section_build_report,
 };
 use mclone_server::ServerRunnerKind;
@@ -208,6 +210,7 @@ pub async fn mclone_web_create_worker_chunk_render_session_with_startup(
     seed: i64,
     initial_center_x: i32,
     initial_center_z: i32,
+    movement_speed_multiplier: f32,
     section_occlusion_culling: bool,
     force_fullbright: bool,
     render_color_profile: String,
@@ -236,6 +239,7 @@ pub async fn mclone_web_create_worker_chunk_render_session_with_startup(
             x: initial_center_x,
             z: initial_center_z,
         },
+        movement_speed_multiplier,
         render_options,
     )
     .await
@@ -264,6 +268,7 @@ pub async fn mclone_web_create_remote_chunk_render_session_with_startup(
     websocket_url: String,
     initial_center_x: i32,
     initial_center_z: i32,
+    movement_speed_multiplier: f32,
     section_occlusion_culling: bool,
     force_fullbright: bool,
     render_color_profile: String,
@@ -282,6 +287,7 @@ pub async fn mclone_web_create_remote_chunk_render_session_with_startup(
             x: initial_center_x,
             z: initial_center_z,
         },
+        movement_speed_multiplier,
         render_options,
     )
     .await
@@ -2862,6 +2868,10 @@ impl WebChunkRenderSession {
             GameUiAction::SetFlySpeed(multiplier) => {
                 self.camera.set_fly_speed_multiplier(f64::from(multiplier));
             }
+            GameUiAction::SetMovementSpeed(multiplier) => {
+                self.camera
+                    .set_movement_speed_multiplier(f64::from(multiplier));
+            }
             GameUiAction::CreateWorld(seed) => {
                 self.session
                     .begin_start(SessionStartRequest::NewLocalWorld { seed });
@@ -2933,6 +2943,9 @@ impl WebChunkRenderSession {
                 GameUiAction::Quit => {
                     set_bool(&object, "shutdownRequested", true)?;
                 }
+                GameUiAction::SetMovementSpeed(multiplier) => {
+                    set_number(&object, "movementSpeedMultiplier", f64::from(multiplier))?;
+                }
                 GameUiAction::StartWorld
                 | GameUiAction::OpenNewWorld
                 | GameUiAction::OpenJoinRemote
@@ -2965,6 +2978,9 @@ impl WebChunkRenderSession {
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
             max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
+            movement_speed_multiplier: self.camera.movement_speed_multiplier() as f32,
+            min_movement_speed_multiplier: ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32,
+            max_movement_speed_multiplier: ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: WEB_FIXED_FPS_CAP,
             touch_controls_mode: Some(self.input_preferences.touch_controls),
@@ -2985,6 +3001,7 @@ impl WebChunkRenderSession {
             SessionStartRequest::NewLocalWorld { seed: SMOKE_SEED },
             WebRuntime::local_integrated(SMOKE_SEED),
             SMOKE_INITIAL_CENTER,
+            ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             TexturedSectionRenderOptions::default(),
         )
         .await
@@ -3003,6 +3020,7 @@ impl WebChunkRenderSession {
             SessionStartRequest::NewLocalWorld { seed },
             runtime,
             SMOKE_INITIAL_CENTER,
+            ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             TexturedSectionRenderOptions::default(),
         )
         .await
@@ -3013,6 +3031,7 @@ impl WebChunkRenderSession {
         asset_pack_bytes: Vec<u8>,
         config: WebIntegratedServerRunnerConfig,
         initial_center: ChunkPos,
+        movement_speed_multiplier: f32,
         render_options: TexturedSectionRenderOptions,
     ) -> Result<Self, String> {
         let seed = config.seed;
@@ -3023,6 +3042,7 @@ impl WebChunkRenderSession {
             SessionStartRequest::NewLocalWorld { seed },
             runtime,
             initial_center,
+            movement_speed_multiplier,
             render_options,
         )
         .await
@@ -3042,6 +3062,7 @@ impl WebChunkRenderSession {
             },
             runtime,
             SMOKE_INITIAL_CENTER,
+            ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             TexturedSectionRenderOptions::default(),
         )
         .await
@@ -3052,6 +3073,7 @@ impl WebChunkRenderSession {
         asset_pack_bytes: Vec<u8>,
         websocket_url: String,
         initial_center: ChunkPos,
+        movement_speed_multiplier: f32,
         render_options: TexturedSectionRenderOptions,
     ) -> Result<Self, String> {
         let runtime =
@@ -3064,6 +3086,7 @@ impl WebChunkRenderSession {
             },
             runtime,
             initial_center,
+            movement_speed_multiplier,
             render_options,
         )
         .await
@@ -3075,6 +3098,7 @@ impl WebChunkRenderSession {
         session_request: SessionStartRequest,
         runtime: WebRuntime,
         initial_center: ChunkPos,
+        movement_speed_multiplier: f32,
         render_options: TexturedSectionRenderOptions,
     ) -> Result<Self, String> {
         let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes)?;
@@ -3110,6 +3134,8 @@ impl WebChunkRenderSession {
         }
         ui.set_scale(GuiScale::from_pixels(context.width, context.height));
         let session = started_web_session_coordinator(session_request)?;
+        let mut camera = EngineCameraController::spawn_for_chunk(initial_center);
+        camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
 
         Ok(Self {
             context,
@@ -3117,7 +3143,7 @@ impl WebChunkRenderSession {
             sky,
             runtime,
             session,
-            camera: EngineCameraController::spawn_for_chunk(initial_center),
+            camera,
             interaction: ClientInteractionController::new(),
             actor_interpolation: ActorInterpolationState::new(),
             mesh_assets,
@@ -3205,7 +3231,10 @@ impl WebChunkRenderSession {
             SessionStartRequest::Unknown => {}
         }
         self.status_overlay = StatusOverlay::hidden();
+        let movement_speed_multiplier = self.camera.movement_speed_multiplier();
         self.camera = EngineCameraController::spawn_for_chunk(SMOKE_INITIAL_CENTER);
+        self.camera
+            .set_movement_speed_multiplier(movement_speed_multiplier);
         self.interaction = ClientInteractionController::new();
         self.actor_interpolation = ActorInterpolationState::new();
         self.draw = None;
@@ -4515,6 +4544,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::CycleFpsCap => "cycleFpsCap",
         GameUiAction::SetRenderDistance(_) => "setRenderDistance",
         GameUiAction::SetFlySpeed(_) => "setFlySpeed",
+        GameUiAction::SetMovementSpeed(_) => "setMovementSpeed",
         GameUiAction::SetTouchLookSensitivity(_) => "setTouchLookSensitivity",
         GameUiAction::SetTouchControlsMode(_) => "setTouchControlsMode",
         GameUiAction::Quit => "quit",
@@ -4580,6 +4610,11 @@ fn startup_options_to_js_value(options: &StartupOptions) -> Result<JsValue, Stri
         &object,
         "renderDistance",
         f64::from(options.scene.render_distance),
+    )?;
+    set_number(
+        &object,
+        "movementSpeedMultiplier",
+        f64::from(options.scene.movement_speed_multiplier),
     )?;
     if let Some(remote_addr) = &options.scene.remote_addr {
         set_string(&object, "remoteWebSocketUrl", remote_addr)?;

@@ -883,6 +883,9 @@ pub const ENGINE_CAMERA_MAX_SPEED_BLOCKS_PER_SECOND: f64 = 256.0;
 /// the slider's midpoint.
 pub const ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER: f64 = 0.125;
 pub const ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER: f64 = 8.0;
+pub const ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER: f64 = 1.0;
+pub const ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER: f64 = 0.125;
+pub const ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER: f64 = 8.0;
 pub const ENGINE_CAMERA_MOUSE_SENSITIVITY: f64 = 0.0035;
 pub const ENGINE_CAMERA_SPAWN_Y: f64 = 104.0;
 pub const ENGINE_CAMERA_SPAWN_YAW_RADIANS: f64 = 0.55;
@@ -1078,6 +1081,7 @@ pub struct EngineCameraController {
     player: LocalPlayerController,
     movement_mode: EngineCameraMovementMode,
     speed_blocks_per_second: f64,
+    movement_speed_multiplier: f64,
     landing_events: Vec<LandingEvent>,
 }
 
@@ -1113,6 +1117,7 @@ impl EngineCameraController {
             player,
             movement_mode: EngineCameraMovementMode::Walking,
             speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
+            movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER,
             landing_events: Vec::new(),
         }
     }
@@ -1226,6 +1231,15 @@ impl EngineCameraController {
             return;
         }
         self.set_speed_blocks_per_second(multiplier * ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND);
+    }
+
+    /// Current walking movement speed multiplier.
+    pub const fn movement_speed_multiplier(&self) -> f64 {
+        self.movement_speed_multiplier
+    }
+
+    pub fn set_movement_speed_multiplier(&mut self, multiplier: f64) {
+        self.movement_speed_multiplier = clamp_movement_speed_multiplier(multiplier);
     }
 
     pub fn adjust_speed(&mut self, wheel_amount: f64) {
@@ -1410,6 +1424,7 @@ impl EngineCameraController {
                 client,
                 WalkingMovementStep {
                     y_rot_degrees,
+                    speed_multiplier: self.movement_speed_multiplier,
                     dt_seconds,
                 },
                 input
@@ -1458,6 +1473,17 @@ fn clamp_camera_speed(speed_blocks_per_second: f64) -> f64 {
         )
     } else {
         ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND
+    }
+}
+
+fn clamp_movement_speed_multiplier(multiplier: f64) -> f64 {
+    if multiplier.is_finite() {
+        multiplier.clamp(
+            ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
+            ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
+        )
+    } else {
+        ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER
     }
 }
 
@@ -3377,6 +3403,41 @@ mod tests {
         assert_eq!(camera.movement_mode(), EngineCameraMovementMode::Walking);
         assert!(after.eye.z > before.eye.z);
         assert!(camera.player().delta_movement().y < 0.0);
+    }
+
+    #[test]
+    fn engine_camera_controller_applies_walking_speed_multiplier() {
+        let client = ClientRuntime::local_integrated();
+        let input = EngineCameraInput {
+            dt_seconds: 0.05,
+            forward: true,
+            ..EngineCameraInput::default()
+        };
+        let mut normal =
+            EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), 0.0, 0.0, 32.0);
+        let mut faster =
+            EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), 0.0, 0.0, 32.0);
+        faster.set_movement_speed_multiplier(2.0);
+
+        let normal_before = normal.snapshot();
+        let fast_before = faster.snapshot();
+        let normal_after = normal.apply_movement_input(&client, input);
+        let fast_after = faster.apply_movement_input(&client, input);
+
+        assert_eq!(normal.movement_speed_multiplier(), 1.0);
+        assert_eq!(faster.movement_speed_multiplier(), 2.0);
+        assert!(fast_after.eye.z - fast_before.eye.z > normal_after.eye.z - normal_before.eye.z);
+
+        faster.set_movement_speed_multiplier(20.0);
+        assert_eq!(
+            faster.movement_speed_multiplier(),
+            ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER
+        );
+        faster.set_movement_speed_multiplier(f64::NAN);
+        assert_eq!(
+            faster.movement_speed_multiplier(),
+            ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER
+        );
     }
 
     #[test]

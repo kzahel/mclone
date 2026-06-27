@@ -6,6 +6,7 @@ use mclone_app_runtime::startup_args::{
     parse_u32_arg, parse_u64_arg,
 };
 use mclone_render::chunk::TexturedSectionRenderOptions;
+use mclone_render_session::ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER;
 
 use crate::camera::{SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED};
 use crate::{
@@ -20,7 +21,7 @@ const MAX_SCREENSHOT_REMOTE_SETTLE_MS: u64 = 10_000;
 const DEFAULT_XR_CLEAR_SMOKE_FRAMES: u32 = 120;
 const MAX_XR_SMOKE_FRAMES: u32 = 4096;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SceneOptions {
     pub(crate) seed: i64,
     pub(crate) chunk_x: i32,
@@ -33,6 +34,7 @@ pub(crate) struct SceneOptions {
     /// Debug: stop the integrated server from advancing the day/night clock, so a
     /// forced (or initial) `dayTime` stays put for inspection.
     pub(crate) freeze_time: bool,
+    pub(crate) movement_speed_multiplier: f32,
     /// Debug/perf switch: bypass native `ChunkStatus::Light` promotion and let
     /// generated `Features` snapshots stream directly to the client.
     pub(crate) lighting_enabled: bool,
@@ -206,6 +208,7 @@ impl Default for SceneOptions {
             remote_addr: None,
             day_time_override: None,
             freeze_time: false,
+            movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             lighting_enabled: true,
         }
     }
@@ -222,6 +225,7 @@ impl SceneOptions {
             remote_addr: self.remote_addr.clone(),
             day_time_override: self.day_time_override,
             freeze_time: self.freeze_time,
+            movement_speed_multiplier: self.movement_speed_multiplier,
             lighting_enabled: self.lighting_enabled,
         }
     }
@@ -236,6 +240,7 @@ impl SceneOptions {
             remote_addr: scene.remote_addr,
             day_time_override: scene.day_time_override,
             freeze_time: scene.freeze_time,
+            movement_speed_multiplier: scene.movement_speed_multiplier,
             lighting_enabled: scene.lighting_enabled,
         })
     }
@@ -889,11 +894,11 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-          mclone-native-client [--menu|--start-in-world true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+          mclone-native-client [--menu|--start-in-world true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --headless-ui /tmp/mclone-ui-title.png [--width 960] [--height 540]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|new-world|join-remote|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
-           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|new-world|join-remote|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
@@ -901,7 +906,7 @@ fn print_help() {
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
-           mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-         Window mode streams chunks around a collision-backed local player with WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane toggle, O section-occlusion toggle, and L fullbright toggle. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
+           mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+         Window mode streams chunks around a collision-backed local player with WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane toggle, O section-occlusion toggle, and L fullbright toggle. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }

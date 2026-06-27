@@ -28,6 +28,19 @@ mclone_configure_msys_adb_path_conversion() {
 
 mclone_configure_msys_adb_path_conversion
 
+if [[ -n "${ANDROID_DIR:-}" && -f "$ANDROID_DIR/startup-properties.sh" ]]; then
+    source "$ANDROID_DIR/startup-properties.sh"
+fi
+
+mclone_require_arg() {
+    local option="$1"
+    local value="${2:-}"
+    [[ -n "$value" ]] || mclone_die "$option requires a value"
+}
+
+MCLONE_ANDROID_STARTUP_ARGV=()
+MCLONE_ANDROID_EFFECTIVE_STARTUP_ARGV=()
+
 mclone_windows_local_android_sdk() {
     if [[ -n "${LOCALAPPDATA:-}" && "$(uname -s 2>/dev/null || true)" =~ MINGW|MSYS|CYGWIN ]] && command -v cygpath >/dev/null 2>&1; then
         cygpath -u "$LOCALAPPDATA/Android/Sdk"
@@ -570,6 +583,9 @@ mclone_install_launch_smoke() {
     local screenshot_path="$2"
     local log_path="$3"
     local smoke_seconds="$4"
+    local startup_argv_json=""
+    local launch_component
+    local remote_launch_command
     local launch_output
     local pid
     local focused_line
@@ -586,12 +602,23 @@ mclone_install_launch_smoke() {
     fi
 
     mclone_configure_remote_addr "$serial"
+    mclone_android_collect_startup_argv
+    if ((${#MCLONE_ANDROID_EFFECTIVE_STARTUP_ARGV[@]} > 0)); then
+        startup_argv_json="$(mclone_android_startup_argv_json "${MCLONE_ANDROID_EFFECTIVE_STARTUP_ARGV[@]}")"
+        mclone_note "Startup argv intent extra: $startup_argv_json"
+    fi
 
     "$ADB" -s "$serial" shell am force-stop "$MCLONE_ANDROID_APP_ID" >/dev/null 2>&1 || true
     "$ADB" -s "$serial" logcat -c || true
 
     mclone_note "Launching $MCLONE_ANDROID_APP_ID/$MCLONE_ANDROID_ACTIVITY"
-    launch_output="$("$ADB" -s "$serial" shell am start -W -n "$MCLONE_ANDROID_APP_ID/$MCLONE_ANDROID_ACTIVITY" 2>&1 | tr -d '\r')"
+    launch_component="$MCLONE_ANDROID_APP_ID/$MCLONE_ANDROID_ACTIVITY"
+    remote_launch_command="am start -W -n $(mclone_android_shell_quote "$launch_component")"
+    if [[ -n "$startup_argv_json" ]]; then
+        remote_launch_command+=" --es $(mclone_android_shell_quote "$STARTUP_ARGV_INTENT_EXTRA")"
+        remote_launch_command+=" $(mclone_android_shell_quote "$startup_argv_json")"
+    fi
+    launch_output="$("$ADB" -s "$serial" shell "$remote_launch_command" 2>&1 | tr -d '\r')"
     echo "$launch_output"
     if printf '%s\n' "$launch_output" | grep -F "Status: ok" >/dev/null; then
         :
@@ -651,14 +678,24 @@ mclone_install_launch_smoke() {
 
 mclone_configure_remote_addr() {
     local serial="$1"
-    local property="${MCLONE_ANDROID_REMOTE_ADDR_PROPERTY:-debug.mclone.remote_addr}"
+    local property="${MCLONE_ANDROID_REMOTE_ADDR_PROPERTY:-${REMOTE_ADDR_PROPERTY:-debug.mclone.remote_addr}}"
     local remote_addr="${MCLONE_ANDROID_REMOTE_ADDR:-}"
+    local none_sentinel="${REMOTE_ADDR_NONE_SENTINEL:-__mclone_none__}"
 
-    if [[ -n "$remote_addr" ]]; then
-        mclone_note "Configuring Android remote dedicated address $property=$remote_addr"
+    if [[ -n "$remote_addr" && "${MCLONE_ANDROID_REMOTE_ADDR_VIA_PROPERTY:-0}" == "1" ]]; then
+        mclone_note "Configuring legacy Android remote dedicated address $property=$remote_addr"
         "$ADB" -s "$serial" shell setprop "$property" "$remote_addr" >/dev/null
     else
-        mclone_note "Clearing Android remote dedicated address $property"
-        "$ADB" -s "$serial" shell setprop "$property" "__mclone_none__" >/dev/null
+        mclone_note "Clearing legacy Android remote dedicated address $property"
+        "$ADB" -s "$serial" shell setprop "$property" "$none_sentinel" >/dev/null
+    fi
+}
+
+mclone_android_collect_startup_argv() {
+    local remote_addr="${MCLONE_ANDROID_REMOTE_ADDR:-}"
+
+    MCLONE_ANDROID_EFFECTIVE_STARTUP_ARGV=("${MCLONE_ANDROID_STARTUP_ARGV[@]}")
+    if [[ -n "$remote_addr" && "${MCLONE_ANDROID_REMOTE_ADDR_VIA_PROPERTY:-0}" != "1" ]]; then
+        MCLONE_ANDROID_EFFECTIVE_STARTUP_ARGV+=(--remote-addr "$remote_addr")
     fi
 }

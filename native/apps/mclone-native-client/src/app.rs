@@ -54,7 +54,8 @@ use mclone_app_runtime::session::{
 };
 use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 use mclone_render_session::{
-    ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
+    ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
+    ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
     EngineCameraMovementMode, EngineCameraSnapshot, RenderSectionCacheUpdate,
     actor_instances_from_presentations, render_camera_from_snapshot,
@@ -101,6 +102,7 @@ pub(crate) fn game_ui_render_state(
     frame_pacing: FramePacingUiState,
     fly_enabled: bool,
     fly_speed_multiplier: f32,
+    movement_speed_multiplier: f32,
 ) -> GameUiRenderState {
     GameUiRenderState {
         render_distance,
@@ -112,6 +114,9 @@ pub(crate) fn game_ui_render_state(
         fly_speed_multiplier,
         min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
         max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
+        movement_speed_multiplier,
+        min_movement_speed_multiplier: ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32,
+        max_movement_speed_multiplier: ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32,
         frame_pacing_mode: game_frame_pacing_mode(frame_pacing.mode),
         fps_cap: frame_pacing.fps_cap,
         touch_controls_mode: None,
@@ -281,7 +286,8 @@ impl ChunkApp {
         start_intent: WindowStartIntent,
     ) -> Self {
         let spectator = SpectatorCamera::spawn_for_scene(&scene);
-        let camera = engine_camera_controller_from_spectator(&spectator);
+        let camera =
+            engine_camera_controller_from_spectator(&spectator, scene.movement_speed_multiplier);
         let seed_reroll_state = initial_seed_reroll_state(scene.seed);
         let mut ui = match start_intent {
             WindowStartIntent::InWorld => GameUi::new_ingame(),
@@ -473,6 +479,7 @@ impl ChunkApp {
             self.frame_pacing.ui_state(),
             self.camera.movement_mode() == EngineCameraMovementMode::NoClip,
             self.camera.fly_speed_multiplier() as f32,
+            self.camera.movement_speed_multiplier() as f32,
         );
         state.touch_controls_mode = Some(self.input_preferences.touch_controls);
         state
@@ -642,6 +649,7 @@ impl ChunkApp {
             action,
             GameUiAction::SetRenderDistance(_)
                 | GameUiAction::SetFlySpeed(_)
+                | GameUiAction::SetMovementSpeed(_)
                 | GameUiAction::SetTouchLookSensitivity(_)
                 | GameUiAction::SetTouchControlsMode(_)
         );
@@ -679,6 +687,16 @@ impl ChunkApp {
                     "fly speed set to {:.1}x ({:.0} blocks/s)",
                     self.camera.fly_speed_multiplier(),
                     self.camera.speed_blocks_per_second()
+                );
+            }
+            GameUiAction::SetMovementSpeed(multiplier) => {
+                self.camera
+                    .set_movement_speed_multiplier(f64::from(multiplier));
+                self.scene.movement_speed_multiplier =
+                    self.camera.movement_speed_multiplier() as f32;
+                log::info!(
+                    "movement speed multiplier set to {:.1}x",
+                    self.camera.movement_speed_multiplier()
                 );
             }
             GameUiAction::SetTouchControlsMode(mode) => {
@@ -811,7 +829,10 @@ impl ChunkApp {
 
     fn reset_world_local_state(&mut self) {
         self.spectator = SpectatorCamera::spawn_for_scene(&self.scene);
-        self.camera = engine_camera_controller_from_spectator(&self.spectator);
+        self.camera = engine_camera_controller_from_spectator(
+            &self.spectator,
+            self.scene.movement_speed_multiplier,
+        );
         self.actor_interpolation = ActorInterpolationState::new();
         self.interaction = ClientInteractionController::new();
         self.flat_input.clear_held();
@@ -1301,13 +1322,18 @@ fn session_start_request_for_scene(scene: &SceneOptions) -> SessionStartRequest 
     )
 }
 
-fn engine_camera_controller_from_spectator(spectator: &SpectatorCamera) -> EngineCameraController {
-    EngineCameraController::from_eye_pose(
+fn engine_camera_controller_from_spectator(
+    spectator: &SpectatorCamera,
+    movement_speed_multiplier: f32,
+) -> EngineCameraController {
+    let mut camera = EngineCameraController::from_eye_pose(
         vec3d_from_glam(spectator.position),
         f64::from(spectator.yaw),
         f64::from(spectator.pitch),
         f64::from(spectator.speed),
-    )
+    );
+    camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
+    camera
 }
 
 fn sync_spectator_from_camera(spectator: &mut SpectatorCamera, camera: &EngineCameraController) {

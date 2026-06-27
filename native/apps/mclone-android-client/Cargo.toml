@@ -8,6 +8,7 @@ publish.workspace = true
 [target.'cfg(target_os = "android")'.dependencies]
 anyhow.workspace = true
 glam.workspace = true
+jni.workspace = true
 log.workspace = true
 mclone-audio.workspace = true
 mclone-app-runtime.workspace = true
@@ -22,6 +23,7 @@ mclone-render-session.workspace = true
 mclone-server.workspace = true
 mclone-ui.workspace = true
 pollster.workspace = true
+serde_json.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 

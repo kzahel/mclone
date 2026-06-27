@@ -31,10 +31,11 @@ use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiRenderer};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render_session::{
-    ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
-    ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineCameraInput,
-    EngineCameraMovementImpulse, EngineCameraMovementMode, EngineCameraSnapshot,
-    actor_instances_from_presentations,
+    ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER,
+    ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
+    ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MOUSE_SENSITIVITY,
+    EngineCameraController, EngineCameraInput, EngineCameraMovementImpulse,
+    EngineCameraMovementMode, EngineCameraSnapshot, actor_instances_from_presentations,
 };
 use mclone_ui::{
     DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState,
@@ -85,12 +86,13 @@ impl XrLocomotionMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct XrSceneOptions {
     pub seed: i64,
     pub chunk_x: i32,
     pub chunk_z: i32,
     pub render_distance: u32,
+    pub movement_speed_multiplier: f32,
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
     pub lighting_enabled: bool,
@@ -103,6 +105,7 @@ impl Default for XrSceneOptions {
             chunk_x: DEFAULT_XR_CHUNK_X,
             chunk_z: DEFAULT_XR_CHUNK_Z,
             render_distance: DEFAULT_XR_RENDER_DISTANCE,
+            movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             day_time_override: None,
             freeze_time: false,
             lighting_enabled: true,
@@ -120,6 +123,16 @@ impl XrSceneOptions {
             bail!(
                 "XR render distance must be between 1 and {MAX_XR_RENDER_DISTANCE}, got {}",
                 self.render_distance
+            );
+        }
+        let min = ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32;
+        let max = ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32;
+        if !self.movement_speed_multiplier.is_finite()
+            || !(min..=max).contains(&self.movement_speed_multiplier)
+        {
+            bail!(
+                "XR movement speed multiplier must be between {min} and {max}, got {}",
+                self.movement_speed_multiplier
             );
         }
         Ok(self)
@@ -380,8 +393,14 @@ where
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
         let scene = scene.validated()?;
-        let started =
-            start_xr_terrain_runtime(device, queue, color_format, runtime, startup_view_pose)?;
+        let started = start_xr_terrain_runtime(
+            device,
+            queue,
+            color_format,
+            runtime,
+            scene.movement_speed_multiplier,
+            startup_view_pose,
+        )?;
         let ui = xr_game_ui_for_session(started.runtime.active_session(), scene.seed);
         let state = Self {
             scene,
@@ -1094,6 +1113,9 @@ where
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
             max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
+            movement_speed_multiplier: self.camera.movement_speed_multiplier() as f32,
+            min_movement_speed_multiplier: ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32,
+            max_movement_speed_multiplier: ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: self
                 .display_refresh_hz
@@ -1264,16 +1286,22 @@ where
                 return Err(error);
             }
         };
-        let started =
-            match start_xr_terrain_runtime(device, queue, self.color_format, runtime, None) {
-                Ok(started) => started,
-                Err(error) => {
-                    log::error!("failed to warm XR session {request:?}: {error:#}");
-                    self.session_status =
-                        StatusOverlay::new(request.default_failure_message(), false);
-                    return Err(error);
-                }
-            };
+        let movement_speed_multiplier = scene.movement_speed_multiplier;
+        let started = match start_xr_terrain_runtime(
+            device,
+            queue,
+            self.color_format,
+            runtime,
+            movement_speed_multiplier,
+            None,
+        ) {
+            Ok(started) => started,
+            Err(error) => {
+                log::error!("failed to warm XR session {request:?}: {error:#}");
+                self.session_status = StatusOverlay::new(request.default_failure_message(), false);
+                return Err(error);
+            }
+        };
 
         self.scene = scene;
         self.runtime = started.runtime;
@@ -1353,6 +1381,16 @@ where
                     "XR fly speed set to {:.1}x ({:.0} blocks/s)",
                     self.camera.fly_speed_multiplier(),
                     self.camera.speed_blocks_per_second()
+                );
+            }
+            GameUiAction::SetMovementSpeed(multiplier) => {
+                self.camera
+                    .set_movement_speed_multiplier(f64::from(multiplier));
+                self.scene.movement_speed_multiplier =
+                    self.camera.movement_speed_multiplier() as f32;
+                log::info!(
+                    "XR movement speed multiplier set to {:.1}x",
+                    self.camera.movement_speed_multiplier()
                 );
             }
             GameUiAction::Quit => {
@@ -1482,6 +1520,7 @@ fn start_xr_terrain_runtime<S>(
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,
     mut runtime: NativeSingleViewSessionRuntime<S>,
+    movement_speed_multiplier: f32,
     startup_view_pose: Option<XrStartupViewPose>,
 ) -> Result<StartedXrTerrainRuntime<S>>
 where
@@ -1492,6 +1531,7 @@ where
     let host_label = runtime.host_label();
     let session_label = active_session_label(runtime.active_session());
     let mut camera = EngineCameraController::spawn_for_chunk(center);
+    camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
     let initial_poll_start = Instant::now();
     let (initial_poll_count, initial_poll_ms) = runtime
         .poll_until_idle()

@@ -1,6 +1,9 @@
 #![deny(unsafe_code)]
 
 #[cfg(target_os = "android")]
+use mclone_render::color_profile::{RenderColorProfile, preferred_surface_format_for_profile};
+
+#[cfg(target_os = "android")]
 mod android {
     use std::ffi::{CStr, CString, c_char, c_int};
     use std::sync::Arc;
@@ -21,6 +24,9 @@ mod android {
     use mclone_app_runtime::session::{
         ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
     };
+    use mclone_app_runtime::startup_args::{
+        RenderDistanceLimits, StartupArgState, StartupSceneOptions,
+    };
     use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
     use mclone_client::ClientInteractionController;
     use mclone_core::{ChunkPos, Vec3d};
@@ -36,14 +42,15 @@ mod android {
         ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
         TexturedSectionUploadReport,
     };
-    use mclone_render::color_profile::{RenderColorProfile, preferred_surface_format_for_profile};
     use mclone_render::gui::GuiRenderer;
     use mclone_render::sky_render::SkyRenderer;
     use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
     use mclone_render_session::{
-        ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
-        ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraController, EngineCameraInput,
-        EngineCameraMovementImpulse, EngineCameraMovementMode, EngineRenderCamera,
+        ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER,
+        ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
+        ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MOUSE_SENSITIVITY,
+        EngineCameraController, EngineCameraInput, EngineCameraMovementImpulse,
+        EngineCameraMovementMode, EngineRenderCamera,
     };
     use mclone_ui::{
         DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameFramePacingMode, GameUi,
@@ -64,6 +71,7 @@ mod android {
     use winit::window::{Window, WindowAttributes, WindowId};
 
     const LOG_TAG: &str = "mclone_android";
+    const STARTUP_ARGV_INTENT_EXTRA: &str = "mclone.startup.argv";
     const REMOTE_ADDR_PROPERTY: &str = "debug.mclone.remote_addr";
     const REMOTE_ADDR_NONE_SENTINEL: &str = "__mclone_none__";
     const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
@@ -336,7 +344,10 @@ mod android {
     }
 
     impl AndroidGpuState {
-        fn new(window: Arc<Window>) -> Result<Self, String> {
+        fn new(
+            window: Arc<Window>,
+            startup_options: AndroidStartupOptions,
+        ) -> Result<Self, String> {
             let size = window.inner_size();
             let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
                 backends: wgpu::Backends::VULKAN,
@@ -389,6 +400,7 @@ mod android {
                 config.format,
                 config.width,
                 config.height,
+                startup_options,
             )
             .map_err(|error| format!("initialize Android mclone renderer: {error:#}"))?;
             log::info!(
@@ -533,11 +545,12 @@ mod android {
             format: wgpu::TextureFormat,
             width: u32,
             height: u32,
+            startup_options: AndroidStartupOptions,
         ) -> Result<Self> {
-            let scene_options = android_scene_options();
+            let scene_options = startup_options.scene.clone();
             let started = start_android_render_scene(device, queue, format, scene_options.clone())?;
             let depth = ChunkDepthTarget::new(device, width, height);
-            let render_options = TexturedSectionRenderOptions::default();
+            let render_options = startup_options.render_options;
             let sky =
                 SkyRenderer::new_with_color_profile(device, format, render_options.color_profile);
             let audio = match load_asset_source()
@@ -1201,6 +1214,16 @@ mod android {
                         self.camera.speed_blocks_per_second()
                     );
                 }
+                GameUiAction::SetMovementSpeed(multiplier) => {
+                    self.camera
+                        .set_movement_speed_multiplier(f64::from(multiplier));
+                    self.scene_options.movement_speed_multiplier =
+                        self.camera.movement_speed_multiplier() as f32;
+                    log::info!(
+                        "Mclone Android movement speed multiplier set to {:.1}x",
+                        self.camera.movement_speed_multiplier()
+                    );
+                }
                 GameUiAction::Quit => {
                     result.quit = true;
                 }
@@ -1285,6 +1308,9 @@ mod android {
                 fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
                 min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
                 max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
+                movement_speed_multiplier: self.camera.movement_speed_multiplier() as f32,
+                min_movement_speed_multiplier: ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32,
+                max_movement_speed_multiplier: ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32,
                 frame_pacing_mode: GameFramePacingMode::Vsync,
                 fps_cap: ANDROID_FIXED_FPS_CAP,
                 touch_controls_mode: Some(self.input_preferences.touch_controls),
@@ -1564,10 +1590,12 @@ mod android {
         format: wgpu::TextureFormat,
         options: AndroidSceneOptions,
     ) -> Result<StartedAndroidRenderScene> {
+        let movement_speed_multiplier = options.movement_speed_multiplier;
         let mut scene = android_single_view_scene_runtime(options)?;
         let host_label = scene.host_label();
         let session_label = active_session_label(scene.active_session());
         let mut camera = EngineCameraController::spawn_for_chunk(scene.interest_center());
+        camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
         let (poll_count, poll_ms) = scene.poll_until_idle()?;
         log::info!(
             "Mclone Android {host_label} runtime idle: session={} polls={} poll_ms={:.1} loaded_chunks={}",
@@ -1646,8 +1674,10 @@ mod android {
         seed: i64,
         center: ChunkPos,
         render_distance: u32,
+        movement_speed_multiplier: f32,
         day_time_override: Option<u64>,
         freeze_time: bool,
+        lighting_enabled: bool,
         remote_addr: Option<String>,
     }
 
@@ -1656,10 +1686,100 @@ mod android {
             LocalSingleViewSceneOptions::new(self.seed, self.center, self.render_distance)
                 .with_day_time(self.day_time_override)
                 .with_freeze_time(self.freeze_time)
+                .with_lighting_enabled(self.lighting_enabled)
         }
 
         fn host_options(&self) -> SingleViewHostOptions {
             SingleViewHostOptions::new(self.center, self.render_distance)
+        }
+
+        fn validated(self) -> Result<Self> {
+            if self.render_distance == 0
+                || self.render_distance > ANDROID_MAX_RENDER_DISTANCE as u32
+            {
+                bail!(
+                    "Android render distance must be between {} and {}, got {}",
+                    ANDROID_MIN_RENDER_DISTANCE,
+                    ANDROID_MAX_RENDER_DISTANCE,
+                    self.render_distance
+                );
+            }
+            let min = ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32;
+            let max = ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32;
+            if !self.movement_speed_multiplier.is_finite()
+                || !(min..=max).contains(&self.movement_speed_multiplier)
+            {
+                bail!(
+                    "Android movement speed multiplier must be between {min} and {max}, got {}",
+                    self.movement_speed_multiplier
+                );
+            }
+            Ok(self)
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct AndroidStartupOptions {
+        scene: AndroidSceneOptions,
+        render_options: TexturedSectionRenderOptions,
+    }
+
+    fn parse_android_startup_options(
+        startup_argv_json: Option<&str>,
+    ) -> Result<AndroidStartupOptions> {
+        let mut shared_args = StartupArgState::new(
+            android_startup_scene_defaults(),
+            TexturedSectionRenderOptions::default(),
+        );
+        if let Some(json) = startup_argv_json.filter(|json| !json.trim().is_empty()) {
+            let argv = serde_json::from_str::<Vec<String>>(json)
+                .context("parse Android startup argv JSON")?;
+            let mut argv = argv.into_iter();
+            while let Some(arg) = argv.next() {
+                if shared_args.parse_next_arg(
+                    &arg,
+                    &mut argv,
+                    RenderDistanceLimits::new(
+                        ANDROID_MIN_RENDER_DISTANCE as u32,
+                        ANDROID_MAX_RENDER_DISTANCE as u32,
+                    ),
+                )? {
+                    continue;
+                }
+                bail!("unsupported Android startup argument `{arg}`");
+            }
+        }
+        let options = shared_args.finish();
+        Ok(AndroidStartupOptions {
+            scene: android_scene_options_from_startup(options.scene).validated()?,
+            render_options: options.render_options,
+        })
+    }
+
+    fn android_startup_scene_defaults() -> StartupSceneOptions {
+        StartupSceneOptions {
+            seed: 12345,
+            chunk_x: 0,
+            chunk_z: 0,
+            render_distance: 2,
+            movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
+            remote_addr: None,
+            day_time_override: Some(6000),
+            freeze_time: true,
+            lighting_enabled: true,
+        }
+    }
+
+    fn android_scene_options_from_startup(scene: StartupSceneOptions) -> AndroidSceneOptions {
+        AndroidSceneOptions {
+            seed: scene.seed,
+            center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
+            render_distance: scene.render_distance,
+            movement_speed_multiplier: scene.movement_speed_multiplier,
+            day_time_override: scene.day_time_override,
+            freeze_time: scene.freeze_time,
+            lighting_enabled: scene.lighting_enabled,
+            remote_addr: scene.remote_addr,
         }
     }
 
@@ -1691,27 +1811,6 @@ mod android {
             .max(1)
     }
 
-    fn android_scene_options() -> AndroidSceneOptions {
-        let remote_addr = android_remote_addr();
-        if let Some(remote_addr) = &remote_addr {
-            log::info!(
-                "Mclone Android remote dedicated address from {REMOTE_ADDR_PROPERTY}: {remote_addr}"
-            );
-        } else {
-            log::info!(
-                "Mclone Android remote dedicated address from {REMOTE_ADDR_PROPERTY}: <none>"
-            );
-        }
-        AndroidSceneOptions {
-            seed: 12345,
-            center: ChunkPos::new(0, 0),
-            render_distance: 2,
-            day_time_override: Some(6000),
-            freeze_time: true,
-            remote_addr,
-        }
-    }
-
     fn android_remote_addr() -> Option<String> {
         android_property(REMOTE_ADDR_PROPERTY)
             .map(|value| value.trim().to_owned())
@@ -1731,6 +1830,51 @@ mod android {
                 .to_string_lossy()
                 .into_owned(),
         )
+    }
+
+    #[allow(unsafe_code)]
+    fn android_startup_argv_json(app: &AndroidApp) -> Result<Option<String>> {
+        let vm = app.vm_as_ptr() as *mut jni::sys::JavaVM;
+        let activity = app.activity_as_ptr() as jni::sys::jobject;
+        if vm.is_null() || activity.is_null() {
+            log::warn!("Android startup argv intent extra unavailable: null JVM or Activity");
+            return Ok(None);
+        }
+
+        let vm = unsafe { jni::JavaVM::from_raw(vm) };
+        vm.attach_current_thread(|env| {
+            let activity = unsafe { jni::objects::JObject::from_raw(env, activity) };
+            let intent = env
+                .call_method(
+                    &activity,
+                    jni::jni_str!("getIntent"),
+                    jni::jni_sig!("()Landroid/content/Intent;"),
+                    &[],
+                )?
+                .into_object()?;
+            if intent.is_null() {
+                return Ok(None);
+            }
+
+            let key = env.new_string(STARTUP_ARGV_INTENT_EXTRA)?;
+            let key = jni::objects::JObject::from(key);
+            let object = env
+                .call_method(
+                    &intent,
+                    jni::jni_str!("getStringExtra"),
+                    jni::jni_sig!("(Ljava/lang/String;)Ljava/lang/String;"),
+                    &[jni::objects::JValue::Object(&key)],
+                )?
+                .into_object()?;
+            if object.is_null() {
+                return Ok(None);
+            }
+            let string = jni::objects::JString::cast_local(env, object)?;
+            string.try_to_string(env).map(Some)
+        })
+        .with_context(|| {
+            format!("failed to read Android intent extra `{STARTUP_ARGV_INTENT_EXTRA}`")
+        })
     }
 
     type AndroidSingleViewSceneRuntime = NativeSingleViewSessionRuntime<AndroidRemoteServerSession>;
@@ -1795,8 +1939,8 @@ mod android {
         }
     }
 
-    #[derive(Default)]
     struct McloneAndroidApp {
+        startup_options: AndroidStartupOptions,
         window: Option<Arc<Window>>,
         gpu: Option<AndroidGpuState>,
         active_touch: Option<ActiveTouch>,
@@ -1828,7 +1972,7 @@ mod android {
 
             if let Some(window) = &self.window {
                 if self.gpu.is_none() {
-                    match AndroidGpuState::new(window.clone()) {
+                    match AndroidGpuState::new(window.clone(), self.startup_options.clone()) {
                         Ok(gpu) => self.gpu = Some(gpu),
                         Err(error) => {
                             log::error!("{error}");
@@ -1978,6 +2122,16 @@ mod android {
     }
 
     impl McloneAndroidApp {
+        fn new(startup_options: AndroidStartupOptions) -> Self {
+            Self {
+                startup_options,
+                window: None,
+                gpu: None,
+                active_touch: None,
+                last_cursor: None,
+            }
+        }
+
         fn handle_gpu_input_result(
             &mut self,
             event_loop: &ActiveEventLoop,
@@ -2081,12 +2235,67 @@ mod android {
         init_android_logger();
         configure_android_asset_root(&app);
         log::info!("Mclone Android starting");
+        let startup_argv = match android_startup_argv_json(&app) {
+            Ok(value) => value,
+            Err(error) => {
+                log::error!("MCLONE_ANDROID_FAILURE: {error:#}");
+                return;
+            }
+        };
+        match startup_argv.as_deref() {
+            Some(json) if !json.trim().is_empty() => {
+                log::info!("Android startup argv from {STARTUP_ARGV_INTENT_EXTRA}: {json}");
+            }
+            _ => {
+                log::info!("Android startup argv from {STARTUP_ARGV_INTENT_EXTRA}: <none>");
+            }
+        }
+        let mut startup_options = match parse_android_startup_options(startup_argv.as_deref()) {
+            Ok(options) => options,
+            Err(error) => {
+                log::error!("MCLONE_ANDROID_FAILURE: {error:#}");
+                return;
+            }
+        };
+        let startup_remote_addr = startup_options.scene.remote_addr.clone();
+        let legacy_remote_addr = android_remote_addr();
+        if startup_options.scene.remote_addr.is_none() {
+            startup_options.scene.remote_addr = legacy_remote_addr.clone();
+        }
+        if let Some(remote_addr) = startup_remote_addr.as_deref() {
+            log::info!(
+                "Mclone Android remote dedicated address from {STARTUP_ARGV_INTENT_EXTRA}: {remote_addr}"
+            );
+        } else if let Some(remote_addr) = legacy_remote_addr.as_deref() {
+            log::info!(
+                "Mclone Android remote dedicated address from legacy {REMOTE_ADDR_PROPERTY}: {remote_addr}"
+            );
+        } else {
+            log::info!("Mclone Android remote dedicated address: <none>");
+        }
+        log::info!(
+            "Mclone Android scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} movement_speed={:.2}x lighting={}",
+            startup_options.scene.seed,
+            startup_options.scene.center.x,
+            startup_options.scene.center.z,
+            startup_options.scene.render_distance,
+            startup_options.scene.day_time_override,
+            startup_options.scene.freeze_time,
+            startup_options.scene.movement_speed_multiplier,
+            startup_options.scene.lighting_enabled
+        );
+        log::info!(
+            "Mclone Android render options: section_occlusion={} fullbright={} color_profile={}",
+            startup_options.render_options.section_occlusion_culling,
+            startup_options.render_options.force_fullbright,
+            startup_options.render_options.color_profile.as_str()
+        );
         let event_loop = EventLoop::builder()
             .with_android_app(app)
             .build()
             .expect("create Android event loop");
         event_loop.set_control_flow(ControlFlow::Wait);
-        let mut state = McloneAndroidApp::default();
+        let mut state = McloneAndroidApp::new(startup_options);
         event_loop
             .run_app(&mut state)
             .expect("run Android event loop");

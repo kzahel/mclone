@@ -1,6 +1,10 @@
 use anyhow::{Context, Result, bail};
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::RenderColorProfile;
+use mclone_render_session::{
+    ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
+    ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
+};
 
 pub const ARG_SEED: &str = "--seed";
 pub const ARG_CHUNK_X: &str = "--chunk-x";
@@ -9,6 +13,7 @@ pub const ARG_RENDER_DISTANCE: &str = "--render-distance";
 pub const ARG_REMOTE_ADDR: &str = "--remote-addr";
 pub const ARG_DAY_TIME: &str = "--day-time";
 pub const ARG_FREEZE_TIME: &str = "--freeze-time";
+pub const ARG_MOVEMENT_SPEED_MULTIPLIER: &str = "--movement-speed-multiplier";
 pub const ARG_LIGHTING: &str = "--lighting";
 pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
 pub const ARG_FULLBRIGHT: &str = "--fullbright";
@@ -21,6 +26,7 @@ pub const QUERY_RENDER_DISTANCE: &str = "renderDistance";
 pub const QUERY_REMOTE_WS_URL: &str = "remoteWsUrl";
 pub const QUERY_DAY_TIME: &str = "dayTime";
 pub const QUERY_FREEZE_TIME: &str = "freezeTime";
+pub const QUERY_MOVEMENT_SPEED_MULTIPLIER: &str = "movementSpeedMultiplier";
 pub const QUERY_LIGHTING: &str = "lighting";
 pub const QUERY_SECTION_OCCLUSION: &str = "sectionOcclusion";
 pub const QUERY_FULLBRIGHT: &str = "fullbright";
@@ -34,6 +40,7 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_REMOTE_WS_URL,
     QUERY_DAY_TIME,
     QUERY_FREEZE_TIME,
+    QUERY_MOVEMENT_SPEED_MULTIPLIER,
     QUERY_LIGHTING,
     QUERY_SECTION_OCCLUSION,
     QUERY_FULLBRIGHT,
@@ -57,7 +64,7 @@ impl RenderDistanceLimits {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StartupSceneOptions {
     pub seed: i64,
     pub chunk_x: i32,
@@ -66,6 +73,7 @@ pub struct StartupSceneOptions {
     pub remote_addr: Option<String>,
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
+    pub movement_speed_multiplier: f32,
     pub lighting_enabled: bool,
 }
 
@@ -79,6 +87,7 @@ impl Default for StartupSceneOptions {
             remote_addr: None,
             day_time_override: None,
             freeze_time: false,
+            movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             lighting_enabled: true,
         }
     }
@@ -138,6 +147,12 @@ impl StartupArgState {
             ARG_FREEZE_TIME => {
                 self.scene.freeze_time = true;
             }
+            ARG_MOVEMENT_SPEED_MULTIPLIER => {
+                self.scene.movement_speed_multiplier = parse_movement_speed_multiplier_arg(
+                    ARG_MOVEMENT_SPEED_MULTIPLIER,
+                    args.next(),
+                )?;
+            }
             ARG_LIGHTING => {
                 self.scene.lighting_enabled = parse_bool_arg(ARG_LIGHTING, args.next())?;
             }
@@ -189,6 +204,10 @@ impl StartupArgState {
             }
             QUERY_FREEZE_TIME => {
                 self.scene.freeze_time = parse_query_presence_bool(QUERY_FREEZE_TIME, value)?;
+            }
+            QUERY_MOVEMENT_SPEED_MULTIPLIER => {
+                self.scene.movement_speed_multiplier =
+                    parse_movement_speed_multiplier_arg(QUERY_MOVEMENT_SPEED_MULTIPLIER, value)?;
             }
             QUERY_LIGHTING => {
                 self.scene.lighting_enabled = parse_bool_arg(QUERY_LIGHTING, value)?;
@@ -266,6 +285,13 @@ pub fn parse_u64_arg(flag: &str, value: Option<String>) -> Result<u64> {
         .with_context(|| format!("{flag} requires an unsigned 64-bit integer, got `{value}`"))
 }
 
+pub fn parse_f32_arg(flag: &str, value: Option<String>) -> Result<f32> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    value
+        .parse::<f32>()
+        .with_context(|| format!("{flag} requires a number, got `{value}`"))
+}
+
 pub fn parse_bool_arg(flag: &str, value: Option<String>) -> Result<bool> {
     let value = value.with_context(|| format!("{flag} requires true or false"))?;
     match value.as_str() {
@@ -293,6 +319,16 @@ pub fn parse_render_distance_arg(
     let parsed = parse_u32_arg(flag, value)?;
     if parsed < limits.min || parsed > limits.max {
         bail!("{flag} must be between {} and {}", limits.min, limits.max);
+    }
+    Ok(parsed)
+}
+
+pub fn parse_movement_speed_multiplier_arg(flag: &str, value: Option<String>) -> Result<f32> {
+    let parsed = parse_f32_arg(flag, value)?;
+    let min = ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32;
+    let max = ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32;
+    if !parsed.is_finite() || !(min..=max).contains(&parsed) {
+        bail!("{flag} must be between {min} and {max}");
     }
     Ok(parsed)
 }
@@ -350,6 +386,7 @@ mod tests {
                 remote_addr: None,
                 day_time_override: None,
                 freeze_time: false,
+                movement_speed_multiplier: 1.0,
                 lighting_enabled: true,
             }
         );
@@ -373,6 +410,8 @@ mod tests {
             ARG_DAY_TIME,
             "6000",
             ARG_FREEZE_TIME,
+            ARG_MOVEMENT_SPEED_MULTIPLIER,
+            "2.5",
             ARG_REMOTE_ADDR,
             "127.0.0.1:25565",
         ]);
@@ -386,6 +425,7 @@ mod tests {
                 remote_addr: Some("127.0.0.1:25565".to_owned()),
                 day_time_override: Some(6000),
                 freeze_time: true,
+                movement_speed_multiplier: 2.5,
                 lighting_enabled: true,
             }
         );
@@ -429,6 +469,7 @@ mod tests {
             (QUERY_REMOTE_WS_URL, "ws://127.0.0.1:25565"),
             (QUERY_DAY_TIME, "6000"),
             (QUERY_FREEZE_TIME, ""),
+            (QUERY_MOVEMENT_SPEED_MULTIPLIER, "0.5"),
             (QUERY_LIGHTING, "false"),
             (QUERY_SECTION_OCCLUSION, "false"),
             (QUERY_FULLBRIGHT, "true"),
@@ -457,6 +498,7 @@ mod tests {
                 remote_addr: Some("ws://127.0.0.1:25565".to_owned()),
                 day_time_override: Some(6000),
                 freeze_time: true,
+                movement_speed_multiplier: 0.5,
                 lighting_enabled: false,
             }
         );

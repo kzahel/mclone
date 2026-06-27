@@ -1020,6 +1020,7 @@ mod tests {
             remote_addr: None,
             day_time_override: None,
             freeze_time: false,
+            movement_speed_multiplier: 1.0,
             lighting_enabled: true,
         }
         .chunk_positions()

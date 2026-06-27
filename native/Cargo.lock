@@ -1179,6 +1179,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "glam",
+ "jni 0.22.4",
  "log",
  "mclone-app-runtime",
  "mclone-audio",
@@ -1193,6 +1194,7 @@ dependencies = [
  "mclone-server",
  "mclone-ui",
  "pollster",
+ "serde_json",
  "wgpu",
  "winit",
 ]

@@ -736,6 +736,7 @@ mod tests {
                     remote_addr: None,
                     day_time_override: None,
                     freeze_time: false,
+                    movement_speed_multiplier: 1.0,
                     lighting_enabled: true,
                 },
                 render_options: TexturedSectionRenderOptions::default(),
@@ -761,6 +762,31 @@ mod tests {
                 height: 480,
                 scene: SceneOptions {
                     render_distance: 16,
+                    ..SceneOptions::default()
+                },
+                render_options: TexturedSectionRenderOptions::default(),
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_movement_speed_multiplier() {
+        let cli = Cli::parse([
+            "--headless-chunk".to_owned(),
+            "/tmp/mclone-chunk.png".to_owned(),
+            "--movement-speed-multiplier".to_owned(),
+            "2.25".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::HeadlessChunk {
+                path: PathBuf::from("/tmp/mclone-chunk.png"),
+                width: 640,
+                height: 480,
+                scene: SceneOptions {
+                    movement_speed_multiplier: 2.25,
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),

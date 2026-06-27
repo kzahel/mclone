@@ -48,6 +48,7 @@ interface WebStartupOptions extends WasmReport {
   chunkX: number;
   chunkZ: number;
   renderDistance: number;
+  movementSpeedMultiplier: number;
   remoteWebSocketUrl?: string;
   sectionOcclusionCulling: boolean;
   forceFullbright: boolean;
@@ -388,6 +389,7 @@ class WebChunkApp {
         remoteWebSocketUrl,
         startup.chunkX,
         startup.chunkZ,
+        startup.movementSpeedMultiplier,
         this.sectionOcclusionCulling,
         this.forceFullbright,
         startup.renderColorProfile,
@@ -403,6 +405,7 @@ class WebChunkApp {
         seed,
         startup.chunkX,
         startup.chunkZ,
+        startup.movementSpeedMultiplier,
         this.sectionOcclusionCulling,
         this.forceFullbright,
         startup.renderColorProfile,
@@ -1548,6 +1551,7 @@ function startupOptionsFromLocation(module: WasmModule): WebStartupOptions {
     chunkX: finiteInteger(raw.chunkX, 0),
     chunkZ: finiteInteger(raw.chunkZ, 0),
     renderDistance: clampRadiusChunks(raw.renderDistance),
+    movementSpeedMultiplier: finiteNumber(raw.movementSpeedMultiplier, 1.0),
     sectionOcclusionCulling: Boolean(raw.sectionOcclusionCulling),
     forceFullbright: Boolean(raw.forceFullbright),
     renderColorProfile: String(raw.renderColorProfile ?? "vanilla"),
@@ -1564,6 +1568,11 @@ function startupRemoteWebSocketUrl(options: WebStartupOptions): string | null {
 
 function finiteInteger(value: unknown, fallback: number): number {
   const parsed = Math.trunc(Number(value));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 

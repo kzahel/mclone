@@ -158,6 +158,7 @@ pub struct NoClipMovementStep {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WalkingMovementStep {
     pub y_rot_degrees: f64,
+    pub speed_multiplier: f64,
     pub dt_seconds: f64,
 }
 
@@ -581,7 +582,8 @@ impl LocalPlayerController {
         let acceleration = walking_input_acceleration(
             input,
             step.y_rot_degrees,
-            walking_input_speed(self.on_ground, sprinting),
+            walking_input_speed(self.on_ground, sprinting)
+                * walking_speed_multiplier(step.speed_multiplier),
         )
         .scale(tick_scale);
         self.delta_movement = self.delta_movement.add(acceleration);
@@ -825,6 +827,14 @@ fn walking_input_speed(on_ground: bool, sprinting: bool) -> f64 {
     }
 }
 
+fn walking_speed_multiplier(multiplier: f64) -> f64 {
+    if multiplier.is_finite() && multiplier > 0.0 {
+        multiplier
+    } else {
+        1.0
+    }
+}
+
 fn walking_input_acceleration(input: PlayerInput, y_rot_degrees: f64, speed: f64) -> Vec3d {
     if !y_rot_degrees.is_finite() || !speed.is_finite() || speed <= 0.0 {
         return Vec3d::ZERO;
@@ -985,6 +995,7 @@ mod tests {
     fn one_java_tick_step(y_rot_degrees: f64) -> WalkingMovementStep {
         WalkingMovementStep {
             y_rot_degrees,
+            speed_multiplier: 1.0,
             dt_seconds: 1.0 / LOCAL_PLAYER_TICKS_PER_SECOND,
         }
     }

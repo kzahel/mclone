@@ -12,9 +12,9 @@ Current status:
   resize, package paths, asset staging paths, and touch input.
 - Runtime, render-section streaming, texture/mesh asset loading, and full-frame
   sky/terrain composition come from shared native Rust crates.
-- The default host mode is local integrated. Setting
-  `debug.mclone.remote_addr` switches the flat Android app to remote dedicated
-  play through the shared host-mode contract.
+- The default host mode is local integrated. Launch-scoped startup arguments
+  are passed as JSON argv through intent extra `mclone.startup.argv`; the flat
+  Android app feeds those tokens into the shared startup parser.
 - AVD validation builds an x86_64 emulator APK, stages assets, verifies the
   app-rendered frame marker, and captures a screenshot.
 - Quest-flat validation is scripted, but still needs a machine with an attached
@@ -105,10 +105,28 @@ Run against a dedicated server reachable from the AVD:
 pnpm native:android:avd-smoke -- --skip-build --remote-addr 10.0.2.2:25565
 ```
 
-The validator writes the address to Android property
-`debug.mclone.remote_addr` before launch. When `--remote-addr` is omitted, the
-property is set to the `__mclone_none__` sentinel so normal smokes stay local
-integrated; Android `setprop` cannot write an empty value.
+The validator passes the address through intent extra `mclone.startup.argv`,
+for example:
+
+```bash
+adb shell am start -W -n com.kzahel.mclone/android.app.NativeActivity \
+  --es mclone.startup.argv '["--remote-addr","10.0.2.2:25565"]'
+```
+
+The legacy Android property `debug.mclone.remote_addr` is still read as a
+fallback for manual launches, but validators clear it to the
+`__mclone_none__` sentinel so stale process-global properties do not affect
+normal local integrated smokes.
+
+Other shared startup arguments use the same intent extra:
+
+```bash
+pnpm native:android:avd-smoke -- --skip-build \
+  --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 \
+  --movement-speed-multiplier 1.0 --day-time 6000 --freeze-time \
+  --lighting false --fullbright true \
+  --render-color-profile stylized-bright
+```
 
 Use the raw validator when you need custom paths, a visible emulator window, a
 specific serial, or a different swipe:

@@ -426,6 +426,7 @@ pub(crate) fn run_headless_screenshot(
                 FramePacingUiState::default(),
                 false,
                 1.0,
+                1.0,
             ));
             let gui_state = FullFrameGui::new(
                 gui_active,

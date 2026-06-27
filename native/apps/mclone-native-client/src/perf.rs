@@ -1412,6 +1412,7 @@ pub(crate) fn run_frame_budget_probe(
                 FramePacingUiState::default(),
                 false,
                 1.0,
+                1.0,
             );
             let gui_scale = state.ui.scale();
             let gui_state = FullFrameGui::new(

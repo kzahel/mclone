@@ -83,7 +83,8 @@ Install and launch with startup config:
 ```bash
 bash android-xr/install-quest-openxr.sh --debug --skip-build --launch \
   --view-pose 0,120,-96,180 \
-  --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
+  --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 \
+  --movement-speed-multiplier 1.0 --day-time 6000 --freeze-time
 ```
 
 Install and launch against a dedicated server reachable from the headset:
