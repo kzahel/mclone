@@ -2680,8 +2680,10 @@ impl WebChunkRenderSession {
             }
             GameUiAction::StartWorld
             | GameUiAction::OpenNewWorld
+            | GameUiAction::OpenJoinRemote
             | GameUiAction::RerollSeed
             | GameUiAction::CreateWorld(_)
+            | GameUiAction::JoinRemote
             | GameUiAction::Resume
             | GameUiAction::OpenOptions(_)
             | GameUiAction::BackToTitle
@@ -2723,8 +2725,10 @@ impl WebChunkRenderSession {
                 }
                 GameUiAction::StartWorld
                 | GameUiAction::OpenNewWorld
+                | GameUiAction::OpenJoinRemote
                 | GameUiAction::RerollSeed
                 | GameUiAction::CreateWorld(_)
+                | GameUiAction::JoinRemote
                 | GameUiAction::Resume
                 | GameUiAction::BackToTitle
                 | GameUiAction::BackToPause
@@ -4030,6 +4034,7 @@ fn ui_screen_label(screen: Option<GameScreen>) -> &'static str {
     match screen {
         Some(GameScreen::Title) => "title",
         Some(GameScreen::NewWorld) => "newWorld",
+        Some(GameScreen::JoinRemote) => "joinRemote",
         Some(GameScreen::Pause) => "pause",
         Some(GameScreen::Options { .. }) => "options",
         None => "none",
@@ -4047,8 +4052,10 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
     match action {
         GameUiAction::StartWorld => "startWorld",
         GameUiAction::OpenNewWorld => "openNewWorld",
+        GameUiAction::OpenJoinRemote => "openJoinRemote",
         GameUiAction::RerollSeed => "rerollSeed",
         GameUiAction::CreateWorld(_) => "createWorld",
+        GameUiAction::JoinRemote => "joinRemote",
         GameUiAction::Resume => "resume",
         GameUiAction::OpenOptions(_) => "openOptions",
         GameUiAction::BackToTitle => "backToTitle",

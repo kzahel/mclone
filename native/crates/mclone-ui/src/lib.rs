@@ -591,6 +591,7 @@ pub enum GuiKey {
 pub enum GameScreen {
     Title,
     NewWorld,
+    JoinRemote,
     Pause,
     Options { parent: GameOptionsParent },
 }
@@ -605,8 +606,10 @@ pub enum GameOptionsParent {
 pub enum GameUiAction {
     StartWorld,
     OpenNewWorld,
+    OpenJoinRemote,
     RerollSeed,
     CreateWorld(i64),
+    JoinRemote,
     Resume,
     OpenOptions(GameOptionsParent),
     BackToTitle,
@@ -911,6 +914,7 @@ pub fn render_touch_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &T
 pub struct GameUi {
     screen: Option<GameScreen>,
     new_world_seed: i64,
+    join_remote_addr: String,
     pointer: Option<Point>,
     pressed: Option<WidgetId>,
     font: Font,
@@ -935,6 +939,11 @@ const ID_OPTIONS_FLY_SPEED: WidgetId = WidgetId(15);
 const ID_NEW_WORLD_REROLL: WidgetId = WidgetId(16);
 const ID_NEW_WORLD_CREATE: WidgetId = WidgetId(17);
 const ID_NEW_WORLD_BACK: WidgetId = WidgetId(18);
+const ID_TITLE_JOIN_REMOTE: WidgetId = WidgetId(19);
+const ID_JOIN_REMOTE_CONNECT: WidgetId = WidgetId(20);
+const ID_JOIN_REMOTE_BACK: WidgetId = WidgetId(21);
+
+pub const DEFAULT_JOIN_REMOTE_ADDR: &str = "127.0.0.1:25565";
 
 impl Default for GameUi {
     fn default() -> Self {
@@ -947,6 +956,7 @@ impl GameUi {
         Self {
             screen: Some(GameScreen::Title),
             new_world_seed: 0,
+            join_remote_addr: DEFAULT_JOIN_REMOTE_ADDR.to_owned(),
             pointer: None,
             pressed: None,
             font: Font::default(),
@@ -972,6 +982,14 @@ impl GameUi {
         self.new_world_seed = seed;
     }
 
+    pub fn join_remote_addr(&self) -> &str {
+        &self.join_remote_addr
+    }
+
+    pub fn set_join_remote_addr(&mut self, addr: impl Into<String>) {
+        self.join_remote_addr = addr.into();
+    }
+
     pub fn scale(&self) -> GuiScale {
         self.scale
     }
@@ -993,7 +1011,10 @@ impl GameUi {
     }
 
     pub fn covers_world(&self) -> bool {
-        matches!(self.screen, Some(GameScreen::Title | GameScreen::NewWorld))
+        matches!(
+            self.screen,
+            Some(GameScreen::Title | GameScreen::NewWorld | GameScreen::JoinRemote)
+        )
     }
 
     pub fn open_pause(&mut self) {
@@ -1077,6 +1098,7 @@ impl GameUi {
         match (screen, key) {
             (GameScreen::Pause, GuiKey::Escape) => (true, Some(GameUiAction::Resume)),
             (GameScreen::NewWorld, GuiKey::Escape) => (true, Some(GameUiAction::BackToTitle)),
+            (GameScreen::JoinRemote, GuiKey::Escape) => (true, Some(GameUiAction::BackToTitle)),
             (GameScreen::Options { parent }, GuiKey::Escape) => match parent {
                 GameOptionsParent::Title => (true, Some(GameUiAction::BackToTitle)),
                 GameOptionsParent::Pause => (true, Some(GameUiAction::BackToPause)),
@@ -1090,6 +1112,10 @@ impl GameUi {
             GameUiAction::StartWorld | GameUiAction::Resume => self.close(),
             GameUiAction::OpenNewWorld => {
                 self.screen = Some(GameScreen::NewWorld);
+                self.pressed = None;
+            }
+            GameUiAction::OpenJoinRemote => {
+                self.screen = Some(GameScreen::JoinRemote);
                 self.pressed = None;
             }
             GameUiAction::OpenOptions(parent) => {
@@ -1108,7 +1134,7 @@ impl GameUi {
                 self.screen = Some(GameScreen::Pause);
                 self.pressed = None;
             }
-            GameUiAction::CreateWorld(_) => self.close(),
+            GameUiAction::CreateWorld(_) | GameUiAction::JoinRemote => self.close(),
             GameUiAction::RerollSeed => {}
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::ToggleFullbright
@@ -1127,6 +1153,7 @@ impl GameUi {
         match self.screen {
             Some(GameScreen::Title) => self.render_title(&mut draw),
             Some(GameScreen::NewWorld) => self.render_new_world(&mut draw),
+            Some(GameScreen::JoinRemote) => self.render_join_remote(&mut draw),
             Some(GameScreen::Pause) => self.render_pause(&mut draw),
             Some(GameScreen::Options { parent }) => {
                 self.render_options_screen(&mut draw, state, parent)
@@ -1143,6 +1170,10 @@ impl GameUi {
                 .find(|button| button.contains(point))
                 .map(|button| button.id),
             GameScreen::NewWorld => new_world_buttons(self.scale)
+                .into_iter()
+                .find(|button| button.contains(point))
+                .map(|button| button.id),
+            GameScreen::JoinRemote => join_remote_buttons(self.scale)
                 .into_iter()
                 .find(|button| button.contains(point))
                 .map(|button| button.id),
@@ -1180,11 +1211,14 @@ impl GameUi {
     fn action_for(&self, id: WidgetId) -> Option<GameUiAction> {
         match id {
             ID_TITLE_START => Some(GameUiAction::OpenNewWorld),
+            ID_TITLE_JOIN_REMOTE => Some(GameUiAction::OpenJoinRemote),
             ID_TITLE_OPTIONS => Some(GameUiAction::OpenOptions(GameOptionsParent::Title)),
             ID_TITLE_QUIT => Some(GameUiAction::Quit),
             ID_NEW_WORLD_REROLL => Some(GameUiAction::RerollSeed),
             ID_NEW_WORLD_CREATE => Some(GameUiAction::CreateWorld(self.new_world_seed)),
             ID_NEW_WORLD_BACK => Some(GameUiAction::BackToTitle),
+            ID_JOIN_REMOTE_CONNECT => Some(GameUiAction::JoinRemote),
+            ID_JOIN_REMOTE_BACK => Some(GameUiAction::BackToTitle),
             ID_PAUSE_RESUME => Some(GameUiAction::Resume),
             ID_PAUSE_OPTIONS => Some(GameUiAction::OpenOptions(GameOptionsParent::Pause)),
             ID_PAUSE_TITLE => Some(GameUiAction::QuitToTitle),
@@ -1318,6 +1352,35 @@ impl GameUi {
         }
     }
 
+    fn render_join_remote(&self, draw: &mut GuiDrawList) {
+        draw.fill_gradient(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(24, 44, 51, 255),
+            Color::rgba(7, 10, 12, 255),
+        );
+        draw.fill(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(0, 0, 0, 55),
+        );
+        self.font.draw_centered(
+            draw,
+            "JOIN REMOTE",
+            self.scale.width * 0.5,
+            self.scale.height * 0.28,
+            Color::rgba(245, 252, 234, 255),
+        );
+        self.font.draw_centered(
+            draw,
+            &format!("Server: {}", self.join_remote_addr),
+            self.scale.width * 0.5,
+            self.scale.height * 0.28 + 22.0,
+            Color::rgba(185, 212, 198, 255),
+        );
+        for button in join_remote_buttons(self.scale) {
+            button.render(draw, &self.font, self.interaction());
+        }
+    }
+
     fn render_pause(&self, draw: &mut GuiDrawList) {
         draw.fill(
             Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
@@ -1441,20 +1504,21 @@ struct OptionWidgetRects {
     back: Rect,
 }
 
-fn title_buttons(scale: GuiScale) -> [Button; 3] {
-    let y = scale.height * 0.5 - 22.0;
+fn title_buttons(scale: GuiScale) -> [Button; 4] {
+    let y = scale.height * 0.5 - 34.0;
     [
+        Button::new(ID_TITLE_START, menu_button_rect(scale, y), "New World"),
         Button::new(
-            ID_TITLE_START,
-            menu_button_rect(scale, y),
-            "Start Local World",
+            ID_TITLE_JOIN_REMOTE,
+            menu_button_rect(scale, y + 24.0),
+            "Join Remote",
         ),
         Button::new(
             ID_TITLE_OPTIONS,
-            menu_button_rect(scale, y + 24.0),
+            menu_button_rect(scale, y + 48.0),
             "Options",
         ),
-        Button::new(ID_TITLE_QUIT, menu_button_rect(scale, y + 48.0), "Quit"),
+        Button::new(ID_TITLE_QUIT, menu_button_rect(scale, y + 72.0), "Quit"),
     ]
 }
 
@@ -1468,6 +1532,22 @@ fn new_world_buttons(scale: GuiScale) -> [Button; 3] {
             "Create World",
         ),
         Button::new(ID_NEW_WORLD_BACK, menu_button_rect(scale, y + 48.0), "Back"),
+    ]
+}
+
+fn join_remote_buttons(scale: GuiScale) -> [Button; 2] {
+    let y = scale.height * 0.5 + 20.0;
+    [
+        Button::new(
+            ID_JOIN_REMOTE_CONNECT,
+            menu_button_rect(scale, y),
+            "Connect",
+        ),
+        Button::new(
+            ID_JOIN_REMOTE_BACK,
+            menu_button_rect(scale, y + 24.0),
+            "Back",
+        ),
     ]
 }
 
@@ -1992,6 +2072,43 @@ mod tests {
 
         ui.set_screen(Some(GameScreen::NewWorld));
         let back = click(buttons[2].rect);
+        assert!(ui.pointer_down(back, state));
+        let (_handled, action) = ui.pointer_up(back, state);
+        assert_eq!(action, Some(GameUiAction::BackToTitle));
+        ui.apply_action(action.unwrap());
+        assert_eq!(ui.screen(), Some(GameScreen::Title));
+    }
+
+    #[test]
+    fn game_ui_join_remote_flow_emits_connect_action() {
+        let mut ui = GameUi::new();
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        ui.set_join_remote_addr("10.0.0.5:25565");
+        let state = GameUiRenderState::default();
+        let click = |rect: Rect| Point {
+            x: rect.center_x(),
+            y: rect.y + rect.height * 0.5,
+        };
+
+        let join = click(title_buttons(ui.scale())[1].rect);
+        assert!(ui.pointer_down(join, state));
+        let (_handled, action) = ui.pointer_up(join, state);
+        assert_eq!(action, Some(GameUiAction::OpenJoinRemote));
+        ui.apply_action(action.unwrap());
+        assert_eq!(ui.screen(), Some(GameScreen::JoinRemote));
+        assert!(ui.covers_world());
+        assert_eq!(ui.join_remote_addr(), "10.0.0.5:25565");
+
+        let buttons = join_remote_buttons(ui.scale());
+        let connect = click(buttons[0].rect);
+        assert!(ui.pointer_down(connect, state));
+        let (_handled, action) = ui.pointer_up(connect, state);
+        assert_eq!(action, Some(GameUiAction::JoinRemote));
+        ui.apply_action(action.unwrap());
+        assert_eq!(ui.screen(), None);
+
+        ui.set_screen(Some(GameScreen::JoinRemote));
+        let back = click(buttons[1].rect);
         assert!(ui.pointer_down(back, state));
         let (_handled, action) = ui.pointer_up(back, state);
         assert_eq!(action, Some(GameUiAction::BackToTitle));

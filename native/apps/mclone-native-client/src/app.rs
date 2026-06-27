@@ -19,8 +19,8 @@ use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_ui::{
-    GameFramePacingMode, GameScreen, GameUi, GameUiAction, GameUiRenderState, GuiKey, GuiScale,
-    Point, StatusOverlay, render_status_overlay,
+    DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameScreen, GameUi, GameUiAction,
+    GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, render_status_overlay,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -202,10 +202,16 @@ impl ChunkApp {
         let spectator = SpectatorCamera::spawn_for_scene(&scene);
         let camera = engine_camera_controller_from_spectator(&spectator);
         let seed_reroll_state = initial_seed_reroll_state(scene.seed);
-        let ui = match start_intent {
+        let mut ui = match start_intent {
             WindowStartIntent::InWorld => GameUi::new_ingame(),
             WindowStartIntent::Menu => GameUi::new(),
         };
+        ui.set_join_remote_addr(
+            scene
+                .remote_addr
+                .clone()
+                .unwrap_or_else(|| DEFAULT_JOIN_REMOTE_ADDR.to_owned()),
+        );
         Self {
             scene,
             assets,
@@ -351,6 +357,12 @@ impl ChunkApp {
         scene
     }
 
+    fn remote_session_scene(&self, remote_addr: String) -> SceneOptions {
+        let mut scene = self.scene.clone();
+        scene.remote_addr = Some(remote_addr);
+        scene
+    }
+
     fn session_status_overlay(&self) -> StatusOverlay {
         self.session
             .status()
@@ -379,6 +391,23 @@ impl ChunkApp {
         self.sync_mouse_lock();
     }
 
+    fn queue_remote_session_start(&mut self, remote_addr: String, arm_mouse_lock: bool) {
+        self.ui.set_join_remote_addr(remote_addr.clone());
+        self.session.request_start(
+            SessionStartRequest::JoinRemote {
+                endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
+            },
+            PendingWindowSessionStart {
+                scene: self.remote_session_scene(remote_addr),
+                arm_mouse_lock,
+            },
+        );
+        self.mouse_lock_requested = false;
+        self.camera.clear_keys();
+        self.ui.clear_input();
+        self.sync_mouse_lock();
+    }
+
     fn finish_pending_session_start(
         &mut self,
         pending: PendingSessionStart<PendingWindowSessionStart>,
@@ -394,8 +423,12 @@ impl ChunkApp {
                 self.sync_mouse_lock();
             }
             Err(_) => {
-                if let SessionStartRequest::NewLocalWorld { seed } = request {
-                    self.ui.set_new_world_seed(seed);
+                match request {
+                    SessionStartRequest::NewLocalWorld { seed } => self.ui.set_new_world_seed(seed),
+                    SessionStartRequest::JoinRemote { endpoint } => {
+                        self.ui.set_join_remote_addr(endpoint.address);
+                    }
+                    SessionStartRequest::Unknown => {}
                 }
                 self.mouse_lock_requested = false;
                 self.sync_mouse_lock();
@@ -434,7 +467,7 @@ impl ChunkApp {
                 log::info!("created local world seed={seed}");
             }
             ActiveSessionDescriptor::Remote { endpoint } => {
-                self.ui.apply_action(GameUiAction::StartWorld);
+                self.ui.apply_action(GameUiAction::JoinRemote);
                 log::info!("joined remote session {}", endpoint.address);
             }
         }
@@ -451,8 +484,11 @@ impl ChunkApp {
             return;
         }
 
-        let should_arm_mouse_lock =
-            from_pointer_click && matches!(action, GameUiAction::StartWorld | GameUiAction::Resume);
+        let should_arm_mouse_lock = from_pointer_click
+            && matches!(
+                action,
+                GameUiAction::StartWorld | GameUiAction::Resume | GameUiAction::JoinRemote
+            );
         let preserve_pointer_state = matches!(
             action,
             GameUiAction::SetRenderDistance(_)
@@ -544,6 +580,15 @@ impl ChunkApp {
                 self.ui.set_new_world_seed(seed);
                 self.clear_inactive_session_status();
             }
+            GameUiAction::OpenJoinRemote => {
+                let remote_addr = self
+                    .scene
+                    .remote_addr
+                    .clone()
+                    .unwrap_or_else(|| DEFAULT_JOIN_REMOTE_ADDR.to_owned());
+                self.ui.set_join_remote_addr(remote_addr);
+                self.clear_inactive_session_status();
+            }
             GameUiAction::RerollSeed => {
                 let seed = self.next_new_world_seed();
                 self.ui.set_new_world_seed(seed);
@@ -552,6 +597,14 @@ impl ChunkApp {
             }
             GameUiAction::CreateWorld(seed) => {
                 self.queue_local_world_start(seed, from_pointer_click);
+                self.schedule_next_redraw(event_loop);
+                return;
+            }
+            GameUiAction::JoinRemote => {
+                self.queue_remote_session_start(
+                    self.ui.join_remote_addr().to_owned(),
+                    from_pointer_click,
+                );
                 self.schedule_next_redraw(event_loop);
                 return;
             }
@@ -1635,6 +1688,7 @@ fn hotbar_slot_from_key_code(key_code: KeyCode) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DEFAULT_SEED;
 
     fn test_app_with_runtime(scene: SceneOptions) -> ChunkApp {
         let assets = WindowSceneAssets::load().unwrap();
@@ -1842,6 +1896,49 @@ mod tests {
         assert_eq!(pending.payload.scene.remote_addr, None);
         assert!(pending.payload.arm_mouse_lock);
         assert_eq!(app.ui.screen(), Some(GameScreen::NewWorld));
+        assert!(!app.mouse_lock_requested);
+    }
+
+    #[test]
+    fn queue_remote_session_start_sets_connecting_status_without_closing_menu() {
+        let scene = SceneOptions::default();
+        let assets = WindowSceneAssets::load().unwrap();
+        let mut app = ChunkApp::new(
+            scene,
+            assets,
+            TexturedSectionRenderOptions::default(),
+            WindowStartIntent::Menu,
+        );
+        app.ui.set_screen(Some(GameScreen::JoinRemote));
+
+        app.queue_remote_session_start("10.0.0.5:25565".to_owned(), true);
+
+        assert_eq!(
+            app.session.state(),
+            &GameSessionState::Starting {
+                request: SessionStartRequest::JoinRemote {
+                    endpoint: RemoteSessionEndpoint::new("10.0.0.5:25565")
+                }
+            }
+        );
+        let status = app.session.status().unwrap();
+        assert!(status.ok);
+        assert_eq!(status.message, "Connecting...");
+        let pending = app.session.take_pending_start().unwrap();
+        assert_eq!(
+            pending.request,
+            SessionStartRequest::JoinRemote {
+                endpoint: RemoteSessionEndpoint::new("10.0.0.5:25565")
+            }
+        );
+        assert_eq!(
+            pending.payload.scene.remote_addr,
+            Some("10.0.0.5:25565".to_owned())
+        );
+        assert_eq!(pending.payload.scene.seed, DEFAULT_SEED);
+        assert!(pending.payload.arm_mouse_lock);
+        assert_eq!(app.ui.screen(), Some(GameScreen::JoinRemote));
+        assert_eq!(app.ui.join_remote_addr(), "10.0.0.5:25565");
         assert!(!app.mouse_lock_requested);
     }
 

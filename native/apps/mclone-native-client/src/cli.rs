@@ -137,6 +137,7 @@ pub(crate) enum HeadlessScreenshotUi {
     None,
     Title,
     NewWorld,
+    JoinRemote,
     Pause,
     OptionsTitle,
     OptionsPause,
@@ -934,6 +935,7 @@ pub(crate) fn parse_screenshot_ui_arg(
         "none" | "off" | "false" | "0" => Ok(HeadlessScreenshotUi::None),
         "title" => Ok(HeadlessScreenshotUi::Title),
         "new-world" | "new_world" => Ok(HeadlessScreenshotUi::NewWorld),
+        "join-remote" | "join_remote" => Ok(HeadlessScreenshotUi::JoinRemote),
         "pause" => Ok(HeadlessScreenshotUi::Pause),
         "options-title" | "options_title" => Ok(HeadlessScreenshotUi::OptionsTitle),
         "options-pause" | "options_pause" | "options" => Ok(HeadlessScreenshotUi::OptionsPause),
@@ -950,7 +952,7 @@ fn print_help() {
           mclone-native-client [--menu|--start-in-world true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --headless-ui /tmp/mclone-ui-title.png [--width 960] [--height 540]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|new-world|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|new-world|join-remote|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\

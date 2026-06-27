@@ -690,6 +690,10 @@ mod tests {
             HeadlessScreenshotUi::NewWorld
         );
         assert_eq!(
+            parse_screenshot_ui_arg("--screenshot-ui", Some("join-remote".to_owned())).unwrap(),
+            HeadlessScreenshotUi::JoinRemote
+        );
+        assert_eq!(
             parse_screenshot_ui_arg("--screenshot-ui", Some("options-title".to_owned())).unwrap(),
             HeadlessScreenshotUi::OptionsTitle
         );

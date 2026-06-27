@@ -172,6 +172,7 @@ impl HeadlessScreenshotUi {
             Self::None => None,
             Self::Title => Some(GameScreen::Title),
             Self::NewWorld => Some(GameScreen::NewWorld),
+            Self::JoinRemote => Some(GameScreen::JoinRemote),
             Self::Pause => Some(GameScreen::Pause),
             Self::OptionsTitle => Some(GameScreen::Options {
                 parent: GameOptionsParent::Title,

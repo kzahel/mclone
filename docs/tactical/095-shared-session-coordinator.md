@@ -1,12 +1,13 @@
 # 095: Shared Session Coordinator
 
-Status: active; Slices 1-2 landed on 2026-06-27. `mclone-app-runtime` now owns
+Status: active; Slices 1-3 landed on 2026-06-27. `mclone-app-runtime` now owns
 the platform-neutral session request/state vocabulary and shared start-result
 boundary, including local-world start, remote-join start, active session
 descriptors, pending starts, failure state, status text, and success/failure
-transition policy. Desktop flat consumes that coordinator for initial startup
-and queued New World creation. Runtime construction is still desktop-local;
-web/XR/Android adoption and remote-join UI remain follow-ups.
+transition policy. Desktop flat consumes that coordinator for initial startup,
+queued New World creation, and the first Join Remote menu flow. Runtime
+construction is still desktop-local; manual remote address entry and
+web/XR/Android coordinator adoption remain follow-ups.
 
 ## Purpose
 
@@ -166,11 +167,44 @@ shared result-boundary refactor.
 
 ### Slice 3 - Join Remote Menu Flow
 
-- [ ] Add a UI action/screen path for joining a remote host without baking it
+- [x] Add a UI action/screen path for joining a remote host without baking it
   into desktop-only code.
-- [ ] Route the request through `SessionStartRequest::JoinRemote`.
-- [ ] Reuse existing remote-dedicated transport/session code for the desktop
+- [x] Route the request through `SessionStartRequest::JoinRemote`.
+- [x] Reuse existing remote-dedicated transport/session code for the desktop
   factory, and keep the web factory on WebSocket/worker mechanics.
+
+Recorded Slice 3 result:
+
+- Added shared `GameScreen::JoinRemote`, `GameUiAction::OpenJoinRemote`, and
+  `GameUiAction::JoinRemote` in `mclone-ui`.
+- Added a Title-screen Join Remote entry and a first Join Remote screen with a
+  displayed endpoint plus Connect/Back buttons. The endpoint uses the existing
+  `--remote-addr` value when present and otherwise defaults to
+  `127.0.0.1:25565`. Manual text entry is still deferred.
+- Desktop `ChunkApp` now queues Join Remote through
+  `SessionStartRequest::JoinRemote { endpoint }`, uses the same pending loading
+  frame and shared `SessionStartResult` transition as New World, and preserves
+  the Join Remote screen plus endpoint on connection failure.
+- Web, flat Android, and XR shared UI consumers now compile with the new action
+  and screen labels but intentionally ignore remote-join execution until their
+  coordinator-adoption slices.
+- Added screenshot support for `--screenshot-ui join-remote`.
+
+Validation after Slice 3 on 2026-06-27:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml
+pnpm native:web:build
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot C:\tmp\mclone-join-remote-menu.png --screenshot-ui join-remote --width 960 --height 540
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot C:\tmp\mclone-title-join-remote-entry.png --screenshot-ui title --width 960 --height 540
+```
+
+The Join Remote and updated Title screenshots were inspected and rendered
+without blank output or overlapping UI.
 
 ### Slice 4 - Platform Adoption
 

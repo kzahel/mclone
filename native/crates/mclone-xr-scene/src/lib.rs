@@ -945,8 +945,10 @@ where
             | GameUiAction::SetTouchLookSensitivity(_) => {}
             GameUiAction::StartWorld
             | GameUiAction::OpenNewWorld
+            | GameUiAction::OpenJoinRemote
             | GameUiAction::RerollSeed
             | GameUiAction::CreateWorld(_)
+            | GameUiAction::JoinRemote
             | GameUiAction::Resume
             | GameUiAction::OpenOptions(_)
             | GameUiAction::BackToTitle
