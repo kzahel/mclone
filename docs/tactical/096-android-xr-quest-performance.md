@@ -129,8 +129,9 @@ Use Playbox as a pattern library only. Do not copy its egui/runtime shape.
   move server detail snapshot construction outside the diagnostics mutex, and
   expose diagnostic refresh/cache-age fields in `RUNTIME_MAX`.
 - [x] Add a settled stationary render-isolation lane that disables locomotion,
-  waits for consecutive quiet frames with no server/render/compile/upload
-  backlog, records settle time, then samples steady-state frame/render cost.
+  waits for consecutive quiet frames with no server queues, compile jobs,
+  rebuilds, uploads, or poll changes, records settle time, then samples
+  steady-state frame/render cost.
 
 Validation target:
 
@@ -170,6 +171,9 @@ Recorded first-pass implementation:
   `--perf-settled-stationary`, wait for quiet frames before starting the timed
   sample, and write `mode=stationary-settled` plus `settle_seconds`,
   `settle_frames`, and `settle_quiet_frames` in the summary.
+- Stationary settle treats persistent deferred render sections as a reported
+  steady-state condition, not as active generation/upload work. They remain
+  visible in `COMPILE_MAX deferred_sections` and settle-progress log markers.
 - The marker block now includes terrain runtime sub-timings for poll, section
   sync, GPU upload, and traversal-ready refresh. It also includes max and latest
   pending render chunks, pending compile jobs, submitted/completed/stale compile

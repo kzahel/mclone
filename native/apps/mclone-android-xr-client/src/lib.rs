@@ -1753,7 +1753,6 @@ mod android {
         summary.poll_changed
             || summary.rebuilt_section_count > 0
             || summary.removed_section_count > 0
-            || summary.deferred_section_count > 0
             || summary.submitted_compile_section_count > 0
             || summary.completed_compile_section_count > 0
             || summary.stale_compile_section_count > 0

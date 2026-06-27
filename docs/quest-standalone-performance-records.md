@@ -50,9 +50,11 @@ pnpm native:android-xr:perf:stationary:sweep
 
 Flight samples start after the first submitted terrain frame and stress
 movement, streaming, compile/upload, and rendering together. Stationary samples
-disable locomotion, wait for quiet server/render/compile/upload counters, then
-record a 20 second steady-state render sample. The validator force-stops the app
-and sleeps the headset during cleanup.
+disable locomotion, wait for no server queues, no compile jobs, no rebuilds, no
+uploads, and no poll changes, then record a 20 second steady-state render
+sample. Persistent deferred render sections are recorded as a steady-state
+condition rather than blocking the sample forever. The validator force-stops the
+app and sleeps the headset during cleanup.
 
 ## Records
 
