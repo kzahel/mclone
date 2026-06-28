@@ -99,6 +99,14 @@ pane, remote settle delay, and scripted interaction. The remaining gap is a
 long-lived exposed offscreen mode that can run the same host for multiple frames
 with an input stream and explicit non-PNG frame sinks.
 
+Desktop window startup and the offscreen screenshot host now share the
+`--startup-wait none|playable|idle|frames:N` CLI policy. Desktop defaults to
+`playable` and keeps startup nonblocking unless `idle` is requested. Screenshots
+default to `idle` for deterministic captures; `playable` uses the same flat
+startup pump as desktop, and `frames:N` renders warmup frames before saving the
+last offscreen capture. `none` means no extra host readiness wait beyond the
+minimum needed for the selected host to produce frames.
+
 ## Desired Cleanup Shape
 
 Introduce a host-neutral flat client driver with a real lifetime:
@@ -144,8 +152,16 @@ Target examples:
 cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- \
   --screenshot /tmp/mclone-flat-client.png \
   --width 1280 --height 720 \
+  --startup-wait idle \
   --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 \
   --day-time 6000 --freeze-time
+
+# Use the same host startup policy with playable readiness plus warmup frames.
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --screenshot /tmp/mclone-flat-client-warm.png \
+  --width 1280 --height 720 \
+  --startup-wait frames:2 \
+  --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2
 
 # Future shape: deterministic client loop that writes frames or streams them.
 cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- \

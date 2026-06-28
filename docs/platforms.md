@@ -26,7 +26,7 @@ Additional host lane:
 
 | Host | Status | Notes |
 |---|---|---|
-| Offscreen flat client | active cleanup | No-window flat-client host for full-frame validation, scripted/network/model input, PNG/video/network/model frame sinks, and future remote UI style use. Current public validation uses the full-frame `--screenshot` offscreen host path; older narrow `--headless-ui` / `--headless-chunk` native-client modes are retired. Long-lived host lifetime remains tracked in [`tactical/105-offscreen-flat-client-host.md`](tactical/105-offscreen-flat-client-host.md) and specified in [`offscreen-flat-client.md`](offscreen-flat-client.md). |
+| Offscreen flat client | active cleanup | No-window flat-client host for full-frame validation, scripted/network/model input, PNG/video/network/model frame sinks, and future remote UI style use. Current public validation uses the full-frame `--screenshot` offscreen host path with shared `--startup-wait none\|playable\|idle\|frames:N` readiness policy; screenshots default to `idle`, while desktop defaults to `playable`. Older narrow `--headless-ui` / `--headless-chunk` native-client modes are retired. Long-lived host lifetime remains tracked in [`tactical/105-offscreen-flat-client-host.md`](tactical/105-offscreen-flat-client-host.md) and specified in [`offscreen-flat-client.md`](offscreen-flat-client.md). |
 | Native dedicated server | active | `native/apps/mclone-dedicated-server` validates the protocol/server boundary without a renderer. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
 
 The retired TypeScript/browser engine is gone from the live tree. Use Git

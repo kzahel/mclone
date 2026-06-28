@@ -27,7 +27,8 @@ and the rule that keeps new features from re-forking.
 > 2026-06-26 and refreshed on 2026-06-28 after tactical 095 Slice 4f, the
 > existing audio foundation audit, user headset validation of the shared XR
 > world-panel menu/pointer path, the offscreen flat-client target definition,
-> and the native `FlatClientDriver` headless screenshot/UI ownership work.
+> the native `FlatClientDriver` headless screenshot/UI ownership work, and the
+> shared desktop/offscreen `--startup-wait` readiness policy.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -116,8 +117,9 @@ Reading the matrix:
   crosshair.
 - **offscreen-flat** is the desired real no-window validation host. Today it has
   full-frame screenshots and scripted attack/use through neutral
-  `FlatInputFrame`, but still lacks a long-lived client loop, broader input
-  stream, and frame sinks. Tactical 105 owns that cleanup.
+  `FlatInputFrame`, plus shared startup readiness CLI with desktop window mode,
+  but still lacks a long-lived client loop, broader input stream, and frame
+  sinks. Tactical 105 owns that cleanup.
 - **web** is near desktop parity; gaps are connect-UI, underwater FX wiring,
   persistence (structurally impossible on `wasm32` today), and audio.
 - **desktop-XR** has render/locomotion parity and a shared pause/options

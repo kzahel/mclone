@@ -25,7 +25,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
 use crate::MAX_RENDER_DISTANCE;
-use crate::cli::{SceneOptions, WindowStartIntent};
+use crate::cli::{SceneOptions, StartupWaitPolicy, WindowStartIntent};
 use crate::flat_client_driver::{
     FlatClientCameraView, FlatClientDebugFrame, FlatClientDriver, FlatClientHostAction,
     FlatClientUiActionContext, FlatClientUiFrame, FlatClientUiRenderOptions,
@@ -51,10 +51,11 @@ pub(crate) fn run_window(
     scene: SceneOptions,
     render_options: TexturedSectionRenderOptions,
     start_intent: WindowStartIntent,
+    startup_wait: StartupWaitPolicy,
 ) -> Result<()> {
     let assets = WindowSceneAssets::load()?;
     log::info!(
-        "native window startup seed={} initial_center=({}, {}) render_distance={} lighting={} color_profile={} remote={:?} atlas={}x{} start={:?}",
+        "native window startup seed={} initial_center=({}, {}) render_distance={} lighting={} color_profile={} remote={:?} atlas={}x{} start={:?} startup_wait={:?}",
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
@@ -68,12 +69,13 @@ pub(crate) fn run_window(
         scene.remote_addr,
         assets.mesh_assets.atlas.width,
         assets.mesh_assets.atlas.height,
-        start_intent
+        start_intent,
+        startup_wait
     );
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = ChunkApp::new(scene, assets, render_options, start_intent);
+    let mut app = ChunkApp::new(scene, assets, render_options, start_intent, startup_wait);
     event_loop.run_app(&mut app)?;
     Ok(())
 }
@@ -183,6 +185,7 @@ struct ChunkApp {
     last_frame: Instant,
     next_redraw_at: Option<Instant>,
     start_intent: WindowStartIntent,
+    startup_wait: StartupWaitPolicy,
 }
 
 impl ChunkApp {
@@ -191,6 +194,7 @@ impl ChunkApp {
         assets: WindowSceneAssets,
         render_options: TexturedSectionRenderOptions,
         start_intent: WindowStartIntent,
+        startup_wait: StartupWaitPolicy,
     ) -> Self {
         let mut ui = match start_intent {
             WindowStartIntent::InWorld => GameUi::new_ingame(),
@@ -218,6 +222,7 @@ impl ChunkApp {
             last_frame: Instant::now(),
             next_redraw_at: None,
             start_intent,
+            startup_wait,
         }
     }
 
@@ -594,11 +599,11 @@ impl ChunkApp {
         Ok(())
     }
 
-    #[cfg(test)]
     fn start_world_from_scene(&mut self, scene: SceneOptions) -> Result<()> {
         let assets = &self.assets;
+        let device = self.surface.as_ref().map(|surface| &surface.device);
         self.driver
-            .start_world_from_scene(scene, None, &mut |scene| {
+            .start_world_from_scene(scene, device, &mut |scene| {
                 WindowSceneRuntime::with_assets(scene, assets)
             })
     }
@@ -848,7 +853,20 @@ impl ApplicationHandler for ChunkApp {
         self.next_redraw_at = None;
         event_loop.listen_device_events(DeviceEvents::WhenFocused);
         if self.start_intent == WindowStartIntent::InWorld {
-            self.driver.request_current_scene_start(false, true);
+            match self.startup_wait {
+                StartupWaitPolicy::Idle => {
+                    if let Err(err) = self.start_world_from_scene(self.driver.scene.clone()) {
+                        log::error!("failed to complete idle desktop startup: {err:#}");
+                        event_loop.exit();
+                        return;
+                    }
+                }
+                StartupWaitPolicy::None
+                | StartupWaitPolicy::Playable
+                | StartupWaitPolicy::Frames(_) => {
+                    self.driver.request_current_scene_start(false, true);
+                }
+            }
         }
         self.sync_mouse_lock();
         self.schedule_next_redraw(event_loop);
@@ -1251,6 +1269,7 @@ mod tests {
             assets,
             TexturedSectionRenderOptions::default(),
             WindowStartIntent::InWorld,
+            StartupWaitPolicy::DESKTOP_DEFAULT,
         );
         app.driver.runtime = Some(runtime);
         app
@@ -1435,6 +1454,7 @@ mod tests {
             assets,
             TexturedSectionRenderOptions::default(),
             WindowStartIntent::Menu,
+            StartupWaitPolicy::DESKTOP_DEFAULT,
         );
         app.driver.set_ui_screen(Some(GameScreen::NewWorld));
 
@@ -1471,6 +1491,7 @@ mod tests {
             assets,
             TexturedSectionRenderOptions::default(),
             WindowStartIntent::Menu,
+            StartupWaitPolicy::DESKTOP_DEFAULT,
         );
         app.driver.set_ui_screen(Some(GameScreen::JoinRemote));
 
@@ -1519,6 +1540,7 @@ mod tests {
             assets,
             TexturedSectionRenderOptions::default(),
             WindowStartIntent::Menu,
+            StartupWaitPolicy::DESKTOP_DEFAULT,
         );
         app.driver.request_local_world_start(77, true);
 
@@ -1549,6 +1571,7 @@ mod tests {
             assets,
             TexturedSectionRenderOptions::default(),
             WindowStartIntent::Menu,
+            StartupWaitPolicy::DESKTOP_DEFAULT,
         );
 
         app.start_world_from_scene(scene).unwrap();

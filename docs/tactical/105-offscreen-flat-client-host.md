@@ -1,9 +1,9 @@
 # 105: Offscreen Flat Client Host
 
 Status: active; `GameUi`, session/startup lifetime, host-neutral local/remote
-start routing, the first one-frame offscreen host wrapper, and neutral
-`FlatInputFrame` / `OffscreenScript` scaffolding now live in the native flat
-path.
+start routing, the first one-frame offscreen host wrapper, shared
+`--startup-wait` host readiness policy, and neutral `FlatInputFrame` /
+`OffscreenScript` scaffolding now live in the native flat path.
 
 ## Purpose
 
@@ -50,8 +50,11 @@ The current gaps:
 - `run_headless_screenshot` is now a one-frame use of that offscreen host
   wrapper. Screenshot-only code still selects scenario setup such as camera
   override, requested UI screen, debug pane, remote settle delay, and scripted
-  interaction. Scripted attack/use now enter through neutral `FlatInputFrame`
-  rather than hand-assembled break/place commands.
+  interaction. Startup readiness is selected with the same `--startup-wait`
+  policy exposed to desktop window mode; screenshots default to `idle`, desktop
+  defaults to `playable`, and offscreen `frames:N` renders warmup frames before
+  saving the last capture. Scripted attack/use now enter through neutral
+  `FlatInputFrame` rather than hand-assembled break/place commands.
 - `mclone-native-client::flat_client_driver` now exists as a native staging
   owner for flat-client runtime, camera/spectator, interaction, actor
   interpolation, render options, render stats, frame timing, and full-frame UI
@@ -329,6 +332,34 @@ Validation run after retiring the public narrow modes:
 - `pnpm native:desktop-offscreen:smoke`
 - Visual inspection of `/tmp/mclone-desktop-offscreen.png`: nonblank terrain
   from the full-frame offscreen screenshot path.
+- `git diff --check`
+
+### Slice 5a - Shared Startup Readiness Policy
+
+- [x] Add shared `--startup-wait none|playable|idle|frames:N` parsing for
+  desktop window mode and full-frame offscreen screenshots.
+- [x] Preserve desktop's default nonblocking startup by defaulting window mode
+  to `playable`.
+- [x] Preserve deterministic capture startup by defaulting offscreen
+  screenshots to `idle`.
+- [x] Route offscreen `playable` / `none` / `frames:N` startup through the same
+  pending-session and local startup-pump path desktop uses.
+- [x] Treat `frames:N` as offscreen warmup frames and save the last captured
+  frame.
+- [x] Keep retired narrow headless modes outside this policy so new readiness
+  features accumulate on the real offscreen flat-client host.
+
+Validation run after shared startup readiness landed:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+- `pnpm native:desktop-offscreen:smoke`
+- `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-startup-wait-playable.png --width 960 --height 540 --startup-wait playable --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --screenshot-debug-pane true`
+- `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-startup-wait-frames.png --width 960 --height 540 --startup-wait frames:2 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time`
+- Visual inspection of `/tmp/mclone-startup-wait-playable.png` and
+  `/tmp/mclone-startup-wait-frames.png`: nonblank terrain, shared full-frame
+  composition, and expected capture output.
 - `git diff --check`
 
 ### Slice 6 - Long-Lived Offscreen Host

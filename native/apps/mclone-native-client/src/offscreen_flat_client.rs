@@ -11,10 +11,13 @@ use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
 use mclone_render::target::RenderFrameContext;
 use mclone_render_session::EngineCameraMovementMode;
+use mclone_server::initial_spawn_center_for_seed;
 use mclone_ui::GuiScale;
 
 use crate::camera::SpectatorCamera;
-use crate::cli::{HeadlessScreenshotOptions, HeadlessScreenshotUi, SceneOptions};
+use crate::cli::{
+    HeadlessScreenshotOptions, HeadlessScreenshotUi, SceneOptions, StartupWaitPolicy,
+};
 use crate::flat_client_driver::{
     FlatClientDebugFrame, FlatClientDriver, FlatClientUiFrame, FlatClientUiRenderOptions,
     FlatClientWorldActionStatus,
@@ -25,6 +28,7 @@ use crate::scene_runtime::{WindowSceneAssets, WindowSceneRuntime, WindowSceneSta
 use crate::ui::DebugPaneStats;
 
 const DEFAULT_OFFSCREEN_FRAME_MS: f64 = 1000.0 / 60.0;
+const MAX_OFFSCREEN_PLAYABLE_STARTUP_STEPS: usize = 65_536;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct OffscreenFlatClientScreenshotReport {
@@ -141,7 +145,21 @@ impl OffscreenFlatClientHost {
         })
     }
 
-    pub(crate) fn start_scene_now(
+    pub(crate) fn start_scene_with_wait_policy(
+        &mut self,
+        device: &wgpu::Device,
+        scene: SceneOptions,
+        startup_wait: StartupWaitPolicy,
+    ) -> Result<()> {
+        match startup_wait {
+            StartupWaitPolicy::Idle => self.start_scene_idle(device, scene),
+            StartupWaitPolicy::None
+            | StartupWaitPolicy::Playable
+            | StartupWaitPolicy::Frames(_) => self.start_scene_playable(device, scene),
+        }
+    }
+
+    pub(crate) fn start_scene_idle(
         &mut self,
         device: &wgpu::Device,
         scene: SceneOptions,
@@ -154,6 +172,58 @@ impl OffscreenFlatClientHost {
             .context("failed to start offscreen flat client scene")?;
         self.require_uploaded_sections()?;
         Ok(())
+    }
+
+    fn start_scene_playable(&mut self, device: &wgpu::Device, scene: SceneOptions) -> Result<()> {
+        self.anchor_local_playable_startup_camera(&scene);
+        self.driver.scene = scene;
+        self.driver.request_current_scene_start(false, false);
+
+        let assets = &self.assets;
+        let session_update = self.driver.finish_pending_session_start(
+            Some(device),
+            |scene| WindowSceneRuntime::with_assets(scene, assets),
+            |scene| WindowSceneStartupPump::new_local(scene, assets),
+        );
+        if session_update.mouse_lock_requested.is_some() {
+            self.driver.clear_camera_input();
+        }
+
+        for _ in 0..MAX_OFFSCREEN_PLAYABLE_STARTUP_STEPS {
+            if self.driver.startup.is_none() {
+                break;
+            }
+            let startup_update = self.driver.advance_local_world_startup(Some(device));
+            if startup_update.mouse_lock_requested.is_some() {
+                self.driver.clear_camera_input();
+            }
+            if self.driver.startup.is_some() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        if self.driver.startup.is_some() {
+            bail!(
+                "offscreen flat client did not reach playable startup after {MAX_OFFSCREEN_PLAYABLE_STARTUP_STEPS} steps"
+            );
+        }
+        if self.driver.runtime.is_none() {
+            bail!("offscreen flat client startup did not create a runtime");
+        }
+        self.require_uploaded_sections()?;
+        Ok(())
+    }
+
+    fn anchor_local_playable_startup_camera(&mut self, scene: &SceneOptions) {
+        if scene.remote_addr.is_some() {
+            return;
+        }
+        let spawn = initial_spawn_center_for_seed(scene.seed);
+        let mut startup_scene = scene.clone();
+        startup_scene.chunk_x = spawn.x;
+        startup_scene.chunk_z = spawn.z;
+        let spectator = SpectatorCamera::spawn_for_scene(&startup_scene);
+        self.driver
+            .set_spectator_camera(spectator, scene.movement_speed_multiplier);
     }
 
     pub(crate) fn render_frame(
@@ -444,11 +514,12 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
     let asset_source = load_asset_source()?;
     let scene = options.scene.clone();
     let render_options = options.render_options;
+    let startup_wait = options.startup_wait;
     let (loop_report, frame_pixels, host) = run_headless_capture_loop(
         HeadlessFrameLoopOptions {
             width: options.width,
             height: options.height,
-            frame_count: 1,
+            frame_count: startup_wait.offscreen_capture_frame_count(),
         },
         move |device, queue, format, size| {
             let mut host = OffscreenFlatClientHost::new(
@@ -461,7 +532,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                 assets,
                 asset_source,
             )?;
-            host.start_scene_now(device, scene.clone())?;
+            host.start_scene_with_wait_policy(device, scene.clone(), startup_wait)?;
             configure_screenshot_scene(&mut host, options)?;
             Ok(host)
         },

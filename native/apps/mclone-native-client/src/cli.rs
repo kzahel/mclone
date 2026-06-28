@@ -19,6 +19,7 @@ use crate::{
 };
 
 const MAX_SCREENSHOT_REMOTE_SETTLE_MS: u64 = 10_000;
+const MAX_STARTUP_WAIT_FRAMES: u32 = 4096;
 const DEFAULT_XR_CLEAR_SMOKE_FRAMES: u32 = 120;
 const MAX_XR_SMOKE_FRAMES: u32 = 4096;
 
@@ -103,6 +104,7 @@ pub(crate) struct HeadlessScreenshotOptions {
     pub(crate) height: u32,
     pub(crate) scene: SceneOptions,
     pub(crate) render_options: TexturedSectionRenderOptions,
+    pub(crate) startup_wait: StartupWaitPolicy,
     pub(crate) ui: HeadlessScreenshotUi,
     pub(crate) debug_pane: bool,
     pub(crate) scripted_interaction: bool,
@@ -165,6 +167,26 @@ pub(crate) enum WindowStartIntent {
     #[default]
     InWorld,
     Menu,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum StartupWaitPolicy {
+    None,
+    Playable,
+    Idle,
+    Frames(u32),
+}
+
+impl StartupWaitPolicy {
+    pub(crate) const DESKTOP_DEFAULT: Self = Self::Playable;
+    pub(crate) const OFFSCREEN_SCREENSHOT_DEFAULT: Self = Self::Idle;
+
+    pub(crate) fn offscreen_capture_frame_count(self) -> usize {
+        match self {
+            Self::Frames(frames) => (frames as usize).saturating_add(1),
+            Self::None | Self::Playable | Self::Idle => 1,
+        }
+    }
 }
 
 impl Default for MovementPerfOptions {
@@ -263,6 +285,7 @@ pub(crate) enum Cli {
         scene: SceneOptions,
         render_options: TexturedSectionRenderOptions,
         start_intent: WindowStartIntent,
+        startup_wait: StartupWaitPolicy,
     },
     HeadlessClear {
         path: PathBuf,
@@ -318,6 +341,7 @@ impl Cli {
         let mut screenshot_remote_settle_ms = 0;
         let mut screenshot_eye = None;
         let mut window_start_intent = WindowStartIntent::InWorld;
+        let mut startup_wait = None;
         let mut movement_perf = false;
         let mut timedemo = false;
         let mut frame_budget_probe = false;
@@ -481,6 +505,9 @@ impl Cli {
                         WindowStartIntent::Menu
                     };
                 }
+                "--startup-wait" => {
+                    startup_wait = Some(parse_startup_wait_arg("--startup-wait", args.next())?);
+                }
                 "--width" => width = Some(parse_u32_arg("--width", args.next())?),
                 "--height" => height = Some(parse_u32_arg("--height", args.next())?),
                 "--movement-steps" => {
@@ -585,6 +612,21 @@ impl Cli {
         {
             bail!("--rebuild-render-scale requires --renderer-rebuild-smoke");
         }
+        if startup_wait.is_some()
+            && (perf_mode_count > 0
+                || xr_clear_smoke
+                || xr_mclone_smoke
+                || matches!(
+                    mode,
+                    Some(
+                        HeadlessMode::Clear(_)
+                            | HeadlessMode::DualView(_)
+                            | HeadlessMode::RendererRebuildSmoke(_)
+                    )
+                ))
+        {
+            bail!("--startup-wait applies to window mode and --screenshot");
+        }
         let startup_options = startup_args.finish();
         let scene = SceneOptions::from_startup_scene(startup_options.scene)?;
         let render_options = startup_options.render_options;
@@ -610,6 +652,8 @@ impl Cli {
                     height: height.unwrap_or(720),
                     scene,
                     render_options,
+                    startup_wait: startup_wait
+                        .unwrap_or(StartupWaitPolicy::OFFSCREEN_SCREENSHOT_DEFAULT),
                     ui: screenshot_ui,
                     debug_pane: screenshot_debug_pane,
                     scripted_interaction: screenshot_scripted_interaction,
@@ -681,6 +725,7 @@ impl Cli {
                 scene,
                 render_options,
                 start_intent: window_start_intent,
+                startup_wait: startup_wait.unwrap_or(StartupWaitPolicy::DESKTOP_DEFAULT),
             }),
         }
     }
@@ -821,6 +866,30 @@ fn parse_screenshot_remote_settle_ms_arg(flag: &str, value: Option<String>) -> R
     Ok(parsed)
 }
 
+fn parse_startup_wait_arg(flag: &str, value: Option<String>) -> Result<StartupWaitPolicy> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    match value.as_str() {
+        "none" => Ok(StartupWaitPolicy::None),
+        "playable" => Ok(StartupWaitPolicy::Playable),
+        "idle" => Ok(StartupWaitPolicy::Idle),
+        _ => {
+            let frames = value
+                .strip_prefix("frames:")
+                .or_else(|| value.strip_prefix("frames="))
+                .with_context(|| {
+                    format!("{flag} must be none, playable, idle, or frames:N, got `{value}`")
+                })?;
+            let frames = frames
+                .parse::<u32>()
+                .with_context(|| format!("{flag} frames:N requires an unsigned integer"))?;
+            if frames > MAX_STARTUP_WAIT_FRAMES {
+                bail!("{flag} frames must be between 0 and {MAX_STARTUP_WAIT_FRAMES}");
+            }
+            Ok(StartupWaitPolicy::Frames(frames))
+        }
+    }
+}
+
 fn parse_f32_vec3_arg(flag: &str, value: Option<String>) -> Result<[f32; 3]> {
     let raw = value.with_context(|| format!("{flag} requires x,y,z"))?;
     let parts = raw
@@ -878,9 +947,9 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-          mclone-native-client [--menu|--start-in-world true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+          mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|new-world|join-remote|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
@@ -889,6 +958,6 @@ fn print_help() {
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
            mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-         Window mode streams chunks around a collision-backed local player with WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
+         Window mode streams chunks around a collision-backed local player with WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }

@@ -169,7 +169,8 @@ fn main() -> Result<()> {
             scene,
             render_options,
             start_intent,
-        } => run_window(scene, render_options, start_intent),
+            startup_wait,
+        } => run_window(scene, render_options, start_intent, startup_wait),
     }
 }
 
@@ -249,6 +250,7 @@ fn run_xr_mclone_smoke(_options: crate::cli::XrMcloneSmokeOptions) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::StartupWaitPolicy;
     use mclone_core::{BlockStateId, ChunkRevision, ChunkStatus};
 
     fn screenshot_cli(
@@ -263,6 +265,7 @@ mod tests {
                 height: 720,
                 scene,
                 render_options,
+                startup_wait: StartupWaitPolicy::OFFSCREEN_SCREENSHOT_DEFAULT,
                 ui: HeadlessScreenshotUi::None,
                 debug_pane: false,
                 scripted_interaction: false,
@@ -280,6 +283,7 @@ mod tests {
                 scene: SceneOptions::default(),
                 render_options: TexturedSectionRenderOptions::default(),
                 start_intent: WindowStartIntent::InWorld,
+                startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             }
         );
     }
@@ -292,6 +296,7 @@ mod tests {
                 scene: SceneOptions::default(),
                 render_options: TexturedSectionRenderOptions::default(),
                 start_intent: WindowStartIntent::Menu,
+                startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             }
         );
 
@@ -301,8 +306,52 @@ mod tests {
                 scene: SceneOptions::default(),
                 render_options: TexturedSectionRenderOptions::default(),
                 start_intent: WindowStartIntent::Menu,
+                startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             }
         );
+    }
+
+    #[test]
+    fn cli_parses_startup_wait_policy() {
+        assert_eq!(
+            Cli::parse(["--startup-wait".to_owned(), "idle".to_owned()]).unwrap(),
+            Cli::Window {
+                scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions::default(),
+                start_intent: WindowStartIntent::InWorld,
+                startup_wait: StartupWaitPolicy::Idle,
+            }
+        );
+
+        let cli = Cli::parse([
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
+            "--startup-wait".to_owned(),
+            "frames:2".to_owned(),
+        ])
+        .unwrap();
+        let Cli::HeadlessScreenshot { options } = cli else {
+            panic!("expected screenshot cli");
+        };
+        assert_eq!(options.startup_wait, StartupWaitPolicy::Frames(2));
+    }
+
+    #[test]
+    fn cli_rejects_startup_wait_for_non_host_modes() {
+        let err = Cli::parse([
+            "--headless-dual-view".to_owned(),
+            "/tmp/mclone-dual-view".to_owned(),
+            "--startup-wait".to_owned(),
+            "idle".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("applies to window mode and --screenshot"));
+
+        let err = Cli::parse(["--startup-wait".to_owned(), "frames:4097".to_owned()])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("frames must be between 0 and 4096"));
     }
 
     #[test]
@@ -675,6 +724,7 @@ mod tests {
                         force_fullbright: true,
                         ..TexturedSectionRenderOptions::default()
                     },
+                    startup_wait: StartupWaitPolicy::OFFSCREEN_SCREENSHOT_DEFAULT,
                     ui: HeadlessScreenshotUi::Pause,
                     debug_pane: true,
                     scripted_interaction: true,
@@ -866,6 +916,7 @@ mod tests {
                 scene: SceneOptions::default(),
                 render_options: TexturedSectionRenderOptions::default(),
                 start_intent: WindowStartIntent::InWorld,
+                startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             }
         );
     }
@@ -914,6 +965,7 @@ mod tests {
                     ..TexturedSectionRenderOptions::default()
                 },
                 start_intent: WindowStartIntent::InWorld,
+                startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             }
         );
 
@@ -934,6 +986,7 @@ mod tests {
                 },
                 render_options: TexturedSectionRenderOptions::default(),
                 start_intent: WindowStartIntent::InWorld,
+                startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             }
         );
     }
