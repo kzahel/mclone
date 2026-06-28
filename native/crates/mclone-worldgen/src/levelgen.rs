@@ -1509,15 +1509,10 @@ mod tests {
         let report = compare_generated_chunk_to_full_fixture(&actual, expected);
 
         assert_eq!(report.total_blocks, 16 * 16 * 256);
-        assert_eq!(report.mismatched_blocks, 177, "{report:#?}");
+        assert_eq!(report.mismatched_blocks, 69, "{report:#?}");
         assert_eq!(
             report.top_mismatch_pairs,
             vec![
-                MismatchBucket {
-                    actual: "minecraft:stone".to_owned(),
-                    expected: "minecraft:dripstone_block".to_owned(),
-                    count: 60,
-                },
                 MismatchBucket {
                     actual: "minecraft:air".to_owned(),
                     expected: "minecraft:grass".to_owned(),
@@ -1527,26 +1522,6 @@ mod tests {
                     actual: "minecraft:grass".to_owned(),
                     expected: "minecraft:air".to_owned(),
                     count: 16,
-                },
-                MismatchBucket {
-                    actual: "minecraft:water".to_owned(),
-                    expected: "minecraft:pointed_dripstone".to_owned(),
-                    count: 15,
-                },
-                MismatchBucket {
-                    actual: "minecraft:granite".to_owned(),
-                    expected: "minecraft:dripstone_block".to_owned(),
-                    count: 9,
-                },
-                MismatchBucket {
-                    actual: "minecraft:air".to_owned(),
-                    expected: "minecraft:pointed_dripstone".to_owned(),
-                    count: 8,
-                },
-                MismatchBucket {
-                    actual: "minecraft:deepslate".to_owned(),
-                    expected: "minecraft:dripstone_block".to_owned(),
-                    count: 7,
                 },
                 MismatchBucket {
                     actual: "minecraft:poppy".to_owned(),
@@ -1564,11 +1539,6 @@ mod tests {
                     count: 4,
                 },
                 MismatchBucket {
-                    actual: "minecraft:dirt".to_owned(),
-                    expected: "minecraft:dripstone_block".to_owned(),
-                    count: 4,
-                },
-                MismatchBucket {
                     actual: "minecraft:poppy".to_owned(),
                     expected: "minecraft:grass".to_owned(),
                     count: 4,
@@ -1577,11 +1547,6 @@ mod tests {
                     actual: "minecraft:water".to_owned(),
                     expected: "minecraft:glow_lichen".to_owned(),
                     count: 4,
-                },
-                MismatchBucket {
-                    actual: "minecraft:andesite".to_owned(),
-                    expected: "minecraft:dripstone_block".to_owned(),
-                    count: 3,
                 },
                 MismatchBucket {
                     actual: "minecraft:air".to_owned(),
@@ -1618,7 +1583,7 @@ mod tests {
         let report = compare_generated_chunk_to_full_fixture(&actual, expected);
 
         assert_eq!(report.total_blocks, 16 * 16 * 256);
-        assert_eq!(report.mismatched_blocks, 127, "{report:#?}");
+        assert_eq!(report.mismatched_blocks, 110, "{report:#?}");
         assert_eq!(
             report.top_mismatch_pairs,
             vec![
@@ -1648,29 +1613,9 @@ mod tests {
                     count: 7,
                 },
                 MismatchBucket {
-                    actual: "minecraft:granite".to_owned(),
-                    expected: "minecraft:dripstone_block".to_owned(),
-                    count: 5,
-                },
-                MismatchBucket {
-                    actual: "minecraft:air".to_owned(),
-                    expected: "minecraft:pointed_dripstone".to_owned(),
-                    count: 4,
-                },
-                MismatchBucket {
-                    actual: "minecraft:andesite".to_owned(),
-                    expected: "minecraft:dripstone_block".to_owned(),
-                    count: 4,
-                },
-                MismatchBucket {
                     actual: "minecraft:poppy".to_owned(),
                     expected: "minecraft:air".to_owned(),
                     count: 4,
-                },
-                MismatchBucket {
-                    actual: "minecraft:deepslate".to_owned(),
-                    expected: "minecraft:dripstone_block".to_owned(),
-                    count: 3,
                 },
                 MismatchBucket {
                     actual: "minecraft:poppy".to_owned(),
@@ -1695,11 +1640,6 @@ mod tests {
                 MismatchBucket {
                     actual: "minecraft:poppy".to_owned(),
                     expected: "minecraft:grass".to_owned(),
-                    count: 1,
-                },
-                MismatchBucket {
-                    actual: "minecraft:stone".to_owned(),
-                    expected: "minecraft:dripstone_block".to_owned(),
                     count: 1,
                 },
             ]
@@ -1743,31 +1683,14 @@ mod tests {
         let report = compare_generated_chunk_to_full_fixture(&actual, expected);
 
         assert_eq!(report.total_blocks, 16 * 16 * 256);
-        assert_eq!(report.mismatched_blocks, 46, "{report:#?}");
+        assert_eq!(report.mismatched_blocks, 3, "{report:#?}");
         assert_eq!(
             report.top_mismatch_pairs,
-            vec![
-                MismatchBucket {
-                    actual: "minecraft:stone".to_owned(),
-                    expected: "minecraft:dripstone_block".to_owned(),
-                    count: 31,
-                },
-                MismatchBucket {
-                    actual: "minecraft:air".to_owned(),
-                    expected: "minecraft:pointed_dripstone".to_owned(),
-                    count: 9,
-                },
-                MismatchBucket {
-                    actual: "minecraft:air".to_owned(),
-                    expected: "minecraft:grass".to_owned(),
-                    count: 3,
-                },
-                MismatchBucket {
-                    actual: "minecraft:granite".to_owned(),
-                    expected: "minecraft:dripstone_block".to_owned(),
-                    count: 3,
-                },
-            ]
+            vec![MismatchBucket {
+                actual: "minecraft:air".to_owned(),
+                expected: "minecraft:grass".to_owned(),
+                count: 3,
+            }]
         );
     }
 

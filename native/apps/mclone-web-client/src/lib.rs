@@ -633,7 +633,7 @@ pub fn try_run_web_runtime_smoke() -> ProtocolCodecResult<WebSmokeReport> {
         && transport_drained
         && protocol_codec_roundtrip
         && command_count == 2
-        && update_count == 4
+        && update_count == 6
         && loaded_chunk_count == 1;
 
     Ok(WebSmokeReport {
@@ -693,7 +693,7 @@ mod tests {
                 previous_chunk_unloaded: true,
                 protocol_codec_roundtrip: true,
                 command_count: 2,
-                update_count: 4,
+                update_count: 6,
                 loaded_chunk_count: 1,
             }
         );
@@ -713,7 +713,7 @@ mod tests {
                 .unwrap(),
             WebRuntimeStepReport {
                 command_count: 1,
-                update_count: 2,
+                update_count: 3,
                 loaded_chunk_count: 1,
                 protocol_codec_roundtrip: true,
                 transport_drained: true,
@@ -732,7 +732,7 @@ mod tests {
                 .unwrap(),
             WebRuntimeStepReport {
                 command_count: 1,
-                update_count: 2,
+                update_count: 3,
                 loaded_chunk_count: 1,
                 protocol_codec_roundtrip: true,
                 transport_drained: true,
@@ -789,6 +789,6 @@ mod tests {
 
     #[test]
     fn packed_smoke_report_has_stable_browser_layout() {
-        assert_eq!(mclone_web_smoke(), 0x0104_02ff);
+        assert_eq!(mclone_web_smoke(), 0x0106_02ff);
     }
 }

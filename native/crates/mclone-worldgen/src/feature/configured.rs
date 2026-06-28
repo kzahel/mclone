@@ -170,6 +170,129 @@ impl GlowLichenConfiguration {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FloatProvider {
+    Uniform {
+        min_inclusive: f32,
+        max_exclusive: f32,
+    },
+    ClampedNormal {
+        mean: f32,
+        deviation: f32,
+        min: f32,
+        max: f32,
+    },
+}
+
+impl Eq for FloatProvider {}
+
+impl FloatProvider {
+    pub const fn uniform(min_inclusive: f32, max_exclusive: f32) -> Self {
+        Self::Uniform {
+            min_inclusive,
+            max_exclusive,
+        }
+    }
+
+    pub const fn clamped_normal(mean: f32, deviation: f32, min: f32, max: f32) -> Self {
+        Self::ClampedNormal {
+            mean,
+            deviation,
+            min,
+            max,
+        }
+    }
+
+    pub(super) fn sample(self, random: &mut impl RandomSource) -> f32 {
+        match self {
+            Self::Uniform {
+                min_inclusive,
+                max_exclusive,
+            } => random.next_float() * (max_exclusive - min_inclusive) + min_inclusive,
+            Self::ClampedNormal {
+                mean,
+                deviation,
+                min,
+                max,
+            } => ((random.next_gaussian() as f32) * deviation + mean).clamp(min, max),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DripstoneClusterConfiguration {
+    pub floor_to_ceiling_search_range: i32,
+    pub height: IntProvider,
+    pub radius: IntProvider,
+    pub max_stalagmite_stalactite_height_diff: i32,
+    pub height_deviation: i32,
+    pub dripstone_block_layer_thickness: IntProvider,
+    pub density: FloatProvider,
+    pub wetness: FloatProvider,
+    pub chance_of_dripstone_column_at_max_distance_from_center: f32,
+    pub max_distance_from_edge_affecting_chance_of_dripstone_column: i32,
+    pub max_distance_from_center_affecting_height_bias: i32,
+}
+
+impl Eq for DripstoneClusterConfiguration {}
+
+impl DripstoneClusterConfiguration {
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        floor_to_ceiling_search_range: i32,
+        height: IntProvider,
+        radius: IntProvider,
+        max_stalagmite_stalactite_height_diff: i32,
+        height_deviation: i32,
+        dripstone_block_layer_thickness: IntProvider,
+        density: FloatProvider,
+        wetness: FloatProvider,
+        chance_of_dripstone_column_at_max_distance_from_center: f32,
+        max_distance_from_edge_affecting_chance_of_dripstone_column: i32,
+        max_distance_from_center_affecting_height_bias: i32,
+    ) -> Self {
+        Self {
+            floor_to_ceiling_search_range,
+            height,
+            radius,
+            max_stalagmite_stalactite_height_diff,
+            height_deviation,
+            dripstone_block_layer_thickness,
+            density,
+            wetness,
+            chance_of_dripstone_column_at_max_distance_from_center,
+            max_distance_from_edge_affecting_chance_of_dripstone_column,
+            max_distance_from_center_affecting_height_bias,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SmallDripstoneConfiguration {
+    pub max_placements: i32,
+    pub empty_space_search_radius: i32,
+    pub max_offset_from_origin: i32,
+    pub chance_of_taller_dripstone: f32,
+}
+
+impl Eq for SmallDripstoneConfiguration {}
+
+impl SmallDripstoneConfiguration {
+    pub const fn new(
+        max_placements: i32,
+        empty_space_search_radius: i32,
+        max_offset_from_origin: i32,
+        chance_of_taller_dripstone: f32,
+    ) -> Self {
+        Self {
+            max_placements,
+            empty_space_search_radius,
+            max_offset_from_origin,
+            chance_of_taller_dripstone,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BasicTreeConfiguration {
     pub log: RawBlockId,
@@ -613,6 +736,8 @@ pub enum ConfiguredFeature {
     Flower(RandomPatchConfiguration),
     Disk(DiskConfiguration),
     GlowLichen(GlowLichenConfiguration),
+    DripstoneCluster(DripstoneClusterConfiguration),
+    SmallDripstone(SmallDripstoneConfiguration),
     BasicTree(BasicTreeConfiguration),
     Tree(TreeConfiguration),
     RandomSelector(RandomFeatureConfiguration),
@@ -652,6 +777,14 @@ impl ConfiguredFeature {
 
     pub const fn glow_lichen(config: GlowLichenConfiguration) -> Self {
         Self::GlowLichen(config)
+    }
+
+    pub const fn dripstone_cluster(config: DripstoneClusterConfiguration) -> Self {
+        Self::DripstoneCluster(config)
+    }
+
+    pub const fn small_dripstone(config: SmallDripstoneConfiguration) -> Self {
+        Self::SmallDripstone(config)
     }
 
     pub const fn basic_tree(config: BasicTreeConfiguration) -> Self {

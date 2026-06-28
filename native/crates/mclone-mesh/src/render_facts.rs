@@ -68,7 +68,10 @@ fn java_no_occlusion(block: &ResourceLocation) -> bool {
     let path = block.path();
     path.ends_with("_leaves")
         || path.ends_with("_stained_glass")
-        || matches!(path, "glass" | "tinted_glass" | "ice" | "frosted_ice")
+        || matches!(
+            path,
+            "glass" | "tinted_glass" | "ice" | "frosted_ice" | "pointed_dripstone"
+        )
 }
 
 fn java_collision_shape_full_block(
@@ -76,6 +79,9 @@ fn java_collision_shape_full_block(
     occlusion_shape_full_block: bool,
 ) -> bool {
     if matches!(block.path(), "snow") {
+        return false;
+    }
+    if matches!(block.path(), "pointed_dripstone") {
         return false;
     }
     occlusion_shape_full_block
@@ -280,6 +286,18 @@ mod tests {
         assert_eq!(packed_ice.light_block, 15);
         assert!(packed_ice.view_blocking);
         assert!(packed_ice.solid_render);
+    }
+
+    #[test]
+    fn pointed_dripstone_is_non_occluding_with_partial_collision() {
+        let facts = block_render_facts(&record("minecraft:pointed_dripstone"), false);
+
+        assert!(!facts.occludes);
+        assert_eq!(facts.light_block, 0);
+        assert!(!facts.view_blocking);
+        assert!(!facts.solid_render);
+        assert!(!facts.collision_shape_full_block);
+        assert_eq!(facts.shade_brightness, 1.0);
     }
 
     #[test]

@@ -6,6 +6,7 @@ use crate::prng::RandomSource;
 mod configured;
 mod context;
 mod disk;
+mod dripstone;
 mod glow_lichen;
 mod lake;
 mod ore;
@@ -19,9 +20,10 @@ mod tree;
 
 pub use configured::{
     BasicTreeConfiguration, ConfiguredFeature, DecoratedFeatureConfiguration, DiskConfiguration,
-    FoliagePlacerConfiguration, GlowLichenConfiguration, LakeConfiguration, OreConfiguration,
-    OreTarget, OreTargetBlockState, RandomFeatureConfiguration, RandomPatchConfiguration,
-    SimpleBlockConfiguration, SpringConfiguration, StraightTrunkPlacerConfiguration,
+    DripstoneClusterConfiguration, FloatProvider, FoliagePlacerConfiguration,
+    GlowLichenConfiguration, LakeConfiguration, OreConfiguration, OreTarget, OreTargetBlockState,
+    RandomFeatureConfiguration, RandomPatchConfiguration, SimpleBlockConfiguration,
+    SmallDripstoneConfiguration, SpringConfiguration, StraightTrunkPlacerConfiguration,
     TreeConfiguration, TrunkPlacerConfiguration, TwoLayersFeatureSize, WeightedBlockState,
     WeightedConfiguredFeature,
 };
@@ -138,6 +140,12 @@ impl ConfiguredFeature {
             Self::Disk(config) => disk::place_disk(world, random, origin, *config),
             Self::GlowLichen(config) => {
                 glow_lichen::place_glow_lichen(world, random, origin, *config)
+            }
+            Self::DripstoneCluster(config) => {
+                dripstone::place_dripstone_cluster(world, random, origin, *config)
+            }
+            Self::SmallDripstone(config) => {
+                dripstone::place_small_dripstone(world, random, origin, *config)
             }
             Self::BasicTree(config) => tree::place_basic_tree(world, random, origin, *config),
             Self::Tree(config) => tree::place_tree(world, random, origin, *config),
@@ -1154,7 +1162,7 @@ mod tests {
         ];
 
         for (feature, (stone_ore, deepslate_ore, size, count, height)) in
-            plains.iter().skip(9).zip(expected)
+            plains.iter().skip(11).zip(expected)
         {
             assert_eq!(feature.step, DecorationStep::UndergroundOres);
             let mut expected_decorators = Vec::new();
@@ -1222,7 +1230,7 @@ mod tests {
         ];
 
         for (feature, (state, radius, half_height, targets, decorators)) in
-            plains.iter().skip(16).zip(expected)
+            plains.iter().skip(18).zip(expected)
         {
             assert_eq!(feature.step, DecorationStep::UndergroundOres);
             assert_eq!(feature.decorators, decorators);
@@ -1281,7 +1289,7 @@ mod tests {
         let report = apply_overworld_biome_features(12_345, get_layered_biome_by_id(4), &mut chunk);
 
         assert_eq!(report.biome_key, "minecraft:forest");
-        assert_eq!(report.attempted_features, 31);
+        assert_eq!(report.attempted_features, 33);
         assert!(report.placed_features > 0);
         assert!(report.added_non_air_blocks > 0);
     }

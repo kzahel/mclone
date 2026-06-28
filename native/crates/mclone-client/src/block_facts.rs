@@ -21,6 +21,9 @@ pub(crate) mod terrain_id {
     pub(crate) const WATER_LEVEL_8: u32 = 79;
     pub(crate) const LAVA_LEVEL_1: u32 = 80;
     pub(crate) const LAVA_LEVEL_8: u32 = 87;
+    #[cfg(test)]
+    pub(crate) const DRIPSTONE_BLOCK: u32 = 89;
+    pub(crate) const POINTED_DRIPSTONE: u32 = 90;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

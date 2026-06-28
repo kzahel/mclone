@@ -9,14 +9,16 @@ use crate::block::{
     PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, TERRACOTTA, TUFF, WATER,
 };
 use crate::placement::{
-    ConfiguredDecorator, HeightProvider, HeightmapType, IntProvider, VerticalAnchor,
+    ConfiguredDecorator, CountConfiguration, HeightProvider, HeightmapType, IntProvider,
+    VerticalAnchor,
 };
 
 use super::{
     BasicTreeConfiguration, ConfiguredFeature, DecorationStep, DiskConfiguration,
-    GlowLichenConfiguration, LakeConfiguration, OreConfiguration, PlacedFeature,
-    RandomFeatureConfiguration, RandomPatchConfiguration, SpringConfiguration, TreeConfiguration,
-    WeightedBlockState, WeightedConfiguredFeature,
+    DripstoneClusterConfiguration, FloatProvider, GlowLichenConfiguration, LakeConfiguration,
+    OreConfiguration, PlacedFeature, RandomFeatureConfiguration, RandomPatchConfiguration,
+    SmallDripstoneConfiguration, SpringConfiguration, TreeConfiguration, WeightedBlockState,
+    WeightedConfiguredFeature,
 };
 
 pub(super) const TAIGA_GRASS_STATES: [WeightedBlockState; 2] = [
@@ -278,7 +280,57 @@ fn default_underground_variety_features() -> Vec<PlacedFeature> {
             VerticalAnchor::absolute(16),
             2,
         ),
+        rare_dripstone_cluster_feature(),
+        rare_small_dripstone_feature(),
     ]
+}
+
+fn rare_dripstone_cluster_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::UndergroundDecoration,
+        ConfiguredFeature::dripstone_cluster(DripstoneClusterConfiguration::new(
+            12,
+            IntProvider::uniform(3, 3),
+            IntProvider::uniform(2, 6),
+            1,
+            3,
+            IntProvider::uniform(2, 2),
+            FloatProvider::uniform(0.3, 0.4),
+            FloatProvider::clamped_normal(0.1, 0.3, 0.1, 0.9),
+            0.1,
+            3,
+            8,
+        )),
+        vec![
+            ConfiguredDecorator::chance(25),
+            ConfiguredDecorator::Count(CountConfiguration::from_provider(IntProvider::uniform(
+                10, 10,
+            ))),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::range(HeightProvider::uniform(
+                VerticalAnchor::bottom(),
+                VerticalAnchor::absolute(59),
+            )),
+        ],
+    )
+}
+
+fn rare_small_dripstone_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::UndergroundDecoration,
+        ConfiguredFeature::small_dripstone(SmallDripstoneConfiguration::new(5, 10, 2, 0.2)),
+        vec![
+            ConfiguredDecorator::chance(30),
+            ConfiguredDecorator::Count(CountConfiguration::from_provider(IntProvider::uniform(
+                40, 80,
+            ))),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::range(HeightProvider::uniform(
+                VerticalAnchor::bottom(),
+                VerticalAnchor::absolute(59),
+            )),
+        ],
+    )
 }
 
 fn default_ore_features() -> Vec<PlacedFeature> {

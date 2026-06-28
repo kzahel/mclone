@@ -91,6 +91,8 @@ pub const LAVA_LEVEL_6: RawBlockId = 85;
 pub const LAVA_LEVEL_7: RawBlockId = 86;
 pub const LAVA_LEVEL_8: RawBlockId = 87;
 pub const CLAY: RawBlockId = 88;
+pub const DRIPSTONE_BLOCK: RawBlockId = 89;
+pub const POINTED_DRIPSTONE: RawBlockId = 90;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -121,6 +123,8 @@ impl GeneratedBlockId {
     pub const GLOW_LICHEN: Self = Self(GLOW_LICHEN);
     pub const CAVE_AIR: Self = Self(CAVE_AIR);
     pub const CLAY: Self = Self(CLAY);
+    pub const DRIPSTONE_BLOCK: Self = Self(DRIPSTONE_BLOCK);
+    pub const POINTED_DRIPSTONE: Self = Self(POINTED_DRIPSTONE);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -164,6 +168,7 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | LARGE_FERN_LOWER
             | LARGE_FERN_UPPER
             | GLOW_LICHEN
+            | POINTED_DRIPSTONE
     )
 }
 
@@ -335,6 +340,8 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         GLOW_LICHEN => "minecraft:glow_lichen",
         CAVE_AIR => "minecraft:cave_air",
         CLAY => "minecraft:clay",
+        DRIPSTONE_BLOCK => "minecraft:dripstone_block",
+        POINTED_DRIPSTONE => "minecraft:pointed_dripstone",
         _ => "minecraft:unknown",
     }
 }
@@ -363,5 +370,7 @@ mod tests {
         assert_eq!(block_light_opacity(WATER), 1);
         assert_eq!(block_light_opacity(LAVA), 1);
         assert_eq!(block_light_opacity(GLOW_LICHEN), 0);
+        assert_eq!(block_light_opacity(DRIPSTONE_BLOCK), 15);
+        assert_eq!(block_light_opacity(POINTED_DRIPSTONE), 0);
     }
 }

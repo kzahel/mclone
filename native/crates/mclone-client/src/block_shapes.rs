@@ -72,6 +72,7 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
             )
             .with_offset(OffsetKind::Xz),
         ),
+        terrain_id::POINTED_DRIPSTONE => Some(pointed_dripstone_shape()),
         terrain_id::GLOW_LICHEN => None,
         _ => Some(full_block()),
     }
@@ -90,6 +91,7 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::LARGE_FERN_LOWER
         | terrain_id::LARGE_FERN_UPPER
         | terrain_id::GLOW_LICHEN => None,
+        terrain_id::POINTED_DRIPSTONE => Some(pointed_dripstone_shape()),
         id if is_fluid(BlockStateId(id)) => None,
         _ => Some(full_block()),
     }
@@ -104,6 +106,10 @@ fn local_box(min_x: f64, min_y: f64, min_z: f64, max_x: f64, max_y: f64, max_z: 
 
 fn full_block() -> LocalShape {
     local_box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+}
+
+fn pointed_dripstone_shape() -> LocalShape {
+    local_box(5.0 / 16.0, 0.0, 5.0 / 16.0, 11.0 / 16.0, 1.0, 11.0 / 16.0)
 }
 
 impl LocalShape {
@@ -195,7 +201,7 @@ mod tests {
 
     #[test]
     fn terrain_solids_use_full_cube_collision_shapes() {
-        for id in [1, 3, 7, 40, 42, 49] {
+        for id in [1, 3, 7, 40, 42, 49, terrain_id::DRIPSTONE_BLOCK] {
             assert_eq!(
                 block_collision_aabb(state(id), BlockPos::new(1, 2, 3)),
                 Some(Aabb::new(1.0, 2.0, 3.0, 2.0, 3.0, 4.0)),
@@ -241,6 +247,22 @@ mod tests {
                 pos.y as f64 + 10.0 / 16.0,
                 pos.z as f64 + offset.z + 11.0 / 16.0,
             ))
+        );
+    }
+
+    #[test]
+    fn pointed_dripstone_uses_partial_center_shape() {
+        let pos = BlockPos::new(1, 2, 3);
+        let expected = Aabb::new(1.3125, 2.0, 3.3125, 1.6875, 3.0, 3.6875);
+
+        assert_eq!(
+            shape_for(state(terrain_id::POINTED_DRIPSTONE), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(expected)
+        );
+        assert_eq!(
+            block_collision_aabb(state(terrain_id::POINTED_DRIPSTONE), pos),
+            Some(expected)
         );
     }
 

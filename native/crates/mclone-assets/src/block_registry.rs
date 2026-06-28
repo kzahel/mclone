@@ -367,6 +367,8 @@ const AXIS_Y: &[(&str, &str)] = &[("axis", "y")];
 const LAYERS_1: &[(&str, &str)] = &[("layers", "1")];
 const HALF_LOWER: &[(&str, &str)] = &[("half", "lower")];
 const HALF_UPPER: &[(&str, &str)] = &[("half", "upper")];
+const POINTED_DRIPSTONE_UP_TIP: &[(&str, &str)] =
+    &[("thickness", "tip"), ("vertical_direction", "up")];
 const LEVEL_0: &[(&str, &str)] = &[("level", "0")];
 const LEVEL_1: &[(&str, &str)] = &[("level", "1")];
 const LEVEL_2: &[(&str, &str)] = &[("level", "2")];
@@ -469,6 +471,8 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (86, "minecraft:lava", LEVEL_7),
     (87, "minecraft:lava", LEVEL_8),
     (88, "minecraft:clay", EMPTY_PROPS),
+    (89, "minecraft:dripstone_block", EMPTY_PROPS),
+    (90, "minecraft:pointed_dripstone", POINTED_DRIPSTONE_UP_TIP),
 ];
 
 #[cfg(test)]
@@ -480,7 +484,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 89);
+        assert_eq!(registry.len(), 91);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -516,6 +520,14 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:clay"),
             Some(BlockStateId(88))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:dripstone_block"),
+            Some(BlockStateId(89))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:pointed_dripstone[thickness=tip,vertical_direction=up]"),
+            Some(BlockStateId(90))
         );
         assert_eq!(
             registry.by_id(BlockStateId(41)).unwrap().canonical_key(),
