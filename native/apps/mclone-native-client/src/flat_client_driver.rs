@@ -5,13 +5,14 @@ use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats,
 };
+use mclone_app_runtime::session::{ActiveSessionDescriptor, SessionStartRequest};
 use mclone_assets::AssetSource;
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
     ClientInteractionController,
 };
 use mclone_core::Vec3d;
-use mclone_input::{FlatInputAction, FlatInputFrame};
+use mclone_input::{FlatInputAction, FlatInputFrame, TouchControlsMode};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_render::chunk::{
     ChunkCamera, ChunkTextureAtlas, TexturedSectionRenderOptions, TexturedSectionUploadReport,
@@ -26,9 +27,10 @@ use mclone_render_session::{
     RenderSectionCacheUpdate, actor_instances_from_presentations, render_camera_from_snapshot,
 };
 use mclone_ui::{
-    FlatHud, GameFramePacingMode, GameUi, GameUiRenderState, GuiDrawList, GuiScale,
-    LoadingProgressOverlay, Point, render_flat_hud, render_loading_progress_overlay,
-    render_loading_progress_panel_at,
+    DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameScreen, GameUi, GameUiAction,
+    GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point,
+    render_flat_hud, render_loading_progress_overlay, render_loading_progress_panel_at,
+    touch_controls_mode_label,
 };
 
 use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
@@ -70,6 +72,7 @@ impl FlatClientCameraView {
 
 pub(crate) struct FlatClientDriver {
     pub(crate) runtime: Option<WindowSceneRuntime>,
+    pub(crate) ui: GameUi,
     pub(crate) spectator: SpectatorCamera,
     pub(crate) camera: EngineCameraController,
     pub(crate) actor_interpolation: ActorInterpolationState,
@@ -78,6 +81,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) render_resources: Option<FlatRenderResources>,
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
+    seed_reroll_state: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -153,21 +157,64 @@ pub(crate) struct FlatClientDebugFrame {
 }
 
 #[derive(Debug)]
-pub(crate) struct FlatClientUiFrame<'a> {
-    pub(crate) ui: &'a GameUi,
+pub(crate) struct FlatClientUiFrame {
     pub(crate) render_options: FlatClientUiRenderOptions,
     pub(crate) hud: Option<FlatHud>,
     pub(crate) loading_progress_overlay: Option<LoadingProgressOverlay>,
     pub(crate) debug: FlatClientDebugFrame,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct FlatClientUiActionContext<'a> {
+    pub(crate) session_starting: bool,
+    pub(crate) from_pointer_click: bool,
+    pub(crate) fallback_remote_addr: Option<&'a str>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum FlatClientHostAction {
+    StartLocalWorld {
+        seed: i64,
+        arm_mouse_lock: bool,
+    },
+    JoinRemote {
+        address: String,
+        arm_mouse_lock: bool,
+    },
+    QuitToTitle,
+    Quit,
+    CycleFramePacing,
+    CycleFpsCap,
+    SetTouchControlsMode(TouchControlsMode),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FlatClientUiActionResult {
+    pub(crate) host_action: Option<FlatClientHostAction>,
+    pub(crate) clear_inactive_session_status: bool,
+    pub(crate) should_arm_mouse_lock: bool,
+    pub(crate) preserve_pointer_state: bool,
+    pub(crate) clear_gameplay_input: bool,
+    pub(crate) scene_render_distance: Option<i32>,
+    pub(crate) scene_movement_speed_multiplier: Option<f32>,
+}
+
 impl FlatClientDriver {
     pub(crate) fn new(scene: &SceneOptions, render_options: TexturedSectionRenderOptions) -> Self {
+        Self::new_with_ui(scene, render_options, GameUi::new())
+    }
+
+    pub(crate) fn new_with_ui(
+        scene: &SceneOptions,
+        render_options: TexturedSectionRenderOptions,
+        ui: GameUi,
+    ) -> Self {
         let spectator = SpectatorCamera::spawn_for_scene(scene);
         let camera =
             engine_camera_controller_from_spectator(&spectator, scene.movement_speed_multiplier);
         Self {
             runtime: None,
+            ui,
             spectator,
             camera,
             actor_interpolation: ActorInterpolationState::new(),
@@ -176,6 +223,7 @@ impl FlatClientDriver {
             render_resources: None,
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
+            seed_reroll_state: initial_seed_reroll_state(scene.seed),
         }
     }
 
@@ -223,6 +271,284 @@ impl FlatClientDriver {
 
     pub(crate) fn clear_camera_input(&mut self) {
         self.camera.clear_keys();
+    }
+
+    pub(crate) fn ui_is_active(&self) -> bool {
+        self.ui.is_active()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ui_screen(&self) -> Option<GameScreen> {
+        self.ui.screen()
+    }
+
+    pub(crate) fn set_ui_screen(&mut self, screen: Option<GameScreen>) {
+        self.ui.set_screen(screen);
+    }
+
+    pub(crate) fn set_new_world_seed(&mut self, seed: i64) {
+        self.ui.set_new_world_seed(seed);
+    }
+
+    pub(crate) fn set_join_remote_addr(&mut self, addr: impl Into<String>) {
+        self.ui.set_join_remote_addr(addr);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn join_remote_addr(&self) -> &str {
+        self.ui.join_remote_addr()
+    }
+
+    pub(crate) fn set_ui_scale(&mut self, scale: GuiScale) {
+        self.ui.set_scale(scale);
+    }
+
+    pub(crate) fn clear_ui_input(&mut self) {
+        self.ui.clear_input();
+    }
+
+    pub(crate) fn open_pause_menu(&mut self) {
+        self.ui.open_pause();
+    }
+
+    pub(crate) fn ui_key_pressed(&mut self, key: GuiKey) -> (bool, Option<GameUiAction>) {
+        self.ui.key_pressed(key)
+    }
+
+    pub(crate) fn ui_pointer_down(&mut self, point: Point, state: GameUiRenderState) -> bool {
+        self.ui.pointer_down(point, state)
+    }
+
+    pub(crate) fn ui_pointer_up(
+        &mut self,
+        point: Point,
+        state: GameUiRenderState,
+    ) -> (bool, Option<GameUiAction>) {
+        self.ui.pointer_up(point, state)
+    }
+
+    pub(crate) fn ui_pointer_move(
+        &mut self,
+        point: Point,
+        state: GameUiRenderState,
+    ) -> (bool, Option<GameUiAction>) {
+        self.ui.pointer_move(point, state)
+    }
+
+    pub(crate) fn apply_started_session_ui(&mut self, descriptor: &ActiveSessionDescriptor) {
+        match descriptor {
+            ActiveSessionDescriptor::LocalWorld { seed } => {
+                self.ui.apply_action(GameUiAction::CreateWorld(*seed));
+                log::info!("created local world seed={seed}");
+            }
+            ActiveSessionDescriptor::Remote { endpoint } => {
+                self.ui.apply_action(GameUiAction::JoinRemote);
+                log::info!("joined remote session {}", endpoint.address);
+            }
+        }
+    }
+
+    pub(crate) fn apply_failed_session_ui(
+        &mut self,
+        request: &SessionStartRequest,
+        show_title_on_failure: bool,
+    ) {
+        match request {
+            SessionStartRequest::NewLocalWorld { seed } => self.ui.set_new_world_seed(*seed),
+            SessionStartRequest::JoinRemote { endpoint } => {
+                self.ui.set_join_remote_addr(endpoint.address.clone());
+            }
+            SessionStartRequest::Unknown => {}
+        }
+        if show_title_on_failure {
+            self.ui.set_screen(Some(GameScreen::Title));
+        }
+    }
+
+    pub(crate) fn apply_quit_to_title_ui(&mut self) {
+        self.ui.apply_action(GameUiAction::QuitToTitle);
+    }
+
+    pub(crate) fn apply_ui_action(
+        &mut self,
+        action: GameUiAction,
+        context: FlatClientUiActionContext<'_>,
+    ) -> FlatClientUiActionResult {
+        let mut result = FlatClientUiActionResult {
+            host_action: None,
+            clear_inactive_session_status: false,
+            should_arm_mouse_lock: context.from_pointer_click
+                && matches!(
+                    action,
+                    GameUiAction::StartWorld | GameUiAction::Resume | GameUiAction::JoinRemote
+                ),
+            preserve_pointer_state: matches!(
+                action,
+                GameUiAction::SetRenderDistance(_)
+                    | GameUiAction::SetFlySpeed(_)
+                    | GameUiAction::SetMovementSpeed(_)
+                    | GameUiAction::SetTouchLookSensitivity(_)
+                    | GameUiAction::SetTouchControlsMode(_)
+            ),
+            clear_gameplay_input: true,
+            scene_render_distance: None,
+            scene_movement_speed_multiplier: None,
+        };
+
+        if context.session_starting && !matches!(action, GameUiAction::Quit) {
+            result.clear_gameplay_input = false;
+            result.should_arm_mouse_lock = false;
+            result.preserve_pointer_state = true;
+            return result;
+        }
+
+        let mut apply_ui_action = true;
+        match action {
+            GameUiAction::ToggleSectionOcclusion => {
+                self.render_options.section_occlusion_culling =
+                    !self.render_options.section_occlusion_culling;
+                log::info!(
+                    "section occlusion culling {}",
+                    if self.render_options.section_occlusion_culling {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+            }
+            GameUiAction::ToggleFullbright => {
+                self.render_options.force_fullbright = !self.render_options.force_fullbright;
+                log::info!(
+                    "fullbright {}",
+                    if self.render_options.force_fullbright {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+            }
+            GameUiAction::ToggleFly => {
+                let movement_mode = self.camera.toggle_movement_mode();
+                log::info!("player movement mode {}", movement_mode.label());
+            }
+            GameUiAction::SetFlySpeed(multiplier) => {
+                self.camera.set_fly_speed_multiplier(f64::from(multiplier));
+                log::info!(
+                    "fly speed set to {:.1}x ({:.0} blocks/s)",
+                    self.camera.fly_speed_multiplier(),
+                    self.camera.speed_blocks_per_second()
+                );
+            }
+            GameUiAction::SetMovementSpeed(multiplier) => {
+                self.camera
+                    .set_movement_speed_multiplier(f64::from(multiplier));
+                result.scene_movement_speed_multiplier =
+                    Some(self.camera.movement_speed_multiplier() as f32);
+                log::info!(
+                    "movement speed multiplier set to {:.1}x",
+                    self.camera.movement_speed_multiplier()
+                );
+            }
+            GameUiAction::SetRenderDistance(render_distance) => {
+                let render_distance =
+                    render_distance.clamp(MIN_RENDER_DISTANCE, MAX_RENDER_DISTANCE);
+                result.scene_render_distance = Some(render_distance);
+                let render_distance_chunks =
+                    u32::try_from(render_distance).expect("clamped render distance must fit u32");
+                if let Some(runtime) = &mut self.runtime {
+                    match runtime.set_render_distance(render_distance_chunks) {
+                        Ok(true) => {
+                            log::info!(
+                                "render distance set to {} (chunk tracking radius {})",
+                                render_distance,
+                                runtime.chunk_tracking_radius()
+                            );
+                        }
+                        Ok(false) => {}
+                        Err(err) => {
+                            log::error!(
+                                "failed to set render distance to {render_distance}: {err:#}"
+                            );
+                            return result;
+                        }
+                    }
+                } else {
+                    log::info!("new-world render distance set to {render_distance}");
+                }
+            }
+            GameUiAction::SetTouchControlsMode(mode) => {
+                result.host_action = Some(FlatClientHostAction::SetTouchControlsMode(mode));
+                log::info!("touch controls set to {}", touch_controls_mode_label(mode));
+            }
+            GameUiAction::CycleFramePacing => {
+                result.host_action = Some(FlatClientHostAction::CycleFramePacing);
+            }
+            GameUiAction::CycleFpsCap => {
+                result.host_action = Some(FlatClientHostAction::CycleFpsCap);
+            }
+            GameUiAction::OpenNewWorld => {
+                let seed = self.next_new_world_seed();
+                self.ui.set_new_world_seed(seed);
+                result.clear_inactive_session_status = true;
+            }
+            GameUiAction::OpenJoinRemote => {
+                let remote_addr = context
+                    .fallback_remote_addr
+                    .unwrap_or(DEFAULT_JOIN_REMOTE_ADDR)
+                    .to_owned();
+                self.ui.set_join_remote_addr(remote_addr);
+                result.clear_inactive_session_status = true;
+            }
+            GameUiAction::RerollSeed => {
+                let seed = self.next_new_world_seed();
+                self.ui.set_new_world_seed(seed);
+                result.clear_inactive_session_status = true;
+                log::info!("new-world seed rerolled to {seed}");
+            }
+            GameUiAction::CreateWorld(seed) => {
+                result.host_action = Some(FlatClientHostAction::StartLocalWorld {
+                    seed,
+                    arm_mouse_lock: context.from_pointer_click,
+                });
+                apply_ui_action = false;
+            }
+            GameUiAction::JoinRemote => {
+                result.host_action = Some(FlatClientHostAction::JoinRemote {
+                    address: self.ui.join_remote_addr().to_owned(),
+                    arm_mouse_lock: context.from_pointer_click,
+                });
+                apply_ui_action = false;
+            }
+            GameUiAction::QuitToTitle => {
+                result.host_action = Some(FlatClientHostAction::QuitToTitle);
+                apply_ui_action = false;
+            }
+            GameUiAction::Quit => {
+                result.host_action = Some(FlatClientHostAction::Quit);
+                apply_ui_action = false;
+            }
+            GameUiAction::BackToTitle => {
+                result.clear_inactive_session_status = true;
+            }
+            GameUiAction::StartWorld
+            | GameUiAction::Resume
+            | GameUiAction::OpenOptions(_)
+            | GameUiAction::BackToPause
+            | GameUiAction::SetTouchLookSensitivity(_) => {}
+        }
+
+        if apply_ui_action {
+            self.ui.apply_action(action);
+        }
+        result
+    }
+
+    fn next_new_world_seed(&mut self) -> i64 {
+        self.seed_reroll_state = self
+            .seed_reroll_state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        self.seed_reroll_state as i64
     }
 
     pub(crate) fn render_config(&self) -> Option<RenderConfig> {
@@ -754,11 +1080,11 @@ impl FlatClientDriver {
         &mut self,
         frame: mclone_render::target::RenderFrameContext<'_>,
         fallback_render_distance: i32,
-        ui_frame: FlatClientUiFrame<'_>,
+        ui_frame: FlatClientUiFrame,
     ) -> anyhow::Result<FullFrameRenderSummary> {
-        let ui_active = ui_frame.ui.is_active();
-        let ui_covers_world = ui_frame.ui.covers_world();
-        let gui_scale = ui_frame.ui.scale();
+        let ui_active = self.ui.is_active();
+        let ui_covers_world = self.ui.covers_world();
+        let gui_scale = self.ui.scale();
         let debug_stats = (!ui_active).then_some(ui_frame.debug.stats).flatten();
         let debug_view_readiness_overlay = debug_stats
             .is_some()
@@ -773,7 +1099,7 @@ impl FlatClientDriver {
                 .is_some_and(mclone_ui::FlatHud::has_visible_commands)
             || loading_progress_overlay.is_some()
             || debug_view_readiness_overlay.is_some();
-        let base_ui_draw = ui_frame
+        let base_ui_draw = self
             .ui
             .render_draw_list(game_ui_render_state(ui_frame.render_options));
         let gui_state = FullFrameGui::new(
@@ -857,6 +1183,13 @@ pub(crate) fn game_frame_pacing_mode(mode: FramePacingMode) -> GameFramePacingMo
     }
 }
 
+fn initial_seed_reroll_state(seed: i64) -> u64 {
+    (seed as u64)
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(0xD1B5_4A32_D192_ED03)
+        .max(1)
+}
+
 fn render_flat_client_gui_draw(
     mut ui_draw: GuiDrawList,
     gui_scale: GuiScale,
@@ -889,6 +1222,63 @@ fn render_flat_client_gui_draw(
         );
     }
     ui_draw
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ui_action_context() -> FlatClientUiActionContext<'static> {
+        FlatClientUiActionContext {
+            session_starting: false,
+            from_pointer_click: true,
+            fallback_remote_addr: Some("10.0.0.9:25565"),
+        }
+    }
+
+    #[test]
+    fn ui_action_routing_keeps_local_world_start_as_host_request() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        let open_result = driver.apply_ui_action(GameUiAction::OpenNewWorld, ui_action_context());
+        assert_eq!(open_result.host_action, None);
+        assert!(open_result.clear_inactive_session_status);
+        assert_eq!(driver.ui_screen(), Some(GameScreen::NewWorld));
+
+        let seed = driver.ui.new_world_seed();
+        let start_result =
+            driver.apply_ui_action(GameUiAction::CreateWorld(seed), ui_action_context());
+        assert_eq!(
+            start_result.host_action,
+            Some(FlatClientHostAction::StartLocalWorld {
+                seed,
+                arm_mouse_lock: true
+            })
+        );
+        assert_eq!(driver.ui_screen(), Some(GameScreen::NewWorld));
+    }
+
+    #[test]
+    fn ui_action_routing_handles_join_remote_without_desktop_payloads() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        let open_result = driver.apply_ui_action(GameUiAction::OpenJoinRemote, ui_action_context());
+        assert!(open_result.clear_inactive_session_status);
+        assert_eq!(driver.ui_screen(), Some(GameScreen::JoinRemote));
+        assert_eq!(driver.join_remote_addr(), "10.0.0.9:25565");
+
+        let join_result = driver.apply_ui_action(GameUiAction::JoinRemote, ui_action_context());
+        assert_eq!(
+            join_result.host_action,
+            Some(FlatClientHostAction::JoinRemote {
+                address: "10.0.0.9:25565".to_owned(),
+                arm_mouse_lock: true
+            })
+        );
+        assert_eq!(driver.ui_screen(), Some(GameScreen::JoinRemote));
+    }
 }
 
 pub(crate) fn effective_render_options_for_camera(

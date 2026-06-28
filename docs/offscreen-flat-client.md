@@ -82,16 +82,18 @@ The existing code already has good low-level pieces:
 
 The gap is above those pieces. Desktop flat now has a native-client
 `FlatClientDriver` staging owner for runtime, camera, interaction, actor
-interpolation, render options, render stats, and frame timing, but the desktop
-`winit` app shell still drives much of the real client lifetime directly.
+interpolation, render options, render stats, frame timing, `GameUi`, and
+host-neutral menu action routing, but the desktop `winit` app shell still owns
+host execution for surface frames, frame pacing, mouse lock, desktop
+runtime/startup construction, and desktop session pending payloads.
 `run_headless_screenshot` now constructs that driver, rebuilds render resources
 through it, uploads sections through it, and renders through
 `FlatClientDriver::render_full_frame_with_ui`, including shared debug/HUD/status
-draw-list assembly. It is still screenshot-shaped: it creates a fresh
-runtime/driver per capture and owns scenario UI setup plus scripted interaction
-state. That still lets desktop features miss headless until session/UI lifetime
-moves behind shared driver methods and an offscreen host can run the same driver
-for multiple frames.
+draw-list assembly and driver-owned UI scenario setup. It is still
+screenshot-shaped: it creates a fresh runtime/driver per capture and owns
+scripted interaction state. That still lets desktop features miss headless until
+session/startup host execution moves behind shared driver methods and an
+offscreen host can run the same driver for multiple frames.
 
 ## Desired Cleanup Shape
 

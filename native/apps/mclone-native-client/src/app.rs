@@ -13,8 +13,8 @@ use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameScreen, GameUi, GameUiAction,
-    GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay,
+    DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameUi, GameUiAction, GameUiRenderState,
+    GuiKey, GuiScale, Point, StatusOverlay,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -24,10 +24,12 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
+use crate::MAX_RENDER_DISTANCE;
 use crate::cli::{SceneOptions, WindowStartIntent};
 use crate::flat_client_driver::{
-    FlatClientCameraView, FlatClientDebugFrame, FlatClientDriver, FlatClientUiFrame,
-    FlatClientUiRenderOptions, FlatClientWorldActionStatus, game_ui_render_state,
+    FlatClientCameraView, FlatClientDebugFrame, FlatClientDriver, FlatClientHostAction,
+    FlatClientUiActionContext, FlatClientUiFrame, FlatClientUiRenderOptions,
+    FlatClientWorldActionStatus, game_ui_render_state,
 };
 use crate::frame_pacing::{
     FramePacing, FramePacingMode, FrameTimingStats, RedrawSchedule, elapsed_ms,
@@ -38,11 +40,9 @@ use crate::scene_runtime::{
     WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump, poll_window_runtime_until_idle,
 };
 use crate::ui::DebugPaneStats;
-use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 use mclone_app_runtime::session::{
-    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
-    RemoteSessionEndpoint, SessionFailure, SessionStartRequest, SessionStartResult,
-    StartedGameSession,
+    GameSessionCoordinator, GameSessionState, PendingSessionStart, RemoteSessionEndpoint,
+    SessionFailure, SessionStartRequest, SessionStartResult, StartedGameSession,
 };
 use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 use mclone_render_session::EngineCameraMovementMode;
@@ -184,7 +184,6 @@ struct ChunkApp {
     flat_input: DesktopFlatInputAdapter,
     input_preferences: InputPreferences,
     frame_pacing: FramePacing,
-    ui: GameUi,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
     audio: Option<AudioEngine>,
@@ -195,7 +194,6 @@ struct ChunkApp {
     last_frame: Instant,
     next_redraw_at: Option<Instant>,
     start_intent: WindowStartIntent,
-    seed_reroll_state: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -220,7 +218,6 @@ impl ChunkApp {
         render_options: TexturedSectionRenderOptions,
         start_intent: WindowStartIntent,
     ) -> Self {
-        let seed_reroll_state = initial_seed_reroll_state(scene.seed);
         let mut ui = match start_intent {
             WindowStartIntent::InWorld => GameUi::new_ingame(),
             WindowStartIntent::Menu => GameUi::new(),
@@ -232,7 +229,7 @@ impl ChunkApp {
                 .unwrap_or_else(|| DEFAULT_JOIN_REMOTE_ADDR.to_owned()),
         );
         Self {
-            driver: FlatClientDriver::new(&scene, render_options),
+            driver: FlatClientDriver::new_with_ui(&scene, render_options, ui),
             scene,
             assets,
             startup: None,
@@ -240,7 +237,6 @@ impl ChunkApp {
             flat_input: DesktopFlatInputAdapter::new(),
             input_preferences: InputPreferences::AUTO,
             frame_pacing: FramePacing::default(),
-            ui,
             window: None,
             surface: None,
             audio: None,
@@ -251,7 +247,6 @@ impl ChunkApp {
             last_frame: Instant::now(),
             next_redraw_at: None,
             start_intent,
-            seed_reroll_state,
         }
     }
 
@@ -318,7 +313,7 @@ impl ChunkApp {
             self.frame_pacing.target_frame_ms(),
         );
 
-        if self.ui.is_active() {
+        if self.driver.ui_is_active() {
             return Ok(());
         }
 
@@ -347,7 +342,7 @@ impl ChunkApp {
     ) -> bool {
         if frame.open_menu {
             self.mouse_lock_requested = false;
-            self.ui.open_pause();
+            self.driver.open_pause_menu();
             self.clear_flat_gameplay_input();
             self.last_cursor = None;
             self.sync_mouse_lock();
@@ -417,14 +412,6 @@ impl ChunkApp {
         hud
     }
 
-    fn next_new_world_seed(&mut self) -> i64 {
-        self.seed_reroll_state = self
-            .seed_reroll_state
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        self.seed_reroll_state as i64
-    }
-
     fn local_world_scene(&self, seed: i64) -> SceneOptions {
         let mut scene = self.scene.clone();
         scene.seed = seed;
@@ -463,12 +450,12 @@ impl ChunkApp {
         );
         self.mouse_lock_requested = false;
         self.clear_flat_gameplay_input();
-        self.ui.clear_input();
+        self.driver.clear_ui_input();
         self.sync_mouse_lock();
     }
 
     fn queue_remote_session_start(&mut self, remote_addr: String, arm_mouse_lock: bool) {
-        self.ui.set_join_remote_addr(remote_addr.clone());
+        self.driver.set_join_remote_addr(remote_addr.clone());
         self.session.request_start(
             SessionStartRequest::JoinRemote {
                 endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
@@ -481,7 +468,7 @@ impl ChunkApp {
         );
         self.mouse_lock_requested = false;
         self.clear_flat_gameplay_input();
-        self.ui.clear_input();
+        self.driver.clear_ui_input();
         self.sync_mouse_lock();
     }
 
@@ -501,21 +488,13 @@ impl ChunkApp {
         self.session.apply_start_result(&result);
         match result {
             Ok(started) => {
-                self.apply_started_session_ui(started.descriptor());
+                self.driver.apply_started_session_ui(started.descriptor());
                 self.mouse_lock_requested = arm_mouse_lock;
                 self.sync_mouse_lock();
             }
             Err(_) => {
-                match request {
-                    SessionStartRequest::NewLocalWorld { seed } => self.ui.set_new_world_seed(seed),
-                    SessionStartRequest::JoinRemote { endpoint } => {
-                        self.ui.set_join_remote_addr(endpoint.address);
-                    }
-                    SessionStartRequest::Unknown => {}
-                }
-                if show_title_on_failure {
-                    self.ui.set_screen(Some(GameScreen::Title));
-                }
+                self.driver
+                    .apply_failed_session_ui(&request, show_title_on_failure);
                 self.mouse_lock_requested = false;
                 self.sync_mouse_lock();
             }
@@ -671,7 +650,7 @@ impl ChunkApp {
                 .map_or(0, |progress| progress.target_chunk_count)
         );
         self.session.complete_start(descriptor.clone());
-        self.apply_started_session_ui(&descriptor);
+        self.driver.apply_started_session_ui(&descriptor);
         self.mouse_lock_requested = startup.arm_mouse_lock;
         self.sync_mouse_lock();
         Ok(())
@@ -687,33 +666,12 @@ impl ChunkApp {
         self.startup = None;
         self.driver.runtime = None;
         let failure_message = request.default_failure_message();
-        match &request {
-            SessionStartRequest::NewLocalWorld { seed } => self.ui.set_new_world_seed(*seed),
-            SessionStartRequest::JoinRemote { endpoint } => {
-                self.ui.set_join_remote_addr(endpoint.address.clone());
-            }
-            SessionStartRequest::Unknown => {}
-        }
-        if show_title_on_failure {
-            self.ui.set_screen(Some(GameScreen::Title));
-        }
+        self.driver
+            .apply_failed_session_ui(&request, show_title_on_failure);
         self.session
             .fail_start(SessionFailure::new(failure_message));
         self.mouse_lock_requested = false;
         self.sync_mouse_lock();
-    }
-
-    fn apply_started_session_ui(&mut self, descriptor: &ActiveSessionDescriptor) {
-        match descriptor {
-            ActiveSessionDescriptor::LocalWorld { seed } => {
-                self.ui.apply_action(GameUiAction::CreateWorld(*seed));
-                log::info!("created local world seed={seed}");
-            }
-            ActiveSessionDescriptor::Remote { endpoint } => {
-                self.ui.apply_action(GameUiAction::JoinRemote);
-                log::info!("joined remote session {}", endpoint.address);
-            }
-        }
     }
 
     fn apply_ui_action(
@@ -722,185 +680,87 @@ impl ChunkApp {
         event_loop: &ActiveEventLoop,
         from_pointer_click: bool,
     ) {
-        if self.session.is_starting() && !matches!(action, GameUiAction::Quit) {
-            self.schedule_next_redraw(event_loop);
-            return;
+        let fallback_remote_addr = self.scene.remote_addr.as_deref();
+        let result = self.driver.apply_ui_action(
+            action,
+            FlatClientUiActionContext {
+                session_starting: self.session.is_starting(),
+                from_pointer_click,
+                fallback_remote_addr,
+            },
+        );
+
+        if let Some(render_distance) = result.scene_render_distance {
+            self.scene.render_distance = render_distance;
+        }
+        if let Some(multiplier) = result.scene_movement_speed_multiplier {
+            self.scene.movement_speed_multiplier = multiplier;
+        }
+        if result.clear_inactive_session_status {
+            self.clear_inactive_session_status();
         }
 
-        let should_arm_mouse_lock = from_pointer_click
-            && matches!(
-                action,
-                GameUiAction::StartWorld | GameUiAction::Resume | GameUiAction::JoinRemote
-            );
-        let preserve_pointer_state = matches!(
-            action,
-            GameUiAction::SetRenderDistance(_)
-                | GameUiAction::SetFlySpeed(_)
-                | GameUiAction::SetMovementSpeed(_)
-                | GameUiAction::SetTouchLookSensitivity(_)
-                | GameUiAction::SetTouchControlsMode(_)
-        );
-        match action {
-            GameUiAction::ToggleSectionOcclusion => {
-                self.driver.render_options.section_occlusion_culling =
-                    !self.driver.render_options.section_occlusion_culling;
-                log::info!(
-                    "section occlusion culling {}",
-                    if self.driver.render_options.section_occlusion_culling {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    }
-                );
-            }
-            GameUiAction::ToggleFullbright => {
-                self.driver.render_options.force_fullbright =
-                    !self.driver.render_options.force_fullbright;
-                log::info!(
-                    "fullbright {}",
-                    if self.driver.render_options.force_fullbright {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    }
-                );
-            }
-            GameUiAction::ToggleFly => {
-                let movement_mode = self.driver.camera.toggle_movement_mode();
-                log::info!("player movement mode {}", movement_mode.label());
-            }
-            GameUiAction::SetFlySpeed(multiplier) => {
-                self.driver
-                    .camera
-                    .set_fly_speed_multiplier(f64::from(multiplier));
-                log::info!(
-                    "fly speed set to {:.1}x ({:.0} blocks/s)",
-                    self.driver.camera.fly_speed_multiplier(),
-                    self.driver.camera.speed_blocks_per_second()
-                );
-            }
-            GameUiAction::SetMovementSpeed(multiplier) => {
-                self.driver
-                    .camera
-                    .set_movement_speed_multiplier(f64::from(multiplier));
-                self.scene.movement_speed_multiplier =
-                    self.driver.camera.movement_speed_multiplier() as f32;
-                log::info!(
-                    "movement speed multiplier set to {:.1}x",
-                    self.driver.camera.movement_speed_multiplier()
-                );
-            }
-            GameUiAction::SetTouchControlsMode(mode) => {
-                self.input_preferences.touch_controls = mode;
-                log::info!(
-                    "touch controls set to {}",
-                    mclone_ui::touch_controls_mode_label(mode)
-                );
-            }
-            GameUiAction::CycleFramePacing => {
-                self.frame_pacing.cycle_mode();
-                self.next_redraw_at = None;
-                if let Some(surface) = &mut self.surface {
-                    self.frame_pacing.apply_to_surface(surface);
-                }
-                log::info!(
-                    "frame pacing set to {} at cap {} fps",
-                    self.frame_pacing.mode.label(),
-                    self.frame_pacing.fps_cap
-                );
-            }
-            GameUiAction::CycleFpsCap => {
-                self.frame_pacing.cycle_fps_cap();
-                self.next_redraw_at = None;
-                log::info!("fps cap set to {}", self.frame_pacing.fps_cap);
-            }
-            GameUiAction::SetRenderDistance(render_distance) => {
-                let render_distance =
-                    render_distance.clamp(MIN_RENDER_DISTANCE, MAX_RENDER_DISTANCE);
-                self.scene.render_distance = render_distance;
-                let render_distance_chunks =
-                    u32::try_from(render_distance).expect("clamped render distance must fit u32");
-                if let Some(runtime) = &mut self.driver.runtime {
-                    match runtime.set_render_distance(render_distance_chunks) {
-                        Ok(true) => {
-                            log::info!(
-                                "render distance set to {} (chunk tracking radius {})",
-                                render_distance,
-                                runtime.chunk_tracking_radius()
-                            );
-                        }
-                        Ok(false) => {}
-                        Err(err) => {
-                            log::error!(
-                                "failed to set render distance to {render_distance}: {err:#}"
-                            );
-                            return;
-                        }
-                    }
-                } else {
-                    log::info!("new-world render distance set to {render_distance}");
-                }
-            }
-            GameUiAction::OpenNewWorld => {
-                let seed = self.next_new_world_seed();
-                self.ui.set_new_world_seed(seed);
-                self.clear_inactive_session_status();
-            }
-            GameUiAction::OpenJoinRemote => {
-                let remote_addr = self
-                    .scene
-                    .remote_addr
-                    .clone()
-                    .unwrap_or_else(|| DEFAULT_JOIN_REMOTE_ADDR.to_owned());
-                self.ui.set_join_remote_addr(remote_addr);
-                self.clear_inactive_session_status();
-            }
-            GameUiAction::RerollSeed => {
-                let seed = self.next_new_world_seed();
-                self.ui.set_new_world_seed(seed);
-                self.clear_inactive_session_status();
-                log::info!("new-world seed rerolled to {seed}");
-            }
-            GameUiAction::CreateWorld(seed) => {
-                self.queue_local_world_start(seed, from_pointer_click);
-                self.schedule_next_redraw(event_loop);
-                return;
-            }
-            GameUiAction::JoinRemote => {
-                self.queue_remote_session_start(
-                    self.ui.join_remote_addr().to_owned(),
-                    from_pointer_click,
-                );
-                self.schedule_next_redraw(event_loop);
-                return;
-            }
-            GameUiAction::QuitToTitle => {
-                if let Err(err) = self.teardown_world() {
-                    log::error!("failed to tear down world: {err:#}");
+        if let Some(host_action) = result.host_action {
+            match host_action {
+                FlatClientHostAction::StartLocalWorld {
+                    seed,
+                    arm_mouse_lock,
+                } => {
+                    self.queue_local_world_start(seed, arm_mouse_lock);
                     self.schedule_next_redraw(event_loop);
                     return;
                 }
-                self.session.clear();
+                FlatClientHostAction::JoinRemote {
+                    address,
+                    arm_mouse_lock,
+                } => {
+                    self.queue_remote_session_start(address, arm_mouse_lock);
+                    self.schedule_next_redraw(event_loop);
+                    return;
+                }
+                FlatClientHostAction::QuitToTitle => {
+                    if let Err(err) = self.teardown_world() {
+                        log::error!("failed to tear down world: {err:#}");
+                        self.schedule_next_redraw(event_loop);
+                        return;
+                    }
+                    self.session.clear();
+                    self.driver.apply_quit_to_title_ui();
+                }
+                FlatClientHostAction::Quit => {
+                    event_loop.exit();
+                    return;
+                }
+                FlatClientHostAction::CycleFramePacing => {
+                    self.frame_pacing.cycle_mode();
+                    self.next_redraw_at = None;
+                    if let Some(surface) = &mut self.surface {
+                        self.frame_pacing.apply_to_surface(surface);
+                    }
+                    log::info!(
+                        "frame pacing set to {} at cap {} fps",
+                        self.frame_pacing.mode.label(),
+                        self.frame_pacing.fps_cap
+                    );
+                }
+                FlatClientHostAction::CycleFpsCap => {
+                    self.frame_pacing.cycle_fps_cap();
+                    self.next_redraw_at = None;
+                    log::info!("fps cap set to {}", self.frame_pacing.fps_cap);
+                }
+                FlatClientHostAction::SetTouchControlsMode(mode) => {
+                    self.input_preferences.touch_controls = mode;
+                }
             }
-            GameUiAction::Quit => {
-                event_loop.exit();
-                return;
-            }
-            GameUiAction::BackToTitle => {
-                self.clear_inactive_session_status();
-            }
-            GameUiAction::StartWorld
-            | GameUiAction::Resume
-            | GameUiAction::OpenOptions(_)
-            | GameUiAction::BackToPause
-            | GameUiAction::SetTouchLookSensitivity(_) => {}
         }
-        self.ui.apply_action(action);
-        if should_arm_mouse_lock {
+
+        if result.should_arm_mouse_lock {
             self.mouse_lock_requested = true;
         }
-        self.clear_flat_gameplay_input();
-        if !preserve_pointer_state {
+        if result.clear_gameplay_input {
+            self.clear_flat_gameplay_input();
+        }
+        if !result.preserve_pointer_state {
             self.last_cursor = None;
         }
         self.sync_mouse_lock();
@@ -909,7 +769,9 @@ impl ChunkApp {
 
     fn sync_mouse_lock(&mut self) {
         self.set_mouse_lock(
-            self.mouse_lock_requested && !self.ui.is_active() && self.driver.runtime.is_some(),
+            self.mouse_lock_requested
+                && !self.driver.ui_is_active()
+                && self.driver.runtime.is_some(),
         );
     }
 
@@ -1338,13 +1200,6 @@ impl ChunkApp {
     }
 }
 
-fn initial_seed_reroll_state(seed: i64) -> u64 {
-    (seed as u64)
-        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        .wrapping_add(0xD1B5_4A32_D192_ED03)
-        .max(1)
-}
-
 fn session_start_request_for_scene(scene: &SceneOptions) -> SessionStartRequest {
     scene.remote_addr.as_ref().map_or(
         SessionStartRequest::NewLocalWorld { seed: scene.seed },
@@ -1391,7 +1246,7 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
-        self.ui.set_scale(GuiScale::from_pixels(
+        self.driver.set_ui_scale(GuiScale::from_pixels(
             surface.config.width,
             surface.config.height,
         ));
@@ -1443,7 +1298,7 @@ impl ApplicationHandler for ChunkApp {
                         &surface.device,
                         [surface.config.width, surface.config.height],
                     );
-                    self.ui.set_scale(GuiScale::from_pixels(
+                    self.driver.set_ui_scale(GuiScale::from_pixels(
                         surface.config.width,
                         surface.config.height,
                     ));
@@ -1453,7 +1308,7 @@ impl ApplicationHandler for ChunkApp {
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key_code) = event.physical_key {
                     if let Some(scale) = self.gui_scale() {
-                        self.ui.set_scale(scale);
+                        self.driver.set_ui_scale(scale);
                     }
                     self.flat_input.note_keyboard_activity();
                     if key_code == KeyCode::Backquote
@@ -1478,9 +1333,9 @@ impl ApplicationHandler for ChunkApp {
                         self.trigger_render_scale_rebuild(event_loop);
                         return;
                     }
-                    if event.state == ElementState::Pressed && self.ui.is_active() {
+                    if event.state == ElementState::Pressed && self.driver.ui_is_active() {
                         if let Some(gui_key) = gui_key_from_key_code(key_code) {
-                            let (handled, action) = self.ui.key_pressed(gui_key);
+                            let (handled, action) = self.driver.ui_key_pressed(gui_key);
                             if let Some(action) = action {
                                 self.apply_ui_action(action, event_loop, false);
                             } else if handled {
@@ -1543,7 +1398,7 @@ impl ApplicationHandler for ChunkApp {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let input_frame = self.flat_input.handle_mouse_button(button, state);
-                if self.ui.is_active() {
+                if self.driver.ui_is_active() {
                     if button == MouseButton::Left {
                         if let Some((x, y)) = self.last_cursor
                             && let Some(point) = self.gui_point(x, y)
@@ -1551,11 +1406,12 @@ impl ApplicationHandler for ChunkApp {
                             match state {
                                 ElementState::Pressed => {
                                     let ui_state = self.current_ui_render_state();
-                                    self.ui.pointer_down(point, ui_state);
+                                    self.driver.ui_pointer_down(point, ui_state);
                                 }
                                 ElementState::Released => {
                                     let ui_state = self.current_ui_render_state();
-                                    let (_handled, action) = self.ui.pointer_up(point, ui_state);
+                                    let (_handled, action) =
+                                        self.driver.ui_pointer_up(point, ui_state);
                                     if let Some(action) = action {
                                         self.apply_ui_action(action, event_loop, true);
                                         return;
@@ -1593,11 +1449,11 @@ impl ApplicationHandler for ChunkApp {
             WindowEvent::CursorMoved { position, .. } => {
                 self.flat_input.note_mouse_activity();
                 let cursor = (position.x, position.y);
-                if self.ui.is_active() {
+                if self.driver.ui_is_active() {
                     self.last_cursor = Some(cursor);
                     if let Some(point) = self.gui_point(cursor.0, cursor.1) {
                         let ui_state = self.current_ui_render_state();
-                        let (_handled, action) = self.ui.pointer_move(point, ui_state);
+                        let (_handled, action) = self.driver.ui_pointer_move(point, ui_state);
                         if let Some(action) = action {
                             self.apply_ui_action(action, event_loop, true);
                             return;
@@ -1619,7 +1475,7 @@ impl ApplicationHandler for ChunkApp {
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 self.flat_input.note_mouse_activity();
-                if self.ui.is_active() {
+                if self.driver.ui_is_active() {
                     return;
                 }
                 let amount = match delta {
@@ -1641,7 +1497,7 @@ impl ApplicationHandler for ChunkApp {
                 self.mouse_lock_requested = false;
                 self.clear_flat_gameplay_input();
                 self.last_cursor = None;
-                self.ui.clear_input();
+                self.driver.clear_ui_input();
                 self.set_mouse_lock(false);
             }
             WindowEvent::Focused(true) => {
@@ -1666,12 +1522,12 @@ impl ApplicationHandler for ChunkApp {
                 let Some(gui_scale) = self.gui_scale() else {
                     return;
                 };
-                self.ui.set_scale(gui_scale);
+                self.driver.set_ui_scale(gui_scale);
                 let render_options = self.driver.effective_render_options();
                 let debug_stats = (self.debug_visible && self.driver.runtime.is_some())
                     .then(|| self.debug_pane_stats(render_options));
                 let status_overlay = self.session_status_overlay();
-                let flat_hud = self.current_flat_hud(status_overlay, self.ui.is_active());
+                let flat_hud = self.current_flat_hud(status_overlay, self.driver.ui_is_active());
                 let loading_progress_overlay = self
                     .startup
                     .as_ref()
@@ -1697,7 +1553,6 @@ impl ApplicationHandler for ChunkApp {
                         as f32,
                 };
                 let ui_frame = FlatClientUiFrame {
-                    ui: &self.ui,
                     render_options: ui_render_options,
                     hud: Some(flat_hud),
                     loading_progress_overlay,
@@ -1759,7 +1614,7 @@ impl ApplicationHandler for ChunkApp {
         _device_id: DeviceId,
         event: DeviceEvent,
     ) {
-        if self.ui.is_active() || !self.mouse_locked || self.driver.runtime.is_none() {
+        if self.driver.ui_is_active() || !self.mouse_locked || self.driver.runtime.is_none() {
             return;
         }
         if let DeviceEvent::MouseMotion { delta } = event {
@@ -1820,6 +1675,7 @@ mod tests {
     };
     use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
     use mclone_render_session::actor_instances_from_presentations;
+    use mclone_ui::GameScreen;
 
     fn test_app_with_runtime(scene: SceneOptions) -> ChunkApp {
         let assets = WindowSceneAssets::load().unwrap();
@@ -2014,7 +1870,7 @@ mod tests {
             TexturedSectionRenderOptions::default(),
             WindowStartIntent::Menu,
         );
-        app.ui.set_screen(Some(GameScreen::NewWorld));
+        app.driver.set_ui_screen(Some(GameScreen::NewWorld));
 
         app.queue_local_world_start(44, true);
 
@@ -2036,7 +1892,7 @@ mod tests {
         assert_eq!(pending.payload.scene.remote_addr, None);
         assert!(pending.payload.arm_mouse_lock);
         assert!(!pending.payload.show_title_on_failure);
-        assert_eq!(app.ui.screen(), Some(GameScreen::NewWorld));
+        assert_eq!(app.driver.ui_screen(), Some(GameScreen::NewWorld));
         assert!(!app.mouse_lock_requested);
     }
 
@@ -2050,7 +1906,7 @@ mod tests {
             TexturedSectionRenderOptions::default(),
             WindowStartIntent::Menu,
         );
-        app.ui.set_screen(Some(GameScreen::JoinRemote));
+        app.driver.set_ui_screen(Some(GameScreen::JoinRemote));
 
         app.queue_remote_session_start("10.0.0.5:25565".to_owned(), true);
 
@@ -2079,8 +1935,8 @@ mod tests {
         assert_eq!(pending.payload.scene.seed, DEFAULT_SEED);
         assert!(pending.payload.arm_mouse_lock);
         assert!(!pending.payload.show_title_on_failure);
-        assert_eq!(app.ui.screen(), Some(GameScreen::JoinRemote));
-        assert_eq!(app.ui.join_remote_addr(), "10.0.0.5:25565");
+        assert_eq!(app.driver.ui_screen(), Some(GameScreen::JoinRemote));
+        assert_eq!(app.driver.join_remote_addr(), "10.0.0.5:25565");
         assert!(!app.mouse_lock_requested);
     }
 

@@ -720,13 +720,6 @@ pub(crate) fn run_headless_screenshot(
         spectator.position = Vec3::from_array(eye);
     }
 
-    let mut ui = GameUi::new();
-    if options.ui == crate::cli::HeadlessScreenshotUi::NewWorld {
-        ui.set_new_world_seed(options.scene.seed);
-    }
-    ui.set_screen(options.ui.game_screen());
-    ui.set_scale(GuiScale::from_pixels(options.width, options.height));
-
     let debug_pane = options.debug_pane;
     let render_options = options.render_options;
     let runtime_stats = runtime.stats();
@@ -734,6 +727,11 @@ pub(crate) fn run_headless_screenshot(
     let entity_count = runtime.client().entity_count();
     let asset_source = load_asset_source()?;
     let mut driver = FlatClientDriver::new(&options.scene, render_options);
+    if options.ui == crate::cli::HeadlessScreenshotUi::NewWorld {
+        driver.set_new_world_seed(options.scene.seed);
+    }
+    driver.set_ui_screen(options.ui.game_screen());
+    driver.set_ui_scale(GuiScale::from_pixels(options.width, options.height));
     driver.set_spectator_camera(spectator, options.scene.movement_speed_multiplier);
     driver.runtime = Some(runtime);
 
@@ -796,7 +794,6 @@ pub(crate) fn run_headless_screenshot(
                 })
                 .flatten();
             let ui_frame = FlatClientUiFrame {
-                ui: &ui,
                 render_options: FlatClientUiRenderOptions {
                     render_distance: driver.current_render_distance(options.scene.render_distance)
                         as i32,

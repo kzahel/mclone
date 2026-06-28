@@ -1,6 +1,6 @@
 # 105: Offscreen Flat Client Host
 
-Status: active; desktop and headless full-frame UI assembly now route through
+Status: active; `GameUi` ownership and host-neutral menu routing now live in
 the native flat driver.
 
 ## Purpose
@@ -37,10 +37,9 @@ Good pieces already exist:
 
 The current gaps:
 
-- `ChunkApp` still owns much of the real flat client lifetime: input semantics,
-  camera updates, UI/session actions, interaction dispatch, actor interpolation,
-  render-resource lifetime, section upload, debug/HUD construction, and frame
-  composition setup.
+- `ChunkApp` still owns the desktop host shell: `winit` events, surface
+  acquire/present, frame pacing, mouse lock, desktop asset/runtime construction,
+  local startup pump, and desktop-specific session pending payloads.
 - `run_headless_screenshot` now constructs a `FlatClientDriver`, gives it the
   screenshot runtime/camera, rebuilds `FlatRenderResources` through the driver,
   uploads sections through the driver, and renders through
@@ -48,10 +47,12 @@ The current gaps:
 - `mclone-native-client::flat_client_driver` now exists as a native staging
   owner for flat-client runtime, camera/spectator, interaction, actor
   interpolation, render options, render stats, frame timing, and full-frame UI
-  draw-list assembly. `ChunkApp` still drives it directly from the desktop event
-  loop and still owns the `GameUi` instance and session/startup policy.
+  draw-list assembly. It also owns `GameUi`, deterministic new-world seed
+  reroll state, and host-neutral menu action routing. `ChunkApp` still drives it
+  directly from the desktop event loop and still owns desktop session/startup
+  execution.
 - `run_headless_screenshot` is still screenshot-shaped: it constructs a fresh
-  runtime/driver per capture and still owns UI scenario setup and
+  runtime/driver per capture and still owns screenshot scenario setup and
   scripted interaction instead of sharing a long-lived flat-client host loop.
 - Older `--headless-chunk`, `--headless-chunk-scenarios`, and `--headless-ui`
   modes validate narrower renderer surfaces and can drift from real flat-client
@@ -148,9 +149,13 @@ Validation run:
   rendering, debug pane, loading/progress overlays, HUD/status overlay, and
   readiness overlay now share `FlatClientDriver::render_full_frame_with_ui(...)`
   for desktop and headless screenshot.
-- [ ] Move session coordinator/startup, UI state, input preferences, render
-  resource asset loading, and menu action routing behind driver methods instead
-  of direct `ChunkApp` field access.
+- [x] Move `GameUi` ownership, deterministic seed reroll state, UI input
+  forwarding wrappers, and host-neutral menu action routing into the driver.
+  The driver now returns host requests for local/remote start, quit, frame
+  pacing, and touch preference changes instead of constructing desktop payloads.
+- [ ] Move session coordinator/startup, input preferences, render resource asset
+  loading, and menu action host execution behind driver methods instead of
+  direct `ChunkApp` field access.
 - [ ] Keep platform transport/session construction injectable so desktop TCP,
   offscreen TCP, Android property TCP, and future network sources stay adapters.
 - [ ] Preserve existing desktop behavior.
@@ -203,7 +208,7 @@ Follow-up validation run after render-resource ownership moved into driver:
 - [x] Validate that screenshots exercise the same full-frame path as desktop
   flat.
 - [x] Move debug/HUD draw-list assembly behind shared driver methods.
-- [ ] Move scenario UI setup behind shared driver methods.
+- [x] Move scenario UI setup behind shared driver methods.
 - [ ] Replace screenshot-owned runtime construction with a long-lived offscreen
   flat-client host.
 
@@ -224,6 +229,16 @@ Follow-up validation run after UI draw-list assembly moved into the driver:
 - `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-offscreen-driver-ui-debug.png --width 960 --height 540 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --screenshot-debug-pane true`
 - Visual inspection of `/tmp/mclone-offscreen-driver-ui-debug.png`: nonblank
   terrain, debug pane, view swatch, and cow actor rendered.
+
+Follow-up validation run after `GameUi` ownership/menu routing moved into the
+driver:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-offscreen-driver-ui-owner-debug.png --width 960 --height 540 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --screenshot-debug-pane true`
+- Visual inspection of `/tmp/mclone-offscreen-driver-ui-owner-debug.png`:
+  nonblank terrain, debug pane, view swatch, and cow actor rendered.
 
 ### Slice 4 - Neutral Scripted Input
 

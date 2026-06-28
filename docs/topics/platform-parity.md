@@ -27,7 +27,7 @@ and the rule that keeps new features from re-forking.
 > 2026-06-26 and refreshed on 2026-06-28 after tactical 095 Slice 4f, the
 > existing audio foundation audit, user headset validation of the shared XR
 > world-panel menu/pointer path, the offscreen flat-client target definition,
-> and the first `FlatClientDriver` screenshot integration.
+> and the native `FlatClientDriver` headless screenshot/UI ownership work.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -180,10 +180,11 @@ Concretely:
 - The offscreen path currently gets shared scene/runtime facts through the same
   native-client wrapper, and `run_headless_screenshot` now shares
   `FlatClientDriver` render-resource rebuild, section upload, frame-input
-  preparation, and full-frame render dispatch with desktop flat. It still lacks
-  a long-lived offscreen flat-client host. Session/UI setup and neutral input
-  lifetime still need to move behind that driver before offscreen can behave as
-  a real no-window client rather than a one-shot screenshot scenario. Tactical
+  preparation, full-frame render dispatch, `GameUi` ownership, and host-neutral
+  menu routing with desktop flat. It still lacks a long-lived offscreen flat
+  client host. Session/startup host execution and neutral input lifetime still
+  need to move behind that driver before offscreen can behave as a real
+  no-window client rather than a one-shot screenshot scenario. Tactical
   [`105-offscreen-flat-client-host.md`](../tactical/105-offscreen-flat-client-host.md)
   tracks replacing that with a real no-window flat client host.
 - The XR scene-driver fork is closed:
