@@ -321,10 +321,10 @@ struct FluidMutationReport {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ScheduledFluidTickRequest {
-    pos: WorldBlockPos,
-    fluid: FluidKind,
-    delay: i32,
+pub(crate) struct ScheduledFluidTickRequest {
+    pub(crate) pos: WorldBlockPos,
+    pub(crate) fluid: FluidKind,
+    pub(crate) delay: i32,
 }
 
 #[derive(Debug)]
@@ -948,6 +948,28 @@ impl ChunkScheduler {
         true
     }
 
+    pub(crate) fn fluid_tick_requests_after_block_change(
+        &self,
+        pos: WorldBlockPos,
+        block_id: RawBlockId,
+    ) -> Vec<ScheduledFluidTickRequest> {
+        let mut requests = Vec::new();
+        if let Some(fluid) = FluidKind::from_block_id(block_id) {
+            record_scheduled_fluid_tick_request(&mut requests, pos, fluid);
+        }
+
+        for direction in ALL_FLUID_DIRECTIONS {
+            let neighbor = offset_pos(pos, direction);
+            let Some(neighbor_block) = self.block_at_world(neighbor) else {
+                continue;
+            };
+            if let Some(fluid) = FluidKind::from_block_id(neighbor_block) {
+                record_scheduled_fluid_tick_request(&mut requests, neighbor, fluid);
+            }
+        }
+        requests
+    }
+
     fn record_section_block_delta(
         &mut self,
         pos: ChunkPos,
@@ -1188,18 +1210,8 @@ impl ChunkScheduler {
         block_id: RawBlockId,
         report: &mut FluidMutationReport,
     ) {
-        if let Some(fluid) = FluidKind::from_block_id(block_id) {
-            record_scheduled_fluid_tick(report, pos, fluid);
-        }
-
-        for direction in ALL_FLUID_DIRECTIONS {
-            let neighbor = offset_pos(pos, direction);
-            let Some(neighbor_block) = self.block_at_world(neighbor) else {
-                continue;
-            };
-            if let Some(fluid) = FluidKind::from_block_id(neighbor_block) {
-                record_scheduled_fluid_tick(report, neighbor, fluid);
-            }
+        for request in self.fluid_tick_requests_after_block_change(pos, block_id) {
+            record_scheduled_fluid_tick(report, request.pos, request.fluid);
         }
     }
 
@@ -2313,13 +2325,21 @@ fn record_scheduled_fluid_tick(
     pos: WorldBlockPos,
     fluid: FluidKind,
 ) {
+    record_scheduled_fluid_tick_request(&mut report.scheduled_ticks, pos, fluid);
+}
+
+fn record_scheduled_fluid_tick_request(
+    requests: &mut Vec<ScheduledFluidTickRequest>,
+    pos: WorldBlockPos,
+    fluid: FluidKind,
+) {
     let request = ScheduledFluidTickRequest {
         pos,
         fluid,
         delay: fluid.tick_delay(),
     };
-    if !report.scheduled_ticks.contains(&request) {
-        report.scheduled_ticks.push(request);
+    if !requests.contains(&request) {
+        requests.push(request);
     }
 }
 fn ticket_level_dependency_status_target(_ticket_level: i32) -> ChunkStatus {

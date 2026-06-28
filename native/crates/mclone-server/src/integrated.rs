@@ -597,7 +597,16 @@ impl IntegratedServer {
         let Some(block_id) = raw_block_id_from_block_state(block_state) else {
             return false;
         };
-        self.scheduler.set_block_at_world(pos, block_id)
+        let changed = self.scheduler.set_block_at_world(pos, block_id);
+        if changed {
+            for request in self
+                .scheduler
+                .fluid_tick_requests_after_block_change(pos, block_id)
+            {
+                self.schedule_fluid_tick(request.pos, request.fluid, request.delay);
+            }
+        }
+        changed
     }
 
     fn drain_pending_block_delta_updates_for_target(
@@ -988,7 +997,7 @@ mod tests {
         PlayerPositionRelativeFlags, RemotePlayerId, RemotePlayerUpdate, ServerUpdate,
     };
     use mclone_worldgen::block::{
-        BRICKS, DIRT, GRASS, SNOW, STONE, has_fluid, material_blocks_motion,
+        AIR, BRICKS, DIRT, GRASS, SNOW, STONE, WATER, has_fluid, material_blocks_motion,
     };
 
     fn last_time_update(report: &ServerSimulationTickReport) -> u64 {
@@ -2020,6 +2029,77 @@ mod tests {
                 _ => false,
             }
         }));
+    }
+
+    #[test]
+    fn debug_break_reschedules_neighbor_water_to_refill_removed_block() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+        server.liquid_ticks = FluidTickList::new();
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
+        sync_carried_slot(&mut server, 1);
+
+        let target = BlockPos::new(8, 80, 8);
+        for x in 6..=10 {
+            for z in 6..=10 {
+                server
+                    .scheduler_mut()
+                    .set_block_at_world(BlockPos::new(x, 79, z), STONE);
+                server
+                    .scheduler_mut()
+                    .set_block_at_world(BlockPos::new(x, 80, z), STONE);
+            }
+        }
+        for x in 7..=9 {
+            for z in 7..=9 {
+                server
+                    .scheduler_mut()
+                    .set_block_at_world(BlockPos::new(x, 80, z), WATER);
+            }
+        }
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.5, 81.0, 8.5),
+                Direction::Up,
+                target,
+                false,
+            )))
+            .expect("place command");
+        assert_eq!(server.scheduler().block_at_world(target), Some(DIRT));
+        assert!(
+            server.scheduled_fluid_tick_count() > 0,
+            "placing into water should schedule adjacent source water"
+        );
+
+        for _ in 0..FluidKind::Water.tick_delay() {
+            server
+                .try_simulation_tick_report()
+                .expect("fluid tick while block is present");
+        }
+        assert_eq!(server.scheduler().block_at_world(target), Some(DIRT));
+        assert_eq!(server.scheduled_fluid_tick_count(), 0);
+
+        server
+            .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
+                pos: target,
+                direction: Direction::Up,
+                kind: PlayerActionKind::DebugInstantBreak,
+            }))
+            .expect("break command");
+        assert_eq!(server.scheduler().block_at_world(target), Some(AIR));
+        assert!(
+            server.scheduled_fluid_tick_count() > 0,
+            "removing the block should reschedule adjacent source water"
+        );
+
+        for _ in 0..FluidKind::Water.tick_delay() {
+            server
+                .try_simulation_tick_report()
+                .expect("fluid tick after break");
+        }
+        assert_eq!(server.scheduler().block_at_world(target), Some(WATER));
     }
 
     #[test]
