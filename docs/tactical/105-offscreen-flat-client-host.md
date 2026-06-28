@@ -1,6 +1,6 @@
 # 105: Offscreen Flat Client Host
 
-Status: active; screenshot-resource cleanup and native driver skeleton landed.
+Status: active; headless screenshot now renders through the native flat driver.
 
 ## Purpose
 
@@ -40,16 +40,17 @@ The current gaps:
   camera updates, UI/session actions, interaction dispatch, actor interpolation,
   render-resource lifetime, section upload, debug/HUD construction, and frame
   composition setup.
-- `run_headless_screenshot` now creates `FlatRenderResources`, uploads sections
-  through the same draw-resource bundle used by desktop/rebuild paths, and
-  composes the frame through `FlatRenderResources::render_full_frame`.
+- `run_headless_screenshot` now constructs a `FlatClientDriver`, gives it the
+  screenshot runtime/camera, rebuilds `FlatRenderResources` through the driver,
+  uploads sections through the driver, and renders through
+  `FlatClientDriver::render_full_frame`.
 - `mclone-native-client::flat_client_driver` now exists as a native staging
   owner for flat-client runtime, camera/spectator, interaction, actor
   interpolation, render options, render stats, and frame timing. `ChunkApp`
   still drives it directly from the desktop event loop.
 - `run_headless_screenshot` is still screenshot-shaped: it constructs a fresh
-  render-resource bundle per capture and still owns debug/UI scenario setup and
-  scripted interaction instead of sharing a long-lived flat-client driver.
+  runtime/driver per capture and still owns debug/UI scenario setup and
+  scripted interaction instead of sharing a long-lived flat-client host loop.
 - Older `--headless-chunk`, `--headless-chunk-scenarios`, and `--headless-ui`
   modes validate narrower renderer surfaces and can drift from real flat-client
   behavior.
@@ -185,15 +186,29 @@ Follow-up validation run after render-resource ownership moved into driver:
 
 ### Slice 3 - Rewire Headless Screenshot To The Driver
 
-- [ ] Replace screenshot-owned runtime/UI/interaction setup with the shared
-  driver. The private renderer/resource graph is already gone.
-- [ ] Keep screenshot-specific setup as scenario input: initial seed, fixed
+- [x] Replace screenshot-owned render-resource lifetime, section upload,
+  actor/underwater/selection setup, and full-frame render dispatch with the
+  shared `FlatClientDriver` path.
+- [x] Keep screenshot-specific setup as scenario input: initial seed, fixed
   time, camera pose, requested UI screen, debug pane flag, and optional scripted
   input.
-- [ ] Remove duplicate debug/HUD/selection/underwater/actor setup from
-  headless code.
-- [ ] Validate that screenshots exercise the same full-frame path as desktop
+- [x] Remove duplicate selection, underwater, actor, and full-frame renderer
+  setup from the screenshot path.
+- [x] Validate that screenshots exercise the same full-frame path as desktop
   flat.
+- [ ] Move debug/HUD draw-list assembly and scenario UI setup behind shared
+  driver methods.
+- [ ] Replace screenshot-owned runtime construction with a long-lived offscreen
+  flat-client host.
+
+Validation run:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-offscreen-driver-debug.png --width 960 --height 540 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --screenshot-debug-pane true`
+- Visual inspection of `/tmp/mclone-offscreen-driver-debug.png`: nonblank
+  terrain, debug pane, view swatch, and cow actor rendered.
 
 ### Slice 4 - Neutral Scripted Input
 

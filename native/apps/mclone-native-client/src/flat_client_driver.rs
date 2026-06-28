@@ -719,6 +719,16 @@ impl FlatClientDriver {
         sync_spectator_from_camera(&mut self.spectator, &self.camera);
     }
 
+    pub(crate) fn set_spectator_camera(
+        &mut self,
+        spectator: SpectatorCamera,
+        movement_speed_multiplier: f32,
+    ) {
+        self.spectator = spectator;
+        self.camera =
+            engine_camera_controller_from_spectator(&self.spectator, movement_speed_multiplier);
+    }
+
     pub(crate) fn reset_world_state(&mut self, scene: &SceneOptions) {
         self.runtime = None;
         self.spectator = SpectatorCamera::spawn_for_scene(scene);

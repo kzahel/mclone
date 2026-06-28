@@ -24,7 +24,6 @@ use mclone_render::headless::{
     write_headless_textured_sections_png_with_ready_sections,
 };
 use mclone_render::screen_effect::UnderwaterOverlay;
-use mclone_render::selection_outline::SelectionOutline;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render_session::actor_instances_from_presentations;
 use mclone_ui::{GameUi, GuiDrawList, GuiScale, Point, render_loading_progress_panel_at};
@@ -34,9 +33,10 @@ use crate::camera::SpectatorCamera;
 use crate::cli::{
     HeadlessDualViewOptions, HeadlessScreenshotOptions, RendererRebuildSmokeOptions, SceneOptions,
 };
+use crate::flat_client_driver::FlatClientDriver;
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState, FrameTimingStats};
 use crate::render_cache::load_asset_source;
-use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
+use crate::scene_runtime::{WindowSceneAssets, WindowSceneRuntime, poll_window_runtime_until_idle};
 use crate::ui::{DebugPaneStats, render_debug_pane};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -697,7 +697,8 @@ fn write_headless_runtime_chunk_with_camera(
 pub(crate) fn run_headless_screenshot(
     options: &HeadlessScreenshotOptions,
 ) -> Result<HeadlessScreenshotReport> {
-    let mut runtime = WindowSceneRuntime::new(&options.scene)?;
+    let assets = WindowSceneAssets::load()?;
+    let mut runtime = WindowSceneRuntime::with_assets(&options.scene, &assets)?;
     poll_window_runtime_until_idle(&mut runtime)?;
     let initial_player_position = ack_pending_player_position_updates(&mut runtime)?;
     if let Some(day_time) = options.scene.day_time_override {
@@ -716,17 +717,6 @@ pub(crate) fn run_headless_screenshot(
     if let Some(eye) = options.eye {
         spectator.position = Vec3::from_array(eye);
     }
-    let section_update = runtime.sync_all_render_sections(spectator.position)?;
-    let sections = runtime.cached_sections();
-    if sections.is_empty() {
-        bail!(
-            "headless screenshot seed={} center=({}, {}) render_distance={} produced no render sections",
-            options.scene.seed,
-            options.scene.chunk_x,
-            options.scene.chunk_z,
-            options.scene.render_distance
-        );
-    }
 
     let mut ui = GameUi::new();
     if options.ui == crate::cli::HeadlessScreenshotUi::NewWorld {
@@ -735,23 +725,15 @@ pub(crate) fn run_headless_screenshot(
     ui.set_screen(options.ui.game_screen());
     ui.set_scale(GuiScale::from_pixels(options.width, options.height));
 
-    let mut render_stats = RenderStreamStats::default();
     let debug_pane = options.debug_pane;
     let render_options = options.render_options;
-    let camera = spectator.camera(runtime.render_distance());
-    let underwater_overlay = runtime
-        .camera_inside_water(spectator.position)
-        .then(|| UnderwaterOverlay::vanilla_from_native_camera(spectator.yaw, spectator.pitch));
-    let underwater = underwater_overlay.is_some();
-    let sky_clear_color = runtime.sky_clear_color();
-    let time_of_day = runtime.time_of_day();
-    let sun_angle = runtime.sun_angle();
     let runtime_stats = runtime.stats();
-    let actor_interpolation =
-        ActorInterpolationState::from_authoritative(runtime.client().actor_presentations());
-    let actor_instances =
-        actor_instances_from_presentations(&actor_interpolation.presentations(), runtime.client());
+    let remote_player_count = runtime.client().remote_player_count();
+    let entity_count = runtime.client().entity_count();
     let asset_source = load_asset_source()?;
+    let mut driver = FlatClientDriver::new(&options.scene, render_options);
+    driver.set_spectator_camera(spectator, options.scene.movement_speed_multiplier);
+    driver.runtime = Some(runtime);
 
     let (frame_report, summary) = write_headless_frame_png(
         HeadlessFrameOptions {
@@ -762,35 +744,39 @@ pub(crate) fn run_headless_screenshot(
         |frame| {
             let render_config =
                 RenderConfig::for_color_target(render_options.color_profile, HEADLESS_FORMAT);
-            let mut resources = FlatRenderResources::new(
+            driver.rebuild_render_resources(
                 frame.device,
                 frame.queue,
                 frame.target.size,
                 render_config,
-                runtime.mesh_assets().atlas.as_upload(),
-                runtime.actor_textures.atlas.as_upload(),
+                assets.mesh_assets.atlas.as_upload(),
+                assets.actor_textures.atlas.as_upload(),
                 &asset_source,
             )?;
-            let upload_report = resources
-                .draw_mut()
-                .update_sections(frame.device, &sections)
-                .context("failed to upload headless screenshot sections")?;
-            resources.draw_mut().set_traversal_ready_sections(
-                &runtime.traversal_ready_render_section_keys(spectator.position),
-            );
-
-            render_stats.section_count = resources.section_count();
-            render_stats.index_count = resources.index_count();
-            render_stats.face_count = quad_face_count_from_indices(render_stats.index_count);
-            record_render_section_update_stats(&mut render_stats, &section_update, upload_report);
+            let Some((section_sync, _upload_summary)) = driver
+                .upload_all_runtime_sections(frame.device, |elapsed| {
+                    elapsed.as_secs_f64() * 1000.0
+                })?
+            else {
+                bail!("headless screenshot has no runtime to upload");
+            };
+            if section_sync.sections.is_empty() {
+                bail!(
+                    "headless screenshot seed={} center=({}, {}) render_distance={} produced no render sections",
+                    options.scene.seed,
+                    options.scene.chunk_x,
+                    options.scene.chunk_z,
+                    options.scene.render_distance
+                );
+            }
 
             let debug_stats = debug_pane.then_some(DebugPaneStats {
-                position: spectator.position,
-                speed: spectator.speed,
+                position: driver.spectator.position,
+                speed: driver.spectator.speed,
                 movement_mode: "NOCLIP",
                 on_ground: false,
                 runtime: runtime_stats,
-                render: render_stats,
+                render: driver.render_stats,
                 frame: FrameTimingStats::default(),
                 pacing: FramePacingDebugStats::default(),
                 section_occlusion: render_options.section_occlusion_culling,
@@ -803,13 +789,18 @@ pub(crate) fn run_headless_screenshot(
             let debug_stats = (!ui_active).then_some(debug_stats).flatten();
             let debug_view_readiness_overlay = debug_stats
                 .is_some()
-                .then(|| runtime.view_readiness_overlay())
+                .then(|| {
+                    driver
+                        .runtime
+                        .as_ref()
+                        .and_then(WindowSceneRuntime::view_readiness_overlay)
+                })
                 .flatten();
             let gui_active =
                 ui_active || debug_stats.is_some() || debug_view_readiness_overlay.is_some();
             let gui_scale = ui.scale();
             let base_ui_draw = ui.render_draw_list(game_ui_render_state(
-                runtime.render_distance() as i32,
+                driver.current_render_distance(options.scene.render_distance) as i32,
                 render_options,
                 FramePacingUiState::default(),
                 false,
@@ -822,17 +813,10 @@ pub(crate) fn run_headless_screenshot(
                 [gui_scale.width, gui_scale.height],
             );
 
-            let selection_outline = selection_outline_for_camera(&runtime, camera, ui_active);
-            resources.render_full_frame(
+            driver.render_full_frame(
                 frame,
-                camera,
-                &actor_instances,
-                underwater_overlay,
-                sky_clear_color,
-                time_of_day,
-                sun_angle,
-                render_options,
-                selection_outline.as_ref(),
+                options.scene.render_distance,
+                ui_active,
                 gui_state,
                 |stats| {
                     let mut ui_draw = base_ui_draw;
@@ -854,10 +838,10 @@ pub(crate) fn run_headless_screenshot(
                     }
                     ui_draw
                 },
-                &mut render_stats,
             )
         },
     )?;
+    let underwater = driver.underwater_overlay(driver.camera_view()).is_some();
 
     Ok(HeadlessScreenshotReport {
         path: frame_report.path,
@@ -869,40 +853,12 @@ pub(crate) fn run_headless_screenshot(
         index_count: summary.index_count,
         drawn_index_count: summary.drawn_index_count,
         gui_command_count: summary.gui_command_count,
-        remote_player_count: runtime.client().remote_player_count(),
-        entity_count: runtime.client().entity_count(),
+        remote_player_count,
+        entity_count,
         actor_count: summary.actor_count,
         drawn_actor_count: summary.drawn_actor_count,
         underwater,
     })
-}
-
-fn selection_outline_for_camera(
-    runtime: &WindowSceneRuntime,
-    camera: ChunkCamera,
-    ui_active: bool,
-) -> Option<SelectionOutline> {
-    if ui_active {
-        return None;
-    }
-    let eye = Vec3::from_array(camera.eye);
-    let target = Vec3::from_array(camera.target);
-    if !eye.is_finite() || !target.is_finite() {
-        return None;
-    }
-    let direction = (target - eye).try_normalize()?;
-    let interaction = ClientInteractionController::new();
-    interaction
-        .target_block(
-            runtime.client(),
-            vec3d_from_vec3(eye),
-            vec3d_from_vec3(direction),
-        )
-        .map(|target| SelectionOutline::new(target.outline_boxes))
-}
-
-fn vec3d_from_vec3(value: Vec3) -> Vec3d {
-    Vec3d::new(value.x as f64, value.y as f64, value.z as f64)
 }
 
 fn settle_remote_screenshot_session(
