@@ -19,6 +19,7 @@ use crate::{
 pub(crate) struct ChunkDistanceManager {
     tickets: BTreeMap<ChunkPos, BTreeSet<ChunkTicket>>,
     aggregate_player_ticket_positions: BTreeSet<ChunkPos>,
+    aggregate_player_ticket_priority_centers: Vec<ChunkPos>,
     ticket_tick: u64,
 }
 
@@ -27,6 +28,7 @@ impl ChunkDistanceManager {
         Self {
             tickets: BTreeMap::new(),
             aggregate_player_ticket_positions: BTreeSet::new(),
+            aggregate_player_ticket_priority_centers: Vec::new(),
             ticket_tick: 0,
         }
     }
@@ -35,9 +37,10 @@ impl ChunkDistanceManager {
         self.ticket_tick
     }
 
-    pub(crate) fn set_aggregate_player_ticket_positions(
+    pub(crate) fn set_aggregate_player_ticket_positions_with_priority(
         &mut self,
         new_positions: BTreeSet<ChunkPos>,
+        priority_centers: Vec<ChunkPos>,
     ) {
         let old_positions = std::mem::take(&mut self.aggregate_player_ticket_positions);
 
@@ -60,6 +63,11 @@ impl ChunkDistanceManager {
         }
 
         self.aggregate_player_ticket_positions = new_positions;
+        self.aggregate_player_ticket_priority_centers = priority_centers
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
     }
 
     pub(crate) fn add_region_ticket(
@@ -162,6 +170,10 @@ impl ChunkDistanceManager {
 
     pub(crate) fn player_interest_positions(&self) -> BTreeSet<ChunkPos> {
         self.aggregate_player_ticket_positions.clone()
+    }
+
+    pub(crate) fn player_interest_priority_centers(&self) -> &[ChunkPos] {
+        &self.aggregate_player_ticket_priority_centers
     }
 
     pub(crate) fn ticketed_chunk_count(&self) -> usize {

@@ -68,6 +68,7 @@ pub(crate) struct PlayerChunkViewChange {
     pub(crate) added_chunks: Vec<ChunkPos>,
     pub(crate) removed_chunks: Vec<ChunkPos>,
     pub(crate) aggregate_changed: bool,
+    pub(crate) priority_centers_changed: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -126,6 +127,7 @@ impl PlayerChunkTracking {
             added_chunks: Vec::new(),
             removed_chunks: removed.into_iter().collect(),
             aggregate_changed,
+            priority_centers_changed: true,
         }
     }
 
@@ -135,6 +137,7 @@ impl PlayerChunkTracking {
         requested: ChunkView,
     ) -> PlayerChunkViewChange {
         self.add_player(player_id);
+        let old_priority_centers = self.aggregate_player_ticket_priority_centers();
         let accepted = self.policy.clamp_view(&requested);
         let new_visible = chunk_positions_for_view(&accepted);
         let state = self
@@ -155,12 +158,15 @@ impl PlayerChunkTracking {
             .copied()
             .collect();
         let aggregate_changed = self.rebuild_aggregate_player_ticket_positions();
+        let priority_centers_changed =
+            self.aggregate_player_ticket_priority_centers() != old_priority_centers;
 
         PlayerChunkViewChange {
             accepted: Some(accepted),
             added_chunks,
             removed_chunks,
             aggregate_changed,
+            priority_centers_changed,
         }
     }
 
@@ -173,6 +179,13 @@ impl PlayerChunkTracking {
 
     pub(crate) fn aggregate_player_ticket_positions(&self) -> BTreeSet<ChunkPos> {
         self.aggregate_player_ticket_positions.clone()
+    }
+
+    pub(crate) fn aggregate_player_ticket_priority_centers(&self) -> Vec<ChunkPos> {
+        self.players
+            .values()
+            .filter_map(|state| state.accepted.as_ref().map(|view| view.center))
+            .collect()
     }
 
     pub(crate) fn diagnostics(&self) -> PlayerChunkTrackingDiagnostics {

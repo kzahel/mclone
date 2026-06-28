@@ -468,9 +468,11 @@ impl IntegratedServer {
                     .queue_snapshot_for_player(player_id, snapshot);
             }
         }
-        let events = if change.aggregate_changed {
-            self.scheduler.apply_player_ticket_positions(
+        let events = if change.aggregate_changed || change.priority_centers_changed {
+            self.scheduler.apply_player_ticket_positions_with_priority(
                 self.chunk_tracking.aggregate_player_ticket_positions(),
+                self.chunk_tracking
+                    .aggregate_player_ticket_priority_centers(),
             )?
         } else {
             Vec::new()
@@ -917,7 +919,11 @@ impl IntegratedServer {
         }
         let events = self
             .scheduler
-            .apply_player_ticket_positions(self.chunk_tracking.aggregate_player_ticket_positions())
+            .apply_player_ticket_positions_with_priority(
+                self.chunk_tracking.aggregate_player_ticket_positions(),
+                self.chunk_tracking
+                    .aggregate_player_ticket_priority_centers(),
+            )
             .expect("failed to reconcile chunk tracking after dedicated player disconnect");
         self.route_scheduler_events(events);
     }

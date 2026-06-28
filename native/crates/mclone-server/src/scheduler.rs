@@ -430,15 +430,19 @@ impl ChunkScheduler {
         &mut self,
         view: ChunkView,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
-        self.apply_player_ticket_positions(chunk_positions_for_view(&view))
+        self.apply_player_ticket_positions_with_priority(
+            chunk_positions_for_view(&view),
+            vec![view.center],
+        )
     }
 
-    pub(crate) fn apply_player_ticket_positions(
+    pub(crate) fn apply_player_ticket_positions_with_priority(
         &mut self,
         positions: BTreeSet<ChunkPos>,
+        priority_centers: Vec<ChunkPos>,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         self.distance_manager
-            .set_aggregate_player_ticket_positions(positions);
+            .set_aggregate_player_ticket_positions_with_priority(positions, priority_centers);
         self.reconcile_ticketed_holders()
     }
 
@@ -1480,6 +1484,10 @@ impl ChunkScheduler {
         let active_levels = self.distance_manager.active_levels();
         let desired_set = active_levels.keys().copied().collect::<BTreeSet<_>>();
         let client_visible_set = self.distance_manager.player_interest_positions();
+        let priority_centers = self
+            .distance_manager
+            .player_interest_priority_centers()
+            .to_vec();
         let lighting_enabled = self.lighting_enabled;
         let mut events = Vec::new();
 
@@ -1550,9 +1558,10 @@ impl ChunkScheduler {
         }
 
         events.extend(self.enqueue_runtime_chunks(
-            sorted_chunk_positions_z_major(runtime_targets),
+            sorted_chunk_positions_by_priority(runtime_targets, &priority_centers),
             &client_visible_set,
             self.runtime_chunk_target_status(),
+            &priority_centers,
         )?);
         Ok(events)
     }
@@ -1562,6 +1571,7 @@ impl ChunkScheduler {
         desired_chunks: Vec<ChunkPos>,
         client_visible_set: &BTreeSet<ChunkPos>,
         target_status: ChunkStatus,
+        priority_centers: &[ChunkPos],
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         let mut events = Vec::new();
         let mut to_generate = Vec::new();
@@ -1675,7 +1685,8 @@ impl ChunkScheduler {
         }
 
         if !to_generate.is_empty() {
-            let (job_id, seeded_dependencies) = self.create_feature_job(&to_generate);
+            let (job_id, seeded_dependencies) =
+                self.create_feature_job(&to_generate, priority_centers);
             for pos in &to_generate {
                 self.holders
                     .get_mut(pos)
@@ -1775,16 +1786,25 @@ impl ChunkScheduler {
                     .and_then(|holder| holder.status_slot(ChunkStatus::Light))
                     .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled);
             if should_light {
-                self.pending_light_status_batches
-                    .entry(publication.completed.job_id)
-                    .or_default()
-                    .push(PendingLightStatus::from_feature_publication(
+                let ready_light_batch = {
+                    let statuses = self
+                        .pending_light_status_batches
+                        .entry(publication.completed.job_id)
+                        .or_default();
+                    statuses.push(PendingLightStatus::from_feature_publication(
                         pos,
                         snapshot,
                         chunk,
                         generated.iter(),
                         retained_dependencies.iter(),
                     ));
+                    (statuses.len() >= CENTER_PRIORITY_LIGHT_STATUS_BATCH_SIZE)
+                        .then(|| std::mem::take(statuses))
+                };
+                if let Some(statuses) = ready_light_batch {
+                    self.light_mailbox
+                        .enqueue_batch(PendingLightStatusBatch::new(statuses));
+                }
             } else if self
                 .distance_manager
                 .player_interest_positions()
@@ -1812,8 +1832,10 @@ impl ChunkScheduler {
             self.mark_dependency_ready(dependency);
         }
         self.mark_job_complete(completed.job_id, completed.cache_report, completed.timing);
-        self.light_mailbox
-            .enqueue_batch(PendingLightStatusBatch::new(pending_light_statuses));
+        if !pending_light_statuses.is_empty() {
+            self.light_mailbox
+                .enqueue_batch(PendingLightStatusBatch::new(pending_light_statuses));
+        }
         Ok((events, None))
     }
 
@@ -1881,10 +1903,12 @@ impl ChunkScheduler {
     fn create_feature_job(
         &mut self,
         targets: &[ChunkPos],
+        priority_centers: &[ChunkPos],
     ) -> (ChunkJobId, Vec<MutableChunkBlockBuffer>) {
         let id = ChunkJobId(self.next_job_id);
         self.next_job_id += 1;
-        let (target_chunks, feature_centers, dependency_chunks) = feature_job_positions(targets);
+        let (target_chunks, feature_centers, dependency_chunks) =
+            feature_job_positions(targets, priority_centers);
         let seeded_dependencies = self.seeded_dependency_buffers(&dependency_chunks);
         for pos in &dependency_chunks {
             self.ensure_dependency_status_scheduled(*pos, ChunkStatus::Surface);
@@ -2056,7 +2080,10 @@ fn fluid_tick_event_from_generated_tick(tick: &ScheduledTick) -> Option<ChunkSch
     })
 }
 
-fn feature_job_positions(targets: &[ChunkPos]) -> (Vec<ChunkPos>, Vec<ChunkPos>, Vec<ChunkPos>) {
+fn feature_job_positions(
+    targets: &[ChunkPos],
+    priority_centers: &[ChunkPos],
+) -> (Vec<ChunkPos>, Vec<ChunkPos>, Vec<ChunkPos>) {
     let target_chunks = targets.iter().copied().collect::<BTreeSet<_>>();
     let mut feature_centers = BTreeSet::new();
     let mut dependency_chunks = BTreeSet::new();
@@ -2078,16 +2105,101 @@ fn feature_job_positions(targets: &[ChunkPos]) -> (Vec<ChunkPos>, Vec<ChunkPos>,
     }
 
     (
-        sorted_chunk_positions_z_major(target_chunks),
-        sorted_chunk_positions_z_major(feature_centers),
-        sorted_chunk_positions_z_major(dependency_chunks),
+        sorted_chunk_positions_by_priority(target_chunks, priority_centers),
+        sorted_chunk_positions_by_priority(feature_centers, priority_centers),
+        sorted_chunk_positions_by_priority(dependency_chunks, priority_centers),
     )
+}
+
+fn sorted_chunk_positions_by_priority(
+    positions: BTreeSet<ChunkPos>,
+    priority_centers: &[ChunkPos],
+) -> Vec<ChunkPos> {
+    if priority_centers.is_empty() {
+        return sorted_chunk_positions_z_major(positions);
+    }
+
+    let mut positions = positions.into_iter().collect::<Vec<_>>();
+    positions.sort_by_key(|pos| chunk_priority_key(*pos, priority_centers));
+    positions
+}
+
+fn chunk_priority_key(pos: ChunkPos, priority_centers: &[ChunkPos]) -> (i64, i64, i32, i32) {
+    let (chebyshev_distance, manhattan_distance) = priority_centers
+        .iter()
+        .map(|center| {
+            let dx = (i64::from(pos.x) - i64::from(center.x)).abs();
+            let dz = (i64::from(pos.z) - i64::from(center.z)).abs();
+            (dx.max(dz), dx + dz)
+        })
+        .min()
+        .expect("priority key requires at least one center");
+    (chebyshev_distance, manhattan_distance, pos.z, pos.x)
 }
 
 fn sorted_chunk_positions_z_major(positions: BTreeSet<ChunkPos>) -> Vec<ChunkPos> {
     let mut positions = positions.into_iter().collect::<Vec<_>>();
     positions.sort_by_key(|pos| (pos.z, pos.x));
     positions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn square(center: ChunkPos, radius: i32) -> BTreeSet<ChunkPos> {
+        (-radius..=radius)
+            .flat_map(|z| {
+                (-radius..=radius).map(move |x| ChunkPos::new(center.x + x, center.z + z))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn priority_sort_keeps_z_major_without_centers() {
+        assert_eq!(
+            sorted_chunk_positions_by_priority(square(ChunkPos::new(0, 0), 1), &[]),
+            (-1..=1)
+                .flat_map(|z| (-1..=1).map(move |x| ChunkPos::new(x, z)))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn priority_sort_orders_chunks_from_view_center_outward() {
+        let sorted = sorted_chunk_positions_by_priority(
+            square(ChunkPos::new(0, 0), 2),
+            &[ChunkPos::new(0, 0)],
+        );
+
+        assert_eq!(sorted.first(), Some(&ChunkPos::new(0, 0)));
+        let first_ring = sorted.iter().take(9).copied().collect::<BTreeSet<_>>();
+        assert_eq!(first_ring, square(ChunkPos::new(0, 0), 1));
+        assert!(
+            sorted
+                .iter()
+                .position(|pos| *pos == ChunkPos::new(1, 1))
+                .unwrap()
+                < sorted
+                    .iter()
+                    .position(|pos| *pos == ChunkPos::new(2, 2))
+                    .unwrap()
+        );
+    }
+
+    #[test]
+    fn feature_job_positions_keep_target_and_dependency_lists_center_first() {
+        let targets = square(ChunkPos::new(5, -3), 1)
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let (target_chunks, feature_centers, dependency_chunks) =
+            feature_job_positions(&targets, &[ChunkPos::new(5, -3)]);
+
+        assert_eq!(target_chunks.first(), Some(&ChunkPos::new(5, -3)));
+        assert_eq!(feature_centers.first(), Some(&ChunkPos::new(5, -3)));
+        assert_eq!(dependency_chunks.first(), Some(&ChunkPos::new(5, -3)));
+    }
 }
 
 fn status_path_to(target_status: ChunkStatus) -> Vec<ChunkStatus> {
@@ -2101,6 +2213,7 @@ fn status_path_to(target_status: ChunkStatus) -> Vec<ChunkStatus> {
 pub(crate) const DEFAULT_PENDING_UNLOAD_BUDGET: usize = 200;
 pub(crate) const DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET: usize = 1;
 pub(crate) const DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET: usize = 1;
+const CENTER_PRIORITY_LIGHT_STATUS_BATCH_SIZE: usize = 9;
 const MAX_SCHEDULED_FLUID_TICKS_PER_TICK: usize = 65_536;
 
 fn snapshot_is_client_ready_for_lighting_mode(

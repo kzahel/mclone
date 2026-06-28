@@ -18,7 +18,11 @@ frozen while the menu panel shows the chunk-status grid, and the scene swaps to
 the new local world as soon as the playable threshold is reached. A follow-up on
 2026-06-27 moved initial local XR boot-to-world onto the same pump: local XR
 startup can now render the menu/loader before terrain exists, then install the
-runtime/draw resources at the playable threshold.
+runtime/draw resources at the playable threshold. A center-prioritized scheduler
+follow-up landed on 2026-06-28: player view centers now shape runtime chunk
+ordering, feature publication starts at the underfoot area, and light-status
+batches are released in center-first 3x3 groups so the playable target can turn
+white before the full warm region finishes.
 
 ## Purpose
 
@@ -68,10 +72,24 @@ vanilla-accurate:
   - creates the progress listener with spawn radius `11` at `:344`
   - updates spawn position and waits for start-region readiness at `:499`
 - `reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java`
+  - constructs `ChunkTaskPriorityQueueSorter` and wraps the worldgen, main
+    thread, and light-engine mailboxes at `:155`
   - emits `progressListener.onStatusChange(pos, status)` while loading or
     generating statuses at `:450` and `:512`
+  - schedules generation work through the priority sorter-backed worldgen
+    mailbox at `:516`
   - clears status on unload at `:410`
   - tracks ticking-generated readiness at `:599`
+- `reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkTaskPriorityQueueSorter.java`
+  - priority sorter messages carry chunk position plus a ticket/queue level
+    supplier at `:37` and `:48`
+  - level changes resort queued chunk tasks at `:80`
+  - submitted tasks are bucketed by current level at `:103`
+- `reference/minecraft-1.17.1/src/net/minecraft/server/level/DistanceManager.java`
+  - owns ticket levels and the player-ticket throttler at `:35` and `:46`
+  - derives active ticket level from the first sorted ticket at `:78`
+  - updates chunk scheduling from propagated ticket levels through
+    `runAllUpdates(...)` at `:83`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java`
   - canonical Java status order and generation tasks at `:39`
   - `getStatusList`, `getStatusAroundFullChunk`, and `maxDistance` at `:232`
@@ -160,6 +178,9 @@ waits for 441 ticking chunks.
   map native `Terrain`, `Surface`, `Features`, `Light`, and target-ready states
   to Java-inspired colors. Keep the Java source references above so a later
   parity slice can expose finer statuses.
+- Native startup scheduling should be center-prioritized by the accepted player
+  view center. This approximates Java's ticket/queue-level shaping without
+  requiring a full `ChunkTaskPriorityQueueSorter` port in the first pass.
 
 ## Proposed Native Palette
 
@@ -299,6 +320,37 @@ Slice 4 result:
   gameplay starts. The next correctness slice should harden collision and
   interaction behavior around not-yet-loaded neighboring chunks before relying
   heavily on very early entry at larger render distances.
+
+### Slice 4A - Center-Prioritized Startup Scheduling
+
+- [x] Carry accepted player view centers from player chunk tracking into the
+  shared scheduler's distance manager.
+- [x] Sort runtime chunk targets, feature job target lists, and dependency
+  metadata from the nearest accepted view center outward, with z-major order as
+  the fallback for non-player/manual tickets.
+- [x] Publish feature-ready chunks in that center-first order so the grid no
+  longer fills left-to-right/top-to-bottom for player-startup work.
+- [x] Release light-status work in center-first 3x3 batches. Per-chunk light
+  batches were rejected because they changed existing scheduler light oracle
+  output; 3x3 preserves current lighting correctness while letting the
+  underfoot area become target-ready before the whole warm region.
+- [ ] If large render-distance startup still spends too long before the first
+  green cell, split or stream the worldgen feature job itself. This should be a
+  measured follow-up because the current feature worker still computes a full
+  requested batch before any feature publication can start.
+
+Slice 4A result:
+
+- `ChunkDistanceManager` stores aggregate player ticket priority centers
+  alongside the aggregate player-ticket positions.
+- `PlayerChunkTracking` reports priority-center changes so integrated local and
+  dedicated player views can update scheduler ordering without regenerating
+  duplicate chunks for unchanged views.
+- `ChunkScheduler` now uses center-first ordering for runtime generation and
+  publishes `Features` / `Light` readiness for the underfoot 3x3 before the
+  rest of the warm region.
+- `pnpm native:movement:smoke` passed after this change, including the prior
+  `client_visible_chunks=46 expected 49` smoke lane.
 
 ### Slice 5 - Platform Adoption
 

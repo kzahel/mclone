@@ -79,7 +79,7 @@ pub use types::{
 };
 
 #[cfg(test)]
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[cfg(test)]
 use lighting_seed::{
@@ -1612,6 +1612,21 @@ mod tests {
             .count()
     }
 
+    fn first_status_event_pos(
+        events: &[ChunkSchedulerEvent],
+        status: ChunkStatus,
+        step: ChunkStatusStep,
+    ) -> Option<ChunkPos> {
+        events.iter().find_map(|event| match event {
+            ChunkSchedulerEvent::StatusChanged {
+                pos,
+                status: event_status,
+                step: event_step,
+            } if *event_status == status && *event_step == step => Some(*pos),
+            _ => None,
+        })
+    }
+
     fn snapshot_ready_count(events: &[ChunkSchedulerEvent]) -> usize {
         events
             .iter()
@@ -2685,11 +2700,9 @@ mod tests {
             chunk_tracking_radius: 0,
         };
 
-        assert_eq!(
-            handle_command_and_poll(&mut server, ClientCommand::SetChunkView(interest.clone()))
-                .len(),
-            1
-        );
+        let first_updates =
+            handle_command_and_poll(&mut server, ClientCommand::SetChunkView(interest.clone()));
+        assert!(snapshot_update_for(&first_updates, ChunkPos::new(0, 0)).is_some());
         assert_eq!(server.scheduler().job_count(), 1);
         assert_eq!(
             handle_command_and_poll(&mut server, ClientCommand::SetChunkView(interest)).len(),
@@ -2702,18 +2715,15 @@ mod tests {
     fn adjacent_interest_reuses_retained_dependency_chunks() {
         let mut server = IntegratedServer::new(12_345);
 
-        assert_eq!(
-            handle_command_and_poll(
-                &mut server,
-                ClientCommand::SetChunkView(ChunkView {
-                    center: ChunkPos::new(0, 0),
-                    render_distance: 0,
-                    chunk_tracking_radius: 0,
-                }),
-            )
-            .len(),
-            1
+        let first_updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }),
         );
+        assert!(snapshot_update_for(&first_updates, ChunkPos::new(0, 0)).is_some());
         assert_eq!(
             server.scheduler().job(ChunkJobId(1)).map(|job| (
                 job.seeded_dependency_chunks,
@@ -2724,18 +2734,15 @@ mod tests {
             Some((0, 0, 21 * 21, 21 * 21))
         );
 
-        assert_eq!(
-            handle_command_and_poll(
-                &mut server,
-                ClientCommand::SetChunkView(ChunkView {
-                    center: ChunkPos::new(1, 0),
-                    render_distance: 0,
-                    chunk_tracking_radius: 0,
-                }),
-            )
-            .len(),
-            2
+        let moved_updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(1, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }),
         );
+        assert!(snapshot_update_for(&moved_updates, ChunkPos::new(1, 0)).is_some());
         assert_eq!(
             server.scheduler().job(ChunkJobId(2)).map(|job| (
                 job.seeded_dependency_chunks,
@@ -3215,28 +3222,36 @@ mod tests {
             light_slot.revision.expect("light should have revision") > feature_revision,
             "light status must be published after the feature snapshot it consumes"
         );
-        assert_eq!(scheduler.job_count(), 1);
         assert_eq!(
-            scheduler.job(ChunkJobId(1)),
-            Some(&ChunkStatusJob {
-                id: ChunkJobId(1),
-                status: ChunkStatus::Features,
-                state: ChunkJobState::Complete,
-                target_chunks: (-1..=1)
-                    .flat_map(|z| (-1..=1).map(move |x| ChunkPos::new(x, z)))
-                    .collect(),
-                feature_centers: (-2..=2)
-                    .flat_map(|z| (-2..=2).map(move |x| ChunkPos::new(x, z)))
-                    .collect(),
-                dependency_chunks: (-10..=10)
-                    .flat_map(|z| (-10..=10).map(move |x| ChunkPos::new(x, z)))
-                    .collect(),
-                seeded_dependency_chunks: 0,
-                dependency_cache_hits: 0,
-                dependency_cache_misses: 21 * 21,
-                retained_dependency_chunks: 21 * 21,
-            })
+            first_status_event_pos(&events, ChunkStatus::Features, ChunkStatusStep::Ready),
+            Some(ChunkPos::new(0, 0))
         );
+        assert_eq!(
+            first_status_event_pos(&events, ChunkStatus::Light, ChunkStatusStep::Ready),
+            Some(ChunkPos::new(0, 0))
+        );
+        assert_eq!(scheduler.job_count(), 1);
+        let job = scheduler.job(ChunkJobId(1)).unwrap();
+        assert_eq!(job.id, ChunkJobId(1));
+        assert_eq!(job.status, ChunkStatus::Features);
+        assert_eq!(job.state, ChunkJobState::Complete);
+        assert_eq!(job.target_chunks.first(), Some(&ChunkPos::new(0, 0)));
+        assert_eq!(
+            job.target_chunks.iter().copied().collect::<BTreeSet<_>>(),
+            {
+                (-1..=1)
+                    .flat_map(|z| (-1..=1).map(move |x| ChunkPos::new(x, z)))
+                    .collect()
+            }
+        );
+        assert_eq!(job.feature_centers.first(), Some(&ChunkPos::new(0, 0)));
+        assert_eq!(job.feature_centers.len(), 5 * 5);
+        assert_eq!(job.dependency_chunks.first(), Some(&ChunkPos::new(0, 0)));
+        assert_eq!(job.dependency_chunks.len(), 21 * 21);
+        assert_eq!(job.seeded_dependency_chunks, 0);
+        assert_eq!(job.dependency_cache_hits, 0);
+        assert_eq!(job.dependency_cache_misses, 21 * 21);
+        assert_eq!(job.retained_dependency_chunks, 21 * 21);
     }
 
     #[test]
@@ -3304,9 +3319,8 @@ mod tests {
                 ClientCommand::SetChunkView(interest.clone()),
             )
             .unwrap();
-            let ServerUpdate::ChunkSnapshot(snapshot) = updates.first().unwrap() else {
-                panic!("first update was not a chunk snapshot");
-            };
+            let snapshot = snapshot_update_for(&updates, ChunkPos::new(0, 0))
+                .expect("updates should include the resident chunk snapshot");
             assert_eq!(server.scheduler().job_count(), 1);
             assert_eq!(server.scheduler().dirty_chunk_count(), 9);
             assert_eq!(
