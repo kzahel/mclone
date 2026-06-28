@@ -283,6 +283,10 @@ pub fn apply_overworld_surface(
     }
 }
 
+pub fn overworld_surface_top_material(biome: BiomeDefinition) -> u8 {
+    resolve_surface_biome_definition(biome).config.top_material
+}
+
 fn resolve_surface_biome_definition(biome: BiomeDefinition) -> SurfaceBiomeDefinition {
     match biome.key() {
         "minecraft:mountains" | "minecraft:mountain_edge" | "minecraft:wooded_mountains" => {

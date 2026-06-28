@@ -152,7 +152,7 @@ impl WindowSceneStartupPump {
     pub(crate) fn new_local(scene: &SceneOptions, assets: &WindowSceneAssets) -> Result<Self> {
         Ok(Self {
             pump: LocalSingleViewStartupPump::with_mesh_assets(
-                local_single_view_options(scene)?,
+                local_single_view_options(scene)?.with_initial_spawn_center(),
                 assets.mesh_assets.clone(),
             )
             .context("failed to create local world startup pump")?,

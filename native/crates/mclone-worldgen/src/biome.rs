@@ -1,6 +1,6 @@
 use crate::noise::ImprovedNoise;
 use crate::prng::SimpleRandomSource;
-use mclone_core::chunk_min_block_coord;
+use mclone_core::{ChunkPos, block_to_chunk_coord, chunk_min_block_coord};
 use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
@@ -420,6 +420,19 @@ pub fn get_layered_biome_by_id(id: i32) -> BiomeDefinition {
         .unwrap_or_else(|| panic!("unknown layered biome id {id}"))
 }
 
+pub fn is_player_spawn_friendly_biome(biome: BiomeDefinition) -> bool {
+    matches!(
+        biome.key(),
+        "minecraft:plains"
+            | "minecraft:forest"
+            | "minecraft:taiga"
+            | "minecraft:wooded_hills"
+            | "minecraft:taiga_hills"
+            | "minecraft:jungle"
+            | "minecraft:jungle_hills"
+    )
+}
+
 #[derive(Clone)]
 pub struct OverworldBiomeSource {
     seed: i64,
@@ -497,6 +510,75 @@ impl OverworldBiomeSource {
             |quart_x, quart_y, quart_z| self.get_noise_biome_id(quart_x, quart_y, quart_z),
         ))
     }
+
+    pub fn find_player_spawn_friendly_chunk(&self) -> Option<ChunkPos> {
+        const JAVA_OVERWORLD_SEA_LEVEL: i32 = 63;
+        const JAVA_INITIAL_SPAWN_BIOME_SEARCH_RADIUS_BLOCKS: i32 = 256;
+
+        self.find_biome_horizontal_block(
+            0,
+            JAVA_OVERWORLD_SEA_LEVEL,
+            0,
+            JAVA_INITIAL_SPAWN_BIOME_SEARCH_RADIUS_BLOCKS,
+            is_player_spawn_friendly_biome,
+            false,
+        )
+        .map(|(block_x, block_z)| {
+            ChunkPos::new(block_to_chunk_coord(block_x), block_to_chunk_coord(block_z))
+        })
+    }
+
+    fn find_biome_horizontal_block(
+        &self,
+        block_x: i32,
+        block_y: i32,
+        block_z: i32,
+        radius_blocks: i32,
+        predicate: impl Fn(BiomeDefinition) -> bool,
+        closest_match: bool,
+    ) -> Option<(i32, i32)> {
+        let center_quart_x = quart_from_block(block_x);
+        let center_quart_z = quart_from_block(block_z);
+        let radius_quarts = quart_from_block(radius_blocks);
+        let quart_y = quart_from_block(block_y);
+        let mut random = SimpleRandomSource::new(self.seed);
+        let mut result = None;
+        let mut matches_seen = 0;
+        let mut ring = if closest_match { 0 } else { radius_quarts };
+
+        while ring <= radius_quarts {
+            for dz in (-ring..=ring).step_by(1) {
+                let dz_on_edge = dz.abs() == ring;
+                for dx in (-ring..=ring).step_by(1) {
+                    if closest_match {
+                        let dx_on_edge = dx.abs() == ring;
+                        if !dx_on_edge && !dz_on_edge {
+                            continue;
+                        }
+                    }
+
+                    let quart_x = center_quart_x + dx;
+                    let quart_z = center_quart_z + dz;
+                    if predicate(self.get_noise_biome_definition(quart_x, quart_y, quart_z)) {
+                        if result.is_none() || random.next_int_bound(matches_seen + 1) == 0 {
+                            result = Some((block_from_quart(quart_x), block_from_quart(quart_z)));
+                            if closest_match {
+                                return result;
+                            }
+                        }
+                        matches_seen += 1;
+                    }
+                }
+            }
+            ring += 1;
+        }
+
+        result
+    }
+}
+
+fn block_from_quart(quart_coord: i32) -> i32 {
+    quart_coord << 2
 }
 
 impl NoiseBiomeSource for OverworldBiomeSource {
@@ -2116,6 +2198,45 @@ mod tests {
             assert_eq!(actual.depth().to_bits(), expected.depth.to_bits());
             assert_eq!(actual.scale().to_bits(), expected.scale.to_bits());
         }
+    }
+
+    #[test]
+    fn player_spawn_friendly_biomes_match_vanilla_builders() {
+        for id in [1, 4, 5, 18, 19, 21, 22] {
+            let biome = get_layered_biome_by_id(id);
+            assert!(
+                is_player_spawn_friendly_biome(biome),
+                "{} should be player-spawn-friendly",
+                biome.key()
+            );
+        }
+
+        for id in [2, 16, 27, 30, 31, 32, 35, 129, 132, 133, 149, 168] {
+            let biome = get_layered_biome_by_id(id);
+            assert!(
+                !is_player_spawn_friendly_biome(biome),
+                "{} should not be player-spawn-friendly",
+                biome.key()
+            );
+        }
+    }
+
+    #[test]
+    fn seeded_player_spawn_biome_search_returns_friendly_quart_biome() {
+        let source = OverworldBiomeSource::new(789, false, false);
+        let (block_x, block_z) = source
+            .find_biome_horizontal_block(0, 63, 0, 256, is_player_spawn_friendly_biome, false)
+            .expect("friendly spawn biome");
+        let biome = source.get_noise_biome_definition(block_x >> 2, 63 >> 2, block_z >> 2);
+
+        assert!(is_player_spawn_friendly_biome(biome));
+        assert_eq!(
+            source.find_player_spawn_friendly_chunk(),
+            Some(ChunkPos::new(
+                block_to_chunk_coord(block_x),
+                block_to_chunk_coord(block_z)
+            ))
+        );
     }
 
     #[test]

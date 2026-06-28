@@ -12,6 +12,7 @@ use mclone_protocol::{
     ChunkView, ClientCommand, InteractionHand, MovePlayerCommand, PlayerActionCommand,
     PlayerActionKind, ServerUpdate, SetCarriedItemCommand, UseItemOnCommand,
 };
+use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::RawBlockId;
 
 #[cfg(target_arch = "wasm32")]
@@ -791,9 +792,14 @@ impl IntegratedServer {
         let Some(center) = self.initial_spawn_center_for_target(target)? else {
             return Ok(None);
         };
-        let Some(position) =
-            find_safe_surface_spawn(center, |pos| self.scheduler.block_at_world(pos))
-        else {
+        let seed = self.seed;
+        let biome_source = OverworldBiomeSource::new(seed, false, false);
+        let Some(position) = find_safe_surface_spawn(
+            center,
+            |pos| self.scheduler.block_at_world(pos),
+            |x, z| biome_source.get_block_position_biome_definition(seed, x, z),
+            |chunk| self.scheduler.client_visible_snapshot(chunk).is_some(),
+        ) else {
             return Ok(None);
         };
         self.entities.ensure_starter_passive_near_spawn(position);

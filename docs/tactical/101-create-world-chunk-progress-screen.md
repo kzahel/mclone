@@ -434,6 +434,53 @@ Slice 4C result:
   `/tmp/mclone-view-readiness-debug.png` showed `VIEW 100%` beside the debug
   pane.
 
+### Slice 4D - Java-Style Initial Spawn Surface
+
+- [x] Keep early entry: gameplay still starts when the playable spawn chunk is
+  ready, not when the whole warm region is ready.
+- [x] Use Java's player-spawn-friendly biome selection to choose the local-world
+  startup center before the startup pump requests chunks.
+- [x] Keep generic server `SetChunkView` semantics literal. Low-level tests,
+  debug scene captures, and remote/dedicated clients still get the chunk view
+  they explicitly requested.
+- [x] Move surface placement closer to `PlayerRespawnLogic`: require the biome
+  surface top material to be Java `valid_spawn` (`grass_block` / `podzol`),
+  derive motion/world/ocean-floor heightmap floors from loaded block state, and
+  scan down from the motion-blocking surface to the biome top material instead
+  of accepting cave floors below rejected surfaces.
+- [x] Gate spawn scanning to chunks that already have a client-visible snapshot,
+  so unloaded spiral chunks do not create a repeated full-height scan while the
+  startup pump is still generating.
+
+Java references for future parity:
+
+- Initial spawn biome search and spawn chunk spiral:
+  `reference/minecraft-1.17.1/src/net/minecraft/server/MinecraftServer.java:427`.
+- `BiomeSource.findBiomeHorizontal(...)` seeded quart-biome search:
+  `reference/minecraft-1.17.1/src/net/minecraft/world/level/biome/BiomeSource.java:70`.
+- Player-spawn-friendly biome flags:
+  `reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/biome/VanillaBiomes.java:171`,
+  `:353`, `:888`, and `:900`.
+- Valid spawn block tag:
+  `reference/minecraft-1.17.1/src/net/minecraft/data/tags/BlockTagsProvider.java:405`.
+- Heightmap/top-material respawn column logic:
+  `reference/minecraft-1.17.1/src/net/minecraft/server/level/PlayerRespawnLogic.java:15`.
+
+Slice 4D result:
+
+- `mclone-worldgen` exposes player-spawn-friendly biome classification and a
+  Java-shaped seeded search for the initial spawn chunk.
+- `mclone-server::initial_spawn_center_for_seed` is the narrow shared API used
+  by startup code; the server itself does not rewrite arbitrary first
+  `SetChunkView` commands.
+- `mclone-server` spawn placement now uses Java-shaped chunk spiral order,
+  biome top material, valid-spawn top block filtering, and heightmap-derived
+  surface rejection.
+- `mclone-app-runtime` adds `LocalSingleViewSceneOptions::with_initial_spawn_center`.
+  Desktop Create World startup, flat Android local startup, desktop XR local
+  startup, and Android XR local startup opt into it; generic desktop scene/debug
+  runtime remains centered on the requested chunk.
+
 ### Slice 5 - Platform Adoption
 
 - [x] Validate desktop flat first because it exposes the beachball most clearly
@@ -488,6 +535,13 @@ Slice 5 partial result:
   `cargo test --manifest-path native/Cargo.toml -p mclone-ui loading_progress_panel_draws_compact_grid_without_fullscreen_scrim`,
   `pnpm native:web:build`, `pnpm native:movement:smoke`, and headless screenshot
   capture/inspection at `/tmp/mclone-view-readiness-debug.png`.
+- Slice 4D validation on 2026-06-28:
+  `cargo test --manifest-path native/Cargo.toml -p mclone-worldgen`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-server`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`,
+  `pnpm native:movement:smoke`, `pnpm native:web:build`, and headless screenshot
+  capture/inspection at `/tmp/mclone-seed-789-spawn-parity.png`.
 - Desktop manual/automated Create World smoke: click New World -> Create World
   and verify the app remains responsive while the grid updates.
 - Desktop screenshot/capture while startup is in progress, saved under `/tmp`.
@@ -508,5 +562,8 @@ Slice 5 partial result:
   screen immediately after the user confirms Create World?
 - After early entry, should warm-region progress remain visible as a compact
   overlay, fade out automatically, or move entirely into debug UI?
+- Should the older synchronous desktop boot-to-world path also opt into the Java
+  spawn center, or should it remain a literal scene/debug bootstrap until it is
+  replaced by the non-blocking startup pump?
 - How much remote dedicated progress belongs in protocol, and how much should
   stay as local connection/status UI?

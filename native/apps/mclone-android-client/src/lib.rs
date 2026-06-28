@@ -1684,6 +1684,7 @@ mod android {
     impl AndroidSceneOptions {
         fn local_options(&self) -> LocalSingleViewSceneOptions {
             LocalSingleViewSceneOptions::new(self.seed, self.center, self.render_distance)
+                .with_initial_spawn_center()
                 .with_day_time(self.day_time_override)
                 .with_freeze_time(self.freeze_time)
                 .with_lighting_enabled(self.lighting_enabled)

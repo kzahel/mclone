@@ -1,27 +1,42 @@
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
+use mclone_worldgen::biome::{BiomeDefinition, OverworldBiomeSource};
 use mclone_worldgen::block::{
-    BIRCH_LEAVES, BIRCH_LOG, OAK_LEAVES, OAK_LOG, RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG, has_fluid,
-    material_blocks_motion,
+    GRASS_BLOCK, PODZOL, RawBlockId, has_fluid, is_air_like, material_blocks_motion,
 };
+use mclone_worldgen::surface::overworld_surface_top_material;
 
 use crate::game_mode::JAVA_OVERWORLD_MAX_BUILD_HEIGHT;
 
 const JAVA_OVERWORLD_MIN_BUILD_HEIGHT: i32 = 0;
-const JAVA_DEFAULT_SPAWN_RADIUS: i32 = 10;
+const JAVA_INITIAL_SPAWN_MAX_CHUNK_STEPS: usize = 1024;
+const JAVA_INITIAL_SPAWN_CHUNK_RADIUS: i32 = 16;
+
+pub fn initial_spawn_center_for_seed(seed: i64) -> ChunkPos {
+    OverworldBiomeSource::new(seed, false, false)
+        .find_player_spawn_friendly_chunk()
+        .unwrap_or(ChunkPos::new(0, 0))
+}
 
 pub(crate) fn find_safe_surface_spawn(
     center: ChunkPos,
     mut block_at: impl FnMut(BlockPos) -> Option<RawBlockId>,
+    mut biome_at: impl FnMut(i32, i32) -> BiomeDefinition,
+    mut chunk_ready: impl FnMut(ChunkPos) -> bool,
 ) -> Option<Vec3d> {
-    let center_x = center.middle_block_x();
-    let center_z = center.middle_block_z();
-    for (x, z) in spawn_columns(center_x, center_z, JAVA_DEFAULT_SPAWN_RADIUS) {
-        if let Some(feet_y) = safe_feet_y_at_column(x, z, &mut block_at) {
-            return Some(Vec3d::new(
-                x as f64 + 0.5,
-                f64::from(feet_y),
-                z as f64 + 0.5,
-            ));
+    for chunk in initial_spawn_chunks(center) {
+        if !chunk_ready(chunk) {
+            continue;
+        }
+
+        for (x, z) in chunk_columns(chunk) {
+            let biome = biome_at(x, z);
+            if let Some(feet_y) = safe_feet_y_at_column(x, z, biome, &mut block_at) {
+                return Some(Vec3d::new(
+                    x as f64 + 0.5,
+                    f64::from(feet_y),
+                    z as f64 + 0.5,
+                ));
+            }
         }
     }
     None
@@ -30,119 +45,231 @@ pub(crate) fn find_safe_surface_spawn(
 fn safe_feet_y_at_column(
     x: i32,
     z: i32,
+    biome: BiomeDefinition,
     block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
 ) -> Option<i32> {
-    let floor_y = surface_floor_y_at_column(x, z, block_at)?;
-    let feet_y = floor_y + 1;
-    if feet_y >= JAVA_OVERWORLD_MAX_BUILD_HEIGHT - 1 {
+    let top_material = overworld_surface_top_material(biome);
+    if !is_valid_spawn_surface_block(top_material) {
         return None;
     }
 
-    let floor = block_at(BlockPos::new(x, floor_y, z))?;
-    let feet = block_at(BlockPos::new(x, feet_y, z))?;
-    let head = block_at(BlockPos::new(x, feet_y + 1, z))?;
-    (is_spawn_floor(floor) && is_spawn_space(feet) && is_spawn_space(head)).then_some(feet_y)
-}
+    let heights = column_heightmap_floors(x, z, block_at)?;
+    if heights.world_surface <= heights.motion_blocking
+        && heights.world_surface > heights.ocean_floor
+    {
+        return None;
+    }
 
-fn surface_floor_y_at_column(
-    x: i32,
-    z: i32,
-    block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
-) -> Option<i32> {
-    for y in (JAVA_OVERWORLD_MIN_BUILD_HEIGHT..JAVA_OVERWORLD_MAX_BUILD_HEIGHT).rev() {
+    if heights.motion_blocking + 1 >= JAVA_OVERWORLD_MAX_BUILD_HEIGHT {
+        return None;
+    }
+
+    for y in (JAVA_OVERWORLD_MIN_BUILD_HEIGHT..=heights.motion_blocking + 1).rev() {
         let block = block_at(BlockPos::new(x, y, z))?;
-        if is_motion_blocking_for_spawn_surface(block) {
-            return Some(y);
+        if has_fluid(block) {
+            break;
+        }
+
+        if block == top_material {
+            let feet_y = y + 1;
+            return has_spawn_clearance(x, feet_y, z, block_at).then_some(feet_y);
         }
     }
+
     None
 }
 
-fn is_motion_blocking_for_spawn_surface(block: RawBlockId) -> bool {
-    material_blocks_motion(block) || has_fluid(block)
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SpawnColumnHeights {
+    motion_blocking: i32,
+    world_surface: i32,
+    ocean_floor: i32,
 }
 
-fn spawn_columns(center_x: i32, center_z: i32, radius: i32) -> impl Iterator<Item = (i32, i32)> {
-    (0..=radius).flat_map(move |ring| {
-        (-ring..=ring).flat_map(move |dz| {
-            (-ring..=ring).filter_map(move |dx| {
-                (dx.abs().max(dz.abs()) == ring).then_some((center_x + dx, center_z + dz))
-            })
-        })
+fn column_heightmap_floors(
+    x: i32,
+    z: i32,
+    block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
+) -> Option<SpawnColumnHeights> {
+    let mut motion_blocking = None;
+    let mut world_surface = None;
+    let mut ocean_floor = None;
+
+    for y in (JAVA_OVERWORLD_MIN_BUILD_HEIGHT..JAVA_OVERWORLD_MAX_BUILD_HEIGHT).rev() {
+        let block = block_at(BlockPos::new(x, y, z))?;
+        if motion_blocking.is_none() && is_motion_blocking_heightmap_block(block) {
+            motion_blocking = Some(y);
+        }
+        if world_surface.is_none() && !is_air_like(block) {
+            world_surface = Some(y);
+        }
+        if ocean_floor.is_none() && material_blocks_motion(block) {
+            ocean_floor = Some(y);
+        }
+
+        if motion_blocking.is_some() && world_surface.is_some() && ocean_floor.is_some() {
+            break;
+        }
+    }
+
+    Some(SpawnColumnHeights {
+        motion_blocking: motion_blocking?,
+        world_surface: world_surface?,
+        ocean_floor: ocean_floor?,
     })
 }
 
-fn is_spawn_floor(block: RawBlockId) -> bool {
-    material_blocks_motion(block) && !is_tree_block(block)
+fn is_motion_blocking_heightmap_block(block: RawBlockId) -> bool {
+    material_blocks_motion(block) || has_fluid(block)
+}
+
+fn chunk_columns(chunk: ChunkPos) -> impl Iterator<Item = (i32, i32)> {
+    let min_x = chunk.min_block_x();
+    let min_z = chunk.min_block_z();
+    (min_x..min_x + 16).flat_map(move |x| (min_z..min_z + 16).map(move |z| (x, z)))
+}
+
+fn initial_spawn_chunks(center: ChunkPos) -> impl Iterator<Item = ChunkPos> {
+    let mut chunks = Vec::new();
+    let mut x = 0;
+    let mut z = 0;
+    let mut step_x = 0;
+    let mut step_z = -1;
+
+    for _ in 0..JAVA_INITIAL_SPAWN_MAX_CHUNK_STEPS {
+        if x > -JAVA_INITIAL_SPAWN_CHUNK_RADIUS
+            && x <= JAVA_INITIAL_SPAWN_CHUNK_RADIUS
+            && z > -JAVA_INITIAL_SPAWN_CHUNK_RADIUS
+            && z <= JAVA_INITIAL_SPAWN_CHUNK_RADIUS
+        {
+            chunks.push(ChunkPos::new(center.x + x, center.z + z));
+        }
+
+        if x == z || (x < 0 && x == -z) || (x > 0 && x == 1 - z) {
+            let old_step_x = step_x;
+            step_x = -step_z;
+            step_z = old_step_x;
+        }
+        x += step_x;
+        z += step_z;
+    }
+
+    chunks.into_iter()
 }
 
 fn is_spawn_space(block: RawBlockId) -> bool {
     !material_blocks_motion(block) && !has_fluid(block)
 }
 
-fn is_tree_block(block: RawBlockId) -> bool {
-    matches!(
-        block,
-        OAK_LOG | OAK_LEAVES | BIRCH_LOG | BIRCH_LEAVES | SPRUCE_LOG | SPRUCE_LEAVES
-    )
+fn is_valid_spawn_surface_block(block: RawBlockId) -> bool {
+    matches!(block, GRASS_BLOCK | PODZOL)
+}
+
+fn has_spawn_clearance(
+    x: i32,
+    feet_y: i32,
+    z: i32,
+    block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
+) -> bool {
+    if feet_y >= JAVA_OVERWORLD_MAX_BUILD_HEIGHT - 1 {
+        return false;
+    }
+
+    let Some(feet) = block_at(BlockPos::new(x, feet_y, z)) else {
+        return false;
+    };
+    let Some(head) = block_at(BlockPos::new(x, feet_y + 1, z)) else {
+        return false;
+    };
+    is_spawn_space(feet) && is_spawn_space(head)
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
+    use mclone_worldgen::biome::get_layered_biome_by_id;
     use mclone_worldgen::block::{AIR, GRASS_BLOCK, OAK_LEAVES, STONE, WATER};
 
     use super::*;
 
+    fn plains_biome(_x: i32, _z: i32) -> BiomeDefinition {
+        get_layered_biome_by_id(1)
+    }
+
     #[test]
     fn finds_center_surface_spawn_with_two_clear_blocks() {
         let mut blocks = BTreeMap::new();
-        blocks.insert(BlockPos::new(8, 63, 8), GRASS_BLOCK);
+        blocks.insert(BlockPos::new(0, 63, 0), GRASS_BLOCK);
 
-        let spawn = find_safe_surface_spawn(ChunkPos::new(0, 0), |pos| {
-            Some(*blocks.get(&pos).unwrap_or(&AIR))
-        })
+        let spawn = find_safe_surface_spawn(
+            ChunkPos::new(0, 0),
+            |pos| Some(*blocks.get(&pos).unwrap_or(&AIR)),
+            plains_biome,
+            |_| true,
+        )
         .expect("spawn");
 
-        assert_eq!(spawn, Vec3d::new(8.5, 64.0, 8.5));
+        assert_eq!(spawn, Vec3d::new(0.5, 64.0, 0.5));
     }
 
     #[test]
     fn skips_fluid_and_tree_floor_columns() {
         let mut blocks = BTreeMap::new();
-        blocks.insert(BlockPos::new(8, 63, 8), STONE);
-        blocks.insert(BlockPos::new(8, 64, 8), WATER);
-        blocks.insert(BlockPos::new(7, 63, 7), OAK_LEAVES);
-        blocks.insert(BlockPos::new(7, 63, 8), GRASS_BLOCK);
+        blocks.insert(BlockPos::new(0, 63, 0), STONE);
+        blocks.insert(BlockPos::new(0, 64, 0), WATER);
+        blocks.insert(BlockPos::new(0, 63, 1), OAK_LEAVES);
+        blocks.insert(BlockPos::new(0, 63, 2), GRASS_BLOCK);
 
-        let spawn = find_safe_surface_spawn(ChunkPos::new(0, 0), |pos| {
-            Some(*blocks.get(&pos).unwrap_or(&AIR))
-        })
+        let spawn = find_safe_surface_spawn(
+            ChunkPos::new(0, 0),
+            |pos| Some(*blocks.get(&pos).unwrap_or(&AIR)),
+            plains_biome,
+            |_| true,
+        )
         .expect("spawn");
 
-        assert_eq!(spawn, Vec3d::new(7.5, 64.0, 8.5));
+        assert_eq!(spawn, Vec3d::new(0.5, 64.0, 2.5));
     }
 
     #[test]
     fn surface_spawn_does_not_descend_into_caves_under_rejected_surface() {
         let mut blocks = BTreeMap::new();
-        blocks.insert(BlockPos::new(8, 80, 8), OAK_LEAVES);
-        blocks.insert(BlockPos::new(8, 12, 8), STONE);
-        blocks.insert(BlockPos::new(7, 63, 7), GRASS_BLOCK);
+        blocks.insert(BlockPos::new(0, 80, 0), OAK_LEAVES);
+        blocks.insert(BlockPos::new(0, 12, 0), STONE);
+        blocks.insert(BlockPos::new(0, 63, 1), GRASS_BLOCK);
 
-        let spawn = find_safe_surface_spawn(ChunkPos::new(0, 0), |pos| {
-            Some(*blocks.get(&pos).unwrap_or(&AIR))
-        })
+        let spawn = find_safe_surface_spawn(
+            ChunkPos::new(0, 0),
+            |pos| Some(*blocks.get(&pos).unwrap_or(&AIR)),
+            plains_biome,
+            |_| true,
+        )
         .expect("spawn");
 
-        assert_eq!(spawn, Vec3d::new(7.5, 64.0, 7.5));
+        assert_eq!(spawn, Vec3d::new(0.5, 64.0, 1.5));
+    }
+
+    #[test]
+    fn waits_for_spawn_chunk_to_be_ready() {
+        let mut blocks = BTreeMap::new();
+        blocks.insert(BlockPos::new(0, 63, 0), GRASS_BLOCK);
+
+        assert_eq!(
+            find_safe_surface_spawn(
+                ChunkPos::new(0, 0),
+                |pos| Some(*blocks.get(&pos).unwrap_or(&AIR)),
+                plains_biome,
+                |_| false,
+            ),
+            None
+        );
     }
 
     #[test]
     fn unloaded_columns_do_not_produce_spawn() {
         assert_eq!(
-            find_safe_surface_spawn(ChunkPos::new(0, 0), |_pos| None),
+            find_safe_surface_spawn(ChunkPos::new(0, 0), |_pos| None, plains_biome, |_| true),
             None
         );
     }

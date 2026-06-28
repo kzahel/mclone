@@ -11,7 +11,7 @@ use mclone_protocol::{ClientCommand, ServerUpdate};
 use mclone_render_session::RenderSectionCacheUpdate;
 use mclone_server::{
     IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
-    ServerRunnerDiagnostics,
+    ServerRunnerDiagnostics, initial_spawn_center_for_seed,
 };
 use mclone_ui::LoadingProgressOverlay;
 
@@ -63,6 +63,11 @@ impl LocalSingleViewSceneOptions {
 
     pub const fn with_freeze_time(mut self, freeze_time: bool) -> Self {
         self.freeze_time = freeze_time;
+        self
+    }
+
+    pub fn with_initial_spawn_center(mut self) -> Self {
+        self.center = initial_spawn_center_for_seed(self.seed);
         self
     }
 
@@ -1058,6 +1063,14 @@ mod tests {
         let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2);
 
         assert_eq!(options.chunk_tracking_radius(), 3);
+    }
+
+    #[test]
+    fn local_single_view_options_can_use_java_initial_spawn_center() {
+        let options = LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
+            .with_initial_spawn_center();
+
+        assert_eq!(options.center, initial_spawn_center_for_seed(12345));
     }
 
     #[test]

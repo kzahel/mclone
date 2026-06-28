@@ -2157,6 +2157,7 @@ fn initial_xr_seed_reroll_state(seed: i64) -> u64 {
 
 fn local_single_view_options(scene: XrSceneOptions) -> LocalSingleViewSceneOptions {
     LocalSingleViewSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
+        .with_initial_spawn_center()
         .with_day_time(scene.day_time_override)
         .with_freeze_time(scene.freeze_time)
         .with_lighting_enabled(scene.lighting_enabled)
