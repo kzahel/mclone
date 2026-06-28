@@ -995,6 +995,44 @@ mod tests {
             .expect("simulation tick should emit a TimeUpdate")
     }
 
+    fn request_initial_chunk_view(server: &mut IntegratedServer) {
+        server.set_lighting_enabled(false);
+        let updates = server
+            .try_handle_command(ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }))
+            .expect("set chunk view");
+        assert!(
+            updates
+                .iter()
+                .all(|update| !matches!(update, ServerUpdate::PlayerPosition(_)))
+        );
+    }
+
+    fn wait_for_initial_spawn_update(
+        server: &mut IntegratedServer,
+    ) -> mclone_protocol::PlayerPositionUpdate {
+        let mut spawn = None;
+        for _ in 0..60_000 {
+            let updates = server.try_poll().expect("poll");
+            spawn = spawn.or_else(|| {
+                updates.iter().find_map(|update| match update {
+                    ServerUpdate::PlayerPosition(update) => Some(*update),
+                    _ => None,
+                })
+            });
+            if let Some(spawn) = spawn {
+                return spawn;
+            }
+            if server.pending_job_count() > 0 && server.pending_publication_count() == 0 {
+                server.wait_for_worldgen_completion(Duration::from_secs(1));
+            }
+        }
+        panic!("timed out waiting for initial spawn position update");
+    }
+
     fn load_chunk_view_with_lighting(
         server: &mut IntegratedServer,
         center: ChunkPos,
@@ -1693,37 +1731,8 @@ mod tests {
     #[test]
     fn first_chunk_view_sends_safe_surface_spawn_position() {
         let mut server = IntegratedServer::new(12345);
-        server.set_lighting_enabled(false);
-        let updates = server
-            .try_handle_command(ClientCommand::SetChunkView(ChunkView {
-                center: ChunkPos::new(0, 0),
-                render_distance: 0,
-                chunk_tracking_radius: 0,
-            }))
-            .expect("set chunk view");
-        assert!(
-            updates
-                .iter()
-                .all(|update| !matches!(update, ServerUpdate::PlayerPosition(_)))
-        );
-
-        let mut spawn = None;
-        for _ in 0..60_000 {
-            let updates = server.try_poll().expect("poll");
-            spawn = spawn.or_else(|| {
-                updates.iter().find_map(|update| match update {
-                    ServerUpdate::PlayerPosition(update) => Some(*update),
-                    _ => None,
-                })
-            });
-            if spawn.is_some() {
-                break;
-            }
-            if server.pending_job_count() > 0 && server.pending_publication_count() == 0 {
-                server.wait_for_worldgen_completion(Duration::from_secs(1));
-            }
-        }
-        let spawn = spawn.expect("initial spawn position update");
+        request_initial_chunk_view(&mut server);
+        let spawn = wait_for_initial_spawn_update(&mut server);
 
         assert_eq!(spawn.relative, PlayerPositionRelativeFlags::ABSOLUTE);
         assert_eq!(spawn.teleport_id, 1);
@@ -1772,6 +1781,30 @@ mod tests {
         assert!(updates.is_empty());
         assert_eq!(server.player.awaiting_teleport(), None);
         assert_eq!(server.player.position(), spawn.position);
+    }
+
+    #[test]
+    fn seed_789_initial_spawn_uses_surface_not_underground_cave() {
+        let mut server = IntegratedServer::new(789);
+        request_initial_chunk_view(&mut server);
+        let spawn = wait_for_initial_spawn_update(&mut server);
+        let feet = BlockPos::new(
+            spawn.position.x.floor() as i32,
+            spawn.position.y as i32,
+            spawn.position.z.floor() as i32,
+        );
+
+        for y in feet.y..crate::game_mode::JAVA_OVERWORLD_MAX_BUILD_HEIGHT {
+            let block = server
+                .scheduler()
+                .block_at_world(BlockPos::new(feet.x, y, feet.z))
+                .expect("spawn column block above feet");
+            assert!(
+                !material_blocks_motion(block) && !has_fluid(block),
+                "seed 789 spawn selected underground column with blocking/fluid block {block} at y={y}; spawn={:?}",
+                spawn.position
+            );
+        }
     }
 
     #[test]

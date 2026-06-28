@@ -32,15 +32,34 @@ fn safe_feet_y_at_column(
     z: i32,
     block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
 ) -> Option<i32> {
-    for feet_y in (JAVA_OVERWORLD_MIN_BUILD_HEIGHT + 1..JAVA_OVERWORLD_MAX_BUILD_HEIGHT - 1).rev() {
-        let floor = block_at(BlockPos::new(x, feet_y - 1, z))?;
-        let feet = block_at(BlockPos::new(x, feet_y, z))?;
-        let head = block_at(BlockPos::new(x, feet_y + 1, z))?;
-        if is_spawn_floor(floor) && is_spawn_space(feet) && is_spawn_space(head) {
-            return Some(feet_y);
+    let floor_y = surface_floor_y_at_column(x, z, block_at)?;
+    let feet_y = floor_y + 1;
+    if feet_y >= JAVA_OVERWORLD_MAX_BUILD_HEIGHT - 1 {
+        return None;
+    }
+
+    let floor = block_at(BlockPos::new(x, floor_y, z))?;
+    let feet = block_at(BlockPos::new(x, feet_y, z))?;
+    let head = block_at(BlockPos::new(x, feet_y + 1, z))?;
+    (is_spawn_floor(floor) && is_spawn_space(feet) && is_spawn_space(head)).then_some(feet_y)
+}
+
+fn surface_floor_y_at_column(
+    x: i32,
+    z: i32,
+    block_at: &mut impl FnMut(BlockPos) -> Option<RawBlockId>,
+) -> Option<i32> {
+    for y in (JAVA_OVERWORLD_MIN_BUILD_HEIGHT..JAVA_OVERWORLD_MAX_BUILD_HEIGHT).rev() {
+        let block = block_at(BlockPos::new(x, y, z))?;
+        if is_motion_blocking_for_spawn_surface(block) {
+            return Some(y);
         }
     }
     None
+}
+
+fn is_motion_blocking_for_spawn_surface(block: RawBlockId) -> bool {
+    material_blocks_motion(block) || has_fluid(block)
 }
 
 fn spawn_columns(center_x: i32, center_z: i32, radius: i32) -> impl Iterator<Item = (i32, i32)> {
@@ -103,6 +122,21 @@ mod tests {
         .expect("spawn");
 
         assert_eq!(spawn, Vec3d::new(7.5, 64.0, 8.5));
+    }
+
+    #[test]
+    fn surface_spawn_does_not_descend_into_caves_under_rejected_surface() {
+        let mut blocks = BTreeMap::new();
+        blocks.insert(BlockPos::new(8, 80, 8), OAK_LEAVES);
+        blocks.insert(BlockPos::new(8, 12, 8), STONE);
+        blocks.insert(BlockPos::new(7, 63, 7), GRASS_BLOCK);
+
+        let spawn = find_safe_surface_spawn(ChunkPos::new(0, 0), |pos| {
+            Some(*blocks.get(&pos).unwrap_or(&AIR))
+        })
+        .expect("spawn");
+
+        assert_eq!(spawn, Vec3d::new(7.5, 64.0, 7.5));
     }
 
     #[test]
