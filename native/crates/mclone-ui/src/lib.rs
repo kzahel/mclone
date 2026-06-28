@@ -1533,6 +1533,87 @@ pub fn render_loading_progress_overlay(
     }
 }
 
+pub fn render_loading_progress_panel_at(
+    scale: GuiScale,
+    draw: &mut GuiDrawList,
+    progress: &LoadingProgressOverlay,
+    origin: Point,
+) {
+    let side = progress.grid_side().max(1) as f32;
+    let available_width = (scale.width - origin.x - 4.0).max(1.0);
+    let available_height = (scale.height - origin.y - 4.0).max(1.0);
+    let font = Font::default();
+    let title = format!("LOAD {}%", progress.percent());
+    let max_grid = available_width
+        .min(available_height - 28.0)
+        .min(96.0)
+        .max(1.0);
+    let cell_size = (max_grid / side).min(3.0).max(1.0).floor();
+    let grid_size = side * cell_size;
+    let panel_width = (grid_size + 14.0)
+        .max(font.width(&title) + 14.0)
+        .min(available_width);
+    let panel_height = (grid_size + font.line_height() + 15.0).min(available_height);
+    let panel = Rect::new(origin.x, origin.y, panel_width, panel_height);
+    let grid = Rect::new(
+        panel.x + ((panel.width - grid_size) * 0.5).floor(),
+        panel.y + font.line_height() + 10.0,
+        grid_size,
+        grid_size,
+    );
+
+    draw.fill(panel, Color::rgba(6, 9, 10, 185));
+    draw.outline(panel, Color::rgba(110, 140, 136, 230));
+    draw.push_clip(panel.inset(4.0));
+    font.draw_centered(
+        draw,
+        &title,
+        panel.x + panel.width * 0.5,
+        panel.y + 5.0,
+        Color::rgba(220, 238, 220, 255),
+    );
+
+    let radius = progress.display_radius as i32;
+    for relative_z in -radius..=radius {
+        for relative_x in -radius..=radius {
+            let status = progress.status_at(relative_x, relative_z);
+            let col = (relative_x + radius) as f32;
+            let row = (relative_z + radius) as f32;
+            draw.fill(
+                Rect::new(
+                    grid.x + col * cell_size,
+                    grid.y + row * cell_size,
+                    cell_size,
+                    cell_size,
+                ),
+                status.color(),
+            );
+        }
+    }
+
+    if let Some(playable) = progress.playable_cell() {
+        let col = (playable.relative_x + radius) as f32;
+        let row = (playable.relative_z + radius) as f32;
+        if col >= 0.0 && row >= 0.0 && col < side && row < side {
+            let outline = if progress.playable_ready {
+                Color::WHITE
+            } else {
+                Color::rgba(242, 96, 96, 255)
+            };
+            draw.outline(
+                Rect::new(
+                    grid.x + col * cell_size,
+                    grid.y + row * cell_size,
+                    cell_size,
+                    cell_size,
+                ),
+                outline,
+            );
+        }
+    }
+    draw.pop_clip();
+}
+
 pub fn render_crosshair(scale: GuiScale, draw: &mut GuiDrawList) {
     let center_x = (scale.width * 0.5).floor();
     let center_y = (scale.height * 0.5).floor();
@@ -3024,6 +3105,59 @@ mod tests {
                 GuiDrawCommand::SolidRect { color, .. } if *color == playable_outline_color
             )
         }));
+    }
+
+    #[test]
+    fn loading_progress_panel_draws_compact_grid_without_fullscreen_scrim() {
+        let progress = LoadingProgressOverlay::new(
+            1,
+            3,
+            9,
+            false,
+            [
+                LoadingProgressCell::new(-1, -1, LoadingProgressCellStatus::Terrain),
+                LoadingProgressCell::new(0, 0, LoadingProgressCellStatus::TargetReady)
+                    .playable(true),
+                LoadingProgressCell::new(1, 1, LoadingProgressCellStatus::Features),
+            ],
+        );
+        let mut draw = GuiDrawList::new();
+
+        render_loading_progress_panel_at(
+            GuiScale::from_pixels(960, 540),
+            &mut draw,
+            &progress,
+            Point { x: 800.0, y: 4.0 },
+        );
+
+        assert!(!draw.commands().iter().any(|command| {
+            matches!(
+                command,
+                GuiDrawCommand::SolidRect { rect, .. }
+                    if rect.x == 0.0 && rect.y == 0.0 && rect.width == 960.0 && rect.height == 540.0
+            )
+        }));
+        assert!(draw.commands().iter().any(|command| {
+            matches!(
+                command,
+                GuiDrawCommand::SolidRect { rect, .. } if rect.x == 800.0 && rect.y == 4.0
+            )
+        }));
+        let cell_rects = draw
+            .commands()
+            .iter()
+            .filter(|command| {
+                matches!(
+                    command,
+                    GuiDrawCommand::SolidRect { color, .. }
+                        if *color == LoadingProgressCellStatus::None.color()
+                            || *color == LoadingProgressCellStatus::Terrain.color()
+                            || *color == LoadingProgressCellStatus::TargetReady.color()
+                            || *color == LoadingProgressCellStatus::Features.color()
+                )
+            })
+            .count();
+        assert_eq!(cell_rects, 9);
     }
 
     #[test]

@@ -28,7 +28,7 @@ use mclone_render::headless::{
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render_session::actor_instances_from_presentations;
-use mclone_ui::{GameUi, GuiDrawList, GuiScale};
+use mclone_ui::{GameUi, GuiDrawList, GuiScale, Point, render_loading_progress_panel_at};
 
 use crate::app::game_ui_render_state;
 use crate::camera::SpectatorCamera;
@@ -819,7 +819,12 @@ pub(crate) fn run_headless_screenshot(
             let ui_active = ui.is_active();
             let ui_covers_world = ui.covers_world();
             let debug_stats = (!ui_active).then_some(debug_stats).flatten();
-            let gui_active = ui_active || debug_stats.is_some();
+            let debug_loading_progress_overlay = debug_stats
+                .is_some()
+                .then(|| runtime.loading_progress_overlay())
+                .flatten();
+            let gui_active =
+                ui_active || debug_stats.is_some() || debug_loading_progress_overlay.is_some();
             let gui_scale = ui.scale();
             let base_ui_draw = ui.render_draw_list(game_ui_render_state(
                 runtime.render_distance() as i32,
@@ -857,6 +862,17 @@ pub(crate) fn run_headless_screenshot(
                     if let Some(mut debug_stats) = debug_stats {
                         debug_stats.render = *stats;
                         render_debug_pane(gui_scale, &mut ui_draw, &debug_stats);
+                    }
+                    if let Some(progress) = &debug_loading_progress_overlay {
+                        render_loading_progress_panel_at(
+                            gui_scale,
+                            &mut ui_draw,
+                            progress,
+                            Point {
+                                x: (gui_scale.width - 132.0).max(4.0),
+                                y: 4.0,
+                            },
+                        );
                     }
                     ui_draw
                 },

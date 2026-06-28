@@ -24,7 +24,7 @@ use mclone_render::screen_effect::UnderwaterOverlay;
 use mclone_ui::{
     DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameFramePacingMode, GameScreen, GameUi,
     GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, render_flat_hud,
-    render_loading_progress_overlay,
+    render_loading_progress_overlay, render_loading_progress_panel_at,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -2074,10 +2074,19 @@ impl ApplicationHandler for ChunkApp {
                     .startup
                     .as_ref()
                     .and_then(|startup| startup.pump.progress_overlay());
+                let debug_loading_progress_overlay =
+                    (!ui_active && self.debug_visible && loading_progress_overlay.is_none())
+                        .then(|| {
+                            self.runtime
+                                .as_ref()
+                                .and_then(WindowSceneRuntime::loading_progress_overlay)
+                        })
+                        .flatten();
                 let gui_active = ui_active
                     || debug_stats.is_some()
                     || flat_hud.has_visible_commands()
-                    || loading_progress_overlay.is_some();
+                    || loading_progress_overlay.is_some()
+                    || debug_loading_progress_overlay.is_some();
                 let gui_scale = self.ui.scale();
                 let base_ui_draw = self.ui.render_draw_list(ui_render_state);
                 let gui_state = FullFrameGui::new(
@@ -2125,6 +2134,14 @@ impl ApplicationHandler for ChunkApp {
                                 if let Some(mut debug_stats) = debug_stats {
                                     debug_stats.render = *stats;
                                     render_debug_pane(gui_scale, &mut ui_draw, &debug_stats);
+                                }
+                                if let Some(progress) = &debug_loading_progress_overlay {
+                                    render_loading_progress_panel_at(
+                                        gui_scale,
+                                        &mut ui_draw,
+                                        progress,
+                                        loading_progress_debug_panel_origin(gui_scale),
+                                    );
                                 }
                                 ui_draw
                             },
@@ -2186,6 +2203,13 @@ impl ApplicationHandler for ChunkApp {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.schedule_next_redraw(event_loop);
+    }
+}
+
+fn loading_progress_debug_panel_origin(scale: GuiScale) -> Point {
+    Point {
+        x: (scale.width - 132.0).max(4.0),
+        y: 4.0,
     }
 }
 

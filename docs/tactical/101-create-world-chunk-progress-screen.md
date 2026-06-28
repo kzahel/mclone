@@ -22,7 +22,10 @@ runtime/draw resources at the playable threshold. A center-prioritized scheduler
 follow-up landed on 2026-06-28: player view centers now shape runtime chunk
 ordering, feature publication starts at the underfoot area, and light-status
 batches are released in center-first 3x3 groups so the playable target can turn
-white before the full warm region finishes.
+white before the full warm region finishes. A debug-visibility follow-up also
+landed on 2026-06-28: the desktop tilde debug pane can show the latest
+post-join loading-progress grid as a compact panel instead of hiding the grid
+once gameplay starts.
 
 ## Purpose
 
@@ -351,6 +354,17 @@ Slice 4A result:
   rest of the warm region.
 - `pnpm native:movement:smoke` passed after this change, including the prior
   `client_visible_chunks=46 expected 49` smoke lane.
+
+### Slice 4B - Post-Join Progress Visibility
+
+- [x] Keep the full-screen loading grid for startup only.
+- [x] Reuse the existing tilde debug-pane toggle after join to render a compact
+  loading-progress grid panel beside the normal debug pane.
+- [x] Expose the detailed progress overlay through shared native app-runtime
+  accessors without adding the cell grid to the hot-path `Copy` diagnostics
+  structs.
+- [x] Mirror the compact panel in headless debug screenshots for rendered-output
+  validation.
 
 ### Slice 5 - Platform Adoption
 

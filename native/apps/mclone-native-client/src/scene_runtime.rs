@@ -380,6 +380,10 @@ impl WindowSceneRuntime {
         self.scene.last_poll_diagnostics()
     }
 
+    pub(crate) fn loading_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        self.scene.loading_progress_overlay()
+    }
+
     pub(crate) fn camera_inside_occluding_block(&self, position: Vec3) -> bool {
         let Some(state_id) = self.block_state_at_position(position) else {
             return false;
