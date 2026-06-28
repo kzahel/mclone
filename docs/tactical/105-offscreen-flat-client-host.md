@@ -2,7 +2,8 @@
 
 Status: active; `GameUi`, session/startup lifetime, host-neutral local/remote
 start routing, the first one-frame offscreen host wrapper, and neutral
-`FlatInputFrame` application now live in the native flat path.
+`FlatInputFrame` / `OffscreenScript` scaffolding now live in the native flat
+path.
 
 ## Purpose
 
@@ -44,7 +45,8 @@ The current gaps:
 - `mclone-native-client::offscreen_flat_client` now wraps `FlatClientDriver`
   with native offscreen device/target callbacks, a deterministic frame clock,
   render-resource setup, runtime/startup factories, neutral `FlatInputFrame`
-  application, section upload, full-frame render, and a screenshot PNG sink.
+  application, a small internal `OffscreenScript` step runner, section upload,
+  full-frame render, and a screenshot PNG sink.
 - `run_headless_screenshot` is now a one-frame use of that offscreen host
   wrapper. Screenshot-only code still selects scenario setup such as camera
   override, requested UI screen, debug pane, remote settle delay, and scripted
@@ -287,6 +289,8 @@ Follow-up validation run after screenshot routing moved to
 - [x] Route the existing screenshot scripted attack/use scenario through
   `OffscreenFlatClientHost::apply_input_frame(FlatInputFrame)` and
   `FlatClientDriver::handle_world_action(...)`.
+- [x] Add basic internal `OffscreenScript` / `OffscreenScriptStep` scaffolding
+  with camera look-at, camera pose, and input-frame steps.
 - [ ] Add deterministic movement, look, pointer, menu, hotbar, attack, and use
   scenario coverage over `mclone-input`/UI events.
 - [ ] Keep direct protocol command helpers only for low-level protocol/runtime

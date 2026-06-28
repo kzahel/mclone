@@ -58,6 +58,47 @@ pub(crate) struct OffscreenFlatClientFrameOptions {
     pub(crate) debug_pane: bool,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct OffscreenScript {
+    steps: Vec<OffscreenScriptStep>,
+}
+
+impl OffscreenScript {
+    pub(crate) fn from_steps(steps: impl IntoIterator<Item = OffscreenScriptStep>) -> Self {
+        Self {
+            steps: steps.into_iter().collect(),
+        }
+    }
+
+    #[cfg(test)]
+    fn steps(&self) -> &[OffscreenScriptStep] {
+        &self.steps
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum OffscreenScriptStep {
+    SetCameraLookAt {
+        eye: Vec3,
+        target: Vec3,
+    },
+    SetCameraPose {
+        position: Vec3,
+        yaw: f32,
+        pitch: f32,
+    },
+    InputFrame {
+        frame: FlatInputFrame,
+        require_changed_action: Option<FlatInputAction>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct OffscreenScriptReport {
+    pub(crate) input_frame_count: usize,
+    pub(crate) world_action_count: usize,
+}
+
 pub(crate) struct OffscreenFlatClientHost {
     assets: WindowSceneAssets,
     _asset_source: mclone_assets::AssetSourceChain,
@@ -231,6 +272,40 @@ impl OffscreenFlatClientHost {
         Ok(statuses)
     }
 
+    pub(crate) fn run_script(&mut self, script: &OffscreenScript) -> Result<OffscreenScriptReport> {
+        let mut report = OffscreenScriptReport::default();
+        for step in &script.steps {
+            match *step {
+                OffscreenScriptStep::SetCameraLookAt { eye, target } => {
+                    self.set_camera_look_at(eye, target);
+                }
+                OffscreenScriptStep::SetCameraPose {
+                    position,
+                    yaw,
+                    pitch,
+                } => {
+                    self.set_camera_pose(position, yaw, pitch);
+                }
+                OffscreenScriptStep::InputFrame {
+                    frame,
+                    require_changed_action,
+                } => {
+                    report.input_frame_count += 1;
+                    let statuses = self.apply_input_frame(frame)?;
+                    report.world_action_count += statuses.len();
+                    if let Some(action) = require_changed_action {
+                        require_world_action_changed(
+                            &statuses,
+                            action,
+                            "offscreen script input frame",
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(report)
+    }
+
     fn debug_pane_stats(&self, enabled: bool) -> Option<DebugPaneStats> {
         if !enabled {
             return None;
@@ -292,25 +367,19 @@ impl OffscreenFlatClientHost {
     }
 
     fn apply_scripted_interaction(&mut self) -> Result<()> {
-        let target = self.stage_scripted_interaction_camera()?;
-        let attack_statuses =
-            self.apply_input_frame(action_input_frame(FlatInputAction::Attack))?;
-        require_world_action_changed(
-            &attack_statuses,
-            FlatInputAction::Attack,
-            "scripted interaction attack",
-        )?;
-        let use_statuses = self.apply_input_frame(action_input_frame(FlatInputAction::Use))?;
-        require_world_action_changed(
-            &use_statuses,
-            FlatInputAction::Use,
-            "scripted interaction use",
-        )?;
-        self.frame_scripted_interaction_target(target);
+        let target = self.scripted_interaction_target()?;
+        let report = self.run_script(&scripted_interaction_script(target))?;
+        if report.input_frame_count != 2 || report.world_action_count != 2 {
+            bail!(
+                "scripted interaction expected 2 input frames and 2 world actions, got {} input frames and {} world actions",
+                report.input_frame_count,
+                report.world_action_count
+            );
+        }
         Ok(())
     }
 
-    fn stage_scripted_interaction_camera(&mut self) -> Result<ScriptedInteractionTarget> {
+    fn scripted_interaction_target(&self) -> Result<ScriptedInteractionTarget> {
         let runtime = self
             .driver
             .runtime
@@ -324,38 +393,11 @@ impl OffscreenFlatClientHost {
             .with_context(|| {
                 format!("no loaded surface for scripted interaction at ({target_x}, {target_z})")
             })?;
-        let eye = Vec3::new(
-            target_x as f32 + 0.5,
-            surface_y as f32 + 3.0,
-            target_z as f32 - 1.5,
-        );
-        let target = Vec3::new(
-            target_x as f32 + 0.5,
-            surface_y as f32 + 0.5,
-            target_z as f32 + 0.5,
-        );
-        let mut spectator = self.driver.spectator.clone();
-        aim_spectator_at(&mut spectator, eye, target);
-        self.driver
-            .set_spectator_camera(spectator, self.driver.scene.movement_speed_multiplier);
         Ok(ScriptedInteractionTarget {
             x: target_x,
             y: surface_y,
             z: target_z,
         })
-    }
-
-    fn frame_scripted_interaction_target(&mut self, target: ScriptedInteractionTarget) {
-        let mut spectator = self.driver.spectator.clone();
-        spectator.position = Vec3::new(
-            target.x as f32 + 0.5,
-            target.y as f32 + 5.0,
-            target.z as f32 - 6.0,
-        );
-        spectator.yaw = 0.0;
-        spectator.pitch = -0.7;
-        self.driver
-            .set_spectator_camera(spectator, self.driver.scene.movement_speed_multiplier);
     }
 
     fn frame_first_actor(&mut self) {
@@ -368,8 +410,28 @@ impl OffscreenFlatClientHost {
     }
 
     fn set_eye_override(&mut self, eye: [f32; 3]) {
+        self.set_camera_position(Vec3::from_array(eye));
+    }
+
+    fn set_camera_position(&mut self, position: Vec3) {
         let mut spectator = self.driver.spectator.clone();
-        spectator.position = Vec3::from_array(eye);
+        spectator.position = position;
+        self.driver
+            .set_spectator_camera(spectator, self.driver.scene.movement_speed_multiplier);
+    }
+
+    fn set_camera_pose(&mut self, position: Vec3, yaw: f32, pitch: f32) {
+        let mut spectator = self.driver.spectator.clone();
+        spectator.position = position;
+        spectator.yaw = yaw;
+        spectator.pitch = pitch;
+        self.driver
+            .set_spectator_camera(spectator, self.driver.scene.movement_speed_multiplier);
+    }
+
+    fn set_camera_look_at(&mut self, eye: Vec3, target: Vec3) {
+        let mut spectator = self.driver.spectator.clone();
+        aim_spectator_at(&mut spectator, eye, target);
         self.driver
             .set_spectator_camera(spectator, self.driver.scene.movement_speed_multiplier);
     }
@@ -515,6 +577,43 @@ fn action_input_frame(action: FlatInputAction) -> FlatInputFrame {
     frame
 }
 
+fn scripted_interaction_script(target: ScriptedInteractionTarget) -> OffscreenScript {
+    let interaction_eye = Vec3::new(
+        target.x as f32 + 0.5,
+        target.y as f32 + 3.0,
+        target.z as f32 - 1.5,
+    );
+    let interaction_target = Vec3::new(
+        target.x as f32 + 0.5,
+        target.y as f32 + 0.5,
+        target.z as f32 + 0.5,
+    );
+    let final_position = Vec3::new(
+        target.x as f32 + 0.5,
+        target.y as f32 + 5.0,
+        target.z as f32 - 6.0,
+    );
+    OffscreenScript::from_steps([
+        OffscreenScriptStep::SetCameraLookAt {
+            eye: interaction_eye,
+            target: interaction_target,
+        },
+        OffscreenScriptStep::InputFrame {
+            frame: action_input_frame(FlatInputAction::Attack),
+            require_changed_action: Some(FlatInputAction::Attack),
+        },
+        OffscreenScriptStep::InputFrame {
+            frame: action_input_frame(FlatInputAction::Use),
+            require_changed_action: Some(FlatInputAction::Use),
+        },
+        OffscreenScriptStep::SetCameraPose {
+            position: final_position,
+            yaw: 0.0,
+            pitch: -0.7,
+        },
+    ])
+}
+
 fn require_world_action_changed(
     statuses: &[(FlatInputAction, FlatClientWorldActionStatus)],
     action: FlatInputAction,
@@ -534,5 +633,39 @@ fn require_world_action_changed(
         FlatClientWorldActionStatus::NoRuntime => bail!("{label} had no active runtime"),
         FlatClientWorldActionStatus::NoTarget => bail!("{label} found no interaction target"),
         FlatClientWorldActionStatus::NoCommand => bail!("{label} produced no gameplay command"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scripted_interaction_script_has_camera_input_and_final_pose_steps() {
+        let script = scripted_interaction_script(ScriptedInteractionTarget { x: 1, y: 64, z: 2 });
+
+        assert_eq!(script.steps().len(), 4);
+        assert!(matches!(
+            script.steps()[0],
+            OffscreenScriptStep::SetCameraLookAt { .. }
+        ));
+        assert!(matches!(
+            script.steps()[1],
+            OffscreenScriptStep::InputFrame {
+                require_changed_action: Some(FlatInputAction::Attack),
+                ..
+            }
+        ));
+        assert!(matches!(
+            script.steps()[2],
+            OffscreenScriptStep::InputFrame {
+                require_changed_action: Some(FlatInputAction::Use),
+                ..
+            }
+        ));
+        assert!(matches!(
+            script.steps()[3],
+            OffscreenScriptStep::SetCameraPose { .. }
+        ));
     }
 }
