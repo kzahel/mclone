@@ -52,7 +52,7 @@ const DEFAULT_CHUNK_X: i32 = 0;
 const DEFAULT_CHUNK_Z: i32 = 0;
 const MIN_RENDER_DISTANCE: i32 = 2;
 const DEFAULT_RENDER_DISTANCE: i32 = 2;
-const MAX_RENDER_DISTANCE: i32 = 16;
+const MAX_RENDER_DISTANCE: i32 = 32;
 const DEFAULT_MOVEMENT_PERF_STEPS: usize = 12;
 const DEFAULT_MOVEMENT_PERF_PATH_RADIUS: i32 = 4;
 const DEFAULT_TIMEDEMO_FRAMES: usize = 120;
@@ -811,7 +811,7 @@ mod tests {
             "--headless-chunk".to_owned(),
             "/tmp/mclone-chunk.png".to_owned(),
             "--render-distance".to_owned(),
-            "16".to_owned(),
+            "32".to_owned(),
         ])
         .unwrap();
 
@@ -822,7 +822,7 @@ mod tests {
                 width: 640,
                 height: 480,
                 scene: SceneOptions {
-                    render_distance: 16,
+                    render_distance: 32,
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),
@@ -866,7 +866,7 @@ mod tests {
         .unwrap_err()
         .to_string();
 
-        assert!(err.contains("--render-distance must be between 2 and 16"));
+        assert!(err.contains("--render-distance must be between 2 and 32"));
     }
 
     #[test]
