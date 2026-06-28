@@ -90,12 +90,13 @@ input preferences, desktop runtime/startup factories, and desktop-only
 diagnostics.
 `mclone-native-client::offscreen_flat_client` now wraps that driver with native
 offscreen device/target callbacks, a deterministic frame clock, render-resource
-setup, runtime/startup factories, section upload, full-frame rendering, and the
-current screenshot PNG sink. `run_headless_screenshot` is now a one-frame use
-of that host, with screenshot-only scenario setup for camera override, requested
-UI screen, debug pane, remote settle delay, and scripted interaction. The
-remaining gap is a long-lived exposed offscreen mode that can run the same host
-for multiple frames with neutral input and explicit non-PNG frame sinks.
+setup, runtime/startup factories, neutral `FlatInputFrame` application, section
+upload, full-frame rendering, and the current screenshot PNG sink.
+`run_headless_screenshot` is now a one-frame use of that host, with
+screenshot-only scenario setup for camera override, requested UI screen, debug
+pane, remote settle delay, and scripted interaction. The remaining gap is a
+long-lived exposed offscreen mode that can run the same host for multiple frames
+with an input stream and explicit non-PNG frame sinks.
 
 ## Desired Cleanup Shape
 

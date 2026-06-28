@@ -1,8 +1,8 @@
 # 105: Offscreen Flat Client Host
 
 Status: active; `GameUi`, session/startup lifetime, host-neutral local/remote
-start routing, and the first one-frame offscreen host wrapper now live in the
-native flat path.
+start routing, the first one-frame offscreen host wrapper, and neutral
+`FlatInputFrame` application now live in the native flat path.
 
 ## Purpose
 
@@ -43,12 +43,13 @@ The current gaps:
   asset/runtime construction factories, and desktop-only diagnostics.
 - `mclone-native-client::offscreen_flat_client` now wraps `FlatClientDriver`
   with native offscreen device/target callbacks, a deterministic frame clock,
-  render-resource setup, runtime/startup factories, section upload, full-frame
-  render, and a screenshot PNG sink.
+  render-resource setup, runtime/startup factories, neutral `FlatInputFrame`
+  application, section upload, full-frame render, and a screenshot PNG sink.
 - `run_headless_screenshot` is now a one-frame use of that offscreen host
   wrapper. Screenshot-only code still selects scenario setup such as camera
   override, requested UI screen, debug pane, remote settle delay, and scripted
-  interaction.
+  interaction. Scripted attack/use now enter through neutral `FlatInputFrame`
+  rather than hand-assembled break/place commands.
 - `mclone-native-client::flat_client_driver` now exists as a native staging
   owner for flat-client runtime, camera/spectator, interaction, actor
   interpolation, render options, render stats, frame timing, and full-frame UI
@@ -59,8 +60,8 @@ The current gaps:
   supplies the current `wgpu::Device` plus desktop runtime/startup factories.
 - The offscreen host is not yet exposed as a long-lived client mode. It can run
   the screenshot path as a one-frame capture, but it does not yet accept a
-  neutral input stream, run N frames from CLI, or stream frames to sinks beyond
-  the current screenshot PNG handoff.
+  long-lived input stream, run N frames from CLI, or stream frames to sinks
+  beyond the current screenshot PNG handoff.
 - Older public `--headless-chunk`, `--headless-chunk-scenarios`, and
   `--headless-ui` native-client modes have been retired so they cannot drift
   into parallel client validation paths. Low-level helpers in
@@ -213,7 +214,8 @@ Follow-up validation run after session/startup lifetime moved into the driver:
 - [x] Add the first offscreen host API shape around `FlatClientDriver`:
   deterministic fixed frame timing, session/startup advancement, runtime poll,
   section upload, and `render_frame(RenderFrameContext)`.
-- [ ] Add neutral input application to that host API.
+- [x] Add neutral `FlatInputFrame` application to that host API for movement,
+  look, hotbar slot selection/stepping, menu-open, attack, and use.
 - [ ] Move desktop redraw logic into the driver except surface acquire/present,
   frame pacing, and `winit` event translation.
 - [x] Move HUD/debug/loading/status draw-list construction into the shared
@@ -280,12 +282,26 @@ Follow-up validation run after screenshot routing moved to
 
 ### Slice 4 - Neutral Scripted Input
 
-- [ ] Replace direct screenshot-only gameplay command shortcuts with neutral
+- [x] Replace direct screenshot-only gameplay command shortcuts with neutral
   input/UI events where possible.
+- [x] Route the existing screenshot scripted attack/use scenario through
+  `OffscreenFlatClientHost::apply_input_frame(FlatInputFrame)` and
+  `FlatClientDriver::handle_world_action(...)`.
 - [ ] Add deterministic movement, look, pointer, menu, hotbar, attack, and use
-  scenarios over `mclone-input`/UI events.
+  scenario coverage over `mclone-input`/UI events.
 - [ ] Keep direct protocol command helpers only for low-level protocol/runtime
   tests, not for flat-client validation.
+
+Validation run after the first neutral scripted input slice:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-offscreen-neutral-input-debug.png --width 960 --height 540 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --screenshot-scripted-interaction true --screenshot-debug-pane true`
+- Visual inspection of `/tmp/mclone-offscreen-neutral-input-debug.png`:
+  nonblank terrain, debug pane, view swatch, cow actor, and scripted
+  interaction frame rendered.
+- `git diff --check`
 
 ### Slice 5 - Retire Older Client Validation Modes
 

@@ -96,7 +96,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Lighting (sky+block, render integ.) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Day/night + sky | ✅ | ✅ | ✅ | ◐ (frozen) | ✅ | ✅ |
 | Player movement + collision | ✅ | ◐ (perf/scripted paths; no real host loop) | ✅ | ◐ (shared touch move, device pending) | ✅ | ✅ |
-| Block interaction (break/place) | ✅ | ◐ (scripted direct commands, not neutral input) | ✗ | ✗ | ✗ | ✅ |
+| Block interaction (break/place) | ✅ | ◐ (scripted `FlatInputFrame`, no real host loop) | ✗ | ✗ | ✗ | ✅ |
 | Remote-player rendering | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ✅ |
 | Passive entities (cow/chicken) | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ◐ (placeholder) |
 | Fluids (server sim, renders as terrain) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -114,10 +114,10 @@ Reading the matrix:
 - **desktop-flat** is the reference; the remaining flat-class gaps are
   connect-UI, persistence, full audio validation/categories, and an in-world
   crosshair.
-- **offscreen-flat** is the desired real no-window validation host, but today it
-  is still a hybrid of full-frame screenshots, renderer helpers, and direct
-  scripted commands. Tactical 105 owns the cleanup into a long-lived client
-  host with neutral input and frame sinks.
+- **offscreen-flat** is the desired real no-window validation host. Today it has
+  full-frame screenshots and scripted attack/use through neutral
+  `FlatInputFrame`, but still lacks a long-lived client loop, broader input
+  stream, and frame sinks. Tactical 105 owns that cleanup.
 - **web** is near desktop parity; gaps are connect-UI, underwater FX wiring,
   persistence (structurally impossible on `wasm32` today), and audio.
 - **desktop-XR** has render/locomotion parity and a shared pause/options
@@ -182,10 +182,11 @@ Concretely:
   `OffscreenFlatClientHost` capture around `FlatClientDriver`. That shares
   render-resource rebuild, section upload, frame-input preparation, full-frame
   render dispatch, `GameUi` ownership, a deterministic offscreen frame clock,
-  and host-neutral menu/session/startup routing with desktop flat. It still
-  lacks an exposed long-lived offscreen client mode. Neutral input lifetime and
-  non-PNG frame sinks still need to wrap that host before offscreen can behave
-  as a real no-window client rather than a one-shot screenshot scenario.
+  neutral `FlatInputFrame` attack/use for scripted screenshots, and
+  host-neutral menu/session/startup routing with desktop flat. It still lacks an
+  exposed long-lived offscreen client mode. Broader input lifetime and non-PNG
+  frame sinks still need to wrap that host before offscreen can behave as a real
+  no-window client rather than a one-shot screenshot scenario.
   Tactical
   [`105-offscreen-flat-client-host.md`](../tactical/105-offscreen-flat-client-host.md)
   tracks the remaining long-lived no-window flat client work.

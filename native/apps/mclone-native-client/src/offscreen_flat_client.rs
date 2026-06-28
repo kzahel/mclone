@@ -4,8 +4,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_app_runtime::frame_render::FullFrameRenderSummary;
-use mclone_client::{ClientHost, ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT};
-use mclone_core::{HitResultType, Vec3d};
+use mclone_client::ClientHost;
+use mclone_input::{FlatInputAction, FlatInputFrame, FlatInputIntent};
 use mclone_protocol::{ClientCommand, MovePlayerCommand};
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
@@ -17,6 +17,7 @@ use crate::camera::SpectatorCamera;
 use crate::cli::{HeadlessScreenshotOptions, HeadlessScreenshotUi, SceneOptions};
 use crate::flat_client_driver::{
     FlatClientDebugFrame, FlatClientDriver, FlatClientUiFrame, FlatClientUiRenderOptions,
+    FlatClientWorldActionStatus,
 };
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState};
 use crate::render_cache::load_asset_source;
@@ -189,6 +190,47 @@ impl OffscreenFlatClientHost {
         Ok(summary)
     }
 
+    pub(crate) fn apply_input_frame(
+        &mut self,
+        frame: FlatInputFrame,
+    ) -> Result<Vec<(FlatInputAction, FlatClientWorldActionStatus)>> {
+        if frame.open_menu {
+            self.driver.open_pause_menu();
+            self.driver.clear_camera_input();
+            return Ok(Vec::new());
+        }
+        if self.driver.ui_is_active() {
+            return Ok(Vec::new());
+        }
+
+        if let Some(slot) = frame.selected_hotbar_slot {
+            self.driver.select_hotbar_slot(slot);
+        }
+        if frame.hotbar_step != 0 {
+            self.driver.step_hotbar_slot(frame.hotbar_step);
+        }
+
+        let dt_seconds = self.clock.frame_ms / 1000.0;
+        if self.driver.apply_held_input_frame(frame, dt_seconds) {
+            self.driver.commit_player_pose_change()?;
+        }
+
+        let mut statuses = Vec::new();
+        if frame.attack {
+            statuses.push((
+                FlatInputAction::Attack,
+                self.driver.handle_world_action(FlatInputAction::Attack)?,
+            ));
+        }
+        if frame.use_item {
+            statuses.push((
+                FlatInputAction::Use,
+                self.driver.handle_world_action(FlatInputAction::Use)?,
+            ));
+        }
+        Ok(statuses)
+    }
+
     fn debug_pane_stats(&self, enabled: bool) -> Option<DebugPaneStats> {
         if !enabled {
             return None;
@@ -250,19 +292,70 @@ impl OffscreenFlatClientHost {
     }
 
     fn apply_scripted_interaction(&mut self) -> Result<()> {
-        let initial_player_position = self.driver.camera.player().pose().position;
+        let target = self.stage_scripted_interaction_camera()?;
+        let attack_statuses =
+            self.apply_input_frame(action_input_frame(FlatInputAction::Attack))?;
+        require_world_action_changed(
+            &attack_statuses,
+            FlatInputAction::Attack,
+            "scripted interaction attack",
+        )?;
+        let use_statuses = self.apply_input_frame(action_input_frame(FlatInputAction::Use))?;
+        require_world_action_changed(
+            &use_statuses,
+            FlatInputAction::Use,
+            "scripted interaction use",
+        )?;
+        self.frame_scripted_interaction_target(target);
+        Ok(())
+    }
+
+    fn stage_scripted_interaction_camera(&mut self) -> Result<ScriptedInteractionTarget> {
+        let runtime = self
+            .driver
+            .runtime
+            .as_ref()
+            .context("offscreen scripted interaction requires an active runtime")?;
+        let (base_x, base_z) = self.driver.spectator.block_column();
+        let target_x = base_x;
+        let target_z = base_z + 4;
+        let surface_y = runtime
+            .highest_non_air_block_y_at_world(target_x, target_z)
+            .with_context(|| {
+                format!("no loaded surface for scripted interaction at ({target_x}, {target_z})")
+            })?;
+        let eye = Vec3::new(
+            target_x as f32 + 0.5,
+            surface_y as f32 + 3.0,
+            target_z as f32 - 1.5,
+        );
+        let target = Vec3::new(
+            target_x as f32 + 0.5,
+            surface_y as f32 + 0.5,
+            target_z as f32 + 0.5,
+        );
         let mut spectator = self.driver.spectator.clone();
-        {
-            let runtime = self
-                .driver
-                .runtime
-                .as_mut()
-                .context("offscreen scripted interaction requires an active runtime")?;
-            apply_scripted_interaction(runtime, &mut spectator, initial_player_position)?;
-        }
+        aim_spectator_at(&mut spectator, eye, target);
         self.driver
             .set_spectator_camera(spectator, self.driver.scene.movement_speed_multiplier);
-        Ok(())
+        Ok(ScriptedInteractionTarget {
+            x: target_x,
+            y: surface_y,
+            z: target_z,
+        })
+    }
+
+    fn frame_scripted_interaction_target(&mut self, target: ScriptedInteractionTarget) {
+        let mut spectator = self.driver.spectator.clone();
+        spectator.position = Vec3::new(
+            target.x as f32 + 0.5,
+            target.y as f32 + 5.0,
+            target.z as f32 - 6.0,
+        );
+        spectator.yaw = 0.0;
+        spectator.pitch = -0.7;
+        self.driver
+            .set_spectator_camera(spectator, self.driver.scene.movement_speed_multiplier);
     }
 
     fn frame_first_actor(&mut self) {
@@ -383,87 +476,6 @@ impl OffscreenFlatClientHost {
     }
 }
 
-fn apply_scripted_interaction(
-    runtime: &mut WindowSceneRuntime,
-    spectator: &mut SpectatorCamera,
-    initial_player_position: Vec3d,
-) -> Result<()> {
-    let (base_x, base_z) = spectator.block_column();
-    let target_x = base_x;
-    let target_z = base_z + 4;
-    let surface_y = runtime
-        .highest_non_air_block_y_at_world(target_x, target_z)
-        .with_context(|| {
-            format!("no loaded surface for scripted interaction at ({target_x}, {target_z})")
-        })?;
-    let interaction = ClientInteractionController::new();
-    let eye_position = Vec3d::new(
-        target_x as f64 + 0.5,
-        surface_y as f64 + 3.0,
-        target_z as f64 + 0.5,
-    );
-    let player_feet_position =
-        eye_position.add(Vec3d::new(0.0, -LOCAL_PLAYER_STANDING_EYE_HEIGHT, 0.0));
-    sync_scripted_player_position(runtime, initial_player_position, player_feet_position)?;
-    let hit = interaction.pick_block(runtime.client(), eye_position, Vec3d::new(0.0, -1.0, 0.0));
-    if hit.hit_type() != HitResultType::Block {
-        bail!("scripted interaction ray missed target column");
-    }
-    let break_command = interaction
-        .debug_instant_break_command(hit)
-        .context("scripted interaction did not produce break command")?;
-    let break_changed = runtime.send_gameplay_command(break_command)?;
-    let place_command = interaction
-        .use_item_on_command(hit)
-        .context("scripted interaction did not produce place command")?;
-    let place_changed = runtime.send_gameplay_command(place_command)?;
-    if !break_changed || !place_changed {
-        bail!(
-            "scripted interaction did not mutate both blocks: break_changed={break_changed} place_changed={place_changed}"
-        );
-    }
-
-    spectator.position = glam::Vec3::new(
-        target_x as f32 + 0.5,
-        surface_y as f32 + 5.0,
-        target_z as f32 - 6.0,
-    );
-    spectator.yaw = 0.0;
-    spectator.pitch = -0.7;
-    Ok(())
-}
-
-fn sync_scripted_player_position(
-    runtime: &mut WindowSceneRuntime,
-    mut current: Vec3d,
-    target: Vec3d,
-) -> Result<()> {
-    for _ in 0..64 {
-        let delta = target.subtract(current);
-        if delta.length_sqr() <= 64.0 {
-            send_scripted_player_move(runtime, target)?;
-            return Ok(());
-        }
-        let length = delta.length_sqr().sqrt();
-        current = current.add(delta.scale(8.0 / length));
-        send_scripted_player_move(runtime, current)?;
-        runtime.poll()?;
-    }
-    bail!("timed out moving scripted player to interaction target");
-}
-
-fn send_scripted_player_move(runtime: &mut WindowSceneRuntime, position: Vec3d) -> Result<()> {
-    runtime
-        .send_gameplay_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
-            position,
-            y_rot_degrees: 0.0,
-            x_rot_degrees: 90.0,
-            on_ground: false,
-        }))
-        .context("failed to sync scripted player position")?;
-    Ok(())
-}
-
 fn frame_first_actor(runtime: &WindowSceneRuntime, spectator: &mut SpectatorCamera) {
     let Some(actor) = runtime.client().actor_presentations().first().copied() else {
         return;
@@ -485,4 +497,42 @@ fn aim_spectator_at(spectator: &mut SpectatorCamera, eye: glam::Vec3, target: gl
     spectator.position = eye;
     spectator.yaw = direction.x.atan2(direction.z);
     spectator.pitch = direction.y.clamp(-1.0, 1.0).asin();
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ScriptedInteractionTarget {
+    x: i32,
+    y: i32,
+    z: i32,
+}
+
+fn action_input_frame(action: FlatInputAction) -> FlatInputFrame {
+    let mut frame = FlatInputFrame::default();
+    frame.apply_intent(FlatInputIntent::Action {
+        action,
+        pressed: true,
+    });
+    frame
+}
+
+fn require_world_action_changed(
+    statuses: &[(FlatInputAction, FlatClientWorldActionStatus)],
+    action: FlatInputAction,
+    label: &str,
+) -> Result<()> {
+    let Some((_, status)) = statuses
+        .iter()
+        .find(|(status_action, _)| *status_action == action)
+    else {
+        bail!("{label} did not run");
+    };
+    match status {
+        FlatClientWorldActionStatus::Sent { changed: true, .. } => Ok(()),
+        FlatClientWorldActionStatus::Sent { changed: false, .. } => {
+            bail!("{label} sent a command but reported no world change")
+        }
+        FlatClientWorldActionStatus::NoRuntime => bail!("{label} had no active runtime"),
+        FlatClientWorldActionStatus::NoTarget => bail!("{label} found no interaction target"),
+        FlatClientWorldActionStatus::NoCommand => bail!("{label} produced no gameplay command"),
+    }
 }

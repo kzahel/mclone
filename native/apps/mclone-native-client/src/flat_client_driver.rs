@@ -17,7 +17,7 @@ use mclone_client::{
     ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
 use mclone_core::Vec3d;
-use mclone_input::{FlatInputAction, FlatInputFrame, TouchControlsMode};
+use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, TouchControlsMode};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_render::chunk::{
     ChunkCamera, ChunkTextureAtlas, TexturedSectionRenderOptions, TexturedSectionUploadReport,
@@ -1046,6 +1046,16 @@ impl FlatClientDriver {
         self.interaction.select_hotbar_slot(slot)
     }
 
+    pub(crate) fn step_hotbar_slot(&mut self, step: i8) -> bool {
+        if step == 0 {
+            return false;
+        }
+        let slot_count = i16::from(FLAT_HOTBAR_SLOT_COUNT);
+        let selected = i16::from(self.interaction.selected_hotbar_slot());
+        let next = (selected + i16::from(step)).rem_euclid(slot_count) as u8;
+        self.select_hotbar_slot(next)
+    }
+
     pub(crate) fn apply_look_frame(&mut self, frame: FlatInputFrame) -> bool {
         if frame.look_delta.x == 0.0 && frame.look_delta.y == 0.0 {
             return false;
@@ -1748,6 +1758,23 @@ mod tests {
         );
         assert!(pending.payload.arm_mouse_lock);
         assert_eq!(driver.ui_screen(), Some(GameScreen::JoinRemote));
+    }
+
+    #[test]
+    fn hotbar_step_wraps_around_selected_slot() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        assert_eq!(driver.interaction.selected_hotbar_slot(), 0);
+        assert!(driver.step_hotbar_slot(-1));
+        assert_eq!(
+            driver.interaction.selected_hotbar_slot(),
+            FLAT_HOTBAR_SLOT_COUNT - 1
+        );
+        assert!(driver.step_hotbar_slot(2));
+        assert_eq!(driver.interaction.selected_hotbar_slot(), 1);
+        assert!(!driver.step_hotbar_slot(0));
+        assert_eq!(driver.interaction.selected_hotbar_slot(), 1);
     }
 }
 
