@@ -1,6 +1,11 @@
 use std::collections::BTreeSet;
 
-use mclone_app_runtime::frame_render::{RenderStreamStats, record_render_section_update_stats};
+use anyhow::Context;
+use mclone_app_runtime::frame_render::{
+    FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
+    record_render_section_update_stats,
+};
+use mclone_assets::AssetSource;
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
     ClientInteractionController,
@@ -9,15 +14,18 @@ use mclone_core::Vec3d;
 use mclone_input::{FlatInputAction, FlatInputFrame};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_render::chunk::{
-    ChunkCamera, TexturedSectionRenderOptions, TexturedSectionUploadReport,
+    ChunkCamera, ChunkTextureAtlas, TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
+use mclone_render::color_profile::RenderConfig;
 use mclone_render::entity::ActorInstance;
+use mclone_render::entity::ActorTextureAtlas;
 use mclone_render::screen_effect::UnderwaterOverlay;
 use mclone_render::selection_outline::SelectionOutline;
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
     RenderSectionCacheUpdate, actor_instances_from_presentations, render_camera_from_snapshot,
 };
+use mclone_ui::GuiDrawList;
 
 use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
 use crate::cli::SceneOptions;
@@ -57,6 +65,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) actor_interpolation: ActorInterpolationState,
     pub(crate) interaction: ClientInteractionController,
     pub(crate) render_options: TexturedSectionRenderOptions,
+    pub(crate) render_resources: Option<FlatRenderResources>,
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
 }
@@ -129,6 +138,7 @@ impl FlatClientDriver {
             actor_interpolation: ActorInterpolationState::new(),
             interaction: ClientInteractionController::new(),
             render_options,
+            render_resources: None,
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
         }
@@ -147,6 +157,14 @@ impl FlatClientDriver {
             || u32::try_from(fallback_render_distance).unwrap_or(0),
             WindowSceneRuntime::render_distance,
         )
+    }
+
+    pub(crate) fn current_render_scale(&self, fallback_render_scale: f32) -> f32 {
+        self.render_resources
+            .as_ref()
+            .map_or(fallback_render_scale, |resources| {
+                resources.render_config().render_scale
+            })
     }
 
     pub(crate) fn tick_frame_timing(&mut self, frame_ms: f64, target_frame_ms: Option<f64>) {
@@ -170,6 +188,58 @@ impl FlatClientDriver {
 
     pub(crate) fn clear_camera_input(&mut self) {
         self.camera.clear_keys();
+    }
+
+    pub(crate) fn render_config(&self) -> Option<RenderConfig> {
+        self.render_resources
+            .as_ref()
+            .map(FlatRenderResources::render_config)
+    }
+
+    pub(crate) fn rebuild_render_resources(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target_size: [u32; 2],
+        render_config: RenderConfig,
+        chunk_atlas: ChunkTextureAtlas<'_>,
+        actor_atlas: ActorTextureAtlas<'_>,
+        asset_source: &impl AssetSource,
+    ) -> anyhow::Result<(Option<RenderConfig>, RenderConfig)> {
+        let previous_config = self.render_config();
+        let resources = FlatRenderResources::new(
+            device,
+            queue,
+            target_size,
+            render_config,
+            chunk_atlas,
+            actor_atlas,
+            asset_source,
+        )?;
+        let next_config = resources.render_config();
+        self.render_resources = Some(resources);
+        Ok((previous_config, next_config))
+    }
+
+    pub(crate) fn resize_frame_targets(&mut self, device: &wgpu::Device, size: [u32; 2]) {
+        if let Some(render_resources) = &mut self.render_resources {
+            render_resources.resize_frame_targets(device, size);
+        }
+    }
+
+    pub(crate) fn clear_draw_sections(
+        &mut self,
+        device: &wgpu::Device,
+    ) -> anyhow::Result<TexturedSectionUploadReport> {
+        let Some(render_resources) = &mut self.render_resources else {
+            return Ok(TexturedSectionUploadReport::default());
+        };
+        let report = render_resources
+            .draw_mut()
+            .update_sections(device, &[])
+            .context("failed to clear world render sections")?;
+        self.clear_render_stats();
+        Ok(report)
     }
 
     pub(crate) fn select_hotbar_slot(&mut self, slot: u8) -> bool {
@@ -416,6 +486,124 @@ impl FlatClientDriver {
         }
     }
 
+    pub(crate) fn upload_runtime_sections(
+        &mut self,
+        device: &wgpu::Device,
+        elapsed_ms: impl FnOnce(std::time::Duration) -> f64,
+    ) -> anyhow::Result<Option<(FlatClientSectionSync, FlatClientSectionUploadSummary)>> {
+        let Some(sync) = self.sync_runtime_sections(elapsed_ms)? else {
+            return Ok(None);
+        };
+        let Some(render_resources) = &mut self.render_resources else {
+            return Ok(None);
+        };
+        let upload_start = std::time::Instant::now();
+        let upload_report = render_resources
+            .draw_mut()
+            .apply_section_updates(
+                device,
+                &sync.section_update.rebuilt_sections,
+                &sync.section_update.removed_section_keys,
+            )
+            .context("failed to upload streamed chunk section updates")?;
+        let upload_ms = upload_start.elapsed().as_secs_f64() * 1000.0;
+        let summary = self.record_section_upload(
+            &sync.section_update,
+            upload_report,
+            self.render_resources
+                .as_ref()
+                .expect("render resources present after upload")
+                .section_count(),
+            self.render_resources
+                .as_ref()
+                .expect("render resources present after upload")
+                .index_count(),
+            sync.remesh_ms,
+            upload_ms,
+            Some(sync.loaded_chunk_count),
+        );
+        Ok(Some((sync, summary)))
+    }
+
+    pub(crate) fn upload_all_runtime_sections(
+        &mut self,
+        device: &wgpu::Device,
+        elapsed_ms: impl FnOnce(std::time::Duration) -> f64,
+    ) -> anyhow::Result<Option<(FlatClientFullSectionSync, FlatClientSectionUploadSummary)>> {
+        let Some(sync) = self.sync_all_runtime_sections(elapsed_ms)? else {
+            return Ok(None);
+        };
+        let traversal_ready_sections = self.traversal_ready_section_keys(sync.camera_view);
+        let Some(render_resources) = &mut self.render_resources else {
+            return Ok(None);
+        };
+        let upload_start = std::time::Instant::now();
+        let upload_report = render_resources
+            .draw_mut()
+            .update_sections(device, &sync.sections)
+            .context("failed to upload world chunk section resources")?;
+        render_resources
+            .draw_mut()
+            .set_traversal_ready_sections(&traversal_ready_sections);
+        let upload_ms = upload_start.elapsed().as_secs_f64() * 1000.0;
+        let summary = self.record_section_upload(
+            &sync.section_update,
+            upload_report,
+            self.render_resources
+                .as_ref()
+                .expect("render resources present after upload")
+                .section_count(),
+            self.render_resources
+                .as_ref()
+                .expect("render resources present after upload")
+                .index_count(),
+            sync.remesh_ms,
+            upload_ms,
+            None,
+        );
+        Ok(Some((sync, summary)))
+    }
+
+    pub(crate) fn upload_cached_runtime_sections(
+        &mut self,
+        device: &wgpu::Device,
+    ) -> anyhow::Result<
+        Option<(
+            FlatClientCachedSections,
+            FlatClientSectionUploadSummary,
+            TexturedSectionUploadReport,
+        )>,
+    > {
+        let Some(cached) = self.cached_runtime_sections() else {
+            return Ok(None);
+        };
+        let traversal_ready_sections = self.traversal_ready_section_keys(cached.camera_view);
+        let Some(render_resources) = &mut self.render_resources else {
+            return Ok(None);
+        };
+        let upload_start = std::time::Instant::now();
+        let upload_report = render_resources
+            .draw_mut()
+            .update_sections(device, &cached.sections)
+            .context("failed to upload cached startup chunk section resources")?;
+        render_resources
+            .draw_mut()
+            .set_traversal_ready_sections(&traversal_ready_sections);
+        let upload_ms = upload_start.elapsed().as_secs_f64() * 1000.0;
+        let summary = self.record_cached_section_upload(
+            self.render_resources
+                .as_ref()
+                .expect("render resources present after upload")
+                .section_count(),
+            self.render_resources
+                .as_ref()
+                .expect("render resources present after upload")
+                .index_count(),
+            upload_ms,
+        );
+        Ok(Some((cached, summary, upload_report)))
+    }
+
     pub(crate) fn record_cached_section_upload(
         &mut self,
         section_count: usize,
@@ -488,6 +676,43 @@ impl FlatClientDriver {
             traversal_ready_sections,
             render_stats,
         }
+    }
+
+    pub(crate) fn render_full_frame<BuildGuiDraw>(
+        &mut self,
+        frame: mclone_render::target::RenderFrameContext<'_>,
+        fallback_render_distance: i32,
+        ui_active: bool,
+        gui_state: FullFrameGui,
+        build_gui_draw: BuildGuiDraw,
+    ) -> anyhow::Result<FullFrameRenderSummary>
+    where
+        BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+    {
+        let frame_inputs = self.prepare_frame_inputs(fallback_render_distance, ui_active);
+        let Some(render_resources) = &mut self.render_resources else {
+            anyhow::bail!("flat client render resources are not initialized");
+        };
+        render_resources
+            .draw_mut()
+            .set_traversal_ready_sections(&frame_inputs.traversal_ready_sections);
+        let mut render_stats = frame_inputs.render_stats;
+        let summary = render_resources.render_full_frame(
+            frame,
+            frame_inputs.camera,
+            &frame_inputs.actor_instances,
+            frame_inputs.underwater_overlay,
+            frame_inputs.sky_clear_color,
+            frame_inputs.time_of_day,
+            frame_inputs.sun_angle,
+            frame_inputs.render_options,
+            frame_inputs.selection_outline.as_ref(),
+            gui_state,
+            build_gui_draw,
+            &mut render_stats,
+        )?;
+        self.render_stats = render_stats;
+        Ok(summary)
     }
 
     pub(crate) fn sync_spectator_from_camera(&mut self) {

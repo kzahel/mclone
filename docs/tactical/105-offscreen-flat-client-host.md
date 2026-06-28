@@ -137,9 +137,13 @@ Validation run:
 - [x] Move runtime polling, section sync, section upload bookkeeping, render-stat
   updates, traversal-ready lookup, and flat frame-input preparation behind
   driver APIs while leaving GPU device/resource ownership in the desktop app.
+- [x] Move `FlatRenderResources` ownership, render-resource rebuild/resize,
+  section GPU upload calls, and full-frame render dispatch into the driver.
+  Desktop still owns the surface and passes frame targets/devices into the
+  driver.
 - [ ] Move session coordinator/startup, UI state, input preferences, render
-  resource lifetime, GPU upload calls, and full frame assembly behind driver
-  methods instead of direct `ChunkApp` field access.
+  resource asset loading, and UI draw-list assembly behind driver methods
+  instead of direct `ChunkApp` field access.
 - [ ] Keep platform transport/session construction injectable so desktop TCP,
   offscreen TCP, Android property TCP, and future network sources stay adapters.
 - [ ] Preserve existing desktop behavior.
@@ -157,6 +161,12 @@ Follow-up validation run after behavior delegation:
 - `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
 
 Follow-up validation run after section/frame prep delegation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+
+Follow-up validation run after render-resource ownership moved into driver:
 
 - `cargo fmt --manifest-path native/Cargo.toml --all --check`
 - `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`

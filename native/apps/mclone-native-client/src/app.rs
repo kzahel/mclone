@@ -39,7 +39,7 @@ use crate::scene_runtime::{
 };
 use crate::ui::{DebugPaneStats, render_debug_pane};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
-use mclone_app_runtime::frame_render::{FlatRenderResources, FullFrameGui};
+use mclone_app_runtime::frame_render::FullFrameGui;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
     RemoteSessionEndpoint, SessionFailure, SessionStartRequest, SessionStartResult,
@@ -228,7 +228,6 @@ struct ChunkApp {
     ui: GameUi,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
-    render_resources: Option<FlatRenderResources>,
     audio: Option<AudioEngine>,
     mouse_locked: bool,
     mouse_lock_requested: bool,
@@ -285,7 +284,6 @@ impl ChunkApp {
             ui,
             window: None,
             surface: None,
-            render_resources: None,
             audio: None,
             mouse_locked: false,
             mouse_lock_requested: false,
@@ -343,16 +341,13 @@ impl ChunkApp {
     }
 
     fn current_render_scale(&self) -> f32 {
-        self.render_resources.as_ref().map_or_else(
-            || {
-                self.surface
-                    .as_ref()
-                    .map_or(DEFAULT_RENDER_SCALE, |surface| {
-                        surface.render_config.render_scale
-                    })
-            },
-            |resources| resources.render_config().render_scale,
-        )
+        let fallback = self
+            .surface
+            .as_ref()
+            .map_or(DEFAULT_RENDER_SCALE, |surface| {
+                surface.render_config.render_scale
+            });
+        self.driver.current_render_scale(fallback)
     }
 
     fn update_camera_from_keys(&mut self, now: Instant) -> Result<()> {
@@ -981,29 +976,21 @@ impl ChunkApp {
         asset_source: &impl AssetSource,
         render_config: RenderConfig,
     ) -> Result<()> {
-        let previous_config = self
-            .render_resources
-            .as_ref()
-            .map(FlatRenderResources::render_config);
-        let resources = {
-            let Some(surface) = self.surface.as_ref() else {
-                return Ok(());
-            };
-            FlatRenderResources::new(
-                &surface.device,
-                &surface.queue,
-                [surface.config.width, surface.config.height],
-                render_config,
-                self.assets.mesh_assets.atlas.as_upload(),
-                self.assets.actor_textures.atlas.as_upload(),
-                asset_source,
-            )?
+        let Some(surface) = self.surface.as_ref() else {
+            return Ok(());
         };
-        let next_config = resources.render_config();
+        let (previous_config, next_config) = self.driver.rebuild_render_resources(
+            &surface.device,
+            &surface.queue,
+            [surface.config.width, surface.config.height],
+            render_config,
+            self.assets.mesh_assets.atlas.as_upload(),
+            self.assets.actor_textures.atlas.as_upload(),
+            asset_source,
+        )?;
         if let Some(surface) = &mut self.surface {
             surface.render_config = next_config;
         }
-        self.render_resources = Some(resources);
         if self.driver.runtime.is_some() {
             self.upload_all_runtime_sections()
                 .context("failed to restore runtime sections after render resource rebuild")?;
@@ -1071,21 +1058,16 @@ impl ChunkApp {
     }
 
     fn clear_draw_sections(&mut self) -> Result<()> {
-        let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
-        else {
+        let Some(surface) = &self.surface else {
             return Ok(());
         };
-        let report = render_resources
-            .draw_mut()
-            .update_sections(&surface.device, &[])
-            .context("failed to clear world render sections")?;
+        let report = self.driver.clear_draw_sections(&surface.device)?;
         if report.removed_section_count > 0 {
             log::info!(
                 "cleared {} render sections for world teardown",
                 report.removed_section_count
             );
         }
-        self.driver.clear_render_stats();
         Ok(())
     }
 
@@ -1237,32 +1219,15 @@ impl ChunkApp {
     }
 
     fn upload_runtime_sections(&mut self) -> Result<()> {
-        let Some(sync) = self.driver.sync_runtime_sections(elapsed_ms)? else {
+        let Some(surface) = &self.surface else {
             return Ok(());
         };
-        let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
+        let Some((sync, summary)) = self
+            .driver
+            .upload_runtime_sections(&surface.device, elapsed_ms)?
         else {
             return Ok(());
         };
-        let upload_start = Instant::now();
-        let upload_report = render_resources
-            .draw_mut()
-            .apply_section_updates(
-                &surface.device,
-                &sync.section_update.rebuilt_sections,
-                &sync.section_update.removed_section_keys,
-            )
-            .context("failed to upload streamed chunk section updates")?;
-        let upload_ms = elapsed_ms(upload_start.elapsed());
-        let summary = self.driver.record_section_upload(
-            &sync.section_update,
-            upload_report,
-            render_resources.section_count(),
-            render_resources.index_count(),
-            sync.remesh_ms,
-            upload_ms,
-            Some(sync.loaded_chunk_count),
-        );
         log::info!(
             "streamed chunks loaded={} sections={} faces={} indices={} rebuilt={} visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} remesh_ms={:.3} upload_ms={:.3}",
             sync.loaded_chunk_count,
@@ -1279,16 +1244,18 @@ impl ChunkApp {
             self.driver.render_stats.last_uploaded_index_count,
             self.driver.render_stats.last_upload_removed_section_count,
             sync.remesh_ms,
-            upload_ms
+            self.driver.render_stats.last_upload_ms
         );
         Ok(())
     }
 
     fn upload_all_runtime_sections(&mut self) -> Result<()> {
-        let Some(sync) = self.driver.sync_all_runtime_sections(elapsed_ms)? else {
+        let Some(surface) = &self.surface else {
             return Ok(());
         };
-        let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
+        let Some((sync, summary)) = self
+            .driver
+            .upload_all_runtime_sections(&surface.device, elapsed_ms)?
         else {
             return Ok(());
         };
@@ -1301,24 +1268,6 @@ impl ChunkApp {
                 self.scene.render_distance
             );
         }
-        let upload_start = Instant::now();
-        let upload_report = render_resources
-            .draw_mut()
-            .update_sections(&surface.device, &sync.sections)
-            .context("failed to upload world chunk section resources")?;
-        render_resources.draw_mut().set_traversal_ready_sections(
-            &self.driver.traversal_ready_section_keys(sync.camera_view),
-        );
-        let upload_ms = elapsed_ms(upload_start.elapsed());
-        let summary = self.driver.record_section_upload(
-            &sync.section_update,
-            upload_report,
-            render_resources.section_count(),
-            render_resources.index_count(),
-            sync.remesh_ms,
-            upload_ms,
-            None,
-        );
         log::info!(
             "uploaded {} world render sections with {} vertices / {} faces / {} indices visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} remesh_ms={:.3} upload_ms={:.3}",
             summary.section_count,
@@ -1329,13 +1278,19 @@ impl ChunkApp {
             sync.section_update.visibility_graph_stats.total_ms,
             sync.section_update.visibility_graph_stats.worst_ms,
             sync.remesh_ms,
-            upload_ms
+            self.driver.render_stats.last_upload_ms
         );
         Ok(())
     }
 
     fn upload_cached_runtime_sections(&mut self) -> Result<()> {
-        let Some(cached) = self.driver.cached_runtime_sections() else {
+        let Some(surface) = &self.surface else {
+            return Ok(());
+        };
+        let Some((cached, summary, upload_report)) = self
+            .driver
+            .upload_cached_runtime_sections(&surface.device)?
+        else {
             return Ok(());
         };
         if cached.sections.is_empty() {
@@ -1347,24 +1302,6 @@ impl ChunkApp {
                 self.scene.render_distance
             );
         }
-        let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
-        else {
-            return Ok(());
-        };
-        let upload_start = Instant::now();
-        let upload_report = render_resources
-            .draw_mut()
-            .update_sections(&surface.device, &cached.sections)
-            .context("failed to upload cached startup chunk section resources")?;
-        render_resources.draw_mut().set_traversal_ready_sections(
-            &self.driver.traversal_ready_section_keys(cached.camera_view),
-        );
-        let upload_ms = elapsed_ms(upload_start.elapsed());
-        let summary = self.driver.record_cached_section_upload(
-            render_resources.section_count(),
-            render_resources.index_count(),
-            upload_ms,
-        );
         log::info!(
             "uploaded {} playable startup render sections with {} vertices / {} faces / {} indices uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} upload_ms={:.3}",
             summary.section_count,
@@ -1376,7 +1313,7 @@ impl ChunkApp {
             upload_report.uploaded_face_count(),
             upload_report.uploaded_index_count,
             upload_report.removed_section_count,
-            upload_ms
+            self.driver.render_stats.last_upload_ms
         );
         Ok(())
     }
@@ -1541,10 +1478,8 @@ impl ApplicationHandler for ChunkApp {
                 if let Some(surface) = &mut self.surface {
                     surface.resize(size);
                 }
-                if let (Some(surface), Some(render_resources)) =
-                    (&self.surface, &mut self.render_resources)
-                {
-                    render_resources.resize_frame_targets(
+                if let Some(surface) = &self.surface {
+                    self.driver.resize_frame_targets(
                         &surface.device,
                         [surface.config.width, surface.config.height],
                     );
@@ -1772,12 +1707,9 @@ impl ApplicationHandler for ChunkApp {
                     return;
                 };
                 self.ui.set_scale(gui_scale);
-                let ui_render_state = self.current_ui_render_state();
                 let ui_active = self.ui.is_active();
-                let frame_inputs = self
-                    .driver
-                    .prepare_frame_inputs(self.scene.render_distance, ui_active);
-                let render_options = frame_inputs.render_options;
+                let ui_render_state = self.current_ui_render_state();
+                let render_options = self.driver.effective_render_options();
                 let debug_stats = (self.debug_visible && self.driver.runtime.is_some())
                     .then(|| self.debug_pane_stats(render_options));
                 let ui_covers_world = self.ui.covers_world();
@@ -1809,29 +1741,17 @@ impl ApplicationHandler for ChunkApp {
                     ui_covers_world || loading_progress_overlay.is_some(),
                     [gui_scale.width, gui_scale.height],
                 );
-                let mut render_stats = frame_inputs.render_stats;
                 let render_start = Instant::now();
                 let result = {
-                    let (Some(surface), Some(render_resources)) =
-                        (&mut self.surface, &mut self.render_resources)
-                    else {
+                    let Some(surface) = &mut self.surface else {
                         return;
                     };
-                    render_resources
-                        .draw_mut()
-                        .set_traversal_ready_sections(&frame_inputs.traversal_ready_sections);
                     self.frame_pacing.apply_to_surface(surface);
                     surface.render_with_report(|frame| {
-                        render_resources.render_full_frame(
+                        self.driver.render_full_frame(
                             frame,
-                            frame_inputs.camera,
-                            &frame_inputs.actor_instances,
-                            frame_inputs.underwater_overlay,
-                            frame_inputs.sky_clear_color,
-                            frame_inputs.time_of_day,
-                            frame_inputs.sun_angle,
-                            render_options,
-                            frame_inputs.selection_outline.as_ref(),
+                            self.scene.render_distance,
+                            ui_active,
                             gui_state,
                             |stats| {
                                 let mut ui_draw = base_ui_draw;
@@ -1858,7 +1778,6 @@ impl ApplicationHandler for ChunkApp {
                                 }
                                 ui_draw
                             },
-                            &mut render_stats,
                         )?;
                         Ok(())
                     })
@@ -1874,7 +1793,6 @@ impl ApplicationHandler for ChunkApp {
                         );
                         match report.status {
                             SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped => {
-                                self.driver.render_stats = render_stats;
                                 if let Some(pending) = self.session.take_pending_start() {
                                     self.finish_pending_session_start(pending);
                                 }
@@ -2284,14 +2202,8 @@ mod tests {
         assert!(first_runtime.client().chunk_snapshot(center).is_some());
         let first_signature = center_chunk_signature(first_runtime, center);
 
-        assert!(
-            !app.driver
-                .runtime
-                .as_ref()
-                .unwrap()
-                .cached_sections()
-                .is_empty()
-        );
+        assert_eq!(app.driver.render_stats.section_count, 0);
+        assert_eq!(app.driver.render_stats.index_count, 0);
 
         app.start_local_world(98_765).unwrap();
         let second_runtime = app.driver.runtime.as_ref().unwrap();
