@@ -138,6 +138,14 @@ target itself.
   `mclone-web-client` smoke fixture failures: expected update counts/checksum no
   longer match the produced runtime reports (`update_count` 3/6 instead of 2/4).
   No web client files changed in this slice.
+- 2026-06-28: Corrected outline thickness. WebGPU line-list rendering was only
+  producing a 1-pixel screen-space line, which looked too faint/narrow in flat
+  and would not have stable XR scale. The selection outline now renders each box
+  edge as a culled world-space prism with default thickness `1.0 / 256.0` block
+  units. Validation: `cargo test --manifest-path native/Cargo.toml -p mclone-render selection_outline`;
+  `cargo test --manifest-path native/Cargo.toml -p mclone-render -p mclone-app-runtime -p mclone-xr-scene -p mclone-native-client`;
+  inspected `/tmp/mclone-selection-outline-thick.png` and
+  `/tmp/mclone-selection-outline-thick-default.png`.
 
 Next implementation step: Slice 2 should wire XR controller button state into
 shared attack/use actions with press hysteresis, then add a cleaner outline

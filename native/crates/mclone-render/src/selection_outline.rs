@@ -44,11 +44,13 @@ const OUTLINE_VERTEX_SIZE: wgpu::BufferAddress =
     (OUTLINE_VERTEX_FLOATS * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
 
 pub const JAVA_SELECTION_OUTLINE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.4];
+pub const DEFAULT_SELECTION_OUTLINE_THICKNESS: f32 = 1.0 / 256.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SelectionOutline {
     pub boxes: Vec<Aabb>,
     pub color: [f32; 4],
+    pub thickness: f32,
 }
 
 impl SelectionOutline {
@@ -56,11 +58,17 @@ impl SelectionOutline {
         Self {
             boxes,
             color: JAVA_SELECTION_OUTLINE_COLOR,
+            thickness: DEFAULT_SELECTION_OUTLINE_THICKNESS,
         }
     }
 
     pub fn with_color(mut self, color: [f32; 4]) -> Self {
         self.color = color;
+        self
+    }
+
+    pub fn with_thickness(mut self, thickness: f32) -> Self {
+        self.thickness = thickness;
         self
     }
 
@@ -150,8 +158,8 @@ impl SelectionOutlineRenderer {
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
-                cull_mode: None,
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: Some(wgpu::Face::Back),
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -256,14 +264,22 @@ impl SelectionOutlineRenderer {
 }
 
 fn selection_outline_vertices(outline: &SelectionOutline) -> Vec<f32> {
-    let mut vertices = Vec::with_capacity(outline.boxes.len() * 24 * OUTLINE_VERTEX_FLOATS);
+    if !outline.thickness.is_finite() || outline.thickness <= 0.0 {
+        return Vec::new();
+    }
+    let mut vertices = Vec::with_capacity(outline.boxes.len() * 432 * OUTLINE_VERTEX_FLOATS);
     for bounds in &outline.boxes {
-        push_box_edges(&mut vertices, *bounds, outline.color);
+        push_box_edge_prisms(
+            &mut vertices,
+            *bounds,
+            outline.thickness * 0.5,
+            outline.color,
+        );
     }
     vertices
 }
 
-fn push_box_edges(vertices: &mut Vec<f32>, bounds: Aabb, color: [f32; 4]) {
+fn push_box_edge_prisms(vertices: &mut Vec<f32>, bounds: Aabb, half_width: f32, color: [f32; 4]) {
     let min = Vec3::new(
         bounds.min_x as f32,
         bounds.min_y as f32,
@@ -298,8 +314,42 @@ fn push_box_edges(vertices: &mut Vec<f32>, bounds: Aabb, color: [f32; 4]) {
         [2, 6],
         [3, 7],
     ] {
-        push_vertex(vertices, corners[a], color);
-        push_vertex(vertices, corners[b], color);
+        push_edge_prism(vertices, corners[a], corners[b], half_width, color);
+    }
+}
+
+fn push_edge_prism(
+    vertices: &mut Vec<f32>,
+    start: Vec3,
+    end: Vec3,
+    half_width: f32,
+    color: [f32; 4],
+) {
+    let min = start.min(end) - Vec3::splat(half_width);
+    let max = start.max(end) + Vec3::splat(half_width);
+    push_solid_box(vertices, min, max, color);
+}
+
+fn push_solid_box(vertices: &mut Vec<f32>, min: Vec3, max: Vec3, color: [f32; 4]) {
+    let corners = [
+        Vec3::new(min.x, min.y, min.z),
+        Vec3::new(max.x, min.y, min.z),
+        Vec3::new(max.x, max.y, min.z),
+        Vec3::new(min.x, max.y, min.z),
+        Vec3::new(min.x, min.y, max.z),
+        Vec3::new(max.x, min.y, max.z),
+        Vec3::new(max.x, max.y, max.z),
+        Vec3::new(min.x, max.y, max.z),
+    ];
+    for index in [
+        0, 3, 2, 0, 2, 1, // -Z
+        4, 5, 6, 4, 6, 7, // +Z
+        0, 4, 7, 0, 7, 3, // -X
+        1, 2, 6, 1, 6, 5, // +X
+        0, 1, 5, 0, 5, 4, // -Y
+        3, 7, 6, 3, 6, 2, // +Y
+    ] {
+        push_vertex(vertices, corners[index], color);
     }
 }
 
@@ -331,14 +381,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selection_outline_vertices_emit_twelve_box_edges() {
+    fn selection_outline_vertices_emit_twelve_thick_box_edges() {
         let outline = SelectionOutline::new(vec![Aabb::new(1.0, 2.0, 3.0, 2.0, 4.0, 5.0)])
-            .with_color([0.1, 0.2, 0.3, 0.4]);
+            .with_color([0.1, 0.2, 0.3, 0.4])
+            .with_thickness(1.0 / 256.0);
 
         let vertices = selection_outline_vertices(&outline);
 
-        assert_eq!(vertices.len(), 24 * OUTLINE_VERTEX_FLOATS);
-        assert_eq!(&vertices[0..7], &[1.0, 2.0, 3.0, 0.1, 0.2, 0.3, 0.4]);
-        assert_eq!(&vertices[7..14], &[2.0, 2.0, 3.0, 0.1, 0.2, 0.3, 0.4]);
+        let half_width = 1.0 / 512.0;
+        assert_eq!(vertices.len(), 432 * OUTLINE_VERTEX_FLOATS);
+        assert_eq!(
+            &vertices[0..7],
+            &[
+                1.0 - half_width,
+                2.0 - half_width,
+                3.0 - half_width,
+                0.1,
+                0.2,
+                0.3,
+                0.4
+            ]
+        );
+        assert_eq!(
+            &vertices[7..14],
+            &[
+                1.0 - half_width,
+                2.0 + half_width,
+                3.0 - half_width,
+                0.1,
+                0.2,
+                0.3,
+                0.4
+            ]
+        );
+        assert_eq!(
+            &vertices[35..42],
+            &[
+                2.0 + half_width,
+                2.0 - half_width,
+                3.0 - half_width,
+                0.1,
+                0.2,
+                0.3,
+                0.4
+            ]
+        );
+    }
+
+    #[test]
+    fn selection_outline_rejects_non_positive_thickness() {
+        let outline = SelectionOutline::new(vec![Aabb::new(1.0, 2.0, 3.0, 2.0, 4.0, 5.0)])
+            .with_thickness(0.0);
+
+        assert!(selection_outline_vertices(&outline).is_empty());
     }
 }
