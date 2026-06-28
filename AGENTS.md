@@ -109,6 +109,8 @@ Before doing oracle work, make sure the local Minecraft artifacts are actually h
 
 For any native slice that produces pixels, **capture a screenshot and look at it before moving on.** Do not finish a whole slice and then check. Check at the first drawable milestone, then keep checking as complexity increases.
 
+If a required native headless render/screenshot fails because `wgpu` cannot see a GPU adapter, rerun the same command with elevation before treating GPU validation as blocked.
+
 Use native validation lanes first:
 
 - `cargo test --manifest-path native/Cargo.toml`
