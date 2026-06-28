@@ -80,12 +80,15 @@ The existing code already has good low-level pieces:
   `NativeSingleViewSceneRuntime`, so local/remote session, runtime polling,
   chunk interest, render-section sync, and sky/time facts are mostly shared.
 
-The gap is above those pieces. Desktop flat still owns too much real client
-behavior in its `winit` app shell. `run_headless_screenshot` now uses
-`FlatRenderResources` and the shared full-frame renderer bundle, but it is still
-screenshot-shaped: it creates fresh resources per capture and owns scenario
-debug/UI setup plus scripted interaction state. That still lets desktop features
-miss headless unless real client lifetime moves behind a shared driver.
+The gap is above those pieces. Desktop flat now has a native-client
+`FlatClientDriver` staging owner for runtime, camera, interaction, actor
+interpolation, render options, render stats, and frame timing, but the desktop
+`winit` app shell still drives much of the real client lifetime directly.
+`run_headless_screenshot` now uses `FlatRenderResources` and the shared
+full-frame renderer bundle, but it is still screenshot-shaped: it creates fresh
+resources per capture and owns scenario debug/UI setup plus scripted interaction
+state. That still lets desktop features miss headless until session/UI/render
+resource lifetime moves behind shared driver methods.
 
 ## Desired Cleanup Shape
 

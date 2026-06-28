@@ -179,8 +179,10 @@ Concretely:
 - The offscreen path currently gets shared scene/runtime facts through the same
   native-client wrapper, and `run_headless_screenshot` now shares
   `FlatRenderResources` with the desktop/rebuild full-frame path. It still lacks
-  a long-lived flat-client driver and still owns screenshot scenario/debug/UI
-  setup plus scripted interactions. Tactical
+  a long-lived offscreen flat-client host. Desktop now has a native-client
+  `FlatClientDriver` staging owner for runtime/camera/interaction/render stats,
+  but session/UI/render-resource methods still need to move behind that driver
+  before offscreen can reuse it directly. Tactical
   [`105-offscreen-flat-client-host.md`](../tactical/105-offscreen-flat-client-host.md)
   tracks replacing that with a real no-window flat client host.
 - The XR scene-driver fork is closed:

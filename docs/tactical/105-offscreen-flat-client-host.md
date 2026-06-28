@@ -1,6 +1,6 @@
 # 105: Offscreen Flat Client Host
 
-Status: active; first screenshot-resource cleanup landed.
+Status: active; screenshot-resource cleanup and native driver skeleton landed.
 
 ## Purpose
 
@@ -43,6 +43,10 @@ The current gaps:
 - `run_headless_screenshot` now creates `FlatRenderResources`, uploads sections
   through the same draw-resource bundle used by desktop/rebuild paths, and
   composes the frame through `FlatRenderResources::render_full_frame`.
+- `mclone-native-client::flat_client_driver` now exists as a native staging
+  owner for flat-client runtime, camera/spectator, interaction, actor
+  interpolation, render options, render stats, and frame timing. `ChunkApp`
+  still drives it directly from the desktop event loop.
 - `run_headless_screenshot` is still screenshot-shaped: it constructs a fresh
   render-resource bundle per capture and still owns debug/UI scenario setup and
   scripted interaction instead of sharing a long-lived flat-client driver.
@@ -119,15 +123,25 @@ Validation run:
 
 ### Slice 1 - Flat Client Driver Skeleton
 
-- [ ] Create a host-neutral `FlatClientDriver` module, likely in
-  `mclone-app-runtime` if dependency boundaries permit, or a new native client
-  support module if actor texture/desktop asset details force a staging step.
-- [ ] Move non-`winit` state out of `ChunkApp`: runtime/session, camera,
-  interaction, actor interpolation, UI, input preferences, render options,
-  render stats, and frame timing.
+- [x] Create a native-client staging `FlatClientDriver` module. This intentionally
+  lands in `mclone-native-client` first because current dependencies still
+  include native actor texture assets, `WindowSceneRuntime`, and desktop startup
+  glue.
+- [x] Move the first non-`winit` state cluster out of `ChunkApp`: runtime,
+  camera/spectator mirror, interaction controller, actor interpolation, render
+  options, render stats, and frame timing.
+- [ ] Move session coordinator/startup, UI state, input preferences, render
+  resource lifetime, and frame assembly behind driver methods instead of direct
+  `ChunkApp` field access.
 - [ ] Keep platform transport/session construction injectable so desktop TCP,
   offscreen TCP, Android property TCP, and future network sources stay adapters.
 - [ ] Preserve existing desktop behavior.
+
+Validation run:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
 
 ### Slice 2 - Shared Step And Render API
 

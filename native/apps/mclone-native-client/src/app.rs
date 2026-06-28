@@ -5,8 +5,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use mclone_assets::AssetSource;
 use mclone_client::{
-    ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
-    ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+    ActorInterpolationConfig, BlockInteractionTarget, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
 use mclone_core::Vec3d;
 use mclone_input::{
@@ -14,9 +13,7 @@ use mclone_input::{
     InputPreferences, KeyboardKey, KeyboardMouseInputAdapter, PointerButton,
 };
 use mclone_mesh::quad_face_count_from_indices;
-use mclone_render::chunk::{
-    ChunkCamera, TexturedSectionRenderOptions, TexturedSectionUploadReport,
-};
+use mclone_render::chunk::{TexturedSectionRenderOptions, TexturedSectionUploadReport};
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::entity::ActorInstance;
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
@@ -35,8 +32,11 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
-use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
 use crate::cli::{SceneOptions, WindowStartIntent};
+use crate::flat_client_driver::{
+    FlatClientCameraView, FlatClientDriver, effective_render_options_for_camera,
+    engine_camera_input_from_flat_frame, sync_spectator_from_camera,
+};
 use crate::frame_pacing::{
     FramePacing, FramePacingMode, FramePacingUiState, FrameTimingStats, RedrawSchedule, elapsed_ms,
     next_capped_redraw_deadline, redraw_schedule,
@@ -48,7 +48,7 @@ use crate::scene_runtime::{
 use crate::ui::{DebugPaneStats, render_debug_pane};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 use mclone_app_runtime::frame_render::{
-    FlatRenderResources, FullFrameGui, RenderStreamStats, record_render_section_update_stats,
+    FlatRenderResources, FullFrameGui, record_render_section_update_stats,
 };
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
@@ -59,9 +59,7 @@ use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 use mclone_render_session::{
     ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
-    EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
-    EngineCameraMovementMode, EngineCameraSnapshot, RenderSectionCacheUpdate,
-    actor_instances_from_presentations, render_camera_from_snapshot,
+    EngineCameraMovementMode, RenderSectionCacheUpdate, actor_instances_from_presentations,
 };
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
@@ -156,32 +154,6 @@ fn gui_key_from_key_code(key_code: KeyCode) -> Option<GuiKey> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct WindowCameraView {
-    snapshot: EngineCameraSnapshot,
-    eye: glam::Vec3,
-}
-
-impl WindowCameraView {
-    fn from_snapshot(snapshot: EngineCameraSnapshot) -> Self {
-        Self {
-            snapshot,
-            eye: glam_vec3_from_vec3d(snapshot.eye),
-        }
-    }
-
-    fn block_column(self) -> (i32, i32) {
-        (
-            self.snapshot.eye.x.floor() as i32,
-            self.snapshot.eye.z.floor() as i32,
-        )
-    }
-
-    fn chunk_camera(self, render_distance: u32) -> ChunkCamera {
-        chunk_camera_from_engine(render_camera_from_snapshot(self.snapshot, render_distance))
-    }
-}
-
 #[derive(Clone, Debug)]
 struct DesktopFlatInputAdapter {
     capability_state: InputCapabilityState,
@@ -257,16 +229,11 @@ impl DesktopFlatInputAdapter {
 struct ChunkApp {
     scene: SceneOptions,
     assets: WindowSceneAssets,
-    runtime: Option<WindowSceneRuntime>,
+    driver: FlatClientDriver,
     startup: Option<PendingWindowStartup>,
     session: GameSessionCoordinator<PendingWindowSessionStart>,
-    spectator: SpectatorCamera,
-    camera: EngineCameraController,
-    actor_interpolation: ActorInterpolationState,
-    interaction: ClientInteractionController,
     flat_input: DesktopFlatInputAdapter,
     input_preferences: InputPreferences,
-    render_options: TexturedSectionRenderOptions,
     frame_pacing: FramePacing,
     ui: GameUi,
     window: Option<Arc<Window>>,
@@ -279,8 +246,6 @@ struct ChunkApp {
     debug_visible: bool,
     last_frame: Instant,
     next_redraw_at: Option<Instant>,
-    render_stats: RenderStreamStats,
-    frame_timing: FrameTimingStats,
     start_intent: WindowStartIntent,
     seed_reroll_state: u64,
 }
@@ -307,9 +272,6 @@ impl ChunkApp {
         render_options: TexturedSectionRenderOptions,
         start_intent: WindowStartIntent,
     ) -> Self {
-        let spectator = SpectatorCamera::spawn_for_scene(&scene);
-        let camera =
-            engine_camera_controller_from_spectator(&spectator, scene.movement_speed_multiplier);
         let seed_reroll_state = initial_seed_reroll_state(scene.seed);
         let mut ui = match start_intent {
             WindowStartIntent::InWorld => GameUi::new_ingame(),
@@ -322,18 +284,13 @@ impl ChunkApp {
                 .unwrap_or_else(|| DEFAULT_JOIN_REMOTE_ADDR.to_owned()),
         );
         Self {
+            driver: FlatClientDriver::new(&scene, render_options),
             scene,
             assets,
-            runtime: None,
             startup: None,
             session: GameSessionCoordinator::new(),
-            spectator,
-            camera,
-            actor_interpolation: ActorInterpolationState::new(),
-            interaction: ClientInteractionController::new(),
             flat_input: DesktopFlatInputAdapter::new(),
             input_preferences: InputPreferences::AUTO,
-            render_options,
             frame_pacing: FramePacing::default(),
             ui,
             window: None,
@@ -346,8 +303,6 @@ impl ChunkApp {
             debug_visible: false,
             last_frame: Instant::now(),
             next_redraw_at: None,
-            render_stats: RenderStreamStats::default(),
-            frame_timing: FrameTimingStats::default(),
             start_intent,
             seed_reroll_state,
         }
@@ -388,12 +343,12 @@ impl ChunkApp {
         self.schedule_next_redraw(event_loop);
     }
 
-    fn window_camera_view(&self) -> WindowCameraView {
-        WindowCameraView::from_snapshot(self.camera.snapshot())
+    fn window_camera_view(&self) -> FlatClientCameraView {
+        self.driver.camera_view()
     }
 
     fn current_render_distance(&self) -> u32 {
-        self.runtime.as_ref().map_or_else(
+        self.driver.runtime.as_ref().map_or_else(
             || u32::try_from(self.scene.render_distance).unwrap_or(0),
             WindowSceneRuntime::render_distance,
         )
@@ -416,8 +371,8 @@ impl ChunkApp {
         let frame_dt = now.duration_since(self.last_frame);
         let movement_dt = frame_dt.as_secs_f32().min(0.05);
         self.last_frame = now;
-        self.render_stats.last_frame_ms = (frame_dt.as_secs_f64() * 1000.0) as f32;
-        self.frame_timing.begin_frame(
+        self.driver.render_stats.last_frame_ms = (frame_dt.as_secs_f64() * 1000.0) as f32;
+        self.driver.frame_timing.begin_frame(
             frame_dt.as_secs_f64() * 1000.0,
             self.frame_pacing.target_frame_ms(),
         );
@@ -426,14 +381,17 @@ impl ChunkApp {
             return Ok(());
         }
 
-        let Some(runtime) = self.runtime.as_ref() else {
+        let Some(runtime) = self.driver.runtime.as_ref() else {
             return Ok(());
         };
 
         let frame = self.flat_input.held_frame();
         let input = engine_camera_input_from_flat_frame(frame, f64::from(movement_dt));
-        let before = self.camera.snapshot();
-        let after = self.camera.apply_movement_input(runtime.client(), input);
+        let before = self.driver.camera.snapshot();
+        let after = self
+            .driver
+            .camera
+            .apply_movement_input(runtime.client(), input);
 
         if after != before {
             self.play_landing_events();
@@ -446,7 +404,7 @@ impl ChunkApp {
 
     fn clear_flat_gameplay_input(&mut self) {
         self.flat_input.clear_held();
-        self.camera.clear_keys();
+        self.driver.camera.clear_keys();
     }
 
     fn apply_flat_keyboard_frame(
@@ -464,7 +422,7 @@ impl ChunkApp {
             return true;
         }
         if let Some(slot) = frame.selected_hotbar_slot {
-            if self.interaction.select_hotbar_slot(slot) {
+            if self.driver.interaction.select_hotbar_slot(slot) {
                 log::info!("selected hotbar slot {}", slot + 1);
             }
             self.schedule_next_redraw(event_loop);
@@ -487,9 +445,10 @@ impl ChunkApp {
         if frame.look_delta.x == 0.0 && frame.look_delta.y == 0.0 {
             return;
         }
-        self.camera
+        self.driver
+            .camera
             .turn_mouse_delta(f64::from(frame.look_delta.x), f64::from(frame.look_delta.y));
-        sync_spectator_from_camera(&mut self.spectator, &self.camera);
+        sync_spectator_from_camera(&mut self.driver.spectator, &self.driver.camera);
         self.schedule_next_redraw(event_loop);
     }
 
@@ -506,11 +465,11 @@ impl ChunkApp {
     fn current_ui_render_state(&self) -> GameUiRenderState {
         let mut state = game_ui_render_state(
             i32::try_from(self.current_render_distance()).unwrap_or(MAX_RENDER_DISTANCE),
-            self.render_options,
+            self.driver.render_options,
             self.frame_pacing.ui_state(),
-            self.camera.movement_mode() == EngineCameraMovementMode::NoClip,
-            self.camera.fly_speed_multiplier() as f32,
-            self.camera.movement_speed_multiplier() as f32,
+            self.driver.camera.movement_mode() == EngineCameraMovementMode::NoClip,
+            self.driver.camera.fly_speed_multiplier() as f32,
+            self.driver.camera.movement_speed_multiplier() as f32,
         );
         state.touch_controls_mode = Some(self.input_preferences.touch_controls);
         state
@@ -522,9 +481,9 @@ impl ChunkApp {
                 .capability_state
                 .resolve(self.input_preferences),
         );
-        hud.world_hud_visible = !ui_active && self.runtime.is_some();
+        hud.world_hud_visible = !ui_active && self.driver.runtime.is_some();
         hud.crosshair_visible = hud.world_hud_visible;
-        hud.hotbar = FlatHotbarOverlay::selected(self.interaction.selected_hotbar_slot());
+        hud.hotbar = FlatHotbarOverlay::selected(self.driver.interaction.selected_hotbar_slot());
         hud.status = status;
         hud
     }
@@ -681,7 +640,7 @@ impl ChunkApp {
         }
 
         self.startup = None;
-        self.runtime = None;
+        self.driver.runtime = None;
         self.scene = pending.payload.scene;
         self.reset_world_local_state();
         self.clear_draw_sections()?;
@@ -752,18 +711,19 @@ impl ChunkApp {
             .request
             .active_descriptor()
             .context("unsupported local session start")?;
-        self.runtime = Some(startup.pump.into_runtime());
+        self.driver.runtime = Some(startup.pump.into_runtime());
         match self.apply_pending_player_position_updates() {
             Ok(true) => {}
             Ok(false) => self.place_spectator_above_loaded_surface(),
             Err(err) => {
-                self.runtime = None;
+                self.driver.runtime = None;
                 return Err(err).context("failed to apply initial server player position");
             }
         }
         self.upload_cached_runtime_sections()
             .context("failed to upload playable startup render sections")?;
         let loaded = self
+            .driver
             .runtime
             .as_ref()
             .map_or(0, |runtime| runtime.client().loaded_chunk_count());
@@ -796,7 +756,7 @@ impl ChunkApp {
     ) {
         log::error!("failed to start session {request:?}: {err:#}");
         self.startup = None;
-        self.runtime = None;
+        self.driver.runtime = None;
         let failure_message = request.default_failure_message();
         match &request {
             SessionStartRequest::NewLocalWorld { seed } => self.ui.set_new_world_seed(*seed),
@@ -853,11 +813,11 @@ impl ChunkApp {
         );
         match action {
             GameUiAction::ToggleSectionOcclusion => {
-                self.render_options.section_occlusion_culling =
-                    !self.render_options.section_occlusion_culling;
+                self.driver.render_options.section_occlusion_culling =
+                    !self.driver.render_options.section_occlusion_culling;
                 log::info!(
                     "section occlusion culling {}",
-                    if self.render_options.section_occlusion_culling {
+                    if self.driver.render_options.section_occlusion_culling {
                         "enabled"
                     } else {
                         "disabled"
@@ -865,10 +825,11 @@ impl ChunkApp {
                 );
             }
             GameUiAction::ToggleFullbright => {
-                self.render_options.force_fullbright = !self.render_options.force_fullbright;
+                self.driver.render_options.force_fullbright =
+                    !self.driver.render_options.force_fullbright;
                 log::info!(
                     "fullbright {}",
-                    if self.render_options.force_fullbright {
+                    if self.driver.render_options.force_fullbright {
                         "enabled"
                     } else {
                         "disabled"
@@ -876,25 +837,28 @@ impl ChunkApp {
                 );
             }
             GameUiAction::ToggleFly => {
-                let movement_mode = self.camera.toggle_movement_mode();
+                let movement_mode = self.driver.camera.toggle_movement_mode();
                 log::info!("player movement mode {}", movement_mode.label());
             }
             GameUiAction::SetFlySpeed(multiplier) => {
-                self.camera.set_fly_speed_multiplier(f64::from(multiplier));
+                self.driver
+                    .camera
+                    .set_fly_speed_multiplier(f64::from(multiplier));
                 log::info!(
                     "fly speed set to {:.1}x ({:.0} blocks/s)",
-                    self.camera.fly_speed_multiplier(),
-                    self.camera.speed_blocks_per_second()
+                    self.driver.camera.fly_speed_multiplier(),
+                    self.driver.camera.speed_blocks_per_second()
                 );
             }
             GameUiAction::SetMovementSpeed(multiplier) => {
-                self.camera
+                self.driver
+                    .camera
                     .set_movement_speed_multiplier(f64::from(multiplier));
                 self.scene.movement_speed_multiplier =
-                    self.camera.movement_speed_multiplier() as f32;
+                    self.driver.camera.movement_speed_multiplier() as f32;
                 log::info!(
                     "movement speed multiplier set to {:.1}x",
-                    self.camera.movement_speed_multiplier()
+                    self.driver.camera.movement_speed_multiplier()
                 );
             }
             GameUiAction::SetTouchControlsMode(mode) => {
@@ -927,7 +891,7 @@ impl ChunkApp {
                 self.scene.render_distance = render_distance;
                 let render_distance_chunks =
                     u32::try_from(render_distance).expect("clamped render distance must fit u32");
-                if let Some(runtime) = &mut self.runtime {
+                if let Some(runtime) = &mut self.driver.runtime {
                     match runtime.set_render_distance(render_distance_chunks) {
                         Ok(true) => {
                             log::info!(
@@ -1016,26 +980,18 @@ impl ChunkApp {
 
     fn sync_mouse_lock(&mut self) {
         self.set_mouse_lock(
-            self.mouse_lock_requested && !self.ui.is_active() && self.runtime.is_some(),
+            self.mouse_lock_requested && !self.ui.is_active() && self.driver.runtime.is_some(),
         );
     }
 
     fn toggle_movement_mode(&mut self) {
-        let movement_mode = self.camera.toggle_movement_mode();
+        let movement_mode = self.driver.camera.toggle_movement_mode();
         log::info!("player movement mode {}", movement_mode.label());
     }
 
     fn reset_world_local_state(&mut self) {
-        self.spectator = SpectatorCamera::spawn_for_scene(&self.scene);
-        self.camera = engine_camera_controller_from_spectator(
-            &self.spectator,
-            self.scene.movement_speed_multiplier,
-        );
-        self.actor_interpolation = ActorInterpolationState::new();
-        self.interaction = ClientInteractionController::new();
+        self.driver.reset_world_state(&self.scene);
         self.flat_input.clear_held();
-        self.render_stats = RenderStreamStats::default();
-        self.frame_timing = FrameTimingStats::default();
         self.last_cursor = None;
     }
 
@@ -1074,7 +1030,7 @@ impl ChunkApp {
             surface.render_config = next_config;
         }
         self.render_resources = Some(resources);
-        if self.runtime.is_some() {
+        if self.driver.runtime.is_some() {
             self.upload_all_runtime_sections()
                 .context("failed to restore runtime sections after render resource rebuild")?;
         }
@@ -1155,18 +1111,18 @@ impl ChunkApp {
                 report.removed_section_count
             );
         }
-        self.render_stats.section_count = 0;
-        self.render_stats.index_count = 0;
-        self.render_stats.face_count = 0;
-        self.render_stats.drawn_section_count = 0;
-        self.render_stats.drawn_face_count = 0;
-        self.render_stats.drawn_index_count = 0;
+        self.driver.render_stats.section_count = 0;
+        self.driver.render_stats.index_count = 0;
+        self.driver.render_stats.face_count = 0;
+        self.driver.render_stats.drawn_section_count = 0;
+        self.driver.render_stats.drawn_face_count = 0;
+        self.driver.render_stats.drawn_index_count = 0;
         Ok(())
     }
 
     fn teardown_world(&mut self) -> Result<()> {
         self.startup = None;
-        self.runtime = None;
+        self.driver.runtime = None;
         self.reset_world_local_state();
         self.clear_draw_sections()?;
         self.mouse_lock_requested = false;
@@ -1175,7 +1131,7 @@ impl ChunkApp {
     }
 
     fn start_world_from_scene(&mut self, scene: SceneOptions) -> Result<()> {
-        self.runtime = None;
+        self.driver.runtime = None;
         self.scene = scene;
         self.reset_world_local_state();
         self.clear_draw_sections()?;
@@ -1185,16 +1141,17 @@ impl ChunkApp {
         let initial_poll_start = Instant::now();
         let (initial_poll_count, initial_poll_ms) = poll_window_runtime_until_idle(&mut runtime)
             .context("failed to load initial light-ready chunks")?;
-        self.runtime = Some(runtime);
+        self.driver.runtime = Some(runtime);
         match self.apply_pending_player_position_updates() {
             Ok(true) => {}
             Ok(false) => self.place_spectator_above_loaded_surface(),
             Err(err) => {
-                self.runtime = None;
+                self.driver.runtime = None;
                 return Err(err).context("failed to apply initial server player position");
             }
         }
         let loaded = self
+            .driver
             .runtime
             .as_ref()
             .map_or(0, |runtime| runtime.client().loaded_chunk_count());
@@ -1219,7 +1176,7 @@ impl ChunkApp {
     fn place_spectator_above_loaded_surface(&mut self) {
         let view = self.window_camera_view();
         let (world_x, world_z) = view.block_column();
-        let Some(runtime) = self.runtime.as_ref() else {
+        let Some(runtime) = self.driver.runtime.as_ref() else {
             return;
         };
         let Some(surface_y) = runtime.highest_non_air_block_y_at_world(world_x, world_z) else {
@@ -1233,14 +1190,15 @@ impl ChunkApp {
             surface_y as f64 + PLAYER_SURFACE_FEET_OFFSET + LOCAL_PLAYER_STANDING_EYE_HEIGHT,
             view.snapshot.eye.z,
         );
-        self.camera.set_eye_pose(
+        self.driver.camera.set_eye_pose(
             eye_position,
             view.snapshot.yaw_radians,
             f64::from(crate::camera::SPECTATOR_SURFACE_PITCH),
         );
-        if self.camera.movement_mode() == EngineCameraMovementMode::Walking {
-            if let Some(runtime) = self.runtime.as_ref() {
-                self.camera
+        if self.driver.camera.movement_mode() == EngineCameraMovementMode::Walking {
+            if let Some(runtime) = self.driver.runtime.as_ref() {
+                self.driver
+                    .camera
                     .probe_ground(runtime.client(), GROUND_PROBE_DISTANCE);
             }
         }
@@ -1250,7 +1208,7 @@ impl ChunkApp {
         log::info!(
             "placed player above loaded surface column ({world_x}, {world_z}) y={} -> feet_y={:.1} eye_y={:.1}",
             surface_y,
-            self.camera.player().pose().position.y,
+            self.driver.camera.player().pose().position.y,
             self.window_camera_view().eye.y
         );
     }
@@ -1297,21 +1255,24 @@ impl ChunkApp {
     }
 
     fn poll_runtime_and_upload(&mut self) -> Result<()> {
-        if self.runtime.is_none() {
+        if self.driver.runtime.is_none() {
             return Ok(());
         }
         let poll_start = Instant::now();
         let mut changed = self
+            .driver
             .runtime
             .as_mut()
             .expect("runtime presence checked")
             .poll()?;
         changed |= self.apply_pending_player_position_updates()?;
-        self.frame_timing
+        self.driver
+            .frame_timing
             .record_runtime_poll(elapsed_ms(poll_start.elapsed()));
         let camera_eye = self.window_camera_view().eye;
         if !changed
             && !self
+                .driver
                 .runtime
                 .as_ref()
                 .is_some_and(|runtime| runtime.has_pending_render_work(camera_eye))
@@ -1324,7 +1285,7 @@ impl ChunkApp {
 
     fn upload_runtime_sections(&mut self) -> Result<()> {
         let camera_view = self.window_camera_view();
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &mut self.driver.runtime else {
             return Ok(());
         };
         let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
@@ -1348,16 +1309,18 @@ impl ChunkApp {
         let index_count = render_resources.index_count();
         let face_count = quad_face_count_from_indices(index_count);
         let loaded_chunk_count = runtime.client().loaded_chunk_count();
-        self.render_stats.section_count = section_count;
-        self.render_stats.index_count = index_count;
-        self.render_stats.face_count = face_count;
-        self.render_stats.drawn_section_count = 0;
-        self.render_stats.drawn_face_count = 0;
-        self.render_stats.drawn_index_count = 0;
+        self.driver.render_stats.section_count = section_count;
+        self.driver.render_stats.index_count = index_count;
+        self.driver.render_stats.face_count = face_count;
+        self.driver.render_stats.drawn_section_count = 0;
+        self.driver.render_stats.drawn_face_count = 0;
+        self.driver.render_stats.drawn_index_count = 0;
         self.record_section_update_stats(&section_update, upload_report);
-        self.render_stats.last_remesh_ms = remesh_ms;
-        self.render_stats.last_upload_ms = upload_ms;
-        self.frame_timing.record_remesh_upload(remesh_ms, upload_ms);
+        self.driver.render_stats.last_remesh_ms = remesh_ms;
+        self.driver.render_stats.last_upload_ms = upload_ms;
+        self.driver
+            .frame_timing
+            .record_remesh_upload(remesh_ms, upload_ms);
         log::info!(
             "streamed chunks loaded={} sections={} faces={} indices={} rebuilt={} visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} remesh_ms={:.3} upload_ms={:.3}",
             loaded_chunk_count,
@@ -1381,7 +1344,7 @@ impl ChunkApp {
 
     fn upload_all_runtime_sections(&mut self) -> Result<()> {
         let camera_view = self.window_camera_view();
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &mut self.driver.runtime else {
             return Ok(());
         };
         let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
@@ -1413,15 +1376,15 @@ impl ChunkApp {
         let section_count = render_resources.section_count();
         let index_count = render_resources.index_count();
         let face_count = quad_face_count_from_indices(index_count);
-        self.render_stats.section_count = section_count;
-        self.render_stats.index_count = index_count;
-        self.render_stats.face_count = face_count;
-        self.render_stats.drawn_section_count = 0;
-        self.render_stats.drawn_face_count = 0;
-        self.render_stats.drawn_index_count = 0;
+        self.driver.render_stats.section_count = section_count;
+        self.driver.render_stats.index_count = index_count;
+        self.driver.render_stats.face_count = face_count;
+        self.driver.render_stats.drawn_section_count = 0;
+        self.driver.render_stats.drawn_face_count = 0;
+        self.driver.render_stats.drawn_index_count = 0;
         self.record_section_update_stats(&section_update, upload_report);
-        self.render_stats.last_remesh_ms = remesh_ms;
-        self.render_stats.last_upload_ms = upload_ms;
+        self.driver.render_stats.last_remesh_ms = remesh_ms;
+        self.driver.render_stats.last_upload_ms = upload_ms;
         log::info!(
             "uploaded {} world render sections with {} vertices / {} faces / {} indices visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} remesh_ms={:.3} upload_ms={:.3}",
             section_count,
@@ -1439,7 +1402,7 @@ impl ChunkApp {
 
     fn upload_cached_runtime_sections(&mut self) -> Result<()> {
         let camera_view = self.window_camera_view();
-        let Some(runtime) = self.runtime.as_ref() else {
+        let Some(runtime) = self.driver.runtime.as_ref() else {
             return Ok(());
         };
         let sections = runtime.cached_sections();
@@ -1468,15 +1431,17 @@ impl ChunkApp {
         let section_count = render_resources.section_count();
         let index_count = render_resources.index_count();
         let face_count = quad_face_count_from_indices(index_count);
-        self.render_stats.section_count = section_count;
-        self.render_stats.index_count = index_count;
-        self.render_stats.face_count = face_count;
-        self.render_stats.drawn_section_count = 0;
-        self.render_stats.drawn_face_count = 0;
-        self.render_stats.drawn_index_count = 0;
-        self.render_stats.last_remesh_ms = 0.0;
-        self.render_stats.last_upload_ms = upload_ms;
-        self.frame_timing.record_remesh_upload(0.0, upload_ms);
+        self.driver.render_stats.section_count = section_count;
+        self.driver.render_stats.index_count = index_count;
+        self.driver.render_stats.face_count = face_count;
+        self.driver.render_stats.drawn_section_count = 0;
+        self.driver.render_stats.drawn_face_count = 0;
+        self.driver.render_stats.drawn_index_count = 0;
+        self.driver.render_stats.last_remesh_ms = 0.0;
+        self.driver.render_stats.last_upload_ms = upload_ms;
+        self.driver
+            .frame_timing
+            .record_remesh_upload(0.0, upload_ms);
         log::info!(
             "uploaded {} playable startup render sections with {} vertices / {} faces / {} indices uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} upload_ms={:.3}",
             section_count,
@@ -1498,32 +1463,37 @@ impl ChunkApp {
         section_update: &RenderSectionCacheUpdate,
         upload_report: TexturedSectionUploadReport,
     ) {
-        record_render_section_update_stats(&mut self.render_stats, section_update, upload_report);
+        record_render_section_update_stats(
+            &mut self.driver.render_stats,
+            section_update,
+            upload_report,
+        );
     }
 
     fn effective_render_options(&self) -> TexturedSectionRenderOptions {
         effective_render_options_for_camera(
-            self.render_options,
-            self.runtime.as_ref().is_some_and(|runtime| {
+            self.driver.render_options,
+            self.driver.runtime.as_ref().is_some_and(|runtime| {
                 runtime.camera_inside_occluding_block(self.window_camera_view().eye)
             }),
         )
     }
 
     fn debug_pane_stats(&self, render_options: TexturedSectionRenderOptions) -> DebugPaneStats {
-        let camera_state = self.camera_frame_state();
+        let camera_state = self.driver.camera_frame_state();
         DebugPaneStats {
             position: self.window_camera_view().eye,
             speed: camera_state.camera.speed_blocks_per_second as f32,
             movement_mode: camera_state.movement_mode_label(),
             on_ground: camera_state.on_ground,
             runtime: self
+                .driver
                 .runtime
                 .as_ref()
                 .expect("debug pane requires an active runtime")
                 .stats(),
-            render: self.render_stats,
-            frame: self.frame_timing,
+            render: self.driver.render_stats,
+            frame: self.driver.frame_timing,
             pacing: self.frame_pacing.debug_stats(),
             section_occlusion: render_options.section_occlusion_culling,
             force_fullbright: render_options.force_fullbright,
@@ -1532,12 +1502,9 @@ impl ChunkApp {
         }
     }
 
-    fn camera_frame_state(&self) -> EngineCameraFrameState {
-        self.camera.frame_state(&self.interaction)
-    }
-
-    fn underwater_overlay(&self, camera_view: WindowCameraView) -> Option<UnderwaterOverlay> {
-        self.runtime
+    fn underwater_overlay(&self, camera_view: FlatClientCameraView) -> Option<UnderwaterOverlay> {
+        self.driver
+            .runtime
             .as_ref()?
             .camera_inside_water(camera_view.eye)
             .then(|| {
@@ -1549,16 +1516,16 @@ impl ChunkApp {
     }
 
     fn commit_player_pose_change(&mut self) -> Result<bool> {
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &mut self.driver.runtime else {
             return Ok(false);
         };
-        let changed = runtime.commit_engine_camera_player_pose(&mut self.camera)?;
-        sync_spectator_from_camera(&mut self.spectator, &self.camera);
+        let changed = runtime.commit_engine_camera_player_pose(&mut self.driver.camera)?;
+        sync_spectator_from_camera(&mut self.driver.spectator, &self.driver.camera);
         Ok(changed)
     }
 
     fn play_landing_events(&mut self) {
-        let events = self.camera.take_landing_events();
+        let events = self.driver.camera.take_landing_events();
         let Some(audio) = &self.audio else {
             return;
         };
@@ -1569,44 +1536,46 @@ impl ChunkApp {
     }
 
     fn interpolated_actor_instances(&mut self) -> Vec<ActorInstance> {
-        let Some(runtime) = self.runtime.as_ref() else {
+        let Some(runtime) = self.driver.runtime.as_ref() else {
             return Vec::new();
         };
-        self.actor_interpolation
+        self.driver
+            .actor_interpolation
             .reconcile_authoritative(runtime.client().actor_presentations());
-        self.actor_interpolation.step(
-            (self.render_stats.last_frame_ms * 0.001).min(0.1),
+        self.driver.actor_interpolation.step(
+            (self.driver.render_stats.last_frame_ms * 0.001).min(0.1),
             ActorInterpolationConfig::default(),
         );
         actor_instances_from_presentations(
-            &self.actor_interpolation.presentations(),
+            &self.driver.actor_interpolation.presentations(),
             runtime.client(),
         )
     }
 
     fn sync_server_player_pose(&mut self) -> Result<bool> {
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &mut self.driver.runtime else {
             return Ok(false);
         };
-        let changed = runtime.sync_engine_camera_player_pose(&mut self.camera)?;
-        sync_spectator_from_camera(&mut self.spectator, &self.camera);
+        let changed = runtime.sync_engine_camera_player_pose(&mut self.driver.camera)?;
+        sync_spectator_from_camera(&mut self.driver.spectator, &self.driver.camera);
         Ok(changed)
     }
 
     fn apply_pending_player_position_updates(&mut self) -> Result<bool> {
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &mut self.driver.runtime else {
             return Ok(false);
         };
-        let changed = runtime.apply_pending_engine_camera_position_updates(&mut self.camera)?;
-        sync_spectator_from_camera(&mut self.spectator, &self.camera);
+        let changed =
+            runtime.apply_pending_engine_camera_position_updates(&mut self.driver.camera)?;
+        sync_spectator_from_camera(&mut self.driver.spectator, &self.driver.camera);
         Ok(changed)
     }
 
     fn sync_carried_item(&mut self) -> Result<bool> {
-        let Some(command) = self.interaction.ensure_has_sent_carried_item() else {
+        let Some(command) = self.driver.interaction.ensure_has_sent_carried_item() else {
             return Ok(false);
         };
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &mut self.driver.runtime else {
             return Ok(false);
         };
         runtime
@@ -1615,9 +1584,10 @@ impl ChunkApp {
     }
 
     fn current_block_interaction_target(&self) -> Option<BlockInteractionTarget> {
-        let runtime = self.runtime.as_ref()?;
-        self.camera
-            .target_block(runtime.client(), &self.interaction)
+        let runtime = self.driver.runtime.as_ref()?;
+        self.driver
+            .camera
+            .target_block(runtime.client(), &self.driver.interaction)
     }
 
     fn current_selection_outline(&self, ui_active: bool) -> Option<SelectionOutline> {
@@ -1629,7 +1599,7 @@ impl ChunkApp {
     }
 
     fn handle_world_flat_action(&mut self, action: FlatInputAction) -> Result<()> {
-        if self.runtime.is_none() {
+        if self.driver.runtime.is_none() {
             return Ok(());
         }
         self.sync_server_player_pose()?;
@@ -1638,14 +1608,17 @@ impl ChunkApp {
             return Ok(());
         };
         let command = match action {
-            FlatInputAction::Attack => self.interaction.debug_instant_break_command(target.hit),
-            FlatInputAction::Use => self.interaction.use_item_on_command(target.hit),
+            FlatInputAction::Attack => self
+                .driver
+                .interaction
+                .debug_instant_break_command(target.hit),
+            FlatInputAction::Use => self.driver.interaction.use_item_on_command(target.hit),
             _ => None,
         };
         let Some(command) = command else {
             return Ok(());
         };
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &mut self.driver.runtime else {
             return Ok(());
         };
         let changed = runtime
@@ -1664,24 +1637,6 @@ impl ChunkApp {
     }
 }
 
-fn effective_render_options_for_camera(
-    mut render_options: TexturedSectionRenderOptions,
-    camera_inside_occluding_block: bool,
-) -> TexturedSectionRenderOptions {
-    if camera_inside_occluding_block {
-        render_options.section_occlusion_culling = false;
-    }
-    render_options
-}
-
-fn vec3d_from_glam(value: glam::Vec3) -> Vec3d {
-    Vec3d::new(value.x as f64, value.y as f64, value.z as f64)
-}
-
-fn glam_vec3_from_vec3d(value: Vec3d) -> glam::Vec3 {
-    glam::Vec3::new(value.x as f32, value.y as f32, value.z as f32)
-}
-
 fn initial_seed_reroll_state(seed: i64) -> u64 {
     (seed as u64)
         .wrapping_mul(0x9E37_79B9_7F4A_7C15)
@@ -1696,51 +1651,6 @@ fn session_start_request_for_scene(scene: &SceneOptions) -> SessionStartRequest 
             endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
         },
     )
-}
-
-fn engine_camera_controller_from_spectator(
-    spectator: &SpectatorCamera,
-    movement_speed_multiplier: f32,
-) -> EngineCameraController {
-    let mut camera = EngineCameraController::from_eye_pose(
-        vec3d_from_glam(spectator.position),
-        f64::from(spectator.yaw),
-        f64::from(spectator.pitch),
-        f64::from(spectator.speed),
-    );
-    camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
-    camera
-}
-
-fn sync_spectator_from_camera(spectator: &mut SpectatorCamera, camera: &EngineCameraController) {
-    let snapshot = camera.snapshot();
-    spectator.position = glam_vec3_from_vec3d(snapshot.eye);
-    spectator.yaw = snapshot.yaw_radians as f32;
-    spectator.pitch = snapshot.pitch_radians as f32;
-    spectator.speed = snapshot.speed_blocks_per_second as f32;
-}
-
-fn engine_camera_input_from_flat_frame(
-    frame: FlatInputFrame,
-    dt_seconds: f64,
-) -> EngineCameraInput {
-    EngineCameraInput {
-        dt_seconds,
-        mouse_delta_x: f64::from(frame.look_delta.x),
-        mouse_delta_y: f64::from(frame.look_delta.y),
-        forward: frame.forward,
-        backward: frame.backward,
-        left: frame.left,
-        right: frame.right,
-        jump: frame.jump,
-        descend: frame.descend,
-        shift: frame.sneak,
-        sprint: frame.sprint,
-        movement_impulse: frame
-            .analog_movement
-            .map(|movement| EngineCameraMovementImpulse::new(movement.left, movement.forward)),
-        movement_yaw_radians: None,
-    }
 }
 
 impl ApplicationHandler for ChunkApp {
@@ -1761,7 +1671,7 @@ impl ApplicationHandler for ChunkApp {
         };
         let mut surface = match NativeSurfaceContext::new_with_color_profile(
             window.clone(),
-            self.render_options.color_profile,
+            self.driver.render_options.color_profile,
         ) {
             Ok(surface) => surface,
             Err(err) => {
@@ -1801,7 +1711,7 @@ impl ApplicationHandler for ChunkApp {
         self.audio = audio;
         self.window = Some(window);
         self.last_frame = Instant::now();
-        self.frame_timing = FrameTimingStats::default();
+        self.driver.frame_timing = FrameTimingStats::default();
         self.next_redraw_at = None;
         event_loop.listen_device_events(DeviceEvents::WhenFocused);
         if self.start_intent == WindowStartIntent::InWorld {
@@ -1884,11 +1794,11 @@ impl ApplicationHandler for ChunkApp {
                         && event.state == ElementState::Pressed
                         && !event.repeat
                     {
-                        self.render_options.section_occlusion_culling =
-                            !self.render_options.section_occlusion_culling;
+                        self.driver.render_options.section_occlusion_culling =
+                            !self.driver.render_options.section_occlusion_culling;
                         log::info!(
                             "section occlusion culling {}",
-                            if self.render_options.section_occlusion_culling {
+                            if self.driver.render_options.section_occlusion_culling {
                                 "enabled"
                             } else {
                                 "disabled"
@@ -1901,11 +1811,11 @@ impl ApplicationHandler for ChunkApp {
                         && event.state == ElementState::Pressed
                         && !event.repeat
                     {
-                        self.render_options.force_fullbright =
-                            !self.render_options.force_fullbright;
+                        self.driver.render_options.force_fullbright =
+                            !self.driver.render_options.force_fullbright;
                         log::info!(
                             "fullbright {}",
-                            if self.render_options.force_fullbright {
+                            if self.driver.render_options.force_fullbright {
                                 "enabled"
                             } else {
                                 "disabled"
@@ -1958,7 +1868,7 @@ impl ApplicationHandler for ChunkApp {
                     }
                     return;
                 }
-                if self.runtime.is_none() {
+                if self.driver.runtime.is_none() {
                     self.mouse_lock_requested = false;
                     self.sync_mouse_lock();
                     self.schedule_next_redraw(event_loop);
@@ -2017,11 +1927,11 @@ impl ApplicationHandler for ChunkApp {
                     MouseScrollDelta::LineDelta(_, y) => y * 0.12,
                     MouseScrollDelta::PixelDelta(position) => position.y as f32 * 0.001,
                 };
-                self.camera.adjust_speed(f64::from(amount));
-                sync_spectator_from_camera(&mut self.spectator, &self.camera);
+                self.driver.camera.adjust_speed(f64::from(amount));
+                sync_spectator_from_camera(&mut self.driver.spectator, &self.driver.camera);
                 log::info!(
                     "no-clip speed {:.1} blocks/s",
-                    self.camera.snapshot().speed_blocks_per_second
+                    self.driver.camera.snapshot().speed_blocks_per_second
                 );
                 self.schedule_next_redraw(event_loop);
             }
@@ -2061,15 +1971,17 @@ impl ApplicationHandler for ChunkApp {
                 self.ui.set_scale(gui_scale);
                 let camera_view = self.window_camera_view();
                 let camera = camera_view.chunk_camera(self.current_render_distance());
-                let sky_clear_color = self.runtime.as_ref().map_or_else(
+                let sky_clear_color = self.driver.runtime.as_ref().map_or_else(
                     mclone_render::default_clear_color,
                     WindowSceneRuntime::sky_clear_color,
                 );
                 let time_of_day = self
+                    .driver
                     .runtime
                     .as_ref()
                     .map_or(0.0, WindowSceneRuntime::time_of_day);
                 let sun_angle = self
+                    .driver
                     .runtime
                     .as_ref()
                     .map_or(0.0, WindowSceneRuntime::sun_angle);
@@ -2077,7 +1989,7 @@ impl ApplicationHandler for ChunkApp {
                 let underwater_overlay = self.underwater_overlay(camera_view);
                 let ui_render_state = self.current_ui_render_state();
                 let actor_instances = self.interpolated_actor_instances();
-                let debug_stats = (self.debug_visible && self.runtime.is_some())
+                let debug_stats = (self.debug_visible && self.driver.runtime.is_some())
                     .then(|| self.debug_pane_stats(render_options));
                 let ui_active = self.ui.is_active();
                 let ui_covers_world = self.ui.covers_world();
@@ -2091,7 +2003,8 @@ impl ApplicationHandler for ChunkApp {
                 let debug_view_readiness_overlay =
                     (!ui_active && self.debug_visible && loading_progress_overlay.is_none())
                         .then(|| {
-                            self.runtime
+                            self.driver
+                                .runtime
                                 .as_ref()
                                 .and_then(WindowSceneRuntime::view_readiness_overlay)
                         })
@@ -2109,11 +2022,14 @@ impl ApplicationHandler for ChunkApp {
                     [gui_scale.width, gui_scale.height],
                 );
                 let selection_outline = self.current_selection_outline(ui_active);
-                let traversal_ready_sections =
-                    self.runtime.as_ref().map_or_else(BTreeSet::new, |runtime| {
+                let traversal_ready_sections = self
+                    .driver
+                    .runtime
+                    .as_ref()
+                    .map_or_else(BTreeSet::new, |runtime| {
                         runtime.traversal_ready_render_section_keys(camera_view.eye)
                     });
-                let mut render_stats = self.render_stats;
+                let mut render_stats = self.driver.render_stats;
                 let render_start = Instant::now();
                 let result = {
                     let (Some(surface), Some(render_resources)) =
@@ -2169,7 +2085,7 @@ impl ApplicationHandler for ChunkApp {
                 };
                 match result {
                     Ok(report) => {
-                        self.frame_timing.record_surface_frame(
+                        self.driver.frame_timing.record_surface_frame(
                             elapsed_ms(render_start.elapsed()),
                             report.acquire_ms,
                             report.encode_ms,
@@ -2178,7 +2094,7 @@ impl ApplicationHandler for ChunkApp {
                         );
                         match report.status {
                             SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped => {
-                                self.render_stats = render_stats;
+                                self.driver.render_stats = render_stats;
                                 if let Some(pending) = self.session.take_pending_start() {
                                     self.finish_pending_session_start(pending);
                                 }
@@ -2206,7 +2122,7 @@ impl ApplicationHandler for ChunkApp {
         _device_id: DeviceId,
         event: DeviceEvent,
     ) {
-        if self.ui.is_active() || !self.mouse_locked || self.runtime.is_none() {
+        if self.ui.is_active() || !self.mouse_locked || self.driver.runtime.is_none() {
             return;
         }
         if let DeviceEvent::MouseMotion { delta } = event {
@@ -2269,6 +2185,7 @@ fn desktop_pointer_button_from_mouse_button(button: MouseButton) -> Option<Point
 mod tests {
     use super::*;
     use crate::DEFAULT_SEED;
+    use mclone_client::ActorInterpolationState;
 
     fn test_app_with_runtime(scene: SceneOptions) -> ChunkApp {
         let assets = WindowSceneAssets::load().unwrap();
@@ -2279,7 +2196,7 @@ mod tests {
             TexturedSectionRenderOptions::default(),
             WindowStartIntent::InWorld,
         );
-        app.runtime = Some(runtime);
+        app.driver.runtime = Some(runtime);
         app
     }
 
@@ -2407,12 +2324,12 @@ mod tests {
         };
         let mut app = test_app_with_runtime(scene);
         let target_eye = Vec3d::new(16.25, 96.0, 8.0);
-        app.camera.set_eye_pose(target_eye, 0.0, 0.0);
+        app.driver.camera.set_eye_pose(target_eye, 0.0, 0.0);
 
         assert!(app.commit_player_pose_change().unwrap());
 
         assert_eq!(
-            app.spectator.position,
+            app.driver.spectator.position,
             glam::Vec3::new(
                 target_eye.x as f32,
                 target_eye.y as f32,
@@ -2420,11 +2337,11 @@ mod tests {
             )
         );
         assert_eq!(
-            app.camera_frame_state().camera.chunk_pos,
+            app.driver.camera_frame_state().camera.chunk_pos,
             mclone_core::ChunkPos::new(1, 0)
         );
         assert_eq!(
-            app.runtime.as_ref().unwrap().stats().interest_center,
+            app.driver.runtime.as_ref().unwrap().stats().interest_center,
             mclone_core::ChunkPos::new(1, 0)
         );
     }
@@ -2435,7 +2352,7 @@ mod tests {
         let mut app = test_app_with_runtime(scene);
         let target_eye = Vec3d::new(32.25, 80.0, -0.25);
 
-        app.camera.set_eye_pose(target_eye, 0.25, -0.125);
+        app.driver.camera.set_eye_pose(target_eye, 0.25, -0.125);
         let view = app.window_camera_view();
 
         assert_eq!(
@@ -2447,7 +2364,7 @@ mod tests {
             )
         );
         assert_eq!(view.snapshot.chunk_pos, mclone_core::ChunkPos::new(2, -1));
-        assert_ne!(app.spectator.position, view.eye);
+        assert_ne!(app.driver.spectator.position, view.eye);
     }
 
     #[test]
@@ -2552,7 +2469,7 @@ mod tests {
         app.finish_pending_session_start(pending);
 
         assert!(app.startup.is_some());
-        assert!(app.runtime.is_none());
+        assert!(app.driver.runtime.is_none());
         assert_eq!(
             app.session.state(),
             &GameSessionState::Starting {
@@ -2579,22 +2496,30 @@ mod tests {
         );
 
         app.start_world_from_scene(scene).unwrap();
-        let first_runtime = app.runtime.as_ref().unwrap();
+        let first_runtime = app.driver.runtime.as_ref().unwrap();
         assert!(first_runtime.client().chunk_snapshot(center).is_some());
         let first_signature = center_chunk_signature(first_runtime, center);
 
         let camera_eye = app.window_camera_view().eye;
         let first_update = app
+            .driver
             .runtime
             .as_mut()
             .unwrap()
             .sync_all_render_sections(camera_eye)
             .unwrap();
         assert!(first_update.rebuilt_section_count() > 0);
-        assert!(!app.runtime.as_ref().unwrap().cached_sections().is_empty());
+        assert!(
+            !app.driver
+                .runtime
+                .as_ref()
+                .unwrap()
+                .cached_sections()
+                .is_empty()
+        );
 
         app.start_local_world(98_765).unwrap();
-        let second_runtime = app.runtime.as_ref().unwrap();
+        let second_runtime = app.driver.runtime.as_ref().unwrap();
         assert_eq!(app.scene.seed, 98_765);
         assert_eq!(app.scene.remote_addr, None);
         assert!(second_runtime.client().chunk_snapshot(center).is_some());
@@ -2602,8 +2527,8 @@ mod tests {
 
         assert_ne!(first_signature, second_signature);
         assert!(second_runtime.cached_sections().is_empty());
-        assert_eq!(app.render_stats.section_count, 0);
-        assert_eq!(app.render_stats.index_count, 0);
+        assert_eq!(app.driver.render_stats.section_count, 0);
+        assert_eq!(app.driver.render_stats.index_count, 0);
     }
 
     #[test]
