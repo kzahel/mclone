@@ -25,6 +25,12 @@ pub(crate) fn block_collision_aabb(state: BlockStateId, pos: BlockPos) -> Option
     shape_for(state, ShapeUse::Collision).map(|shape| shape.world_aabb(pos))
 }
 
+pub(crate) fn block_outline_aabbs(state: BlockStateId, pos: BlockPos) -> Vec<Aabb> {
+    shape_for(state, ShapeUse::Outline)
+        .map(|shape| vec![shape.world_aabb(pos)])
+        .unwrap_or_default()
+}
+
 pub(crate) fn clip_block_outline(
     state: BlockStateId,
     from: Vec3d,

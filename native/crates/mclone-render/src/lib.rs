@@ -11,6 +11,7 @@ pub mod fog;
 pub mod gui;
 pub mod light_texture;
 pub mod screen_effect;
+pub mod selection_outline;
 pub mod sky;
 pub mod sky_render;
 pub mod target;

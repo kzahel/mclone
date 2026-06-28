@@ -22,7 +22,7 @@ pub use actor::{
     ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, ActorPresentationId,
     ActorPresentationKind,
 };
-pub use interaction::{CREATIVE_PICK_RANGE, ClientInteractionController};
+pub use interaction::{BlockInteractionTarget, CREATIVE_PICK_RANGE, ClientInteractionController};
 pub use inventory::ClientInventory;
 pub use player::{
     CollisionMovementResult, LOCAL_PLAYER_AIR_SPEED, LOCAL_PLAYER_BASE_MOVEMENT_SPEED,

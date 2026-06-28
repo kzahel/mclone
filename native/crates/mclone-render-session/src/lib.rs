@@ -5,9 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_client::{
-    ActorPresentation, ActorPresentationKind, ClientInteractionController, ClientRuntime,
-    LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_TICKS_PER_SECOND, LocalPlayerController,
-    LocalPlayerPose, NoClipMovementStep, PlayerInputKey, WalkingMovementStep,
+    ActorPresentation, ActorPresentationKind, BlockInteractionTarget, ClientInteractionController,
+    ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_TICKS_PER_SECOND,
+    LocalPlayerController, LocalPlayerPose, NoClipMovementStep, PlayerInputKey,
+    WalkingMovementStep,
 };
 use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockHitResult, BlockPos, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos,
@@ -1283,6 +1284,15 @@ impl EngineCameraController {
     ) -> BlockHitResult {
         let pose = self.player.pose();
         interaction.pick_block(client, pose.eye_position(), pose.view_vector())
+    }
+
+    pub fn target_block(
+        &self,
+        client: &ClientRuntime,
+        interaction: &ClientInteractionController,
+    ) -> Option<BlockInteractionTarget> {
+        let pose = self.player.pose();
+        interaction.target_block(client, pose.eye_position(), pose.view_vector())
     }
 
     pub fn set_key(&mut self, key: PlayerInputKey, down: bool) {

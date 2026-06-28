@@ -26,6 +26,7 @@ use mclone_render::headless::{
     write_headless_textured_sections_png_with_ready_sections,
 };
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
+use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render_session::actor_instances_from_presentations;
 use mclone_ui::{GameUi, GuiDrawList, GuiScale, Point, render_loading_progress_panel_at};
@@ -598,6 +599,7 @@ fn render_renderer_rebuild_smoke_frame(
         time_of_day,
         sun_angle,
         state.render_options,
+        None,
         gui_state,
         |_| ui_draw,
         &mut state.render_stats,
@@ -765,11 +767,16 @@ pub(crate) fn run_headless_screenshot(
             height: options.height,
         },
         |frame| {
-            let depth =
-                ChunkDepthTarget::new(frame.device, frame.target.size[0], frame.target.size[1]);
+            let mclone_render::target::RenderFrameContext {
+                device,
+                queue,
+                encoder,
+                target,
+            } = frame;
+            let depth = ChunkDepthTarget::new(device, target.size[0], target.size[1]);
             let mut draw = TexturedSectionDrawResources::new(
-                frame.device,
-                frame.queue,
+                device,
+                queue,
                 HEADLESS_FORMAT,
                 &sections,
                 runtime.mesh_assets().atlas.as_upload(),
@@ -778,24 +785,22 @@ pub(crate) fn run_headless_screenshot(
                 &runtime.traversal_ready_render_section_keys(spectator.position),
             );
             let sky = SkyRenderer::new_with_color_profile(
-                frame.device,
+                device,
                 HEADLESS_FORMAT,
                 render_options.color_profile,
             );
             let mut actors = ActorDrawResources::new(
-                frame.device,
-                frame.queue,
+                device,
+                queue,
                 HEADLESS_FORMAT,
                 runtime.actor_textures.atlas.as_upload(),
             )?;
             let asset_source = load_asset_source()?;
-            let mut screen_effects = ScreenEffectsRenderer::new(
-                frame.device,
-                frame.queue,
-                HEADLESS_FORMAT,
-                &asset_source,
-            )?;
-            let mut gui = GuiRenderer::new(frame.device, HEADLESS_FORMAT);
+            let mut screen_effects =
+                ScreenEffectsRenderer::new(device, queue, HEADLESS_FORMAT, &asset_source)?;
+            let mut selection_outline_renderer =
+                SelectionOutlineRenderer::new(device, HEADLESS_FORMAT);
+            let mut gui = GuiRenderer::new(device, HEADLESS_FORMAT);
 
             render_stats.section_count = draw.section_count();
             render_stats.index_count = draw.index_count();
@@ -840,9 +845,15 @@ pub(crate) fn run_headless_screenshot(
                 [gui_scale.width, gui_scale.height],
             );
 
-            let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
-            render_full_frame_for_view(
-                frame,
+            let selection_outline = selection_outline_for_camera(&runtime, camera, ui_active);
+            let render_view = camera.render_view(target.size[0], target.size[1]);
+            let summary = render_full_frame_for_view(
+                mclone_render::target::RenderFrameContext::new(
+                    device,
+                    queue,
+                    &mut *encoder,
+                    target,
+                ),
                 &depth,
                 &sky,
                 &mut draw,
@@ -878,7 +889,17 @@ pub(crate) fn run_headless_screenshot(
                     ui_draw
                 },
                 &mut render_stats,
-            )
+            )?;
+            selection_outline_renderer.render(
+                device,
+                queue,
+                &mut *encoder,
+                target,
+                &depth,
+                render_view,
+                selection_outline.as_ref(),
+            );
+            Ok(summary)
         },
     )?;
 
@@ -898,6 +919,34 @@ pub(crate) fn run_headless_screenshot(
         drawn_actor_count: summary.drawn_actor_count,
         underwater,
     })
+}
+
+fn selection_outline_for_camera(
+    runtime: &WindowSceneRuntime,
+    camera: ChunkCamera,
+    ui_active: bool,
+) -> Option<SelectionOutline> {
+    if ui_active {
+        return None;
+    }
+    let eye = Vec3::from_array(camera.eye);
+    let target = Vec3::from_array(camera.target);
+    if !eye.is_finite() || !target.is_finite() {
+        return None;
+    }
+    let direction = (target - eye).try_normalize()?;
+    let interaction = ClientInteractionController::new();
+    interaction
+        .target_block(
+            runtime.client(),
+            vec3d_from_vec3(eye),
+            vec3d_from_vec3(direction),
+        )
+        .map(|target| SelectionOutline::new(target.outline_boxes))
+}
+
+fn vec3d_from_vec3(value: Vec3) -> Vec3d {
+    Vec3d::new(value.x as f64, value.y as f64, value.z as f64)
 }
 
 fn settle_remote_screenshot_session(

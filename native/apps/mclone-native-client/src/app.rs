@@ -5,8 +5,8 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use mclone_assets::AssetSource;
 use mclone_client::{
-    ActorInterpolationConfig, ActorInterpolationState, ClientInteractionController,
-    LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+    ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
+    ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
 use mclone_core::Vec3d;
 use mclone_input::{
@@ -21,6 +21,7 @@ use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::entity::ActorInstance;
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_render::screen_effect::UnderwaterOverlay;
+use mclone_render::selection_outline::SelectionOutline;
 use mclone_ui::{
     DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameFramePacingMode, GameScreen, GameUi,
     GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, render_flat_hud,
@@ -1613,19 +1614,32 @@ impl ChunkApp {
             .context("failed to sync carried item to server")
     }
 
+    fn current_block_interaction_target(&self) -> Option<BlockInteractionTarget> {
+        let runtime = self.runtime.as_ref()?;
+        self.camera
+            .target_block(runtime.client(), &self.interaction)
+    }
+
+    fn current_selection_outline(&self, ui_active: bool) -> Option<SelectionOutline> {
+        if ui_active {
+            return None;
+        }
+        self.current_block_interaction_target()
+            .map(|target| SelectionOutline::new(target.outline_boxes))
+    }
+
     fn handle_world_flat_action(&mut self, action: FlatInputAction) -> Result<()> {
         if self.runtime.is_none() {
             return Ok(());
         }
         self.sync_server_player_pose()?;
         self.sync_carried_item()?;
-        let Some(runtime) = self.runtime.as_ref() else {
+        let Some(target) = self.current_block_interaction_target() else {
             return Ok(());
         };
-        let hit = self.camera.pick_block(runtime.client(), &self.interaction);
         let command = match action {
-            FlatInputAction::Attack => self.interaction.debug_instant_break_command(hit),
-            FlatInputAction::Use => self.interaction.use_item_on_command(hit),
+            FlatInputAction::Attack => self.interaction.debug_instant_break_command(target.hit),
+            FlatInputAction::Use => self.interaction.use_item_on_command(target.hit),
             _ => None,
         };
         let Some(command) = command else {
@@ -1640,10 +1654,10 @@ impl ChunkApp {
         log::info!(
             "gameplay interaction {:?} at ({}, {}, {}) face={:?} changed={}",
             action,
-            hit.block_pos.x,
-            hit.block_pos.y,
-            hit.block_pos.z,
-            hit.direction,
+            target.hit.block_pos.x,
+            target.hit.block_pos.y,
+            target.hit.block_pos.z,
+            target.hit.direction,
             changed
         );
         Ok(())
@@ -2094,6 +2108,7 @@ impl ApplicationHandler for ChunkApp {
                     ui_covers_world || loading_progress_overlay.is_some(),
                     [gui_scale.width, gui_scale.height],
                 );
+                let selection_outline = self.current_selection_outline(ui_active);
                 let traversal_ready_sections =
                     self.runtime.as_ref().map_or_else(BTreeSet::new, |runtime| {
                         runtime.traversal_ready_render_section_keys(camera_view.eye)
@@ -2120,6 +2135,7 @@ impl ApplicationHandler for ChunkApp {
                             time_of_day,
                             sun_angle,
                             render_options,
+                            selection_outline.as_ref(),
                             gui_state,
                             |stats| {
                                 let mut ui_draw = base_ui_draw;

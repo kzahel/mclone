@@ -12,6 +12,7 @@ use mclone_render::entity::{
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
+use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_render_session::RenderSectionCacheUpdate;
@@ -142,6 +143,7 @@ pub struct FlatRenderResources {
     draw: TexturedSectionDrawResources,
     actors: ActorDrawResources,
     screen_effects: ScreenEffectsRenderer,
+    selection_outline: SelectionOutlineRenderer,
     gui: GuiRenderer,
 }
 
@@ -151,6 +153,7 @@ pub struct FlatRenderResourcePartsMut<'a> {
     pub draw: &'a mut TexturedSectionDrawResources,
     pub actors: &'a mut ActorDrawResources,
     pub screen_effects: &'a mut ScreenEffectsRenderer,
+    pub selection_outline: &'a mut SelectionOutlineRenderer,
     pub gui: &'a mut GuiRenderer,
 }
 
@@ -193,6 +196,7 @@ impl FlatRenderResources {
         let screen_effects =
             ScreenEffectsRenderer::new(device, queue, render_config.color_format, asset_source)
                 .context("failed to initialize screen effects renderer")?;
+        let selection_outline = SelectionOutlineRenderer::new(device, render_config.color_format);
         let gui = GuiRenderer::new(device, render_config.color_format);
         Ok(Self {
             render_config,
@@ -203,6 +207,7 @@ impl FlatRenderResources {
             draw,
             actors,
             screen_effects,
+            selection_outline,
             gui,
         })
     }
@@ -277,6 +282,7 @@ impl FlatRenderResources {
             draw: &mut self.draw,
             actors: &mut self.actors,
             screen_effects: &mut self.screen_effects,
+            selection_outline: &mut self.selection_outline,
             gui: &mut self.gui,
         }
     }
@@ -292,6 +298,7 @@ impl FlatRenderResources {
         time_of_day: f32,
         sun_angle: f32,
         render_options: TexturedSectionRenderOptions,
+        selection_outline: Option<&SelectionOutline>,
         gui: FullFrameGui,
         build_gui_draw: BuildGuiDraw,
         render_stats: &mut RenderStreamStats,
@@ -330,6 +337,15 @@ impl FlatRenderResources {
             build_gui_draw,
             render_stats,
         )?;
+        self.selection_outline.render(
+            device,
+            queue,
+            encoder,
+            render_target,
+            &self.depth,
+            render_view,
+            selection_outline,
+        );
         if let (Some(scaled), Some(presenter)) = (&self.scaled_color, &self.scale_presenter) {
             presenter.present(encoder, scaled, target.color_view);
         }

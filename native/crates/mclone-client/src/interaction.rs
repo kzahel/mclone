@@ -1,12 +1,16 @@
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, BlockHitResult, BlockPos, BlockStateId, Direction, HitResultType, Vec3d,
-    block_to_section_coord, chunk_section_index, local_block_coord, local_section_block_coord,
+    AIR_BLOCK_STATE_ID, Aabb, BlockHitResult, BlockPos, BlockStateId, Direction, HitResultType,
+    Vec3d, block_to_section_coord, chunk_section_index, local_block_coord,
+    local_section_block_coord,
 };
 use mclone_protocol::{
     ClientCommand, InteractionHand, PlayerActionCommand, PlayerActionKind, UseItemOnCommand,
 };
 
-use crate::{ClientInventory, ClientRuntime, block_shapes::clip_block_outline};
+use crate::{
+    ClientInventory, ClientRuntime,
+    block_shapes::{block_outline_aabbs, clip_block_outline},
+};
 
 pub const CREATIVE_PICK_RANGE: f64 = 5.0;
 
@@ -14,6 +18,12 @@ pub const CREATIVE_PICK_RANGE: f64 = 5.0;
 pub struct ClientInteractionController {
     pick_range: f64,
     inventory: ClientInventory,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlockInteractionTarget {
+    pub hit: BlockHitResult,
+    pub outline_boxes: Vec<Aabb>,
 }
 
 impl Default for ClientInteractionController {
@@ -55,6 +65,27 @@ impl ClientInteractionController {
         client.pick_block(eye_position, view_vector, self.pick_range)
     }
 
+    pub fn target_block(
+        &self,
+        client: &ClientRuntime,
+        eye_position: Vec3d,
+        view_vector: Vec3d,
+    ) -> Option<BlockInteractionTarget> {
+        self.target_from_hit(client, self.pick_block(client, eye_position, view_vector))
+    }
+
+    pub fn target_from_hit(
+        &self,
+        client: &ClientRuntime,
+        hit: BlockHitResult,
+    ) -> Option<BlockInteractionTarget> {
+        if hit.hit_type() != HitResultType::Block {
+            return None;
+        }
+        let outline_boxes = client.block_outline_aabbs_at_block_pos(hit.block_pos)?;
+        (!outline_boxes.is_empty()).then_some(BlockInteractionTarget { hit, outline_boxes })
+    }
+
     pub fn debug_instant_break_command(&self, hit: BlockHitResult) -> Option<ClientCommand> {
         (hit.hit_type() == HitResultType::Block).then_some(ClientCommand::PlayerAction(
             PlayerActionCommand {
@@ -94,6 +125,11 @@ impl ClientRuntime {
                 .map(|section| section.unpack_block_state_ids()[index])
                 .unwrap_or(AIR_BLOCK_STATE_ID),
         )
+    }
+
+    pub fn block_outline_aabbs_at_block_pos(&self, pos: BlockPos) -> Option<Vec<Aabb>> {
+        let state = self.block_state_at_block_pos(pos)?;
+        Some(block_outline_aabbs(state, pos))
     }
 
     pub fn pick_block(
@@ -309,6 +345,37 @@ mod tests {
         assert_eq!(hit.block_pos, BlockPos::new(1, 2, 3));
         assert_eq!(hit.direction, Direction::West);
         assert!(hit.inside);
+    }
+
+    #[test]
+    fn interaction_target_carries_matching_outline_box() {
+        let pos = BlockPos::new(4, 2, 1);
+        let client = client_with_blocks(&[(pos, BlockStateId(8))]);
+        let controller = ClientInteractionController::new();
+
+        let target = controller
+            .target_block(
+                &client,
+                Vec3d::new(1.5, 2.05, 1.5),
+                Vec3d::new(1.0, 0.0, 0.0),
+            )
+            .expect("snow layer target");
+
+        assert_eq!(target.hit.hit_type(), HitResultType::Block);
+        assert_eq!(target.hit.block_pos, pos);
+        assert_eq!(
+            target.outline_boxes,
+            vec![Aabb::new(4.0, 2.0, 1.0, 5.0, 2.125, 2.0)]
+        );
+    }
+
+    #[test]
+    fn interaction_target_skips_misses_and_empty_outline_blocks() {
+        let client = client_with_blocks(&[]);
+        let controller = ClientInteractionController::new();
+        let miss = BlockHitResult::miss(Vec3d::ZERO, Direction::North, BlockPos::ZERO);
+
+        assert_eq!(controller.target_from_hit(&client, miss), None);
     }
 
     #[test]

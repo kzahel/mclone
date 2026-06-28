@@ -20,6 +20,7 @@ use mclone_app_runtime::session::{
 };
 use mclone_app_runtime::{RuntimePollDiagnostics, elapsed_ms};
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
+use mclone_client::{BlockInteractionTarget, ClientInteractionController};
 use mclone_core::{ChunkPos, Vec3d, time};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -29,6 +30,7 @@ use mclone_render::chunk::{
 };
 use mclone_render::entity::ActorDrawResources;
 use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiRenderer};
+use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky::overworld_clear_color;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
@@ -336,10 +338,12 @@ where
     local_startup: Option<XrLocalStartup>,
     session_runtime_factory: Option<XrSessionRuntimeFactory<S>>,
     camera: EngineCameraController,
+    interaction: ClientInteractionController,
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
     draw: TexturedSectionDrawResources,
     actors: ActorDrawResources,
+    selection_outline: SelectionOutlineRenderer,
     world_gui_renderer: WorldGuiRenderer,
     ui: GameUi,
     session_status: StatusOverlay,
@@ -435,6 +439,7 @@ where
             }),
             session_runtime_factory: None,
             camera,
+            interaction: ClientInteractionController::new(),
             initial_alignment_mode: if startup_view_pose.is_some() {
                 XrViewAlignmentMode::ViewPose
             } else {
@@ -444,6 +449,7 @@ where
             draw,
             actors: ActorDrawResources::new(device, queue, color_format, actor_atlas.as_upload())
                 .context("initialize XR terrain actor draw resources")?,
+            selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer: WorldGuiRenderer::new(device, color_format),
             ui,
             session_status: StatusOverlay::new(request.starting_message(), true),
@@ -497,6 +503,7 @@ where
             local_startup: None,
             session_runtime_factory: None,
             camera: started.camera,
+            interaction: ClientInteractionController::new(),
             initial_alignment_mode: if startup_view_pose.is_some() {
                 XrViewAlignmentMode::ViewPose
             } else {
@@ -506,6 +513,7 @@ where
             draw: started.draw,
             actors: ActorDrawResources::new(device, queue, color_format, actor_atlas.as_upload())
                 .context("initialize XR terrain actor draw resources")?,
+            selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer: WorldGuiRenderer::new(device, color_format),
             ui,
             session_status: StatusOverlay::hidden(),
@@ -1109,6 +1117,7 @@ where
         }
         render_status_overlay(gui_scale, &mut ui_draw, &self.session_status);
         let summary_ui_draw = ui_draw.clone();
+        let selection_outline = self.current_xr_selection_outline();
         let mut render_stats = self.render_stats;
         let (summary, frame_timing) = if collect_split_timing {
             render_full_frame_for_view_with_prepared_records_timed(
@@ -1155,6 +1164,15 @@ where
             .map(|summary| (summary, Default::default()))
         }
         .with_context(|| format!("render XR terrain {label} eye"))?;
+        self.selection_outline.render(
+            device,
+            queue,
+            &mut *encoder,
+            RenderFrameTarget::color(target.color_view, target.size),
+            target.depth,
+            render_view,
+            selection_outline.as_ref(),
+        );
         if ui_active {
             if let Some(panel) = self.menu_panel_pose {
                 let controller_ray_lines = self
@@ -1402,6 +1420,28 @@ where
             transform,
             panel,
         ))
+    }
+
+    fn current_xr_block_interaction_target(&self) -> Option<BlockInteractionTarget> {
+        if self.ui.is_active() {
+            return None;
+        }
+        let runtime = self.runtime.as_ref()?;
+        let origin = self.tracking_origin?;
+        let transform =
+            XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot()).ok()?;
+        let (ray_origin, ray_direction) =
+            xr_controller_interaction_ray_from_controllers(&self.latest_controllers, transform)?;
+        self.interaction.target_block(
+            runtime.client(),
+            vec3d_from_glam(ray_origin),
+            vec3d_from_glam(ray_direction),
+        )
+    }
+
+    fn current_xr_selection_outline(&self) -> Option<SelectionOutline> {
+        self.current_xr_block_interaction_target()
+            .map(|target| SelectionOutline::new(target.outline_boxes))
     }
 
     fn next_new_world_seed(&mut self) -> i64 {
@@ -2456,6 +2496,33 @@ pub fn xr_menu_toggle_pressed(controllers: &[XrControllerSnapshot]) -> bool {
         .any(|controller| controller.hand == XR_MENU_TOGGLE_HAND && controller.select_pressed)
 }
 
+pub fn xr_controller_interaction_ray_from_controllers(
+    controllers: &[XrControllerSnapshot],
+    transform: XrStageToWorld,
+) -> Option<(Vec3, Vec3)> {
+    [XrHand::Right, XrHand::Left].into_iter().find_map(|hand| {
+        controllers
+            .iter()
+            .find(|controller| controller.hand == hand)
+            .and_then(|controller| xr_controller_interaction_ray(controller, transform))
+    })
+}
+
+fn xr_controller_interaction_ray(
+    controller: &XrControllerSnapshot,
+    transform: XrStageToWorld,
+) -> Option<(Vec3, Vec3)> {
+    let ray_origin = transform.transform_position(controller.aim_position?);
+    let ray_direction = transform.transform_direction(controller.aim_direction?);
+    if !ray_origin.is_finite()
+        || !ray_direction.is_finite()
+        || ray_direction.length_squared() <= f32::EPSILON
+    {
+        return None;
+    }
+    Some((ray_origin, ray_direction.normalize()))
+}
+
 pub fn xr_menu_panel_from_render_views(render_views: [ChunkRenderView; 2]) -> WorldGuiPanel {
     let center_position = (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
     let forward = average_unit_direction(
@@ -3004,6 +3071,40 @@ mod tests {
         assert!(xr_menu_pointer_trigger_down(0.56, false));
         assert!(xr_menu_pointer_trigger_down(0.4, true));
         assert!(!xr_menu_pointer_trigger_down(0.3, true));
+    }
+
+    #[test]
+    fn xr_controller_interaction_ray_prefers_right_hand() {
+        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
+        left.aim_position = Some(Vec3::new(-1.0, 0.0, 0.0));
+        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
+        right.aim_position = Some(Vec3::new(1.0, 0.0, 0.0));
+
+        let (origin, direction) =
+            xr_controller_interaction_ray_from_controllers(&[left, right], test_stage_to_world())
+                .expect("right hand ray");
+
+        assert_eq!(origin, Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(direction, Vec3::NEG_Z);
+    }
+
+    #[test]
+    fn xr_controller_interaction_ray_applies_stage_to_world_transform() {
+        let transform = XrStageToWorld {
+            origin_stage: Vec3::new(1.0, 0.0, 0.0),
+            origin_world: Vec3::new(10.0, 70.0, -4.0),
+            stage_to_world_rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        };
+        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
+        right.aim_position = Some(Vec3::new(1.0, 1.0, -2.0));
+        right.aim_direction = Some(Vec3::NEG_Z);
+
+        let (origin, direction) =
+            xr_controller_interaction_ray_from_controllers(&[right], transform)
+                .expect("transformed ray");
+
+        assert!((origin - Vec3::new(8.0, 71.0, -4.0)).length() < 1.0e-6);
+        assert!((direction - Vec3::NEG_X).length() < 1.0e-6);
     }
 
     #[test]
