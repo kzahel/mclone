@@ -4,9 +4,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use mclone_assets::AssetSource;
-use mclone_client::{
-    ActorInterpolationConfig, BlockInteractionTarget, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
-};
+use mclone_client::LOCAL_PLAYER_STANDING_EYE_HEIGHT;
 use mclone_core::Vec3d;
 use mclone_input::{
     FlatInputAction, FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind,
@@ -15,10 +13,7 @@ use mclone_input::{
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{TexturedSectionRenderOptions, TexturedSectionUploadReport};
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
-use mclone_render::entity::ActorInstance;
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
-use mclone_render::screen_effect::UnderwaterOverlay;
-use mclone_render::selection_outline::SelectionOutline;
 use mclone_ui::{
     DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameFramePacingMode, GameScreen, GameUi,
     GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, render_flat_hud,
@@ -34,8 +29,7 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 
 use crate::cli::{SceneOptions, WindowStartIntent};
 use crate::flat_client_driver::{
-    FlatClientCameraView, FlatClientDriver, effective_render_options_for_camera,
-    engine_camera_input_from_flat_frame, sync_spectator_from_camera,
+    FlatClientCameraView, FlatClientDriver, FlatClientWorldActionStatus,
 };
 use crate::frame_pacing::{
     FramePacing, FramePacingMode, FramePacingUiState, FrameTimingStats, RedrawSchedule, elapsed_ms,
@@ -59,7 +53,7 @@ use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 use mclone_render_session::{
     ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
-    EngineCameraMovementMode, RenderSectionCacheUpdate, actor_instances_from_presentations,
+    EngineCameraMovementMode, RenderSectionCacheUpdate,
 };
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
@@ -348,10 +342,8 @@ impl ChunkApp {
     }
 
     fn current_render_distance(&self) -> u32 {
-        self.driver.runtime.as_ref().map_or_else(
-            || u32::try_from(self.scene.render_distance).unwrap_or(0),
-            WindowSceneRuntime::render_distance,
-        )
+        self.driver
+            .current_render_distance(self.scene.render_distance)
     }
 
     fn current_render_scale(&self) -> f32 {
@@ -371,8 +363,7 @@ impl ChunkApp {
         let frame_dt = now.duration_since(self.last_frame);
         let movement_dt = frame_dt.as_secs_f32().min(0.05);
         self.last_frame = now;
-        self.driver.render_stats.last_frame_ms = (frame_dt.as_secs_f64() * 1000.0) as f32;
-        self.driver.frame_timing.begin_frame(
+        self.driver.tick_frame_timing(
             frame_dt.as_secs_f64() * 1000.0,
             self.frame_pacing.target_frame_ms(),
         );
@@ -381,19 +372,11 @@ impl ChunkApp {
             return Ok(());
         }
 
-        let Some(runtime) = self.driver.runtime.as_ref() else {
-            return Ok(());
-        };
-
         let frame = self.flat_input.held_frame();
-        let input = engine_camera_input_from_flat_frame(frame, f64::from(movement_dt));
-        let before = self.driver.camera.snapshot();
-        let after = self
+        if self
             .driver
-            .camera
-            .apply_movement_input(runtime.client(), input);
-
-        if after != before {
+            .apply_held_input_frame(frame, f64::from(movement_dt))
+        {
             self.play_landing_events();
             self.commit_player_pose_change()?;
         } else {
@@ -404,7 +387,7 @@ impl ChunkApp {
 
     fn clear_flat_gameplay_input(&mut self) {
         self.flat_input.clear_held();
-        self.driver.camera.clear_keys();
+        self.driver.clear_camera_input();
     }
 
     fn apply_flat_keyboard_frame(
@@ -422,7 +405,7 @@ impl ChunkApp {
             return true;
         }
         if let Some(slot) = frame.selected_hotbar_slot {
-            if self.driver.interaction.select_hotbar_slot(slot) {
+            if self.driver.select_hotbar_slot(slot) {
                 log::info!("selected hotbar slot {}", slot + 1);
             }
             self.schedule_next_redraw(event_loop);
@@ -442,14 +425,9 @@ impl ChunkApp {
     }
 
     fn apply_flat_look_frame(&mut self, frame: FlatInputFrame, event_loop: &ActiveEventLoop) {
-        if frame.look_delta.x == 0.0 && frame.look_delta.y == 0.0 {
-            return;
+        if self.driver.apply_look_frame(frame) {
+            self.schedule_next_redraw(event_loop);
         }
-        self.driver
-            .camera
-            .turn_mouse_delta(f64::from(frame.look_delta.x), f64::from(frame.look_delta.y));
-        sync_spectator_from_camera(&mut self.driver.spectator, &self.driver.camera);
-        self.schedule_next_redraw(event_loop);
     }
 
     fn gui_scale(&self) -> Option<GuiScale> {
@@ -1471,12 +1449,7 @@ impl ChunkApp {
     }
 
     fn effective_render_options(&self) -> TexturedSectionRenderOptions {
-        effective_render_options_for_camera(
-            self.driver.render_options,
-            self.driver.runtime.as_ref().is_some_and(|runtime| {
-                runtime.camera_inside_occluding_block(self.window_camera_view().eye)
-            }),
-        )
+        self.driver.effective_render_options()
     }
 
     fn debug_pane_stats(&self, render_options: TexturedSectionRenderOptions) -> DebugPaneStats {
@@ -1502,26 +1475,8 @@ impl ChunkApp {
         }
     }
 
-    fn underwater_overlay(&self, camera_view: FlatClientCameraView) -> Option<UnderwaterOverlay> {
-        self.driver
-            .runtime
-            .as_ref()?
-            .camera_inside_water(camera_view.eye)
-            .then(|| {
-                UnderwaterOverlay::vanilla_from_native_camera(
-                    camera_view.snapshot.yaw_radians as f32,
-                    camera_view.snapshot.pitch_radians as f32,
-                )
-            })
-    }
-
     fn commit_player_pose_change(&mut self) -> Result<bool> {
-        let Some(runtime) = &mut self.driver.runtime else {
-            return Ok(false);
-        };
-        let changed = runtime.commit_engine_camera_player_pose(&mut self.driver.camera)?;
-        sync_spectator_from_camera(&mut self.driver.spectator, &self.driver.camera);
-        Ok(changed)
+        self.driver.commit_player_pose_change()
     }
 
     fn play_landing_events(&mut self) {
@@ -1535,104 +1490,31 @@ impl ChunkApp {
         }
     }
 
-    fn interpolated_actor_instances(&mut self) -> Vec<ActorInstance> {
-        let Some(runtime) = self.driver.runtime.as_ref() else {
-            return Vec::new();
-        };
-        self.driver
-            .actor_interpolation
-            .reconcile_authoritative(runtime.client().actor_presentations());
-        self.driver.actor_interpolation.step(
-            (self.driver.render_stats.last_frame_ms * 0.001).min(0.1),
-            ActorInterpolationConfig::default(),
-        );
-        actor_instances_from_presentations(
-            &self.driver.actor_interpolation.presentations(),
-            runtime.client(),
-        )
-    }
-
-    fn sync_server_player_pose(&mut self) -> Result<bool> {
-        let Some(runtime) = &mut self.driver.runtime else {
-            return Ok(false);
-        };
-        let changed = runtime.sync_engine_camera_player_pose(&mut self.driver.camera)?;
-        sync_spectator_from_camera(&mut self.driver.spectator, &self.driver.camera);
-        Ok(changed)
-    }
-
     fn apply_pending_player_position_updates(&mut self) -> Result<bool> {
-        let Some(runtime) = &mut self.driver.runtime else {
-            return Ok(false);
-        };
-        let changed =
-            runtime.apply_pending_engine_camera_position_updates(&mut self.driver.camera)?;
-        sync_spectator_from_camera(&mut self.driver.spectator, &self.driver.camera);
-        Ok(changed)
+        self.driver.apply_pending_player_position_updates()
     }
 
-    fn sync_carried_item(&mut self) -> Result<bool> {
-        let Some(command) = self.driver.interaction.ensure_has_sent_carried_item() else {
-            return Ok(false);
-        };
-        let Some(runtime) = &mut self.driver.runtime else {
-            return Ok(false);
-        };
-        runtime
-            .send_gameplay_command(command)
-            .context("failed to sync carried item to server")
-    }
-
-    fn current_block_interaction_target(&self) -> Option<BlockInteractionTarget> {
-        let runtime = self.driver.runtime.as_ref()?;
-        self.driver
-            .camera
-            .target_block(runtime.client(), &self.driver.interaction)
-    }
-
-    fn current_selection_outline(&self, ui_active: bool) -> Option<SelectionOutline> {
-        if ui_active {
-            return None;
-        }
-        self.current_block_interaction_target()
-            .map(|target| SelectionOutline::new(target.outline_boxes))
+    fn current_selection_outline(
+        &self,
+        ui_active: bool,
+    ) -> Option<mclone_render::selection_outline::SelectionOutline> {
+        self.driver.current_selection_outline(ui_active)
     }
 
     fn handle_world_flat_action(&mut self, action: FlatInputAction) -> Result<()> {
-        if self.driver.runtime.is_none() {
-            return Ok(());
+        if let FlatClientWorldActionStatus::Sent { target, changed } =
+            self.driver.handle_world_action(action)?
+        {
+            log::info!(
+                "gameplay interaction {:?} at ({}, {}, {}) face={:?} changed={}",
+                action,
+                target.hit.block_pos.x,
+                target.hit.block_pos.y,
+                target.hit.block_pos.z,
+                target.hit.direction,
+                changed
+            );
         }
-        self.sync_server_player_pose()?;
-        self.sync_carried_item()?;
-        let Some(target) = self.current_block_interaction_target() else {
-            return Ok(());
-        };
-        let command = match action {
-            FlatInputAction::Attack => self
-                .driver
-                .interaction
-                .debug_instant_break_command(target.hit),
-            FlatInputAction::Use => self.driver.interaction.use_item_on_command(target.hit),
-            _ => None,
-        };
-        let Some(command) = command else {
-            return Ok(());
-        };
-        let Some(runtime) = &mut self.driver.runtime else {
-            return Ok(());
-        };
-        let changed = runtime
-            .send_gameplay_command(command)
-            .context("failed to send gameplay interaction command")?;
-        log::info!(
-            "gameplay interaction {:?} at ({}, {}, {}) face={:?} changed={}",
-            action,
-            target.hit.block_pos.x,
-            target.hit.block_pos.y,
-            target.hit.block_pos.z,
-            target.hit.direction,
-            changed
-        );
         Ok(())
     }
 }
@@ -1927,8 +1809,7 @@ impl ApplicationHandler for ChunkApp {
                     MouseScrollDelta::LineDelta(_, y) => y * 0.12,
                     MouseScrollDelta::PixelDelta(position) => position.y as f32 * 0.001,
                 };
-                self.driver.camera.adjust_speed(f64::from(amount));
-                sync_spectator_from_camera(&mut self.driver.spectator, &self.driver.camera);
+                self.driver.adjust_camera_speed(f64::from(amount));
                 log::info!(
                     "no-clip speed {:.1} blocks/s",
                     self.driver.camera.snapshot().speed_blocks_per_second
@@ -1986,9 +1867,9 @@ impl ApplicationHandler for ChunkApp {
                     .as_ref()
                     .map_or(0.0, WindowSceneRuntime::sun_angle);
                 let render_options = self.effective_render_options();
-                let underwater_overlay = self.underwater_overlay(camera_view);
+                let underwater_overlay = self.driver.underwater_overlay(camera_view);
                 let ui_render_state = self.current_ui_render_state();
-                let actor_instances = self.interpolated_actor_instances();
+                let actor_instances = self.driver.interpolated_actor_instances();
                 let debug_stats = (self.debug_visible && self.driver.runtime.is_some())
                     .then(|| self.debug_pane_stats(render_options));
                 let ui_active = self.ui.is_active();
@@ -2185,7 +2066,11 @@ fn desktop_pointer_button_from_mouse_button(button: MouseButton) -> Option<Point
 mod tests {
     use super::*;
     use crate::DEFAULT_SEED;
-    use mclone_client::ActorInterpolationState;
+    use crate::flat_client_driver::{
+        effective_render_options_for_camera, engine_camera_input_from_flat_frame,
+    };
+    use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
+    use mclone_render_session::actor_instances_from_presentations;
 
     fn test_app_with_runtime(scene: SceneOptions) -> ChunkApp {
         let assets = WindowSceneAssets::load().unwrap();

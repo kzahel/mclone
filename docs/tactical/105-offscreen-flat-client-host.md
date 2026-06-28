@@ -130,14 +130,24 @@ Validation run:
 - [x] Move the first non-`winit` state cluster out of `ChunkApp`: runtime,
   camera/spectator mirror, interaction controller, actor interpolation, render
   options, render stats, and frame timing.
+- [x] Move first behavior methods behind the driver: held/analog input
+  application, look input, camera speed adjustment, pose sync, carried-item
+  sync, block interaction, effective render options, underwater overlay, actor
+  interpolation, and selection outline.
 - [ ] Move session coordinator/startup, UI state, input preferences, render
-  resource lifetime, and frame assembly behind driver methods instead of direct
-  `ChunkApp` field access.
+  resource lifetime, section upload, and frame assembly behind driver methods
+  instead of direct `ChunkApp` field access.
 - [ ] Keep platform transport/session construction injectable so desktop TCP,
   offscreen TCP, Android property TCP, and future network sources stay adapters.
 - [ ] Preserve existing desktop behavior.
 
 Validation run:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+
+Follow-up validation run after behavior delegation:
 
 - `cargo fmt --manifest-path native/Cargo.toml --all --check`
 - `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
