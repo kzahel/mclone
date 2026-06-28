@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use crate::biome::BiomeDefinition;
 use crate::block::{
-    ANDESITE, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE,
+    ANDESITE, CLAY, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE,
     DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE,
     DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, FERN, GOLD_ORE,
     GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LAVA, MYCELIUM,
@@ -13,10 +13,10 @@ use crate::placement::{
 };
 
 use super::{
-    BasicTreeConfiguration, ConfiguredFeature, DecorationStep, GlowLichenConfiguration,
-    LakeConfiguration, OreConfiguration, PlacedFeature, RandomFeatureConfiguration,
-    RandomPatchConfiguration, SpringConfiguration, TreeConfiguration, WeightedBlockState,
-    WeightedConfiguredFeature,
+    BasicTreeConfiguration, ConfiguredFeature, DecorationStep, DiskConfiguration,
+    GlowLichenConfiguration, LakeConfiguration, OreConfiguration, PlacedFeature,
+    RandomFeatureConfiguration, RandomPatchConfiguration, SpringConfiguration, TreeConfiguration,
+    WeightedBlockState, WeightedConfiguredFeature,
 };
 
 pub(super) const TAIGA_GRASS_STATES: [WeightedBlockState; 2] = [
@@ -27,6 +27,9 @@ pub(super) const DEFAULT_FLOWER_STATES: [WeightedBlockState; 2] = [
     WeightedBlockState::new(POPPY, 2),
     WeightedBlockState::new(DANDELION, 1),
 ];
+const DISK_SAND_TARGETS: [RawBlockId; 2] = [DIRT, GRASS_BLOCK];
+const DISK_CLAY_TARGETS: [RawBlockId; 2] = [DIRT, CLAY];
+const DISK_GRAVEL_TARGETS: [RawBlockId; 2] = [DIRT, GRASS_BLOCK];
 
 pub fn overworld_features_for_biome(biome: BiomeDefinition) -> Vec<PlacedFeature> {
     overworld_features_for_biome_cached(biome).to_vec()
@@ -85,6 +88,7 @@ fn build_overworld_feature_table(
     let mut features = default_lake_features(biome_key);
     features.extend(default_underground_variety_features());
     features.extend(default_ore_features());
+    features.extend(default_disk_features(biome_key));
     features.append(&mut biome_features);
     features.extend(default_top_layer_features());
     features
@@ -369,6 +373,53 @@ fn single_ore_feature(config: OreConfiguration, height: HeightProvider) -> Place
             ConfiguredDecorator::square(),
             ConfiguredDecorator::range(height),
         ],
+    )
+}
+
+fn default_disk_features(biome_key: &str) -> Vec<PlacedFeature> {
+    if matches!(biome_key, "minecraft:swamp" | "minecraft:swamp_hills") {
+        vec![disk_clay_feature()]
+    } else {
+        vec![
+            disk_sand_feature(),
+            disk_clay_feature(),
+            disk_gravel_feature(),
+        ]
+    }
+}
+
+fn disk_sand_feature() -> PlacedFeature {
+    disk_feature(
+        DiskConfiguration::new(SAND, IntProvider::uniform(2, 6), 2, &DISK_SAND_TARGETS),
+        Some(3),
+    )
+}
+
+fn disk_clay_feature() -> PlacedFeature {
+    disk_feature(
+        DiskConfiguration::new(CLAY, IntProvider::uniform(2, 3), 1, &DISK_CLAY_TARGETS),
+        None,
+    )
+}
+
+fn disk_gravel_feature() -> PlacedFeature {
+    disk_feature(
+        DiskConfiguration::new(GRAVEL, IntProvider::uniform(2, 5), 2, &DISK_GRAVEL_TARGETS),
+        None,
+    )
+}
+
+fn disk_feature(config: DiskConfiguration, count: Option<i32>) -> PlacedFeature {
+    let mut decorators = Vec::new();
+    if let Some(count) = count {
+        decorators.push(ConfiguredDecorator::count(count));
+    }
+    decorators.push(ConfiguredDecorator::square());
+    decorators.push(ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg));
+    PlacedFeature::new(
+        DecorationStep::UndergroundOres,
+        ConfiguredFeature::disk(config),
+        decorators,
     )
 }
 

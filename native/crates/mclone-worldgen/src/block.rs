@@ -90,6 +90,7 @@ pub const LAVA_LEVEL_5: RawBlockId = 84;
 pub const LAVA_LEVEL_6: RawBlockId = 85;
 pub const LAVA_LEVEL_7: RawBlockId = 86;
 pub const LAVA_LEVEL_8: RawBlockId = 87;
+pub const CLAY: RawBlockId = 88;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -119,6 +120,7 @@ impl GeneratedBlockId {
     pub const LARGE_FERN_UPPER: Self = Self(LARGE_FERN_UPPER);
     pub const GLOW_LICHEN: Self = Self(GLOW_LICHEN);
     pub const CAVE_AIR: Self = Self(CAVE_AIR);
+    pub const CLAY: Self = Self(CLAY);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -332,6 +334,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         LARGE_FERN_LOWER | LARGE_FERN_UPPER => "minecraft:large_fern",
         GLOW_LICHEN => "minecraft:glow_lichen",
         CAVE_AIR => "minecraft:cave_air",
+        CLAY => "minecraft:clay",
         _ => "minecraft:unknown",
     }
 }

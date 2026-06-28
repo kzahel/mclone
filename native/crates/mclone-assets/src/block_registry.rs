@@ -468,6 +468,7 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (85, "minecraft:lava", LEVEL_6),
     (86, "minecraft:lava", LEVEL_7),
     (87, "minecraft:lava", LEVEL_8),
+    (88, "minecraft:clay", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -479,7 +480,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 88);
+        assert_eq!(registry.len(), 89);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -511,6 +512,10 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:lava[level=8]"),
             Some(BlockStateId(87))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:clay"),
+            Some(BlockStateId(88))
         );
         assert_eq!(
             registry.by_id(BlockStateId(41)).unwrap().canonical_key(),

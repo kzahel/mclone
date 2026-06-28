@@ -5,6 +5,7 @@ use crate::prng::RandomSource;
 
 mod configured;
 mod context;
+mod disk;
 mod glow_lichen;
 mod lake;
 mod ore;
@@ -17,7 +18,7 @@ mod top_layer;
 mod tree;
 
 pub use configured::{
-    BasicTreeConfiguration, ConfiguredFeature, DecoratedFeatureConfiguration,
+    BasicTreeConfiguration, ConfiguredFeature, DecoratedFeatureConfiguration, DiskConfiguration,
     FoliagePlacerConfiguration, GlowLichenConfiguration, LakeConfiguration, OreConfiguration,
     OreTarget, OreTargetBlockState, RandomFeatureConfiguration, RandomPatchConfiguration,
     SimpleBlockConfiguration, SpringConfiguration, StraightTrunkPlacerConfiguration,
@@ -133,6 +134,7 @@ impl ConfiguredFeature {
             Self::SimpleBlock(config) => patch::place_simple_block(world, random, origin, *config),
             Self::RandomPatch(config) => patch::place_random_patch(world, random, origin, *config),
             Self::Flower(config) => patch::place_flower(world, random, origin, *config),
+            Self::Disk(config) => disk::place_disk(world, random, origin, *config),
             Self::GlowLichen(config) => {
                 glow_lichen::place_glow_lichen(world, random, origin, *config)
             }
@@ -217,15 +219,15 @@ mod tests {
     use super::*;
     use crate::biome::get_layered_biome_by_id;
     use crate::block::{
-        AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, COAL_ORE, COPPER_ORE, DANDELION,
+        AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE, DANDELION,
         DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE,
         DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE,
         DIAMOND_ORE, DIORITE, DIRT, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL,
         ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, OAK_LEAVES, OAK_LOG,
-        POPPY, REDSTONE_ORE, SNOW, SPRUCE_LEAVES, STONE, TUFF, WATER,
+        POPPY, REDSTONE_ORE, SAND, SNOW, SPRUCE_LEAVES, STONE, TUFF, WATER,
     };
     use crate::placement::{
-        ConfiguredDecorator, DecorationContext, HeightProvider, VerticalAnchor,
+        ConfiguredDecorator, DecorationContext, HeightProvider, IntProvider, VerticalAnchor,
     };
     use crate::prng::WorldgenRandom;
     use mclone_core::CHUNK_WIDTH;
@@ -1106,6 +1108,87 @@ mod tests {
     }
 
     #[test]
+    fn biome_feature_tables_include_default_soft_disks_after_ores() {
+        let plains = overworld_features_for_biome(get_layered_biome_by_id(1));
+        let expected = [
+            (
+                SAND,
+                IntProvider::uniform(2, 6),
+                2,
+                &[DIRT, GRASS_BLOCK][..],
+                vec![
+                    ConfiguredDecorator::count(3),
+                    ConfiguredDecorator::square(),
+                    ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
+                ],
+            ),
+            (
+                CLAY,
+                IntProvider::uniform(2, 3),
+                1,
+                &[DIRT, CLAY][..],
+                vec![
+                    ConfiguredDecorator::square(),
+                    ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
+                ],
+            ),
+            (
+                GRAVEL,
+                IntProvider::uniform(2, 5),
+                2,
+                &[DIRT, GRASS_BLOCK][..],
+                vec![
+                    ConfiguredDecorator::square(),
+                    ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
+                ],
+            ),
+        ];
+
+        for (feature, (state, radius, half_height, targets, decorators)) in
+            plains.iter().skip(16).zip(expected)
+        {
+            assert_eq!(feature.step, DecorationStep::UndergroundOres);
+            assert_eq!(feature.decorators, decorators);
+            match &feature.feature {
+                ConfiguredFeature::Disk(config) => {
+                    assert_eq!(config.state, state);
+                    assert_eq!(config.radius, radius);
+                    assert_eq!(config.half_height, half_height);
+                    assert_eq!(config.targets, targets);
+                }
+                other => panic!("expected disk feature, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn swamp_feature_table_uses_clay_only_soft_disk() {
+        let swamp = overworld_features_for_biome(get_layered_biome_by_id(6));
+        let disk_features: Vec<_> = swamp
+            .iter()
+            .filter_map(|feature| match &feature.feature {
+                ConfiguredFeature::Disk(config) => Some((feature, config)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(disk_features.len(), 1);
+        let (feature, config) = disk_features[0];
+        assert_eq!(feature.step, DecorationStep::UndergroundOres);
+        assert_eq!(config.state, CLAY);
+        assert_eq!(config.radius, IntProvider::uniform(2, 3));
+        assert_eq!(config.half_height, 1);
+        assert_eq!(config.targets, &[DIRT, CLAY]);
+        assert_eq!(
+            feature.decorators,
+            vec![
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
+            ]
+        );
+    }
+
+    #[test]
     fn biome_feature_tables_end_with_default_freeze_top_layer() {
         let plains = overworld_features_for_biome(get_layered_biome_by_id(1));
         let feature = plains.last().expect("plains has features");
@@ -1121,7 +1204,7 @@ mod tests {
         let report = apply_overworld_biome_features(12_345, get_layered_biome_by_id(4), &mut chunk);
 
         assert_eq!(report.biome_key, "minecraft:forest");
-        assert_eq!(report.attempted_features, 23);
+        assert_eq!(report.attempted_features, 26);
         assert!(report.placed_features > 0);
         assert!(report.added_non_air_blocks > 0);
     }

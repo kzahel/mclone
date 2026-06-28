@@ -347,6 +347,13 @@ mod tests {
         .expect("valid vanilla scheduler features snapshot fixture")
     }
 
+    fn plains_scheduler_features_snapshot_fixture() -> SchedulerTraceFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/scheduler/vanilla-scheduler-features-snapshot-seed-16-chunk-0-0-plains.json"
+        ))
+        .expect("valid vanilla plains scheduler features snapshot fixture")
+    }
+
     #[derive(Clone, Debug, Eq, PartialEq)]
     struct TaigaTreeIndexShiftCenterDiagnostic {
         center: ChunkPos,
@@ -1465,6 +1472,115 @@ mod tests {
 
         let report = compare_generated_chunk_to_full_fixture(&actual, expected);
         assert!(report.is_exact(), "{report:#?}");
+    }
+
+    #[test]
+    fn plains_features_snapshot_reports_current_native_gap() {
+        let fixture = plains_scheduler_features_snapshot_fixture();
+        assert_eq!(fixture.module, "scheduler-trace");
+        assert_eq!(fixture.minecraft_version, "1.17.1");
+        assert_eq!(fixture.seed, "16");
+        assert_eq!(fixture.target_chunk_x, 0);
+        assert_eq!(fixture.target_chunk_z, 0);
+        assert_eq!(fixture.target_radius, FEATURES_WRITE_RADIUS_CUTOFF);
+        assert_eq!(fixture.stop_status, "FEATURES");
+        assert_eq!(fixture.chunks.len(), 1);
+
+        let expected = &fixture.chunks[0];
+        assert_eq!(expected.chunk_x, 0);
+        assert_eq!(expected.chunk_z, 0);
+        assert_eq!(expected.status, "features");
+
+        let actual = generate_overworld_features_chunk(16, expected.chunk_x, expected.chunk_z);
+        let report = compare_generated_chunk_to_full_fixture(&actual, expected);
+
+        assert_eq!(report.total_blocks, 16 * 16 * 256);
+        assert_eq!(report.mismatched_blocks, 177, "{report:#?}");
+        assert_eq!(
+            report.top_mismatch_pairs,
+            vec![
+                MismatchBucket {
+                    actual: "minecraft:stone".to_owned(),
+                    expected: "minecraft:dripstone_block".to_owned(),
+                    count: 60,
+                },
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:grass".to_owned(),
+                    count: 29,
+                },
+                MismatchBucket {
+                    actual: "minecraft:grass".to_owned(),
+                    expected: "minecraft:air".to_owned(),
+                    count: 16,
+                },
+                MismatchBucket {
+                    actual: "minecraft:water".to_owned(),
+                    expected: "minecraft:pointed_dripstone".to_owned(),
+                    count: 15,
+                },
+                MismatchBucket {
+                    actual: "minecraft:granite".to_owned(),
+                    expected: "minecraft:dripstone_block".to_owned(),
+                    count: 9,
+                },
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:pointed_dripstone".to_owned(),
+                    count: 8,
+                },
+                MismatchBucket {
+                    actual: "minecraft:deepslate".to_owned(),
+                    expected: "minecraft:dripstone_block".to_owned(),
+                    count: 7,
+                },
+                MismatchBucket {
+                    actual: "minecraft:poppy".to_owned(),
+                    expected: "minecraft:air".to_owned(),
+                    count: 5,
+                },
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:poppy".to_owned(),
+                    count: 4,
+                },
+                MismatchBucket {
+                    actual: "minecraft:dandelion".to_owned(),
+                    expected: "minecraft:air".to_owned(),
+                    count: 4,
+                },
+                MismatchBucket {
+                    actual: "minecraft:dirt".to_owned(),
+                    expected: "minecraft:dripstone_block".to_owned(),
+                    count: 4,
+                },
+                MismatchBucket {
+                    actual: "minecraft:poppy".to_owned(),
+                    expected: "minecraft:grass".to_owned(),
+                    count: 4,
+                },
+                MismatchBucket {
+                    actual: "minecraft:water".to_owned(),
+                    expected: "minecraft:glow_lichen".to_owned(),
+                    count: 4,
+                },
+                MismatchBucket {
+                    actual: "minecraft:andesite".to_owned(),
+                    expected: "minecraft:dripstone_block".to_owned(),
+                    count: 3,
+                },
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:tall_grass".to_owned(),
+                    count: 2,
+                },
+                MismatchBucket {
+                    actual: "minecraft:dandelion".to_owned(),
+                    expected: "minecraft:grass".to_owned(),
+                    count: 1,
+                },
+            ]
+        );
     }
 
     #[test]

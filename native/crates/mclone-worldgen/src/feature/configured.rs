@@ -50,6 +50,30 @@ impl LakeConfiguration {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DiskConfiguration {
+    pub state: RawBlockId,
+    pub radius: IntProvider,
+    pub half_height: i32,
+    pub targets: &'static [RawBlockId],
+}
+
+impl DiskConfiguration {
+    pub const fn new(
+        state: RawBlockId,
+        radius: IntProvider,
+        half_height: i32,
+        targets: &'static [RawBlockId],
+    ) -> Self {
+        Self {
+            state,
+            radius,
+            half_height,
+            targets,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SpringConfiguration {
     pub state: RawBlockId,
     pub requires_block_below: bool,
@@ -471,6 +495,7 @@ pub enum ConfiguredFeature {
     SimpleBlock(SimpleBlockConfiguration),
     RandomPatch(RandomPatchConfiguration),
     Flower(RandomPatchConfiguration),
+    Disk(DiskConfiguration),
     GlowLichen(GlowLichenConfiguration),
     BasicTree(BasicTreeConfiguration),
     Tree(TreeConfiguration),
@@ -503,6 +528,10 @@ impl ConfiguredFeature {
 
     pub const fn flower(config: RandomPatchConfiguration) -> Self {
         Self::Flower(config)
+    }
+
+    pub const fn disk(config: DiskConfiguration) -> Self {
+        Self::Disk(config)
     }
 
     pub const fn glow_lichen(config: GlowLichenConfiguration) -> Self {
