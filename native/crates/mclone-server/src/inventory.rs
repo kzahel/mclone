@@ -1,7 +1,7 @@
 use mclone_core::BlockStateId;
 use mclone_protocol::{HOTBAR_SLOT_COUNT, SetCarriedItemCommand};
 use mclone_worldgen::block::{
-    DIRT, GRASS_BLOCK, OAK_LEAVES, OAK_LOG, SAND, SNOW, STONE, generated_block_state_id,
+    BRICKS, DIRT, GRASS_BLOCK, OAK_LEAVES, OAK_LOG, SAND, SNOW, STONE, generated_block_state_id,
 };
 
 const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
@@ -14,7 +14,7 @@ const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
     Some(generated_block_state_id(OAK_LOG)),
     Some(generated_block_state_id(OAK_LEAVES)),
     Some(generated_block_state_id(SNOW)),
-    None,
+    Some(generated_block_state_id(BRICKS)),
     None,
 ];
 
@@ -83,5 +83,16 @@ mod tests {
         );
         assert!(inventory.apply_set_carried_item(SetCarriedItemCommand { slot: 8 }));
         assert_eq!(inventory.selected_block_state(), None);
+    }
+
+    #[test]
+    fn debug_hotbar_exposes_bricks_as_a_placeable_block() {
+        let mut inventory = ServerInventory::default();
+
+        assert!(inventory.apply_set_carried_item(SetCarriedItemCommand { slot: 7 }));
+        assert_eq!(
+            inventory.selected_block_state(),
+            Some(generated_block_state_id(BRICKS))
+        );
     }
 }

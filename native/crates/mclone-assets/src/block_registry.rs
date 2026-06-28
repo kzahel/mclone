@@ -473,6 +473,7 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (88, "minecraft:clay", EMPTY_PROPS),
     (89, "minecraft:dripstone_block", EMPTY_PROPS),
     (90, "minecraft:pointed_dripstone", POINTED_DRIPSTONE_UP_TIP),
+    (91, "minecraft:bricks", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -484,7 +485,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 91);
+        assert_eq!(registry.len(), 92);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -528,6 +529,10 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:pointed_dripstone[thickness=tip,vertical_direction=up]"),
             Some(BlockStateId(90))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:bricks"),
+            Some(BlockStateId(91))
         );
         assert_eq!(
             registry.by_id(BlockStateId(41)).unwrap().canonical_key(),

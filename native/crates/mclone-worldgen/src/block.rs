@@ -93,6 +93,7 @@ pub const LAVA_LEVEL_8: RawBlockId = 87;
 pub const CLAY: RawBlockId = 88;
 pub const DRIPSTONE_BLOCK: RawBlockId = 89;
 pub const POINTED_DRIPSTONE: RawBlockId = 90;
+pub const BRICKS: RawBlockId = 91;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -125,6 +126,7 @@ impl GeneratedBlockId {
     pub const CLAY: Self = Self(CLAY);
     pub const DRIPSTONE_BLOCK: Self = Self(DRIPSTONE_BLOCK);
     pub const POINTED_DRIPSTONE: Self = Self(POINTED_DRIPSTONE);
+    pub const BRICKS: Self = Self(BRICKS);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -342,6 +344,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         CLAY => "minecraft:clay",
         DRIPSTONE_BLOCK => "minecraft:dripstone_block",
         POINTED_DRIPSTONE => "minecraft:pointed_dripstone",
+        BRICKS => "minecraft:bricks",
         _ => "minecraft:unknown",
     }
 }

@@ -439,9 +439,9 @@ impl OffscreenFlatClientHost {
     fn apply_scripted_interaction(&mut self) -> Result<()> {
         let target = self.scripted_interaction_target()?;
         let report = self.run_script(&scripted_interaction_script(target))?;
-        if report.input_frame_count != 2 || report.world_action_count != 2 {
+        if report.input_frame_count != 3 || report.world_action_count != 2 {
             bail!(
-                "scripted interaction expected 2 input frames and 2 world actions, got {} input frames and {} world actions",
+                "scripted interaction expected 3 input frames and 2 world actions, got {} input frames and {} world actions",
                 report.input_frame_count,
                 report.world_action_count
             );
@@ -594,7 +594,9 @@ fn configure_screenshot_scene(
     if options.scripted_interaction {
         host.apply_scripted_interaction()?;
     }
-    host.frame_first_actor();
+    if !options.scripted_interaction {
+        host.frame_first_actor();
+    }
     if let Some(eye) = options.eye {
         host.set_eye_override(eye);
     }
@@ -648,6 +650,12 @@ fn action_input_frame(action: FlatInputAction) -> FlatInputFrame {
     frame
 }
 
+fn hotbar_input_frame(slot: u8) -> FlatInputFrame {
+    let mut frame = FlatInputFrame::default();
+    frame.apply_intent(FlatInputIntent::SelectHotbarSlot(slot));
+    frame
+}
+
 fn scripted_interaction_script(target: ScriptedInteractionTarget) -> OffscreenScript {
     let interaction_eye = Vec3::new(
         target.x as f32 + 0.5,
@@ -668,6 +676,10 @@ fn scripted_interaction_script(target: ScriptedInteractionTarget) -> OffscreenSc
         OffscreenScriptStep::SetCameraLookAt {
             eye: interaction_eye,
             target: interaction_target,
+        },
+        OffscreenScriptStep::InputFrame {
+            frame: hotbar_input_frame(7),
+            require_changed_action: None,
         },
         OffscreenScriptStep::InputFrame {
             frame: action_input_frame(FlatInputAction::Attack),
@@ -715,7 +727,7 @@ mod tests {
     fn scripted_interaction_script_has_camera_input_and_final_pose_steps() {
         let script = scripted_interaction_script(ScriptedInteractionTarget { x: 1, y: 64, z: 2 });
 
-        assert_eq!(script.steps().len(), 4);
+        assert_eq!(script.steps().len(), 5);
         assert!(matches!(
             script.steps()[0],
             OffscreenScriptStep::SetCameraLookAt { .. }
@@ -723,19 +735,29 @@ mod tests {
         assert!(matches!(
             script.steps()[1],
             OffscreenScriptStep::InputFrame {
+                frame: FlatInputFrame {
+                    selected_hotbar_slot: Some(7),
+                    ..
+                },
+                require_changed_action: None,
+            }
+        ));
+        assert!(matches!(
+            script.steps()[2],
+            OffscreenScriptStep::InputFrame {
                 require_changed_action: Some(FlatInputAction::Attack),
                 ..
             }
         ));
         assert!(matches!(
-            script.steps()[2],
+            script.steps()[3],
             OffscreenScriptStep::InputFrame {
                 require_changed_action: Some(FlatInputAction::Use),
                 ..
             }
         ));
         assert!(matches!(
-            script.steps()[3],
+            script.steps()[4],
             OffscreenScriptStep::SetCameraPose { .. }
         ));
     }

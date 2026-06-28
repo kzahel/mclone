@@ -70,6 +70,12 @@ placement rules.
   `SetCarriedItem` on the next carried-item sync when the slot changed,
   `UseItemOn` now carries only hand and hit result, and the server resolves
   placement from its own debug hotbar.
+- 2026-06-28: Added `minecraft:bricks` as the first explicitly build-oriented
+  debug hotbar block. The implementation follows the already-ported Java
+  `UseOnContext` -> `BlockPlaceContext` -> `BlockItem.place` path: bricks use
+  the generic full-block placement state, can survive by default, place only
+  through the server-selected hotbar, and render through the vanilla extracted
+  blockstate/model/texture assets.
 
 ## Current Native State
 

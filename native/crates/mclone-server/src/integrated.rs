@@ -987,7 +987,9 @@ mod tests {
         AcceptTeleportCommand, EntityId, EntityKind, EntitySnapshot, EntityUpdate,
         PlayerPositionRelativeFlags, RemotePlayerId, RemotePlayerUpdate, ServerUpdate,
     };
-    use mclone_worldgen::block::{DIRT, GRASS, SNOW, STONE, has_fluid, material_blocks_motion};
+    use mclone_worldgen::block::{
+        BRICKS, DIRT, GRASS, SNOW, STONE, has_fluid, material_blocks_motion,
+    };
 
     fn last_time_update(report: &ServerSimulationTickReport) -> u64 {
         report
@@ -2046,6 +2048,37 @@ mod tests {
                 ServerUpdate::SectionBlockUpdates { updates, .. } => updates
                     .iter()
                     .any(|update| update.block_state == BlockStateId(DIRT as u32)),
+                _ => false,
+            }
+        }));
+    }
+
+    #[test]
+    fn debug_place_command_places_bricks_from_selected_hotbar_slot() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
+        sync_carried_slot(&mut server, 7);
+        let clicked = BlockPos::new(8, 80, 8);
+        let target = clicked.relative(Direction::Up);
+        assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let updates = server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.5, 81.0, 8.5),
+                Direction::Up,
+                clicked,
+                false,
+            )))
+            .expect("place command");
+
+        assert_eq!(server.scheduler().block_at_world(target), Some(BRICKS));
+        assert!(updates.iter().any(|update| {
+            match update {
+                ServerUpdate::SectionBlockUpdates { updates, .. } => updates
+                    .iter()
+                    .any(|update| update.block_state == BlockStateId(BRICKS as u32)),
                 _ => false,
             }
         }));
