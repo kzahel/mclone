@@ -26,18 +26,20 @@ use mclone_render::headless::{
 use mclone_render::screen_effect::UnderwaterOverlay;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render_session::actor_instances_from_presentations;
-use mclone_ui::{GameUi, GuiDrawList, GuiScale, Point, render_loading_progress_panel_at};
+use mclone_ui::{GameUi, GuiDrawList, GuiScale};
 
-use crate::app::game_ui_render_state;
 use crate::camera::SpectatorCamera;
 use crate::cli::{
     HeadlessDualViewOptions, HeadlessScreenshotOptions, RendererRebuildSmokeOptions, SceneOptions,
 };
-use crate::flat_client_driver::FlatClientDriver;
+use crate::flat_client_driver::{
+    FlatClientDebugFrame, FlatClientDriver, FlatClientUiFrame, FlatClientUiRenderOptions,
+    game_ui_render_state,
+};
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState, FrameTimingStats};
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneAssets, WindowSceneRuntime, poll_window_runtime_until_idle};
-use crate::ui::{DebugPaneStats, render_debug_pane};
+use crate::ui::DebugPaneStats;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct HeadlessScreenshotReport {
@@ -573,14 +575,14 @@ fn render_renderer_rebuild_smoke_frame(
         &state.actor_interpolation.presentations(),
         state.runtime.client(),
     );
-    let ui_render_state = game_ui_render_state(
-        state.runtime.render_distance() as i32,
-        state.render_options,
-        FramePacingUiState::default(),
-        false,
-        1.0,
-        1.0,
-    );
+    let ui_render_state = game_ui_render_state(FlatClientUiRenderOptions {
+        render_distance: state.runtime.render_distance() as i32,
+        render_options: state.render_options,
+        frame_pacing: FramePacingUiState::default(),
+        fly_enabled: false,
+        fly_speed_multiplier: 1.0,
+        movement_speed_multiplier: 1.0,
+    });
     let gui_scale = state.ui.scale();
     let gui_state = FullFrameGui::new(
         state.ui.is_active(),
@@ -784,9 +786,6 @@ pub(crate) fn run_headless_screenshot(
                 color_profile: render_options.color_profile.label(),
                 render_scale: DEFAULT_RENDER_SCALE,
             });
-            let ui_active = ui.is_active();
-            let ui_covers_world = ui.covers_world();
-            let debug_stats = (!ui_active).then_some(debug_stats).flatten();
             let debug_view_readiness_overlay = debug_stats
                 .is_some()
                 .then(|| {
@@ -796,49 +795,25 @@ pub(crate) fn run_headless_screenshot(
                         .and_then(WindowSceneRuntime::view_readiness_overlay)
                 })
                 .flatten();
-            let gui_active =
-                ui_active || debug_stats.is_some() || debug_view_readiness_overlay.is_some();
-            let gui_scale = ui.scale();
-            let base_ui_draw = ui.render_draw_list(game_ui_render_state(
-                driver.current_render_distance(options.scene.render_distance) as i32,
-                render_options,
-                FramePacingUiState::default(),
-                false,
-                1.0,
-                1.0,
-            ));
-            let gui_state = FullFrameGui::new(
-                gui_active,
-                ui_covers_world,
-                [gui_scale.width, gui_scale.height],
-            );
-
-            driver.render_full_frame(
-                frame,
-                options.scene.render_distance,
-                ui_active,
-                gui_state,
-                |stats| {
-                    let mut ui_draw = base_ui_draw;
-                    if let Some(mut debug_stats) = debug_stats {
-                        debug_stats.render = *stats;
-                        render_debug_pane(gui_scale, &mut ui_draw, &debug_stats);
-                    }
-                    if let Some(progress) = &debug_view_readiness_overlay {
-                        render_loading_progress_panel_at(
-                            gui_scale,
-                            &mut ui_draw,
-                            progress,
-                            Point {
-                                x: (gui_scale.width - 132.0).max(4.0),
-                                y: 4.0,
-                            },
-                            "VIEW",
-                        );
-                    }
-                    ui_draw
+            let ui_frame = FlatClientUiFrame {
+                ui: &ui,
+                render_options: FlatClientUiRenderOptions {
+                    render_distance: driver.current_render_distance(options.scene.render_distance)
+                        as i32,
+                    render_options,
+                    frame_pacing: FramePacingUiState::default(),
+                    fly_enabled: false,
+                    fly_speed_multiplier: 1.0,
+                    movement_speed_multiplier: 1.0,
                 },
-            )
+                hud: None,
+                loading_progress_overlay: None,
+                debug: FlatClientDebugFrame {
+                    stats: debug_stats,
+                    view_readiness_overlay: debug_view_readiness_overlay,
+                },
+            };
+            driver.render_full_frame_with_ui(frame, options.scene.render_distance, ui_frame)
         },
     )?;
     let underwater = driver.underwater_overlay(driver.camera_view()).is_some();

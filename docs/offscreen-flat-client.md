@@ -86,11 +86,12 @@ interpolation, render options, render stats, and frame timing, but the desktop
 `winit` app shell still drives much of the real client lifetime directly.
 `run_headless_screenshot` now constructs that driver, rebuilds render resources
 through it, uploads sections through it, and renders through
-`FlatClientDriver::render_full_frame`, but it is still screenshot-shaped: it
-creates a fresh runtime/driver per capture and owns scenario debug/UI setup plus
-scripted interaction state. That still lets desktop features miss headless until
-session/UI lifetime moves behind shared driver methods and an offscreen host can
-run the same driver for multiple frames.
+`FlatClientDriver::render_full_frame_with_ui`, including shared debug/HUD/status
+draw-list assembly. It is still screenshot-shaped: it creates a fresh
+runtime/driver per capture and owns scenario UI setup plus scripted interaction
+state. That still lets desktop features miss headless until session/UI lifetime
+moves behind shared driver methods and an offscreen host can run the same driver
+for multiple frames.
 
 ## Desired Cleanup Shape
 

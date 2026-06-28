@@ -13,9 +13,8 @@ use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameFramePacingMode, GameScreen, GameUi,
-    GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, render_flat_hud,
-    render_loading_progress_overlay, render_loading_progress_panel_at,
+    DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameScreen, GameUi, GameUiAction,
+    GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -27,30 +26,26 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 
 use crate::cli::{SceneOptions, WindowStartIntent};
 use crate::flat_client_driver::{
-    FlatClientCameraView, FlatClientDriver, FlatClientWorldActionStatus,
+    FlatClientCameraView, FlatClientDebugFrame, FlatClientDriver, FlatClientUiFrame,
+    FlatClientUiRenderOptions, FlatClientWorldActionStatus, game_ui_render_state,
 };
 use crate::frame_pacing::{
-    FramePacing, FramePacingMode, FramePacingUiState, FrameTimingStats, RedrawSchedule, elapsed_ms,
+    FramePacing, FramePacingMode, FrameTimingStats, RedrawSchedule, elapsed_ms,
     next_capped_redraw_deadline, redraw_schedule,
 };
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{
     WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump, poll_window_runtime_until_idle,
 };
-use crate::ui::{DebugPaneStats, render_debug_pane};
+use crate::ui::DebugPaneStats;
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
-use mclone_app_runtime::frame_render::FullFrameGui;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
     RemoteSessionEndpoint, SessionFailure, SessionStartRequest, SessionStartResult,
     StartedGameSession,
 };
 use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
-use mclone_render_session::{
-    ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
-    ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
-    EngineCameraMovementMode,
-};
+use mclone_render_session::EngineCameraMovementMode;
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
 const RENDER_RESOURCE_REBUILD_KEY: KeyCode = KeyCode::F8;
@@ -99,42 +94,6 @@ fn next_desktop_render_scale(current: f32) -> f32 {
         return DEFAULT_RENDER_SCALE;
     };
     DESKTOP_RENDER_SCALE_PRESETS[(index + 1) % DESKTOP_RENDER_SCALE_PRESETS.len()]
-}
-
-pub(crate) fn game_ui_render_state(
-    render_distance: i32,
-    render_options: TexturedSectionRenderOptions,
-    frame_pacing: FramePacingUiState,
-    fly_enabled: bool,
-    fly_speed_multiplier: f32,
-    movement_speed_multiplier: f32,
-) -> GameUiRenderState {
-    GameUiRenderState {
-        render_distance,
-        min_render_distance: MIN_RENDER_DISTANCE,
-        max_render_distance: MAX_RENDER_DISTANCE,
-        section_occlusion_culling: render_options.section_occlusion_culling,
-        force_fullbright: render_options.force_fullbright,
-        fly_enabled,
-        fly_speed_multiplier,
-        min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
-        max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
-        movement_speed_multiplier,
-        min_movement_speed_multiplier: ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32,
-        max_movement_speed_multiplier: ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32,
-        frame_pacing_mode: game_frame_pacing_mode(frame_pacing.mode),
-        fps_cap: frame_pacing.fps_cap,
-        touch_controls_mode: None,
-        touch_settings: None,
-    }
-}
-
-fn game_frame_pacing_mode(mode: FramePacingMode) -> GameFramePacingMode {
-    match mode {
-        FramePacingMode::Vsync => GameFramePacingMode::Vsync,
-        FramePacingMode::Capped => GameFramePacingMode::Capped,
-        FramePacingMode::Uncapped => GameFramePacingMode::Uncapped,
-    }
 }
 
 fn gui_key_from_key_code(key_code: KeyCode) -> Option<GuiKey> {
@@ -432,14 +391,15 @@ impl ChunkApp {
     }
 
     fn current_ui_render_state(&self) -> GameUiRenderState {
-        let mut state = game_ui_render_state(
-            i32::try_from(self.current_render_distance()).unwrap_or(MAX_RENDER_DISTANCE),
-            self.driver.render_options,
-            self.frame_pacing.ui_state(),
-            self.driver.camera.movement_mode() == EngineCameraMovementMode::NoClip,
-            self.driver.camera.fly_speed_multiplier() as f32,
-            self.driver.camera.movement_speed_multiplier() as f32,
-        );
+        let mut state = game_ui_render_state(FlatClientUiRenderOptions {
+            render_distance: i32::try_from(self.current_render_distance())
+                .unwrap_or(MAX_RENDER_DISTANCE),
+            render_options: self.driver.render_options,
+            frame_pacing: self.frame_pacing.ui_state(),
+            fly_enabled: self.driver.camera.movement_mode() == EngineCameraMovementMode::NoClip,
+            fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
+            movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
+        });
         state.touch_controls_mode = Some(self.input_preferences.touch_controls);
         state
     }
@@ -1707,40 +1667,45 @@ impl ApplicationHandler for ChunkApp {
                     return;
                 };
                 self.ui.set_scale(gui_scale);
-                let ui_active = self.ui.is_active();
-                let ui_render_state = self.current_ui_render_state();
                 let render_options = self.driver.effective_render_options();
                 let debug_stats = (self.debug_visible && self.driver.runtime.is_some())
                     .then(|| self.debug_pane_stats(render_options));
-                let ui_covers_world = self.ui.covers_world();
-                let debug_stats = (!ui_active).then_some(debug_stats).flatten();
                 let status_overlay = self.session_status_overlay();
-                let flat_hud = self.current_flat_hud(status_overlay, ui_active);
+                let flat_hud = self.current_flat_hud(status_overlay, self.ui.is_active());
                 let loading_progress_overlay = self
                     .startup
                     .as_ref()
                     .and_then(|startup| startup.pump.progress_overlay());
-                let debug_view_readiness_overlay =
-                    (!ui_active && self.debug_visible && loading_progress_overlay.is_none())
-                        .then(|| {
-                            self.driver
-                                .runtime
-                                .as_ref()
-                                .and_then(WindowSceneRuntime::view_readiness_overlay)
-                        })
-                        .flatten();
-                let gui_active = ui_active
-                    || debug_stats.is_some()
-                    || flat_hud.has_visible_commands()
-                    || loading_progress_overlay.is_some()
-                    || debug_view_readiness_overlay.is_some();
-                let gui_scale = self.ui.scale();
-                let base_ui_draw = self.ui.render_draw_list(ui_render_state);
-                let gui_state = FullFrameGui::new(
-                    gui_active,
-                    ui_covers_world || loading_progress_overlay.is_some(),
-                    [gui_scale.width, gui_scale.height],
-                );
+                let debug_view_readiness_overlay = (self.debug_visible
+                    && loading_progress_overlay.is_none())
+                .then(|| {
+                    self.driver
+                        .runtime
+                        .as_ref()
+                        .and_then(WindowSceneRuntime::view_readiness_overlay)
+                })
+                .flatten();
+                let ui_render_options = FlatClientUiRenderOptions {
+                    render_distance: i32::try_from(self.current_render_distance())
+                        .unwrap_or(MAX_RENDER_DISTANCE),
+                    render_options: self.driver.render_options,
+                    frame_pacing: self.frame_pacing.ui_state(),
+                    fly_enabled: self.driver.camera.movement_mode()
+                        == EngineCameraMovementMode::NoClip,
+                    fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
+                    movement_speed_multiplier: self.driver.camera.movement_speed_multiplier()
+                        as f32,
+                };
+                let ui_frame = FlatClientUiFrame {
+                    ui: &self.ui,
+                    render_options: ui_render_options,
+                    hud: Some(flat_hud),
+                    loading_progress_overlay,
+                    debug: FlatClientDebugFrame {
+                        stats: debug_stats,
+                        view_readiness_overlay: debug_view_readiness_overlay,
+                    },
+                };
                 let render_start = Instant::now();
                 let result = {
                     let Some(surface) = &mut self.surface else {
@@ -1748,36 +1713,10 @@ impl ApplicationHandler for ChunkApp {
                     };
                     self.frame_pacing.apply_to_surface(surface);
                     surface.render_with_report(|frame| {
-                        self.driver.render_full_frame(
+                        self.driver.render_full_frame_with_ui(
                             frame,
                             self.scene.render_distance,
-                            ui_active,
-                            gui_state,
-                            |stats| {
-                                let mut ui_draw = base_ui_draw;
-                                if let Some(progress) = &loading_progress_overlay {
-                                    render_loading_progress_overlay(
-                                        gui_scale,
-                                        &mut ui_draw,
-                                        progress,
-                                    );
-                                }
-                                render_flat_hud(gui_scale, &mut ui_draw, &flat_hud);
-                                if let Some(mut debug_stats) = debug_stats {
-                                    debug_stats.render = *stats;
-                                    render_debug_pane(gui_scale, &mut ui_draw, &debug_stats);
-                                }
-                                if let Some(progress) = &debug_view_readiness_overlay {
-                                    render_loading_progress_panel_at(
-                                        gui_scale,
-                                        &mut ui_draw,
-                                        progress,
-                                        loading_progress_debug_panel_origin(gui_scale),
-                                        "VIEW",
-                                    );
-                                }
-                                ui_draw
-                            },
+                            ui_frame,
                         )?;
                         Ok(())
                     })
@@ -1834,13 +1773,6 @@ impl ApplicationHandler for ChunkApp {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.schedule_next_redraw(event_loop);
-    }
-}
-
-fn loading_progress_debug_panel_origin(scale: GuiScale) -> Point {
-    Point {
-        x: (scale.width - 132.0).max(4.0),
-        y: 4.0,
     }
 }
 

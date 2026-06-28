@@ -24,7 +24,6 @@ use mclone_render::target::RenderFrameContext;
 use mclone_render_session::actor_instances_from_presentations;
 use mclone_ui::{GameUi, GuiScale};
 
-use crate::app::game_ui_render_state;
 use crate::camera::{
     SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED, SpectatorCamera,
 };
@@ -32,6 +31,7 @@ use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, MovementPerfOptions, SceneOptions,
     TimedemoOptions,
 };
+use crate::flat_client_driver::{FlatClientUiRenderOptions, game_ui_render_state};
 use crate::frame_pacing::{FramePacingUiState, elapsed_ms};
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{
@@ -1406,14 +1406,14 @@ pub(crate) fn run_frame_budget_probe(
                     .runtime
                     .traversal_ready_render_section_keys(spectator.position),
             );
-            let ui_render_state = game_ui_render_state(
-                state.runtime.render_distance() as i32,
+            let ui_render_state = game_ui_render_state(FlatClientUiRenderOptions {
+                render_distance: state.runtime.render_distance() as i32,
                 render_options,
-                FramePacingUiState::default(),
-                false,
-                1.0,
-                1.0,
-            );
+                frame_pacing: FramePacingUiState::default(),
+                fly_enabled: false,
+                fly_speed_multiplier: 1.0,
+                movement_speed_multiplier: 1.0,
+            });
             let gui_scale = state.ui.scale();
             let gui_state = FullFrameGui::new(
                 state.ui.is_active(),

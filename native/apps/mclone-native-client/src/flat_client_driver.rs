@@ -25,12 +25,22 @@ use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
     RenderSectionCacheUpdate, actor_instances_from_presentations, render_camera_from_snapshot,
 };
-use mclone_ui::GuiDrawList;
+use mclone_ui::{
+    FlatHud, GameFramePacingMode, GameUi, GameUiRenderState, GuiDrawList, GuiScale,
+    LoadingProgressOverlay, Point, render_flat_hud, render_loading_progress_overlay,
+    render_loading_progress_panel_at,
+};
 
 use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
 use crate::cli::SceneOptions;
-use crate::frame_pacing::FrameTimingStats;
+use crate::frame_pacing::{FramePacingMode, FramePacingUiState, FrameTimingStats};
 use crate::scene_runtime::WindowSceneRuntime;
+use crate::ui::{DebugPaneStats, render_debug_pane};
+use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
+use mclone_render_session::{
+    ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
+    ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct FlatClientCameraView {
@@ -124,6 +134,31 @@ pub(crate) struct FlatClientFrameInputs {
     pub(crate) selection_outline: Option<SelectionOutline>,
     pub(crate) traversal_ready_sections: BTreeSet<RenderSectionKey>,
     pub(crate) render_stats: RenderStreamStats,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct FlatClientUiRenderOptions {
+    pub(crate) render_distance: i32,
+    pub(crate) render_options: TexturedSectionRenderOptions,
+    pub(crate) frame_pacing: FramePacingUiState,
+    pub(crate) fly_enabled: bool,
+    pub(crate) fly_speed_multiplier: f32,
+    pub(crate) movement_speed_multiplier: f32,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FlatClientDebugFrame {
+    pub(crate) stats: Option<DebugPaneStats>,
+    pub(crate) view_readiness_overlay: Option<LoadingProgressOverlay>,
+}
+
+#[derive(Debug)]
+pub(crate) struct FlatClientUiFrame<'a> {
+    pub(crate) ui: &'a GameUi,
+    pub(crate) render_options: FlatClientUiRenderOptions,
+    pub(crate) hud: Option<FlatHud>,
+    pub(crate) loading_progress_overlay: Option<LoadingProgressOverlay>,
+    pub(crate) debug: FlatClientDebugFrame,
 }
 
 impl FlatClientDriver {
@@ -715,6 +750,56 @@ impl FlatClientDriver {
         Ok(summary)
     }
 
+    pub(crate) fn render_full_frame_with_ui(
+        &mut self,
+        frame: mclone_render::target::RenderFrameContext<'_>,
+        fallback_render_distance: i32,
+        ui_frame: FlatClientUiFrame<'_>,
+    ) -> anyhow::Result<FullFrameRenderSummary> {
+        let ui_active = ui_frame.ui.is_active();
+        let ui_covers_world = ui_frame.ui.covers_world();
+        let gui_scale = ui_frame.ui.scale();
+        let debug_stats = (!ui_active).then_some(ui_frame.debug.stats).flatten();
+        let debug_view_readiness_overlay = debug_stats
+            .is_some()
+            .then_some(ui_frame.debug.view_readiness_overlay)
+            .flatten();
+        let hud = ui_frame.hud;
+        let loading_progress_overlay = ui_frame.loading_progress_overlay;
+        let gui_active = ui_active
+            || debug_stats.is_some()
+            || hud
+                .as_ref()
+                .is_some_and(mclone_ui::FlatHud::has_visible_commands)
+            || loading_progress_overlay.is_some()
+            || debug_view_readiness_overlay.is_some();
+        let base_ui_draw = ui_frame
+            .ui
+            .render_draw_list(game_ui_render_state(ui_frame.render_options));
+        let gui_state = FullFrameGui::new(
+            gui_active,
+            ui_covers_world || loading_progress_overlay.is_some(),
+            [gui_scale.width, gui_scale.height],
+        );
+        self.render_full_frame(
+            frame,
+            fallback_render_distance,
+            ui_active,
+            gui_state,
+            |stats| {
+                render_flat_client_gui_draw(
+                    base_ui_draw,
+                    gui_scale,
+                    hud.as_ref(),
+                    loading_progress_overlay.as_ref(),
+                    debug_stats,
+                    debug_view_readiness_overlay.as_ref(),
+                    stats,
+                )
+            },
+        )
+    }
+
     pub(crate) fn sync_spectator_from_camera(&mut self) {
         sync_spectator_from_camera(&mut self.spectator, &self.camera);
     }
@@ -741,6 +826,69 @@ impl FlatClientDriver {
         self.render_stats = RenderStreamStats::default();
         self.frame_timing = FrameTimingStats::default();
     }
+}
+
+pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUiRenderState {
+    GameUiRenderState {
+        render_distance: options.render_distance,
+        min_render_distance: MIN_RENDER_DISTANCE,
+        max_render_distance: MAX_RENDER_DISTANCE,
+        section_occlusion_culling: options.render_options.section_occlusion_culling,
+        force_fullbright: options.render_options.force_fullbright,
+        fly_enabled: options.fly_enabled,
+        fly_speed_multiplier: options.fly_speed_multiplier,
+        min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
+        max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
+        movement_speed_multiplier: options.movement_speed_multiplier,
+        min_movement_speed_multiplier: ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32,
+        max_movement_speed_multiplier: ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32,
+        frame_pacing_mode: game_frame_pacing_mode(options.frame_pacing.mode),
+        fps_cap: options.frame_pacing.fps_cap,
+        touch_controls_mode: None,
+        touch_settings: None,
+    }
+}
+
+pub(crate) fn game_frame_pacing_mode(mode: FramePacingMode) -> GameFramePacingMode {
+    match mode {
+        FramePacingMode::Vsync => GameFramePacingMode::Vsync,
+        FramePacingMode::Capped => GameFramePacingMode::Capped,
+        FramePacingMode::Uncapped => GameFramePacingMode::Uncapped,
+    }
+}
+
+fn render_flat_client_gui_draw(
+    mut ui_draw: GuiDrawList,
+    gui_scale: GuiScale,
+    hud: Option<&FlatHud>,
+    loading_progress_overlay: Option<&LoadingProgressOverlay>,
+    debug_stats: Option<DebugPaneStats>,
+    debug_view_readiness_overlay: Option<&LoadingProgressOverlay>,
+    stats: &RenderStreamStats,
+) -> GuiDrawList {
+    if let Some(progress) = loading_progress_overlay {
+        render_loading_progress_overlay(gui_scale, &mut ui_draw, progress);
+    }
+    if let Some(hud) = hud {
+        render_flat_hud(gui_scale, &mut ui_draw, hud);
+    }
+    if let Some(mut debug_stats) = debug_stats {
+        debug_stats.render = *stats;
+        render_debug_pane(gui_scale, &mut ui_draw, &debug_stats);
+    }
+    if let Some(progress) = debug_view_readiness_overlay {
+        render_loading_progress_panel_at(
+            gui_scale,
+            &mut ui_draw,
+            progress,
+            Point {
+                x: (gui_scale.width - 132.0).max(4.0),
+                y: 4.0,
+            },
+            "VIEW",
+        );
+    }
+    ui_draw
 }
 
 pub(crate) fn effective_render_options_for_camera(
