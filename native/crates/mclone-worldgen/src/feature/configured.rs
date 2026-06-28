@@ -230,8 +230,43 @@ impl StraightTrunkPlacerConfiguration {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrunkPlacerConfiguration {
+    Straight(StraightTrunkPlacerConfiguration),
+    Fancy(StraightTrunkPlacerConfiguration),
+}
+
+impl TrunkPlacerConfiguration {
+    pub const fn straight(base_height: i32, height_rand_a: i32, height_rand_b: i32) -> Self {
+        Self::Straight(StraightTrunkPlacerConfiguration::new(
+            base_height,
+            height_rand_a,
+            height_rand_b,
+        ))
+    }
+
+    pub const fn fancy(base_height: i32, height_rand_a: i32, height_rand_b: i32) -> Self {
+        Self::Fancy(StraightTrunkPlacerConfiguration::new(
+            base_height,
+            height_rand_a,
+            height_rand_b,
+        ))
+    }
+
+    pub(super) fn tree_height(self, random: &mut impl RandomSource) -> i32 {
+        match self {
+            Self::Straight(config) | Self::Fancy(config) => config.tree_height(random),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FoliagePlacerConfiguration {
     Blob {
+        radius: IntProvider,
+        offset: IntProvider,
+        height: i32,
+    },
+    Fancy {
         radius: IntProvider,
         offset: IntProvider,
         height: i32,
@@ -257,6 +292,7 @@ impl FoliagePlacerConfiguration {
     ) -> i32 {
         match self {
             Self::Blob { height, .. } => height,
+            Self::Fancy { height, .. } => height,
             Self::Spruce { trunk_height, .. } => (tree_height - trunk_height.sample(random)).max(4),
             Self::Pine { height, .. } => height.sample(random),
         }
@@ -264,7 +300,7 @@ impl FoliagePlacerConfiguration {
 
     pub(super) fn foliage_radius(self, random: &mut impl RandomSource, trunk_height: i32) -> i32 {
         match self {
-            Self::Blob { radius, .. } => radius.sample(random),
+            Self::Blob { radius, .. } | Self::Fancy { radius, .. } => radius.sample(random),
             Self::Spruce { radius, .. } => radius.sample(random),
             Self::Pine { radius, .. } => {
                 radius.sample(random) + random.next_int_bound((trunk_height + 1).max(1))
@@ -274,9 +310,10 @@ impl FoliagePlacerConfiguration {
 
     pub(super) fn offset(self, random: &mut impl RandomSource) -> i32 {
         match self {
-            Self::Blob { offset, .. } | Self::Spruce { offset, .. } | Self::Pine { offset, .. } => {
-                offset.sample(random)
-            }
+            Self::Blob { offset, .. }
+            | Self::Fancy { offset, .. }
+            | Self::Spruce { offset, .. }
+            | Self::Pine { offset, .. } => offset.sample(random),
         }
     }
 }
@@ -286,6 +323,7 @@ pub struct TwoLayersFeatureSize {
     pub limit: i32,
     pub lower_size: i32,
     pub upper_size: i32,
+    pub min_clipped_height: Option<i32>,
 }
 
 impl TwoLayersFeatureSize {
@@ -294,7 +332,13 @@ impl TwoLayersFeatureSize {
             limit,
             lower_size,
             upper_size,
+            min_clipped_height: None,
         }
+    }
+
+    pub const fn with_min_clipped_height(mut self, min_clipped_height: i32) -> Self {
+        self.min_clipped_height = Some(min_clipped_height);
+        self
     }
 
     pub const fn size_at_height(self, height: i32) -> i32 {
@@ -306,20 +350,23 @@ impl TwoLayersFeatureSize {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TreeConfiguration {
     pub log: RawBlockId,
     pub leaves: RawBlockId,
-    pub trunk_placer: StraightTrunkPlacerConfiguration,
+    pub trunk_placer: TrunkPlacerConfiguration,
     pub foliage_placer: FoliagePlacerConfiguration,
     pub minimum_size: TwoLayersFeatureSize,
+    pub beehive_probability: Option<f32>,
 }
+
+impl Eq for TreeConfiguration {}
 
 impl TreeConfiguration {
     pub const fn new(
         log: RawBlockId,
         leaves: RawBlockId,
-        trunk_placer: StraightTrunkPlacerConfiguration,
+        trunk_placer: TrunkPlacerConfiguration,
         foliage_placer: FoliagePlacerConfiguration,
         minimum_size: TwoLayersFeatureSize,
     ) -> Self {
@@ -329,14 +376,20 @@ impl TreeConfiguration {
             trunk_placer,
             foliage_placer,
             minimum_size,
+            beehive_probability: None,
         }
+    }
+
+    pub const fn with_beehive_probability(mut self, probability: f32) -> Self {
+        self.beehive_probability = Some(probability);
+        self
     }
 
     pub const fn oak() -> Self {
         Self::new(
             OAK_LOG,
             OAK_LEAVES,
-            StraightTrunkPlacerConfiguration::new(4, 2, 0),
+            TrunkPlacerConfiguration::straight(4, 2, 0),
             FoliagePlacerConfiguration::Blob {
                 radius: IntProvider::constant(2),
                 offset: IntProvider::constant(0),
@@ -344,13 +397,17 @@ impl TreeConfiguration {
             },
             TwoLayersFeatureSize::new(1, 0, 1),
         )
+    }
+
+    pub const fn oak_bees_0002() -> Self {
+        Self::oak().with_beehive_probability(0.002)
     }
 
     pub const fn birch() -> Self {
         Self::new(
             BIRCH_LOG,
             BIRCH_LEAVES,
-            StraightTrunkPlacerConfiguration::new(5, 2, 0),
+            TrunkPlacerConfiguration::straight(5, 2, 0),
             FoliagePlacerConfiguration::Blob {
                 radius: IntProvider::constant(2),
                 offset: IntProvider::constant(0),
@@ -360,11 +417,33 @@ impl TreeConfiguration {
         )
     }
 
+    pub const fn birch_bees_0002() -> Self {
+        Self::birch().with_beehive_probability(0.002)
+    }
+
+    pub const fn fancy_oak() -> Self {
+        Self::new(
+            OAK_LOG,
+            OAK_LEAVES,
+            TrunkPlacerConfiguration::fancy(3, 11, 0),
+            FoliagePlacerConfiguration::Fancy {
+                radius: IntProvider::constant(2),
+                offset: IntProvider::constant(4),
+                height: 4,
+            },
+            TwoLayersFeatureSize::new(0, 0, 0).with_min_clipped_height(4),
+        )
+    }
+
+    pub const fn fancy_oak_bees_0002() -> Self {
+        Self::fancy_oak().with_beehive_probability(0.002)
+    }
+
     pub const fn spruce() -> Self {
         Self::new(
             SPRUCE_LOG,
             SPRUCE_LEAVES,
-            StraightTrunkPlacerConfiguration::new(5, 2, 1),
+            TrunkPlacerConfiguration::straight(5, 2, 1),
             FoliagePlacerConfiguration::Spruce {
                 radius: IntProvider::uniform(2, 3),
                 offset: IntProvider::uniform(0, 2),
@@ -378,7 +457,7 @@ impl TreeConfiguration {
         Self::new(
             SPRUCE_LOG,
             SPRUCE_LEAVES,
-            StraightTrunkPlacerConfiguration::new(6, 4, 0),
+            TrunkPlacerConfiguration::straight(6, 4, 0),
             FoliagePlacerConfiguration::Pine {
                 radius: IntProvider::constant(1),
                 offset: IntProvider::constant(1),

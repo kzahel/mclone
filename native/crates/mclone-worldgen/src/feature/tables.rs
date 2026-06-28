@@ -563,15 +563,15 @@ fn forest_birch_other_feature() -> PlacedFeature {
         ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
             [
                 WeightedConfiguredFeature::new(
-                    ConfiguredFeature::tree(TreeConfiguration::birch()),
+                    ConfiguredFeature::tree(TreeConfiguration::birch_bees_0002()),
                     0.2,
                 ),
                 WeightedConfiguredFeature::new(
-                    ConfiguredFeature::tree(TreeConfiguration::oak()),
+                    ConfiguredFeature::tree(TreeConfiguration::fancy_oak_bees_0002()),
                     0.1,
                 ),
             ],
-            ConfiguredFeature::tree(TreeConfiguration::oak()),
+            ConfiguredFeature::tree(TreeConfiguration::oak_bees_0002()),
         )),
         tree_threshold_decorators(10, 0.1, 1),
     )

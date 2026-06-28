@@ -1733,40 +1733,20 @@ mod tests {
         );
         assert_eq!(actual.block_at_y(8, 67, 8).name(), "minecraft:oak_leaves");
 
-        let remaining_fancy_oak_index = ((70 - actual.min_y) << 8) | (8 << 4) | 8;
+        let fancy_oak_index = ((70 - actual.min_y) << 8) | (8 << 4) | 8;
         assert_eq!(
-            expected_blocks[remaining_fancy_oak_index as usize],
+            expected_blocks[fancy_oak_index as usize],
             "minecraft:oak_leaves"
         );
-        assert_eq!(actual.block_at_y(8, 70, 8).name(), "minecraft:air");
+        assert_eq!(actual.block_at_y(8, 70, 8).name(), "minecraft:oak_leaves");
 
         let report = compare_generated_chunk_to_full_fixture(&actual, expected);
 
         assert_eq!(report.total_blocks, 16 * 16 * 256);
-        assert_eq!(report.mismatched_blocks, 598, "{report:#?}");
+        assert_eq!(report.mismatched_blocks, 46, "{report:#?}");
         assert_eq!(
             report.top_mismatch_pairs,
             vec![
-                MismatchBucket {
-                    actual: "minecraft:air".to_owned(),
-                    expected: "minecraft:oak_leaves".to_owned(),
-                    count: 248,
-                },
-                MismatchBucket {
-                    actual: "minecraft:oak_leaves".to_owned(),
-                    expected: "minecraft:air".to_owned(),
-                    count: 108,
-                },
-                MismatchBucket {
-                    actual: "minecraft:birch_leaves".to_owned(),
-                    expected: "minecraft:air".to_owned(),
-                    count: 74,
-                },
-                MismatchBucket {
-                    actual: "minecraft:air".to_owned(),
-                    expected: "minecraft:birch_leaves".to_owned(),
-                    count: 42,
-                },
                 MismatchBucket {
                     actual: "minecraft:stone".to_owned(),
                     expected: "minecraft:dripstone_block".to_owned(),
@@ -1774,57 +1754,17 @@ mod tests {
                 },
                 MismatchBucket {
                     actual: "minecraft:air".to_owned(),
-                    expected: "minecraft:oak_log".to_owned(),
-                    count: 24,
-                },
-                MismatchBucket {
-                    actual: "minecraft:air".to_owned(),
                     expected: "minecraft:pointed_dripstone".to_owned(),
                     count: 9,
                 },
                 MismatchBucket {
-                    actual: "minecraft:birch_log".to_owned(),
-                    expected: "minecraft:air".to_owned(),
-                    count: 9,
-                },
-                MismatchBucket {
-                    actual: "minecraft:oak_leaves".to_owned(),
-                    expected: "minecraft:birch_leaves".to_owned(),
-                    count: 9,
-                },
-                MismatchBucket {
-                    actual: "minecraft:oak_log".to_owned(),
-                    expected: "minecraft:air".to_owned(),
-                    count: 8,
-                },
-                MismatchBucket {
-                    actual: "minecraft:air".to_owned(),
-                    expected: "minecraft:birch_log".to_owned(),
-                    count: 7,
-                },
-                MismatchBucket {
                     actual: "minecraft:air".to_owned(),
                     expected: "minecraft:grass".to_owned(),
-                    count: 5,
-                },
-                MismatchBucket {
-                    actual: "minecraft:grass_block".to_owned(),
-                    expected: "minecraft:dirt".to_owned(),
-                    count: 5,
-                },
-                MismatchBucket {
-                    actual: "minecraft:dirt".to_owned(),
-                    expected: "minecraft:grass_block".to_owned(),
-                    count: 4,
-                },
-                MismatchBucket {
-                    actual: "minecraft:birch_leaves".to_owned(),
-                    expected: "minecraft:oak_leaves".to_owned(),
                     count: 3,
                 },
                 MismatchBucket {
-                    actual: "minecraft:birch_log".to_owned(),
-                    expected: "minecraft:birch_leaves".to_owned(),
+                    actual: "minecraft:granite".to_owned(),
+                    expected: "minecraft:dripstone_block".to_owned(),
                     count: 3,
                 },
             ]

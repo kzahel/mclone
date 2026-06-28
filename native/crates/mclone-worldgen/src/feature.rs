@@ -22,7 +22,8 @@ pub use configured::{
     FoliagePlacerConfiguration, GlowLichenConfiguration, LakeConfiguration, OreConfiguration,
     OreTarget, OreTargetBlockState, RandomFeatureConfiguration, RandomPatchConfiguration,
     SimpleBlockConfiguration, SpringConfiguration, StraightTrunkPlacerConfiguration,
-    TreeConfiguration, TwoLayersFeatureSize, WeightedBlockState, WeightedConfiguredFeature,
+    TreeConfiguration, TrunkPlacerConfiguration, TwoLayersFeatureSize, WeightedBlockState,
+    WeightedConfiguredFeature,
 };
 pub use context::{DecorationStep, FeatureDecorationTiming, FeatureWorld};
 pub use placed::{
@@ -818,18 +819,18 @@ mod tests {
                     config.features,
                     vec![
                         WeightedConfiguredFeature::new(
-                            ConfiguredFeature::tree(TreeConfiguration::birch()),
+                            ConfiguredFeature::tree(TreeConfiguration::birch_bees_0002()),
                             0.2,
                         ),
                         WeightedConfiguredFeature::new(
-                            ConfiguredFeature::tree(TreeConfiguration::oak()),
+                            ConfiguredFeature::tree(TreeConfiguration::fancy_oak_bees_0002()),
                             0.1,
                         ),
                     ]
                 );
                 assert_eq!(
                     *config.default_feature,
-                    ConfiguredFeature::tree(TreeConfiguration::oak())
+                    ConfiguredFeature::tree(TreeConfiguration::oak_bees_0002())
                 );
             }
             other => panic!("expected forest birch_other random selector, got {other:?}"),

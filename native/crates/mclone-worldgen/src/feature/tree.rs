@@ -8,8 +8,55 @@ use crate::prng::RandomSource;
 
 use super::{
     BasicTreeConfiguration, FeatureWorld, FoliagePlacerConfiguration, TreeConfiguration,
-    project_to_surface,
+    TrunkPlacerConfiguration, project_to_surface,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FoliageAttachment {
+    pos: BlockPos,
+    radius_offset: i32,
+    double_trunk: bool,
+}
+
+impl FoliageAttachment {
+    const fn new(pos: BlockPos, radius_offset: i32, double_trunk: bool) -> Self {
+        Self {
+            pos,
+            radius_offset,
+            double_trunk,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FancyFoliageCoords {
+    attachment: FoliageAttachment,
+    branch_base_y: i32,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct TreePlacementBlocks {
+    trunks: Vec<BlockPos>,
+    leaves: Vec<BlockPos>,
+}
+
+impl TreePlacementBlocks {
+    fn record_trunk(&mut self, pos: BlockPos) {
+        if !self.trunks.contains(&pos) {
+            self.trunks.push(pos);
+        }
+    }
+
+    fn record_leaf(&mut self, pos: BlockPos) {
+        if !self.leaves.contains(&pos) {
+            self.leaves.push(pos);
+        }
+    }
+
+    fn has_tree_blocks(&self) -> bool {
+        !self.trunks.is_empty() || !self.leaves.is_empty()
+    }
+}
 
 pub(super) fn place_basic_tree<W: FeatureWorld>(
     world: &mut W,
@@ -91,20 +138,38 @@ pub(super) fn place_tree<W: FeatureWorld>(
         return false;
     }
     let max_free_tree_height = get_max_free_tree_height(world, tree_height, base, config);
-    if max_free_tree_height < tree_height {
+    if max_free_tree_height < tree_height
+        && !matches!(
+            config.minimum_size.min_clipped_height,
+            Some(min_clipped_height) if max_free_tree_height >= min_clipped_height
+        )
+    {
         return false;
     }
 
-    place_straight_trunk(world, random, base, tree_height, config);
-    let foliage_attachment = BlockPos::new(base.x, base.y + tree_height, base.z);
-    create_foliage(
+    let mut placement = TreePlacementBlocks::default();
+    let foliage_attachments = place_trunk(
         world,
         random,
+        base,
+        max_free_tree_height,
         config,
-        foliage_attachment,
-        foliage_height,
-        foliage_radius,
+        &mut placement,
     );
+    for foliage_attachment in foliage_attachments {
+        create_foliage(
+            world,
+            random,
+            config,
+            foliage_attachment,
+            foliage_height,
+            foliage_radius,
+            &mut placement,
+        );
+    }
+    if placement.has_tree_blocks() {
+        apply_tree_decorators(world, random, config, &placement);
+    }
     true
 }
 
@@ -129,13 +194,32 @@ fn get_max_free_tree_height<W: FeatureWorld>(
     tree_height
 }
 
+fn place_trunk<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    base: BlockPos,
+    height: i32,
+    config: TreeConfiguration,
+    placement: &mut TreePlacementBlocks,
+) -> Vec<FoliageAttachment> {
+    match config.trunk_placer {
+        TrunkPlacerConfiguration::Straight(_) => {
+            place_straight_trunk(world, random, base, height, config, placement)
+        }
+        TrunkPlacerConfiguration::Fancy(_) => {
+            place_fancy_trunk(world, random, base, height, config, placement)
+        }
+    }
+}
+
 fn place_straight_trunk<W: FeatureWorld>(
     world: &mut W,
     random: &mut impl RandomSource,
     base: BlockPos,
     height: i32,
     config: TreeConfiguration,
-) {
+    placement: &mut TreePlacementBlocks,
+) -> Vec<FoliageAttachment> {
     set_dirt_at(world, random, BlockPos::new(base.x, base.y - 1, base.z));
 
     for y_offset in 0..height {
@@ -144,24 +228,146 @@ fn place_straight_trunk<W: FeatureWorld>(
             random,
             BlockPos::new(base.x, base.y + y_offset, base.z),
             config,
+            placement,
         );
     }
+    vec![FoliageAttachment::new(
+        BlockPos::new(base.x, base.y + height, base.z),
+        0,
+        false,
+    )]
+}
+
+fn place_fancy_trunk<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    base: BlockPos,
+    height: i32,
+    config: TreeConfiguration,
+    placement: &mut TreePlacementBlocks,
+) -> Vec<FoliageAttachment> {
+    let height_with_crown = height + 2;
+    let trunk_height = (f64::from(height_with_crown) * 0.618).floor() as i32;
+    set_dirt_at(world, random, BlockPos::new(base.x, base.y - 1, base.z));
+
+    let cluster_count =
+        1.min((1.382 + (f64::from(height_with_crown) / 13.0).powi(2)).floor() as i32);
+    let branch_base_y = base.y + trunk_height;
+    let mut layer = height_with_crown - 5;
+    let mut foliage_coords = Vec::new();
+    foliage_coords.push(FancyFoliageCoords {
+        attachment: FoliageAttachment::new(BlockPos::new(base.x, base.y + layer, base.z), 0, false),
+        branch_base_y,
+    });
+
+    while layer >= 0 {
+        let shape = fancy_tree_shape(height_with_crown, layer);
+        if shape >= 0.0 {
+            for _ in 0..cluster_count {
+                let distance = f64::from(shape) * (f64::from(random.next_float()) + 0.328);
+                let angle = f64::from(random.next_float() * 2.0) * std::f64::consts::PI;
+                let x_offset = distance * angle.sin() + 0.5;
+                let z_offset = distance * angle.cos() + 0.5;
+                let foliage_pos = offset_double(base, x_offset, f64::from(layer - 1), z_offset);
+                let foliage_top = BlockPos::new(foliage_pos.x, foliage_pos.y + 5, foliage_pos.z);
+                if make_limb(
+                    world,
+                    random,
+                    foliage_pos,
+                    foliage_top,
+                    false,
+                    config,
+                    placement,
+                ) {
+                    let x_delta = base.x - foliage_pos.x;
+                    let z_delta = base.z - foliage_pos.z;
+                    let branch_base = f64::from(foliage_pos.y)
+                        - f64::from(x_delta * x_delta + z_delta * z_delta).sqrt() * 0.381;
+                    let branch_y = if branch_base > f64::from(branch_base_y) {
+                        branch_base_y
+                    } else {
+                        branch_base as i32
+                    };
+                    let branch_base_pos = BlockPos::new(base.x, branch_y, base.z);
+                    if make_limb(
+                        world,
+                        random,
+                        branch_base_pos,
+                        foliage_pos,
+                        false,
+                        config,
+                        placement,
+                    ) {
+                        foliage_coords.push(FancyFoliageCoords {
+                            attachment: FoliageAttachment::new(foliage_pos, 0, false),
+                            branch_base_y: branch_y,
+                        });
+                    }
+                }
+            }
+        }
+        layer -= 1;
+    }
+
+    make_limb(
+        world,
+        random,
+        base,
+        BlockPos::new(base.x, base.y + trunk_height, base.z),
+        true,
+        config,
+        placement,
+    );
+    for coords in &foliage_coords {
+        let branch_base = BlockPos::new(base.x, coords.branch_base_y, base.z);
+        if branch_base != coords.attachment.pos
+            && trim_fancy_branches(height_with_crown, coords.branch_base_y - base.y)
+        {
+            make_limb(
+                world,
+                random,
+                branch_base,
+                coords.attachment.pos,
+                true,
+                config,
+                placement,
+            );
+        }
+    }
+
+    foliage_coords
+        .into_iter()
+        .filter(|coords| trim_fancy_branches(height_with_crown, coords.branch_base_y - base.y))
+        .map(|coords| coords.attachment)
+        .collect()
 }
 
 fn create_foliage<W: FeatureWorld>(
     world: &mut W,
     random: &mut impl RandomSource,
     config: TreeConfiguration,
-    attachment: BlockPos,
+    attachment: FoliageAttachment,
     foliage_height: i32,
     foliage_radius: i32,
+    placement: &mut TreePlacementBlocks,
 ) {
     let offset = config.foliage_placer.offset(random);
     match config.foliage_placer {
         FoliagePlacerConfiguration::Blob { .. } => {
             for y_offset in ((offset - foliage_height)..=offset).rev() {
-                let radius = (foliage_radius - 1 - y_offset / 2).max(0);
-                place_leaves_row(world, random, config, attachment, radius, y_offset);
+                let radius = (foliage_radius + attachment.radius_offset - 1 - y_offset / 2).max(0);
+                place_leaves_row(
+                    world, random, config, attachment, radius, y_offset, placement,
+                );
+            }
+        }
+        FoliagePlacerConfiguration::Fancy { .. } => {
+            for y_offset in ((offset - foliage_height)..=offset).rev() {
+                let radius = foliage_radius
+                    + i32::from(y_offset != offset && y_offset != offset - foliage_height);
+                place_leaves_row(
+                    world, random, config, attachment, radius, y_offset, placement,
+                );
             }
         }
         FoliagePlacerConfiguration::Spruce { .. } => {
@@ -170,7 +376,9 @@ fn create_foliage<W: FeatureWorld>(
             let mut reset_radius = 0;
 
             for y_offset in (-(foliage_height)..=offset).rev() {
-                place_leaves_row(world, random, config, attachment, radius, y_offset);
+                place_leaves_row(
+                    world, random, config, attachment, radius, y_offset, placement,
+                );
                 if radius >= radius_limit {
                     radius = reset_radius;
                     reset_radius = 1;
@@ -184,7 +392,9 @@ fn create_foliage<W: FeatureWorld>(
             let mut radius = 0;
 
             for y_offset in ((offset - foliage_height)..=offset).rev() {
-                place_leaves_row(world, random, config, attachment, radius, y_offset);
+                place_leaves_row(
+                    world, random, config, attachment, radius, y_offset, placement,
+                );
                 if radius >= 1 && y_offset == offset - foliage_height + 1 {
                     radius -= 1;
                 } else if radius < foliage_radius {
@@ -199,12 +409,14 @@ fn place_leaves_row<W: FeatureWorld>(
     world: &mut W,
     random: &mut impl RandomSource,
     config: TreeConfiguration,
-    center: BlockPos,
+    attachment: FoliageAttachment,
     radius: i32,
     y_offset: i32,
+    placement: &mut TreePlacementBlocks,
 ) {
-    for x_offset in -radius..=radius {
-        for z_offset in -radius..=radius {
+    let double_trunk_width = i32::from(attachment.double_trunk);
+    for x_offset in -radius..=radius + double_trunk_width {
+        for z_offset in -radius..=radius + double_trunk_width {
             match config.foliage_placer {
                 FoliagePlacerConfiguration::Blob { .. } => {
                     if should_skip_blob_leaf(
@@ -214,6 +426,11 @@ fn place_leaves_row<W: FeatureWorld>(
                         z_offset.abs(),
                         radius,
                     ) {
+                        continue;
+                    }
+                }
+                FoliagePlacerConfiguration::Fancy { .. } => {
+                    if should_skip_fancy_leaf(x_offset, z_offset, radius, attachment.double_trunk) {
                         continue;
                     }
                 }
@@ -228,11 +445,12 @@ fn place_leaves_row<W: FeatureWorld>(
                 world,
                 random,
                 BlockPos::new(
-                    center.x + x_offset,
-                    center.y + y_offset,
-                    center.z + z_offset,
+                    attachment.pos.x + x_offset,
+                    attachment.pos.y + y_offset,
+                    attachment.pos.z + z_offset,
                 ),
                 config,
+                placement,
             );
         }
     }
@@ -252,14 +470,168 @@ fn should_skip_blob_leaf(
     abs_x == radius && abs_z == radius && (random.next_int_bound(2) == 0 || y_offset == 0)
 }
 
+fn should_skip_fancy_leaf(x_offset: i32, z_offset: i32, radius: i32, double_trunk: bool) -> bool {
+    let abs_x = if double_trunk {
+        x_offset.abs().min((x_offset - 1).abs())
+    } else {
+        x_offset.abs()
+    };
+    let abs_z = if double_trunk {
+        z_offset.abs().min((z_offset - 1).abs())
+    } else {
+        z_offset.abs()
+    };
+    let x = abs_x as f32 + 0.5;
+    let z = abs_z as f32 + 0.5;
+    x * x + z * z > (radius * radius) as f32
+}
+
+fn make_limb<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    from: BlockPos,
+    to: BlockPos,
+    place: bool,
+    config: TreeConfiguration,
+    placement: &mut TreePlacementBlocks,
+) -> bool {
+    if !place && from == to {
+        return true;
+    }
+
+    let delta = BlockPos::new(to.x - from.x, to.y - from.y, to.z - from.z);
+    let steps = delta.x.abs().max(delta.y.abs()).max(delta.z.abs());
+    if steps == 0 {
+        if place {
+            place_log(world, random, from, config, placement);
+        }
+        return true;
+    }
+
+    let step_x = delta.x as f32 / steps as f32;
+    let step_y = delta.y as f32 / steps as f32;
+    let step_z = delta.z as f32 / steps as f32;
+    for step in 0..=steps {
+        let pos = offset_double(
+            from,
+            f64::from(0.5_f32 + step as f32 * step_x),
+            f64::from(0.5_f32 + step as f32 * step_y),
+            f64::from(0.5_f32 + step as f32 * step_z),
+        );
+        if place {
+            place_log(world, random, pos, config, placement);
+        } else if !is_free_tree_pos(world, pos) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn offset_double(pos: BlockPos, x: f64, y: f64, z: f64) -> BlockPos {
+    BlockPos::new(
+        (f64::from(pos.x) + x).floor() as i32,
+        (f64::from(pos.y) + y).floor() as i32,
+        (f64::from(pos.z) + z).floor() as i32,
+    )
+}
+
+fn fancy_tree_shape(height: i32, layer: i32) -> f32 {
+    if (layer as f32) < (height as f32) * 0.3 {
+        return -1.0;
+    }
+
+    let half_height = height as f32 / 2.0;
+    let y_delta = half_height - layer as f32;
+    let mut radius = (half_height * half_height - y_delta * y_delta).sqrt();
+    if y_delta == 0.0 {
+        radius = half_height;
+    } else if y_delta.abs() >= half_height {
+        return 0.0;
+    }
+    radius * 0.5
+}
+
+fn trim_fancy_branches(height: i32, branch_base_offset: i32) -> bool {
+    (branch_base_offset as f32) >= (height as f32) * 0.2
+}
+
+fn apply_tree_decorators<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    config: TreeConfiguration,
+    placement: &TreePlacementBlocks,
+) {
+    if let Some(probability) = config.beehive_probability {
+        apply_beehive_decorator(world, random, probability, placement);
+    }
+}
+
+fn apply_beehive_decorator<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    probability: f32,
+    placement: &TreePlacementBlocks,
+) {
+    if random.next_float() >= probability || placement.trunks.is_empty() {
+        return;
+    }
+
+    let (dx, dz) = match random.next_int_bound(3) {
+        0 => (-1, 0),
+        1 => (1, 0),
+        _ => (0, 1),
+    };
+
+    let mut trunks = placement.trunks.clone();
+    let mut leaves = placement.leaves.clone();
+    trunks.sort_by_key(|pos| pos.y);
+    leaves.sort_by_key(|pos| pos.y);
+
+    let target_y = if let Some(first_leaf) = leaves.first() {
+        (first_leaf.y - 1).max(trunks[0].y)
+    } else {
+        (trunks[0].y + 1 + random.next_int_bound(3)).min(trunks[trunks.len() - 1].y)
+    };
+
+    let trunks_at_y = trunks
+        .iter()
+        .copied()
+        .filter(|pos| pos.y == target_y)
+        .collect::<Vec<_>>();
+    if trunks_at_y.is_empty() {
+        return;
+    }
+
+    let trunk = trunks_at_y[random.next_int_bound(trunks_at_y.len() as i32) as usize];
+    let hive_pos = BlockPos::new(trunk.x + dx, trunk.y, trunk.z + dz);
+    let hive_south = BlockPos::new(hive_pos.x, hive_pos.y, hive_pos.z + 1);
+    if is_air_block(world, hive_pos) && is_air_block(world, hive_south) {
+        let bee_count = 2 + random.next_int_bound(2);
+        for _ in 0..bee_count {
+            let _release_tick = random.next_int_bound(599);
+        }
+    }
+}
+
+fn is_air_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
+    matches!(world.block_at_world(pos), Some(AIR | CAVE_AIR))
+}
+
 fn place_log<W: FeatureWorld>(
     world: &mut W,
     _random: &mut impl RandomSource,
     pos: BlockPos,
     config: TreeConfiguration,
+    placement: &mut TreePlacementBlocks,
 ) -> bool {
     if valid_tree_pos(world, pos) {
-        world.set_block_world(pos, config.log)
+        if world.set_block_world(pos, config.log) {
+            placement.record_trunk(pos);
+            true
+        } else {
+            false
+        }
     } else {
         false
     }
@@ -270,9 +642,15 @@ fn try_place_leaf<W: FeatureWorld>(
     _random: &mut impl RandomSource,
     pos: BlockPos,
     config: TreeConfiguration,
+    placement: &mut TreePlacementBlocks,
 ) -> bool {
     if valid_tree_pos(world, pos) {
-        world.set_block_world(pos, config.leaves)
+        if world.set_block_world(pos, config.leaves) {
+            placement.record_leaf(pos);
+            true
+        } else {
+            false
+        }
     } else {
         false
     }
