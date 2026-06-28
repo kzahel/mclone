@@ -88,14 +88,14 @@ runtime replacement, and session status/failure UI. The desktop `winit` app
 shell still owns host execution for surface frames, frame pacing, mouse lock,
 input preferences, desktop runtime/startup factories, and desktop-only
 diagnostics.
-`run_headless_screenshot` now constructs that driver, rebuilds render resources
-through it, uploads sections through it, and renders through
-`FlatClientDriver::render_full_frame_with_ui`, including shared debug/HUD/status
-draw-list assembly and driver-owned UI scenario setup. It is still
-screenshot-shaped: it creates a fresh runtime/driver per capture and owns
-scripted interaction state. That still lets desktop features miss headless until
-a long-lived offscreen host can run the same driver for multiple frames with
-neutral input and explicit frame sinks.
+`mclone-native-client::offscreen_flat_client` now wraps that driver with native
+offscreen device/target callbacks, a deterministic frame clock, render-resource
+setup, runtime/startup factories, section upload, full-frame rendering, and the
+current screenshot PNG sink. `run_headless_screenshot` is now a one-frame use
+of that host, with screenshot-only scenario setup for camera override, requested
+UI screen, debug pane, remote settle delay, and scripted interaction. The
+remaining gap is a long-lived exposed offscreen mode that can run the same host
+for multiple frames with neutral input and explicit non-PNG frame sinks.
 
 ## Desired Cleanup Shape
 

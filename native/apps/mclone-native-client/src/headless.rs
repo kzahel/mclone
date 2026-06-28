@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
@@ -7,17 +6,13 @@ use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats, render_full_frame_for_view,
 };
-use mclone_client::{
-    ActorInterpolationState, ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
-};
-use mclone_core::{HitResultType, Vec3d};
+use mclone_client::ActorInterpolationState;
 use mclone_mesh::quad_face_count_from_indices;
-use mclone_protocol::{AcceptTeleportCommand, ClientCommand, MovePlayerCommand};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
     TexturedSectionUploadReport,
 };
-use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
+use mclone_render::color_profile::RenderConfig;
 use mclone_render::headless::{
     HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessFrameLoopOptions, HeadlessFrameOptions,
     run_headless_capture_loop, save_rgba_png, write_headless_frame_png,
@@ -32,14 +27,10 @@ use crate::camera::SpectatorCamera;
 use crate::cli::{
     HeadlessDualViewOptions, HeadlessScreenshotOptions, RendererRebuildSmokeOptions, SceneOptions,
 };
-use crate::flat_client_driver::{
-    FlatClientDebugFrame, FlatClientDriver, FlatClientUiFrame, FlatClientUiRenderOptions,
-    game_ui_render_state,
-};
-use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState, FrameTimingStats};
+use crate::flat_client_driver::{FlatClientUiRenderOptions, game_ui_render_state};
+use crate::frame_pacing::FramePacingUiState;
 use crate::render_cache::load_asset_source;
-use crate::scene_runtime::{WindowSceneAssets, WindowSceneRuntime, poll_window_runtime_until_idle};
-use crate::ui::DebugPaneStats;
+use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct HeadlessScreenshotReport {
@@ -699,278 +690,24 @@ fn write_headless_runtime_chunk_with_camera(
 pub(crate) fn run_headless_screenshot(
     options: &HeadlessScreenshotOptions,
 ) -> Result<HeadlessScreenshotReport> {
-    let assets = WindowSceneAssets::load()?;
-    let mut runtime = WindowSceneRuntime::with_assets(&options.scene, &assets)?;
-    poll_window_runtime_until_idle(&mut runtime)?;
-    let initial_player_position = ack_pending_player_position_updates(&mut runtime)?;
-    if let Some(day_time) = options.scene.day_time_override {
-        runtime.force_day_time(day_time);
-    }
-    settle_remote_screenshot_session(&mut runtime, options.remote_settle_ms)?;
-    let mut spectator = SpectatorCamera::spawn_for_scene(&options.scene);
-    let (world_x, world_z) = spectator.block_column();
-    if let Some(surface_y) = runtime.highest_non_air_block_y_at_world(world_x, world_z) {
-        spectator.place_above_surface(surface_y);
-    }
-    if options.scripted_interaction {
-        apply_scripted_interaction(&mut runtime, &mut spectator, initial_player_position)?;
-    }
-    frame_first_actor_for_screenshot(&runtime, &mut spectator);
-    if let Some(eye) = options.eye {
-        spectator.position = Vec3::from_array(eye);
-    }
-
-    let debug_pane = options.debug_pane;
-    let render_options = options.render_options;
-    let runtime_stats = runtime.stats();
-    let remote_player_count = runtime.client().remote_player_count();
-    let entity_count = runtime.client().entity_count();
-    let asset_source = load_asset_source()?;
-    let mut driver = FlatClientDriver::new(&options.scene, render_options);
-    if options.ui == crate::cli::HeadlessScreenshotUi::NewWorld {
-        driver.set_new_world_seed(options.scene.seed);
-    }
-    driver.set_ui_screen(options.ui.game_screen());
-    driver.set_ui_scale(GuiScale::from_pixels(options.width, options.height));
-    driver.set_spectator_camera(spectator, options.scene.movement_speed_multiplier);
-    driver.runtime = Some(runtime);
-
-    let (frame_report, summary) = write_headless_frame_png(
-        HeadlessFrameOptions {
-            path: options.path.clone(),
-            width: options.width,
-            height: options.height,
-        },
-        |frame| {
-            let render_config =
-                RenderConfig::for_color_target(render_options.color_profile, HEADLESS_FORMAT);
-            driver.rebuild_render_resources(
-                frame.device,
-                frame.queue,
-                frame.target.size,
-                render_config,
-                assets.mesh_assets.atlas.as_upload(),
-                assets.actor_textures.atlas.as_upload(),
-                &asset_source,
-            )?;
-            let Some((section_sync, _upload_summary)) = driver
-                .upload_all_runtime_sections(frame.device, |elapsed| {
-                    elapsed.as_secs_f64() * 1000.0
-                })?
-            else {
-                bail!("headless screenshot has no runtime to upload");
-            };
-            if section_sync.sections.is_empty() {
-                bail!(
-                    "headless screenshot seed={} center=({}, {}) render_distance={} produced no render sections",
-                    options.scene.seed,
-                    options.scene.chunk_x,
-                    options.scene.chunk_z,
-                    options.scene.render_distance
-                );
-            }
-
-            let debug_stats = debug_pane.then_some(DebugPaneStats {
-                position: driver.spectator.position,
-                speed: driver.spectator.speed,
-                movement_mode: "NOCLIP",
-                on_ground: false,
-                runtime: runtime_stats,
-                render: driver.render_stats,
-                frame: FrameTimingStats::default(),
-                pacing: FramePacingDebugStats::default(),
-                section_occlusion: render_options.section_occlusion_culling,
-                force_fullbright: render_options.force_fullbright,
-                color_profile: render_options.color_profile.label(),
-                render_scale: DEFAULT_RENDER_SCALE,
-            });
-            let debug_view_readiness_overlay = debug_stats
-                .is_some()
-                .then(|| {
-                    driver
-                        .runtime
-                        .as_ref()
-                        .and_then(WindowSceneRuntime::view_readiness_overlay)
-                })
-                .flatten();
-            let ui_frame = FlatClientUiFrame {
-                render_options: FlatClientUiRenderOptions {
-                    render_distance: driver.current_render_distance(options.scene.render_distance)
-                        as i32,
-                    render_options,
-                    frame_pacing: FramePacingUiState::default(),
-                    fly_enabled: false,
-                    fly_speed_multiplier: 1.0,
-                    movement_speed_multiplier: 1.0,
-                },
-                hud: None,
-                loading_progress_overlay: None,
-                debug: FlatClientDebugFrame {
-                    stats: debug_stats,
-                    view_readiness_overlay: debug_view_readiness_overlay,
-                },
-            };
-            driver.render_full_frame_with_ui(frame, options.scene.render_distance, ui_frame)
-        },
-    )?;
-    let underwater = driver.underwater_overlay(driver.camera_view()).is_some();
+    let report = crate::offscreen_flat_client::run_offscreen_flat_client_screenshot(options)?;
 
     Ok(HeadlessScreenshotReport {
-        path: frame_report.path,
-        width: frame_report.width,
-        height: frame_report.height,
-        byte_len: frame_report.byte_len,
-        section_count: summary.section_count,
-        drawn_section_count: summary.drawn_section_count,
-        index_count: summary.index_count,
-        drawn_index_count: summary.drawn_index_count,
-        gui_command_count: summary.gui_command_count,
-        remote_player_count,
-        entity_count,
-        actor_count: summary.actor_count,
-        drawn_actor_count: summary.drawn_actor_count,
-        underwater,
+        path: report.path,
+        width: report.width,
+        height: report.height,
+        byte_len: report.byte_len,
+        section_count: report.summary.section_count,
+        drawn_section_count: report.summary.drawn_section_count,
+        index_count: report.summary.index_count,
+        drawn_index_count: report.summary.drawn_index_count,
+        gui_command_count: report.summary.gui_command_count,
+        remote_player_count: report.remote_player_count,
+        entity_count: report.entity_count,
+        actor_count: report.summary.actor_count,
+        drawn_actor_count: report.summary.drawn_actor_count,
+        underwater: report.underwater,
     })
-}
-
-fn settle_remote_screenshot_session(
-    runtime: &mut WindowSceneRuntime,
-    remote_settle_ms: u64,
-) -> Result<()> {
-    if remote_settle_ms == 0
-        || runtime.client().host() != mclone_client::ClientHost::RemoteDedicated
-    {
-        return Ok(());
-    }
-
-    std::thread::sleep(Duration::from_millis(remote_settle_ms));
-    runtime
-        .send_gameplay_command(ClientCommand::MovePlayer(MovePlayerCommand::StatusOnly {
-            on_ground: false,
-        }))
-        .context("failed to poll remote screenshot session after settle delay")?;
-    Ok(())
-}
-
-fn ack_pending_player_position_updates(runtime: &mut WindowSceneRuntime) -> Result<Option<Vec3d>> {
-    let mut last_position = None;
-    for update in runtime.drain_player_position_updates() {
-        last_position = Some(update.position);
-        runtime
-            .send_gameplay_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
-                id: update.teleport_id,
-            }))
-            .context("failed to acknowledge initial player position")?;
-    }
-    Ok(last_position)
-}
-
-fn apply_scripted_interaction(
-    runtime: &mut WindowSceneRuntime,
-    spectator: &mut SpectatorCamera,
-    initial_player_position: Option<Vec3d>,
-) -> Result<()> {
-    let (base_x, base_z) = spectator.block_column();
-    let target_x = base_x;
-    let target_z = base_z + 4;
-    let surface_y = runtime
-        .highest_non_air_block_y_at_world(target_x, target_z)
-        .with_context(|| {
-            format!("no loaded surface for scripted interaction at ({target_x}, {target_z})")
-        })?;
-    let interaction = ClientInteractionController::new();
-    let eye_position = Vec3d::new(
-        target_x as f64 + 0.5,
-        surface_y as f64 + 3.0,
-        target_z as f64 + 0.5,
-    );
-    let player_feet_position =
-        eye_position.add(Vec3d::new(0.0, -LOCAL_PLAYER_STANDING_EYE_HEIGHT, 0.0));
-    sync_scripted_player_position(
-        runtime,
-        initial_player_position.unwrap_or(player_feet_position),
-        player_feet_position,
-    )?;
-    let hit = interaction.pick_block(runtime.client(), eye_position, Vec3d::new(0.0, -1.0, 0.0));
-    if hit.hit_type() != HitResultType::Block {
-        bail!("scripted interaction ray missed target column");
-    }
-    let break_command = interaction
-        .debug_instant_break_command(hit)
-        .context("scripted interaction did not produce break command")?;
-    let break_changed = runtime.send_gameplay_command(break_command)?;
-    let place_command = interaction
-        .use_item_on_command(hit)
-        .context("scripted interaction did not produce place command")?;
-    let place_changed = runtime.send_gameplay_command(place_command)?;
-    if !break_changed || !place_changed {
-        bail!(
-            "scripted interaction did not mutate both blocks: break_changed={break_changed} place_changed={place_changed}"
-        );
-    }
-
-    spectator.position = glam::Vec3::new(
-        target_x as f32 + 0.5,
-        surface_y as f32 + 5.0,
-        target_z as f32 - 6.0,
-    );
-    spectator.yaw = 0.0;
-    spectator.pitch = -0.7;
-    Ok(())
-}
-
-fn sync_scripted_player_position(
-    runtime: &mut WindowSceneRuntime,
-    mut current: Vec3d,
-    target: Vec3d,
-) -> Result<()> {
-    for _ in 0..64 {
-        let delta = target.subtract(current);
-        if delta.length_sqr() <= 64.0 {
-            send_scripted_player_move(runtime, target)?;
-            return Ok(());
-        }
-        let length = delta.length_sqr().sqrt();
-        current = current.add(delta.scale(8.0 / length));
-        send_scripted_player_move(runtime, current)?;
-        runtime.poll()?;
-    }
-    bail!("timed out moving scripted player to interaction target");
-}
-
-fn send_scripted_player_move(runtime: &mut WindowSceneRuntime, position: Vec3d) -> Result<()> {
-    runtime
-        .send_gameplay_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
-            position,
-            y_rot_degrees: 0.0,
-            x_rot_degrees: 90.0,
-            on_ground: false,
-        }))
-        .context("failed to sync scripted player position")?;
-    Ok(())
-}
-
-fn frame_first_actor_for_screenshot(runtime: &WindowSceneRuntime, spectator: &mut SpectatorCamera) {
-    let Some(actor) = runtime.client().actor_presentations().first().copied() else {
-        return;
-    };
-    let target = glam::Vec3::new(
-        actor.feet_position.x as f32,
-        actor.feet_position.y as f32 + 1.0,
-        actor.feet_position.z as f32,
-    );
-    let eye = target + glam::Vec3::new(-2.2, 1.4, -4.8);
-    aim_spectator_at(spectator, eye, target);
-}
-
-fn aim_spectator_at(spectator: &mut SpectatorCamera, eye: glam::Vec3, target: glam::Vec3) {
-    let direction = target - eye;
-    let Some(direction) = direction.try_normalize() else {
-        return;
-    };
-    spectator.position = eye;
-    spectator.yaw = direction.x.atan2(direction.z);
-    spectator.pitch = direction.y.clamp(-1.0, 1.0).asin();
 }
 
 fn chunk_capture_scenarios(scene: &SceneOptions) -> [(&'static str, ChunkCamera); 3] {

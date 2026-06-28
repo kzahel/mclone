@@ -1,7 +1,8 @@
 # 105: Offscreen Flat Client Host
 
-Status: active; `GameUi`, session/startup lifetime, and host-neutral
-local/remote start routing now live in the native flat driver.
+Status: active; `GameUi`, session/startup lifetime, host-neutral local/remote
+start routing, and the first one-frame offscreen host wrapper now live in the
+native flat path.
 
 ## Purpose
 
@@ -40,10 +41,14 @@ The current gaps:
 - `ChunkApp` still owns the desktop host shell: `winit` events, surface
   acquire/present, frame pacing, mouse lock, input preferences, desktop
   asset/runtime construction factories, and desktop-only diagnostics.
-- `run_headless_screenshot` now constructs a `FlatClientDriver`, gives it the
-  screenshot runtime/camera, rebuilds `FlatRenderResources` through the driver,
-  uploads sections through the driver, and renders through
-  `FlatClientDriver::render_full_frame`.
+- `mclone-native-client::offscreen_flat_client` now wraps `FlatClientDriver`
+  with native offscreen device/target callbacks, a deterministic frame clock,
+  render-resource setup, runtime/startup factories, section upload, full-frame
+  render, and a screenshot PNG sink.
+- `run_headless_screenshot` is now a one-frame use of that offscreen host
+  wrapper. Screenshot-only code still selects scenario setup such as camera
+  override, requested UI screen, debug pane, remote settle delay, and scripted
+  interaction.
 - `mclone-native-client::flat_client_driver` now exists as a native staging
   owner for flat-client runtime, camera/spectator, interaction, actor
   interpolation, render options, render stats, frame timing, and full-frame UI
@@ -52,9 +57,10 @@ The current gaps:
   local startup pump lifetime, runtime replacement, and session status/failure
   UI. `ChunkApp` still drives it directly from the desktop event loop and
   supplies the current `wgpu::Device` plus desktop runtime/startup factories.
-- `run_headless_screenshot` is still screenshot-shaped: it constructs a fresh
-  runtime/driver per capture and still owns screenshot scenario setup and
-  scripted interaction instead of sharing a long-lived flat-client host loop.
+- The offscreen host is not yet exposed as a long-lived client mode. It can run
+  the screenshot path as a one-frame capture, but it does not yet accept a
+  neutral input stream, run N frames from CLI, or stream frames to sinks beyond
+  the current screenshot PNG handoff.
 - Older `--headless-chunk`, `--headless-chunk-scenarios`, and `--headless-ui`
   modes validate narrower renderer surfaces and can drift from real flat-client
   behavior.
@@ -159,7 +165,7 @@ Validation run:
   replacement, session status/failure UI, initial player placement, and
   teardown behind driver methods while keeping runtime/startup construction
   injectable.
-- [ ] Move input preferences, render resource asset loading, and remaining
+- [ ] Move input preferences and remaining
   desktop-only menu action execution behind clearer host/driver adapter methods
   instead of direct `ChunkApp` field access.
 - [ ] Keep platform transport/session construction injectable so desktop TCP,
@@ -201,8 +207,10 @@ Follow-up validation run after session/startup lifetime moved into the driver:
 
 ### Slice 2 - Shared Step And Render API
 
-- [ ] Add a small API shape such as `apply_input(...)`, `tick(...)`,
-  `upload_runtime_sections(...)`, and `render_frame(RenderFrameContext)`.
+- [x] Add the first offscreen host API shape around `FlatClientDriver`:
+  deterministic fixed frame timing, session/startup advancement, runtime poll,
+  section upload, and `render_frame(RenderFrameContext)`.
+- [ ] Add neutral input application to that host API.
 - [ ] Move desktop redraw logic into the driver except surface acquire/present,
   frame pacing, and `winit` event translation.
 - [x] Move HUD/debug/loading/status draw-list construction into the shared
@@ -224,8 +232,10 @@ Follow-up validation run after session/startup lifetime moved into the driver:
   flat.
 - [x] Move debug/HUD draw-list assembly behind shared driver methods.
 - [x] Move scenario UI setup behind shared driver methods.
-- [ ] Replace screenshot-owned runtime construction with a long-lived offscreen
-  flat-client host.
+- [x] Replace screenshot-owned runtime construction/render assembly with a
+  one-frame `OffscreenFlatClientHost` run.
+- [ ] Expose a long-lived offscreen flat-client mode that reuses
+  `OffscreenFlatClientHost` for multiple frames and non-PNG frame sinks.
 
 Validation run:
 
@@ -254,6 +264,16 @@ driver:
 - `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-offscreen-driver-ui-owner-debug.png --width 960 --height 540 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --screenshot-debug-pane true`
 - Visual inspection of `/tmp/mclone-offscreen-driver-ui-owner-debug.png`:
   nonblank terrain, debug pane, view swatch, and cow actor rendered.
+
+Follow-up validation run after screenshot routing moved to
+`OffscreenFlatClientHost`:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-offscreen-host-debug.png --width 960 --height 540 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --screenshot-debug-pane true`
+- Visual inspection of `/tmp/mclone-offscreen-host-debug.png`: nonblank
+  terrain, debug pane, view swatch, and cow actor rendered.
 
 ### Slice 4 - Neutral Scripted Input
 

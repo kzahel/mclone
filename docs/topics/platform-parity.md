@@ -178,15 +178,17 @@ Concretely:
   in the app crates. This landed in
   [`../tactical/084-single-view-platform-alignment.md`](../tactical/084-single-view-platform-alignment.md).
 - The offscreen path currently gets shared scene/runtime facts through the same
-  native-client wrapper, and `run_headless_screenshot` now shares
-  `FlatClientDriver` render-resource rebuild, section upload, frame-input
-  preparation, full-frame render dispatch, `GameUi` ownership, and host-neutral
-  menu/session/startup routing with desktop flat. It still lacks a long-lived
-  offscreen flat client host. Neutral input lifetime, frame-clock control, and
-  frame sinks still need to wrap that driver before offscreen can behave as a
-  real no-window client rather than a one-shot screenshot scenario. Tactical
+  native-client wrapper, and `run_headless_screenshot` now runs as a one-frame
+  `OffscreenFlatClientHost` capture around `FlatClientDriver`. That shares
+  render-resource rebuild, section upload, frame-input preparation, full-frame
+  render dispatch, `GameUi` ownership, a deterministic offscreen frame clock,
+  and host-neutral menu/session/startup routing with desktop flat. It still
+  lacks an exposed long-lived offscreen client mode. Neutral input lifetime and
+  non-PNG frame sinks still need to wrap that host before offscreen can behave
+  as a real no-window client rather than a one-shot screenshot scenario.
+  Tactical
   [`105-offscreen-flat-client-host.md`](../tactical/105-offscreen-flat-client-host.md)
-  tracks replacing that with a real no-window flat client host.
+  tracks the remaining long-lived no-window flat client work.
 - The XR scene-driver fork is closed:
   `XrMcloneTerrainState<S>` composes `NativeSingleViewSessionRuntime<S>` around
   the shared native scene runtime, desktop XR passes the desktop TCP

@@ -10,6 +10,7 @@ mod cli;
 mod flat_client_driver;
 mod frame_pacing;
 mod headless;
+mod offscreen_flat_client;
 mod perf;
 mod remote_session;
 mod render_cache;
