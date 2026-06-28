@@ -56,6 +56,27 @@ feature table. It accepts `--chunk-x` / `--chunk-z` for negative-coordinate or
 boundary-specific fixtures, but the default biome matrix should stay at `(0,0)`
 unless a bug specifically needs another coordinate.
 
+For fixtures intended for manual visual inspection, use the quality-search
+flags as well:
+
+```bash
+pnpm native:worldgen:find-biome-seed -- \
+  --biome plains \
+  --max-seeds 10000 \
+  --count 10 \
+  --biome-radius 2 \
+  --min-biome-ratio 0.5 \
+  --surface-radius 1 \
+  --min-dry-surface-ratio 0.75 \
+  --min-grass-surface-ratio 0.5 \
+  --rank-by-score
+```
+
+This keeps the old first-match mode available while making "good plains" mean
+more than "primary biome at `(0,0)`." Final seed choice must still be gated by
+the scheduler-trace oracle; some visually good native seeds do not complete the
+current spawn-bootstrap trace for chunk `(0,0)`.
+
 ## Oracle Fixture Command
 
 For clean decorated snapshots, use the scheduler-trace oracle instead of the
@@ -93,7 +114,8 @@ is exact fixture pass/fail plus mismatch buckets for the targeted biome.
 | Biome family | Seed / chunk | Native table | Fixture status | Current purpose |
 |---|---:|---|---|---|
 | `minecraft:taiga_mountains` | `12345`, `(0,0)` | `taiga_feature_table` | exact clean `FEATURES`; older full fixture has 5 runtime-tail mismatches | permanent regression anchor from `017` |
-| `minecraft:plains` | `16`, `(0,0)` | `plains_feature_table` | fixture landed; `65,359 / 65,536` blocks matched, `177` mismatches after soft disks | next low-noise vegetation baseline; first candidates from seeds `0..10000` were `16`, `17`, `27`, `41`, `67` |
+| `minecraft:plains` shoreline | `16`, `(0,0)` | `plains_feature_table` | fixture landed; `65,359 / 65,536` blocks matched, `177` mismatches after soft disks | retained as small-island/shoreline disk coverage; first primary-biome match |
+| `minecraft:plains` inland | `17`, `(0,0)` | `plains_feature_table` | fixture landed; `65,409 / 65,536` blocks matched, `127` mismatches after soft disks | preferred manual-check plains baseline; quality score `21/25` plains chunks and `2304/2304` dry grass columns in sampled 3x3 surface |
 | `minecraft:desert` | searched seed, `(0,0)` | `desert_feature_table` | pending | cactus/dead bush/lake and sand-family follow-up |
 | `minecraft:forest` / `minecraft:birch_forest` | searched seed, `(0,0)` | `forest_feature_table` / `birch_forest_feature_table` | pending | tree selector and foliage breadth |
 | `minecraft:swamp` | searched seed, `(0,0)` | `swamp_feature_table` | pending | wetter vegetation and later fluid-visible checks |
@@ -128,9 +150,43 @@ largest buckets:
   water -> glow_lichen: 4
 ```
 
+## Inland Plains Slice
+
+Done:
+
+1. Added quality-search flags to `native:worldgen:find-biome-seed`:
+   `--biome-radius`, `--min-biome-ratio`, `--surface-radius`,
+   `--min-dry-surface-ratio`, `--min-grass-surface-ratio`, and
+   `--rank-by-score`.
+2. Ranked candidate plains seeds with a 5x5 biome window and 3x3 surface
+   scoring. Seed `137` was the first perfect native-quality candidate, but the
+   current scheduler-trace spawn-bootstrap oracle did not complete for chunk
+   `(0,0)`. Seed `41` also timed out. Seed `17` completed and still gives a
+   useful dry plains landmass.
+3. Generated
+   `test/fixtures/scheduler/vanilla-scheduler-features-snapshot-seed-17-chunk-0-0-plains-inland.json`.
+4. Added `inland_plains_features_snapshot_reports_current_native_gap`.
+
+Current inland plains mismatch buckets:
+
+```text
+matched_blocks: 65,409 / 65,536
+mismatched_blocks: 127
+largest buckets:
+  air -> grass: 38
+  grass -> air: 26
+  dandelion -> air: 14
+  air -> dandelion: 13
+  dandelion -> grass: 7
+  granite -> dripstone_block: 5
+  air -> pointed_dripstone: 4
+  andesite -> dripstone_block: 4
+  poppy -> air: 4
+```
+
 Next: read the Java dripstone feature/decorator path and decide whether to port
-the rare dripstone cluster/small-dripstone pair next, or first close the smaller
-plains vegetation drift (`grass`, `poppy`, `tall_grass`) if that proves to be a
+the rare dripstone cluster/small-dripstone pair next, or first close the inland
+plains vegetation drift (`grass`, `dandelion`, `poppy`) if that proves to be a
 feature-index or decorator ordering issue.
 
 ## Validation
@@ -138,8 +194,9 @@ feature-index or decorator ordering issue.
 Focused checks for this lane:
 
 ```bash
-cargo test --manifest-path native/Cargo.toml -p mclone-worldgen find_biome_seed
+cargo test --manifest-path native/Cargo.toml -p mclone-worldgen --bin find_biome_seed
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen full_decorated_chunk_gauntlet_reports_current_native_gap
+cargo test --manifest-path native/Cargo.toml -p mclone-worldgen inland_plains_features_snapshot_reports_current_native_gap
 cargo test --manifest-path native/Cargo.toml -p mclone-worldgen features_status_chunk_snapshot_excludes_runtime_liquid_tick_results
 ```
 
