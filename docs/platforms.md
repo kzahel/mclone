@@ -26,7 +26,7 @@ Additional host lane:
 
 | Host | Status | Notes |
 |---|---|---|
-| Offscreen flat client | proposed high-priority cleanup | No-window flat-client host for full-frame validation, scripted/network/model input, PNG/video/network/model frame sinks, and future remote UI style use. Current code has headless full-frame screenshots and renderer helpers, but the real host lifetime is tracked in [`tactical/105-offscreen-flat-client-host.md`](tactical/105-offscreen-flat-client-host.md) and specified in [`offscreen-flat-client.md`](offscreen-flat-client.md). |
+| Offscreen flat client | active cleanup | No-window flat-client host for full-frame validation, scripted/network/model input, PNG/video/network/model frame sinks, and future remote UI style use. Current public validation uses the full-frame `--screenshot` offscreen host path; older narrow `--headless-ui` / `--headless-chunk` native-client modes are retired. Long-lived host lifetime remains tracked in [`tactical/105-offscreen-flat-client-host.md`](tactical/105-offscreen-flat-client-host.md) and specified in [`offscreen-flat-client.md`](offscreen-flat-client.md). |
 | Native dedicated server | active | `native/apps/mclone-dedicated-server` validates the protocol/server boundary without a renderer. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
 
 The retired TypeScript/browser engine is gone from the live tree. Use Git
@@ -197,13 +197,13 @@ Recommended default gates:
 
 ```bash
 cargo test --manifest-path native/Cargo.toml
-pnpm native:desktop-chunk:smoke
+pnpm native:desktop-offscreen:smoke
 pnpm native:web:build
 ```
 
-`native:desktop-chunk:smoke` is still the current offscreen renderer/client
-smoke. Tactical 105 should replace it with a full-frame offscreen flat-client
-smoke once the shared host lands.
+`native:desktop-offscreen:smoke` is the current full-frame offscreen
+flat-client smoke. It runs the real offscreen host path and writes its screenshot
+under `/tmp`.
 
 Platform-specific gates:
 

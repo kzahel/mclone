@@ -4,14 +4,13 @@ use mclone_app_runtime::frame_render::RenderStreamStats;
 use mclone_core::ChunkPos;
 use mclone_ui::{
     FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts, FlatDebugOverlay,
-    FlatDebugRenderOptions, FlatDebugRunner, FlatDebugView, GameOptionsParent, GameScreen, GameUi,
-    GameUiRenderState, GuiDrawList, GuiScale, render_debug_overlay,
+    FlatDebugRenderOptions, FlatDebugRunner, FlatDebugView, GameOptionsParent, GameScreen,
+    GuiDrawList, GuiScale, render_debug_overlay,
 };
 
 use crate::cli::HeadlessScreenshotUi;
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingMode, FrameTimingStats};
 use crate::scene_runtime::WindowRuntimeStats;
-use crate::{DEFAULT_RENDER_DISTANCE, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct DebugPaneStats {
@@ -203,18 +202,6 @@ impl HeadlessScreenshotUi {
 pub(crate) fn render_debug_pane(scale: GuiScale, draw: &mut GuiDrawList, stats: &DebugPaneStats) {
     let overlay = stats.to_owned().overlay().to_debug_overlay();
     render_debug_overlay(scale, draw, &overlay);
-}
-
-pub(crate) fn render_static_title_ui(width: u32, height: u32) -> GuiDrawList {
-    let scale = GuiScale::from_pixels(width, height);
-    let mut ui = GameUi::new();
-    ui.set_scale(scale);
-    ui.render_draw_list(GameUiRenderState {
-        render_distance: DEFAULT_RENDER_DISTANCE,
-        min_render_distance: MIN_RENDER_DISTANCE,
-        max_render_distance: MAX_RENDER_DISTANCE,
-        ..GameUiRenderState::default()
-    })
 }
 
 #[cfg(test)]

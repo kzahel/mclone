@@ -31,11 +31,9 @@ use crate::cli::{
     XrClearSmokeOptions, XrMcloneSmokeOptions, XrViewPose, parse_screenshot_ui_arg,
 };
 use crate::headless::{
-    run_headless_screenshot, run_renderer_rebuild_smoke, write_headless_chunk_scenarios,
-    write_headless_dual_view, write_headless_runtime_chunk,
+    run_headless_screenshot, run_renderer_rebuild_smoke, write_headless_dual_view,
 };
 use crate::perf::{run_frame_budget_probe, run_movement_perf_smoke, run_timedemo};
-use crate::ui::render_static_title_ui;
 use anyhow::Result;
 #[cfg(test)]
 use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, ChunkPos, ChunkSnapshot};
@@ -43,9 +41,7 @@ use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, ChunkPos, ChunkSnaps
 use mclone_render::chunk::TexturedSectionRenderOptions;
 #[cfg(test)]
 use mclone_render::color_profile::RenderColorProfile;
-use mclone_render::headless::{
-    HeadlessClearOptions, HeadlessUiOptions, write_headless_clear_png, write_headless_ui_png,
-};
+use mclone_render::headless::{HeadlessClearOptions, write_headless_clear_png};
 #[cfg(test)]
 use mclone_render_session::snapshot_mesh_block_state_ids;
 
@@ -86,72 +82,6 @@ fn main() -> Result<()> {
                 report.width,
                 report.height,
                 report.byte_len
-            );
-            Ok(())
-        }
-        Cli::HeadlessChunk {
-            path,
-            width,
-            height,
-            scene,
-            render_options,
-        } => {
-            let report = write_headless_runtime_chunk(path, width, height, &scene, render_options)?;
-            println!(
-                "headless runtime chunk saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
-                report.path.display(),
-                report.width,
-                report.height,
-                report.byte_len,
-                report.vertex_count,
-                report.index_count
-            );
-            Ok(())
-        }
-        Cli::HeadlessChunkScenarios {
-            directory,
-            width,
-            height,
-            scene,
-            render_options,
-        } => {
-            let reports =
-                write_headless_chunk_scenarios(&directory, width, height, &scene, render_options)?;
-            for report in reports {
-                println!(
-                    "headless runtime chunk scenario saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
-                    report.path.display(),
-                    report.width,
-                    report.height,
-                    report.byte_len,
-                    report.vertex_count,
-                    report.index_count
-                );
-            }
-            Ok(())
-        }
-        Cli::HeadlessUi {
-            path,
-            width,
-            height,
-        } => {
-            let draw = render_static_title_ui(width, height);
-            let report = write_headless_ui_png(
-                HeadlessUiOptions {
-                    path,
-                    width,
-                    height,
-                    color: mclone_render::default_clear_color(),
-                },
-                &draw,
-            )?;
-            println!(
-                "headless UI saved to {} ({}x{}, {} bytes, {} commands)",
-                report.path.display(),
-                report.width,
-                report.height,
-                report.byte_len,
-                report.command_count
             );
             Ok(())
         }
@@ -320,6 +250,27 @@ fn run_xr_mclone_smoke(_options: crate::cli::XrMcloneSmokeOptions) -> Result<()>
 mod tests {
     use super::*;
     use mclone_core::{BlockStateId, ChunkRevision, ChunkStatus};
+
+    fn screenshot_cli(
+        path: &str,
+        scene: SceneOptions,
+        render_options: TexturedSectionRenderOptions,
+    ) -> Cli {
+        Cli::HeadlessScreenshot {
+            options: HeadlessScreenshotOptions {
+                path: PathBuf::from(path),
+                width: 1280,
+                height: 720,
+                scene,
+                render_options,
+                ui: HeadlessScreenshotUi::None,
+                debug_pane: false,
+                scripted_interaction: false,
+                remote_settle_ms: 0,
+                eye: None,
+            },
+        }
+    }
 
     #[test]
     fn cli_defaults_to_window() {
@@ -670,25 +621,17 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_headless_ui_dimensions() {
-        let cli = Cli::parse([
-            "--headless-ui".to_owned(),
-            "/tmp/mclone-ui.png".to_owned(),
-            "--width".to_owned(),
-            "960".to_owned(),
-            "--height".to_owned(),
-            "540".to_owned(),
-        ])
-        .unwrap();
-
-        assert_eq!(
-            cli,
-            Cli::HeadlessUi {
-                path: PathBuf::from("/tmp/mclone-ui.png"),
-                width: 960,
-                height: 540,
-            }
-        );
+    fn cli_rejects_retired_narrow_headless_modes() {
+        for flag in [
+            "--headless-ui",
+            "--headless-chunk",
+            "--headless-chunk-scenarios",
+        ] {
+            let err = Cli::parse([flag.to_owned(), "/tmp/retired.png".to_owned()])
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("unknown argument"), "{flag}: {err}");
+        }
     }
 
     #[test]
@@ -772,10 +715,10 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_headless_chunk_scene_options() {
+    fn cli_parses_screenshot_scene_options() {
         let cli = Cli::parse([
-            "--headless-chunk".to_owned(),
-            "/tmp/mclone-chunk.png".to_owned(),
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
             "--seed".to_owned(),
             "-9".to_owned(),
             "--chunk-x".to_owned(),
@@ -787,11 +730,9 @@ mod tests {
 
         assert_eq!(
             cli,
-            Cli::HeadlessChunk {
-                path: PathBuf::from("/tmp/mclone-chunk.png"),
-                width: 640,
-                height: 480,
-                scene: SceneOptions {
+            screenshot_cli(
+                "/tmp/mclone-frame.png",
+                SceneOptions {
                     seed: -9,
                     chunk_x: 2,
                     chunk_z: -3,
@@ -802,16 +743,16 @@ mod tests {
                     movement_speed_multiplier: 1.0,
                     lighting_enabled: true,
                 },
-                render_options: TexturedSectionRenderOptions::default(),
-            }
+                TexturedSectionRenderOptions::default(),
+            )
         );
     }
 
     #[test]
     fn cli_parses_render_distance() {
         let cli = Cli::parse([
-            "--headless-chunk".to_owned(),
-            "/tmp/mclone-chunk.png".to_owned(),
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
             "--render-distance".to_owned(),
             "32".to_owned(),
         ])
@@ -819,24 +760,22 @@ mod tests {
 
         assert_eq!(
             cli,
-            Cli::HeadlessChunk {
-                path: PathBuf::from("/tmp/mclone-chunk.png"),
-                width: 640,
-                height: 480,
-                scene: SceneOptions {
+            screenshot_cli(
+                "/tmp/mclone-frame.png",
+                SceneOptions {
                     render_distance: 32,
                     ..SceneOptions::default()
                 },
-                render_options: TexturedSectionRenderOptions::default(),
-            }
+                TexturedSectionRenderOptions::default(),
+            )
         );
     }
 
     #[test]
     fn cli_parses_movement_speed_multiplier() {
         let cli = Cli::parse([
-            "--headless-chunk".to_owned(),
-            "/tmp/mclone-chunk.png".to_owned(),
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
             "--movement-speed-multiplier".to_owned(),
             "2.25".to_owned(),
         ])
@@ -844,24 +783,22 @@ mod tests {
 
         assert_eq!(
             cli,
-            Cli::HeadlessChunk {
-                path: PathBuf::from("/tmp/mclone-chunk.png"),
-                width: 640,
-                height: 480,
-                scene: SceneOptions {
+            screenshot_cli(
+                "/tmp/mclone-frame.png",
+                SceneOptions {
                     movement_speed_multiplier: 2.25,
                     ..SceneOptions::default()
                 },
-                render_options: TexturedSectionRenderOptions::default(),
-            }
+                TexturedSectionRenderOptions::default(),
+            )
         );
     }
 
     #[test]
     fn cli_rejects_render_distance_below_java_minimum() {
         let err = Cli::parse([
-            "--headless-chunk".to_owned(),
-            "/tmp/mclone-chunk.png".to_owned(),
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
             "--render-distance".to_owned(),
             "1".to_owned(),
         ])
@@ -874,8 +811,8 @@ mod tests {
     #[test]
     fn cli_parses_section_occlusion_toggle() {
         let cli = Cli::parse([
-            "--headless-chunk".to_owned(),
-            "/tmp/mclone-chunk.png".to_owned(),
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
             "--section-occlusion".to_owned(),
             "false".to_owned(),
         ])
@@ -883,16 +820,14 @@ mod tests {
 
         assert_eq!(
             cli,
-            Cli::HeadlessChunk {
-                path: PathBuf::from("/tmp/mclone-chunk.png"),
-                width: 640,
-                height: 480,
-                scene: SceneOptions::default(),
-                render_options: TexturedSectionRenderOptions {
+            screenshot_cli(
+                "/tmp/mclone-frame.png",
+                SceneOptions::default(),
+                TexturedSectionRenderOptions {
                     section_occlusion_culling: false,
                     ..TexturedSectionRenderOptions::default()
                 },
-            }
+            )
         );
 
         let err = Cli::parse(["--disable-section-occlusion".to_owned()])
@@ -904,8 +839,8 @@ mod tests {
     #[test]
     fn cli_parses_fullbright_toggle() {
         let cli = Cli::parse([
-            "--headless-chunk".to_owned(),
-            "/tmp/mclone-chunk.png".to_owned(),
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
             "--fullbright".to_owned(),
             "true".to_owned(),
         ])
@@ -913,16 +848,14 @@ mod tests {
 
         assert_eq!(
             cli,
-            Cli::HeadlessChunk {
-                path: PathBuf::from("/tmp/mclone-chunk.png"),
-                width: 640,
-                height: 480,
-                scene: SceneOptions::default(),
-                render_options: TexturedSectionRenderOptions {
+            screenshot_cli(
+                "/tmp/mclone-frame.png",
+                SceneOptions::default(),
+                TexturedSectionRenderOptions {
                     force_fullbright: true,
                     ..TexturedSectionRenderOptions::default()
                 },
-            }
+            )
         );
 
         let cli = Cli::parse(["--fullbright".to_owned(), "false".to_owned()]).unwrap();
@@ -940,8 +873,8 @@ mod tests {
     #[test]
     fn cli_parses_render_color_profile() {
         let cli = Cli::parse([
-            "--headless-chunk".to_owned(),
-            "/tmp/mclone-chunk.png".to_owned(),
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
             "--render-color-profile".to_owned(),
             "stylized-bright".to_owned(),
         ])
@@ -949,16 +882,14 @@ mod tests {
 
         assert_eq!(
             cli,
-            Cli::HeadlessChunk {
-                path: PathBuf::from("/tmp/mclone-chunk.png"),
-                width: 640,
-                height: 480,
-                scene: SceneOptions::default(),
-                render_options: TexturedSectionRenderOptions {
+            screenshot_cli(
+                "/tmp/mclone-frame.png",
+                SceneOptions::default(),
+                TexturedSectionRenderOptions {
                     color_profile: RenderColorProfile::StylizedBright,
                     ..TexturedSectionRenderOptions::default()
                 },
-            }
+            )
         );
 
         let err = Cli::parse(["--render-color-profile".to_owned(), "neon".to_owned()])
@@ -1175,39 +1106,10 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_headless_chunk_scenarios() {
-        let cli = Cli::parse([
-            "--headless-chunk-scenarios".to_owned(),
-            "/tmp/mclone-camera".to_owned(),
-            "--width".to_owned(),
-            "320".to_owned(),
-            "--height".to_owned(),
-            "180".to_owned(),
-            "--render-distance".to_owned(),
-            "2".to_owned(),
-        ])
-        .unwrap();
-
-        assert_eq!(
-            cli,
-            Cli::HeadlessChunkScenarios {
-                directory: PathBuf::from("/tmp/mclone-camera"),
-                width: 320,
-                height: 180,
-                scene: SceneOptions {
-                    render_distance: 2,
-                    ..SceneOptions::default()
-                },
-                render_options: TexturedSectionRenderOptions::default(),
-            }
-        );
-    }
-
-    #[test]
     fn cli_parses_remote_addr() {
         let cli = Cli::parse([
-            "--headless-chunk".to_owned(),
-            "/tmp/mclone-chunk.png".to_owned(),
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
             "--remote-addr".to_owned(),
             "127.0.0.1:25565".to_owned(),
         ])
@@ -1215,16 +1117,14 @@ mod tests {
 
         assert_eq!(
             cli,
-            Cli::HeadlessChunk {
-                path: PathBuf::from("/tmp/mclone-chunk.png"),
-                width: 640,
-                height: 480,
-                scene: SceneOptions {
+            screenshot_cli(
+                "/tmp/mclone-frame.png",
+                SceneOptions {
                     remote_addr: Some("127.0.0.1:25565".to_owned()),
                     ..SceneOptions::default()
                 },
-                render_options: TexturedSectionRenderOptions::default(),
-            }
+                TexturedSectionRenderOptions::default(),
+            )
         );
     }
 

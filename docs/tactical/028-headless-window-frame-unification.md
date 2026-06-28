@@ -70,9 +70,10 @@ stay native-web and future XR compatible.
 3. Add a full-frame headless screenshot mode that can select UI screen state and
    debug pane visibility while using the same runtime, camera, renderer options,
    GUI renderer, and debug-pane draw path as windowed mode.
-4. Keep existing `--headless-chunk`, `--headless-chunk-scenarios`, and
-   `--headless-ui` commands as compatibility validation lanes until the full-frame
-   screenshot mode replaces them in later tacticals.
+4. Retired update: the older `--headless-chunk`, `--headless-chunk-scenarios`,
+   and `--headless-ui` compatibility commands have since been removed from the
+   native-client CLI. Current validation should use the full-frame offscreen
+   screenshot path tracked in tactical 105.
 
 ## Follow-Up Slices
 

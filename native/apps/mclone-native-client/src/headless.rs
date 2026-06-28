@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
@@ -14,9 +14,8 @@ use mclone_render::chunk::{
 };
 use mclone_render::color_profile::RenderConfig;
 use mclone_render::headless::{
-    HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessFrameLoopOptions, HeadlessFrameOptions,
-    run_headless_capture_loop, save_rgba_png, write_headless_frame_png,
-    write_headless_textured_sections_png_with_ready_sections,
+    HEADLESS_FORMAT, HeadlessFrameLoopOptions, HeadlessFrameOptions, run_headless_capture_loop,
+    save_rgba_png, write_headless_frame_png,
 };
 use mclone_render::screen_effect::UnderwaterOverlay;
 use mclone_render::sky_render::SkyRenderer;
@@ -24,9 +23,7 @@ use mclone_render_session::actor_instances_from_presentations;
 use mclone_ui::{GameUi, GuiDrawList, GuiScale};
 
 use crate::camera::SpectatorCamera;
-use crate::cli::{
-    HeadlessDualViewOptions, HeadlessScreenshotOptions, RendererRebuildSmokeOptions, SceneOptions,
-};
+use crate::cli::{HeadlessDualViewOptions, HeadlessScreenshotOptions, RendererRebuildSmokeOptions};
 use crate::flat_client_driver::{FlatClientUiRenderOptions, game_ui_render_state};
 use crate::frame_pacing::FramePacingUiState;
 use crate::render_cache::load_asset_source;
@@ -615,78 +612,6 @@ fn count_non_clear_rgb_pixels(pixels: &[u8]) -> usize {
         .count()
 }
 
-pub(crate) fn write_headless_chunk_scenarios(
-    directory: &Path,
-    width: u32,
-    height: u32,
-    scene: &SceneOptions,
-    render_options: TexturedSectionRenderOptions,
-) -> Result<Vec<mclone_render::headless::HeadlessChunkReport>> {
-    let mut runtime = WindowSceneRuntime::new(scene)?;
-    poll_window_runtime_until_idle(&mut runtime)?;
-    let mut reports = Vec::new();
-    for (name, camera) in chunk_capture_scenarios(scene) {
-        reports.push(write_headless_runtime_chunk_with_camera(
-            &mut runtime,
-            directory.join(format!("{name}.png")),
-            width,
-            height,
-            camera,
-            render_options,
-        )?);
-    }
-    Ok(reports)
-}
-
-pub(crate) fn write_headless_runtime_chunk(
-    path: PathBuf,
-    width: u32,
-    height: u32,
-    scene: &SceneOptions,
-    render_options: TexturedSectionRenderOptions,
-) -> Result<mclone_render::headless::HeadlessChunkReport> {
-    let mut runtime = WindowSceneRuntime::new(scene)?;
-    poll_window_runtime_until_idle(&mut runtime)?;
-    write_headless_runtime_chunk_with_camera(
-        &mut runtime,
-        path,
-        width,
-        height,
-        ChunkCamera::overview_for_chunk_area(scene.chunk_x, scene.chunk_z, scene.render_distance),
-        render_options,
-    )
-}
-
-fn write_headless_runtime_chunk_with_camera(
-    runtime: &mut WindowSceneRuntime,
-    path: PathBuf,
-    width: u32,
-    height: u32,
-    camera: ChunkCamera,
-    render_options: TexturedSectionRenderOptions,
-) -> Result<mclone_render::headless::HeadlessChunkReport> {
-    let camera_position = Vec3::from_array(camera.eye);
-    runtime.sync_all_render_sections(camera_position)?;
-    let sections = runtime.cached_sections();
-    if sections.is_empty() {
-        bail!("headless runtime chunk capture produced no render sections");
-    }
-    let ready_sections = runtime.traversal_ready_render_section_keys(camera_position);
-    write_headless_textured_sections_png_with_ready_sections(
-        HeadlessChunkOptions {
-            path,
-            width,
-            height,
-            color: mclone_render::default_clear_color(),
-            camera,
-        },
-        &sections,
-        runtime.mesh_assets().atlas.as_upload(),
-        render_options,
-        Some(&ready_sections),
-    )
-}
-
 pub(crate) fn run_headless_screenshot(
     options: &HeadlessScreenshotOptions,
 ) -> Result<HeadlessScreenshotReport> {
@@ -708,19 +633,4 @@ pub(crate) fn run_headless_screenshot(
         drawn_actor_count: report.summary.drawn_actor_count,
         underwater: report.underwater,
     })
-}
-
-fn chunk_capture_scenarios(scene: &SceneOptions) -> [(&'static str, ChunkCamera); 3] {
-    let overview =
-        ChunkCamera::overview_for_chunk_area(scene.chunk_x, scene.chunk_z, scene.render_distance);
-    let mut orbit = overview;
-    orbit.orbit(0.7, -0.16);
-    let mut close = overview;
-    close.zoom(0.45);
-    close.orbit(-0.32, 0.08);
-    [
-        ("overview", overview),
-        ("orbit-east", orbit),
-        ("close", close),
-    ]
 }

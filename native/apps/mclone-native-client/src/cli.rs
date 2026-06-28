@@ -269,25 +269,6 @@ pub(crate) enum Cli {
         width: u32,
         height: u32,
     },
-    HeadlessChunk {
-        path: PathBuf,
-        width: u32,
-        height: u32,
-        scene: SceneOptions,
-        render_options: TexturedSectionRenderOptions,
-    },
-    HeadlessChunkScenarios {
-        directory: PathBuf,
-        width: u32,
-        height: u32,
-        scene: SceneOptions,
-        render_options: TexturedSectionRenderOptions,
-    },
-    HeadlessUi {
-        path: PathBuf,
-        width: u32,
-        height: u32,
-    },
     HeadlessScreenshot {
         options: HeadlessScreenshotOptions,
     },
@@ -317,10 +298,7 @@ pub(crate) enum Cli {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum HeadlessMode {
     Clear(PathBuf),
-    Chunk(PathBuf),
-    ChunkScenarios(PathBuf),
     DualView(PathBuf),
-    Ui(PathBuf),
     Screenshot(PathBuf),
     RendererRebuildSmoke(PathBuf),
 }
@@ -443,26 +421,6 @@ impl Cli {
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Clear(path))?;
                 }
-                "--headless-chunk" => {
-                    let path = args
-                        .next()
-                        .map(PathBuf::from)
-                        .context("--headless-chunk requires an output PNG path")?;
-                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
-                        bail!("headless output modes cannot be combined with perf modes");
-                    }
-                    set_headless_mode(&mut mode, HeadlessMode::Chunk(path))?;
-                }
-                "--headless-chunk-scenarios" => {
-                    let path = args
-                        .next()
-                        .map(PathBuf::from)
-                        .context("--headless-chunk-scenarios requires an output directory")?;
-                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
-                        bail!("headless output modes cannot be combined with perf modes");
-                    }
-                    set_headless_mode(&mut mode, HeadlessMode::ChunkScenarios(path))?;
-                }
                 "--headless-dual-view" => {
                     let path = args
                         .next()
@@ -472,16 +430,6 @@ impl Cli {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::DualView(path))?;
-                }
-                "--headless-ui" => {
-                    let path = args
-                        .next()
-                        .map(PathBuf::from)
-                        .context("--headless-ui requires an output PNG path")?;
-                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
-                        bail!("headless output modes cannot be combined with perf modes");
-                    }
-                    set_headless_mode(&mut mode, HeadlessMode::Ui(path))?;
                 }
                 "--screenshot" => {
                     let path = args
@@ -646,20 +594,6 @@ impl Cli {
                 width: width.unwrap_or(96),
                 height: height.unwrap_or(64),
             }),
-            Some(HeadlessMode::Chunk(path)) => Ok(Self::HeadlessChunk {
-                path,
-                width: width.unwrap_or(640),
-                height: height.unwrap_or(480),
-                scene,
-                render_options,
-            }),
-            Some(HeadlessMode::ChunkScenarios(directory)) => Ok(Self::HeadlessChunkScenarios {
-                directory,
-                width: width.unwrap_or(960),
-                height: height.unwrap_or(640),
-                scene,
-                render_options,
-            }),
             Some(HeadlessMode::DualView(directory)) => Ok(Self::HeadlessDualView {
                 options: HeadlessDualViewOptions {
                     directory,
@@ -668,11 +602,6 @@ impl Cli {
                     scene,
                     render_options,
                 },
-            }),
-            Some(HeadlessMode::Ui(path)) => Ok(Self::HeadlessUi {
-                path,
-                width: width.unwrap_or(960),
-                height: height.unwrap_or(540),
             }),
             Some(HeadlessMode::Screenshot(path)) => Ok(Self::HeadlessScreenshot {
                 options: HeadlessScreenshotOptions {
@@ -951,10 +880,7 @@ fn print_help() {
          Usage:\n\
           mclone-native-client [--menu|--start-in-world true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
-           mclone-native-client --headless-ui /tmp/mclone-ui-title.png [--width 960] [--height 540]\n\
           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|new-world|join-remote|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
-           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
-           mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\

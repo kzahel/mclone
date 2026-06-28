@@ -83,7 +83,7 @@ cargo fmt --manifest-path native/Cargo.toml --all --check
 cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -p mclone-render -p mclone-native-client
 cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
 pnpm native:web:build
-pnpm native:desktop-chunk:smoke
+pnpm native:desktop-offscreen:smoke
 git diff --check
 ```
 

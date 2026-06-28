@@ -61,9 +61,12 @@ The current gaps:
   the screenshot path as a one-frame capture, but it does not yet accept a
   neutral input stream, run N frames from CLI, or stream frames to sinks beyond
   the current screenshot PNG handoff.
-- Older `--headless-chunk`, `--headless-chunk-scenarios`, and `--headless-ui`
-  modes validate narrower renderer surfaces and can drift from real flat-client
-  behavior.
+- Older public `--headless-chunk`, `--headless-chunk-scenarios`, and
+  `--headless-ui` native-client modes have been retired so they cannot drift
+  into parallel client validation paths. Low-level helpers in
+  `mclone-render::headless` may still exist as renderer-unit primitives, but
+  client behavior should validate through the full-frame offscreen screenshot
+  path.
 
 ## Target Shape
 
@@ -286,15 +289,27 @@ Follow-up validation run after screenshot routing moved to
 
 ### Slice 5 - Retire Older Client Validation Modes
 
-- [ ] Move `native:desktop-chunk:smoke` to a full-frame offscreen flat-client
-  smoke once coverage is equivalent.
-- [ ] Replace `--headless-ui` with full-frame screenshot scenarios such as
-  `--screenshot --screenshot-ui title`.
-- [ ] Replace `--headless-chunk` and `--headless-chunk-scenarios` with
-  full-frame screenshot scenarios unless a specific renderer-level test still
-  needs them.
-- [ ] Leave narrow renderer helpers in `mclone-render::headless` only when they
-  test renderer units, not client behavior.
+- [x] Move `native:desktop-chunk:smoke` to the full-frame offscreen flat-client
+  smoke `native:desktop-offscreen:smoke`.
+- [x] Replace the public `--headless-ui` native-client mode with full-frame
+  screenshot scenarios such as `--screenshot --screenshot-ui title`.
+- [x] Replace the public `--headless-chunk` and
+  `--headless-chunk-scenarios` native-client modes with full-frame screenshot
+  scenarios.
+- [x] Leave narrow helpers in `mclone-render::headless` only as renderer-unit
+  primitives, not client behavior validation.
+- [x] Add a native-client CLI regression test that rejects the retired narrow
+  modes as unknown arguments.
+
+Validation run after retiring the public narrow modes:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+- `pnpm native:desktop-offscreen:smoke`
+- Visual inspection of `/tmp/mclone-desktop-offscreen.png`: nonblank terrain
+  from the full-frame offscreen screenshot path.
+- `git diff --check`
 
 ### Slice 6 - Long-Lived Offscreen Host
 
