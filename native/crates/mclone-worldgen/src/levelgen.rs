@@ -361,6 +361,13 @@ mod tests {
         .expect("valid vanilla inland plains scheduler features snapshot fixture")
     }
 
+    fn forest_seed_23823_scheduler_features_snapshot_fixture() -> SchedulerTraceFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/scheduler/vanilla-scheduler-features-snapshot-seed-23823-chunk--13-8-forest.json"
+        ))
+        .expect("valid vanilla forest scheduler features snapshot fixture")
+    }
+
     #[derive(Clone, Debug, Eq, PartialEq)]
     struct TaigaTreeIndexShiftCenterDiagnostic {
         center: ChunkPos,
@@ -1694,6 +1701,131 @@ mod tests {
                     actual: "minecraft:stone".to_owned(),
                     expected: "minecraft:dripstone_block".to_owned(),
                     count: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn forest_seed_23823_features_snapshot_reports_current_native_gap() {
+        let fixture = forest_seed_23823_scheduler_features_snapshot_fixture();
+        assert_eq!(fixture.module, "scheduler-trace");
+        assert_eq!(fixture.minecraft_version, "1.17.1");
+        assert_eq!(fixture.seed, "23823");
+        assert_eq!(fixture.target_chunk_x, -13);
+        assert_eq!(fixture.target_chunk_z, 8);
+        assert_eq!(fixture.target_radius, FEATURES_WRITE_RADIUS_CUTOFF);
+        assert_eq!(fixture.stop_status, "FEATURES");
+        assert_eq!(fixture.chunks.len(), 1);
+
+        let expected = &fixture.chunks[0];
+        assert_eq!(expected.chunk_x, -13);
+        assert_eq!(expected.chunk_z, 8);
+        assert_eq!(expected.status, "features");
+
+        let actual = generate_overworld_features_chunk(23823, expected.chunk_x, expected.chunk_z);
+        let expected_blocks = expand_full_fixture_blocks(expected, actual.min_y, actual.height);
+
+        let canopy_index = ((67 - actual.min_y) << 8) | (8 << 4) | 8;
+        assert_eq!(
+            expected_blocks[canopy_index as usize],
+            "minecraft:oak_leaves"
+        );
+        assert_eq!(actual.block_at_y(8, 67, 8).name(), "minecraft:oak_leaves");
+
+        let remaining_fancy_oak_index = ((70 - actual.min_y) << 8) | (8 << 4) | 8;
+        assert_eq!(
+            expected_blocks[remaining_fancy_oak_index as usize],
+            "minecraft:oak_leaves"
+        );
+        assert_eq!(actual.block_at_y(8, 70, 8).name(), "minecraft:air");
+
+        let report = compare_generated_chunk_to_full_fixture(&actual, expected);
+
+        assert_eq!(report.total_blocks, 16 * 16 * 256);
+        assert_eq!(report.mismatched_blocks, 598, "{report:#?}");
+        assert_eq!(
+            report.top_mismatch_pairs,
+            vec![
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:oak_leaves".to_owned(),
+                    count: 248,
+                },
+                MismatchBucket {
+                    actual: "minecraft:oak_leaves".to_owned(),
+                    expected: "minecraft:air".to_owned(),
+                    count: 108,
+                },
+                MismatchBucket {
+                    actual: "minecraft:birch_leaves".to_owned(),
+                    expected: "minecraft:air".to_owned(),
+                    count: 74,
+                },
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:birch_leaves".to_owned(),
+                    count: 42,
+                },
+                MismatchBucket {
+                    actual: "minecraft:stone".to_owned(),
+                    expected: "minecraft:dripstone_block".to_owned(),
+                    count: 31,
+                },
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:oak_log".to_owned(),
+                    count: 24,
+                },
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:pointed_dripstone".to_owned(),
+                    count: 9,
+                },
+                MismatchBucket {
+                    actual: "minecraft:birch_log".to_owned(),
+                    expected: "minecraft:air".to_owned(),
+                    count: 9,
+                },
+                MismatchBucket {
+                    actual: "minecraft:oak_leaves".to_owned(),
+                    expected: "minecraft:birch_leaves".to_owned(),
+                    count: 9,
+                },
+                MismatchBucket {
+                    actual: "minecraft:oak_log".to_owned(),
+                    expected: "minecraft:air".to_owned(),
+                    count: 8,
+                },
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:birch_log".to_owned(),
+                    count: 7,
+                },
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:grass".to_owned(),
+                    count: 5,
+                },
+                MismatchBucket {
+                    actual: "minecraft:grass_block".to_owned(),
+                    expected: "minecraft:dirt".to_owned(),
+                    count: 5,
+                },
+                MismatchBucket {
+                    actual: "minecraft:dirt".to_owned(),
+                    expected: "minecraft:grass_block".to_owned(),
+                    count: 4,
+                },
+                MismatchBucket {
+                    actual: "minecraft:birch_leaves".to_owned(),
+                    expected: "minecraft:oak_leaves".to_owned(),
+                    count: 3,
+                },
+                MismatchBucket {
+                    actual: "minecraft:birch_log".to_owned(),
+                    expected: "minecraft:birch_leaves".to_owned(),
+                    count: 3,
                 },
             ]
         );

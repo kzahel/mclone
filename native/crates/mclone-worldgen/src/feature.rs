@@ -751,6 +751,7 @@ mod tests {
     #[test]
     fn biome_feature_tables_select_distinct_visible_families() {
         let plains = overworld_features_for_biome(get_layered_biome_by_id(1));
+        let forest = overworld_features_for_biome(get_layered_biome_by_id(4));
         let birch = overworld_features_for_biome(get_layered_biome_by_id(27));
         let taiga = overworld_features_for_biome(get_layered_biome_by_id(5));
         let desert = overworld_features_for_biome(get_layered_biome_by_id(2));
@@ -768,6 +769,11 @@ mod tests {
             )
         }));
         assert!(
+            forest
+                .iter()
+                .any(|feature| matches!(feature.feature, ConfiguredFeature::RandomSelector(_)))
+        );
+        assert!(
             taiga
                 .iter()
                 .any(|feature| matches!(feature.feature, ConfiguredFeature::RandomSelector(_)))
@@ -781,6 +787,76 @@ mod tests {
                 })
             )
         }));
+    }
+
+    #[test]
+    fn forest_feature_table_uses_vanilla_birch_other_slot() {
+        let forest = overworld_features_for_biome(get_layered_biome_by_id(4));
+        let vegetal_features = forest
+            .iter()
+            .filter(|feature| feature.step == DecorationStep::VegetalDecoration)
+            .collect::<Vec<_>>();
+
+        assert_eq!(vegetal_features.len(), 11);
+        assert_eq!(vegetal_features[0].feature, ConfiguredFeature::noop());
+        assert_eq!(
+            vegetal_features[1].feature,
+            ConfiguredFeature::glow_lichen(GlowLichenConfiguration::default_overworld())
+        );
+        assert_eq!(
+            vegetal_features[2].decorators,
+            vec![
+                ConfiguredDecorator::count_extra(10, 0.1, 1),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::water_depth_threshold(0),
+                ConfiguredDecorator::heightmap(HeightmapType::OceanFloor),
+            ]
+        );
+        match &vegetal_features[2].feature {
+            ConfiguredFeature::RandomSelector(config) => {
+                assert_eq!(
+                    config.features,
+                    vec![
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::birch()),
+                            0.2,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::oak()),
+                            0.1,
+                        ),
+                    ]
+                );
+                assert_eq!(
+                    *config.default_feature,
+                    ConfiguredFeature::tree(TreeConfiguration::oak())
+                );
+            }
+            other => panic!("expected forest birch_other random selector, got {other:?}"),
+        }
+        assert_eq!(
+            vegetal_features[3].decorators,
+            vec![
+                ConfiguredDecorator::count(2),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+                ConfiguredDecorator::spread_32_above(),
+            ]
+        );
+        assert_eq!(
+            vegetal_features[4].decorators,
+            vec![
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+            ]
+        );
+        assert_eq!(
+            vegetal_features[5..9]
+                .iter()
+                .filter(|feature| feature.feature == ConfiguredFeature::noop())
+                .count(),
+            4
+        );
     }
 
     #[test]
@@ -1204,7 +1280,7 @@ mod tests {
         let report = apply_overworld_biome_features(12_345, get_layered_biome_by_id(4), &mut chunk);
 
         assert_eq!(report.biome_key, "minecraft:forest");
-        assert_eq!(report.attempted_features, 26);
+        assert_eq!(report.attempted_features, 31);
         assert!(report.placed_features > 0);
         assert!(report.added_non_air_blocks > 0);
     }

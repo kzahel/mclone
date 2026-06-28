@@ -231,6 +231,11 @@ impl StraightTrunkPlacerConfiguration {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FoliagePlacerConfiguration {
+    Blob {
+        radius: IntProvider,
+        offset: IntProvider,
+        height: i32,
+    },
     Spruce {
         radius: IntProvider,
         offset: IntProvider,
@@ -251,6 +256,7 @@ impl FoliagePlacerConfiguration {
         _config: TreeConfiguration,
     ) -> i32 {
         match self {
+            Self::Blob { height, .. } => height,
             Self::Spruce { trunk_height, .. } => (tree_height - trunk_height.sample(random)).max(4),
             Self::Pine { height, .. } => height.sample(random),
         }
@@ -258,6 +264,7 @@ impl FoliagePlacerConfiguration {
 
     pub(super) fn foliage_radius(self, random: &mut impl RandomSource, trunk_height: i32) -> i32 {
         match self {
+            Self::Blob { radius, .. } => radius.sample(random),
             Self::Spruce { radius, .. } => radius.sample(random),
             Self::Pine { radius, .. } => {
                 radius.sample(random) + random.next_int_bound((trunk_height + 1).max(1))
@@ -267,7 +274,9 @@ impl FoliagePlacerConfiguration {
 
     pub(super) fn offset(self, random: &mut impl RandomSource) -> i32 {
         match self {
-            Self::Spruce { offset, .. } | Self::Pine { offset, .. } => offset.sample(random),
+            Self::Blob { offset, .. } | Self::Spruce { offset, .. } | Self::Pine { offset, .. } => {
+                offset.sample(random)
+            }
         }
     }
 }
@@ -321,6 +330,34 @@ impl TreeConfiguration {
             foliage_placer,
             minimum_size,
         }
+    }
+
+    pub const fn oak() -> Self {
+        Self::new(
+            OAK_LOG,
+            OAK_LEAVES,
+            StraightTrunkPlacerConfiguration::new(4, 2, 0),
+            FoliagePlacerConfiguration::Blob {
+                radius: IntProvider::constant(2),
+                offset: IntProvider::constant(0),
+                height: 3,
+            },
+            TwoLayersFeatureSize::new(1, 0, 1),
+        )
+    }
+
+    pub const fn birch() -> Self {
+        Self::new(
+            BIRCH_LOG,
+            BIRCH_LEAVES,
+            StraightTrunkPlacerConfiguration::new(5, 2, 0),
+            FoliagePlacerConfiguration::Blob {
+                radius: IntProvider::constant(2),
+                offset: IntProvider::constant(0),
+                height: 3,
+            },
+            TwoLayersFeatureSize::new(1, 0, 1),
+        )
     }
 
     pub const fn spruce() -> Self {

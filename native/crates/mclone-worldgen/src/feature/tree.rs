@@ -158,6 +158,12 @@ fn create_foliage<W: FeatureWorld>(
 ) {
     let offset = config.foliage_placer.offset(random);
     match config.foliage_placer {
+        FoliagePlacerConfiguration::Blob { .. } => {
+            for y_offset in ((offset - foliage_height)..=offset).rev() {
+                let radius = (foliage_radius - 1 - y_offset / 2).max(0);
+                place_leaves_row(world, random, config, attachment, radius, y_offset);
+            }
+        }
         FoliagePlacerConfiguration::Spruce { .. } => {
             let mut radius = random.next_int_bound(2);
             let mut radius_limit = 1;
@@ -199,8 +205,24 @@ fn place_leaves_row<W: FeatureWorld>(
 ) {
     for x_offset in -radius..=radius {
         for z_offset in -radius..=radius {
-            if should_skip_conifer_leaf(x_offset.abs(), z_offset.abs(), radius) {
-                continue;
+            match config.foliage_placer {
+                FoliagePlacerConfiguration::Blob { .. } => {
+                    if should_skip_blob_leaf(
+                        random,
+                        x_offset.abs(),
+                        y_offset,
+                        z_offset.abs(),
+                        radius,
+                    ) {
+                        continue;
+                    }
+                }
+                FoliagePlacerConfiguration::Spruce { .. }
+                | FoliagePlacerConfiguration::Pine { .. } => {
+                    if should_skip_conifer_leaf(x_offset.abs(), z_offset.abs(), radius) {
+                        continue;
+                    }
+                }
             }
             try_place_leaf(
                 world,
@@ -218,6 +240,16 @@ fn place_leaves_row<W: FeatureWorld>(
 
 fn should_skip_conifer_leaf(abs_x: i32, abs_z: i32, radius: i32) -> bool {
     abs_x == radius && abs_z == radius && radius > 0
+}
+
+fn should_skip_blob_leaf(
+    random: &mut impl RandomSource,
+    abs_x: i32,
+    y_offset: i32,
+    abs_z: i32,
+    radius: i32,
+) -> bool {
+    abs_x == radius && abs_z == radius && (random.next_int_bound(2) == 0 || y_offset == 0)
 }
 
 fn place_log<W: FeatureWorld>(

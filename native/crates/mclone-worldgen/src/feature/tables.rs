@@ -425,12 +425,17 @@ fn disk_feature(config: DiskConfiguration, count: Option<i32>) -> PlacedFeature 
 
 fn forest_features() -> Vec<PlacedFeature> {
     vec![
-        tree_feature(BasicTreeConfiguration::oak(), 5, 0.35, 1),
-        tree_feature(BasicTreeConfiguration::birch(), 2, 0.25, 1),
-        grass_patch(GRASS, 3),
-        grass_patch(FERN, 1),
-        flower_patch(DANDELION, 1),
-        flower_patch(POPPY, 1),
+        omitted_vegetal_feature(),
+        glow_lichen_feature(),
+        forest_birch_other_feature(),
+        default_flower_feature(),
+        forest_grass_patch_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        spring_water_feature(),
+        spring_lava_feature(),
     ]
 }
 
@@ -552,6 +557,39 @@ pub(super) fn taiga_vegetation_feature() -> PlacedFeature {
     )
 }
 
+fn forest_birch_other_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
+            [
+                WeightedConfiguredFeature::new(
+                    ConfiguredFeature::tree(TreeConfiguration::birch()),
+                    0.2,
+                ),
+                WeightedConfiguredFeature::new(
+                    ConfiguredFeature::tree(TreeConfiguration::oak()),
+                    0.1,
+                ),
+            ],
+            ConfiguredFeature::tree(TreeConfiguration::oak()),
+        )),
+        tree_threshold_decorators(10, 0.1, 1),
+    )
+}
+
+fn tree_threshold_decorators(
+    count: i32,
+    extra_chance: f32,
+    extra_count: i32,
+) -> Vec<ConfiguredDecorator> {
+    vec![
+        ConfiguredDecorator::count_extra(count, extra_chance, extra_count),
+        ConfiguredDecorator::square(),
+        ConfiguredDecorator::water_depth_threshold(0),
+        ConfiguredDecorator::heightmap(HeightmapType::OceanFloor),
+    ]
+}
+
 fn default_flower_feature() -> PlacedFeature {
     PlacedFeature::new(
         DecorationStep::VegetalDecoration,
@@ -572,6 +610,28 @@ fn default_flower_feature() -> PlacedFeature {
             ConfiguredDecorator::square(),
             ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
             ConfiguredDecorator::spread_32_above(),
+        ],
+    )
+}
+
+fn forest_grass_patch_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: GRASS,
+            weighted_states: &[],
+            tries: 32,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: true,
+            can_replace: false,
+            double_plant: false,
+            place_on: &[],
+        }),
+        vec![
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
         ],
     )
 }
