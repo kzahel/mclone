@@ -268,6 +268,7 @@ pub struct ServerRunnerDiagnostics {
     pub chunk_tracking: PlayerChunkTrackingDiagnostics,
     pub loading_progress: Option<ChunkLoadingProgressStats>,
     pub loading_progress_snapshot: Option<ChunkLoadingProgressSnapshot>,
+    pub view_readiness_snapshot: Option<ChunkLoadingProgressSnapshot>,
     pub diagnostics_detail_refreshes: u64,
     pub diagnostics_detail_age_ms: f64,
     pub last_tick: ServerRunnerTickDiagnostics,
@@ -298,6 +299,7 @@ impl ServerRunnerDiagnostics {
             chunk_tracking: PlayerChunkTrackingDiagnostics::default(),
             loading_progress: None,
             loading_progress_snapshot: None,
+            view_readiness_snapshot: None,
             diagnostics_detail_refreshes: 0,
             diagnostics_detail_age_ms: 0.0,
             last_tick: ServerRunnerTickDiagnostics::default(),
@@ -434,6 +436,7 @@ mod native {
         chunk_tracking: PlayerChunkTrackingDiagnostics,
         loading_progress: Option<ChunkLoadingProgressStats>,
         loading_progress_snapshot: Option<ChunkLoadingProgressSnapshot>,
+        view_readiness_snapshot: Option<ChunkLoadingProgressSnapshot>,
     }
 
     impl DiagnosticsDetailSnapshot {
@@ -453,6 +456,7 @@ mod native {
                 chunk_tracking: server.chunk_tracking_diagnostics(),
                 loading_progress: server.loading_progress_stats(),
                 loading_progress_snapshot: server.loading_progress_snapshot(),
+                view_readiness_snapshot: server.view_readiness_snapshot(),
             }
         }
     }
@@ -959,6 +963,7 @@ mod native {
             diagnostics.chunk_tracking = detail_snapshot.chunk_tracking;
             diagnostics.loading_progress = detail_snapshot.loading_progress;
             diagnostics.loading_progress_snapshot = detail_snapshot.loading_progress_snapshot;
+            diagnostics.view_readiness_snapshot = detail_snapshot.view_readiness_snapshot;
             diagnostics.diagnostics_detail_refreshes += 1;
             diagnostics.diagnostics_detail_age_ms = 0.0;
             diagnostics.diagnostics_detail_refreshed_at = Some(now);

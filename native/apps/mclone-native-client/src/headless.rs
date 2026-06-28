@@ -819,12 +819,12 @@ pub(crate) fn run_headless_screenshot(
             let ui_active = ui.is_active();
             let ui_covers_world = ui.covers_world();
             let debug_stats = (!ui_active).then_some(debug_stats).flatten();
-            let debug_loading_progress_overlay = debug_stats
+            let debug_view_readiness_overlay = debug_stats
                 .is_some()
-                .then(|| runtime.loading_progress_overlay())
+                .then(|| runtime.view_readiness_overlay())
                 .flatten();
             let gui_active =
-                ui_active || debug_stats.is_some() || debug_loading_progress_overlay.is_some();
+                ui_active || debug_stats.is_some() || debug_view_readiness_overlay.is_some();
             let gui_scale = ui.scale();
             let base_ui_draw = ui.render_draw_list(game_ui_render_state(
                 runtime.render_distance() as i32,
@@ -863,7 +863,7 @@ pub(crate) fn run_headless_screenshot(
                         debug_stats.render = *stats;
                         render_debug_pane(gui_scale, &mut ui_draw, &debug_stats);
                     }
-                    if let Some(progress) = &debug_loading_progress_overlay {
+                    if let Some(progress) = &debug_view_readiness_overlay {
                         render_loading_progress_panel_at(
                             gui_scale,
                             &mut ui_draw,
@@ -872,6 +872,7 @@ pub(crate) fn run_headless_screenshot(
                                 x: (gui_scale.width - 132.0).max(4.0),
                                 y: 4.0,
                             },
+                            "VIEW",
                         );
                     }
                     ui_draw

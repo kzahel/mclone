@@ -72,6 +72,15 @@ pub fn loading_progress_overlay_from_diagnostics(
         .map(loading_progress_overlay_from_snapshot)
 }
 
+pub fn view_readiness_overlay_from_diagnostics(
+    diagnostics: &ServerRunnerDiagnostics,
+) -> Option<LoadingProgressOverlay> {
+    diagnostics
+        .view_readiness_snapshot
+        .as_ref()
+        .map(loading_progress_overlay_from_snapshot)
+}
+
 pub fn loading_progress_overlay_from_snapshot(
     snapshot: &ChunkLoadingProgressSnapshot,
 ) -> LoadingProgressOverlay {
@@ -1075,6 +1084,17 @@ mod tests {
         assert_eq!(overlay.status_at(1, 0), LoadingProgressCellStatus::Features);
         assert_eq!(overlay.status_at(-1, 0), LoadingProgressCellStatus::None);
         assert!(overlay.playable_cell().unwrap().playable);
+
+        let mut diagnostics =
+            ServerRunnerDiagnostics::initial(ServerRunnerKind::InlineFallback, 0, 0);
+        diagnostics.view_readiness_snapshot = Some(snapshot);
+        let diagnostics_overlay = view_readiness_overlay_from_diagnostics(&diagnostics)
+            .expect("view readiness diagnostics should map to an overlay");
+        assert_eq!(diagnostics_overlay.percent(), overlay.percent());
+        assert_eq!(
+            diagnostics_overlay.status_at(1, 0),
+            LoadingProgressCellStatus::Features
+        );
     }
 
     #[test]

@@ -81,6 +81,14 @@ impl ChunkHolder {
             .count()
     }
 
+    pub fn highest_ready_status(&self) -> Option<ChunkStatus> {
+        self.status_slots
+            .values()
+            .filter(|slot| slot.step == ChunkStatusStep::Ready)
+            .map(|slot| slot.status)
+            .max()
+    }
+
     pub fn residency(&self) -> ChunkResidency {
         self.residency
     }

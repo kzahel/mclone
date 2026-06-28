@@ -29,7 +29,7 @@ use crate::session::{
 use crate::{
     RuntimePollDiagnostics, RuntimePollTiming, RuntimeUpdateApplyReport, SingleViewRuntime,
     SingleViewRuntimeStats, chunk_tracking_radius_for_render_distance, elapsed_ms,
-    loading_progress_overlay_from_diagnostics,
+    loading_progress_overlay_from_diagnostics, view_readiness_overlay_from_diagnostics,
 };
 
 const RUNTIME_DIAGNOSTICS_POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -678,12 +678,12 @@ where
         self.core().last_poll_diagnostics()
     }
 
-    pub fn loading_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+    pub fn view_readiness_overlay(&self) -> Option<LoadingProgressOverlay> {
         match self {
             Self::Local(scene) => scene
                 .last_runner_diagnostics
                 .as_ref()
-                .and_then(loading_progress_overlay_from_diagnostics),
+                .and_then(view_readiness_overlay_from_diagnostics),
             Self::RemoteDedicated(_) => None,
         }
     }

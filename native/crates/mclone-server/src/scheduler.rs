@@ -41,6 +41,9 @@ use crate::light_mailbox::{CompletedLightStatus, LightStatusMailbox};
 use crate::light_status::{
     PendingLightStatus, PendingLightStatusBatch, hydrate_loaded_light_snapshot,
 };
+use crate::loading_progress::{
+    ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
+};
 use crate::persistence::{ChunkSnapshotStore, ChunkStoreResult, NullChunkSnapshotStore};
 use crate::player_chunk_tracking::chunk_positions_for_view;
 use crate::timing::{
@@ -553,6 +556,57 @@ impl ChunkScheduler {
 
     pub fn holder(&self, pos: ChunkPos) -> Option<&ChunkHolder> {
         self.holders.get(&pos)
+    }
+
+    pub(crate) fn view_readiness_snapshot(&self, view: &ChunkView) -> ChunkLoadingProgressSnapshot {
+        let target_status = self.runtime_chunk_target_status();
+        let radius = i32::try_from(view.chunk_tracking_radius)
+            .expect("chunk tracking radius must fit into i32");
+        let target_chunk_count = {
+            let side = radius as usize * 2 + 1;
+            side * side
+        };
+        let mut target_ready_chunks = 0;
+        let mut playable_chunk_ready = false;
+        let mut cells = Vec::with_capacity(target_chunk_count);
+
+        for relative_z in -radius..=radius {
+            for relative_x in -radius..=radius {
+                let pos = ChunkPos::new(view.center.x + relative_x, view.center.z + relative_z);
+                let status = self
+                    .holders
+                    .get(&pos)
+                    .and_then(ChunkHolder::highest_ready_status);
+                let target_ready = status.is_some_and(|status| status >= target_status);
+                let playable = pos == view.center;
+                if target_ready {
+                    target_ready_chunks += 1;
+                }
+                if playable {
+                    playable_chunk_ready = target_ready;
+                }
+                cells.push(ChunkLoadingProgressCell {
+                    relative_x,
+                    relative_z,
+                    status,
+                    target_ready,
+                    playable,
+                });
+            }
+        }
+
+        ChunkLoadingProgressSnapshot {
+            stats: ChunkLoadingProgressStats {
+                center: view.center,
+                target_radius: view.chunk_tracking_radius,
+                target_status,
+                target_chunk_count,
+                target_ready_chunks,
+                playable_chunk: view.center,
+                playable_chunk_ready,
+            },
+            cells,
+        }
     }
 
     pub(crate) fn client_visible_snapshot(&self, pos: ChunkPos) -> Option<ChunkSnapshot> {

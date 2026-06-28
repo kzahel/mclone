@@ -1538,12 +1538,13 @@ pub fn render_loading_progress_panel_at(
     draw: &mut GuiDrawList,
     progress: &LoadingProgressOverlay,
     origin: Point,
+    label: &str,
 ) {
     let side = progress.grid_side().max(1) as f32;
     let available_width = (scale.width - origin.x - 4.0).max(1.0);
     let available_height = (scale.height - origin.y - 4.0).max(1.0);
     let font = Font::default();
-    let title = format!("LOAD {}%", progress.percent());
+    let title = format!("{label} {}%", progress.percent());
     let max_grid = available_width
         .min(available_height - 28.0)
         .min(96.0)
@@ -3128,6 +3129,7 @@ mod tests {
             &mut draw,
             &progress,
             Point { x: 800.0, y: 4.0 },
+            "VIEW",
         );
 
         assert!(!draw.commands().iter().any(|command| {

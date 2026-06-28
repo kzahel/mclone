@@ -25,7 +25,10 @@ batches are released in center-first 3x3 groups so the playable target can turn
 white before the full warm region finishes. A debug-visibility follow-up also
 landed on 2026-06-28: the desktop tilde debug pane can show the latest
 post-join loading-progress grid as a compact panel instead of hiding the grid
-once gameplay starts.
+once gameplay starts. Slice 4C landed on 2026-06-28: the post-join compact
+debug panel now uses an authoritative current-view readiness snapshot from
+scheduler holder state and is labeled `VIEW`, while startup keeps using the
+event-sourced loading overlay.
 
 ## Purpose
 
@@ -372,31 +375,32 @@ Slice 4A result:
 
 ### Slice 4C - Authoritative In-World View Readiness
 
-- [ ] Keep `ChunkLoadingProgress` as the startup/event producer for the
+- [x] Keep `ChunkLoadingProgress` as the startup/event producer for the
   full-screen loading flow. It answers "which status events has startup heard?"
   and should not be treated as authoritative after gameplay starts.
-- [ ] Add a server-owned current-view readiness snapshot for the local accepted
+- [x] Add a server-owned current-view readiness snapshot for the local accepted
   view. It should answer "for the current desired local view, what is each
   chunk's actual highest ready status right now?"
-- [ ] Compute the snapshot from scheduler holder/snapshot state, not from the
+- [x] Compute the snapshot from scheduler holder/snapshot state, not from the
   loading-progress event map. The target-ready test should use the same runtime
   target as startup (`Light` with lighting, `Features` without).
-- [ ] Preserve ownership boundaries: `mclone-server` produces the authoritative
+- [x] Preserve ownership boundaries: `mclone-server` produces the authoritative
   diagnostic, `mclone-app-runtime` maps it into `LoadingProgressOverlay`, and
   app/UI crates render it without peeking into holders, tickets, or scheduler
   internals.
-- [ ] Use the startup event overlay while `LocalSingleViewStartupPump` is active.
+- [x] Use the startup event overlay while `LocalSingleViewStartupPump` is active.
   After the runtime is active, use the current-view readiness overlay for the
   tilde/debug panel.
-- [ ] Rename the compact post-join label from `LOAD` to `VIEW` or `STREAM` so
+- [x] Rename the compact post-join label from `LOAD` to `VIEW` or `STREAM` so
   it does not imply world-startup loading.
-- [ ] Backfill already-ready chunks through the authoritative snapshot instead
+- [x] Backfill already-ready chunks through the authoritative snapshot instead
   of special-casing `SnapshotReady` or existing `client_visible_snapshot` event
   paths in the event accumulator.
-- [ ] Unit-test scheduler/current-view counts against already-ready chunks,
+- [x] Unit-test scheduler/current-view counts against already-ready chunks,
   moved views, and target-status changes with lighting enabled/disabled.
-- [ ] Unit-test app-runtime mapping and UI label selection, then capture a
-  headless debug screenshot to verify the in-world compact panel.
+- [x] Unit-test app-runtime mapping and compact-panel rendering, then capture a
+  headless debug screenshot to verify the in-world compact panel label and
+  placement.
 
 Implementation notes:
 
@@ -412,6 +416,23 @@ Implementation notes:
   or past the runtime target.
 - Remote dedicated play should keep the simple connection/status behavior until
   protocol-level remote progress or diagnostics are designed.
+
+Slice 4C result:
+
+- `ChunkHolder::highest_ready_status()` and
+  `ChunkScheduler::view_readiness_snapshot()` expose a full current accepted-view
+  square from authoritative holder status slots, including chunks with no ready
+  status yet.
+- `IntegratedServer::view_readiness_snapshot()` and
+  `ServerRunnerDiagnostics::view_readiness_snapshot` carry the server diagnostic
+  through native and web-worker runner paths.
+- `mclone-app-runtime` now keeps startup `loading_progress` overlays separate
+  from post-join `view_readiness` overlays. Desktop/headless debug rendering uses
+  the post-join source and labels the compact panel `VIEW`.
+- Tests cover moved accepted views, already-ready chunks, and lit/unlit runtime
+  target status selection. The rendered debug screenshot at
+  `/tmp/mclone-view-readiness-debug.png` showed `VIEW 100%` beside the debug
+  pane.
 
 ### Slice 5 - Platform Adoption
 
@@ -460,6 +481,13 @@ Slice 5 partial result:
 ## Validation
 
 - `cargo test --manifest-path native/Cargo.toml`
+- Slice 4C validation on 2026-06-28:
+  `cargo test --manifest-path native/Cargo.toml -p mclone-server`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime loading_progress_snapshot_maps_to_shared_overlay`,
+  `cargo test --manifest-path native/Cargo.toml -p mclone-ui loading_progress_panel_draws_compact_grid_without_fullscreen_scrim`,
+  `pnpm native:web:build`, `pnpm native:movement:smoke`, and headless screenshot
+  capture/inspection at `/tmp/mclone-view-readiness-debug.png`.
 - Desktop manual/automated Create World smoke: click New World -> Create World
   and verify the app remains responsive while the grid updates.
 - Desktop screenshot/capture while startup is in progress, saved under `/tmp`.

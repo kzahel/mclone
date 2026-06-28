@@ -147,6 +147,11 @@ impl IntegratedServer {
         self.loading_progress.snapshot()
     }
 
+    pub fn view_readiness_snapshot(&self) -> Option<ChunkLoadingProgressSnapshot> {
+        let view = self.chunk_tracking.accepted_view(ServerPlayerId::LOCAL)?;
+        Some(self.scheduler.view_readiness_snapshot(view))
+    }
+
     pub fn lighting_enabled(&self) -> bool {
         self.scheduler.lighting_enabled()
     }
@@ -990,11 +995,15 @@ mod tests {
             .expect("simulation tick should emit a TimeUpdate")
     }
 
-    fn load_center_chunk(server: &mut IntegratedServer) {
-        server.set_lighting_enabled(false);
+    fn load_chunk_view_with_lighting(
+        server: &mut IntegratedServer,
+        center: ChunkPos,
+        lighting_enabled: bool,
+    ) {
+        server.set_lighting_enabled(lighting_enabled);
         let updates = server
             .try_handle_command(ClientCommand::SetChunkView(ChunkView {
-                center: ChunkPos::new(0, 0),
+                center,
                 render_distance: 0,
                 chunk_tracking_radius: 0,
             }))
@@ -1011,6 +1020,14 @@ mod tests {
             }
         }
         panic!("timed out loading center chunk");
+    }
+
+    fn load_chunk_view(server: &mut IntegratedServer, center: ChunkPos) {
+        load_chunk_view_with_lighting(server, center, false);
+    }
+
+    fn load_center_chunk(server: &mut IntegratedServer) {
+        load_chunk_view(server, ChunkPos::new(0, 0));
     }
 
     #[test]
@@ -1040,6 +1057,61 @@ mod tests {
         assert_eq!(stats.target_ready_chunks, 1);
         assert_eq!(stats.playable_chunk, ChunkPos::new(0, 0));
         assert!(stats.playable_chunk_ready);
+    }
+
+    #[test]
+    fn view_readiness_snapshot_tracks_current_accepted_view() {
+        let mut server = IntegratedServer::new(0);
+        assert_eq!(server.view_readiness_snapshot(), None);
+
+        load_chunk_view(&mut server, ChunkPos::new(0, 0));
+        let first = server
+            .view_readiness_snapshot()
+            .expect("loaded local view should expose readiness snapshot");
+        assert_eq!(first.stats.center, ChunkPos::new(0, 0));
+        assert_eq!(first.stats.target_radius, 0);
+        assert_eq!(first.stats.target_chunk_count, 1);
+        assert_eq!(first.stats.target_ready_chunks, 1);
+        assert_eq!(first.cells.len(), 1);
+        assert!(first.stats.playable_chunk_ready);
+
+        load_chunk_view(&mut server, ChunkPos::new(2, 0));
+        let moved = server
+            .view_readiness_snapshot()
+            .expect("moved local view should expose readiness snapshot");
+        assert_eq!(moved.stats.center, ChunkPos::new(2, 0));
+        assert_eq!(moved.stats.target_radius, 0);
+        assert_eq!(moved.stats.target_chunk_count, 1);
+        assert_eq!(moved.stats.target_ready_chunks, 1);
+        assert_eq!(moved.cells.len(), 1);
+        assert_eq!(moved.cells[0].relative_x, 0);
+        assert_eq!(moved.cells[0].relative_z, 0);
+        assert!(moved.cells[0].playable);
+        assert!(moved.stats.playable_chunk_ready);
+    }
+
+    #[test]
+    fn view_readiness_snapshot_uses_runtime_target_status() {
+        let mut unlit_server = IntegratedServer::new(0);
+        load_chunk_view_with_lighting(&mut unlit_server, ChunkPos::new(0, 0), false);
+        let unlit = unlit_server
+            .view_readiness_snapshot()
+            .expect("unlit loaded view should expose readiness snapshot");
+        assert_eq!(
+            unlit.stats.target_status,
+            mclone_core::ChunkStatus::Features
+        );
+        assert_eq!(unlit.stats.target_ready_chunks, 1);
+        assert!(unlit.stats.playable_chunk_ready);
+
+        let mut lit_server = IntegratedServer::new(0);
+        load_chunk_view_with_lighting(&mut lit_server, ChunkPos::new(0, 0), true);
+        let lit = lit_server
+            .view_readiness_snapshot()
+            .expect("lit loaded view should expose readiness snapshot");
+        assert_eq!(lit.stats.target_status, mclone_core::ChunkStatus::Light);
+        assert_eq!(lit.stats.target_ready_chunks, 1);
+        assert!(lit.stats.playable_chunk_ready);
     }
 
     fn accept_player_position_updates(server: &mut IntegratedServer, updates: &[ServerUpdate]) {

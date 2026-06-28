@@ -170,7 +170,6 @@ impl PlayerChunkTracking {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn accepted_view(&self, player_id: ServerPlayerId) -> Option<&ChunkView> {
         self.players
             .get(&player_id)

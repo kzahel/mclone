@@ -380,8 +380,8 @@ impl WindowSceneRuntime {
         self.scene.last_poll_diagnostics()
     }
 
-    pub(crate) fn loading_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
-        self.scene.loading_progress_overlay()
+    pub(crate) fn view_readiness_overlay(&self) -> Option<LoadingProgressOverlay> {
+        self.scene.view_readiness_overlay()
     }
 
     pub(crate) fn camera_inside_occluding_block(&self, position: Vec3) -> bool {
