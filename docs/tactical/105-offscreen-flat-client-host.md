@@ -1,7 +1,7 @@
 # 105: Offscreen Flat Client Host
 
-Status: active; `GameUi` ownership and host-neutral menu routing now live in
-the native flat driver.
+Status: active; `GameUi`, session/startup lifetime, and host-neutral
+local/remote start routing now live in the native flat driver.
 
 ## Purpose
 
@@ -38,8 +38,8 @@ Good pieces already exist:
 The current gaps:
 
 - `ChunkApp` still owns the desktop host shell: `winit` events, surface
-  acquire/present, frame pacing, mouse lock, desktop asset/runtime construction,
-  local startup pump, and desktop-specific session pending payloads.
+  acquire/present, frame pacing, mouse lock, input preferences, desktop
+  asset/runtime construction factories, and desktop-only diagnostics.
 - `run_headless_screenshot` now constructs a `FlatClientDriver`, gives it the
   screenshot runtime/camera, rebuilds `FlatRenderResources` through the driver,
   uploads sections through the driver, and renders through
@@ -48,9 +48,10 @@ The current gaps:
   owner for flat-client runtime, camera/spectator, interaction, actor
   interpolation, render options, render stats, frame timing, and full-frame UI
   draw-list assembly. It also owns `GameUi`, deterministic new-world seed
-  reroll state, and host-neutral menu action routing. `ChunkApp` still drives it
-  directly from the desktop event loop and still owns desktop session/startup
-  execution.
+  reroll state, host-neutral menu action routing, the session coordinator,
+  local startup pump lifetime, runtime replacement, and session status/failure
+  UI. `ChunkApp` still drives it directly from the desktop event loop and
+  supplies the current `wgpu::Device` plus desktop runtime/startup factories.
 - `run_headless_screenshot` is still screenshot-shaped: it constructs a fresh
   runtime/driver per capture and still owns screenshot scenario setup and
   scripted interaction instead of sharing a long-lived flat-client host loop.
@@ -151,11 +152,16 @@ Validation run:
   for desktop and headless screenshot.
 - [x] Move `GameUi` ownership, deterministic seed reroll state, UI input
   forwarding wrappers, and host-neutral menu action routing into the driver.
-  The driver now returns host requests for local/remote start, quit, frame
-  pacing, and touch preference changes instead of constructing desktop payloads.
-- [ ] Move session coordinator/startup, input preferences, render resource asset
-  loading, and menu action host execution behind driver methods instead of
-  direct `ChunkApp` field access.
+  The driver now owns local/remote start queueing and returns host requests only
+  for true host-shell actions such as quit, frame pacing, and touch preference
+  changes.
+- [x] Move session coordinator, local startup pump lifetime, runtime
+  replacement, session status/failure UI, initial player placement, and
+  teardown behind driver methods while keeping runtime/startup construction
+  injectable.
+- [ ] Move input preferences, render resource asset loading, and remaining
+  desktop-only menu action execution behind clearer host/driver adapter methods
+  instead of direct `ChunkApp` field access.
 - [ ] Keep platform transport/session construction injectable so desktop TCP,
   offscreen TCP, Android property TCP, and future network sources stay adapters.
 - [ ] Preserve existing desktop behavior.
@@ -183,6 +189,15 @@ Follow-up validation run after render-resource ownership moved into driver:
 - `cargo fmt --manifest-path native/Cargo.toml --all --check`
 - `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
 - `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+
+Follow-up validation run after session/startup lifetime moved into the driver:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all --check`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
+- `cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-offscreen-driver-session-debug.png --width 960 --height 540 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --screenshot-debug-pane true`
+- Visual inspection of `/tmp/mclone-offscreen-driver-session-debug.png`:
+  nonblank terrain, debug pane, view swatch, and cow actor rendered.
 
 ### Slice 2 - Shared Step And Render API
 

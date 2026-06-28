@@ -169,7 +169,7 @@ use (and should) · — n/a.
 The reuse story in one line: **desktop flat, current offscreen/headless,
 flat Android, desktop XR, and Android XR now share the native scene shells; web
 still carries the important runtime/render fork, and offscreen still lacks a
-real flat-client driver.**
+long-lived no-window flat-client host.**
 Concretely:
 
 - The native flat single-view scene driver is shared:
@@ -181,10 +181,10 @@ Concretely:
   native-client wrapper, and `run_headless_screenshot` now shares
   `FlatClientDriver` render-resource rebuild, section upload, frame-input
   preparation, full-frame render dispatch, `GameUi` ownership, and host-neutral
-  menu routing with desktop flat. It still lacks a long-lived offscreen flat
-  client host. Session/startup host execution and neutral input lifetime still
-  need to move behind that driver before offscreen can behave as a real
-  no-window client rather than a one-shot screenshot scenario. Tactical
+  menu/session/startup routing with desktop flat. It still lacks a long-lived
+  offscreen flat client host. Neutral input lifetime, frame-clock control, and
+  frame sinks still need to wrap that driver before offscreen can behave as a
+  real no-window client rather than a one-shot screenshot scenario. Tactical
   [`105-offscreen-flat-client-host.md`](../tactical/105-offscreen-flat-client-host.md)
   tracks replacing that with a real no-window flat client host.
 - The XR scene-driver fork is closed:

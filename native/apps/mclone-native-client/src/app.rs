@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use mclone_assets::AssetSource;
-use mclone_client::LOCAL_PLAYER_STANDING_EYE_HEIGHT;
+#[cfg(test)]
 use mclone_core::Vec3d;
 use mclone_input::{
     FlatInputAction, FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind,
@@ -36,14 +36,8 @@ use crate::frame_pacing::{
     next_capped_redraw_deadline, redraw_schedule,
 };
 use crate::render_cache::load_asset_source;
-use crate::scene_runtime::{
-    WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump, poll_window_runtime_until_idle,
-};
+use crate::scene_runtime::{WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump};
 use crate::ui::DebugPaneStats;
-use mclone_app_runtime::session::{
-    GameSessionCoordinator, GameSessionState, PendingSessionStart, RemoteSessionEndpoint,
-    SessionFailure, SessionStartRequest, SessionStartResult, StartedGameSession,
-};
 use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 use mclone_render_session::EngineCameraMovementMode;
 
@@ -52,8 +46,6 @@ const RENDER_RESOURCE_REBUILD_KEY: KeyCode = KeyCode::F8;
 const RENDER_SCALE_REBUILD_KEY: KeyCode = KeyCode::F9;
 const DESKTOP_RENDER_SCALE_PRESETS: [f32; 4] = [DEFAULT_RENDER_SCALE, 0.5, 0.75, 1.5];
 const RENDER_SCALE_PRESET_EPSILON: f32 = 0.000_1;
-const PLAYER_SURFACE_FEET_OFFSET: f64 = 1.0;
-const GROUND_PROBE_DISTANCE: f64 = 0.01;
 
 pub(crate) fn run_window(
     scene: SceneOptions,
@@ -176,11 +168,8 @@ impl DesktopFlatInputAdapter {
 }
 
 struct ChunkApp {
-    scene: SceneOptions,
     assets: WindowSceneAssets,
     driver: FlatClientDriver,
-    startup: Option<PendingWindowStartup>,
-    session: GameSessionCoordinator<PendingWindowSessionStart>,
     flat_input: DesktopFlatInputAdapter,
     input_preferences: InputPreferences,
     frame_pacing: FramePacing,
@@ -194,21 +183,6 @@ struct ChunkApp {
     last_frame: Instant,
     next_redraw_at: Option<Instant>,
     start_intent: WindowStartIntent,
-}
-
-#[derive(Clone, Debug)]
-struct PendingWindowSessionStart {
-    scene: SceneOptions,
-    arm_mouse_lock: bool,
-    show_title_on_failure: bool,
-}
-
-#[derive(Debug)]
-struct PendingWindowStartup {
-    request: SessionStartRequest,
-    arm_mouse_lock: bool,
-    show_title_on_failure: bool,
-    pump: WindowSceneStartupPump,
 }
 
 impl ChunkApp {
@@ -230,10 +204,7 @@ impl ChunkApp {
         );
         Self {
             driver: FlatClientDriver::new_with_ui(&scene, render_options, ui),
-            scene,
             assets,
-            startup: None,
-            session: GameSessionCoordinator::new(),
             flat_input: DesktopFlatInputAdapter::new(),
             input_preferences: InputPreferences::AUTO,
             frame_pacing: FramePacing::default(),
@@ -291,7 +262,7 @@ impl ChunkApp {
 
     fn current_render_distance(&self) -> u32 {
         self.driver
-            .current_render_distance(self.scene.render_distance)
+            .current_render_distance(self.driver.scene.render_distance)
     }
 
     fn current_render_scale(&self) -> f32 {
@@ -412,266 +383,28 @@ impl ChunkApp {
         hud
     }
 
-    fn local_world_scene(&self, seed: i64) -> SceneOptions {
-        let mut scene = self.scene.clone();
-        scene.seed = seed;
-        scene.remote_addr = None;
-        scene
-    }
-
-    fn remote_session_scene(&self, remote_addr: String) -> SceneOptions {
-        let mut scene = self.scene.clone();
-        scene.remote_addr = Some(remote_addr);
-        scene
-    }
-
-    fn session_status_overlay(&self) -> StatusOverlay {
-        self.session
-            .status()
-            .map_or_else(StatusOverlay::hidden, |status| {
-                StatusOverlay::new(status.message, status.ok)
-            })
-    }
-
-    fn clear_inactive_session_status(&mut self) {
-        if !matches!(self.session.state(), GameSessionState::Active { .. }) {
-            self.session.clear();
+    fn apply_session_update(&mut self, update: crate::flat_client_driver::FlatClientSessionUpdate) {
+        if let Some(mouse_lock_requested) = update.mouse_lock_requested {
+            self.mouse_lock_requested = mouse_lock_requested;
+            self.sync_mouse_lock();
         }
     }
 
-    fn queue_local_world_start(&mut self, seed: i64, arm_mouse_lock: bool) {
-        self.session.request_start(
-            SessionStartRequest::NewLocalWorld { seed },
-            PendingWindowSessionStart {
-                scene: self.local_world_scene(seed),
-                arm_mouse_lock,
-                show_title_on_failure: false,
-            },
+    fn finish_pending_session_start(&mut self) {
+        let device = self.surface.as_ref().map(|surface| &surface.device);
+        let assets = &self.assets;
+        let update = self.driver.finish_pending_session_start(
+            device,
+            |scene| WindowSceneRuntime::with_assets(scene, assets),
+            |scene| WindowSceneStartupPump::new_local(scene, assets),
         );
-        self.mouse_lock_requested = false;
-        self.clear_flat_gameplay_input();
-        self.driver.clear_ui_input();
-        self.sync_mouse_lock();
-    }
-
-    fn queue_remote_session_start(&mut self, remote_addr: String, arm_mouse_lock: bool) {
-        self.driver.set_join_remote_addr(remote_addr.clone());
-        self.session.request_start(
-            SessionStartRequest::JoinRemote {
-                endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
-            },
-            PendingWindowSessionStart {
-                scene: self.remote_session_scene(remote_addr),
-                arm_mouse_lock,
-                show_title_on_failure: false,
-            },
-        );
-        self.mouse_lock_requested = false;
-        self.clear_flat_gameplay_input();
-        self.driver.clear_ui_input();
-        self.sync_mouse_lock();
-    }
-
-    fn finish_pending_session_start(
-        &mut self,
-        pending: PendingSessionStart<PendingWindowSessionStart>,
-    ) {
-        if matches!(&pending.request, SessionStartRequest::NewLocalWorld { .. }) {
-            self.begin_pending_local_world_start(pending);
-            return;
-        }
-
-        let request = pending.request.clone();
-        let arm_mouse_lock = pending.payload.arm_mouse_lock;
-        let show_title_on_failure = pending.payload.show_title_on_failure;
-        let result = self.start_pending_window_session(pending);
-        self.session.apply_start_result(&result);
-        match result {
-            Ok(started) => {
-                self.driver.apply_started_session_ui(started.descriptor());
-                self.mouse_lock_requested = arm_mouse_lock;
-                self.sync_mouse_lock();
-            }
-            Err(_) => {
-                self.driver
-                    .apply_failed_session_ui(&request, show_title_on_failure);
-                self.mouse_lock_requested = false;
-                self.sync_mouse_lock();
-            }
-        }
-    }
-
-    fn start_pending_window_session(
-        &mut self,
-        pending: PendingSessionStart<PendingWindowSessionStart>,
-    ) -> SessionStartResult<()> {
-        self.start_window_session_from_scene(pending.request, pending.payload.scene)
-    }
-
-    fn start_window_session_from_scene(
-        &mut self,
-        request: SessionStartRequest,
-        scene: SceneOptions,
-    ) -> SessionStartResult<()> {
-        let Some(descriptor) = request.active_descriptor() else {
-            return Err(SessionFailure::new("Unsupported session start"));
-        };
-        match self.start_world_from_scene(scene) {
-            Ok(()) => Ok(StartedGameSession::new(descriptor, ())),
-            Err(err) => {
-                log::error!("failed to start session {request:?}: {err:#}");
-                Err(SessionFailure::new(request.default_failure_message()))
-            }
-        }
-    }
-
-    fn begin_pending_local_world_start(
-        &mut self,
-        pending: PendingSessionStart<PendingWindowSessionStart>,
-    ) {
-        let request = pending.request.clone();
-        let show_title_on_failure = pending.payload.show_title_on_failure;
-        if let Err(err) = self.prepare_pending_local_world_start(pending) {
-            self.fail_session_start(request, show_title_on_failure, err);
-        }
-    }
-
-    fn prepare_pending_local_world_start(
-        &mut self,
-        pending: PendingSessionStart<PendingWindowSessionStart>,
-    ) -> Result<()> {
-        if pending.payload.scene.remote_addr.is_some() {
-            anyhow::bail!("local startup pump received a remote scene");
-        }
-        if pending.request.active_descriptor().is_none() {
-            anyhow::bail!("unsupported local session start");
-        }
-
-        self.startup = None;
-        self.driver.runtime = None;
-        self.scene = pending.payload.scene;
-        self.reset_world_local_state();
-        self.clear_draw_sections()?;
-
-        let pump = WindowSceneStartupPump::new_local(&self.scene, &self.assets)
-            .context("failed to start local world loading pump")?;
-        log::info!(
-            "started non-blocking local world startup seed={} center=({}, {}) render_distance={}",
-            self.scene.seed,
-            self.scene.chunk_x,
-            self.scene.chunk_z,
-            self.scene.render_distance
-        );
-        self.startup = Some(PendingWindowStartup {
-            request: pending.request,
-            arm_mouse_lock: pending.payload.arm_mouse_lock,
-            show_title_on_failure: pending.payload.show_title_on_failure,
-            pump,
-        });
-        Ok(())
+        self.apply_session_update(update);
     }
 
     fn advance_local_world_startup(&mut self) {
-        if self.startup.is_none() {
-            return;
-        }
-
-        let camera_eye = self.window_camera_view().eye;
-        let step = match self
-            .startup
-            .as_mut()
-            .expect("startup presence checked")
-            .pump
-            .step(camera_eye)
-        {
-            Ok(step) => step,
-            Err(err) => {
-                let startup = self
-                    .startup
-                    .take()
-                    .expect("startup must exist after failed step");
-                self.fail_session_start(startup.request, startup.show_title_on_failure, err);
-                return;
-            }
-        };
-
-        if !step.playable_ready {
-            return;
-        }
-
-        let startup = self
-            .startup
-            .take()
-            .expect("startup must exist after playable step");
-        let request = startup.request.clone();
-        let show_title_on_failure = startup.show_title_on_failure;
-        if let Err(err) = self.complete_local_world_startup(startup, step) {
-            self.fail_session_start(request, show_title_on_failure, err);
-        }
-    }
-
-    fn complete_local_world_startup(
-        &mut self,
-        startup: PendingWindowStartup,
-        step: mclone_app_runtime::local_single_view::LocalSingleViewStartupStep,
-    ) -> Result<()> {
-        let descriptor = startup
-            .request
-            .active_descriptor()
-            .context("unsupported local session start")?;
-        self.driver.runtime = Some(startup.pump.into_runtime());
-        match self.apply_pending_player_position_updates() {
-            Ok(true) => {}
-            Ok(false) => self.place_spectator_above_loaded_surface(),
-            Err(err) => {
-                self.driver.runtime = None;
-                return Err(err).context("failed to apply initial server player position");
-            }
-        }
-        self.upload_cached_runtime_sections()
-            .context("failed to upload playable startup render sections")?;
-        let loaded = self
-            .driver
-            .runtime
-            .as_ref()
-            .map_or(0, |runtime| runtime.client().loaded_chunk_count());
-        log::info!(
-            "world seed={} playable startup ready polls={} poll_ms={:.3} loaded={} cached_sections={} target_ready={}/{}",
-            self.scene.seed,
-            step.poll_count,
-            step.poll_ms,
-            loaded,
-            step.cached_section_count,
-            step.progress
-                .as_ref()
-                .map_or(0, |progress| progress.target_ready_chunks),
-            step.progress
-                .as_ref()
-                .map_or(0, |progress| progress.target_chunk_count)
-        );
-        self.session.complete_start(descriptor.clone());
-        self.driver.apply_started_session_ui(&descriptor);
-        self.mouse_lock_requested = startup.arm_mouse_lock;
-        self.sync_mouse_lock();
-        Ok(())
-    }
-
-    fn fail_session_start(
-        &mut self,
-        request: SessionStartRequest,
-        show_title_on_failure: bool,
-        err: anyhow::Error,
-    ) {
-        log::error!("failed to start session {request:?}: {err:#}");
-        self.startup = None;
-        self.driver.runtime = None;
-        let failure_message = request.default_failure_message();
-        self.driver
-            .apply_failed_session_ui(&request, show_title_on_failure);
-        self.session
-            .fail_start(SessionFailure::new(failure_message));
-        self.mouse_lock_requested = false;
-        self.sync_mouse_lock();
+        let device = self.surface.as_ref().map(|surface| &surface.device);
+        let update = self.driver.advance_local_world_startup(device);
+        self.apply_session_update(update);
     }
 
     fn apply_ui_action(
@@ -680,51 +413,26 @@ impl ChunkApp {
         event_loop: &ActiveEventLoop,
         from_pointer_click: bool,
     ) {
-        let fallback_remote_addr = self.scene.remote_addr.as_deref();
+        let fallback_remote_addr = self.driver.scene.remote_addr.clone();
+        let session_starting = self.driver.session.is_starting();
         let result = self.driver.apply_ui_action(
             action,
             FlatClientUiActionContext {
-                session_starting: self.session.is_starting(),
+                session_starting,
                 from_pointer_click,
-                fallback_remote_addr,
+                fallback_remote_addr: fallback_remote_addr.as_deref(),
             },
         );
 
-        if let Some(render_distance) = result.scene_render_distance {
-            self.scene.render_distance = render_distance;
-        }
-        if let Some(multiplier) = result.scene_movement_speed_multiplier {
-            self.scene.movement_speed_multiplier = multiplier;
-        }
-        if result.clear_inactive_session_status {
-            self.clear_inactive_session_status();
-        }
-
         if let Some(host_action) = result.host_action {
             match host_action {
-                FlatClientHostAction::StartLocalWorld {
-                    seed,
-                    arm_mouse_lock,
-                } => {
-                    self.queue_local_world_start(seed, arm_mouse_lock);
-                    self.schedule_next_redraw(event_loop);
-                    return;
-                }
-                FlatClientHostAction::JoinRemote {
-                    address,
-                    arm_mouse_lock,
-                } => {
-                    self.queue_remote_session_start(address, arm_mouse_lock);
-                    self.schedule_next_redraw(event_loop);
-                    return;
-                }
                 FlatClientHostAction::QuitToTitle => {
                     if let Err(err) = self.teardown_world() {
                         log::error!("failed to tear down world: {err:#}");
                         self.schedule_next_redraw(event_loop);
                         return;
                     }
-                    self.session.clear();
+                    self.driver.clear_session();
                     self.driver.apply_quit_to_title_ui();
                 }
                 FlatClientHostAction::Quit => {
@@ -754,8 +462,11 @@ impl ChunkApp {
             }
         }
 
-        if result.should_arm_mouse_lock {
-            self.mouse_lock_requested = true;
+        if result.session_start_queued {
+            self.mouse_lock_requested = false;
+        }
+        if let Some(mouse_lock_requested) = result.mouse_lock_requested {
+            self.mouse_lock_requested = mouse_lock_requested;
         }
         if result.clear_gameplay_input {
             self.clear_flat_gameplay_input();
@@ -778,12 +489,6 @@ impl ChunkApp {
     fn toggle_movement_mode(&mut self) {
         let movement_mode = self.driver.camera.toggle_movement_mode();
         log::info!("player movement mode {}", movement_mode.label());
-    }
-
-    fn reset_world_local_state(&mut self) {
-        self.driver.reset_world_state(&self.scene);
-        self.flat_input.clear_held();
-        self.last_cursor = None;
     }
 
     fn rebuild_render_resources(&mut self, asset_source: &impl AssetSource) -> Result<()> {
@@ -879,111 +584,31 @@ impl ChunkApp {
         }
     }
 
-    fn clear_draw_sections(&mut self) -> Result<()> {
-        let Some(surface) = &self.surface else {
-            return Ok(());
-        };
-        let report = self.driver.clear_draw_sections(&surface.device)?;
-        if report.removed_section_count > 0 {
-            log::info!(
-                "cleared {} render sections for world teardown",
-                report.removed_section_count
-            );
-        }
-        Ok(())
-    }
-
     fn teardown_world(&mut self) -> Result<()> {
-        self.startup = None;
-        self.driver.runtime = None;
-        self.reset_world_local_state();
-        self.clear_draw_sections()?;
+        let device = self.surface.as_ref().map(|surface| &surface.device);
+        self.driver.teardown_world(device)?;
+        self.flat_input.clear_held();
+        self.last_cursor = None;
         self.mouse_lock_requested = false;
         self.set_mouse_lock(false);
         Ok(())
     }
 
+    #[cfg(test)]
     fn start_world_from_scene(&mut self, scene: SceneOptions) -> Result<()> {
-        self.driver.runtime = None;
-        self.scene = scene;
-        self.reset_world_local_state();
-        self.clear_draw_sections()?;
-
-        let mut runtime = WindowSceneRuntime::with_assets(&self.scene, &self.assets)
-            .context("failed to create window world runtime")?;
-        let initial_poll_start = Instant::now();
-        let (initial_poll_count, initial_poll_ms) = poll_window_runtime_until_idle(&mut runtime)
-            .context("failed to load initial light-ready chunks")?;
-        self.driver.runtime = Some(runtime);
-        match self.apply_pending_player_position_updates() {
-            Ok(true) => {}
-            Ok(false) => self.place_spectator_above_loaded_surface(),
-            Err(err) => {
-                self.driver.runtime = None;
-                return Err(err).context("failed to apply initial server player position");
-            }
-        }
-        let loaded = self
-            .driver
-            .runtime
-            .as_ref()
-            .map_or(0, |runtime| runtime.client().loaded_chunk_count());
-        log::info!(
-            "world seed={} initial chunks loaded in {} polls poll_ms={:.3} elapsed_ms={:.3} loaded={}",
-            self.scene.seed,
-            initial_poll_count,
-            initial_poll_ms,
-            elapsed_ms(initial_poll_start.elapsed()),
-            loaded
-        );
-        self.upload_all_runtime_sections()
-            .context("failed to upload initial world render sections")?;
-        Ok(())
+        let assets = &self.assets;
+        self.driver
+            .start_world_from_scene(scene, None, &mut |scene| {
+                WindowSceneRuntime::with_assets(scene, assets)
+            })
     }
 
     #[cfg(test)]
     fn start_local_world(&mut self, seed: i64) -> Result<()> {
-        self.start_world_from_scene(self.local_world_scene(seed))
-    }
-
-    fn place_spectator_above_loaded_surface(&mut self) {
-        let view = self.window_camera_view();
-        let (world_x, world_z) = view.block_column();
-        let Some(runtime) = self.driver.runtime.as_ref() else {
-            return;
-        };
-        let Some(surface_y) = runtime.highest_non_air_block_y_at_world(world_x, world_z) else {
-            log::warn!(
-                "no loaded surface column found for initial spectator at ({world_x}, {world_z})"
-            );
-            return;
-        };
-        let eye_position = Vec3d::new(
-            view.snapshot.eye.x,
-            surface_y as f64 + PLAYER_SURFACE_FEET_OFFSET + LOCAL_PLAYER_STANDING_EYE_HEIGHT,
-            view.snapshot.eye.z,
-        );
-        self.driver.camera.set_eye_pose(
-            eye_position,
-            view.snapshot.yaw_radians,
-            f64::from(crate::camera::SPECTATOR_SURFACE_PITCH),
-        );
-        if self.driver.camera.movement_mode() == EngineCameraMovementMode::Walking {
-            if let Some(runtime) = self.driver.runtime.as_ref() {
-                self.driver
-                    .camera
-                    .probe_ground(runtime.client(), GROUND_PROBE_DISTANCE);
-            }
-        }
-        if let Err(err) = self.commit_player_pose_change() {
-            log::warn!("failed to commit initial player pose: {err:#}");
-        }
-        log::info!(
-            "placed player above loaded surface column ({world_x}, {world_z}) y={} -> feet_y={:.1} eye_y={:.1}",
-            surface_y,
-            self.driver.camera.player().pose().position.y,
-            self.window_camera_view().eye.y
-        );
+        let mut scene = self.driver.scene.clone();
+        scene.seed = seed;
+        scene.remote_addr = None;
+        self.start_world_from_scene(scene)
     }
 
     fn set_mouse_lock(&mut self, should_lock: bool) {
@@ -1084,10 +709,10 @@ impl ChunkApp {
         if sync.sections.is_empty() {
             anyhow::bail!(
                 "world seed={} center=({}, {}) render_distance={} produced no render sections",
-                self.scene.seed,
-                self.scene.chunk_x,
-                self.scene.chunk_z,
-                self.scene.render_distance
+                self.driver.scene.seed,
+                self.driver.scene.chunk_x,
+                self.driver.scene.chunk_z,
+                self.driver.scene.render_distance
             );
         }
         log::info!(
@@ -1100,41 +725,6 @@ impl ChunkApp {
             sync.section_update.visibility_graph_stats.total_ms,
             sync.section_update.visibility_graph_stats.worst_ms,
             sync.remesh_ms,
-            self.driver.render_stats.last_upload_ms
-        );
-        Ok(())
-    }
-
-    fn upload_cached_runtime_sections(&mut self) -> Result<()> {
-        let Some(surface) = &self.surface else {
-            return Ok(());
-        };
-        let Some((cached, summary, upload_report)) = self
-            .driver
-            .upload_cached_runtime_sections(&surface.device)?
-        else {
-            return Ok(());
-        };
-        if cached.sections.is_empty() {
-            anyhow::bail!(
-                "world seed={} center=({}, {}) render_distance={} reached playable startup without render sections",
-                self.scene.seed,
-                self.scene.chunk_x,
-                self.scene.chunk_z,
-                self.scene.render_distance
-            );
-        }
-        log::info!(
-            "uploaded {} playable startup render sections with {} vertices / {} faces / {} indices uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} upload_ms={:.3}",
-            summary.section_count,
-            upload_report.uploaded_vertex_count,
-            summary.face_count,
-            summary.index_count,
-            upload_report.uploaded_section_count,
-            upload_report.uploaded_vertex_count,
-            upload_report.uploaded_face_count(),
-            upload_report.uploaded_index_count,
-            upload_report.removed_section_count,
             self.driver.render_stats.last_upload_ms
         );
         Ok(())
@@ -1178,10 +768,6 @@ impl ChunkApp {
         }
     }
 
-    fn apply_pending_player_position_updates(&mut self) -> Result<bool> {
-        self.driver.apply_pending_player_position_updates()
-    }
-
     fn handle_world_flat_action(&mut self, action: FlatInputAction) -> Result<()> {
         if let FlatClientWorldActionStatus::Sent { target, changed } =
             self.driver.handle_world_action(action)?
@@ -1198,15 +784,6 @@ impl ChunkApp {
         }
         Ok(())
     }
-}
-
-fn session_start_request_for_scene(scene: &SceneOptions) -> SessionStartRequest {
-    scene.remote_addr.as_ref().map_or(
-        SessionStartRequest::NewLocalWorld { seed: scene.seed },
-        |remote_addr| SessionStartRequest::JoinRemote {
-            endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
-        },
-    )
 }
 
 impl ApplicationHandler for ChunkApp {
@@ -1271,16 +848,7 @@ impl ApplicationHandler for ChunkApp {
         self.next_redraw_at = None;
         event_loop.listen_device_events(DeviceEvents::WhenFocused);
         if self.start_intent == WindowStartIntent::InWorld {
-            let scene = self.scene.clone();
-            let request = session_start_request_for_scene(&scene);
-            self.session.request_start(
-                request,
-                PendingWindowSessionStart {
-                    scene,
-                    arm_mouse_lock: false,
-                    show_title_on_failure: true,
-                },
-            );
+            self.driver.request_current_scene_start(false, true);
         }
         self.sync_mouse_lock();
         self.schedule_next_redraw(event_loop);
@@ -1526,12 +1094,9 @@ impl ApplicationHandler for ChunkApp {
                 let render_options = self.driver.effective_render_options();
                 let debug_stats = (self.debug_visible && self.driver.runtime.is_some())
                     .then(|| self.debug_pane_stats(render_options));
-                let status_overlay = self.session_status_overlay();
+                let status_overlay = self.driver.session_status_overlay();
                 let flat_hud = self.current_flat_hud(status_overlay, self.driver.ui_is_active());
-                let loading_progress_overlay = self
-                    .startup
-                    .as_ref()
-                    .and_then(|startup| startup.pump.progress_overlay());
+                let loading_progress_overlay = self.driver.startup_progress_overlay();
                 let debug_view_readiness_overlay = (self.debug_visible
                     && loading_progress_overlay.is_none())
                 .then(|| {
@@ -1570,7 +1135,7 @@ impl ApplicationHandler for ChunkApp {
                     surface.render_with_report(|frame| {
                         self.driver.render_full_frame_with_ui(
                             frame,
-                            self.scene.render_distance,
+                            self.driver.scene.render_distance,
                             ui_frame,
                         )?;
                         Ok(())
@@ -1587,9 +1152,7 @@ impl ApplicationHandler for ChunkApp {
                         );
                         match report.status {
                             SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped => {
-                                if let Some(pending) = self.session.take_pending_start() {
-                                    self.finish_pending_session_start(pending);
-                                }
+                                self.finish_pending_session_start();
                                 self.finish_redraw(event_loop, frame_start);
                             }
                             SurfaceFrameStatus::Reconfigured => {
@@ -1672,6 +1235,9 @@ mod tests {
     use crate::DEFAULT_SEED;
     use crate::flat_client_driver::{
         effective_render_options_for_camera, engine_camera_input_from_flat_frame,
+    };
+    use mclone_app_runtime::session::{
+        GameSessionState, RemoteSessionEndpoint, SessionStartRequest,
     };
     use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
     use mclone_render_session::actor_instances_from_presentations;
@@ -1872,18 +1438,18 @@ mod tests {
         );
         app.driver.set_ui_screen(Some(GameScreen::NewWorld));
 
-        app.queue_local_world_start(44, true);
+        app.driver.request_local_world_start(44, true);
 
         assert_eq!(
-            app.session.state(),
+            app.driver.session.state(),
             &GameSessionState::Starting {
                 request: SessionStartRequest::NewLocalWorld { seed: 44 }
             }
         );
-        let status = app.session.status().unwrap();
+        let status = app.driver.session.status().unwrap();
         assert!(status.ok);
         assert_eq!(status.message, "Creating world...");
-        let pending = app.session.take_pending_start().unwrap();
+        let pending = app.driver.session.take_pending_start().unwrap();
         assert_eq!(
             pending.request,
             SessionStartRequest::NewLocalWorld { seed: 44 }
@@ -1908,20 +1474,21 @@ mod tests {
         );
         app.driver.set_ui_screen(Some(GameScreen::JoinRemote));
 
-        app.queue_remote_session_start("10.0.0.5:25565".to_owned(), true);
+        app.driver
+            .request_remote_session_start("10.0.0.5:25565".to_owned(), true);
 
         assert_eq!(
-            app.session.state(),
+            app.driver.session.state(),
             &GameSessionState::Starting {
                 request: SessionStartRequest::JoinRemote {
                     endpoint: RemoteSessionEndpoint::new("10.0.0.5:25565")
                 }
             }
         );
-        let status = app.session.status().unwrap();
+        let status = app.driver.session.status().unwrap();
         assert!(status.ok);
         assert_eq!(status.message, "Connecting...");
-        let pending = app.session.take_pending_start().unwrap();
+        let pending = app.driver.session.take_pending_start().unwrap();
         assert_eq!(
             pending.request,
             SessionStartRequest::JoinRemote {
@@ -1953,15 +1520,14 @@ mod tests {
             TexturedSectionRenderOptions::default(),
             WindowStartIntent::Menu,
         );
-        app.queue_local_world_start(77, true);
-        let pending = app.session.take_pending_start().unwrap();
+        app.driver.request_local_world_start(77, true);
 
-        app.finish_pending_session_start(pending);
+        app.finish_pending_session_start();
 
-        assert!(app.startup.is_some());
+        assert!(app.driver.startup.is_some());
         assert!(app.driver.runtime.is_none());
         assert_eq!(
-            app.session.state(),
+            app.driver.session.state(),
             &GameSessionState::Starting {
                 request: SessionStartRequest::NewLocalWorld { seed: 77 }
             }
@@ -1995,8 +1561,8 @@ mod tests {
 
         app.start_local_world(98_765).unwrap();
         let second_runtime = app.driver.runtime.as_ref().unwrap();
-        assert_eq!(app.scene.seed, 98_765);
-        assert_eq!(app.scene.remote_addr, None);
+        assert_eq!(app.driver.scene.seed, 98_765);
+        assert_eq!(app.driver.scene.remote_addr, None);
         assert!(second_runtime.client().chunk_snapshot(center).is_some());
         let second_signature = center_chunk_signature(second_runtime, center);
 

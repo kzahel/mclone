@@ -5,11 +5,16 @@ use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats,
 };
-use mclone_app_runtime::session::{ActiveSessionDescriptor, SessionStartRequest};
+use mclone_app_runtime::local_single_view::LocalSingleViewStartupStep;
+use mclone_app_runtime::session::{
+    ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
+    RemoteSessionEndpoint, SessionFailure, SessionStartRequest, SessionStartResult,
+    StartedGameSession,
+};
 use mclone_assets::AssetSource;
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
-    ClientInteractionController,
+    ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
 use mclone_core::Vec3d;
 use mclone_input::{FlatInputAction, FlatInputFrame, TouchControlsMode};
@@ -28,7 +33,7 @@ use mclone_render_session::{
 };
 use mclone_ui::{
     DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameScreen, GameUi, GameUiAction,
-    GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point,
+    GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, StatusOverlay,
     render_flat_hud, render_loading_progress_overlay, render_loading_progress_panel_at,
     touch_controls_mode_label,
 };
@@ -36,13 +41,18 @@ use mclone_ui::{
 use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
 use crate::cli::SceneOptions;
 use crate::frame_pacing::{FramePacingMode, FramePacingUiState, FrameTimingStats};
-use crate::scene_runtime::WindowSceneRuntime;
+use crate::scene_runtime::{
+    WindowSceneRuntime, WindowSceneStartupPump, poll_window_runtime_until_idle,
+};
 use crate::ui::{DebugPaneStats, render_debug_pane};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 use mclone_render_session::{
     ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
 };
+
+const PLAYER_SURFACE_FEET_OFFSET: f64 = 1.0;
+const GROUND_PROBE_DISTANCE: f64 = 0.01;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct FlatClientCameraView {
@@ -71,7 +81,10 @@ impl FlatClientCameraView {
 }
 
 pub(crate) struct FlatClientDriver {
+    pub(crate) scene: SceneOptions,
     pub(crate) runtime: Option<WindowSceneRuntime>,
+    pub(crate) startup: Option<FlatClientPendingStartup>,
+    pub(crate) session: GameSessionCoordinator<FlatClientPendingSessionStart>,
     pub(crate) ui: GameUi,
     pub(crate) spectator: SpectatorCamera,
     pub(crate) camera: EngineCameraController,
@@ -82,6 +95,26 @@ pub(crate) struct FlatClientDriver {
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
     seed_reroll_state: u64,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FlatClientPendingSessionStart {
+    pub(crate) scene: SceneOptions,
+    pub(crate) arm_mouse_lock: bool,
+    pub(crate) show_title_on_failure: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct FlatClientPendingStartup {
+    request: SessionStartRequest,
+    arm_mouse_lock: bool,
+    show_title_on_failure: bool,
+    pump: WindowSceneStartupPump,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct FlatClientSessionUpdate {
+    pub(crate) mouse_lock_requested: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -173,14 +206,6 @@ pub(crate) struct FlatClientUiActionContext<'a> {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum FlatClientHostAction {
-    StartLocalWorld {
-        seed: i64,
-        arm_mouse_lock: bool,
-    },
-    JoinRemote {
-        address: String,
-        arm_mouse_lock: bool,
-    },
     QuitToTitle,
     Quit,
     CycleFramePacing,
@@ -191,12 +216,10 @@ pub(crate) enum FlatClientHostAction {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FlatClientUiActionResult {
     pub(crate) host_action: Option<FlatClientHostAction>,
-    pub(crate) clear_inactive_session_status: bool,
-    pub(crate) should_arm_mouse_lock: bool,
+    pub(crate) mouse_lock_requested: Option<bool>,
+    pub(crate) session_start_queued: bool,
     pub(crate) preserve_pointer_state: bool,
     pub(crate) clear_gameplay_input: bool,
-    pub(crate) scene_render_distance: Option<i32>,
-    pub(crate) scene_movement_speed_multiplier: Option<f32>,
 }
 
 impl FlatClientDriver {
@@ -213,7 +236,10 @@ impl FlatClientDriver {
         let camera =
             engine_camera_controller_from_spectator(&spectator, scene.movement_speed_multiplier);
         Self {
+            scene: scene.clone(),
             runtime: None,
+            startup: None,
+            session: GameSessionCoordinator::new(),
             ui,
             spectator,
             camera,
@@ -369,6 +395,174 @@ impl FlatClientDriver {
         self.ui.apply_action(GameUiAction::QuitToTitle);
     }
 
+    pub(crate) fn session_status_overlay(&self) -> StatusOverlay {
+        self.session
+            .status()
+            .map_or_else(StatusOverlay::hidden, |status| {
+                StatusOverlay::new(status.message, status.ok)
+            })
+    }
+
+    pub(crate) fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
+        self.startup
+            .as_ref()
+            .and_then(|startup| startup.pump.progress_overlay())
+    }
+
+    pub(crate) fn request_current_scene_start(
+        &mut self,
+        arm_mouse_lock: bool,
+        show_title_on_failure: bool,
+    ) {
+        let scene = self.scene.clone();
+        self.session.request_start(
+            session_start_request_for_scene(&scene),
+            FlatClientPendingSessionStart {
+                scene,
+                arm_mouse_lock,
+                show_title_on_failure,
+            },
+        );
+    }
+
+    pub(crate) fn request_local_world_start(&mut self, seed: i64, arm_mouse_lock: bool) {
+        let scene = self.local_world_scene(seed);
+        self.session.request_start(
+            SessionStartRequest::NewLocalWorld { seed },
+            FlatClientPendingSessionStart {
+                scene,
+                arm_mouse_lock,
+                show_title_on_failure: false,
+            },
+        );
+        self.clear_ui_input();
+    }
+
+    pub(crate) fn request_remote_session_start(
+        &mut self,
+        remote_addr: String,
+        arm_mouse_lock: bool,
+    ) {
+        self.set_join_remote_addr(remote_addr.clone());
+        self.session.request_start(
+            SessionStartRequest::JoinRemote {
+                endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
+            },
+            FlatClientPendingSessionStart {
+                scene: self.remote_session_scene(remote_addr),
+                arm_mouse_lock,
+                show_title_on_failure: false,
+            },
+        );
+        self.clear_ui_input();
+    }
+
+    pub(crate) fn clear_inactive_session_status(&mut self) {
+        if !matches!(self.session.state(), GameSessionState::Active { .. }) {
+            self.session.clear();
+        }
+    }
+
+    pub(crate) fn clear_session(&mut self) {
+        self.session.clear();
+    }
+
+    pub(crate) fn finish_pending_session_start(
+        &mut self,
+        device: Option<&wgpu::Device>,
+        mut make_runtime: impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneRuntime>,
+        mut make_startup_pump: impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneStartupPump>,
+    ) -> FlatClientSessionUpdate {
+        let Some(pending) = self.session.take_pending_start() else {
+            return FlatClientSessionUpdate::default();
+        };
+        if matches!(&pending.request, SessionStartRequest::NewLocalWorld { .. }) {
+            let request = pending.request.clone();
+            let show_title_on_failure = pending.payload.show_title_on_failure;
+            if let Err(err) =
+                self.begin_pending_local_world_start(pending, device, &mut make_startup_pump)
+            {
+                self.fail_session_start(request, show_title_on_failure, err);
+                return FlatClientSessionUpdate {
+                    mouse_lock_requested: Some(false),
+                };
+            }
+            return FlatClientSessionUpdate {
+                mouse_lock_requested: Some(false),
+            };
+        }
+
+        let request = pending.request.clone();
+        let arm_mouse_lock = pending.payload.arm_mouse_lock;
+        let show_title_on_failure = pending.payload.show_title_on_failure;
+        let result = self.start_pending_session(pending, device, &mut make_runtime);
+        self.session.apply_start_result(&result);
+        match result {
+            Ok(started) => {
+                self.apply_started_session_ui(started.descriptor());
+                FlatClientSessionUpdate {
+                    mouse_lock_requested: Some(arm_mouse_lock),
+                }
+            }
+            Err(_) => {
+                self.apply_failed_session_ui(&request, show_title_on_failure);
+                FlatClientSessionUpdate {
+                    mouse_lock_requested: Some(false),
+                }
+            }
+        }
+    }
+
+    pub(crate) fn advance_local_world_startup(
+        &mut self,
+        device: Option<&wgpu::Device>,
+    ) -> FlatClientSessionUpdate {
+        if self.startup.is_none() {
+            return FlatClientSessionUpdate::default();
+        }
+
+        let camera_eye = self.camera_view().eye;
+        let step = match self
+            .startup
+            .as_mut()
+            .expect("startup presence checked")
+            .pump
+            .step(camera_eye)
+        {
+            Ok(step) => step,
+            Err(err) => {
+                let startup = self
+                    .startup
+                    .take()
+                    .expect("startup must exist after failed step");
+                self.fail_session_start(startup.request, startup.show_title_on_failure, err);
+                return FlatClientSessionUpdate {
+                    mouse_lock_requested: Some(false),
+                };
+            }
+        };
+
+        if !step.playable_ready {
+            return FlatClientSessionUpdate::default();
+        }
+
+        let startup = self
+            .startup
+            .take()
+            .expect("startup must exist after playable step");
+        let request = startup.request.clone();
+        let show_title_on_failure = startup.show_title_on_failure;
+        match self.complete_local_world_startup(startup, step, device) {
+            Ok(update) => update,
+            Err(err) => {
+                self.fail_session_start(request, show_title_on_failure, err);
+                FlatClientSessionUpdate {
+                    mouse_lock_requested: Some(false),
+                }
+            }
+        }
+    }
+
     pub(crate) fn apply_ui_action(
         &mut self,
         action: GameUiAction,
@@ -376,12 +570,13 @@ impl FlatClientDriver {
     ) -> FlatClientUiActionResult {
         let mut result = FlatClientUiActionResult {
             host_action: None,
-            clear_inactive_session_status: false,
-            should_arm_mouse_lock: context.from_pointer_click
+            mouse_lock_requested: (context.from_pointer_click
                 && matches!(
                     action,
                     GameUiAction::StartWorld | GameUiAction::Resume | GameUiAction::JoinRemote
-                ),
+                ))
+            .then_some(true),
+            session_start_queued: false,
             preserve_pointer_state: matches!(
                 action,
                 GameUiAction::SetRenderDistance(_)
@@ -391,13 +586,11 @@ impl FlatClientDriver {
                     | GameUiAction::SetTouchControlsMode(_)
             ),
             clear_gameplay_input: true,
-            scene_render_distance: None,
-            scene_movement_speed_multiplier: None,
         };
 
         if context.session_starting && !matches!(action, GameUiAction::Quit) {
             result.clear_gameplay_input = false;
-            result.should_arm_mouse_lock = false;
+            result.mouse_lock_requested = None;
             result.preserve_pointer_state = true;
             return result;
         }
@@ -442,8 +635,8 @@ impl FlatClientDriver {
             GameUiAction::SetMovementSpeed(multiplier) => {
                 self.camera
                     .set_movement_speed_multiplier(f64::from(multiplier));
-                result.scene_movement_speed_multiplier =
-                    Some(self.camera.movement_speed_multiplier() as f32);
+                let multiplier = self.camera.movement_speed_multiplier() as f32;
+                self.scene.movement_speed_multiplier = multiplier;
                 log::info!(
                     "movement speed multiplier set to {:.1}x",
                     self.camera.movement_speed_multiplier()
@@ -452,7 +645,7 @@ impl FlatClientDriver {
             GameUiAction::SetRenderDistance(render_distance) => {
                 let render_distance =
                     render_distance.clamp(MIN_RENDER_DISTANCE, MAX_RENDER_DISTANCE);
-                result.scene_render_distance = Some(render_distance);
+                self.scene.render_distance = render_distance;
                 let render_distance_chunks =
                     u32::try_from(render_distance).expect("clamped render distance must fit u32");
                 if let Some(runtime) = &mut self.runtime {
@@ -489,7 +682,7 @@ impl FlatClientDriver {
             GameUiAction::OpenNewWorld => {
                 let seed = self.next_new_world_seed();
                 self.ui.set_new_world_seed(seed);
-                result.clear_inactive_session_status = true;
+                self.clear_inactive_session_status();
             }
             GameUiAction::OpenJoinRemote => {
                 let remote_addr = context
@@ -497,26 +690,27 @@ impl FlatClientDriver {
                     .unwrap_or(DEFAULT_JOIN_REMOTE_ADDR)
                     .to_owned();
                 self.ui.set_join_remote_addr(remote_addr);
-                result.clear_inactive_session_status = true;
+                self.clear_inactive_session_status();
             }
             GameUiAction::RerollSeed => {
                 let seed = self.next_new_world_seed();
                 self.ui.set_new_world_seed(seed);
-                result.clear_inactive_session_status = true;
+                self.clear_inactive_session_status();
                 log::info!("new-world seed rerolled to {seed}");
             }
             GameUiAction::CreateWorld(seed) => {
-                result.host_action = Some(FlatClientHostAction::StartLocalWorld {
-                    seed,
-                    arm_mouse_lock: context.from_pointer_click,
-                });
+                self.request_local_world_start(seed, context.from_pointer_click);
+                result.session_start_queued = true;
+                result.mouse_lock_requested = Some(false);
                 apply_ui_action = false;
             }
             GameUiAction::JoinRemote => {
-                result.host_action = Some(FlatClientHostAction::JoinRemote {
-                    address: self.ui.join_remote_addr().to_owned(),
-                    arm_mouse_lock: context.from_pointer_click,
-                });
+                self.request_remote_session_start(
+                    self.ui.join_remote_addr().to_owned(),
+                    context.from_pointer_click,
+                );
+                result.session_start_queued = true;
+                result.mouse_lock_requested = Some(false);
                 apply_ui_action = false;
             }
             GameUiAction::QuitToTitle => {
@@ -528,7 +722,7 @@ impl FlatClientDriver {
                 apply_ui_action = false;
             }
             GameUiAction::BackToTitle => {
-                result.clear_inactive_session_status = true;
+                self.clear_inactive_session_status();
             }
             GameUiAction::StartWorld
             | GameUiAction::Resume
@@ -549,6 +743,251 @@ impl FlatClientDriver {
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
         self.seed_reroll_state as i64
+    }
+
+    fn local_world_scene(&self, seed: i64) -> SceneOptions {
+        let mut scene = self.scene.clone();
+        scene.seed = seed;
+        scene.remote_addr = None;
+        scene
+    }
+
+    fn remote_session_scene(&self, remote_addr: String) -> SceneOptions {
+        let mut scene = self.scene.clone();
+        scene.remote_addr = Some(remote_addr);
+        scene
+    }
+
+    fn start_pending_session(
+        &mut self,
+        pending: PendingSessionStart<FlatClientPendingSessionStart>,
+        device: Option<&wgpu::Device>,
+        make_runtime: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneRuntime>,
+    ) -> SessionStartResult<()> {
+        self.start_session_from_scene(pending.request, pending.payload.scene, device, make_runtime)
+    }
+
+    fn start_session_from_scene(
+        &mut self,
+        request: SessionStartRequest,
+        scene: SceneOptions,
+        device: Option<&wgpu::Device>,
+        make_runtime: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneRuntime>,
+    ) -> SessionStartResult<()> {
+        let Some(descriptor) = request.active_descriptor() else {
+            return Err(SessionFailure::new("Unsupported session start"));
+        };
+        match self.start_world_from_scene(scene, device, make_runtime) {
+            Ok(()) => Ok(StartedGameSession::new(descriptor, ())),
+            Err(err) => {
+                log::error!("failed to start session {request:?}: {err:#}");
+                Err(SessionFailure::new(request.default_failure_message()))
+            }
+        }
+    }
+
+    pub(crate) fn start_world_from_scene(
+        &mut self,
+        scene: SceneOptions,
+        device: Option<&wgpu::Device>,
+        make_runtime: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneRuntime>,
+    ) -> anyhow::Result<()> {
+        self.runtime = None;
+        self.startup = None;
+        self.scene = scene;
+        self.reset_world_state();
+        if let Some(device) = device {
+            self.clear_draw_sections(device)?;
+        } else {
+            self.clear_render_stats();
+        }
+
+        let mut runtime =
+            make_runtime(&self.scene).context("failed to create flat client world runtime")?;
+        let initial_poll_start = std::time::Instant::now();
+        let (initial_poll_count, initial_poll_ms) = poll_window_runtime_until_idle(&mut runtime)
+            .context("failed to load initial light-ready chunks")?;
+        self.runtime = Some(runtime);
+        match self.apply_pending_player_position_updates() {
+            Ok(true) => {}
+            Ok(false) => self.place_spectator_above_loaded_surface(),
+            Err(err) => {
+                self.runtime = None;
+                return Err(err).context("failed to apply initial server player position");
+            }
+        }
+        let loaded = self
+            .runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.client().loaded_chunk_count());
+        log::info!(
+            "world seed={} initial chunks loaded in {} polls poll_ms={:.3} elapsed_ms={:.3} loaded={}",
+            self.scene.seed,
+            initial_poll_count,
+            initial_poll_ms,
+            initial_poll_start.elapsed().as_secs_f64() * 1000.0,
+            loaded
+        );
+        if let Some(device) = device {
+            self.upload_all_runtime_sections(device, |elapsed| elapsed.as_secs_f64() * 1000.0)
+                .context("failed to upload initial world render sections")?;
+        }
+        Ok(())
+    }
+
+    fn begin_pending_local_world_start(
+        &mut self,
+        pending: PendingSessionStart<FlatClientPendingSessionStart>,
+        device: Option<&wgpu::Device>,
+        make_startup_pump: &mut impl FnMut(&SceneOptions) -> anyhow::Result<WindowSceneStartupPump>,
+    ) -> anyhow::Result<()> {
+        if pending.payload.scene.remote_addr.is_some() {
+            anyhow::bail!("local startup pump received a remote scene");
+        }
+        if pending.request.active_descriptor().is_none() {
+            anyhow::bail!("unsupported local session start");
+        }
+
+        self.startup = None;
+        self.runtime = None;
+        self.scene = pending.payload.scene;
+        self.reset_world_state();
+        if let Some(device) = device {
+            self.clear_draw_sections(device)?;
+        } else {
+            self.clear_render_stats();
+        }
+
+        let pump =
+            make_startup_pump(&self.scene).context("failed to start local world loading pump")?;
+        log::info!(
+            "started non-blocking local world startup seed={} center=({}, {}) render_distance={}",
+            self.scene.seed,
+            self.scene.chunk_x,
+            self.scene.chunk_z,
+            self.scene.render_distance
+        );
+        self.startup = Some(FlatClientPendingStartup {
+            request: pending.request,
+            arm_mouse_lock: pending.payload.arm_mouse_lock,
+            show_title_on_failure: pending.payload.show_title_on_failure,
+            pump,
+        });
+        Ok(())
+    }
+
+    fn complete_local_world_startup(
+        &mut self,
+        startup: FlatClientPendingStartup,
+        step: LocalSingleViewStartupStep,
+        device: Option<&wgpu::Device>,
+    ) -> anyhow::Result<FlatClientSessionUpdate> {
+        let descriptor = startup
+            .request
+            .active_descriptor()
+            .context("unsupported local session start")?;
+        self.runtime = Some(startup.pump.into_runtime());
+        match self.apply_pending_player_position_updates() {
+            Ok(true) => {}
+            Ok(false) => self.place_spectator_above_loaded_surface(),
+            Err(err) => {
+                self.runtime = None;
+                return Err(err).context("failed to apply initial server player position");
+            }
+        }
+        if let Some(device) = device {
+            self.upload_cached_runtime_sections(device)
+                .context("failed to upload playable startup render sections")?;
+        }
+        let loaded = self
+            .runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.client().loaded_chunk_count());
+        log::info!(
+            "world seed={} playable startup ready polls={} poll_ms={:.3} loaded={} cached_sections={} target_ready={}/{}",
+            self.scene.seed,
+            step.poll_count,
+            step.poll_ms,
+            loaded,
+            step.cached_section_count,
+            step.progress
+                .as_ref()
+                .map_or(0, |progress| progress.target_ready_chunks),
+            step.progress
+                .as_ref()
+                .map_or(0, |progress| progress.target_chunk_count)
+        );
+        self.session.complete_start(descriptor.clone());
+        self.apply_started_session_ui(&descriptor);
+        Ok(FlatClientSessionUpdate {
+            mouse_lock_requested: Some(startup.arm_mouse_lock),
+        })
+    }
+
+    fn fail_session_start(
+        &mut self,
+        request: SessionStartRequest,
+        show_title_on_failure: bool,
+        err: anyhow::Error,
+    ) {
+        log::error!("failed to start session {request:?}: {err:#}");
+        self.startup = None;
+        self.runtime = None;
+        let failure_message = request.default_failure_message();
+        self.apply_failed_session_ui(&request, show_title_on_failure);
+        self.session
+            .fail_start(SessionFailure::new(failure_message));
+    }
+
+    pub(crate) fn teardown_world(&mut self, device: Option<&wgpu::Device>) -> anyhow::Result<()> {
+        self.startup = None;
+        self.runtime = None;
+        self.reset_world_state();
+        if let Some(device) = device {
+            self.clear_draw_sections(device)?;
+        } else {
+            self.clear_render_stats();
+        }
+        Ok(())
+    }
+
+    fn place_spectator_above_loaded_surface(&mut self) {
+        let view = self.camera_view();
+        let (world_x, world_z) = view.block_column();
+        let Some(runtime) = self.runtime.as_ref() else {
+            return;
+        };
+        let Some(surface_y) = runtime.highest_non_air_block_y_at_world(world_x, world_z) else {
+            log::warn!(
+                "no loaded surface column found for initial spectator at ({world_x}, {world_z})"
+            );
+            return;
+        };
+        let eye_position = Vec3d::new(
+            view.snapshot.eye.x,
+            surface_y as f64 + PLAYER_SURFACE_FEET_OFFSET + LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+            view.snapshot.eye.z,
+        );
+        self.camera.set_eye_pose(
+            eye_position,
+            view.snapshot.yaw_radians,
+            f64::from(crate::camera::SPECTATOR_SURFACE_PITCH),
+        );
+        if self.camera.movement_mode() == mclone_render_session::EngineCameraMovementMode::Walking {
+            if let Some(runtime) = self.runtime.as_ref() {
+                self.camera
+                    .probe_ground(runtime.client(), GROUND_PROBE_DISTANCE);
+            }
+        }
+        if let Err(err) = self.commit_player_pose_change() {
+            log::warn!("failed to commit initial player pose: {err:#}");
+        }
+        log::info!(
+            "placed player above loaded surface column ({world_x}, {world_z}) y={} -> feet_y={:.1} eye_y={:.1}",
+            surface_y,
+            self.camera.player().pose().position.y,
+            self.camera_view().eye.y
+        );
     }
 
     pub(crate) fn render_config(&self) -> Option<RenderConfig> {
@@ -1140,12 +1579,12 @@ impl FlatClientDriver {
             engine_camera_controller_from_spectator(&self.spectator, movement_speed_multiplier);
     }
 
-    pub(crate) fn reset_world_state(&mut self, scene: &SceneOptions) {
+    pub(crate) fn reset_world_state(&mut self) {
         self.runtime = None;
-        self.spectator = SpectatorCamera::spawn_for_scene(scene);
+        self.spectator = SpectatorCamera::spawn_for_scene(&self.scene);
         self.camera = engine_camera_controller_from_spectator(
             &self.spectator,
-            scene.movement_speed_multiplier,
+            self.scene.movement_speed_multiplier,
         );
         self.actor_interpolation = ActorInterpolationState::new();
         self.interaction = ClientInteractionController::new();
@@ -1188,6 +1627,15 @@ fn initial_seed_reroll_state(seed: i64) -> u64 {
         .wrapping_mul(0x9E37_79B9_7F4A_7C15)
         .wrapping_add(0xD1B5_4A32_D192_ED03)
         .max(1)
+}
+
+fn session_start_request_for_scene(scene: &SceneOptions) -> SessionStartRequest {
+    scene.remote_addr.as_ref().map_or(
+        SessionStartRequest::NewLocalWorld { seed: scene.seed },
+        |remote_addr| SessionStartRequest::JoinRemote {
+            endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
+        },
+    )
 }
 
 fn render_flat_client_gui_draw(
@@ -1237,25 +1685,31 @@ mod tests {
     }
 
     #[test]
-    fn ui_action_routing_keeps_local_world_start_as_host_request() {
+    fn ui_action_routing_queues_local_world_start_in_driver() {
         let scene = SceneOptions::default();
         let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
 
         let open_result = driver.apply_ui_action(GameUiAction::OpenNewWorld, ui_action_context());
         assert_eq!(open_result.host_action, None);
-        assert!(open_result.clear_inactive_session_status);
         assert_eq!(driver.ui_screen(), Some(GameScreen::NewWorld));
 
         let seed = driver.ui.new_world_seed();
         let start_result =
             driver.apply_ui_action(GameUiAction::CreateWorld(seed), ui_action_context());
+        assert_eq!(start_result.host_action, None);
+        assert!(start_result.session_start_queued);
+        assert_eq!(start_result.mouse_lock_requested, Some(false));
         assert_eq!(
-            start_result.host_action,
-            Some(FlatClientHostAction::StartLocalWorld {
-                seed,
-                arm_mouse_lock: true
-            })
+            driver.session.state(),
+            &GameSessionState::Starting {
+                request: SessionStartRequest::NewLocalWorld { seed }
+            }
         );
+        let pending = driver.session.take_pending_start().unwrap();
+        assert_eq!(pending.request, SessionStartRequest::NewLocalWorld { seed });
+        assert_eq!(pending.payload.scene.seed, seed);
+        assert_eq!(pending.payload.scene.remote_addr, None);
+        assert!(pending.payload.arm_mouse_lock);
         assert_eq!(driver.ui_screen(), Some(GameScreen::NewWorld));
     }
 
@@ -1265,18 +1719,34 @@ mod tests {
         let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
 
         let open_result = driver.apply_ui_action(GameUiAction::OpenJoinRemote, ui_action_context());
-        assert!(open_result.clear_inactive_session_status);
+        assert_eq!(open_result.host_action, None);
         assert_eq!(driver.ui_screen(), Some(GameScreen::JoinRemote));
         assert_eq!(driver.join_remote_addr(), "10.0.0.9:25565");
 
         let join_result = driver.apply_ui_action(GameUiAction::JoinRemote, ui_action_context());
+        assert_eq!(join_result.host_action, None);
+        assert!(join_result.session_start_queued);
+        assert_eq!(join_result.mouse_lock_requested, Some(false));
         assert_eq!(
-            join_result.host_action,
-            Some(FlatClientHostAction::JoinRemote {
-                address: "10.0.0.9:25565".to_owned(),
-                arm_mouse_lock: true
-            })
+            driver.session.state(),
+            &GameSessionState::Starting {
+                request: SessionStartRequest::JoinRemote {
+                    endpoint: RemoteSessionEndpoint::new("10.0.0.9:25565")
+                }
+            }
         );
+        let pending = driver.session.take_pending_start().unwrap();
+        assert_eq!(
+            pending.request,
+            SessionStartRequest::JoinRemote {
+                endpoint: RemoteSessionEndpoint::new("10.0.0.9:25565")
+            }
+        );
+        assert_eq!(
+            pending.payload.scene.remote_addr,
+            Some("10.0.0.9:25565".to_owned())
+        );
+        assert!(pending.payload.arm_mouse_lock);
         assert_eq!(driver.ui_screen(), Some(GameScreen::JoinRemote));
     }
 }
