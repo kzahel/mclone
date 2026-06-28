@@ -184,6 +184,10 @@ waits for 441 ticking chunks.
 - Native startup scheduling should be center-prioritized by the accepted player
   view center. This approximates Java's ticket/queue-level shaping without
   requiring a full `ChunkTaskPriorityQueueSorter` port in the first pass.
+- After gameplay starts, the compact debug grid should stop using the startup
+  event accumulator as its authority. It should use a live current-view
+  readiness snapshot produced by the server/scheduler and mapped through
+  `mclone-app-runtime` into the same UI model.
 
 ## Proposed Native Palette
 
@@ -365,6 +369,49 @@ Slice 4A result:
   structs.
 - [x] Mirror the compact panel in headless debug screenshots for rendered-output
   validation.
+
+### Slice 4C - Authoritative In-World View Readiness
+
+- [ ] Keep `ChunkLoadingProgress` as the startup/event producer for the
+  full-screen loading flow. It answers "which status events has startup heard?"
+  and should not be treated as authoritative after gameplay starts.
+- [ ] Add a server-owned current-view readiness snapshot for the local accepted
+  view. It should answer "for the current desired local view, what is each
+  chunk's actual highest ready status right now?"
+- [ ] Compute the snapshot from scheduler holder/snapshot state, not from the
+  loading-progress event map. The target-ready test should use the same runtime
+  target as startup (`Light` with lighting, `Features` without).
+- [ ] Preserve ownership boundaries: `mclone-server` produces the authoritative
+  diagnostic, `mclone-app-runtime` maps it into `LoadingProgressOverlay`, and
+  app/UI crates render it without peeking into holders, tickets, or scheduler
+  internals.
+- [ ] Use the startup event overlay while `LocalSingleViewStartupPump` is active.
+  After the runtime is active, use the current-view readiness overlay for the
+  tilde/debug panel.
+- [ ] Rename the compact post-join label from `LOAD` to `VIEW` or `STREAM` so
+  it does not imply world-startup loading.
+- [ ] Backfill already-ready chunks through the authoritative snapshot instead
+  of special-casing `SnapshotReady` or existing `client_visible_snapshot` event
+  paths in the event accumulator.
+- [ ] Unit-test scheduler/current-view counts against already-ready chunks,
+  moved views, and target-status changes with lighting enabled/disabled.
+- [ ] Unit-test app-runtime mapping and UI label selection, then capture a
+  headless debug screenshot to verify the in-world compact panel.
+
+Implementation notes:
+
+- Existing event-progress undercounts after join because it only observes
+  `ChunkSchedulerEvent::StatusChanged { step: Ready, ... }`. Chunks that are
+  already ready and later re-enter the accepted view can be visible to the
+  client without producing a fresh ready-status event.
+- The current accepted local view is already tracked by the local
+  `SetChunkView` path; the new diagnostic should use that same accepted
+  center/radius rather than the initial spawn center.
+- The denominator should be the current accepted local view's tracking square.
+  The numerator should be chunks in that square whose authoritative status is at
+  or past the runtime target.
+- Remote dedicated play should keep the simple connection/status behavior until
+  protocol-level remote progress or diagnostics are designed.
 
 ### Slice 5 - Platform Adoption
 
