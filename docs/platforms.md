@@ -11,11 +11,12 @@ contract health.
 
 ## Current Status
 
-Mclone currently has five supported client/platform validation lanes:
+Mclone currently has five supported client/platform validation lanes, plus an
+emerging offscreen flat-client host for no-window validation:
 
 | Target | Status | Validation shape |
 |---|---|---|
-| Desktop flat | primary development lane | `native/apps/mclone-native-client` owns desktop `winit`, surface acquisition, keyboard/mouse input, frame pacing, and headless screenshots. Basics validated: integrated runtime, locomotion, world rendering, chunk loading/generation. |
+| Desktop flat | primary development lane | `native/apps/mclone-native-client` owns desktop `winit`, surface acquisition/presentation, keyboard/mouse input, frame pacing, and desktop diagnostics. Basics validated: integrated runtime, locomotion, world rendering, chunk loading/generation. |
 | Desktop OpenXR | active XR lane | `mclone-native-client --features xr` owns desktop runtime selection and OpenXR startup. Shared XR crates provide host/session helpers, graphics wrapping, scene alignment, controller locomotion, shared world-panel menu/pointer UI, and shared New World / Join Remote scene replacement. Validated with real stereo mclone terrain on Quest 3 through VirtualDesktopXR; user headset validation says the shared XR menu works mostly fine, while an automated replacement-menu headset click smoke remains pending. |
 | Android XR / Quest standalone | active XR lane | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, launch-scoped remote-address argv, and validation. Validated with staged assets, stereo terrain, controller actions, basic locomotion, remote-dedicated play over direct LAN and through the `--adb-reverse` USB tunnel path, plus launch-scoped in-headset New World replacement smoke. User headset validation says the shared XR menu works mostly fine; an automated controller-click replacement-menu smoke remains pending. |
 | Flat Android | active mobile lane | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity` package. Validated on x86_64 AVD with Vulkan-backed `wgpu`, real terrain pixels, staged assets, rendered-frame log marker, touch smoke, and app-owned New World / Join Remote scene replacement. New World replacement is covered by `native:android:avd-session-smoke`; arm64 remains the physical device / Quest-flat ABI. |
@@ -25,6 +26,7 @@ Additional host lane:
 
 | Host | Status | Notes |
 |---|---|---|
+| Offscreen flat client | proposed high-priority cleanup | No-window flat-client host for full-frame validation, scripted/network/model input, PNG/video/network/model frame sinks, and future remote UI style use. Current code has headless full-frame screenshots and renderer helpers, but the real host lifetime is tracked in [`tactical/105-offscreen-flat-client-host.md`](tactical/105-offscreen-flat-client-host.md) and specified in [`offscreen-flat-client.md`](offscreen-flat-client.md). |
 | Native dedicated server | active | `native/apps/mclone-dedicated-server` validates the protocol/server boundary without a renderer. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
 
 The retired TypeScript/browser engine is gone from the live tree. Use Git
@@ -61,8 +63,8 @@ platform bring-up:
   contracts
 - desktop app gravity should go down, not up: code that heavily grows
   `mclone-native-client` should be treated as a refactor signal unless it is
-  genuinely `winit`, desktop surface, keyboard/mouse, CLI, headless capture,
-  perf harness, or desktop diagnostics glue
+  genuinely `winit`, desktop surface, keyboard/mouse, CLI, offscreen frame
+  sink/source glue, perf harness, or desktop diagnostics glue
 - validation should move toward contract tests plus targeted platform smokes
   instead of broad manual matrix checks for every change
 
@@ -88,6 +90,8 @@ Platform hosts own:
 
 - event loop and lifecycle
 - desktop window, Android activity, browser canvas, or OpenXR session
+- offscreen target creation, readback, encoding, and frame delivery for
+  no-window hosts
 - `wgpu` surface/swapchain acquisition and presentation pacing
 - OpenXR swapchain image acquisition/release where applicable
 - platform input collection and translation
@@ -108,7 +112,8 @@ Shared engine crates own:
 Shared app/runtime boundary crates currently include:
 
 - `mclone-app-runtime`: shared single-view runtime helpers used by desktop,
-  flat Android, headless captures, and XR terrain runtime construction
+  flat Android, current headless captures, future offscreen flat client, and XR
+  terrain runtime construction
 - `mclone-render-session`: shared render-section dirty state, compile request,
   cache update, neighbor-readiness, and camera-controller contracts used by
   desktop and web, and consumed by XR scene code
@@ -134,8 +139,9 @@ the Android XR app. Desktop runtime selection and launch helpers stay in the
 desktop app/scripts.
 
 `mclone-native-client` is allowed to be larger than other app crates because it
-owns the primary `winit` loop, desktop input, headless screenshots, perf
-harnesses, CLI options, and desktop diagnostics. Size alone is not a bug, but
+owns the primary `winit` loop, desktop input, current headless/offscreen CLI
+entrypoints, perf harnesses, CLI options, and desktop diagnostics. Size alone is
+not a bug, but
 new desktop-local gameplay, renderer policy, runtime startup policy, UI state,
 session lifecycle policy, persistence behavior, or input semantics are bugs
 unless they are temporary forks tracked in the platform parity matrix.
@@ -157,14 +163,14 @@ platform input/lifecycle
   -> mclone-render
 ```
 
-This includes desktop flat, flat Android, headless captures, and the web canvas
+This includes desktop flat, offscreen flat, flat Android, and the web canvas
 path. The app shells are not identical: desktop owns native threads and
-keyboard/mouse, Android owns `NativeActivity` lifecycle and touch, and web owns
-browser workers and canvas APIs. The convergence point is shared runtime/render
-state and explicit frame facts. The server host mode is independent from that
-platform shell: local integrated and remote dedicated should differ by
-session/transport adapter, not by private client, simulation, or render-session
-logic.
+keyboard/mouse, offscreen owns synthetic/network/model input and frame sinks,
+Android owns `NativeActivity` lifecycle and touch, and web owns browser workers
+and canvas APIs. The convergence point is shared runtime/render state and
+explicit frame facts. The server host mode is independent from that platform
+shell: local integrated and remote dedicated should differ by session/transport
+adapter, not by private client, simulation, or render-session logic.
 
 Stereo XR hosts:
 
@@ -194,6 +200,10 @@ cargo test --manifest-path native/Cargo.toml
 pnpm native:desktop-chunk:smoke
 pnpm native:web:build
 ```
+
+`native:desktop-chunk:smoke` is still the current offscreen renderer/client
+smoke. Tactical 105 should replace it with a full-frame offscreen flat-client
+smoke once the shared host lands.
 
 Platform-specific gates:
 
@@ -231,8 +241,8 @@ Run the narrowest lane that can catch the bug class:
 
 - simulation/content changes: native tests, oracle fixtures, and web compile
   gates before platform device lanes
-- renderer/view/target changes: desktop headless screenshot first, then web or
-  one device/headset lane depending on the affected boundary
+- renderer/view/target changes: offscreen full-frame screenshot first, then web
+  or one device/headset lane depending on the affected boundary
 - shared runtime/render-session changes: desktop flat plus web build/smoke;
   add Android/XR checks when app-runtime or XR scene contracts change
 - Android activity/package changes: the relevant Android APK and validation
@@ -288,7 +298,7 @@ manual checks:
 
 1. **Reduce desktop app gravity before adding more desktop-local behavior.**
    Treat new growth in `mclone-native-client` as suspicious unless it is true
-   `winit`/surface/input/CLI/headless/perf/diagnostic glue. Startup loops,
+   `winit`/surface/input/CLI/offscreen/perf/diagnostic glue. Startup loops,
    loading/progress state, session lifecycle, render policy, input semantics,
    HUD/menu behavior, persistence, and gameplay should move into shared owners
    before more features build on desktop-local versions.

@@ -7,12 +7,12 @@ Android remote-host selection, and the native local/remote single-view scene
 shell into shared app-runtime contracts while keeping concrete transports and
 platform config in app crates. Slice 4's durable matrix now lives in
 `docs/topics/platform-parity.md`; the remaining alignment work is making the
-sentinel gates more executable and auditing web/XR forks against the shared
-contracts.
+sentinel gates more executable, promoting headless/offscreen into a real flat
+client host, and auditing web/XR forks against the shared contracts.
 
 ## Purpose
 
-Keep desktop flat, flat Android, headless capture, and web/WASM aligned around
+Keep desktop flat, offscreen flat, flat Android, and web/WASM aligned around
 shared single-view runtime/render contracts so new features do not require
 manual platform-by-platform implementation work.
 
@@ -36,6 +36,12 @@ and rendering continue to grow.
   `WindowSceneRuntime`. Desktop still owns `winit`, headless/perf/XR-smoke
   entrypoints, CLI options, actor textures, UI/debug state, and concrete TCP
   session construction.
+- Headless/offscreen currently shares the native scene runtime and low-level
+  full-frame render helpers. `run_headless_screenshot` now shares
+  `FlatRenderResources`, but it is still screenshot-shaped in lifetime,
+  debug/UI scenario setup, and scripted interaction. The target is a real
+  offscreen flat client host tracked in
+  [`105-offscreen-flat-client-host.md`](105-offscreen-flat-client-host.md).
 - Flat Android renders real terrain through shared crates, selects local
   integrated or remote dedicated through the shared host-mode contract, and now
   uses a shared native local/remote scene shell. Android still owns
@@ -49,7 +55,8 @@ and rendering continue to grow.
 Single-view platform adapters should own only true platform concerns:
 
 - desktop `winit` event loop, window/surface, keyboard/mouse, frame pacing,
-  headless output paths, and remote-session CLI options
+- offscreen frame sinks, scripted/network/model input sources, and remote-session
+  CLI options where the desktop binary is hosting the offscreen lane
 - flat Android `NativeActivity`, Android app data paths, Vulkan surface,
   resume/suspend/resize, touch translation, APK scripts, and AVD validation
 - web canvas, browser workers, TypeScript glue, storage/fetch adapters, and

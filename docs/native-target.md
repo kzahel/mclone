@@ -2,7 +2,7 @@
 
 Historical note on preserving native host/renderer paths for `mclone`.
 
-This document has been superseded by [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). The committed direction is now native-first Rust with five validated client/platform lanes: desktop flat, desktop OpenXR, Android XR / Quest standalone, flat Android, and web/WASM. Use [`platforms.md`](platforms.md) for the current platform matrix and validation policy.
+This document has been superseded by [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). The committed direction is now native-first Rust with five validated client/platform lanes: desktop flat, desktop OpenXR, Android XR / Quest standalone, flat Android, and web/WASM, plus an emerging offscreen flat client validation host. Use [`platforms.md`](platforms.md) for the current platform matrix and validation policy.
 
 ## Current posture
 

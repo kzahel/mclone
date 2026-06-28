@@ -9,12 +9,13 @@ The primary implementation direction is now:
 ```text
 native-first Rust engine with five validated client/platform lanes:
 desktop flat, desktop OpenXR, Android XR / Quest, flat Android, and web/WASM
+plus an emerging no-window offscreen flat client validation host
 ```
 
 Reference Rust engine for native app/render/XR patterns:
 
 - local path: `~/code/playbox`
-- use it for `winit`/`wgpu` bring-up, frame pacing, headless capture, render target, camera, diagnostics, Android/OpenXR reference, and validation patterns
+- use it for `winit`/`wgpu` bring-up, frame pacing, headless/offscreen capture, render target, camera, diagnostics, Android/OpenXR reference, and validation patterns
 - start with `~/code/playbox/Cargo.toml` for debug-profile optimization policy
 - use `~/code/playbox/docs/architecture/rendering.md` and `~/code/playbox/docs/architecture/platforms.md` for render/view/target and platform host boundaries
 - use `~/code/playbox/android/README.md`, `~/code/playbox/android-xr/README.md`, and `~/code/playbox/docs/tactical/106-desktop-xr-companion-window.md` when planning flat Android, Quest/OpenXR, or desktop OpenXR companion/mirror work
@@ -22,11 +23,13 @@ Reference Rust engine for native app/render/XR patterns:
 
 ## Direction
 
-Build the engine as normal Rust crates first, with desktop/native as the fastest main development loop. Keep the other validated lanes alive through explicit contracts and targeted smokes rather than platform-specific feature forks. Current platform posture lives in [`platforms.md`](platforms.md), and the completed XR frontload sequence is recorded through [`tactical/076-native-xr-frontload-plan.md`](tactical/076-native-xr-frontload-plan.md), [`tactical/077-multiview-render-contract.md`](tactical/077-multiview-render-contract.md), [`tactical/079-desktop-openxr-mclone-frame.md`](tactical/079-desktop-openxr-mclone-frame.md), and [`tactical/083-android-xr-quest-standalone.md`](tactical/083-android-xr-quest-standalone.md).
+Build the engine as normal Rust crates first, with desktop/native as the fastest main development loop. Keep the other validated lanes alive through explicit contracts and targeted smokes rather than platform-specific feature forks. Current platform posture lives in [`platforms.md`](platforms.md), the offscreen flat-client target lives in [`offscreen-flat-client.md`](offscreen-flat-client.md), and the completed XR frontload sequence is recorded through [`tactical/076-native-xr-frontload-plan.md`](tactical/076-native-xr-frontload-plan.md), [`tactical/077-multiview-render-contract.md`](tactical/077-multiview-render-contract.md), [`tactical/079-desktop-openxr-mclone-frame.md`](tactical/079-desktop-openxr-mclone-frame.md), and [`tactical/083-android-xr-quest-standalone.md`](tactical/083-android-xr-quest-standalone.md).
 
 This is not equal effort across targets:
 
-- desktop flat is the first-priority daily development and screenshot target
+- desktop flat is the first-priority daily interactive development target
+- offscreen flat is the target no-window validation host for screenshots,
+  scripted/network input, and future frame sinks
 - desktop OpenXR is the desktop stereo/runtime validation lane
 - Android XR / Quest standalone is the standalone headset validation lane
 - flat Android is the single-view native mobile validation lane, tracked by [`tactical/074-flat-android-build-smoke.md`](tactical/074-flat-android-build-smoke.md)

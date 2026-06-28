@@ -18,15 +18,13 @@ use mclone_render::chunk::{
     TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
-use mclone_render::entity::ActorDrawResources;
-use mclone_render::gui::GuiRenderer;
 use mclone_render::headless::{
     HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessFrameLoopOptions, HeadlessFrameOptions,
     run_headless_capture_loop, save_rgba_png, write_headless_frame_png,
     write_headless_textured_sections_png_with_ready_sections,
 };
-use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
-use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
+use mclone_render::screen_effect::UnderwaterOverlay;
+use mclone_render::selection_outline::SelectionOutline;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render_session::actor_instances_from_presentations;
 use mclone_ui::{GameUi, GuiDrawList, GuiScale, Point, render_loading_progress_panel_at};
@@ -753,12 +751,7 @@ pub(crate) fn run_headless_screenshot(
         ActorInterpolationState::from_authoritative(runtime.client().actor_presentations());
     let actor_instances =
         actor_instances_from_presentations(&actor_interpolation.presentations(), runtime.client());
-    let initial_upload = TexturedSectionUploadReport {
-        uploaded_section_count: section_update.rebuilt_section_count(),
-        removed_section_count: section_update.removed_section_count(),
-        uploaded_vertex_count: section_update.rebuilt_vertex_count,
-        uploaded_index_count: section_update.rebuilt_index_count,
-    };
+    let asset_source = load_asset_source()?;
 
     let (frame_report, summary) = write_headless_frame_png(
         HeadlessFrameOptions {
@@ -767,45 +760,29 @@ pub(crate) fn run_headless_screenshot(
             height: options.height,
         },
         |frame| {
-            let mclone_render::target::RenderFrameContext {
-                device,
-                queue,
-                encoder,
-                target,
-            } = frame;
-            let depth = ChunkDepthTarget::new(device, target.size[0], target.size[1]);
-            let mut draw = TexturedSectionDrawResources::new(
-                device,
-                queue,
-                HEADLESS_FORMAT,
-                &sections,
+            let render_config =
+                RenderConfig::for_color_target(render_options.color_profile, HEADLESS_FORMAT);
+            let mut resources = FlatRenderResources::new(
+                frame.device,
+                frame.queue,
+                frame.target.size,
+                render_config,
                 runtime.mesh_assets().atlas.as_upload(),
+                runtime.actor_textures.atlas.as_upload(),
+                &asset_source,
             )?;
-            draw.set_traversal_ready_sections(
+            let upload_report = resources
+                .draw_mut()
+                .update_sections(frame.device, &sections)
+                .context("failed to upload headless screenshot sections")?;
+            resources.draw_mut().set_traversal_ready_sections(
                 &runtime.traversal_ready_render_section_keys(spectator.position),
             );
-            let sky = SkyRenderer::new_with_color_profile(
-                device,
-                HEADLESS_FORMAT,
-                render_options.color_profile,
-            );
-            let mut actors = ActorDrawResources::new(
-                device,
-                queue,
-                HEADLESS_FORMAT,
-                runtime.actor_textures.atlas.as_upload(),
-            )?;
-            let asset_source = load_asset_source()?;
-            let mut screen_effects =
-                ScreenEffectsRenderer::new(device, queue, HEADLESS_FORMAT, &asset_source)?;
-            let mut selection_outline_renderer =
-                SelectionOutlineRenderer::new(device, HEADLESS_FORMAT);
-            let mut gui = GuiRenderer::new(device, HEADLESS_FORMAT);
 
-            render_stats.section_count = draw.section_count();
-            render_stats.index_count = draw.index_count();
+            render_stats.section_count = resources.section_count();
+            render_stats.index_count = resources.index_count();
             render_stats.face_count = quad_face_count_from_indices(render_stats.index_count);
-            record_render_section_update_stats(&mut render_stats, &section_update, initial_upload);
+            record_render_section_update_stats(&mut render_stats, &section_update, upload_report);
 
             let debug_stats = debug_pane.then_some(DebugPaneStats {
                 position: spectator.position,
@@ -846,27 +823,16 @@ pub(crate) fn run_headless_screenshot(
             );
 
             let selection_outline = selection_outline_for_camera(&runtime, camera, ui_active);
-            let render_view = camera.render_view(target.size[0], target.size[1]);
-            let summary = render_full_frame_for_view(
-                mclone_render::target::RenderFrameContext::new(
-                    device,
-                    queue,
-                    &mut *encoder,
-                    target,
-                ),
-                &depth,
-                &sky,
-                &mut draw,
-                Some(&mut actors),
-                Some(&mut screen_effects),
-                Some(&mut gui),
-                render_view,
+            resources.render_full_frame(
+                frame,
+                camera,
                 &actor_instances,
                 underwater_overlay,
                 sky_clear_color,
                 time_of_day,
                 sun_angle,
                 render_options,
+                selection_outline.as_ref(),
                 gui_state,
                 |stats| {
                     let mut ui_draw = base_ui_draw;
@@ -889,17 +855,7 @@ pub(crate) fn run_headless_screenshot(
                     ui_draw
                 },
                 &mut render_stats,
-            )?;
-            selection_outline_renderer.render(
-                device,
-                queue,
-                &mut *encoder,
-                target,
-                &depth,
-                render_view,
-                selection_outline.as_ref(),
-            );
-            Ok(summary)
+            )
         },
     )?;
 

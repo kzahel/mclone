@@ -1,7 +1,8 @@
 # Platform Parity
 
-Durable cross-platform parity tracker for the five client lanes. This is the
-"where are we now, and what is left to reach par" answer between sessions.
+Durable cross-platform parity tracker for the client lanes and offscreen flat
+validation host. This is the "where are we now, and what is left to reach par"
+answer between sessions.
 
 This doc owns three things no other doc owns:
 
@@ -17,26 +18,30 @@ This doc owns three things no other doc owns:
    (Slice 4) all call for.
 
 Related docs: [`../platforms.md`](../platforms.md) owns lane status and
-validation policy; [`../architecture.md`](../architecture.md) owns the runtime
-boundary; this doc owns the per-feature and per-contract grids and the rule that
-keeps new features from re-forking.
+validation policy; [`../offscreen-flat-client.md`](../offscreen-flat-client.md)
+owns the no-window flat-client target; [`../architecture.md`](../architecture.md)
+owns the runtime boundary; this doc owns the per-feature and per-contract grids
+and the rule that keeps new features from re-forking.
 
 > Status note: the current-state cells below were derived from a code audit on
-> 2026-06-26 and refreshed on 2026-06-27 after tactical 095 Slice 4f, the
-> existing audio foundation audit, and user headset validation of the shared XR
-> world-panel menu/pointer path.
+> 2026-06-26 and refreshed on 2026-06-28 after tactical 095 Slice 4f, the
+> existing audio foundation audit, user headset validation of the shared XR
+> world-panel menu/pointer path, and the offscreen flat-client target definition.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
 ## Platform Classes And Target State
 
-Collapse the five lanes into two **classes** with an explicit feature target. A
-feature is "at par" for a lane when it meets its class target (adapted for the
-display/input shape), not when it is byte-identical to desktop.
+Collapse the display/client lanes into two **classes** with an explicit feature
+target. A feature is "at par" for a lane when it meets its class target
+(adapted for the display/input shape), not when it is byte-identical to desktop.
 
-### Flat class — desktop flat, flat Android, web/WASM
+### Flat class — desktop flat, offscreen flat, flat Android, web/WASM
 
-Target: **full game client.** Same player-facing feature set across all three.
+Target: **full game client.** Same player-facing feature set across all flat
+hosts. Offscreen flat is a validation/automation host rather than a user-facing
+display lane, but it should run the same client lifetime and render the same
+full-frame output into frame sinks.
 
 - world render, lighting, day/night
 - first-person player movement + collision
@@ -46,6 +51,8 @@ Target: **full game client.** Same player-facing feature set across all three.
 - menus: title, pause, options, **server-connect, world/seed select**
 - local-integrated **and** remote-dedicated host modes
 - underwater/camera screen effects for flat clients
+- no-window operation for offscreen flat: neutral input source, explicit render
+  target, frame sink, and remote-dedicated play without a window manager
 
 > **Confirmed:** flat Android is a full client, not a viewer. Its current
 > shared touch player-camera/movement shell is interim and must gain
@@ -82,30 +89,34 @@ support it; the lane does not wire it) · — n/a for the class.
 
 A cell is a **parity gap** when it is not ✅ and its class targets it above.
 
-| Feature | desktop-flat | desktop-XR | flat-Android | Android-XR | web/WASM |
-|---|:--:|:--:|:--:|:--:|:--:|
-| World render (textured terrain) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Lighting (sky+block, render integ.) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Day/night + sky | ✅ | ✅ | ◐ (frozen) | ✅ | ✅ |
-| Player movement + collision | ✅ | ✅ | ◐ (shared touch move, device pending) | ✅ | ✅ |
-| Block interaction (break/place) | ✅ | ✗ | ✗ | ✗ | ✅ |
-| Remote-player rendering | ✅ | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ✅ |
-| Passive entities (cow/chicken) | ✅ | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ◐ (placeholder) |
-| Fluids (server sim, renders as terrain) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Underwater camera FX / screen effects | ✅ | ✗ (XR treatment TBD) | ✗ (wiring pending) | ✗ (XR treatment TBD) | ✗ (inline render fork) |
-| HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ✗ | ✗ | ✗ | ✅ |
-| Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✅ |
-| Menus (title/pause/options) | ✅ | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ (shared touch menu, AVD session smoke) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ |
-| Connect / world-select UI | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Remote-dedicated connect (wired in app) | ✅ TCP | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ✅ WebSocket query param |
-| Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ (cfg-excluded) |
-| Basic audio (landing sound foundation) | ◐ (code; listen validation pending) | ◐ (code; listen validation pending) | ◐ (code; device audio pending) | ◐ (code; device audio pending) | ✗ |
+| Feature | desktop-flat | offscreen-flat | desktop-XR | flat-Android | Android-XR | web/WASM |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|
+| World render (textured terrain) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Lighting (sky+block, render integ.) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Day/night + sky | ✅ | ✅ | ✅ | ◐ (frozen) | ✅ | ✅ |
+| Player movement + collision | ✅ | ◐ (perf/scripted paths; no real host loop) | ✅ | ◐ (shared touch move, device pending) | ✅ | ✅ |
+| Block interaction (break/place) | ✅ | ◐ (scripted direct commands, not neutral input) | ✗ | ✗ | ✗ | ✅ |
+| Remote-player rendering | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ✅ |
+| Passive entities (cow/chicken) | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ✗ | ◐ (path, unspawned; device smoke pending) | ◐ (placeholder) |
+| Fluids (server sim, renders as terrain) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Underwater camera FX / screen effects | ✅ | ✅ | ✗ (XR treatment TBD) | ✗ (wiring pending) | ✗ (XR treatment TBD) | ✗ (inline render fork) |
+| HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ◐ (debug/UI screenshots; no real HUD host) | ✗ | ✗ | ✗ | ✅ |
+| Hotbar (debug palette) | ✅ | ✗ | ✗ | ✗ | ✗ | ✅ |
+| Menus (title/pause/options) | ✅ | ◐ (screenshot scenarios; no real input host) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ (shared touch menu, AVD session smoke) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ |
+| Connect / world-select UI | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Remote-dedicated connect (wired in app) | ✅ TCP | ◐ TCP screenshot/settle, no long-lived offscreen host | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ✅ WebSocket query param |
+| Persistence (world save/load, in-app) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ (cfg-excluded) |
+| Basic audio (landing sound foundation) | ◐ (code; listen validation pending) | — (not targeted for no-window validation yet) | ◐ (code; listen validation pending) | ◐ (code; device audio pending) | ◐ (code; device audio pending) | ✗ |
 
 Reading the matrix:
 
 - **desktop-flat** is the reference; the remaining flat-class gaps are
   connect-UI, persistence, full audio validation/categories, and an in-world
   crosshair.
+- **offscreen-flat** is the desired real no-window validation host, but today it
+  is still a hybrid of full-frame screenshots, renderer helpers, and direct
+  scripted commands. Tactical 105 owns the cleanup into a long-lived client
+  host with neutral input and frame sinks.
 - **web** is near desktop parity; gaps are connect-UI, underwater FX wiring,
   persistence (structurally impossible on `wasm32` today), and audio.
 - **desktop-XR** has render/locomotion parity and a shared pause/options
@@ -121,10 +132,11 @@ Reading the matrix:
   shared touch player camera/movement path, but still lacks interaction,
   actors, HUD/hotbar, underwater FX wiring, and an in-app connect flow.
 - **underwater camera effects** are not desktop-only by architecture. The shared
-  renderer/app-runtime path exists, but only the desktop native app/headless/perf
-  paths currently compute and pass the camera-water overlay/fog. Flat Android,
-  web, and XR still need app-lane wiring; XR may need a stereo-comfort-specific
-  treatment instead of copying the flat screen overlay verbatim.
+  renderer/app-runtime path exists, but only the desktop native app, current
+  offscreen/headless screenshots, and perf paths compute and pass the
+  camera-water overlay/fog. Flat Android, web, and XR still need app-lane
+  wiring; XR may need a stereo-comfort-specific treatment instead of copying the
+  flat screen overlay verbatim.
 - **basic audio** exists through `mclone-audio` on native desktop, desktop XR,
   flat Android, and Android XR. It is still a foundation slice: landing sounds
   only, no web audio yet, no automated audible validation, and no step/break/
@@ -136,7 +148,7 @@ Does each app consume the shared boundary, or fork it? Legend: ✅ consumes
 shared · ◐ partial / re-derives · ⚑ forks (parallel app-local copy) · ✗ does not
 use (and should) · — n/a.
 
-| Shared boundary | native-client | web-client | flat-Android | Android-XR | Sentinel gate |
+| Shared boundary | native-client desktop/offscreen | web-client | flat-Android | Android-XR | Sentinel gate |
 |---|:--:|:--:|:--:|:--:|---|
 | `mclone-protocol` / `mclone-net` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-net`; `--multi-client-smoke` |
 | `mclone-server` / `IntegratedServer` | ✅ | ✅ | ✅ | ✅ | `cargo test -p mclone-server` |
@@ -153,9 +165,10 @@ use (and should) · — n/a.
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✅ (shared touch menu+controls, AVD touch/session smoke) | ✅ (XR world panel + pointer, user-validated; automation/tuning pending) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-xr-scene`; `native:android:avd-session-smoke` |
 | `mclone-xr-{host,graphics,scene}` | ✅ | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 
-The reuse story in one line: **desktop flat, flat Android, desktop XR, and
-Android XR now share the native scene shells; web still carries the important
-runtime/render fork.**
+The reuse story in one line: **desktop flat, current offscreen/headless,
+flat Android, desktop XR, and Android XR now share the native scene shells; web
+still carries the important runtime/render fork, and offscreen still lacks a
+real flat-client driver.**
 Concretely:
 
 - The native flat single-view scene driver is shared:
@@ -163,6 +176,13 @@ Concretely:
   `NativeSingleViewSceneRuntime<S>`, while concrete TCP/property/config remains
   in the app crates. This landed in
   [`../tactical/084-single-view-platform-alignment.md`](../tactical/084-single-view-platform-alignment.md).
+- The offscreen path currently gets shared scene/runtime facts through the same
+  native-client wrapper, and `run_headless_screenshot` now shares
+  `FlatRenderResources` with the desktop/rebuild full-frame path. It still lacks
+  a long-lived flat-client driver and still owns screenshot scenario/debug/UI
+  setup plus scripted interactions. Tactical
+  [`105-offscreen-flat-client-host.md`](../tactical/105-offscreen-flat-client-host.md)
+  tracks replacing that with a real no-window flat client host.
 - The XR scene-driver fork is closed:
   `XrMcloneTerrainState<S>` composes `NativeSingleViewSessionRuntime<S>` around
   the shared native scene runtime, desktop XR passes the desktop TCP
@@ -299,7 +319,7 @@ rg -n "poll_until_idle|sync_all_render_sections|std::thread::sleep|block_on" \
 Do not turn the counts into a hard budget. Use them to find cleanup candidates:
 
 - `mclone-native-client` growth outside `winit`, desktop surface/input, CLI,
-  headless capture, perf harnesses, or desktop diagnostics
+  offscreen source/sink glue, perf harnesses, or desktop diagnostics
 - startup/loading/progress policy that blocks a platform loop instead of
   reporting incremental shared progress
 - app-local runtime/session/render/UI/input behavior that another platform
@@ -314,7 +334,8 @@ these first:
 
 1. **Reduce desktop app gravity before adding more desktop-local behavior.**
    `mclone-native-client` can own `winit`, desktop surface/input, CLI,
-   headless capture, perf harnesses, and desktop diagnostics. It should not keep
+   offscreen source/sink glue, perf harnesses, and desktop diagnostics. It
+   should not keep
    accumulating startup-loop policy, loading/progress state, session lifecycle,
    render policy, UI/HUD/menu behavior, input semantics, persistence, or
    gameplay. Move those into the shared owners in the checklist above, then use

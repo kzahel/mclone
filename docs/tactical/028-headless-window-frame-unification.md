@@ -1,11 +1,18 @@
 # 028: Headless Window Frame Unification
 
-Status: active.
+Status: first slice landed; remaining direction superseded by
+[`105-offscreen-flat-client-host.md`](105-offscreen-flat-client-host.md).
 
 ## Purpose
 
 Make headless/offscreen rendering a first-class way to exercise the same native
 client frame capabilities as the desktop window path.
+
+This tactical records the first full-frame screenshot convergence work. The
+broader target is now a real offscreen flat client host with a long-lived client
+state, neutral input sources, and pluggable frame sinks. That target lives in
+[`../offscreen-flat-client.md`](../offscreen-flat-client.md) and is tracked by
+[`105-offscreen-flat-client-host.md`](105-offscreen-flat-client-host.md).
 
 The current native client has useful low-level target boundaries, but the
 high-level modes still fork too early: windowed rendering composes world, UI, and
@@ -69,6 +76,9 @@ stay native-web and future XR compatible.
 
 ## Follow-Up Slices
 
+The follow-up direction below is retained as historical context. New work should
+use tactical 105.
+
 - Rename remaining `Window*Runtime` symbols to single-view/client-runtime names
   once the shared frame path is stable.
 - Move more native app state out of `main.rs` into host-neutral native client
@@ -93,4 +103,3 @@ git diff --check
 
 Inspect `/tmp/mclone-full-frame-debug.png`. It must be nonblank, show terrain,
 and include the same debug pane styling/content shape as the native window path.
-
