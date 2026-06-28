@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -10,8 +9,7 @@ use mclone_input::{
     FlatInputAction, FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind,
     InputPreferences, KeyboardKey, KeyboardMouseInputAdapter, PointerButton,
 };
-use mclone_mesh::quad_face_count_from_indices;
-use mclone_render::chunk::{TexturedSectionRenderOptions, TexturedSectionUploadReport};
+use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_ui::{
@@ -41,9 +39,7 @@ use crate::scene_runtime::{
 };
 use crate::ui::{DebugPaneStats, render_debug_pane};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
-use mclone_app_runtime::frame_render::{
-    FlatRenderResources, FullFrameGui, record_render_section_update_stats,
-};
+use mclone_app_runtime::frame_render::{FlatRenderResources, FullFrameGui};
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, PendingSessionStart,
     RemoteSessionEndpoint, SessionFailure, SessionStartRequest, SessionStartResult,
@@ -53,7 +49,7 @@ use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 use mclone_render_session::{
     ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
-    EngineCameraMovementMode, RenderSectionCacheUpdate,
+    EngineCameraMovementMode,
 };
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
@@ -1089,12 +1085,7 @@ impl ChunkApp {
                 report.removed_section_count
             );
         }
-        self.driver.render_stats.section_count = 0;
-        self.driver.render_stats.index_count = 0;
-        self.driver.render_stats.face_count = 0;
-        self.driver.render_stats.drawn_section_count = 0;
-        self.driver.render_stats.drawn_face_count = 0;
-        self.driver.render_stats.drawn_index_count = 0;
+        self.driver.clear_render_stats();
         Ok(())
     }
 
@@ -1233,28 +1224,12 @@ impl ChunkApp {
     }
 
     fn poll_runtime_and_upload(&mut self) -> Result<()> {
-        if self.driver.runtime.is_none() {
-            return Ok(());
-        }
         let poll_start = Instant::now();
-        let mut changed = self
-            .driver
-            .runtime
-            .as_mut()
-            .expect("runtime presence checked")
-            .poll()?;
-        changed |= self.apply_pending_player_position_updates()?;
+        let poll = self.driver.poll_runtime()?;
         self.driver
             .frame_timing
             .record_runtime_poll(elapsed_ms(poll_start.elapsed()));
-        let camera_eye = self.window_camera_view().eye;
-        if !changed
-            && !self
-                .driver
-                .runtime
-                .as_ref()
-                .is_some_and(|runtime| runtime.has_pending_render_work(camera_eye))
-        {
+        if !poll.needs_section_upload {
             return Ok(());
         }
         self.upload_runtime_sections()?;
@@ -1262,77 +1237,62 @@ impl ChunkApp {
     }
 
     fn upload_runtime_sections(&mut self) -> Result<()> {
-        let camera_view = self.window_camera_view();
-        let Some(runtime) = &mut self.driver.runtime else {
+        let Some(sync) = self.driver.sync_runtime_sections(elapsed_ms)? else {
             return Ok(());
         };
         let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
         else {
             return Ok(());
         };
-        let remesh_start = Instant::now();
-        let section_update = runtime.sync_render_sections(camera_view.eye)?;
-        let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let upload_start = Instant::now();
         let upload_report = render_resources
             .draw_mut()
             .apply_section_updates(
                 &surface.device,
-                &section_update.rebuilt_sections,
-                &section_update.removed_section_keys,
+                &sync.section_update.rebuilt_sections,
+                &sync.section_update.removed_section_keys,
             )
             .context("failed to upload streamed chunk section updates")?;
         let upload_ms = elapsed_ms(upload_start.elapsed());
-        let section_count = render_resources.section_count();
-        let index_count = render_resources.index_count();
-        let face_count = quad_face_count_from_indices(index_count);
-        let loaded_chunk_count = runtime.client().loaded_chunk_count();
-        self.driver.render_stats.section_count = section_count;
-        self.driver.render_stats.index_count = index_count;
-        self.driver.render_stats.face_count = face_count;
-        self.driver.render_stats.drawn_section_count = 0;
-        self.driver.render_stats.drawn_face_count = 0;
-        self.driver.render_stats.drawn_index_count = 0;
-        self.record_section_update_stats(&section_update, upload_report);
-        self.driver.render_stats.last_remesh_ms = remesh_ms;
-        self.driver.render_stats.last_upload_ms = upload_ms;
-        self.driver
-            .frame_timing
-            .record_remesh_upload(remesh_ms, upload_ms);
+        let summary = self.driver.record_section_upload(
+            &sync.section_update,
+            upload_report,
+            render_resources.section_count(),
+            render_resources.index_count(),
+            sync.remesh_ms,
+            upload_ms,
+            Some(sync.loaded_chunk_count),
+        );
         log::info!(
             "streamed chunks loaded={} sections={} faces={} indices={} rebuilt={} visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} remesh_ms={:.3} upload_ms={:.3}",
-            loaded_chunk_count,
-            section_count,
-            face_count,
-            index_count,
-            section_update.rebuilt_section_count(),
-            section_update.visibility_graph_stats.build_count,
-            section_update.visibility_graph_stats.total_ms,
-            section_update.visibility_graph_stats.worst_ms,
-            upload_report.uploaded_section_count,
-            upload_report.uploaded_vertex_count,
-            upload_report.uploaded_face_count(),
-            upload_report.uploaded_index_count,
-            upload_report.removed_section_count,
-            remesh_ms,
+            sync.loaded_chunk_count,
+            summary.section_count,
+            summary.face_count,
+            summary.index_count,
+            sync.section_update.rebuilt_section_count(),
+            sync.section_update.visibility_graph_stats.build_count,
+            sync.section_update.visibility_graph_stats.total_ms,
+            sync.section_update.visibility_graph_stats.worst_ms,
+            self.driver.render_stats.last_uploaded_section_count,
+            self.driver.render_stats.last_uploaded_vertex_count,
+            self.driver.render_stats.last_uploaded_face_count,
+            self.driver.render_stats.last_uploaded_index_count,
+            self.driver.render_stats.last_upload_removed_section_count,
+            sync.remesh_ms,
             upload_ms
         );
         Ok(())
     }
 
     fn upload_all_runtime_sections(&mut self) -> Result<()> {
-        let camera_view = self.window_camera_view();
-        let Some(runtime) = &mut self.driver.runtime else {
+        let Some(sync) = self.driver.sync_all_runtime_sections(elapsed_ms)? else {
             return Ok(());
         };
         let (Some(surface), Some(render_resources)) = (&self.surface, &mut self.render_resources)
         else {
             return Ok(());
         };
-        let remesh_start = Instant::now();
-        let section_update = runtime.sync_all_render_sections(camera_view.eye)?;
-        let sections = runtime.cached_sections();
-        if sections.is_empty() {
+        if sync.sections.is_empty() {
             anyhow::bail!(
                 "world seed={} center=({}, {}) render_distance={} produced no render sections",
                 self.scene.seed,
@@ -1341,50 +1301,44 @@ impl ChunkApp {
                 self.scene.render_distance
             );
         }
-        let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let upload_start = Instant::now();
         let upload_report = render_resources
             .draw_mut()
-            .update_sections(&surface.device, &sections)
+            .update_sections(&surface.device, &sync.sections)
             .context("failed to upload world chunk section resources")?;
         render_resources.draw_mut().set_traversal_ready_sections(
-            &runtime.traversal_ready_render_section_keys(camera_view.eye),
+            &self.driver.traversal_ready_section_keys(sync.camera_view),
         );
         let upload_ms = elapsed_ms(upload_start.elapsed());
-        let section_count = render_resources.section_count();
-        let index_count = render_resources.index_count();
-        let face_count = quad_face_count_from_indices(index_count);
-        self.driver.render_stats.section_count = section_count;
-        self.driver.render_stats.index_count = index_count;
-        self.driver.render_stats.face_count = face_count;
-        self.driver.render_stats.drawn_section_count = 0;
-        self.driver.render_stats.drawn_face_count = 0;
-        self.driver.render_stats.drawn_index_count = 0;
-        self.record_section_update_stats(&section_update, upload_report);
-        self.driver.render_stats.last_remesh_ms = remesh_ms;
-        self.driver.render_stats.last_upload_ms = upload_ms;
+        let summary = self.driver.record_section_upload(
+            &sync.section_update,
+            upload_report,
+            render_resources.section_count(),
+            render_resources.index_count(),
+            sync.remesh_ms,
+            upload_ms,
+            None,
+        );
         log::info!(
             "uploaded {} world render sections with {} vertices / {} faces / {} indices visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} remesh_ms={:.3} upload_ms={:.3}",
-            section_count,
-            section_update.rebuilt_vertex_count,
-            face_count,
-            index_count,
-            section_update.visibility_graph_stats.build_count,
-            section_update.visibility_graph_stats.total_ms,
-            section_update.visibility_graph_stats.worst_ms,
-            remesh_ms,
+            summary.section_count,
+            sync.section_update.rebuilt_vertex_count,
+            summary.face_count,
+            summary.index_count,
+            sync.section_update.visibility_graph_stats.build_count,
+            sync.section_update.visibility_graph_stats.total_ms,
+            sync.section_update.visibility_graph_stats.worst_ms,
+            sync.remesh_ms,
             upload_ms
         );
         Ok(())
     }
 
     fn upload_cached_runtime_sections(&mut self) -> Result<()> {
-        let camera_view = self.window_camera_view();
-        let Some(runtime) = self.driver.runtime.as_ref() else {
+        let Some(cached) = self.driver.cached_runtime_sections() else {
             return Ok(());
         };
-        let sections = runtime.cached_sections();
-        if sections.is_empty() {
+        if cached.sections.is_empty() {
             anyhow::bail!(
                 "world seed={} center=({}, {}) render_distance={} reached playable startup without render sections",
                 self.scene.seed,
@@ -1400,32 +1354,23 @@ impl ChunkApp {
         let upload_start = Instant::now();
         let upload_report = render_resources
             .draw_mut()
-            .update_sections(&surface.device, &sections)
+            .update_sections(&surface.device, &cached.sections)
             .context("failed to upload cached startup chunk section resources")?;
         render_resources.draw_mut().set_traversal_ready_sections(
-            &runtime.traversal_ready_render_section_keys(camera_view.eye),
+            &self.driver.traversal_ready_section_keys(cached.camera_view),
         );
         let upload_ms = elapsed_ms(upload_start.elapsed());
-        let section_count = render_resources.section_count();
-        let index_count = render_resources.index_count();
-        let face_count = quad_face_count_from_indices(index_count);
-        self.driver.render_stats.section_count = section_count;
-        self.driver.render_stats.index_count = index_count;
-        self.driver.render_stats.face_count = face_count;
-        self.driver.render_stats.drawn_section_count = 0;
-        self.driver.render_stats.drawn_face_count = 0;
-        self.driver.render_stats.drawn_index_count = 0;
-        self.driver.render_stats.last_remesh_ms = 0.0;
-        self.driver.render_stats.last_upload_ms = upload_ms;
-        self.driver
-            .frame_timing
-            .record_remesh_upload(0.0, upload_ms);
+        let summary = self.driver.record_cached_section_upload(
+            render_resources.section_count(),
+            render_resources.index_count(),
+            upload_ms,
+        );
         log::info!(
             "uploaded {} playable startup render sections with {} vertices / {} faces / {} indices uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} upload_ms={:.3}",
-            section_count,
+            summary.section_count,
             upload_report.uploaded_vertex_count,
-            face_count,
-            index_count,
+            summary.face_count,
+            summary.index_count,
             upload_report.uploaded_section_count,
             upload_report.uploaded_vertex_count,
             upload_report.uploaded_face_count(),
@@ -1434,22 +1379,6 @@ impl ChunkApp {
             upload_ms
         );
         Ok(())
-    }
-
-    fn record_section_update_stats(
-        &mut self,
-        section_update: &RenderSectionCacheUpdate,
-        upload_report: TexturedSectionUploadReport,
-    ) {
-        record_render_section_update_stats(
-            &mut self.driver.render_stats,
-            section_update,
-            upload_report,
-        );
-    }
-
-    fn effective_render_options(&self) -> TexturedSectionRenderOptions {
-        self.driver.effective_render_options()
     }
 
     fn debug_pane_stats(&self, render_options: TexturedSectionRenderOptions) -> DebugPaneStats {
@@ -1492,13 +1421,6 @@ impl ChunkApp {
 
     fn apply_pending_player_position_updates(&mut self) -> Result<bool> {
         self.driver.apply_pending_player_position_updates()
-    }
-
-    fn current_selection_outline(
-        &self,
-        ui_active: bool,
-    ) -> Option<mclone_render::selection_outline::SelectionOutline> {
-        self.driver.current_selection_outline(ui_active)
     }
 
     fn handle_world_flat_action(&mut self, action: FlatInputAction) -> Result<()> {
@@ -1850,29 +1772,14 @@ impl ApplicationHandler for ChunkApp {
                     return;
                 };
                 self.ui.set_scale(gui_scale);
-                let camera_view = self.window_camera_view();
-                let camera = camera_view.chunk_camera(self.current_render_distance());
-                let sky_clear_color = self.driver.runtime.as_ref().map_or_else(
-                    mclone_render::default_clear_color,
-                    WindowSceneRuntime::sky_clear_color,
-                );
-                let time_of_day = self
-                    .driver
-                    .runtime
-                    .as_ref()
-                    .map_or(0.0, WindowSceneRuntime::time_of_day);
-                let sun_angle = self
-                    .driver
-                    .runtime
-                    .as_ref()
-                    .map_or(0.0, WindowSceneRuntime::sun_angle);
-                let render_options = self.effective_render_options();
-                let underwater_overlay = self.driver.underwater_overlay(camera_view);
                 let ui_render_state = self.current_ui_render_state();
-                let actor_instances = self.driver.interpolated_actor_instances();
+                let ui_active = self.ui.is_active();
+                let frame_inputs = self
+                    .driver
+                    .prepare_frame_inputs(self.scene.render_distance, ui_active);
+                let render_options = frame_inputs.render_options;
                 let debug_stats = (self.debug_visible && self.driver.runtime.is_some())
                     .then(|| self.debug_pane_stats(render_options));
-                let ui_active = self.ui.is_active();
                 let ui_covers_world = self.ui.covers_world();
                 let debug_stats = (!ui_active).then_some(debug_stats).flatten();
                 let status_overlay = self.session_status_overlay();
@@ -1902,15 +1809,7 @@ impl ApplicationHandler for ChunkApp {
                     ui_covers_world || loading_progress_overlay.is_some(),
                     [gui_scale.width, gui_scale.height],
                 );
-                let selection_outline = self.current_selection_outline(ui_active);
-                let traversal_ready_sections = self
-                    .driver
-                    .runtime
-                    .as_ref()
-                    .map_or_else(BTreeSet::new, |runtime| {
-                        runtime.traversal_ready_render_section_keys(camera_view.eye)
-                    });
-                let mut render_stats = self.driver.render_stats;
+                let mut render_stats = frame_inputs.render_stats;
                 let render_start = Instant::now();
                 let result = {
                     let (Some(surface), Some(render_resources)) =
@@ -1920,19 +1819,19 @@ impl ApplicationHandler for ChunkApp {
                     };
                     render_resources
                         .draw_mut()
-                        .set_traversal_ready_sections(&traversal_ready_sections);
+                        .set_traversal_ready_sections(&frame_inputs.traversal_ready_sections);
                     self.frame_pacing.apply_to_surface(surface);
                     surface.render_with_report(|frame| {
                         render_resources.render_full_frame(
                             frame,
-                            camera,
-                            &actor_instances,
-                            underwater_overlay,
-                            sky_clear_color,
-                            time_of_day,
-                            sun_angle,
+                            frame_inputs.camera,
+                            &frame_inputs.actor_instances,
+                            frame_inputs.underwater_overlay,
+                            frame_inputs.sky_clear_color,
+                            frame_inputs.time_of_day,
+                            frame_inputs.sun_angle,
                             render_options,
-                            selection_outline.as_ref(),
+                            frame_inputs.selection_outline.as_ref(),
                             gui_state,
                             |stats| {
                                 let mut ui_draw = base_ui_draw;
@@ -2385,15 +2284,6 @@ mod tests {
         assert!(first_runtime.client().chunk_snapshot(center).is_some());
         let first_signature = center_chunk_signature(first_runtime, center);
 
-        let camera_eye = app.window_camera_view().eye;
-        let first_update = app
-            .driver
-            .runtime
-            .as_mut()
-            .unwrap()
-            .sync_all_render_sections(camera_eye)
-            .unwrap();
-        assert!(first_update.rebuilt_section_count() > 0);
         assert!(
             !app.driver
                 .runtime
@@ -2411,7 +2301,6 @@ mod tests {
         let second_signature = center_chunk_signature(second_runtime, center);
 
         assert_ne!(first_signature, second_signature);
-        assert!(second_runtime.cached_sections().is_empty());
         assert_eq!(app.driver.render_stats.section_count, 0);
         assert_eq!(app.driver.render_stats.index_count, 0);
     }

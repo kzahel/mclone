@@ -1,17 +1,22 @@
-use mclone_app_runtime::frame_render::RenderStreamStats;
+use std::collections::BTreeSet;
+
+use mclone_app_runtime::frame_render::{RenderStreamStats, record_render_section_update_stats};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
     ClientInteractionController,
 };
 use mclone_core::Vec3d;
 use mclone_input::{FlatInputAction, FlatInputFrame};
-use mclone_render::chunk::{ChunkCamera, TexturedSectionRenderOptions};
+use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
+use mclone_render::chunk::{
+    ChunkCamera, TexturedSectionRenderOptions, TexturedSectionUploadReport,
+};
 use mclone_render::entity::ActorInstance;
 use mclone_render::screen_effect::UnderwaterOverlay;
 use mclone_render::selection_outline::SelectionOutline;
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
-    actor_instances_from_presentations, render_camera_from_snapshot,
+    RenderSectionCacheUpdate, actor_instances_from_presentations, render_camera_from_snapshot,
 };
 
 use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
@@ -65,6 +70,51 @@ pub(crate) enum FlatClientWorldActionStatus {
         target: BlockInteractionTarget,
         changed: bool,
     },
+}
+
+pub(crate) struct FlatClientRuntimePoll {
+    pub(crate) needs_section_upload: bool,
+}
+
+pub(crate) struct FlatClientSectionSync {
+    pub(crate) section_update: RenderSectionCacheUpdate,
+    pub(crate) remesh_ms: f64,
+    pub(crate) loaded_chunk_count: usize,
+}
+
+pub(crate) struct FlatClientFullSectionSync {
+    pub(crate) camera_view: FlatClientCameraView,
+    pub(crate) section_update: RenderSectionCacheUpdate,
+    pub(crate) sections: Vec<TexturedRenderSectionMesh>,
+    pub(crate) remesh_ms: f64,
+}
+
+pub(crate) struct FlatClientCachedSections {
+    pub(crate) camera_view: FlatClientCameraView,
+    pub(crate) sections: Vec<TexturedRenderSectionMesh>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FlatClientSectionUploadSummary {
+    pub(crate) section_count: usize,
+    pub(crate) face_count: u32,
+    pub(crate) index_count: u32,
+    pub(crate) loaded_chunk_count: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FlatClientFrameInputs {
+    pub(crate) camera_view: FlatClientCameraView,
+    pub(crate) camera: ChunkCamera,
+    pub(crate) sky_clear_color: wgpu::Color,
+    pub(crate) time_of_day: f32,
+    pub(crate) sun_angle: f32,
+    pub(crate) render_options: TexturedSectionRenderOptions,
+    pub(crate) underwater_overlay: Option<UnderwaterOverlay>,
+    pub(crate) actor_instances: Vec<ActorInstance>,
+    pub(crate) selection_outline: Option<SelectionOutline>,
+    pub(crate) traversal_ready_sections: BTreeSet<RenderSectionKey>,
+    pub(crate) render_stats: RenderStreamStats,
 }
 
 impl FlatClientDriver {
@@ -257,6 +307,187 @@ impl FlatClientDriver {
             &self.actor_interpolation.presentations(),
             runtime.client(),
         )
+    }
+
+    pub(crate) fn poll_runtime(&mut self) -> anyhow::Result<FlatClientRuntimePoll> {
+        if self.runtime.is_none() {
+            return Ok(FlatClientRuntimePoll {
+                needs_section_upload: false,
+            });
+        }
+        let camera_eye = self.camera_view().eye;
+        let changed = {
+            let runtime = self.runtime.as_mut().expect("runtime presence checked");
+            runtime.poll()?
+        };
+        let changed = changed | self.apply_pending_player_position_updates()?;
+        let needs_pending_upload = self
+            .runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.has_pending_render_work(camera_eye));
+        Ok(FlatClientRuntimePoll {
+            needs_section_upload: changed || needs_pending_upload,
+        })
+    }
+
+    pub(crate) fn sync_runtime_sections(
+        &mut self,
+        elapsed_ms: impl FnOnce(std::time::Duration) -> f64,
+    ) -> anyhow::Result<Option<FlatClientSectionSync>> {
+        let camera_view = self.camera_view();
+        let Some(runtime) = &mut self.runtime else {
+            return Ok(None);
+        };
+        let remesh_start = std::time::Instant::now();
+        let section_update = runtime.sync_render_sections(camera_view.eye)?;
+        let remesh_ms = elapsed_ms(remesh_start.elapsed());
+        let loaded_chunk_count = runtime.client().loaded_chunk_count();
+        Ok(Some(FlatClientSectionSync {
+            section_update,
+            remesh_ms,
+            loaded_chunk_count,
+        }))
+    }
+
+    pub(crate) fn sync_all_runtime_sections(
+        &mut self,
+        elapsed_ms: impl FnOnce(std::time::Duration) -> f64,
+    ) -> anyhow::Result<Option<FlatClientFullSectionSync>> {
+        let camera_view = self.camera_view();
+        let Some(runtime) = &mut self.runtime else {
+            return Ok(None);
+        };
+        let remesh_start = std::time::Instant::now();
+        let section_update = runtime.sync_all_render_sections(camera_view.eye)?;
+        let sections = runtime.cached_sections();
+        let remesh_ms = elapsed_ms(remesh_start.elapsed());
+        Ok(Some(FlatClientFullSectionSync {
+            camera_view,
+            section_update,
+            sections,
+            remesh_ms,
+        }))
+    }
+
+    pub(crate) fn cached_runtime_sections(&self) -> Option<FlatClientCachedSections> {
+        let camera_view = self.camera_view();
+        let runtime = self.runtime.as_ref()?;
+        Some(FlatClientCachedSections {
+            camera_view,
+            sections: runtime.cached_sections(),
+        })
+    }
+
+    pub(crate) fn traversal_ready_section_keys(
+        &self,
+        camera_view: FlatClientCameraView,
+    ) -> BTreeSet<RenderSectionKey> {
+        self.runtime.as_ref().map_or_else(BTreeSet::new, |runtime| {
+            runtime.traversal_ready_render_section_keys(camera_view.eye)
+        })
+    }
+
+    pub(crate) fn record_section_upload(
+        &mut self,
+        section_update: &RenderSectionCacheUpdate,
+        upload_report: TexturedSectionUploadReport,
+        section_count: usize,
+        index_count: u32,
+        remesh_ms: f64,
+        upload_ms: f64,
+        loaded_chunk_count: Option<usize>,
+    ) -> FlatClientSectionUploadSummary {
+        let face_count = quad_face_count_from_indices(index_count);
+        self.render_stats.section_count = section_count;
+        self.render_stats.index_count = index_count;
+        self.render_stats.face_count = face_count;
+        self.render_stats.drawn_section_count = 0;
+        self.render_stats.drawn_face_count = 0;
+        self.render_stats.drawn_index_count = 0;
+        record_render_section_update_stats(&mut self.render_stats, section_update, upload_report);
+        self.render_stats.last_remesh_ms = remesh_ms;
+        self.render_stats.last_upload_ms = upload_ms;
+        self.frame_timing.record_remesh_upload(remesh_ms, upload_ms);
+        FlatClientSectionUploadSummary {
+            section_count,
+            face_count,
+            index_count,
+            loaded_chunk_count,
+        }
+    }
+
+    pub(crate) fn record_cached_section_upload(
+        &mut self,
+        section_count: usize,
+        index_count: u32,
+        upload_ms: f64,
+    ) -> FlatClientSectionUploadSummary {
+        let face_count = quad_face_count_from_indices(index_count);
+        self.render_stats.section_count = section_count;
+        self.render_stats.index_count = index_count;
+        self.render_stats.face_count = face_count;
+        self.render_stats.drawn_section_count = 0;
+        self.render_stats.drawn_face_count = 0;
+        self.render_stats.drawn_index_count = 0;
+        self.render_stats.last_remesh_ms = 0.0;
+        self.render_stats.last_upload_ms = upload_ms;
+        self.frame_timing.record_remesh_upload(0.0, upload_ms);
+        FlatClientSectionUploadSummary {
+            section_count,
+            face_count,
+            index_count,
+            loaded_chunk_count: None,
+        }
+    }
+
+    pub(crate) fn clear_render_stats(&mut self) {
+        self.render_stats.section_count = 0;
+        self.render_stats.index_count = 0;
+        self.render_stats.face_count = 0;
+        self.render_stats.drawn_section_count = 0;
+        self.render_stats.drawn_face_count = 0;
+        self.render_stats.drawn_index_count = 0;
+    }
+
+    pub(crate) fn prepare_frame_inputs(
+        &mut self,
+        fallback_render_distance: i32,
+        ui_active: bool,
+    ) -> FlatClientFrameInputs {
+        let camera_view = self.camera_view();
+        let camera =
+            camera_view.chunk_camera(self.current_render_distance(fallback_render_distance));
+        let sky_clear_color = self.runtime.as_ref().map_or_else(
+            mclone_render::default_clear_color,
+            WindowSceneRuntime::sky_clear_color,
+        );
+        let time_of_day = self
+            .runtime
+            .as_ref()
+            .map_or(0.0, WindowSceneRuntime::time_of_day);
+        let sun_angle = self
+            .runtime
+            .as_ref()
+            .map_or(0.0, WindowSceneRuntime::sun_angle);
+        let render_options = self.effective_render_options();
+        let underwater_overlay = self.underwater_overlay(camera_view);
+        let actor_instances = self.interpolated_actor_instances();
+        let selection_outline = self.current_selection_outline(ui_active);
+        let traversal_ready_sections = self.traversal_ready_section_keys(camera_view);
+        let render_stats = self.render_stats;
+        FlatClientFrameInputs {
+            camera_view,
+            camera,
+            sky_clear_color,
+            time_of_day,
+            sun_angle,
+            render_options,
+            underwater_overlay,
+            actor_instances,
+            selection_outline,
+            traversal_ready_sections,
+            render_stats,
+        }
     }
 
     pub(crate) fn sync_spectator_from_camera(&mut self) {
