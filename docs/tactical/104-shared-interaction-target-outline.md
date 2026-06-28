@@ -146,7 +146,16 @@ target itself.
   `cargo test --manifest-path native/Cargo.toml -p mclone-render -p mclone-app-runtime -p mclone-xr-scene -p mclone-native-client`;
   inspected `/tmp/mclone-selection-outline-thick.png` and
   `/tmp/mclone-selection-outline-thick-default.png`.
+- 2026-06-28: Slice 2 implemented for shared XR gameplay actions. Right
+  controller trigger now sends shared attack/debug-break on press; right
+  controller squeeze sends shared use/place on press. Both use the same analog
+  press/release hysteresis as the XR menu pointer, latch while the menu is open,
+  suppress interactions on menu transition frames, and resolve targets through
+  `ClientInteractionController`. Validation:
+  `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`;
+  `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-native-client -p mclone-app-runtime -p mclone-render-session`;
+  `cargo fmt --manifest-path native/Cargo.toml --all -- --check`.
 
-Next implementation step: Slice 2 should wire XR controller button state into
-shared attack/use actions with press hysteresis, then add a cleaner outline
-pixel/screenshot probe for both flat and XR views.
+Next implementation step: add a cleaner deterministic outline pixel/screenshot
+probe for flat and XR-style views, then validate the new XR action mapping on a
+desktop OpenXR headset or Quest lane.

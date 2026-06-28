@@ -69,6 +69,7 @@ pub const XR_MENU_PANEL_WIDTH_BLOCKS: f32 = 1.75;
 pub const XR_MENU_CONTROLLER_RAY_LENGTH_BLOCKS: f32 = 6.0;
 pub const XR_MENU_POINTER_TRIGGER_PRESS: f32 = 0.55;
 pub const XR_MENU_POINTER_TRIGGER_RELEASE: f32 = 0.35;
+pub const XR_GAMEPLAY_INTERACTION_HAND: XrHand = XrHand::Right;
 const XR_FIXED_RENDER_EYE_SEPARATION_BLOCKS: f32 = 0.064;
 const XR_MENU_LEFT_RAY_COLOR: [f32; 4] = [0.18, 0.85, 1.0, 0.95];
 const XR_MENU_RIGHT_RAY_COLOR: [f32; 4] = [0.2, 1.0, 0.45, 0.95];
@@ -88,6 +89,39 @@ impl XrLocomotionMode {
             Self::PlayerYaw => "player-yaw",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct XrGameplayInteractionButtons {
+    attack: bool,
+    use_item: bool,
+}
+
+impl XrGameplayInteractionButtons {
+    const fn press_edges(self, current: Self) -> XrGameplayInteractionEdges {
+        XrGameplayInteractionEdges {
+            attack: current.attack && !self.attack,
+            use_item: current.use_item && !self.use_item,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct XrGameplayInteractionEdges {
+    attack: bool,
+    use_item: bool,
+}
+
+impl XrGameplayInteractionEdges {
+    const fn any(self) -> bool {
+        self.attack || self.use_item
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum XrGameplayInteractionAction {
+    Attack,
+    Use,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -356,6 +390,7 @@ where
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
     menu_pointer_down: bool,
+    gameplay_interaction_buttons: XrGameplayInteractionButtons,
     menu_panel_pose: Option<WorldGuiPanel>,
     menu_panel_recenter_pending: bool,
     latest_controllers: Vec<XrControllerSnapshot>,
@@ -466,6 +501,7 @@ where
             last_locomotion_update: None,
             menu_toggle_down: false,
             menu_pointer_down: false,
+            gameplay_interaction_buttons: XrGameplayInteractionButtons::default(),
             menu_panel_pose: None,
             menu_panel_recenter_pending: true,
             latest_controllers: Vec::new(),
@@ -530,6 +566,7 @@ where
             last_locomotion_update: None,
             menu_toggle_down: false,
             menu_pointer_down: false,
+            gameplay_interaction_buttons: XrGameplayInteractionButtons::default(),
             menu_panel_pose: None,
             menu_panel_recenter_pending: false,
             latest_controllers: Vec::new(),
@@ -786,7 +823,11 @@ where
             .replace(now)
             .map(|last| now.duration_since(last).as_secs_f64())
             .unwrap_or(0.0);
+        let ui_was_active = self.ui.is_active();
         self.apply_menu_toggle_input(controllers);
+        let ui_active = self.ui.is_active();
+        let gameplay_interaction_edges = self.update_gameplay_interaction_buttons(controllers);
+        let suppress_gameplay_interaction = ui_was_active != ui_active;
         if self.ui.is_active() {
             return Ok(());
         }
@@ -803,6 +844,9 @@ where
         self.play_landing_events();
         self.commit_engine_camera_player_pose()
             .context("sync XR locomotion player pose")?;
+        if !suppress_gameplay_interaction {
+            self.apply_xr_gameplay_interaction_edges(gameplay_interaction_edges)?;
+        }
         Ok(())
     }
 
@@ -818,6 +862,7 @@ where
         self.ui.close();
         self.ui.clear_input();
         self.menu_pointer_down = false;
+        self.gameplay_interaction_buttons = XrGameplayInteractionButtons::default();
         self.menu_panel_pose = None;
         self.menu_panel_recenter_pending = false;
         let now = Instant::now();
@@ -1408,6 +1453,86 @@ where
             return self.apply_xr_ui_action(action, device, queue);
         }
         Ok(false)
+    }
+
+    fn update_gameplay_interaction_buttons(
+        &mut self,
+        controllers: &[XrControllerSnapshot],
+    ) -> XrGameplayInteractionEdges {
+        let current = xr_gameplay_interaction_buttons_from_controllers(
+            controllers,
+            self.gameplay_interaction_buttons,
+        );
+        let edges = self.gameplay_interaction_buttons.press_edges(current);
+        self.gameplay_interaction_buttons = current;
+        edges
+    }
+
+    fn sync_carried_item(&mut self) -> Result<bool> {
+        let Some(command) = self.interaction.ensure_has_sent_carried_item() else {
+            return Ok(false);
+        };
+        let Some(runtime) = &mut self.runtime else {
+            return Ok(false);
+        };
+        runtime
+            .send_gameplay_command(command)
+            .context("failed to sync XR carried item to server")
+    }
+
+    fn apply_xr_gameplay_interaction_edges(
+        &mut self,
+        edges: XrGameplayInteractionEdges,
+    ) -> Result<()> {
+        if !edges.any() {
+            return Ok(());
+        }
+        self.sync_carried_item()?;
+        let Some(target) = self.current_xr_block_interaction_target() else {
+            return Ok(());
+        };
+        if edges.attack {
+            self.send_xr_gameplay_interaction_command(
+                XrGameplayInteractionAction::Attack,
+                &target,
+            )?;
+        }
+        if edges.use_item {
+            self.send_xr_gameplay_interaction_command(XrGameplayInteractionAction::Use, &target)?;
+        }
+        Ok(())
+    }
+
+    fn send_xr_gameplay_interaction_command(
+        &mut self,
+        action: XrGameplayInteractionAction,
+        target: &BlockInteractionTarget,
+    ) -> Result<()> {
+        let command = match action {
+            XrGameplayInteractionAction::Attack => {
+                self.interaction.debug_instant_break_command(target.hit)
+            }
+            XrGameplayInteractionAction::Use => self.interaction.use_item_on_command(target.hit),
+        };
+        let Some(command) = command else {
+            return Ok(());
+        };
+        let Some(runtime) = &mut self.runtime else {
+            return Ok(());
+        };
+        let changed = runtime
+            .send_gameplay_command(command)
+            .context("failed to send XR gameplay interaction command")?;
+        log::info!(
+            "XR gameplay interaction {:?} at ({}, {}, {}) face={:?} changed={}",
+            action,
+            target.hit.block_pos.x,
+            target.hit.block_pos.y,
+            target.hit.block_pos.z,
+            target.hit.direction,
+            changed
+        );
+        Ok(())
     }
 
     fn xr_menu_controller_ray_lines(&self, panel: WorldGuiPanel) -> Result<Vec<WorldGuiLine>> {
@@ -2496,6 +2621,31 @@ pub fn xr_menu_toggle_pressed(controllers: &[XrControllerSnapshot]) -> bool {
         .any(|controller| controller.hand == XR_MENU_TOGGLE_HAND && controller.select_pressed)
 }
 
+fn xr_gameplay_interaction_buttons_from_controllers(
+    controllers: &[XrControllerSnapshot],
+    previous: XrGameplayInteractionButtons,
+) -> XrGameplayInteractionButtons {
+    let Some(controller) = controllers
+        .iter()
+        .find(|controller| controller.hand == XR_GAMEPLAY_INTERACTION_HAND)
+    else {
+        return XrGameplayInteractionButtons::default();
+    };
+    XrGameplayInteractionButtons {
+        attack: xr_analog_button_down(controller.trigger, previous.attack),
+        use_item: xr_analog_button_down(controller.squeeze, previous.use_item),
+    }
+}
+
+fn xr_analog_button_down(value: f32, was_down: bool) -> bool {
+    let value = if value.is_finite() { value } else { 0.0 };
+    if was_down {
+        value >= XR_MENU_POINTER_TRIGGER_RELEASE
+    } else {
+        value >= XR_MENU_POINTER_TRIGGER_PRESS
+    }
+}
+
 pub fn xr_controller_interaction_ray_from_controllers(
     controllers: &[XrControllerSnapshot],
     transform: XrStageToWorld,
@@ -2708,12 +2858,7 @@ pub fn xr_menu_panel_pointer_hit(
 }
 
 pub fn xr_menu_pointer_trigger_down(trigger: f32, was_down: bool) -> bool {
-    let trigger = if trigger.is_finite() { trigger } else { 0.0 };
-    if was_down {
-        trigger >= XR_MENU_POINTER_TRIGGER_RELEASE
-    } else {
-        trigger >= XR_MENU_POINTER_TRIGGER_PRESS
-    }
+    xr_analog_button_down(trigger, was_down)
 }
 
 fn xr_menu_panel_height_blocks() -> f32 {
@@ -3071,6 +3216,78 @@ mod tests {
         assert!(xr_menu_pointer_trigger_down(0.56, false));
         assert!(xr_menu_pointer_trigger_down(0.4, true));
         assert!(!xr_menu_pointer_trigger_down(0.3, true));
+    }
+
+    #[test]
+    fn xr_gameplay_interaction_buttons_use_right_trigger_and_squeeze() {
+        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
+        left.trigger = 1.0;
+        left.squeeze = 1.0;
+        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
+        right.trigger = XR_MENU_POINTER_TRIGGER_PRESS;
+        right.squeeze = XR_MENU_POINTER_TRIGGER_PRESS - 0.01;
+
+        let buttons = xr_gameplay_interaction_buttons_from_controllers(
+            &[left, right],
+            XrGameplayInteractionButtons::default(),
+        );
+
+        assert_eq!(
+            buttons,
+            XrGameplayInteractionButtons {
+                attack: true,
+                use_item: false
+            }
+        );
+    }
+
+    #[test]
+    fn xr_gameplay_interaction_buttons_use_hysteresis() {
+        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
+        right.trigger = XR_MENU_POINTER_TRIGGER_PRESS;
+        right.squeeze = XR_MENU_POINTER_TRIGGER_PRESS;
+        let pressed = xr_gameplay_interaction_buttons_from_controllers(
+            &[right],
+            XrGameplayInteractionButtons::default(),
+        );
+        assert_eq!(
+            pressed,
+            XrGameplayInteractionButtons {
+                attack: true,
+                use_item: true
+            }
+        );
+
+        right.trigger = XR_MENU_POINTER_TRIGGER_RELEASE + 0.01;
+        right.squeeze = XR_MENU_POINTER_TRIGGER_RELEASE + 0.01;
+        let held = xr_gameplay_interaction_buttons_from_controllers(&[right], pressed);
+        assert_eq!(held, pressed);
+
+        right.trigger = XR_MENU_POINTER_TRIGGER_RELEASE - 0.01;
+        right.squeeze = XR_MENU_POINTER_TRIGGER_RELEASE - 0.01;
+        let released = xr_gameplay_interaction_buttons_from_controllers(&[right], held);
+        assert_eq!(released, XrGameplayInteractionButtons::default());
+    }
+
+    #[test]
+    fn xr_gameplay_interaction_edges_fire_on_press_only() {
+        let previous = XrGameplayInteractionButtons {
+            attack: false,
+            use_item: true,
+        };
+        let current = XrGameplayInteractionButtons {
+            attack: true,
+            use_item: true,
+        };
+
+        assert_eq!(
+            previous.press_edges(current),
+            XrGameplayInteractionEdges {
+                attack: true,
+                use_item: false
+            }
+        );
+        assert!(!current.press_edges(current).any());
     }
 
     #[test]
