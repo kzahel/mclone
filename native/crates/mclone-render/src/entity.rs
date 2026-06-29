@@ -42,6 +42,7 @@ pub enum ActorInstanceShape {
     Humanoid,
     QuadrupedPlaceholder,
     CowModel,
+    DebugCube,
 }
 
 impl ActorInstance {
@@ -103,6 +104,19 @@ impl ActorInstance {
             height,
             body_color: [0.92, 0.90, 0.82, 1.0],
             accent_color: [0.92, 0.18, 0.12, 1.0],
+            packed_light: FULL_BRIGHT,
+        }
+    }
+
+    pub fn debug_cube(feet_position: Vec3, y_rot_degrees: f32, width: f32, height: f32) -> Self {
+        Self {
+            feet_position,
+            yaw_radians: -y_rot_degrees.to_radians(),
+            shape: ActorInstanceShape::DebugCube,
+            width,
+            height,
+            body_color: [0.13, 0.48, 0.72, 1.0],
+            accent_color: [0.95, 0.78, 0.22, 1.0],
             packed_light: FULL_BRIGHT,
         }
     }
@@ -724,6 +738,7 @@ fn append_actor(
             append_quadruped_placeholder(mesh, actor, texture_layout, atlas_size)
         }
         ActorInstanceShape::CowModel => append_cow_model(mesh, actor, texture_layout, atlas_size),
+        ActorInstanceShape::DebugCube => append_debug_cube(mesh, actor, texture_layout, atlas_size),
     }
 }
 
@@ -852,6 +867,33 @@ fn append_quadruped_placeholder(
             );
         }
     }
+}
+
+fn append_debug_cube(
+    mesh: &mut ActorMesh,
+    actor: ActorInstance,
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
+) {
+    let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
+    let width = actor.width.max(0.1);
+    let height = actor.height.max(0.1);
+    let half_width = width * 0.5;
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(-half_width, 0.0, -half_width),
+        Vec3::new(half_width, height, half_width),
+        white_uv,
+        [
+            scale_color(actor.body_color, 0.56),
+            scale_color(actor.body_color, 0.78),
+            scale_color(actor.body_color, 0.84),
+            scale_color(actor.accent_color, 0.82),
+            actor.body_color,
+            actor.accent_color,
+        ],
+    );
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1370,6 +1412,18 @@ mod tests {
 
         assert_eq!(mesh.vertices.len(), 6 * 6 * 4);
         assert_eq!(mesh.indices.len(), 6 * 6 * 6);
+    }
+
+    #[test]
+    fn actor_mesh_emits_debug_cube() {
+        let mesh = actor_mesh(
+            &[ActorInstance::debug_cube(Vec3::ZERO, 0.0, 1.0, 1.0)],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+        );
+
+        assert_eq!(mesh.vertices.len(), 6 * 4);
+        assert_eq!(mesh.indices.len(), 6 * 6);
     }
 
     #[test]

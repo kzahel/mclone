@@ -61,6 +61,8 @@ pub(crate) struct ServerEntityStore {
     entities: BTreeMap<EntityId, ServerEntityState>,
     next_entity_id: u64,
     starter_passive_id: Option<EntityId>,
+    #[cfg(feature = "physics-rapier")]
+    debug_physics_cube_id: Option<EntityId>,
 }
 
 impl ServerEntityStore {
@@ -89,6 +91,36 @@ impl ServerEntityStore {
         id
     }
 
+    #[cfg(feature = "physics-rapier")]
+    pub(crate) fn upsert_debug_physics_cube(
+        &mut self,
+        position: Vec3d,
+        age_ticks: u64,
+    ) -> ServerEntityState {
+        let id = match self.debug_physics_cube_id {
+            Some(id) => id,
+            None => {
+                let id = self.allocate_entity_id();
+                self.debug_physics_cube_id = Some(id);
+                id
+            }
+        };
+        let state = ServerEntityState {
+            id,
+            kind: EntityKind::DebugCube,
+            position,
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            on_ground: false,
+            width: 1.0,
+            height: 1.0,
+            age_ticks,
+            alive: true,
+        };
+        self.entities.insert(id, state);
+        state
+    }
+
     pub(crate) fn states(&self) -> Vec<ServerEntityState> {
         self.entities.values().copied().collect()
     }
@@ -108,6 +140,10 @@ impl ServerEntityStore {
             .collect::<BTreeSet<_>>();
         let mut updated = Vec::new();
         for entity in self.entities.values_mut() {
+            #[cfg(feature = "physics-rapier")]
+            if Some(entity.id) == self.debug_physics_cube_id {
+                continue;
+            }
             if entity.alive && entity_ticking_chunks.contains(&entity.chunk_pos()) {
                 entity.age_ticks = entity.age_ticks.saturating_add(1);
                 updated.push(*entity);

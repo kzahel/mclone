@@ -7,6 +7,7 @@ publish.workspace = true
 
 [features]
 default = []
+physics-rapier = ["mclone-server/physics-rapier"]
 xr = [
     "dep:libloading",
     "dep:metal",

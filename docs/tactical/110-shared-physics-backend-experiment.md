@@ -1,11 +1,12 @@
 # 110: Shared Physics Backend Experiment
 
-Status: active; Slices 1-4a landed with the shared `mclone-physics` facade,
+Status: active; Slices 1-4b landed with the shared `mclone-physics` facade,
 no-op backend, optional Rapier backend, synthetic cuboid/static-patch
 simulation test, section terrain collider probe, feature-gated live
 chunk-to-physics terrain conversion, server-owned debug cube physics runtime,
-and `mclone-server` intent feature wiring. App binary-size measurement is
-deferred until an app/server path actually links physics.
+debug cube protocol/entity publication, desktop `F7` diagnostic launch wiring,
+and `mclone-server` / native-client intent feature wiring. App binary-size
+measurement is deferred until the physics path is promoted beyond diagnostics.
 
 ## Purpose
 
@@ -348,10 +349,10 @@ Add a focused benchmark/smoke command if normal tests are too noisy.
 - [x] Add a temporary debug/test spawn API for one cube.
 - [x] Step the debug cube against a live scheduler terrain section.
 - [x] Add physics diagnostics to simulation tick reports.
-- [ ] Add a temporary debug spawn command for one throwable cube.
-- [ ] Publish cube pose through existing entity/update concepts or a small
+- [x] Add a temporary debug spawn command for one throwable cube.
+- [x] Publish cube pose through existing entity/update concepts or a small
   shared entity extension.
-- [ ] Render the test cube without adding renderer-side physics knowledge.
+- [x] Render the test cube without adding renderer-side physics knowledge.
 - [ ] Add physics diagnostics to the native smoke output.
 
 Recorded Slice 4a result:
@@ -378,7 +379,7 @@ Recorded Slice 4a result:
   app feature wiring, client replica/rendering, smoke output, and broader
   terrain collider retention/invalidation around moving bodies.
 
-Current Slice 4a validation:
+Slice 4a validation:
 
 ```bash
 cargo test --manifest-path native/Cargo.toml -p mclone-physics
@@ -391,6 +392,53 @@ cargo check --manifest-path native/Cargo.toml
 
 If the slice produces pixels, capture and inspect a screenshot before moving
 on.
+
+Recorded Slice 4b result:
+
+- Added `ClientCommand::ShootDebugPhysicsCube` and bumped
+  `PROTOCOL_VERSION` to 13.
+- Added `EntityKind::DebugCube`; the server publishes the physics body pose as
+  ordinary entity snapshots/updates, with the Rapier center pose converted to
+  the entity bottom/feet position used by actor rendering.
+- Added a server command handler that launches the cube from the authoritative
+  player pose using the current yaw/pitch, so local, dedicated, and future web
+  client lanes use the same command.
+- Expanded debug terrain collision from one current section to a capped 3x3x3
+  loaded-section island around the launch section, skipping empty sections.
+- Added `mclone-native-client` feature forwarding for `physics-rapier` and a
+  desktop `F7` diagnostic hotkey. With physics disabled, the command is a
+  validated no-op; with `physics-rapier`, it spawns/publishes the cube.
+- Added a simple colored block-sized actor for `DebugCube` in the shared render
+  path without exposing physics handles or Rapier types to render crates.
+- Added tests for the command codec, debug cube entity publication/update, the
+  bounded terrain island behavior, and the cube actor mesh.
+
+Slice 4b validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-protocol
+cargo test --manifest-path native/Cargo.toml -p mclone-render
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session
+cargo test --manifest-path native/Cargo.toml -p mclone-client
+cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier
+cargo test --manifest-path native/Cargo.toml -p mclone-server
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
+cargo check --manifest-path native/Cargo.toml
+pnpm native:web:build
+pnpm native:desktop-offscreen:smoke
+```
+
+Screenshot inspected:
+
+```text
+/tmp/mclone-desktop-offscreen.png
+```
+
+The current offscreen smoke validates the composed native frame and actor path,
+but it does not yet press `F7` or include physics diagnostics in its printed
+report. A dedicated scripted physics screenshot/smoke remains pending.
 
 ### Slice 5 - Web Worker Viability
 

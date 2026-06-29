@@ -19,6 +19,7 @@ use mclone_client::{
 use mclone_core::{BlockStateId, Vec3d};
 use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, TouchControlsMode};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
+use mclone_protocol::ClientCommand;
 use mclone_render::chunk::{
     ChunkCamera, ChunkTextureAtlas, TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
@@ -1141,6 +1142,19 @@ impl FlatClientDriver {
             return Ok(false);
         };
         runtime.send_gameplay_command(command).map_err(Into::into)
+    }
+
+    pub(crate) fn shoot_debug_physics_cube(&mut self) -> anyhow::Result<bool> {
+        if self.runtime.is_none() {
+            return Ok(false);
+        }
+        self.sync_server_player_pose()?;
+        let Some(runtime) = &mut self.runtime else {
+            return Ok(false);
+        };
+        runtime
+            .send_gameplay_command(ClientCommand::ShootDebugPhysicsCube)
+            .map_err(Into::into)
     }
 
     pub(crate) fn current_block_interaction_target(&self) -> Option<BlockInteractionTarget> {

@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
@@ -31,6 +31,7 @@ const CLIENT_COMMAND_MOVE_PLAYER: u8 = 4;
 const CLIENT_COMMAND_SET_CARRIED_ITEM: u8 = 5;
 const CLIENT_COMMAND_ACCEPT_TELEPORT: u8 = 6;
 const CLIENT_COMMAND_SET_DEBUG_HOTBAR_SLOT: u8 = 7;
+const CLIENT_COMMAND_SHOOT_DEBUG_PHYSICS_CUBE: u8 = 8;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
@@ -59,6 +60,7 @@ pub enum ClientCommand {
     SetDebugHotbarSlot(SetDebugHotbarSlotCommand),
     PlayerAction(PlayerActionCommand),
     UseItemOn(UseItemOnCommand),
+    ShootDebugPhysicsCube,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -214,6 +216,7 @@ pub struct EntityId(pub u64);
 pub enum EntityKind {
     Cow,
     Chicken,
+    DebugCube,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -396,6 +399,9 @@ pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec
             writer.write_u8(CLIENT_COMMAND_USE_ITEM_ON);
             writer.write_use_item_on(command);
         }
+        ClientCommand::ShootDebugPhysicsCube => {
+            writer.write_u8(CLIENT_COMMAND_SHOOT_DEBUG_PHYSICS_CUBE);
+        }
     }
     Ok(writer.into_inner())
 }
@@ -426,6 +432,7 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
         }
         CLIENT_COMMAND_PLAYER_ACTION => ClientCommand::PlayerAction(reader.read_player_action()?),
         CLIENT_COMMAND_USE_ITEM_ON => ClientCommand::UseItemOn(reader.read_use_item_on()?),
+        CLIENT_COMMAND_SHOOT_DEBUG_PHYSICS_CUBE => ClientCommand::ShootDebugPhysicsCube,
         _ => return Err(ProtocolCodecError::UnknownClientCommandTag(tag)),
     };
     reader.finish()?;
@@ -693,6 +700,7 @@ impl ByteWriter {
         self.write_u8(match kind {
             EntityKind::Cow => 0,
             EntityKind::Chicken => 1,
+            EntityKind::DebugCube => 2,
         });
     }
 
@@ -1002,6 +1010,7 @@ impl<'a> ByteReader<'a> {
         match kind {
             0 => Ok(EntityKind::Cow),
             1 => Ok(EntityKind::Chicken),
+            2 => Ok(EntityKind::DebugCube),
             kind => Err(ProtocolCodecError::UnknownEntityKind(kind)),
         }
     }
@@ -1465,6 +1474,15 @@ mod tests {
     }
 
     #[test]
+    fn client_command_codec_round_trips_shoot_debug_physics_cube() {
+        let command = ClientCommand::ShootDebugPhysicsCube;
+
+        let bytes = encode_client_command(&command).unwrap();
+
+        assert_eq!(decode_client_command(&bytes).unwrap(), command);
+    }
+
+    #[test]
     fn server_update_codec_round_trips_chunk_snapshot() {
         let mut blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
         blocks[chunk_section_index(1, 2, 3)] = BlockStateId(9);
@@ -1553,13 +1571,13 @@ mod tests {
     fn server_update_codec_round_trips_entity_updates() {
         let snapshot = EntitySnapshot {
             id: EntityId(7),
-            kind: EntityKind::Cow,
+            kind: EntityKind::DebugCube,
             position: Vec3d::new(12.5, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
             on_ground: true,
-            width: 0.9,
-            height: 1.4,
+            width: 1.0,
+            height: 1.0,
             age_ticks: 12,
         };
         let update = EntityUpdate {

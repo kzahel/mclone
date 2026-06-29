@@ -42,6 +42,7 @@ use crate::ui::DebugPaneStats;
 use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
+const DEBUG_PHYSICS_CUBE_SHOOT_KEY: KeyCode = KeyCode::F7;
 const RENDER_RESOURCE_REBUILD_KEY: KeyCode = KeyCode::F8;
 const RENDER_SCALE_REBUILD_KEY: KeyCode = KeyCode::F9;
 const DESKTOP_RENDER_SCALE_PRESETS: [f32; 4] = [DEFAULT_RENDER_SCALE, 0.5, 0.75, 1.5];
@@ -948,6 +949,18 @@ impl ApplicationHandler for ChunkApp {
                                 self.schedule_next_redraw(event_loop);
                             }
                         }
+                        return;
+                    }
+                    if key_code == DEBUG_PHYSICS_CUBE_SHOOT_KEY
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                    {
+                        match self.driver.shoot_debug_physics_cube() {
+                            Ok(true) => log::info!("shot debug physics cube"),
+                            Ok(false) => log::debug!("debug physics cube shot ignored"),
+                            Err(err) => log::error!("failed to shoot debug physics cube: {err:#}"),
+                        }
+                        self.schedule_next_redraw(event_loop);
                         return;
                     }
                     if key_code == KeyCode::KeyO

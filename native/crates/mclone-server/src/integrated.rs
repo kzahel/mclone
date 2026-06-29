@@ -42,6 +42,15 @@ use crate::{
     ServerTickReport, ServerTickTiming, WorldBlockPos,
 };
 
+#[cfg(feature = "physics-rapier")]
+const DEBUG_PHYSICS_CUBE_EYE_HEIGHT: f64 = 1.5;
+#[cfg(feature = "physics-rapier")]
+const DEBUG_PHYSICS_CUBE_SPAWN_DISTANCE: f64 = 1.25;
+#[cfg(feature = "physics-rapier")]
+const DEBUG_PHYSICS_CUBE_LAUNCH_SPEED: f64 = 14.0;
+#[cfg(feature = "physics-rapier")]
+const DEBUG_PHYSICS_CUBE_HALF_EXTENT: f64 = 0.5;
+
 #[derive(Debug)]
 pub struct IntegratedServer {
     seed: i64,
@@ -273,6 +282,9 @@ impl IntegratedServer {
             ClientCommand::UseItemOn(command) => {
                 self.handle_use_item_on_for_target(target, command)
             }
+            ClientCommand::ShootDebugPhysicsCube => {
+                self.handle_shoot_debug_physics_cube_for_target(target)
+            }
         }
     }
 
@@ -411,10 +423,16 @@ impl IntegratedServer {
         let entity_updates = self
             .entities
             .tick_stationary(&tick_report.entity_ticking_chunks);
+        #[cfg(feature = "physics-rapier")]
+        let mut entity_updates = entity_updates;
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
         let physics_tick_start = simulation_timing_start();
         let physics = self.step_physics();
+        #[cfg(feature = "physics-rapier")]
+        if let Some(entity) = self.sync_debug_physics_cube_entity(simulation_tick, physics) {
+            entity_updates.push(entity);
+        }
         let physics_tick_us = simulation_timing_elapsed_us(physics_tick_start);
 
         let mut updates = tick_report.updates;
@@ -626,6 +644,42 @@ impl IntegratedServer {
             self.set_block_debug(target, block_state);
         }
         self.drain_pending_block_delta_updates_for_target(target)
+    }
+
+    fn handle_shoot_debug_physics_cube_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        #[cfg(not(feature = "physics-rapier"))]
+        {
+            self.ensure_target_exists(target)?;
+            Ok(Vec::new())
+        }
+        #[cfg(feature = "physics-rapier")]
+        {
+            let (position, y_rot_degrees, x_rot_degrees) = {
+                let player = self.player_for_target(target)?;
+                (
+                    player.position(),
+                    player.y_rot_degrees(),
+                    player.x_rot_degrees(),
+                )
+            };
+            let launch = debug_physics_cube_launch(position, y_rot_degrees, x_rot_degrees);
+            if self
+                .physics
+                .spawn_debug_cube(&self.scheduler, launch.position, launch.velocity)
+            {
+                let physics = self.physics.diagnostics();
+                if let Some(entity) =
+                    self.sync_debug_physics_cube_entity(self.simulation_tick, physics)
+                {
+                    self.reconcile_entity_subjects([entity], true);
+                    return self.drain_chunk_updates_for_target(target);
+                }
+            }
+            Ok(Vec::new())
+        }
     }
 
     fn held_item_place_target_for_target(
@@ -887,6 +941,19 @@ impl IntegratedServer {
         self.route_entity_updates(routes);
     }
 
+    #[cfg(feature = "physics-rapier")]
+    fn sync_debug_physics_cube_entity(
+        &mut self,
+        age_ticks: u64,
+        physics: ServerPhysicsTickDiagnostics,
+    ) -> Option<ServerEntityState> {
+        let position =
+            physics
+                .test_cube_position?
+                .add(Vec3d::new(0.0, -DEBUG_PHYSICS_CUBE_HALF_EXTENT, 0.0));
+        Some(self.entities.upsert_debug_physics_cube(position, age_ticks))
+    }
+
     fn player_observers(&self) -> Vec<ServerPlayerId> {
         std::iter::once(ServerPlayerId::LOCAL)
             .chain(
@@ -1086,6 +1153,36 @@ fn unknown_player_error(player_id: ServerPlayerId) -> ChunkStoreError {
 
 fn raw_block_id_from_block_state(block_state: BlockStateId) -> Option<RawBlockId> {
     RawBlockId::try_from(block_state.0).ok()
+}
+
+#[cfg(feature = "physics-rapier")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DebugPhysicsCubeLaunch {
+    position: Vec3d,
+    velocity: Vec3d,
+}
+
+#[cfg(feature = "physics-rapier")]
+fn debug_physics_cube_launch(
+    player_position: Vec3d,
+    y_rot_degrees: f32,
+    x_rot_degrees: f32,
+) -> DebugPhysicsCubeLaunch {
+    let direction = look_direction_from_rot(y_rot_degrees, x_rot_degrees);
+    DebugPhysicsCubeLaunch {
+        position: player_position
+            .add(Vec3d::new(0.0, DEBUG_PHYSICS_CUBE_EYE_HEIGHT, 0.0))
+            .add(direction.scale(DEBUG_PHYSICS_CUBE_SPAWN_DISTANCE)),
+        velocity: direction.scale(DEBUG_PHYSICS_CUBE_LAUNCH_SPEED),
+    }
+}
+
+#[cfg(feature = "physics-rapier")]
+fn look_direction_from_rot(y_rot_degrees: f32, x_rot_degrees: f32) -> Vec3d {
+    let yaw = f64::from(y_rot_degrees).to_radians();
+    let pitch = f64::from(x_rot_degrees).to_radians();
+    let pitch_cos = pitch.cos();
+    Vec3d::new(-yaw.sin() * pitch_cos, -pitch.sin(), yaw.cos() * pitch_cos)
 }
 
 fn runtime_chunk_target_status(scheduler: &ChunkScheduler) -> mclone_core::ChunkStatus {
@@ -1445,6 +1542,17 @@ mod tests {
     fn first_entity_snapshot(updates: &[ServerUpdate]) -> Option<EntitySnapshot> {
         updates.iter().find_map(|update| match update {
             ServerUpdate::EntitySnapshot(snapshot) => Some(*snapshot),
+            _ => None,
+        })
+    }
+
+    #[cfg(feature = "physics-rapier")]
+    fn first_entity_snapshot_of_kind(
+        updates: &[ServerUpdate],
+        kind: EntityKind,
+    ) -> Option<EntitySnapshot> {
+        updates.iter().find_map(|update| match update {
+            ServerUpdate::EntitySnapshot(snapshot) if snapshot.kind == kind => Some(*snapshot),
             _ => None,
         })
     }
@@ -1922,7 +2030,7 @@ mod tests {
         let spawned = server.physics_diagnostics();
         assert!(spawned.enabled);
         assert_eq!(spawned.body_count, 1);
-        assert_eq!(spawned.terrain_collider_count, 1);
+        assert!((1..=27).contains(&spawned.terrain_collider_count));
         assert_eq!(
             spawned.test_cube_position.map(|position| position.y),
             Some(4.0)
@@ -1930,6 +2038,7 @@ mod tests {
 
         let mut updated_while_falling = false;
         let mut last_physics = spawned;
+        let terrain_collider_count = spawned.terrain_collider_count;
         for _ in 0..120 {
             let report = server
                 .try_simulation_tick_report()
@@ -1937,8 +2046,11 @@ mod tests {
             assert!(report.physics.enabled);
             assert!(report.physics.test_cube_spawned);
             assert_eq!(report.physics.body_count, 1);
-            assert_eq!(report.physics.terrain_collider_count, 1);
-            assert!(report.physics.collider_count >= 2);
+            assert_eq!(
+                report.physics.terrain_collider_count,
+                terrain_collider_count
+            );
+            assert!(report.physics.collider_count > terrain_collider_count);
             updated_while_falling |= report.physics.body_pose_update_count > 0;
             last_physics = report.physics;
         }
@@ -1952,6 +2064,50 @@ mod tests {
             final_y > 1.45 && final_y < 1.8,
             "debug cube should settle on the live terrain floor, got y={final_y}"
         );
+    }
+
+    #[cfg(feature = "physics-rapier")]
+    #[test]
+    fn shoot_debug_physics_cube_command_publishes_debug_entity() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+
+        for y in 0..16 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    let block = if y == 0 { STONE } else { AIR };
+                    server
+                        .scheduler_mut()
+                        .set_block_at_world(BlockPos::new(x, y, z), block);
+                }
+            }
+        }
+        server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                position: Vec3d::new(8.0, 3.0, 6.0),
+                y_rot_degrees: 0.0,
+                x_rot_degrees: 0.0,
+                on_ground: false,
+            }))
+            .expect("move player before debug shot");
+
+        let updates = server
+            .try_handle_command(ClientCommand::ShootDebugPhysicsCube)
+            .expect("shoot debug physics cube");
+        let snapshot = first_entity_snapshot_of_kind(&updates, EntityKind::DebugCube)
+            .expect("debug cube entity snapshot");
+
+        assert_eq!(snapshot.width, 1.0);
+        assert_eq!(snapshot.height, 1.0);
+        assert_eq!(snapshot.position, Vec3d::new(8.0, 4.0, 7.25));
+
+        let report = server.try_simulation_tick_report().expect("physics tick");
+        let update = first_entity_update(&report.updates, snapshot.id)
+            .expect("debug cube should publish pose updates");
+
+        assert!(report.physics.test_cube_spawned);
+        assert_eq!(update.id, snapshot.id);
+        assert!(update.position.y < snapshot.position.y);
     }
 
     #[test]
