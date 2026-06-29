@@ -1,17 +1,17 @@
 # 107: XR Stereo Uniform Ownership and Multiview
 
 Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
-proof landed, and Slice E's headless, Android XR, terrain-chunk proof, sky and
-actor render paths, and terrain+sky / terrain+sky+actor multiview perf paths
-exist. Quest now exposes
+proof landed, and Slice E's headless, Android XR, terrain-chunk proof, sky,
+actor, selection-outline, and world-GUI render paths, and terrain+sky /
+terrain+sky+actor multiview perf paths exist. Quest now exposes
 `wgpu::Features::MULTIVIEW` after enabling
 `VK_KHR_get_physical_device_properties2` on the OpenXR Vulkan instance and
 threading `VK_KHR_multiview` into the wgpu-wrapped device extension list, and
 the on-device proofs now validate true multiview layer writes/readback, the
-left/right stereo projection guard, and chunk-terrain rendering through a
-two-layer OpenXR swapchain. The production headset frame remains on the correct
-per-eye submit path until selection outline/GUI/screen effects migrate too.
-Created after
+left/right stereo projection guard, chunk-terrain rendering, and synthetic
+selection/world-GUI overlay rendering through a two-layer OpenXR swapchain. The
+production headset frame remains on the correct per-eye submit path until screen
+effects migrate too. Created after
 `d0c5161` (`Restore XR per-eye command submission`) rolled back the unsafe
 single-submit Quest XR optimization from `264c723`.
 
@@ -532,10 +532,32 @@ frame loop.
 Release APK SHA-256 for the sky+terrain+actor perf runs:
 `a28c45dc44579360c390ea389d1618458087dc7e68132f55f7ae507f44731527`.
 
+**Selection outline and world-GUI multiview paths added 2026-06-29.**
+Selection outlines now have a separate multiview shader/pipeline using a `[2]`
+view uniform array. World GUI panel quads and world-space line/ray overlays have
+matching multiview panel and line pipelines; the offscreen 2D panel texture
+remains single-view because it is shared UI content, not eye-specific
+projection data.
+
+The existing terrain multiview proof now submits a small synthetic overlay smoke
+after terrain rendering and before readback. That smoke draws a selection
+outline plus a world-GUI panel/line into the acquired two-layer target, so Quest
+validation exercises these new lazy pipelines on a real multiview device.
+
+Quest 3 validation passed:
+
+```text
+OpenXR wgpu features: multiview=true
+OpenXR Vulkan multiview diagnostics: instance_properties2_ext=true device_khr_multiview_ext=true raw_feature=true raw_geometry_shader=false raw_tessellation_shader=false max_views=6 max_instance_index=4294967295 wgpu_adapter=true wgpu_device=true
+MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY submitted=208 runtime_frames=208 skipped=0 eye=1680x1760 layers=2 sections=6 left_drawn_sections=2 right_drawn_sections=2 left_drawn_indices=15924 right_drawn_indices=15924 different_pixels=2311886 minimum_different_pixels=2956
+```
+
+Release APK SHA-256 for that proof run:
+`1d38b499657de49dffa05e9358e4bad7dd3de5cd0a9429970c864ee6178f4712`.
+
 Move from proof-of-correctness one-submit to the real target:
 
-- migrate selection outline, world GUI, and screen effects to multiview-capable
-  paths;
+- migrate screen effects to a multiview-capable path;
 - decide whether terrain's union-of-eye-culls policy is acceptable for the first
   production path or should be tightened before enabling;
 - shared draw list feeding both eye layers.

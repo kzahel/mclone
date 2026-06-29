@@ -23,7 +23,7 @@ use mclone_app_runtime::{RuntimePollDiagnostics, debug_block_palette_overlay, el
 use mclone_assets::AssetSource;
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
 use mclone_client::{BlockInteractionTarget, ClientInteractionController};
-use mclone_core::{BlockStateId, ChunkPos, Vec3d, time};
+use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
@@ -52,8 +52,8 @@ use mclone_render_session::{
     actor_instances_from_presentations,
 };
 use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameMovementMode, GameScreen, GameUi,
-    GameUiAction, GameUiRenderState, GuiScale, Point, StatusOverlay,
+    Color, DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameMovementMode, GameScreen, GameUi,
+    GameUiAction, GameUiRenderState, GuiDrawList, GuiScale, Point, Rect, StatusOverlay,
     render_loading_progress_overlay, render_status_overlay,
 };
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
@@ -808,6 +808,7 @@ where
             target,
             true,
             false,
+            false,
         )
     }
 
@@ -826,7 +827,117 @@ where
             target,
             true,
             true,
+            false,
         )
+    }
+
+    pub fn render_sky_terrain_actors_overlays_multiview_frame_frozen(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        target: XrTerrainMultiviewTarget<'_>,
+    ) -> Result<XrTerrainMultiviewFrameSummary> {
+        let render_views = self.render_views(&views)?;
+        self.update_menu_panel_pose(render_views);
+        self.render_prepared_terrain_multiview_frame_frozen_inner(
+            device,
+            queue,
+            render_views,
+            target,
+            true,
+            true,
+            true,
+        )
+    }
+
+    pub fn render_overlay_multiview_smoke_frame_frozen(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        target: XrTerrainMultiviewTarget<'_>,
+    ) -> Result<()> {
+        let render_views = self.render_views(&views)?;
+        let center_position =
+            (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+        let forward = average_unit_direction(
+            render_views[0].camera_forward,
+            render_views[1].camera_forward,
+            Vec3::Z,
+        );
+        let right = average_unit_direction(
+            render_views[0].camera_right,
+            render_views[1].camera_right,
+            Vec3::X,
+        );
+        let up = average_unit_direction(
+            render_views[0].camera_up,
+            render_views[1].camera_up,
+            Vec3::Y,
+        );
+        let marker_center = center_position + forward * 2.0;
+        let outline_min = marker_center - Vec3::splat(0.12);
+        let outline_max = marker_center + Vec3::splat(0.12);
+        let outline = SelectionOutline::new(vec![Aabb::new(
+            f64::from(outline_min.x),
+            f64::from(outline_min.y),
+            f64::from(outline_min.z),
+            f64::from(outline_max.x),
+            f64::from(outline_max.y),
+            f64::from(outline_max.z),
+        )])
+        .with_color([1.0, 0.0, 1.0, 0.8]);
+        let panel = WorldGuiPanel::new(marker_center + up * 0.24, right, up, 0.42, 0.22);
+        let mut gui = GuiDrawList::new();
+        gui.fill(
+            Rect::new(0.0, 0.0, 96.0, 48.0),
+            Color::rgba(40, 170, 240, 220),
+        );
+        let line = WorldGuiLine::new(
+            marker_center - right * 0.3,
+            marker_center + right * 0.3,
+            [1.0, 1.0, 0.0, 1.0],
+        );
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_xr_overlay_multiview_smoke_encoder"),
+        });
+        let overlay_target = RenderFrameTarget::color(target.color_view, target.size);
+        self.selection_outline
+            .render_multiview(
+                device,
+                queue,
+                &mut encoder,
+                overlay_target,
+                target.depth,
+                render_views,
+                Some(&outline),
+            )
+            .context("render synthetic XR selection outline multiview smoke")?;
+        self.world_gui_renderer
+            .render_panel_multiview(
+                device,
+                queue,
+                &mut encoder,
+                overlay_target,
+                render_views,
+                [96, 48],
+                [96.0, 48.0],
+                &gui,
+                panel,
+                &[line],
+            )
+            .context("render synthetic XR world GUI multiview smoke")?;
+        let submission = queue.submit(Some(encoder.finish()));
+        device
+            .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+            .map(|_| ())
+            .context("wait for XR overlay multiview smoke submission")?;
+        device
+            .poll(wgpu::PollType::Wait)
+            .map(|_| ())
+            .context("wait for XR overlay multiview smoke device idle")?;
+        Ok(())
     }
 
     pub fn render_terrain_stereo_frame_frozen(
@@ -1226,6 +1337,7 @@ where
             target,
             false,
             false,
+            false,
         )
     }
 
@@ -1237,6 +1349,7 @@ where
         target: XrTerrainMultiviewTarget<'_>,
         include_sky: bool,
         include_actors: bool,
+        include_overlays: bool,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
         self.render_prepared_terrain_multiview_frame_with_upload_inner(
             device,
@@ -1246,6 +1359,7 @@ where
             XrTerrainUploadSummary::default(),
             include_sky,
             include_actors,
+            include_overlays,
         )
     }
 
@@ -1265,6 +1379,7 @@ where
             upload,
             false,
             false,
+            false,
         )
     }
 
@@ -1277,6 +1392,7 @@ where
         upload: XrTerrainUploadSummary,
         include_sky: bool,
         include_actors: bool,
+        include_overlays: bool,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
         let (terrain_views, terrain_options) = self.terrain_render_views_and_options(render_views);
         let actor_instances = if include_actors {
@@ -1338,6 +1454,16 @@ where
         } else {
             ActorRenderStats::default()
         };
+        if include_overlays {
+            self.render_xr_world_overlays_multiview(
+                device,
+                queue,
+                &mut encoder,
+                target,
+                render_views,
+            )
+            .context("render XR multiview world overlays")?;
+        }
         let submission = queue.submit(Some(encoder.finish()));
         device
             .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
@@ -1361,6 +1487,80 @@ where
             drawn_actor_count: actor_stats.drawn_actor_count,
             upload,
         })
+    }
+
+    fn render_xr_world_overlays_multiview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: XrTerrainMultiviewTarget<'_>,
+        render_views: [ChunkRenderView; 2],
+    ) -> Result<()> {
+        let overlay_target = RenderFrameTarget::color(target.color_view, target.size);
+        let selection_outline = self.current_xr_selection_outline();
+        self.selection_outline
+            .render_multiview(
+                device,
+                queue,
+                encoder,
+                overlay_target,
+                target.depth,
+                render_views,
+                selection_outline.as_ref(),
+            )
+            .context("render XR selection outline multiview")?;
+        if let Some(gameplay_ray) = self
+            .xr_gameplay_controller_ray_line()
+            .context("build XR gameplay controller ray visual")?
+        {
+            self.world_gui_renderer
+                .render_lines_multiview(
+                    device,
+                    queue,
+                    encoder,
+                    overlay_target,
+                    render_views,
+                    &[gameplay_ray],
+                )
+                .context("render XR gameplay ray multiview")?;
+        }
+        if !self.ui.is_active() {
+            return Ok(());
+        }
+        let Some(panel) = self.menu_panel_pose else {
+            return Ok(());
+        };
+        let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
+        self.ui.set_scale(gui_scale);
+        let ui_state = self.current_ui_render_state();
+        let mut ui_draw = self.ui.render_draw_list(ui_state);
+        if let Some(progress) = self
+            .local_startup
+            .as_ref()
+            .and_then(|startup| startup.pump.progress_overlay())
+        {
+            render_loading_progress_overlay(gui_scale, &mut ui_draw, &progress);
+        }
+        render_status_overlay(gui_scale, &mut ui_draw, &self.session_status);
+        let controller_ray_lines = self
+            .xr_menu_controller_ray_lines(panel)
+            .context("build XR menu controller ray visuals")?;
+        self.world_gui_renderer
+            .render_panel_multiview(
+                device,
+                queue,
+                encoder,
+                overlay_target,
+                render_views,
+                XR_MENU_PANEL_PIXELS,
+                [gui_scale.width, gui_scale.height],
+                &ui_draw,
+                panel,
+                &controller_ray_lines,
+            )
+            .context("render XR menu panel multiview")?;
+        Ok(())
     }
 
     pub fn set_locomotion_mode(&mut self, locomotion_mode: XrLocomotionMode) {

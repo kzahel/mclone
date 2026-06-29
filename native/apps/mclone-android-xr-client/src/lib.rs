@@ -2183,6 +2183,18 @@ mod android {
                     },
                 )
                 .context("render OpenXR terrain multiview proof")?;
+            terrain
+                .render_overlay_multiview_smoke_frame_frozen(
+                    &graphics.device,
+                    &graphics.queue,
+                    [stereo_views.left, stereo_views.right],
+                    XrTerrainMultiviewTarget {
+                        color_view: target.color_array_view(),
+                        depth,
+                        size: [target_width, target_height],
+                    },
+                )
+                .context("render OpenXR overlay multiview smoke")?;
             let difference =
                 if summary.left.drawn_index_count > 0 && summary.right.drawn_index_count > 0 {
                     Some(

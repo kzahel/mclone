@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::num::{NonZeroU32, NonZeroU64};
+
 use anyhow::{Result, bail};
 use glam::{Mat4, Vec3};
 use mclone_ui::{ClipRect, Color, GuiDrawCommand, GuiDrawList, Rect};
@@ -139,6 +142,76 @@ fn vertex_main(
 ) -> VertexOut {
   var out: VertexOut;
   out.position = line_uniform.view_projection * vec4f(world_position, 1.0);
+  out.color = color;
+  return out;
+}
+
+@fragment
+fn fragment_main(input: VertexOut) -> @location(0) vec4f {
+  return input.color;
+}
+"#;
+
+const WORLD_GUI_MULTIVIEW_WGSL: &str = r#"
+struct ViewUniform {
+  view_projection: mat4x4<f32>,
+};
+
+struct StereoUniforms {
+  views: array<ViewUniform, 2>,
+};
+
+@group(0) @binding(0) var panel_texture: texture_2d<f32>;
+@group(0) @binding(1) var panel_sampler: sampler;
+@group(1) @binding(0) var<uniform> stereo_uniforms: StereoUniforms;
+
+struct VertexOut {
+  @builtin(position) position: vec4f,
+  @location(0) uv: vec2f,
+};
+
+@vertex
+fn vertex_main(
+  @location(0) world_position: vec3f,
+  @location(1) uv: vec2f,
+  @builtin(view_index) view_index: i32,
+) -> VertexOut {
+  var out: VertexOut;
+  out.position = stereo_uniforms.views[u32(view_index)].view_projection * vec4f(world_position, 1.0);
+  out.uv = uv;
+  return out;
+}
+
+@fragment
+fn fragment_main(input: VertexOut) -> @location(0) vec4f {
+  return textureSample(panel_texture, panel_sampler, input.uv);
+}
+"#;
+
+const WORLD_LINE_MULTIVIEW_WGSL: &str = r#"
+struct ViewUniform {
+  view_projection: mat4x4<f32>,
+};
+
+struct StereoUniforms {
+  views: array<ViewUniform, 2>,
+};
+
+@group(0) @binding(0) var<uniform> stereo_uniforms: StereoUniforms;
+
+struct VertexOut {
+  @builtin(position) position: vec4f,
+  @location(0) color: vec4f,
+};
+
+@vertex
+fn vertex_main(
+  @location(0) world_position: vec3f,
+  @location(1) color: vec4f,
+  @builtin(view_index) view_index: i32,
+) -> VertexOut {
+  var out: VertexOut;
+  out.position = stereo_uniforms.views[u32(view_index)].view_projection * vec4f(world_position, 1.0);
   out.color = color;
   return out;
 }
@@ -564,6 +637,8 @@ pub struct WorldGuiRenderer {
     line_pipeline: wgpu::RenderPipeline,
     uniforms: PerViewUniformBuffer,
     uniform_bind_group: wgpu::BindGroup,
+    color_format: wgpu::TextureFormat,
+    multiview: RefCell<Option<WorldGuiMultiviewRenderer>>,
     vertex_buffer: Option<wgpu::Buffer>,
     vertex_buffer_size: wgpu::BufferAddress,
     line_vertex_buffer: Option<wgpu::Buffer>,
@@ -736,6 +811,8 @@ impl WorldGuiRenderer {
             line_pipeline,
             uniforms,
             uniform_bind_group,
+            color_format,
+            multiview: RefCell::new(None),
             vertex_buffer: None,
             vertex_buffer_size: 0,
             line_vertex_buffer: None,
@@ -874,6 +951,96 @@ impl WorldGuiRenderer {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_panel_multiview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_views: [ChunkRenderView; 2],
+        panel_pixels: [u32; 2],
+        gui_size: [f32; 2],
+        gui: &GuiDrawList,
+        panel: WorldGuiPanel,
+        lines: &[WorldGuiLine],
+    ) -> Result<()> {
+        if gui.commands().is_empty() || panel.width <= 0.0 || panel.height <= 0.0 {
+            return Ok(());
+        }
+        let panel_pixels = [panel_pixels[0].max(1), panel_pixels[1].max(1)];
+        self.ensure_panel_texture(device, panel_pixels);
+        {
+            let texture = self
+                .panel_texture
+                .as_ref()
+                .expect("world GUI panel texture exists");
+            self.gui_renderer.render(
+                device,
+                queue,
+                encoder,
+                RenderFrameTarget::color(&texture.view, panel_pixels),
+                gui_size,
+                gui,
+                GuiRenderOptions::clear(wgpu::Color::TRANSPARENT),
+            )?;
+        }
+
+        let vertices = world_gui_panel_vertices(panel);
+        self.upload_world_vertices(device, queue, &vertices);
+        let line_vertices = world_gui_line_vertices(lines);
+        if !line_vertices.is_empty() {
+            self.upload_world_line_vertices(device, queue, &line_vertices);
+        }
+        let renderer = self.multiview_renderer(device)?;
+        renderer.write_uniforms(queue, render_views);
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_world_gui_panel_multiview_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        let texture = self
+            .panel_texture
+            .as_ref()
+            .expect("world GUI panel texture exists");
+        pass.set_pipeline(&renderer.pipeline);
+        pass.set_bind_group(0, &texture.bind_group, &[]);
+        pass.set_bind_group(1, &renderer.uniform_bind_group, &[]);
+        pass.set_vertex_buffer(
+            0,
+            self.vertex_buffer
+                .as_ref()
+                .expect("world GUI vertex buffer exists")
+                .slice(..),
+        );
+        pass.draw(0..QUAD_VERTEX_COUNT, 0..1);
+        if !line_vertices.is_empty() {
+            pass.set_pipeline(&renderer.line_pipeline);
+            pass.set_bind_group(0, &renderer.uniform_bind_group, &[]);
+            pass.set_vertex_buffer(
+                0,
+                self.line_vertex_buffer
+                    .as_ref()
+                    .expect("world GUI line vertex buffer exists")
+                    .slice(..),
+            );
+            pass.draw(
+                0..(line_vertices.len() / WORLD_LINE_FLOATS_PER_VERTEX) as u32,
+                0..1,
+            );
+        }
+        Ok(())
+    }
+
     pub fn render_lines_in_slot(
         &mut self,
         device: &wgpu::Device,
@@ -920,6 +1087,74 @@ impl WorldGuiRenderer {
             0..1,
         );
         Ok(())
+    }
+
+    pub fn render_lines_multiview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_views: [ChunkRenderView; 2],
+        lines: &[WorldGuiLine],
+    ) -> Result<()> {
+        let line_vertices = world_gui_line_vertices(lines);
+        if line_vertices.is_empty() {
+            return Ok(());
+        }
+        self.upload_world_line_vertices(device, queue, &line_vertices);
+        let renderer = self.multiview_renderer(device)?;
+        renderer.write_uniforms(queue, render_views);
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_world_gui_lines_multiview_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        pass.set_pipeline(&renderer.line_pipeline);
+        pass.set_bind_group(0, &renderer.uniform_bind_group, &[]);
+        pass.set_vertex_buffer(
+            0,
+            self.line_vertex_buffer
+                .as_ref()
+                .expect("world GUI line vertex buffer exists")
+                .slice(..),
+        );
+        pass.draw(
+            0..(line_vertices.len() / WORLD_LINE_FLOATS_PER_VERTEX) as u32,
+            0..1,
+        );
+        Ok(())
+    }
+
+    fn multiview_renderer(
+        &self,
+        device: &wgpu::Device,
+    ) -> Result<std::cell::Ref<'_, WorldGuiMultiviewRenderer>> {
+        if !device.features().contains(wgpu::Features::MULTIVIEW) {
+            bail!("world GUI multiview render requires wgpu MULTIVIEW");
+        }
+        if self.multiview.borrow().is_none() {
+            let renderer = WorldGuiMultiviewRenderer::new(
+                device,
+                self.color_format,
+                &self.texture_bind_group_layout,
+            );
+            *self.multiview.borrow_mut() = Some(renderer);
+        }
+        Ok(std::cell::Ref::map(self.multiview.borrow(), |renderer| {
+            renderer
+                .as_ref()
+                .expect("world GUI multiview renderer initialized above")
+        }))
     }
 
     fn ensure_panel_texture(&mut self, device: &wgpu::Device, size: [u32; 2]) {
@@ -988,6 +1223,220 @@ impl WorldGuiRenderer {
             queue.write_buffer(buffer, 0, &bytes);
         }
     }
+}
+
+struct WorldGuiMultiviewRenderer {
+    pipeline: wgpu::RenderPipeline,
+    line_pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind_group: wgpu::BindGroup,
+}
+
+impl WorldGuiMultiviewRenderer {
+    fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        texture_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_world_gui_multiview_uniforms"),
+            size: 128,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_world_gui_multiview_uniform_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: NonZeroU64::new(128),
+                    },
+                    count: None,
+                }],
+            });
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_world_gui_multiview_uniform_bind_group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_world_gui_multiview_shader"),
+            source: wgpu::ShaderSource::Wgsl(WORLD_GUI_MULTIVIEW_WGSL.into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_world_gui_multiview_pipeline_layout"),
+            bind_group_layouts: &[texture_bind_group_layout, &uniform_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = create_world_gui_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_world_gui_multiview_pipeline",
+            NonZeroU32::new(2),
+        );
+        let line_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_world_gui_line_multiview_shader"),
+            source: wgpu::ShaderSource::Wgsl(WORLD_LINE_MULTIVIEW_WGSL.into()),
+        });
+        let line_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_world_gui_line_multiview_pipeline_layout"),
+            bind_group_layouts: &[&uniform_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let line_pipeline = create_world_gui_line_pipeline(
+            device,
+            &line_pipeline_layout,
+            &line_shader,
+            color_format,
+            "mclone_world_gui_line_multiview_pipeline",
+            NonZeroU32::new(2),
+        );
+        Self {
+            pipeline,
+            line_pipeline,
+            uniform_buffer,
+            uniform_bind_group,
+        }
+    }
+
+    fn write_uniforms(&self, queue: &wgpu::Queue, render_views: [ChunkRenderView; 2]) {
+        queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            &multiview_matrix_bytes([
+                render_views[0].view_projection,
+                render_views[1].view_projection,
+            ]),
+        );
+    }
+}
+
+fn create_world_gui_pipeline(
+    device: &wgpu::Device,
+    pipeline_layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    color_format: wgpu::TextureFormat,
+    label: &'static str,
+    multiview: Option<NonZeroU32>,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vertex_main"),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: WORLD_PANEL_VERTEX_SIZE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[
+                    wgpu::VertexAttribute {
+                        shader_location: 0,
+                        offset: 0,
+                        format: wgpu::VertexFormat::Float32x3,
+                    },
+                    wgpu::VertexAttribute {
+                        shader_location: 1,
+                        offset: 12,
+                        format: wgpu::VertexFormat::Float32x2,
+                    },
+                ],
+            }],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fragment_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::One,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                    alpha: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::One,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: Default::default(),
+        multiview,
+        cache: None,
+    })
+}
+
+fn create_world_gui_line_pipeline(
+    device: &wgpu::Device,
+    pipeline_layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    color_format: wgpu::TextureFormat,
+    label: &'static str,
+    multiview: Option<NonZeroU32>,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vertex_main"),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: WORLD_LINE_VERTEX_SIZE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[
+                    wgpu::VertexAttribute {
+                        shader_location: 0,
+                        offset: 0,
+                        format: wgpu::VertexFormat::Float32x3,
+                    },
+                    wgpu::VertexAttribute {
+                        shader_location: 1,
+                        offset: 12,
+                        format: wgpu::VertexFormat::Float32x4,
+                    },
+                ],
+            }],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fragment_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::LineList,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: Default::default(),
+        multiview,
+        cache: None,
+    })
 }
 
 struct WorldGuiTexture {
@@ -1213,6 +1662,13 @@ fn matrix_bytes(matrix: Mat4) -> [u8; 64] {
     bytes
 }
 
+fn multiview_matrix_bytes(matrices: [Mat4; 2]) -> [u8; 128] {
+    let mut bytes = [0; 128];
+    bytes[..64].copy_from_slice(&matrix_bytes(matrices[0]));
+    bytes[64..].copy_from_slice(&matrix_bytes(matrices[1]));
+    bytes
+}
+
 fn world_gui_panel_vertices(panel: WorldGuiPanel) -> Vec<f32> {
     let half_right = panel.right * (panel.width * 0.5);
     let half_up = panel.up * (panel.height * 0.5);
@@ -1331,5 +1787,18 @@ mod tests {
                 1.0, 2.0, 3.0, 0.1, 0.2, 0.3, 0.4, 4.0, 5.0, 6.0, 0.1, 0.2, 0.3, 0.4,
             ]
         );
+    }
+
+    #[test]
+    fn world_gui_multiview_uniform_serializes_distinct_views() {
+        let left = Mat4::from_translation(Vec3::new(1.0, 2.0, 3.0));
+        let right = Mat4::from_translation(Vec3::new(4.0, 5.0, 6.0));
+
+        let bytes = multiview_matrix_bytes([left, right]);
+
+        assert_eq!(bytes.len(), 128);
+        assert_eq!(&bytes[..64], matrix_bytes(left).as_slice());
+        assert_eq!(&bytes[64..], matrix_bytes(right).as_slice());
+        assert_ne!(&bytes[..64], &bytes[64..]);
     }
 }
