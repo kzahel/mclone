@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { ClipSpec, FigureAsset, PartSpec, Vec3 } from "./dsl";
+import type { BoxFaceName, ClipSpec, FaceSpec, FigureAsset, PartSpec, Vec3 } from "./dsl";
 
 export interface FigureScene {
   root: THREE.Group;
@@ -48,7 +48,7 @@ export function createFigureScene(asset: FigureAsset, clipName?: string, options
     group.position.copy(toVector(part.at ?? [0, 0, 0]));
     group.rotation.copy(toEuler(part.rot ?? [0, 0, 0]));
 
-    const mesh = new THREE.Mesh(createGeometry(part), createMaterial(part, materialMap, textureMap));
+    const mesh = new THREE.Mesh(createGeometry(part), createMaterials(part, materialMap, textureMap));
     mesh.name = `${part.name}_mesh`;
     group.add(mesh);
 
@@ -137,13 +137,32 @@ function createGeometry(part: PartSpec): THREE.BufferGeometry {
   );
 }
 
-function createMaterial(
+const BOX_FACE_MATERIAL_ORDER: BoxFaceName[] = ["east", "west", "up", "down", "south", "north"];
+
+function createMaterials(
   part: PartSpec,
   materialMap: Map<string, THREE.Material>,
   textureMap: Map<string, THREE.Texture>,
+): THREE.Material | THREE.Material[] {
+  if (part.primitive.kind === "box" && part.primitive.faces) {
+    const faces = part.primitive.faces;
+    return BOX_FACE_MATERIAL_ORDER.map((faceName) =>
+      createMaterial(part, faces[faceName], materialMap, textureMap),
+    );
+  }
+  return createMaterial(part, undefined, materialMap, textureMap);
+}
+
+function createMaterial(
+  part: PartSpec,
+  face: FaceSpec | undefined,
+  materialMap: Map<string, THREE.Material>,
+  textureMap: Map<string, THREE.Texture>,
 ): THREE.Material {
-  const base = part.material ? materialMap.get(part.material) : undefined;
-  const texture = part.texture ? textureMap.get(part.texture) : undefined;
+  const materialName = face?.material ?? part.material;
+  const textureName = face?.texture ?? part.texture;
+  const base = materialName ? materialMap.get(materialName) : undefined;
+  const texture = textureName ? textureMap.get(textureName) : undefined;
 
   if (texture) {
     const cloned = base?.clone() as THREE.MeshStandardMaterial | undefined;
@@ -185,7 +204,7 @@ function asciiTextureToCanvasTexture(palette: Record<string, string>, pixels: st
   texture.magFilter = THREE.NearestFilter;
   texture.minFilter = THREE.NearestFilter;
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.flipY = false;
+  texture.flipY = true;
   return texture;
 }
 

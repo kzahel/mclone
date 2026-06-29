@@ -5,29 +5,59 @@ export default figure("piglet", ({ mat, asciiTexture, part, box, capsule, sphere
   mat("skin_dark", "#bd6f7b");
   mat("hoof", "#4a3033");
 
-  asciiTexture("face", {
+  asciiTexture("head_face", {
     palette: {
       ".": "#d88a92",
-      "s": "#bd6f7b",
       "e": "#261718",
-      "n": "#a85b65",
-      "h": "#4a3033",
     },
     pixels: [
       "........",
-      "..e..e..",
-      "........",
-      "..ssss..",
-      "..snn s.",
-      "..snn s.",
+      ".ee..ee.",
+      ".ee..ee.",
       "........",
       "........",
-    ].map((row) => row.replaceAll(" ", ".")),
+      "........",
+      "........",
+      "........",
+    ],
+  });
+
+  asciiTexture("snout_face", {
+    palette: {
+      ".": "#bd6f7b",
+      "n": "#261718",
+    },
+    pixels: [
+      "........",
+      "........",
+      "..n..n..",
+      "..n..n..",
+      "........",
+      "........",
+      "........",
+      "........",
+    ],
   });
 
   part("body", box({ size: [1.18, 0.68, 0.78], material: "skin" }));
-  part("head", box({ parent: "body", at: [0, 0.17, -0.68], size: [0.7, 0.58, 0.58], material: "skin", texture: "face" }));
-  part("snout", box({ parent: "head", at: [0, -0.06, -0.34], size: [0.36, 0.2, 0.16], material: "skin_dark" }));
+  part("head", box({
+    parent: "body",
+    at: [0, 0.17, -0.68],
+    size: [0.7, 0.58, 0.58],
+    material: "skin",
+    faces: {
+      north: { texture: "head_face" },
+    },
+  }));
+  part("snout", box({
+    parent: "head",
+    at: [0, -0.06, -0.34],
+    size: [0.36, 0.2, 0.16],
+    material: "skin_dark",
+    faces: {
+      north: { texture: "snout_face" },
+    },
+  }));
 
   part("ear_l", box({ parent: "head", at: [-0.29, 0.32, -0.08], rot: [0, 0, -10], size: [0.16, 0.22, 0.08], material: "skin" }));
   part("ear_r", box({ parent: "head", at: [0.29, 0.32, -0.08], rot: [0, 0, 10], size: [0.16, 0.22, 0.08], material: "skin" }));

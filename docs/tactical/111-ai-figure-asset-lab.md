@@ -104,6 +104,7 @@ The exported asset should contain only simple data:
 - named materials
 - ASCII palette textures
 - named primitive parts
+- per-face box material/texture overrides
 - parent relationships and local transforms
 - optional joint/pivot metadata
 - simple animation clips
@@ -224,6 +225,8 @@ profile the harness before adding animation-sheet captures.
 - [x] Add static multi-view sheet capture.
 - [x] Add animation strip capture with fixed frame times.
 - [x] Add bounds/pivot/joint debug overlay toggles.
+- [x] Add Minecraft-style box face overrides so a face texture can target only
+      `north`, `south`, `east`, `west`, `up`, or `down`.
 - [ ] Add a validation report that points to the asset file and part names.
 - [ ] Add starter prompts and examples for sheep, dog, cat, butterfly, and
       player stand-in variants.

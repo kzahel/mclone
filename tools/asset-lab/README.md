@@ -25,3 +25,15 @@ three-quarter, and fixed-frame animation-strip captures.
 
 Asset files should use the DSL from `src/dsl.ts`. Three.js is an implementation
 detail of the preview, not the source format.
+
+Boxes support Minecraft-style per-face overrides:
+
+```ts
+part("head", box({
+  size: [0.7, 0.58, 0.58],
+  material: "skin",
+  faces: {
+    north: { texture: "face" },
+  },
+}));
+```

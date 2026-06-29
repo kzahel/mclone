@@ -21,8 +21,19 @@ export interface AsciiTextureSpec {
   pixels: string[];
 }
 
+export type BoxFaceName = "north" | "south" | "east" | "west" | "up" | "down";
+
+export const BOX_FACE_NAMES: readonly BoxFaceName[] = ["north", "south", "east", "west", "up", "down"];
+
+export interface FaceSpec {
+  material?: string;
+  texture?: string;
+}
+
+export type BoxFaceMap = Partial<Record<BoxFaceName, FaceSpec>>;
+
 export type PrimitiveSpec =
-  | { kind: "box"; size: Vec3 }
+  | { kind: "box"; size: Vec3; faces?: BoxFaceMap }
   | { kind: "sphere"; radius: number; widthSegments?: number; heightSegments?: number }
   | { kind: "capsule"; radius: number; length: number; capSegments?: number; radialSegments?: number }
   | { kind: "cylinder"; radiusTop: number; radiusBottom: number; length: number; radialSegments?: number };
@@ -56,6 +67,7 @@ export interface PartOptions {
 
 export interface BoxOptions extends PartOptions {
   size: Vec3;
+  faces?: BoxFaceMap;
 }
 
 export interface SphereOptions extends PartOptions {
@@ -155,6 +167,9 @@ export function validateFigure(asset: FigureAsset): string[] {
     if (part.texture && !asset.textures[part.texture]) {
       errors.push(`part '${part.name}' references missing texture '${part.texture}'`);
     }
+    if (part.primitive.kind === "box" && part.primitive.faces) {
+      validateBoxFaces(part, asset, errors);
+    }
     validatePrimitive(part, errors);
   }
 
@@ -224,8 +239,12 @@ class FigureBuilder {
 }
 
 function box(options: BoxOptions): PartDraft {
-  const { size, ...rest } = options;
-  return { ...rest, primitive: { kind: "box", size } };
+  const { size, faces, ...rest } = options;
+  const primitive: PrimitiveSpec = { kind: "box", size };
+  if (faces) {
+    primitive.faces = faces;
+  }
+  return { ...rest, primitive };
 }
 
 function sphere(options: SphereOptions): PartDraft {
@@ -308,6 +327,23 @@ function validatePrimitive(part: PartSpec, errors: string[]): void {
     validatePositive(`part '${part.name}' cylinder radiusTop`, primitive.radiusTop, errors);
     validatePositive(`part '${part.name}' cylinder radiusBottom`, primitive.radiusBottom, errors);
     validatePositive(`part '${part.name}' cylinder length`, primitive.length, errors);
+  }
+}
+
+function validateBoxFaces(part: PartSpec, asset: FigureAsset, errors: string[]): void {
+  if (part.primitive.kind !== "box" || !part.primitive.faces) {
+    return;
+  }
+  for (const [faceName, face] of Object.entries(part.primitive.faces)) {
+    if (!BOX_FACE_NAMES.includes(faceName as BoxFaceName)) {
+      errors.push(`part '${part.name}' references unknown box face '${faceName}'`);
+    }
+    if (face.material && !asset.materials[face.material]) {
+      errors.push(`part '${part.name}' face '${faceName}' references missing material '${face.material}'`);
+    }
+    if (face.texture && !asset.textures[face.texture]) {
+      errors.push(`part '${part.name}' face '${faceName}' references missing texture '${face.texture}'`);
+    }
   }
 }
 
