@@ -945,11 +945,153 @@ fn elapsed_ms(duration: std::time::Duration) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::uniform::{
+        LEFT_EYE_VIEW_SLOT, PerViewUniformBuffer, RIGHT_EYE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT,
+    };
 
     #[test]
     fn row_padding_uses_wgpu_copy_alignment() {
         assert_eq!(padded_row_bytes(4), 256);
         assert_eq!(padded_row_bytes(256), 256);
         assert_eq!(padded_row_bytes(260), 512);
+    }
+
+    #[test]
+    #[ignore = "GPU validation proof for 107 Slice D; run on hosts with a wgpu adapter"]
+    fn one_submit_keeps_distinct_per_view_uniform_slots_live() -> Result<()> {
+        const SHADER: &str = r#"
+@group(0) @binding(0)
+var<uniform> color: vec4<f32>;
+
+struct VertexOut {
+    @builtin(position) position: vec4<f32>,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOut {
+    var positions = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0),
+    );
+    var out: VertexOut;
+    out.position = vec4<f32>(positions[vertex_index], 0.0, 1.0);
+    return out;
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return color;
+}
+"#;
+        let (device, queue) = create_headless_device()?;
+        let left = OffscreenTarget::new(&device, 8, 8, HEADLESS_FORMAT);
+        let right = OffscreenTarget::new(&device, 8, 8, HEADLESS_FORMAT);
+        let uniforms = PerViewUniformBuffer::new(
+            &device,
+            "mclone_test_per_view_uniforms",
+            16,
+            STEREO_VIEW_SLOT_COUNT,
+        );
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("mclone_test_per_view_uniform_layout"),
+            entries: &[uniforms.layout_entry(0, wgpu::ShaderStages::FRAGMENT)],
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_test_per_view_uniform_bind_group"),
+            layout: &bind_group_layout,
+            entries: &[uniforms.bind_group_entry(0)],
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_test_per_view_uniform_shader"),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_test_per_view_uniform_pipeline_layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mclone_test_per_view_uniform_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: HEADLESS_FORMAT,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_test_per_view_uniform_encoder"),
+        });
+        let left_color = color_bytes([1.0, 0.0, 0.0, 1.0]);
+        let left_offset = uniforms.write_slot(&queue, LEFT_EYE_VIEW_SLOT, &left_color);
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mclone_test_per_view_uniform_left_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &left.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[left_offset]);
+            pass.draw(0..3, 0..1);
+        }
+        let right_color = color_bytes([0.0, 1.0, 0.0, 1.0]);
+        let right_offset = uniforms.write_slot(&queue, RIGHT_EYE_VIEW_SLOT, &right_color);
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mclone_test_per_view_uniform_right_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &right.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[right_offset]);
+            pass.draw(0..3, 0..1);
+        }
+        queue.submit(std::iter::once(encoder.finish()));
+        let left_pixels = read_rgba8(&device, &queue, &left.texture, 8, 8)?;
+        let right_pixels = read_rgba8(&device, &queue, &right.texture, 8, 8)?;
+
+        assert_eq!(left_pixels.get(0..4), Some(&[255, 0, 0, 255][..]));
+        assert_eq!(right_pixels.get(0..4), Some(&[0, 255, 0, 255][..]));
+        Ok(())
+    }
+
+    fn color_bytes(color: [f32; 4]) -> [u8; 16] {
+        let mut bytes = [0_u8; 16];
+        for (index, value) in color.into_iter().enumerate() {
+            bytes[index * 4..index * 4 + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes
     }
 }

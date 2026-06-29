@@ -1,6 +1,21 @@
 use std::num::NonZeroU64;
 
-pub const SINGLE_VIEW_SLOT: u32 = 0;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PerViewSlot(u32);
+
+impl PerViewSlot {
+    pub const SINGLE: Self = Self(0);
+    pub const LEFT_EYE: Self = Self(0);
+    pub const RIGHT_EYE: Self = Self(1);
+
+    pub const fn index(self) -> u32 {
+        self.0
+    }
+}
+
+pub const SINGLE_VIEW_SLOT: PerViewSlot = PerViewSlot::SINGLE;
+pub const LEFT_EYE_VIEW_SLOT: PerViewSlot = PerViewSlot::LEFT_EYE;
+pub const RIGHT_EYE_VIEW_SLOT: PerViewSlot = PerViewSlot::RIGHT_EYE;
 pub const STEREO_VIEW_SLOT_COUNT: u32 = 2;
 
 /// Uniform buffer storage for per-view data that may need multiple live copies
@@ -77,10 +92,11 @@ impl PerViewUniformBuffer {
         }
     }
 
-    pub fn write_slot(&self, queue: &wgpu::Queue, slot: u32, bytes: &[u8]) -> u32 {
+    pub fn write_slot(&self, queue: &wgpu::Queue, slot: PerViewSlot, bytes: &[u8]) -> u32 {
+        let slot_index = slot.index();
         assert!(
-            slot < self.slot_count,
-            "uniform slot {slot} is outside slot count {}",
+            slot_index < self.slot_count,
+            "uniform slot {slot_index} is outside slot count {}",
             self.slot_count
         );
         assert!(
@@ -89,7 +105,7 @@ impl PerViewUniformBuffer {
             bytes.len(),
             self.payload_size
         );
-        let offset = self.slot_offset(slot);
+        let offset = self.slot_offset(slot_index);
         queue.write_buffer(&self.buffer, offset as wgpu::BufferAddress, bytes);
         offset
     }

@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use mclone_assets::{AssetPath, AssetSource};
 
 use crate::target::RenderFrameTarget;
-use crate::uniform::{SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
+use crate::uniform::{PerViewSlot, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
 
 pub const VANILLA_UNDERWATER_ALPHA: f32 = 0.1;
 pub const VANILLA_UNDERWATER_FOV_MULTIPLIER: f32 = 0.85714287;
@@ -296,8 +296,20 @@ impl ScreenEffectsRenderer {
         target: RenderFrameTarget<'_>,
         overlay: UnderwaterOverlay,
     ) {
+        self.render_underwater_in_slot(device, queue, encoder, target, overlay, SINGLE_VIEW_SLOT);
+    }
+
+    pub fn render_underwater_in_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        overlay: UnderwaterOverlay,
+        view_slot: PerViewSlot,
+    ) {
         let vertices = underwater_quad_vertices(overlay);
-        let vertex_range = self.upload_vertices(device, queue, SINGLE_VIEW_SLOT, &vertices);
+        let vertex_range = self.upload_vertices(device, queue, view_slot, &vertices);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_underwater_screen_effect_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -327,12 +339,13 @@ impl ScreenEffectsRenderer {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        slot: u32,
+        slot: PerViewSlot,
         vertices: &[f32],
     ) -> Range<wgpu::BufferAddress> {
+        let slot_index = slot.index();
         assert!(
-            slot < STEREO_VIEW_SLOT_COUNT,
-            "screen effect vertex slot {slot} is outside slot count {STEREO_VIEW_SLOT_COUNT}"
+            slot_index < STEREO_VIEW_SLOT_COUNT,
+            "screen effect vertex slot {slot_index} is outside slot count {STEREO_VIEW_SLOT_COUNT}"
         );
         let bytes = f32_bytes_vec(vertices);
         let required_slot_size = bytes.len().max(4) as wgpu::BufferAddress;
@@ -349,7 +362,7 @@ impl ScreenEffectsRenderer {
                 mapped_at_creation: false,
             }));
         }
-        let slot_offset = self.vertex_buffer_slot_size * slot as wgpu::BufferAddress;
+        let slot_offset = self.vertex_buffer_slot_size * slot_index as wgpu::BufferAddress;
         if let Some(buffer) = &self.vertex_buffer {
             queue.write_buffer(buffer, slot_offset, &bytes);
         }

@@ -5,7 +5,7 @@ use wgpu::util::DeviceExt;
 
 use crate::chunk::{ChunkRenderView, ChunkTextureAtlas};
 use crate::target::RenderFrameTarget;
-use crate::uniform::{PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
+use crate::uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
 
 const FLOATS_PER_VERTEX: usize = 8;
 const VERTEX_SIZE: wgpu::BufferAddress =
@@ -767,6 +767,36 @@ impl WorldGuiRenderer {
         panel: WorldGuiPanel,
         lines: &[WorldGuiLine],
     ) -> Result<()> {
+        self.render_panel_in_slot(
+            device,
+            queue,
+            encoder,
+            target,
+            render_view,
+            panel_pixels,
+            gui_size,
+            gui,
+            panel,
+            lines,
+            SINGLE_VIEW_SLOT,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_panel_in_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_view: ChunkRenderView,
+        panel_pixels: [u32; 2],
+        gui_size: [f32; 2],
+        gui: &GuiDrawList,
+        panel: WorldGuiPanel,
+        lines: &[WorldGuiLine],
+        view_slot: PerViewSlot,
+    ) -> Result<()> {
         if gui.commands().is_empty() || panel.width <= 0.0 || panel.height <= 0.0 {
             return Ok(());
         }
@@ -794,11 +824,9 @@ impl WorldGuiRenderer {
         if !line_vertices.is_empty() {
             self.upload_world_line_vertices(device, queue, &line_vertices);
         }
-        let uniform_offset = self.uniforms.write_slot(
-            queue,
-            SINGLE_VIEW_SLOT,
-            &matrix_bytes(render_view.view_projection),
-        );
+        let uniform_offset =
+            self.uniforms
+                .write_slot(queue, view_slot, &matrix_bytes(render_view.view_projection));
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_world_gui_panel_pass"),

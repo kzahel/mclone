@@ -18,7 +18,7 @@ use crate::color_profile::{
     color_transform_wgpu,
 };
 use crate::sky::sunrise_color;
-use crate::uniform::{PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
+use crate::uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
 
 const SKY_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = 64;
 const SKY_VERTEX_FLOAT_COUNT: usize = 7; // position(3) + color(4)
@@ -222,6 +222,30 @@ impl SkyRenderer {
         time_of_day: f32,
         sun_angle: f32,
     ) {
+        self.render_in_slot(
+            queue,
+            encoder,
+            color_view,
+            clear_color,
+            sky_view_projection,
+            time_of_day,
+            sun_angle,
+            SINGLE_VIEW_SLOT,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_in_slot(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        clear_color: wgpu::Color,
+        sky_view_projection: Mat4,
+        time_of_day: f32,
+        sun_angle: f32,
+        view_slot: PerViewSlot,
+    ) {
         let clear_color = color_transform_wgpu(clear_color, self.color_transform);
         let sky_color = [
             clear_color.r as f32,
@@ -230,7 +254,7 @@ impl SkyRenderer {
         ];
         let uniform_offset = self.uniforms.write_slot(
             queue,
-            SINGLE_VIEW_SLOT,
+            view_slot,
             &matrix_bytes(sky_view_projection.to_cols_array_2d()),
         );
         queue.write_buffer(

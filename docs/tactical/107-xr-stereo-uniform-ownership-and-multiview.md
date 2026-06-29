@@ -1,9 +1,8 @@
 # 107: XR Stereo Uniform Ownership and Multiview
 
-Status: active high-priority prerequisite; Slices A-B landed, Slice C code
-landed pending headset visual check. Created after `d0c5161` (`Restore XR
-per-eye command submission`) rolled back the unsafe single-submit Quest XR
-optimization from `264c723`.
+Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
+proof landed. Created after `d0c5161` (`Restore XR per-eye command submission`)
+rolled back the unsafe single-submit Quest XR optimization from `264c723`.
 
 ## Goal
 
@@ -179,15 +178,14 @@ Acceptance:
 
 ### Slice C - Migrate All XR Per-View Renderers
 
-**Code landed 2026-06-29; headset visual check pending.** Chunk terrain, sky,
+**Landed 2026-06-29; headset visual check passed.** Chunk terrain, sky,
 actors/entities, selection outline, and world GUI now use
 `PerViewUniformBuffer` with dynamic uniform offsets and two stereo-capable slots.
-Existing flat and XR per-eye-submit paths still bind slot `0`, so behavior is
-unchanged; Slice D must thread explicit left/right slot selection through the
-stereo caller before any one-submit proof. Screen effects have no projection
-uniform today, but the underwater overlay vertex buffer now uses two per-view
-slots and binds the selected slice, removing the same queue-write clobber risk
-from that pass.
+Screen effects have no projection uniform today, but the underwater overlay
+vertex buffer now uses two per-view slots and binds the selected slice, removing
+the same queue-write clobber risk from that pass. The per-eye-submit baseline
+was installed and checked in headset after this slice; left/right stereo looked
+normal.
 
 Move chunk terrain, sky, actors, selection outline, world GUI, and screen effects
 onto the same ownership model. Do not start one-submit until this slice is
@@ -201,6 +199,16 @@ Acceptance:
 - headset visual check still matches the per-eye-submit baseline.
 
 ### Slice D - Prove One-Submit Correctness Without Claiming The Perf Win
+
+**Desktop proof landed 2026-06-29.** `mclone_render::uniform::PerViewSlot`
+defines explicit single/left/right slots, the shared full-frame render path can
+render into a caller-selected slot, and XR terrain now passes left slot `0` and
+right slot `1` while still using the safe per-eye submit baseline. The ignored
+GPU proof
+`headless::tests::one_submit_keeps_distinct_per_view_uniform_slots_live`
+records two render passes with different uniform-slot colors into one command
+buffer, submits once, reads both targets back, and proves the left commands do
+not read the right slot. No production one-submit path or perf lane was enabled.
 
 Add a temporary diagnostic path or test-only path that records both eyes into one
 submit using the new uniform slots. Its purpose is correctness proof, not the

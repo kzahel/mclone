@@ -22,7 +22,7 @@ use crate::color_profile::{RenderColorProfile, RenderConfig};
 use crate::fog::RenderFog;
 use crate::target::RenderFrameTarget;
 use crate::texture_mips::generate_rgba_mip_chain;
-use crate::uniform::{PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
+use crate::uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
@@ -1364,9 +1364,20 @@ impl ChunkDrawResources {
         target: ChunkRenderTarget<'_>,
         render_view: ChunkRenderView,
     ) -> Result<()> {
+        self.render_in_slot(queue, encoder, target, render_view, SINGLE_VIEW_SLOT)
+    }
+
+    pub fn render_in_slot(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        view_slot: PerViewSlot,
+    ) -> Result<()> {
         let uniform_offset = self.renderer.uniforms.write_slot(
             queue,
-            SINGLE_VIEW_SLOT,
+            view_slot,
             &uniform_bytes(
                 render_view,
                 TexturedSectionRenderOptions::default(),
@@ -1450,9 +1461,20 @@ impl TexturedChunkDrawResources {
         target: ChunkRenderTarget<'_>,
         render_view: ChunkRenderView,
     ) -> Result<()> {
+        self.render_in_slot(queue, encoder, target, render_view, SINGLE_VIEW_SLOT)
+    }
+
+    pub fn render_in_slot(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        view_slot: PerViewSlot,
+    ) -> Result<()> {
         let uniform_offset = self.renderer.uniforms.write_slot(
             queue,
-            SINGLE_VIEW_SLOT,
+            view_slot,
             &uniform_bytes(
                 render_view,
                 TexturedSectionRenderOptions::default(),
@@ -1632,12 +1654,13 @@ impl TexturedSectionDrawResources {
         target: ChunkRenderTarget<'_>,
         render_view: ChunkRenderView,
     ) -> Result<TexturedSectionRenderStats> {
-        self.render_with_options(
+        self.render_with_options_in_slot(
             queue,
             encoder,
             target,
             render_view,
             TexturedSectionRenderOptions::default(),
+            SINGLE_VIEW_SLOT,
         )
     }
 
@@ -1649,7 +1672,35 @@ impl TexturedSectionDrawResources {
         render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
     ) -> Result<TexturedSectionRenderStats> {
-        self.render_with_options_inner(queue, encoder, target, render_view, options, None, None)
+        self.render_with_options_in_slot(
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            SINGLE_VIEW_SLOT,
+        )
+    }
+
+    pub fn render_with_options_in_slot(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+    ) -> Result<TexturedSectionRenderStats> {
+        self.render_with_options_inner(
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            view_slot,
+            None,
+            None,
+        )
     }
 
     pub fn render_with_options_timed(
@@ -1660,6 +1711,25 @@ impl TexturedSectionDrawResources {
         render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
     ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
+        self.render_with_options_timed_in_slot(
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            SINGLE_VIEW_SLOT,
+        )
+    }
+
+    pub fn render_with_options_timed_in_slot(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+    ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
         let mut timing = TexturedSectionRenderTiming::default();
         let stats = self.render_with_options_inner(
             queue,
@@ -1667,6 +1737,7 @@ impl TexturedSectionDrawResources {
             target,
             render_view,
             options,
+            view_slot,
             None,
             Some(&mut timing),
         )?;
@@ -1701,12 +1772,34 @@ impl TexturedSectionDrawResources {
         render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
     ) -> Result<TexturedSectionRenderStats> {
+        self.render_prepared_with_options_in_slot(
+            records,
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            SINGLE_VIEW_SLOT,
+        )
+    }
+
+    pub fn render_prepared_with_options_in_slot(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+    ) -> Result<TexturedSectionRenderStats> {
         self.render_with_options_inner(
             queue,
             encoder,
             target,
             render_view,
             options,
+            view_slot,
             Some(records),
             None,
         )
@@ -1721,6 +1814,27 @@ impl TexturedSectionDrawResources {
         render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
     ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
+        self.render_prepared_with_options_timed_in_slot(
+            records,
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            SINGLE_VIEW_SLOT,
+        )
+    }
+
+    pub fn render_prepared_with_options_timed_in_slot(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+    ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
         let mut timing = TexturedSectionRenderTiming::default();
         let stats = self.render_with_options_inner(
             queue,
@@ -1728,6 +1842,7 @@ impl TexturedSectionDrawResources {
             target,
             render_view,
             options,
+            view_slot,
             Some(records),
             Some(&mut timing),
         )?;
@@ -1741,6 +1856,7 @@ impl TexturedSectionDrawResources {
         target: ChunkRenderTarget<'_>,
         render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
         prepared_records: Option<&PreparedTexturedSectionRecords>,
         mut timing: Option<&mut TexturedSectionRenderTiming>,
     ) -> Result<TexturedSectionRenderStats> {
@@ -1770,7 +1886,7 @@ impl TexturedSectionDrawResources {
         let uniform_start = timing.as_ref().map(|_| Instant::now());
         let uniform_offset = self.renderer.uniforms.write_slot(
             queue,
-            SINGLE_VIEW_SLOT,
+            view_slot,
             &uniform_bytes(render_view, options, self.renderer.color_format),
         );
         if let (Some(timing), Some(uniform_start)) = (&mut timing, uniform_start) {

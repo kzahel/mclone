@@ -5,7 +5,7 @@ use wgpu::util::DeviceExt;
 use crate::{
     chunk::{ChunkDepthTarget, ChunkRenderView, DEPTH_FORMAT},
     target::RenderFrameTarget,
-    uniform::{PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT},
+    uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT},
 };
 
 const OUTLINE_WGSL: &str = r#"
@@ -181,6 +181,30 @@ impl SelectionOutlineRenderer {
         render_view: ChunkRenderView,
         outline: Option<&SelectionOutline>,
     ) {
+        self.render_in_slot(
+            device,
+            queue,
+            encoder,
+            target,
+            depth,
+            render_view,
+            outline,
+            SINGLE_VIEW_SLOT,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_in_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        depth: &ChunkDepthTarget,
+        render_view: ChunkRenderView,
+        outline: Option<&SelectionOutline>,
+        view_slot: PerViewSlot,
+    ) {
         let Some(outline) = outline else {
             return;
         };
@@ -192,11 +216,9 @@ impl SelectionOutlineRenderer {
             return;
         }
         self.upload_vertices(device, queue, &vertices);
-        let uniform_offset = self.uniforms.write_slot(
-            queue,
-            SINGLE_VIEW_SLOT,
-            &matrix_bytes(render_view.view_projection),
-        );
+        let uniform_offset =
+            self.uniforms
+                .write_slot(queue, view_slot, &matrix_bytes(render_view.view_projection));
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_selection_outline_pass"),

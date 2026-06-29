@@ -5,7 +5,7 @@ use wgpu::util::DeviceExt;
 use crate::chunk::{ChunkRenderView, DEPTH_FORMAT, TexturedSectionRenderOptions};
 use crate::light_texture::FULL_BRIGHT;
 use crate::target::RenderFrameTarget;
-use crate::uniform::{PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
+use crate::uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
 
 const ACTOR_VERTEX_BYTE_LEN: usize = 3 * std::mem::size_of::<f32>()
     + 2 * std::mem::size_of::<f32>()
@@ -172,6 +172,30 @@ impl ActorDrawResources {
         render_options: TexturedSectionRenderOptions,
         actors: &[ActorInstance],
     ) -> Result<ActorRenderStats> {
+        self.render_in_slot(
+            device,
+            queue,
+            encoder,
+            target,
+            render_view,
+            render_options,
+            actors,
+            SINGLE_VIEW_SLOT,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_in_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_view: ChunkRenderView,
+        render_options: TexturedSectionRenderOptions,
+        actors: &[ActorInstance],
+        view_slot: PerViewSlot,
+    ) -> Result<ActorRenderStats> {
         if actors.is_empty() {
             return Ok(ActorRenderStats::default());
         }
@@ -188,7 +212,7 @@ impl ActorDrawResources {
 
         let uniform_offset = self.renderer.uniforms.write_slot(
             queue,
-            SINGLE_VIEW_SLOT,
+            view_slot,
             &uniform_bytes(render_view, render_options),
         );
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

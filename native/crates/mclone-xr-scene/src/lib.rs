@@ -6,8 +6,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
-    render_full_frame_for_view_with_prepared_records,
-    render_full_frame_for_view_with_prepared_records_timed,
+    render_full_frame_for_view_with_prepared_records_in_slot,
+    render_full_frame_for_view_with_prepared_records_timed_in_slot,
 };
 use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
 use mclone_app_runtime::local_single_view::{
@@ -34,6 +34,7 @@ use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRendere
 use mclone_render::sky::overworld_clear_color;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
+use mclone_render::uniform::{LEFT_EYE_VIEW_SLOT, PerViewSlot, RIGHT_EYE_VIEW_SLOT};
 use mclone_render_session::{
     ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
@@ -762,6 +763,7 @@ where
             time_of_day,
             sun_angle,
             "left",
+            LEFT_EYE_VIEW_SLOT,
         )?;
         timing.left_eye_ms = elapsed_ms(left_eye_start.elapsed());
         timing.left_eye_render = left_eye.timing;
@@ -778,6 +780,7 @@ where
             time_of_day,
             sun_angle,
             "right",
+            RIGHT_EYE_VIEW_SLOT,
         )?;
         timing.right_eye_ms = elapsed_ms(right_eye_start.elapsed());
         timing.right_eye_render = right_eye.timing;
@@ -1137,6 +1140,7 @@ where
         time_of_day: f32,
         sun_angle: f32,
         label: &'static str,
+        view_slot: PerViewSlot,
     ) -> Result<XrRenderedEye> {
         let collect_split_timing = self.render_split_timing_enabled;
         let encode_start = collect_split_timing.then(Instant::now);
@@ -1170,7 +1174,7 @@ where
         let selection_outline = self.current_xr_selection_outline();
         let mut render_stats = self.render_stats;
         let (summary, frame_timing) = if collect_split_timing {
-            render_full_frame_for_view_with_prepared_records_timed(
+            render_full_frame_for_view_with_prepared_records_timed_in_slot(
                 frame,
                 target.depth,
                 &self.sky,
@@ -1189,9 +1193,10 @@ where
                 FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                 |_| summary_ui_draw,
                 &mut render_stats,
+                view_slot,
             )
         } else {
-            render_full_frame_for_view_with_prepared_records(
+            render_full_frame_for_view_with_prepared_records_in_slot(
                 frame,
                 target.depth,
                 &self.sky,
@@ -1210,11 +1215,12 @@ where
                 FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                 |_| summary_ui_draw,
                 &mut render_stats,
+                view_slot,
             )
             .map(|summary| (summary, Default::default()))
         }
         .with_context(|| format!("render XR terrain {label} eye"))?;
-        self.selection_outline.render(
+        self.selection_outline.render_in_slot(
             device,
             queue,
             &mut encoder,
@@ -1222,6 +1228,7 @@ where
             target.depth,
             render_view,
             selection_outline.as_ref(),
+            view_slot,
         );
         if ui_active {
             if let Some(panel) = self.menu_panel_pose {
@@ -1229,7 +1236,7 @@ where
                     .xr_menu_controller_ray_lines(panel)
                     .context("build XR menu controller ray visuals")?;
                 self.world_gui_renderer
-                    .render_panel(
+                    .render_panel_in_slot(
                         device,
                         queue,
                         &mut encoder,
@@ -1240,6 +1247,7 @@ where
                         &ui_draw,
                         panel,
                         &controller_ray_lines,
+                        view_slot,
                     )
                     .with_context(|| format!("render XR menu panel for {label} eye"))?;
             }
