@@ -18,6 +18,8 @@ mod light_world;
 mod lighting_seed;
 mod loading_progress;
 mod persistence;
+#[cfg(feature = "physics-rapier")]
+mod physics_runtime;
 #[cfg(feature = "physics")]
 mod physics_terrain;
 mod placement;
@@ -70,8 +72,8 @@ pub use scheduler::{
 };
 pub use spawn::initial_spawn_center_for_seed;
 pub use timing::{
-    ChunkSchedulerTickReport, ChunkSchedulerTickTiming, ServerSimulationTickReport,
-    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
+    ChunkSchedulerTickReport, ChunkSchedulerTickTiming, ServerPhysicsTickDiagnostics,
+    ServerSimulationTickReport, ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
 };
 #[cfg(target_arch = "wasm32")]
 pub use types::WasmServerJobWorkerConfig;
@@ -2097,6 +2099,15 @@ mod tests {
         assert_eq!(report.block_tick_chunks, 9);
         assert!(report.fluid_ticks_executed > 0);
         assert_eq!(report.entity_tick_chunks, 1);
+        #[cfg(not(feature = "physics-rapier"))]
+        assert_eq!(report.physics, ServerPhysicsTickDiagnostics::default());
+        #[cfg(feature = "physics-rapier")]
+        {
+            assert!(report.physics.enabled);
+            assert_eq!(report.physics.body_count, 0);
+            assert_eq!(report.physics.collider_count, 0);
+            assert!(!report.physics.test_cube_spawned);
+        }
         assert_eq!(report.pending_unloads_processed, 0);
         assert_eq!(
             server.scheduler().metrics().block_ticking_chunks,

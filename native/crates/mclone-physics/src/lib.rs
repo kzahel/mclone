@@ -345,6 +345,29 @@ impl PhysicsWorld {
         self.backend.terrain_patch(id)
     }
 
+    pub fn add_terrain_section(&mut self, section: PhysicsTerrainSection) -> PhysicsColliderId {
+        self.backend.add_terrain_section(section)
+    }
+
+    pub fn update_terrain_section(
+        &mut self,
+        id: PhysicsColliderId,
+        section: PhysicsTerrainSection,
+    ) -> bool {
+        self.backend.update_terrain_section(id, section)
+    }
+
+    pub fn remove_terrain_section(
+        &mut self,
+        id: PhysicsColliderId,
+    ) -> Option<PhysicsTerrainSection> {
+        self.backend.remove_terrain_section(id)
+    }
+
+    pub fn terrain_section(&self, id: PhysicsColliderId) -> Option<&PhysicsTerrainSection> {
+        self.backend.terrain_section(id)
+    }
+
     pub fn step(&mut self, dt_seconds: f64) -> PhysicsStepReport {
         self.backend.step(dt_seconds)
     }
@@ -429,6 +452,42 @@ impl PhysicsWorldBackend {
         }
     }
 
+    fn add_terrain_section(&mut self, section: PhysicsTerrainSection) -> PhysicsColliderId {
+        match self {
+            Self::Noop(backend) => backend.add_terrain_section(section),
+            #[cfg(feature = "rapier")]
+            Self::Rapier(backend) => backend.add_terrain_section(section),
+        }
+    }
+
+    fn update_terrain_section(
+        &mut self,
+        id: PhysicsColliderId,
+        section: PhysicsTerrainSection,
+    ) -> bool {
+        match self {
+            Self::Noop(backend) => backend.update_terrain_section(id, section),
+            #[cfg(feature = "rapier")]
+            Self::Rapier(backend) => backend.update_terrain_section(id, section),
+        }
+    }
+
+    fn remove_terrain_section(&mut self, id: PhysicsColliderId) -> Option<PhysicsTerrainSection> {
+        match self {
+            Self::Noop(backend) => backend.remove_terrain_section(id),
+            #[cfg(feature = "rapier")]
+            Self::Rapier(backend) => backend.remove_terrain_section(id),
+        }
+    }
+
+    fn terrain_section(&self, id: PhysicsColliderId) -> Option<&PhysicsTerrainSection> {
+        match self {
+            Self::Noop(backend) => backend.terrain_section(id),
+            #[cfg(feature = "rapier")]
+            Self::Rapier(backend) => backend.terrain_section(id),
+        }
+    }
+
     fn step(&mut self, dt_seconds: f64) -> PhysicsStepReport {
         match self {
             Self::Noop(backend) => backend.step(dt_seconds),
@@ -444,6 +503,7 @@ struct NoopPhysicsWorld {
     next_collider_id: u64,
     bodies: BTreeMap<PhysicsBodyId, PhysicsBodySpawn>,
     terrain_patches: BTreeMap<PhysicsColliderId, PhysicsTerrainPatch>,
+    terrain_sections: BTreeMap<PhysicsColliderId, PhysicsTerrainSection>,
 }
 
 impl NoopPhysicsWorld {
@@ -453,6 +513,7 @@ impl NoopPhysicsWorld {
             next_collider_id: 1,
             bodies: BTreeMap::new(),
             terrain_patches: BTreeMap::new(),
+            terrain_sections: BTreeMap::new(),
         }
     }
 
@@ -506,14 +567,42 @@ impl NoopPhysicsWorld {
         self.terrain_patches.get(&id)
     }
 
+    fn add_terrain_section(&mut self, section: PhysicsTerrainSection) -> PhysicsColliderId {
+        let id = PhysicsColliderId(self.next_collider_id);
+        self.next_collider_id = self.next_collider_id.wrapping_add(1).max(1);
+        self.terrain_sections.insert(id, section);
+        id
+    }
+
+    fn update_terrain_section(
+        &mut self,
+        id: PhysicsColliderId,
+        section: PhysicsTerrainSection,
+    ) -> bool {
+        let Some(existing) = self.terrain_sections.get_mut(&id) else {
+            return false;
+        };
+        *existing = section;
+        true
+    }
+
+    fn remove_terrain_section(&mut self, id: PhysicsColliderId) -> Option<PhysicsTerrainSection> {
+        self.terrain_sections.remove(&id)
+    }
+
+    fn terrain_section(&self, id: PhysicsColliderId) -> Option<&PhysicsTerrainSection> {
+        self.terrain_sections.get(&id)
+    }
+
     fn step(&mut self, dt_seconds: f64) -> PhysicsStepReport {
+        let terrain_collider_count = self.terrain_patches.len() + self.terrain_sections.len();
         PhysicsStepReport {
             backend: self.backend_kind(),
             dt_seconds,
             body_count: self.bodies.len(),
-            collider_count: self.terrain_patches.len(),
+            collider_count: terrain_collider_count,
             active_body_count: 0,
-            terrain_patch_count: self.terrain_patches.len(),
+            terrain_patch_count: terrain_collider_count,
             body_pose_update_count: 0,
         }
     }
@@ -536,6 +625,7 @@ struct RapierPhysicsWorld {
     next_collider_id: u64,
     bodies: BTreeMap<PhysicsBodyId, RapierBodyRecord>,
     terrain_patches: BTreeMap<PhysicsColliderId, RapierTerrainPatchRecord>,
+    terrain_sections: BTreeMap<PhysicsColliderId, RapierTerrainSectionRecord>,
 }
 
 #[cfg(feature = "rapier")]
@@ -548,6 +638,12 @@ struct RapierBodyRecord {
 struct RapierTerrainPatchRecord {
     handle: Option<rapier::ColliderHandle>,
     patch: PhysicsTerrainPatch,
+}
+
+#[cfg(feature = "rapier")]
+struct RapierTerrainSectionRecord {
+    handle: Option<rapier::ColliderHandle>,
+    section: PhysicsTerrainSection,
 }
 
 #[cfg(feature = "rapier")]
@@ -579,6 +675,7 @@ impl RapierPhysicsWorld {
             next_collider_id: 1,
             bodies: BTreeMap::new(),
             terrain_patches: BTreeMap::new(),
+            terrain_sections: BTreeMap::new(),
         }
     }
 
@@ -685,6 +782,62 @@ impl RapierPhysicsWorld {
         self.terrain_patches.get(&id).map(|record| &record.patch)
     }
 
+    fn add_terrain_section(&mut self, section: PhysicsTerrainSection) -> PhysicsColliderId {
+        let id = PhysicsColliderId(self.next_collider_id);
+        self.next_collider_id = self.next_collider_id.wrapping_add(1).max(1);
+        let handle = self.insert_terrain_section_collider(&section);
+        self.terrain_sections
+            .insert(id, RapierTerrainSectionRecord { handle, section });
+        id
+    }
+
+    fn update_terrain_section(
+        &mut self,
+        id: PhysicsColliderId,
+        section: PhysicsTerrainSection,
+    ) -> bool {
+        let Some(old_handle) = self
+            .terrain_sections
+            .get_mut(&id)
+            .map(|existing| existing.handle.take())
+        else {
+            return false;
+        };
+        if let Some(handle) = old_handle {
+            self.collider_set.remove(
+                handle,
+                &mut self.island_manager,
+                &mut self.rigid_body_set,
+                true,
+            );
+        }
+        let handle = self.insert_terrain_section_collider(&section);
+        let existing = self
+            .terrain_sections
+            .get_mut(&id)
+            .expect("terrain section record survives collider replacement");
+        existing.handle = handle;
+        existing.section = section;
+        true
+    }
+
+    fn remove_terrain_section(&mut self, id: PhysicsColliderId) -> Option<PhysicsTerrainSection> {
+        let record = self.terrain_sections.remove(&id)?;
+        if let Some(handle) = record.handle {
+            self.collider_set.remove(
+                handle,
+                &mut self.island_manager,
+                &mut self.rigid_body_set,
+                true,
+            );
+        }
+        Some(record.section)
+    }
+
+    fn terrain_section(&self, id: PhysicsColliderId) -> Option<&PhysicsTerrainSection> {
+        self.terrain_sections.get(&id).map(|record| &record.section)
+    }
+
     fn step(&mut self, dt_seconds: f64) -> PhysicsStepReport {
         self.integration_parameters.dt = to_rapier_real(dt_seconds.max(0.0));
         let before = self
@@ -736,7 +889,7 @@ impl RapierPhysicsWorld {
             body_count: self.bodies.len(),
             collider_count: self.collider_set.len(),
             active_body_count,
-            terrain_patch_count: self.terrain_patches.len(),
+            terrain_patch_count: self.terrain_patches.len() + self.terrain_sections.len(),
             body_pose_update_count,
         }
     }
@@ -751,6 +904,19 @@ impl RapierPhysicsWorld {
         Some(
             self.collider_set
                 .insert(rapier_terrain_collider_builder(patch)?.build()),
+        )
+    }
+
+    fn insert_terrain_section_collider(
+        &mut self,
+        section: &PhysicsTerrainSection,
+    ) -> Option<rapier::ColliderHandle> {
+        if section.solid_cell_count() == 0 {
+            return None;
+        }
+        Some(
+            self.collider_set
+                .insert(rapier_terrain_section_collider_builder(section)?.build()),
         )
     }
 }
@@ -814,6 +980,14 @@ fn rapier_terrain_collider_builder(patch: PhysicsTerrainPatch) -> Option<rapier:
         )
         .translation(rapier_vec(center)),
     )
+}
+
+#[cfg(feature = "rapier")]
+fn rapier_terrain_section_collider_builder(
+    section: &PhysicsTerrainSection,
+) -> Option<rapier::ColliderBuilder> {
+    let shapes = rapier_section_merged_x_run_shapes(section);
+    (!shapes.is_empty()).then(|| rapier::ColliderBuilder::compound(shapes))
 }
 
 #[cfg(feature = "rapier")]
@@ -1289,6 +1463,30 @@ mod tests {
         assert!(!section.set_solid(PHYSICS_TERRAIN_SECTION_WIDTH, 0, 0, true));
     }
 
+    #[test]
+    fn noop_world_tracks_terrain_section_lifecycle() {
+        let mut world = PhysicsWorld::noop();
+        let mut section = PhysicsTerrainSection::new(Vec3d::new(0.0, 0.0, 0.0), 1.0);
+        assert!(section.set_solid(0, 0, 0, true));
+
+        let terrain = world.add_terrain_section(section.clone());
+        assert_eq!(terrain, PhysicsColliderId(1));
+        assert_eq!(world.terrain_section(terrain), Some(&section));
+
+        let mut updated = PhysicsTerrainSection::new(Vec3d::new(16.0, 0.0, 0.0), 1.0);
+        assert!(updated.set_solid(1, 0, 0, true));
+        assert!(updated.set_solid(2, 0, 0, true));
+        assert!(world.update_terrain_section(terrain, updated.clone()));
+        assert_eq!(world.terrain_section(terrain), Some(&updated));
+        assert!(!world.update_terrain_section(PhysicsColliderId(99), updated.clone()));
+
+        let report = world.step(0.05);
+        assert_eq!(report.collider_count, 1);
+        assert_eq!(report.terrain_patch_count, 1);
+        assert_eq!(world.remove_terrain_section(terrain), Some(updated));
+        assert_eq!(world.remove_terrain_section(terrain), None);
+    }
+
     #[cfg(feature = "rapier")]
     #[test]
     fn rapier_world_simulates_dynamic_cube_against_static_patch() {
@@ -1320,6 +1518,43 @@ mod tests {
             pose.position.y
         );
         assert_eq!(world.terrain_patch(terrain).copied(), Some(terrain_patch));
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_world_simulates_dynamic_cube_against_static_section() {
+        let mut world = PhysicsWorld::new(PhysicsBackendKind::Rapier);
+        let mut section = PhysicsTerrainSection::new(Vec3d::ZERO, 1.0);
+        for x in 0..PHYSICS_TERRAIN_SECTION_WIDTH {
+            for z in 0..PHYSICS_TERRAIN_SECTION_WIDTH {
+                assert!(section.set_solid(x, 0, z, true));
+            }
+        }
+        let terrain = world.add_terrain_section(section.clone());
+        let body = world.spawn_body(PhysicsBodySpawn::dynamic_cube(
+            Vec3d::new(8.0, 4.0, 8.0),
+            0.5,
+            Vec3d::ZERO,
+        ));
+
+        let mut updated_while_falling = false;
+        for _ in 0..160 {
+            let report = world.step(1.0 / 60.0);
+            assert_eq!(report.backend, PhysicsBackendKind::Rapier);
+            assert_eq!(report.body_count, 1);
+            assert_eq!(report.terrain_patch_count, 1);
+            assert!(report.collider_count >= 2);
+            updated_while_falling |= report.body_pose_update_count > 0;
+        }
+
+        let pose = world.body_pose(body).expect("dynamic body pose");
+        assert!(updated_while_falling);
+        assert!(
+            pose.position.y > 1.45 && pose.position.y < 1.75,
+            "cube should settle on section floor top, got y={}",
+            pose.position.y
+        );
+        assert_eq!(world.terrain_section(terrain), Some(&section));
     }
 
     #[cfg(feature = "rapier")]

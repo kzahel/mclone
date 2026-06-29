@@ -1,11 +1,11 @@
 # 110: Shared Physics Backend Experiment
 
-Status: active; Slices 1-3 plus the server terrain-source follow-up landed with
-the shared `mclone-physics` facade, no-op backend, optional Rapier backend,
-synthetic cuboid/static-patch simulation test, section terrain collider probe,
-feature-gated live chunk-to-physics terrain conversion, and `mclone-server`
-intent feature wiring. App binary-size measurement is deferred until an
-app/server path actually links physics.
+Status: active; Slices 1-4a landed with the shared `mclone-physics` facade,
+no-op backend, optional Rapier backend, synthetic cuboid/static-patch
+simulation test, section terrain collider probe, feature-gated live
+chunk-to-physics terrain conversion, server-owned debug cube physics runtime,
+and `mclone-server` intent feature wiring. App binary-size measurement is
+deferred until an app/server path actually links physics.
 
 ## Purpose
 
@@ -344,19 +344,49 @@ Add a focused benchmark/smoke command if normal tests are too noisy.
 
 ### Slice 4 - Server-Authoritative Throwable Cube
 
-- [ ] Add an explicit physics-enabled server/runtime path.
+- [x] Add an explicit physics-enabled server/runtime path.
+- [x] Add a temporary debug/test spawn API for one cube.
+- [x] Step the debug cube against a live scheduler terrain section.
+- [x] Add physics diagnostics to simulation tick reports.
 - [ ] Add a temporary debug spawn command for one throwable cube.
 - [ ] Publish cube pose through existing entity/update concepts or a small
   shared entity extension.
 - [ ] Render the test cube without adding renderer-side physics knowledge.
 - [ ] Add physics diagnostics to the native smoke output.
 
-Validation:
+Recorded Slice 4a result:
+
+- Added `PhysicsWorld::add_terrain_section` / `update_terrain_section` /
+  `remove_terrain_section` / `terrain_section` facade APIs.
+- The no-op backend stores terrain sections without simulating; the Rapier
+  backend converts terrain sections to merged X-run compound cuboids, matching
+  the Slice 3 MVP recommendation.
+- Added `mclone-server/src/physics_runtime.rs`, feature-gated behind
+  `physics-rapier`, with one server-owned debug cube, one retained terrain
+  section collider, and no Rapier handles exposed outside `mclone-physics`.
+- Added `IntegratedServer::spawn_debug_physics_cube(...)`,
+  `debug_physics_cube_pose(...)`, and `physics_diagnostics()` for tests and the
+  next debug command slice.
+- Added `ServerPhysicsTickDiagnostics` to simulation and runner tick reports.
+  Default builds report disabled/zero diagnostics; `physics-rapier` builds fill
+  body, collider, active-body, terrain-collider, pose-update, and test-cube
+  position facts.
+- Added an integrated server test that loads a real chunk, forces one live
+  section into a 16x16 floor fixture, spawns the debug cube, and verifies it
+  falls and settles through the authoritative simulation tick.
+- Still pending: a protocol/debug command or input hook, entity publication,
+  app feature wiring, client replica/rendering, smoke output, and broader
+  terrain collider retention/invalidation around moving bodies.
+
+Current Slice 4a validation:
 
 ```bash
+cargo test --manifest-path native/Cargo.toml -p mclone-physics
+cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier
+cargo test --manifest-path native/Cargo.toml -p mclone-server
 cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
-cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
-pnpm native:movement:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
+cargo check --manifest-path native/Cargo.toml
 ```
 
 If the slice produces pixels, capture and inspect a screenshot before moving

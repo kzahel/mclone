@@ -25,6 +25,8 @@ use crate::falling_block::{
 };
 use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
+#[cfg(feature = "physics-rapier")]
+use crate::physics_runtime::ServerPhysicsRuntime;
 use crate::placement::DebugBlockItem;
 use crate::player::{MovePlayerApplyResult, ServerPlayerState};
 use crate::player_chunk_tracking::{PlayerChunkTracking, PlayerChunkTrackingPolicy};
@@ -36,8 +38,8 @@ use crate::{
     ChunkLoadingProgress, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkScheduler,
     ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, FluidKind,
     FluidTickList, NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics,
-    ServerSimulationTickReport, ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
-    WorldBlockPos,
+    ServerPhysicsTickDiagnostics, ServerSimulationTickReport, ServerSimulationTickTiming,
+    ServerTickReport, ServerTickTiming, WorldBlockPos,
 };
 
 #[derive(Debug)]
@@ -57,6 +59,8 @@ pub struct IntegratedServer {
     remote_players: RemotePlayerTracking,
     entities: ServerEntityStore,
     entity_tracking: EntityTracking,
+    #[cfg(feature = "physics-rapier")]
+    physics: ServerPhysicsRuntime,
     loading_progress: ChunkLoadingProgress,
 }
 
@@ -110,6 +114,8 @@ impl IntegratedServer {
             remote_players: RemotePlayerTracking::default(),
             entities: ServerEntityStore::default(),
             entity_tracking: EntityTracking::default(),
+            #[cfg(feature = "physics-rapier")]
+            physics: ServerPhysicsRuntime::new(),
             loading_progress,
         }
     }
@@ -162,6 +168,28 @@ impl IntegratedServer {
     pub fn view_readiness_snapshot(&self) -> Option<ChunkLoadingProgressSnapshot> {
         let view = self.chunk_tracking.accepted_view(ServerPlayerId::LOCAL)?;
         Some(self.scheduler.view_readiness_snapshot(view))
+    }
+
+    pub fn physics_diagnostics(&self) -> ServerPhysicsTickDiagnostics {
+        #[cfg(feature = "physics-rapier")]
+        {
+            return self.physics.diagnostics();
+        }
+        #[cfg(not(feature = "physics-rapier"))]
+        {
+            ServerPhysicsTickDiagnostics::default()
+        }
+    }
+
+    #[cfg(feature = "physics-rapier")]
+    pub fn spawn_debug_physics_cube(&mut self, position: Vec3d, velocity: Vec3d) -> bool {
+        self.physics
+            .spawn_debug_cube(&self.scheduler, position, velocity)
+    }
+
+    #[cfg(feature = "physics-rapier")]
+    pub fn debug_physics_cube_pose(&self) -> Option<mclone_physics::PhysicsBodyPose> {
+        self.physics.debug_cube_pose()
     }
 
     pub fn lighting_enabled(&self) -> bool {
@@ -385,6 +413,10 @@ impl IntegratedServer {
             .tick_stationary(&tick_report.entity_ticking_chunks);
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
+        let physics_tick_start = simulation_timing_start();
+        let physics = self.step_physics();
+        let physics_tick_us = simulation_timing_elapsed_us(physics_tick_start);
+
         let mut updates = tick_report.updates;
         updates.push(ServerUpdate::TimeUpdate {
             day_time: self.day_time,
@@ -408,6 +440,7 @@ impl IntegratedServer {
             fluid_event_count,
             scheduled_fluid_ticks: fluid_report.scheduled_ticks,
             entity_tick_chunks,
+            physics,
             pending_unloads_processed: tick_report.pending_unloads_processed,
             scheduler_event_count: tick_report.scheduler_event_count,
             chunk_tracking,
@@ -429,6 +462,7 @@ impl IntegratedServer {
                 fluid_tick_fluid_us: fluid_report.tick_fluid_us,
                 fluid_set_block_us: fluid_report.set_block_us,
                 entity_tick_us,
+                physics_tick_us,
             },
         })
     }
@@ -463,6 +497,17 @@ impl IntegratedServer {
 
     pub fn scheduler_mut(&mut self) -> &mut ChunkScheduler {
         &mut self.scheduler
+    }
+
+    fn step_physics(&mut self) -> ServerPhysicsTickDiagnostics {
+        #[cfg(feature = "physics-rapier")]
+        {
+            self.physics.step()
+        }
+        #[cfg(not(feature = "physics-rapier"))]
+        {
+            ServerPhysicsTickDiagnostics::default()
+        }
     }
 
     pub fn save_dirty_chunks(&mut self) -> ChunkStoreResult<usize> {
@@ -1849,6 +1894,64 @@ mod tests {
         let report = server.try_simulation_tick_report().expect("tick");
         assert_eq!(server.day_time(), start + 1);
         assert_eq!(last_time_update(&report), start + 1);
+    }
+
+    #[cfg(feature = "physics-rapier")]
+    #[test]
+    fn debug_physics_cube_steps_against_live_terrain_section() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+
+        for y in 0..16 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    let block = if y == 0 { STONE } else { AIR };
+                    server
+                        .scheduler_mut()
+                        .set_block_at_world(BlockPos::new(x, y, z), block);
+                }
+            }
+        }
+        let terrain = server
+            .scheduler()
+            .physics_terrain_section_at_block(BlockPos::new(8, 4, 8))
+            .expect("physics terrain section");
+        assert_eq!(terrain.solid_cell_count(), 16 * 16);
+
+        assert!(server.spawn_debug_physics_cube(Vec3d::new(8.0, 4.0, 8.0), Vec3d::ZERO));
+        let spawned = server.physics_diagnostics();
+        assert!(spawned.enabled);
+        assert_eq!(spawned.body_count, 1);
+        assert_eq!(spawned.terrain_collider_count, 1);
+        assert_eq!(
+            spawned.test_cube_position.map(|position| position.y),
+            Some(4.0)
+        );
+
+        let mut updated_while_falling = false;
+        let mut last_physics = spawned;
+        for _ in 0..120 {
+            let report = server
+                .try_simulation_tick_report()
+                .expect("physics simulation tick");
+            assert!(report.physics.enabled);
+            assert!(report.physics.test_cube_spawned);
+            assert_eq!(report.physics.body_count, 1);
+            assert_eq!(report.physics.terrain_collider_count, 1);
+            assert!(report.physics.collider_count >= 2);
+            updated_while_falling |= report.physics.body_pose_update_count > 0;
+            last_physics = report.physics;
+        }
+
+        let final_y = last_physics
+            .test_cube_position
+            .expect("debug cube position")
+            .y;
+        assert!(updated_while_falling);
+        assert!(
+            final_y > 1.45 && final_y < 1.8,
+            "debug cube should settle on the live terrain floor, got y={final_y}"
+        );
     }
 
     #[test]

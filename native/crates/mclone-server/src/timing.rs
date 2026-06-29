@@ -7,7 +7,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
-use mclone_core::ChunkPos;
+use mclone_core::{ChunkPos, Vec3d};
 use mclone_protocol::ServerUpdate;
 
 use crate::{ChunkSchedulerEvent, PlayerChunkTrackingDiagnostics};
@@ -40,6 +40,7 @@ pub struct ServerSimulationTickTiming {
     pub fluid_tick_fluid_us: u128,
     pub fluid_set_block_us: u128,
     pub entity_tick_us: u128,
+    pub physics_tick_us: u128,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -87,11 +88,24 @@ pub struct ServerSimulationTickReport {
     pub fluid_event_count: usize,
     pub scheduled_fluid_ticks: usize,
     pub entity_tick_chunks: usize,
+    pub physics: ServerPhysicsTickDiagnostics,
     pub pending_unloads_processed: usize,
     pub scheduler_event_count: usize,
     pub chunk_tracking: PlayerChunkTrackingDiagnostics,
     pub updates: Vec<ServerUpdate>,
     pub timing: ServerSimulationTickTiming,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ServerPhysicsTickDiagnostics {
+    pub enabled: bool,
+    pub body_count: usize,
+    pub collider_count: usize,
+    pub active_body_count: usize,
+    pub terrain_collider_count: usize,
+    pub body_pose_update_count: usize,
+    pub test_cube_spawned: bool,
+    pub test_cube_position: Option<Vec3d>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
