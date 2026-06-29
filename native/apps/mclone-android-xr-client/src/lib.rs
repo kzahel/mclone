@@ -1868,8 +1868,8 @@ mod android {
                 // loaded-minus-control deltas are the measured unified-memory
                 // contention cost. `gpu_*` values are meaningful only when
                 // `--perf-gpu-timestamps` is also enabled (else they read 0).
-                let poll_delta = self.contention_loaded.avg_poll_ms()
-                    - self.contention_control.avg_poll_ms();
+                let poll_delta =
+                    self.contention_loaded.avg_poll_ms() - self.contention_control.avg_poll_ms();
                 let gpu_delta =
                     self.contention_loaded.avg_gpu_ms() - self.contention_control.avg_gpu_ms();
                 log::info!(

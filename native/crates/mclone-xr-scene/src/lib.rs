@@ -1,9 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, mpsc};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
@@ -379,312 +376,6 @@ impl RemoteDedicatedServerSession for XrLocalOnlyRemoteSession {
     }
 }
 
-// E1 (docs/tactical/106): GPU-timestamp split of the stereo frame.
-//
-// `render_prepared_frame` records both eyes into one encoder, submits once, then
-// blocks on `device.poll(WaitForSubmissionIndex)`. That poll wait (~10-11ms at
-// frozen RD10) fuses real GPU execution with submit/acquire overhead, leaving an
-// unresolved gap against the ~7ms Meta `app/gpu_frametime` counter. Bracketing
-// the encoder with timestamp writes (before the left eye, between eyes, after the
-// right eye — all downstream sky/UI/selection passes share the encoder) yields
-// the true on-device GPU time plus a per-eye split.
-//
-// The frame already blocks on the submission before we read back, so the readback
-// buffer is guaranteed populated and a single extra `poll(Wait)` drives the map
-// callback. This is opt-in (`set_gpu_timestamps_enabled`); the normal headset
-// loop never allocates the query set or pays the readback cost.
-const XR_GPU_TIMESTAMP_COUNT: u32 = 3;
-const XR_GPU_TIMESTAMP_RESOLVE_SIZE: u64 = 64;
-const XR_GPU_TIMESTAMP_MAP_TIMEOUT: Duration = Duration::from_millis(100);
-
-struct XrGpuStereoTimestamps {
-    query_set: wgpu::QuerySet,
-    resolve_buffer: wgpu::Buffer,
-    readback_buffer: wgpu::Buffer,
-    timestamp_period_ns: f32,
-}
-
-impl XrGpuStereoTimestamps {
-    fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Option<Self> {
-        let required = wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
-        if !device.features().contains(required) {
-            return None;
-        }
-        let timestamp_period_ns = queue.get_timestamp_period();
-        if !timestamp_period_ns.is_finite() || timestamp_period_ns <= 0.0 {
-            return None;
-        }
-        let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
-            label: Some("mclone_xr_stereo_gpu_timestamps"),
-            ty: wgpu::QueryType::Timestamp,
-            count: XR_GPU_TIMESTAMP_COUNT,
-        });
-        let resolve_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mclone_xr_stereo_gpu_timestamp_resolve"),
-            size: XR_GPU_TIMESTAMP_RESOLVE_SIZE,
-            usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mclone_xr_stereo_gpu_timestamp_readback"),
-            size: XR_GPU_TIMESTAMP_RESOLVE_SIZE,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        Some(Self {
-            query_set,
-            resolve_buffer,
-            readback_buffer,
-            timestamp_period_ns,
-        })
-    }
-
-    /// Write a single timestamp into the encoder timeline at `index`.
-    fn write(&self, encoder: &mut wgpu::CommandEncoder, index: u32) {
-        encoder.write_timestamp(&self.query_set, index);
-    }
-
-    /// Resolve the timestamps and stage them for readback. Call once after the
-    /// last write and before `encoder.finish()`.
-    fn resolve(&self, encoder: &mut wgpu::CommandEncoder) {
-        encoder.resolve_query_set(
-            &self.query_set,
-            0..XR_GPU_TIMESTAMP_COUNT,
-            &self.resolve_buffer,
-            0,
-        );
-        encoder.copy_buffer_to_buffer(
-            &self.resolve_buffer,
-            0,
-            &self.readback_buffer,
-            0,
-            XR_GPU_TIMESTAMP_RESOLVE_SIZE,
-        );
-    }
-
-    /// Read back the resolved timestamps after the frame's GPU work has
-    /// completed. Returns `(total_ms, left_eye_ms, right_eye_ms)`.
-    fn collect(&self, device: &wgpu::Device) -> Option<(f64, f64, f64)> {
-        let slice = self.readback_buffer.slice(..);
-        let (sender, receiver) = mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = sender.send(result);
-        });
-        if let Err(err) = device.poll(wgpu::PollType::Wait) {
-            log::warn!("XR GPU timestamp readback poll failed: {err:?}");
-            return None;
-        }
-        match receiver.recv_timeout(XR_GPU_TIMESTAMP_MAP_TIMEOUT) {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => {
-                log::warn!("XR GPU timestamp readback map failed: {err:?}");
-                return None;
-            }
-            Err(err) => {
-                log::warn!("XR GPU timestamp readback timed out: {err:?}");
-                return None;
-            }
-        }
-        let result = {
-            let data = slice.get_mapped_range();
-            match (
-                read_xr_timestamp(&data, 0),
-                read_xr_timestamp(&data, 8),
-                read_xr_timestamp(&data, 16),
-            ) {
-                (Some(start), Some(mid), Some(end)) => Some((
-                    xr_timestamp_delta_ms(start, end, self.timestamp_period_ns),
-                    xr_timestamp_delta_ms(start, mid, self.timestamp_period_ns),
-                    xr_timestamp_delta_ms(mid, end, self.timestamp_period_ns),
-                )),
-                _ => None,
-            }
-        };
-        self.readback_buffer.unmap();
-        result
-    }
-}
-
-fn read_xr_timestamp(data: &[u8], offset: usize) -> Option<u64> {
-    let bytes = data.get(offset..offset + std::mem::size_of::<u64>())?;
-    Some(u64::from_ne_bytes(bytes.try_into().ok()?))
-}
-
-fn xr_timestamp_delta_ms(start: u64, end: u64, period_ns: f32) -> f64 {
-    if end <= start || !period_ns.is_finite() || period_ns <= 0.0 {
-        return 0.0;
-    }
-    (end - start) as f64 * period_ns as f64 / 1_000_000.0
-}
-
-// E2 (docs/tactical/106): poll-contention probe.
-//
-// E1 established that the blocking `device.poll(Wait)` after the single stereo
-// submit is real GPU execution (~10.7ms), during which the CPU sits idle. E4
-// (frame pipelining / Slice K) wants to reclaim that idle by running the next
-// frame's CPU prep (cull/encode) concurrently with this frame's GPU. The open
-// question (106 "CPU/GPU Overlap Mechanics") is whether that concurrent CPU work
-// inflates the GPU on the Quest's unified-memory SoC — shared DRAM bus / LLC /
-// power budget — i.e. *contention, not exclusion*. This probe answers it with our
-// own number rather than inheriting Playbox's deferral.
-//
-// While enabled, the render path alternates frames: on a "loaded" frame a single
-// worker thread streams a read-modify-write over a multi-MiB buffer for the whole
-// duration of the stereo poll; a "control" frame polls with the worker idle. The
-// app buckets the per-frame stereo poll wait and (when `--perf-gpu-timestamps` is
-// also on) the GPU-clock stereo total by `poll_contention_active`; the
-// loaded-minus-control delta is the contention cost. Within-run A/B keeps the two
-// buckets thermally matched (records note frame p50 drifts ~1.5ms across
-// build/run cycles, so a cross-run baseline would be unreliable here).
-//
-// The load is a deliberately memory-traffic-heavy, *single-core* stand-in: a
-// 16 MiB buffer (well past the SoC last-level cache, so it generates real DRAM
-// traffic) streamed continuously for the entire ~11ms poll. That is heavier and
-// longer than the real next-frame cull/encode (~3-7ms, a smaller mostly-cached
-// working set) E4 would actually overlap, so the bias is conservative: a *small*
-// measured GPU inflation here is a confident green light for E4, while a large
-// one warrants re-measuring with a lighter representative load before drawing a
-// conclusion (contention changes the *size* of the overlap win, not whether one
-// exists).
-//
-// A native OS thread is the 062 shared-threading-topology native backend. This is
-// an opt-in native diagnostic — the contention question is intrinsic to the
-// native unified-memory headset and has no web analogue — and the normal headset
-// loop never spawns the worker.
-const POLL_CONTENTION_BUFFER_LEN: usize = 2 * 1024 * 1024; // 2M u64 = 16 MiB
-const POLL_CONTENTION_STOP_CHECK_STRIDE: usize = 8 * 1024;
-const POLL_CONTENTION_MAX_LOAD: Duration = Duration::from_millis(40);
-
-struct PollContentionShared {
-    /// Set true for the duration of a loaded frame's poll; the worker streams
-    /// memory while it is true and stops promptly once it clears.
-    run: AtomicBool,
-    shutdown: AtomicBool,
-    /// Published so the optimizer cannot elide the streaming traffic.
-    checksum: AtomicU64,
-    /// Park gate: the worker sleeps on the condvar until a load is requested.
-    wake: Mutex<bool>,
-    wake_cv: Condvar,
-}
-
-struct PollContentionProbe {
-    shared: Arc<PollContentionShared>,
-    worker: Option<JoinHandle<()>>,
-    frame_counter: u64,
-}
-
-impl PollContentionProbe {
-    fn new() -> Self {
-        let shared = Arc::new(PollContentionShared {
-            run: AtomicBool::new(false),
-            shutdown: AtomicBool::new(false),
-            checksum: AtomicU64::new(0),
-            wake: Mutex::new(false),
-            wake_cv: Condvar::new(),
-        });
-        let worker_shared = Arc::clone(&shared);
-        let worker = thread::Builder::new()
-            .name("mclone xr poll-contention".to_owned())
-            .spawn(move || poll_contention_worker(&worker_shared))
-            .ok();
-        if worker.is_none() {
-            log::warn!("XR poll-contention probe worker failed to spawn; probe inert");
-        }
-        Self {
-            shared,
-            worker,
-            frame_counter: 0,
-        }
-    }
-
-    /// Alternate loaded/control frames. Returns true if this frame should run the
-    /// contention load.
-    fn next_frame_is_loaded(&mut self) -> bool {
-        let loaded = self.worker.is_some() && self.frame_counter % 2 == 0;
-        self.frame_counter = self.frame_counter.wrapping_add(1);
-        loaded
-    }
-
-    /// Wake the worker to stream memory; call immediately before the blocking poll.
-    fn begin_load(&self) {
-        self.shared.run.store(true, Ordering::SeqCst);
-        let mut wake = self
-            .shared
-            .wake
-            .lock()
-            .expect("poll-contention wake lock poisoned");
-        *wake = true;
-        self.shared.wake_cv.notify_one();
-    }
-
-    /// Stop the worker; call immediately after the poll returns.
-    fn end_load(&self) {
-        self.shared.run.store(false, Ordering::SeqCst);
-    }
-}
-
-impl Drop for PollContentionProbe {
-    fn drop(&mut self) {
-        self.shared.shutdown.store(true, Ordering::SeqCst);
-        self.shared.run.store(false, Ordering::SeqCst);
-        if let Ok(mut wake) = self.shared.wake.lock() {
-            *wake = true;
-            self.shared.wake_cv.notify_one();
-        }
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-    }
-}
-
-fn poll_contention_worker(shared: &PollContentionShared) {
-    let mut buffer = vec![0u64; POLL_CONTENTION_BUFFER_LEN];
-    let mut seed: u64 = 0x9E37_79B9_7F4A_7C15;
-    loop {
-        {
-            let mut wake = match shared.wake.lock() {
-                Ok(guard) => guard,
-                Err(_) => break,
-            };
-            while !*wake {
-                wake = match shared.wake_cv.wait(wake) {
-                    Ok(guard) => guard,
-                    Err(_) => return,
-                };
-            }
-            *wake = false;
-        }
-        if shared.shutdown.load(Ordering::SeqCst) {
-            break;
-        }
-        // Stream a read-modify-write over the whole buffer until the main thread
-        // clears `run` (the poll returned) or the safety cap trips. The RMW plus
-        // running checksum forces real loads and stores on every element.
-        let started = Instant::now();
-        let mut checksum = shared.checksum.load(Ordering::Relaxed);
-        'load: while shared.run.load(Ordering::Relaxed) {
-            let mut index = 0;
-            while index < buffer.len() {
-                let end = (index + POLL_CONTENTION_STOP_CHECK_STRIDE).min(buffer.len());
-                for slot in &mut buffer[index..end] {
-                    seed = seed
-                        .wrapping_mul(6_364_136_223_846_793_005)
-                        .wrapping_add(1_442_695_040_888_963_407);
-                    *slot = slot.wrapping_add(seed);
-                    checksum ^= *slot;
-                }
-                index = end;
-                if !shared.run.load(Ordering::Relaxed)
-                    || started.elapsed() >= POLL_CONTENTION_MAX_LOAD
-                {
-                    break 'load;
-                }
-            }
-        }
-        shared.checksum.store(checksum, Ordering::Relaxed);
-    }
-}
-
 pub struct XrMcloneTerrainState<S = XrLocalOnlyRemoteSession>
 where
     S: RemoteDedicatedServerSession,
@@ -710,10 +401,6 @@ where
     locomotion_mode: XrLocomotionMode,
     display_refresh_hz: Option<f32>,
     render_split_timing_enabled: bool,
-    gpu_timestamps_requested: bool,
-    gpu_timestamps_init_attempted: bool,
-    gpu_timestamps: Option<XrGpuStereoTimestamps>,
-    poll_contention: Option<PollContentionProbe>,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
     menu_pointer_down: bool,
@@ -829,10 +516,6 @@ where
             locomotion_mode: XrLocomotionMode::default(),
             display_refresh_hz: None,
             render_split_timing_enabled: false,
-            gpu_timestamps_requested: false,
-            gpu_timestamps_init_attempted: false,
-            gpu_timestamps: None,
-            poll_contention: None,
             last_locomotion_update: None,
             menu_toggle_down: false,
             menu_pointer_down: false,
@@ -906,10 +589,6 @@ where
             locomotion_mode: XrLocomotionMode::default(),
             display_refresh_hz: None,
             render_split_timing_enabled: false,
-            gpu_timestamps_requested: false,
-            gpu_timestamps_init_attempted: false,
-            gpu_timestamps: None,
-            poll_contention: None,
             last_locomotion_update: None,
             menu_toggle_down: false,
             menu_pointer_down: false,
@@ -1080,38 +759,14 @@ where
                 runtime.client(),
             )
         });
-        if self.gpu_timestamps_requested && !self.gpu_timestamps_init_attempted {
-            self.gpu_timestamps_init_attempted = true;
-            self.gpu_timestamps = XrGpuStereoTimestamps::new(device, queue);
-            match self.gpu_timestamps.as_ref() {
-                Some(ts) => log::info!(
-                    "XR GPU timestamps enabled (timestamp_period={:.3}ns)",
-                    ts.timestamp_period_ns
-                ),
-                None => log::warn!(
-                    "XR GPU timestamps requested but TIMESTAMP_QUERY is unavailable on this OpenXR Vulkan device"
-                ),
-            }
-        }
-        // Move the profiler out of `self` for the duration of the encode so the
-        // per-eye render calls can still borrow `&mut self`; restored after the
-        // readback below.
-        let gpu_timestamps = self.gpu_timestamps.take();
         let collect_split_timing = self.render_split_timing_enabled;
         let records_start = collect_split_timing.then(Instant::now);
         let prepared_records = self.draw.prepare_render_records();
         timing.shared_records_ms = records_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("mclone_xr_terrain_stereo_encoder"),
-        });
-        if let Some(ts) = gpu_timestamps.as_ref() {
-            ts.write(&mut encoder, 0);
-        }
         let left_eye_start = Instant::now();
         let left_eye = self.render_eye_target(
             device,
             queue,
-            &mut encoder,
             &prepared_records,
             left_target,
             render_views[0],
@@ -1124,14 +779,10 @@ where
         )?;
         timing.left_eye_ms = elapsed_ms(left_eye_start.elapsed());
         timing.left_eye_render = left_eye.timing;
-        if let Some(ts) = gpu_timestamps.as_ref() {
-            ts.write(&mut encoder, 1);
-        }
         let right_eye_start = Instant::now();
         let right_eye = self.render_eye_target(
             device,
             queue,
-            &mut encoder,
             &prepared_records,
             right_target,
             render_views[1],
@@ -1144,53 +795,11 @@ where
         )?;
         timing.right_eye_ms = elapsed_ms(right_eye_start.elapsed());
         timing.right_eye_render = right_eye.timing;
-        if let Some(ts) = gpu_timestamps.as_ref() {
-            ts.write(&mut encoder, 2);
-            ts.resolve(&mut encoder);
-        }
-        let finish_start = collect_split_timing.then(Instant::now);
-        let command_buffer = encoder.finish();
-        timing.stereo_finish_ms = finish_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
-        let submit_start = collect_split_timing.then(Instant::now);
-        let submission = queue.submit(Some(command_buffer));
-        timing.stereo_submit_ms = submit_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
-        // E2: optionally run a CPU memory-bandwidth load on a worker concurrently
-        // with the blocking GPU poll, on alternating frames, to measure
-        // unified-memory contention (loaded vs control). Opt-in; no worker exists
-        // otherwise.
-        let contention_loaded = match self.poll_contention.as_mut() {
-            Some(probe) => {
-                let loaded = probe.next_frame_is_loaded();
-                if loaded {
-                    probe.begin_load();
-                }
-                loaded
-            }
-            None => false,
-        };
-        timing.poll_contention_active = contention_loaded;
-        let poll_start = collect_split_timing.then(Instant::now);
-        let poll_result = device
-            .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
-            .map(|_| ())
-            .context("wait for XR terrain stereo render submission");
-        timing.stereo_poll_wait_ms = poll_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
-        if contention_loaded {
-            if let Some(probe) = self.poll_contention.as_ref() {
-                probe.end_load();
-            }
-        }
-        poll_result?;
-        // The submission has completed (the poll above blocked on it), so the
-        // resolved timestamps are ready; collect them and restore the profiler.
-        if let Some(ts) = gpu_timestamps.as_ref() {
-            if let Some((total_ms, left_ms, right_ms)) = ts.collect(device) {
-                timing.gpu_stereo_total_ms = total_ms;
-                timing.gpu_left_eye_ms = left_ms;
-                timing.gpu_right_eye_ms = right_ms;
-            }
-        }
-        self.gpu_timestamps = gpu_timestamps;
+        timing.stereo_submit_ms =
+            timing.left_eye_render.submit_ms + timing.right_eye_render.submit_ms;
+        timing.stereo_poll_wait_ms =
+            timing.left_eye_render.poll_wait_ms + timing.right_eye_render.poll_wait_ms;
+        timing.poll_contention_active = false;
         self.record_eye0_summary(left_eye.summary);
         Ok(self.frame_summary_with_timing(timing, upload))
     }
@@ -1211,26 +820,19 @@ where
         self.render_split_timing_enabled = enabled;
     }
 
-    /// E1 (docs/tactical/106): opt into GPU-timestamp instrumentation of the
-    /// stereo render. The query set is created lazily on the first rendered
-    /// frame (when the device/queue are in hand) and is a no-op when the OpenXR
-    /// Vulkan adapter does not advertise `TIMESTAMP_QUERY`.
     pub fn set_gpu_timestamps_enabled(&mut self, enabled: bool) {
-        self.gpu_timestamps_requested = enabled;
+        if enabled {
+            log::warn!(
+                "XR GPU timestamp instrumentation is disabled while XR uses per-eye command submission"
+            );
+        }
     }
 
-    /// E2 (docs/tactical/106): opt into the poll-contention probe. When enabled,
-    /// a single worker thread runs a memory-bandwidth load concurrently with the
-    /// blocking stereo poll on alternating frames so the app can bucket
-    /// loaded-vs-control poll wait / GPU time and measure unified-memory
-    /// contention. Opt-in; the normal headset loop never spawns the worker.
     pub fn set_poll_contention_enabled(&mut self, enabled: bool) {
         if enabled {
-            if self.poll_contention.is_none() {
-                self.poll_contention = Some(PollContentionProbe::new());
-            }
-        } else {
-            self.poll_contention = None;
+            log::warn!(
+                "XR poll-contention probe is disabled while XR uses per-eye command submission"
+            );
         }
     }
 
@@ -1557,7 +1159,6 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
         prepared_records: &PreparedTexturedSectionRecords,
         target: XrTerrainEyeTarget<'_>,
         render_view: ChunkRenderView,
@@ -1570,10 +1171,17 @@ where
     ) -> Result<XrRenderedEye> {
         let collect_split_timing = self.render_split_timing_enabled;
         let encode_start = collect_split_timing.then(Instant::now);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some(match label {
+                "left" => "mclone_xr_terrain_left_eye_encoder",
+                "right" => "mclone_xr_terrain_right_eye_encoder",
+                _ => "mclone_xr_terrain_eye_encoder",
+            }),
+        });
         let frame = RenderFrameContext::new(
             device,
             queue,
-            &mut *encoder,
+            &mut encoder,
             RenderFrameTarget::color(target.color_view, target.size),
         );
         let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
@@ -1640,7 +1248,7 @@ where
         self.selection_outline.render(
             device,
             queue,
-            &mut *encoder,
+            &mut encoder,
             RenderFrameTarget::color(target.color_view, target.size),
             target.depth,
             render_view,
@@ -1655,7 +1263,7 @@ where
                     .render_panel(
                         device,
                         queue,
-                        &mut *encoder,
+                        &mut encoder,
                         RenderFrameTarget::color(target.color_view, target.size),
                         render_view,
                         XR_MENU_PANEL_PIXELS,
@@ -1667,7 +1275,21 @@ where
                     .with_context(|| format!("render XR menu panel for {label} eye"))?;
             }
         }
+        let command_buffer = encoder.finish();
         let encode_total_ms = encode_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        let submit_start = collect_split_timing.then(Instant::now);
+        let submission = queue.submit(Some(command_buffer));
+        let submit_ms = submit_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        let poll_start = collect_split_timing.then(Instant::now);
+        device
+            .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+            .map(|_| ())
+            .with_context(|| format!("wait for XR terrain {label}-eye render submission"))?;
+        device
+            .poll(wgpu::PollType::Wait)
+            .map(|_| ())
+            .with_context(|| format!("wait for XR terrain {label}-eye render device idle"))?;
+        let poll_wait_ms = poll_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         if label == "left" {
             self.render_stats = render_stats;
         }
@@ -1682,8 +1304,8 @@ where
                 translucent_sort_ms: frame_timing.terrain_translucent_sort_ms,
                 encode_ms: (encode_total_ms - prepare_ms).max(0.0),
                 section_encode_ms: frame_timing.terrain_encode_ms,
-                submit_ms: 0.0,
-                poll_wait_ms: 0.0,
+                submit_ms,
+                poll_wait_ms,
             },
         })
     }
