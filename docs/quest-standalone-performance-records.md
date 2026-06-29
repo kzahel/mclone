@@ -74,6 +74,65 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-29 - Standalone Quest 3 Frozen RD10 Poll-Contention Probe (E2)
+
+Benchmarked code commit: this E2 commit (opt-in poll-contention probe,
+`--perf-poll-contention`, marker `MCLONE_ANDROID_XR_PERF_CONTENTION`, new lane
+`native:android-xr:perf:frozen:rd10:contention`). Two back-to-back runs from the
+same installed APK (run 2 via `--skip-build --skip-assets`), frozen RD10, fixed
+view pose `0,80,-96,180`, with `--perf-gpu-timestamps` also on so the GPU-clock
+delta is the clean contention signal. Cleanup verified after each run: `pidof
+com.kzahel.mclone.xr` empty, `mWakefulness=Asleep`,
+`mHoldingDisplaySuspendBlocker=false`.
+
+The probe alternates frames: on a "loaded" frame a single worker thread (062
+native OS-thread backend) streams a read-modify-write over a 16 MiB buffer (well
+past the SoC last-level cache, so real DRAM traffic) for the whole duration of the
+blocking stereo `device.poll(Wait)`; a "control" frame polls with the worker idle.
+The app buckets the per-frame stereo poll wait and the GPU-clock stereo total by
+the `poll_contention_active` flag. Within-run A/B keeps the two buckets thermally
+matched. The load is a deliberately memory-bandwidth-heavy, single-core,
+full-poll-duration stand-in — heavier and longer than the real next-frame
+cull/encode (~3-7ms, a smaller mostly-cached working set) that E4 would actually
+overlap — so the measured GPU inflation is a conservative upper bound.
+
+| Bucket (avg over the measured window) | Run 1 | Run 2 |
+|---|---:|---:|
+| Loaded / control frames | `717` / `718` | `720` / `720` |
+| Control GPU (uncontended) | `7.285ms` | `7.210ms` |
+| Loaded GPU (contended) | `9.150ms` | `9.135ms` |
+| **GPU delta (contention)** | **`+1.865ms`** | **`+1.925ms`** |
+| Control poll wait | `7.766ms` | `7.722ms` |
+| Loaded poll wait | `9.662ms` | `9.655ms` |
+| **Poll-wait delta** | **`+1.897ms`** | **`+1.933ms`** |
+| Control / loaded GPU max | `8.454` / `11.287ms` | `8.562` / `11.527ms` |
+| Frame p50 (serial, probe alternating) | `13.742ms` | `13.712ms` |
+
+Interpretation:
+
+- **Concurrent CPU work inflates the GPU by ~1.9ms (~26%) on the Quest's
+  unified-memory SoC** — contention is real, not negligible, but bounded and
+  highly reproducible (both runs agree to within `~0.06ms`).
+- **The poll-wait delta matches the GPU delta to within `~0.03ms`.** This (a)
+  re-confirms E1 (the blocking poll *is* GPU execution) and (b) shows the
+  inflation is real GPU slowdown (shared DRAM bandwidth / power-DVFS), not CPU
+  scheduling overhead — the main thread is parked in the fence wait, so the worker
+  runs on a free core. The within-run alternation makes the delta robust to slow
+  thermal drift.
+- **E4 (frame pipelining / Slice K) is still a clear win even at this conservative
+  contention.** Today the frame is serial `CPU(~3-4ms p50) + GPU`. Overlapped it
+  becomes `max(CPU, GPU + contention)`, GPU-dominated: `~9ms` at this run's cool
+  GPU floor (`~7.2ms`), and `~12.6ms` even at E1's hot `10.7ms` floor — under the
+  `13.889ms` 72Hz budget across the thermal range, vs today's `~13.7ms` serial
+  p50. The real cull/encode overlap is lighter than this probe (shorter, smaller
+  footprint), so real contention should be `≤1.9ms`, likely `~0.5-1ms`.
+- **Residual risk:** both runs settled cool (`~7.2ms` control GPU; the frozen lane
+  is idle terrain), so this does not test whether contention grows near the SoC
+  power ceiling under a hotter sustained state. The measured `~1.9ms` is at a
+  moderate thermal level; E4's required motion-to-photon / comfort validation
+  should also watch the hot-frame tail. Even so, `+1.9ms` keeps the hot frame
+  under budget, so E2 is a green light for E4.
+
 ### 2026-06-29 - Standalone Quest 3 Frozen RD10 Shared Record Cache (Slice F follow-up)
 
 Benchmarked code commit: this shared-cache-refactor commit. Captured immediately

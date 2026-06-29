@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -239,6 +241,13 @@ pub struct XrTerrainFrameTiming {
     pub gpu_stereo_total_ms: f64,
     pub gpu_left_eye_ms: f64,
     pub gpu_right_eye_ms: f64,
+    /// E2 (docs/tactical/106): true when a CPU memory-bandwidth load ran on a
+    /// worker concurrently with this frame's blocking stereo poll (the probe
+    /// alternates loaded/control frames). Always false unless the poll-contention
+    /// probe is enabled. The app buckets `stereo_poll_wait_ms` /
+    /// `gpu_stereo_total_ms` by this flag; the loaded-minus-control delta is the
+    /// measured unified-memory contention cost.
+    pub poll_contention_active: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -508,6 +517,174 @@ fn xr_timestamp_delta_ms(start: u64, end: u64, period_ns: f32) -> f64 {
     (end - start) as f64 * period_ns as f64 / 1_000_000.0
 }
 
+// E2 (docs/tactical/106): poll-contention probe.
+//
+// E1 established that the blocking `device.poll(Wait)` after the single stereo
+// submit is real GPU execution (~10.7ms), during which the CPU sits idle. E4
+// (frame pipelining / Slice K) wants to reclaim that idle by running the next
+// frame's CPU prep (cull/encode) concurrently with this frame's GPU. The open
+// question (106 "CPU/GPU Overlap Mechanics") is whether that concurrent CPU work
+// inflates the GPU on the Quest's unified-memory SoC — shared DRAM bus / LLC /
+// power budget — i.e. *contention, not exclusion*. This probe answers it with our
+// own number rather than inheriting Playbox's deferral.
+//
+// While enabled, the render path alternates frames: on a "loaded" frame a single
+// worker thread streams a read-modify-write over a multi-MiB buffer for the whole
+// duration of the stereo poll; a "control" frame polls with the worker idle. The
+// app buckets the per-frame stereo poll wait and (when `--perf-gpu-timestamps` is
+// also on) the GPU-clock stereo total by `poll_contention_active`; the
+// loaded-minus-control delta is the contention cost. Within-run A/B keeps the two
+// buckets thermally matched (records note frame p50 drifts ~1.5ms across
+// build/run cycles, so a cross-run baseline would be unreliable here).
+//
+// The load is a deliberately memory-traffic-heavy, *single-core* stand-in: a
+// 16 MiB buffer (well past the SoC last-level cache, so it generates real DRAM
+// traffic) streamed continuously for the entire ~11ms poll. That is heavier and
+// longer than the real next-frame cull/encode (~3-7ms, a smaller mostly-cached
+// working set) E4 would actually overlap, so the bias is conservative: a *small*
+// measured GPU inflation here is a confident green light for E4, while a large
+// one warrants re-measuring with a lighter representative load before drawing a
+// conclusion (contention changes the *size* of the overlap win, not whether one
+// exists).
+//
+// A native OS thread is the 062 shared-threading-topology native backend. This is
+// an opt-in native diagnostic — the contention question is intrinsic to the
+// native unified-memory headset and has no web analogue — and the normal headset
+// loop never spawns the worker.
+const POLL_CONTENTION_BUFFER_LEN: usize = 2 * 1024 * 1024; // 2M u64 = 16 MiB
+const POLL_CONTENTION_STOP_CHECK_STRIDE: usize = 8 * 1024;
+const POLL_CONTENTION_MAX_LOAD: Duration = Duration::from_millis(40);
+
+struct PollContentionShared {
+    /// Set true for the duration of a loaded frame's poll; the worker streams
+    /// memory while it is true and stops promptly once it clears.
+    run: AtomicBool,
+    shutdown: AtomicBool,
+    /// Published so the optimizer cannot elide the streaming traffic.
+    checksum: AtomicU64,
+    /// Park gate: the worker sleeps on the condvar until a load is requested.
+    wake: Mutex<bool>,
+    wake_cv: Condvar,
+}
+
+struct PollContentionProbe {
+    shared: Arc<PollContentionShared>,
+    worker: Option<JoinHandle<()>>,
+    frame_counter: u64,
+}
+
+impl PollContentionProbe {
+    fn new() -> Self {
+        let shared = Arc::new(PollContentionShared {
+            run: AtomicBool::new(false),
+            shutdown: AtomicBool::new(false),
+            checksum: AtomicU64::new(0),
+            wake: Mutex::new(false),
+            wake_cv: Condvar::new(),
+        });
+        let worker_shared = Arc::clone(&shared);
+        let worker = thread::Builder::new()
+            .name("mclone xr poll-contention".to_owned())
+            .spawn(move || poll_contention_worker(&worker_shared))
+            .ok();
+        if worker.is_none() {
+            log::warn!("XR poll-contention probe worker failed to spawn; probe inert");
+        }
+        Self {
+            shared,
+            worker,
+            frame_counter: 0,
+        }
+    }
+
+    /// Alternate loaded/control frames. Returns true if this frame should run the
+    /// contention load.
+    fn next_frame_is_loaded(&mut self) -> bool {
+        let loaded = self.worker.is_some() && self.frame_counter % 2 == 0;
+        self.frame_counter = self.frame_counter.wrapping_add(1);
+        loaded
+    }
+
+    /// Wake the worker to stream memory; call immediately before the blocking poll.
+    fn begin_load(&self) {
+        self.shared.run.store(true, Ordering::SeqCst);
+        let mut wake = self
+            .shared
+            .wake
+            .lock()
+            .expect("poll-contention wake lock poisoned");
+        *wake = true;
+        self.shared.wake_cv.notify_one();
+    }
+
+    /// Stop the worker; call immediately after the poll returns.
+    fn end_load(&self) {
+        self.shared.run.store(false, Ordering::SeqCst);
+    }
+}
+
+impl Drop for PollContentionProbe {
+    fn drop(&mut self) {
+        self.shared.shutdown.store(true, Ordering::SeqCst);
+        self.shared.run.store(false, Ordering::SeqCst);
+        if let Ok(mut wake) = self.shared.wake.lock() {
+            *wake = true;
+            self.shared.wake_cv.notify_one();
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn poll_contention_worker(shared: &PollContentionShared) {
+    let mut buffer = vec![0u64; POLL_CONTENTION_BUFFER_LEN];
+    let mut seed: u64 = 0x9E37_79B9_7F4A_7C15;
+    loop {
+        {
+            let mut wake = match shared.wake.lock() {
+                Ok(guard) => guard,
+                Err(_) => break,
+            };
+            while !*wake {
+                wake = match shared.wake_cv.wait(wake) {
+                    Ok(guard) => guard,
+                    Err(_) => return,
+                };
+            }
+            *wake = false;
+        }
+        if shared.shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+        // Stream a read-modify-write over the whole buffer until the main thread
+        // clears `run` (the poll returned) or the safety cap trips. The RMW plus
+        // running checksum forces real loads and stores on every element.
+        let started = Instant::now();
+        let mut checksum = shared.checksum.load(Ordering::Relaxed);
+        'load: while shared.run.load(Ordering::Relaxed) {
+            let mut index = 0;
+            while index < buffer.len() {
+                let end = (index + POLL_CONTENTION_STOP_CHECK_STRIDE).min(buffer.len());
+                for slot in &mut buffer[index..end] {
+                    seed = seed
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    *slot = slot.wrapping_add(seed);
+                    checksum ^= *slot;
+                }
+                index = end;
+                if !shared.run.load(Ordering::Relaxed)
+                    || started.elapsed() >= POLL_CONTENTION_MAX_LOAD
+                {
+                    break 'load;
+                }
+            }
+        }
+        shared.checksum.store(checksum, Ordering::Relaxed);
+    }
+}
+
 pub struct XrMcloneTerrainState<S = XrLocalOnlyRemoteSession>
 where
     S: RemoteDedicatedServerSession,
@@ -536,6 +713,7 @@ where
     gpu_timestamps_requested: bool,
     gpu_timestamps_init_attempted: bool,
     gpu_timestamps: Option<XrGpuStereoTimestamps>,
+    poll_contention: Option<PollContentionProbe>,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
     menu_pointer_down: bool,
@@ -654,6 +832,7 @@ where
             gpu_timestamps_requested: false,
             gpu_timestamps_init_attempted: false,
             gpu_timestamps: None,
+            poll_contention: None,
             last_locomotion_update: None,
             menu_toggle_down: false,
             menu_pointer_down: false,
@@ -730,6 +909,7 @@ where
             gpu_timestamps_requested: false,
             gpu_timestamps_init_attempted: false,
             gpu_timestamps: None,
+            poll_contention: None,
             last_locomotion_update: None,
             menu_toggle_down: false,
             menu_pointer_down: false,
@@ -974,12 +1154,33 @@ where
         let submit_start = collect_split_timing.then(Instant::now);
         let submission = queue.submit(Some(command_buffer));
         timing.stereo_submit_ms = submit_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        // E2: optionally run a CPU memory-bandwidth load on a worker concurrently
+        // with the blocking GPU poll, on alternating frames, to measure
+        // unified-memory contention (loaded vs control). Opt-in; no worker exists
+        // otherwise.
+        let contention_loaded = match self.poll_contention.as_mut() {
+            Some(probe) => {
+                let loaded = probe.next_frame_is_loaded();
+                if loaded {
+                    probe.begin_load();
+                }
+                loaded
+            }
+            None => false,
+        };
+        timing.poll_contention_active = contention_loaded;
         let poll_start = collect_split_timing.then(Instant::now);
-        device
+        let poll_result = device
             .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
             .map(|_| ())
-            .context("wait for XR terrain stereo render submission")?;
+            .context("wait for XR terrain stereo render submission");
         timing.stereo_poll_wait_ms = poll_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        if contention_loaded {
+            if let Some(probe) = self.poll_contention.as_ref() {
+                probe.end_load();
+            }
+        }
+        poll_result?;
         // The submission has completed (the poll above blocked on it), so the
         // resolved timestamps are ready; collect them and restore the profiler.
         if let Some(ts) = gpu_timestamps.as_ref() {
@@ -1016,6 +1217,21 @@ where
     /// Vulkan adapter does not advertise `TIMESTAMP_QUERY`.
     pub fn set_gpu_timestamps_enabled(&mut self, enabled: bool) {
         self.gpu_timestamps_requested = enabled;
+    }
+
+    /// E2 (docs/tactical/106): opt into the poll-contention probe. When enabled,
+    /// a single worker thread runs a memory-bandwidth load concurrently with the
+    /// blocking stereo poll on alternating frames so the app can bucket
+    /// loaded-vs-control poll wait / GPU time and measure unified-memory
+    /// contention. Opt-in; the normal headset loop never spawns the worker.
+    pub fn set_poll_contention_enabled(&mut self, enabled: bool) {
+        if enabled {
+            if self.poll_contention.is_none() {
+                self.poll_contention = Some(PollContentionProbe::new());
+            }
+        } else {
+            self.poll_contention = None;
+        }
     }
 
     pub fn camera_snapshot(&self) -> EngineCameraSnapshot {

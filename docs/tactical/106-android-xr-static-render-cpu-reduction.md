@@ -11,7 +11,9 @@ and tradeoffs, an on-device **experiment ladder (E1-E6)** to generate our own
 evidence rather than inheriting Playbox's conclusions, and an allocation/copy
 backlog. **E1 (GPU-timestamp split) has landed and materially revises the
 diagnosis — see "E1 Result" below; the frame is GPU-bound serial CPU+GPU, not
-"7ms GPU with 40% headroom." E3 (allocation/copy wins) is next.**
+"7ms GPU with 40% headroom." E3 (allocation/copy wins) and E2 (contention probe)
+have both landed; the next slice is E4 (frame pipelining / Slice K) — see "E2
+Result" for the go decision and the measured contention.**
 
 Scope: standalone Quest / Android XR APK only, not desktop-hosted OpenXR
 streaming to a Quest client. Keep every change behind the shared XR/render
@@ -120,9 +122,10 @@ Grounded in the measured CPU-blocked-idle time:
   is nearly free (records are cached), and cull/encode are pose-dependent — so the
   real win is cross-frame: submit frame N, do frame N+1's `xrWaitFrame`/cull/
   encode while N's GPU runs, and block on N's fence only before releasing N's
-  image. Run E2 first as a contention probe (does CPU work during the poll inflate
-  the GPU poll on this unified-memory SoC? — generate our own number rather than
-  assume), then commit to E4 if contention is small.
+  image. **E2 has now run** (see "E2 Result"): a deliberately heavy CPU load
+  during the poll inflates the GPU by only `~1.9ms`, so the overlapped
+  `max(CPU, GPU+contention)` frame stays under budget — contention is small enough
+  to commit to E4.
 - **E4 cost to weigh before landing:** it adds ~1 frame of latency; motion-to-
   photon is already `~25-39ms`, so measure MTP before/after and keep a comfort
   check (per Slice K). Keep all threading inside the shared job system
@@ -137,6 +140,53 @@ Grounded in the measured CPU-blocked-idle time:
   mclone-appropriate way to cut per-eye vertex/draw cost; FFR can cut fragment
   fill. These lower the `max(CPU, GPU)` floor itself and matter more now that the
   true GPU is `~10.7ms`, not `7ms`.
+
+## E2 Result (landed 2026-06-29) — unified-memory contention is real but small; E4 is a go
+
+E2 added an opt-in poll-contention probe (`--perf-poll-contention`, marker
+`MCLONE_ANDROID_XR_PERF_CONTENTION`, lane
+`native:android-xr:perf:frozen:rd10:contention`). While enabled, a single worker
+thread (062 native OS-thread backend) streams a 16 MiB read-modify-write for the
+whole duration of the blocking stereo `device.poll(Wait)` on alternating frames;
+the app buckets the per-frame stereo poll wait and the GPU-clock stereo total
+(E1's timestamps, also enabled) by loaded vs control. Within-run A/B keeps the
+buckets thermally matched. Two back-to-back frozen RD10 runs (full row in
+[`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md)):
+
+| Bucket (avg) | Run 1 | Run 2 |
+|---|---:|---:|
+| Control GPU (uncontended) | `7.285ms` | `7.210ms` |
+| Loaded GPU (contended) | `9.150ms` | `9.135ms` |
+| **GPU contention delta** | **`+1.865ms`** | **`+1.925ms`** |
+| **Poll-wait delta** | **`+1.897ms`** | **`+1.933ms`** |
+
+The load is deliberately heavier than the real overlap target: one core streaming
+16 MiB (past the LLC → real DRAM traffic) for the *entire* `~7-9ms` poll, versus
+the real next-frame cull/encode (`~3-7ms`, a smaller mostly-cached working set).
+So `~1.9ms` is a conservative upper bound on the contention E4 would actually see.
+
+Findings:
+
+1. **Concurrent CPU work inflates the GPU by `~1.9ms` (`~26%`)** — contention is
+   real, not negligible, but bounded and highly reproducible (both runs within
+   `~0.06ms`).
+2. **The poll-wait delta equals the GPU delta to within `~0.03ms`.** This
+   re-confirms E1 (the poll *is* GPU execution) and pins the inflation to real GPU
+   slowdown (shared DRAM bandwidth / power-DVFS), not CPU scheduling — the main
+   thread is parked in the fence wait, so the worker has a free core.
+3. **E4 still wins decisively.** Serial today: `CPU(~3-4ms p50) + GPU`. Overlapped:
+   `max(CPU, GPU + contention)`, GPU-dominated → `~9ms` at this run's cool GPU
+   floor and `~12.6ms` even at E1's hot `10.7ms` floor — under the `13.889ms`
+   budget across the thermal range, vs today's `~13.7ms` serial p50. The real
+   overlap is lighter than the probe, so real contention should be `≤1.9ms`.
+
+**Decision: proceed to E4 (Slice K).** Contention shaves at most `~1.9ms` off the
+theoretical `max(CPU, GPU)` win and does not erase it — exactly the "changes the
+size, not the existence" prediction. Carry two cautions into E4: (a) both probe
+runs settled cool (`~7.2ms` control GPU; the frozen lane is idle terrain), so
+contention near the SoC power ceiling is untested and the hot-frame tail must be
+watched; (b) E4 adds `~1` frame of latency — measure motion-to-photon before/after
+and keep the comfort check (Slice K). Defer E5 as before.
 
 ## Sharper Diagnosis (new since 099)
 
@@ -293,7 +343,7 @@ inference. Keep diagnostics opt-in; never add always-on per-frame cost.
 | # | Experiment | Tests | Effort | A good result tells us |
 |---|---|---|---|---|
 | E1 | GPU-timestamp split of the stereo poll | how much of the ~`11ms` poll is real GPU vs CPU/submit overhead | low | **DONE (2026-06-29): GPU `10.68ms` total ≈ poll `11.14ms`; the poll is GPU, Meta's `7ms` under-reported. Frame is serial CPU~9 + GPU~10.7. See "E1 Result".** |
-| E2 | Worker-thread overlap probe | run real next-frame prep on a job thread *during* `poll(Wait)`; does it run concurrently, improve wall time, or lose to bandwidth contention | low-med | **RECOMMENDED next (not yet run): E1 measured ~10.7ms of CPU-blocked-idle per frame and E3 shrank CPU to ~6.7ms, so overlap would gate the frame at `max(CPU,GPU) ≈ 10.9ms` — comfortably under budget. See "E3 Result + Overlap Recommendation".** |
+| E2 | Worker-thread overlap probe | run real next-frame prep on a job thread *during* `poll(Wait)`; does it run concurrently, improve wall time, or lose to bandwidth contention | low-med | **DONE (2026-06-29): a deliberately heavy single-core 16 MiB load during the poll inflates the GPU by `~1.9ms` (`~26%`); poll delta == GPU delta to `~0.03ms`. Contention is real but bounded — the overlapped `max(CPU, GPU+1.9ms)` frame stays under budget across the thermal range. E4 is a go. See "E2 Result".** |
 | E3 | Allocation/copy elimination | the backlog below | low | **DONE (2026-06-29): Slices F+G landed. shared_records 1.5ms->0.02ms, per-eye cull 2.3ms->1.5ms; frame p50 15.66ms->13.87ms (under budget at median, p95 still over). See "E3 Result".** |
 | E4 | Frame pipelining | submit N, prepare N+1 pose-independent work, block on N's fence only before releasing N's image | med | the real latency<->throughput tradeoff (Slice K), measured |
 | E5 | Semaphore / no-block via `wgpu-hal` | remove the CPU fence wait entirely; compositor waits GPU-side | med-high | whether Playbox's "wgpu can't" is actually true for us |

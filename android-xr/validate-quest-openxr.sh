@@ -44,6 +44,7 @@ PERF_SETTLED_STATIONARY="${MCLONE_ANDROID_XR_PERF_SETTLED_STATIONARY:-0}"
 PERF_FROZEN_RENDER="${MCLONE_ANDROID_XR_PERF_FROZEN_RENDER:-0}"
 PERF_METRICS="${MCLONE_ANDROID_XR_PERF_METRICS:-0}"
 PERF_GPU_TIMESTAMPS="${MCLONE_ANDROID_XR_PERF_GPU_TIMESTAMPS:-0}"
+PERF_POLL_CONTENTION="${MCLONE_ANDROID_XR_PERF_POLL_CONTENTION:-0}"
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     PERF_SETTLED_STATIONARY=1
 fi
@@ -133,6 +134,12 @@ Options:
                      with the real on-device GPU time (total and per eye). Splits
                      the blocking stereo poll wait into GPU execution vs
                      CPU/submit overhead. Combine with a perf lane.
+  --perf-poll-contention
+                     Opt-in unified-memory contention probe (E2). Runs a CPU
+                     memory-bandwidth load on a worker during the stereo poll on
+                     alternating frames and logs MCLONE_ANDROID_XR_PERF_CONTENTION
+                     with loaded-vs-control poll/GPU deltas. Combine with
+                     --perf-gpu-timestamps for the clean GPU-clock delta.
   --perf-summary PATH
                      Local file for the compact perf marker block. Default:
                      /tmp/mclone-quest-openxr-perf-summary.txt.
@@ -427,6 +434,10 @@ while [[ $# -gt 0 ]]; do
             PERF_GPU_TIMESTAMPS=1
             shift
             ;;
+        --perf-poll-contention)
+            PERF_POLL_CONTENTION=1
+            shift
+            ;;
         --perf-summary)
             require_arg "$1" "${2:-}"
             PERF_SUMMARY_PATH="$2"
@@ -574,6 +585,9 @@ if [[ "$PERF_METRICS" == "1" ]]; then
 fi
 if [[ "$PERF_GPU_TIMESTAMPS" == "1" ]]; then
     STARTUP_ARGV+=(--perf-gpu-timestamps)
+fi
+if [[ "$PERF_POLL_CONTENTION" == "1" ]]; then
+    STARTUP_ARGV+=(--perf-poll-contention)
 fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"

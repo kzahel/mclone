@@ -223,6 +223,7 @@ mod android {
         perf_frozen_render: bool,
         perf_metrics: bool,
         perf_gpu_timestamps: bool,
+        perf_poll_contention: bool,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -238,6 +239,7 @@ mod android {
                 perf_frozen_render: false,
                 perf_metrics: false,
                 perf_gpu_timestamps: false,
+                perf_poll_contention: false,
             }
         }
     }
@@ -322,6 +324,9 @@ mod android {
                 }
                 "--perf-gpu-timestamps" => {
                     options.perf_gpu_timestamps = true;
+                }
+                "--perf-poll-contention" => {
+                    options.perf_poll_contention = true;
                 }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
@@ -594,6 +599,10 @@ mod android {
             startup_options.perf_gpu_timestamps
         );
         log::info!(
+            "Android XR performance poll-contention probe: {}",
+            startup_options.perf_poll_contention
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -633,6 +642,7 @@ mod android {
             startup_options.perf_frozen_render,
             startup_options.perf_metrics,
             startup_options.perf_gpu_timestamps,
+            startup_options.perf_poll_contention,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -653,6 +663,7 @@ mod android {
         perf_frozen_render: bool,
         perf_metrics: bool,
         perf_gpu_timestamps: bool,
+        perf_poll_contention: bool,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -921,6 +932,7 @@ mod android {
         terrain.set_display_refresh_hz(display_refresh.current_rate);
         terrain.set_render_split_timing_enabled(perf_seconds.is_some());
         terrain.set_gpu_timestamps_enabled(perf_gpu_timestamps);
+        terrain.set_poll_contention_enabled(perf_poll_contention);
         log::info!(
             "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={} actors={}",
             terrain_summary.section_count,
@@ -1561,6 +1573,8 @@ mod android {
                 start_camera: rendered.camera,
                 latest_camera: rendered.camera,
                 latest_summary: rendered.summary,
+                contention_loaded: ContentionBucket::default(),
+                contention_control: ContentionBucket::default(),
             });
             true
         }
@@ -1627,6 +1641,45 @@ mod android {
         }
     }
 
+    /// E2 (docs/tactical/106): accumulates one side of the poll-contention A/B
+    /// (loaded frames ran a CPU memory-bandwidth load during the stereo poll;
+    /// control frames did not). Means are reported because they are stable over
+    /// the ~600 frames each bucket collects; maxima catch the worst case.
+    #[derive(Clone, Copy, Debug, Default)]
+    struct ContentionBucket {
+        count: u64,
+        poll_sum_ms: f64,
+        poll_max_ms: f64,
+        gpu_sum_ms: f64,
+        gpu_max_ms: f64,
+    }
+
+    impl ContentionBucket {
+        fn observe(&mut self, poll_ms: f64, gpu_ms: f64) {
+            self.count += 1;
+            self.poll_sum_ms += poll_ms;
+            self.poll_max_ms = self.poll_max_ms.max(poll_ms);
+            self.gpu_sum_ms += gpu_ms;
+            self.gpu_max_ms = self.gpu_max_ms.max(gpu_ms);
+        }
+
+        fn avg_poll_ms(&self) -> f64 {
+            if self.count == 0 {
+                0.0
+            } else {
+                self.poll_sum_ms / self.count as f64
+            }
+        }
+
+        fn avg_gpu_ms(&self) -> f64 {
+            if self.count == 0 {
+                0.0
+            } else {
+                self.gpu_sum_ms / self.count as f64
+            }
+        }
+    }
+
     struct AndroidXrActivePerfProbe {
         requested: Duration,
         started: Instant,
@@ -1653,6 +1706,8 @@ mod android {
         start_camera: EngineCameraSnapshot,
         latest_camera: EngineCameraSnapshot,
         latest_summary: mclone_xr_scene::XrTerrainFrameSummary,
+        contention_loaded: ContentionBucket,
+        contention_control: ContentionBucket,
     }
 
     impl AndroidXrActivePerfProbe {
@@ -1687,6 +1742,16 @@ mod android {
                     self.diagnostics_refresh_frames += 1;
                 }
                 self.max_upload = max_upload_summary(self.max_upload, rendered.summary.upload);
+                let terrain_timing = rendered.summary.timing;
+                let bucket = if terrain_timing.poll_contention_active {
+                    &mut self.contention_loaded
+                } else {
+                    &mut self.contention_control
+                };
+                bucket.observe(
+                    terrain_timing.stereo_poll_wait_ms,
+                    terrain_timing.gpu_stereo_total_ms,
+                );
                 self.latest_summary = rendered.summary;
                 self.latest_camera = rendered.camera;
             }
@@ -1797,6 +1862,32 @@ mod android {
                 self.max_render.terrain_gpu_left_eye_ms,
                 self.max_render.terrain_gpu_right_eye_ms
             );
+            if self.contention_loaded.count > 0 {
+                // E2 (docs/tactical/106): loaded frames ran a CPU memory-bandwidth
+                // load during the stereo poll; control frames did not. The
+                // loaded-minus-control deltas are the measured unified-memory
+                // contention cost. `gpu_*` values are meaningful only when
+                // `--perf-gpu-timestamps` is also enabled (else they read 0).
+                let poll_delta = self.contention_loaded.avg_poll_ms()
+                    - self.contention_control.avg_poll_ms();
+                let gpu_delta =
+                    self.contention_loaded.avg_gpu_ms() - self.contention_control.avg_gpu_ms();
+                log::info!(
+                    "MCLONE_ANDROID_XR_PERF_CONTENTION loaded_frames={} control_frames={} loaded_poll_avg_ms={:.3} loaded_poll_max_ms={:.3} control_poll_avg_ms={:.3} control_poll_max_ms={:.3} poll_delta_avg_ms={:.3} loaded_gpu_avg_ms={:.3} loaded_gpu_max_ms={:.3} control_gpu_avg_ms={:.3} control_gpu_max_ms={:.3} gpu_delta_avg_ms={:.3}",
+                    self.contention_loaded.count,
+                    self.contention_control.count,
+                    self.contention_loaded.avg_poll_ms(),
+                    self.contention_loaded.poll_max_ms,
+                    self.contention_control.avg_poll_ms(),
+                    self.contention_control.poll_max_ms,
+                    poll_delta,
+                    self.contention_loaded.avg_gpu_ms(),
+                    self.contention_loaded.gpu_max_ms,
+                    self.contention_control.avg_gpu_ms(),
+                    self.contention_control.gpu_max_ms,
+                    gpu_delta
+                );
+            }
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_UPLOAD_MAX work_frames={} rebuilt_sections={} removed_sections={} rebuilt_vertices={} rebuilt_indices={} uploaded_sections={} upload_removed_sections={} uploaded_vertices={} uploaded_indices={} ready_sections={}",
                 self.upload_work_frames,
