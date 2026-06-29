@@ -10,6 +10,10 @@
 //! elsewhere; this module only covers the flat geometry. Triangle fans are
 //! expanded to indexed triangle lists since wgpu has no fan topology.
 
+use std::cell::RefCell;
+use std::num::{NonZeroU32, NonZeroU64};
+
+use anyhow::{Result, bail};
 use glam::{Mat4, Quat, Vec3};
 use wgpu::util::DeviceExt;
 
@@ -21,6 +25,7 @@ use crate::sky::sunrise_color;
 use crate::uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
 
 const SKY_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = 64;
+const SKY_MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = SKY_UNIFORM_BYTE_SIZE * 2;
 const SKY_VERTEX_FLOAT_COUNT: usize = 7; // position(3) + color(4)
 const SKY_VERTEX_BYTE_SIZE: wgpu::BufferAddress =
     (SKY_VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
@@ -52,6 +57,8 @@ pub struct SkyRenderer {
     glow_index_buffer: wgpu::Buffer,
     glow_index_count: u32,
     color_transform: RenderTargetColorTransform,
+    color_format: wgpu::TextureFormat,
+    multiview: RefCell<Option<SkyMultiviewRenderer>>,
 }
 
 impl SkyRenderer {
@@ -205,6 +212,8 @@ impl SkyRenderer {
             glow_index_buffer,
             glow_index_count,
             color_transform: render_config.target_color_transform(),
+            color_format: render_config.color_format,
+            multiview: RefCell::new(None),
         }
     }
 
@@ -298,6 +307,225 @@ impl SkyRenderer {
             pass.set_index_buffer(self.glow_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..self.glow_index_count, 0, 0..1);
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_multiview(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        clear_color: wgpu::Color,
+        sky_view_projections: [Mat4; 2],
+        time_of_day: f32,
+        sun_angle: f32,
+    ) -> Result<()> {
+        let clear_color = self.prepare_vertices(queue, clear_color, time_of_day, sun_angle);
+        let renderer = self.multiview_renderer(device)?;
+        renderer.write_uniforms(queue, sky_view_projections);
+        let glow = sunrise_color(time_of_day);
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_sky_multiview_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear_color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        pass.set_bind_group(0, &renderer.bind_group, &[]);
+        pass.set_pipeline(&renderer.disc_pipeline);
+        pass.set_vertex_buffer(0, self.disc_vertex_buffer.slice(..));
+        pass.set_index_buffer(self.disc_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..self.disc_index_count, 0, 0..1);
+        if glow.is_some() {
+            pass.set_pipeline(&renderer.glow_pipeline);
+            pass.set_vertex_buffer(0, self.glow_vertex_buffer.slice(..));
+            pass.set_index_buffer(self.glow_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..self.glow_index_count, 0, 0..1);
+        }
+        Ok(())
+    }
+
+    fn prepare_vertices(
+        &self,
+        queue: &wgpu::Queue,
+        clear_color: wgpu::Color,
+        time_of_day: f32,
+        sun_angle: f32,
+    ) -> wgpu::Color {
+        let clear_color = color_transform_wgpu(clear_color, self.color_transform);
+        let sky_color = [
+            clear_color.r as f32,
+            clear_color.g as f32,
+            clear_color.b as f32,
+        ];
+        queue.write_buffer(
+            &self.disc_vertex_buffer,
+            0,
+            &vertex_bytes(&disc_vertices(sky_color)),
+        );
+        if let Some(color) = sunrise_color(time_of_day) {
+            queue.write_buffer(
+                &self.glow_vertex_buffer,
+                0,
+                &vertex_bytes(&glow_vertices(
+                    color_transform_rgba(color, self.color_transform),
+                    sun_angle,
+                )),
+            );
+        }
+        clear_color
+    }
+
+    fn multiview_renderer(
+        &self,
+        device: &wgpu::Device,
+    ) -> Result<std::cell::Ref<'_, SkyMultiviewRenderer>> {
+        if !device.features().contains(wgpu::Features::MULTIVIEW) {
+            bail!("sky multiview render requires wgpu MULTIVIEW");
+        }
+        if self.multiview.borrow().is_none() {
+            let renderer = SkyMultiviewRenderer::new(device, self.color_format);
+            *self.multiview.borrow_mut() = Some(renderer);
+        }
+        Ok(std::cell::Ref::map(self.multiview.borrow(), |renderer| {
+            renderer
+                .as_ref()
+                .expect("sky multiview renderer initialized above")
+        }))
+    }
+}
+
+struct SkyMultiviewRenderer {
+    disc_pipeline: wgpu::RenderPipeline,
+    glow_pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+impl SkyMultiviewRenderer {
+    fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_sky_multiview_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sky_multiview.wgsl").into()),
+        });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_sky_multiview_uniforms"),
+            size: SKY_MULTIVIEW_UNIFORM_BYTE_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("mclone_sky_multiview_bind_group_layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: NonZeroU64::new(SKY_MULTIVIEW_UNIFORM_BYTE_SIZE),
+                },
+                count: None,
+            }],
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_sky_multiview_bind_group"),
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_sky_multiview_pipeline_layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: SKY_VERTEX_BYTE_SIZE,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: 12,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+            ],
+        };
+        let make_pipeline = |label: &str, blend: Option<wgpu::BlendState>| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[vertex_layout.clone()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview: NonZeroU32::new(2),
+                cache: None,
+            })
+        };
+        let disc_pipeline = make_pipeline("mclone_sky_multiview_disc_pipeline", None);
+        let glow_pipeline = make_pipeline(
+            "mclone_sky_multiview_glow_pipeline",
+            Some(wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::SrcAlpha,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::Zero,
+                    operation: wgpu::BlendOperation::Add,
+                },
+            }),
+        );
+        Self {
+            disc_pipeline,
+            glow_pipeline,
+            uniform_buffer,
+            bind_group,
+        }
+    }
+
+    fn write_uniforms(&self, queue: &wgpu::Queue, sky_view_projections: [Mat4; 2]) {
+        let mut bytes = [0u8; SKY_MULTIVIEW_UNIFORM_BYTE_SIZE as usize];
+        bytes[..SKY_UNIFORM_BYTE_SIZE as usize]
+            .copy_from_slice(&matrix_bytes(sky_view_projections[0].to_cols_array_2d()));
+        bytes[SKY_UNIFORM_BYTE_SIZE as usize..]
+            .copy_from_slice(&matrix_bytes(sky_view_projections[1].to_cols_array_2d()));
+        queue.write_buffer(&self.uniform_buffer, 0, &bytes);
     }
 }
 

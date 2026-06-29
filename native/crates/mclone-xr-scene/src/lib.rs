@@ -791,6 +791,23 @@ where
         self.render_prepared_terrain_multiview_frame_frozen(device, queue, render_views, target)
     }
 
+    pub fn render_sky_terrain_multiview_frame_frozen(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        target: XrTerrainMultiviewTarget<'_>,
+    ) -> Result<XrTerrainMultiviewFrameSummary> {
+        let render_views = self.render_views(&views)?;
+        self.render_prepared_terrain_multiview_frame_frozen_inner(
+            device,
+            queue,
+            render_views,
+            target,
+            true,
+        )
+    }
+
     pub fn render_terrain_stereo_frame_frozen(
         &mut self,
         device: &wgpu::Device,
@@ -806,6 +823,25 @@ where
             render_views,
             left_target,
             right_target,
+        )
+    }
+
+    pub fn render_sky_terrain_stereo_frame_frozen(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        left_target: XrTerrainEyeTarget<'_>,
+        right_target: XrTerrainEyeTarget<'_>,
+    ) -> Result<XrTerrainStereoFrameSummary> {
+        let render_views = self.render_views(&views)?;
+        self.render_prepared_terrain_stereo_frame_frozen_inner(
+            device,
+            queue,
+            render_views,
+            left_target,
+            right_target,
+            true,
         )
     }
 
@@ -968,6 +1004,25 @@ where
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
     ) -> Result<XrTerrainStereoFrameSummary> {
+        self.render_prepared_terrain_stereo_frame_frozen_inner(
+            device,
+            queue,
+            render_views,
+            left_target,
+            right_target,
+            false,
+        )
+    }
+
+    fn render_prepared_terrain_stereo_frame_frozen_inner(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        render_views: [ChunkRenderView; 2],
+        left_target: XrTerrainEyeTarget<'_>,
+        right_target: XrTerrainEyeTarget<'_>,
+        include_sky: bool,
+    ) -> Result<XrTerrainStereoFrameSummary> {
         let (terrain_views, terrain_options) = self.terrain_render_views_and_options(render_views);
         let prepared_records = self.draw.prepare_render_records();
         let left = self.render_terrain_eye_only_target(
@@ -979,6 +1034,7 @@ where
             terrain_options[0],
             "left",
             LEFT_EYE_VIEW_SLOT,
+            include_sky,
         )?;
         let right = self.render_terrain_eye_only_target(
             device,
@@ -989,6 +1045,7 @@ where
             terrain_options[1],
             "right",
             RIGHT_EYE_VIEW_SLOT,
+            include_sky,
         )?;
 
         self.render_stats.drawn_section_count = left.drawn_section_count;
@@ -1013,6 +1070,7 @@ where
         render_options: TexturedSectionRenderOptions,
         label: &'static str,
         view_slot: PerViewSlot,
+        include_sky: bool,
     ) -> Result<TexturedSectionRenderStats> {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some(match label {
@@ -1021,12 +1079,25 @@ where
                 _ => "mclone_xr_terrain_only_eye_encoder",
             }),
         });
-        let render_target = ChunkRenderTarget::new(
+        let mut render_target = ChunkRenderTarget::new(
             target.color_view,
             &target.depth.view,
             target.size,
             self.sky_clear_color(),
         );
+        if include_sky {
+            self.sky.render_in_slot(
+                queue,
+                &mut encoder,
+                target.color_view,
+                self.sky_clear_color(),
+                render_view.sky_view_projection(),
+                self.time_of_day(),
+                self.sun_angle(),
+                view_slot,
+            );
+            render_target = render_target.with_loaded_color();
+        }
         let stats = self
             .draw
             .render_prepared_with_options_in_slot(
@@ -1067,7 +1138,7 @@ where
             self.frozen_runtime_upload_summary()
         };
 
-        self.render_prepared_terrain_multiview_frame_with_upload(
+        self.render_prepared_terrain_multiview_frame_with_upload_inner(
             device,
             queue,
             render_views,
@@ -1083,12 +1154,30 @@ where
         render_views: [ChunkRenderView; 2],
         target: XrTerrainMultiviewTarget<'_>,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
-        self.render_prepared_terrain_multiview_frame_with_upload(
+        self.render_prepared_terrain_multiview_frame_frozen_inner(
+            device,
+            queue,
+            render_views,
+            target,
+            false,
+        )
+    }
+
+    fn render_prepared_terrain_multiview_frame_frozen_inner(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        render_views: [ChunkRenderView; 2],
+        target: XrTerrainMultiviewTarget<'_>,
+        include_sky: bool,
+    ) -> Result<XrTerrainMultiviewFrameSummary> {
+        self.render_prepared_terrain_multiview_frame_with_upload_inner(
             device,
             queue,
             render_views,
             target,
             XrTerrainUploadSummary::default(),
+            include_sky,
         )
     }
 
@@ -1100,17 +1189,52 @@ where
         target: XrTerrainMultiviewTarget<'_>,
         upload: XrTerrainUploadSummary,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
+        self.render_prepared_terrain_multiview_frame_with_upload_inner(
+            device,
+            queue,
+            render_views,
+            target,
+            upload,
+            false,
+        )
+    }
+
+    fn render_prepared_terrain_multiview_frame_with_upload_inner(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        render_views: [ChunkRenderView; 2],
+        target: XrTerrainMultiviewTarget<'_>,
+        upload: XrTerrainUploadSummary,
+        include_sky: bool,
+    ) -> Result<XrTerrainMultiviewFrameSummary> {
         let (terrain_views, terrain_options) = self.terrain_render_views_and_options(render_views);
         let prepared_records = self.draw.prepare_render_records();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("mclone_xr_terrain_multiview_encoder"),
         });
-        let render_target = ChunkMultiviewRenderTarget::new(
+        let mut render_target = ChunkMultiviewRenderTarget::new(
             target.color_view,
             &target.depth.view,
             target.size,
             self.sky_clear_color(),
         );
+        if include_sky {
+            self.sky.render_multiview(
+                device,
+                queue,
+                &mut encoder,
+                target.color_view,
+                self.sky_clear_color(),
+                [
+                    terrain_views[0].sky_view_projection(),
+                    terrain_views[1].sky_view_projection(),
+                ],
+                self.time_of_day(),
+                self.sun_angle(),
+            )?;
+            render_target = render_target.with_loaded_color();
+        }
         let stats = self
             .draw
             .render_prepared_multiview_with_options(
