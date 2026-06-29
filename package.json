@@ -96,6 +96,7 @@
     "asset-lab:export": "pnpm --dir ./tools/asset-lab export",
     "asset-lab:smoke": "pnpm --dir ./tools/asset-lab smoke",
     "asset-lab:sheet": "pnpm --dir ./tools/asset-lab sheet",
+    "asset-lab:video": "pnpm --dir ./tools/asset-lab video",
     "asset-lab:preview": "pnpm --dir ./tools/asset-lab preview",
     "typecheck": "pnpm native:web:typecheck",
     "oracle:gen": "bash ./oracle/run.sh"

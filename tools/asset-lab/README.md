@@ -15,6 +15,7 @@ pnpm asset-lab:typecheck
 pnpm asset-lab:export
 pnpm asset-lab:smoke
 pnpm asset-lab:sheet
+pnpm asset-lab:video
 pnpm asset-lab:preview
 ```
 
@@ -22,6 +23,8 @@ The smoke command writes screenshots under `/tmp/mclone-asset-lab/` by default.
 The exported figure JSON is also written under `/tmp` unless `--out` is passed.
 The sheet command writes a larger review image with front, side,
 three-quarter, side animation, and three-quarter animation captures.
+The video command captures deterministic Playwright frames and uses `ffmpeg` to
+write an MP4 animation review at `/tmp/mclone-asset-lab/piglet-walk.mp4`.
 
 Asset files should use the DSL from `src/dsl.ts`. Three.js is an implementation
 detail of the preview, not the source format.
@@ -69,4 +72,14 @@ walkCycle("walk", {
     swing("leg_fr", { axis: "x", degrees: 20, phase: 0.5 }),
   ],
 });
+```
+
+The video command accepts the same figure path plus timing options:
+
+```sh
+pnpm --dir tools/asset-lab exec tsx src/video.ts examples/piglet/figure.ts \
+  --out /tmp/mclone-asset-lab/piglet-walk.mp4 \
+  --clip walk \
+  --fps 24 \
+  --seconds 2
 ```

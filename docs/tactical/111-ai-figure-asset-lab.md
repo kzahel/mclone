@@ -1,6 +1,6 @@
 # 111 - AI Figure Asset Lab
 
-Status: active; Slice 2 sheet capture landed.
+Status: active; Slice 2 MP4 video capture landed.
 
 ## Purpose
 
@@ -147,6 +147,7 @@ pnpm asset-lab:typecheck
 pnpm asset-lab:export
 pnpm asset-lab:smoke
 pnpm asset-lab:sheet
+pnpm asset-lab:video
 pnpm asset-lab:preview
 ```
 
@@ -160,6 +161,12 @@ The sheet capture writes a larger review image:
 
 ```text
 /tmp/mclone-asset-lab/piglet-sheet.png
+```
+
+The video capture writes an MP4 animation review:
+
+```text
+/tmp/mclone-asset-lab/piglet-walk.mp4
 ```
 
 The next useful captures are:
@@ -234,6 +241,8 @@ profile the harness before adding animation-sheet captures.
       `joint.pivot` instead of their mesh center.
 - [x] Add procedural walk-cycle authoring helpers for common `swing` and `bob`
       tracks while keeping exported clips as ordinary keyframes.
+- [x] Add MP4 animation review output from deterministic Playwright frames
+      assembled with `ffmpeg`.
 - [ ] Add a validation report that points to the asset file and part names.
 - [ ] Add starter prompts and examples for sheep, dog, cat, butterfly, and
       player stand-in variants.
@@ -245,6 +254,7 @@ pnpm asset-lab:typecheck
 pnpm asset-lab:export
 pnpm asset-lab:smoke
 pnpm asset-lab:sheet
+pnpm asset-lab:video
 node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); JSON.parse(require('fs').readFileSync('tools/asset-lab/package.json','utf8'))"
 git diff --check
 ```
@@ -253,6 +263,12 @@ Sheet output inspected:
 
 ```text
 /tmp/mclone-asset-lab/piglet-sheet.png
+```
+
+Video output inspected:
+
+```text
+/tmp/mclone-asset-lab/piglet-walk.mp4
 ```
 
 ### Slice 3 - Runtime Promotion Decision
