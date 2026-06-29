@@ -4,16 +4,19 @@ Status: proposed implementation plan. Continues
 [`099`](099-android-xr-rd10-render-cost-attribution.md) from the end of its
 Slice C2. 099 established, with on-device Meta metrics, that standalone Quest 3
 RD10 is **CPU draw-submission bound with ~40% GPU headroom**, and landed the
-diagnostics plus the single-submit / shared-records slices. This doc records the
-sharper diagnosis (the residual CPU cost is *container-bound*, not math-bound),
-the convergent target architecture, the ordered remaining slices with estimates
-and tradeoffs, an on-device **experiment ladder (E1-E6)** to generate our own
-evidence rather than inheriting Playbox's conclusions, and an allocation/copy
-backlog. **E1 (GPU-timestamp split) has landed and materially revises the
-diagnosis — see "E1 Result" below; the frame is GPU-bound serial CPU+GPU, not
+diagnostics plus the single-submit / shared-records slices. The single-submit
+slice was later reverted by `d0c5161` after headset validation exposed a left-eye
+projection regression; see "Post-Validation Rollback" below. This doc records
+the sharper diagnosis (the residual CPU cost is *container-bound*, not
+math-bound), the convergent target architecture, the ordered remaining slices
+with estimates and tradeoffs, an on-device **experiment ladder (E1-E6)** to
+generate our own evidence rather than inheriting Playbox's conclusions, and an
+allocation/copy backlog. **E1 (GPU-timestamp split) landed and materially revised
+the diagnosis — see "E1 Result" below; the frame is GPU-bound serial CPU+GPU, not
 "7ms GPU with 40% headroom." E3 (allocation/copy wins) and E2 (contention probe)
-have both landed; the next slice is E4 (frame pipelining / Slice K) — see "E2
-Result" for the go decision and the measured contention.**
+both landed, but E1/E2 instrumentation depended on the reverted single-submit
+path. Treat their numbers as historical diagnostics until a future safe
+single-submit or multiview path gives each eye immutable per-submission uniforms.**
 
 Scope: standalone Quest / Android XR APK only, not desktop-hosted OpenXR
 streaming to a Quest client. Keep every change behind the shared XR/render
@@ -39,7 +42,7 @@ Fresh `native:android-xr:perf:frozen:rd10` reproduction on the current build
 
 Marker maxima are independent per-field maxima, not one additive frame.
 
-## E1 Result (landed 2026-06-29) — the frame is GPU-bound, not "7ms + headroom"
+## E1 Result (landed 2026-06-29; instrumentation later removed by `d0c5161`) — the frame is GPU-bound, not "7ms + headroom"
 
 E1 added an opt-in wgpu `TIMESTAMP_QUERY` bracket around the whole stereo command
 encoder (`--perf-gpu-timestamps`, marker `MCLONE_ANDROID_XR_PERF_GPU`). Quest 3's
@@ -141,7 +144,7 @@ Grounded in the measured CPU-blocked-idle time:
   fill. These lower the `max(CPU, GPU)` floor itself and matter more now that the
   true GPU is `~10.7ms`, not `7ms`.
 
-## E2 Result (landed 2026-06-29) — unified-memory contention is real but small; E4 is a go
+## E2 Result (landed 2026-06-29; probe later removed by `d0c5161`) — unified-memory contention is real but small; E4 is a go
 
 E2 added an opt-in poll-contention probe (`--perf-poll-contention`, marker
 `MCLONE_ANDROID_XR_PERF_CONTENTION`, lane
@@ -188,17 +191,61 @@ contention near the SoC power ceiling is untested and the hot-frame tail must be
 watched; (b) E4 adds `~1` frame of latency — measure motion-to-photon before/after
 and keep the comfort check (Slice K). Defer E5 as before.
 
+## Post-Validation Rollback (landed 2026-06-29)
+
+Commit `d0c5161` (`Restore XR per-eye command submission`) reverted the risky
+part of `264c723` (`Submit Quest XR stereo eyes together`) after in-headset
+validation showed the left-eye projection was wrong/off-center while the right
+eye looked correct. This was not the underwater FOV path: XR does not pass the
+underwater overlay/FOV state into the render view.
+
+The cause was uniform lifetime, not the projection math itself. The
+single-encoder/single-submit path recorded the left eye and then the right eye
+before submitting, while shared render resources still update per-view uniforms
+with `queue.write_buffer` into reusable buffers. This is deterministic, not a
+timing race: under wgpu queue ordering, writes issued before a submit are visible
+to the command buffers in that submit in issue order. The recorded sequence was
+effectively `write(left uniforms) -> record left -> write(right uniforms) ->
+record right -> submit both`; by the time that submit executed, shared uniform
+buffers held right-eye data, so left-eye draws could read right-eye uniforms.
+Restoring per-eye encoder/submit/poll restores the prior ordering barrier:
+left-eye commands complete before right-eye uniforms are written.
+
+This was also broader than the chunk camera uniform. The same shared per-view
+`queue.write_buffer(..., 0, ...)` pattern exists in chunk terrain, sky, actors,
+selection outline, world GUI, and screen-effect renderers. A future stereo
+single-submit path must fix the lifetime discipline across every per-view
+renderer in the pass, not patch one chunk buffer.
+
+The same revert removed the E1 GPU timestamp split and E2 poll-contention probe,
+because both were built around one stereo command encoder and no longer matched
+the safe per-eye submission path. Keep the E1/E2 numbers as useful historical
+diagnostics for "poll wait is real GPU execution" and "contention is bounded,"
+but do not treat the current `main` branch as having runnable E1/E2
+instrumentation. Any future single-submit, multiview, or overlap slice must first
+make per-eye uniform data immutable for the whole submission across all per-view
+renderers. The minimal salvage path is a dynamic-offset uniform scheme backed by
+a small per-eye/per-frame ring, so frame N's left/right data and any in-flight
+frame N+1 data cannot alias. The strategic Slice I path is a multiview uniform
+array selected by `@builtin(view_index)`, which solves the same lifetime problem
+while also attacking the real GPU bottleneck. Do not re-land bare single-submit
+alone; validate both eyes in-headset, and preferably capture/diff both eye
+targets, before accepting performance wins.
+
 ## Sharper Diagnosis (new since 099)
 
 ### 1. The frame is CPU + GPU with no overlap
 
-`render_prepared_frame` (`mclone-xr-scene/src/lib.rs:713`) records both eyes into
-one encoder, `queue.submit`s once, then immediately blocks on
-`device.poll(WaitForSubmissionIndex)` (`:796`). The GPU cannot start until
-submit, and the CPU is parked for the whole GPU execution. So frame time is
-essentially **serial CPU prep/encode (~9-11ms) + GPU wait (~5-7ms)**, which is
-why p50 sits at ~15.7ms. Two independent levers follow: make the CPU work
-cheaper, or overlap CPU and GPU (latency tradeoff — see Slice K).
+At the time of E1/E2, `render_prepared_frame`
+(`mclone-xr-scene/src/lib.rs:713`) recorded both eyes into one encoder,
+`queue.submit`ted once, then immediately blocked on
+`device.poll(WaitForSubmissionIndex)` (`:796`). Current `main` after `d0c5161`
+records/submits/waits per eye for correctness, but still has no cross-frame
+CPU/GPU overlap. The GPU cannot start until submit, and the CPU is parked while
+waiting for GPU completion. So frame time is essentially **serial CPU
+prep/encode + GPU wait**, which is why p50 sits near the budget at RD10. Two
+independent levers follow: make the CPU work cheaper, or overlap CPU and GPU
+(latency tradeoff — see Slice K).
 
 ### 2. The cull cost is container-bound, not math-bound
 
@@ -246,10 +293,13 @@ The end state that makes all the cheap wins land in their best form:
 
 > **cull once (shared, flat) -> encode once (stereo multiview) -> submit once.**
 
-099's Slice B already made submit/poll shared. The remaining duplication is the
-per-eye cull (Slice H removes it) and the per-eye encode (Slice I / multiview
-removes it). Slices F and G make the shared cull cheap. Slice J (batching) and
-Slice K (CPU/GPU overlap) are the deeper levers if RD10 needs real headroom.
+099's Slice B attempted to make submit/poll shared, but `d0c5161` restored
+per-eye submission after the headset-only left-eye projection regression above.
+The target remains valid, but `submit once` is now explicitly gated on fixing
+per-eye uniform ownership first. The remaining duplication is the per-eye cull
+(Slice H removes it) and the per-eye encode (Slice I / multiview removes it).
+Slices F and G make the shared cull cheap. Slice J (batching) and Slice K
+(CPU/GPU overlap) are the deeper levers if RD10 needs real headroom.
 
 ## Playbox CPU/GPU Wait Cross-Check
 
@@ -342,8 +392,8 @@ inference. Keep diagnostics opt-in; never add always-on per-frame cost.
 
 | # | Experiment | Tests | Effort | A good result tells us |
 |---|---|---|---|---|
-| E1 | GPU-timestamp split of the stereo poll | how much of the ~`11ms` poll is real GPU vs CPU/submit overhead | low | **DONE (2026-06-29): GPU `10.68ms` total ≈ poll `11.14ms`; the poll is GPU, Meta's `7ms` under-reported. Frame is serial CPU~9 + GPU~10.7. See "E1 Result".** |
-| E2 | Worker-thread overlap probe | run real next-frame prep on a job thread *during* `poll(Wait)`; does it run concurrently, improve wall time, or lose to bandwidth contention | low-med | **DONE (2026-06-29): a deliberately heavy single-core 16 MiB load during the poll inflates the GPU by `~1.9ms` (`~26%`); poll delta == GPU delta to `~0.03ms`. Contention is real but bounded — the overlapped `max(CPU, GPU+1.9ms)` frame stays under budget across the thermal range. E4 is a go. See "E2 Result".** |
+| E1 | GPU-timestamp split of the stereo poll | how much of the ~`11ms` poll is real GPU vs CPU/submit overhead | low | **DONE (2026-06-29): GPU `10.68ms` total ≈ poll `11.14ms`; the poll is GPU, Meta's `7ms` under-reported. Frame is serial CPU~9 + GPU~10.7. Instrumentation later removed by `d0c5161` with the single-submit rollback. See "E1 Result".** |
+| E2 | Worker-thread overlap probe | run real next-frame prep on a job thread *during* `poll(Wait)`; does it run concurrently, improve wall time, or lose to bandwidth contention | low-med | **DONE (2026-06-29): a deliberately heavy single-core 16 MiB load during the poll inflates the GPU by `~1.9ms` (`~26%`); poll delta == GPU delta to `~0.03ms`. Contention is real but bounded — the overlapped `max(CPU, GPU+1.9ms)` frame stays under budget across the thermal range. Probe later removed by `d0c5161` with the single-submit rollback. See "E2 Result".** |
 | E3 | Allocation/copy elimination | the backlog below | low | **DONE (2026-06-29): Slices F+G landed. shared_records 1.5ms->0.02ms, per-eye cull 2.3ms->1.5ms; frame p50 15.66ms->13.87ms (under budget at median, p95 still over). See "E3 Result".** |
 | E4 | Frame pipelining | submit N, prepare N+1 pose-independent work, block on N's fence only before releasing N's image | med | the real latency<->throughput tradeoff (Slice K), measured |
 | E5 | Semaphore / no-block via `wgpu-hal` | remove the CPU fence wait entirely; compositor waits GPU-side | med-high | whether Playbox's "wgpu can't" is actually true for us |
