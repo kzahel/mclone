@@ -18,6 +18,8 @@ mod light_world;
 mod lighting_seed;
 mod loading_progress;
 mod persistence;
+#[cfg(feature = "physics")]
+mod physics_terrain;
 mod placement;
 mod player;
 mod player_chunk_tracking;

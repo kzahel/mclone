@@ -1,10 +1,11 @@
 # 110: Shared Physics Backend Experiment
 
-Status: active; Slices 1-3 landed with the shared `mclone-physics` facade,
-no-op backend, optional Rapier backend, synthetic cuboid/static-patch
-simulation test, section terrain collider probe, and `mclone-server` intent
-feature wiring. App binary-size measurement is deferred until an app/server path
-actually links physics.
+Status: active; Slices 1-3 plus the server terrain-source follow-up landed with
+the shared `mclone-physics` facade, no-op backend, optional Rapier backend,
+synthetic cuboid/static-patch simulation test, section terrain collider probe,
+feature-gated live chunk-to-physics terrain conversion, and `mclone-server`
+intent feature wiring. App binary-size measurement is deferred until an
+app/server path actually links physics.
 
 ## Purpose
 
@@ -292,7 +293,7 @@ cargo check --manifest-path native/Cargo.toml
   step/query cost with one dynamic cube and one capsule.
 - [x] Choose the first MVP terrain representation based on measurement, not
   aesthetics.
-- [ ] Wire section terrain input to real loaded chunk/block facts in the
+- [x] Wire section terrain input to real loaded chunk/block facts in the
   server-authoritative slice.
 
 Recorded Slice 3 result:
@@ -312,15 +313,29 @@ Recorded Slice 3 result:
   first runtime MVP, prefer merged X-run compound cuboids until real chunk
   fixtures show that voxel colliders or triangle meshes win. This keeps flat
   terrain compact while still representing vertical section details.
-- The live server chunk-fact conversion is intentionally still pending; this
-  slice proves the shared physics crate can build and compare the candidate
-  shapes without pulling Rapier into default builds or app crates.
+- Added a feature-gated server terrain-source follow-up:
+  - `mclone-server/src/physics_terrain.rs` converts `MutableChunkBlockBuffer`
+    live chunk sections into `PhysicsTerrainSection`.
+  - `ChunkScheduler::physics_terrain_section(...)` and
+    `ChunkScheduler::physics_terrain_section_at_block(...)` expose that source
+    without leaking holders, live block buffers, or Rapier.
+  - The MVP solidity classifier uses the existing
+    `mclone_worldgen::block::material_blocks_motion` taxonomy, so air, fluids,
+    snow, plants, glow lichen, and pointed dripstone do not become full physics
+    terrain cells, while ordinary full-cube terrain and leaves do.
+  - Default server builds still do not compile `mclone-physics`; the terrain
+    source exists only behind the `physics` / `physics-rapier` intent features.
+- Still pending: retaining/invalidation of built colliders around active bodies,
+  dynamic body ownership in the server tick, entity publication, rendering, and
+  physics diagnostics.
 
 Validation:
 
 ```bash
 cargo test --manifest-path native/Cargo.toml -p mclone-physics
 cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier
+cargo test --manifest-path native/Cargo.toml -p mclone-server
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
 cargo check --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
 cargo check --manifest-path native/Cargo.toml
 ```

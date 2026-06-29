@@ -902,6 +902,31 @@ impl ChunkScheduler {
             })
     }
 
+    #[cfg(feature = "physics")]
+    pub fn physics_terrain_section(
+        &self,
+        pos: ChunkPos,
+        section_y: i32,
+    ) -> Option<mclone_physics::PhysicsTerrainSection> {
+        self.holders
+            .get(&pos)
+            .and_then(|holder| holder.live_blocks.as_ref())
+            .and_then(|live_blocks| {
+                crate::physics_terrain::physics_terrain_section_from_live_blocks(
+                    live_blocks,
+                    section_y,
+                )
+            })
+    }
+
+    #[cfg(feature = "physics")]
+    pub fn physics_terrain_section_at_block(
+        &self,
+        pos: WorldBlockPos,
+    ) -> Option<mclone_physics::PhysicsTerrainSection> {
+        self.physics_terrain_section(pos.chunk_pos(), block_to_section_coord(pos.y))
+    }
+
     pub(crate) fn set_block_at_world(&mut self, pos: WorldBlockPos, block_id: RawBlockId) -> bool {
         let chunk_pos = pos.chunk_pos();
         let local_x = local_block_coord(pos.x);
@@ -2380,6 +2405,40 @@ mod tests {
         assert_eq!(target_chunks.first(), Some(&ChunkPos::new(5, -3)));
         assert_eq!(feature_centers.first(), Some(&ChunkPos::new(5, -3)));
         assert_eq!(dependency_chunks.first(), Some(&ChunkPos::new(5, -3)));
+    }
+
+    #[cfg(feature = "physics")]
+    #[test]
+    fn physics_terrain_section_reads_live_scheduler_blocks() {
+        use mclone_worldgen::block::{DIRT, WATER};
+
+        let chunk_pos = ChunkPos::new(2, -3);
+        let mut live_blocks = MutableChunkBlockBuffer::new(chunk_pos.x, chunk_pos.z, -16, 64);
+        live_blocks.set_block_at_y(0, 0, 0, STONE);
+        live_blocks.set_block_at_y(1, 0, 0, WATER);
+        live_blocks.set_block_at_y(2, 0, 0, DIRT);
+
+        let mut holder = ChunkHolder::new(chunk_pos);
+        holder.live_blocks = Some(live_blocks);
+
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler.holders.insert(chunk_pos, holder);
+
+        let section = scheduler
+            .physics_terrain_section_at_block(WorldBlockPos::new(32, 0, -48))
+            .expect("live section terrain");
+
+        assert_eq!(section.origin, mclone_core::Vec3d::new(32.0, 0.0, -48.0));
+        assert_eq!(section.solid_cell_count(), 2);
+        assert!(section.is_solid(0, 0, 0));
+        assert!(!section.is_solid(1, 0, 0));
+        assert!(section.is_solid(2, 0, 0));
+        assert!(scheduler.physics_terrain_section(chunk_pos, -2).is_none());
+        assert!(
+            scheduler
+                .physics_terrain_section(ChunkPos::new(99, 99), 0)
+                .is_none()
+        );
     }
 }
 
