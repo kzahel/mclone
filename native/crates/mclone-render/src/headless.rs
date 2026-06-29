@@ -842,6 +842,17 @@ fn read_rgba8(
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>> {
+    read_rgba8_layer(device, queue, texture, width, height, 0)
+}
+
+fn read_rgba8_layer(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+    layer: u32,
+) -> Result<Vec<u8>> {
     let unpadded_row_bytes = width * BYTES_PER_PIXEL;
     let padded_row_bytes = padded_row_bytes(unpadded_row_bytes);
     let buffer_size = padded_row_bytes as u64 * height as u64;
@@ -859,7 +870,11 @@ fn read_rgba8(
         wgpu::TexelCopyTextureInfo {
             texture,
             mip_level: 0,
-            origin: Default::default(),
+            origin: wgpu::Origin3d {
+                x: 0,
+                y: 0,
+                z: layer,
+            },
             aspect: Default::default(),
         },
         wgpu::TexelCopyBufferInfo {
@@ -1082,6 +1097,129 @@ fn fs_main() -> @location(0) vec4<f32> {
         let left_pixels = read_rgba8(&device, &queue, &left.texture, 8, 8)?;
         let right_pixels = read_rgba8(&device, &queue, &right.texture, 8, 8)?;
 
+        assert_eq!(left_pixels.get(0..4), Some(&[255, 0, 0, 255][..]));
+        assert_eq!(right_pixels.get(0..4), Some(&[0, 255, 0, 255][..]));
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "GPU validation proof for 107 Slice E; run on hosts with wgpu MULTIVIEW support"]
+    fn multiview_renders_distinct_view_index_layers() -> Result<()> {
+        const SHADER: &str = r#"
+struct VertexOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) @interpolate(flat) view_index: u32,
+};
+
+@vertex
+fn vs_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @builtin(view_index) view_index: u32,
+) -> VertexOut {
+    var positions = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0),
+    );
+    var out: VertexOut;
+    out.position = vec4<f32>(positions[vertex_index], 0.0, 1.0);
+    out.view_index = view_index;
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    if (in.view_index == 0u) {
+        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+    }
+    return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+}
+"#;
+        let (device, queue) = create_headless_device()?;
+        if !device.features().contains(wgpu::Features::MULTIVIEW) {
+            eprintln!("skipping multiview proof: headless adapter does not expose wgpu MULTIVIEW");
+            return Ok(());
+        }
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_test_multiview_target"),
+            size: wgpu::Extent3d {
+                width: 8,
+                height: 8,
+                depth_or_array_layers: 2,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: HEADLESS_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("mclone_test_multiview_target_view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            base_array_layer: 0,
+            array_layer_count: Some(2),
+            ..Default::default()
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_test_multiview_shader"),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_test_multiview_pipeline_layout"),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mclone_test_multiview_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: HEADLESS_FORMAT,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: std::num::NonZeroU32::new(2),
+            cache: None,
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_test_multiview_encoder"),
+        });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mclone_test_multiview_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(&pipeline);
+            pass.draw(0..3, 0..1);
+        }
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let left_pixels = read_rgba8_layer(&device, &queue, &texture, 8, 8, 0)?;
+        let right_pixels = read_rgba8_layer(&device, &queue, &texture, 8, 8, 1)?;
         assert_eq!(left_pixels.get(0..4), Some(&[255, 0, 0, 255][..]));
         assert_eq!(right_pixels.get(0..4), Some(&[0, 255, 0, 255][..]));
         Ok(())

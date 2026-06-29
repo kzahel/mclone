@@ -1,8 +1,10 @@
 # 107: XR Stereo Uniform Ownership and Multiview
 
 Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
-proof landed. Created after `d0c5161` (`Restore XR per-eye command submission`)
-rolled back the unsafe single-submit Quest XR optimization from `264c723`.
+proof landed, and Slice E's headless multiview proof path exists but still needs
+a multiview-capable adapter run. Created after `d0c5161` (`Restore XR per-eye
+command submission`) rolled back the unsafe single-submit Quest XR optimization
+from `264c723`.
 
 ## Goal
 
@@ -221,6 +223,39 @@ Acceptance:
 - no public perf lane reports this as the final optimization yet.
 
 ### Slice E - Implement Multiview As The Real Stereo Optimization
+
+**Headless proof path landed 2026-06-29.** The renderer now requests optional
+`wgpu::Features::MULTIVIEW` when a native adapter advertises it, `headless.rs`
+can read back an individual array layer, and the ignored GPU proof
+`headless::tests::multiview_renders_distinct_view_index_layers` records one
+multiview pass into a two-layer `D2Array` target. The shader uses
+`@builtin(view_index)` to write red for layer `0` and green for layer `1`, then
+the test reads each layer separately.
+
+Current Mac validation is compile/skip only: the local headless adapter does not
+expose `wgpu::Features::MULTIVIEW`, so the ignored proof reports an explicit
+skip instead of pretending to validate multiview execution. Production XR
+multiview remains pending; the Quest path still uses two independent
+`array_size: 1` color swapchains and per-eye depth targets.
+
+Validation recorded for this slice:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo test --manifest-path native/Cargo.toml -p mclone-render
+cargo test --manifest-path native/Cargo.toml -p mclone-render headless::tests::one_submit_keeps_distinct_per_view_uniform_slots_live -- --ignored --exact --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-render headless::tests::multiview_renders_distinct_view_index_layers -- --ignored --exact --nocapture
+git diff --check
+./android-xr/build-apk.sh --release
+pnpm native:desktop-offscreen:smoke
+```
+
+The multiview proof command compiled and exited successfully with the explicit
+skip message `headless adapter does not expose wgpu MULTIVIEW`. Android XR
+release APK SHA-256:
+`8d7fab38d33bac6c260cd222233d0c683ac7a90aad1edae9e459e18ad8a43adc`.
+Desktop offscreen screenshot `/tmp/mclone-desktop-offscreen.png` was inspected
+and showed the expected nonblank terrain/cow scene.
 
 Move from proof-of-correctness one-submit to the real target:
 

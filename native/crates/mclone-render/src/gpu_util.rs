@@ -3,6 +3,9 @@ pub(crate) fn optional_gpu_features(adapter_features: wgpu::Features) -> wgpu::F
     if adapter_features.contains(wgpu::Features::TIMESTAMP_QUERY) {
         features |= wgpu::Features::TIMESTAMP_QUERY;
     }
+    if adapter_features.contains(wgpu::Features::MULTIVIEW) {
+        features |= wgpu::Features::MULTIVIEW;
+    }
     features
 }
 
