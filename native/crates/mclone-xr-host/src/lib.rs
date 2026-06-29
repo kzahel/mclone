@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use glam::{Mat4, Quat, Vec3, Vec4};
 use openxr as xr;
 use std::marker::PhantomData;
+use std::num::NonZeroU32;
 
 pub use actions::{OpenXrControllerActions, XrControllerSnapshot, XrHand};
 
@@ -107,6 +108,18 @@ where
     fn height(&self) -> u32;
 }
 
+pub trait XrStereoSwapchain<G>
+where
+    G: xr::Graphics,
+{
+    fn swapchain(&self) -> &xr::Swapchain<G>;
+    fn swapchain_mut(&mut self) -> &mut xr::Swapchain<G>;
+    fn textures(&self) -> &[wgpu::Texture];
+    fn width(&self) -> u32;
+    fn height(&self) -> u32;
+    fn array_size(&self) -> u32;
+}
+
 pub struct XrAcquiredEyeTarget<'a, G, E>
 where
     G: xr::Graphics,
@@ -135,6 +148,37 @@ where
             .swapchain_mut()
             .release_image()
             .context("release OpenXR swapchain image")
+    }
+}
+
+pub struct XrAcquiredStereoTarget<'a, G, S>
+where
+    G: xr::Graphics,
+    S: XrStereoSwapchain<G> + ?Sized,
+{
+    stereo_state: &'a mut S,
+    color_array_view: wgpu::TextureView,
+    _graphics: PhantomData<G>,
+}
+
+impl<'a, G, S> XrAcquiredStereoTarget<'a, G, S>
+where
+    G: xr::Graphics,
+    S: XrStereoSwapchain<G> + ?Sized,
+{
+    pub fn stereo(&self) -> &S {
+        self.stereo_state
+    }
+
+    pub fn color_array_view(&self) -> &wgpu::TextureView {
+        &self.color_array_view
+    }
+
+    pub fn release(self) -> Result<()> {
+        self.stereo_state
+            .swapchain_mut()
+            .release_image()
+            .context("release OpenXR stereo array swapchain image")
     }
 }
 
@@ -403,6 +447,52 @@ where
     })
 }
 
+pub fn acquire_stereo_target<G, S>(stereo_state: &mut S) -> Result<XrAcquiredStereoTarget<'_, G, S>>
+where
+    G: xr::Graphics,
+    S: XrStereoSwapchain<G> + ?Sized,
+{
+    if stereo_state.array_size() < 2 {
+        anyhow::bail!(
+            "OpenXR stereo array swapchain requires at least 2 layers, got {}",
+            stereo_state.array_size()
+        );
+    }
+    let image_index = stereo_state
+        .swapchain_mut()
+        .acquire_image()
+        .context("acquire OpenXR stereo array swapchain image")?;
+    if let Err(err) = stereo_state
+        .swapchain_mut()
+        .wait_image(xr::Duration::INFINITE)
+    {
+        let _ = stereo_state.swapchain_mut().release_image();
+        return Err(err).context("wait for OpenXR stereo array swapchain image");
+    }
+    let color_array_view = {
+        let texture = stereo_state
+            .textures()
+            .get(image_index as usize)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "OpenXR returned out-of-range stereo array image index {image_index}"
+                )
+            })?;
+        texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("mclone_xr_stereo_array_swapchain_view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            base_array_layer: 0,
+            array_layer_count: Some(stereo_state.array_size()),
+            ..Default::default()
+        })
+    };
+    Ok(XrAcquiredStereoTarget {
+        stereo_state,
+        color_array_view,
+        _graphics: PhantomData,
+    })
+}
+
 pub fn end_stereo_projection_frame<G, L, R>(
     frame_stream: &mut xr::FrameStream<G>,
     predicted_display_time: xr::Time,
@@ -456,6 +546,63 @@ where
     )
 }
 
+pub fn end_multiview_projection_frame<G, S>(
+    frame_stream: &mut xr::FrameStream<G>,
+    predicted_display_time: xr::Time,
+    environment_blend_mode: xr::EnvironmentBlendMode,
+    stage: &xr::Space,
+    stereo_views: XrStereoFrameViews,
+    stereo_target: &S,
+) -> Result<()>
+where
+    G: xr::Graphics,
+    S: XrStereoSwapchain<G> + ?Sized,
+{
+    if stereo_target.array_size() < 2 {
+        anyhow::bail!(
+            "OpenXR multiview projection frame requires at least 2 array layers, got {}",
+            stereo_target.array_size()
+        );
+    }
+    let rect = xr::Rect2Di {
+        offset: xr::Offset2Di { x: 0, y: 0 },
+        extent: xr::Extent2Di {
+            width: stereo_target.width() as _,
+            height: stereo_target.height() as _,
+        },
+    };
+    let projection_views = [
+        xr::CompositionLayerProjectionView::new()
+            .pose(stereo_views.left.pose)
+            .fov(stereo_views.left.fov)
+            .sub_image(
+                xr::SwapchainSubImage::new()
+                    .swapchain(stereo_target.swapchain())
+                    .image_array_index(0)
+                    .image_rect(rect),
+            ),
+        xr::CompositionLayerProjectionView::new()
+            .pose(stereo_views.right.pose)
+            .fov(stereo_views.right.fov)
+            .sub_image(
+                xr::SwapchainSubImage::new()
+                    .swapchain(stereo_target.swapchain())
+                    .image_array_index(1)
+                    .image_rect(rect),
+            ),
+    ];
+    let projection = xr::CompositionLayerProjection::new()
+        .space(stage)
+        .views(&projection_views);
+    let layers: [&xr::CompositionLayerBase<'_, G>; 1] = [&projection];
+    end_frame_with_layers(
+        frame_stream,
+        predicted_display_time,
+        environment_blend_mode,
+        &layers,
+    )
+}
+
 pub fn clear_stereo_targets(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -476,6 +623,112 @@ pub fn clear_stereo_targets(
         .poll(wgpu::PollType::Wait)
         .map(|_| ())
         .context("wait for OpenXR clear device idle")
+}
+
+pub fn render_multiview_layer_proof(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    color_view: &wgpu::TextureView,
+    color_format: wgpu::TextureFormat,
+) -> Result<()> {
+    const SHADER: &str = r#"
+struct VertexOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) @interpolate(flat) view_index: u32,
+};
+
+@vertex
+fn vs_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @builtin(view_index) view_index: u32,
+) -> VertexOut {
+    var positions = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0),
+    );
+    var out: VertexOut;
+    out.position = vec4<f32>(positions[vertex_index], 0.0, 1.0);
+    out.view_index = view_index;
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    if (in.view_index == 0u) {
+        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+    }
+    return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+}
+"#;
+
+    if !device.features().contains(wgpu::Features::MULTIVIEW) {
+        anyhow::bail!("wgpu device does not expose MULTIVIEW");
+    }
+
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("mclone_xr_multiview_proof_shader"),
+        source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("mclone_xr_multiview_proof_pipeline_layout"),
+        bind_group_layouts: &[],
+        push_constant_ranges: &[],
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("mclone_xr_multiview_proof_pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: Default::default(),
+        multiview: NonZeroU32::new(2),
+        cache: None,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("mclone_xr_multiview_proof_encoder"),
+    });
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_xr_multiview_proof_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_pipeline(&pipeline);
+        pass.draw(0..3, 0..1);
+    }
+    let submission = queue.submit(Some(encoder.finish()));
+    device
+        .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+        .map(|_| ())
+        .context("wait for OpenXR multiview proof submission")?;
+    device
+        .poll(wgpu::PollType::Wait)
+        .map(|_| ())
+        .context("wait for OpenXR multiview proof device idle")
 }
 
 pub fn diagnostic_eye_clear_color(eye: usize) -> wgpu::Color {

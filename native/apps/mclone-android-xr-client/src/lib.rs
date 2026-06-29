@@ -50,6 +50,11 @@ mod android {
         graphics_vulkan::AppGraphics,
         graphics_vulkan::OpenXrEyeState,
     >;
+    type AcquiredStereoTarget<'a> = mclone_xr_host::XrAcquiredStereoTarget<
+        'a,
+        graphics_vulkan::AppGraphics,
+        graphics_vulkan::OpenXrStereoState,
+    >;
     type AndroidXrSceneRuntime = NativeSingleViewSessionRuntime<AndroidXrRemoteServerSession>;
     type AndroidXrTerrainState = XrMcloneTerrainState<AndroidXrRemoteServerSession>;
 
@@ -222,6 +227,7 @@ mod android {
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
+        multiview_proof: bool,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -236,6 +242,7 @@ mod android {
                 perf_settled_stationary: false,
                 perf_frozen_render: false,
                 perf_metrics: false,
+                multiview_proof: false,
             }
         }
     }
@@ -318,6 +325,9 @@ mod android {
                 "--perf-metrics" => {
                     options.perf_metrics = true;
                 }
+                "--multiview-proof" => {
+                    options.multiview_proof = true;
+                }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
         }
@@ -339,6 +349,19 @@ mod android {
         }
         if options.perf_frozen_render && options.perf_flight.is_some() {
             bail!("--perf-frozen-render cannot be combined with --perf-flight");
+        }
+        if options.multiview_proof {
+            if options.session_smoke.is_some() {
+                bail!("--multiview-proof cannot be combined with --session-smoke");
+            }
+            if options.perf_seconds.is_some()
+                || options.perf_flight.is_some()
+                || options.perf_settled_stationary
+                || options.perf_frozen_render
+                || options.perf_metrics
+            {
+                bail!("--multiview-proof cannot be combined with performance probes");
+            }
         }
         Ok(options)
     }
@@ -585,6 +608,10 @@ mod android {
             startup_options.perf_metrics
         );
         log::info!(
+            "Android XR multiview proof: {}",
+            startup_options.multiview_proof
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -623,6 +650,7 @@ mod android {
             startup_options.perf_settled_stationary,
             startup_options.perf_frozen_render,
             startup_options.perf_metrics,
+            startup_options.multiview_proof,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -642,6 +670,7 @@ mod android {
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
+        multiview_proof: bool,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -835,6 +864,13 @@ mod android {
             graphics.physical_device_api_version,
             graphics.queue_family_index
         );
+        log::info!(
+            "OpenXR wgpu features: multiview={}",
+            graphics
+                .device
+                .features()
+                .contains(wgpu::Features::MULTIVIEW)
+        );
         let display_refresh = mclone_xr_host::query_display_refresh_snapshot(
             &graphics.session,
             available.fb_display_refresh_rate,
@@ -855,6 +891,33 @@ mod android {
         log::info!("OpenXR reference space: STAGE");
 
         let (eye_width, eye_height) = stereo_config.primary_eye_size();
+        if multiview_proof {
+            let mut stereo_target = graphics_vulkan::create_stereo(
+                &graphics.device,
+                &graphics.session,
+                eye_width,
+                eye_height,
+                XR_COLOR_FORMAT,
+                XR_SAMPLE_COUNT,
+            )
+            .context("create OpenXR stereo array swapchain")?;
+            log::info!(
+                "OpenXR multiview proof swapchain: color_format={XR_COLOR_FORMAT:?} eye={}x{} images={} layers={}",
+                eye_width,
+                eye_height,
+                stereo_target.texture_count(),
+                stereo_target.array_size()
+            );
+            log::info!("MCLONE_ANDROID_XR_SESSION_READY");
+            return run_multiview_proof_loop(
+                app,
+                &mut graphics,
+                &stage,
+                environment_blend_mode,
+                &mut stereo_target,
+            );
+        }
+
         let mut left_eye = graphics_vulkan::create_eye(
             &graphics.device,
             &graphics.session,
@@ -1080,6 +1143,133 @@ mod android {
             })?;
             Ok(())
         }
+    }
+
+    fn run_multiview_proof_loop(
+        app: &AndroidApp,
+        graphics: &mut graphics_vulkan::VulkanGraphicsSession,
+        stage: &xr::Space,
+        environment_blend_mode: xr::EnvironmentBlendMode,
+        stereo_target: &mut graphics_vulkan::OpenXrStereoState,
+    ) -> Result<()> {
+        let mut event_storage = xr::EventDataBuffer::new();
+        let mut session_running = false;
+        let mut frame_stats = XrFrameStats::default();
+        let mut logged_ready = false;
+
+        loop {
+            if !poll_android_events(app, Some(Duration::from_millis(0)))? {
+                log::info!("Android activity destroyed; exiting OpenXR multiview proof loop");
+                return Ok(());
+            }
+
+            match mclone_xr_host::poll_openxr_events(
+                &graphics.session,
+                &mut event_storage,
+                &mut session_running,
+                VIEW_TYPE,
+                log_openxr_host_event,
+            )
+            .context("poll OpenXR events")?
+            {
+                OpenXrPollStatus::Exit => {
+                    log::info!(
+                        "OpenXR multiview proof requested exit: submitted={} runtime_frames={} skipped={}",
+                        frame_stats.submitted_frames,
+                        frame_stats.runtime_frames,
+                        frame_stats.skipped_frames
+                    );
+                    return Ok(());
+                }
+                OpenXrPollStatus::Idle if !session_running => {
+                    if !poll_android_events(app, Some(SESSION_IDLE_POLL_INTERVAL))? {
+                        log::info!(
+                            "Android activity destroyed while waiting for OpenXR READY in multiview proof"
+                        );
+                        return Ok(());
+                    }
+                    continue;
+                }
+                OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
+            }
+
+            let frame_state = mclone_xr_host::wait_begin_frame(
+                &mut graphics.frame_wait,
+                &mut graphics.frame_stream,
+                &mut frame_stats,
+            )?;
+            let frame_result = if frame_state.should_render {
+                render_multiview_proof_frame(
+                    graphics,
+                    stage,
+                    environment_blend_mode,
+                    frame_state.predicted_display_time,
+                    stereo_target,
+                )
+                .map(|()| {
+                    frame_stats.record_submitted_frame();
+                    if !logged_ready {
+                        logged_ready = true;
+                        log::info!(
+                            "MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted={} runtime_frames={} skipped={} eye={}x{} layers={} multiview={}",
+                            frame_stats.submitted_frames,
+                            frame_stats.runtime_frames,
+                            frame_stats.skipped_frames,
+                            stereo_target.width,
+                            stereo_target.height,
+                            stereo_target.array_size(),
+                            graphics.device.features().contains(wgpu::Features::MULTIVIEW)
+                        );
+                    }
+                })
+            } else {
+                mclone_xr_host::end_skipped_frame(
+                    &mut graphics.frame_stream,
+                    frame_state.predicted_display_time,
+                    environment_blend_mode,
+                    &mut frame_stats,
+                )
+            };
+
+            if let Err(error) = frame_result {
+                let _ = mclone_xr_host::end_frame_with_layers(
+                    &mut graphics.frame_stream,
+                    frame_state.predicted_display_time,
+                    environment_blend_mode,
+                    &[],
+                );
+                return Err(error);
+            }
+        }
+    }
+
+    fn render_multiview_proof_frame(
+        graphics: &mut graphics_vulkan::VulkanGraphicsSession,
+        stage: &xr::Space,
+        environment_blend_mode: xr::EnvironmentBlendMode,
+        predicted_display_time: xr::Time,
+        stereo_target: &mut graphics_vulkan::OpenXrStereoState,
+    ) -> Result<()> {
+        let stereo_views =
+            mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+        let target =
+            acquire_stereo_target(stereo_target).context("acquire multiview proof target")?;
+        mclone_xr_host::render_multiview_layer_proof(
+            &graphics.device,
+            &graphics.queue,
+            target.color_array_view(),
+            XR_COLOR_FORMAT,
+        )
+        .context("render OpenXR multiview proof")?;
+        target.release()?;
+        mclone_xr_host::end_multiview_projection_frame(
+            &mut graphics.frame_stream,
+            predicted_display_time,
+            environment_blend_mode,
+            stage,
+            stereo_views,
+            stereo_target,
+        )
     }
 
     fn run_mclone_frame_loop(
@@ -2312,6 +2502,12 @@ mod android {
         eye_state: &mut graphics_vulkan::OpenXrEyeState,
     ) -> Result<AcquiredEyeTarget<'_>> {
         mclone_xr_host::acquire_eye_target(eye_state)
+    }
+
+    fn acquire_stereo_target(
+        stereo_state: &mut graphics_vulkan::OpenXrStereoState,
+    ) -> Result<AcquiredStereoTarget<'_>> {
+        mclone_xr_host::acquire_stereo_target(stereo_state)
     }
 
     fn wait_for_android_resume(app: &AndroidApp) -> Result<()> {

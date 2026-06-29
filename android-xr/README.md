@@ -135,6 +135,24 @@ bash android-xr/validate-quest-openxr.sh --debug --skip-build --session-only --v
 `--session-only` accepts `MCLONE_ANDROID_XR_SESSION_READY` without requiring the
 terrain runtime or first submitted stereo frame.
 
+For the first XR multiview target proof:
+
+```bash
+pnpm native:android-xr:multiview-proof
+```
+
+or directly:
+
+```bash
+bash android-xr/validate-quest-openxr.sh --multiview-proof
+```
+
+This explicit proof mode creates one two-layer OpenXR color swapchain, renders a
+minimal `wgpu` multiview pass that colors array layer `0` red and layer `1`
+green using `@builtin(view_index)`, presents those layers as the left/right
+projection views, and waits for `MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY`.
+Normal terrain rendering still uses the per-eye swapchain path.
+
 For the first Quest performance probe:
 
 ```bash

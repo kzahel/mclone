@@ -27,6 +27,14 @@ pub mod vulkan {
         height: u32,
     }
 
+    pub struct VulkanStereoSwapchain {
+        swapchain: xr::Swapchain<AppGraphics>,
+        textures: Vec<wgpu::Texture>,
+        width: u32,
+        height: u32,
+        array_size: u32,
+    }
+
     impl VulkanEyeSwapchain {
         pub fn swapchain(&self) -> &xr::Swapchain<AppGraphics> {
             &self.swapchain
@@ -49,6 +57,32 @@ pub mod vulkan {
         }
     }
 
+    impl VulkanStereoSwapchain {
+        pub fn swapchain(&self) -> &xr::Swapchain<AppGraphics> {
+            &self.swapchain
+        }
+
+        pub fn swapchain_mut(&mut self) -> &mut xr::Swapchain<AppGraphics> {
+            &mut self.swapchain
+        }
+
+        pub fn textures(&self) -> &[wgpu::Texture] {
+            &self.textures
+        }
+
+        pub fn width(&self) -> u32 {
+            self.width
+        }
+
+        pub fn height(&self) -> u32 {
+            self.height
+        }
+
+        pub fn array_size(&self) -> u32 {
+            self.array_size
+        }
+    }
+
     impl mclone_xr_host::XrEyeSwapchain<AppGraphics> for VulkanEyeSwapchain {
         fn swapchain(&self) -> &xr::Swapchain<AppGraphics> {
             self.swapchain()
@@ -68,6 +102,32 @@ pub mod vulkan {
 
         fn height(&self) -> u32 {
             self.height()
+        }
+    }
+
+    impl mclone_xr_host::XrStereoSwapchain<AppGraphics> for VulkanStereoSwapchain {
+        fn swapchain(&self) -> &xr::Swapchain<AppGraphics> {
+            self.swapchain()
+        }
+
+        fn swapchain_mut(&mut self) -> &mut xr::Swapchain<AppGraphics> {
+            self.swapchain_mut()
+        }
+
+        fn textures(&self) -> &[wgpu::Texture] {
+            self.textures()
+        }
+
+        fn width(&self) -> u32 {
+            self.width()
+        }
+
+        fn height(&self) -> u32 {
+            self.height()
+        }
+
+        fn array_size(&self) -> u32 {
+            self.array_size()
         }
     }
 
@@ -148,28 +208,6 @@ pub mod vulkan {
                     anyhow!("OpenXR Vulkan physical device has no graphics queue family")
                 })?;
 
-        let queue_priorities = [1.0];
-        let queue_infos = [vk::DeviceQueueCreateInfo::default()
-            .queue_family_index(queue_family_index)
-            .queue_priorities(&queue_priorities)];
-        let vk_device_info = vk::DeviceCreateInfo::default().queue_create_infos(&queue_infos);
-        let vk_device = {
-            let get_instance_proc_addr =
-                unsafe { std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr) };
-            let raw = unsafe {
-                xr_instance.create_vulkan_device(
-                    system,
-                    get_instance_proc_addr,
-                    vk_physical_device.as_raw() as _,
-                    &vk_device_info as *const _ as *const _,
-                )
-            }
-            .context("XR error creating Vulkan device")?
-            .map_err(vk::Result::from_raw)
-            .map_err(|err| anyhow!("Vulkan error creating Vulkan device: {err:?}"))?;
-            unsafe { ash::Device::load(vk_instance.fp_v1_0(), vk::Device::from_raw(raw as _)) }
-        };
-
         let hal_instance = unsafe {
             wgpu::hal::vulkan::Instance::from_raw(
                 vk_entry.clone(),
@@ -188,12 +226,48 @@ pub mod vulkan {
         let exposed_adapter = hal_instance
             .expose_adapter(vk_physical_device)
             .context("expose OpenXR Vulkan physical device to wgpu")?;
-        let required_features = wgpu::Features::empty();
+        let required_features = optional_openxr_wgpu_features(exposed_adapter.features);
+        let enabled_extensions = exposed_adapter
+            .adapter
+            .required_device_extensions(required_features);
+        let enabled_extension_names = enabled_extensions
+            .iter()
+            .map(|name| name.as_ptr())
+            .collect::<Vec<_>>();
+        let mut physical_device_features = exposed_adapter
+            .adapter
+            .physical_device_features(&enabled_extensions, required_features);
+
+        let queue_priorities = [1.0];
+        let queue_infos = [vk::DeviceQueueCreateInfo::default()
+            .queue_family_index(queue_family_index)
+            .queue_priorities(&queue_priorities)];
+        let vk_device_info = vk::DeviceCreateInfo::default()
+            .queue_create_infos(&queue_infos)
+            .enabled_extension_names(&enabled_extension_names);
+        let vk_device_info = physical_device_features.add_to_device_create(vk_device_info);
+        let vk_device = {
+            let get_instance_proc_addr =
+                unsafe { std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr) };
+            let raw = unsafe {
+                xr_instance.create_vulkan_device(
+                    system,
+                    get_instance_proc_addr,
+                    vk_physical_device.as_raw() as _,
+                    &vk_device_info as *const _ as *const _,
+                )
+            }
+            .context("XR error creating Vulkan device")?
+            .map_err(vk::Result::from_raw)
+            .map_err(|err| anyhow!("Vulkan error creating Vulkan device: {err:?}"))?;
+            unsafe { ash::Device::load(vk_instance.fp_v1_0(), vk::Device::from_raw(raw as _)) }
+        };
+
         let hal_device = unsafe {
             exposed_adapter.adapter.device_from_raw(
                 vk_device,
                 Some(Box::new(|| {})),
-                &[],
+                &enabled_extensions,
                 required_features,
                 &wgpu::MemoryHints::Performance,
                 queue_family_index,
@@ -251,6 +325,14 @@ pub mod vulkan {
         })
     }
 
+    fn optional_openxr_wgpu_features(adapter_features: wgpu::Features) -> wgpu::Features {
+        let mut features = wgpu::Features::empty();
+        if adapter_features.contains(wgpu::Features::MULTIVIEW) {
+            features |= wgpu::Features::MULTIVIEW;
+        }
+        features
+    }
+
     pub fn create_eye_swapchain(
         device: &wgpu::Device,
         session: &xr::Session<AppGraphics>,
@@ -296,6 +378,7 @@ pub mod vulkan {
                     vk_image_raw,
                     eye_width,
                     eye_height,
+                    1,
                     color_format,
                     texture_label,
                 )
@@ -310,6 +393,68 @@ pub mod vulkan {
         })
     }
 
+    pub fn create_stereo_swapchain(
+        device: &wgpu::Device,
+        session: &xr::Session<AppGraphics>,
+        eye_width: u32,
+        eye_height: u32,
+        color_format: wgpu::TextureFormat,
+        sample_count: u32,
+        texture_label: &'static str,
+    ) -> Result<VulkanStereoSwapchain> {
+        let vk_format = wgpu_format_to_vk_format(color_format)
+            .ok_or_else(|| anyhow!("unsupported XR color format {color_format:?}"))?;
+        let xr_format = vk_format.as_raw() as u32;
+        let supported_formats = session
+            .enumerate_swapchain_formats()
+            .context("enumerate OpenXR Vulkan swapchain formats")?;
+        if !supported_formats.contains(&xr_format) {
+            bail!("OpenXR runtime does not advertise {vk_format:?} swapchain images");
+        }
+
+        let array_size = 2;
+        let swapchain = session
+            .create_swapchain(&xr::SwapchainCreateInfo {
+                create_flags: xr::SwapchainCreateFlags::EMPTY,
+                usage_flags: xr::SwapchainUsageFlags::COLOR_ATTACHMENT
+                    | xr::SwapchainUsageFlags::SAMPLED
+                    | xr::SwapchainUsageFlags::TRANSFER_SRC,
+                format: xr_format,
+                sample_count,
+                width: eye_width,
+                height: eye_height,
+                face_count: 1,
+                array_size,
+                mip_count: 1,
+            })
+            .context("create OpenXR Vulkan stereo array swapchain")?;
+
+        let textures = swapchain
+            .enumerate_images()
+            .context("enumerate OpenXR Vulkan stereo array swapchain images")?
+            .into_iter()
+            .map(|vk_image_raw| {
+                create_vulkan_swapchain_texture(
+                    device,
+                    vk_image_raw,
+                    eye_width,
+                    eye_height,
+                    array_size,
+                    color_format,
+                    texture_label,
+                )
+            })
+            .collect();
+
+        Ok(VulkanStereoSwapchain {
+            swapchain,
+            textures,
+            width: eye_width,
+            height: eye_height,
+            array_size,
+        })
+    }
+
     fn load_vulkan_entry() -> Result<ash::Entry> {
         unsafe { ash::Entry::load().context("load Vulkan loader") }
     }
@@ -319,6 +464,7 @@ pub mod vulkan {
         vk_image_raw: <AppGraphics as xr::Graphics>::SwapchainImage,
         width: u32,
         height: u32,
+        array_layers: u32,
         color_format: wgpu::TextureFormat,
         texture_label: &'static str,
     ) -> wgpu::Texture {
@@ -330,7 +476,7 @@ pub mod vulkan {
                     size: wgpu::Extent3d {
                         width,
                         height,
-                        depth_or_array_layers: 1,
+                        depth_or_array_layers: array_layers,
                     },
                     mip_level_count: 1,
                     sample_count: 1,
@@ -351,7 +497,7 @@ pub mod vulkan {
                     size: wgpu::Extent3d {
                         width,
                         height,
-                        depth_or_array_layers: 1,
+                        depth_or_array_layers: array_layers,
                     },
                     mip_level_count: 1,
                     sample_count: 1,

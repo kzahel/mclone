@@ -1,10 +1,10 @@
 # 107: XR Stereo Uniform Ownership and Multiview
 
 Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
-proof landed, and Slice E's headless multiview proof path exists but still needs
-a multiview-capable adapter run. Created after `d0c5161` (`Restore XR per-eye
-command submission`) rolled back the unsafe single-submit Quest XR optimization
-from `264c723`.
+proof landed, and Slice E's headless plus Android XR multiview proof paths
+exist but still need an on-device Quest proof run. Created after `d0c5161`
+(`Restore XR per-eye command submission`) rolled back the unsafe single-submit
+Quest XR optimization from `264c723`.
 
 ## Goal
 
@@ -238,6 +238,27 @@ skip instead of pretending to validate multiview execution. Production XR
 multiview remains pending; the Quest path still uses two independent
 `array_size: 1` color swapchains and per-eye depth targets.
 
+**Android XR proof launch path added 2026-06-29.** The OpenXR Vulkan device now
+requests optional `wgpu::Features::MULTIVIEW` when the runtime-backed adapter
+advertises it, and the Android XR app has an explicit `--multiview-proof` mode.
+That mode creates one two-layer OpenXR color swapchain, wraps it as a `wgpu`
+`D2Array` texture, renders the minimal `view_index` multiview proof into both
+layers, and presents layer `0` as the left projection view and layer `1` as the
+right projection view. Normal terrain rendering remains on the correct per-eye
+swapchain/submit path.
+
+Validation command for the on-device proof:
+
+```bash
+pnpm native:android-xr:multiview-proof
+```
+
+This waits for `MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY`. Passing this marker
+means the Quest/OpenXR/Vulkan path can create the two-layer target, compile and
+execute a multiview pipeline, and present distinct left/right array layers. It
+does not mean terrain, sky, entities, GUI, or screen effects have been migrated
+to multiview.
+
 Validation recorded for this slice:
 
 ```bash
@@ -245,6 +266,10 @@ cargo fmt --manifest-path native/Cargo.toml --all --check
 cargo test --manifest-path native/Cargo.toml -p mclone-render
 cargo test --manifest-path native/Cargo.toml -p mclone-render headless::tests::one_submit_keeps_distinct_per_view_uniform_slots_live -- --ignored --exact --nocapture
 cargo test --manifest-path native/Cargo.toml -p mclone-render headless::tests::multiview_renders_distinct_view_index_layers -- --ignored --exact --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-host -p mclone-xr-graphics -p mclone-render
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+bash -n android-xr/validate-quest-openxr.sh
+node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'))"
 git diff --check
 ./android-xr/build-apk.sh --release
 pnpm native:desktop-offscreen:smoke
@@ -256,6 +281,13 @@ release APK SHA-256:
 `8d7fab38d33bac6c260cd222233d0c683ac7a90aad1edae9e459e18ad8a43adc`.
 Desktop offscreen screenshot `/tmp/mclone-desktop-offscreen.png` was inspected
 and showed the expected nonblank terrain/cow scene.
+
+Latest Android XR release build after adding the Android proof path passed with
+APK SHA-256:
+`7120607635b94e1586357b0e3b2cb0c92141e82db1494e3117c57aa46e8a704f`.
+An on-device proof attempt with
+`bash android-xr/validate-quest-openxr.sh --skip-build --multiview-proof --wait-seconds 30`
+could not run because no Quest headset was attached (`adb` listed no devices).
 
 Move from proof-of-correctness one-submit to the real target:
 
