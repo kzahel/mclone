@@ -1,9 +1,10 @@
 # 110: Shared Physics Backend Experiment
 
-Status: active; Slices 1-2 landed with the shared `mclone-physics` facade,
+Status: active; Slices 1-3 landed with the shared `mclone-physics` facade,
 no-op backend, optional Rapier backend, synthetic cuboid/static-patch
-simulation test, and `mclone-server` intent feature wiring. App binary-size
-measurement is deferred until an app/server path actually links physics.
+simulation test, section terrain collider probe, and `mclone-server` intent
+feature wiring. App binary-size measurement is deferred until an app/server path
+actually links physics.
 
 ## Purpose
 
@@ -283,18 +284,45 @@ cargo check --manifest-path native/Cargo.toml
 
 ### Slice 3 - Terrain Patch Benchmark
 
-- [ ] Build one section-sized static terrain patch from loaded block facts.
-- [ ] Benchmark merged cuboids, Rapier voxel colliders, and triangle meshes
+- [x] Define a section-sized static terrain occupancy input for collider
+  building.
+- [x] Benchmark merged cuboids, Rapier voxel colliders, and triangle meshes
   against the same section fixtures.
-- [ ] Measure build time, collider count, memory shape where available, and
+- [x] Measure build time, collider count, primitive/mesh shape, and
   step/query cost with one dynamic cube and one capsule.
-- [ ] Choose the first MVP terrain representation based on measurement, not
+- [x] Choose the first MVP terrain representation based on measurement, not
   aesthetics.
+- [ ] Wire section terrain input to real loaded chunk/block facts in the
+  server-authoritative slice.
+
+Recorded Slice 3 result:
+
+- Added `PhysicsTerrainSection`, a fixed 16x16x16 section occupancy container
+  with mclone-owned coordinates and no Rapier dependency in the default build.
+- Added `run_rapier_section_terrain_probe`, available only behind the `rapier`
+  feature, to build the same terrain section three ways and run one dynamic cube
+  plus one capsule against each candidate for 240 simulation steps.
+- The synthetic fixture is a 16x16 floor plus a three-block pillar: 259 solid
+  cells total.
+- Stable fixture shape counts:
+  - merged X-runs: 19 cuboid primitives
+  - Rapier voxel collider: 259 voxel cells
+  - visible-face trimesh: 1,176 triangles and 2,352 vertices
+- All three candidates settle the cube and capsule against the fixture. For the
+  first runtime MVP, prefer merged X-run compound cuboids until real chunk
+  fixtures show that voxel colliders or triangle meshes win. This keeps flat
+  terrain compact while still representing vertical section details.
+- The live server chunk-fact conversion is intentionally still pending; this
+  slice proves the shared physics crate can build and compare the candidate
+  shapes without pulling Rapier into default builds or app crates.
 
 Validation:
 
 ```bash
+cargo test --manifest-path native/Cargo.toml -p mclone-physics
 cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier
+cargo check --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
+cargo check --manifest-path native/Cargo.toml
 ```
 
 Add a focused benchmark/smoke command if normal tests are too noisy.

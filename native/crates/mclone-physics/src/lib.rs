@@ -1,10 +1,16 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
+#[cfg(feature = "rapier")]
+use std::time::Instant;
 
 use mclone_core::{Aabb, Vec3d};
 #[cfg(feature = "rapier")]
 use rapier3d::prelude as rapier;
+
+pub const PHYSICS_TERRAIN_SECTION_WIDTH: usize = 16;
+pub const PHYSICS_TERRAIN_SECTION_VOLUME: usize =
+    PHYSICS_TERRAIN_SECTION_WIDTH * PHYSICS_TERRAIN_SECTION_WIDTH * PHYSICS_TERRAIN_SECTION_WIDTH;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PhysicsBodyId(pub u64);
@@ -96,6 +102,26 @@ impl PhysicsBodySpawn {
             },
         }
     }
+
+    pub const fn dynamic_capsule_y(
+        position: Vec3d,
+        half_height: f64,
+        radius: f64,
+        velocity: Vec3d,
+    ) -> Self {
+        Self {
+            kind: PhysicsBodyKind::Dynamic,
+            shape: PhysicsShape::CapsuleY {
+                half_height,
+                radius,
+            },
+            pose: PhysicsBodyPose::new(position, PhysicsRotation::IDENTITY),
+            velocity: PhysicsBodyVelocity {
+                linear: velocity,
+                angular: Vec3d::ZERO,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -113,6 +139,129 @@ impl PhysicsTerrainPatch {
             solid_cell_count,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicsTerrainSection {
+    pub origin: Vec3d,
+    pub voxel_size: f64,
+    solid_cells: Vec<u8>,
+    solid_cell_count: usize,
+}
+
+impl PhysicsTerrainSection {
+    pub fn new(origin: Vec3d, voxel_size: f64) -> Self {
+        Self {
+            origin,
+            voxel_size: voxel_size.max(1.0e-4),
+            solid_cells: vec![0; PHYSICS_TERRAIN_SECTION_VOLUME],
+            solid_cell_count: 0,
+        }
+    }
+
+    pub fn bounds(&self) -> Aabb {
+        let width = PHYSICS_TERRAIN_SECTION_WIDTH as f64 * self.voxel_size;
+        Aabb::new(
+            self.origin.x,
+            self.origin.y,
+            self.origin.z,
+            self.origin.x + width,
+            self.origin.y + width,
+            self.origin.z + width,
+        )
+    }
+
+    pub const fn solid_cell_count(&self) -> usize {
+        self.solid_cell_count
+    }
+
+    pub fn set_solid(&mut self, x: usize, y: usize, z: usize, solid: bool) -> bool {
+        let Some(index) = terrain_section_index(x, y, z) else {
+            return false;
+        };
+        let old_solid = self.solid_cells[index] != 0;
+        if old_solid == solid {
+            return true;
+        }
+        self.solid_cells[index] = u8::from(solid);
+        if solid {
+            self.solid_cell_count += 1;
+        } else {
+            self.solid_cell_count -= 1;
+        }
+        true
+    }
+
+    pub fn is_solid(&self, x: usize, y: usize, z: usize) -> bool {
+        terrain_section_index(x, y, z).is_some_and(|index| self.solid_cells[index] != 0)
+    }
+
+    #[cfg(feature = "rapier")]
+    fn solid_cells(&self) -> impl Iterator<Item = (usize, usize, usize)> + '_ {
+        self.solid_cells
+            .iter()
+            .enumerate()
+            .filter(|(_, solid)| **solid != 0)
+            .map(|(index, _)| terrain_section_coords(index))
+    }
+}
+
+const fn terrain_section_index(x: usize, y: usize, z: usize) -> Option<usize> {
+    if x < PHYSICS_TERRAIN_SECTION_WIDTH
+        && y < PHYSICS_TERRAIN_SECTION_WIDTH
+        && z < PHYSICS_TERRAIN_SECTION_WIDTH
+    {
+        Some((y * PHYSICS_TERRAIN_SECTION_WIDTH + z) * PHYSICS_TERRAIN_SECTION_WIDTH + x)
+    } else {
+        None
+    }
+}
+
+#[cfg(feature = "rapier")]
+const fn terrain_section_coords(index: usize) -> (usize, usize, usize) {
+    let x = index % PHYSICS_TERRAIN_SECTION_WIDTH;
+    let yz = index / PHYSICS_TERRAIN_SECTION_WIDTH;
+    let z = yz % PHYSICS_TERRAIN_SECTION_WIDTH;
+    let y = yz / PHYSICS_TERRAIN_SECTION_WIDTH;
+    (x, y, z)
+}
+
+#[cfg(feature = "rapier")]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum PhysicsTerrainColliderCandidate {
+    MergedCuboids,
+    Voxels,
+    Trimesh,
+}
+
+#[cfg(feature = "rapier")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicsTerrainProbeReport {
+    pub candidate: PhysicsTerrainColliderCandidate,
+    pub solid_cell_count: usize,
+    pub primitive_count: usize,
+    pub vertex_count: usize,
+    pub triangle_count: usize,
+    pub build_micros: u128,
+    pub simulation_micros: u128,
+    pub collider_count: usize,
+    pub body_pose_update_count: usize,
+    pub cube_final_y: f64,
+    pub capsule_final_y: f64,
+}
+
+#[cfg(feature = "rapier")]
+pub fn run_rapier_section_terrain_probe(
+    section: &PhysicsTerrainSection,
+) -> Vec<PhysicsTerrainProbeReport> {
+    [
+        PhysicsTerrainColliderCandidate::MergedCuboids,
+        PhysicsTerrainColliderCandidate::Voxels,
+        PhysicsTerrainColliderCandidate::Trimesh,
+    ]
+    .into_iter()
+    .filter_map(|candidate| run_rapier_section_terrain_candidate_probe(section, candidate))
+    .collect()
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -399,6 +548,16 @@ struct RapierBodyRecord {
 struct RapierTerrainPatchRecord {
     handle: Option<rapier::ColliderHandle>,
     patch: PhysicsTerrainPatch,
+}
+
+#[cfg(feature = "rapier")]
+struct RapierTerrainCandidateBuild {
+    candidate: PhysicsTerrainColliderCandidate,
+    collider: rapier::Collider,
+    primitive_count: usize,
+    vertex_count: usize,
+    triangle_count: usize,
+    build_micros: u128,
 }
 
 #[cfg(feature = "rapier")]
@@ -731,6 +890,283 @@ fn poses_almost_equal(left: PhysicsBodyPose, right: PhysicsBodyPose) -> bool {
         && (left.rotation.w - right.rotation.w).abs() <= 1.0e-9
 }
 
+#[cfg(feature = "rapier")]
+fn run_rapier_section_terrain_candidate_probe(
+    section: &PhysicsTerrainSection,
+    candidate: PhysicsTerrainColliderCandidate,
+) -> Option<PhysicsTerrainProbeReport> {
+    let build = build_rapier_section_terrain_candidate(section, candidate)?;
+    let mut world = RapierPhysicsWorld::new();
+    world.collider_set.insert(build.collider);
+
+    let center = section.bounds();
+    let spawn_y = section.origin.y + section.voxel_size * 5.0;
+    let cube = world.spawn_body(PhysicsBodySpawn::dynamic_cube(
+        Vec3d::new(
+            (center.min_x + center.max_x) * 0.5 - 2.0,
+            spawn_y,
+            (center.min_z + center.max_z) * 0.5,
+        ),
+        0.5,
+        Vec3d::ZERO,
+    ));
+    let capsule = world.spawn_body(PhysicsBodySpawn::dynamic_capsule_y(
+        Vec3d::new(
+            (center.min_x + center.max_x) * 0.5 + 2.0,
+            spawn_y,
+            (center.min_z + center.max_z) * 0.5,
+        ),
+        0.5,
+        0.25,
+        Vec3d::ZERO,
+    ));
+
+    let step_start = Instant::now();
+    let mut body_pose_update_count = 0;
+    for _ in 0..240 {
+        body_pose_update_count += world.step(1.0 / 60.0).body_pose_update_count;
+    }
+    let simulation_micros = step_start.elapsed().as_micros();
+
+    Some(PhysicsTerrainProbeReport {
+        candidate: build.candidate,
+        solid_cell_count: section.solid_cell_count(),
+        primitive_count: build.primitive_count,
+        vertex_count: build.vertex_count,
+        triangle_count: build.triangle_count,
+        build_micros: build.build_micros,
+        simulation_micros,
+        collider_count: world.collider_set.len(),
+        body_pose_update_count,
+        cube_final_y: world
+            .body(cube)
+            .expect("probe cube body survives")
+            .pose
+            .position
+            .y,
+        capsule_final_y: world
+            .body(capsule)
+            .expect("probe capsule body survives")
+            .pose
+            .position
+            .y,
+    })
+}
+
+#[cfg(feature = "rapier")]
+fn build_rapier_section_terrain_candidate(
+    section: &PhysicsTerrainSection,
+    candidate: PhysicsTerrainColliderCandidate,
+) -> Option<RapierTerrainCandidateBuild> {
+    let start = Instant::now();
+    let (builder, primitive_count, vertex_count, triangle_count) = match candidate {
+        PhysicsTerrainColliderCandidate::MergedCuboids => {
+            let shapes = rapier_section_merged_x_run_shapes(section);
+            let primitive_count = shapes.len();
+            if primitive_count == 0 {
+                return None;
+            }
+            (
+                rapier::ColliderBuilder::compound(shapes),
+                primitive_count,
+                0,
+                0,
+            )
+        }
+        PhysicsTerrainColliderCandidate::Voxels => {
+            let voxels = rapier_section_voxels(section);
+            let primitive_count = voxels.len();
+            if primitive_count == 0 {
+                return None;
+            }
+            (
+                rapier::ColliderBuilder::voxels(
+                    rapier::Vector::splat(to_rapier_real(section.voxel_size)),
+                    &voxels,
+                )
+                .translation(rapier_vec(section.origin)),
+                primitive_count,
+                0,
+                0,
+            )
+        }
+        PhysicsTerrainColliderCandidate::Trimesh => {
+            let (vertices, indices) = rapier_section_visible_face_mesh(section);
+            let vertex_count = vertices.len();
+            let triangle_count = indices.len();
+            if triangle_count == 0 {
+                return None;
+            }
+            (
+                rapier::ColliderBuilder::trimesh(vertices, indices).ok()?,
+                triangle_count,
+                vertex_count,
+                triangle_count,
+            )
+        }
+    };
+
+    let collider = builder.build();
+
+    Some(RapierTerrainCandidateBuild {
+        candidate,
+        collider,
+        primitive_count,
+        vertex_count,
+        triangle_count,
+        build_micros: start.elapsed().as_micros(),
+    })
+}
+
+#[cfg(feature = "rapier")]
+fn rapier_section_merged_x_run_shapes(
+    section: &PhysicsTerrainSection,
+) -> Vec<(rapier::Pose, rapier::SharedShape)> {
+    let mut shapes = Vec::new();
+    let voxel_size = section.voxel_size;
+    for y in 0..PHYSICS_TERRAIN_SECTION_WIDTH {
+        for z in 0..PHYSICS_TERRAIN_SECTION_WIDTH {
+            let mut x = 0;
+            while x < PHYSICS_TERRAIN_SECTION_WIDTH {
+                if !section.is_solid(x, y, z) {
+                    x += 1;
+                    continue;
+                }
+                let start_x = x;
+                while x < PHYSICS_TERRAIN_SECTION_WIDTH && section.is_solid(x, y, z) {
+                    x += 1;
+                }
+                let run_width = x - start_x;
+                let center = Vec3d::new(
+                    section.origin.x + (start_x as f64 + run_width as f64 * 0.5) * voxel_size,
+                    section.origin.y + (y as f64 + 0.5) * voxel_size,
+                    section.origin.z + (z as f64 + 0.5) * voxel_size,
+                );
+                shapes.push((
+                    rapier::Pose::from_parts(rapier_vec(center), rapier::Rotation::IDENTITY),
+                    rapier::SharedShape::cuboid(
+                        positive_rapier_real(run_width as f64 * voxel_size * 0.5),
+                        positive_rapier_real(voxel_size * 0.5),
+                        positive_rapier_real(voxel_size * 0.5),
+                    ),
+                ));
+            }
+        }
+    }
+    shapes
+}
+
+#[cfg(feature = "rapier")]
+fn rapier_section_voxels(section: &PhysicsTerrainSection) -> Vec<rapier::IVector> {
+    section
+        .solid_cells()
+        .map(|(x, y, z)| rapier::IVector::new(x as i32, y as i32, z as i32))
+        .collect()
+}
+
+#[cfg(feature = "rapier")]
+fn rapier_section_visible_face_mesh(
+    section: &PhysicsTerrainSection,
+) -> (Vec<rapier::Vector>, Vec<[u32; 3]>) {
+    const FACES: [((isize, isize, isize), [[f64; 3]; 4]); 6] = [
+        (
+            (-1, 0, 0),
+            [
+                [0.0, 0.0, 1.0],
+                [0.0, 1.0, 1.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+        ),
+        (
+            (1, 0, 0),
+            [
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [1.0, 1.0, 1.0],
+                [1.0, 0.0, 1.0],
+            ],
+        ),
+        (
+            (0, -1, 0),
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0],
+            ],
+        ),
+        (
+            (0, 1, 0),
+            [
+                [0.0, 1.0, 1.0],
+                [1.0, 1.0, 1.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+        ),
+        (
+            (0, 0, -1),
+            [
+                [0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [1.0, 0.0, 0.0],
+            ],
+        ),
+        (
+            (0, 0, 1),
+            [
+                [1.0, 0.0, 1.0],
+                [1.0, 1.0, 1.0],
+                [0.0, 1.0, 1.0],
+                [0.0, 0.0, 1.0],
+            ],
+        ),
+    ];
+
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let voxel_size = section.voxel_size;
+    for (x, y, z) in section.solid_cells() {
+        for ((dx, dy, dz), corners) in FACES {
+            if terrain_neighbor_solid(section, x, y, z, dx, dy, dz) {
+                continue;
+            }
+            let base_index = vertices.len() as u32;
+            for [cx, cy, cz] in corners {
+                vertices.push(rapier_vec(Vec3d::new(
+                    section.origin.x + (x as f64 + cx) * voxel_size,
+                    section.origin.y + (y as f64 + cy) * voxel_size,
+                    section.origin.z + (z as f64 + cz) * voxel_size,
+                )));
+            }
+            indices.push([base_index, base_index + 1, base_index + 2]);
+            indices.push([base_index, base_index + 2, base_index + 3]);
+        }
+    }
+    (vertices, indices)
+}
+
+#[cfg(feature = "rapier")]
+fn terrain_neighbor_solid(
+    section: &PhysicsTerrainSection,
+    x: usize,
+    y: usize,
+    z: usize,
+    dx: isize,
+    dy: isize,
+    dz: isize,
+) -> bool {
+    let nx = x as isize + dx;
+    let ny = y as isize + dy;
+    let nz = z as isize + dz;
+    if nx < 0 || ny < 0 || nz < 0 {
+        return false;
+    }
+    section.is_solid(nx as usize, ny as usize, nz as usize)
+}
+
 impl Default for PhysicsBackendKind {
     fn default() -> Self {
         Self::Noop
@@ -829,6 +1265,30 @@ mod tests {
         assert_eq!(world.step(0.05).body_count, 0);
     }
 
+    #[test]
+    fn terrain_section_tracks_solid_cells_and_bounds() {
+        let mut section = PhysicsTerrainSection::new(Vec3d::new(-8.0, -1.0, -8.0), 1.0);
+
+        assert_eq!(section.solid_cell_count(), 0);
+        assert_eq!(
+            section.bounds(),
+            Aabb::new(-8.0, -1.0, -8.0, 8.0, 15.0, 8.0)
+        );
+        assert!(!section.is_solid(2, 3, 4));
+        assert!(!section.is_solid(PHYSICS_TERRAIN_SECTION_WIDTH, 0, 0));
+
+        assert!(section.set_solid(2, 3, 4, true));
+        assert!(section.is_solid(2, 3, 4));
+        assert_eq!(section.solid_cell_count(), 1);
+        assert!(section.set_solid(2, 3, 4, true));
+        assert_eq!(section.solid_cell_count(), 1);
+
+        assert!(section.set_solid(2, 3, 4, false));
+        assert!(!section.is_solid(2, 3, 4));
+        assert_eq!(section.solid_cell_count(), 0);
+        assert!(!section.set_solid(PHYSICS_TERRAIN_SECTION_WIDTH, 0, 0, true));
+    }
+
     #[cfg(feature = "rapier")]
     #[test]
     fn rapier_world_simulates_dynamic_cube_against_static_patch() {
@@ -860,5 +1320,65 @@ mod tests {
             pose.position.y
         );
         assert_eq!(world.terrain_patch(terrain).copied(), Some(terrain_patch));
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_section_terrain_probe_compares_candidate_shapes() {
+        let mut section = PhysicsTerrainSection::new(Vec3d::new(-8.0, -1.0, -8.0), 1.0);
+        for x in 0..PHYSICS_TERRAIN_SECTION_WIDTH {
+            for z in 0..PHYSICS_TERRAIN_SECTION_WIDTH {
+                assert!(section.set_solid(x, 0, z, true));
+            }
+        }
+        for y in 1..4 {
+            assert!(section.set_solid(15, y, 15, true));
+        }
+
+        let reports = run_rapier_section_terrain_probe(&section);
+        assert_eq!(section.solid_cell_count(), 259);
+        assert_eq!(reports.len(), 3);
+
+        let merged = report_for_candidate(&reports, PhysicsTerrainColliderCandidate::MergedCuboids);
+        assert_eq!(merged.primitive_count, 19);
+        assert_eq!(merged.vertex_count, 0);
+        assert_eq!(merged.triangle_count, 0);
+
+        let voxels = report_for_candidate(&reports, PhysicsTerrainColliderCandidate::Voxels);
+        assert_eq!(voxels.primitive_count, section.solid_cell_count());
+
+        let trimesh = report_for_candidate(&reports, PhysicsTerrainColliderCandidate::Trimesh);
+        assert_eq!(trimesh.primitive_count, 1_176);
+        assert_eq!(trimesh.vertex_count, 2_352);
+        assert_eq!(trimesh.triangle_count, 1_176);
+
+        for report in reports {
+            assert_eq!(report.solid_cell_count, section.solid_cell_count());
+            assert_eq!(report.collider_count, 3);
+            assert!(report.body_pose_update_count > 0);
+            assert!(
+                report.cube_final_y > 0.45 && report.cube_final_y < 0.8,
+                "{:?} cube should settle on the floor, got y={}",
+                report.candidate,
+                report.cube_final_y
+            );
+            assert!(
+                report.capsule_final_y > 0.65 && report.capsule_final_y < 1.0,
+                "{:?} capsule should settle on the floor, got y={}",
+                report.candidate,
+                report.capsule_final_y
+            );
+        }
+    }
+
+    #[cfg(feature = "rapier")]
+    fn report_for_candidate(
+        reports: &[PhysicsTerrainProbeReport],
+        candidate: PhysicsTerrainColliderCandidate,
+    ) -> &PhysicsTerrainProbeReport {
+        reports
+            .iter()
+            .find(|report| report.candidate == candidate)
+            .expect("candidate report")
     }
 }
