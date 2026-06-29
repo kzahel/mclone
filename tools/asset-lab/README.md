@@ -22,9 +22,13 @@ pnpm asset-lab:preview
 The smoke command writes screenshots under `/tmp/mclone-asset-lab/` by default.
 The exported figure JSON is also written under `/tmp` unless `--out` is passed.
 The sheet command writes a larger review image with front, side,
-three-quarter, side animation, and three-quarter animation captures.
+three-quarter, side animation, and three-quarter animation captures. Sheets use
+the clip locomotion metadata to scroll the floor at sampled frames.
 The video command captures deterministic Playwright frames and uses `ffmpeg` to
-write an MP4 animation review at `/tmp/mclone-asset-lab/piglet-walk.mp4`.
+write a multi-cycle MP4 animation review at
+`/tmp/mclone-asset-lab/piglet-walk.mp4`. Walk clips keep the figure centered and
+move the floor backward by the authored cycle distance so foot sliding is easy
+to see.
 
 Asset files should use the DSL from `src/dsl.ts`. Three.js is an implementation
 detail of the preview, not the source format.
@@ -75,7 +79,9 @@ walkCycle("walk", {
 ```
 
 Use gait macros when the anatomy is conventional. They are authoring shortcuts,
-not runtime procedural animation.
+not runtime procedural animation. Walk macros export ordinary keyframes plus
+`clip.locomotion` metadata describing cycle distance, speed, forward direction,
+and stance/contact windows.
 
 ```ts
 quadrupedWalk("walk", {
@@ -86,7 +92,15 @@ quadrupedWalk("walk", {
     backRight: "leg_br",
   },
   body: "body",
+  contactParts: {
+    frontLeft: "hoof_fl",
+    frontRight: "hoof_fr",
+    backLeft: "hoof_bl",
+    backRight: "hoof_br",
+  },
+  cycleDistance: 0.72,
   gait: "trot",
+  stanceRatio: 0.56,
   swingDegrees: 20,
   bodyBob: 0.012,
 });
@@ -99,6 +113,10 @@ bipedWalk("walk", {
   leftArm: "arm_l",
   rightArm: "arm_r",
   body: "torso",
+  cycleDistance: 0.9,
+  leftContact: "foot_l",
+  rightContact: "foot_r",
+  stanceRatio: 0.62,
 });
 ```
 
@@ -112,6 +130,26 @@ wingFlap("fly", {
 });
 ```
 
+Use `contactSwing` when you need a lower-level planted/recovery leg curve
+without the full gait macro. `phase` is the contact-start phase; `stanceRatio`
+is the fraction of the cycle spent in planted motion.
+
+```ts
+walkCycle("walk", {
+  duration: 1,
+  locomotion: {
+    kind: "biped-walk",
+    cycleDistance: 0.9,
+    direction: [0, 0, -1],
+    units: "figure",
+  },
+  tracks: [
+    contactSwing("leg_l", { degrees: 24, phase: 0, stanceRatio: 0.62 }),
+    contactSwing("leg_r", { degrees: 24, phase: 0.5, stanceRatio: 0.62 }),
+  ],
+});
+```
+
 The video command accepts the same figure path plus timing options:
 
 ```sh
@@ -119,5 +157,5 @@ pnpm --dir tools/asset-lab exec tsx src/video.ts examples/piglet/figure.ts \
   --out /tmp/mclone-asset-lab/piglet-walk.mp4 \
   --clip walk \
   --fps 24 \
-  --seconds 2
+  --cycles 4
 ```

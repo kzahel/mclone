@@ -101,9 +101,29 @@ export interface TransformKey {
 
 export type ClipKey = readonly [part: string, time: number, transform: TransformKey];
 
+export type LocomotionKind = "biped-walk" | "quadruped-walk" | "wing-flap";
+
+export interface LocomotionContactSpec {
+  part: string;
+  phaseStart: number;
+  phaseEnd: number;
+  role?: string;
+  stanceRatio: number;
+}
+
+export interface ClipLocomotionSpec {
+  kind: LocomotionKind;
+  cycleDistance: number;
+  contacts?: LocomotionContactSpec[];
+  direction?: Vec3;
+  speed?: number;
+  units?: "figure";
+}
+
 export interface ClipSpec {
   fps?: number;
   loop?: boolean;
+  locomotion?: ClipLocomotionSpec;
   keys: ClipKey[];
 }
 
@@ -125,13 +145,19 @@ export interface BobOptions {
   phase?: number;
 }
 
+export interface ContactSwingOptions extends SwingOptions {
+  stanceRatio: number;
+}
+
 export type CycleTrack =
   | ({ kind: "swing"; part: string } & SwingOptions)
+  | ({ kind: "contactSwing"; part: string } & ContactSwingOptions)
   | ({ kind: "bob"; part: string } & BobOptions);
 
 export interface WalkCycleSpec {
   duration?: number;
   fps?: number;
+  locomotion?: ClipLocomotionSpec;
   loop?: boolean;
   samples?: number;
   tracks: CycleTrack[];
@@ -158,11 +184,15 @@ export interface QuadrupedWalkSpec extends CycleTimingSpec {
   bodyBob?: number;
   bodyBobCenter?: number;
   bodyBobPhase?: number;
+  contactParts?: Partial<QuadrupedLegs>;
+  cycleDistance?: number;
+  direction?: Vec3;
   gait?: QuadrupedGait;
   head?: string;
   headSwingDegrees?: number;
   legAxis?: AxisName;
   legs: QuadrupedLegs;
+  stanceRatio?: number;
   swingDegrees?: number;
   tail?: string;
   tailSwingDegrees?: number;
@@ -176,13 +206,18 @@ export interface BipedWalkSpec extends CycleTimingSpec {
   bodyBob?: number;
   bodyBobCenter?: number;
   bodyBobPhase?: number;
+  cycleDistance?: number;
+  direction?: Vec3;
   head?: string;
   headSwingDegrees?: number;
   leftArm?: string;
+  leftContact?: string;
   leftLeg: string;
   legAxis?: AxisName;
+  rightContact?: string;
   rightArm?: string;
   rightLeg: string;
+  stanceRatio?: number;
   swingDegrees?: number;
   tracks?: CycleTrack[];
 }
@@ -194,6 +229,8 @@ export interface WingFlapSpec extends CycleTimingSpec {
   bodyBobCenter?: number;
   bodyBobPhase?: number;
   center?: number;
+  cycleDistance?: number;
+  direction?: Vec3;
   degrees?: number;
   frequency?: number;
   leftWing: string;
@@ -213,6 +250,7 @@ export interface FigureApi {
   quadrupedWalk(name: string, spec: QuadrupedWalkSpec): void;
   wingFlap(name: string, spec: WingFlapSpec): void;
   swing(part: string, options: SwingOptions): CycleTrack;
+  contactSwing(part: string, options: ContactSwingOptions): CycleTrack;
   bob(part: string, options: BobOptions): CycleTrack;
   box(options: BoxOptions): PartDraft;
   sphere(options: SphereOptions): PartDraft;
@@ -284,6 +322,9 @@ export function validateFigure(asset: FigureAsset): string[] {
         errors.push(`clip '${clipName}' has invalid key time '${time}'`);
       }
     }
+    if (clip.locomotion) {
+      validateLocomotion(clipName, clip.locomotion, partNames, errors);
+    }
   }
 
   return errors;
@@ -307,6 +348,7 @@ class FigureBuilder {
       quadrupedWalk: (name, spec) => this.clip(name, buildWalkCycleClip(buildQuadrupedWalkCycle(spec))),
       wingFlap: (name, spec) => this.clip(name, buildWalkCycleClip(buildWingFlapCycle(spec))),
       swing,
+      contactSwing,
       bob,
       box,
       sphere,
@@ -427,15 +469,59 @@ function bob(part: string, options: BobOptions): CycleTrack {
   return track;
 }
 
+function contactSwing(part: string, options: ContactSwingOptions): CycleTrack {
+  const track: CycleTrack = {
+    kind: "contactSwing",
+    part,
+    degrees: options.degrees,
+    stanceRatio: options.stanceRatio,
+  };
+  if (options.axis !== undefined) {
+    track.axis = options.axis;
+  }
+  if (options.center !== undefined) {
+    track.center = options.center;
+  }
+  if (options.frequency !== undefined) {
+    track.frequency = options.frequency;
+  }
+  if (options.phase !== undefined) {
+    track.phase = options.phase;
+  }
+  return track;
+}
+
 function buildQuadrupedWalkCycle(spec: QuadrupedWalkSpec): WalkCycleSpec {
   const swingDegrees = spec.swingDegrees ?? 18;
   const legAxis = spec.legAxis ?? "x";
-  const phases = quadrupedPhases(spec.gait ?? "trot");
+  const gait = spec.gait ?? "trot";
+  const phases = quadrupedPhases(gait);
+  const stanceRatio = spec.stanceRatio ?? defaultQuadrupedStanceRatio(gait);
   const tracks: CycleTrack[] = [
-    swing(spec.legs.frontLeft, { axis: legAxis, degrees: swingDegrees, phase: phases.frontLeft }),
-    swing(spec.legs.frontRight, { axis: legAxis, degrees: swingDegrees, phase: phases.frontRight }),
-    swing(spec.legs.backLeft, { axis: legAxis, degrees: swingDegrees, phase: phases.backLeft }),
-    swing(spec.legs.backRight, { axis: legAxis, degrees: swingDegrees, phase: phases.backRight }),
+    contactSwing(spec.legs.frontLeft, {
+      axis: legAxis,
+      degrees: swingDegrees,
+      phase: phases.frontLeft,
+      stanceRatio,
+    }),
+    contactSwing(spec.legs.frontRight, {
+      axis: legAxis,
+      degrees: swingDegrees,
+      phase: phases.frontRight,
+      stanceRatio,
+    }),
+    contactSwing(spec.legs.backLeft, {
+      axis: legAxis,
+      degrees: swingDegrees,
+      phase: phases.backLeft,
+      stanceRatio,
+    }),
+    contactSwing(spec.legs.backRight, {
+      axis: legAxis,
+      degrees: swingDegrees,
+      phase: phases.backRight,
+      stanceRatio,
+    }),
   ];
 
   if (spec.body && spec.bodyBob !== 0) {
@@ -463,7 +549,38 @@ function buildQuadrupedWalkCycle(spec: QuadrupedWalkSpec): WalkCycleSpec {
   }
   tracks.push(...(spec.tracks ?? []));
 
-  return cycleSpecFromTiming(spec, tracks);
+  return cycleSpecFromTiming(spec, tracks, {
+    kind: "quadruped-walk",
+    cycleDistance: spec.cycleDistance ?? 0.72,
+    contacts: [
+      contactSpec(
+        spec.contactParts?.frontLeft ?? spec.legs.frontLeft,
+        "front-left",
+        phases.frontLeft,
+        stanceRatio,
+      ),
+      contactSpec(
+        spec.contactParts?.frontRight ?? spec.legs.frontRight,
+        "front-right",
+        phases.frontRight,
+        stanceRatio,
+      ),
+      contactSpec(
+        spec.contactParts?.backLeft ?? spec.legs.backLeft,
+        "back-left",
+        phases.backLeft,
+        stanceRatio,
+      ),
+      contactSpec(
+        spec.contactParts?.backRight ?? spec.legs.backRight,
+        "back-right",
+        phases.backRight,
+        stanceRatio,
+      ),
+    ],
+    direction: spec.direction ?? [0, 0, -1],
+    units: "figure",
+  });
 }
 
 function buildBipedWalkCycle(spec: BipedWalkSpec): WalkCycleSpec {
@@ -471,9 +588,10 @@ function buildBipedWalkCycle(spec: BipedWalkSpec): WalkCycleSpec {
   const armSwingDegrees = spec.armSwingDegrees ?? swingDegrees * 0.7;
   const legAxis = spec.legAxis ?? "x";
   const armAxis = spec.armAxis ?? legAxis;
+  const stanceRatio = spec.stanceRatio ?? 0.62;
   const tracks: CycleTrack[] = [
-    swing(spec.leftLeg, { axis: legAxis, degrees: swingDegrees, phase: 0 }),
-    swing(spec.rightLeg, { axis: legAxis, degrees: swingDegrees, phase: 0.5 }),
+    contactSwing(spec.leftLeg, { axis: legAxis, degrees: swingDegrees, phase: 0, stanceRatio }),
+    contactSwing(spec.rightLeg, { axis: legAxis, degrees: swingDegrees, phase: 0.5, stanceRatio }),
   ];
 
   if (spec.leftArm && armSwingDegrees !== 0) {
@@ -500,7 +618,16 @@ function buildBipedWalkCycle(spec: BipedWalkSpec): WalkCycleSpec {
   }
   tracks.push(...(spec.tracks ?? []));
 
-  return cycleSpecFromTiming(spec, tracks);
+  return cycleSpecFromTiming(spec, tracks, {
+    kind: "biped-walk",
+    cycleDistance: spec.cycleDistance ?? 0.9,
+    contacts: [
+      contactSpec(spec.leftContact ?? spec.leftLeg, "left", 0, stanceRatio),
+      contactSpec(spec.rightContact ?? spec.rightLeg, "right", 0.5, stanceRatio),
+    ],
+    direction: spec.direction ?? [0, 0, -1],
+    units: "figure",
+  });
 }
 
 function buildWingFlapCycle(spec: WingFlapSpec): WalkCycleSpec {
@@ -533,10 +660,23 @@ function buildWingFlapCycle(spec: WingFlapSpec): WalkCycleSpec {
   }
   tracks.push(...(spec.tracks ?? []));
 
-  return cycleSpecFromTiming(spec, tracks);
+  const locomotion = spec.cycleDistance === undefined
+    ? undefined
+    : {
+      kind: "wing-flap" as const,
+      cycleDistance: spec.cycleDistance,
+      direction: spec.direction ?? [0, 0, -1] as const,
+      units: "figure" as const,
+    };
+
+  return cycleSpecFromTiming(spec, tracks, locomotion);
 }
 
-function cycleSpecFromTiming(timing: CycleTimingSpec, tracks: CycleTrack[]): WalkCycleSpec {
+function cycleSpecFromTiming(
+  timing: CycleTimingSpec,
+  tracks: CycleTrack[],
+  locomotion?: ClipLocomotionSpec,
+): WalkCycleSpec {
   const spec: WalkCycleSpec = { tracks };
   if (timing.duration !== undefined) {
     spec.duration = timing.duration;
@@ -549,6 +689,9 @@ function cycleSpecFromTiming(timing: CycleTimingSpec, tracks: CycleTrack[]): Wal
   }
   if (timing.samples !== undefined) {
     spec.samples = timing.samples;
+  }
+  if (locomotion) {
+    spec.locomotion = locomotion;
   }
   return spec;
 }
@@ -564,6 +707,26 @@ function quadrupedPhases(gait: QuadrupedGait): Record<keyof QuadrupedLegs, numbe
     return { frontLeft: 0, frontRight: 0, backLeft: 0.5, backRight: 0.5 };
   }
   return { frontLeft: 0, frontRight: 0.5, backLeft: 0.5, backRight: 0 };
+}
+
+function defaultQuadrupedStanceRatio(gait: QuadrupedGait): number {
+  if (gait === "bound") {
+    return 0.48;
+  }
+  if (gait === "walk") {
+    return 0.65;
+  }
+  return 0.56;
+}
+
+function contactSpec(part: string, role: string, phaseStart: number, stanceRatio: number): LocomotionContactSpec {
+  return {
+    part,
+    phaseStart: roundFloat(normalizePhase(phaseStart)),
+    phaseEnd: roundFloat(normalizePhase(phaseStart + stanceRatio)),
+    role,
+    stanceRatio: roundFloat(stanceRatio),
+  };
 }
 
 function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
@@ -587,15 +750,24 @@ function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
     validateCycleTrack(track);
     for (let index = 0; index < samples; index += 1) {
       const progress = index / (samples - 1);
-      const value = cycleValue(
-        progress,
-        track.phase ?? 0,
-        track.center ?? 0,
-        track.kind === "swing" ? track.degrees : track.amount,
-        track.frequency ?? 1,
-      );
+      const value = track.kind === "contactSwing"
+        ? contactCycleValue(
+          progress,
+          track.phase ?? 0,
+          track.center ?? 0,
+          track.degrees,
+          track.frequency ?? 1,
+          track.stanceRatio,
+        )
+        : cycleValue(
+          progress,
+          track.phase ?? 0,
+          track.center ?? 0,
+          track.kind === "swing" ? track.degrees : track.amount,
+          track.frequency ?? 1,
+        );
       const transform = ensureFrameTransform(frameParts[index], track.part);
-      if (track.kind === "swing") {
+      if (track.kind === "swing" || track.kind === "contactSwing") {
         const rot = mutableVec(transform.rot);
         setAxis(rot, track.axis ?? "x", value);
         transform.rot = rot;
@@ -622,6 +794,9 @@ function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
   if (spec.fps !== undefined) {
     clip.fps = spec.fps;
   }
+  if (spec.locomotion) {
+    clip.locomotion = completeLocomotion(spec.locomotion, duration);
+  }
   return clip;
 }
 
@@ -632,7 +807,7 @@ function validateCycleTrack(track: CycleTrack): void {
   if (track.axis !== undefined && !["x", "y", "z"].includes(track.axis)) {
     throw new Error(`walkCycle track '${track.part}' has invalid axis '${track.axis}'`);
   }
-  const amount = track.kind === "swing" ? track.degrees : track.amount;
+  const amount = track.kind === "bob" ? track.amount : track.degrees;
   if (!Number.isFinite(amount)) {
     throw new Error(`walkCycle track '${track.part}' amount must be finite`);
   }
@@ -644,6 +819,59 @@ function validateCycleTrack(track: CycleTrack): void {
   }
   if (track.phase !== undefined && !Number.isFinite(track.phase)) {
     throw new Error(`walkCycle track '${track.part}' phase must be finite`);
+  }
+  if (
+    track.kind === "contactSwing" &&
+    (!Number.isFinite(track.stanceRatio) || track.stanceRatio <= 0 || track.stanceRatio >= 1)
+  ) {
+    throw new Error(`walkCycle track '${track.part}' stanceRatio must be between 0 and 1`);
+  }
+}
+
+function validateLocomotion(
+  clipName: string,
+  locomotion: ClipLocomotionSpec,
+  partNames: Set<string>,
+  errors: string[],
+): void {
+  if (!["biped-walk", "quadruped-walk", "wing-flap"].includes(locomotion.kind)) {
+    errors.push(`clip '${clipName}' locomotion kind '${locomotion.kind}' is invalid`);
+  }
+  if (!Number.isFinite(locomotion.cycleDistance) || locomotion.cycleDistance <= 0) {
+    errors.push(`clip '${clipName}' locomotion cycleDistance must be positive`);
+  }
+  if (locomotion.speed !== undefined && (!Number.isFinite(locomotion.speed) || locomotion.speed <= 0)) {
+    errors.push(`clip '${clipName}' locomotion speed must be positive`);
+  }
+  if (locomotion.direction) {
+    let lengthSq = 0;
+    for (const [index, value] of locomotion.direction.entries()) {
+      if (!Number.isFinite(value)) {
+        errors.push(`clip '${clipName}' locomotion direction[${index}] must be finite`);
+      }
+      lengthSq += value * value;
+    }
+    if (lengthSq === 0) {
+      errors.push(`clip '${clipName}' locomotion direction must be nonzero`);
+    }
+  }
+  if (locomotion.contacts) {
+    for (const contact of locomotion.contacts) {
+      if (!partNames.has(contact.part)) {
+        errors.push(`clip '${clipName}' locomotion contact references missing part '${contact.part}'`);
+      }
+      validatePhase(`clip '${clipName}' locomotion contact '${contact.part}' phaseStart`, contact.phaseStart, errors);
+      validatePhase(`clip '${clipName}' locomotion contact '${contact.part}' phaseEnd`, contact.phaseEnd, errors);
+      if (!Number.isFinite(contact.stanceRatio) || contact.stanceRatio <= 0 || contact.stanceRatio >= 1) {
+        errors.push(`clip '${clipName}' locomotion contact '${contact.part}' stanceRatio must be between 0 and 1`);
+      }
+    }
+  }
+}
+
+function validatePhase(label: string, value: number, errors: string[]): void {
+  if (!Number.isFinite(value) || value < 0 || value >= 1) {
+    errors.push(`${label} must be in [0, 1)`);
   }
 }
 
@@ -662,6 +890,48 @@ function ensureFrameTransform(frame: Map<string, TransformKey> | undefined, part
 
 function cycleValue(progress: number, phase: number, center: number, amount: number, frequency: number): number {
   return center + Math.cos((progress * frequency + phase) * Math.PI * 2) * amount;
+}
+
+function contactCycleValue(
+  progress: number,
+  phaseStart: number,
+  center: number,
+  amount: number,
+  frequency: number,
+  stanceRatio: number,
+): number {
+  const cycleProgress = normalizePhase(progress * frequency - phaseStart);
+  if (cycleProgress <= stanceRatio) {
+    return center + lerp(amount, -amount, cycleProgress / stanceRatio);
+  }
+  const recoveryProgress = (cycleProgress - stanceRatio) / (1 - stanceRatio);
+  return center + lerp(-amount, amount, smoothStep(recoveryProgress));
+}
+
+function completeLocomotion(locomotion: ClipLocomotionSpec, duration: number): ClipLocomotionSpec {
+  const complete: ClipLocomotionSpec = { ...locomotion };
+  if (complete.speed === undefined) {
+    complete.speed = roundFloat(complete.cycleDistance / duration);
+  }
+  return complete;
+}
+
+function normalizePhase(value: number): number {
+  const normalized = value - Math.floor(value);
+  return normalized === 1 ? 0 : normalized;
+}
+
+function smoothStep(value: number): number {
+  const t = Math.max(0, Math.min(1, value));
+  return t * t * (3 - 2 * t);
+}
+
+function lerp(left: number, right: number, alpha: number): number {
+  return left + (right - left) * alpha;
+}
+
+function roundFloat(value: number): number {
+  return Math.round(value * 10_000) / 10_000;
 }
 
 function mutableVec(value: Vec3 | undefined): [number, number, number] {

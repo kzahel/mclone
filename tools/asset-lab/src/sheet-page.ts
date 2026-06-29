@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { assertValidFigure, type FigureAsset } from "./dsl";
+import { createReviewFloor, locomotionSummary } from "./review-floor";
 import { clipDuration, createFigureScene } from "./scene";
 
 declare global {
@@ -60,11 +61,14 @@ function renderSheet(
   const frameCount = 6;
   const frameTimes =
     duration > 0 ? Array.from({ length: frameCount }, (_, index) => (duration * index) / frameCount) : [0];
+  const subtitle = `${options.clipName} · ${
+    locomotionSummary(clip?.locomotion) ?? `${duration.toFixed(2)}s cycle`
+  } · ${options.debug ? "debug overlays" : "clean render"}`;
 
   container.innerHTML = `
     <header class="title">
       <h1>${escapeHtml(asset.name)}</h1>
-      <span>${escapeHtml(options.clipName)} · ${options.debug ? "debug overlays" : "clean render"}</span>
+      <span>${escapeHtml(subtitle)}</span>
     </header>
     <div class="section-title">Static Views</div>
     <section class="grid static-grid" data-section="static"></section>
@@ -180,9 +184,10 @@ function renderCell(
   }
   const center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
-  const floor = new THREE.GridHelper(Math.max(3, Math.ceil(Math.max(size.x, size.z) * 3)), 12, "#8a98a6", "#c5cdd5");
-  floor.position.y = bounds.min.y - 0.035;
-  scene.add(floor);
+  const clip = asset.clips[options.clipName];
+  const floor = createReviewFloor(bounds, clip?.locomotion, clipDuration(clip));
+  floor.update(options.time);
+  scene.add(floor.root);
 
   const camera = new THREE.PerspectiveCamera(35, width / height, 0.01, 100);
   placeCamera(camera, center, size, options.view);

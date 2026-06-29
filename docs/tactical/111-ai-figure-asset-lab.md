@@ -1,6 +1,6 @@
 # 111 - AI Figure Asset Lab
 
-Status: active; Slice 2 gait macros landed.
+Status: active; Slice 2 locomotion review metadata landed.
 
 ## Purpose
 
@@ -111,6 +111,8 @@ The exported asset should contain only simple data:
 - simple animation clips generated either by raw keyframes, procedural
   `walkCycle` tracks such as `swing` and `bob`, or gait macros such as
   `quadrupedWalk`, `bipedWalk`, and `wingFlap`
+- optional clip locomotion metadata: cycle distance, speed, forward direction,
+  and stance/contact windows for gait review and future runtime import
 
 ## Initial Primitive Set
 
@@ -169,6 +171,11 @@ The video capture writes an MP4 animation review:
 ```text
 /tmp/mclone-asset-lab/piglet-walk.mp4
 ```
+
+Walk-cycle review captures keep the figure centered and move the grid floor
+backward by the clip's authored cycle distance. The default MP4 spans multiple
+cycles so stance timing, recovery timing, and visible foot sliding are easier to
+critique than in a single-loop pose preview.
 
 The next useful captures are:
 
@@ -244,8 +251,16 @@ profile the harness before adding animation-sheet captures.
       tracks while keeping exported clips as ordinary keyframes.
 - [x] Add `quadrupedWalk`, `bipedWalk`, and `wingFlap` authoring macros that
       compile to ordinary keyframes.
+- [x] Add gait locomotion metadata for cycle distance, derived speed, forward
+      direction, and stance/contact windows.
+- [x] Let gait contact metadata target foot/hoof parts separately from the
+      animated limb segment.
+- [x] Add contact-shaped `contactSwing` tracks so gait macros can separate
+      planted stance from recovery swing while still exporting keyframes.
 - [x] Add MP4 animation review output from deterministic Playwright frames
       assembled with `ffmpeg`.
+- [x] Make sheet and MP4 review floors scroll from locomotion metadata, with
+      MP4 output defaulting to several cycles.
 - [ ] Add a validation report that points to the asset file and part names.
 - [ ] Add starter prompts and examples for sheep, dog, cat, butterfly, and
       player stand-in variants.

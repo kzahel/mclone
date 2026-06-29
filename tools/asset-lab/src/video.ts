@@ -9,6 +9,7 @@ import { createServer } from "vite";
 
 interface VideoArgs {
   clip: string;
+  cycles: number;
   debug: boolean;
   fps: number;
   input: string;
@@ -74,11 +75,11 @@ try {
   }
 
   const clipDuration = await page.evaluate(() => window.assetLabVideoDuration ?? 1);
-  const seconds = args.seconds ?? Math.max(clipDuration * 2, 2);
+  const seconds = args.seconds ?? Math.max(clipDuration * args.cycles, 2);
   const frameCount = Math.max(2, Math.ceil(seconds * args.fps));
   const target = page.locator("#video");
   for (let frame = 0; frame < frameCount; frame += 1) {
-    const time = (frame / args.fps) % clipDuration;
+    const time = frame / args.fps;
     await page.evaluate((timeSeconds) => window.assetLabSetVideoTime?.(timeSeconds), time);
     await target.screenshot({ path: path.join(frameDir, `frame-${frame.toString().padStart(5, "0")}.png`) });
   }
@@ -94,10 +95,11 @@ try {
 function parseArgs(argv: string[]): VideoArgs {
   const input = argv[0];
   if (!input || input.startsWith("-")) {
-    throw new Error("Usage: tsx src/video.ts <figure.ts> [--out <mp4>] [--clip <name>] [--fps <n>] [--seconds <n>] [--clean]");
+    throw new Error("Usage: tsx src/video.ts <figure.ts> [--out <mp4>] [--clip <name>] [--fps <n>] [--seconds <n>] [--cycles <n>] [--clean]");
   }
 
   let clip = "walk";
+  let cycles = 4;
   let debug = true;
   let fps = 24;
   let outPath = path.join("/tmp", "mclone-asset-lab", "walk.mp4");
@@ -117,6 +119,9 @@ function parseArgs(argv: string[]): VideoArgs {
     } else if (arg === "--seconds") {
       seconds = parsePositiveNumber(argv[index + 1], "--seconds");
       index += 1;
+    } else if (arg === "--cycles") {
+      cycles = parsePositiveNumber(argv[index + 1], "--cycles");
+      index += 1;
     } else if (arg === "--clean") {
       debug = false;
     } else {
@@ -124,7 +129,7 @@ function parseArgs(argv: string[]): VideoArgs {
     }
   }
 
-  return { clip, debug, fps, input, outPath, seconds };
+  return { clip, cycles, debug, fps, input, outPath, seconds };
 }
 
 function parsePositiveNumber(value: string | undefined, flag: string): number {

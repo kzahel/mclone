@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { assertValidFigure, type FigureAsset } from "./dsl";
+import { createReviewFloor, locomotionSummary, type ReviewFloor } from "./review-floor";
 import { clipDuration, createFigureScene, type FigureScene } from "./scene";
 
 declare global {
@@ -15,6 +16,7 @@ type ViewName = "right" | "three-quarter";
 interface RenderPanel {
   camera: THREE.PerspectiveCamera;
   figureScene: FigureScene;
+  floor: ReviewFloor;
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
 }
@@ -37,6 +39,7 @@ try {
     for (const panel of panels) {
       panel.figureScene.update(timeSeconds);
       panel.figureScene.root.updateMatrixWorld(true);
+      panel.floor.update(timeSeconds);
       panel.renderer.render(panel.scene, panel.camera);
     }
   };
@@ -66,10 +69,16 @@ function renderVideo(
   asset: FigureAsset,
   options: { clipName: string; debug: boolean },
 ): RenderPanel[] {
+  const clip = asset.clips[options.clipName];
+  const duration = clipDuration(clip);
+  const locomotion = locomotionSummary(clip?.locomotion);
+  const subtitle = `${options.clipName} · ${locomotion ?? `${duration.toFixed(2)}s cycle`} · ${
+    options.debug ? "debug overlays" : "clean render"
+  }`;
   container.innerHTML = `
     <header class="title">
       <h1>${escapeHtml(asset.name)}</h1>
-      <span>${escapeHtml(options.clipName)} · ${options.debug ? "debug overlays" : "clean render"}</span>
+      <span>${escapeHtml(subtitle)}</span>
     </header>
     <section class="views">
       <article class="cell" data-view="right"><div class="viewport"></div><div class="label">Side</div></article>
@@ -108,6 +117,7 @@ function renderPanel(
   viewport.appendChild(renderer.domElement);
 
   const scene = createLitScene();
+  const clip = asset.clips[options.clipName];
   const figureScene = createFigureScene(asset, options.clipName, {
     debug: options.debug,
     labels: false,
@@ -122,15 +132,15 @@ function renderPanel(
   }
   const center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
-  const floor = new THREE.GridHelper(Math.max(3, Math.ceil(Math.max(size.x, size.z) * 3)), 12, "#8a98a6", "#c5cdd5");
-  floor.position.y = bounds.min.y - 0.035;
-  scene.add(floor);
+  const floor = createReviewFloor(bounds, clip?.locomotion, clipDuration(clip));
+  scene.add(floor.root);
+  floor.update(0);
 
   const camera = new THREE.PerspectiveCamera(35, width / height, 0.01, 100);
   placeCamera(camera, center, size, options.view);
   renderer.render(scene, camera);
 
-  return { camera, figureScene, renderer, scene };
+  return { camera, figureScene, floor, renderer, scene };
 }
 
 function createLitScene(): THREE.Scene {
