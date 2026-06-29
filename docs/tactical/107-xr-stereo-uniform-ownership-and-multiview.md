@@ -431,6 +431,43 @@ MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY submitted=209 runtime_frames=209
 Release APK SHA-256 for that proof run:
 `8f48d2b1aa1d666fc5179e8d898660ca9ac498d98269b700d65c7431176c6409`.
 
+**Terrain-only A/B perf probe landed 2026-06-29.** Android XR now has a
+diagnostic `--terrain-multiview-perf` launch mode:
+
+```bash
+pnpm native:android-xr:terrain-multiview-perf
+```
+
+The probe waits until terrain chunks are drawable, then renders frozen terrain
+offscreen with the current per-eye shape (left submit/wait, right submit/wait)
+and the terrain multiview shape (one `multiview: Some(2)` pass). It warms both
+paths, alternates measurement order, takes 60 samples, and excludes any layer
+readback. It is a terrain microbenchmark, not a full-frame headset pacing claim.
+
+Initial Quest 3 results are mixed but useful:
+
+```text
+Default tiny scene:
+MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PERF_SUMMARY samples=60 warmup=12 eye=1680x1760 sections=6 left_drawn_sections=2 right_drawn_sections=2 left_drawn_indices=15924 right_drawn_indices=15924 stereo_avg_ms=1.637 stereo_p50_ms=1.447 stereo_p95_ms=2.492 multiview_avg_ms=1.665 multiview_p50_ms=1.494 multiview_p95_ms=2.111 delta_avg_ms=-0.027 speedup=0.984
+
+RD10 frozen pose 0,80,-96,180:
+MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PERF_SUMMARY samples=60 warmup=12 eye=1680x1760 sections=18 left_drawn_sections=2 right_drawn_sections=2 left_drawn_indices=1650 right_drawn_indices=1650 stereo_avg_ms=1.044 stereo_p50_ms=0.908 stereo_p95_ms=1.442 multiview_avg_ms=0.726 multiview_p50_ms=0.574 multiview_p95_ms=1.088 delta_avg_ms=0.319 speedup=1.439
+
+RD10 frozen pose 0,120,-96,180:
+MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PERF_SUMMARY samples=60 warmup=12 eye=1680x1760 sections=6 left_drawn_sections=3 right_drawn_sections=3 left_drawn_indices=4644 right_drawn_indices=4644 stereo_avg_ms=1.441 stereo_p50_ms=0.913 stereo_p95_ms=1.488 multiview_avg_ms=1.060 multiview_p50_ms=0.578 multiview_p95_ms=0.996 delta_avg_ms=0.381 speedup=1.360
+```
+
+Interpretation: there is no universal terrain win yet. The tiny/default case is
+flat to slightly worse on average. The two RD10 frozen-pose microbenchmarks show
+a positive terrain-only signal (about `1.36x` to `1.44x`) where removing the
+second submit/pass appears to matter. This is enough to continue to full-frame
+multiview migration, but not enough to claim production frame pacing improvement
+until sky/entities/GUI/screen effects are migrated and measured in the normal
+headset frame loop.
+
+Release APK SHA-256 for the perf runs:
+`3c95848259dda09f80abd92271f6f51452a57016eb1bb23e0db9f6596cdc2a2b`.
+
 Move from proof-of-correctness one-submit to the real target:
 
 - migrate sky, actors/entities, selection outline, world GUI, and screen effects

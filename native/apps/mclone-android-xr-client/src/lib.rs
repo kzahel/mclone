@@ -30,7 +30,9 @@ mod android {
     use mclone_audio::{AudioEngine, AudioSettings};
     use mclone_net::NativeClientSession;
     use mclone_protocol::{ClientCommand, ServerUpdate};
-    use mclone_render::chunk::{ChunkMultiviewDepthTarget, TexturedSectionRenderOptions};
+    use mclone_render::chunk::{
+        ChunkDepthTarget, ChunkMultiviewDepthTarget, TexturedSectionRenderOptions,
+    };
     use mclone_render_session::EngineCameraSnapshot;
     use mclone_xr_host::{
         OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
@@ -75,6 +77,8 @@ mod android {
     const ANDROID_XR_PERF_SETTLE_MIN_SECONDS: f64 = 5.0;
     const ANDROID_XR_PERF_SETTLE_QUIET_FRAMES: u64 = 45;
     const ANDROID_XR_PERF_SETTLE_PROGRESS_FRAMES: u64 = 120;
+    const TERRAIN_MULTIVIEW_PERF_WARMUP_FRAMES: usize = 12;
+    const TERRAIN_MULTIVIEW_PERF_SAMPLE_FRAMES: usize = 60;
 
     #[allow(unsafe_code)]
     #[link(name = "log")]
@@ -229,6 +233,7 @@ mod android {
         perf_metrics: bool,
         multiview_proof: bool,
         terrain_multiview_proof: bool,
+        terrain_multiview_perf: bool,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -245,6 +250,7 @@ mod android {
                 perf_metrics: false,
                 multiview_proof: false,
                 terrain_multiview_proof: false,
+                terrain_multiview_perf: false,
             }
         }
     }
@@ -340,6 +346,9 @@ mod android {
                 "--terrain-multiview-proof" => {
                     options.terrain_multiview_proof = true;
                 }
+                "--terrain-multiview-perf" => {
+                    options.terrain_multiview_perf = true;
+                }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
         }
@@ -367,7 +376,15 @@ mod android {
         if options.multiview_proof && options.terrain_multiview_proof {
             bail!("--multiview-proof cannot be combined with --terrain-multiview-proof");
         }
-        if options.multiview_proof || options.terrain_multiview_proof {
+        if options.terrain_multiview_perf
+            && (options.multiview_proof || options.terrain_multiview_proof)
+        {
+            bail!("--terrain-multiview-perf cannot be combined with multiview proof modes");
+        }
+        if options.multiview_proof
+            || options.terrain_multiview_proof
+            || options.terrain_multiview_perf
+        {
             if options.session_smoke.is_some() {
                 bail!("multiview proof modes cannot be combined with --session-smoke");
             }
@@ -377,7 +394,7 @@ mod android {
                 || options.perf_frozen_render
                 || options.perf_metrics
             {
-                bail!("multiview proof modes cannot be combined with performance probes");
+                bail!("terrain multiview diagnostics cannot be combined with performance probes");
             }
         }
         Ok(options)
@@ -634,6 +651,10 @@ mod android {
             startup_options.terrain_multiview_proof
         );
         log::info!(
+            "Android XR terrain multiview perf: {}",
+            startup_options.terrain_multiview_perf
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -674,6 +695,7 @@ mod android {
             startup_options.perf_metrics,
             startup_options.multiview_proof,
             startup_options.terrain_multiview_proof,
+            startup_options.terrain_multiview_perf,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -695,6 +717,7 @@ mod android {
         perf_metrics: bool,
         multiview_proof: bool,
         terrain_multiview_proof: bool,
+        terrain_multiview_perf: bool,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -974,6 +997,30 @@ mod android {
                 &stage,
                 environment_blend_mode,
                 &mut stereo_target,
+                &mut terrain,
+            );
+        }
+
+        if terrain_multiview_perf {
+            log::info!("MCLONE_ANDROID_XR_SESSION_READY");
+            let mut terrain = create_android_xr_terrain_state(
+                &graphics.device,
+                &graphics.queue,
+                runtime_assets,
+                startup_view_pose,
+                scene_options,
+                render_options,
+                remote_addr,
+            )
+            .context("initialize Android XR terrain multiview perf runtime")?;
+            terrain.set_display_refresh_hz(display_refresh.current_rate);
+            return run_terrain_multiview_perf_loop(
+                app,
+                &mut graphics,
+                &stage,
+                environment_blend_mode,
+                eye_width,
+                eye_height,
                 &mut terrain,
             );
         }
@@ -1323,6 +1370,442 @@ mod android {
                 }
             }
         }
+    }
+
+    struct TerrainPerfEyeTarget {
+        _color: wgpu::Texture,
+        color_view: wgpu::TextureView,
+        depth: ChunkDepthTarget,
+        size: [u32; 2],
+    }
+
+    impl TerrainPerfEyeTarget {
+        fn new(device: &wgpu::Device, width: u32, height: u32, label: &'static str) -> Self {
+            let width = width.max(1);
+            let height = height.max(1);
+            let color = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: XR_COLOR_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let color_view = color.create_view(&Default::default());
+            Self {
+                _color: color,
+                color_view,
+                depth: ChunkDepthTarget::new(device, width, height),
+                size: [width, height],
+            }
+        }
+
+        fn target(&self) -> XrTerrainEyeTarget<'_> {
+            XrTerrainEyeTarget {
+                color_view: &self.color_view,
+                depth: &self.depth,
+                size: self.size,
+            }
+        }
+    }
+
+    struct TerrainPerfMultiviewTarget {
+        _color: wgpu::Texture,
+        color_view: wgpu::TextureView,
+        depth: ChunkMultiviewDepthTarget,
+        size: [u32; 2],
+    }
+
+    impl TerrainPerfMultiviewTarget {
+        fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+            let width = width.max(1);
+            let height = height.max(1);
+            let color = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("mclone_xr_terrain_perf_multiview_color"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 2,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: XR_COLOR_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let color_view = color.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("mclone_xr_terrain_perf_multiview_color_view"),
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                base_array_layer: 0,
+                array_layer_count: Some(2),
+                ..Default::default()
+            });
+            Self {
+                _color: color,
+                color_view,
+                depth: ChunkMultiviewDepthTarget::new(device, width, height),
+                size: [width, height],
+            }
+        }
+
+        fn target(&self) -> XrTerrainMultiviewTarget<'_> {
+            XrTerrainMultiviewTarget {
+                color_view: &self.color_view,
+                depth: &self.depth,
+                size: self.size,
+            }
+        }
+    }
+
+    struct TerrainPerfTargets {
+        left: TerrainPerfEyeTarget,
+        right: TerrainPerfEyeTarget,
+        multiview: TerrainPerfMultiviewTarget,
+    }
+
+    impl TerrainPerfTargets {
+        fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+            Self {
+                left: TerrainPerfEyeTarget::new(
+                    device,
+                    width,
+                    height,
+                    "mclone_xr_terrain_perf_left_color",
+                ),
+                right: TerrainPerfEyeTarget::new(
+                    device,
+                    width,
+                    height,
+                    "mclone_xr_terrain_perf_right_color",
+                ),
+                multiview: TerrainPerfMultiviewTarget::new(device, width, height),
+            }
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct TerrainMultiviewPerfFrame {
+        summary: mclone_xr_scene::XrTerrainMultiviewFrameSummary,
+        ready: bool,
+    }
+
+    struct TerrainMultiviewPerfSummary {
+        terrain: mclone_xr_scene::XrTerrainMultiviewFrameSummary,
+        stereo_ms: Vec<f64>,
+        multiview_ms: Vec<f64>,
+    }
+
+    impl TerrainMultiviewPerfSummary {
+        fn stereo_stats(&self) -> SampleStats {
+            SampleStats::from_samples(&self.stereo_ms)
+        }
+
+        fn multiview_stats(&self) -> SampleStats {
+            SampleStats::from_samples(&self.multiview_ms)
+        }
+
+        fn speedup(&self) -> f64 {
+            let stereo = self.stereo_stats().avg_ms;
+            let multiview = self.multiview_stats().avg_ms;
+            if multiview > 0.0 {
+                stereo / multiview
+            } else {
+                0.0
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Default)]
+    struct SampleStats {
+        avg_ms: f64,
+        min_ms: f64,
+        p50_ms: f64,
+        p95_ms: f64,
+        max_ms: f64,
+    }
+
+    impl SampleStats {
+        fn from_samples(samples: &[f64]) -> Self {
+            if samples.is_empty() {
+                return Self::default();
+            }
+            let mut sorted = samples.to_vec();
+            sorted.sort_by(|left, right| {
+                left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let avg_ms = sorted.iter().sum::<f64>() / sorted.len() as f64;
+            Self {
+                avg_ms,
+                min_ms: sorted[0],
+                p50_ms: percentile(&sorted, 0.50),
+                p95_ms: percentile(&sorted, 0.95),
+                max_ms: *sorted.last().expect("non-empty samples checked above"),
+            }
+        }
+    }
+
+    fn run_terrain_multiview_perf_loop(
+        app: &AndroidApp,
+        graphics: &mut graphics_vulkan::VulkanGraphicsSession,
+        stage: &xr::Space,
+        environment_blend_mode: xr::EnvironmentBlendMode,
+        eye_width: u32,
+        eye_height: u32,
+        terrain: &mut AndroidXrTerrainState,
+    ) -> Result<()> {
+        let mut event_storage = xr::EventDataBuffer::new();
+        let mut session_running = false;
+        let mut frame_stats = XrFrameStats::default();
+        let targets = TerrainPerfTargets::new(&graphics.device, eye_width, eye_height);
+        let perf_start = Instant::now();
+
+        loop {
+            if perf_start.elapsed() > Duration::from_secs(60) {
+                bail!(
+                    "terrain multiview perf timed out: submitted={} runtime_frames={} skipped={} sections={}",
+                    frame_stats.submitted_frames,
+                    frame_stats.runtime_frames,
+                    frame_stats.skipped_frames,
+                    terrain.frame_summary().section_count
+                );
+            }
+            if !poll_android_events(app, Some(Duration::from_millis(0)))? {
+                log::info!(
+                    "Android activity destroyed; exiting OpenXR terrain multiview perf loop"
+                );
+                return Ok(());
+            }
+
+            match mclone_xr_host::poll_openxr_events(
+                &graphics.session,
+                &mut event_storage,
+                &mut session_running,
+                VIEW_TYPE,
+                log_openxr_host_event,
+            )
+            .context("poll OpenXR events")?
+            {
+                OpenXrPollStatus::Exit => {
+                    log::info!(
+                        "OpenXR terrain multiview perf requested exit: submitted={} runtime_frames={} skipped={}",
+                        frame_stats.submitted_frames,
+                        frame_stats.runtime_frames,
+                        frame_stats.skipped_frames
+                    );
+                    return Ok(());
+                }
+                OpenXrPollStatus::Idle if !session_running => {
+                    if !poll_android_events(app, Some(SESSION_IDLE_POLL_INTERVAL))? {
+                        log::info!(
+                            "Android activity destroyed while waiting for OpenXR READY in terrain multiview perf"
+                        );
+                        return Ok(());
+                    }
+                    continue;
+                }
+                OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
+            }
+
+            let frame_state = mclone_xr_host::wait_begin_frame(
+                &mut graphics.frame_wait,
+                &mut graphics.frame_stream,
+                &mut frame_stats,
+            )?;
+            if frame_state.should_render {
+                let frame_result = render_terrain_multiview_perf_frame(
+                    graphics,
+                    stage,
+                    frame_state.predicted_display_time,
+                    &targets,
+                    terrain,
+                );
+                let end_result = mclone_xr_host::end_frame_with_layers(
+                    &mut graphics.frame_stream,
+                    frame_state.predicted_display_time,
+                    environment_blend_mode,
+                    &[],
+                );
+                let maybe_summary = match frame_result {
+                    Ok(summary) => summary,
+                    Err(error) => {
+                        let _ = end_result;
+                        return Err(error);
+                    }
+                };
+                end_result.context("end terrain multiview perf OpenXR frame")?;
+                frame_stats.record_submitted_frame();
+                if let Some(summary) = maybe_summary {
+                    let stereo = summary.stereo_stats();
+                    let multiview = summary.multiview_stats();
+                    let delta_ms = stereo.avg_ms - multiview.avg_ms;
+                    log::info!(
+                        "MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PERF_SUMMARY samples={} warmup={} eye={}x{} sections={} left_drawn_sections={} right_drawn_sections={} left_drawn_indices={} right_drawn_indices={} stereo_avg_ms={:.3} stereo_min_ms={:.3} stereo_p50_ms={:.3} stereo_p95_ms={:.3} stereo_max_ms={:.3} multiview_avg_ms={:.3} multiview_min_ms={:.3} multiview_p50_ms={:.3} multiview_p95_ms={:.3} multiview_max_ms={:.3} delta_avg_ms={:.3} speedup={:.3}",
+                        TERRAIN_MULTIVIEW_PERF_SAMPLE_FRAMES,
+                        TERRAIN_MULTIVIEW_PERF_WARMUP_FRAMES,
+                        eye_width,
+                        eye_height,
+                        summary.terrain.section_count,
+                        summary.terrain.left.drawn_section_count,
+                        summary.terrain.right.drawn_section_count,
+                        summary.terrain.left.drawn_index_count,
+                        summary.terrain.right.drawn_index_count,
+                        stereo.avg_ms,
+                        stereo.min_ms,
+                        stereo.p50_ms,
+                        stereo.p95_ms,
+                        stereo.max_ms,
+                        multiview.avg_ms,
+                        multiview.min_ms,
+                        multiview.p50_ms,
+                        multiview.p95_ms,
+                        multiview.max_ms,
+                        delta_ms,
+                        summary.speedup()
+                    );
+                    return Ok(());
+                }
+            } else if let Err(error) = mclone_xr_host::end_skipped_frame(
+                &mut graphics.frame_stream,
+                frame_state.predicted_display_time,
+                environment_blend_mode,
+                &mut frame_stats,
+            ) {
+                return Err(error);
+            }
+        }
+    }
+
+    fn render_terrain_multiview_perf_frame(
+        graphics: &mut graphics_vulkan::VulkanGraphicsSession,
+        stage: &xr::Space,
+        predicted_display_time: xr::Time,
+        targets: &TerrainPerfTargets,
+        terrain: &mut AndroidXrTerrainState,
+    ) -> Result<Option<TerrainMultiviewPerfSummary>> {
+        let stereo_views =
+            mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+        let startup_summary = terrain
+            .render_terrain_multiview_frame(
+                &graphics.device,
+                &graphics.queue,
+                [stereo_views.left, stereo_views.right],
+                targets.multiview.target(),
+            )
+            .context("warm up terrain multiview perf scene")?;
+        let readiness = TerrainMultiviewPerfFrame {
+            summary: startup_summary,
+            ready: !terrain.frame_summary().local_startup_active
+                && startup_summary.left.drawn_index_count > 0
+                && startup_summary.right.drawn_index_count > 0,
+        };
+        if !readiness.ready {
+            return Ok(None);
+        }
+
+        for _ in 0..TERRAIN_MULTIVIEW_PERF_WARMUP_FRAMES {
+            let _ = terrain.render_terrain_stereo_frame_frozen(
+                &graphics.device,
+                &graphics.queue,
+                [stereo_views.left, stereo_views.right],
+                targets.left.target(),
+                targets.right.target(),
+            )?;
+            let _ = terrain.render_terrain_multiview_frame_frozen(
+                &graphics.device,
+                &graphics.queue,
+                [stereo_views.left, stereo_views.right],
+                targets.multiview.target(),
+            )?;
+        }
+
+        let mut stereo_ms = Vec::with_capacity(TERRAIN_MULTIVIEW_PERF_SAMPLE_FRAMES);
+        let mut multiview_ms = Vec::with_capacity(TERRAIN_MULTIVIEW_PERF_SAMPLE_FRAMES);
+        let mut latest_summary = readiness.summary;
+        for index in 0..TERRAIN_MULTIVIEW_PERF_SAMPLE_FRAMES {
+            if index % 2 == 0 {
+                stereo_ms.push(measure_terrain_stereo_frame(
+                    &graphics.device,
+                    &graphics.queue,
+                    [stereo_views.left, stereo_views.right],
+                    targets,
+                    terrain,
+                )?);
+                let (elapsed_ms, summary) = measure_terrain_multiview_frame(
+                    &graphics.device,
+                    &graphics.queue,
+                    [stereo_views.left, stereo_views.right],
+                    targets,
+                    terrain,
+                )?;
+                multiview_ms.push(elapsed_ms);
+                latest_summary = summary;
+            } else {
+                let (elapsed_ms, summary) = measure_terrain_multiview_frame(
+                    &graphics.device,
+                    &graphics.queue,
+                    [stereo_views.left, stereo_views.right],
+                    targets,
+                    terrain,
+                )?;
+                multiview_ms.push(elapsed_ms);
+                latest_summary = summary;
+                stereo_ms.push(measure_terrain_stereo_frame(
+                    &graphics.device,
+                    &graphics.queue,
+                    [stereo_views.left, stereo_views.right],
+                    targets,
+                    terrain,
+                )?);
+            }
+        }
+
+        Ok(Some(TerrainMultiviewPerfSummary {
+            terrain: latest_summary,
+            stereo_ms,
+            multiview_ms,
+        }))
+    }
+
+    fn measure_terrain_stereo_frame(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        targets: &TerrainPerfTargets,
+        terrain: &mut AndroidXrTerrainState,
+    ) -> Result<f64> {
+        let start = Instant::now();
+        let _summary = terrain.render_terrain_stereo_frame_frozen(
+            device,
+            queue,
+            views,
+            targets.left.target(),
+            targets.right.target(),
+        )?;
+        Ok(start.elapsed().as_secs_f64() * 1000.0)
+    }
+
+    fn measure_terrain_multiview_frame(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        targets: &TerrainPerfTargets,
+        terrain: &mut AndroidXrTerrainState,
+    ) -> Result<(f64, mclone_xr_scene::XrTerrainMultiviewFrameSummary)> {
+        let start = Instant::now();
+        let summary = terrain.render_terrain_multiview_frame_frozen(
+            device,
+            queue,
+            views,
+            targets.multiview.target(),
+        )?;
+        Ok((start.elapsed().as_secs_f64() * 1000.0, summary))
     }
 
     fn run_terrain_multiview_proof_loop(
