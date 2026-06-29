@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mclone Asset Lab Sheet</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, sans-serif;
+        background: #e7edf2;
+        color: #17202a;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-width: 1280px;
+        background: #e7edf2;
+      }
+
+      #sheet {
+        box-sizing: border-box;
+        width: 1280px;
+        padding: 18px;
+      }
+
+      .title {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+
+      .title h1 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 700;
+      }
+
+      .title span {
+        color: #475569;
+        font-size: 13px;
+      }
+
+      .section-title {
+        margin: 14px 0 8px;
+        font-size: 13px;
+        font-weight: 700;
+        color: #334155;
+        text-transform: uppercase;
+      }
+
+      .grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .static-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+
+      .strip-grid {
+        grid-template-columns: repeat(6, 1fr);
+      }
+
+      .cell {
+        position: relative;
+        overflow: hidden;
+        min-height: 0;
+        border: 1px solid #bac6d1;
+        background: #edf1f4;
+      }
+
+      .static-grid .cell {
+        height: 300px;
+      }
+
+      .strip-grid .cell {
+        height: 220px;
+      }
+
+      .viewport {
+        width: 100%;
+        height: 100%;
+      }
+
+      .label {
+        position: absolute;
+        left: 8px;
+        top: 8px;
+        padding: 3px 6px;
+        background: rgba(255, 255, 255, 0.82);
+        color: #17202a;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .error {
+        box-sizing: border-box;
+        max-width: 960px;
+        margin: 24px;
+        padding: 16px;
+        border: 1px solid #b93636;
+        background: #fff7f7;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="sheet"></main>
+    <script type="module" src="/src/sheet-page.ts"></script>
+  </body>
+</html>

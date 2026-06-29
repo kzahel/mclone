@@ -6,6 +6,11 @@ export interface FigureScene {
   update(timeSeconds: number): void;
 }
 
+export interface FigureSceneOptions {
+  debug?: boolean;
+  labels?: boolean;
+}
+
 interface PartObject {
   part: PartSpec;
   group: THREE.Group;
@@ -13,7 +18,7 @@ interface PartObject {
   baseRotation: THREE.Euler;
 }
 
-export function createFigureScene(asset: FigureAsset, clipName?: string): FigureScene {
+export function createFigureScene(asset: FigureAsset, clipName?: string, options: FigureSceneOptions = {}): FigureScene {
   const root = new THREE.Group();
   root.name = asset.name;
 
@@ -47,7 +52,16 @@ export function createFigureScene(asset: FigureAsset, clipName?: string): Figure
     mesh.name = `${part.name}_mesh`;
     group.add(mesh);
 
-    if (part.joint?.pivot) {
+    if (options.debug) {
+      group.add(createWireframe(mesh.geometry));
+      if (part.joint) {
+        group.add(createPivotMarker(part.joint.pivot ?? [0, 0, 0]));
+        group.add(createAxisMarker(0.18));
+      }
+      if (options.labels) {
+        group.add(createLabel(part.name));
+      }
+    } else if (part.joint?.pivot) {
       group.add(createPivotMarker(part.joint.pivot));
     }
 
@@ -70,6 +84,10 @@ export function createFigureScene(asset: FigureAsset, clipName?: string): Figure
 
   const clip = clipName ? asset.clips[clipName] : undefined;
 
+  if (options.debug) {
+    root.add(createAxisMarker(0.35));
+  }
+
   return {
     root,
     update(timeSeconds: number) {
@@ -82,6 +100,13 @@ export function createFigureScene(asset: FigureAsset, clipName?: string): Figure
       }
     },
   };
+}
+
+export function clipDuration(clip: ClipSpec | undefined): number {
+  if (!clip) {
+    return 0;
+  }
+  return Math.max(0, ...clip.keys.map(([, time]) => time));
 }
 
 function createGeometry(part: PartSpec): THREE.BufferGeometry {
@@ -172,6 +197,59 @@ function createPivotMarker(pivot: Vec3): THREE.Object3D {
   marker.name = "pivot";
   marker.position.copy(toVector(pivot));
   return marker;
+}
+
+function createAxisMarker(size: number): THREE.Object3D {
+  const axes = new THREE.AxesHelper(size);
+  axes.name = "debug_axes";
+  return axes;
+}
+
+function createWireframe(geometry: THREE.BufferGeometry): THREE.Object3D {
+  const wireframe = new THREE.LineSegments(
+    new THREE.WireframeGeometry(geometry),
+    new THREE.LineBasicMaterial({
+      color: new THREE.Color("#31506b"),
+      transparent: true,
+      opacity: 0.38,
+      depthTest: false,
+    }),
+  );
+  wireframe.name = "debug_wireframe";
+  wireframe.renderOrder = 20;
+  return wireframe;
+}
+
+function createLabel(text: string): THREE.Object3D {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 64;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Could not create label canvas context");
+  }
+  context.font = "28px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillStyle = "rgba(255, 255, 255, 0.82)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#17202a";
+  context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+    }),
+  );
+  sprite.name = `label_${text}`;
+  sprite.position.set(0, 0.28, 0);
+  sprite.scale.set(0.34, 0.085, 1);
+  sprite.renderOrder = 30;
+  return sprite;
 }
 
 function applyClip(parts: Map<string, PartObject>, clip: ClipSpec, timeSeconds: number): void {

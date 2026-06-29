@@ -1,6 +1,6 @@
 # 111 - AI Figure Asset Lab
 
-Status: active; Slice 1 scaffold landed.
+Status: active; Slice 2 sheet capture landed.
 
 ## Purpose
 
@@ -143,6 +143,7 @@ pnpm asset-lab:install
 pnpm asset-lab:typecheck
 pnpm asset-lab:export
 pnpm asset-lab:smoke
+pnpm asset-lab:sheet
 pnpm asset-lab:preview
 ```
 
@@ -150,6 +151,12 @@ The default smoke writes to `/tmp`, for example:
 
 ```text
 /tmp/mclone-asset-lab/piglet-preview.png
+```
+
+The sheet capture writes a larger review image:
+
+```text
+/tmp/mclone-asset-lab/piglet-sheet.png
 ```
 
 The next useful captures are:
@@ -214,12 +221,29 @@ profile the harness before adding animation-sheet captures.
 
 ### Slice 2 - Better Agent Feedback
 
-- [ ] Add static multi-view sheet capture.
-- [ ] Add animation strip capture with fixed frame times.
-- [ ] Add bounds/pivot/joint debug overlay toggles.
+- [x] Add static multi-view sheet capture.
+- [x] Add animation strip capture with fixed frame times.
+- [x] Add bounds/pivot/joint debug overlay toggles.
 - [ ] Add a validation report that points to the asset file and part names.
 - [ ] Add starter prompts and examples for sheep, dog, cat, butterfly, and
       player stand-in variants.
+
+Landed validation:
+
+```powershell
+pnpm asset-lab:typecheck
+pnpm asset-lab:export
+pnpm asset-lab:smoke
+pnpm asset-lab:sheet
+node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); JSON.parse(require('fs').readFileSync('tools/asset-lab/package.json','utf8'))"
+git diff --check
+```
+
+Sheet output inspected:
+
+```text
+/tmp/mclone-asset-lab/piglet-sheet.png
+```
 
 ### Slice 3 - Runtime Promotion Decision
 
