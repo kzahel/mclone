@@ -76,6 +76,9 @@ web-sys = "0.3.102"
 wgpu = { version = "25", features = ["metal", "vulkan", "vulkan-portability"] }
 winit = { version = "0.30", features = ["android-native-activity"] }
 
+[patch.crates-io]
+wgpu-hal = { path = "vendor/wgpu-hal-25.0.2" }
+
 # Keep native debug runs useful for movement/render/worldgen performance work.
 # This mirrors the Playbox policy in ~/code/playbox/Cargo.toml: optimize dev
 # builds enough that `cargo run` and pnpm native smokes are not dominated by

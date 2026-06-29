@@ -5,11 +5,11 @@ proof landed, and Slice E's headless plus Android XR proof paths exist. Quest
 now exposes `wgpu::Features::MULTIVIEW` after enabling
 `VK_KHR_get_physical_device_properties2` on the OpenXR Vulkan instance and
 threading `VK_KHR_multiview` into the wgpu-wrapped device extension list, and
-the on-device proof now includes a stereo projection readback guard. True
-multiview pixel writes/readback are still not proven on Quest, so production
-terrain/sky/entity/GUI multiview migration remains blocked until that is
-resolved. Created after `d0c5161` (`Restore XR per-eye command submission`)
-rolled back the unsafe single-submit Quest XR optimization from `264c723`.
+the on-device proof now validates true multiview layer writes/readback plus the
+left/right stereo projection guard. Production terrain/sky/entity/GUI multiview
+migration remains pending. Created after `d0c5161` (`Restore XR per-eye command
+submission`) rolled back the unsafe single-submit Quest XR optimization from
+`264c723`.
 
 ## Goal
 
@@ -378,18 +378,34 @@ MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted=1 runtime_frames=1 skipped=0 e
 Release APK SHA-256 for that proof run:
 `855be06a1537c71b87457ca4eb27854d1d96e26f2e3ea00cb698a0e4014f0aff`.
 
-The same investigation also found a remaining blocker: attempts to read back
-pixels from a true `multiview: Some(2)` render pass, both in a private
-two-layer `D2Array` texture and from the OpenXR swapchain texture, returned zero
-pixels on Quest. Explicitly adding `VK_KHR_multiview` to the wgpu-wrapped device
-extension list did not resolve that readback failure. Treat
-`wgpu::Features::MULTIVIEW` exposure and the projection guard as necessary
-prerequisites, not as proof that production terrain multiview is ready.
+Follow-up true-multiview validation initially failed before any shader was
+involved: a private `D2Array` `multiview: Some(2)` clear-only pass read back
+zeroes from both layers. The root cause is the wgpu-hal 25 Vulkan imageless
+framebuffer path on Quest/Adreno. Disabling that optional path makes the same
+wgpu multiview pass write both layers correctly. The workspace now carries a
+temporary patched `wgpu-hal 25.0.2` under
+`native/vendor/wgpu-hal-25.0.2`, wired through `[patch.crates-io]`, with
+`imageless_framebuffers` disabled until a deliberate wgpu upgrade removes the
+workaround.
+
+Final Quest 3 validation with the vendored workaround passed:
+
+```text
+OpenXR wgpu features: multiview=true
+OpenXR Vulkan multiview diagnostics: instance_properties2_ext=true device_khr_multiview_ext=true raw_feature=true raw_geometry_shader=false raw_tessellation_shader=false max_views=6 max_instance_index=4294967295 wgpu_adapter=true wgpu_device=true
+OpenXR multiview private clear-only readback: left_clear_pixels=4096 right_clear_pixels=4096 minimum_expected_pixels=3686 left_first=[5, 10, 20, 255] right_first=[5, 10, 20, 255]
+OpenXR multiview private readback: left_red_pixels=4096 right_green_pixels=4096 minimum_expected_pixels=3686 left_first=[255, 0, 0, 255] right_first=[0, 255, 0, 255]
+OpenXR stereo projection proof fixture: left_expected=(1151.1,695.3) right_expected=(710.9,695.3) expected_disparity_px=440.2 tolerance_px=26.4
+OpenXR stereo projection proof readback: left_marker_pixels=1224 right_marker_pixels=1224 left_first=[5, 10, 20, 255] right_first=[5, 10, 20, 255]
+OpenXR multiview swapchain readback: left_red_pixels=2956800 right_green_pixels=2956800 minimum_expected_pixels=2661120 left_first=[255, 0, 0, 255] right_first=[0, 255, 0, 255]
+MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted=1 runtime_frames=1 skipped=0 eye=1680x1760 layers=2 multiview=true private_left_red=4096 private_right_green=4096 swapchain_left_red=2956800 swapchain_right_green=2956800 expected_disparity_px=440.2 tolerance_px=26.4 left_actual=(1151.0,695.0) left_expected=(1151.1,695.3) left_error_px=0.3 left_pixels=1224 right_actual=(711.0,695.0) right_expected=(710.9,695.3) right_error_px=0.3 right_pixels=1224
+```
+
+Release APK SHA-256 for that proof run:
+`687a87f00554a651087c2cd5c10905be18b50e11a3da3e8b36ed7a397bb37a19`.
 
 Move from proof-of-correctness one-submit to the real target:
 
-- resolve the true multiview pixel-write/readback failure on Quest, or replace
-  it with an equally strong per-layer validation path;
 - two-layer XR color/depth target or equivalent swapchain path;
 - render pipelines with `multiview: Some(2)`;
 - shader `@builtin(view_index)` selection for per-eye view data;

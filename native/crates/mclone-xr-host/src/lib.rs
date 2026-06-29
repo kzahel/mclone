@@ -753,6 +753,189 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         .context("wait for OpenXR multiview proof device idle")
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct XrMultiviewLayerProof {
+    pub width: u32,
+    pub height: u32,
+    pub left_red_pixels: u32,
+    pub right_green_pixels: u32,
+    pub minimum_expected_pixels: u32,
+    pub left_first_pixel: [u8; 4],
+    pub right_first_pixel: [u8; 4],
+}
+
+pub fn render_private_multiview_readback_proof(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    color_format: wgpu::TextureFormat,
+    width: u32,
+    height: u32,
+) -> Result<XrMultiviewLayerProof> {
+    if !device.features().contains(wgpu::Features::MULTIVIEW) {
+        anyhow::bail!("wgpu device does not expose MULTIVIEW");
+    }
+    if !matches!(
+        color_format,
+        wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb
+    ) {
+        anyhow::bail!("OpenXR multiview readback proof expects RGBA8 color, got {color_format:?}");
+    }
+    if width == 0 || height == 0 {
+        anyhow::bail!("OpenXR multiview readback proof requires a non-empty target");
+    }
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mclone_xr_private_multiview_readback_target"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 2,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: color_format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("mclone_xr_private_multiview_readback_view"),
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        base_array_layer: 0,
+        array_layer_count: Some(2),
+        ..Default::default()
+    });
+
+    render_multiview_clear_only_proof(device, queue, &view)
+        .context("render private OpenXR multiview clear-only proof")?;
+    read_multiview_clear_color_proof(device, queue, &texture, width, height, "private")
+        .context("validate private OpenXR multiview clear-only proof")?;
+    render_multiview_layer_proof(device, queue, &view, color_format)
+        .context("render private OpenXR multiview readback proof")?;
+    read_multiview_layer_color_proof(device, queue, &texture, width, height, "private")
+}
+
+fn render_multiview_clear_only_proof(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    color_view: &wgpu::TextureView,
+) -> Result<()> {
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("mclone_xr_multiview_clear_only_encoder"),
+    });
+    {
+        let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_xr_multiview_clear_only_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 0.02,
+                        g: 0.04,
+                        b: 0.08,
+                        a: 1.0,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+    }
+    let submission = queue.submit(Some(encoder.finish()));
+    device
+        .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+        .map(|_| ())
+        .context("wait for OpenXR multiview clear-only submission")?;
+    device
+        .poll(wgpu::PollType::Wait)
+        .map(|_| ())
+        .context("wait for OpenXR multiview clear-only device idle")
+}
+
+fn read_multiview_clear_color_proof(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+    label: &'static str,
+) -> Result<()> {
+    let left_pixels = read_rgba8_layer(device, queue, texture, width, height, 0)?;
+    let right_pixels = read_rgba8_layer(device, queue, texture, width, height, 1)?;
+    let left_clear_pixels = pixel_count_matching(&left_pixels, is_clear_pixel);
+    let right_clear_pixels = pixel_count_matching(&right_pixels, is_clear_pixel);
+    let minimum_expected_pixels = ((width as u64 * height as u64) * 9 / 10) as u32;
+    let left_first_pixel = first_pixel_rgba(&left_pixels);
+    let right_first_pixel = first_pixel_rgba(&right_pixels);
+    log::info!(
+        "OpenXR multiview {label} clear-only readback: left_clear_pixels={} right_clear_pixels={} minimum_expected_pixels={} left_first={:?} right_first={:?}",
+        left_clear_pixels,
+        right_clear_pixels,
+        minimum_expected_pixels,
+        left_first_pixel,
+        right_first_pixel
+    );
+    if left_clear_pixels < minimum_expected_pixels || right_clear_pixels < minimum_expected_pixels {
+        anyhow::bail!(
+            "OpenXR multiview {label} clear-only readback failed: left_clear_pixels={} right_clear_pixels={} minimum_expected_pixels={} left_first={:?} right_first={:?}",
+            left_clear_pixels,
+            right_clear_pixels,
+            minimum_expected_pixels,
+            left_first_pixel,
+            right_first_pixel
+        );
+    }
+    Ok(())
+}
+
+pub fn read_multiview_layer_color_proof(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+    label: &'static str,
+) -> Result<XrMultiviewLayerProof> {
+    if width == 0 || height == 0 {
+        anyhow::bail!("OpenXR multiview readback proof requires a non-empty target");
+    }
+    let left_pixels = read_rgba8_layer(device, queue, texture, width, height, 0)?;
+    let right_pixels = read_rgba8_layer(device, queue, texture, width, height, 1)?;
+    let left_red_pixels = pixel_count_matching(&left_pixels, is_red_layer_pixel);
+    let right_green_pixels = pixel_count_matching(&right_pixels, is_green_layer_pixel);
+    let minimum_expected_pixels = ((width as u64 * height as u64) * 9 / 10) as u32;
+    let left_first_pixel = first_pixel_rgba(&left_pixels);
+    let right_first_pixel = first_pixel_rgba(&right_pixels);
+    log::info!(
+        "OpenXR multiview {label} readback: left_red_pixels={} right_green_pixels={} minimum_expected_pixels={} left_first={:?} right_first={:?}",
+        left_red_pixels,
+        right_green_pixels,
+        minimum_expected_pixels,
+        left_first_pixel,
+        right_first_pixel
+    );
+    if left_red_pixels < minimum_expected_pixels || right_green_pixels < minimum_expected_pixels {
+        anyhow::bail!(
+            "OpenXR multiview {label} readback failed: left_red_pixels={} right_green_pixels={} minimum_expected_pixels={} left_first={:?} right_first={:?}",
+            left_red_pixels,
+            right_green_pixels,
+            minimum_expected_pixels,
+            left_first_pixel,
+            right_first_pixel
+        );
+    }
+    Ok(XrMultiviewLayerProof {
+        width,
+        height,
+        left_red_pixels,
+        right_green_pixels,
+        minimum_expected_pixels,
+        left_first_pixel,
+        right_first_pixel,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct XrProjectionMarkerSample {
     pub expected_px: [f32; 2],
@@ -1186,8 +1369,37 @@ fn marker_pixel_count(pixels: &[u8]) -> u32 {
         .count() as u32
 }
 
+fn pixel_count_matching(pixels: &[u8], predicate: fn(&[u8]) -> bool) -> u32 {
+    pixels
+        .chunks_exact(RGBA8_BYTES_PER_PIXEL as usize)
+        .filter(|pixel| predicate(pixel))
+        .count() as u32
+}
+
 fn is_marker_pixel(pixel: &[u8]) -> bool {
     pixel[0] >= 200 && pixel[1] >= 200 && pixel[2] >= 200
+}
+
+fn is_clear_pixel(pixel: &[u8]) -> bool {
+    (3..=7).contains(&pixel[0])
+        && (8..=12).contains(&pixel[1])
+        && (18..=24).contains(&pixel[2])
+        && pixel[3] >= 200
+}
+
+fn is_red_layer_pixel(pixel: &[u8]) -> bool {
+    pixel[0] >= 200 && pixel[1] <= 40 && pixel[2] <= 40 && pixel[3] >= 200
+}
+
+fn is_green_layer_pixel(pixel: &[u8]) -> bool {
+    pixel[0] <= 40 && pixel[1] >= 200 && pixel[2] <= 40 && pixel[3] >= 200
+}
+
+fn first_pixel_rgba(pixels: &[u8]) -> [u8; 4] {
+    pixels
+        .get(0..4)
+        .and_then(|pixel| pixel.try_into().ok())
+        .unwrap_or([0, 0, 0, 0])
 }
 
 fn read_rgba8_layer(

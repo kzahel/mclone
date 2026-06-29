@@ -1233,7 +1233,7 @@ mod android {
                     Ok(proof) => {
                         frame_stats.record_submitted_frame();
                         log::info!(
-                            "MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted={} runtime_frames={} skipped={} eye={}x{} layers={} multiview={} expected_disparity_px={:.1} tolerance_px={:.1} left_actual=({:.1},{:.1}) left_expected=({:.1},{:.1}) left_error_px={:.1} left_pixels={} right_actual=({:.1},{:.1}) right_expected=({:.1},{:.1}) right_error_px={:.1} right_pixels={}",
+                            "MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted={} runtime_frames={} skipped={} eye={}x{} layers={} multiview={} private_left_red={} private_right_green={} swapchain_left_red={} swapchain_right_green={} expected_disparity_px={:.1} tolerance_px={:.1} left_actual=({:.1},{:.1}) left_expected=({:.1},{:.1}) left_error_px={:.1} left_pixels={} right_actual=({:.1},{:.1}) right_expected=({:.1},{:.1}) right_error_px={:.1} right_pixels={}",
                             frame_stats.submitted_frames,
                             frame_stats.runtime_frames,
                             frame_stats.skipped_frames,
@@ -1244,20 +1244,24 @@ mod android {
                                 .device
                                 .features()
                                 .contains(wgpu::Features::MULTIVIEW),
-                            proof.expected_disparity_px,
-                            proof.tolerance_px,
-                            proof.left.actual_px[0],
-                            proof.left.actual_px[1],
-                            proof.left.expected_px[0],
-                            proof.left.expected_px[1],
-                            proof.left.error_px,
-                            proof.left.pixel_count,
-                            proof.right.actual_px[0],
-                            proof.right.actual_px[1],
-                            proof.right.expected_px[0],
-                            proof.right.expected_px[1],
-                            proof.right.error_px,
-                            proof.right.pixel_count
+                            proof.private_multiview.left_red_pixels,
+                            proof.private_multiview.right_green_pixels,
+                            proof.swapchain_multiview.left_red_pixels,
+                            proof.swapchain_multiview.right_green_pixels,
+                            proof.projection.expected_disparity_px,
+                            proof.projection.tolerance_px,
+                            proof.projection.left.actual_px[0],
+                            proof.projection.left.actual_px[1],
+                            proof.projection.left.expected_px[0],
+                            proof.projection.left.expected_px[1],
+                            proof.projection.left.error_px,
+                            proof.projection.left.pixel_count,
+                            proof.projection.right.actual_px[0],
+                            proof.projection.right.actual_px[1],
+                            proof.projection.right.expected_px[0],
+                            proof.projection.right.expected_px[1],
+                            proof.projection.right.error_px,
+                            proof.projection.right.pixel_count
                         );
                         return Ok(());
                     }
@@ -1284,18 +1288,32 @@ mod android {
         }
     }
 
+    struct MultiviewProofFrame {
+        projection: mclone_xr_host::XrStereoProjectionProof,
+        private_multiview: mclone_xr_host::XrMultiviewLayerProof,
+        swapchain_multiview: mclone_xr_host::XrMultiviewLayerProof,
+    }
+
     fn render_multiview_proof_frame(
         graphics: &mut graphics_vulkan::VulkanGraphicsSession,
         stage: &xr::Space,
         environment_blend_mode: xr::EnvironmentBlendMode,
         predicted_display_time: xr::Time,
         stereo_target: &mut graphics_vulkan::OpenXrStereoState,
-    ) -> Result<mclone_xr_host::XrStereoProjectionProof> {
+    ) -> Result<MultiviewProofFrame> {
         let stereo_views =
             mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
         let target_width = stereo_target.width;
         let target_height = stereo_target.height;
-        let proof = mclone_xr_host::render_stereo_projection_readback_proof(
+        let private_multiview = mclone_xr_host::render_private_multiview_readback_proof(
+            &graphics.device,
+            &graphics.queue,
+            XR_COLOR_FORMAT,
+            64,
+            64,
+        )
+        .context("validate private OpenXR multiview readback proof")?;
+        let projection = mclone_xr_host::render_stereo_projection_readback_proof(
             &graphics.device,
             &graphics.queue,
             XR_COLOR_FORMAT,
@@ -1313,6 +1331,15 @@ mod android {
             XR_COLOR_FORMAT,
         )
         .context("render OpenXR multiview proof")?;
+        let swapchain_multiview = mclone_xr_host::read_multiview_layer_color_proof(
+            &graphics.device,
+            &graphics.queue,
+            target.color_texture()?,
+            target_width,
+            target_height,
+            "swapchain",
+        )
+        .context("validate OpenXR swapchain multiview readback proof")?;
         target.release()?;
         mclone_xr_host::end_multiview_projection_frame(
             &mut graphics.frame_stream,
@@ -1322,7 +1349,11 @@ mod android {
             stereo_views,
             stereo_target,
         )?;
-        Ok(proof)
+        Ok(MultiviewProofFrame {
+            projection,
+            private_multiview,
+            swapchain_multiview,
+        })
     }
 
     fn run_mclone_frame_loop(
