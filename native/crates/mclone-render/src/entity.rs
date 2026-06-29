@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::num::{NonZeroU32, NonZeroU64};
+
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use wgpu::util::DeviceExt;
@@ -15,6 +18,9 @@ const ACTOR_VERTEX_BYTE_SIZE: wgpu::BufferAddress = ACTOR_VERTEX_BYTE_LEN as wgp
 const UNIFORM_FLOAT_COUNT: usize = 32;
 const UNIFORM_BYTE_LEN: usize = UNIFORM_FLOAT_COUNT * std::mem::size_of::<f32>();
 const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = UNIFORM_BYTE_LEN as wgpu::BufferAddress;
+const MULTIVIEW_UNIFORM_BYTE_LEN: usize = UNIFORM_BYTE_LEN * 2;
+const MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
+    MULTIVIEW_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
 const MODEL_PIXEL_SCALE: f32 = 1.0 / 16.0;
 const MODEL_FEET_Y_PIXELS: f32 = 24.0;
 
@@ -260,6 +266,79 @@ impl ActorDrawResources {
             index_count: mesh.indices.len() as u32,
         })
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_multiview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_views: [ChunkRenderView; 2],
+        render_options: [TexturedSectionRenderOptions; 2],
+        actors: &[ActorInstance],
+    ) -> Result<ActorRenderStats> {
+        if actors.is_empty() {
+            return Ok(ActorRenderStats::default());
+        }
+        let depth_view = target
+            .depth_view
+            .context("actor multiview render pass requires a depth attachment")?;
+        let mesh = actor_mesh(actors, self.texture_layout, self.atlas_size);
+        if mesh.vertices.is_empty() || mesh.indices.is_empty() {
+            return Ok(ActorRenderStats {
+                submitted_actor_count: actors.len(),
+                ..ActorRenderStats::default()
+            });
+        }
+
+        let renderer = self.renderer.multiview_renderer(device)?;
+        renderer.write_uniforms(queue, render_views, render_options);
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mclone_actor_multiview_vertices"),
+            contents: &actor_vertex_bytes(&mesh.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mclone_actor_multiview_indices"),
+            contents: &index_bytes(&mesh.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_actor_multiview_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+        pass.set_pipeline(&renderer.pipeline);
+        pass.set_bind_group(0, &renderer.bind_group, &[]);
+        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..mesh.indices.len() as u32, 0, 0..1);
+
+        Ok(ActorRenderStats {
+            submitted_actor_count: actors.len(),
+            drawn_actor_count: actors.len(),
+            vertex_count: mesh.vertices.len() as u32,
+            index_count: mesh.indices.len() as u32,
+        })
+    }
 }
 
 struct ActorRenderer {
@@ -267,6 +346,8 @@ struct ActorRenderer {
     uniforms: PerViewUniformBuffer,
     bind_group: wgpu::BindGroup,
     texture_bind_group_layout: wgpu::BindGroupLayout,
+    color_format: wgpu::TextureFormat,
+    multiview: RefCell<Option<ActorMultiviewRenderer>>,
 }
 
 impl ActorRenderer {
@@ -317,74 +398,196 @@ impl ActorRenderer {
             bind_group_layouts: &[&bind_group_layout, &texture_bind_group_layout],
             push_constant_ranges: &[],
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mclone_actor_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: ACTOR_VERTEX_BYTE_SIZE,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            offset: 0,
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x3,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 12,
-                            shader_location: 1,
-                            format: wgpu::VertexFormat::Float32x2,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 20,
-                            shader_location: 2,
-                            format: wgpu::VertexFormat::Float32x4,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 36,
-                            shader_location: 3,
-                            format: wgpu::VertexFormat::Uint32,
-                        },
-                    ],
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: Some(wgpu::Face::Back),
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: Default::default(),
-            multiview: None,
-            cache: None,
-        });
+        let pipeline = create_actor_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_actor_pipeline",
+            None,
+        );
 
         Self {
             pipeline,
             uniforms,
             bind_group,
             texture_bind_group_layout,
+            color_format,
+            multiview: RefCell::new(None),
         }
     }
+
+    fn multiview_renderer(
+        &self,
+        device: &wgpu::Device,
+    ) -> Result<std::cell::Ref<'_, ActorMultiviewRenderer>> {
+        if !device.features().contains(wgpu::Features::MULTIVIEW) {
+            bail!("actor multiview render requires wgpu MULTIVIEW");
+        }
+        if self.multiview.borrow().is_none() {
+            let renderer = ActorMultiviewRenderer::new(
+                device,
+                self.color_format,
+                &self.texture_bind_group_layout,
+            );
+            *self.multiview.borrow_mut() = Some(renderer);
+        }
+        Ok(std::cell::Ref::map(self.multiview.borrow(), |renderer| {
+            renderer
+                .as_ref()
+                .expect("actor multiview renderer initialized above")
+        }))
+    }
+}
+
+struct ActorMultiviewRenderer {
+    pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+impl ActorMultiviewRenderer {
+    fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        texture_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_actor_multiview_shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shaders/entity_actor_multiview.wgsl").into(),
+            ),
+        });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_actor_multiview_uniforms"),
+            size: MULTIVIEW_UNIFORM_BYTE_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_actor_multiview_uniform_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: NonZeroU64::new(MULTIVIEW_UNIFORM_BYTE_SIZE),
+                    },
+                    count: None,
+                }],
+            });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_actor_multiview_uniform_bind_group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_actor_multiview_pipeline_layout"),
+            bind_group_layouts: &[&uniform_bind_group_layout, texture_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = create_actor_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_actor_multiview_pipeline",
+            NonZeroU32::new(2),
+        );
+        Self {
+            pipeline,
+            uniform_buffer,
+            bind_group,
+        }
+    }
+
+    fn write_uniforms(
+        &self,
+        queue: &wgpu::Queue,
+        render_views: [ChunkRenderView; 2],
+        render_options: [TexturedSectionRenderOptions; 2],
+    ) {
+        queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            &multiview_uniform_bytes(render_views, render_options),
+        );
+    }
+}
+
+fn create_actor_pipeline(
+    device: &wgpu::Device,
+    pipeline_layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    color_format: wgpu::TextureFormat,
+    label: &'static str,
+    multiview: Option<NonZeroU32>,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: ACTOR_VERTEX_BYTE_SIZE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[
+                    wgpu::VertexAttribute {
+                        offset: 0,
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x3,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 12,
+                        shader_location: 1,
+                        format: wgpu::VertexFormat::Float32x2,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 20,
+                        shader_location: 2,
+                        format: wgpu::VertexFormat::Float32x4,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 36,
+                        shader_location: 3,
+                        format: wgpu::VertexFormat::Uint32,
+                    },
+                ],
+            }],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: Some(wgpu::Face::Back),
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: Default::default(),
+        multiview,
+        cache: None,
+    })
 }
 
 struct GpuActorTextureAtlas {
@@ -1100,6 +1303,16 @@ fn uniform_bytes(
     bytes
 }
 
+fn multiview_uniform_bytes(
+    render_views: [ChunkRenderView; 2],
+    render_options: [TexturedSectionRenderOptions; 2],
+) -> [u8; MULTIVIEW_UNIFORM_BYTE_LEN] {
+    let mut bytes = [0u8; MULTIVIEW_UNIFORM_BYTE_LEN];
+    bytes[..UNIFORM_BYTE_LEN].copy_from_slice(&uniform_bytes(render_views[0], render_options[0]));
+    bytes[UNIFORM_BYTE_LEN..].copy_from_slice(&uniform_bytes(render_views[1], render_options[1]));
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1192,6 +1405,45 @@ mod tests {
             f32::from_ne_bytes(bytes[116..120].try_into().unwrap()),
             96.0
         );
+    }
+
+    #[test]
+    fn actor_multiview_uniform_serializes_distinct_left_right_views() {
+        let left = crate::chunk::ChunkCamera {
+            eye: [1.0, 2.0, 3.0],
+            target: [1.0, 2.0, 2.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 70.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 256.0,
+        }
+        .render_view(640, 480);
+        let right = crate::chunk::ChunkCamera {
+            eye: [4.0, 5.0, 6.0],
+            target: [4.0, 5.0, 5.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 75.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 256.0,
+        }
+        .render_view(640, 480);
+        let options = [
+            TexturedSectionRenderOptions::default(),
+            TexturedSectionRenderOptions::default().with_fog(crate::fog::RenderFog::underwater()),
+        ];
+
+        let bytes = multiview_uniform_bytes([left, right], options);
+
+        assert_eq!(bytes.len(), MULTIVIEW_UNIFORM_BYTE_LEN);
+        assert_eq!(
+            &bytes[..UNIFORM_BYTE_LEN],
+            uniform_bytes(left, options[0]).as_slice()
+        );
+        assert_eq!(
+            &bytes[UNIFORM_BYTE_LEN..],
+            uniform_bytes(right, options[1]).as_slice()
+        );
+        assert_ne!(&bytes[..UNIFORM_BYTE_LEN], &bytes[UNIFORM_BYTE_LEN..]);
     }
 
     #[test]

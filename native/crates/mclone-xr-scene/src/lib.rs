@@ -32,7 +32,7 @@ use mclone_render::chunk::{
     TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderStats,
     TexturedSectionUploadReport,
 };
-use mclone_render::entity::ActorDrawResources;
+use mclone_render::entity::{ActorDrawResources, ActorInstance, ActorRenderStats};
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiRenderer};
 use mclone_render::screen_effect::{
@@ -377,6 +377,8 @@ pub struct XrTerrainMultiviewFrameSummary {
     pub section_count: usize,
     pub left: TexturedSectionRenderStats,
     pub right: TexturedSectionRenderStats,
+    pub actor_count: usize,
+    pub drawn_actor_count: usize,
     pub upload: XrTerrainUploadSummary,
 }
 
@@ -805,6 +807,25 @@ where
             render_views,
             target,
             true,
+            false,
+        )
+    }
+
+    pub fn render_sky_terrain_actors_multiview_frame_frozen(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        target: XrTerrainMultiviewTarget<'_>,
+    ) -> Result<XrTerrainMultiviewFrameSummary> {
+        let render_views = self.render_views(&views)?;
+        self.render_prepared_terrain_multiview_frame_frozen_inner(
+            device,
+            queue,
+            render_views,
+            target,
+            true,
+            true,
         )
     }
 
@@ -841,6 +862,27 @@ where
             render_views,
             left_target,
             right_target,
+            true,
+            false,
+        )
+    }
+
+    pub fn render_sky_terrain_actors_stereo_frame_frozen(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        left_target: XrTerrainEyeTarget<'_>,
+        right_target: XrTerrainEyeTarget<'_>,
+    ) -> Result<XrTerrainStereoFrameSummary> {
+        let render_views = self.render_views(&views)?;
+        self.render_prepared_terrain_stereo_frame_frozen_inner(
+            device,
+            queue,
+            render_views,
+            left_target,
+            right_target,
+            true,
             true,
         )
     }
@@ -919,12 +961,7 @@ where
         let time_of_day = self.time_of_day();
         let sun_angle = self.sun_angle();
         let underwater_overlays = self.underwater_overlays(render_views);
-        let actor_instances = self.runtime.as_ref().map_or_else(Vec::new, |runtime| {
-            actor_instances_from_presentations(
-                &runtime.client().actor_presentations(),
-                runtime.client(),
-            )
-        });
+        let actor_instances = self.current_actor_instances();
         let collect_split_timing = self.render_split_timing_enabled;
         let records_start = collect_split_timing.then(Instant::now);
         let prepared_records = self.draw.prepare_render_records();
@@ -1011,6 +1048,7 @@ where
             left_target,
             right_target,
             false,
+            false,
         )
     }
 
@@ -1022,8 +1060,14 @@ where
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
         include_sky: bool,
+        include_actors: bool,
     ) -> Result<XrTerrainStereoFrameSummary> {
         let (terrain_views, terrain_options) = self.terrain_render_views_and_options(render_views);
+        let actor_instances = if include_actors {
+            self.current_actor_instances()
+        } else {
+            Vec::new()
+        };
         let prepared_records = self.draw.prepare_render_records();
         let left = self.render_terrain_eye_only_target(
             device,
@@ -1032,9 +1076,11 @@ where
             left_target,
             terrain_views[0],
             terrain_options[0],
+            &actor_instances,
             "left",
             LEFT_EYE_VIEW_SLOT,
             include_sky,
+            include_actors,
         )?;
         let right = self.render_terrain_eye_only_target(
             device,
@@ -1043,9 +1089,11 @@ where
             right_target,
             terrain_views[1],
             terrain_options[1],
+            &actor_instances,
             "right",
             RIGHT_EYE_VIEW_SLOT,
             include_sky,
+            include_actors,
         )?;
 
         self.render_stats.drawn_section_count = left.drawn_section_count;
@@ -1068,9 +1116,11 @@ where
         target: XrTerrainEyeTarget<'_>,
         render_view: ChunkRenderView,
         render_options: TexturedSectionRenderOptions,
+        actor_instances: &[ActorInstance],
         label: &'static str,
         view_slot: PerViewSlot,
         include_sky: bool,
+        include_actors: bool,
     ) -> Result<TexturedSectionRenderStats> {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some(match label {
@@ -1110,6 +1160,21 @@ where
                 view_slot,
             )
             .context("render XR terrain-only chunks")?;
+        if include_actors {
+            self.actors
+                .render_in_slot(
+                    device,
+                    queue,
+                    &mut encoder,
+                    RenderFrameTarget::color(target.color_view, target.size)
+                        .with_depth(&target.depth.view),
+                    render_view,
+                    render_options,
+                    actor_instances,
+                    view_slot,
+                )
+                .context("render XR terrain-only actors")?;
+        }
         let submission = queue.submit(Some(encoder.finish()));
         device
             .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
@@ -1160,6 +1225,7 @@ where
             render_views,
             target,
             false,
+            false,
         )
     }
 
@@ -1170,6 +1236,7 @@ where
         render_views: [ChunkRenderView; 2],
         target: XrTerrainMultiviewTarget<'_>,
         include_sky: bool,
+        include_actors: bool,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
         self.render_prepared_terrain_multiview_frame_with_upload_inner(
             device,
@@ -1178,6 +1245,7 @@ where
             target,
             XrTerrainUploadSummary::default(),
             include_sky,
+            include_actors,
         )
     }
 
@@ -1196,6 +1264,7 @@ where
             target,
             upload,
             false,
+            false,
         )
     }
 
@@ -1207,8 +1276,14 @@ where
         target: XrTerrainMultiviewTarget<'_>,
         upload: XrTerrainUploadSummary,
         include_sky: bool,
+        include_actors: bool,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
         let (terrain_views, terrain_options) = self.terrain_render_views_and_options(render_views);
+        let actor_instances = if include_actors {
+            self.current_actor_instances()
+        } else {
+            Vec::new()
+        };
         let prepared_records = self.draw.prepare_render_records();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("mclone_xr_terrain_multiview_encoder"),
@@ -1247,6 +1322,22 @@ where
                 terrain_options,
             )
             .context("render XR terrain multiview chunks")?;
+        let actor_stats = if include_actors {
+            self.actors
+                .render_multiview(
+                    device,
+                    queue,
+                    &mut encoder,
+                    RenderFrameTarget::color(target.color_view, target.size)
+                        .with_depth(&target.depth.view),
+                    terrain_views,
+                    terrain_options,
+                    &actor_instances,
+                )
+                .context("render XR actor multiview pass")?
+        } else {
+            ActorRenderStats::default()
+        };
         let submission = queue.submit(Some(encoder.finish()));
         device
             .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
@@ -1266,6 +1357,8 @@ where
             section_count: self.draw.section_count(),
             left: stats[0],
             right: stats[1],
+            actor_count: actor_instances.len(),
+            drawn_actor_count: actor_stats.drawn_actor_count,
             upload,
         })
     }
@@ -1675,6 +1768,15 @@ where
                 ]
             }
         }
+    }
+
+    fn current_actor_instances(&self) -> Vec<ActorInstance> {
+        self.runtime.as_ref().map_or_else(Vec::new, |runtime| {
+            actor_instances_from_presentations(
+                &runtime.client().actor_presentations(),
+                runtime.client(),
+            )
+        })
     }
 
     fn underwater_effect_dt_seconds(&mut self) -> f32 {

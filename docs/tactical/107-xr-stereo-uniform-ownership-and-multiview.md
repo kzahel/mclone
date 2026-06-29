@@ -1,15 +1,17 @@
 # 107: XR Stereo Uniform Ownership and Multiview
 
 Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
-proof landed, and Slice E's headless, Android XR, terrain-chunk, sky background,
-and terrain+sky multiview proof/perf paths exist. Quest now exposes
+proof landed, and Slice E's headless, Android XR, terrain-chunk proof, sky and
+actor render paths, and terrain+sky / terrain+sky+actor multiview perf paths
+exist. Quest now exposes
 `wgpu::Features::MULTIVIEW` after enabling
 `VK_KHR_get_physical_device_properties2` on the OpenXR Vulkan instance and
 threading `VK_KHR_multiview` into the wgpu-wrapped device extension list, and
 the on-device proofs now validate true multiview layer writes/readback, the
 left/right stereo projection guard, and chunk-terrain rendering through a
 two-layer OpenXR swapchain. The production headset frame remains on the correct
-per-eye submit path until entities/GUI/screen effects migrate too. Created after
+per-eye submit path until selection outline/GUI/screen effects migrate too.
+Created after
 `d0c5161` (`Restore XR per-eye command submission`) rolled back the unsafe
 single-submit Quest XR optimization from `264c723`.
 
@@ -498,10 +500,42 @@ improved yet.
 Release APK SHA-256 for the sky+terrain perf runs:
 `8d2b302ff8865038b09ed4f2831ea06d4e4cd25403dcf996ccf8bbf714dd0aa9`.
 
+**Actor multiview path and sky+terrain+actor A/B probe added 2026-06-29.**
+Actors now have a separate multiview shader/pipeline using a `[2]` view uniform
+array selected by `@builtin(view_index)`. Android XR has a diagnostic launch
+mode that measures the current per-eye sky+terrain+actor shape against one
+multiview sky pass, one multiview terrain pass, and one multiview actor pass:
+
+```bash
+pnpm native:android-xr:sky-terrain-actors-multiview-perf
+```
+
+The marker reports actor counts so a run cannot silently claim actor coverage
+when the scene has none. The current default and RD10 scenes both exercised one
+actor:
+
+```text
+Default tiny scene:
+MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF_SUMMARY samples=60 warmup=12 eye=1680x1760 sections=6 left_drawn_sections=2 right_drawn_sections=2 left_drawn_indices=15924 right_drawn_indices=15924 actors=1 drawn_actors=1 stereo_avg_ms=2.038 stereo_p50_ms=1.951 stereo_p95_ms=2.582 multiview_avg_ms=2.071 multiview_p50_ms=1.954 multiview_p95_ms=2.493 delta_avg_ms=-0.033 speedup=0.984
+
+RD10 frozen pose 0,120,-96,180:
+MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF_SUMMARY samples=60 warmup=12 eye=1680x1760 sections=6 left_drawn_sections=3 right_drawn_sections=3 left_drawn_indices=4644 right_drawn_indices=4644 actors=1 drawn_actors=1 stereo_avg_ms=1.390 stereo_p50_ms=1.228 stereo_p95_ms=1.788 multiview_avg_ms=0.898 multiview_p50_ms=0.714 multiview_p95_ms=1.312 delta_avg_ms=0.491 speedup=1.547
+```
+
+Interpretation: adding one actor does not improve the tiny/default case; it
+stays flat to slightly worse. The RD10 actor-inclusive row remains strongly
+positive (`1.55x`), roughly matching the sky+terrain RD10 signal. This keeps
+multiview worth pursuing, but still does not prove normal headset frame pacing
+until the remaining full-frame passes are migrated and measured in the live
+frame loop.
+
+Release APK SHA-256 for the sky+terrain+actor perf runs:
+`a28c45dc44579360c390ea389d1618458087dc7e68132f55f7ae507f44731527`.
+
 Move from proof-of-correctness one-submit to the real target:
 
-- migrate actors/entities, selection outline, world GUI, and screen effects to
-  multiview-capable paths;
+- migrate selection outline, world GUI, and screen effects to multiview-capable
+  paths;
 - decide whether terrain's union-of-eye-culls policy is acceptable for the first
   production path or should be tightened before enabling;
 - shared draw list feeding both eye layers.

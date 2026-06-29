@@ -48,6 +48,7 @@ MULTIVIEW_PROOF="${MCLONE_ANDROID_XR_MULTIVIEW_PROOF:-0}"
 TERRAIN_MULTIVIEW_PROOF="${MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF:-0}"
 TERRAIN_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PERF:-0}"
 SKY_TERRAIN_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_SKY_TERRAIN_MULTIVIEW_PERF:-0}"
+SKY_TERRAIN_ACTORS_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF:-0}"
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     PERF_SETTLED_STATIONARY=1
 fi
@@ -154,6 +155,10 @@ Options:
                      Launch the same offscreen A/B microbenchmark with sky
                      background plus chunk terrain and wait for
                      MCLONE_ANDROID_XR_SKY_TERRAIN_MULTIVIEW_PERF_SUMMARY.
+  --sky-terrain-actors-multiview-perf
+                     Launch the same offscreen A/B microbenchmark with sky,
+                     chunk terrain, and actors and wait for
+                     MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF_SUMMARY.
   -h, --help         Show this help.
 USAGE
 }
@@ -467,6 +472,10 @@ while [[ $# -gt 0 ]]; do
             SKY_TERRAIN_MULTIVIEW_PERF=1
             shift
             ;;
+        --sky-terrain-actors-multiview-perf)
+            SKY_TERRAIN_ACTORS_MULTIVIEW_PERF=1
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -537,8 +546,8 @@ if [[ "$TERRAIN_MULTIVIEW_PROOF" == "1" ]]; then
     fi
 fi
 if [[ "$TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
-    if [[ "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
-        mclone_die "--terrain-multiview-perf cannot be combined with --sky-terrain-multiview-perf"
+    if [[ "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
+        mclone_die "--terrain-multiview-perf cannot be combined with other multiview perf modes"
     fi
     if [[ "$MULTIVIEW_PROOF" == "1" ]]; then
         mclone_die "--terrain-multiview-perf cannot be combined with --multiview-proof"
@@ -554,6 +563,9 @@ if [[ "$TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
     fi
 fi
 if [[ "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
+    if [[ "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
+        mclone_die "--sky-terrain-multiview-perf cannot be combined with --sky-terrain-actors-multiview-perf"
+    fi
     if [[ "$MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PROOF" == "1" ]]; then
         mclone_die "--sky-terrain-multiview-perf cannot be combined with multiview proof modes"
     fi
@@ -565,6 +577,20 @@ if [[ "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
     fi
     if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
         mclone_die "--sky-terrain-multiview-perf cannot be combined with frame performance probes"
+    fi
+fi
+if [[ "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
+    if [[ "$MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PROOF" == "1" ]]; then
+        mclone_die "--sky-terrain-actors-multiview-perf cannot be combined with multiview proof modes"
+    fi
+    if [[ "$SESSION_ONLY" == "1" ]]; then
+        mclone_die "--sky-terrain-actors-multiview-perf has its own summary marker; remove --session-only"
+    fi
+    if [[ -n "$SESSION_SMOKE" ]]; then
+        mclone_die "--sky-terrain-actors-multiview-perf cannot be combined with --session-smoke"
+    fi
+    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
+        mclone_die "--sky-terrain-actors-multiview-perf cannot be combined with frame performance probes"
     fi
 fi
 if [[ -n "$PERF_SECONDS" ]]; then
@@ -688,6 +714,9 @@ fi
 if [[ "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
     STARTUP_ARGV+=(--sky-terrain-multiview-perf)
 fi
+if [[ "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
+    STARTUP_ARGV+=(--sky-terrain-actors-multiview-perf)
+fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"
 
@@ -739,6 +768,10 @@ while (( SECONDS < deadline )); do
         success=1
         break
     fi
+    if [[ "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]] && grep -F "MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF_SUMMARY" "$LOG_PATH" >/dev/null 2>&1; then
+        success=1
+        break
+    fi
     if [[ -n "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_PERF_SUMMARY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
@@ -747,7 +780,7 @@ while (( SECONDS < deadline )); do
         success=1
         break
     fi
-    if [[ "$MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_MULTIVIEW_PERF" != "1" && -z "$SESSION_SMOKE" && -z "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
+    if [[ "$MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" != "1" && -z "$SESSION_SMOKE" && -z "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
     fi
@@ -780,6 +813,8 @@ if [[ "$success" != "1" ]]; then
         mclone_die "Android XR terrain multiview perf summary marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     elif [[ "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
         mclone_die "Android XR sky+terrain multiview perf summary marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
+    elif [[ "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
+        mclone_die "Android XR sky+terrain+actors multiview perf summary marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     elif [[ "$SESSION_ONLY" == "1" ]]; then
         mclone_die "Android XR session-ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     elif [[ -n "$PERF_SECONDS" ]]; then
@@ -822,10 +857,17 @@ elif [[ "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
     if ! grep -F "MCLONE_ANDROID_XR_SKY_TERRAIN_MULTIVIEW_PERF_SUMMARY" "$LOG_PATH" >/dev/null 2>&1; then
         mclone_die "Android XR sky+terrain multiview perf summary marker was not seen; see $LOG_PATH"
     fi
+elif [[ "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
+    if ! grep -F "MCLONE_ANDROID_XR_SESSION_READY" "$LOG_PATH" >/dev/null 2>&1; then
+        mclone_die "Android XR session-ready marker was not seen; see $LOG_PATH"
+    fi
+    if ! grep -F "MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF_SUMMARY" "$LOG_PATH" >/dev/null 2>&1; then
+        mclone_die "Android XR sky+terrain+actors multiview perf summary marker was not seen; see $LOG_PATH"
+    fi
 elif ! grep -F "MCLONE_ANDROID_XR_CONTROLLERS_READY" "$LOG_PATH" >/dev/null 2>&1; then
     mclone_die "Android XR controllers-ready marker was not seen; see $LOG_PATH"
 fi
-if [[ "$MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_MULTIVIEW_PERF" != "1" && "$SESSION_ONLY" != "1" ]] && ! grep -F "MCLONE_ANDROID_XR_TERRAIN_READY" "$LOG_PATH" >/dev/null 2>&1; then
+if [[ "$MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" != "1" && "$SESSION_ONLY" != "1" ]] && ! grep -F "MCLONE_ANDROID_XR_TERRAIN_READY" "$LOG_PATH" >/dev/null 2>&1; then
     mclone_die "Android XR terrain-ready marker was not seen; see $LOG_PATH"
 fi
 if [[ -n "$SESSION_SMOKE" ]]; then
