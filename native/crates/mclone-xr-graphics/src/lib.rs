@@ -258,9 +258,15 @@ pub mod vulkan {
         multiview_diagnostics.wgpu_adapter_multiview =
             exposed_adapter.features.contains(wgpu::Features::MULTIVIEW);
         let required_features = optional_openxr_wgpu_features(exposed_adapter.features);
-        let enabled_extensions = exposed_adapter
+        let mut enabled_extensions = exposed_adapter
             .adapter
             .required_device_extensions(required_features);
+        if required_features.contains(wgpu::Features::MULTIVIEW)
+            && multiview_diagnostics.device_khr_multiview_extension
+            && !enabled_extensions.contains(&vk::KHR_MULTIVIEW_NAME)
+        {
+            enabled_extensions.push(vk::KHR_MULTIVIEW_NAME);
+        }
         let enabled_extension_names = enabled_extensions
             .iter()
             .map(|name| name.as_ptr())

@@ -1,11 +1,14 @@
 # 107: XR Stereo Uniform Ownership and Multiview
 
 Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
-proof landed, and Slice E's headless plus Android XR multiview proof paths
-exist. The Quest proof now exposes and executes `wgpu::Features::MULTIVIEW`
-after enabling `VK_KHR_get_physical_device_properties2` on the OpenXR Vulkan
-instance. Production terrain/sky/entity/GUI multiview migration remains
-pending. Created after `d0c5161` (`Restore XR per-eye command submission`)
+proof landed, and Slice E's headless plus Android XR proof paths exist. Quest
+now exposes `wgpu::Features::MULTIVIEW` after enabling
+`VK_KHR_get_physical_device_properties2` on the OpenXR Vulkan instance and
+threading `VK_KHR_multiview` into the wgpu-wrapped device extension list, and
+the on-device proof now includes a stereo projection readback guard. True
+multiview pixel writes/readback are still not proven on Quest, so production
+terrain/sky/entity/GUI multiview migration remains blocked until that is
+resolved. Created after `d0c5161` (`Restore XR per-eye command submission`)
 rolled back the unsafe single-submit Quest XR optimization from `264c723`.
 
 ## Goal
@@ -255,11 +258,20 @@ Validation command for the on-device proof:
 pnpm native:android-xr:multiview-proof
 ```
 
-This waits for `MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY`. Passing this marker
-would mean the Quest/OpenXR/Vulkan path can create the two-layer target, compile
-and execute a multiview pipeline, and present distinct left/right array layers.
-It does not mean terrain, sky, entities, GUI, or screen effects have been
-migrated to multiview.
+This waits for `MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY`. The marker now means
+two separate things:
+
+- the Quest/OpenXR/Vulkan path can create the two-layer target, expose
+  `wgpu::Features::MULTIVIEW`, and submit the minimal `view_index` multiview
+  presentation proof;
+- before presenting, the app renders an offscreen two-layer stereo projection
+  fixture using the runtime OpenXR left/right poses and asymmetric FOVs, reads
+  both layers back on-device, and verifies that a world-space marker lands at
+  the expected per-eye pixel positions with real stereo disparity.
+
+This is a defensive check for swapped, mono, or miscentered eye projection
+plumbing before a human headset pass has to catch it. It does not mean terrain,
+sky, entities, GUI, or screen effects have been migrated to multiview.
 
 Validation recorded for this slice:
 
@@ -351,8 +363,33 @@ MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted=1 runtime_frames=1 skipped=0 e
 Release APK SHA-256 for that proof run:
 `54c5910e4cb5542329dcbe294b5e0974d82a3a54a48551837a91523d2e44703e`.
 
+Follow-up defensive validation added a Quest-side stereo projection readback
+guard to the same proof mode. Final validation passed:
+
+```text
+OpenXR wgpu features: multiview=true
+OpenXR Vulkan multiview diagnostics: instance_properties2_ext=true device_khr_multiview_ext=true raw_feature=true raw_geometry_shader=false raw_tessellation_shader=false max_views=6 max_instance_index=4294967295 wgpu_adapter=true wgpu_device=true
+OpenXR multiview proof swapchain: color_format=Rgba8Unorm eye=1680x1760 images=3 layers=2
+OpenXR stereo projection proof fixture: left_expected=(1151.1,695.3) right_expected=(710.9,695.3) expected_disparity_px=440.2 tolerance_px=26.4
+OpenXR stereo projection proof readback: left_marker_pixels=1224 right_marker_pixels=1224 left_first=[5, 10, 20, 255] right_first=[5, 10, 20, 255]
+MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted=1 runtime_frames=1 skipped=0 eye=1680x1760 layers=2 multiview=true expected_disparity_px=440.2 tolerance_px=26.4 left_actual=(1151.0,695.0) left_expected=(1151.1,695.3) left_error_px=0.3 left_pixels=1224 right_actual=(711.0,695.0) right_expected=(710.9,695.3) right_error_px=0.3 right_pixels=1224
+```
+
+Release APK SHA-256 for that proof run:
+`855be06a1537c71b87457ca4eb27854d1d96e26f2e3ea00cb698a0e4014f0aff`.
+
+The same investigation also found a remaining blocker: attempts to read back
+pixels from a true `multiview: Some(2)` render pass, both in a private
+two-layer `D2Array` texture and from the OpenXR swapchain texture, returned zero
+pixels on Quest. Explicitly adding `VK_KHR_multiview` to the wgpu-wrapped device
+extension list did not resolve that readback failure. Treat
+`wgpu::Features::MULTIVIEW` exposure and the projection guard as necessary
+prerequisites, not as proof that production terrain multiview is ready.
+
 Move from proof-of-correctness one-submit to the real target:
 
+- resolve the true multiview pixel-write/readback failure on Quest, or replace
+  it with an equally strong per-layer validation path;
 - two-layer XR color/depth target or equivalent swapchain path;
 - render pipelines with `multiview: Some(2)`;
 - shader `@builtin(view_index)` selection for per-eye view data;

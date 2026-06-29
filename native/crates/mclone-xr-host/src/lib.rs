@@ -7,12 +7,15 @@ use glam::{Mat4, Quat, Vec3, Vec4};
 use openxr as xr;
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
+use std::sync::mpsc;
 
 pub use actions::{OpenXrControllerActions, XrControllerSnapshot, XrHand};
 
 pub const PRIMARY_STEREO_VIEW_TYPE: xr::ViewConfigurationType =
     xr::ViewConfigurationType::PRIMARY_STEREO;
 pub const XR_REFRESH_RATE_MATCH_EPSILON_HZ: f32 = 0.05;
+const RGBA8_BYTES_PER_PIXEL: u32 = 4;
+const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenXrPollStatus {
@@ -157,6 +160,7 @@ where
     S: XrStereoSwapchain<G> + ?Sized,
 {
     stereo_state: &'a mut S,
+    image_index: u32,
     color_array_view: wgpu::TextureView,
     _graphics: PhantomData<G>,
 }
@@ -172,6 +176,18 @@ where
 
     pub fn color_array_view(&self) -> &wgpu::TextureView {
         &self.color_array_view
+    }
+
+    pub fn color_texture(&self) -> Result<&wgpu::Texture> {
+        self.stereo_state
+            .textures()
+            .get(self.image_index as usize)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "OpenXR returned out-of-range stereo array image index {}",
+                    self.image_index
+                )
+            })
     }
 
     pub fn release(self) -> Result<()> {
@@ -488,6 +504,7 @@ where
     };
     Ok(XrAcquiredStereoTarget {
         stereo_state,
+        image_index,
         color_array_view,
         _graphics: PhantomData,
     })
@@ -711,7 +728,12 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
                 view: color_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 0.02,
+                        g: 0.04,
+                        b: 0.08,
+                        a: 1.0,
+                    }),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -729,6 +751,526 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         .poll(wgpu::PollType::Wait)
         .map(|_| ())
         .context("wait for OpenXR multiview proof device idle")
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct XrProjectionMarkerSample {
+    pub expected_px: [f32; 2],
+    pub actual_px: [f32; 2],
+    pub error_px: f32,
+    pub pixel_count: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct XrStereoProjectionProof {
+    pub left: XrProjectionMarkerSample,
+    pub right: XrProjectionMarkerSample,
+    pub expected_disparity_px: f32,
+    pub tolerance_px: f32,
+}
+
+pub fn render_stereo_projection_readback_proof(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    color_format: wgpu::TextureFormat,
+    width: u32,
+    height: u32,
+    stereo_views: XrStereoFrameViews,
+) -> Result<XrStereoProjectionProof> {
+    const SHADER: &str = r#"
+struct ProjectionProbe {
+    view_projection: mat4x4<f32>,
+};
+
+@group(0) @binding(0)
+var<uniform> probe: ProjectionProbe;
+
+struct VertexIn {
+    @location(0) position: vec3<f32>,
+};
+
+struct VertexOut {
+    @builtin(position) position: vec4<f32>,
+};
+
+@vertex
+fn vs_main(input: VertexIn) -> VertexOut {
+    var out: VertexOut;
+    out.position = probe.view_projection * vec4<f32>(input.position, 1.0);
+    return out;
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+}
+"#;
+
+    if width == 0 || height == 0 {
+        anyhow::bail!("OpenXR stereo projection proof requires a non-empty target");
+    }
+    let proof_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_target"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 2,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: color_format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let left_layer_view = proof_texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_left_view"),
+        dimension: Some(wgpu::TextureViewDimension::D2),
+        base_array_layer: 0,
+        array_layer_count: Some(1),
+        ..Default::default()
+    });
+    let right_layer_view = proof_texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_right_view"),
+        dimension: Some(wgpu::TextureViewDimension::D2),
+        base_array_layer: 1,
+        array_layer_count: Some(1),
+        ..Default::default()
+    });
+
+    let left_view = render_view_from_world_pose(
+        view_pose(&stereo_views.left)?,
+        stereo_views.left.fov,
+        0.05,
+        100.0,
+    )?;
+    let right_view = render_view_from_world_pose(
+        view_pose(&stereo_views.right)?,
+        stereo_views.right.fov,
+        0.05,
+        100.0,
+    )?;
+    let marker = stereo_projection_marker(left_view, right_view)?;
+    let expected_left = project_to_pixel(left_view.view_projection, marker.center, width, height)
+        .context("left projection marker is outside the left eye view")?;
+    let expected_right = project_to_pixel(right_view.view_projection, marker.center, width, height)
+        .context("right projection marker is outside the right eye view")?;
+    let expected_disparity_px = distance2(expected_left, expected_right);
+    let tolerance_px = (width.max(height) as f32 * 0.015).max(8.0);
+    if expected_disparity_px <= tolerance_px * 1.5 {
+        anyhow::bail!(
+            "OpenXR stereo projection proof fixture produced insufficient eye separation: expected_disparity_px={expected_disparity_px:.2} tolerance_px={tolerance_px:.2}"
+        );
+    }
+    log::info!(
+        "OpenXR stereo projection proof fixture: left_expected=({:.1},{:.1}) right_expected=({:.1},{:.1}) expected_disparity_px={:.1} tolerance_px={:.1}",
+        expected_left[0],
+        expected_left[1],
+        expected_right[0],
+        expected_right[1],
+        expected_disparity_px,
+        tolerance_px
+    );
+
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    });
+    let left_uniform_bytes = projection_probe_uniform_bytes(left_view.view_projection);
+    let left_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_left_uniform"),
+        size: left_uniform_bytes.len() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&left_uniform_buffer, 0, &left_uniform_bytes);
+    let left_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_left_bind_group"),
+        layout: &bind_group_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: left_uniform_buffer.as_entire_binding(),
+        }],
+    });
+    let right_uniform_bytes = projection_probe_uniform_bytes(right_view.view_projection);
+    let right_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_right_uniform"),
+        size: right_uniform_bytes.len() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&right_uniform_buffer, 0, &right_uniform_bytes);
+    let right_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_right_bind_group"),
+        layout: &bind_group_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: right_uniform_buffer.as_entire_binding(),
+        }],
+    });
+    let vertex_bytes = projection_marker_vertex_bytes(marker);
+    let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_vertices"),
+        size: vertex_bytes.len() as u64,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&vertex_buffer, 0, &vertex_bytes);
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_shader"),
+        source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_pipeline_layout"),
+        bind_group_layouts: &[&bind_group_layout],
+        push_constant_ranges: &[],
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: 12,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 0,
+                }],
+            }],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: Default::default(),
+        multiview: None,
+        cache: None,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("mclone_xr_stereo_projection_probe_encoder"),
+    });
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_xr_stereo_projection_probe_left_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &left_layer_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 0.02,
+                        g: 0.04,
+                        b: 0.08,
+                        a: 1.0,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &left_bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..6, 0..1);
+    }
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_xr_stereo_projection_probe_right_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &right_layer_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 0.02,
+                        g: 0.04,
+                        b: 0.08,
+                        a: 1.0,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &right_bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..6, 0..1);
+    }
+    let submission = queue.submit(Some(encoder.finish()));
+    device
+        .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+        .map(|_| ())
+        .context("wait for OpenXR stereo projection proof submission")?;
+    device
+        .poll(wgpu::PollType::Wait)
+        .map(|_| ())
+        .context("wait for OpenXR stereo projection proof device idle")?;
+
+    let left_pixels = read_rgba8_layer(device, queue, &proof_texture, width, height, 0)?;
+    let right_pixels = read_rgba8_layer(device, queue, &proof_texture, width, height, 1)?;
+    let left_pixel_count = marker_pixel_count(&left_pixels);
+    let right_pixel_count = marker_pixel_count(&right_pixels);
+    let left_first = left_pixels.get(0..4).unwrap_or(&[]);
+    let right_first = right_pixels.get(0..4).unwrap_or(&[]);
+    log::info!(
+        "OpenXR stereo projection proof readback: left_marker_pixels={} right_marker_pixels={} left_first={:?} right_first={:?}",
+        left_pixel_count,
+        right_pixel_count,
+        left_first,
+        right_first
+    );
+    let left_actual =
+        find_marker_center(&left_pixels, width, height).context("left marker was not rendered")?;
+    let right_actual = find_marker_center(&right_pixels, width, height)
+        .context("right marker was not rendered")?;
+    let left_error_px = distance2(left_actual, expected_left);
+    let right_error_px = distance2(right_actual, expected_right);
+    if left_error_px > tolerance_px || right_error_px > tolerance_px {
+        anyhow::bail!(
+            "OpenXR stereo projection proof failed: left_actual=({:.1},{:.1}) left_expected=({:.1},{:.1}) left_error={:.1}px right_actual=({:.1},{:.1}) right_expected=({:.1},{:.1}) right_error={:.1}px tolerance={:.1}px",
+            left_actual[0],
+            left_actual[1],
+            expected_left[0],
+            expected_left[1],
+            left_error_px,
+            right_actual[0],
+            right_actual[1],
+            expected_right[0],
+            expected_right[1],
+            right_error_px,
+            tolerance_px
+        );
+    }
+
+    Ok(XrStereoProjectionProof {
+        left: XrProjectionMarkerSample {
+            expected_px: expected_left,
+            actual_px: left_actual,
+            error_px: left_error_px,
+            pixel_count: left_pixel_count,
+        },
+        right: XrProjectionMarkerSample {
+            expected_px: expected_right,
+            actual_px: right_actual,
+            error_px: right_error_px,
+            pixel_count: right_pixel_count,
+        },
+        expected_disparity_px,
+        tolerance_px,
+    })
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ProjectionMarker {
+    center: Vec3,
+    right_extent: Vec3,
+    up_extent: Vec3,
+}
+
+fn stereo_projection_marker(
+    left_view: XrRenderView,
+    right_view: XrRenderView,
+) -> Result<ProjectionMarker> {
+    let head_center = (left_view.camera_position + right_view.camera_position) * 0.5;
+    let forward = (left_view.camera_forward + right_view.camera_forward).normalize_or_zero();
+    let right = (left_view.camera_right + right_view.camera_right).normalize_or_zero();
+    let up = (left_view.camera_up + right_view.camera_up).normalize_or_zero();
+    if forward.length_squared() < 1.0e-6
+        || right.length_squared() < 1.0e-6
+        || up.length_squared() < 1.0e-6
+    {
+        anyhow::bail!("OpenXR stereo projection proof received degenerate eye poses");
+    }
+    Ok(ProjectionMarker {
+        center: head_center + forward * 1.5 + right * 0.18 + up * 0.03,
+        right_extent: right * 0.035,
+        up_extent: up * 0.035,
+    })
+}
+
+fn projection_probe_uniform_bytes(view_projection: Mat4) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(64);
+    push_mat4_bytes(&mut bytes, view_projection);
+    bytes
+}
+
+fn projection_marker_vertex_bytes(marker: ProjectionMarker) -> Vec<u8> {
+    let offsets = [
+        [-1.0_f32, -1.0_f32],
+        [1.0, -1.0],
+        [-1.0, 1.0],
+        [-1.0, 1.0],
+        [1.0, -1.0],
+        [1.0, 1.0],
+    ];
+    let mut bytes = Vec::with_capacity(offsets.len() * 12);
+    for [right_scale, up_scale] in offsets {
+        let position =
+            marker.center + marker.right_extent * right_scale + marker.up_extent * up_scale;
+        for value in position.to_array() {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    bytes
+}
+
+fn push_mat4_bytes(bytes: &mut Vec<u8>, matrix: Mat4) {
+    for value in matrix.to_cols_array() {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+}
+
+fn project_to_pixel(
+    view_projection: Mat4,
+    world_position: Vec3,
+    width: u32,
+    height: u32,
+) -> Option<[f32; 2]> {
+    let clip = view_projection * world_position.extend(1.0);
+    if !clip.is_finite() || clip.w.abs() <= f32::EPSILON {
+        return None;
+    }
+    let ndc = clip.truncate() / clip.w;
+    if !ndc.is_finite() || ndc.z < -1.0 || ndc.z > 1.0 {
+        return None;
+    }
+    Some([
+        (ndc.x * 0.5 + 0.5) * width as f32,
+        (0.5 - ndc.y * 0.5) * height as f32,
+    ])
+}
+
+fn find_marker_center(pixels: &[u8], width: u32, height: u32) -> Option<[f32; 2]> {
+    let mut count = 0_u32;
+    let mut sum_x = 0.0_f32;
+    let mut sum_y = 0.0_f32;
+    for y in 0..height {
+        for x in 0..width {
+            let index = ((y * width + x) * RGBA8_BYTES_PER_PIXEL) as usize;
+            let pixel = pixels.get(index..index + 4)?;
+            if is_marker_pixel(pixel) {
+                count += 1;
+                sum_x += x as f32 + 0.5;
+                sum_y += y as f32 + 0.5;
+            }
+        }
+    }
+    (count > 0).then_some([sum_x / count as f32, sum_y / count as f32])
+}
+
+fn marker_pixel_count(pixels: &[u8]) -> u32 {
+    pixels
+        .chunks_exact(RGBA8_BYTES_PER_PIXEL as usize)
+        .filter(|pixel| is_marker_pixel(pixel))
+        .count() as u32
+}
+
+fn is_marker_pixel(pixel: &[u8]) -> bool {
+    pixel[0] >= 200 && pixel[1] >= 200 && pixel[2] >= 200
+}
+
+fn read_rgba8_layer(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+    layer: u32,
+) -> Result<Vec<u8>> {
+    let unpadded_row_bytes = width * RGBA8_BYTES_PER_PIXEL;
+    let padded_row_bytes = padded_row_bytes(unpadded_row_bytes);
+    let buffer_size = padded_row_bytes as u64 * height as u64;
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("mclone_xr_stereo_projection_readback"),
+        size: buffer_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("mclone_xr_stereo_projection_readback_encoder"),
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d {
+                x: 0,
+                y: 0,
+                z: layer,
+            },
+            aspect: Default::default(),
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &staging,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_row_bytes),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(Some(encoder.finish()));
+
+    let slice = staging.slice(..);
+    let (sender, receiver) = mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
+    device
+        .poll(wgpu::PollType::Wait)
+        .context("wait for OpenXR stereo projection readback")?;
+    receiver
+        .recv()
+        .context("failed to receive OpenXR stereo projection readback map result")?
+        .context("failed to map OpenXR stereo projection readback buffer")?;
+
+    let mapped = slice.get_mapped_range();
+    let mut pixels = Vec::with_capacity((width * height * RGBA8_BYTES_PER_PIXEL) as usize);
+    for row in 0..height {
+        let start = (row * padded_row_bytes) as usize;
+        let end = start + unpadded_row_bytes as usize;
+        pixels.extend_from_slice(&mapped[start..end]);
+    }
+    drop(mapped);
+    staging.unmap();
+    Ok(pixels)
+}
+
+fn padded_row_bytes(unpadded_row_bytes: u32) -> u32 {
+    unpadded_row_bytes.div_ceil(COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT
+}
+
+fn distance2(a: [f32; 2], b: [f32; 2]) -> f32 {
+    let dx = a[0] - b[0];
+    let dy = a[1] - b[1];
+    (dx * dx + dy * dy).sqrt()
 }
 
 pub fn diagnostic_eye_clear_color(eye: usize) -> wgpu::Color {

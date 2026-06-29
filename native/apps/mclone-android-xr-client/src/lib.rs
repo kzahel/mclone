@@ -1180,7 +1180,6 @@ mod android {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
         let mut frame_stats = XrFrameStats::default();
-        let mut logged_ready = false;
 
         loop {
             if !poll_android_events(app, Some(Duration::from_millis(0)))? {
@@ -1223,47 +1222,64 @@ mod android {
                 &mut graphics.frame_stream,
                 &mut frame_stats,
             )?;
-            let frame_result = if frame_state.should_render {
-                render_multiview_proof_frame(
+            if frame_state.should_render {
+                match render_multiview_proof_frame(
                     graphics,
                     stage,
                     environment_blend_mode,
                     frame_state.predicted_display_time,
                     stereo_target,
-                )
-                .map(|()| {
-                    frame_stats.record_submitted_frame();
-                    if !logged_ready {
-                        logged_ready = true;
+                ) {
+                    Ok(proof) => {
+                        frame_stats.record_submitted_frame();
                         log::info!(
-                            "MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted={} runtime_frames={} skipped={} eye={}x{} layers={} multiview={}",
+                            "MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted={} runtime_frames={} skipped={} eye={}x{} layers={} multiview={} expected_disparity_px={:.1} tolerance_px={:.1} left_actual=({:.1},{:.1}) left_expected=({:.1},{:.1}) left_error_px={:.1} left_pixels={} right_actual=({:.1},{:.1}) right_expected=({:.1},{:.1}) right_error_px={:.1} right_pixels={}",
                             frame_stats.submitted_frames,
                             frame_stats.runtime_frames,
                             frame_stats.skipped_frames,
                             stereo_target.width,
                             stereo_target.height,
                             stereo_target.array_size(),
-                            graphics.device.features().contains(wgpu::Features::MULTIVIEW)
+                            graphics
+                                .device
+                                .features()
+                                .contains(wgpu::Features::MULTIVIEW),
+                            proof.expected_disparity_px,
+                            proof.tolerance_px,
+                            proof.left.actual_px[0],
+                            proof.left.actual_px[1],
+                            proof.left.expected_px[0],
+                            proof.left.expected_px[1],
+                            proof.left.error_px,
+                            proof.left.pixel_count,
+                            proof.right.actual_px[0],
+                            proof.right.actual_px[1],
+                            proof.right.expected_px[0],
+                            proof.right.expected_px[1],
+                            proof.right.error_px,
+                            proof.right.pixel_count
                         );
+                        return Ok(());
                     }
-                })
+                    Err(error) => {
+                        let _ = mclone_xr_host::end_frame_with_layers(
+                            &mut graphics.frame_stream,
+                            frame_state.predicted_display_time,
+                            environment_blend_mode,
+                            &[],
+                        );
+                        return Err(error);
+                    }
+                }
             } else {
-                mclone_xr_host::end_skipped_frame(
+                if let Err(error) = mclone_xr_host::end_skipped_frame(
                     &mut graphics.frame_stream,
                     frame_state.predicted_display_time,
                     environment_blend_mode,
                     &mut frame_stats,
-                )
-            };
-
-            if let Err(error) = frame_result {
-                let _ = mclone_xr_host::end_frame_with_layers(
-                    &mut graphics.frame_stream,
-                    frame_state.predicted_display_time,
-                    environment_blend_mode,
-                    &[],
-                );
-                return Err(error);
+                ) {
+                    return Err(error);
+                }
             }
         }
     }
@@ -1274,9 +1290,20 @@ mod android {
         environment_blend_mode: xr::EnvironmentBlendMode,
         predicted_display_time: xr::Time,
         stereo_target: &mut graphics_vulkan::OpenXrStereoState,
-    ) -> Result<()> {
+    ) -> Result<mclone_xr_host::XrStereoProjectionProof> {
         let stereo_views =
             mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+        let target_width = stereo_target.width;
+        let target_height = stereo_target.height;
+        let proof = mclone_xr_host::render_stereo_projection_readback_proof(
+            &graphics.device,
+            &graphics.queue,
+            XR_COLOR_FORMAT,
+            target_width,
+            target_height,
+            stereo_views,
+        )
+        .context("validate OpenXR stereo projection proof")?;
         let target =
             acquire_stereo_target(stereo_target).context("acquire multiview proof target")?;
         mclone_xr_host::render_multiview_layer_proof(
@@ -1294,7 +1321,8 @@ mod android {
             stage,
             stereo_views,
             stereo_target,
-        )
+        )?;
+        Ok(proof)
     }
 
     fn run_mclone_frame_loop(
