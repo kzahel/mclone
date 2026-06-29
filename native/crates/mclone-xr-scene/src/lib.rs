@@ -18,10 +18,10 @@ use mclone_app_runtime::render_assets::TexturedMeshAssets;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
 };
-use mclone_app_runtime::{RuntimePollDiagnostics, elapsed_ms};
+use mclone_app_runtime::{RuntimePollDiagnostics, debug_block_palette_overlay, elapsed_ms};
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
 use mclone_client::{BlockInteractionTarget, ClientInteractionController};
-use mclone_core::{ChunkPos, Vec3d, time};
+use mclone_core::{BlockStateId, ChunkPos, Vec3d, time};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
@@ -43,8 +43,9 @@ use mclone_render_session::{
     EngineCameraMovementMode, EngineCameraSnapshot, actor_instances_from_presentations,
 };
 use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState,
-    GuiScale, Point, StatusOverlay, render_loading_progress_overlay, render_status_overlay,
+    DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameScreen, GameUi, GameUiAction,
+    GameUiRenderState, GuiScale, Point, StatusOverlay, render_loading_progress_overlay,
+    render_status_overlay,
 };
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
@@ -71,6 +72,11 @@ pub const XR_MENU_CONTROLLER_RAY_LENGTH_BLOCKS: f32 = 6.0;
 pub const XR_MENU_POINTER_TRIGGER_PRESS: f32 = 0.55;
 pub const XR_MENU_POINTER_TRIGGER_RELEASE: f32 = 0.35;
 pub const XR_GAMEPLAY_INTERACTION_HAND: XrHand = XrHand::Right;
+pub const XR_GAME_UI_TOGGLE_HAND: XrHand = XrHand::Left;
+pub const XR_GAME_UI_PANEL_HAND: XrHand = XrHand::Left;
+pub const XR_GAME_UI_PANEL_WIDTH_BLOCKS: f32 = 1.35;
+pub const XR_GAME_UI_PANEL_UP_OFFSET_BLOCKS: f32 = 0.18;
+pub const XR_GAME_UI_PANEL_FORWARD_OFFSET_BLOCKS: f32 = 0.12;
 const XR_FIXED_RENDER_EYE_SEPARATION_BLOCKS: f32 = 0.064;
 const XR_MENU_LEFT_RAY_COLOR: [f32; 4] = [0.18, 0.85, 1.0, 0.95];
 const XR_MENU_RIGHT_RAY_COLOR: [f32; 4] = [0.2, 1.0, 0.45, 0.95];
@@ -123,6 +129,13 @@ impl XrGameplayInteractionEdges {
 enum XrGameplayInteractionAction {
     Attack,
     Use,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum XrUiPanelAnchor {
+    #[default]
+    Head,
+    LeftHand,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -390,9 +403,11 @@ where
     render_split_timing_enabled: bool,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
+    game_ui_toggle_down: bool,
     menu_pointer_down: bool,
     gameplay_interaction_buttons: XrGameplayInteractionButtons,
     menu_panel_pose: Option<WorldGuiPanel>,
+    menu_panel_anchor: XrUiPanelAnchor,
     menu_panel_recenter_pending: bool,
     latest_controllers: Vec<XrControllerSnapshot>,
     first_eye_summary: Option<FullFrameRenderSummary>,
@@ -505,9 +520,11 @@ where
             render_split_timing_enabled: false,
             last_locomotion_update: None,
             menu_toggle_down: false,
+            game_ui_toggle_down: false,
             menu_pointer_down: false,
             gameplay_interaction_buttons: XrGameplayInteractionButtons::default(),
             menu_panel_pose: None,
+            menu_panel_anchor: XrUiPanelAnchor::Head,
             menu_panel_recenter_pending: true,
             latest_controllers: Vec::new(),
             first_eye_summary: None,
@@ -578,9 +595,11 @@ where
             render_split_timing_enabled: false,
             last_locomotion_update: None,
             menu_toggle_down: false,
+            game_ui_toggle_down: false,
             menu_pointer_down: false,
             gameplay_interaction_buttons: XrGameplayInteractionButtons::default(),
             menu_panel_pose: None,
+            menu_panel_anchor: XrUiPanelAnchor::Head,
             menu_panel_recenter_pending: false,
             latest_controllers: Vec::new(),
             first_eye_summary: None,
@@ -827,6 +846,7 @@ where
             .unwrap_or(0.0);
         let ui_was_active = self.ui.is_active();
         self.apply_menu_toggle_input(controllers);
+        self.apply_game_ui_toggle_input(controllers);
         let ui_active = self.ui.is_active();
         let gameplay_interaction_edges = self.update_gameplay_interaction_buttons(controllers);
         let suppress_gameplay_interaction = ui_was_active != ui_active;
@@ -866,6 +886,7 @@ where
         self.menu_pointer_down = false;
         self.gameplay_interaction_buttons = XrGameplayInteractionButtons::default();
         self.menu_panel_pose = None;
+        self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = false;
         let now = Instant::now();
         let dt_seconds = self
@@ -897,6 +918,7 @@ where
         self.ui.clear_input();
         self.menu_pointer_down = false;
         self.menu_panel_pose = None;
+        self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = false;
         self.last_locomotion_update = Some(Instant::now());
     }
@@ -1230,6 +1252,22 @@ where
             selection_outline.as_ref(),
             view_slot,
         );
+        if let Some(gameplay_ray) = self
+            .xr_gameplay_controller_ray_line()
+            .context("build XR gameplay controller ray visual")?
+        {
+            self.world_gui_renderer
+                .render_lines_in_slot(
+                    device,
+                    queue,
+                    &mut encoder,
+                    RenderFrameTarget::color(target.color_view, target.size),
+                    render_view,
+                    &[gameplay_ray],
+                    view_slot,
+                )
+                .with_context(|| format!("render XR gameplay ray for {label} eye"))?;
+        }
         if ui_active {
             if let Some(panel) = self.menu_panel_pose {
                 let controller_ray_lines = self
@@ -1366,6 +1404,24 @@ where
             },
             |startup| startup.scene.render_distance,
         );
+        let block_palette = self.runtime.as_ref().map_or_else(
+            || {
+                self.local_startup
+                    .as_ref()
+                    .map_or_else(Default::default, |startup| {
+                        debug_block_palette_overlay(
+                            &startup.pump.runtime().mesh_assets().catalog,
+                            self.interaction.selected_hotbar_slot(),
+                        )
+                    })
+            },
+            |runtime| {
+                debug_block_palette_overlay(
+                    &runtime.mesh_assets().catalog,
+                    self.interaction.selected_hotbar_slot(),
+                )
+            },
+        );
         GameUiRenderState {
             render_distance: (render_distance as i32).clamp(1, MAX_XR_RENDER_DISTANCE as i32),
             min_render_distance: 1,
@@ -1386,7 +1442,7 @@ where
                 .unwrap_or(XR_UI_FPS_CAP),
             touch_controls_mode: None,
             touch_settings: None,
-            block_palette: Default::default(),
+            block_palette,
         }
     }
 
@@ -1396,6 +1452,7 @@ where
             if self.local_startup.is_some() {
                 if !self.ui.is_active() {
                     self.ui.open_pause();
+                    self.menu_panel_anchor = XrUiPanelAnchor::Head;
                     self.menu_panel_recenter_pending = true;
                 }
                 self.menu_toggle_down = toggle_down;
@@ -1410,6 +1467,7 @@ where
                 log::info!("XR menu closed");
             } else {
                 self.ui.open_pause();
+                self.menu_panel_anchor = XrUiPanelAnchor::Head;
                 self.menu_panel_recenter_pending = true;
                 log::info!("XR menu opened");
             }
@@ -1417,19 +1475,71 @@ where
         self.menu_toggle_down = toggle_down;
     }
 
+    fn apply_game_ui_toggle_input(&mut self, controllers: &[XrControllerSnapshot]) {
+        let toggle_down = xr_game_ui_toggle_pressed(controllers);
+        if toggle_down && !self.game_ui_toggle_down {
+            if self.local_startup.is_some() || self.runtime.is_none() {
+                self.game_ui_toggle_down = toggle_down;
+                return;
+            }
+            if self.ui.screen() == Some(GameScreen::BlockPalette)
+                && self.menu_panel_anchor == XrUiPanelAnchor::LeftHand
+            {
+                self.ui.close();
+                self.ui.clear_input();
+                self.menu_pointer_down = false;
+                self.menu_panel_pose = None;
+                self.menu_panel_recenter_pending = false;
+                log::info!("XR game UI closed");
+            } else {
+                self.ui.apply_action(GameUiAction::OpenBlockPalette);
+                self.menu_panel_anchor = XrUiPanelAnchor::LeftHand;
+                self.menu_pointer_down = false;
+                self.menu_panel_pose = None;
+                self.menu_panel_recenter_pending = true;
+                log::info!("XR game UI opened");
+            }
+        }
+        self.game_ui_toggle_down = toggle_down;
+    }
+
     fn update_menu_panel_pose(&mut self, render_views: [ChunkRenderView; 2]) {
         if !self.ui.is_active() {
             self.ui.clear_input();
             self.menu_pointer_down = false;
             self.menu_panel_pose = None;
+            self.menu_panel_anchor = XrUiPanelAnchor::Head;
             self.menu_panel_recenter_pending = false;
             return;
         }
-        if self.menu_panel_pose.is_some() && !self.menu_panel_recenter_pending {
-            return;
+        match self.menu_panel_anchor {
+            XrUiPanelAnchor::Head => {
+                if self.menu_panel_pose.is_some() && !self.menu_panel_recenter_pending {
+                    return;
+                }
+                self.menu_panel_pose = Some(xr_menu_panel_from_render_views(render_views));
+                self.menu_panel_recenter_pending = false;
+            }
+            XrUiPanelAnchor::LeftHand => {
+                let hand_panel = self.tracking_origin.and_then(|origin| {
+                    let transform =
+                        XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())
+                            .ok()?;
+                    xr_game_ui_panel_from_controllers(
+                        &self.latest_controllers,
+                        transform,
+                        render_views,
+                    )
+                });
+                if let Some(panel) = hand_panel {
+                    self.menu_panel_pose = Some(panel);
+                    self.menu_panel_recenter_pending = false;
+                } else if self.menu_panel_pose.is_none() || self.menu_panel_recenter_pending {
+                    self.menu_panel_pose = Some(xr_menu_panel_from_render_views(render_views));
+                    self.menu_panel_recenter_pending = false;
+                }
+            }
         }
-        self.menu_panel_pose = Some(xr_menu_panel_from_render_views(render_views));
-        self.menu_panel_recenter_pending = false;
     }
 
     fn apply_menu_pointer_input(
@@ -1508,6 +1618,21 @@ where
             .context("failed to sync XR carried item to server")
     }
 
+    fn assign_debug_hotbar_slot(&mut self, slot: u8, block_state: BlockStateId) -> Result<bool> {
+        let Some(command) = self
+            .interaction
+            .set_debug_hotbar_slot(slot, Some(block_state))
+        else {
+            return Ok(false);
+        };
+        let Some(runtime) = &mut self.runtime else {
+            return Ok(false);
+        };
+        runtime
+            .send_gameplay_command(command)
+            .context("failed to assign XR debug hotbar slot")
+    }
+
     fn apply_xr_gameplay_interaction_edges(
         &mut self,
         edges: XrGameplayInteractionEdges,
@@ -1572,6 +1697,39 @@ where
             &self.latest_controllers,
             transform,
             panel,
+        ))
+    }
+
+    fn xr_gameplay_controller_ray_line(&self) -> Result<Option<WorldGuiLine>> {
+        if self.ui.is_active() {
+            return Ok(None);
+        }
+        let Some(origin) = self.tracking_origin else {
+            return Ok(None);
+        };
+        let transform = XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())?;
+        let Some((ray_origin, ray_direction)) =
+            xr_controller_interaction_ray_from_controllers(&self.latest_controllers, transform)
+        else {
+            return Ok(None);
+        };
+        let hit_distance = self.runtime.as_ref().and_then(|runtime| {
+            self.interaction
+                .target_block(
+                    runtime.client(),
+                    vec3d_from_glam(ray_origin),
+                    vec3d_from_glam(ray_direction),
+                )
+                .map(|target| {
+                    let hit = glam_vec3_from_vec3d(target.hit.location);
+                    (hit - ray_origin).dot(ray_direction.normalize_or_zero())
+                })
+        });
+        Ok(xr_gameplay_controller_ray_line_from_controllers(
+            &self.latest_controllers,
+            transform,
+            hit_distance,
+            self.interaction.pick_range() as f32,
         ))
     }
 
@@ -1651,6 +1809,7 @@ where
         self.session_status = StatusOverlay::new(request.starting_message(), true);
         self.ui.clear_input();
         self.menu_pointer_down = false;
+        self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = true;
         log::info!(
             "XR local world startup queued seed={} center=({}, {}) render_distance={}",
@@ -1715,6 +1874,7 @@ where
                 if let Some(seed) = failure_seed {
                     self.ui.set_new_world_seed(seed);
                 }
+                self.menu_panel_anchor = XrUiPanelAnchor::Head;
                 self.menu_panel_recenter_pending = true;
                 Ok(false)
             }
@@ -1837,6 +1997,7 @@ where
         if let SessionStartRequest::NewLocalWorld { seed } = startup.request {
             self.ui.set_new_world_seed(seed);
         }
+        self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = true;
     }
 
@@ -1844,6 +2005,7 @@ where
         self.ui.clear_input();
         self.menu_pointer_down = false;
         self.menu_panel_pose = None;
+        self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = false;
     }
 
@@ -2052,19 +2214,31 @@ where
                 }
                 scene_replaced = true;
             }
+            GameUiAction::AssignHotbarBlock { slot, block_state } => {
+                let changed = self.assign_debug_hotbar_slot(slot, BlockStateId(block_state))?;
+                log::info!(
+                    "XR debug hotbar slot {} assigned block_state={} changed={}",
+                    slot + 1,
+                    block_state,
+                    changed
+                );
+            }
             GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetTouchLookSensitivity(_)
-            | GameUiAction::SetTouchControlsMode(_)
-            | GameUiAction::AssignHotbarBlock { .. } => {}
+            | GameUiAction::SetTouchControlsMode(_) => {}
             GameUiAction::BackToTitle | GameUiAction::QuitToTitle => {
                 self.session_status = StatusOverlay::hidden();
             }
             GameUiAction::StartWorld
             | GameUiAction::Resume
-            | GameUiAction::OpenBlockPalette
             | GameUiAction::OpenOptions(_)
             | GameUiAction::BackToPause => {}
+            GameUiAction::OpenBlockPalette => {
+                self.menu_panel_anchor = XrUiPanelAnchor::LeftHand;
+                self.menu_panel_pose = None;
+                self.menu_panel_recenter_pending = true;
+            }
         }
         self.ui.apply_action(action);
         if !self.ui.is_active() {
@@ -2652,6 +2826,12 @@ pub fn xr_menu_toggle_pressed(controllers: &[XrControllerSnapshot]) -> bool {
         .any(|controller| controller.hand == XR_MENU_TOGGLE_HAND && controller.select_pressed)
 }
 
+pub fn xr_game_ui_toggle_pressed(controllers: &[XrControllerSnapshot]) -> bool {
+    controllers.iter().any(|controller| {
+        controller.hand == XR_GAME_UI_TOGGLE_HAND && controller.thumbstick_pressed
+    })
+}
+
 fn xr_gameplay_interaction_buttons_from_controllers(
     controllers: &[XrControllerSnapshot],
     previous: XrGameplayInteractionButtons,
@@ -2704,6 +2884,44 @@ fn xr_controller_interaction_ray(
     Some((ray_origin, ray_direction.normalize()))
 }
 
+pub fn xr_gameplay_controller_ray_line_from_controllers(
+    controllers: &[XrControllerSnapshot],
+    transform: XrStageToWorld,
+    hit_distance: Option<f32>,
+    pick_range: f32,
+) -> Option<WorldGuiLine> {
+    let controller = controllers
+        .iter()
+        .find(|controller| controller.hand == XR_GAMEPLAY_INTERACTION_HAND)?;
+    let (ray_origin, ray_direction) = xr_controller_interaction_ray(controller, transform)?;
+    let pick_range = if pick_range.is_finite() && pick_range > 0.0 {
+        pick_range
+    } else {
+        XR_MENU_CONTROLLER_RAY_LENGTH_BLOCKS
+    };
+    let distance = hit_distance
+        .filter(|distance| distance.is_finite() && *distance >= 0.0)
+        .unwrap_or(pick_range)
+        .clamp(0.0, pick_range);
+    Some(WorldGuiLine::new(
+        ray_origin,
+        ray_origin + ray_direction * distance,
+        xr_gameplay_controller_ray_color(controller),
+    ))
+}
+
+fn xr_gameplay_controller_ray_color(controller: &XrControllerSnapshot) -> [f32; 4] {
+    let trigger_active =
+        controller.trigger.is_finite() && controller.trigger >= XR_MENU_POINTER_TRIGGER_PRESS;
+    let squeeze_active =
+        controller.squeeze.is_finite() && controller.squeeze >= XR_MENU_POINTER_TRIGGER_PRESS;
+    if trigger_active || squeeze_active {
+        XR_MENU_TRIGGER_RAY_COLOR
+    } else {
+        xr_menu_controller_ray_color(controller)
+    }
+}
+
 pub fn xr_menu_panel_from_render_views(render_views: [ChunkRenderView; 2]) -> WorldGuiPanel {
     let center_position = (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
     let forward = average_unit_direction(
@@ -2728,6 +2946,68 @@ pub fn xr_menu_panel_from_render_views(render_views: [ChunkRenderView; 2]) -> Wo
         XR_MENU_PANEL_WIDTH_BLOCKS,
         xr_menu_panel_height_blocks(),
     )
+}
+
+pub fn xr_game_ui_panel_from_controllers(
+    controllers: &[XrControllerSnapshot],
+    transform: XrStageToWorld,
+    render_views: [ChunkRenderView; 2],
+) -> Option<WorldGuiPanel> {
+    let controller = controllers
+        .iter()
+        .find(|controller| controller.hand == XR_GAME_UI_PANEL_HAND)?;
+    let stage_anchor = controller.grip_position.or(controller.aim_position)?;
+    let anchor = transform.transform_position(stage_anchor);
+    if !anchor.is_finite() {
+        return None;
+    }
+
+    let eye_center = (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+    let view_up = average_unit_direction(
+        render_views[0].camera_up,
+        render_views[1].camera_up,
+        Vec3::Y,
+    );
+    let view_right = average_unit_direction(
+        render_views[0].camera_right,
+        render_views[1].camera_right,
+        Vec3::X,
+    );
+    let view_forward = average_unit_direction(
+        render_views[0].camera_forward,
+        render_views[1].camera_forward,
+        Vec3::NEG_Z,
+    );
+    let mut normal = eye_center - anchor;
+    if !normal.is_finite() || normal.length_squared() <= f32::EPSILON {
+        normal = -view_forward;
+    }
+    let normal = normal.normalize_or_zero();
+    if normal.length_squared() <= f32::EPSILON {
+        return None;
+    }
+    let mut right = view_right - normal * view_right.dot(normal);
+    if !right.is_finite() || right.length_squared() <= f32::EPSILON {
+        right = view_up.cross(normal);
+    }
+    let right = right.normalize_or_zero();
+    if right.length_squared() <= f32::EPSILON {
+        return None;
+    }
+    let up = normal.cross(right).normalize_or_zero();
+    if up.length_squared() <= f32::EPSILON {
+        return None;
+    }
+    let center = anchor
+        + up * XR_GAME_UI_PANEL_UP_OFFSET_BLOCKS
+        + normal * XR_GAME_UI_PANEL_FORWARD_OFFSET_BLOCKS;
+    Some(WorldGuiPanel::new(
+        center,
+        right,
+        up,
+        XR_GAME_UI_PANEL_WIDTH_BLOCKS,
+        xr_game_ui_panel_height_blocks(),
+    ))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2894,6 +3174,10 @@ pub fn xr_menu_pointer_trigger_down(trigger: f32, was_down: bool) -> bool {
 
 fn xr_menu_panel_height_blocks() -> f32 {
     XR_MENU_PANEL_WIDTH_BLOCKS * XR_MENU_PANEL_PIXELS[1] as f32 / XR_MENU_PANEL_PIXELS[0] as f32
+}
+
+fn xr_game_ui_panel_height_blocks() -> f32 {
+    XR_GAME_UI_PANEL_WIDTH_BLOCKS * XR_MENU_PANEL_PIXELS[1] as f32 / XR_MENU_PANEL_PIXELS[0] as f32
 }
 
 fn average_unit_direction(a: Vec3, b: Vec3, fallback: Vec3) -> Vec3 {
@@ -3131,6 +3415,19 @@ mod tests {
     }
 
     #[test]
+    fn xr_game_ui_toggle_uses_left_thumbstick_click_only() {
+        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
+        left.thumbstick_pressed = true;
+        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
+        right.thumbstick_pressed = true;
+
+        assert!(xr_game_ui_toggle_pressed(&[left]));
+        assert!(!xr_game_ui_toggle_pressed(&[right]));
+        assert!(xr_game_ui_toggle_pressed(&[right, left]));
+        assert!(!xr_game_ui_toggle_pressed(&[]));
+    }
+
+    #[test]
     fn xr_menu_panel_anchors_in_front_of_hmd_center() {
         let left = test_render_view(Vec3::new(-0.03, 64.0, 0.0));
         let right = test_render_view(Vec3::new(0.03, 64.0, 0.0));
@@ -3144,6 +3441,34 @@ mod tests {
         assert!((panel.up - Vec3::Y).length() < 1.0e-6);
         assert_eq!(panel.width, XR_MENU_PANEL_WIDTH_BLOCKS);
         assert_eq!(panel.height, xr_menu_panel_height_blocks());
+    }
+
+    #[test]
+    fn xr_game_ui_panel_anchors_to_left_hand_and_faces_hmd() {
+        let views = [
+            test_render_view(Vec3::new(-0.03, 64.0, 0.0)),
+            test_render_view(Vec3::new(0.03, 64.0, 0.0)),
+        ];
+        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
+        left.grip_position = Some(Vec3::new(0.0, 64.0, -1.0));
+
+        let panel = xr_game_ui_panel_from_controllers(&[left], test_stage_to_world(), views)
+            .expect("hand panel");
+
+        assert!(
+            (panel.center
+                - Vec3::new(
+                    0.0,
+                    64.0 + XR_GAME_UI_PANEL_UP_OFFSET_BLOCKS,
+                    -1.0 + XR_GAME_UI_PANEL_FORWARD_OFFSET_BLOCKS
+                ))
+            .length()
+                < 1.0e-6
+        );
+        assert!((panel.right - Vec3::X).length() < 1.0e-6);
+        assert!((panel.up - Vec3::Y).length() < 1.0e-6);
+        assert_eq!(panel.width, XR_GAME_UI_PANEL_WIDTH_BLOCKS);
+        assert_eq!(panel.height, xr_game_ui_panel_height_blocks());
     }
 
     #[test]
@@ -3353,6 +3678,26 @@ mod tests {
 
         assert!((origin - Vec3::new(8.0, 71.0, -4.0)).length() < 1.0e-6);
         assert!((direction - Vec3::NEG_X).length() < 1.0e-6);
+    }
+
+    #[test]
+    fn xr_gameplay_controller_ray_line_clips_to_hit_distance() {
+        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
+        right.aim_position = Some(Vec3::new(1.0, 64.0, 0.0));
+        right.aim_direction = Some(Vec3::NEG_Z);
+        right.squeeze = XR_MENU_POINTER_TRIGGER_PRESS;
+
+        let line = xr_gameplay_controller_ray_line_from_controllers(
+            &[right],
+            test_stage_to_world(),
+            Some(2.5),
+            5.0,
+        )
+        .expect("gameplay ray line");
+
+        assert_eq!(line.start, Vec3::new(1.0, 64.0, 0.0));
+        assert!((line.end - Vec3::new(1.0, 64.0, -2.5)).length() < 1.0e-6);
+        assert_eq!(line.color, XR_MENU_TRIGGER_RAY_COLOR);
     }
 
     #[test]

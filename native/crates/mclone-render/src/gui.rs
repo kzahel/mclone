@@ -874,6 +874,54 @@ impl WorldGuiRenderer {
         Ok(())
     }
 
+    pub fn render_lines_in_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_view: ChunkRenderView,
+        lines: &[WorldGuiLine],
+        view_slot: PerViewSlot,
+    ) -> Result<()> {
+        let line_vertices = world_gui_line_vertices(lines);
+        if line_vertices.is_empty() {
+            return Ok(());
+        }
+        self.upload_world_line_vertices(device, queue, &line_vertices);
+        let uniform_offset =
+            self.uniforms
+                .write_slot(queue, view_slot, &matrix_bytes(render_view.view_projection));
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_world_gui_lines_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.line_pipeline);
+        pass.set_bind_group(0, &self.uniform_bind_group, &[uniform_offset]);
+        pass.set_vertex_buffer(
+            0,
+            self.line_vertex_buffer
+                .as_ref()
+                .expect("world GUI line vertex buffer exists")
+                .slice(..),
+        );
+        pass.draw(
+            0..(line_vertices.len() / WORLD_LINE_FLOATS_PER_VERTEX) as u32,
+            0..1,
+        );
+        Ok(())
+    }
+
     fn ensure_panel_texture(&mut self, device: &wgpu::Device, size: [u32; 2]) {
         if self
             .panel_texture
