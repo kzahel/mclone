@@ -43,6 +43,7 @@ PERF_FLIGHT_SPEED="${MCLONE_ANDROID_XR_PERF_FLIGHT_SPEED:-}"
 PERF_SETTLED_STATIONARY="${MCLONE_ANDROID_XR_PERF_SETTLED_STATIONARY:-0}"
 PERF_FROZEN_RENDER="${MCLONE_ANDROID_XR_PERF_FROZEN_RENDER:-0}"
 PERF_METRICS="${MCLONE_ANDROID_XR_PERF_METRICS:-0}"
+PERF_GPU_TIMESTAMPS="${MCLONE_ANDROID_XR_PERF_GPU_TIMESTAMPS:-0}"
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     PERF_SETTLED_STATIONARY=1
 fi
@@ -126,6 +127,12 @@ Options:
                      app/compositor GPU+CPU frametime and utilization so render
                      cost can be split into CPU, GPU, and compositor buckets.
                      Combine with a perf lane (e.g. --perf-frozen-render).
+  --perf-gpu-timestamps
+                     Opt-in wgpu TIMESTAMP_QUERY instrumentation that brackets
+                     the stereo command encoder and logs MCLONE_ANDROID_XR_PERF_GPU
+                     with the real on-device GPU time (total and per eye). Splits
+                     the blocking stereo poll wait into GPU execution vs
+                     CPU/submit overhead. Combine with a perf lane.
   --perf-summary PATH
                      Local file for the compact perf marker block. Default:
                      /tmp/mclone-quest-openxr-perf-summary.txt.
@@ -416,6 +423,10 @@ while [[ $# -gt 0 ]]; do
             PERF_METRICS=1
             shift
             ;;
+        --perf-gpu-timestamps)
+            PERF_GPU_TIMESTAMPS=1
+            shift
+            ;;
         --perf-summary)
             require_arg "$1" "${2:-}"
             PERF_SUMMARY_PATH="$2"
@@ -560,6 +571,9 @@ if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
 fi
 if [[ "$PERF_METRICS" == "1" ]]; then
     STARTUP_ARGV+=(--perf-metrics)
+fi
+if [[ "$PERF_GPU_TIMESTAMPS" == "1" ]]; then
+    STARTUP_ARGV+=(--perf-gpu-timestamps)
 fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"

@@ -71,13 +71,22 @@ Quest probe is automated no-clip flight at walking-like speed, with
 render-distance scripts for 1, 5, and 10, current OpenXR refresh reporting,
 and max-stage timing attribution. Durable headset rows live in
 [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md).
-On-device `XR_META_performance_metrics` data shows the RD10 frozen lane has GPU
-headroom (`7ms` app GPU at `58%` utilization) while per-eye CPU wall is `~21ms`,
-so RD10 is CPU draw-submission / pacing bound, not GPU-bound. The attribution,
-confidence levels, Playbox cross-check, and the ordered fix plan
-(split per-eye prepare/encode/poll, then single-submit both eyes, cache the
-static draw set, batch/bundle draws) live in
-[`099`](../tactical/099-android-xr-rd10-render-cost-attribution.md).
+On-device `XR_META_performance_metrics` data initially suggested the RD10 frozen
+lane had GPU headroom (`7ms` app GPU at `58%` utilization) while per-eye CPU wall
+was `~21ms`. **E1 (2026-06-29, in-stream wgpu GPU timestamps) revised this:** the
+blocking stereo poll wait is real GPU execution (`~10.7ms` both eyes, matching
+the poll within `~0.5ms`), the Meta `app/gpu_frametime` counter under-reported,
+and the frame is a balanced serial `CPU(~9ms) + GPU(~10.7ms)` — so CPU reductions
+cannot hit 72Hz alone and CPU/GPU overlap plus GPU-side reduction become the key
+levers. The attribution,
+confidence levels, Playbox cross-check, and the landed diagnostic + single-submit
++ shared-records slices live in
+[`099`](../tactical/099-android-xr-rd10-render-cost-attribution.md). The ordered
+remaining plan — container-bound-cull diagnosis, cache prepared records across
+frames, flatten cull/encode off `BTreeMap`, single shared dual-frustum cull,
+stereo multiview encode, then batching / CPU-GPU overlap, plus the ship-distance
+decision — lives in
+[`106`](../tactical/106-android-xr-static-render-cpu-reduction.md).
 
 ## Priority Queue
 
@@ -90,7 +99,7 @@ static draw set, batch/bundle draws) live in
 | P4 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | deferred | Native now avoids stale queued backlog and accepts unchanged sections. This remains useful for stress-orbit streaming, but current radius-5 evidence no longer puts render compile cancellation ahead of startup presentation or lighting parity. |
 | P5 | GPU upload budgeting and buffer reuse | Broadly | [`024`](../tactical/024-render-section-dirty-cache-and-upload-diffs.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | conditional | Native uploads changed sections incrementally, and movement probes show upload cost is small. Do this when probes show upload/allocation cost is material again. |
 | P6 | Release perf budgets and durable records | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`../performance-records.md`](../performance-records.md) | ongoing | Once baselines stabilize, add budget thresholds that catch regressions without failing on normal host noise. |
-| PX | Quest RD10 CPU-bound render submission | Native policy | [`099`](../tactical/099-android-xr-rd10-render-cost-attribution.md) | active; diagnostic landed | Meta perf-metrics shows RD10 has GPU headroom but ~21ms per-eye CPU wall. Next: split per-eye prepare/encode/poll, then single-submit both eyes, cache the static draw set, and batch/bundle the ~358 unbatched section draws. Quest-only lane, separate from the desktop priority order above. |
+| PX | Quest RD10 serial CPU+GPU render frame | Native policy | [`099`](../tactical/099-android-xr-rd10-render-cost-attribution.md), [`106`](../tactical/106-android-xr-static-render-cpu-reduction.md) | active; diagnostics + single-submit + shared-records + E1 GPU-timestamp split landed; remaining plan in `106` | E1 (GPU timestamps) shows RD10 is a balanced serial `CPU(~9ms)+GPU(~10.7ms)` frame — the Meta `7ms` GPU counter under-reported and the poll wait is real GPU; the residual cull cost is still container-bound (`BTreeMap`/`BTreeSet`), not math-bound. Ordered next steps in `106`: cache prepared records (Slice F), flatten cull/encode (Slice G), single shared dual-frustum cull (H); then because CPU-only wins can't reach 72Hz under the `~10.7ms` GPU floor, CPU/GPU overlap (E2/K) and GPU-side reduction (multiview I) become first-class, plus a ship-distance decision. Quest-only lane, separate from the desktop priority order above. |
 
 ## Java Reference Anchors
 
@@ -183,6 +192,7 @@ Primary performance tacticals:
 - [`034-native-render-compile-revisions-and-priority.md`](../tactical/034-native-render-compile-revisions-and-priority.md)
 - [`096-android-xr-quest-performance.md`](../tactical/096-android-xr-quest-performance.md)
 - [`099-android-xr-rd10-render-cost-attribution.md`](../tactical/099-android-xr-rd10-render-cost-attribution.md)
+- [`106-android-xr-static-render-cpu-reduction.md`](../tactical/106-android-xr-static-render-cpu-reduction.md)
 
 Related subsystem tacticals:
 

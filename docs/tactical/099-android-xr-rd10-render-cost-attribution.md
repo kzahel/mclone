@@ -2,9 +2,14 @@
 
 Status: active; diagnostics landed (opt-in Meta performance-metrics probe,
 commit `0df8733`, and Slice A render split); Slice B single-submit stereo path
+landed; Slices C1/C2 (shared section-record prep + prepare sub-bucket attribution)
 landed. This is the concrete continuation of [`096`](096-android-xr-quest-performance.md)
-Slice 5 (GPU timing / render-mode attribution). Future sessions should start
-here for standalone Quest render optimization.
+Slice 5 (GPU timing / render-mode attribution). **The ordered remaining plan now
+lives in [`106`](106-android-xr-static-render-cpu-reduction.md)** (container-bound
+cull diagnosis, cross-frame record cache, flatten cull/encode, single shared
+dual-frustum cull, stereo multiview, batching / overlap). This doc remains the
+attribution + diagnostics record; future optimization sessions should start at
+`106`.
 
 ## Purpose
 

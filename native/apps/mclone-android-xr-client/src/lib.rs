@@ -222,6 +222,7 @@ mod android {
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
+        perf_gpu_timestamps: bool,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -236,6 +237,7 @@ mod android {
                 perf_settled_stationary: false,
                 perf_frozen_render: false,
                 perf_metrics: false,
+                perf_gpu_timestamps: false,
             }
         }
     }
@@ -317,6 +319,9 @@ mod android {
                 }
                 "--perf-metrics" => {
                     options.perf_metrics = true;
+                }
+                "--perf-gpu-timestamps" => {
+                    options.perf_gpu_timestamps = true;
                 }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
@@ -585,6 +590,10 @@ mod android {
             startup_options.perf_metrics
         );
         log::info!(
+            "Android XR performance GPU timestamps: {}",
+            startup_options.perf_gpu_timestamps
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -623,6 +632,7 @@ mod android {
             startup_options.perf_settled_stationary,
             startup_options.perf_frozen_render,
             startup_options.perf_metrics,
+            startup_options.perf_gpu_timestamps,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -642,6 +652,7 @@ mod android {
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
+        perf_gpu_timestamps: bool,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -909,6 +920,7 @@ mod android {
         let terrain_summary = terrain.frame_summary();
         terrain.set_display_refresh_hz(display_refresh.current_rate);
         terrain.set_render_split_timing_enabled(perf_seconds.is_some());
+        terrain.set_gpu_timestamps_enabled(perf_gpu_timestamps);
         log::info!(
             "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={} actors={}",
             terrain_summary.section_count,
@@ -1394,6 +1406,9 @@ mod android {
         terrain_stereo_finish_ms: f64,
         terrain_stereo_submit_ms: f64,
         terrain_stereo_poll_wait_ms: f64,
+        terrain_gpu_stereo_total_ms: f64,
+        terrain_gpu_left_eye_ms: f64,
+        terrain_gpu_right_eye_ms: f64,
         release_eyes_ms: f64,
         end_frame_ms: f64,
     }
@@ -1777,6 +1792,12 @@ mod android {
                 self.max_render.terrain_right_eye_translucent_sort_ms
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_GPU max_terrain_gpu_stereo_total_ms={:.3} max_terrain_gpu_left_eye_ms={:.3} max_terrain_gpu_right_eye_ms={:.3}",
+                self.max_render.terrain_gpu_stereo_total_ms,
+                self.max_render.terrain_gpu_left_eye_ms,
+                self.max_render.terrain_gpu_right_eye_ms
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_UPLOAD_MAX work_frames={} rebuilt_sections={} removed_sections={} rebuilt_vertices={} rebuilt_indices={} uploaded_sections={} upload_removed_sections={} uploaded_vertices={} uploaded_indices={} ready_sections={}",
                 self.upload_work_frames,
                 self.max_upload.rebuilt_section_count,
@@ -1965,6 +1986,11 @@ mod android {
             terrain_stereo_poll_wait_ms: a
                 .terrain_stereo_poll_wait_ms
                 .max(b.terrain_stereo_poll_wait_ms),
+            terrain_gpu_stereo_total_ms: a
+                .terrain_gpu_stereo_total_ms
+                .max(b.terrain_gpu_stereo_total_ms),
+            terrain_gpu_left_eye_ms: a.terrain_gpu_left_eye_ms.max(b.terrain_gpu_left_eye_ms),
+            terrain_gpu_right_eye_ms: a.terrain_gpu_right_eye_ms.max(b.terrain_gpu_right_eye_ms),
             release_eyes_ms: a.release_eyes_ms.max(b.release_eyes_ms),
             end_frame_ms: a.end_frame_ms.max(b.end_frame_ms),
         }
@@ -2287,6 +2313,9 @@ mod android {
         timing.terrain_stereo_finish_ms = frame_summary.timing.stereo_finish_ms;
         timing.terrain_stereo_submit_ms = frame_summary.timing.stereo_submit_ms;
         timing.terrain_stereo_poll_wait_ms = frame_summary.timing.stereo_poll_wait_ms;
+        timing.terrain_gpu_stereo_total_ms = frame_summary.timing.gpu_stereo_total_ms;
+        timing.terrain_gpu_left_eye_ms = frame_summary.timing.gpu_left_eye_ms;
+        timing.terrain_gpu_right_eye_ms = frame_summary.timing.gpu_right_eye_ms;
         left_release_result?;
         right_release_result?;
 

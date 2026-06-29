@@ -74,6 +74,78 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-29 - Standalone Quest 3 Frozen RD10 GPU-Timestamp Split (E1)
+
+Benchmarked code commit: this E1 commit (opt-in wgpu GPU-timestamp split of the
+stereo encoder). The run was captured immediately before commit from the same
+implementation worktree, based on `9e10ab7` (`Add basic falling block ticks`).
+
+Capture note: captured from the implementation worktree carrying the E1
+GPU-timestamp instrumentation. Run via the new
+`native:android-xr:perf:frozen:rd10:gpu` lane (frozen RD10, fixed render view
+pose `0,80,-96,180`, seed `12345`, center chunk `(0, 0)`, noon, frozen time),
+which enables both `--perf-metrics` and the new `--perf-gpu-timestamps`. The
+device confirmed `XR GPU timestamps enabled (timestamp_period=52.083ns)`, i.e.
+the OpenXR Vulkan adapter advertises `TIMESTAMP_QUERY` and Quest 3 returns valid
+timestamps. Cleanup after the sample: `pidof com.kzahel.mclone.xr` empty,
+`dumpsys power` reported `mWakefulness=Asleep` and
+`mHoldingDisplaySuspendBlocker=false`.
+
+Summary:
+
+| Field | Value |
+|---|---:|
+| Sample | `20.010s`, `1251` frames |
+| Target | `72.0 Hz` / `13.889ms` |
+| Frame avg / p50 / p95 / p99 / max | `15.944ms` / `16.014ms` / `17.849ms` / `19.056ms` / `28.555ms` |
+| Terrain frame max | `19.963ms` |
+| Drawn sections / indices | `179` / `1,352,166` |
+| Runtime work during sample | `0` upload work frames; runtime poll/sync/GPU upload all `0.000ms` |
+
+GPU-timestamp split (`MCLONE_ANDROID_XR_PERF_GPU`, opt-in via
+`--perf-gpu-timestamps`). The query set brackets the whole stereo command
+encoder (both eyes plus sky/UI/selection passes); values are independent maxima:
+
+| Bucket | Value (max) |
+|---|---:|
+| GPU stereo total (both eyes) | `10.680ms` |
+| GPU left eye | `6.266ms` |
+| GPU right eye | `6.125ms` |
+| Stereo poll wait (OS fence, same run) | `11.139ms` |
+| Shared records (CPU) | `1.537ms` |
+| Left / right eye CPU record wall | `4.530ms` / `4.262ms` |
+| Stereo submit | `0.522ms` |
+
+Meta `XR_META_performance_metrics` on the same run reported
+`app_gpu_ms=1.706`, `gpu_util_pct=18.067`, `cpu_util_avg_pct=73.674`,
+`motion_to_photon_ms=25.268`, `dropped_frames=71`.
+
+Interpretation:
+
+- **The blocking stereo poll wait is real GPU execution, not CPU/submit
+  overhead.** Our in-stream wgpu timestamp (`10.680ms`) and the OS fence wait
+  (`11.139ms`) — two independent measurements of the same frames — agree within
+  `~0.46ms`. That residual is the entire submit/acquire/fence-signal cost. This
+  resolves the `11`-vs-`7ms` open question from 106/099: the poll is GPU.
+- **The Meta `app/gpu_frametime` counter under-reports / is unreliable on this
+  Oculus build.** It read `7.0ms` in prior baselines and a nonsensical `1.706ms`
+  here, while the direct timestamp says `~10.7ms`. The 099/106 conclusion of
+  "GPU ~7ms with ~40% headroom, CPU draw-submission bound" was an artifact of
+  trusting that counter. Trust the in-stream timestamp.
+- **The frame is a balanced serial `CPU(~9ms) + GPU(~10.7ms)`**, summing to the
+  `~19.96ms` terrain-frame max. CPU sits blocked-idle for the entire `~10.7ms`
+  GPU poll. Therefore CPU-only reductions (Slices F/G/H) cannot reach 72Hz at
+  RD10 alone — even CPU→0 leaves a `~10.7ms` GPU floor that, with no overlap, is
+  the frame. **CPU/GPU overlap (E2/E4/K) is now a first-class lever**, not
+  optional polish: hiding CPU behind the GPU poll would take the frame toward
+  `max(CPU, GPU) ≈ 10.7ms`, under budget. GPU-side reduction (multiview Slice I,
+  FFR) is the complementary lever for the `~10.7ms` floor itself.
+- The opt-in readback (`map_async` + one extra `poll(Wait)`) adds `~0.35ms` CPU
+  per frame on `--perf-gpu-timestamps` runs only (p50 `16.014` vs `~15.66`
+  baseline); it does not perturb the GPU-clock timestamp values. The normal
+  headset loop and non-GPU-timestamp perf runs allocate no query set and pay
+  nothing.
+
 ### 2026-06-27 - Standalone Quest 3 Frozen RD10 Prepare Sub-Buckets
 
 Benchmarked code commit: this prepare-sub-bucket commit. The run was captured

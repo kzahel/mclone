@@ -1,0 +1,465 @@
+# 106: Android XR Static-Render CPU Reduction (Cull, Records, Stereo Encode)
+
+Status: proposed implementation plan. Continues
+[`099`](099-android-xr-rd10-render-cost-attribution.md) from the end of its
+Slice C2. 099 established, with on-device Meta metrics, that standalone Quest 3
+RD10 is **CPU draw-submission bound with ~40% GPU headroom**, and landed the
+diagnostics plus the single-submit / shared-records slices. This doc records the
+sharper diagnosis (the residual CPU cost is *container-bound*, not math-bound),
+the convergent target architecture, the ordered remaining slices with estimates
+and tradeoffs, an on-device **experiment ladder (E1-E6)** to generate our own
+evidence rather than inheriting Playbox's conclusions, and an allocation/copy
+backlog. **E1 (GPU-timestamp split) has landed and materially revises the
+diagnosis — see "E1 Result" below; the frame is GPU-bound serial CPU+GPU, not
+"7ms GPU with 40% headroom." E3 (allocation/copy wins) is next.**
+
+Scope: standalone Quest / Android XR APK only, not desktop-hosted OpenXR
+streaming to a Quest client. Keep every change behind the shared XR/render
+contracts; do not fork mclone rendering for Quest.
+
+## Reproduced Baseline (carry-forward)
+
+Fresh `native:android-xr:perf:frozen:rd10` reproduction on the current build
+(`2026-06-29`, frozen lane, fixed pose `0,80,-96,180`, 179 drawn sections,
+1.35M drawn indices, runtime poll/sync/upload all `0.000ms`). Consistent with
+099's Slice C2 record (run-to-run / thermal variance of ~1ms):
+
+| Metric | Value | Budget (72 Hz) |
+|---|---:|---:|
+| Frame avg / p50 / p95 / p99 | `15.72` / `15.69` / `17.39` / `18.65` ms | `13.889` ms |
+| Effective FPS | ~62 | 72 |
+| App GPU frametime (both eyes, from 099 metrics run) | `~7.0` ms @ `~57%` util | — |
+| Shared records (built once/frame) | `1.545` ms | — |
+| Left / right eye cull | `2.567` / `2.593` ms | — |
+| Left / right eye prepare (cull+uniform+translucent) | `3.058` / `2.787` ms | — |
+| Left / right eye encode (section encode) | `2.238` (`1.484`) / `2.178` (`1.767`) ms | — |
+| Stereo finish / submit / poll wait | `0.033` / `0.513` / `11.457` ms | — |
+
+Marker maxima are independent per-field maxima, not one additive frame.
+
+## E1 Result (landed 2026-06-29) — the frame is GPU-bound, not "7ms + headroom"
+
+E1 added an opt-in wgpu `TIMESTAMP_QUERY` bracket around the whole stereo command
+encoder (`--perf-gpu-timestamps`, marker `MCLONE_ANDROID_XR_PERF_GPU`). Quest 3's
+OpenXR Vulkan adapter advertises the feature (`timestamp_period=52.083ns`). On
+frozen RD10 the measured GPU time is **`10.680ms` total (both eyes)**, `~6.2ms`
+per eye — and the blocking stereo poll wait on the same run was `11.139ms`. The
+full row is in [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md)
+(2026-06-29 GPU-timestamp split).
+
+This revises the core diagnosis:
+
+1. **The poll wait is real GPU execution.** The in-stream GPU-clock timestamp
+   (`10.680ms`) and the OS fence wait (`11.139ms`) agree within `~0.46ms` — that
+   residual is the entire submit/acquire/fence cost. The `11`-vs-`7ms` gap is
+   resolved: it was never CPU/submit overhead hiding in the poll.
+2. **The Meta `app/gpu_frametime` counter under-reports.** It read `7.0ms` in the
+   099 baseline and a nonsensical `1.706ms` on the E1 run, versus the direct
+   `~10.7ms`. The "GPU ~7ms, ~40% headroom, CPU draw-submission bound" framing in
+   099 and the headers below was an artifact of trusting that counter. Where this
+   doc says "GPU ~7ms" or "~40% GPU headroom," read `~10.7ms` and `~25%` instead.
+3. **The frame is a balanced serial `CPU(~9ms) + GPU(~10.7ms)`** (sums to the
+   `~19.96ms` terrain-frame max). The CPU is blocked-idle for the whole `~10.7ms`
+   poll.
+
+Consequences for the slice plan (the slices are still correct; their *weighting*
+changes):
+
+- **CPU-only wins (F/G/H) cannot reach 72Hz at RD10 by themselves.** Even CPU→0
+  leaves a `~10.7ms` GPU floor that, with no overlap, *is* the frame time. F/G/H
+  remain worth doing (low-risk, shrink the CPU half, make overlap easier and help
+  lower distances), but they are no longer a plausible standalone path to a
+  comfortable RD10.
+- **CPU/GPU overlap (E2 / Slice K) is promoted to a first-class lever.** There is
+  `~10.7ms` of CPU-blocked-idle every frame. Overlapping next-frame CPU prep with
+  the GPU poll would take the frame toward `max(CPU, GPU) ≈ 10.7ms` — under the
+  `13.889ms` budget. This is the single highest-leverage change for RD10 and E2
+  should run right after the cheap E3 wins.
+- **GPU-side reduction attacks the `~10.7ms` floor.** Multiview (Slice I) cuts
+  per-eye vertex/draw cost; FFR cuts fragment fill. With true GPU at `~10.7ms`
+  (not `7ms`) these matter more than previously weighted.
+
+## Sharper Diagnosis (new since 099)
+
+### 1. The frame is CPU + GPU with no overlap
+
+`render_prepared_frame` (`mclone-xr-scene/src/lib.rs:713`) records both eyes into
+one encoder, `queue.submit`s once, then immediately blocks on
+`device.poll(WaitForSubmissionIndex)` (`:796`). The GPU cannot start until
+submit, and the CPU is parked for the whole GPU execution. So frame time is
+essentially **serial CPU prep/encode (~9-11ms) + GPU wait (~5-7ms)**, which is
+why p50 sits at ~15.7ms. Two independent levers follow: make the CPU work
+cheaper, or overlap CPU and GPU (latency tradeoff — see Slice K).
+
+### 2. The cull cost is container-bound, not math-bound
+
+This is the key new finding and it re-ranks the fixes. `cull_textured_sections`
+(`mclone-render/src/chunk.rs:455`) is the dominant per-eye bucket (~2.6ms), but
+the actual frustum geometry is trivial: the per-section test transforms 8 AABB
+corners through the view-projection (`chunk.rs:710`), i.e. ~1,133 sections x 8
+corners x 2 eyes ~= 18k SIMD `Mat4 x Vec4` products — **well under ~0.5ms** of
+real math. The other ~4.5ms of two-eye cull is data-structure overhead:
+
+- two redundant full passes over the records `BTreeMap` purely for the
+  `loaded_section_count` / `loaded_index_count` diagnostics (`chunk.rs:464-470`),
+  which are *view-independent* and recomputed twice per frame for a value that
+  only changes on upload;
+- `BTreeSet` inserts into `frustum_keys` / `ready_frustum_keys` / `drawn_keys`
+  (O(log n), pointer-chasing, allocating) — `chunk.rs:473-490`, `:526-527`;
+- the BFS using a `BTreeMap` `infos` + `VecDeque` with O(log n) lookups per
+  neighbor (`chunk.rs:511-559`).
+
+`RenderSectionKey` is a trivial 12-byte `Copy` struct (`mclone-mesh/src/data.rs:102`)
+ideal for a flat `Vec` / dense index / `FxHashSet`, yet the entire draw-state
+store and cull path use `BTreeMap` / `BTreeSet` with the default hasher
+(`chunk.rs:1444-1446`). No `rustc-hash`/`ahash` dependency exists in the
+workspace today.
+
+### 3. Per-eye work is duplicated, and records rebuild every frame
+
+- `prepare_render_records` → `collect_render_records` (`chunk.rs:1600`, `:1752`)
+  rebuilds a fresh `BTreeMap` of **all** sections every frame, even though the
+  records only change on section upload/removal/readiness — not on camera
+  movement. 099's Slice C1 shares this build *across the two eyes within a
+  frame*; it does **not** cache it *across frames*.
+- Cull + translucent collect/sort run **per eye** although the two eye frustums
+  are ~63mm apart and nearly identical, and both eyes start traversal from the
+  same camera section.
+- The opaque encode loop scans **all** `self.sections` doing a `BTreeSet::contains`
+  per section, then issues **one `draw_indexed` per drawn section**, unbatched,
+  instances `0..1` (`chunk.rs:1735-1744`, `draw_textured_mesh_range` at `:837`):
+  179 sections x 2 eyes ~= 358 draws/frame, each with its own
+  `set_vertex_buffer` + `set_index_buffer`.
+
+## Convergent Target Architecture
+
+The end state that makes all the cheap wins land in their best form:
+
+> **cull once (shared, flat) -> encode once (stereo multiview) -> submit once.**
+
+099's Slice B already made submit/poll shared. The remaining duplication is the
+per-eye cull (Slice H removes it) and the per-eye encode (Slice I / multiview
+removes it). Slices F and G make the shared cull cheap. Slice J (batching) and
+Slice K (CPU/GPU overlap) are the deeper levers if RD10 needs real headroom.
+
+## Playbox CPU/GPU Wait Cross-Check
+
+Checked against Playbox's mature wgpu/OpenXR loop (`~/code/playbox/src/xr/mod.rs`,
+tactical `046-quest-hz-ramp-performance-baselines.md`) to test the hypothesis
+that it pipelines CPU and GPU by doing "render then prepare." **It does not** —
+and the reason it still fits a tighter 120 Hz budget sharpens this plan.
+
+- **Same within-frame structure as mclone.** Playbox's loop is `begin_frame`
+  (xrWaitFrame) -> read poses/UI/sim -> `prepare_frame_scene` (once, shared across
+  eyes) -> record both eyes -> **one `device.poll(Wait)`** -> release images ->
+  `end_frame` (`mod.rs:1631-1648`, `:3532-3551`, `:3683`). The blocking GPU-fence
+  wait before swapchain release is present in both engines; 046 confirms
+  "`render_eye_target` ... blocks with `device.poll(Wait)`" and that it
+  "serializes the stereo frame." There is no render-then-prepare overlap and no
+  CPU(N+1)/GPU(N) cross-frame pipeline in either engine.
+- **Its `poll(Wait)` is GPU execution, not waste.** Playbox's GPU-timestamp slice
+  shows `poll(Wait)` tracks measured render-pass GPU time within ~`0.9ms`
+  (floor-baseline poll `3.19ms` vs GPU `2.95ms`; default cubes poll `5.81ms` vs
+  GPU `5.59ms`). That ~`0.9ms` residual is the *entire* CPU cost of submit +
+  acquire/release + readback. So "reduce the poll wait" means "reduce queued GPU
+  work," not "restructure the wait."
+- **Why Playbox fits and mclone does not is CPU encode size, not lane overlap.**
+  Playbox's render-CPU (its "wall minus GPU" gap) is ~`0.9ms` because it batches
+  draws with instancing and shares frame prep across eyes. mclone's render-CPU is
+  ~`11ms` (shared records `1.5` + per-eye walls `4.6`+`4.6` + submit `0.5`),
+  dominated by BTree cull (~`5ms`) and ~358 unbatched per-section draws (~`4ms`).
+  Identical serial CPU+GPU model; mclone simply carries ~10x the render-CPU.
+- **Playbox reached, and deferred, mclone's Slice K for the same reason.** 046:
+  "avoid the CPU wait before release through proper graphics/runtime
+  synchronization ... likely requires raw Vulkan/OpenXR semaphore-style
+  integration that `wgpu` does not expose cleanly today, so it should not be the
+  first slice"; its standing guidance is "keep the explicit wait and focus on
+  reducing the queued GPU workload." That is exactly Slice K's posture here.
+
+Implications, which do not overturn the plan but re-weight it:
+
+1. The cheap CPU slices (F/G/H) plus draw batching (J) are the **core** levers,
+   not optional polish: closing mclone's ~`11ms` -> ~`1ms` render-CPU gap is what
+   lets serial CPU+GPU fit, exactly as it does for Playbox.
+2. **Playbox's instancing trick does not port directly.** Playbox collapses many
+   *instances of one mesh* into a single instanced `draw_indexed`. mclone's
+   sections are each a *unique* mesh with their own vertex/index buffer, so
+   batching needs a shared vertex/index arena + `multi_draw_indexed_indirect`
+   (Slice J) and/or stereo multiview (Slice I) to remove the per-eye duplication.
+   More work than Playbox needed, but the ~40% GPU headroom and Playbox's
+   ~`0.9ms`-encode proof show the ceiling is high once the draw stream collapses.
+3. **Build the GPU-timestamp split before Slice I/J** (see "Measure First").
+   Playbox's `--gpu-timestamps` path (`mod.rs:3640-3679`, `collect_gpu_draw_timing`)
+   is the porting reference; it is what proved poll == GPU there, and it will
+   resolve mclone's ~`11ms` stereo-poll max vs ~`7ms` Meta-GPU gap (max-vs-mean,
+   or extra queued passes such as sky/UI/selection-outline).
+
+## CPU/GPU Overlap Mechanics (Why The Frame Serializes Today)
+
+The frame is serial CPU-then-GPU **by construction, not by hardware limit**.
+Foundational facts a future session should hold before the overlap experiments:
+
+- `queue.submit()` is **asynchronous**: the GPU begins executing and the call
+  returns; the CPU is free to keep running. CPU and GPU are independent
+  processors that run concurrently by default. The frame only serializes because
+  we then call `device.poll(Wait)` (`lib.rs:796`) and *choose* to stop the CPU
+  until the GPU signals completion.
+- That block exists to satisfy OpenXR's "GPU must finish writing the eye image
+  before `xrReleaseSwapchainImage`/`xrEndFrame`" rule. The block-free alternative
+  is a GPU-side semaphore the compositor waits on, so the CPU never stalls; wgpu
+  does not expose that handshake ergonomically, hence the workaround. This is an
+  API-ergonomics gap, **not** a hardware wall (Experiment E5 tests punching
+  through it via `wgpu-hal` / raw Vulkan).
+- The Quest SoC has unified memory: CPU and GPU share one memory bus, last-level
+  cache, and a thermal/power budget. Concurrent CPU+GPU work therefore contends
+  for bandwidth and can mutually slow down — **contention, not exclusion**. It
+  changes the *size* of an overlap win, never whether one exists. The Adreno is
+  also tile-based, so when GPU work actually executes relative to submit is
+  workload-dependent; measure on-device rather than reasoning a priori
+  (Experiment E2).
+- What overlap buys: today frame ~= CPU(~`9ms`) + GPU(~`7ms`) serial ~= `16ms`.
+  With overlap the frame is gated by `max(CPU, GPU)`, not the sum. Because
+  `xrWaitFrame` paces wall-clock to the display period, the payoff appears as
+  headroom / fewer missed frames, not a shorter wall clock.
+- Do **not** over-index on Playbox's "wgpu can't do this cleanly" conclusions.
+  Their *measurements* (poll == GPU time) are reusable method; their *decisions
+  to defer* were for small batched scenes and their risk appetite. Re-derive ours
+  from the experiments below.
+
+## Experiments To Run First (Generate Our Own Evidence)
+
+Cheap/diagnostic -> deep. Each should produce an on-device number, not an
+inference. Keep diagnostics opt-in; never add always-on per-frame cost.
+
+| # | Experiment | Tests | Effort | A good result tells us |
+|---|---|---|---|---|
+| E1 | GPU-timestamp split of the stereo poll | how much of the ~`11ms` poll is real GPU vs CPU/submit overhead | low | **DONE (2026-06-29): GPU `10.68ms` total ≈ poll `11.14ms`; the poll is GPU, Meta's `7ms` under-reported. Frame is serial CPU~9 + GPU~10.7. See "E1 Result".** |
+| E2 | Worker-thread overlap probe | run real next-frame prep on a job thread *during* `poll(Wait)`; does it run concurrently, improve wall time, or lose to bandwidth contention | low-med | whether CPU/GPU overlap is worth pursuing on this SoC, with our own contention number |
+| E3 | Allocation/copy elimination | the backlog below | low | how much pure-waste CPU exists before any structural change |
+| E4 | Frame pipelining | submit N, prepare N+1 pose-independent work, block on N's fence only before releasing N's image | med | the real latency<->throughput tradeoff (Slice K), measured |
+| E5 | Semaphore / no-block via `wgpu-hal` | remove the CPU fence wait entirely; compositor waits GPU-side | med-high | whether Playbox's "wgpu can't" is actually true for us |
+| E6 | Threaded cull | fan cull across the Quest's 8 cores via the shared job system | med | cull scaling headroom independent of overlap |
+
+- E1 method: request `wgpu::Features::TIMESTAMP_QUERY` (Quest 3 reports support),
+  bracket the eye render passes with timestamp writes, read back, surface on an
+  opt-in marker. Port reference: `~/code/playbox/src/xr/mod.rs:3640-3679`
+  (`collect_gpu_draw_timing`) and 046 sixth slice.
+- Start with **E1 + E3** (cheapest, safe, own baseline), then **E2** (answers the
+  overlap question directly), then decide E4/E5 from E1/E2 data.
+- Keep overlap/threading work inside the shared job system
+  ([`062-shared-threading-topology.md`](062-shared-threading-topology.md)), not a
+  Quest-only thread hack: desktop native threads, browser Web Workers, same
+  lifecycle.
+
+## Obvious-Win Backlog (Allocations / Copies)
+
+Per-frame / per-eye churn in the hot path, mostly movement-agnostic and
+independently landable (this is E3, and it feeds Slices F/G/H):
+
+- `collect_render_records` builds a fresh `BTreeMap` every frame
+  (`chunk.rs:1752`) -> cache + dirty flag (Slice F).
+- `cull_textured_sections` allocates 3x `BTreeSet` + `BTreeMap` + `VecDeque`
+  every eye every frame (`chunk.rs:473-513`) -> reuse scratch buffers, flat
+  structures (Slice G).
+- redundant `loaded_section_count` / `loaded_index_count` full passes
+  (`chunk.rs:464-470`) -> compute on section change, not per frame.
+- translucent collect: `.iter().filter().collect::<Vec>()` + sort per eye
+  (`chunk.rs:1686-1701`) -> reuse buffer, share across eyes (Slice H).
+- `uniform_bytes` builds a `Vec` per eye per frame (`chunk.rs:1680`) -> reused
+  staging / `bytemuck` POD.
+- `vertex_bytes` / `textured_vertex_bytes` copy byte-by-byte via
+  `extend_from_slice` (`chunk.rs:1797-1812`) -> `bytemuck` cast (upload/streaming
+  path, not the frozen frame, but obvious waste).
+- `actor_instances_from_presentations` allocates a `Vec` every frame
+  (`xr-scene/src/lib.rs:742`).
+
+## Ordered Slices (recommended order)
+
+Continues 099's slice lettering (A-E landed there). Cheap, movement-agnostic,
+fully-shared wins first; structural levers last. Re-benchmark frozen RD10 +
+stationary RD10 after each.
+
+### Slice F - Cache prepared records across frames
+
+- Add a dirty flag to `TexturedSectionDrawResources`; rebuild the
+  `PreparedTexturedSectionRecords` only when `apply_section_updates` /
+  `set_traversal_ready_sections` change the section set, not every frame.
+- Fold the view-independent `loaded_section_count` / `loaded_index_count` stats
+  into that cached build so they stop being recomputed twice per frame
+  (`chunk.rs:464-470`).
+- Estimate: ~1.5ms/frame when static; still valid on every camera-only frame
+  during movement (sections change only a few times/sec on streaming).
+- Strict win, no visual change, low effort. This is the correct form of the
+  "don't re-prep when the pose barely moved" instinct: key the cache on what
+  actually invalidates the prep (section changes), not on pose, so it is
+  movement-agnostic.
+
+### Slice G - Flatten cull/encode data structures
+
+- Replace the `BTreeMap`/`BTreeSet` in the cull path and draw-state store with a
+  dense layout: a flat `Vec` of records iterated linearly, section membership via
+  a dense index + reused bitset (or `FxHashSet`/`hashbrown` with a fast hasher).
+- The encode loop should iterate the drawn index list directly instead of
+  scanning all sections with a per-section set lookup (`chunk.rs:1735`).
+- Estimate: ~1.5-2ms/frame (this is where most of the container-bound cull cost
+  goes). Strict win; medium effort. Add `rustc-hash` (or equivalent) to the
+  workspace.
+
+### Slice H - Single shared cull for both eyes
+
+- Run the records iteration + occlusion BFS **once per frame** from the midpoint
+  camera (`center_position` is already computed at `lib.rs:723-724`); both eyes
+  are in the same camera section so `traversal_start_keys` is shared.
+- For the frustum gate, test each candidate against **both** eye view-projections
+  and keep it if visible in either (exact union — no conservative-margin
+  guesswork, which matters because Quest eye projections are asymmetric/canted, so
+  the union of two frustums is not itself a frustum). Both eyes then draw the same
+  union set; the extra edge sections one eye does not see are clipped by the GPU.
+- Share the translucent collect + a single midpoint-sorted order across eyes
+  (63mm of eye separation does not change distant-section depth order).
+- This is the "extract a pure per-eye prepared draw/cull result from command
+  encoding" step 099's Slice C2 flagged as next. It removes one full cull
+  (~2.6ms) + one translucent collect/sort, and is the precondition that makes
+  multiview natural (one draw list feeds both eye layers).
+- Estimate: ~2.5-3ms/frame. Mostly safe (slightly conservative draw set);
+  medium effort. Capture a screenshot — this is pixel-adjacent.
+
+### Slice I - Stereo multiview encode
+
+- Render both eyes in one pass with `OVR_multiview`: a single 2-layer array
+  color+depth target, pipeline `multiview: Some(2)`, and a chunk shader that
+  selects its eye view-projection from a `[2]` uniform via
+  `@builtin(view_index)`. The GPU broadcasts each draw to both layers, so the
+  ~358 draws/frame collapse to ~179 and the per-eye encode bucket collapses to
+  one.
+- Requires changing the swapchain from `array_size: 1` to a 2-layer array (or a
+  2-layer offscreen target blitted to the two eye swapchain images) — today both
+  are single-layer (`mclone-xr-graphics/src/lib.rs:284`, depth/color
+  `depth_or_array_layers: 1` at `:333,:354`). Touches `mclone-xr-graphics`
+  (swapchain/target creation) and the `mclone-render` chunk shader + uniform
+  layout + render-pass attachment.
+- This is a different axis from 099's Slice D (batching) — it cuts the *stereo*
+  duplication and also reduces GPU draw-call overhead. It is the standard Quest
+  stereo path (Playbox uses per-eye instancing instead; multiview is the
+  mclone-appropriate choice given heterogeneous per-section meshes).
+- Estimate: removes ~one eye's encode (~2ms CPU) plus GPU draw-submission
+  overhead; medium-high effort. Pixel-affecting — screenshot both eyes.
+
+### Slice J - Cut per-draw CPU/GPU cost (batching)
+
+- 099's Slice D1: combine section vertex/index data into a shared arena and draw
+  with `multi_draw_indexed_indirect`, so the remaining ~179 per-section draws
+  become a handful. Note Playbox's instancing does not port directly — its
+  objects are instances of one mesh, while mclone sections are each a unique mesh
+  — so the arena + indirect path is the right primitive here (see the Playbox
+  cross-check). Complements multiview (multiview halves *eye* duplication;
+  batching cuts *per-section* overhead).
+- Alternative D2 (`RenderBundle`) is a poorer fit once the draw list is shared
+  and stable; prefer the megabuffer path.
+- Do this only if Slices F-I leave RD10 short of the target distance. Measure GPU
+  draw overhead first (see "Measure first").
+
+### Slice K - Overlap CPU and GPU (deferred; latency tradeoff)
+
+- Today `device.poll(Wait)` right after submit (`lib.rs:796`) forbids any
+  CPU(frame N+1)/GPU(frame N) overlap. Pipelining across the OpenXR swapchain
+  images (3 deep) could hide the ~7ms GPU behind the next frame's CPU.
+- **Not free in VR.** It adds ~1 frame of latency, and motion-to-photon is
+  already ~39ms (099 metrics run); +~14ms is meaningful for comfort. Treat as a
+  last resort after CPU is already small, and measure motion-to-photon before/after.
+- Playbox reached the same conclusion and deferred it: the no-wait path needs raw
+  Vulkan/OpenXR semaphore sync `wgpu` does not expose, and its standing guidance
+  is to keep the explicit wait and reduce queued GPU work instead (see the Playbox
+  cross-check). So the realistic order is shrink CPU encode (F-J) first; revisit
+  K only if GPU/CPU still cannot overlap enough at the target distance.
+
+## Alternative Headroom Levers (not in the main path)
+
+- **Application SpaceWarp / AppSW** (`compositor/spacewarp_mode` is `0` today):
+  render at 36 and let the compositor reproject to 72. Mostly-static terrain is
+  near its best case, but disocclusion edges artifact and it needs depth + motion
+  vectors. A "buy headroom" lever orthogonal to the CPU work; evaluate only if the
+  CPU slices cannot reach the target distance.
+- **Fixed Foveated Rendering**: low value right now — we are not GPU-fill-bound
+  (~57% util). 099 already flags that whether FFR is actually applied is
+  unverified; worth confirming opportunistically, not as a perf slice.
+
+## Measure First (de-risk the structural slices)
+
+- A wgpu `TIMESTAMP_QUERY` split of the ~7ms GPU (099's Slice E, currently
+  deferred) tells how much is draw-call overhead vs raster/fill — that predicts
+  the GPU payoff of multiview (Slice I) and batching (Slice J) before building
+  them. This is Experiment **E1** above; run it first.
+- The container-bound cull claim can be confirmed cheaply by bracketing the
+  frustum-test loop vs the set-building separately inside `cull_textured_sections`
+  on a perf run; the estimate above predicts set-building dominates.
+
+## Expected Cumulative Effect And The Product Question
+
+- Slices F + G + H are movement-agnostic, low-risk, fully shared, and should take
+  the serial CPU from ~9-11ms toward ~5-6ms — likely enough to bring RD10 to/near
+  the 13.889ms budget and to make lower distances comfortable.
+- But with no CPU/GPU overlap, frame ~= CPU + GPU, so even a ~5ms CPU still sits
+  at ~5 + 7 = ~12ms at RD10. A *comfortable* RD10 at 72Hz likely needs multiview
+  (Slice I, which cuts both CPU and GPU) and/or batching (Slice J), or a
+  ship-distance decision.
+- **Decide the target:** RD1 and RD5 already hold 72Hz; RD10 is explicitly a
+  stress lane. What render distance do we want to ship at solid 72Hz on Quest 3?
+  If ~RD7-8, Slices F-H probably suffice. If RD10+, Slice I (and J) are on the
+  critical path. This answers 099's open question #4.
+
+## Tradeoffs And Risks
+
+- Slice H union cull draws a few edge sections per eye that that eye cannot see;
+  harmless (GPU-clipped) but slightly raises drawn-section counts — keep the
+  per-eye stats honest in diagnostics.
+- Slice I changes swapchain/target shape; verify both eye images still present
+  correctly (screenshot both layers) and that depth works per-layer.
+- Slice K trades latency for throughput; do not land it without a
+  motion-to-photon measurement and a comfort check.
+
+## Guardrails (carry from 099)
+
+- Keep diagnostics opt-in; never add always-on per-frame diagnostic cost to the
+  headset loop (the prior ~76ms diagnostics regression is the cautionary tale).
+- Do not fork mclone rendering, chunk streaming, or session runtime for Quest;
+  extend the shared contracts and add platform adapters around them.
+- For pixel-affecting slices (H, I, J): capture a headset screenshot and look
+  before moving on.
+- Always run the validator cleanup and verify `pidof com.kzahel.mclone.xr`
+  empty, `mWakefulness=Asleep`, `mHoldingDisplaySuspendBlocker=false` after
+  on-device runs.
+- Record new frozen/stationary RD10 rows in
+  [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md)
+  per landed slice, with the benchmarked commit.
+
+## References
+
+- Predecessor / diagnostics + Slices A-C2:
+  [`099`](099-android-xr-rd10-render-cost-attribution.md).
+- Records: [`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md)
+  (2026-06-27 frozen RD10 Meta-metrics and render-split rows).
+- Priority index: [`../topics/performance.md`](../topics/performance.md).
+- Hot path (current line numbers):
+  - stereo frame: `mclone-xr-scene/src/lib.rs:713` (`render_prepared_frame`),
+    `:796` (the blocking `device.poll`), `:1140` (`render_eye_target`).
+  - cull: `mclone-render/src/chunk.rs:455` (`cull_textured_sections`), `:710`
+    (per-section frustum test), `:464-470` (redundant stats passes).
+  - records: `chunk.rs:1600` (`prepare_render_records`), `:1752`
+    (`collect_render_records`), `:1444-1446` (BTree draw-state store).
+  - encode: `chunk.rs:1735` (per-section draw loop), `:837`
+    (`draw_textured_mesh_range`).
+  - swapchain/targets: `mclone-xr-graphics/src/lib.rs:284,:333,:354`
+    (`array_size`/`depth_or_array_layers` = 1 today).
+  - key type: `mclone-mesh/src/data.rs:102` (`RenderSectionKey`).
+- Bench lanes: `native:android-xr:perf:frozen:rd10`,
+  `native:android-xr:perf:frozen:rd10:metrics`,
+  `native:android-xr:perf:stationary:rd10` (see `package.json`).
+- Playbox CPU/GPU wait cross-check (this doc): blocking-poll structure and the
+  GPU-timestamp evidence that `poll(Wait)` == GPU time live in
+  `~/code/playbox/src/xr/mod.rs:1631-1648,:3532-3551,:3640-3679,:3683` and
+  `~/code/playbox/docs/tactical/046-quest-hz-ramp-performance-baselines.md`
+  (fifth/sixth slices). See also 099's Playbox section for stereo prep/draw
+  batching.
+</content>
+</invoke>

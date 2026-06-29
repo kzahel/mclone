@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
-use std::time::Instant;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
@@ -231,6 +232,13 @@ pub struct XrTerrainFrameTiming {
     pub stereo_finish_ms: f64,
     pub stereo_submit_ms: f64,
     pub stereo_poll_wait_ms: f64,
+    /// E1: real GPU execution time for the whole stereo frame (both eyes plus
+    /// sky/UI/selection passes), measured via wgpu timestamp queries bracketing
+    /// the stereo command encoder. Zero unless GPU timestamps are enabled and
+    /// the OpenXR Vulkan adapter supports `TIMESTAMP_QUERY`.
+    pub gpu_stereo_total_ms: f64,
+    pub gpu_left_eye_ms: f64,
+    pub gpu_right_eye_ms: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -362,6 +370,144 @@ impl RemoteDedicatedServerSession for XrLocalOnlyRemoteSession {
     }
 }
 
+// E1 (docs/tactical/106): GPU-timestamp split of the stereo frame.
+//
+// `render_prepared_frame` records both eyes into one encoder, submits once, then
+// blocks on `device.poll(WaitForSubmissionIndex)`. That poll wait (~10-11ms at
+// frozen RD10) fuses real GPU execution with submit/acquire overhead, leaving an
+// unresolved gap against the ~7ms Meta `app/gpu_frametime` counter. Bracketing
+// the encoder with timestamp writes (before the left eye, between eyes, after the
+// right eye — all downstream sky/UI/selection passes share the encoder) yields
+// the true on-device GPU time plus a per-eye split.
+//
+// The frame already blocks on the submission before we read back, so the readback
+// buffer is guaranteed populated and a single extra `poll(Wait)` drives the map
+// callback. This is opt-in (`set_gpu_timestamps_enabled`); the normal headset
+// loop never allocates the query set or pays the readback cost.
+const XR_GPU_TIMESTAMP_COUNT: u32 = 3;
+const XR_GPU_TIMESTAMP_RESOLVE_SIZE: u64 = 64;
+const XR_GPU_TIMESTAMP_MAP_TIMEOUT: Duration = Duration::from_millis(100);
+
+struct XrGpuStereoTimestamps {
+    query_set: wgpu::QuerySet,
+    resolve_buffer: wgpu::Buffer,
+    readback_buffer: wgpu::Buffer,
+    timestamp_period_ns: f32,
+}
+
+impl XrGpuStereoTimestamps {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Option<Self> {
+        let required = wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+        if !device.features().contains(required) {
+            return None;
+        }
+        let timestamp_period_ns = queue.get_timestamp_period();
+        if !timestamp_period_ns.is_finite() || timestamp_period_ns <= 0.0 {
+            return None;
+        }
+        let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
+            label: Some("mclone_xr_stereo_gpu_timestamps"),
+            ty: wgpu::QueryType::Timestamp,
+            count: XR_GPU_TIMESTAMP_COUNT,
+        });
+        let resolve_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_xr_stereo_gpu_timestamp_resolve"),
+            size: XR_GPU_TIMESTAMP_RESOLVE_SIZE,
+            usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_xr_stereo_gpu_timestamp_readback"),
+            size: XR_GPU_TIMESTAMP_RESOLVE_SIZE,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        Some(Self {
+            query_set,
+            resolve_buffer,
+            readback_buffer,
+            timestamp_period_ns,
+        })
+    }
+
+    /// Write a single timestamp into the encoder timeline at `index`.
+    fn write(&self, encoder: &mut wgpu::CommandEncoder, index: u32) {
+        encoder.write_timestamp(&self.query_set, index);
+    }
+
+    /// Resolve the timestamps and stage them for readback. Call once after the
+    /// last write and before `encoder.finish()`.
+    fn resolve(&self, encoder: &mut wgpu::CommandEncoder) {
+        encoder.resolve_query_set(
+            &self.query_set,
+            0..XR_GPU_TIMESTAMP_COUNT,
+            &self.resolve_buffer,
+            0,
+        );
+        encoder.copy_buffer_to_buffer(
+            &self.resolve_buffer,
+            0,
+            &self.readback_buffer,
+            0,
+            XR_GPU_TIMESTAMP_RESOLVE_SIZE,
+        );
+    }
+
+    /// Read back the resolved timestamps after the frame's GPU work has
+    /// completed. Returns `(total_ms, left_eye_ms, right_eye_ms)`.
+    fn collect(&self, device: &wgpu::Device) -> Option<(f64, f64, f64)> {
+        let slice = self.readback_buffer.slice(..);
+        let (sender, receiver) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        if let Err(err) = device.poll(wgpu::PollType::Wait) {
+            log::warn!("XR GPU timestamp readback poll failed: {err:?}");
+            return None;
+        }
+        match receiver.recv_timeout(XR_GPU_TIMESTAMP_MAP_TIMEOUT) {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                log::warn!("XR GPU timestamp readback map failed: {err:?}");
+                return None;
+            }
+            Err(err) => {
+                log::warn!("XR GPU timestamp readback timed out: {err:?}");
+                return None;
+            }
+        }
+        let result = {
+            let data = slice.get_mapped_range();
+            match (
+                read_xr_timestamp(&data, 0),
+                read_xr_timestamp(&data, 8),
+                read_xr_timestamp(&data, 16),
+            ) {
+                (Some(start), Some(mid), Some(end)) => Some((
+                    xr_timestamp_delta_ms(start, end, self.timestamp_period_ns),
+                    xr_timestamp_delta_ms(start, mid, self.timestamp_period_ns),
+                    xr_timestamp_delta_ms(mid, end, self.timestamp_period_ns),
+                )),
+                _ => None,
+            }
+        };
+        self.readback_buffer.unmap();
+        result
+    }
+}
+
+fn read_xr_timestamp(data: &[u8], offset: usize) -> Option<u64> {
+    let bytes = data.get(offset..offset + std::mem::size_of::<u64>())?;
+    Some(u64::from_ne_bytes(bytes.try_into().ok()?))
+}
+
+fn xr_timestamp_delta_ms(start: u64, end: u64, period_ns: f32) -> f64 {
+    if end <= start || !period_ns.is_finite() || period_ns <= 0.0 {
+        return 0.0;
+    }
+    (end - start) as f64 * period_ns as f64 / 1_000_000.0
+}
+
 pub struct XrMcloneTerrainState<S = XrLocalOnlyRemoteSession>
 where
     S: RemoteDedicatedServerSession,
@@ -387,6 +533,9 @@ where
     locomotion_mode: XrLocomotionMode,
     display_refresh_hz: Option<f32>,
     render_split_timing_enabled: bool,
+    gpu_timestamps_requested: bool,
+    gpu_timestamps_init_attempted: bool,
+    gpu_timestamps: Option<XrGpuStereoTimestamps>,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
     menu_pointer_down: bool,
@@ -502,6 +651,9 @@ where
             locomotion_mode: XrLocomotionMode::default(),
             display_refresh_hz: None,
             render_split_timing_enabled: false,
+            gpu_timestamps_requested: false,
+            gpu_timestamps_init_attempted: false,
+            gpu_timestamps: None,
             last_locomotion_update: None,
             menu_toggle_down: false,
             menu_pointer_down: false,
@@ -575,6 +727,9 @@ where
             locomotion_mode: XrLocomotionMode::default(),
             display_refresh_hz: None,
             render_split_timing_enabled: false,
+            gpu_timestamps_requested: false,
+            gpu_timestamps_init_attempted: false,
+            gpu_timestamps: None,
             last_locomotion_update: None,
             menu_toggle_down: false,
             menu_pointer_down: false,
@@ -745,6 +900,23 @@ where
                 runtime.client(),
             )
         });
+        if self.gpu_timestamps_requested && !self.gpu_timestamps_init_attempted {
+            self.gpu_timestamps_init_attempted = true;
+            self.gpu_timestamps = XrGpuStereoTimestamps::new(device, queue);
+            match self.gpu_timestamps.as_ref() {
+                Some(ts) => log::info!(
+                    "XR GPU timestamps enabled (timestamp_period={:.3}ns)",
+                    ts.timestamp_period_ns
+                ),
+                None => log::warn!(
+                    "XR GPU timestamps requested but TIMESTAMP_QUERY is unavailable on this OpenXR Vulkan device"
+                ),
+            }
+        }
+        // Move the profiler out of `self` for the duration of the encode so the
+        // per-eye render calls can still borrow `&mut self`; restored after the
+        // readback below.
+        let gpu_timestamps = self.gpu_timestamps.take();
         let collect_split_timing = self.render_split_timing_enabled;
         let records_start = collect_split_timing.then(Instant::now);
         let prepared_records = self.draw.prepare_render_records();
@@ -752,6 +924,9 @@ where
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("mclone_xr_terrain_stereo_encoder"),
         });
+        if let Some(ts) = gpu_timestamps.as_ref() {
+            ts.write(&mut encoder, 0);
+        }
         let left_eye_start = Instant::now();
         let left_eye = self.render_eye_target(
             device,
@@ -769,6 +944,9 @@ where
         )?;
         timing.left_eye_ms = elapsed_ms(left_eye_start.elapsed());
         timing.left_eye_render = left_eye.timing;
+        if let Some(ts) = gpu_timestamps.as_ref() {
+            ts.write(&mut encoder, 1);
+        }
         let right_eye_start = Instant::now();
         let right_eye = self.render_eye_target(
             device,
@@ -786,6 +964,10 @@ where
         )?;
         timing.right_eye_ms = elapsed_ms(right_eye_start.elapsed());
         timing.right_eye_render = right_eye.timing;
+        if let Some(ts) = gpu_timestamps.as_ref() {
+            ts.write(&mut encoder, 2);
+            ts.resolve(&mut encoder);
+        }
         let finish_start = collect_split_timing.then(Instant::now);
         let command_buffer = encoder.finish();
         timing.stereo_finish_ms = finish_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
@@ -798,6 +980,16 @@ where
             .map(|_| ())
             .context("wait for XR terrain stereo render submission")?;
         timing.stereo_poll_wait_ms = poll_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        // The submission has completed (the poll above blocked on it), so the
+        // resolved timestamps are ready; collect them and restore the profiler.
+        if let Some(ts) = gpu_timestamps.as_ref() {
+            if let Some((total_ms, left_ms, right_ms)) = ts.collect(device) {
+                timing.gpu_stereo_total_ms = total_ms;
+                timing.gpu_left_eye_ms = left_ms;
+                timing.gpu_right_eye_ms = right_ms;
+            }
+        }
+        self.gpu_timestamps = gpu_timestamps;
         self.record_eye0_summary(left_eye.summary);
         Ok(self.frame_summary_with_timing(timing, upload))
     }
@@ -816,6 +1008,14 @@ where
 
     pub fn set_render_split_timing_enabled(&mut self, enabled: bool) {
         self.render_split_timing_enabled = enabled;
+    }
+
+    /// E1 (docs/tactical/106): opt into GPU-timestamp instrumentation of the
+    /// stereo render. The query set is created lazily on the first rendered
+    /// frame (when the device/queue are in hand) and is a no-op when the OpenXR
+    /// Vulkan adapter does not advertise `TIMESTAMP_QUERY`.
+    pub fn set_gpu_timestamps_enabled(&mut self, enabled: bool) {
+        self.gpu_timestamps_requested = enabled;
     }
 
     pub fn camera_snapshot(&self) -> EngineCameraSnapshot {
