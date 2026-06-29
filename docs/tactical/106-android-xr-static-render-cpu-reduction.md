@@ -79,6 +79,65 @@ changes):
   per-eye vertex/draw cost; FFR cuts fragment fill. With true GPU at `~10.7ms`
   (not `7ms`) these matter more than previously weighted.
 
+## E3 Result + Overlap Recommendation (landed 2026-06-29)
+
+E3 worked the allocation/copy backlog as Slices F and G (both landed; rows in
+[`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md)).
+Measured on frozen RD10 against the original baseline at comparable GPU poll
+(so the deltas are clean CPU wins, not thermal):
+
+| Bucket (max) | Baseline | After E3 (F+G) | Delta |
+|---|---:|---:|---:|
+| Shared records (Slice F) | `1.537ms` | `0.017ms` | `-1.52ms` |
+| Per-eye cull L/R (Slice G) | `2.28`/`2.34ms` | `1.65`/`1.48ms` | `~-0.75ms`/eye |
+| CPU command-build wall L/R | `4.53`/`4.26ms` | `3.74`/`2.93ms` | `~-2.1ms` total |
+| **Frame p50** | **`15.66ms`** | **`13.866ms`** | **`-1.8ms`** |
+| Frame p95 / over-budget % | `17.29ms` / `94%` | `15.06ms` / `48%` | — |
+| Stereo poll (GPU) | `10.54ms` | `10.90ms` | `+0.36ms` (noise) |
+
+- E3 removed `~2-2.5ms` of CPU per frame (record cache + fast-hash cull) and
+  pulled frame **p50 under the `13.889ms` 72Hz budget** with the GPU half
+  unchanged — better than the E1 "CPU can't help" framing implied, because the
+  CPU half (`~9-10ms`) was a larger share of the frame than Meta's `7ms` GPU
+  counter had suggested.
+- **RD10 is now borderline, not solid, 72Hz.** p95 is `15.06ms` and ~48% of
+  frames still miss budget: the serial `CPU(~3-4ms p50) + GPU(~9.5-10.9ms)`
+  structure means GPU spikes and heavier frames push the tail over.
+
+### Recommendation on E2/E4/E5 (overlap): pursue E2/E4 next; defer E5
+
+Grounded in the measured CPU-blocked-idle time:
+
+- **E1 measured the CPU sitting idle for the entire `~10.7ms` GPU poll** every
+  frame, and E3 shrank the CPU half to `~6.7ms` (max; `~3-4ms` at p50). With no
+  overlap the frame is `CPU + GPU`. **With overlap it is `max(CPU, GPU) ≈ the GPU
+  poll ≈ 10.9ms`** — comfortably under the `13.889ms` budget, tail included. This
+  is the single highest-leverage remaining change for RD10, and the idle time to
+  reclaim is large and real. **Recommendation: pursue overlap.**
+- **Prefer E4 (frame pipelining / Slice K) as the overlap mechanism**, with E2 as
+  the cheap de-risking probe first. After Slice F the only *pose-independent* CPU
+  left to move off the critical path (E2's "run next-frame prep during the poll")
+  is nearly free (records are cached), and cull/encode are pose-dependent — so the
+  real win is cross-frame: submit frame N, do frame N+1's `xrWaitFrame`/cull/
+  encode while N's GPU runs, and block on N's fence only before releasing N's
+  image. Run E2 first as a contention probe (does CPU work during the poll inflate
+  the GPU poll on this unified-memory SoC? — generate our own number rather than
+  assume), then commit to E4 if contention is small.
+- **E4 cost to weigh before landing:** it adds ~1 frame of latency; motion-to-
+  photon is already `~25-39ms`, so measure MTP before/after and keep a comfort
+  check (per Slice K). Keep all threading inside the shared job system
+  ([`062`](062-shared-threading-topology.md)) — desktop OS threads, browser Web
+  Workers — not a Quest-only hack.
+- **Defer E5 (no-block via `wgpu-hal` semaphores).** It is the highest-risk path
+  (raw Vulkan/OpenXR semaphore integration `wgpu` does not expose) and E4 already
+  captures the overlap win with ordinary fences. Revisit only if E4's added
+  latency proves unacceptable.
+- **Complement overlap with GPU-side reduction.** Even with overlap the frame is
+  gated by the `~10.7ms` GPU. Stereo multiview (Slice I) is the
+  mclone-appropriate way to cut per-eye vertex/draw cost; FFR can cut fragment
+  fill. These lower the `max(CPU, GPU)` floor itself and matter more now that the
+  true GPU is `~10.7ms`, not `7ms`.
+
 ## Sharper Diagnosis (new since 099)
 
 ### 1. The frame is CPU + GPU with no overlap
@@ -234,8 +293,8 @@ inference. Keep diagnostics opt-in; never add always-on per-frame cost.
 | # | Experiment | Tests | Effort | A good result tells us |
 |---|---|---|---|---|
 | E1 | GPU-timestamp split of the stereo poll | how much of the ~`11ms` poll is real GPU vs CPU/submit overhead | low | **DONE (2026-06-29): GPU `10.68ms` total ≈ poll `11.14ms`; the poll is GPU, Meta's `7ms` under-reported. Frame is serial CPU~9 + GPU~10.7. See "E1 Result".** |
-| E2 | Worker-thread overlap probe | run real next-frame prep on a job thread *during* `poll(Wait)`; does it run concurrently, improve wall time, or lose to bandwidth contention | low-med | whether CPU/GPU overlap is worth pursuing on this SoC, with our own contention number |
-| E3 | Allocation/copy elimination | the backlog below | low | how much pure-waste CPU exists before any structural change |
+| E2 | Worker-thread overlap probe | run real next-frame prep on a job thread *during* `poll(Wait)`; does it run concurrently, improve wall time, or lose to bandwidth contention | low-med | **RECOMMENDED next (not yet run): E1 measured ~10.7ms of CPU-blocked-idle per frame and E3 shrank CPU to ~6.7ms, so overlap would gate the frame at `max(CPU,GPU) ≈ 10.9ms` — comfortably under budget. See "E3 Result + Overlap Recommendation".** |
+| E3 | Allocation/copy elimination | the backlog below | low | **DONE (2026-06-29): Slices F+G landed. shared_records 1.5ms->0.02ms, per-eye cull 2.3ms->1.5ms; frame p50 15.66ms->13.87ms (under budget at median, p95 still over). See "E3 Result".** |
 | E4 | Frame pipelining | submit N, prepare N+1 pose-independent work, block on N's fence only before releasing N's image | med | the real latency<->throughput tradeoff (Slice K), measured |
 | E5 | Semaphore / no-block via `wgpu-hal` | remove the CPU fence wait entirely; compositor waits GPU-side | med-high | whether Playbox's "wgpu can't" is actually true for us |
 | E6 | Threaded cull | fan cull across the Quest's 8 cores via the shared job system | med | cull scaling headroom independent of overlap |
@@ -281,6 +340,14 @@ stationary RD10 after each.
 
 ### Slice F - Cache prepared records across frames
 
+**Landed 2026-06-29** (commit `Cache prepared Quest XR culling records across
+frames (Slice F)`). `prepare_render_records` now returns a cached `Arc`, rebuilt
+only when `apply_section_updates` / `set_traversal_ready_sections` set a dirty
+flag; loaded section/index counts are folded into the build. Frozen RD10
+`shared_records` max `1.537ms -> 0.006ms`. Behavior-preserving (74 render tests
+pass). Frame-level effect was masked by GPU thermal drift on that run; the clean
+attribution is the `shared_records` bucket.
+
 - Add a dirty flag to `TexturedSectionDrawResources`; rebuild the
   `PreparedTexturedSectionRecords` only when `apply_section_updates` /
   `set_traversal_ready_sections` change the section set, not every frame.
@@ -295,6 +362,18 @@ stationary RD10 after each.
   movement-agnostic.
 
 ### Slice G - Flatten cull/encode data structures
+
+**Landed 2026-06-29** (commit `Flatten Quest XR cull onto reused fast-hash
+scratch (Slice G)`). The per-eye cull `BTreeSet`/`BTreeMap`/`VecDeque` are now
+reused `rustc-hash` `FxHashSet`/`FxHashMap` scratch (`RefCell` on the draw
+resources, cleared per call); `drawn_keys` is `FxHashSet` so the encode loop's
+membership test is fast-hash too. Frozen RD10 per-eye cull `~2.3ms -> ~1.5ms`;
+combined with Slice F, frame p50 `15.66ms -> 13.866ms` (under the 72Hz budget at
+the median, GPU poll unchanged). Behavior-preserving (drawn `179`/`1,352,166`
+unchanged, 74 render tests pass). Not done in this slice: flattening the
+*persistent* draw-state store (`sections`/`visibility_sections`) off `BTreeMap`,
+and the encode loop still scans all sections with a per-section `contains` rather
+than iterating the drawn list — both deferred as lower-value follow-ups.
 
 - Replace the `BTreeMap`/`BTreeSet` in the cull path and draw-state store with a
   dense layout: a flat `Vec` of records iterated linearly, section membership via
