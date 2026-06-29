@@ -14,11 +14,15 @@ use mclone_protocol::{
     UseItemOnCommand,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
-use mclone_worldgen::block::{RawBlockId, generated_block_state_id};
+use mclone_worldgen::block::{AIR, RawBlockId, generated_block_state_id};
 
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
 use crate::entities::{EntityTracking, RoutedEntityUpdate, ServerEntityState, ServerEntityStore};
+use crate::falling_block::{
+    BlockTickList, BlockTickPhaseReport, basic_falling_block_move,
+    block_tick_requests_after_block_change,
+};
 use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
 use crate::placement::DebugBlockItem;
@@ -40,6 +44,7 @@ use crate::{
 pub struct IntegratedServer {
     seed: i64,
     scheduler: ChunkScheduler,
+    block_ticks: BlockTickList,
     pub(crate) liquid_ticks: FluidTickList,
     simulation_tick: u64,
     day_time: u64,
@@ -92,6 +97,7 @@ impl IntegratedServer {
         Self {
             seed,
             scheduler,
+            block_ticks: BlockTickList::new(),
             liquid_ticks: FluidTickList::new(),
             simulation_tick: 0,
             day_time: INITIAL_DAY_TIME,
@@ -135,6 +141,10 @@ impl IntegratedServer {
     pub fn schedule_fluid_tick(&mut self, pos: WorldBlockPos, fluid: FluidKind, delay: i32) {
         self.liquid_ticks
             .schedule_tick(pos, fluid, delay, self.simulation_tick);
+    }
+
+    pub fn scheduled_block_tick_count(&self) -> usize {
+        self.block_ticks.size()
     }
 
     pub fn scheduled_fluid_tick_count(&self) -> usize {
@@ -354,6 +364,8 @@ impl IntegratedServer {
 
         let block_tick_start = simulation_timing_start();
         let block_tick_chunks = run_noop_simulation_phase(&tick_report.block_ticking_chunks);
+        let _block_tick_report =
+            self.tick_scheduled_blocks(simulation_tick, &tick_report.block_ticking_chunks);
         let block_tick_us = simulation_timing_elapsed_us(block_tick_start);
 
         let fluid_tick_start = simulation_timing_start();
@@ -611,6 +623,10 @@ impl IntegratedServer {
         let Some(block_id) = raw_block_id_from_block_state(block_state) else {
             return false;
         };
+        self.set_block_from_simulation(pos, block_id)
+    }
+
+    fn set_block_from_simulation(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool {
         let before = self.scheduler.block_at_world(pos);
         let changed = self.scheduler.set_block_at_world(pos, block_id);
         if changed {
@@ -624,8 +640,43 @@ impl IntegratedServer {
             {
                 self.schedule_fluid_tick(request.pos, request.fluid, request.delay);
             }
+            for request in block_tick_requests_after_block_change(pos, block_id) {
+                self.block_ticks
+                    .schedule_tick(request.pos, request.delay, self.simulation_tick);
+            }
         }
         changed
+    }
+
+    fn tick_scheduled_blocks(
+        &mut self,
+        game_time: u64,
+        block_ticking_chunks: &[ChunkPos],
+    ) -> BlockTickPhaseReport {
+        let due = self.block_ticks.drain_due(game_time, block_ticking_chunks);
+        let mut executed_ticks = 0;
+        let mut mutated_blocks = 0;
+        for pos in due.positions {
+            executed_ticks += 1;
+            let Some(plan) = basic_falling_block_move(&self.scheduler, pos) else {
+                continue;
+            };
+            if !self.set_block_from_simulation(plan.from, AIR) {
+                continue;
+            }
+            mutated_blocks += 1;
+            if self.set_block_from_simulation(plan.to, plan.block) {
+                mutated_blocks += 1;
+            }
+        }
+
+        BlockTickPhaseReport {
+            executed_ticks,
+            due_ticks: executed_ticks.saturating_add(due.deferred_due_ticks),
+            deferred_due_ticks: due.deferred_due_ticks,
+            mutated_blocks,
+            scheduled_ticks: self.block_ticks.size(),
+        }
     }
 
     fn drain_pending_block_delta_updates_for_target(
@@ -1020,8 +1071,8 @@ mod tests {
         PlayerPositionRelativeFlags, RemotePlayerId, RemotePlayerUpdate, ServerUpdate,
     };
     use mclone_worldgen::block::{
-        AIR, BRICKS, DIRT, GRASS, OAK_LOG_X, OAK_LOG_Z, SNOW, STONE, WATER, has_fluid,
-        material_blocks_motion,
+        AIR, BRICKS, DIRT, GRASS, OAK_LOG_X, OAK_LOG_Z, SAND, SNOW, STONE, WATER,
+        generated_block_state_id, has_fluid, material_blocks_motion,
     };
 
     fn last_time_update(report: &ServerSimulationTickReport) -> u64 {
@@ -2236,6 +2287,101 @@ mod tests {
                 _ => false,
             }
         }));
+    }
+
+    #[test]
+    fn debug_place_schedules_basic_falling_block_tick() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 82.0, 8.5));
+        sync_carried_slot(&mut server, 0);
+        assign_debug_hotbar_slot(&mut server, 0, generated_block_state_id(SAND));
+
+        let side_support = BlockPos::new(7, 82, 8);
+        let target = side_support.relative(Direction::East);
+        let landing = BlockPos::new(8, 80, 8);
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(side_support, STONE)
+        );
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(BlockPos::new(8, 79, 8), STONE)
+        );
+        for y in 80..=82 {
+            server
+                .scheduler_mut()
+                .set_block_at_world(BlockPos::new(8, y, 8), AIR);
+        }
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let updates = server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.0, 82.5, 8.5),
+                Direction::East,
+                side_support,
+                false,
+            )))
+            .expect("place sand");
+
+        assert_eq!(server.scheduler().block_at_world(target), Some(SAND));
+        assert!(has_section_block_updates(&updates));
+        assert_eq!(server.scheduled_block_tick_count(), 7);
+
+        let first = server
+            .try_simulation_tick_report()
+            .expect("first falling delay tick");
+        assert!(!has_section_block_updates(&first.updates));
+        assert_eq!(server.scheduler().block_at_world(target), Some(SAND));
+
+        let second = server.try_simulation_tick_report().expect("falling tick");
+        assert!(has_section_block_updates(&second.updates));
+        assert_eq!(server.scheduler().block_at_world(target), Some(AIR));
+        assert_eq!(server.scheduler().block_at_world(landing), Some(SAND));
+    }
+
+    #[test]
+    fn debug_break_schedules_basic_falling_block_above() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 82.0, 8.5));
+
+        let support = BlockPos::new(8, 81, 8);
+        let sand = support.relative(Direction::Up);
+        let landing = BlockPos::new(8, 80, 8);
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(BlockPos::new(8, 79, 8), STONE)
+        );
+        assert!(server.scheduler_mut().set_block_at_world(support, STONE));
+        assert!(server.scheduler_mut().set_block_at_world(sand, SAND));
+        server.scheduler_mut().set_block_at_world(landing, AIR);
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let updates = server
+            .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
+                pos: support,
+                direction: Direction::Up,
+                kind: PlayerActionKind::DebugInstantBreak,
+            }))
+            .expect("break support");
+
+        assert_eq!(server.scheduler().block_at_world(support), Some(AIR));
+        assert_eq!(server.scheduler().block_at_world(sand), Some(SAND));
+        assert!(has_section_block_updates(&updates));
+        assert_eq!(server.scheduled_block_tick_count(), 6);
+
+        server
+            .try_simulation_tick_report()
+            .expect("first falling delay tick");
+        let second = server.try_simulation_tick_report().expect("falling tick");
+
+        assert!(has_section_block_updates(&second.updates));
+        assert_eq!(server.scheduler().block_at_world(sand), Some(AIR));
+        assert_eq!(server.scheduler().block_at_world(landing), Some(SAND));
     }
 
     #[test]
