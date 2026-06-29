@@ -1,7 +1,8 @@
 # 109: XR Hand-Push Locomotion
 
-Status: active; Slice 1 shared controller/menu/input plumbing landed in code.
-Quest standalone headset validation remains the preferred feel gate.
+Status: active; Slice 2 shared swept-sphere collision and head validation
+landed in code. Quest standalone headset validation remains the preferred feel
+gate.
 
 ## Purpose
 
@@ -49,12 +50,21 @@ regression testing.
 - [x] Add focused unit coverage for client hand push, engine mode/emulation,
   UI action, and XR pose conversion.
 
+## Slice 2 - Shared Collision Refinement
+
+- [x] Replace the first-pass hand AABB movement probe with a swept sphere
+  helper that raycasts the hand center against radius-expanded block AABBs.
+- [x] Add separate head-sphere validation before body movement is submitted to
+  the normal player collision path.
+- [x] Preserve the existing shared `HandPushLocomotionController` boundary; no
+  desktop, Android, or XR app owns gameplay locomotion policy.
+- [x] Add focused coverage for hand sphere sweeps and head motion clamping.
+
 ## Known Gaps
 
-- The first controller uses AABB hand probes, not Unity-style iterative
-  spherecasts. It is suitable as a shared baseline but not final feel parity.
-- Head collision is still delegated to the normal player body collision path;
-  the C# reference's separate head-sphere validation remains to port.
+- The sweep helper is a first shared approximation of Unity-style spherecasts:
+  it handles radius-expanded block AABBs, but not the full iterative
+  slide/precision-step behavior from the C# reference.
 - Surface slip/material tuning is not implemented.
 - The desktop emulator is intentionally crude. It validates plumbing and some
   collision response, not real arm/controller feel.
@@ -74,9 +84,22 @@ cargo test --manifest-path native/Cargo.toml -p mclone-native-client
 git diff --check
 ```
 
+Additional validation for Slice 2:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-client -p mclone-render-session -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+git diff --check
+```
+
 ## Next Slice
 
-Run Quest standalone with the new `Hand Push` mode, capture headset notes, and
-then replace the AABB probe with a closer sphere/swept-shape collision helper in
-`mclone-client`. Keep desktop emulation as an automated regression lane, but do
-not tune the final feel from desktop emulation alone.
+Run Quest standalone with the new `Hand Push` mode and capture headset notes.
+Use those notes to tune arm length, hand/head radii, unstick distance, and
+velocity fling thresholds before adding surface slip/material behavior. Keep
+desktop emulation as an automated regression lane, but do not tune the final
+feel from desktop emulation alone.

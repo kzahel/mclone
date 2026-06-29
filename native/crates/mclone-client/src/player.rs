@@ -34,6 +34,7 @@ pub const LOCAL_PLAYER_BLOCK_FRICTION: f64 = 0.6;
 pub const LOCAL_PLAYER_FRICTION_MULTIPLIER: f64 = 0.91;
 pub const LOCAL_PLAYER_VERTICAL_DRAG: f64 = 0.98;
 pub const HAND_PUSH_DEFAULT_HAND_RADIUS: f64 = 0.08;
+pub const HAND_PUSH_DEFAULT_HEAD_RADIUS: f64 = 0.18;
 pub const HAND_PUSH_DEFAULT_MAX_ARM_LENGTH: f64 = 1.5;
 pub const HAND_PUSH_DEFAULT_UNSTICK_DISTANCE: f64 = 1.0;
 pub const HAND_PUSH_DEFAULT_VELOCITY_HISTORY_SIZE: usize = 5;
@@ -210,6 +211,7 @@ pub struct HandPushMovementStep {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HandPushLocomotionSettings {
     pub hand_radius: f64,
+    pub head_radius: f64,
     pub max_arm_length: f64,
     pub unstick_distance: f64,
     pub velocity_history_size: usize,
@@ -222,6 +224,7 @@ impl Default for HandPushLocomotionSettings {
     fn default() -> Self {
         Self {
             hand_radius: HAND_PUSH_DEFAULT_HAND_RADIUS,
+            head_radius: HAND_PUSH_DEFAULT_HEAD_RADIUS,
             max_arm_length: HAND_PUSH_DEFAULT_MAX_ARM_LENGTH,
             unstick_distance: HAND_PUSH_DEFAULT_UNSTICK_DISTANCE,
             velocity_history_size: HAND_PUSH_DEFAULT_VELOCITY_HISTORY_SIZE,
@@ -253,6 +256,7 @@ pub struct HandPushLocomotionController {
     initialized: bool,
     last_left_hand_position: Vec3d,
     last_right_hand_position: Vec3d,
+    last_head_position: Vec3d,
     last_player_position: Vec3d,
     velocity_history: VecDeque<Vec3d>,
     left_hand_touching: bool,
@@ -272,6 +276,7 @@ impl HandPushLocomotionController {
             initialized: false,
             last_left_hand_position: Vec3d::ZERO,
             last_right_hand_position: Vec3d::ZERO,
+            last_head_position: Vec3d::ZERO,
             last_player_position: Vec3d::ZERO,
             velocity_history: VecDeque::new(),
             left_hand_touching: false,
@@ -295,6 +300,7 @@ impl HandPushLocomotionController {
         self.initialized = false;
         self.last_left_hand_position = Vec3d::ZERO;
         self.last_right_hand_position = Vec3d::ZERO;
+        self.last_head_position = Vec3d::ZERO;
         self.last_player_position = Vec3d::ZERO;
         self.velocity_history.clear();
         self.left_hand_touching = false;
@@ -316,6 +322,7 @@ impl HandPushLocomotionController {
             self.initialized = true;
             self.last_left_hand_position = pose.left_hand_position;
             self.last_right_hand_position = pose.right_hand_position;
+            self.last_head_position = pose.head_position;
             self.last_player_position = player.pose().position;
             return Some(HandPushMovementResult::default());
         }
@@ -341,13 +348,22 @@ impl HandPushLocomotionController {
             left.body_offset.add(right.body_offset)
         };
 
-        let body_movement = if requested_body_movement.length_sqr() > COLLISION_EPSILON {
+        let head_validated_body_movement = validate_hand_push_head_movement(
+            client,
+            self.last_head_position,
+            pose.head_position,
+            requested_body_movement,
+            self.settings.head_radius,
+        );
+
+        let body_movement = if head_validated_body_movement.length_sqr() > COLLISION_EPSILON {
             player
-                .move_colliding(client, requested_body_movement)
+                .move_colliding(client, head_validated_body_movement)
                 .traveled
         } else {
             Vec3d::ZERO
         };
+        self.last_head_position = pose.head_position.add(body_movement);
 
         self.last_left_hand_position = self.unstuck_hand_position(
             pose.head_position,
@@ -417,15 +433,12 @@ impl HandPushLocomotionController {
         let movement = current_position.subtract(last_position);
         let probe = hand_probe_aabb(current_position, self.settings.hand_radius);
         let currently_intersecting = !solid_block_aabbs_in(client, probe).is_empty();
-        let traveled = collide_movement(
-            client,
-            hand_probe_aabb(last_position, self.settings.hand_radius),
-            movement,
-        );
-        let sweep_collided = !nearly_equal(traveled.x, movement.x)
-            || !nearly_equal(traveled.y, movement.y)
-            || !nearly_equal(traveled.z, movement.z);
-        let sweep_position = last_position.add(traveled);
+        let sweep =
+            sweep_sphere_against_world(client, last_position, self.settings.hand_radius, movement);
+        let sweep_position = sweep
+            .map(|hit| hit.center_position)
+            .unwrap_or_else(|| last_position.add(movement));
+        let sweep_collided = sweep.is_some();
         let touching = currently_intersecting || sweep_collided;
 
         if !touching {
@@ -1314,6 +1327,205 @@ fn hand_probe_aabb(center: Vec3d, radius: f64) -> Aabb {
     )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SphereSweepHit {
+    center_position: Vec3d,
+    normal: Vec3d,
+    time: f64,
+}
+
+fn sweep_sphere_against_world(
+    client: &ClientRuntime,
+    start: Vec3d,
+    radius: f64,
+    movement: Vec3d,
+) -> Option<SphereSweepHit> {
+    if !start.is_finite() || !movement.is_finite() || movement.length_sqr() <= COLLISION_EPSILON {
+        return None;
+    }
+
+    let radius = sanitize_hand_push_radius(radius, HAND_PUSH_DEFAULT_HAND_RADIUS);
+    let sweep_area = hand_probe_aabb(start, radius).expand_towards(movement);
+    let mut best_hit = None;
+    for solid in solid_block_aabbs_in(client, sweep_area) {
+        let expanded = inflate_aabb(solid, radius);
+        let Some((time, normal)) = raycast_expanded_aabb(start, movement, expanded) else {
+            continue;
+        };
+        if best_hit
+            .map(|hit: SphereSweepHit| time < hit.time)
+            .unwrap_or(true)
+        {
+            best_hit = Some(SphereSweepHit {
+                center_position: start.add(movement.scale(time)),
+                normal,
+                time,
+            });
+        }
+    }
+    best_hit
+}
+
+fn validate_hand_push_head_movement(
+    client: &ClientRuntime,
+    last_head_position: Vec3d,
+    current_head_position: Vec3d,
+    requested_body_movement: Vec3d,
+    radius: f64,
+) -> Vec3d {
+    if !last_head_position.is_finite()
+        || !current_head_position.is_finite()
+        || !requested_body_movement.is_finite()
+    {
+        return Vec3d::ZERO;
+    }
+
+    let requested_head_position = current_head_position.add(requested_body_movement);
+    let head_movement = requested_head_position.subtract(last_head_position);
+    let radius = sanitize_hand_push_radius(radius, HAND_PUSH_DEFAULT_HEAD_RADIUS);
+    let Some(hit) = sweep_sphere_against_world(client, last_head_position, radius, head_movement)
+    else {
+        return requested_body_movement;
+    };
+    hit.center_position.subtract(last_head_position)
+}
+
+fn sanitize_hand_push_radius(radius: f64, fallback: f64) -> f64 {
+    if radius.is_finite() && radius > 0.0 {
+        radius
+    } else {
+        fallback
+    }
+}
+
+fn inflate_aabb(aabb: Aabb, amount: f64) -> Aabb {
+    if !amount.is_finite() || amount <= 0.0 {
+        return aabb;
+    }
+    Aabb::new(
+        aabb.min_x - amount,
+        aabb.min_y - amount,
+        aabb.min_z - amount,
+        aabb.max_x + amount,
+        aabb.max_y + amount,
+        aabb.max_z + amount,
+    )
+}
+
+fn raycast_expanded_aabb(start: Vec3d, movement: Vec3d, target: Aabb) -> Option<(f64, Vec3d)> {
+    if !target.is_finite() {
+        return None;
+    }
+    if aabb_contains_point(target, start) {
+        let normal = point_exit_normal(target, start);
+        if movement.length_sqr() <= COLLISION_EPSILON || dot(movement, normal) <= COLLISION_EPSILON
+        {
+            return Some((0.0, normal));
+        }
+        return None;
+    }
+
+    let mut t_enter = 0.0;
+    let mut t_exit = 1.0;
+    let mut hit_normal = Vec3d::ZERO;
+    update_raycast_axis(
+        start.x,
+        movement.x,
+        target.min_x,
+        target.max_x,
+        Vec3d::new(-1.0, 0.0, 0.0),
+        Vec3d::new(1.0, 0.0, 0.0),
+        &mut t_enter,
+        &mut t_exit,
+        &mut hit_normal,
+    )?;
+    update_raycast_axis(
+        start.y,
+        movement.y,
+        target.min_y,
+        target.max_y,
+        Vec3d::new(0.0, -1.0, 0.0),
+        Vec3d::new(0.0, 1.0, 0.0),
+        &mut t_enter,
+        &mut t_exit,
+        &mut hit_normal,
+    )?;
+    update_raycast_axis(
+        start.z,
+        movement.z,
+        target.min_z,
+        target.max_z,
+        Vec3d::new(0.0, 0.0, -1.0),
+        Vec3d::new(0.0, 0.0, 1.0),
+        &mut t_enter,
+        &mut t_exit,
+        &mut hit_normal,
+    )?;
+
+    if t_enter > t_exit || !(-COLLISION_EPSILON..=1.0 + COLLISION_EPSILON).contains(&t_enter) {
+        return None;
+    }
+    Some((t_enter.clamp(0.0, 1.0), hit_normal))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_raycast_axis(
+    origin: f64,
+    delta: f64,
+    min: f64,
+    max: f64,
+    min_normal: Vec3d,
+    max_normal: Vec3d,
+    t_enter: &mut f64,
+    t_exit: &mut f64,
+    hit_normal: &mut Vec3d,
+) -> Option<()> {
+    if delta.abs() <= COLLISION_EPSILON {
+        return (origin >= min - COLLISION_EPSILON && origin <= max + COLLISION_EPSILON)
+            .then_some(());
+    }
+
+    let t_min_plane = (min - origin) / delta;
+    let t_max_plane = (max - origin) / delta;
+    let (near, far, normal) = if t_min_plane <= t_max_plane {
+        (t_min_plane, t_max_plane, min_normal)
+    } else {
+        (t_max_plane, t_min_plane, max_normal)
+    };
+
+    if near > *t_enter {
+        *t_enter = near;
+        *hit_normal = normal;
+    }
+    *t_exit = (*t_exit).min(far);
+    (*t_enter <= *t_exit + COLLISION_EPSILON).then_some(())
+}
+
+fn aabb_contains_point(aabb: Aabb, point: Vec3d) -> bool {
+    point.x >= aabb.min_x - COLLISION_EPSILON
+        && point.x <= aabb.max_x + COLLISION_EPSILON
+        && point.y >= aabb.min_y - COLLISION_EPSILON
+        && point.y <= aabb.max_y + COLLISION_EPSILON
+        && point.z >= aabb.min_z - COLLISION_EPSILON
+        && point.z <= aabb.max_z + COLLISION_EPSILON
+}
+
+fn point_exit_normal(aabb: Aabb, point: Vec3d) -> Vec3d {
+    let faces = [
+        (point.x - aabb.min_x, Vec3d::new(-1.0, 0.0, 0.0)),
+        (aabb.max_x - point.x, Vec3d::new(1.0, 0.0, 0.0)),
+        (point.y - aabb.min_y, Vec3d::new(0.0, -1.0, 0.0)),
+        (aabb.max_y - point.y, Vec3d::new(0.0, 1.0, 0.0)),
+        (point.z - aabb.min_z, Vec3d::new(0.0, 0.0, -1.0)),
+        (aabb.max_z - point.z, Vec3d::new(0.0, 0.0, 1.0)),
+    ];
+    faces
+        .into_iter()
+        .min_by(|(left, _), (right, _)| left.total_cmp(right))
+        .map(|(_, normal)| normal)
+        .unwrap_or(Vec3d::new(0.0, 1.0, 0.0))
+}
+
 fn clamp_hand_reach(head_position: Vec3d, hand_position: Vec3d, max_arm_length: f64) -> Vec3d {
     if !max_arm_length.is_finite() || max_arm_length <= 0.0 {
         return hand_position;
@@ -1793,6 +2005,44 @@ mod tests {
         assert!(result.left_hand_touching);
         assert!(result.body_movement.z > 0.0);
         assert!(player.pose().position.z > 0.5);
+    }
+
+    #[test]
+    fn hand_push_swept_sphere_hits_wall_before_overlap() {
+        let client = client_with_blocks(&[(BlockPos::new(1, 2, 0), BlockStateId(7))]);
+
+        let hit = sweep_sphere_against_world(
+            &client,
+            Vec3d::new(0.5, 2.5, 0.5),
+            0.1,
+            Vec3d::new(1.0, 0.0, 0.0),
+        )
+        .expect("sphere should hit the expanded wall");
+
+        assert_approx_eq(hit.center_position.x, 0.9);
+        assert_approx_eq(hit.center_position.y, 2.5);
+        assert_approx_eq(hit.center_position.z, 0.5);
+        assert_approx_eq(hit.normal.x, -1.0);
+        assert_approx_eq(hit.normal.y, 0.0);
+        assert_approx_eq(hit.normal.z, 0.0);
+        assert_approx_eq(hit.time, 0.4);
+    }
+
+    #[test]
+    fn hand_push_head_validation_clamps_body_motion_before_wall() {
+        let client = client_with_blocks(&[(BlockPos::new(0, 2, 1), BlockStateId(7))]);
+
+        let movement = validate_hand_push_head_movement(
+            &client,
+            Vec3d::new(0.5, 2.5, 0.5),
+            Vec3d::new(0.5, 2.5, 0.5),
+            Vec3d::new(0.0, 0.0, 1.0),
+            0.1,
+        );
+
+        assert_approx_eq(movement.x, 0.0);
+        assert_approx_eq(movement.y, 0.0);
+        assert_approx_eq(movement.z, 0.4);
     }
 
     #[test]
