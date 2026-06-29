@@ -1,6 +1,7 @@
 use mclone_core::BlockStateId;
 use mclone_protocol::{
     DEFAULT_DEBUG_HOTBAR, HOTBAR_SLOT_COUNT, HOTBAR_SLOT_COUNT_USIZE, SetCarriedItemCommand,
+    SetDebugHotbarSlotCommand,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,6 +28,17 @@ impl ServerInventory {
         true
     }
 
+    pub(crate) fn apply_set_debug_hotbar_slot(
+        &mut self,
+        command: SetDebugHotbarSlotCommand,
+    ) -> bool {
+        if command.slot >= HOTBAR_SLOT_COUNT {
+            return false;
+        }
+        self.items[command.slot as usize] = command.block_state;
+        true
+    }
+
     pub(crate) fn selected_block_state(&self) -> Option<BlockStateId> {
         self.items[self.selected as usize]
     }
@@ -40,7 +52,7 @@ impl ServerInventory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_worldgen::block::{BRICKS, DIRT, STONE, generated_block_state_id};
+    use mclone_worldgen::block::{BRICKS, DIRT, SAND, STONE, generated_block_state_id};
 
     #[test]
     fn carried_item_packet_updates_only_valid_hotbar_slots() {
@@ -79,6 +91,32 @@ mod tests {
         assert_eq!(
             inventory.selected_block_state(),
             Some(generated_block_state_id(BRICKS))
+        );
+    }
+
+    #[test]
+    fn debug_hotbar_slot_assignment_changes_server_held_block() {
+        let mut inventory = ServerInventory::default();
+
+        assert!(
+            inventory.apply_set_debug_hotbar_slot(SetDebugHotbarSlotCommand {
+                slot: 0,
+                block_state: Some(generated_block_state_id(SAND)),
+            })
+        );
+        assert_eq!(
+            inventory.selected_block_state(),
+            Some(generated_block_state_id(SAND))
+        );
+        assert!(
+            !inventory.apply_set_debug_hotbar_slot(SetDebugHotbarSlotCommand {
+                slot: HOTBAR_SLOT_COUNT,
+                block_state: Some(generated_block_state_id(STONE)),
+            })
+        );
+        assert_eq!(
+            inventory.selected_block_state(),
+            Some(generated_block_state_id(SAND))
         );
     }
 }

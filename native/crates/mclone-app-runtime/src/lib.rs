@@ -25,8 +25,7 @@ use mclone_core::{
 };
 use mclone_mesh::{RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionMesh};
 use mclone_protocol::{
-    ChunkView, ClientCommand, DEFAULT_DEBUG_HOTBAR, HOTBAR_SLOT_COUNT_USIZE, PlayerPositionUpdate,
-    ServerUpdate,
+    ChunkView, ClientCommand, HOTBAR_SLOT_COUNT_USIZE, PlayerPositionUpdate, ServerUpdate,
 };
 use mclone_render_session::{
     EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompiler, RenderSectionRemovalMode,
@@ -39,7 +38,8 @@ use mclone_server::{
     ServerRunnerKind,
 };
 use mclone_ui::{
-    GuiTextureUv, LoadingProgressCell, LoadingProgressCellStatus, LoadingProgressOverlay,
+    BlockPaletteEntry, BlockPaletteOverlay, EMPTY_BLOCK_PALETTE_ENTRIES, GuiTextureUv,
+    LoadingProgressCell, LoadingProgressCellStatus, LoadingProgressOverlay,
 };
 
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
@@ -68,13 +68,92 @@ pub fn chunk_view(center: ChunkPos, render_distance: u32, chunk_tracking_radius:
     }
 }
 
+const DEBUG_BLOCK_PALETTE: &[(BlockStateId, &str)] = &[
+    (BlockStateId(1), "Stone"),
+    (BlockStateId(10), "Granite"),
+    (BlockStateId(11), "Diorite"),
+    (BlockStateId(12), "Andesite"),
+    (BlockStateId(52), "Tuff"),
+    (BlockStateId(53), "Deepslate"),
+    (BlockStateId(5), "Dirt"),
+    (BlockStateId(13), "Coarse Dirt"),
+    (BlockStateId(14), "Podzol"),
+    (BlockStateId(15), "Mycelium"),
+    (BlockStateId(4), "Grass Block"),
+    (BlockStateId(6), "Sand"),
+    (BlockStateId(38), "Red Sand"),
+    (BlockStateId(7), "Gravel"),
+    (BlockStateId(33), "Sandstone"),
+    (BlockStateId(34), "Red Sandstone"),
+    (BlockStateId(88), "Clay"),
+    (BlockStateId(40), "Snow Block"),
+    (BlockStateId(35), "Packed Ice"),
+    (BlockStateId(39), "Ice"),
+    (BlockStateId(36), "Obsidian"),
+    (BlockStateId(37), "Magma Block"),
+    (BlockStateId(16), "Terracotta"),
+    (BlockStateId(17), "White Terracotta"),
+    (BlockStateId(18), "Orange Terracotta"),
+    (BlockStateId(19), "Magenta Terracotta"),
+    (BlockStateId(20), "Light Blue Terracotta"),
+    (BlockStateId(21), "Yellow Terracotta"),
+    (BlockStateId(22), "Lime Terracotta"),
+    (BlockStateId(23), "Pink Terracotta"),
+    (BlockStateId(24), "Gray Terracotta"),
+    (BlockStateId(25), "Light Gray Terracotta"),
+    (BlockStateId(26), "Cyan Terracotta"),
+    (BlockStateId(27), "Purple Terracotta"),
+    (BlockStateId(28), "Blue Terracotta"),
+    (BlockStateId(29), "Brown Terracotta"),
+    (BlockStateId(30), "Green Terracotta"),
+    (BlockStateId(31), "Red Terracotta"),
+    (BlockStateId(32), "Black Terracotta"),
+    (BlockStateId(91), "Bricks"),
+    (BlockStateId(41), "Oak Log"),
+    (BlockStateId(46), "Birch Log"),
+    (BlockStateId(48), "Spruce Log"),
+    (BlockStateId(42), "Oak Leaves"),
+    (BlockStateId(47), "Birch Leaves"),
+    (BlockStateId(49), "Spruce Leaves"),
+    (BlockStateId(54), "Coal Ore"),
+    (BlockStateId(56), "Copper Ore"),
+    (BlockStateId(58), "Iron Ore"),
+    (BlockStateId(60), "Gold Ore"),
+    (BlockStateId(64), "Diamond Ore"),
+    (BlockStateId(66), "Lapis Ore"),
+    (BlockStateId(62), "Redstone Ore"),
+    (BlockStateId(89), "Dripstone Block"),
+    (BlockStateId(90), "Pointed Dripstone"),
+    (BlockStateId(43), "Grass"),
+    (BlockStateId(44), "Dandelion"),
+    (BlockStateId(45), "Poppy"),
+    (BlockStateId(50), "Fern"),
+    (BlockStateId(51), "Dead Bush"),
+];
+
 pub fn debug_hotbar_icons(
+    items: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE],
     catalog: &TexturedMeshCatalog,
 ) -> [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE] {
-    DEFAULT_DEBUG_HOTBAR.map(|state_id| {
+    items.map(|state_id| {
         let uv = catalog.gui_icon_uv(state_id?)?;
         Some(GuiTextureUv::new(uv.u0, uv.v0, uv.u1, uv.v1))
     })
+}
+
+pub fn debug_block_palette_overlay(
+    catalog: &TexturedMeshCatalog,
+    selected_hotbar_slot: u8,
+) -> BlockPaletteOverlay {
+    let mut entries = EMPTY_BLOCK_PALETTE_ENTRIES;
+    for (index, &(block_state, label)) in DEBUG_BLOCK_PALETTE.iter().take(entries.len()).enumerate()
+    {
+        let icon = catalog
+            .gui_icon_uv(block_state)
+            .map(|uv| GuiTextureUv::new(uv.u0, uv.v0, uv.u1, uv.v1));
+        entries[index] = Some(BlockPaletteEntry::new(block_state.0, icon, label));
+    }
+    BlockPaletteOverlay::visible(selected_hotbar_slot, entries)
 }
 
 pub fn loading_progress_overlay_from_diagnostics(

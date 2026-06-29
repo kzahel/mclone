@@ -278,6 +278,7 @@ pub enum FlatInputAction {
     Attack,
     Use,
     OpenMenu,
+    OpenBlockPalette,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -334,6 +335,7 @@ pub struct FlatInputFrame {
     pub attack: bool,
     pub use_item: bool,
     pub open_menu: bool,
+    pub open_block_palette: bool,
     pub selected_hotbar_slot: Option<u8>,
     pub hotbar_step: i8,
 }
@@ -420,6 +422,7 @@ impl FlatInputFrame {
             FlatInputAction::Attack => self.attack = true,
             FlatInputAction::Use => self.use_item = true,
             FlatInputAction::OpenMenu => self.open_menu = true,
+            FlatInputAction::OpenBlockPalette => self.open_block_palette = true,
         }
     }
 
@@ -454,6 +457,9 @@ impl FlatInputFrame {
             InputBindingAction::NextHotbarSlot => self.step_hotbar(1),
             InputBindingAction::PreviousHotbarSlot => self.step_hotbar(-1),
             InputBindingAction::OpenMenu => self.press_action(FlatInputAction::OpenMenu),
+            InputBindingAction::OpenBlockPalette => {
+                self.press_action(FlatInputAction::OpenBlockPalette);
+            }
         }
     }
 }
@@ -516,6 +522,8 @@ impl Default for KeyboardMouseBindings {
             KeyboardMouseBinding::key(KeyboardKey::ControlLeft, InputBindingAction::Sprint),
             KeyboardMouseBinding::key(KeyboardKey::ControlRight, InputBindingAction::Sprint),
             KeyboardMouseBinding::key(KeyboardKey::Escape, InputBindingAction::OpenMenu),
+            KeyboardMouseBinding::key(KeyboardKey::KeyE, InputBindingAction::OpenBlockPalette),
+            KeyboardMouseBinding::key(KeyboardKey::KeyB, InputBindingAction::OpenBlockPalette),
             KeyboardMouseBinding::mouse_button(PointerButton::Primary, InputBindingAction::Attack),
             KeyboardMouseBinding::mouse_button(PointerButton::Secondary, InputBindingAction::Use),
             KeyboardMouseBinding {
@@ -584,6 +592,8 @@ pub enum KeyboardKey {
     KeyA,
     KeyS,
     KeyD,
+    KeyE,
+    KeyB,
     KeyX,
     Space,
     ShiftLeft,
@@ -859,7 +869,8 @@ impl KeyboardMouseHeldState {
             | InputBindingAction::SelectHotbarSlot(_)
             | InputBindingAction::NextHotbarSlot
             | InputBindingAction::PreviousHotbarSlot
-            | InputBindingAction::OpenMenu => false,
+            | InputBindingAction::OpenMenu
+            | InputBindingAction::OpenBlockPalette => false,
         }
     }
 
@@ -1037,6 +1048,7 @@ pub enum InputBindingAction {
     NextHotbarSlot,
     PreviousHotbarSlot,
     OpenMenu,
+    OpenBlockPalette,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -1590,6 +1602,14 @@ mod tests {
             KeyboardKey::KeyD,
             InputBindingAction::Move(MovementDirection::Right)
         )));
+        assert!(bindings.bindings.contains(&KeyboardMouseBinding::key(
+            KeyboardKey::KeyE,
+            InputBindingAction::OpenBlockPalette
+        )));
+        assert!(bindings.bindings.contains(&KeyboardMouseBinding::key(
+            KeyboardKey::KeyB,
+            InputBindingAction::OpenBlockPalette
+        )));
         assert!(
             bindings
                 .bindings
@@ -1650,6 +1670,16 @@ mod tests {
         assert!(menu.open_menu);
 
         let repeat = adapter.handle_key(KeyboardKey::Escape, true, true);
+        assert!(repeat.handled);
+        assert!(repeat.frame.is_none());
+
+        let palette = adapter
+            .handle_key(KeyboardKey::KeyE, true, false)
+            .frame
+            .expect("E should emit block palette frame");
+        assert!(palette.open_block_palette);
+
+        let repeat = adapter.handle_key(KeyboardKey::KeyE, true, true);
         assert!(repeat.handled);
         assert!(repeat.frame.is_none());
 

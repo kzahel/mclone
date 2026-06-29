@@ -12,7 +12,6 @@ mod android {
 
     use anyhow::{Context, Result, bail};
     use glam::Vec3;
-    use mclone_app_runtime::debug_hotbar_icons;
     use mclone_app_runtime::frame_render::{
         FullFrameGui, RenderStreamStats, record_render_section_update_stats,
         render_full_frame_for_view,
@@ -28,9 +27,10 @@ mod android {
     use mclone_app_runtime::startup_args::{
         RenderDistanceLimits, StartupArgState, StartupSceneOptions,
     };
+    use mclone_app_runtime::{debug_block_palette_overlay, debug_hotbar_icons};
     use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
     use mclone_client::ClientInteractionController;
-    use mclone_core::{ChunkPos, Vec3d};
+    use mclone_core::{BlockStateId, ChunkPos, Vec3d};
     use mclone_input::{
         FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, FlatInputIntent,
         InputCapabilities, InputCapabilityState, InputDeviceKind, InputPreferences, KeyboardKey,
@@ -1282,6 +1282,12 @@ mod android {
                 GameUiAction::CycleFramePacing
                 | GameUiAction::CycleFpsCap
                 | GameUiAction::SetTouchLookSensitivity(_) => {}
+                GameUiAction::AssignHotbarBlock { slot, block_state } => {
+                    if let Err(err) = self.assign_debug_hotbar_slot(slot, BlockStateId(block_state))
+                    {
+                        log::error!("failed to assign Android debug hotbar slot: {err:#}");
+                    }
+                }
                 GameUiAction::SetTouchControlsMode(mode) => {
                     self.input_preferences.touch_controls = mode;
                     log::info!(
@@ -1294,6 +1300,7 @@ mod android {
                 }
                 GameUiAction::StartWorld
                 | GameUiAction::Resume
+                | GameUiAction::OpenBlockPalette
                 | GameUiAction::OpenOptions(_)
                 | GameUiAction::BackToPause => {}
             }
@@ -1306,7 +1313,7 @@ mod android {
         }
 
         fn current_ui_render_state(&self) -> GameUiRenderState {
-            GameUiRenderState {
+            let mut state = GameUiRenderState {
                 render_distance: (self.scene.render_distance() as i32)
                     .clamp(ANDROID_MIN_RENDER_DISTANCE, ANDROID_MAX_RENDER_DISTANCE),
                 min_render_distance: ANDROID_MIN_RENDER_DISTANCE,
@@ -1324,7 +1331,13 @@ mod android {
                 fps_cap: ANDROID_FIXED_FPS_CAP,
                 touch_controls_mode: Some(self.input_preferences.touch_controls),
                 touch_settings: None,
-            }
+                block_palette: Default::default(),
+            };
+            state.block_palette = debug_block_palette_overlay(
+                &self.scene.mesh_assets().catalog,
+                self.interaction.selected_hotbar_slot(),
+            );
+            state
         }
 
         fn gui_draw_list(&self, gui_scale: GuiScale, ui_state: GameUiRenderState) -> GuiDrawList {
@@ -1342,7 +1355,10 @@ mod android {
                 .touch_controls
                 .overlay(self.interaction.selected_hotbar_slot());
             touch.menu_pressed = self.touch_menu_pressed;
-            let hotbar_icons = debug_hotbar_icons(&self.scene.mesh_assets().catalog);
+            let hotbar_icons = debug_hotbar_icons(
+                self.interaction.hotbar_items(),
+                &self.scene.mesh_assets().catalog,
+            );
             touch.hotbar_icons = hotbar_icons;
             let mut hud = FlatHud::new(self.input_capabilities.resolve(self.input_preferences));
             hud.hotbar = FlatHotbarOverlay::selected_with_icons(
@@ -1385,6 +1401,16 @@ mod android {
                     quit: false,
                 });
             }
+            if frame.open_block_palette {
+                self.ui.apply_action(GameUiAction::OpenBlockPalette);
+                self.clear_flat_gameplay_input();
+                self.ui.clear_input();
+                log::info!("Mclone Android block palette opened from keyboard");
+                return Ok(AndroidUiTouchResult {
+                    handled: true,
+                    quit: false,
+                });
+            }
             self.apply_flat_touch_frame(frame)?;
             Ok(AndroidUiTouchResult {
                 handled: true,
@@ -1420,6 +1446,22 @@ mod android {
             let slot = (i16::from(self.interaction.selected_hotbar_slot()) + i16::from(step))
                 .rem_euclid(slot_count) as u8;
             self.select_hotbar_slot(slot)
+        }
+
+        fn assign_debug_hotbar_slot(
+            &mut self,
+            slot: u8,
+            block_state: BlockStateId,
+        ) -> Result<bool> {
+            let Some(command) = self
+                .interaction
+                .set_debug_hotbar_slot(slot, Some(block_state))
+            else {
+                return Ok(false);
+            };
+            self.scene
+                .send_gameplay_command(command)
+                .context("failed to sync Android debug hotbar assignment")
         }
 
         fn sync_carried_item(&mut self) -> Result<bool> {
@@ -2401,6 +2443,8 @@ mod android {
             KeyCode::KeyA => Some(KeyboardKey::KeyA),
             KeyCode::KeyS => Some(KeyboardKey::KeyS),
             KeyCode::KeyD => Some(KeyboardKey::KeyD),
+            KeyCode::KeyE => Some(KeyboardKey::KeyE),
+            KeyCode::KeyB => Some(KeyboardKey::KeyB),
             KeyCode::KeyX => Some(KeyboardKey::KeyX),
             KeyCode::Space => Some(KeyboardKey::Space),
             KeyCode::ShiftLeft => Some(KeyboardKey::ShiftLeft),
@@ -2493,6 +2537,7 @@ mod android {
             (source.attack, FlatInputAction::Attack),
             (source.use_item, FlatInputAction::Use),
             (source.open_menu, FlatInputAction::OpenMenu),
+            (source.open_block_palette, FlatInputAction::OpenBlockPalette),
         ] {
             if pressed {
                 target.apply_intent(FlatInputIntent::Action {

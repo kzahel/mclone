@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
-use mclone_app_runtime::frame_render::FullFrameRenderSummary;
+use mclone_app_runtime::{debug_block_palette_overlay, frame_render::FullFrameRenderSummary};
 use mclone_client::ClientHost;
 use mclone_input::{FlatInputAction, FlatInputFrame, FlatInputIntent};
 use mclone_protocol::{ClientCommand, MovePlayerCommand};
@@ -279,6 +279,10 @@ impl OffscreenFlatClientHost {
                 fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
                 movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
             },
+            block_palette: debug_block_palette_overlay(
+                &self.assets.mesh_assets.catalog,
+                self.driver.interaction.selected_hotbar_slot(),
+            ),
             hud: None,
             loading_progress_overlay: self.driver.startup_progress_overlay(),
             debug: FlatClientDebugFrame {

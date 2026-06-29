@@ -7,7 +7,6 @@ use super::{
     SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED,
     WebIntegratedServerRunnerConfig, WebRuntime,
 };
-use mclone_app_runtime::debug_hotbar_icons;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
     SessionFailure, SessionStartRequest, SessionStartResult, StartedGameSession,
@@ -15,6 +14,7 @@ use mclone_app_runtime::session::{
 use mclone_app_runtime::startup_args::{
     RenderDistanceLimits, STARTUP_QUERY_KEYS, StartupArgState, StartupOptions, StartupSceneOptions,
 };
+use mclone_app_runtime::{debug_block_palette_overlay, debug_hotbar_icons};
 use mclone_assets::PackedAssetSource;
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ClientInteractionController, ClientRuntime,
@@ -2874,6 +2874,14 @@ impl WebChunkRenderSession {
                 self.camera
                     .set_movement_speed_multiplier(f64::from(multiplier));
             }
+            GameUiAction::AssignHotbarBlock { slot, block_state } => {
+                if let Some(command) = self
+                    .interaction
+                    .set_debug_hotbar_slot(slot, Some(BlockStateId(block_state)))
+                {
+                    let _ = self.runtime.send_gameplay_command_deferred(command);
+                }
+            }
             GameUiAction::CreateWorld(seed) => {
                 self.session
                     .begin_start(SessionStartRequest::NewLocalWorld { seed });
@@ -2889,6 +2897,7 @@ impl WebChunkRenderSession {
                 self.runtime.request_shutdown();
             }
             GameUiAction::StartWorld
+            | GameUiAction::OpenBlockPalette
             | GameUiAction::OpenNewWorld
             | GameUiAction::OpenJoinRemote
             | GameUiAction::RerollSeed
@@ -2942,6 +2951,10 @@ impl WebChunkRenderSession {
                         touch_controls_mode_js_label(mode),
                     )?;
                 }
+                GameUiAction::AssignHotbarBlock { slot, block_state } => {
+                    set_number(&object, "slot", f64::from(slot))?;
+                    set_number(&object, "blockState", f64::from(block_state))?;
+                }
                 GameUiAction::Quit => {
                     set_bool(&object, "shutdownRequested", true)?;
                 }
@@ -2949,6 +2962,7 @@ impl WebChunkRenderSession {
                     set_number(&object, "movementSpeedMultiplier", f64::from(multiplier))?;
                 }
                 GameUiAction::StartWorld
+                | GameUiAction::OpenBlockPalette
                 | GameUiAction::OpenNewWorld
                 | GameUiAction::OpenJoinRemote
                 | GameUiAction::RerollSeed
@@ -2993,6 +3007,10 @@ impl WebChunkRenderSession {
                     WEB_TOUCH_LOOK_SENSITIVITY_MIN,
                     WEB_TOUCH_LOOK_SENSITIVITY_MAX,
                 )),
+            block_palette: debug_block_palette_overlay(
+                &self.mesh_assets.catalog,
+                self.interaction.selected_hotbar_slot(),
+            ),
         }
     }
 
@@ -4111,7 +4129,8 @@ impl WebChunkRenderSession {
         let mut hud = FlatHud::new(self.resolved_flat_input_for_hud());
         hud.world_hud_visible = !ui_active;
         hud.crosshair_visible = !ui_active;
-        let hotbar_icons = debug_hotbar_icons(&self.mesh_assets.catalog);
+        let hotbar_icons =
+            debug_hotbar_icons(self.interaction.hotbar_items(), &self.mesh_assets.catalog);
         hud.hotbar = FlatHotbarOverlay::selected_with_icons(
             self.interaction.selected_hotbar_slot(),
             hotbar_icons,
@@ -4526,6 +4545,7 @@ fn ui_screen_label(screen: Option<GameScreen>) -> &'static str {
         Some(GameScreen::NewWorld) => "newWorld",
         Some(GameScreen::JoinRemote) => "joinRemote",
         Some(GameScreen::Pause) => "pause",
+        Some(GameScreen::BlockPalette) => "blockPalette",
         Some(GameScreen::Options { .. }) => "options",
         None => "none",
     }
@@ -4541,6 +4561,7 @@ fn options_parent_label(parent: GameOptionsParent) -> &'static str {
 fn ui_action_label(action: GameUiAction) -> &'static str {
     match action {
         GameUiAction::StartWorld => "startWorld",
+        GameUiAction::OpenBlockPalette => "openBlockPalette",
         GameUiAction::OpenNewWorld => "openNewWorld",
         GameUiAction::OpenJoinRemote => "openJoinRemote",
         GameUiAction::RerollSeed => "rerollSeed",
@@ -4561,6 +4582,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::SetMovementSpeed(_) => "setMovementSpeed",
         GameUiAction::SetTouchLookSensitivity(_) => "setTouchLookSensitivity",
         GameUiAction::SetTouchControlsMode(_) => "setTouchControlsMode",
+        GameUiAction::AssignHotbarBlock { .. } => "assignHotbarBlock",
         GameUiAction::Quit => "quit",
     }
 }

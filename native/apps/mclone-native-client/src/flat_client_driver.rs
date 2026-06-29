@@ -16,7 +16,7 @@ use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
     ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
-use mclone_core::Vec3d;
+use mclone_core::{BlockStateId, Vec3d};
 use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, TouchControlsMode};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_render::chunk::{
@@ -32,10 +32,10 @@ use mclone_render_session::{
     RenderSectionCacheUpdate, actor_instances_from_presentations, render_camera_from_snapshot,
 };
 use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameScreen, GameUi, GameUiAction,
-    GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, StatusOverlay,
-    render_flat_hud, render_loading_progress_overlay, render_loading_progress_panel_at,
-    touch_controls_mode_label,
+    BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameScreen,
+    GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay,
+    Point, StatusOverlay, render_flat_hud, render_loading_progress_overlay,
+    render_loading_progress_panel_at, touch_controls_mode_label,
 };
 
 use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
@@ -192,6 +192,7 @@ pub(crate) struct FlatClientDebugFrame {
 #[derive(Debug)]
 pub(crate) struct FlatClientUiFrame {
     pub(crate) render_options: FlatClientUiRenderOptions,
+    pub(crate) block_palette: BlockPaletteOverlay,
     pub(crate) hud: Option<FlatHud>,
     pub(crate) loading_progress_overlay: Option<LoadingProgressOverlay>,
     pub(crate) debug: FlatClientDebugFrame,
@@ -303,7 +304,6 @@ impl FlatClientDriver {
         self.ui.is_active()
     }
 
-    #[cfg(test)]
     pub(crate) fn ui_screen(&self) -> Option<GameScreen> {
         self.ui.screen()
     }
@@ -573,7 +573,10 @@ impl FlatClientDriver {
             mouse_lock_requested: (context.from_pointer_click
                 && matches!(
                     action,
-                    GameUiAction::StartWorld | GameUiAction::Resume | GameUiAction::JoinRemote
+                    GameUiAction::StartWorld
+                        | GameUiAction::Resume
+                        | GameUiAction::JoinRemote
+                        | GameUiAction::AssignHotbarBlock { .. }
                 ))
             .then_some(true),
             session_start_queued: false,
@@ -679,6 +682,11 @@ impl FlatClientDriver {
             GameUiAction::CycleFpsCap => {
                 result.host_action = Some(FlatClientHostAction::CycleFpsCap);
             }
+            GameUiAction::AssignHotbarBlock { slot, block_state } => {
+                if let Err(err) = self.assign_debug_hotbar_slot(slot, BlockStateId(block_state)) {
+                    log::error!("failed to assign debug hotbar slot: {err:#}");
+                }
+            }
             GameUiAction::OpenNewWorld => {
                 let seed = self.next_new_world_seed();
                 self.ui.set_new_world_seed(seed);
@@ -726,6 +734,7 @@ impl FlatClientDriver {
             }
             GameUiAction::StartWorld
             | GameUiAction::Resume
+            | GameUiAction::OpenBlockPalette
             | GameUiAction::OpenOptions(_)
             | GameUiAction::BackToPause
             | GameUiAction::SetTouchLookSensitivity(_) => {}
@@ -1044,6 +1053,27 @@ impl FlatClientDriver {
 
     pub(crate) fn select_hotbar_slot(&mut self, slot: u8) -> bool {
         self.interaction.select_hotbar_slot(slot)
+    }
+
+    pub(crate) fn open_block_palette(&mut self) {
+        self.ui.apply_action(GameUiAction::OpenBlockPalette);
+    }
+
+    pub(crate) fn assign_debug_hotbar_slot(
+        &mut self,
+        slot: u8,
+        block_state: BlockStateId,
+    ) -> anyhow::Result<bool> {
+        let Some(command) = self
+            .interaction
+            .set_debug_hotbar_slot(slot, Some(block_state))
+        else {
+            return Ok(false);
+        };
+        let Some(runtime) = &mut self.runtime else {
+            return Ok(false);
+        };
+        runtime.send_gameplay_command(command).map_err(Into::into)
     }
 
     pub(crate) fn step_hotbar_slot(&mut self, step: i8) -> bool {
@@ -1548,9 +1578,9 @@ impl FlatClientDriver {
                 .is_some_and(mclone_ui::FlatHud::has_visible_commands)
             || loading_progress_overlay.is_some()
             || debug_view_readiness_overlay.is_some();
-        let base_ui_draw = self
-            .ui
-            .render_draw_list(game_ui_render_state(ui_frame.render_options));
+        let mut ui_render_state = game_ui_render_state(ui_frame.render_options);
+        ui_render_state.block_palette = ui_frame.block_palette;
+        let base_ui_draw = self.ui.render_draw_list(ui_render_state);
         let gui_state = FullFrameGui::new(
             gui_active,
             ui_covers_world || loading_progress_overlay.is_some(),
@@ -1621,6 +1651,7 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         fps_cap: options.frame_pacing.fps_cap,
         touch_controls_mode: None,
         touch_settings: None,
+        block_palette: Default::default(),
     }
 }
 

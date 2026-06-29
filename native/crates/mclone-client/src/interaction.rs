@@ -4,7 +4,8 @@ use mclone_core::{
     local_section_block_coord,
 };
 use mclone_protocol::{
-    ClientCommand, InteractionHand, PlayerActionCommand, PlayerActionKind, UseItemOnCommand,
+    ClientCommand, HOTBAR_SLOT_COUNT_USIZE, InteractionHand, PlayerActionCommand, PlayerActionKind,
+    UseItemOnCommand,
 };
 
 use crate::{
@@ -48,8 +49,20 @@ impl ClientInteractionController {
         self.inventory.selected_hotbar_slot()
     }
 
+    pub const fn hotbar_items(&self) -> [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] {
+        self.inventory.hotbar_items()
+    }
+
     pub fn select_hotbar_slot(&mut self, slot: u8) -> bool {
         self.inventory.select_hotbar_slot(slot)
+    }
+
+    pub fn set_debug_hotbar_slot(
+        &mut self,
+        slot: u8,
+        block_state: Option<BlockStateId>,
+    ) -> Option<ClientCommand> {
+        self.inventory.set_debug_hotbar_slot(slot, block_state)
     }
 
     pub fn ensure_has_sent_carried_item(&mut self) -> Option<ClientCommand> {

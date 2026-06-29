@@ -5,6 +5,9 @@ use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, InputPromptKind, ResolvedFlatInput, T
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = FLAT_HOTBAR_SLOT_COUNT as usize;
 pub const EMPTY_HOTBAR_ICONS: [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE] =
     [None; HOTBAR_SLOT_COUNT_USIZE];
+pub const BLOCK_PALETTE_ENTRY_CAPACITY: usize = 60;
+pub const EMPTY_BLOCK_PALETTE_ENTRIES: [Option<BlockPaletteEntry>; BLOCK_PALETTE_ENTRY_CAPACITY] =
+    [None; BLOCK_PALETTE_ENTRY_CAPACITY];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GuiScale {
@@ -157,6 +160,61 @@ pub struct GuiTextureUv {
 impl GuiTextureUv {
     pub const fn new(u0: f32, v0: f32, u1: f32, v1: f32) -> Self {
         Self { u0, v0, u1, v1 }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlockPaletteEntry {
+    pub block_state: u32,
+    pub icon: Option<GuiTextureUv>,
+    pub label: &'static str,
+}
+
+impl BlockPaletteEntry {
+    pub const fn new(block_state: u32, icon: Option<GuiTextureUv>, label: &'static str) -> Self {
+        Self {
+            block_state,
+            icon,
+            label,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlockPaletteOverlay {
+    pub visible: bool,
+    pub selected_hotbar_slot: u8,
+    pub entries: [Option<BlockPaletteEntry>; BLOCK_PALETTE_ENTRY_CAPACITY],
+}
+
+impl BlockPaletteOverlay {
+    pub const fn hidden() -> Self {
+        Self {
+            visible: false,
+            selected_hotbar_slot: 0,
+            entries: EMPTY_BLOCK_PALETTE_ENTRIES,
+        }
+    }
+
+    pub const fn visible(
+        selected_hotbar_slot: u8,
+        entries: [Option<BlockPaletteEntry>; BLOCK_PALETTE_ENTRY_CAPACITY],
+    ) -> Self {
+        Self {
+            visible: true,
+            selected_hotbar_slot,
+            entries,
+        }
+    }
+
+    pub fn entry_count(self) -> usize {
+        self.entries.iter().filter(|entry| entry.is_some()).count()
+    }
+}
+
+impl Default for BlockPaletteOverlay {
+    fn default() -> Self {
+        Self::hidden()
     }
 }
 
@@ -631,6 +689,7 @@ pub enum GameScreen {
     NewWorld,
     JoinRemote,
     Pause,
+    BlockPalette,
     Options { parent: GameOptionsParent },
 }
 
@@ -649,6 +708,8 @@ pub enum GameUiAction {
     CreateWorld(i64),
     JoinRemote,
     Resume,
+    OpenBlockPalette,
+    AssignHotbarBlock { slot: u8, block_state: u32 },
     OpenOptions(GameOptionsParent),
     BackToTitle,
     BackToPause,
@@ -750,6 +811,7 @@ pub struct GameUiRenderState {
     pub fps_cap: u32,
     pub touch_controls_mode: Option<TouchControlsMode>,
     pub touch_settings: Option<GameTouchSettings>,
+    pub block_palette: BlockPaletteOverlay,
 }
 
 impl Default for GameUiRenderState {
@@ -771,6 +833,7 @@ impl Default for GameUiRenderState {
             fps_cap: 120,
             touch_controls_mode: None,
             touch_settings: None,
+            block_palette: BlockPaletteOverlay::hidden(),
         }
     }
 }
@@ -1733,6 +1796,13 @@ const ID_JOIN_REMOTE_CONNECT: WidgetId = WidgetId(20);
 const ID_JOIN_REMOTE_BACK: WidgetId = WidgetId(21);
 const ID_OPTIONS_TOUCH_CONTROLS: WidgetId = WidgetId(22);
 const ID_OPTIONS_MOVEMENT_SPEED: WidgetId = WidgetId(23);
+const ID_BLOCK_PALETTE_BASE: u64 = 1000;
+
+const BLOCK_PALETTE_COLUMNS: usize = 10;
+const BLOCK_PALETTE_SLOT_SIZE: f32 = 22.0;
+const BLOCK_PALETTE_GAP: f32 = 3.0;
+const BLOCK_PALETTE_PADDING: f32 = 7.0;
+const BLOCK_PALETTE_HEADER_HEIGHT: f32 = 14.0;
 
 pub const DEFAULT_JOIN_REMOTE_ADDR: &str = "127.0.0.1:25565";
 
@@ -1892,6 +1962,7 @@ impl GameUi {
         };
         match (screen, key) {
             (GameScreen::Pause, GuiKey::Escape) => (true, Some(GameUiAction::Resume)),
+            (GameScreen::BlockPalette, GuiKey::Escape) => (true, Some(GameUiAction::Resume)),
             (GameScreen::NewWorld, GuiKey::Escape) => (true, Some(GameUiAction::BackToTitle)),
             (GameScreen::JoinRemote, GuiKey::Escape) => (true, Some(GameUiAction::BackToTitle)),
             (GameScreen::Options { parent }, GuiKey::Escape) => match parent {
@@ -1904,9 +1975,15 @@ impl GameUi {
 
     pub fn apply_action(&mut self, action: GameUiAction) {
         match action {
-            GameUiAction::StartWorld | GameUiAction::Resume => self.close(),
+            GameUiAction::StartWorld
+            | GameUiAction::Resume
+            | GameUiAction::AssignHotbarBlock { .. } => self.close(),
             GameUiAction::OpenNewWorld => {
                 self.screen = Some(GameScreen::NewWorld);
+                self.pressed = None;
+            }
+            GameUiAction::OpenBlockPalette => {
+                self.screen = Some(GameScreen::BlockPalette);
                 self.pressed = None;
             }
             GameUiAction::OpenJoinRemote => {
@@ -1952,6 +2029,7 @@ impl GameUi {
             Some(GameScreen::NewWorld) => self.render_new_world(&mut draw),
             Some(GameScreen::JoinRemote) => self.render_join_remote(&mut draw),
             Some(GameScreen::Pause) => self.render_pause(&mut draw),
+            Some(GameScreen::BlockPalette) => self.render_block_palette(&mut draw, state),
             Some(GameScreen::Options { parent }) => {
                 self.render_options_screen(&mut draw, state, parent)
             }
@@ -1978,6 +2056,10 @@ impl GameUi {
                 .into_iter()
                 .find(|button| button.contains(point))
                 .map(|button| button.id),
+            GameScreen::BlockPalette => {
+                block_palette_entry_at(self.scale, state.block_palette, point)
+                    .map(|(index, _entry)| block_palette_widget_id(index))
+            }
             GameScreen::Options { .. } => {
                 let rects = option_widgets(self.scale, state);
                 if rects.occlusion.contains(point) {
@@ -2026,6 +2108,18 @@ impl GameUi {
             ID_PAUSE_RESUME => Some(GameUiAction::Resume),
             ID_PAUSE_OPTIONS => Some(GameUiAction::OpenOptions(GameOptionsParent::Pause)),
             ID_PAUSE_TITLE => Some(GameUiAction::QuitToTitle),
+            id if block_palette_index_from_widget_id(id).is_some() => {
+                let index = block_palette_index_from_widget_id(id)?;
+                let entry = state
+                    .block_palette
+                    .entries
+                    .get(index)
+                    .and_then(|entry| *entry)?;
+                Some(GameUiAction::AssignHotbarBlock {
+                    slot: state.block_palette.selected_hotbar_slot,
+                    block_state: entry.block_state,
+                })
+            }
             ID_OPTIONS_OCCLUSION => Some(GameUiAction::ToggleSectionOcclusion),
             ID_OPTIONS_FULLBRIGHT => Some(GameUiAction::ToggleFullbright),
             ID_OPTIONS_FLY => Some(GameUiAction::ToggleFly),
@@ -2219,6 +2313,45 @@ impl GameUi {
         }
     }
 
+    fn render_block_palette(&self, draw: &mut GuiDrawList, state: GameUiRenderState) {
+        let overlay = state.block_palette;
+        if !overlay.visible {
+            return;
+        }
+
+        let panel = block_palette_panel_rect(self.scale, overlay);
+        draw.fill(panel, Color::rgba(5, 8, 9, 188));
+        draw.outline(panel, Color::rgba(132, 158, 148, 210));
+        self.font.draw_shadow(
+            draw,
+            &format!("SLOT {}", u16::from(overlay.selected_hotbar_slot) + 1),
+            panel.x + BLOCK_PALETTE_PADDING,
+            panel.y + 5.0,
+            Color::rgba(218, 234, 226, 255),
+        );
+
+        for (index, entry) in overlay.entries.into_iter().enumerate() {
+            let Some(entry) = entry else {
+                continue;
+            };
+            let Some(rect) = block_palette_slot_rect(self.scale, overlay, index) else {
+                continue;
+            };
+            let id = block_palette_widget_id(index);
+            render_touch_panel(draw, rect, self.pressed == Some(id));
+            if self.pointer.is_some_and(|point| rect.contains(point)) {
+                draw.outline(rect.inset(-1.0), Color::rgba(245, 250, 255, 205));
+            }
+            render_palette_slot_contents(draw, &self.font, rect, entry.icon);
+        }
+
+        if let Some(pointer) = self.pointer {
+            if let Some((_index, entry)) = block_palette_entry_at(self.scale, overlay, pointer) {
+                render_block_palette_tooltip(draw, &self.font, self.scale, pointer, entry.label);
+            }
+        }
+    }
+
     fn render_options_screen(
         &self,
         draw: &mut GuiDrawList,
@@ -2405,6 +2538,149 @@ fn pause_buttons(scale: GuiScale) -> [Button; 3] {
             "Quit To Title",
         ),
     ]
+}
+
+fn block_palette_widget_id(index: usize) -> WidgetId {
+    WidgetId(ID_BLOCK_PALETTE_BASE + index as u64)
+}
+
+fn block_palette_index_from_widget_id(id: WidgetId) -> Option<usize> {
+    let raw = id.0.checked_sub(ID_BLOCK_PALETTE_BASE)?;
+    let index = usize::try_from(raw).ok()?;
+    (index < BLOCK_PALETTE_ENTRY_CAPACITY).then_some(index)
+}
+
+fn block_palette_occupied_span(overlay: BlockPaletteOverlay) -> usize {
+    overlay
+        .entries
+        .iter()
+        .rposition(Option::is_some)
+        .map_or(0, |index| index + 1)
+}
+
+fn block_palette_rows(overlay: BlockPaletteOverlay) -> usize {
+    let occupied = block_palette_occupied_span(overlay).max(1);
+    (occupied + BLOCK_PALETTE_COLUMNS - 1) / BLOCK_PALETTE_COLUMNS
+}
+
+fn block_palette_panel_rect(scale: GuiScale, overlay: BlockPaletteOverlay) -> Rect {
+    let rows = block_palette_rows(overlay) as f32;
+    let columns = BLOCK_PALETTE_COLUMNS as f32;
+    let grid_width = columns * BLOCK_PALETTE_SLOT_SIZE + (columns - 1.0) * BLOCK_PALETTE_GAP;
+    let grid_height = rows * BLOCK_PALETTE_SLOT_SIZE + (rows - 1.0).max(0.0) * BLOCK_PALETTE_GAP;
+    let panel_width = grid_width + BLOCK_PALETTE_PADDING * 2.0;
+    let panel_height = grid_height + BLOCK_PALETTE_HEADER_HEIGHT + BLOCK_PALETTE_PADDING * 2.0;
+    let hotbar = flat_hotbar_slot_rects(scale);
+    let x = ((scale.width - panel_width) * 0.5)
+        .floor()
+        .clamp(4.0, (scale.width - panel_width - 4.0).max(4.0));
+    let y = (hotbar[0].y - panel_height - 8.0)
+        .floor()
+        .clamp(4.0, (scale.height - panel_height - 4.0).max(4.0));
+    Rect::new(x, y, panel_width.min(scale.width - 8.0), panel_height)
+}
+
+fn block_palette_slot_rect(
+    scale: GuiScale,
+    overlay: BlockPaletteOverlay,
+    index: usize,
+) -> Option<Rect> {
+    overlay
+        .entries
+        .get(index)
+        .and_then(|entry| entry.as_ref())?;
+    let panel = block_palette_panel_rect(scale, overlay);
+    let column = index % BLOCK_PALETTE_COLUMNS;
+    let row = index / BLOCK_PALETTE_COLUMNS;
+    Some(Rect::new(
+        panel.x
+            + BLOCK_PALETTE_PADDING
+            + column as f32 * (BLOCK_PALETTE_SLOT_SIZE + BLOCK_PALETTE_GAP),
+        panel.y
+            + BLOCK_PALETTE_PADDING
+            + BLOCK_PALETTE_HEADER_HEIGHT
+            + row as f32 * (BLOCK_PALETTE_SLOT_SIZE + BLOCK_PALETTE_GAP),
+        BLOCK_PALETTE_SLOT_SIZE,
+        BLOCK_PALETTE_SLOT_SIZE,
+    ))
+}
+
+fn block_palette_entry_at(
+    scale: GuiScale,
+    overlay: BlockPaletteOverlay,
+    point: Point,
+) -> Option<(usize, BlockPaletteEntry)> {
+    if !overlay.visible {
+        return None;
+    }
+    overlay
+        .entries
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            Some((
+                index,
+                entry?,
+                block_palette_slot_rect(scale, overlay, index)?,
+            ))
+        })
+        .find_map(|(index, entry, rect)| rect.contains(point).then_some((index, entry)))
+}
+
+fn render_palette_slot_contents(
+    draw: &mut GuiDrawList,
+    font: &Font,
+    rect: Rect,
+    icon: Option<GuiTextureUv>,
+) {
+    if let Some(icon) = icon {
+        let icon_size = 16.0_f32.min(rect.width - 4.0).min(rect.height - 4.0);
+        draw.texture(
+            Rect::new(
+                (rect.center_x() - icon_size * 0.5).floor(),
+                (rect.y + (rect.height - icon_size) * 0.5).floor(),
+                icon_size,
+                icon_size,
+            ),
+            icon,
+            Color::WHITE,
+        );
+    } else {
+        font.draw_centered(
+            draw,
+            "?",
+            rect.center_x(),
+            rect.y + ((rect.height - font.line_height()) * 0.5).floor(),
+            Color::rgba(245, 250, 255, 210),
+        );
+    }
+}
+
+fn render_block_palette_tooltip(
+    draw: &mut GuiDrawList,
+    font: &Font,
+    scale: GuiScale,
+    pointer: Point,
+    label: &str,
+) {
+    let width = (font.width(label) + 12.0).min((scale.width - 8.0).max(0.0));
+    let height = font.line_height() + 8.0;
+    let x = (pointer.x + 8.0)
+        .floor()
+        .clamp(4.0, (scale.width - width - 4.0).max(4.0));
+    let y = (pointer.y - height - 8.0)
+        .floor()
+        .clamp(4.0, (scale.height - height - 4.0).max(4.0));
+    let rect = Rect::new(x, y, width, height);
+    draw.fill(rect, Color::rgba(8, 11, 12, 230));
+    draw.outline(rect, Color::rgba(178, 196, 188, 230));
+    font.draw_shadow(
+        draw,
+        label,
+        rect.x + 6.0,
+        rect.y + 5.0,
+        Color::rgba(238, 246, 240, 255),
+    );
 }
 
 fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRects {
@@ -3588,6 +3864,12 @@ mod tests {
             (true, Some(GameUiAction::Resume))
         );
 
+        ui.set_screen(Some(GameScreen::BlockPalette));
+        assert_eq!(
+            ui.key_pressed(GuiKey::Escape),
+            (true, Some(GameUiAction::Resume))
+        );
+
         ui.set_screen(Some(GameScreen::Options {
             parent: GameOptionsParent::Title,
         }));
@@ -3595,6 +3877,67 @@ mod tests {
             ui.key_pressed(GuiKey::Escape),
             (true, Some(GameUiAction::BackToTitle))
         );
+    }
+
+    #[test]
+    fn block_palette_click_assigns_entry_to_selected_hotbar_slot() {
+        let mut ui = GameUi::new_ingame();
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        ui.apply_action(GameUiAction::OpenBlockPalette);
+        assert_eq!(ui.screen(), Some(GameScreen::BlockPalette));
+        assert!(!ui.covers_world());
+
+        let icon = GuiTextureUv::new(0.1, 0.2, 0.3, 0.4);
+        let mut entries = EMPTY_BLOCK_PALETTE_ENTRIES;
+        entries[0] = Some(BlockPaletteEntry::new(91, Some(icon), "Bricks"));
+        let state = GameUiRenderState {
+            block_palette: BlockPaletteOverlay::visible(4, entries),
+            ..GameUiRenderState::default()
+        };
+        let rect = block_palette_slot_rect(ui.scale(), state.block_palette, 0)
+            .expect("first palette entry should have a slot rect");
+        let point = Point {
+            x: rect.center_x(),
+            y: rect.y + rect.height * 0.5,
+        };
+
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(
+            action,
+            Some(GameUiAction::AssignHotbarBlock {
+                slot: 4,
+                block_state: 91
+            })
+        );
+        ui.apply_action(action.unwrap());
+        assert_eq!(ui.screen(), None);
+    }
+
+    #[test]
+    fn block_palette_render_draws_entry_texture_icons() {
+        let mut ui = GameUi::new_ingame();
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        ui.apply_action(GameUiAction::OpenBlockPalette);
+
+        let icon = GuiTextureUv::new(0.1, 0.2, 0.3, 0.4);
+        let mut entries = EMPTY_BLOCK_PALETTE_ENTRIES;
+        entries[0] = Some(BlockPaletteEntry::new(91, Some(icon), "Bricks"));
+        entries[1] = Some(BlockPaletteEntry::new(41, Some(icon), "Oak Log"));
+        let state = GameUiRenderState {
+            block_palette: BlockPaletteOverlay::visible(0, entries),
+            ..GameUiRenderState::default()
+        };
+
+        let draw = ui.render_draw_list(state);
+        let texture_rects = draw
+            .commands()
+            .iter()
+            .filter(
+                |command| matches!(command, GuiDrawCommand::TextureRect { uv, .. } if *uv == icon),
+            )
+            .count();
+        assert_eq!(texture_rects, 2);
     }
 
     #[test]

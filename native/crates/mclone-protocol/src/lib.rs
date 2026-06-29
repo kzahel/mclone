@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
@@ -30,6 +30,7 @@ const CLIENT_COMMAND_USE_ITEM_ON: u8 = 3;
 const CLIENT_COMMAND_MOVE_PLAYER: u8 = 4;
 const CLIENT_COMMAND_SET_CARRIED_ITEM: u8 = 5;
 const CLIENT_COMMAND_ACCEPT_TELEPORT: u8 = 6;
+const CLIENT_COMMAND_SET_DEBUG_HOTBAR_SLOT: u8 = 7;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
@@ -55,6 +56,7 @@ pub enum ClientCommand {
     MovePlayer(MovePlayerCommand),
     AcceptTeleport(AcceptTeleportCommand),
     SetCarriedItem(SetCarriedItemCommand),
+    SetDebugHotbarSlot(SetDebugHotbarSlotCommand),
     PlayerAction(PlayerActionCommand),
     UseItemOn(UseItemOnCommand),
 }
@@ -129,6 +131,12 @@ pub struct AcceptTeleportCommand {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SetCarriedItemCommand {
     pub slot: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SetDebugHotbarSlotCommand {
+    pub slot: u8,
+    pub block_state: Option<BlockStateId>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -376,6 +384,10 @@ pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec
             writer.write_u8(CLIENT_COMMAND_SET_CARRIED_ITEM);
             writer.write_set_carried_item(command);
         }
+        ClientCommand::SetDebugHotbarSlot(command) => {
+            writer.write_u8(CLIENT_COMMAND_SET_DEBUG_HOTBAR_SLOT);
+            writer.write_set_debug_hotbar_slot(command);
+        }
         ClientCommand::PlayerAction(command) => {
             writer.write_u8(CLIENT_COMMAND_PLAYER_ACTION);
             writer.write_player_action(command);
@@ -408,6 +420,9 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
         }
         CLIENT_COMMAND_SET_CARRIED_ITEM => {
             ClientCommand::SetCarriedItem(reader.read_set_carried_item()?)
+        }
+        CLIENT_COMMAND_SET_DEBUG_HOTBAR_SLOT => {
+            ClientCommand::SetDebugHotbarSlot(reader.read_set_debug_hotbar_slot()?)
         }
         CLIENT_COMMAND_PLAYER_ACTION => ClientCommand::PlayerAction(reader.read_player_action()?),
         CLIENT_COMMAND_USE_ITEM_ON => ClientCommand::UseItemOn(reader.read_use_item_on()?),
@@ -742,6 +757,14 @@ impl ByteWriter {
         self.write_u8(command.slot);
     }
 
+    fn write_set_debug_hotbar_slot(&mut self, command: &SetDebugHotbarSlotCommand) {
+        self.write_u8(command.slot);
+        self.write_bool(command.block_state.is_some());
+        if let Some(block_state) = command.block_state {
+            self.write_u32(block_state.0);
+        }
+    }
+
     fn write_player_action(&mut self, command: &PlayerActionCommand) {
         self.write_block_pos(command.pos);
         self.write_direction(command.direction);
@@ -1062,6 +1085,15 @@ impl<'a> ByteReader<'a> {
         })
     }
 
+    fn read_set_debug_hotbar_slot(&mut self) -> ProtocolCodecResult<SetDebugHotbarSlotCommand> {
+        let slot = self.read_u8()?;
+        let has_block_state = self.read_bool()?;
+        let block_state = has_block_state
+            .then(|| self.read_u32().map(BlockStateId))
+            .transpose()?;
+        Ok(SetDebugHotbarSlotCommand { slot, block_state })
+    }
+
     fn read_player_action(&mut self) -> ProtocolCodecResult<PlayerActionCommand> {
         let pos = self.read_block_pos()?;
         let direction = self.read_direction()?;
@@ -1380,6 +1412,26 @@ mod tests {
         let bytes = encode_client_command(&command).unwrap();
 
         assert_eq!(decode_client_command(&bytes).unwrap(), command);
+    }
+
+    #[test]
+    fn client_command_codec_round_trips_set_debug_hotbar_slot() {
+        let command = ClientCommand::SetDebugHotbarSlot(SetDebugHotbarSlotCommand {
+            slot: 3,
+            block_state: Some(BlockStateId(91)),
+        });
+
+        let bytes = encode_client_command(&command).unwrap();
+
+        assert_eq!(decode_client_command(&bytes).unwrap(), command);
+
+        let clear_command = ClientCommand::SetDebugHotbarSlot(SetDebugHotbarSlotCommand {
+            slot: 8,
+            block_state: None,
+        });
+        let clear_bytes = encode_client_command(&clear_command).unwrap();
+
+        assert_eq!(decode_client_command(&clear_bytes).unwrap(), clear_command);
     }
 
     #[test]

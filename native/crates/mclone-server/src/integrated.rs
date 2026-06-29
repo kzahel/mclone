@@ -10,7 +10,8 @@ use std::time::Duration;
 use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, Vec3d};
 use mclone_protocol::{
     ChunkView, ClientCommand, InteractionHand, MovePlayerCommand, PlayerActionCommand,
-    PlayerActionKind, ServerUpdate, SetCarriedItemCommand, UseItemOnCommand,
+    PlayerActionKind, ServerUpdate, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
+    UseItemOnCommand,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::{RawBlockId, generated_block_state_id};
@@ -224,6 +225,9 @@ impl IntegratedServer {
             }
             ClientCommand::SetCarriedItem(command) => {
                 self.handle_set_carried_item_for_target(target, command)
+            }
+            ClientCommand::SetDebugHotbarSlot(command) => {
+                self.handle_set_debug_hotbar_slot_for_target(target, command)
             }
             ClientCommand::PlayerAction(command) => {
                 self.handle_player_action_for_target(target, command)
@@ -526,6 +530,16 @@ impl IntegratedServer {
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         self.inventory_mut_for_target(target)?
             .apply_set_carried_item(command);
+        Ok(Vec::new())
+    }
+
+    fn handle_set_debug_hotbar_slot_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: SetDebugHotbarSlotCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.inventory_mut_for_target(target)?
+            .apply_set_debug_hotbar_slot(command);
         Ok(Vec::new())
     }
 
@@ -1754,6 +1768,22 @@ mod tests {
         assert!(updates.is_empty());
     }
 
+    fn assign_debug_hotbar_slot(
+        server: &mut IntegratedServer,
+        slot: u8,
+        block_state: BlockStateId,
+    ) {
+        let updates = server
+            .try_handle_command(ClientCommand::SetDebugHotbarSlot(
+                SetDebugHotbarSlotCommand {
+                    slot,
+                    block_state: Some(block_state),
+                },
+            ))
+            .expect("set debug hotbar slot");
+        assert!(updates.is_empty());
+    }
+
     fn use_held_item_on(hit: BlockHitResult) -> ClientCommand {
         ClientCommand::UseItemOn(UseItemOnCommand {
             hand: InteractionHand::MainHand,
@@ -2214,6 +2244,38 @@ mod tests {
         load_center_chunk(&mut server);
         sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
         sync_carried_slot(&mut server, 7);
+        let clicked = BlockPos::new(8, 80, 8);
+        let target = clicked.relative(Direction::Up);
+        assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let updates = server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.5, 81.0, 8.5),
+                Direction::Up,
+                clicked,
+                false,
+            )))
+            .expect("place command");
+
+        assert_eq!(server.scheduler().block_at_world(target), Some(BRICKS));
+        assert!(updates.iter().any(|update| {
+            match update {
+                ServerUpdate::SectionBlockUpdates { updates, .. } => updates
+                    .iter()
+                    .any(|update| update.block_state == BlockStateId(BRICKS as u32)),
+                _ => false,
+            }
+        }));
+    }
+
+    #[test]
+    fn set_debug_hotbar_slot_command_changes_placed_block() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
+        sync_carried_slot(&mut server, 0);
+        assign_debug_hotbar_slot(&mut server, 0, BlockStateId(BRICKS as u32));
         let clicked = BlockPos::new(8, 80, 8);
         let target = clicked.relative(Direction::Up);
         assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));

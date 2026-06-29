@@ -158,6 +158,7 @@ pub(crate) enum HeadlessScreenshotUi {
     NewWorld,
     JoinRemote,
     Pause,
+    BlockPalette,
     OptionsTitle,
     OptionsPause,
 }
@@ -918,7 +919,9 @@ pub(crate) fn parse_screenshot_ui_arg(
     value: Option<String>,
 ) -> Result<HeadlessScreenshotUi> {
     let value = value.with_context(|| {
-        format!("{flag} requires none, title, new-world, pause, options-title, or options-pause")
+        format!(
+            "{flag} requires none, title, new-world, join-remote, pause, block-palette, options-title, or options-pause"
+        )
     })?;
     match value.as_str() {
         "none" | "off" | "false" | "0" => Ok(HeadlessScreenshotUi::None),
@@ -926,10 +929,11 @@ pub(crate) fn parse_screenshot_ui_arg(
         "new-world" | "new_world" => Ok(HeadlessScreenshotUi::NewWorld),
         "join-remote" | "join_remote" => Ok(HeadlessScreenshotUi::JoinRemote),
         "pause" => Ok(HeadlessScreenshotUi::Pause),
+        "block-palette" | "block_palette" | "palette" => Ok(HeadlessScreenshotUi::BlockPalette),
         "options-title" | "options_title" => Ok(HeadlessScreenshotUi::OptionsTitle),
         "options-pause" | "options_pause" | "options" => Ok(HeadlessScreenshotUi::OptionsPause),
         _ => bail!(
-            "{flag} must be none, title, new-world, pause, options-title, or options-pause, got `{value}`"
+            "{flag} must be none, title, new-world, join-remote, pause, block-palette, options-title, or options-pause, got `{value}`"
         ),
     }
 }
@@ -949,7 +953,7 @@ fn print_help() {
          Usage:\n\
           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|block-palette|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\

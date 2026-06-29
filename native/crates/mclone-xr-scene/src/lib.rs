@@ -1371,6 +1371,7 @@ where
                 .unwrap_or(XR_UI_FPS_CAP),
             touch_controls_mode: None,
             touch_settings: None,
+            block_palette: Default::default(),
         }
     }
 
@@ -2039,12 +2040,14 @@ where
             GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetTouchLookSensitivity(_)
-            | GameUiAction::SetTouchControlsMode(_) => {}
+            | GameUiAction::SetTouchControlsMode(_)
+            | GameUiAction::AssignHotbarBlock { .. } => {}
             GameUiAction::BackToTitle | GameUiAction::QuitToTitle => {
                 self.session_status = StatusOverlay::hidden();
             }
             GameUiAction::StartWorld
             | GameUiAction::Resume
+            | GameUiAction::OpenBlockPalette
             | GameUiAction::OpenOptions(_)
             | GameUiAction::BackToPause => {}
         }

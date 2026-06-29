@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use mclone_app_runtime::debug_hotbar_icons;
+use mclone_app_runtime::{debug_block_palette_overlay, debug_hotbar_icons};
 use mclone_assets::AssetSource;
 #[cfg(test)]
 use mclone_core::Vec3d;
@@ -14,8 +14,8 @@ use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameUi, GameUiAction, GameUiRenderState,
-    GuiKey, GuiScale, Point, StatusOverlay,
+    DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameScreen, GameUi, GameUiAction,
+    GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -326,6 +326,15 @@ impl ChunkApp {
             self.schedule_next_redraw(event_loop);
             return true;
         }
+        if frame.open_block_palette {
+            self.mouse_lock_requested = false;
+            self.driver.open_block_palette();
+            self.clear_flat_gameplay_input();
+            self.last_cursor = None;
+            self.sync_mouse_lock();
+            self.schedule_next_redraw(event_loop);
+            return true;
+        }
         if let Some(slot) = frame.selected_hotbar_slot {
             if self.driver.select_hotbar_slot(slot) {
                 log::info!("selected hotbar slot {}", slot + 1);
@@ -373,6 +382,10 @@ impl ChunkApp {
             movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
         });
         state.touch_controls_mode = Some(self.input_preferences.touch_controls);
+        state.block_palette = debug_block_palette_overlay(
+            &self.assets.mesh_assets.catalog,
+            self.driver.interaction.selected_hotbar_slot(),
+        );
         state
     }
 
@@ -382,11 +395,15 @@ impl ChunkApp {
                 .capability_state
                 .resolve(self.input_preferences),
         );
-        hud.world_hud_visible = !ui_active && self.driver.runtime.is_some();
-        hud.crosshair_visible = hud.world_hud_visible;
+        let palette_active = self.driver.ui_screen() == Some(GameScreen::BlockPalette);
+        hud.world_hud_visible = (!ui_active || palette_active) && self.driver.runtime.is_some();
+        hud.crosshair_visible = !ui_active && self.driver.runtime.is_some();
         hud.hotbar = FlatHotbarOverlay::selected_with_icons(
             self.driver.interaction.selected_hotbar_slot(),
-            debug_hotbar_icons(&self.assets.mesh_assets.catalog),
+            debug_hotbar_icons(
+                self.driver.interaction.hotbar_items(),
+                &self.assets.mesh_assets.catalog,
+            ),
         );
         hud.status = status;
         hud
@@ -1141,6 +1158,10 @@ impl ApplicationHandler for ChunkApp {
                 };
                 let ui_frame = FlatClientUiFrame {
                     render_options: ui_render_options,
+                    block_palette: debug_block_palette_overlay(
+                        &self.assets.mesh_assets.catalog,
+                        self.driver.interaction.selected_hotbar_slot(),
+                    ),
                     hud: Some(flat_hud),
                     loading_progress_overlay,
                     debug: FlatClientDebugFrame {
@@ -1222,6 +1243,8 @@ fn desktop_keyboard_key_from_key_code(key_code: KeyCode) -> Option<KeyboardKey> 
         KeyCode::KeyA => Some(KeyboardKey::KeyA),
         KeyCode::KeyS => Some(KeyboardKey::KeyS),
         KeyCode::KeyD => Some(KeyboardKey::KeyD),
+        KeyCode::KeyE => Some(KeyboardKey::KeyE),
+        KeyCode::KeyB => Some(KeyboardKey::KeyB),
         KeyCode::KeyX => Some(KeyboardKey::KeyX),
         KeyCode::Space => Some(KeyboardKey::Space),
         KeyCode::ShiftLeft => Some(KeyboardKey::ShiftLeft),
@@ -1615,6 +1638,14 @@ mod tests {
         assert_eq!(
             desktop_keyboard_key_from_key_code(KeyCode::KeyD),
             Some(KeyboardKey::KeyD)
+        );
+        assert_eq!(
+            desktop_keyboard_key_from_key_code(KeyCode::KeyE),
+            Some(KeyboardKey::KeyE)
+        );
+        assert_eq!(
+            desktop_keyboard_key_from_key_code(KeyCode::KeyB),
+            Some(KeyboardKey::KeyB)
         );
         assert_eq!(
             desktop_keyboard_key_from_key_code(KeyCode::Space),
