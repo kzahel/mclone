@@ -3,7 +3,11 @@ use mclone_protocol::{
     AcceptTeleportCommand, ClientCommand, MovePlayerCommand, PlayerPositionUpdate,
 };
 
-use crate::{ClientRuntime, block_shapes::block_collision_aabb};
+use crate::{
+    ClientRuntime,
+    block_facts::{BlockFluidKind, block_fluid_height, block_fluid_kind},
+    block_shapes::block_collision_aabb,
+};
 
 pub const NO_CLIP_BOOST_MULTIPLIER: f64 = 3.0;
 pub const MOVING_SLOW_FACTOR: f32 = 0.3;
@@ -19,6 +23,11 @@ pub const LOCAL_PLAYER_AIR_SPRINT_SPEED: f64 = 0.026;
 pub const LOCAL_PLAYER_JUMP_POWER: f64 = 0.42;
 pub const LOCAL_PLAYER_SPRINT_JUMP_IMPULSE: f64 = 0.2;
 pub const LOCAL_PLAYER_GRAVITY: f64 = 0.08;
+pub const LOCAL_PLAYER_FLUID_JUMP_POWER: f64 = 0.04;
+pub const LOCAL_PLAYER_WATER_MOVEMENT_SPEED: f64 = 0.02;
+pub const LOCAL_PLAYER_WATER_SLOWDOWN: f64 = 0.8;
+pub const LOCAL_PLAYER_WATER_SPRINT_SLOWDOWN: f64 = 0.9;
+pub const LOCAL_PLAYER_WATER_VERTICAL_DRAG: f64 = 0.8;
 pub const LOCAL_PLAYER_BLOCK_FRICTION: f64 = 0.6;
 pub const LOCAL_PLAYER_FRICTION_MULTIPLIER: f64 = 0.91;
 pub const LOCAL_PLAYER_VERTICAL_DRAG: f64 = 0.98;
@@ -26,6 +35,8 @@ const LOCAL_PLAYER_GROUND_ACCELERATION_NUMERATOR: f64 = 0.21600002;
 const LOCAL_PLAYER_POSITION_SYNC_DELTA_SQR: f64 = 9.0e-4;
 const LOCAL_PLAYER_POSITION_REMINDER_INTERVAL: u32 = 20;
 const COLLISION_EPSILON: f64 = 1.0e-7;
+const LOCAL_PLAYER_AUTO_JUMP_HEIGHT: f64 = 1.0;
+const LOCAL_PLAYER_AUTO_JUMP_MIN_MOVEMENT_DOT: f64 = -0.15;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlayerInputKey {
@@ -138,6 +149,10 @@ impl PlayerInput {
 
     pub fn has_forward_impulse(self) -> bool {
         self.forward_impulse > 1.0e-5
+    }
+
+    pub fn is_moving(self) -> bool {
+        self.forward_impulse.abs() > 1.0e-5 || self.left_impulse.abs() > 1.0e-5
     }
 
     fn right_axis(self) -> f64 {
@@ -297,7 +312,7 @@ impl LocalPlayerPose {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LocalPlayerController {
     pose: LocalPlayerPose,
     keys: PlayerInputKeys,
@@ -307,6 +322,38 @@ pub struct LocalPlayerController {
     horizontal_collision: bool,
     vertical_collision: bool,
     on_ground: bool,
+    auto_jump_enabled: bool,
+    auto_jump_time: u8,
+    touching_water: bool,
+    eye_in_water: bool,
+    water_height: f64,
+}
+
+impl Default for LocalPlayerController {
+    fn default() -> Self {
+        Self {
+            pose: LocalPlayerPose::default(),
+            keys: PlayerInputKeys::default(),
+            input: PlayerInput::default(),
+            move_sync: LocalPlayerMoveSync::default(),
+            delta_movement: Vec3d::ZERO,
+            horizontal_collision: false,
+            vertical_collision: false,
+            on_ground: false,
+            auto_jump_enabled: true,
+            auto_jump_time: 0,
+            touching_water: false,
+            eye_in_water: false,
+            water_height: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct WaterContact {
+    touching: bool,
+    eye_in_water: bool,
+    height: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -423,6 +470,33 @@ impl LocalPlayerController {
         self.on_ground
     }
 
+    pub const fn auto_jump_enabled(&self) -> bool {
+        self.auto_jump_enabled
+    }
+
+    pub const fn auto_jump_time(&self) -> u8 {
+        self.auto_jump_time
+    }
+
+    pub const fn touching_water(&self) -> bool {
+        self.touching_water
+    }
+
+    pub const fn eye_in_water(&self) -> bool {
+        self.eye_in_water
+    }
+
+    pub const fn water_height(&self) -> f64 {
+        self.water_height
+    }
+
+    pub fn set_auto_jump_enabled(&mut self, enabled: bool) {
+        self.auto_jump_enabled = enabled;
+        if !enabled {
+            self.auto_jump_time = 0;
+        }
+    }
+
     pub fn set_pose(&mut self, pose: LocalPlayerPose) {
         self.pose = pose;
     }
@@ -469,6 +543,8 @@ impl LocalPlayerController {
         self.pose.set_position(position);
         self.pose.set_rot(y_rot_degrees, x_rot_degrees);
         self.clear_delta_movement();
+        self.auto_jump_time = 0;
+        self.clear_water_contact();
         self.on_ground = false;
         ClientCommand::AcceptTeleport(AcceptTeleportCommand {
             id: update.teleport_id,
@@ -501,6 +577,7 @@ impl LocalPlayerController {
     pub fn clear_keys(&mut self) {
         self.keys.clear();
         self.input = PlayerInput::default();
+        self.auto_jump_time = 0;
     }
 
     pub fn tick_input(&mut self, moving_slowly: bool) -> PlayerInput {
@@ -538,6 +615,8 @@ impl LocalPlayerController {
         self.vertical_collision = false;
         self.on_ground = false;
         self.delta_movement = Vec3d::ZERO;
+        self.auto_jump_time = 0;
+        self.clear_water_contact();
         Some(displacement)
     }
 
@@ -565,8 +644,18 @@ impl LocalPlayerController {
             return None;
         }
 
-        let input = self.tick_input_with_movement_impulse(self.keys.shift, movement_impulse);
-        let sprinting = self.keys.sprint && input.has_forward_impulse() && !input.shift_key_down;
+        let mut input = self.tick_input_with_movement_impulse(self.keys.shift, movement_impulse);
+        let auto_jumped = self.consume_auto_jump_input(&mut input);
+        let water_contact = self.update_water_contact(client);
+        let can_sprint_in_medium = !water_contact.touching || water_contact.eye_in_water;
+        let sprinting = self.keys.sprint
+            && input.has_forward_impulse()
+            && !input.shift_key_down
+            && can_sprint_in_medium;
+        if water_contact.touching {
+            return Some(self.tick_water_movement(client, input, step, sprinting, tick_scale));
+        }
+
         if input.jumping && self.on_ground {
             self.delta_movement.y = LOCAL_PLAYER_JUMP_POWER;
             if sprinting {
@@ -590,6 +679,10 @@ impl LocalPlayerController {
 
         let requested = self.delta_movement.scale(tick_scale);
         let collision = self.move_colliding(client, requested);
+        self.update_water_contact(client);
+        if self.should_schedule_auto_jump(client, input, step, collision, auto_jumped) {
+            self.auto_jump_time = 1;
+        }
 
         let mut post_move_delta = self.delta_movement;
         if !nearly_equal(requested.x, collision.traveled.x) {
@@ -623,6 +716,142 @@ impl LocalPlayerController {
         })
     }
 
+    fn tick_water_movement(
+        &mut self,
+        client: &ClientRuntime,
+        input: PlayerInput,
+        step: WalkingMovementStep,
+        sprinting: bool,
+        tick_scale: f64,
+    ) -> WalkingMovementResult {
+        if input.jumping {
+            self.delta_movement.y += LOCAL_PLAYER_FLUID_JUMP_POWER * tick_scale;
+        }
+        if input.shift_key_down {
+            self.delta_movement.y -= LOCAL_PLAYER_FLUID_JUMP_POWER * tick_scale;
+        }
+
+        let acceleration = walking_input_acceleration(
+            input,
+            step.y_rot_degrees,
+            LOCAL_PLAYER_WATER_MOVEMENT_SPEED * walking_speed_multiplier(step.speed_multiplier),
+        )
+        .scale(tick_scale);
+        self.delta_movement = self.delta_movement.add(acceleration);
+
+        let requested = self.delta_movement.scale(tick_scale);
+        let collision = self.move_colliding(client, requested);
+
+        let mut post_move_delta = self.delta_movement;
+        if !nearly_equal(requested.x, collision.traveled.x) {
+            post_move_delta.x = 0.0;
+        }
+        if !nearly_equal(requested.y, collision.traveled.y) {
+            post_move_delta.y = 0.0;
+        }
+        if !nearly_equal(requested.z, collision.traveled.z) {
+            post_move_delta.z = 0.0;
+        }
+
+        let horizontal_drag = if sprinting {
+            LOCAL_PLAYER_WATER_SPRINT_SLOWDOWN
+        } else {
+            LOCAL_PLAYER_WATER_SLOWDOWN
+        }
+        .powf(tick_scale);
+        let vertical_drag = LOCAL_PLAYER_WATER_VERTICAL_DRAG.powf(tick_scale);
+        let mut y_delta = post_move_delta.y * vertical_drag;
+        if !sprinting {
+            y_delta = fluid_falling_adjusted_y(y_delta, tick_scale);
+        }
+
+        self.delta_movement = Vec3d::new(
+            post_move_delta.x * horizontal_drag,
+            y_delta,
+            post_move_delta.z * horizontal_drag,
+        );
+        self.update_water_contact(client);
+
+        WalkingMovementResult {
+            input,
+            sprinting,
+            collision,
+            delta_movement: self.delta_movement,
+        }
+    }
+
+    fn consume_auto_jump_input(&mut self, input: &mut PlayerInput) -> bool {
+        if self.auto_jump_time == 0 {
+            return false;
+        }
+
+        self.auto_jump_time = self.auto_jump_time.saturating_sub(1);
+        input.jumping = true;
+        self.input = *input;
+        true
+    }
+
+    fn should_schedule_auto_jump(
+        &self,
+        client: &ClientRuntime,
+        input: PlayerInput,
+        step: WalkingMovementStep,
+        collision: CollisionMovementResult,
+        auto_jumped: bool,
+    ) -> bool {
+        if !self.auto_jump_enabled
+            || self.auto_jump_time != 0
+            || auto_jumped
+            || !collision.on_ground
+            || !collision.horizontal_collision
+            || input.shift_key_down
+            || input.jumping
+            || !input.is_moving()
+            || self.touching_water
+        {
+            return false;
+        }
+
+        let requested = horizontal_only(collision.requested);
+        let traveled = horizontal_only(collision.traveled);
+        let blocked_movement = requested.subtract(traveled);
+        let candidate_movement =
+            if blocked_movement.length_sqr() > COLLISION_EPSILON * COLLISION_EPSILON {
+                blocked_movement
+            } else {
+                requested
+            };
+        if candidate_movement.length_sqr() <= COLLISION_EPSILON * COLLISION_EPSILON {
+            return false;
+        }
+
+        let forward = horizontal_only(view_vector_from_rot_degrees(0.0, step.y_rot_degrees));
+        let forward = normalize_or_zero(forward);
+        let candidate_direction = normalize_or_zero(candidate_movement);
+        if forward != Vec3d::ZERO
+            && candidate_direction != Vec3d::ZERO
+            && dot(forward, candidate_direction) < LOCAL_PLAYER_AUTO_JUMP_MIN_MOVEMENT_DOT
+        {
+            return false;
+        }
+
+        can_auto_jump_over(client, self.pose.bounding_box(), candidate_movement)
+    }
+
+    fn update_water_contact(&mut self, client: &ClientRuntime) -> WaterContact {
+        let contact = water_contact_at_pose(client, self.pose);
+        self.touching_water = contact.touching;
+        self.eye_in_water = contact.eye_in_water;
+        self.water_height = contact.height;
+        contact
+    }
+
+    fn clear_water_contact(&mut self) {
+        self.touching_water = false;
+        self.eye_in_water = false;
+        self.water_height = 0.0;
+    }
+
     pub fn move_colliding(
         &mut self,
         client: &ClientRuntime,
@@ -646,6 +875,107 @@ impl LocalPlayerController {
             on_ground: self.on_ground,
         }
     }
+}
+
+fn can_auto_jump_over(client: &ClientRuntime, bounding_box: Aabb, movement: Vec3d) -> bool {
+    let movement = horizontal_only(movement);
+    if movement.length_sqr() <= COLLISION_EPSILON * COLLISION_EPSILON {
+        return false;
+    }
+
+    let raised = bounding_box.move_by(Vec3d::new(0.0, LOCAL_PLAYER_AUTO_JUMP_HEIGHT, 0.0));
+    if !solid_block_aabbs_in(client, raised).is_empty() {
+        return false;
+    }
+
+    let raised_movement = collide_movement(client, raised, movement);
+    raised_movement.length_sqr() > COLLISION_EPSILON * COLLISION_EPSILON
+        && raised_movement.length_sqr() >= movement.length_sqr() * 0.5
+}
+
+fn water_contact_at_pose(client: &ClientRuntime, pose: LocalPlayerPose) -> WaterContact {
+    let body = water_contact_in_aabb(client, deflate_aabb(pose.bounding_box(), 0.001));
+    let eye = pose.eye_position();
+    let eye_probe = Vec3d::new(eye.x, eye.y - 0.11111111, eye.z);
+    WaterContact {
+        eye_in_water: water_at_position(client, eye_probe),
+        ..body
+    }
+}
+
+fn water_contact_in_aabb(client: &ClientRuntime, area: Aabb) -> WaterContact {
+    if !area.is_finite() {
+        return WaterContact::default();
+    }
+
+    let min_x = area.min_x.floor() as i32;
+    let min_y = area.min_y.floor() as i32;
+    let min_z = area.min_z.floor() as i32;
+    let max_x = area.max_x.ceil() as i32;
+    let max_y = area.max_y.ceil() as i32;
+    let max_z = area.max_z.ceil() as i32;
+    let mut contact = WaterContact::default();
+
+    for y in min_y..max_y {
+        for z in min_z..max_z {
+            for x in min_x..max_x {
+                let pos = BlockPos::new(x, y, z);
+                let Some(state) = client.block_state_at_block_pos(pos) else {
+                    continue;
+                };
+                if block_fluid_kind(state) != BlockFluidKind::Water {
+                    continue;
+                }
+                let Some(height) = block_fluid_height(state) else {
+                    continue;
+                };
+                let fluid_top = f64::from(y) + f64::from(height);
+                if fluid_top >= area.min_y {
+                    contact.touching = true;
+                    contact.height = contact.height.max(fluid_top - area.min_y);
+                }
+            }
+        }
+    }
+
+    contact
+}
+
+fn water_at_position(client: &ClientRuntime, position: Vec3d) -> bool {
+    if !position.is_finite() {
+        return false;
+    }
+
+    let pos = BlockPos::containing(position);
+    let Some(state) = client.block_state_at_block_pos(pos) else {
+        return false;
+    };
+    if block_fluid_kind(state) != BlockFluidKind::Water {
+        return false;
+    }
+    let Some(height) = block_fluid_height(state) else {
+        return false;
+    };
+    position.y < f64::from(pos.y) + f64::from(height)
+}
+
+fn deflate_aabb(aabb: Aabb, amount: f64) -> Aabb {
+    if !amount.is_finite() || amount <= 0.0 {
+        return aabb;
+    }
+    Aabb::new(
+        aabb.min_x + amount,
+        aabb.min_y + amount,
+        aabb.min_z + amount,
+        aabb.max_x - amount,
+        aabb.max_y - amount,
+        aabb.max_z - amount,
+    )
+}
+
+fn fluid_falling_adjusted_y(y_delta: f64, tick_scale: f64) -> f64 {
+    let gravity = (LOCAL_PLAYER_GRAVITY / 16.0) * tick_scale;
+    y_delta - gravity
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -938,6 +1268,14 @@ fn sanitize_movement_impulse(value: f32) -> f32 {
     }
 }
 
+fn horizontal_only(value: Vec3d) -> Vec3d {
+    Vec3d::new(value.x, 0.0, value.z)
+}
+
+fn dot(a: Vec3d, b: Vec3d) -> f64 {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
 fn cross(a: Vec3d, b: Vec3d) -> Vec3d {
     Vec3d::new(
         a.y * b.z - a.z * b.y,
@@ -958,6 +1296,7 @@ fn normalize_or_zero(value: Vec3d) -> Vec3d {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::block_facts::WATER_BLOCK_STATE_ID;
     use mclone_core::{
         AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkSnapshot,
         ChunkStatus, SECTION_HEIGHT, chunk_section_index,
@@ -1008,6 +1347,41 @@ mod tests {
             -LOCAL_PLAYER_GRAVITY * LOCAL_PLAYER_VERTICAL_DRAG,
             0.0,
         ));
+    }
+
+    fn controller_on_ground() -> LocalPlayerController {
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 1.0, 0.5),
+            ..Default::default()
+        });
+        controller
+    }
+
+    fn forward_step_client(extra_blocks: &[(BlockPos, BlockStateId)]) -> ClientRuntime {
+        let mut blocks = vec![(BlockPos::new(0, 0, 0), BlockStateId(7))];
+        blocks.extend_from_slice(extra_blocks);
+        client_with_blocks(&blocks)
+    }
+
+    fn water_column_client() -> ClientRuntime {
+        client_with_blocks(&[
+            (BlockPos::new(0, 1, 0), WATER_BLOCK_STATE_ID),
+            (BlockPos::new(0, 2, 0), WATER_BLOCK_STATE_ID),
+        ])
+    }
+
+    fn shallow_water_client() -> ClientRuntime {
+        client_with_blocks(&[(BlockPos::new(0, 1, 0), WATER_BLOCK_STATE_ID)])
+    }
+
+    fn controller_in_water() -> LocalPlayerController {
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 1.0, 0.5),
+            ..Default::default()
+        });
+        controller
     }
 
     #[test]
@@ -1568,11 +1942,7 @@ mod tests {
             (BlockPos::new(0, 0, 0), BlockStateId(7)),
             (BlockPos::new(0, 1, 1), BlockStateId(7)),
         ]);
-        let mut controller = LocalPlayerController::new();
-        controller.set_pose(LocalPlayerPose {
-            position: Vec3d::new(0.5, 1.0, 0.5),
-            ..Default::default()
-        });
+        let mut controller = controller_on_ground();
         settle_controller_on_ground(&mut controller, &client);
         controller.set_delta_movement(Vec3d::new(
             0.0,
@@ -1588,6 +1958,222 @@ mod tests {
         assert!(result.collision.horizontal_collision);
         assert!(result.collision.on_ground);
         assert_approx_eq(result.delta_movement.z, 0.0);
+    }
+
+    #[test]
+    fn walking_movement_auto_jumps_over_one_block_obstacle() {
+        let client = forward_step_client(&[(BlockPos::new(0, 1, 1), BlockStateId(7))]);
+        let mut controller = controller_on_ground();
+        settle_controller_on_ground(&mut controller, &client);
+        controller.set_key(PlayerInputKey::Forward, true);
+        controller.set_delta_movement(Vec3d::new(
+            0.0,
+            -LOCAL_PLAYER_GRAVITY * LOCAL_PLAYER_VERTICAL_DRAG,
+            1.0,
+        ));
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        assert!(controller.auto_jump_enabled());
+        assert_approx_eq(result.collision.traveled.z, 0.2);
+        assert!(result.collision.horizontal_collision);
+        assert!(result.collision.on_ground);
+        assert!(!result.input.jumping);
+        assert_eq!(controller.auto_jump_time(), 1);
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        assert!(result.input.jumping);
+        assert_approx_eq(result.collision.traveled.y, LOCAL_PLAYER_JUMP_POWER);
+        assert!(!result.collision.on_ground);
+        assert_eq!(controller.auto_jump_time(), 0);
+        assert_approx_eq(controller.pose().position.y, 1.0 + LOCAL_PLAYER_JUMP_POWER);
+    }
+
+    #[test]
+    fn walking_movement_auto_jump_respects_sneak_and_disabled_option() {
+        let client = forward_step_client(&[(BlockPos::new(0, 1, 1), BlockStateId(7))]);
+        for (sneaking, enabled) in [(true, true), (false, false)] {
+            let mut controller = controller_on_ground();
+            settle_controller_on_ground(&mut controller, &client);
+            controller.set_key(PlayerInputKey::Forward, true);
+            controller.set_key(PlayerInputKey::Shift, sneaking);
+            controller.set_auto_jump_enabled(enabled);
+            controller.set_delta_movement(Vec3d::new(
+                0.0,
+                -LOCAL_PLAYER_GRAVITY * LOCAL_PLAYER_VERTICAL_DRAG,
+                1.0,
+            ));
+
+            let result = controller
+                .tick_walking_movement(&client, one_java_tick_step(0.0))
+                .expect("walking movement");
+
+            assert!(result.collision.horizontal_collision);
+            assert!(result.collision.on_ground);
+            assert_eq!(controller.auto_jump_time(), 0);
+        }
+    }
+
+    #[test]
+    fn walking_movement_auto_jump_ignores_backwards_collisions() {
+        let client = client_with_blocks(&[
+            (BlockPos::new(0, 0, 1), BlockStateId(7)),
+            (BlockPos::new(0, 1, 0), BlockStateId(7)),
+        ]);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 1.0, 1.5),
+            ..Default::default()
+        });
+        settle_controller_on_ground(&mut controller, &client);
+        controller.set_key(PlayerInputKey::Backward, true);
+        controller.set_delta_movement(Vec3d::new(
+            0.0,
+            -LOCAL_PLAYER_GRAVITY * LOCAL_PLAYER_VERTICAL_DRAG,
+            -1.0,
+        ));
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        assert_approx_eq(result.collision.traveled.z, -0.2);
+        assert!(result.collision.horizontal_collision);
+        assert!(result.collision.on_ground);
+        assert_eq!(controller.auto_jump_time(), 0);
+    }
+
+    #[test]
+    fn walking_movement_auto_jump_requires_headroom() {
+        let client = forward_step_client(&[
+            (BlockPos::new(0, 1, 1), BlockStateId(7)),
+            (BlockPos::new(0, 2, 1), BlockStateId(7)),
+        ]);
+        let mut controller = controller_on_ground();
+        settle_controller_on_ground(&mut controller, &client);
+        controller.set_key(PlayerInputKey::Forward, true);
+        controller.set_delta_movement(Vec3d::new(
+            0.0,
+            -LOCAL_PLAYER_GRAVITY * LOCAL_PLAYER_VERTICAL_DRAG,
+            1.0,
+        ));
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        assert!(result.collision.horizontal_collision);
+        assert!(result.collision.on_ground);
+        assert_eq!(controller.auto_jump_time(), 0);
+    }
+
+    #[test]
+    fn walking_movement_swims_in_water_with_java_drag() {
+        let client = water_column_client();
+        let mut controller = controller_in_water();
+        controller.set_key(PlayerInputKey::Forward, true);
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        assert!(controller.touching_water());
+        assert!(controller.eye_in_water());
+        assert!(controller.water_height() > 1.0);
+        assert_approx_eq(
+            result.collision.traveled.z,
+            LOCAL_PLAYER_WATER_MOVEMENT_SPEED,
+        );
+        assert_approx_eq(
+            result.delta_movement.z,
+            LOCAL_PLAYER_WATER_MOVEMENT_SPEED * LOCAL_PLAYER_WATER_SLOWDOWN,
+        );
+        assert_approx_eq(result.delta_movement.y, -LOCAL_PLAYER_GRAVITY / 16.0);
+    }
+
+    #[test]
+    fn walking_movement_jumps_up_in_water() {
+        let client = water_column_client();
+        let mut controller = controller_in_water();
+        controller.set_key(PlayerInputKey::Jump, true);
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        assert!(controller.touching_water());
+        assert!(result.input.jumping);
+        assert_approx_eq(result.collision.traveled.y, LOCAL_PLAYER_FLUID_JUMP_POWER);
+        assert_approx_eq(
+            result.delta_movement.y,
+            LOCAL_PLAYER_FLUID_JUMP_POWER * LOCAL_PLAYER_WATER_VERTICAL_DRAG
+                - LOCAL_PLAYER_GRAVITY / 16.0,
+        );
+    }
+
+    #[test]
+    fn walking_movement_shift_descends_in_water() {
+        let client = water_column_client();
+        let mut controller = controller_in_water();
+        controller.set_key(PlayerInputKey::Shift, true);
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        assert!(controller.touching_water());
+        assert!(result.input.shift_key_down);
+        assert_approx_eq(result.collision.traveled.y, -LOCAL_PLAYER_FLUID_JUMP_POWER);
+        assert_approx_eq(
+            result.delta_movement.y,
+            -LOCAL_PLAYER_FLUID_JUMP_POWER * LOCAL_PLAYER_WATER_VERTICAL_DRAG
+                - LOCAL_PLAYER_GRAVITY / 16.0,
+        );
+    }
+
+    #[test]
+    fn walking_movement_sprint_swims_with_java_water_slowdown() {
+        let client = water_column_client();
+        let mut controller = controller_in_water();
+        controller.set_key(PlayerInputKey::Forward, true);
+        controller.set_key(PlayerInputKey::Sprint, true);
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        assert!(result.sprinting);
+        assert_approx_eq(
+            result.delta_movement.z,
+            LOCAL_PLAYER_WATER_MOVEMENT_SPEED * LOCAL_PLAYER_WATER_SPRINT_SLOWDOWN,
+        );
+        assert_approx_eq(result.delta_movement.y, 0.0);
+    }
+
+    #[test]
+    fn walking_movement_shallow_water_disables_sprint_swim() {
+        let client = shallow_water_client();
+        let mut controller = controller_in_water();
+        controller.set_key(PlayerInputKey::Forward, true);
+        controller.set_key(PlayerInputKey::Sprint, true);
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        assert!(controller.touching_water());
+        assert!(!controller.eye_in_water());
+        assert!(!result.sprinting);
+        assert_approx_eq(
+            result.delta_movement.z,
+            LOCAL_PLAYER_WATER_MOVEMENT_SPEED * LOCAL_PLAYER_WATER_SLOWDOWN,
+        );
+        assert_approx_eq(result.delta_movement.y, -LOCAL_PLAYER_GRAVITY / 16.0);
     }
 
     #[test]
