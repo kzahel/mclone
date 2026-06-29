@@ -1,8 +1,9 @@
 # 107: XR Stereo Uniform Ownership and Multiview
 
-Status: active high-priority prerequisite; Slices A-B landed. Created after
-`d0c5161` (`Restore XR per-eye command submission`) rolled back the unsafe
-single-submit Quest XR optimization from `264c723`.
+Status: active high-priority prerequisite; Slices A-B landed, Slice C code
+landed pending headset visual check. Created after `d0c5161` (`Restore XR
+per-eye command submission`) rolled back the unsafe single-submit Quest XR
+optimization from `264c723`.
 
 ## Goal
 
@@ -41,8 +42,9 @@ resource lifetime issue across the stereo pass.
 
 ## Affected Surface
 
-The problem is broader than chunk terrain. The same per-view shared-uniform
-pattern exists across the renderers that participate in XR frames:
+The problem is broader than chunk terrain. The same per-view shared-uniform or
+shared queue-written view-data pattern exists across the renderers that
+participate in XR frames:
 
 - chunk terrain (`mclone-render/src/chunk.rs`)
 - sky (`mclone-render/src/sky_render.rs`)
@@ -176,6 +178,16 @@ Acceptance:
 - no per-frame heap allocation is introduced for normal uniform writes.
 
 ### Slice C - Migrate All XR Per-View Renderers
+
+**Code landed 2026-06-29; headset visual check pending.** Chunk terrain, sky,
+actors/entities, selection outline, and world GUI now use
+`PerViewUniformBuffer` with dynamic uniform offsets and two stereo-capable slots.
+Existing flat and XR per-eye-submit paths still bind slot `0`, so behavior is
+unchanged; Slice D must thread explicit left/right slot selection through the
+stereo caller before any one-submit proof. Screen effects have no projection
+uniform today, but the underwater overlay vertex buffer now uses two per-view
+slots and binds the selected slice, removing the same queue-write clobber risk
+from that pass.
 
 Move chunk terrain, sky, actors, selection outline, world GUI, and screen effects
 onto the same ownership model. Do not start one-submit until this slice is

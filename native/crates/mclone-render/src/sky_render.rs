@@ -18,6 +18,7 @@ use crate::color_profile::{
     color_transform_wgpu,
 };
 use crate::sky::sunrise_color;
+use crate::uniform::{PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
 
 const SKY_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = 64;
 const SKY_VERTEX_FLOAT_COUNT: usize = 7; // position(3) + color(4)
@@ -42,7 +43,7 @@ type SkyVertex = [f32; SKY_VERTEX_FLOAT_COUNT];
 pub struct SkyRenderer {
     disc_pipeline: wgpu::RenderPipeline,
     glow_pipeline: wgpu::RenderPipeline,
-    uniform_buffer: wgpu::Buffer,
+    uniforms: PerViewUniformBuffer,
     bind_group: wgpu::BindGroup,
     disc_vertex_buffer: wgpu::Buffer,
     disc_index_buffer: wgpu::Buffer,
@@ -74,32 +75,20 @@ impl SkyRenderer {
             label: Some("mclone_sky_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sky.wgsl").into()),
         });
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mclone_sky_uniforms"),
-            size: SKY_UNIFORM_BYTE_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniforms = PerViewUniformBuffer::new(
+            device,
+            "mclone_sky_uniforms",
+            SKY_UNIFORM_BYTE_SIZE,
+            STEREO_VIEW_SLOT_COUNT,
+        );
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_sky_bind_group_layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
+            entries: &[uniforms.layout_entry(0, wgpu::ShaderStages::VERTEX)],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("mclone_sky_bind_group"),
             layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
+            entries: &[uniforms.bind_group_entry(0)],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mclone_sky_pipeline_layout"),
@@ -207,7 +196,7 @@ impl SkyRenderer {
         Self {
             disc_pipeline,
             glow_pipeline,
-            uniform_buffer,
+            uniforms,
             bind_group,
             disc_vertex_buffer,
             disc_index_buffer,
@@ -239,9 +228,9 @@ impl SkyRenderer {
             clear_color.g as f32,
             clear_color.b as f32,
         ];
-        queue.write_buffer(
-            &self.uniform_buffer,
-            0,
+        let uniform_offset = self.uniforms.write_slot(
+            queue,
+            SINGLE_VIEW_SLOT,
             &matrix_bytes(sky_view_projection.to_cols_array_2d()),
         );
         queue.write_buffer(
@@ -274,7 +263,7 @@ impl SkyRenderer {
             depth_stencil_attachment: None,
             ..Default::default()
         });
-        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_bind_group(0, &self.bind_group, &[uniform_offset]);
         pass.set_pipeline(&self.disc_pipeline);
         pass.set_vertex_buffer(0, self.disc_vertex_buffer.slice(..));
         pass.set_index_buffer(self.disc_index_buffer.slice(..), wgpu::IndexFormat::Uint32);

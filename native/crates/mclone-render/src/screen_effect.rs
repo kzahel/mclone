@@ -1,8 +1,10 @@
+use std::ops::Range;
+
 use anyhow::{Context, Result, anyhow, bail};
 use mclone_assets::{AssetPath, AssetSource};
-use wgpu::util::DeviceExt;
 
 use crate::target::RenderFrameTarget;
+use crate::uniform::{SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
 
 pub const VANILLA_UNDERWATER_ALPHA: f32 = 0.1;
 pub const VANILLA_UNDERWATER_FOV_MULTIPLIER: f32 = 0.85714287;
@@ -170,7 +172,7 @@ pub struct ScreenEffectsRenderer {
     pipeline: wgpu::RenderPipeline,
     underwater_texture: GpuScreenEffectTexture,
     vertex_buffer: Option<wgpu::Buffer>,
-    vertex_buffer_size: wgpu::BufferAddress,
+    vertex_buffer_slot_size: wgpu::BufferAddress,
 }
 
 impl ScreenEffectsRenderer {
@@ -282,7 +284,7 @@ impl ScreenEffectsRenderer {
             pipeline,
             underwater_texture,
             vertex_buffer: None,
-            vertex_buffer_size: 0,
+            vertex_buffer_slot_size: 0,
         })
     }
 
@@ -295,7 +297,7 @@ impl ScreenEffectsRenderer {
         overlay: UnderwaterOverlay,
     ) {
         let vertices = underwater_quad_vertices(overlay);
-        self.upload_vertices(device, queue, &vertices);
+        let vertex_range = self.upload_vertices(device, queue, SINGLE_VIEW_SLOT, &vertices);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_underwater_screen_effect_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -316,30 +318,42 @@ impl ScreenEffectsRenderer {
             self.vertex_buffer
                 .as_ref()
                 .expect("screen effect vertex buffer exists")
-                .slice(..),
+                .slice(vertex_range),
         );
         pass.draw(0..6, 0..1);
     }
 
-    fn upload_vertices(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
+    fn upload_vertices(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        slot: u32,
+        vertices: &[f32],
+    ) -> Range<wgpu::BufferAddress> {
+        assert!(
+            slot < STEREO_VIEW_SLOT_COUNT,
+            "screen effect vertex slot {slot} is outside slot count {STEREO_VIEW_SLOT_COUNT}"
+        );
         let bytes = f32_bytes_vec(vertices);
-        let required_size = bytes.len().max(4) as wgpu::BufferAddress;
+        let required_slot_size = bytes.len().max(4) as wgpu::BufferAddress;
         let needs_recreate = self
             .vertex_buffer
             .as_ref()
-            .is_none_or(|_| self.vertex_buffer_size < required_size);
+            .is_none_or(|_| self.vertex_buffer_slot_size < required_slot_size);
         if needs_recreate {
-            self.vertex_buffer = Some(device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("mclone_screen_effect_vertices"),
-                    contents: &bytes,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                },
-            ));
-            self.vertex_buffer_size = required_size;
-        } else if let Some(buffer) = &self.vertex_buffer {
-            queue.write_buffer(buffer, 0, &bytes);
+            self.vertex_buffer_slot_size = required_slot_size;
+            self.vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mclone_screen_effect_vertices"),
+                size: self.vertex_buffer_slot_size * STEREO_VIEW_SLOT_COUNT as wgpu::BufferAddress,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
         }
+        let slot_offset = self.vertex_buffer_slot_size * slot as wgpu::BufferAddress;
+        if let Some(buffer) = &self.vertex_buffer {
+            queue.write_buffer(buffer, slot_offset, &bytes);
+        }
+        slot_offset..slot_offset + bytes.len() as wgpu::BufferAddress
     }
 }
 

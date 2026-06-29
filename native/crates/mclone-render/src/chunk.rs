@@ -22,6 +22,7 @@ use crate::color_profile::{RenderColorProfile, RenderConfig};
 use crate::fog::RenderFog;
 use crate::target::RenderFrameTarget;
 use crate::texture_mips::generate_rgba_mip_chain;
+use crate::uniform::{PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
@@ -1074,7 +1075,7 @@ impl ChunkDepthTarget {
 
 pub struct ChunkRenderer {
     pipeline: wgpu::RenderPipeline,
-    uniform_buffer: wgpu::Buffer,
+    uniforms: PerViewUniformBuffer,
     bind_group: wgpu::BindGroup,
 }
 
@@ -1084,32 +1085,20 @@ impl ChunkRenderer {
             label: Some("mclone_chunk_flat_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/chunk_flat.wgsl").into()),
         });
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mclone_chunk_uniforms"),
-            size: UNIFORM_BYTE_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniforms = PerViewUniformBuffer::new(
+            device,
+            "mclone_chunk_uniforms",
+            UNIFORM_BYTE_SIZE,
+            STEREO_VIEW_SLOT_COUNT,
+        );
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_chunk_bind_group_layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
+            entries: &[uniforms.layout_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT)],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("mclone_chunk_bind_group"),
             layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
+            entries: &[uniforms.bind_group_entry(0)],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mclone_chunk_pipeline_layout"),
@@ -1168,7 +1157,7 @@ impl ChunkRenderer {
         });
         Self {
             pipeline,
-            uniform_buffer,
+            uniforms,
             bind_group,
         }
     }
@@ -1177,7 +1166,7 @@ impl ChunkRenderer {
 pub struct TexturedChunkRenderer {
     opaque_pipeline: wgpu::RenderPipeline,
     translucent_pipeline: wgpu::RenderPipeline,
-    uniform_buffer: wgpu::Buffer,
+    uniforms: PerViewUniformBuffer,
     bind_group: wgpu::BindGroup,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     color_format: wgpu::TextureFormat,
@@ -1189,33 +1178,21 @@ impl TexturedChunkRenderer {
             label: Some("mclone_chunk_textured_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/chunk_textured.wgsl").into()),
         });
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mclone_textured_chunk_uniforms"),
-            size: UNIFORM_BYTE_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniforms = PerViewUniformBuffer::new(
+            device,
+            "mclone_textured_chunk_uniforms",
+            UNIFORM_BYTE_SIZE,
+            STEREO_VIEW_SLOT_COUNT,
+        );
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("mclone_textured_chunk_uniform_bind_group_layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
+                entries: &[uniforms.layout_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT)],
             });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("mclone_textured_chunk_uniform_bind_group"),
             layout: &uniform_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
+            entries: &[uniforms.bind_group_entry(0)],
         });
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1265,7 +1242,7 @@ impl TexturedChunkRenderer {
         Self {
             opaque_pipeline,
             translucent_pipeline,
-            uniform_buffer,
+            uniforms,
             bind_group,
             texture_bind_group_layout,
             color_format,
@@ -1387,9 +1364,9 @@ impl ChunkDrawResources {
         target: ChunkRenderTarget<'_>,
         render_view: ChunkRenderView,
     ) -> Result<()> {
-        queue.write_buffer(
-            &self.renderer.uniform_buffer,
-            0,
+        let uniform_offset = self.renderer.uniforms.write_slot(
+            queue,
+            SINGLE_VIEW_SLOT,
             &uniform_bytes(
                 render_view,
                 TexturedSectionRenderOptions::default(),
@@ -1418,7 +1395,7 @@ impl ChunkDrawResources {
             ..Default::default()
         });
         pass.set_pipeline(&self.renderer.pipeline);
-        pass.set_bind_group(0, &self.renderer.bind_group, &[]);
+        pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
         pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
         pass.set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.mesh.index_count, 0, 0..1);
@@ -1473,9 +1450,9 @@ impl TexturedChunkDrawResources {
         target: ChunkRenderTarget<'_>,
         render_view: ChunkRenderView,
     ) -> Result<()> {
-        queue.write_buffer(
-            &self.renderer.uniform_buffer,
-            0,
+        let uniform_offset = self.renderer.uniforms.write_slot(
+            queue,
+            SINGLE_VIEW_SLOT,
             &uniform_bytes(
                 render_view,
                 TexturedSectionRenderOptions::default(),
@@ -1503,7 +1480,7 @@ impl TexturedChunkDrawResources {
             }),
             ..Default::default()
         });
-        pass.set_bind_group(0, &self.renderer.bind_group, &[]);
+        pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
         pass.set_bind_group(1, &self.atlas.bind_group, &[]);
         pass.set_pipeline(&self.renderer.opaque_pipeline);
         draw_textured_mesh_range(&mut pass, &self.mesh, self.mesh.opaque_index_range());
@@ -1791,9 +1768,9 @@ impl TexturedSectionDrawResources {
             timing.cull_ms = elapsed_ms(cull_start.elapsed());
         }
         let uniform_start = timing.as_ref().map(|_| Instant::now());
-        queue.write_buffer(
-            &self.renderer.uniform_buffer,
-            0,
+        let uniform_offset = self.renderer.uniforms.write_slot(
+            queue,
+            SINGLE_VIEW_SLOT,
             &uniform_bytes(render_view, options, self.renderer.color_format),
         );
         if let (Some(timing), Some(uniform_start)) = (&mut timing, uniform_start) {
@@ -1846,7 +1823,7 @@ impl TexturedSectionDrawResources {
                 }),
                 ..Default::default()
             });
-            pass.set_bind_group(0, &self.renderer.bind_group, &[]);
+            pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
             pass.set_bind_group(1, &self.atlas.bind_group, &[]);
             pass.set_pipeline(&self.renderer.opaque_pipeline);
             for (key, mesh) in &self.sections {

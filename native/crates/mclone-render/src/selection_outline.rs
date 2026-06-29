@@ -5,7 +5,7 @@ use wgpu::util::DeviceExt;
 use crate::{
     chunk::{ChunkDepthTarget, ChunkRenderView, DEPTH_FORMAT},
     target::RenderFrameTarget,
-    uniform::{PerViewUniformBuffer, SINGLE_VIEW_UNIFORM_SLOT},
+    uniform::{PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT},
 };
 
 const OUTLINE_WGSL: &str = r#"
@@ -92,8 +92,12 @@ impl SelectionOutlineRenderer {
             label: Some("mclone_selection_outline_shader"),
             source: wgpu::ShaderSource::Wgsl(OUTLINE_WGSL.into()),
         });
-        let uniforms =
-            PerViewUniformBuffer::new(device, "mclone_selection_outline_uniforms", 64, 1);
+        let uniforms = PerViewUniformBuffer::new(
+            device,
+            "mclone_selection_outline_uniforms",
+            64,
+            STEREO_VIEW_SLOT_COUNT,
+        );
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_selection_outline_bind_group_layout"),
             entries: &[uniforms.layout_entry(0, wgpu::ShaderStages::VERTEX)],
@@ -190,7 +194,7 @@ impl SelectionOutlineRenderer {
         self.upload_vertices(device, queue, &vertices);
         let uniform_offset = self.uniforms.write_slot(
             queue,
-            SINGLE_VIEW_UNIFORM_SLOT,
+            SINGLE_VIEW_SLOT,
             &matrix_bytes(render_view.view_projection),
         );
 

@@ -1,6 +1,7 @@
 use std::num::NonZeroU64;
 
-pub const SINGLE_VIEW_UNIFORM_SLOT: u32 = 0;
+pub const SINGLE_VIEW_SLOT: u32 = 0;
+pub const STEREO_VIEW_SLOT_COUNT: u32 = 2;
 
 /// Uniform buffer storage for per-view data that may need multiple live copies
 /// inside one GPU submission.

@@ -5,6 +5,7 @@ use wgpu::util::DeviceExt;
 use crate::chunk::{ChunkRenderView, DEPTH_FORMAT, TexturedSectionRenderOptions};
 use crate::light_texture::FULL_BRIGHT;
 use crate::target::RenderFrameTarget;
+use crate::uniform::{PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
 
 const ACTOR_VERTEX_BYTE_LEN: usize = 3 * std::mem::size_of::<f32>()
     + 2 * std::mem::size_of::<f32>()
@@ -185,9 +186,9 @@ impl ActorDrawResources {
             });
         }
 
-        queue.write_buffer(
-            &self.renderer.uniform_buffer,
-            0,
+        let uniform_offset = self.renderer.uniforms.write_slot(
+            queue,
+            SINGLE_VIEW_SLOT,
             &uniform_bytes(render_view, render_options),
         );
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -222,7 +223,7 @@ impl ActorDrawResources {
             ..Default::default()
         });
         pass.set_pipeline(&self.renderer.pipeline);
-        pass.set_bind_group(0, &self.renderer.bind_group, &[]);
+        pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
         pass.set_bind_group(1, &self.atlas.bind_group, &[]);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -239,7 +240,7 @@ impl ActorDrawResources {
 
 struct ActorRenderer {
     pipeline: wgpu::RenderPipeline,
-    uniform_buffer: wgpu::Buffer,
+    uniforms: PerViewUniformBuffer,
     bind_group: wgpu::BindGroup,
     texture_bind_group_layout: wgpu::BindGroupLayout,
 }
@@ -250,32 +251,20 @@ impl ActorRenderer {
             label: Some("mclone_actor_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/entity_actor.wgsl").into()),
         });
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mclone_actor_uniforms"),
-            size: UNIFORM_BYTE_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniforms = PerViewUniformBuffer::new(
+            device,
+            "mclone_actor_uniforms",
+            UNIFORM_BYTE_SIZE,
+            STEREO_VIEW_SLOT_COUNT,
+        );
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_actor_bind_group_layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
+            entries: &[uniforms.layout_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT)],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("mclone_actor_bind_group"),
             layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
+            entries: &[uniforms.bind_group_entry(0)],
         });
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -367,7 +356,7 @@ impl ActorRenderer {
 
         Self {
             pipeline,
-            uniform_buffer,
+            uniforms,
             bind_group,
             texture_bind_group_layout,
         }
