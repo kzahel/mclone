@@ -785,6 +785,7 @@ where
     BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
 {
     let mut timing = FullFrameRenderTiming::default();
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
     let summary = render_full_frame_for_view_inner(
         frame,
         depth,

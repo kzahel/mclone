@@ -26,7 +26,7 @@ use mclone_core::{ChunkPos, Vec3d, time};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
-    ChunkDepthTarget, ChunkRenderView, PreparedTexturedSectionRecords,
+    ChunkDepthTarget, ChunkProjectionKind, ChunkRenderView, PreparedTexturedSectionRecords,
     TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
 use mclone_render::entity::ActorDrawResources;
@@ -2723,6 +2723,7 @@ pub fn chunk_render_view_from_xr_render_view(
         fov_y_radians: view.fov_y_radians,
         z_near: view.z_near,
         z_far: view.z_far,
+        projection_kind: ChunkProjectionKind::External,
     }
 }
 
@@ -3707,6 +3708,7 @@ mod tests {
             fov_y_radians: 1.0,
             z_near: XR_NEAR,
             z_far: XR_FAR,
+            projection_kind: ChunkProjectionKind::External,
         }
     }
 }

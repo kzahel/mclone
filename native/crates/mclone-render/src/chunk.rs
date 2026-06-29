@@ -101,6 +101,7 @@ impl ChunkCamera {
             fov_y_radians: self.fov_y_radians,
             z_near: self.z_near,
             z_far: self.z_far,
+            projection_kind: ChunkProjectionKind::CameraPerspective,
         }
     }
 
@@ -162,6 +163,12 @@ impl ChunkCamera {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChunkProjectionKind {
+    CameraPerspective,
+    External,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChunkRenderView {
     pub view: Mat4,
@@ -175,6 +182,7 @@ pub struct ChunkRenderView {
     pub fov_y_radians: f32,
     pub z_near: f32,
     pub z_far: f32,
+    pub projection_kind: ChunkProjectionKind,
 }
 
 impl ChunkRenderView {
@@ -183,7 +191,10 @@ impl ChunkRenderView {
     }
 
     pub fn with_fov_multiplier(self, multiplier: f32) -> Self {
-        if !multiplier.is_finite() || multiplier <= 0.0 {
+        if self.projection_kind != ChunkProjectionKind::CameraPerspective
+            || !multiplier.is_finite()
+            || multiplier <= 0.0
+        {
             return self;
         }
         let fov_y_radians = self.fov_y_radians * multiplier;
@@ -2086,6 +2097,24 @@ mod tests {
     }
 
     #[test]
+    fn external_render_view_ignores_underwater_fov_multiplier() {
+        let camera = ChunkCamera {
+            eye: [0.0, 64.0, 0.0],
+            target: [0.0, 64.0, -1.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 70.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 256.0,
+        };
+        let external = ChunkRenderView {
+            projection_kind: ChunkProjectionKind::External,
+            ..camera.render_view(1280, 720)
+        };
+
+        assert_eq!(external.with_fov_multiplier(0.85714287), external);
+    }
+
+    #[test]
     fn textured_render_options_serialize_fullbright_and_sky_darken() {
         let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
         let bytes = uniform_bytes(
@@ -2563,6 +2592,7 @@ mod tests {
             fov_y_radians,
             z_near,
             z_far,
+            projection_kind: ChunkProjectionKind::CameraPerspective,
         }
     }
 
