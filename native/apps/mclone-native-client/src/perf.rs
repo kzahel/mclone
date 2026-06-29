@@ -22,7 +22,7 @@ use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_render_session::actor_instances_from_presentations;
-use mclone_ui::{GameUi, GuiScale};
+use mclone_ui::{GameMovementMode, GameUi, GuiScale};
 
 use crate::camera::{
     SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED, SpectatorCamera,
@@ -1410,7 +1410,7 @@ pub(crate) fn run_frame_budget_probe(
                 render_distance: state.runtime.render_distance() as i32,
                 render_options,
                 frame_pacing: FramePacingUiState::default(),
-                fly_enabled: false,
+                movement_mode: GameMovementMode::Walk,
                 fly_speed_multiplier: 1.0,
                 movement_speed_multiplier: 1.0,
             });

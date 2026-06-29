@@ -20,7 +20,7 @@ use mclone_render::headless::{
 use mclone_render::screen_effect::UnderwaterOverlay;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render_session::actor_instances_from_presentations;
-use mclone_ui::{GameUi, GuiDrawList, GuiScale};
+use mclone_ui::{GameMovementMode, GameUi, GuiDrawList, GuiScale};
 
 use crate::camera::SpectatorCamera;
 use crate::cli::{HeadlessDualViewOptions, HeadlessScreenshotOptions, RendererRebuildSmokeOptions};
@@ -567,7 +567,7 @@ fn render_renderer_rebuild_smoke_frame(
         render_distance: state.runtime.render_distance() as i32,
         render_options: state.render_options,
         frame_pacing: FramePacingUiState::default(),
-        fly_enabled: false,
+        movement_mode: GameMovementMode::Walk,
         fly_speed_multiplier: 1.0,
         movement_speed_multiplier: 1.0,
     });

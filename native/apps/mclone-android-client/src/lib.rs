@@ -55,10 +55,10 @@ mod android {
     };
     use mclone_ui::{
         DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, FlatHud,
-        GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey,
-        GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay, render_flat_hud,
-        touch_action_button_rects, touch_hotbar_slot_rects, touch_menu_button_rect,
-        touch_movement_zone_rect,
+        GameFramePacingMode, GameMovementMode, GameUi, GameUiAction, GameUiRenderState,
+        GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
+        render_flat_hud, touch_action_button_rects, touch_hotbar_slot_rects,
+        touch_menu_button_rect, touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -1208,8 +1208,10 @@ mod android {
                     }
                     self.scene_options.render_distance = render_distance as u32;
                 }
-                GameUiAction::ToggleFly => {
-                    let movement_mode = self.camera.toggle_movement_mode();
+                GameUiAction::SetMovementMode(movement_mode) => {
+                    self.camera
+                        .set_movement_mode(engine_movement_mode(movement_mode));
+                    let movement_mode = self.camera.movement_mode();
                     log::info!(
                         "Mclone Android player movement mode {}",
                         movement_mode.label()
@@ -1320,7 +1322,7 @@ mod android {
                 max_render_distance: ANDROID_MAX_RENDER_DISTANCE,
                 section_occlusion_culling: self.render_options.section_occlusion_culling,
                 force_fullbright: self.render_options.force_fullbright,
-                fly_enabled: self.camera.movement_mode() == EngineCameraMovementMode::NoClip,
+                movement_mode: game_movement_mode(self.camera.movement_mode()),
                 fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
                 min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
                 max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
@@ -2572,6 +2574,22 @@ mod android {
                 .analog_movement
                 .map(|movement| EngineCameraMovementImpulse::new(movement.left, movement.forward)),
             ..EngineCameraInput::default()
+        }
+    }
+
+    fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovementMode {
+        match mode {
+            EngineCameraMovementMode::Walking => GameMovementMode::Walk,
+            EngineCameraMovementMode::NoClip => GameMovementMode::Fly,
+            EngineCameraMovementMode::HandPush => GameMovementMode::HandPush,
+        }
+    }
+
+    fn engine_movement_mode(mode: GameMovementMode) -> EngineCameraMovementMode {
+        match mode {
+            GameMovementMode::Walk => EngineCameraMovementMode::Walking,
+            GameMovementMode::Fly => EngineCameraMovementMode::NoClip,
+            GameMovementMode::HandPush => EngineCameraMovementMode::HandPush,
         }
     }
 

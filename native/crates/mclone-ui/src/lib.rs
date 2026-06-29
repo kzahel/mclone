@@ -699,6 +699,32 @@ pub enum GameOptionsParent {
     Pause,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameMovementMode {
+    #[default]
+    Walk,
+    Fly,
+    HandPush,
+}
+
+impl GameMovementMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Walk => "Walk",
+            Self::Fly => "Fly",
+            Self::HandPush => "Hand Push",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Walk => Self::Fly,
+            Self::Fly => Self::HandPush,
+            Self::HandPush => Self::Walk,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GameUiAction {
     StartWorld,
@@ -716,7 +742,7 @@ pub enum GameUiAction {
     QuitToTitle,
     ToggleSectionOcclusion,
     ToggleFullbright,
-    ToggleFly,
+    SetMovementMode(GameMovementMode),
     CycleFramePacing,
     CycleFpsCap,
     SetRenderDistance(i32),
@@ -800,7 +826,7 @@ pub struct GameUiRenderState {
     pub max_render_distance: i32,
     pub section_occlusion_culling: bool,
     pub force_fullbright: bool,
-    pub fly_enabled: bool,
+    pub movement_mode: GameMovementMode,
     pub fly_speed_multiplier: f32,
     pub min_fly_speed_multiplier: f32,
     pub max_fly_speed_multiplier: f32,
@@ -822,7 +848,7 @@ impl Default for GameUiRenderState {
             max_render_distance: 16,
             section_occlusion_culling: true,
             force_fullbright: false,
-            fly_enabled: false,
+            movement_mode: GameMovementMode::Walk,
             fly_speed_multiplier: 1.0,
             min_fly_speed_multiplier: 0.5,
             max_fly_speed_multiplier: 8.0,
@@ -1786,7 +1812,7 @@ const ID_OPTIONS_BACK: WidgetId = WidgetId(10);
 const ID_OPTIONS_FRAME_PACING: WidgetId = WidgetId(11);
 const ID_OPTIONS_FPS_CAP: WidgetId = WidgetId(12);
 const ID_OPTIONS_TOUCH_LOOK: WidgetId = WidgetId(13);
-const ID_OPTIONS_FLY: WidgetId = WidgetId(14);
+const ID_OPTIONS_MOVEMENT_MODE: WidgetId = WidgetId(14);
 const ID_OPTIONS_FLY_SPEED: WidgetId = WidgetId(15);
 const ID_NEW_WORLD_REROLL: WidgetId = WidgetId(16);
 const ID_NEW_WORLD_CREATE: WidgetId = WidgetId(17);
@@ -2010,7 +2036,7 @@ impl GameUi {
             GameUiAction::RerollSeed => {}
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::ToggleFullbright
-            | GameUiAction::ToggleFly
+            | GameUiAction::SetMovementMode(_)
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetRenderDistance(_)
@@ -2066,8 +2092,8 @@ impl GameUi {
                     Some(ID_OPTIONS_OCCLUSION)
                 } else if rects.fullbright.contains(point) {
                     Some(ID_OPTIONS_FULLBRIGHT)
-                } else if rects.fly.contains(point) {
-                    Some(ID_OPTIONS_FLY)
+                } else if rects.movement_mode.contains(point) {
+                    Some(ID_OPTIONS_MOVEMENT_MODE)
                 } else if rects.frame_pacing.contains(point) {
                     Some(ID_OPTIONS_FRAME_PACING)
                 } else if rects.fps_cap.contains(point) {
@@ -2122,7 +2148,9 @@ impl GameUi {
             }
             ID_OPTIONS_OCCLUSION => Some(GameUiAction::ToggleSectionOcclusion),
             ID_OPTIONS_FULLBRIGHT => Some(GameUiAction::ToggleFullbright),
-            ID_OPTIONS_FLY => Some(GameUiAction::ToggleFly),
+            ID_OPTIONS_MOVEMENT_MODE => {
+                Some(GameUiAction::SetMovementMode(state.movement_mode.next()))
+            }
             ID_OPTIONS_FRAME_PACING => Some(GameUiAction::CycleFramePacing),
             ID_OPTIONS_FPS_CAP => Some(GameUiAction::CycleFpsCap),
             ID_OPTIONS_TOUCH_CONTROLS => state
@@ -2391,11 +2419,13 @@ impl GameUi {
             state.force_fullbright,
         )
         .render(draw, &self.font, self.interaction());
-        Checkbox::new(ID_OPTIONS_FLY, widgets.fly, "Fly Mode", state.fly_enabled).render(
-            draw,
-            &self.font,
-            self.interaction(),
-        );
+        CycleButton::new(
+            ID_OPTIONS_MOVEMENT_MODE,
+            widgets.movement_mode,
+            "Movement",
+            state.movement_mode.label(),
+        )
+        .render(draw, &self.font, self.interaction());
         CycleButton::new(
             ID_OPTIONS_FRAME_PACING,
             widgets.frame_pacing,
@@ -2465,7 +2495,7 @@ impl GameUi {
 struct OptionWidgetRects {
     occlusion: Rect,
     fullbright: Rect,
-    fly: Rect,
+    movement_mode: Rect,
     frame_pacing: Rect,
     fps_cap: Rect,
     radius: Rect,
@@ -2695,8 +2725,8 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
     y += 20.0;
     let fullbright = Rect::new(check_x, y, 190.0, 18.0);
     y += 20.0;
-    let fly = Rect::new(check_x, y, 190.0, 18.0);
-    y += 24.0;
+    let movement_mode = Rect::new(row_x, y, 192.0, 20.0);
+    y += 22.0;
     let frame_pacing = Rect::new(row_x, y, 192.0, 20.0);
     y += 22.0;
     let fps_cap = Rect::new(row_x, y, 192.0, 20.0);
@@ -2727,7 +2757,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
     OptionWidgetRects {
         occlusion,
         fullbright,
-        fly,
+        movement_mode,
         frame_pacing,
         fps_cap,
         radius,
@@ -4037,7 +4067,7 @@ mod tests {
     }
 
     #[test]
-    fn game_ui_options_fly_checkbox_emits_toggle_fly_action() {
+    fn game_ui_options_movement_mode_emits_next_mode_action() {
         let mut ui = GameUi::new();
         ui.set_screen(Some(GameScreen::Options {
             parent: GameOptionsParent::Pause,
@@ -4045,14 +4075,17 @@ mod tests {
         ui.set_scale(GuiScale::from_pixels(960, 540));
         let state = GameUiRenderState::default();
 
-        let fly = option_widgets(ui.scale(), state).fly;
+        let movement_mode = option_widgets(ui.scale(), state).movement_mode;
         let point = Point {
-            x: fly.x + fly.width * 0.5,
-            y: fly.y + fly.height * 0.5,
+            x: movement_mode.x + movement_mode.width * 0.5,
+            y: movement_mode.y + movement_mode.height * 0.5,
         };
         assert!(ui.pointer_down(point, state));
         let (_handled, action) = ui.pointer_up(point, state);
-        assert_eq!(action, Some(GameUiAction::ToggleFly));
+        assert_eq!(
+            action,
+            Some(GameUiAction::SetMovementMode(GameMovementMode::Fly))
+        );
     }
 
     #[test]

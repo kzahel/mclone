@@ -65,8 +65,8 @@ use mclone_ui::{
     DebugOverlay, FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts,
     FlatDebugMeshCounts, FlatDebugOverlay, FlatDebugRenderOptions, FlatDebugRunner,
     FlatDebugTarget, FlatDebugView, FlatHotbarOverlay, FlatHud, GameFramePacingMode,
-    GameOptionsParent, GameScreen, GameTouchSettings, GameUi, GameUiAction, GameUiRenderState,
-    GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
+    GameMovementMode, GameOptionsParent, GameScreen, GameTouchSettings, GameUi, GameUiAction,
+    GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
     render_debug_overlay_at, render_flat_hud,
 };
 
@@ -2688,6 +2688,7 @@ impl WebChunkRenderSession {
             sprint,
             movement_impulse,
             movement_yaw_radians: None,
+            ..EngineCameraInput::default()
         };
         self.camera
             .apply_movement_input(self.runtime.client(), input);
@@ -2864,8 +2865,9 @@ impl WebChunkRenderSession {
             GameUiAction::SetTouchControlsMode(mode) => {
                 self.input_preferences.touch_controls = mode;
             }
-            GameUiAction::ToggleFly => {
-                self.camera.toggle_movement_mode();
+            GameUiAction::SetMovementMode(movement_mode) => {
+                self.camera
+                    .set_movement_mode(engine_movement_mode(movement_mode));
             }
             GameUiAction::SetFlySpeed(multiplier) => {
                 self.camera.set_fly_speed_multiplier(f64::from(multiplier));
@@ -2972,7 +2974,7 @@ impl WebChunkRenderSession {
                 | GameUiAction::QuitToTitle
                 | GameUiAction::ToggleSectionOcclusion
                 | GameUiAction::ToggleFullbright
-                | GameUiAction::ToggleFly
+                | GameUiAction::SetMovementMode(_)
                 | GameUiAction::SetFlySpeed(_)
                 | GameUiAction::CycleFramePacing
                 | GameUiAction::CycleFpsCap => {}
@@ -2990,7 +2992,7 @@ impl WebChunkRenderSession {
             max_render_distance: WEB_MAX_RENDER_DISTANCE,
             section_occlusion_culling: self.section_occlusion_culling,
             force_fullbright: self.force_fullbright,
-            fly_enabled: self.camera.movement_mode() == EngineCameraMovementMode::NoClip,
+            movement_mode: game_movement_mode(self.camera.movement_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
             max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
@@ -4574,7 +4576,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::QuitToTitle => "quitToTitle",
         GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
         GameUiAction::ToggleFullbright => "toggleFullbright",
-        GameUiAction::ToggleFly => "toggleFly",
+        GameUiAction::SetMovementMode(_) => "setMovementMode",
         GameUiAction::CycleFramePacing => "cycleFramePacing",
         GameUiAction::CycleFpsCap => "cycleFpsCap",
         GameUiAction::SetRenderDistance(_) => "setRenderDistance",
@@ -4768,6 +4770,22 @@ fn clamp_touch_look_sensitivity(value: f32) -> f32 {
         )
     } else {
         WEB_TOUCH_LOOK_SENSITIVITY_DEFAULT
+    }
+}
+
+fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovementMode {
+    match mode {
+        EngineCameraMovementMode::Walking => GameMovementMode::Walk,
+        EngineCameraMovementMode::NoClip => GameMovementMode::Fly,
+        EngineCameraMovementMode::HandPush => GameMovementMode::HandPush,
+    }
+}
+
+fn engine_movement_mode(mode: GameMovementMode) -> EngineCameraMovementMode {
+    match mode {
+        GameMovementMode::Walk => EngineCameraMovementMode::Walking,
+        GameMovementMode::Fly => EngineCameraMovementMode::NoClip,
+        GameMovementMode::HandPush => EngineCameraMovementMode::HandPush,
     }
 }
 

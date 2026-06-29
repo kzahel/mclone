@@ -6,9 +6,10 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_client::{
     ActorPresentation, ActorPresentationKind, BlockInteractionTarget, ClientInteractionController,
-    ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_TICKS_PER_SECOND,
-    LocalPlayerController, LocalPlayerPose, NoClipMovementStep, PlayerInputKey,
-    WalkingMovementStep,
+    ClientRuntime, HAND_PUSH_DEFAULT_HAND_RADIUS, HandPushLocomotionController,
+    HandPushMovementStep, HandPushPose, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+    LOCAL_PLAYER_TICKS_PER_SECOND, LocalPlayerController, LocalPlayerPose, NoClipMovementStep,
+    PlayerInputKey, WalkingMovementStep,
 };
 use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockHitResult, BlockPos, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos,
@@ -891,6 +892,11 @@ pub const ENGINE_CAMERA_MOUSE_SENSITIVITY: f64 = 0.0035;
 pub const ENGINE_CAMERA_SPAWN_Y: f64 = 104.0;
 pub const ENGINE_CAMERA_SPAWN_YAW_RADIANS: f64 = 0.55;
 pub const ENGINE_CAMERA_SPAWN_PITCH_RADIANS: f64 = -0.35;
+const ENGINE_HAND_PUSH_EMULATION_CYCLE_HZ: f64 = 1.8;
+const ENGINE_HAND_PUSH_EMULATION_HAND_SPACING: f64 = 0.34;
+const ENGINE_HAND_PUSH_EMULATION_FORWARD_REACH: f64 = 0.32;
+const ENGINE_HAND_PUSH_EMULATION_STROKE: f64 = 0.36;
+const ENGINE_HAND_PUSH_EMULATION_LIFT: f64 = 0.16;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EngineCameraInput {
@@ -907,6 +913,8 @@ pub struct EngineCameraInput {
     pub sprint: bool,
     pub movement_impulse: Option<EngineCameraMovementImpulse>,
     pub movement_yaw_radians: Option<f64>,
+    pub hand_push: Option<EngineHandPushInput>,
+    pub hand_push_emulation: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -922,6 +930,35 @@ impl EngineCameraMovementImpulse {
 
     fn as_player_impulse(self) -> (f32, f32) {
         (self.left, self.forward)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EngineHandPushInput {
+    pub head_position: Vec3d,
+    pub left_hand_position: Vec3d,
+    pub right_hand_position: Vec3d,
+}
+
+impl EngineHandPushInput {
+    pub fn new(
+        head_position: Vec3d,
+        left_hand_position: Vec3d,
+        right_hand_position: Vec3d,
+    ) -> Self {
+        Self {
+            head_position,
+            left_hand_position,
+            right_hand_position,
+        }
+    }
+
+    fn pose(self) -> HandPushPose {
+        HandPushPose {
+            head_position: self.head_position,
+            left_hand_position: self.left_hand_position,
+            right_hand_position: self.right_hand_position,
+        }
     }
 }
 
@@ -941,6 +978,8 @@ impl Default for EngineCameraInput {
             sprint: false,
             movement_impulse: None,
             movement_yaw_radians: None,
+            hand_push: None,
+            hand_push_emulation: false,
         }
     }
 }
@@ -950,13 +989,15 @@ pub enum EngineCameraMovementMode {
     #[default]
     Walking,
     NoClip,
+    HandPush,
 }
 
 impl EngineCameraMovementMode {
     pub const fn toggled(self) -> Self {
         match self {
             Self::Walking => Self::NoClip,
-            Self::NoClip => Self::Walking,
+            Self::NoClip => Self::HandPush,
+            Self::HandPush => Self::Walking,
         }
     }
 
@@ -964,6 +1005,7 @@ impl EngineCameraMovementMode {
         match self {
             Self::Walking => "WALK",
             Self::NoClip => "NOCLIP",
+            Self::HandPush => "HAND",
         }
     }
 }
@@ -1080,10 +1122,12 @@ pub struct LandingEvent {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EngineCameraController {
     player: LocalPlayerController,
+    hand_push: HandPushLocomotionController,
     movement_mode: EngineCameraMovementMode,
     speed_blocks_per_second: f64,
     movement_speed_multiplier: f64,
     landing_events: Vec<LandingEvent>,
+    hand_push_emulation_phase: f64,
 }
 
 impl EngineCameraController {
@@ -1116,10 +1160,12 @@ impl EngineCameraController {
         ));
         Self {
             player,
+            hand_push: HandPushLocomotionController::default(),
             movement_mode: EngineCameraMovementMode::Walking,
             speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER,
             landing_events: Vec::new(),
+            hand_push_emulation_phase: 0.0,
         }
     }
 
@@ -1143,6 +1189,8 @@ impl EngineCameraController {
     pub fn set_movement_mode(&mut self, movement_mode: EngineCameraMovementMode) {
         if self.movement_mode != movement_mode {
             self.player.clear_delta_movement();
+            self.hand_push.reset();
+            self.hand_push_emulation_phase = 0.0;
         }
         self.movement_mode = movement_mode;
     }
@@ -1340,6 +1388,9 @@ impl EngineCameraController {
             EngineCameraMovementMode::NoClip => {
                 let _ = self.tick_no_clip(input);
             }
+            EngineCameraMovementMode::HandPush => {
+                let _ = self.tick_hand_push(client, input);
+            }
         }
         self.snapshot()
     }
@@ -1352,11 +1403,12 @@ impl EngineCameraController {
         match self.movement_mode {
             EngineCameraMovementMode::Walking => self.tick_walking(client, input),
             EngineCameraMovementMode::NoClip => self.tick_no_clip(input),
+            EngineCameraMovementMode::HandPush => self.tick_hand_push(client, input),
         }
     }
 
     pub fn probe_ground(&mut self, client: &ClientRuntime, distance: f64) {
-        if self.movement_mode != EngineCameraMovementMode::Walking
+        if self.movement_mode == EngineCameraMovementMode::NoClip
             || !distance.is_finite()
             || distance <= 0.0
         {
@@ -1454,6 +1506,103 @@ impl EngineCameraController {
         moved
     }
 
+    fn tick_hand_push(&mut self, client: &ClientRuntime, input: EngineCameraInput) -> bool {
+        let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
+        if dt_seconds <= 0.0 {
+            return false;
+        }
+
+        let was_on_ground = self.player.on_ground();
+        let pre_move_fall_speed = (-self.player.delta_movement().y).max(0.0);
+        let hand_input = input.hand_push.or_else(|| {
+            input
+                .hand_push_emulation
+                .then(|| self.emulated_hand_push_input(input, dt_seconds))
+                .flatten()
+        });
+        let mut moved_by_hand = false;
+        if let Some(hand_input) = hand_input {
+            if let Some(result) = self.hand_push.tick(
+                client,
+                &mut self.player,
+                HandPushMovementStep {
+                    dt_seconds,
+                    pose: hand_input.pose(),
+                },
+            ) {
+                moved_by_hand = result.body_movement.length_sqr() > 1.0e-12;
+            }
+        } else {
+            self.hand_push.reset();
+        }
+
+        let pose = self.player.pose();
+        let y_rot_degrees = finite_movement_yaw(input.movement_yaw_radians)
+            .map(|yaw| -yaw.to_degrees())
+            .unwrap_or(pose.y_rot_degrees);
+        let moved_by_physics = self
+            .player
+            .tick_walking_movement_with_impulse(
+                client,
+                WalkingMovementStep {
+                    y_rot_degrees,
+                    speed_multiplier: self.movement_speed_multiplier,
+                    dt_seconds,
+                },
+                Some((0.0, 0.0)),
+            )
+            .is_some();
+        if (moved_by_hand || moved_by_physics) && !was_on_ground && self.player.on_ground() {
+            let impact_speed = pre_move_fall_speed * LOCAL_PLAYER_TICKS_PER_SECOND;
+            if impact_speed >= LANDING_MIN_IMPACT_SPEED {
+                self.landing_events.push(LandingEvent {
+                    impact_speed,
+                    position: self.player.pose().position,
+                });
+            }
+        }
+        moved_by_hand || moved_by_physics
+    }
+
+    fn emulated_hand_push_input(
+        &mut self,
+        input: EngineCameraInput,
+        dt_seconds: f64,
+    ) -> Option<EngineHandPushInput> {
+        let pose = self.player.pose();
+        let yaw_radians = finite_movement_yaw(input.movement_yaw_radians)
+            .unwrap_or_else(|| pose.native_yaw_radians());
+        let direction = hand_push_emulation_direction(input, yaw_radians);
+        if direction == Vec3d::ZERO {
+            return None;
+        }
+        self.hand_push_emulation_phase = (self.hand_push_emulation_phase
+            + dt_seconds * std::f64::consts::TAU * ENGINE_HAND_PUSH_EMULATION_CYCLE_HZ)
+            % std::f64::consts::TAU;
+        let right = horizontal_right_from_yaw(yaw_radians);
+        let feet = pose.position;
+        let hand_y = feet.y + HAND_PUSH_DEFAULT_HAND_RADIUS * 0.5;
+        let base = Vec3d::new(feet.x, hand_y, feet.z)
+            .add(direction.scale(ENGINE_HAND_PUSH_EMULATION_FORWARD_REACH));
+        let left_phase = self.hand_push_emulation_phase;
+        let right_phase = self.hand_push_emulation_phase + std::f64::consts::PI;
+        let hand_at_phase = |side: f64, phase: f64| {
+            base.add(right.scale(side * ENGINE_HAND_PUSH_EMULATION_HAND_SPACING))
+                .add(direction.scale(-phase.sin() * ENGINE_HAND_PUSH_EMULATION_STROKE))
+                .add(Vec3d::new(
+                    0.0,
+                    phase.cos().max(0.0) * ENGINE_HAND_PUSH_EMULATION_LIFT,
+                    0.0,
+                ))
+        };
+        let head = pose.eye_position();
+        Some(EngineHandPushInput::new(
+            head,
+            hand_at_phase(-1.0, left_phase),
+            hand_at_phase(1.0, right_phase),
+        ))
+    }
+
     pub fn render_camera(&self, render_distance: u32) -> EngineRenderCamera {
         render_camera_from_snapshot(self.snapshot(), render_distance)
     }
@@ -1501,12 +1650,58 @@ fn finite_movement_yaw(yaw_radians: Option<f64>) -> Option<f64> {
     yaw_radians.filter(|yaw| yaw.is_finite())
 }
 
+fn hand_push_emulation_direction(input: EngineCameraInput, yaw_radians: f64) -> Vec3d {
+    if !yaw_radians.is_finite() {
+        return Vec3d::ZERO;
+    }
+    let (left_impulse, forward_impulse) = input
+        .movement_impulse
+        .map(|impulse| (f64::from(impulse.left), f64::from(impulse.forward)))
+        .unwrap_or_else(|| {
+            (
+                axis(input.left, input.right) as f64,
+                axis(input.forward, input.backward) as f64,
+            )
+        });
+    if left_impulse.abs() <= 1.0e-5 && forward_impulse.abs() <= 1.0e-5 {
+        return Vec3d::ZERO;
+    }
+    normalize_vec3d_or_zero(
+        horizontal_forward_from_yaw(yaw_radians)
+            .scale(forward_impulse)
+            .add(horizontal_right_from_yaw(yaw_radians).scale(-left_impulse)),
+    )
+}
+
+fn horizontal_forward_from_yaw(yaw_radians: f64) -> Vec3d {
+    Vec3d::new(yaw_radians.sin(), 0.0, yaw_radians.cos())
+}
+
+fn horizontal_right_from_yaw(yaw_radians: f64) -> Vec3d {
+    Vec3d::new(yaw_radians.cos(), 0.0, -yaw_radians.sin())
+}
+
+fn axis(positive: bool, negative: bool) -> f32 {
+    let positive = positive as i32;
+    let negative = negative as i32;
+    (positive - negative) as f32
+}
+
 fn view_forward(yaw_radians: f64, pitch_radians: f64) -> Vec3d {
     let yaw_sin = yaw_radians.sin();
     let yaw_cos = yaw_radians.cos();
     let pitch_sin = pitch_radians.sin();
     let pitch_cos = pitch_radians.cos();
     Vec3d::new(yaw_sin * pitch_cos, pitch_sin, yaw_cos * pitch_cos)
+}
+
+fn normalize_vec3d_or_zero(value: Vec3d) -> Vec3d {
+    let len_sqr = value.length_sqr();
+    if len_sqr <= 1.0e-12 {
+        Vec3d::ZERO
+    } else {
+        value.scale(1.0 / len_sqr.sqrt())
+    }
 }
 
 fn vec3d_to_f32_array(value: Vec3d) -> [f32; 3] {
@@ -3285,8 +3480,40 @@ mod tests {
         );
         assert_eq!(
             camera.toggle_movement_mode(),
+            EngineCameraMovementMode::HandPush
+        );
+        assert_eq!(
+            camera.toggle_movement_mode(),
             EngineCameraMovementMode::Walking
         );
+        assert_eq!(EngineCameraMovementMode::Walking.label(), "WALK");
+        assert_eq!(EngineCameraMovementMode::NoClip.label(), "NOCLIP");
+        assert_eq!(EngineCameraMovementMode::HandPush.label(), "HAND");
+    }
+
+    #[test]
+    fn hand_push_emulation_direction_uses_camera_yaw() {
+        let forward = hand_push_emulation_direction(
+            EngineCameraInput {
+                forward: true,
+                hand_push_emulation: true,
+                ..EngineCameraInput::default()
+            },
+            0.0,
+        );
+        assert!(forward.z > 0.99);
+        assert!(forward.x.abs() < 1.0e-6);
+
+        let right = hand_push_emulation_direction(
+            EngineCameraInput {
+                right: true,
+                hand_push_emulation: true,
+                ..EngineCameraInput::default()
+            },
+            0.0,
+        );
+        assert!(right.x > 0.99);
+        assert!(right.z.abs() < 1.0e-6);
     }
 
     #[test]

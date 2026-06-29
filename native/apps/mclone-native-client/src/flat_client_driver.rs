@@ -29,12 +29,13 @@ use mclone_render::screen_effect::{UnderwaterEffectState, UnderwaterOverlay};
 use mclone_render::selection_outline::SelectionOutline;
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
-    RenderSectionCacheUpdate, actor_instances_from_presentations, render_camera_from_snapshot,
+    EngineCameraMovementMode, RenderSectionCacheUpdate, actor_instances_from_presentations,
+    render_camera_from_snapshot,
 };
 use mclone_ui::{
-    BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameScreen,
-    GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay,
-    Point, StatusOverlay, render_flat_hud, render_loading_progress_overlay,
+    BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameMovementMode,
+    GameScreen, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale,
+    LoadingProgressOverlay, Point, StatusOverlay, render_flat_hud, render_loading_progress_overlay,
     render_loading_progress_panel_at, touch_controls_mode_label,
 };
 
@@ -179,7 +180,7 @@ pub(crate) struct FlatClientUiRenderOptions {
     pub(crate) render_distance: i32,
     pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) frame_pacing: FramePacingUiState,
-    pub(crate) fly_enabled: bool,
+    pub(crate) movement_mode: GameMovementMode,
     pub(crate) fly_speed_multiplier: f32,
     pub(crate) movement_speed_multiplier: f32,
 }
@@ -625,8 +626,10 @@ impl FlatClientDriver {
                     }
                 );
             }
-            GameUiAction::ToggleFly => {
-                let movement_mode = self.camera.toggle_movement_mode();
+            GameUiAction::SetMovementMode(movement_mode) => {
+                self.camera
+                    .set_movement_mode(engine_movement_mode(movement_mode));
+                let movement_mode = self.camera.movement_mode();
                 log::info!("player movement mode {}", movement_mode.label());
             }
             GameUiAction::SetFlySpeed(multiplier) => {
@@ -1650,7 +1653,7 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         max_render_distance: MAX_RENDER_DISTANCE,
         section_occlusion_culling: options.render_options.section_occlusion_culling,
         force_fullbright: options.render_options.force_fullbright,
-        fly_enabled: options.fly_enabled,
+        movement_mode: options.movement_mode,
         fly_speed_multiplier: options.fly_speed_multiplier,
         min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
         max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
@@ -1662,6 +1665,22 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         touch_controls_mode: None,
         touch_settings: None,
         block_palette: Default::default(),
+    }
+}
+
+pub(crate) const fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovementMode {
+    match mode {
+        EngineCameraMovementMode::Walking => GameMovementMode::Walk,
+        EngineCameraMovementMode::NoClip => GameMovementMode::Fly,
+        EngineCameraMovementMode::HandPush => GameMovementMode::HandPush,
+    }
+}
+
+pub(crate) const fn engine_movement_mode(mode: GameMovementMode) -> EngineCameraMovementMode {
+    match mode {
+        GameMovementMode::Walk => EngineCameraMovementMode::Walking,
+        GameMovementMode::Fly => EngineCameraMovementMode::NoClip,
+        GameMovementMode::HandPush => EngineCameraMovementMode::HandPush,
     }
 }
 
@@ -1882,5 +1901,7 @@ pub(crate) fn engine_camera_input_from_flat_frame(
             .analog_movement
             .map(|movement| EngineCameraMovementImpulse::new(movement.left, movement.forward)),
         movement_yaw_radians: None,
+        hand_push_emulation: true,
+        ..EngineCameraInput::default()
     }
 }

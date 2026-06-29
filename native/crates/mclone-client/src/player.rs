@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use mclone_core::{Aabb, BlockPos, ChunkPos, Vec3d};
 use mclone_protocol::{
     AcceptTeleportCommand, ClientCommand, MovePlayerCommand, PlayerPositionUpdate,
@@ -31,6 +33,13 @@ pub const LOCAL_PLAYER_WATER_VERTICAL_DRAG: f64 = 0.8;
 pub const LOCAL_PLAYER_BLOCK_FRICTION: f64 = 0.6;
 pub const LOCAL_PLAYER_FRICTION_MULTIPLIER: f64 = 0.91;
 pub const LOCAL_PLAYER_VERTICAL_DRAG: f64 = 0.98;
+pub const HAND_PUSH_DEFAULT_HAND_RADIUS: f64 = 0.08;
+pub const HAND_PUSH_DEFAULT_MAX_ARM_LENGTH: f64 = 1.5;
+pub const HAND_PUSH_DEFAULT_UNSTICK_DISTANCE: f64 = 1.0;
+pub const HAND_PUSH_DEFAULT_VELOCITY_HISTORY_SIZE: usize = 5;
+pub const HAND_PUSH_DEFAULT_VELOCITY_LIMIT: f64 = 1.0;
+pub const HAND_PUSH_DEFAULT_MAX_JUMP_SPEED: f64 = 7.0;
+pub const HAND_PUSH_DEFAULT_JUMP_MULTIPLIER: f64 = 1.1;
 const LOCAL_PLAYER_GROUND_ACCELERATION_NUMERATOR: f64 = 0.21600002;
 const LOCAL_PLAYER_POSITION_SYNC_DELTA_SQR: f64 = 9.0e-4;
 const LOCAL_PLAYER_POSITION_REMINDER_INTERVAL: u32 = 20;
@@ -175,6 +184,322 @@ pub struct WalkingMovementStep {
     pub y_rot_degrees: f64,
     pub speed_multiplier: f64,
     pub dt_seconds: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HandPushPose {
+    pub head_position: Vec3d,
+    pub left_hand_position: Vec3d,
+    pub right_hand_position: Vec3d,
+}
+
+impl HandPushPose {
+    pub fn is_finite(self) -> bool {
+        self.head_position.is_finite()
+            && self.left_hand_position.is_finite()
+            && self.right_hand_position.is_finite()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HandPushMovementStep {
+    pub dt_seconds: f64,
+    pub pose: HandPushPose,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HandPushLocomotionSettings {
+    pub hand_radius: f64,
+    pub max_arm_length: f64,
+    pub unstick_distance: f64,
+    pub velocity_history_size: usize,
+    pub velocity_limit: f64,
+    pub max_jump_speed: f64,
+    pub jump_multiplier: f64,
+}
+
+impl Default for HandPushLocomotionSettings {
+    fn default() -> Self {
+        Self {
+            hand_radius: HAND_PUSH_DEFAULT_HAND_RADIUS,
+            max_arm_length: HAND_PUSH_DEFAULT_MAX_ARM_LENGTH,
+            unstick_distance: HAND_PUSH_DEFAULT_UNSTICK_DISTANCE,
+            velocity_history_size: HAND_PUSH_DEFAULT_VELOCITY_HISTORY_SIZE,
+            velocity_limit: HAND_PUSH_DEFAULT_VELOCITY_LIMIT,
+            max_jump_speed: HAND_PUSH_DEFAULT_MAX_JUMP_SPEED,
+            jump_multiplier: HAND_PUSH_DEFAULT_JUMP_MULTIPLIER,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HandPushMovementResult {
+    pub body_movement: Vec3d,
+    pub left_hand_touching: bool,
+    pub right_hand_touching: bool,
+    pub velocity_average: Vec3d,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct HandPushHandResult {
+    body_offset: Vec3d,
+    last_position: Vec3d,
+    touching: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HandPushLocomotionController {
+    settings: HandPushLocomotionSettings,
+    initialized: bool,
+    last_left_hand_position: Vec3d,
+    last_right_hand_position: Vec3d,
+    last_player_position: Vec3d,
+    velocity_history: VecDeque<Vec3d>,
+    left_hand_touching: bool,
+    right_hand_touching: bool,
+}
+
+impl Default for HandPushLocomotionController {
+    fn default() -> Self {
+        Self::new(HandPushLocomotionSettings::default())
+    }
+}
+
+impl HandPushLocomotionController {
+    pub fn new(settings: HandPushLocomotionSettings) -> Self {
+        Self {
+            settings,
+            initialized: false,
+            last_left_hand_position: Vec3d::ZERO,
+            last_right_hand_position: Vec3d::ZERO,
+            last_player_position: Vec3d::ZERO,
+            velocity_history: VecDeque::new(),
+            left_hand_touching: false,
+            right_hand_touching: false,
+        }
+    }
+
+    pub const fn settings(&self) -> HandPushLocomotionSettings {
+        self.settings
+    }
+
+    pub const fn left_hand_touching(&self) -> bool {
+        self.left_hand_touching
+    }
+
+    pub const fn right_hand_touching(&self) -> bool {
+        self.right_hand_touching
+    }
+
+    pub fn reset(&mut self) {
+        self.initialized = false;
+        self.last_left_hand_position = Vec3d::ZERO;
+        self.last_right_hand_position = Vec3d::ZERO;
+        self.last_player_position = Vec3d::ZERO;
+        self.velocity_history.clear();
+        self.left_hand_touching = false;
+        self.right_hand_touching = false;
+    }
+
+    pub fn tick(
+        &mut self,
+        client: &ClientRuntime,
+        player: &mut LocalPlayerController,
+        step: HandPushMovementStep,
+    ) -> Option<HandPushMovementResult> {
+        if !step.dt_seconds.is_finite() || step.dt_seconds <= 0.0 || !step.pose.is_finite() {
+            return None;
+        }
+
+        let pose = self.clamped_pose(step.pose);
+        if !self.initialized {
+            self.initialized = true;
+            self.last_left_hand_position = pose.left_hand_position;
+            self.last_right_hand_position = pose.right_hand_position;
+            self.last_player_position = player.pose().position;
+            return Some(HandPushMovementResult::default());
+        }
+
+        let left = self.resolve_hand(
+            client,
+            self.last_left_hand_position,
+            pose.left_hand_position,
+            self.left_hand_touching,
+        );
+        let right = self.resolve_hand(
+            client,
+            self.last_right_hand_position,
+            pose.right_hand_position,
+            self.right_hand_touching,
+        );
+
+        let both_hands_braced = (left.touching || self.left_hand_touching)
+            && (right.touching || self.right_hand_touching);
+        let requested_body_movement = if both_hands_braced {
+            left.body_offset.add(right.body_offset).scale(0.5)
+        } else {
+            left.body_offset.add(right.body_offset)
+        };
+
+        let body_movement = if requested_body_movement.length_sqr() > COLLISION_EPSILON {
+            player
+                .move_colliding(client, requested_body_movement)
+                .traveled
+        } else {
+            Vec3d::ZERO
+        };
+
+        self.last_left_hand_position = self.unstuck_hand_position(
+            pose.head_position,
+            pose.left_hand_position,
+            left.last_position,
+            left.touching,
+        );
+        self.last_right_hand_position = self.unstuck_hand_position(
+            pose.head_position,
+            pose.right_hand_position,
+            right.last_position,
+            right.touching,
+        );
+        self.left_hand_touching = left.touching
+            && self
+                .last_left_hand_position
+                .distance_to_sqr(pose.left_hand_position)
+                <= self.settings.unstick_distance * self.settings.unstick_distance;
+        self.right_hand_touching = right.touching
+            && self
+                .last_right_hand_position
+                .distance_to_sqr(pose.right_hand_position)
+                <= self.settings.unstick_distance * self.settings.unstick_distance;
+
+        let velocity_average = self.store_velocity(player.pose().position, step.dt_seconds);
+        if (self.left_hand_touching || self.right_hand_touching)
+            && velocity_average.length_sqr()
+                > self.settings.velocity_limit * self.settings.velocity_limit
+        {
+            player.set_delta_movement(hand_push_jump_delta_movement(
+                velocity_average,
+                self.settings,
+            ));
+        }
+
+        Some(HandPushMovementResult {
+            body_movement,
+            left_hand_touching: self.left_hand_touching,
+            right_hand_touching: self.right_hand_touching,
+            velocity_average,
+        })
+    }
+
+    fn clamped_pose(&self, pose: HandPushPose) -> HandPushPose {
+        HandPushPose {
+            left_hand_position: clamp_hand_reach(
+                pose.head_position,
+                pose.left_hand_position,
+                self.settings.max_arm_length,
+            ),
+            right_hand_position: clamp_hand_reach(
+                pose.head_position,
+                pose.right_hand_position,
+                self.settings.max_arm_length,
+            ),
+            ..pose
+        }
+    }
+
+    fn resolve_hand(
+        &self,
+        client: &ClientRuntime,
+        last_position: Vec3d,
+        current_position: Vec3d,
+        was_touching: bool,
+    ) -> HandPushHandResult {
+        let movement = current_position.subtract(last_position);
+        let probe = hand_probe_aabb(current_position, self.settings.hand_radius);
+        let currently_intersecting = !solid_block_aabbs_in(client, probe).is_empty();
+        let traveled = collide_movement(
+            client,
+            hand_probe_aabb(last_position, self.settings.hand_radius),
+            movement,
+        );
+        let sweep_collided = !nearly_equal(traveled.x, movement.x)
+            || !nearly_equal(traveled.y, movement.y)
+            || !nearly_equal(traveled.z, movement.z);
+        let sweep_position = last_position.add(traveled);
+        let touching = currently_intersecting || sweep_collided;
+
+        if !touching {
+            return HandPushHandResult {
+                body_offset: Vec3d::ZERO,
+                last_position: current_position,
+                touching: false,
+            };
+        }
+
+        let body_offset = if was_touching || currently_intersecting {
+            last_position.subtract(current_position)
+        } else {
+            sweep_position.subtract(current_position)
+        };
+
+        HandPushHandResult {
+            body_offset,
+            last_position: sweep_position,
+            touching: true,
+        }
+    }
+
+    fn unstuck_hand_position(
+        &self,
+        head_position: Vec3d,
+        current_position: Vec3d,
+        last_position: Vec3d,
+        touching: bool,
+    ) -> Vec3d {
+        if !touching {
+            return current_position;
+        }
+        let distance_sqr = current_position.distance_to_sqr(last_position);
+        let unstick_sqr = self.settings.unstick_distance * self.settings.unstick_distance;
+        if distance_sqr <= unstick_sqr {
+            return last_position;
+        }
+        let head_to_hand = current_position.subtract(head_position);
+        let safe_position = head_position.add(
+            normalize_or_zero(head_to_hand).scale(
+                self.settings
+                    .max_arm_length
+                    .min(head_to_hand.length_sqr().sqrt()),
+            ),
+        );
+        if safe_position.is_finite() {
+            safe_position
+        } else {
+            current_position
+        }
+    }
+
+    fn store_velocity(&mut self, player_position: Vec3d, dt_seconds: f64) -> Vec3d {
+        let velocity = player_position
+            .subtract(self.last_player_position)
+            .scale(1.0 / dt_seconds);
+        self.last_player_position = player_position;
+        if self.settings.velocity_history_size == 0 {
+            return velocity;
+        }
+        self.velocity_history.push_back(velocity);
+        while self.velocity_history.len() > self.settings.velocity_history_size {
+            self.velocity_history.pop_front();
+        }
+        if self.velocity_history.is_empty() {
+            return Vec3d::ZERO;
+        }
+        self.velocity_history
+            .iter()
+            .copied()
+            .fold(Vec3d::ZERO, Vec3d::add)
+            .scale(1.0 / self.velocity_history.len() as f64)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -973,6 +1298,46 @@ fn deflate_aabb(aabb: Aabb, amount: f64) -> Aabb {
     )
 }
 
+fn hand_probe_aabb(center: Vec3d, radius: f64) -> Aabb {
+    let radius = if radius.is_finite() && radius > 0.0 {
+        radius
+    } else {
+        HAND_PUSH_DEFAULT_HAND_RADIUS
+    };
+    Aabb::new(
+        center.x - radius,
+        center.y - radius,
+        center.z - radius,
+        center.x + radius,
+        center.y + radius,
+        center.z + radius,
+    )
+}
+
+fn clamp_hand_reach(head_position: Vec3d, hand_position: Vec3d, max_arm_length: f64) -> Vec3d {
+    if !max_arm_length.is_finite() || max_arm_length <= 0.0 {
+        return hand_position;
+    }
+    let offset = hand_position.subtract(head_position);
+    let length_sqr = offset.length_sqr();
+    if length_sqr <= max_arm_length * max_arm_length {
+        return hand_position;
+    }
+    head_position.add(normalize_or_zero(offset).scale(max_arm_length))
+}
+
+fn hand_push_jump_delta_movement(
+    velocity_average: Vec3d,
+    settings: HandPushLocomotionSettings,
+) -> Vec3d {
+    let speed = velocity_average.length_sqr().sqrt();
+    if speed <= COLLISION_EPSILON {
+        return Vec3d::ZERO;
+    }
+    let jump_speed = (speed * settings.jump_multiplier).min(settings.max_jump_speed);
+    normalize_or_zero(velocity_average).scale(jump_speed / LOCAL_PLAYER_TICKS_PER_SECOND)
+}
+
 fn fluid_falling_adjusted_y(y_delta: f64, tick_scale: f64) -> f64 {
     let gravity = (LOCAL_PLAYER_GRAVITY / 16.0) * tick_scale;
     y_delta - gravity
@@ -1382,6 +1747,52 @@ mod tests {
             ..Default::default()
         });
         controller
+    }
+
+    #[test]
+    fn hand_push_controller_moves_player_from_braced_hand() {
+        let client = forward_step_client(&[]);
+        let mut player = controller_on_ground();
+        let settings = HandPushLocomotionSettings {
+            max_arm_length: 4.0,
+            velocity_limit: 1000.0,
+            ..HandPushLocomotionSettings::default()
+        };
+        let mut hand_push = HandPushLocomotionController::new(settings);
+        let head = Vec3d::new(0.5, 2.62, 0.5);
+        let right = Vec3d::new(0.75, 1.7, 0.5);
+
+        let initial = HandPushPose {
+            head_position: head,
+            left_hand_position: Vec3d::new(0.5, 1.04, 0.5),
+            right_hand_position: right,
+        };
+        hand_push.tick(
+            &client,
+            &mut player,
+            HandPushMovementStep {
+                dt_seconds: 1.0 / LOCAL_PLAYER_TICKS_PER_SECOND,
+                pose: initial,
+            },
+        );
+
+        let result = hand_push
+            .tick(
+                &client,
+                &mut player,
+                HandPushMovementStep {
+                    dt_seconds: 1.0 / LOCAL_PLAYER_TICKS_PER_SECOND,
+                    pose: HandPushPose {
+                        left_hand_position: Vec3d::new(0.5, 1.04, 0.2),
+                        ..initial
+                    },
+                },
+            )
+            .expect("valid hand-push tick");
+
+        assert!(result.left_hand_touching);
+        assert!(result.body_movement.z > 0.0);
+        assert!(player.pose().position.z > 0.5);
     }
 
     #[test]

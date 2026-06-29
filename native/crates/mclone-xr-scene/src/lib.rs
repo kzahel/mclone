@@ -44,12 +44,13 @@ use mclone_render_session::{
     ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MOUSE_SENSITIVITY,
     EngineCameraController, EngineCameraInput, EngineCameraMovementImpulse,
-    EngineCameraMovementMode, EngineCameraSnapshot, actor_instances_from_presentations,
+    EngineCameraMovementMode, EngineCameraSnapshot, EngineHandPushInput,
+    actor_instances_from_presentations,
 };
 use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameScreen, GameUi, GameUiAction,
-    GameUiRenderState, GuiScale, Point, StatusOverlay, render_loading_progress_overlay,
-    render_status_overlay,
+    DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameMovementMode, GameScreen, GameUi,
+    GameUiAction, GameUiRenderState, GuiScale, Point, StatusOverlay,
+    render_loading_progress_overlay, render_status_overlay,
 };
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
@@ -910,11 +911,18 @@ where
         if self.runtime.is_none() {
             return Ok(());
         }
+        let tracking_origin = self
+            .tracking_origin_for_views(&views)
+            .context("resolve XR tracking origin")?;
+        let transform =
+            XrStageToWorld::from_tracking_origin(tracking_origin, self.camera.snapshot())?;
         let movement_yaw_radians = self
-            .locomotion_movement_yaw_radians(&views)
+            .locomotion_movement_yaw_radians_with_transform(&views, transform)
             .context("resolve XR locomotion frame")?;
-        let input =
+        let mut input =
             xr_locomotion_input_from_controllers(controllers, dt_seconds, movement_yaw_radians);
+        input.hand_push = xr_hand_push_input_from_controllers(controllers, &views, transform)
+            .context("resolve XR hand-push input")?;
         let runtime = self.runtime.as_ref().expect("runtime presence checked");
         self.camera.apply_movement_input(runtime.client(), input);
         self.play_landing_events();
@@ -1074,12 +1082,20 @@ where
     }
 
     fn locomotion_movement_yaw_radians(&mut self, views: &[xr::View]) -> Result<Option<f64>> {
+        let tracking_origin = self.tracking_origin_for_views(views)?;
+        let transform =
+            XrStageToWorld::from_tracking_origin(tracking_origin, self.camera.snapshot())?;
+        self.locomotion_movement_yaw_radians_with_transform(views, transform)
+    }
+
+    fn locomotion_movement_yaw_radians_with_transform(
+        &self,
+        views: &[xr::View],
+        transform: XrStageToWorld,
+    ) -> Result<Option<f64>> {
         match self.locomotion_mode {
             XrLocomotionMode::PlayerYaw => Ok(None),
             XrLocomotionMode::HeadsetYaw => {
-                let tracking_origin = self.tracking_origin_for_views(views)?;
-                let transform =
-                    XrStageToWorld::from_tracking_origin(tracking_origin, self.camera.snapshot())?;
                 xr_headset_world_yaw_from_views(views, transform).map(|yaw| Some(f64::from(yaw)))
             }
         }
@@ -1549,7 +1565,7 @@ where
             max_render_distance: MAX_XR_RENDER_DISTANCE as i32,
             section_occlusion_culling: self.render_options.section_occlusion_culling,
             force_fullbright: self.render_options.force_fullbright,
-            fly_enabled: self.camera.movement_mode() == EngineCameraMovementMode::NoClip,
+            movement_mode: game_movement_mode(self.camera.movement_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
             max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
@@ -2261,8 +2277,10 @@ where
                 }
                 self.scene.render_distance = render_distance;
             }
-            GameUiAction::ToggleFly => {
-                let movement_mode = self.camera.toggle_movement_mode();
+            GameUiAction::SetMovementMode(movement_mode) => {
+                self.camera
+                    .set_movement_mode(engine_movement_mode(movement_mode));
+                let movement_mode = self.camera.movement_mode();
                 log::info!("XR player movement mode {}", movement_mode.label());
             }
             GameUiAction::SetFlySpeed(multiplier) => {
@@ -2932,6 +2950,38 @@ pub fn xr_locomotion_input_from_controllers(
     }
 }
 
+pub fn xr_hand_push_input_from_controllers(
+    controllers: &[XrControllerSnapshot],
+    views: &[xr::View],
+    transform: XrStageToWorld,
+) -> Result<Option<EngineHandPushInput>> {
+    if views.len() < 2 {
+        bail!("OpenXR runtime returned fewer than two stereo views");
+    }
+    let Some(left_hand_position) = xr_controller_hand_position(controllers, XrHand::Left) else {
+        return Ok(None);
+    };
+    let Some(right_hand_position) = xr_controller_hand_position(controllers, XrHand::Right) else {
+        return Ok(None);
+    };
+    let left_pose = mclone_xr_host::view_pose(&views[0])?;
+    let right_pose = mclone_xr_host::view_pose(&views[1])?;
+    let head_stage_position = (left_pose.position + right_pose.position) * 0.5;
+
+    Ok(Some(EngineHandPushInput::new(
+        vec3d_from_glam(transform.transform_position(head_stage_position)),
+        vec3d_from_glam(transform.transform_position(left_hand_position)),
+        vec3d_from_glam(transform.transform_position(right_hand_position)),
+    )))
+}
+
+fn xr_controller_hand_position(controllers: &[XrControllerSnapshot], hand: XrHand) -> Option<Vec3> {
+    controllers
+        .iter()
+        .find(|controller| controller.hand == hand)
+        .and_then(|controller| controller.grip_position.or(controller.aim_position))
+}
+
 pub fn xr_automated_flight_input(
     dt_seconds: f64,
     movement_yaw_radians: Option<f64>,
@@ -2946,6 +2996,22 @@ pub fn xr_automated_flight_input(
         movement_impulse: Some(EngineCameraMovementImpulse::new(0.0, 1.0)),
         movement_yaw_radians,
         ..EngineCameraInput::default()
+    }
+}
+
+fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovementMode {
+    match mode {
+        EngineCameraMovementMode::Walking => GameMovementMode::Walk,
+        EngineCameraMovementMode::NoClip => GameMovementMode::Fly,
+        EngineCameraMovementMode::HandPush => GameMovementMode::HandPush,
+    }
+}
+
+fn engine_movement_mode(mode: GameMovementMode) -> EngineCameraMovementMode {
+    match mode {
+        GameMovementMode::Walk => EngineCameraMovementMode::Walking,
+        GameMovementMode::Fly => EngineCameraMovementMode::NoClip,
+        GameMovementMode::HandPush => EngineCameraMovementMode::HandPush,
     }
 }
 
@@ -3585,6 +3651,31 @@ mod tests {
     }
 
     #[test]
+    fn xr_hand_push_input_uses_grip_poses_in_world_space() {
+        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
+        left.grip_position = Some(Vec3::new(-0.25, -1.0, -0.35));
+        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
+        right.grip_position = Some(Vec3::new(0.25, -1.0, -0.35));
+        let views = [
+            test_xr_view(Vec3::new(-0.03, 0.0, 0.0), Quat::IDENTITY),
+            test_xr_view(Vec3::new(0.03, 0.0, 0.0), Quat::IDENTITY),
+        ];
+        let transform = XrStageToWorld {
+            origin_stage: Vec3::ZERO,
+            origin_world: Vec3::new(8.0, 72.0, -12.0),
+            stage_to_world_rotation: Quat::IDENTITY,
+        };
+
+        let input = xr_hand_push_input_from_controllers(&[left, right], &views, transform)
+            .unwrap()
+            .expect("both hands available");
+
+        assert_vec3d_close(input.head_position, Vec3d::new(8.0, 72.0, -12.0));
+        assert_vec3d_close(input.left_hand_position, Vec3d::new(7.75, 71.0, -12.35));
+        assert_vec3d_close(input.right_hand_position, Vec3d::new(8.25, 71.0, -12.35));
+    }
+
+    #[test]
     fn xr_menu_toggle_uses_left_select_only() {
         let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
         left.select_pressed = true;
@@ -4004,6 +4095,13 @@ mod tests {
             thumbstick,
             thumbstick_pressed: false,
         }
+    }
+
+    fn assert_vec3d_close(actual: Vec3d, expected: Vec3d) {
+        assert!(
+            actual.distance_to_sqr(expected) < 1.0e-10,
+            "expected {actual:?} to be close to {expected:?}"
+        );
     }
 
     fn test_xr_view(position: Vec3, orientation: Quat) -> xr::View {

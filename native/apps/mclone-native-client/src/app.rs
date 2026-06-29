@@ -30,7 +30,7 @@ use crate::cli::{SceneOptions, StartupWaitPolicy, WindowStartIntent};
 use crate::flat_client_driver::{
     FlatClientCameraView, FlatClientDebugFrame, FlatClientDriver, FlatClientHostAction,
     FlatClientUiActionContext, FlatClientUiFrame, FlatClientUiRenderOptions,
-    FlatClientWorldActionStatus, game_ui_render_state,
+    FlatClientWorldActionStatus, game_movement_mode, game_ui_render_state,
 };
 use crate::frame_pacing::{
     FramePacing, FramePacingMode, FrameTimingStats, RedrawSchedule, elapsed_ms,
@@ -40,7 +40,6 @@ use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneAssets, WindowSceneRuntime, WindowSceneStartupPump};
 use crate::ui::DebugPaneStats;
 use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
-use mclone_render_session::EngineCameraMovementMode;
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
 const RENDER_RESOURCE_REBUILD_KEY: KeyCode = KeyCode::F8;
@@ -377,7 +376,7 @@ impl ChunkApp {
                 .unwrap_or(MAX_RENDER_DISTANCE),
             render_options: self.driver.render_options,
             frame_pacing: self.frame_pacing.ui_state(),
-            fly_enabled: self.driver.camera.movement_mode() == EngineCameraMovementMode::NoClip,
+            movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
             fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
             movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
         });
@@ -1150,8 +1149,7 @@ impl ApplicationHandler for ChunkApp {
                         .unwrap_or(MAX_RENDER_DISTANCE),
                     render_options: self.driver.render_options,
                     frame_pacing: self.frame_pacing.ui_state(),
-                    fly_enabled: self.driver.camera.movement_mode()
-                        == EngineCameraMovementMode::NoClip,
+                    movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
                     fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
                     movement_speed_multiplier: self.driver.camera.movement_speed_multiplier()
                         as f32,
@@ -1285,7 +1283,7 @@ mod tests {
         GameSessionState, RemoteSessionEndpoint, SessionStartRequest,
     };
     use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
-    use mclone_render_session::actor_instances_from_presentations;
+    use mclone_render_session::{EngineCameraMovementMode, actor_instances_from_presentations};
     use mclone_ui::GameScreen;
 
     fn test_app_with_runtime(scene: SceneOptions) -> ChunkApp {
@@ -1814,16 +1812,21 @@ mod tests {
     }
 
     #[test]
-    fn player_movement_mode_toggles_between_walking_and_no_clip() {
+    fn player_movement_mode_cycles_through_shared_modes() {
         assert_eq!(
             EngineCameraMovementMode::Walking.toggled(),
             EngineCameraMovementMode::NoClip
         );
         assert_eq!(
             EngineCameraMovementMode::NoClip.toggled(),
+            EngineCameraMovementMode::HandPush
+        );
+        assert_eq!(
+            EngineCameraMovementMode::HandPush.toggled(),
             EngineCameraMovementMode::Walking
         );
         assert_eq!(EngineCameraMovementMode::Walking.label(), "WALK");
         assert_eq!(EngineCameraMovementMode::NoClip.label(), "NOCLIP");
+        assert_eq!(EngineCameraMovementMode::HandPush.label(), "HAND");
     }
 }

@@ -10,7 +10,6 @@ use mclone_protocol::{ClientCommand, MovePlayerCommand};
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
 use mclone_render::target::RenderFrameContext;
-use mclone_render_session::EngineCameraMovementMode;
 use mclone_server::initial_spawn_center_for_seed;
 use mclone_ui::GuiScale;
 
@@ -20,7 +19,7 @@ use crate::cli::{
 };
 use crate::flat_client_driver::{
     FlatClientDebugFrame, FlatClientDriver, FlatClientUiFrame, FlatClientUiRenderOptions,
-    FlatClientWorldActionStatus,
+    FlatClientWorldActionStatus, game_movement_mode,
 };
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState};
 use crate::render_cache::load_asset_source;
@@ -275,7 +274,7 @@ impl OffscreenFlatClientHost {
                     as i32,
                 render_options: self.driver.render_options,
                 frame_pacing: FramePacingUiState::default(),
-                fly_enabled: self.driver.camera.movement_mode() == EngineCameraMovementMode::NoClip,
+                movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
                 fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
                 movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
             },
