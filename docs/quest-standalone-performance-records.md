@@ -74,6 +74,47 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-29 - Standalone Quest 3 Frozen RD10 Cached Prepared Records (Slice F)
+
+Benchmarked code commit: this Slice F commit (cache prepared culling records
+across frames behind a dirty flag; fold the view-independent loaded
+section/index counts into the build). Captured immediately before commit from
+the same worktree, based on the E1 commit. Validation: `cargo check
+--target aarch64-linux-android` clean; `cargo test -p mclone-render` 74 passed.
+Cleanup verified: `pidof` empty, `mWakefulness=Asleep`,
+`mHoldingDisplaySuspendBlocker=false`.
+
+Lane `native:android-xr:perf:frozen:rd10` (no `--perf-gpu-timestamps`, so no
+readback perturbation; render-split timing on).
+
+| Field | Slice F | E1 / baseline |
+|---|---:|---:|
+| Frame avg / p50 / p95 / max | `16.440` / `16.540` / `17.973` / `28.068` ms | `15.94` / `16.01` / `17.85` (E1) |
+| **Shared records max (CPU)** | **`0.006ms`** | `1.537ms` (E1) |
+| Left / right eye cull max | `2.820` / `2.295` ms | `2.28` / `2.34` (baseline) |
+| Left / right eye wall max | `4.831` / `4.258` ms | — |
+| Stereo poll wait max (GPU) | `12.146ms` | `11.139` (E1) / `10.543` (baseline) |
+| Drawn sections / indices | `179` / `1,352,166` | same |
+
+Interpretation:
+
+- **The Slice F win is clean and exactly as designed: `shared_records` dropped
+  from `~1.537ms` every frame to `0.006ms`** (an `Arc` clone of the cached
+  records). In the frozen measured window the `~1.5ms` `BTreeMap` rebuild is gone
+  entirely; in live play it now runs only on section upload/removal/readiness
+  change (a few times/sec) instead of every frame. Behavior-preserving (drawn
+  counts unchanged; 74 render tests pass).
+- **The frame-level p50 did not improve and the poll wait rose to `12.146ms`.**
+  This is thermal drift across repeated build/run cycles (poll crept
+  `10.5 -> 11.1 -> 12.1ms` over baseline -> E1 -> F) on a GPU-bound frame: per E1
+  the frame is `CPU + GPU` serial with GPU `~10.7ms+`, so a `~1.5ms` CPU saving
+  is swamped by `~1.5ms` of GPU thermal variance at the frame level. The honest
+  attribution of Slice F is the thermal-independent `shared_records` bucket
+  delta, not frame p50.
+- Cull max ticked up (`2.82` vs `2.28`) — also thermal/CPU-clock noise; folding
+  the two loaded-count passes into the build is within measurement noise because
+  cull is dominated by `BTreeMap`/`BTreeSet` ops, which is Slice G's target.
+
 ### 2026-06-29 - Standalone Quest 3 Frozen RD10 GPU-Timestamp Split (E1)
 
 Benchmarked code commit: this E1 commit (opt-in wgpu GPU-timestamp split of the

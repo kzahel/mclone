@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
@@ -396,7 +397,18 @@ pub fn textured_section_visibility_stats_with_options_and_ready_sections(
             )
         })
         .collect::<BTreeMap<_, _>>();
-    cull_textured_sections(&records, render_view, options).stats
+    let loaded_section_count = records.values().filter(|record| record.drawable).count();
+    let loaded_index_count = records
+        .values()
+        .filter(|record| record.drawable)
+        .map(|record| record.index_count)
+        .sum();
+    let prepared = PreparedTexturedSectionRecords {
+        records,
+        loaded_section_count,
+        loaded_index_count,
+    };
+    cull_textured_sections(&prepared, render_view, options).stats
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -410,6 +422,11 @@ struct TexturedSectionCullingRecord {
 #[derive(Clone, Debug, Default)]
 pub struct PreparedTexturedSectionRecords {
     records: BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
+    // Slice F (docs/tactical/106): view-independent loaded totals, computed once
+    // when the record set is built rather than re-summed per eye per frame in
+    // `cull_textured_sections`.
+    loaded_section_count: usize,
+    loaded_index_count: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -453,20 +470,18 @@ impl RenderSectionTraversalInfo {
 }
 
 fn cull_textured_sections(
-    records: &BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
+    prepared: &PreparedTexturedSectionRecords,
     render_view: ChunkRenderView,
     options: TexturedSectionRenderOptions,
 ) -> TexturedSectionCullingResult {
+    let records = &prepared.records;
     let frustum = ClipFrustum::from_render_view(render_view);
     let mut stats = TexturedSectionRenderStats {
         section_occlusion_culling: options.section_occlusion_culling,
         force_fullbright: options.force_fullbright,
-        loaded_section_count: records.values().filter(|record| record.drawable).count(),
-        loaded_index_count: records
-            .values()
-            .filter(|record| record.drawable)
-            .map(|record| record.index_count)
-            .sum(),
+        // Slice F: precomputed once at record-build time, not re-summed per eye.
+        loaded_section_count: prepared.loaded_section_count,
+        loaded_index_count: prepared.loaded_index_count,
         ..TexturedSectionRenderStats::default()
     };
 
@@ -1445,6 +1460,14 @@ pub struct TexturedSectionDrawResources {
     visibility_sections: BTreeMap<RenderSectionKey, VisibilitySet>,
     traversal_ready_sections: BTreeSet<RenderSectionKey>,
     atlas: GpuChunkTextureAtlas,
+    // Slice F (docs/tactical/106): the prepared culling records only change when
+    // the section set / readiness changes (upload, removal, traversal refresh),
+    // not on camera movement. Cache them across frames and rebuild lazily on the
+    // next `prepare_render_records` after a mutation, instead of rebuilding the
+    // whole `BTreeMap` every frame. `Arc` keeps the type `Send` and makes the
+    // per-frame handout an O(1) refcount bump rather than a deep clone.
+    cached_records: Option<Arc<PreparedTexturedSectionRecords>>,
+    records_dirty: bool,
 }
 
 impl TexturedSectionDrawResources {
@@ -1465,6 +1488,8 @@ impl TexturedSectionDrawResources {
             visibility_sections: BTreeMap::new(),
             traversal_ready_sections: BTreeSet::new(),
             atlas,
+            cached_records: None,
+            records_dirty: true,
         };
         let _ = resources.update_sections(device, sections)?;
         Ok(resources)
@@ -1494,6 +1519,9 @@ impl TexturedSectionDrawResources {
         sections: &[TexturedRenderSectionMesh],
         removed: &BTreeSet<RenderSectionKey>,
     ) -> Result<TexturedSectionUploadReport> {
+        // Slice F: the section set / meshes change here, so the cached culling
+        // records must be rebuilt on the next prepare.
+        self.records_dirty = true;
         let mut report = TexturedSectionUploadReport::default();
         for key in removed {
             if self.sections.remove(key).is_some() {
@@ -1529,6 +1557,8 @@ impl TexturedSectionDrawResources {
     }
 
     pub fn set_traversal_ready_sections(&mut self, ready_sections: &BTreeSet<RenderSectionKey>) {
+        // Slice F: readiness flips change the cached records' `traversal_ready`.
+        self.records_dirty = true;
         self.traversal_ready_sections = self
             .visibility_sections
             .keys()
@@ -1597,10 +1627,18 @@ impl TexturedSectionDrawResources {
         Ok((stats, timing))
     }
 
-    pub fn prepare_render_records(&self) -> PreparedTexturedSectionRecords {
-        PreparedTexturedSectionRecords {
-            records: self.collect_render_records(),
+    pub fn prepare_render_records(&mut self) -> Arc<PreparedTexturedSectionRecords> {
+        // Slice F: rebuild only when the section set / readiness changed since the
+        // last build; otherwise hand back the cached records (an O(1) Arc clone).
+        if self.records_dirty || self.cached_records.is_none() {
+            self.cached_records = Some(Arc::new(self.build_prepared_records()));
+            self.records_dirty = false;
         }
+        Arc::clone(
+            self.cached_records
+                .as_ref()
+                .expect("records cached above"),
+        )
     }
 
     pub fn render_prepared_with_options(
@@ -1657,11 +1695,11 @@ impl TexturedSectionDrawResources {
     ) -> Result<TexturedSectionRenderStats> {
         let prepare_start = timing.as_ref().map(|_| Instant::now());
         let records_storage;
-        let records = match prepared_records {
-            Some(records) => &records.records,
+        let records: &PreparedTexturedSectionRecords = match prepared_records {
+            Some(records) => records,
             None => {
                 let records_start = timing.as_ref().map(|_| Instant::now());
-                records_storage = self.collect_render_records();
+                records_storage = self.build_prepared_records();
                 if let (Some(timing), Some(records_start)) = (&mut timing, records_start) {
                     timing.records_ms = elapsed_ms(records_start.elapsed());
                 }
@@ -1749,22 +1787,33 @@ impl TexturedSectionDrawResources {
         Ok(culling.stats)
     }
 
-    fn collect_render_records(&self) -> BTreeMap<RenderSectionKey, TexturedSectionCullingRecord> {
-        self.visibility_sections
-            .iter()
-            .map(|(key, visibility)| {
-                let mesh = self.sections.get(key);
-                (
-                    *key,
-                    TexturedSectionCullingRecord {
-                        index_count: mesh.map_or(0, GpuTexturedChunkMesh::index_count),
-                        visibility: *visibility,
-                        drawable: mesh.is_some(),
-                        traversal_ready: self.traversal_ready_sections.contains(key),
-                    },
-                )
-            })
-            .collect()
+    fn build_prepared_records(&self) -> PreparedTexturedSectionRecords {
+        let mut records = BTreeMap::new();
+        let mut loaded_section_count = 0usize;
+        let mut loaded_index_count = 0u32;
+        for (key, visibility) in &self.visibility_sections {
+            let mesh = self.sections.get(key);
+            let index_count = mesh.map_or(0, GpuTexturedChunkMesh::index_count);
+            let drawable = mesh.is_some();
+            if drawable {
+                loaded_section_count += 1;
+                loaded_index_count += index_count;
+            }
+            records.insert(
+                *key,
+                TexturedSectionCullingRecord {
+                    index_count,
+                    visibility: *visibility,
+                    drawable,
+                    traversal_ready: self.traversal_ready_sections.contains(key),
+                },
+            );
+        }
+        PreparedTexturedSectionRecords {
+            records,
+            loaded_section_count,
+            loaded_index_count,
+        }
     }
 }
 
