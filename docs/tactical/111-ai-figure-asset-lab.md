@@ -1,6 +1,6 @@
 # 111 - AI Figure Asset Lab
 
-Status: active; Slice 2 starter animal batch landed.
+Status: active; Slice 2 starter biped batch landed.
 
 ## Purpose
 
@@ -263,8 +263,9 @@ profile the harness before adding animation-sheet captures.
       MP4 output defaulting to several cycles.
 - [ ] Add a validation report that points to the asset file and part names.
 - [x] Add starter examples for sheep, dog, cat, and butterfly.
-- [ ] Add starter prompts for sheep, dog, cat, butterfly, and player stand-in
-      variants.
+- [x] Add starter biped examples for a player stand-in, bearfolk, and lionfolk.
+- [ ] Add starter prompts for sheep, dog, cat, butterfly, player stand-in, and
+      humanoid animal variants.
 
 Landed validation:
 

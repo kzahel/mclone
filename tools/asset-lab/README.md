@@ -33,7 +33,8 @@ to see.
 
 The batch command discovers `examples/*/figure.ts`, exports each asset, renders
 each sheet, and writes MP4 reviews under `/tmp/mclone-asset-lab/`. The initial
-batch contains `piglet`, `sheep`, `dog`, `cat`, and `butterfly`.
+batch contains `piglet`, `sheep`, `dog`, `cat`, `butterfly`, `player`,
+`bearfolk`, and `lionfolk`.
 
 Asset files should use the DSL from `src/dsl.ts`. Three.js is an implementation
 detail of the preview, not the source format.
