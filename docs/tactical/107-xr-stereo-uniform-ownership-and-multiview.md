@@ -2,10 +2,11 @@
 
 Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
 proof landed, and Slice E's headless plus Android XR multiview proof paths
-exist. The first Quest proof run showed the runtime-backed `wgpu` device does
-not expose `MULTIVIEW`. Created after `d0c5161` (`Restore XR per-eye command
-submission`) rolled back the unsafe single-submit Quest XR optimization from
-`264c723`.
+exist. The Quest proof now exposes and executes `wgpu::Features::MULTIVIEW`
+after enabling `VK_KHR_get_physical_device_properties2` on the OpenXR Vulkan
+instance. Production terrain/sky/entity/GUI multiview migration remains
+pending. Created after `d0c5161` (`Restore XR per-eye command submission`)
+rolled back the unsafe single-submit Quest XR optimization from `264c723`.
 
 ## Goal
 
@@ -293,6 +294,62 @@ two-layer OpenXR swapchain (`eye=1680x1760 images=3 layers=2`), but failed
 before drawing because the OpenXR-backed `wgpu` device reported
 `multiview=false` and `render_multiview_layer_proof` bailed with
 `wgpu device does not expose MULTIVIEW`.
+
+Research signal gathered 2026-06-29 says this is likely an initialization or
+wgpu-wrapper issue, not a Quest 3 hardware limit:
+
+- Meta's Horizon OS docs say Multiview is enabled by default for OpenXR in the
+  Meta Quest feature group:
+  <https://developers.meta.com/horizon/documentation/unity/enable-multiview/>.
+- Meta's OpenXR Quest Support settings describe Quest-specific optimizations and
+  advanced rendering settings:
+  <https://developers.meta.com/horizon/documentation/unity/unity-openxr-settings-quest/>.
+- Vulkan documents `VK_KHR_multiview` as a VR-oriented feature for recording one
+  set of commands with different behavior for each view:
+  <https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_multiview.html>.
+- `wgpu::Features::MULTIVIEW` is documented as enabling multiview render passes
+  and `builtin(view_index)` on Vulkan:
+  <https://wgpu.rs/doc/wgpu/struct.Features.html#associatedconstant.MULTIVIEW>.
+- Khronos OpenXR guidance confirms a single layered swapchain can present both
+  projection views by using the same swapchain and different array indices:
+  <https://community.khronos.org/t/enable-vulkan-multiview-extension-in-openxr-the-right-way/107585>.
+- The `openxr` crate's Vulkan example targets Vulkan 1.1, explicitly enables
+  `VkPhysicalDeviceMultiviewFeatures { multiview: VK_TRUE }`, and renders with a
+  multiview render pass.
+- A public native OpenXR/Vulkan optimization lab reports Quest 3 / Adreno 740
+  testing with Vulkan multiview:
+  <https://github.com/myers/openxr-vulkan-multiview-msaa>.
+- Qualcomm documents hardware-accelerated multiview rendering for Snapdragon XR2
+  class Adreno GPUs in Vulkan and OpenGL ES:
+  <https://www.qualcomm.com/developer/blog/2023/10/reducing-rendering-work-and-memory-operations-stereoscopic-scenes-new-multiview-extensions>.
+
+Follow-up diagnosis found a concrete local initialization suspect: the OpenXR
+Vulkan instance was wrapped into wgpu-hal with an empty enabled-instance-extension
+list. wgpu-hal only loads `VK_KHR_get_physical_device_properties2` when that
+extension is listed, even though the feature-query functionality is promoted to
+Vulkan 1.1. Without properties2, wgpu-hal cannot query
+`VkPhysicalDeviceMultiviewFeatures`, so the adapter can under-report
+`wgpu::Features::MULTIVIEW`.
+
+Follow-up implementation enables `VK_KHR_get_physical_device_properties2` when
+advertised, passes that list to wgpu-hal, and logs raw Vulkan multiview
+feature/property state beside the wgpu adapter/device bits. The first run after
+that change proved the capability path was fixed, but hit a proof-shader
+validation error: Naga 25 expects `@builtin(view_index)` to be `i32`, not `u32`.
+Both proof shaders were corrected to pass a flat `i32` view index.
+
+Quest 3 validation then passed:
+
+```text
+OpenXR Vulkan session: physical_device='Adreno (TM) 740' api=1.3.295 queue_family=0
+OpenXR wgpu features: multiview=true
+OpenXR Vulkan multiview diagnostics: instance_properties2_ext=true device_khr_multiview_ext=true raw_feature=true raw_geometry_shader=false raw_tessellation_shader=false max_views=6 max_instance_index=4294967295 wgpu_adapter=true wgpu_device=true
+OpenXR multiview proof swapchain: color_format=Rgba8Unorm eye=1680x1760 images=3 layers=2
+MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted=1 runtime_frames=1 skipped=0 eye=1680x1760 layers=2 multiview=true
+```
+
+Release APK SHA-256 for that proof run:
+`54c5910e4cb5542329dcbe294b5e0974d82a3a54a48551837a91523d2e44703e`.
 
 Move from proof-of-correctness one-submit to the real target:
 

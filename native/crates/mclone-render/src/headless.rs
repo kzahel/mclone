@@ -1108,13 +1108,13 @@ fn fs_main() -> @location(0) vec4<f32> {
         const SHADER: &str = r#"
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
-    @location(0) @interpolate(flat) view_index: u32,
+    @location(0) @interpolate(flat) view_index: i32,
 };
 
 @vertex
 fn vs_main(
     @builtin(vertex_index) vertex_index: u32,
-    @builtin(view_index) view_index: u32,
+    @builtin(view_index) view_index: i32,
 ) -> VertexOut {
     var positions = array<vec2<f32>, 3>(
         vec2<f32>(-1.0, -1.0),
@@ -1129,7 +1129,7 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    if (in.view_index == 0u) {
+    if (in.view_index == 0i) {
         return vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }
     return vec4<f32>(0.0, 1.0, 0.0, 1.0);

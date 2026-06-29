@@ -881,6 +881,19 @@ mod android {
                 .features()
                 .contains(wgpu::Features::MULTIVIEW)
         );
+        let multiview = graphics.multiview_diagnostics;
+        log::info!(
+            "OpenXR Vulkan multiview diagnostics: instance_properties2_ext={} device_khr_multiview_ext={} raw_feature={} raw_geometry_shader={} raw_tessellation_shader={} max_views={} max_instance_index={} wgpu_adapter={} wgpu_device={}",
+            multiview.instance_properties2_extension,
+            multiview.device_khr_multiview_extension,
+            multiview.raw_feature_multiview,
+            multiview.raw_feature_multiview_geometry_shader,
+            multiview.raw_feature_multiview_tessellation_shader,
+            multiview.raw_max_multiview_view_count,
+            multiview.raw_max_multiview_instance_index,
+            multiview.wgpu_adapter_multiview,
+            multiview.wgpu_device_multiview
+        );
         let display_refresh = mclone_xr_host::query_display_refresh_snapshot(
             &graphics.session,
             available.fb_display_refresh_rate,

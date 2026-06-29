@@ -5,9 +5,23 @@ pub mod vulkan {
     use ash::vk;
     use ash::vk::Handle as _;
     use openxr as xr;
+    use std::ffi::CStr;
     use wgpu::hal::api::Vulkan as HalVulkan;
 
     pub type AppGraphics = xr::Vulkan;
+
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct VulkanMultiviewDiagnostics {
+        pub instance_properties2_extension: bool,
+        pub device_khr_multiview_extension: bool,
+        pub raw_feature_multiview: bool,
+        pub raw_feature_multiview_geometry_shader: bool,
+        pub raw_feature_multiview_tessellation_shader: bool,
+        pub raw_max_multiview_view_count: u32,
+        pub raw_max_multiview_instance_index: u32,
+        pub wgpu_adapter_multiview: bool,
+        pub wgpu_device_multiview: bool,
+    }
 
     pub struct VulkanGraphicsSession {
         pub frame_wait: xr::FrameWaiter,
@@ -18,6 +32,7 @@ pub mod vulkan {
         pub physical_device_name: String,
         pub physical_device_api_version: String,
         pub queue_family_index: u32,
+        pub multiview_diagnostics: VulkanMultiviewDiagnostics,
     }
 
     pub struct VulkanEyeSwapchain {
@@ -152,13 +167,22 @@ pub mod vulkan {
         }
 
         let vk_entry = load_vulkan_entry()?;
+        let enabled_instance_extensions = openxr_wgpu_instance_extensions(&vk_entry)?;
+        let enabled_instance_extension_names = enabled_instance_extensions
+            .iter()
+            .map(|name| name.as_ptr())
+            .collect::<Vec<_>>();
+        let instance_properties2_extension =
+            enabled_instance_extensions.contains(&vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_NAME);
         let vk_app_info = vk::ApplicationInfo::default()
             .application_name(c"mclone")
             .application_version(1)
             .engine_name(c"mclone")
             .engine_version(1)
             .api_version(vk_target_version);
-        let vk_instance_info = vk::InstanceCreateInfo::default().application_info(&vk_app_info);
+        let vk_instance_info = vk::InstanceCreateInfo::default()
+            .application_info(&vk_app_info)
+            .enabled_extension_names(&enabled_instance_extension_names);
 
         let vk_instance = {
             let get_instance_proc_addr =
@@ -194,6 +218,11 @@ pub mod vulkan {
         let physical_device_name = physical_device_name(&physical_device_properties);
         let physical_device_api_version =
             format_vulkan_api_version(physical_device_properties.api_version);
+        let mut multiview_diagnostics = query_multiview_diagnostics(
+            &vk_instance,
+            vk_physical_device,
+            instance_properties2_extension,
+        )?;
 
         let queue_family_index =
             unsafe { vk_instance.get_physical_device_queue_family_properties(vk_physical_device) }
@@ -215,7 +244,7 @@ pub mod vulkan {
                 vk_target_version,
                 0,
                 None,
-                vec![],
+                enabled_instance_extensions,
                 wgpu::InstanceFlags::empty(),
                 false,
                 Some(Box::new(|| {})),
@@ -226,6 +255,8 @@ pub mod vulkan {
         let exposed_adapter = hal_instance
             .expose_adapter(vk_physical_device)
             .context("expose OpenXR Vulkan physical device to wgpu")?;
+        multiview_diagnostics.wgpu_adapter_multiview =
+            exposed_adapter.features.contains(wgpu::Features::MULTIVIEW);
         let required_features = optional_openxr_wgpu_features(exposed_adapter.features);
         let enabled_extensions = exposed_adapter
             .adapter
@@ -289,6 +320,8 @@ pub mod vulkan {
             )
         }
         .context("create wgpu device from OpenXR Vulkan device")?;
+        multiview_diagnostics.wgpu_device_multiview =
+            device.features().contains(wgpu::Features::MULTIVIEW);
 
         let session_vk_device = unsafe {
             device.as_hal::<HalVulkan, _, _>(|device| {
@@ -322,7 +355,62 @@ pub mod vulkan {
             physical_device_name,
             physical_device_api_version,
             queue_family_index,
+            multiview_diagnostics,
         })
+    }
+
+    fn openxr_wgpu_instance_extensions(vk_entry: &ash::Entry) -> Result<Vec<&'static CStr>> {
+        let available = unsafe { vk_entry.enumerate_instance_extension_properties(None) }
+            .context("enumerate Vulkan instance extensions")?;
+        let mut extensions = Vec::new();
+        if extension_properties_contain(&available, vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_NAME) {
+            extensions.push(vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_NAME);
+        }
+        Ok(extensions)
+    }
+
+    fn query_multiview_diagnostics(
+        vk_instance: &ash::Instance,
+        vk_physical_device: vk::PhysicalDevice,
+        instance_properties2_extension: bool,
+    ) -> Result<VulkanMultiviewDiagnostics> {
+        let device_extensions =
+            unsafe { vk_instance.enumerate_device_extension_properties(vk_physical_device) }
+                .context("enumerate OpenXR Vulkan device extensions")?;
+        let device_khr_multiview_extension =
+            extension_properties_contain(&device_extensions, vk::KHR_MULTIVIEW_NAME);
+
+        let mut multiview_features = vk::PhysicalDeviceMultiviewFeatures::default();
+        let mut features2 =
+            vk::PhysicalDeviceFeatures2::default().push_next(&mut multiview_features);
+        unsafe { vk_instance.get_physical_device_features2(vk_physical_device, &mut features2) };
+
+        let mut multiview_properties = vk::PhysicalDeviceMultiviewProperties::default();
+        let mut properties2 =
+            vk::PhysicalDeviceProperties2::default().push_next(&mut multiview_properties);
+        unsafe {
+            vk_instance.get_physical_device_properties2(vk_physical_device, &mut properties2)
+        };
+
+        Ok(VulkanMultiviewDiagnostics {
+            instance_properties2_extension,
+            device_khr_multiview_extension,
+            raw_feature_multiview: multiview_features.multiview != 0,
+            raw_feature_multiview_geometry_shader: multiview_features.multiview_geometry_shader
+                != 0,
+            raw_feature_multiview_tessellation_shader: multiview_features
+                .multiview_tessellation_shader
+                != 0,
+            raw_max_multiview_view_count: multiview_properties.max_multiview_view_count,
+            raw_max_multiview_instance_index: multiview_properties.max_multiview_instance_index,
+            ..Default::default()
+        })
+    }
+
+    fn extension_properties_contain(extensions: &[vk::ExtensionProperties], name: &CStr) -> bool {
+        extensions
+            .iter()
+            .any(|extension| matches!(extension.extension_name_as_c_str(), Ok(extension_name) if extension_name == name))
     }
 
     fn optional_openxr_wgpu_features(adapter_features: wgpu::Features) -> wgpu::Features {
