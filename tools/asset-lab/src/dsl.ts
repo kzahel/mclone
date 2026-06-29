@@ -113,6 +113,7 @@ export interface SwingOptions {
   axis?: AxisName;
   degrees: number;
   center?: number;
+  frequency?: number;
   phase?: number;
 }
 
@@ -120,6 +121,7 @@ export interface BobOptions {
   axis?: AxisName;
   amount: number;
   center?: number;
+  frequency?: number;
   phase?: number;
 }
 
@@ -135,12 +137,81 @@ export interface WalkCycleSpec {
   tracks: CycleTrack[];
 }
 
+export interface CycleTimingSpec {
+  duration?: number;
+  fps?: number;
+  loop?: boolean;
+  samples?: number;
+}
+
+export type QuadrupedGait = "trot" | "walk" | "pace" | "bound";
+
+export interface QuadrupedLegs {
+  frontLeft: string;
+  frontRight: string;
+  backLeft: string;
+  backRight: string;
+}
+
+export interface QuadrupedWalkSpec extends CycleTimingSpec {
+  body?: string;
+  bodyBob?: number;
+  bodyBobCenter?: number;
+  bodyBobPhase?: number;
+  gait?: QuadrupedGait;
+  head?: string;
+  headSwingDegrees?: number;
+  legAxis?: AxisName;
+  legs: QuadrupedLegs;
+  swingDegrees?: number;
+  tail?: string;
+  tailSwingDegrees?: number;
+  tracks?: CycleTrack[];
+}
+
+export interface BipedWalkSpec extends CycleTimingSpec {
+  armAxis?: AxisName;
+  armSwingDegrees?: number;
+  body?: string;
+  bodyBob?: number;
+  bodyBobCenter?: number;
+  bodyBobPhase?: number;
+  head?: string;
+  headSwingDegrees?: number;
+  leftArm?: string;
+  leftLeg: string;
+  legAxis?: AxisName;
+  rightArm?: string;
+  rightLeg: string;
+  swingDegrees?: number;
+  tracks?: CycleTrack[];
+}
+
+export interface WingFlapSpec extends CycleTimingSpec {
+  axis?: AxisName;
+  body?: string;
+  bodyBob?: number;
+  bodyBobCenter?: number;
+  bodyBobPhase?: number;
+  center?: number;
+  degrees?: number;
+  frequency?: number;
+  leftWing: string;
+  mirror?: boolean;
+  phase?: number;
+  rightWing: string;
+  tracks?: CycleTrack[];
+}
+
 export interface FigureApi {
   mat(name: string, colorOrSpec: string | MaterialSpec): void;
   asciiTexture(name: string, texture: AsciiTextureSpec): void;
   part(name: string, draft: PartDraft): void;
   clip(name: string, spec: ClipSpec): void;
   walkCycle(name: string, spec: WalkCycleSpec): void;
+  bipedWalk(name: string, spec: BipedWalkSpec): void;
+  quadrupedWalk(name: string, spec: QuadrupedWalkSpec): void;
+  wingFlap(name: string, spec: WingFlapSpec): void;
   swing(part: string, options: SwingOptions): CycleTrack;
   bob(part: string, options: BobOptions): CycleTrack;
   box(options: BoxOptions): PartDraft;
@@ -232,6 +303,9 @@ class FigureBuilder {
       part: (name, draft) => this.part(name, draft),
       clip: (name, spec) => this.clip(name, spec),
       walkCycle: (name, spec) => this.clip(name, buildWalkCycleClip(spec)),
+      bipedWalk: (name, spec) => this.clip(name, buildWalkCycleClip(buildBipedWalkCycle(spec))),
+      quadrupedWalk: (name, spec) => this.clip(name, buildWalkCycleClip(buildQuadrupedWalkCycle(spec))),
+      wingFlap: (name, spec) => this.clip(name, buildWalkCycleClip(buildWingFlapCycle(spec))),
       swing,
       bob,
       box,
@@ -327,6 +401,9 @@ function swing(part: string, options: SwingOptions): CycleTrack {
   if (options.center !== undefined) {
     track.center = options.center;
   }
+  if (options.frequency !== undefined) {
+    track.frequency = options.frequency;
+  }
   if (options.phase !== undefined) {
     track.phase = options.phase;
   }
@@ -341,10 +418,152 @@ function bob(part: string, options: BobOptions): CycleTrack {
   if (options.center !== undefined) {
     track.center = options.center;
   }
+  if (options.frequency !== undefined) {
+    track.frequency = options.frequency;
+  }
   if (options.phase !== undefined) {
     track.phase = options.phase;
   }
   return track;
+}
+
+function buildQuadrupedWalkCycle(spec: QuadrupedWalkSpec): WalkCycleSpec {
+  const swingDegrees = spec.swingDegrees ?? 18;
+  const legAxis = spec.legAxis ?? "x";
+  const phases = quadrupedPhases(spec.gait ?? "trot");
+  const tracks: CycleTrack[] = [
+    swing(spec.legs.frontLeft, { axis: legAxis, degrees: swingDegrees, phase: phases.frontLeft }),
+    swing(spec.legs.frontRight, { axis: legAxis, degrees: swingDegrees, phase: phases.frontRight }),
+    swing(spec.legs.backLeft, { axis: legAxis, degrees: swingDegrees, phase: phases.backLeft }),
+    swing(spec.legs.backRight, { axis: legAxis, degrees: swingDegrees, phase: phases.backRight }),
+  ];
+
+  if (spec.body && spec.bodyBob !== 0) {
+    const amount = spec.bodyBob ?? 0.012;
+    tracks.push(bob(spec.body, {
+      axis: "y",
+      amount,
+      center: spec.bodyBobCenter ?? amount,
+      phase: spec.bodyBobPhase ?? 0.5,
+    }));
+  }
+  if (spec.head && spec.headSwingDegrees !== 0) {
+    tracks.push(swing(spec.head, {
+      axis: "y",
+      degrees: spec.headSwingDegrees ?? 3,
+      phase: 0.5,
+    }));
+  }
+  if (spec.tail && spec.tailSwingDegrees !== 0) {
+    tracks.push(swing(spec.tail, {
+      axis: "z",
+      degrees: spec.tailSwingDegrees ?? 10,
+      phase: 0.5,
+    }));
+  }
+  tracks.push(...(spec.tracks ?? []));
+
+  return cycleSpecFromTiming(spec, tracks);
+}
+
+function buildBipedWalkCycle(spec: BipedWalkSpec): WalkCycleSpec {
+  const swingDegrees = spec.swingDegrees ?? 24;
+  const armSwingDegrees = spec.armSwingDegrees ?? swingDegrees * 0.7;
+  const legAxis = spec.legAxis ?? "x";
+  const armAxis = spec.armAxis ?? legAxis;
+  const tracks: CycleTrack[] = [
+    swing(spec.leftLeg, { axis: legAxis, degrees: swingDegrees, phase: 0 }),
+    swing(spec.rightLeg, { axis: legAxis, degrees: swingDegrees, phase: 0.5 }),
+  ];
+
+  if (spec.leftArm && armSwingDegrees !== 0) {
+    tracks.push(swing(spec.leftArm, { axis: armAxis, degrees: armSwingDegrees, phase: 0.5 }));
+  }
+  if (spec.rightArm && armSwingDegrees !== 0) {
+    tracks.push(swing(spec.rightArm, { axis: armAxis, degrees: armSwingDegrees, phase: 0 }));
+  }
+  if (spec.body && spec.bodyBob !== 0) {
+    const amount = spec.bodyBob ?? 0.016;
+    tracks.push(bob(spec.body, {
+      axis: "y",
+      amount,
+      center: spec.bodyBobCenter ?? amount,
+      phase: spec.bodyBobPhase ?? 0.5,
+    }));
+  }
+  if (spec.head && spec.headSwingDegrees !== 0) {
+    tracks.push(swing(spec.head, {
+      axis: "y",
+      degrees: spec.headSwingDegrees ?? 2.5,
+      phase: 0.5,
+    }));
+  }
+  tracks.push(...(spec.tracks ?? []));
+
+  return cycleSpecFromTiming(spec, tracks);
+}
+
+function buildWingFlapCycle(spec: WingFlapSpec): WalkCycleSpec {
+  const axis = spec.axis ?? "z";
+  const degrees = spec.degrees ?? 38;
+  const center = spec.center ?? 0;
+  const frequency = spec.frequency ?? 2;
+  const phase = spec.phase ?? 0;
+  const mirror = spec.mirror ?? true;
+  const tracks: CycleTrack[] = [
+    swing(spec.leftWing, { axis, center, degrees, frequency, phase }),
+    swing(spec.rightWing, {
+      axis,
+      center: mirror ? -center : center,
+      degrees: mirror ? -degrees : degrees,
+      frequency,
+      phase,
+    }),
+  ];
+
+  if (spec.body && spec.bodyBob !== 0) {
+    const amount = spec.bodyBob ?? 0.03;
+    tracks.push(bob(spec.body, {
+      axis: "y",
+      amount,
+      center: spec.bodyBobCenter ?? 0,
+      frequency,
+      phase: spec.bodyBobPhase ?? 0.5,
+    }));
+  }
+  tracks.push(...(spec.tracks ?? []));
+
+  return cycleSpecFromTiming(spec, tracks);
+}
+
+function cycleSpecFromTiming(timing: CycleTimingSpec, tracks: CycleTrack[]): WalkCycleSpec {
+  const spec: WalkCycleSpec = { tracks };
+  if (timing.duration !== undefined) {
+    spec.duration = timing.duration;
+  }
+  if (timing.fps !== undefined) {
+    spec.fps = timing.fps;
+  }
+  if (timing.loop !== undefined) {
+    spec.loop = timing.loop;
+  }
+  if (timing.samples !== undefined) {
+    spec.samples = timing.samples;
+  }
+  return spec;
+}
+
+function quadrupedPhases(gait: QuadrupedGait): Record<keyof QuadrupedLegs, number> {
+  if (gait === "walk") {
+    return { frontLeft: 0, frontRight: 0.5, backLeft: 0.75, backRight: 0.25 };
+  }
+  if (gait === "pace") {
+    return { frontLeft: 0, frontRight: 0.5, backLeft: 0, backRight: 0.5 };
+  }
+  if (gait === "bound") {
+    return { frontLeft: 0, frontRight: 0, backLeft: 0.5, backRight: 0.5 };
+  }
+  return { frontLeft: 0, frontRight: 0.5, backLeft: 0.5, backRight: 0 };
 }
 
 function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
@@ -368,7 +587,13 @@ function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
     validateCycleTrack(track);
     for (let index = 0; index < samples; index += 1) {
       const progress = index / (samples - 1);
-      const value = cycleValue(progress, track.phase ?? 0, track.center ?? 0, track.kind === "swing" ? track.degrees : track.amount);
+      const value = cycleValue(
+        progress,
+        track.phase ?? 0,
+        track.center ?? 0,
+        track.kind === "swing" ? track.degrees : track.amount,
+        track.frequency ?? 1,
+      );
       const transform = ensureFrameTransform(frameParts[index], track.part);
       if (track.kind === "swing") {
         const rot = mutableVec(transform.rot);
@@ -414,6 +639,9 @@ function validateCycleTrack(track: CycleTrack): void {
   if (track.center !== undefined && !Number.isFinite(track.center)) {
     throw new Error(`walkCycle track '${track.part}' center must be finite`);
   }
+  if (track.frequency !== undefined && (!Number.isFinite(track.frequency) || track.frequency <= 0)) {
+    throw new Error(`walkCycle track '${track.part}' frequency must be positive`);
+  }
   if (track.phase !== undefined && !Number.isFinite(track.phase)) {
     throw new Error(`walkCycle track '${track.part}' phase must be finite`);
   }
@@ -432,8 +660,8 @@ function ensureFrameTransform(frame: Map<string, TransformKey> | undefined, part
   return transform;
 }
 
-function cycleValue(progress: number, phase: number, center: number, amount: number): number {
-  return center + Math.cos((progress + phase) * Math.PI * 2) * amount;
+function cycleValue(progress: number, phase: number, center: number, amount: number, frequency: number): number {
+  return center + Math.cos((progress * frequency + phase) * Math.PI * 2) * amount;
 }
 
 function mutableVec(value: Vec3 | undefined): [number, number, number] {

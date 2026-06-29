@@ -58,8 +58,8 @@ part("leg_fl", capsule({
 
 Use cycle helpers for common walk motion instead of hand-writing every keyframe.
 `swing` rotates around an axis in degrees, `bob` translates along an axis, and
-`phase: 0.5` makes a track move opposite another track. The helper exports
-ordinary clip keys.
+`phase: 0.5` makes a track move opposite another track. Track `frequency`
+controls repeats per clip. Helpers export ordinary clip keys.
 
 ```ts
 walkCycle("walk", {
@@ -71,6 +71,44 @@ walkCycle("walk", {
     swing("leg_fl", { axis: "x", degrees: 20 }),
     swing("leg_fr", { axis: "x", degrees: 20, phase: 0.5 }),
   ],
+});
+```
+
+Use gait macros when the anatomy is conventional. They are authoring shortcuts,
+not runtime procedural animation.
+
+```ts
+quadrupedWalk("walk", {
+  legs: {
+    frontLeft: "leg_fl",
+    frontRight: "leg_fr",
+    backLeft: "leg_bl",
+    backRight: "leg_br",
+  },
+  body: "body",
+  gait: "trot",
+  swingDegrees: 20,
+  bodyBob: 0.012,
+});
+```
+
+```ts
+bipedWalk("walk", {
+  leftLeg: "leg_l",
+  rightLeg: "leg_r",
+  leftArm: "arm_l",
+  rightArm: "arm_r",
+  body: "torso",
+});
+```
+
+```ts
+wingFlap("fly", {
+  leftWing: "wing_l",
+  rightWing: "wing_r",
+  body: "body",
+  degrees: 38,
+  frequency: 2,
 });
 ```
 

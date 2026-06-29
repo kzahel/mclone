@@ -1,6 +1,6 @@
 # 111 - AI Figure Asset Lab
 
-Status: active; Slice 2 MP4 video capture landed.
+Status: active; Slice 2 gait macros landed.
 
 ## Purpose
 
@@ -108,8 +108,9 @@ The exported asset should contain only simple data:
 - parent relationships and local transforms
 - optional joint/pivot metadata, with `joint.pivot` measured from the part's
   unrotated local center
-- simple animation clips generated either by raw keyframes or procedural
-  `walkCycle` tracks such as `swing` and `bob`
+- simple animation clips generated either by raw keyframes, procedural
+  `walkCycle` tracks such as `swing` and `bob`, or gait macros such as
+  `quadrupedWalk`, `bipedWalk`, and `wingFlap`
 
 ## Initial Primitive Set
 
@@ -241,6 +242,8 @@ profile the harness before adding animation-sheet captures.
       `joint.pivot` instead of their mesh center.
 - [x] Add procedural walk-cycle authoring helpers for common `swing` and `bob`
       tracks while keeping exported clips as ordinary keyframes.
+- [x] Add `quadrupedWalk`, `bipedWalk`, and `wingFlap` authoring macros that
+      compile to ordinary keyframes.
 - [x] Add MP4 animation review output from deterministic Playwright frames
       assembled with `ffmpeg`.
 - [ ] Add a validation report that points to the asset file and part names.

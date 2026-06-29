@@ -1,6 +1,6 @@
 import { figure } from "../../src/dsl";
 
-export default figure("piglet", ({ mat, asciiTexture, part, box, capsule, sphere, walkCycle, swing, bob }) => {
+export default figure("piglet", ({ mat, asciiTexture, part, box, capsule, sphere, quadrupedWalk }) => {
   mat("skin", "#d88a92");
   mat("skin_dark", "#bd6f7b");
   mat("hoof", "#4a3033");
@@ -74,19 +74,25 @@ export default figure("piglet", ({ mat, asciiTexture, part, box, capsule, sphere
 
   part("tail", sphere({ parent: "body", at: [0, 0.14, 0.47], radius: 0.09, material: "skin_dark" }));
 
-  walkCycle("walk", {
+  quadrupedWalk("walk", {
     fps: 12,
     duration: 1,
+    gait: "trot",
     loop: true,
     samples: 9,
-    tracks: [
-      bob("body", { axis: "y", amount: 0.0125, center: 0.0125, phase: 0.5 }),
-      swing("head", { axis: "y", degrees: 4, phase: 0.5 }),
-      swing("leg_fl", { axis: "x", degrees: 20 }),
-      swing("leg_br", { axis: "x", degrees: 20 }),
-      swing("leg_fr", { axis: "x", degrees: 20, phase: 0.5 }),
-      swing("leg_bl", { axis: "x", degrees: 20, phase: 0.5 }),
-      swing("tail", { axis: "z", degrees: 15, phase: 0.5 }),
-    ],
+    body: "body",
+    bodyBob: 0.0125,
+    bodyBobCenter: 0.0125,
+    head: "head",
+    headSwingDegrees: 4,
+    legs: {
+      frontLeft: "leg_fl",
+      frontRight: "leg_fr",
+      backLeft: "leg_bl",
+      backRight: "leg_br",
+    },
+    swingDegrees: 20,
+    tail: "tail",
+    tailSwingDegrees: 15,
   });
 });
