@@ -2,9 +2,10 @@
 
 Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
 proof landed, and Slice E's headless plus Android XR multiview proof paths
-exist but still need an on-device Quest proof run. Created after `d0c5161`
-(`Restore XR per-eye command submission`) rolled back the unsafe single-submit
-Quest XR optimization from `264c723`.
+exist. The first Quest proof run showed the runtime-backed `wgpu` device does
+not expose `MULTIVIEW`. Created after `d0c5161` (`Restore XR per-eye command
+submission`) rolled back the unsafe single-submit Quest XR optimization from
+`264c723`.
 
 ## Goal
 
@@ -254,10 +255,10 @@ pnpm native:android-xr:multiview-proof
 ```
 
 This waits for `MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY`. Passing this marker
-means the Quest/OpenXR/Vulkan path can create the two-layer target, compile and
-execute a multiview pipeline, and present distinct left/right array layers. It
-does not mean terrain, sky, entities, GUI, or screen effects have been migrated
-to multiview.
+would mean the Quest/OpenXR/Vulkan path can create the two-layer target, compile
+and execute a multiview pipeline, and present distinct left/right array layers.
+It does not mean terrain, sky, entities, GUI, or screen effects have been
+migrated to multiview.
 
 Validation recorded for this slice:
 
@@ -285,9 +286,13 @@ and showed the expected nonblank terrain/cow scene.
 Latest Android XR release build after adding the Android proof path passed with
 APK SHA-256:
 `7120607635b94e1586357b0e3b2cb0c92141e82db1494e3117c57aa46e8a704f`.
-An on-device proof attempt with
-`bash android-xr/validate-quest-openxr.sh --skip-build --multiview-proof --wait-seconds 30`
-could not run because no Quest headset was attached (`adb` listed no devices).
+The first on-device attempt initially failed because the local `adb` server had
+a stale empty device list. After `adb kill-server && adb start-server`, the Quest
+3 appeared as `2G0YC1ZF93041Z`. The proof run then launched and created the
+two-layer OpenXR swapchain (`eye=1680x1760 images=3 layers=2`), but failed
+before drawing because the OpenXR-backed `wgpu` device reported
+`multiview=false` and `render_multiview_layer_proof` bailed with
+`wgpu device does not expose MULTIVIEW`.
 
 Move from proof-of-correctness one-submit to the real target:
 
