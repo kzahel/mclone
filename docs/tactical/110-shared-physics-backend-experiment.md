@@ -1,7 +1,9 @@
 # 110: Shared Physics Backend Experiment
 
-Status: active; Slice 1 landed with the shared `mclone-physics` facade crate
-and no-op backend. Rapier is not wired yet.
+Status: active; Slices 1-2 landed with the shared `mclone-physics` facade,
+no-op backend, optional Rapier backend, synthetic cuboid/static-patch
+simulation test, and `mclone-server` intent feature wiring. App binary-size
+measurement is deferred until an app/server path actually links physics.
 
 ## Purpose
 
@@ -239,13 +241,36 @@ cargo check --manifest-path native/Cargo.toml
 
 ### Slice 2 - Rapier Backend Behind Feature
 
-- [ ] Add optional `rapier3d` dependency and backend implementation.
-- [ ] Keep Rapier handles internal to `mclone-physics`.
-- [ ] Map mclone `glam`/core math and block units into Rapier local-island
-  coordinates.
-- [ ] Add synthetic tests for a dynamic cuboid falling onto a static cuboid.
-- [ ] Record compile-time and binary-size deltas for default vs.
-  `physics-rapier`.
+- [x] Add optional `rapier3d` dependency and backend implementation.
+- [x] Keep Rapier handles internal to `mclone-physics`.
+- [x] Map mclone core math and block units into Rapier's f32/glam-backed
+  coordinate types.
+- [x] Add synthetic tests for a dynamic cuboid falling onto a static cuboid.
+- [ ] Record app binary-size deltas for default vs. `physics-rapier` once an
+  app/server path actually links physics.
+
+Recorded Slice 2 result:
+
+- Added `rapier3d = "0.33"` as an optional `mclone-physics` dependency.
+- Added `rapier`, `rapier-deterministic`, `rapier-parallel`, `rapier-serde`,
+  and `rapier-simd` feature gates in `mclone-physics`.
+- Replaced the private `PhysicsWorld` storage with a backend enum so the public
+  facade still exposes only mclone-owned ids, poses, shapes, terrain patches,
+  and reports.
+- Added a private Rapier backend with `RigidBodySet`, `ColliderSet`, pipeline,
+  island/broad/narrow phase, joint sets, CCD solver, and body/terrain handle
+  maps hidden from callers.
+- Added mclone-to-Rapier conversions for cuboid, ball, capsule-Y, body pose,
+  body velocity, and static AABB terrain patches.
+- Added a `rapier_world_simulates_dynamic_cube_against_static_patch` test that
+  drops a dynamic cube onto a static terrain patch and verifies pose updates
+  and settling.
+- Added `mclone-server` manifest-only `physics` / `physics-rapier` features so
+  higher-level intent-feature wiring can be validated without server behavior
+  integration yet.
+- Noted implementation detail: Rapier 0.33's public math aliases are
+  glam/glamx-backed (`Vector`, `Rotation`, `Pose`), not the older
+  nalgebra-shaped example API.
 
 Validation:
 
@@ -253,6 +278,7 @@ Validation:
 cargo test --manifest-path native/Cargo.toml -p mclone-physics
 cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier
 cargo check --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
+cargo check --manifest-path native/Cargo.toml
 ```
 
 ### Slice 3 - Terrain Patch Benchmark

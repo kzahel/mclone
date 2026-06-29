@@ -8,8 +8,14 @@ publish.workspace = true
 [dependencies]
 mclone-core.workspace = true
 mclone-light.workspace = true
+mclone-physics = { workspace = true, optional = true }
 mclone-protocol.workspace = true
 mclone-worldgen.workspace = true
+
+[features]
+default = []
+physics = ["dep:mclone-physics"]
+physics-rapier = ["physics", "mclone-physics/rapier"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true

@@ -7,6 +7,15 @@ publish.workspace = true
 
 [dependencies]
 mclone-core.workspace = true
+rapier3d = { version = "0.33", optional = true }
+
+[features]
+default = []
+rapier = ["dep:rapier3d"]
+rapier-deterministic = ["rapier", "rapier3d/enhanced-determinism"]
+rapier-parallel = ["rapier", "rapier3d/parallel"]
+rapier-serde = ["rapier", "rapier3d/serde-serialize"]
+rapier-simd = ["rapier", "rapier3d/simd-stable"]
 
 [lib]
 name = "mclone_physics"
