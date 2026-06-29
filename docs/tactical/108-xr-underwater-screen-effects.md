@@ -1,5 +1,9 @@
 # 108: XR Underwater Screen Effects
 
+Status: active first pass; XR per-eye submit underwater fog/overlay plumbing is
+live, and the renderer now also has a multiview underwater screen-effect path
+for 107's production multiview migration.
+
 ## Goal
 
 Bring the existing flat-screen underwater visual cues into shared XR rendering
@@ -68,6 +72,18 @@ and Android XR launch paths.
   `render_full_frame_for_view*_in_slot` calls.
 - Keep FOV unchanged in XR because the view projection remains external.
 - Add parser/tests for the new mode in desktop XR and Android XR.
+
+## Multiview Follow-Up
+
+Added 2026-06-29 for tactical 107: `mclone-render::screen_effect` now has a
+dedicated multiview underwater shader/pipeline. It stores two eye overlay
+records in a `[2]` uniform array and selects them with `@builtin(view_index)`.
+That preserves both modes: midpoint can broadcast the same effect to both
+layers, while `per-eye` can keep distinct UV offsets/alpha or make one layer
+transparent at the waterline.
+
+The Quest `native:android-xr:terrain-multiview-proof` lane now exercises this
+path through its synthetic overlay smoke before readback.
 
 ## Validation
 

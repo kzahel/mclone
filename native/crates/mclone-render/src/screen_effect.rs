@@ -1,3 +1,4 @@
+use std::num::{NonZeroU32, NonZeroU64};
 use std::ops::Range;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -12,6 +13,9 @@ pub const VANILLA_UNDERWATER_UV_TILE: f32 = 4.0;
 const FLOATS_PER_VERTEX: usize = 8;
 const VERTEX_SIZE: wgpu::BufferAddress =
     (FLOATS_PER_VERTEX * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
+const MULTIVIEW_UNIFORM_FLOATS_PER_VIEW: usize = 8;
+const MULTIVIEW_UNIFORM_SIZE: wgpu::BufferAddress =
+    (2 * MULTIVIEW_UNIFORM_FLOATS_PER_VIEW * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
 const UNDERWATER_TEXTURE_PATH: &str = "assets/minecraft/textures/misc/underwater.png";
 const WATER_VISION_MAX_TICKS: f32 = 600.0;
 const WATER_VISION_QUICK_TICKS: f32 = 100.0;
@@ -170,7 +174,10 @@ pub fn underwater_uv_offset_from_native_radians(yaw_radians: f32, pitch_radians:
 
 pub struct ScreenEffectsRenderer {
     pipeline: wgpu::RenderPipeline,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
     underwater_texture: GpuScreenEffectTexture,
+    color_format: wgpu::TextureFormat,
+    multiview: Option<ScreenEffectsMultiviewRenderer>,
     vertex_buffer: Option<wgpu::Buffer>,
     vertex_buffer_slot_size: wgpu::BufferAddress,
 }
@@ -282,7 +289,10 @@ impl ScreenEffectsRenderer {
 
         Ok(Self {
             pipeline,
+            texture_bind_group_layout,
             underwater_texture,
+            color_format,
+            multiview: None,
             vertex_buffer: None,
             vertex_buffer_slot_size: 0,
         })
@@ -335,6 +345,70 @@ impl ScreenEffectsRenderer {
         pass.draw(0..6, 0..1);
     }
 
+    pub fn render_underwater_multiview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        overlays: [Option<UnderwaterOverlay>; 2],
+    ) -> Result<()> {
+        if overlays.iter().all(Option::is_none) {
+            return Ok(());
+        }
+        let vertices = underwater_multiview_quad_vertices();
+        let vertex_range = self.upload_vertices(device, queue, SINGLE_VIEW_SLOT, &vertices);
+        self.ensure_multiview_renderer(device)?;
+        let renderer = self
+            .multiview
+            .as_ref()
+            .expect("screen effect multiview renderer initialized above");
+        queue.write_buffer(
+            &renderer.uniform_buffer,
+            0,
+            &underwater_multiview_uniform_bytes(overlays),
+        );
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_underwater_screen_effect_multiview_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        pass.set_pipeline(&renderer.pipeline);
+        pass.set_bind_group(0, &self.underwater_texture.bind_group, &[]);
+        pass.set_bind_group(1, &renderer.uniform_bind_group, &[]);
+        pass.set_vertex_buffer(
+            0,
+            self.vertex_buffer
+                .as_ref()
+                .expect("screen effect vertex buffer exists")
+                .slice(vertex_range),
+        );
+        pass.draw(0..6, 0..1);
+        Ok(())
+    }
+
+    fn ensure_multiview_renderer(&mut self, device: &wgpu::Device) -> Result<()> {
+        if !device.features().contains(wgpu::Features::MULTIVIEW) {
+            bail!("screen effect multiview render requires wgpu MULTIVIEW");
+        }
+        if self.multiview.is_none() {
+            self.multiview = Some(ScreenEffectsMultiviewRenderer::new(
+                device,
+                &self.texture_bind_group_layout,
+                self.color_format,
+            ));
+        }
+        Ok(())
+    }
+
     fn upload_vertices(
         &mut self,
         device: &wgpu::Device,
@@ -367,6 +441,128 @@ impl ScreenEffectsRenderer {
             queue.write_buffer(buffer, slot_offset, &bytes);
         }
         slot_offset..slot_offset + bytes.len() as wgpu::BufferAddress
+    }
+}
+
+struct ScreenEffectsMultiviewRenderer {
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind_group: wgpu::BindGroup,
+    pipeline: wgpu::RenderPipeline,
+}
+
+impl ScreenEffectsMultiviewRenderer {
+    fn new(
+        device: &wgpu::Device,
+        texture_bind_group_layout: &wgpu::BindGroupLayout,
+        color_format: wgpu::TextureFormat,
+    ) -> Self {
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_screen_effect_multiview_uniforms"),
+            size: MULTIVIEW_UNIFORM_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_screen_effect_multiview_uniform_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(
+                            NonZeroU64::new(MULTIVIEW_UNIFORM_SIZE)
+                                .expect("multiview uniform size is non-zero"),
+                        ),
+                    },
+                    count: None,
+                }],
+            });
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_screen_effect_multiview_uniform_bind_group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_screen_effect_multiview_shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shaders/screen_effect_multiview.wgsl").into(),
+            ),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_screen_effect_multiview_pipeline_layout"),
+            bind_group_layouts: &[texture_bind_group_layout, &uniform_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mclone_screen_effect_multiview_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: VERTEX_SIZE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            shader_location: 0,
+                            offset: 0,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        wgpu::VertexAttribute {
+                            shader_location: 1,
+                            offset: 8,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        wgpu::VertexAttribute {
+                            shader_location: 2,
+                            offset: 16,
+                            format: wgpu::VertexFormat::Float32x4,
+                        },
+                    ],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: NonZeroU32::new(2),
+            cache: None,
+        });
+        Self {
+            uniform_buffer,
+            uniform_bind_group,
+            pipeline,
+        }
     }
 }
 
@@ -508,6 +704,43 @@ fn underwater_quad_vertices(overlay: UnderwaterOverlay) -> Vec<f32> {
     vertices
 }
 
+fn underwater_multiview_quad_vertices() -> Vec<f32> {
+    underwater_quad_vertices(UnderwaterOverlay::new(1.0, 1.0, [0.0, 0.0], 1.0))
+}
+
+fn underwater_multiview_uniform_bytes(overlays: [Option<UnderwaterOverlay>; 2]) -> [u8; 64] {
+    let mut bytes = [0_u8; MULTIVIEW_UNIFORM_SIZE as usize];
+    let mut offset = 0;
+    for overlay in overlays {
+        let (uv_offset, color) = overlay.map_or(([0.0, 0.0], [0.0, 0.0, 0.0, 0.0]), |overlay| {
+            (
+                overlay.uv_offset,
+                [
+                    overlay.brightness,
+                    overlay.brightness,
+                    overlay.brightness,
+                    overlay.alpha,
+                ],
+            )
+        });
+        let values = [
+            uv_offset[0],
+            uv_offset[1],
+            0.0,
+            0.0,
+            color[0],
+            color[1],
+            color[2],
+            color[3],
+        ];
+        for value in values {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+            offset += 4;
+        }
+    }
+    bytes
+}
+
 fn push_vertex(vertices: &mut Vec<f32>, position: [f32; 2], uv: [f32; 2], color: [f32; 4]) {
     vertices.extend_from_slice(&[
         position[0],
@@ -576,6 +809,34 @@ mod tests {
             &vertices[16..24],
             &[1.0, 1.0, 0.5, 0.25, 0.75, 0.75, 0.75, 0.25]
         );
+    }
+
+    #[test]
+    fn underwater_multiview_uniform_serializes_distinct_eye_overlays() {
+        let left = UnderwaterOverlay::new(0.75, 0.2, [0.5, 0.25], 1.0);
+        let bytes = underwater_multiview_uniform_bytes([
+            Some(left),
+            Some(UnderwaterOverlay::new(0.5, 0.1, [-0.25, 0.75], 0.5)),
+        ]);
+        let floats = bytes
+            .chunks_exact(4)
+            .map(|chunk| f32::from_ne_bytes(chunk.try_into().unwrap()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            &floats[0..MULTIVIEW_UNIFORM_FLOATS_PER_VIEW],
+            &[0.5, 0.25, 0.0, 0.0, 0.75, 0.75, 0.75, 0.2]
+        );
+        assert_eq!(
+            &floats[MULTIVIEW_UNIFORM_FLOATS_PER_VIEW..MULTIVIEW_UNIFORM_FLOATS_PER_VIEW * 2],
+            &[-0.25, 0.75, 0.0, 0.0, 0.5, 0.5, 0.5, 0.1]
+        );
+    }
+
+    #[test]
+    fn underwater_multiview_uniform_serializes_missing_eye_as_transparent() {
+        let bytes = underwater_multiview_uniform_bytes([None, None]);
+        assert!(bytes.iter().all(|byte| *byte == 0));
     }
 
     #[test]

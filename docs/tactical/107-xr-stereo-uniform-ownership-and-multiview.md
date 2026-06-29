@@ -2,16 +2,16 @@
 
 Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
 proof landed, and Slice E's headless, Android XR, terrain-chunk proof, sky,
-actor, selection-outline, and world-GUI render paths, and terrain+sky /
-terrain+sky+actor multiview perf paths exist. Quest now exposes
+actor, selection-outline, world-GUI, and screen-effect render paths, and
+terrain+sky / terrain+sky+actor multiview perf paths exist. Quest now exposes
 `wgpu::Features::MULTIVIEW` after enabling
 `VK_KHR_get_physical_device_properties2` on the OpenXR Vulkan instance and
 threading `VK_KHR_multiview` into the wgpu-wrapped device extension list, and
 the on-device proofs now validate true multiview layer writes/readback, the
 left/right stereo projection guard, chunk-terrain rendering, and synthetic
-selection/world-GUI overlay rendering through a two-layer OpenXR swapchain. The
-production headset frame remains on the correct per-eye submit path until screen
-effects migrate too. Created after
+selection/world-GUI/screen-effect overlay rendering through a two-layer OpenXR
+swapchain. The production headset frame remains on the correct per-eye submit
+path until the full-frame multiview switch is made and measured. Created after
 `d0c5161` (`Restore XR per-eye command submission`) rolled back the unsafe
 single-submit Quest XR optimization from `264c723`.
 
@@ -555,9 +555,30 @@ MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY submitted=208 runtime_frames=208
 Release APK SHA-256 for that proof run:
 `1d38b499657de49dffa05e9358e4bad7dd3de5cd0a9429970c864ee6178f4712`.
 
+**Underwater screen-effect multiview path added 2026-06-29.** The underwater
+screen effect now has a dedicated multiview shader/pipeline. Unlike terrain or
+actors it has no view-projection uniform, but it does carry per-eye overlay
+state in a `[2]` uniform array selected by `@builtin(view_index)`, so midpoint
+mode broadcasts the same tint while per-eye validation mode can keep distinct UV
+offsets/alpha or a transparent eye at the waterline.
+
+The synthetic overlay smoke in the terrain multiview proof now draws a low-alpha
+underwater screen effect before the selection outline and world-GUI panel/line.
+Quest 3 validation passed:
+
+```text
+OpenXR wgpu features: multiview=true
+OpenXR Vulkan multiview diagnostics: instance_properties2_ext=true device_khr_multiview_ext=true raw_feature=true raw_geometry_shader=false raw_tessellation_shader=false max_views=6 max_instance_index=4294967295 wgpu_adapter=true wgpu_device=true
+MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY submitted=208 runtime_frames=208 skipped=0 eye=1680x1760 layers=2 sections=6 left_drawn_sections=2 right_drawn_sections=2 left_drawn_indices=15924 right_drawn_indices=15924 different_pixels=2319253 minimum_different_pixels=2956
+```
+
+Release APK SHA-256 for that proof run:
+`0f4d24cfbfac13387c90355d6b5fa4a0c794cdeae650650f81437bce92fcee70`.
+
 Move from proof-of-correctness one-submit to the real target:
 
-- migrate screen effects to a multiview-capable path;
+- switch a full production XR frame to the multiview renderer stack behind a
+  validation/perf lane;
 - decide whether terrain's union-of-eye-culls policy is acceptable for the first
   production path or should be tightened before enabling;
 - shared draw list feeding both eye layers.

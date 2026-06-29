@@ -903,6 +903,18 @@ where
             label: Some("mclone_xr_overlay_multiview_smoke_encoder"),
         });
         let overlay_target = RenderFrameTarget::color(target.color_view, target.size);
+        self.screen_effects
+            .render_underwater_multiview(
+                device,
+                queue,
+                &mut encoder,
+                overlay_target,
+                [
+                    Some(UnderwaterOverlay::new(0.85, 0.04, [0.0, 0.0], 1.0)),
+                    Some(UnderwaterOverlay::new(0.85, 0.04, [0.25, -0.15], 1.0)),
+                ],
+            )
+            .context("render synthetic XR underwater screen effect multiview smoke")?;
         self.selection_outline
             .render_multiview(
                 device,
@@ -1124,7 +1136,11 @@ where
     fn terrain_render_views_and_options(
         &mut self,
         render_views: [ChunkRenderView; 2],
-    ) -> ([ChunkRenderView; 2], [TexturedSectionRenderOptions; 2]) {
+    ) -> (
+        [ChunkRenderView; 2],
+        [TexturedSectionRenderOptions; 2],
+        [Option<UnderwaterOverlay>; 2],
+    ) {
         let center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         let base_options = self
@@ -1141,7 +1157,7 @@ where
                 .unwrap_or_default();
             base_options.with_fog(fog)
         });
-        (terrain_views, terrain_options)
+        (terrain_views, terrain_options, underwater_overlays)
     }
 
     fn render_prepared_terrain_stereo_frame_frozen(
@@ -1173,7 +1189,8 @@ where
         include_sky: bool,
         include_actors: bool,
     ) -> Result<XrTerrainStereoFrameSummary> {
-        let (terrain_views, terrain_options) = self.terrain_render_views_and_options(render_views);
+        let (terrain_views, terrain_options, _) =
+            self.terrain_render_views_and_options(render_views);
         let actor_instances = if include_actors {
             self.current_actor_instances()
         } else {
@@ -1394,7 +1411,8 @@ where
         include_actors: bool,
         include_overlays: bool,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
-        let (terrain_views, terrain_options) = self.terrain_render_views_and_options(render_views);
+        let (terrain_views, terrain_options, underwater_overlays) =
+            self.terrain_render_views_and_options(render_views);
         let actor_instances = if include_actors {
             self.current_actor_instances()
         } else {
@@ -1455,6 +1473,15 @@ where
             ActorRenderStats::default()
         };
         if include_overlays {
+            self.screen_effects
+                .render_underwater_multiview(
+                    device,
+                    queue,
+                    &mut encoder,
+                    RenderFrameTarget::color(target.color_view, target.size),
+                    underwater_overlays,
+                )
+                .context("render XR underwater screen effect multiview")?;
             self.render_xr_world_overlays_multiview(
                 device,
                 queue,
