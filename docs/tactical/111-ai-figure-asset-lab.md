@@ -163,7 +163,7 @@ The sheet capture writes a larger review image:
 The next useful captures are:
 
 - static front / side / three-quarter sheet
-- walk-cycle animation strip
+- walk-cycle side and three-quarter animation strips
 - material/texture atlas preview
 - debug overlay with origins, pivots, part names, and bounds
 - regression mode that compares two generated figures or two revisions
@@ -223,7 +223,8 @@ profile the harness before adding animation-sheet captures.
 ### Slice 2 - Better Agent Feedback
 
 - [x] Add static multi-view sheet capture.
-- [x] Add animation strip capture with fixed frame times.
+- [x] Add side and three-quarter animation strip capture with fixed frame
+      times.
 - [x] Add bounds/pivot/joint debug overlay toggles.
 - [x] Add Minecraft-style box face overrides so a face texture can target only
       `north`, `south`, `east`, `west`, `up`, or `down`.

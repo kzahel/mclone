@@ -68,12 +68,15 @@ function renderSheet(
     </header>
     <div class="section-title">Static Views</div>
     <section class="grid static-grid" data-section="static"></section>
-    <div class="section-title">Animation Strip</div>
-    <section class="grid strip-grid" data-section="strip"></section>
+    <div class="section-title">Side Animation Strip</div>
+    <section class="grid strip-grid" data-section="strip-side"></section>
+    <div class="section-title">Three-Quarter Animation Strip</div>
+    <section class="grid strip-grid" data-section="strip-three-quarter"></section>
   `;
 
   const staticSection = requiredElement(container, "[data-section='static']");
-  const stripSection = requiredElement(container, "[data-section='strip']");
+  const sideStripSection = requiredElement(container, "[data-section='strip-side']");
+  const threeQuarterStripSection = requiredElement(container, "[data-section='strip-three-quarter']");
 
   const staticViews: ViewSpec[] = [
     { label: "Front", view: "front", time: 0 },
@@ -92,14 +95,44 @@ function renderSheet(
     });
   }
 
-  for (const [index, time] of frameTimes.entries()) {
-    renderCell(stripSection, asset, {
-      label: `${options.clipName} ${index + 1}/${frameTimes.length}`,
-      view: "three-quarter",
+  renderStrip(sideStripSection, asset, {
+    clipName: options.clipName,
+    debug: options.debug,
+    frameTimes,
+    labels: false,
+    labelPrefix: "side",
+    view: "right",
+  });
+  renderStrip(threeQuarterStripSection, asset, {
+    clipName: options.clipName,
+    debug: options.debug,
+    frameTimes,
+    labels: false,
+    labelPrefix: "3q",
+    view: "three-quarter",
+  });
+}
+
+function renderStrip(
+  parent: HTMLElement,
+  asset: FigureAsset,
+  options: {
+    clipName: string;
+    debug: boolean;
+    frameTimes: number[];
+    labelPrefix: string;
+    labels: boolean;
+    view: ViewName;
+  },
+): void {
+  for (const [index, time] of options.frameTimes.entries()) {
+    renderCell(parent, asset, {
+      label: `${options.clipName} ${options.labelPrefix} ${index + 1}/${options.frameTimes.length}`,
+      view: options.view,
       clipName: options.clipName,
       time,
       debug: options.debug,
-      labels: false,
+      labels: options.labels,
     });
   }
 }
