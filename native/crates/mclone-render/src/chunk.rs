@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::num::{NonZeroU32, NonZeroU64};
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Instant;
@@ -32,6 +33,9 @@ const VERTEX_BYTE_SIZE: wgpu::BufferAddress =
 const TEXTURED_VERTEX_BYTE_SIZE: wgpu::BufferAddress = 40;
 const UNIFORM_BYTE_LEN: usize = 128;
 const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = UNIFORM_BYTE_LEN as wgpu::BufferAddress;
+const MULTIVIEW_UNIFORM_BYTE_LEN: usize = UNIFORM_BYTE_LEN * 2;
+const MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
+    MULTIVIEW_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
 // Matches the default Java 1.17.1 video option: Options.mipmapLevels = 4.
 // TextureUtil.prepareImage allocates levels 0..=4 for the block atlas.
 const CHUNK_ATLAS_MAX_MIP_LEVEL: u32 = 4;
@@ -1073,6 +1077,47 @@ impl ChunkDepthTarget {
     }
 }
 
+pub struct ChunkMultiviewDepthTarget {
+    _texture: wgpu::Texture,
+    pub view: wgpu::TextureView,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl ChunkMultiviewDepthTarget {
+    pub fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+        let width = width.max(1);
+        let height = height.max(1);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_chunk_multiview_depth"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 2,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("mclone_chunk_multiview_depth_view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            base_array_layer: 0,
+            array_layer_count: Some(2),
+            ..Default::default()
+        });
+        Self {
+            _texture: texture,
+            view,
+            width,
+            height,
+        }
+    }
+}
+
 pub struct ChunkRenderer {
     pipeline: wgpu::RenderPipeline,
     uniforms: PerViewUniformBuffer,
@@ -1170,6 +1215,7 @@ pub struct TexturedChunkRenderer {
     bind_group: wgpu::BindGroup,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     color_format: wgpu::TextureFormat,
+    multiview: RefCell<Option<TexturedChunkMultiviewRenderer>>,
 }
 
 impl TexturedChunkRenderer {
@@ -1229,6 +1275,7 @@ impl TexturedChunkRenderer {
             "mclone_textured_chunk_opaque_pipeline",
             None,
             true,
+            None,
         );
         let translucent_pipeline = create_textured_chunk_pipeline(
             device,
@@ -1238,6 +1285,7 @@ impl TexturedChunkRenderer {
             "mclone_textured_chunk_translucent_pipeline",
             Some(translucent_blend_state()),
             false,
+            None,
         );
         Self {
             opaque_pipeline,
@@ -1246,7 +1294,122 @@ impl TexturedChunkRenderer {
             bind_group,
             texture_bind_group_layout,
             color_format,
+            multiview: RefCell::new(None),
         }
+    }
+
+    fn multiview_renderer(
+        &self,
+        device: &wgpu::Device,
+    ) -> Result<std::cell::Ref<'_, TexturedChunkMultiviewRenderer>> {
+        if !device.features().contains(wgpu::Features::MULTIVIEW) {
+            bail!("textured chunk multiview render requires wgpu MULTIVIEW");
+        }
+        if self.multiview.borrow().is_none() {
+            let renderer = TexturedChunkMultiviewRenderer::new(
+                device,
+                self.color_format,
+                &self.texture_bind_group_layout,
+            );
+            *self.multiview.borrow_mut() = Some(renderer);
+        }
+        Ok(std::cell::Ref::map(self.multiview.borrow(), |renderer| {
+            renderer
+                .as_ref()
+                .expect("multiview renderer initialized above")
+        }))
+    }
+}
+
+struct TexturedChunkMultiviewRenderer {
+    opaque_pipeline: wgpu::RenderPipeline,
+    translucent_pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+impl TexturedChunkMultiviewRenderer {
+    fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        texture_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_chunk_textured_multiview_shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shaders/chunk_textured_multiview.wgsl").into(),
+            ),
+        });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_textured_chunk_multiview_uniforms"),
+            size: MULTIVIEW_UNIFORM_BYTE_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_textured_chunk_multiview_uniform_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: NonZeroU64::new(MULTIVIEW_UNIFORM_BYTE_SIZE),
+                    },
+                    count: None,
+                }],
+            });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_textured_chunk_multiview_uniform_bind_group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_textured_chunk_multiview_pipeline_layout"),
+            bind_group_layouts: &[&uniform_bind_group_layout, texture_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let opaque_pipeline = create_textured_chunk_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_textured_chunk_multiview_opaque_pipeline",
+            None,
+            true,
+            NonZeroU32::new(2),
+        );
+        let translucent_pipeline = create_textured_chunk_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_textured_chunk_multiview_translucent_pipeline",
+            Some(translucent_blend_state()),
+            false,
+            NonZeroU32::new(2),
+        );
+        Self {
+            opaque_pipeline,
+            translucent_pipeline,
+            uniform_buffer,
+            bind_group,
+        }
+    }
+
+    fn write_uniforms(
+        &self,
+        queue: &wgpu::Queue,
+        render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+        color_format: wgpu::TextureFormat,
+    ) {
+        let bytes = multiview_uniform_bytes(render_views, options, color_format);
+        queue.write_buffer(&self.uniform_buffer, 0, &bytes);
     }
 }
 
@@ -1258,6 +1421,7 @@ fn create_textured_chunk_pipeline(
     label: &'static str,
     blend: Option<wgpu::BlendState>,
     depth_write_enabled: bool,
+    multiview: Option<NonZeroU32>,
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
@@ -1316,7 +1480,7 @@ fn create_textured_chunk_pipeline(
             bias: Default::default(),
         }),
         multisample: Default::default(),
-        multiview: None,
+        multiview,
         cache: None,
     })
 }
@@ -1509,6 +1673,47 @@ impl TexturedChunkDrawResources {
         pass.set_pipeline(&self.renderer.translucent_pipeline);
         draw_textured_mesh_range(&mut pass, &self.mesh, self.mesh.translucent_index_range());
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ChunkMultiviewRenderTarget<'a> {
+    pub color_view: &'a wgpu::TextureView,
+    pub depth_view: &'a wgpu::TextureView,
+    pub size: [u32; 2],
+    pub clear_color: wgpu::Color,
+    pub clear_depth: f32,
+    pub load_color: bool,
+}
+
+impl<'a> ChunkMultiviewRenderTarget<'a> {
+    pub fn new(
+        color_view: &'a wgpu::TextureView,
+        depth_view: &'a wgpu::TextureView,
+        size: [u32; 2],
+        clear_color: wgpu::Color,
+    ) -> Self {
+        Self {
+            color_view,
+            depth_view,
+            size,
+            clear_color,
+            clear_depth: 1.0,
+            load_color: false,
+        }
+    }
+
+    pub fn with_loaded_color(mut self) -> Self {
+        self.load_color = true;
+        self
+    }
+
+    fn color_load_op(self) -> wgpu::LoadOp<wgpu::Color> {
+        if self.load_color {
+            wgpu::LoadOp::Load
+        } else {
+            wgpu::LoadOp::Clear(self.clear_color)
+        }
     }
 }
 
@@ -1849,6 +2054,78 @@ impl TexturedSectionDrawResources {
         Ok((stats, timing))
     }
 
+    pub fn render_prepared_multiview_with_options(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkMultiviewRenderTarget<'_>,
+        render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+    ) -> Result<[TexturedSectionRenderStats; 2]> {
+        let left_culling = {
+            let mut scratch = self.cull_scratch.borrow_mut();
+            cull_textured_sections(records, render_views[0], options[0], &mut scratch)
+        };
+        let right_culling = {
+            let mut scratch = self.cull_scratch.borrow_mut();
+            cull_textured_sections(records, render_views[1], options[1], &mut scratch)
+        };
+        let mut drawn_keys = left_culling.drawn_keys.clone();
+        drawn_keys.extend(right_culling.drawn_keys.iter().copied());
+
+        let mut translucent_sections = self
+            .sections
+            .iter()
+            .filter(|(key, mesh)| {
+                drawn_keys.contains(key) && !mesh.translucent_index_range().is_empty()
+            })
+            .collect::<Vec<_>>();
+        translucent_sections.sort_by(|(left_key, _), (right_key, _)| {
+            compare_translucent_sections(**left_key, **right_key, render_views[0])
+        });
+
+        let renderer = self.renderer.multiview_renderer(device)?;
+        renderer.write_uniforms(queue, render_views, options, self.renderer.color_format);
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mclone_textured_section_multiview_render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target.color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: target.color_load_op(),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: target.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(target.clear_depth),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_bind_group(0, &renderer.bind_group, &[]);
+            pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+            pass.set_pipeline(&renderer.opaque_pipeline);
+            for (key, mesh) in &self.sections {
+                if !drawn_keys.contains(key) {
+                    continue;
+                }
+                draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
+            }
+            pass.set_pipeline(&renderer.translucent_pipeline);
+            for (_, mesh) in translucent_sections {
+                draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+            }
+        }
+        Ok([left_culling.stats, right_culling.stats])
+    }
+
     fn render_with_options_inner(
         &self,
         queue: &wgpu::Queue,
@@ -2117,6 +2394,25 @@ fn uniform_bytes(
     bytes
 }
 
+fn multiview_uniform_bytes(
+    render_views: [ChunkRenderView; 2],
+    options: [TexturedSectionRenderOptions; 2],
+    color_format: wgpu::TextureFormat,
+) -> [u8; MULTIVIEW_UNIFORM_BYTE_LEN] {
+    let mut bytes = [0u8; MULTIVIEW_UNIFORM_BYTE_LEN];
+    bytes[..UNIFORM_BYTE_LEN].copy_from_slice(&uniform_bytes(
+        render_views[0],
+        options[0],
+        color_format,
+    ));
+    bytes[UNIFORM_BYTE_LEN..].copy_from_slice(&uniform_bytes(
+        render_views[1],
+        options[1],
+        color_format,
+    ));
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2139,6 +2435,61 @@ mod tests {
         );
         assert!(matrix.into_iter().flatten().all(f32::is_finite));
         assert!(render_view.view_projection.is_finite());
+    }
+
+    #[test]
+    fn multiview_uniform_serializes_distinct_left_right_views() {
+        let left = ChunkCamera {
+            eye: [0.0, 70.0, -4.0],
+            target: [0.0, 70.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 70.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 700.0,
+        }
+        .render_view(1280, 1024);
+        let right = ChunkCamera {
+            eye: [0.063, 70.0, -4.0],
+            target: [0.063, 70.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 72.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 700.0,
+        }
+        .render_view(1280, 1024);
+        let bytes = multiview_uniform_bytes(
+            [left, right],
+            [
+                TexturedSectionRenderOptions::default(),
+                TexturedSectionRenderOptions {
+                    force_fullbright: true,
+                    ..TexturedSectionRenderOptions::default()
+                },
+            ],
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+
+        assert_eq!(bytes.len(), MULTIVIEW_UNIFORM_BYTE_LEN);
+        assert_ne!(&bytes[..UNIFORM_BYTE_LEN], &bytes[UNIFORM_BYTE_LEN..]);
+        assert_eq!(
+            &bytes[..UNIFORM_BYTE_LEN],
+            &uniform_bytes(
+                left,
+                TexturedSectionRenderOptions::default(),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+        );
+        assert_eq!(
+            &bytes[UNIFORM_BYTE_LEN..],
+            &uniform_bytes(
+                right,
+                TexturedSectionRenderOptions {
+                    force_fullbright: true,
+                    ..TexturedSectionRenderOptions::default()
+                },
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+        );
     }
 
     #[test]

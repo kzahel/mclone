@@ -45,6 +45,7 @@ PERF_SETTLED_STATIONARY="${MCLONE_ANDROID_XR_PERF_SETTLED_STATIONARY:-0}"
 PERF_FROZEN_RENDER="${MCLONE_ANDROID_XR_PERF_FROZEN_RENDER:-0}"
 PERF_METRICS="${MCLONE_ANDROID_XR_PERF_METRICS:-0}"
 MULTIVIEW_PROOF="${MCLONE_ANDROID_XR_MULTIVIEW_PROOF:-0}"
+TERRAIN_MULTIVIEW_PROOF="${MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF:-0}"
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     PERF_SETTLED_STATIONARY=1
 fi
@@ -137,6 +138,11 @@ Options:
                      creates one two-layer color swapchain, renders a
                      view_index-colored multiview pass, presents layers 0/1,
                      and waits for MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY.
+  --terrain-multiview-proof
+                     Launch the chunk-terrain XR multiview proof path. The app
+                     creates one two-layer color swapchain, renders terrain
+                     with @builtin(view_index), reads both layers back, and
+                     waits for MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY.
   -h, --help         Show this help.
 USAGE
 }
@@ -438,6 +444,10 @@ while [[ $# -gt 0 ]]; do
             MULTIVIEW_PROOF=1
             shift
             ;;
+        --terrain-multiview-proof)
+            TERRAIN_MULTIVIEW_PROOF=1
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -480,6 +490,9 @@ if [[ -n "$SESSION_SMOKE" && "$SESSION_ONLY" == "1" ]]; then
     mclone_die "--session-smoke requires submitted-frame validation; remove --session-only"
 fi
 if [[ "$MULTIVIEW_PROOF" == "1" ]]; then
+    if [[ "$TERRAIN_MULTIVIEW_PROOF" == "1" ]]; then
+        mclone_die "--multiview-proof cannot be combined with --terrain-multiview-proof"
+    fi
     if [[ "$SESSION_ONLY" == "1" ]]; then
         mclone_die "--multiview-proof has its own proof marker; remove --session-only"
     fi
@@ -488,6 +501,17 @@ if [[ "$MULTIVIEW_PROOF" == "1" ]]; then
     fi
     if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
         mclone_die "--multiview-proof cannot be combined with performance probes"
+    fi
+fi
+if [[ "$TERRAIN_MULTIVIEW_PROOF" == "1" ]]; then
+    if [[ "$SESSION_ONLY" == "1" ]]; then
+        mclone_die "--terrain-multiview-proof has its own proof marker; remove --session-only"
+    fi
+    if [[ -n "$SESSION_SMOKE" ]]; then
+        mclone_die "--terrain-multiview-proof cannot be combined with --session-smoke"
+    fi
+    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
+        mclone_die "--terrain-multiview-proof cannot be combined with performance probes"
     fi
 fi
 if [[ -n "$PERF_SECONDS" ]]; then
@@ -602,6 +626,9 @@ fi
 if [[ "$MULTIVIEW_PROOF" == "1" ]]; then
     STARTUP_ARGV+=(--multiview-proof)
 fi
+if [[ "$TERRAIN_MULTIVIEW_PROOF" == "1" ]]; then
+    STARTUP_ARGV+=(--terrain-multiview-proof)
+fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"
 
@@ -641,6 +668,10 @@ while (( SECONDS < deadline )); do
         success=1
         break
     fi
+    if [[ "$TERRAIN_MULTIVIEW_PROOF" == "1" ]] && grep -F "MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY" "$LOG_PATH" >/dev/null 2>&1; then
+        success=1
+        break
+    fi
     if [[ -n "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_PERF_SUMMARY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
@@ -649,7 +680,7 @@ while (( SECONDS < deadline )); do
         success=1
         break
     fi
-    if [[ "$MULTIVIEW_PROOF" != "1" && -z "$SESSION_SMOKE" && -z "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
+    if [[ "$MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PROOF" != "1" && -z "$SESSION_SMOKE" && -z "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
     fi
@@ -676,6 +707,8 @@ if [[ "$success" != "1" ]]; then
     fi
     if [[ "$MULTIVIEW_PROOF" == "1" ]]; then
         mclone_die "Android XR multiview proof marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
+    elif [[ "$TERRAIN_MULTIVIEW_PROOF" == "1" ]]; then
+        mclone_die "Android XR terrain multiview proof marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     elif [[ "$SESSION_ONLY" == "1" ]]; then
         mclone_die "Android XR session-ready marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     elif [[ -n "$PERF_SECONDS" ]]; then
@@ -697,10 +730,17 @@ if [[ "$MULTIVIEW_PROOF" == "1" ]]; then
     if ! grep -F "MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY" "$LOG_PATH" >/dev/null 2>&1; then
         mclone_die "Android XR multiview proof marker was not seen; see $LOG_PATH"
     fi
+elif [[ "$TERRAIN_MULTIVIEW_PROOF" == "1" ]]; then
+    if ! grep -F "MCLONE_ANDROID_XR_SESSION_READY" "$LOG_PATH" >/dev/null 2>&1; then
+        mclone_die "Android XR session-ready marker was not seen; see $LOG_PATH"
+    fi
+    if ! grep -F "MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY" "$LOG_PATH" >/dev/null 2>&1; then
+        mclone_die "Android XR terrain multiview proof marker was not seen; see $LOG_PATH"
+    fi
 elif ! grep -F "MCLONE_ANDROID_XR_CONTROLLERS_READY" "$LOG_PATH" >/dev/null 2>&1; then
     mclone_die "Android XR controllers-ready marker was not seen; see $LOG_PATH"
 fi
-if [[ "$MULTIVIEW_PROOF" != "1" && "$SESSION_ONLY" != "1" ]] && ! grep -F "MCLONE_ANDROID_XR_TERRAIN_READY" "$LOG_PATH" >/dev/null 2>&1; then
+if [[ "$MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PROOF" != "1" && "$SESSION_ONLY" != "1" ]] && ! grep -F "MCLONE_ANDROID_XR_TERRAIN_READY" "$LOG_PATH" >/dev/null 2>&1; then
     mclone_die "Android XR terrain-ready marker was not seen; see $LOG_PATH"
 fi
 if [[ -n "$SESSION_SMOKE" ]]; then

@@ -30,7 +30,7 @@ mod android {
     use mclone_audio::{AudioEngine, AudioSettings};
     use mclone_net::NativeClientSession;
     use mclone_protocol::{ClientCommand, ServerUpdate};
-    use mclone_render::chunk::TexturedSectionRenderOptions;
+    use mclone_render::chunk::{ChunkMultiviewDepthTarget, TexturedSectionRenderOptions};
     use mclone_render_session::EngineCameraSnapshot;
     use mclone_xr_host::{
         OpenXrControllerActions, OpenXrHostEvent, OpenXrPollStatus, PRIMARY_STEREO_VIEW_TYPE,
@@ -38,7 +38,7 @@ mod android {
     };
     use mclone_xr_scene::{
         MAX_XR_RENDER_DISTANCE, XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose,
-        XrTerrainEyeTarget, XrUnderwaterDetectionMode,
+        XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
     };
     use openxr as xr;
 
@@ -228,6 +228,7 @@ mod android {
         perf_frozen_render: bool,
         perf_metrics: bool,
         multiview_proof: bool,
+        terrain_multiview_proof: bool,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -243,6 +244,7 @@ mod android {
                 perf_frozen_render: false,
                 perf_metrics: false,
                 multiview_proof: false,
+                terrain_multiview_proof: false,
             }
         }
     }
@@ -335,6 +337,9 @@ mod android {
                 "--multiview-proof" => {
                     options.multiview_proof = true;
                 }
+                "--terrain-multiview-proof" => {
+                    options.terrain_multiview_proof = true;
+                }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
         }
@@ -359,9 +364,12 @@ mod android {
         if options.perf_frozen_render && options.perf_flight.is_some() {
             bail!("--perf-frozen-render cannot be combined with --perf-flight");
         }
-        if options.multiview_proof {
+        if options.multiview_proof && options.terrain_multiview_proof {
+            bail!("--multiview-proof cannot be combined with --terrain-multiview-proof");
+        }
+        if options.multiview_proof || options.terrain_multiview_proof {
             if options.session_smoke.is_some() {
-                bail!("--multiview-proof cannot be combined with --session-smoke");
+                bail!("multiview proof modes cannot be combined with --session-smoke");
             }
             if options.perf_seconds.is_some()
                 || options.perf_flight.is_some()
@@ -369,7 +377,7 @@ mod android {
                 || options.perf_frozen_render
                 || options.perf_metrics
             {
-                bail!("--multiview-proof cannot be combined with performance probes");
+                bail!("multiview proof modes cannot be combined with performance probes");
             }
         }
         Ok(options)
@@ -622,6 +630,10 @@ mod android {
             startup_options.multiview_proof
         );
         log::info!(
+            "Android XR terrain multiview proof: {}",
+            startup_options.terrain_multiview_proof
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -661,6 +673,7 @@ mod android {
             startup_options.perf_frozen_render,
             startup_options.perf_metrics,
             startup_options.multiview_proof,
+            startup_options.terrain_multiview_proof,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -681,6 +694,7 @@ mod android {
         perf_frozen_render: bool,
         perf_metrics: bool,
         multiview_proof: bool,
+        terrain_multiview_proof: bool,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -914,7 +928,7 @@ mod android {
         log::info!("OpenXR reference space: STAGE");
 
         let (eye_width, eye_height) = stereo_config.primary_eye_size();
-        if multiview_proof {
+        if multiview_proof || terrain_multiview_proof {
             let mut stereo_target = graphics_vulkan::create_stereo(
                 &graphics.device,
                 &graphics.session,
@@ -931,13 +945,36 @@ mod android {
                 stereo_target.texture_count(),
                 stereo_target.array_size()
             );
+            if multiview_proof {
+                log::info!("MCLONE_ANDROID_XR_SESSION_READY");
+                return run_multiview_proof_loop(
+                    app,
+                    &mut graphics,
+                    &stage,
+                    environment_blend_mode,
+                    &mut stereo_target,
+                );
+            }
+
             log::info!("MCLONE_ANDROID_XR_SESSION_READY");
-            return run_multiview_proof_loop(
+            let mut terrain = create_android_xr_terrain_state(
+                &graphics.device,
+                &graphics.queue,
+                runtime_assets,
+                startup_view_pose,
+                scene_options,
+                render_options,
+                remote_addr,
+            )
+            .context("initialize Android XR terrain multiview proof runtime")?;
+            terrain.set_display_refresh_hz(display_refresh.current_rate);
+            return run_terrain_multiview_proof_loop(
                 app,
                 &mut graphics,
                 &stage,
                 environment_blend_mode,
                 &mut stereo_target,
+                &mut terrain,
             );
         }
 
@@ -1288,10 +1325,149 @@ mod android {
         }
     }
 
+    fn run_terrain_multiview_proof_loop(
+        app: &AndroidApp,
+        graphics: &mut graphics_vulkan::VulkanGraphicsSession,
+        stage: &xr::Space,
+        environment_blend_mode: xr::EnvironmentBlendMode,
+        stereo_target: &mut graphics_vulkan::OpenXrStereoState,
+        terrain: &mut AndroidXrTerrainState,
+    ) -> Result<()> {
+        let mut event_storage = xr::EventDataBuffer::new();
+        let mut session_running = false;
+        let mut frame_stats = XrFrameStats::default();
+        let mut depth = ChunkMultiviewDepthTarget::new(
+            &graphics.device,
+            stereo_target.width,
+            stereo_target.height,
+        );
+        let proof_start = Instant::now();
+
+        loop {
+            if proof_start.elapsed() > Duration::from_secs(45) {
+                bail!(
+                    "terrain multiview proof timed out: submitted={} runtime_frames={} skipped={} sections={}",
+                    frame_stats.submitted_frames,
+                    frame_stats.runtime_frames,
+                    frame_stats.skipped_frames,
+                    terrain.frame_summary().section_count
+                );
+            }
+            if !poll_android_events(app, Some(Duration::from_millis(0)))? {
+                log::info!(
+                    "Android activity destroyed; exiting OpenXR terrain multiview proof loop"
+                );
+                return Ok(());
+            }
+
+            match mclone_xr_host::poll_openxr_events(
+                &graphics.session,
+                &mut event_storage,
+                &mut session_running,
+                VIEW_TYPE,
+                log_openxr_host_event,
+            )
+            .context("poll OpenXR events")?
+            {
+                OpenXrPollStatus::Exit => {
+                    log::info!(
+                        "OpenXR terrain multiview proof requested exit: submitted={} runtime_frames={} skipped={}",
+                        frame_stats.submitted_frames,
+                        frame_stats.runtime_frames,
+                        frame_stats.skipped_frames
+                    );
+                    return Ok(());
+                }
+                OpenXrPollStatus::Idle if !session_running => {
+                    if !poll_android_events(app, Some(SESSION_IDLE_POLL_INTERVAL))? {
+                        log::info!(
+                            "Android activity destroyed while waiting for OpenXR READY in terrain multiview proof"
+                        );
+                        return Ok(());
+                    }
+                    continue;
+                }
+                OpenXrPollStatus::Idle | OpenXrPollStatus::Running => {}
+            }
+
+            let frame_state = mclone_xr_host::wait_begin_frame(
+                &mut graphics.frame_wait,
+                &mut graphics.frame_stream,
+                &mut frame_stats,
+            )?;
+            if frame_state.should_render {
+                match render_terrain_multiview_proof_frame(
+                    graphics,
+                    stage,
+                    environment_blend_mode,
+                    frame_state.predicted_display_time,
+                    stereo_target,
+                    &mut depth,
+                    terrain,
+                ) {
+                    Ok(proof) => {
+                        frame_stats.record_submitted_frame();
+                        if let Some(difference) = proof.difference {
+                            log::info!(
+                                "MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY submitted={} runtime_frames={} skipped={} eye={}x{} layers={} sections={} left_drawn_sections={} right_drawn_sections={} left_drawn_indices={} right_drawn_indices={} different_pixels={} minimum_different_pixels={}",
+                                frame_stats.submitted_frames,
+                                frame_stats.runtime_frames,
+                                frame_stats.skipped_frames,
+                                stereo_target.width,
+                                stereo_target.height,
+                                stereo_target.array_size(),
+                                proof.summary.section_count,
+                                proof.summary.left.drawn_section_count,
+                                proof.summary.right.drawn_section_count,
+                                proof.summary.left.drawn_index_count,
+                                proof.summary.right.drawn_index_count,
+                                difference.different_pixels,
+                                difference.minimum_expected_different_pixels
+                            );
+                            return Ok(());
+                        }
+                        if frame_stats.submitted_frames % 60 == 0 {
+                            log::info!(
+                                "OpenXR terrain multiview proof waiting for drawable terrain: submitted={} sections={} left_indices={} right_indices={} pending_chunks={} pending_jobs={}",
+                                frame_stats.submitted_frames,
+                                proof.summary.section_count,
+                                proof.summary.left.drawn_index_count,
+                                proof.summary.right.drawn_index_count,
+                                proof.summary.upload.pending_render_chunks_after,
+                                proof.summary.upload.pending_compile_jobs_after
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        let _ = mclone_xr_host::end_frame_with_layers(
+                            &mut graphics.frame_stream,
+                            frame_state.predicted_display_time,
+                            environment_blend_mode,
+                            &[],
+                        );
+                        return Err(error);
+                    }
+                }
+            } else if let Err(error) = mclone_xr_host::end_skipped_frame(
+                &mut graphics.frame_stream,
+                frame_state.predicted_display_time,
+                environment_blend_mode,
+                &mut frame_stats,
+            ) {
+                return Err(error);
+            }
+        }
+    }
+
     struct MultiviewProofFrame {
         projection: mclone_xr_host::XrStereoProjectionProof,
         private_multiview: mclone_xr_host::XrMultiviewLayerProof,
         swapchain_multiview: mclone_xr_host::XrMultiviewLayerProof,
+    }
+
+    struct TerrainMultiviewProofFrame {
+        summary: mclone_xr_scene::XrTerrainMultiviewFrameSummary,
+        difference: Option<mclone_xr_host::XrMultiviewLayerDifferenceProof>,
     }
 
     fn render_multiview_proof_frame(
@@ -1354,6 +1530,71 @@ mod android {
             private_multiview,
             swapchain_multiview,
         })
+    }
+
+    fn render_terrain_multiview_proof_frame(
+        graphics: &mut graphics_vulkan::VulkanGraphicsSession,
+        stage: &xr::Space,
+        environment_blend_mode: xr::EnvironmentBlendMode,
+        predicted_display_time: xr::Time,
+        stereo_target: &mut graphics_vulkan::OpenXrStereoState,
+        depth: &mut ChunkMultiviewDepthTarget,
+        terrain: &mut AndroidXrTerrainState,
+    ) -> Result<TerrainMultiviewProofFrame> {
+        let stereo_views =
+            mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+        let target_width = stereo_target.width;
+        let target_height = stereo_target.height;
+        if depth.width != target_width || depth.height != target_height {
+            *depth = ChunkMultiviewDepthTarget::new(&graphics.device, target_width, target_height);
+        }
+        let target = acquire_stereo_target(stereo_target)
+            .context("acquire terrain multiview proof target")?;
+        let render_result: Result<TerrainMultiviewProofFrame> = (|| {
+            let summary = terrain
+                .render_terrain_multiview_frame(
+                    &graphics.device,
+                    &graphics.queue,
+                    [stereo_views.left, stereo_views.right],
+                    XrTerrainMultiviewTarget {
+                        color_view: target.color_array_view(),
+                        depth,
+                        size: [target_width, target_height],
+                    },
+                )
+                .context("render OpenXR terrain multiview proof")?;
+            let difference =
+                if summary.left.drawn_index_count > 0 && summary.right.drawn_index_count > 0 {
+                    Some(
+                        mclone_xr_host::read_multiview_layer_difference_proof(
+                            &graphics.device,
+                            &graphics.queue,
+                            target.color_texture()?,
+                            target_width,
+                            target_height,
+                            "terrain",
+                        )
+                        .context("validate OpenXR terrain multiview layer difference")?,
+                    )
+                } else {
+                    None
+                };
+            Ok(TerrainMultiviewProofFrame {
+                summary,
+                difference,
+            })
+        })();
+        target.release()?;
+        let proof = render_result?;
+        mclone_xr_host::end_multiview_projection_frame(
+            &mut graphics.frame_stream,
+            predicted_display_time,
+            environment_blend_mode,
+            stage,
+            stereo_views,
+            stereo_target,
+        )?;
+        Ok(proof)
     }
 
     fn run_mclone_frame_loop(

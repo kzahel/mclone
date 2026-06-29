@@ -764,6 +764,16 @@ pub struct XrMultiviewLayerProof {
     pub right_first_pixel: [u8; 4],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct XrMultiviewLayerDifferenceProof {
+    pub width: u32,
+    pub height: u32,
+    pub different_pixels: u32,
+    pub minimum_expected_different_pixels: u32,
+    pub left_first_pixel: [u8; 4],
+    pub right_first_pixel: [u8; 4],
+}
+
 pub fn render_private_multiview_readback_proof(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -931,6 +941,54 @@ pub fn read_multiview_layer_color_proof(
         left_red_pixels,
         right_green_pixels,
         minimum_expected_pixels,
+        left_first_pixel,
+        right_first_pixel,
+    })
+}
+
+pub fn read_multiview_layer_difference_proof(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+    label: &'static str,
+) -> Result<XrMultiviewLayerDifferenceProof> {
+    if width == 0 || height == 0 {
+        anyhow::bail!("OpenXR multiview layer difference proof requires a non-empty target");
+    }
+    let left_pixels = read_rgba8_layer(device, queue, texture, width, height, 0)?;
+    let right_pixels = read_rgba8_layer(device, queue, texture, width, height, 1)?;
+    let different_pixels = left_pixels
+        .chunks_exact(4)
+        .zip(right_pixels.chunks_exact(4))
+        .filter(|(left, right)| left != right)
+        .count() as u32;
+    let pixel_count = width.saturating_mul(height);
+    let minimum_expected_different_pixels = (pixel_count / 1000).max(64).min(pixel_count);
+    let left_first_pixel = first_pixel_rgba(&left_pixels);
+    let right_first_pixel = first_pixel_rgba(&right_pixels);
+    log::info!(
+        "OpenXR multiview {label} layer difference readback: different_pixels={} minimum_expected_different_pixels={} left_first={:?} right_first={:?}",
+        different_pixels,
+        minimum_expected_different_pixels,
+        left_first_pixel,
+        right_first_pixel
+    );
+    if different_pixels < minimum_expected_different_pixels {
+        anyhow::bail!(
+            "OpenXR multiview {label} layer difference readback failed: different_pixels={} minimum_expected_different_pixels={} left_first={:?} right_first={:?}",
+            different_pixels,
+            minimum_expected_different_pixels,
+            left_first_pixel,
+            right_first_pixel
+        );
+    }
+    Ok(XrMultiviewLayerDifferenceProof {
+        width,
+        height,
+        different_pixels,
+        minimum_expected_different_pixels,
         left_first_pixel,
         right_first_pixel,
     })

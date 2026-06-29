@@ -1,15 +1,16 @@
 # 107: XR Stereo Uniform Ownership and Multiview
 
 Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
-proof landed, and Slice E's headless plus Android XR proof paths exist. Quest
-now exposes `wgpu::Features::MULTIVIEW` after enabling
+proof landed, and Slice E's headless, Android XR, and terrain-chunk multiview
+proof paths exist. Quest now exposes `wgpu::Features::MULTIVIEW` after enabling
 `VK_KHR_get_physical_device_properties2` on the OpenXR Vulkan instance and
 threading `VK_KHR_multiview` into the wgpu-wrapped device extension list, and
-the on-device proof now validates true multiview layer writes/readback plus the
-left/right stereo projection guard. Production terrain/sky/entity/GUI multiview
-migration remains pending. Created after `d0c5161` (`Restore XR per-eye command
-submission`) rolled back the unsafe single-submit Quest XR optimization from
-`264c723`.
+the on-device proofs now validate true multiview layer writes/readback, the
+left/right stereo projection guard, and chunk-terrain rendering through a
+two-layer OpenXR swapchain. The production headset frame remains on the correct
+per-eye submit path until sky/entities/GUI/screen effects migrate too. Created
+after `d0c5161` (`Restore XR per-eye command submission`) rolled back the unsafe
+single-submit Quest XR optimization from `264c723`.
 
 ## Goal
 
@@ -404,11 +405,38 @@ MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY submitted=1 runtime_frames=1 skipped=0 e
 Release APK SHA-256 for that proof run:
 `687a87f00554a651087c2cd5c10905be18b50e11a3da3e8b36ed7a397bb37a19`.
 
+**Terrain chunk multiview proof path landed 2026-06-29.** Chunk terrain now has
+a separate multiview shader/pipeline path using a `[2]` view uniform array
+selected by `@builtin(view_index)`, plus a two-layer chunk depth target. The
+proof mode renders prepared terrain sections into one two-layer OpenXR color
+swapchain, culls each eye independently, draws the union of visible sections in
+one multiview pass, and reads both swapchain layers back. The normal headset
+frame still uses the safe per-eye submit path.
+
+Validation command:
+
+```bash
+pnpm native:android-xr:terrain-multiview-proof
+```
+
+Quest 3 validation passed:
+
+```text
+OpenXR wgpu features: multiview=true
+OpenXR Vulkan multiview diagnostics: instance_properties2_ext=true device_khr_multiview_ext=true raw_feature=true raw_geometry_shader=false raw_tessellation_shader=false max_views=6 max_instance_index=4294967295 wgpu_adapter=true wgpu_device=true
+OpenXR multiview terrain layer difference readback: different_pixels=2317676 minimum_expected_different_pixels=2956 left_first=[27, 41, 16, 255] right_first=[41, 62, 24, 255]
+MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY submitted=209 runtime_frames=209 skipped=0 eye=1680x1760 layers=2 sections=6 left_drawn_sections=2 right_drawn_sections=2 left_drawn_indices=15924 right_drawn_indices=15924 different_pixels=2317676 minimum_different_pixels=2956
+```
+
+Release APK SHA-256 for that proof run:
+`8f48d2b1aa1d666fc5179e8d898660ca9ac498d98269b700d65c7431176c6409`.
+
 Move from proof-of-correctness one-submit to the real target:
 
-- two-layer XR color/depth target or equivalent swapchain path;
-- render pipelines with `multiview: Some(2)`;
-- shader `@builtin(view_index)` selection for per-eye view data;
+- migrate sky, actors/entities, selection outline, world GUI, and screen effects
+  to multiview-capable paths;
+- decide whether terrain's union-of-eye-culls policy is acceptable for the first
+  production path or should be tightened before enabling;
 - shared draw list feeding both eye layers.
 
 Acceptance:

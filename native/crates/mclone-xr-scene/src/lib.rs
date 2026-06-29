@@ -8,6 +8,7 @@ use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
     render_full_frame_for_view_with_prepared_records_in_slot,
     render_full_frame_for_view_with_prepared_records_timed_in_slot,
+    render_view_with_underwater_effect,
 };
 use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
 use mclone_app_runtime::local_single_view::{
@@ -26,10 +27,12 @@ use mclone_core::{BlockStateId, ChunkPos, Vec3d, time};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
-    ChunkDepthTarget, ChunkProjectionKind, ChunkRenderView, PreparedTexturedSectionRecords,
-    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionUploadReport,
+    ChunkDepthTarget, ChunkMultiviewDepthTarget, ChunkMultiviewRenderTarget, ChunkProjectionKind,
+    ChunkRenderView, PreparedTexturedSectionRecords, TexturedSectionDrawResources,
+    TexturedSectionRenderOptions, TexturedSectionRenderStats, TexturedSectionUploadReport,
 };
 use mclone_render::entity::ActorDrawResources;
+use mclone_render::fog::RenderFog;
 use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiRenderer};
 use mclone_render::screen_effect::{
     ScreenEffectsRenderer, UnderwaterEffectState, UnderwaterOverlay,
@@ -358,6 +361,22 @@ pub struct XrTerrainEyeTarget<'a> {
     pub color_view: &'a wgpu::TextureView,
     pub depth: &'a ChunkDepthTarget,
     pub size: [u32; 2],
+}
+
+#[derive(Clone, Copy)]
+pub struct XrTerrainMultiviewTarget<'a> {
+    pub color_view: &'a wgpu::TextureView,
+    pub depth: &'a ChunkMultiviewDepthTarget,
+    pub size: [u32; 2],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct XrTerrainMultiviewFrameSummary {
+    pub rendered_frames: u32,
+    pub section_count: usize,
+    pub left: TexturedSectionRenderStats,
+    pub right: TexturedSectionRenderStats,
+    pub upload: XrTerrainUploadSummary,
 }
 
 struct XrRenderedEye {
@@ -738,6 +757,20 @@ where
         )
     }
 
+    pub fn render_terrain_multiview_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        target: XrTerrainMultiviewTarget<'_>,
+    ) -> Result<XrTerrainMultiviewFrameSummary> {
+        let mut render_views = self.render_views(&views)?;
+        if self.advance_local_startup(device, queue)? {
+            render_views = self.render_views(&views)?;
+        }
+        self.render_prepared_terrain_multiview_frame(device, queue, render_views, target)
+    }
+
     fn render_frame_inner(
         &mut self,
         device: &wgpu::Device,
@@ -864,6 +897,81 @@ where
             timing.left_eye_render.poll_wait_ms + timing.right_eye_render.poll_wait_ms;
         self.record_eye0_summary(left_eye.summary);
         Ok(self.frame_summary_with_timing(timing, upload))
+    }
+
+    fn render_prepared_terrain_multiview_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        render_views: [ChunkRenderView; 2],
+        target: XrTerrainMultiviewTarget<'_>,
+    ) -> Result<XrTerrainMultiviewFrameSummary> {
+        let center_position =
+            (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+        let mut timing = XrTerrainFrameTiming::default();
+        let upload = if self.local_startup.is_none() && self.runtime.is_some() {
+            self.poll_runtime_and_upload(device, center_position, &mut timing)?
+        } else {
+            self.frozen_runtime_upload_summary()
+        };
+
+        let base_options = self
+            .effective_render_options(center_position)
+            .with_sky_darken(mclone_render::light_texture::sky_darken(self.time_of_day()));
+        let underwater_overlays = self.underwater_overlays(render_views);
+        let terrain_views = [
+            render_view_with_underwater_effect(render_views[0], underwater_overlays[0]),
+            render_view_with_underwater_effect(render_views[1], underwater_overlays[1]),
+        ];
+        let terrain_options = underwater_overlays.map(|overlay| {
+            let fog = overlay
+                .map(|overlay| RenderFog::underwater_with_water_vision(overlay.water_vision))
+                .unwrap_or_default();
+            base_options.with_fog(fog)
+        });
+        let prepared_records = self.draw.prepare_render_records();
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_xr_terrain_multiview_encoder"),
+        });
+        let render_target = ChunkMultiviewRenderTarget::new(
+            target.color_view,
+            &target.depth.view,
+            target.size,
+            self.sky_clear_color(),
+        );
+        let stats = self
+            .draw
+            .render_prepared_multiview_with_options(
+                &prepared_records,
+                device,
+                queue,
+                &mut encoder,
+                render_target,
+                terrain_views,
+                terrain_options,
+            )
+            .context("render XR terrain multiview chunks")?;
+        let submission = queue.submit(Some(encoder.finish()));
+        device
+            .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+            .map(|_| ())
+            .context("wait for XR terrain multiview submission")?;
+        device
+            .poll(wgpu::PollType::Wait)
+            .map(|_| ())
+            .context("wait for XR terrain multiview device idle")?;
+
+        self.render_stats.drawn_section_count = stats[0].drawn_section_count;
+        self.render_stats.drawn_face_count = stats[0].drawn_face_count();
+        self.render_stats.drawn_index_count = stats[0].drawn_index_count;
+        self.rendered_frames += 1;
+        Ok(XrTerrainMultiviewFrameSummary {
+            rendered_frames: self.rendered_frames,
+            section_count: self.draw.section_count(),
+            left: stats[0],
+            right: stats[1],
+            upload,
+        })
     }
 
     pub fn set_locomotion_mode(&mut self, locomotion_mode: XrLocomotionMode) {
