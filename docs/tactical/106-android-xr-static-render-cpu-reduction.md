@@ -348,6 +348,14 @@ flag; loaded section/index counts are folded into the build. Frozen RD10
 pass). Frame-level effect was masked by GPU thermal drift on that run; the clean
 attribution is the `shared_records` bucket.
 
+**Follow-up (same day): the cache now lives on the shared `&self` render path**
+(`render_with_options_inner` via `RefCell`/`Cell` interior mutability), not just
+the XR-only `prepare_render_records` entry point. So flat desktop, flat Android,
+web, and headless — every single-view client culling through
+`TexturedSectionDrawResources` — reuse the same cross-frame cache, the same way
+Slice G's cull win reached them for free. XR re-confirmed unregressed
+(`shared_records` `0.021ms`, p50 `13.838ms`, drawn sections `179`).
+
 - Add a dirty flag to `TexturedSectionDrawResources`; rebuild the
   `PreparedTexturedSectionRecords` only when `apply_section_updates` /
   `set_traversal_ready_sections` change the section set, not every frame.

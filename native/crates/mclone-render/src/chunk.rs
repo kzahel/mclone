@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
@@ -1514,8 +1514,13 @@ pub struct TexturedSectionDrawResources {
     // next `prepare_render_records` after a mutation, instead of rebuilding the
     // whole `BTreeMap` every frame. `Arc` keeps the type `Send` and makes the
     // per-frame handout an O(1) refcount bump rather than a deep clone.
-    cached_records: Option<Arc<PreparedTexturedSectionRecords>>,
-    records_dirty: bool,
+    //
+    // Behind interior mutability so the cache lives on the shared `&self` render
+    // path (`render_with_options_inner`), not just the XR-only
+    // `prepare_render_records` entry point: every client (flat, web, headless,
+    // XR) that culls through this draw-state store reuses the same cache.
+    cached_records: RefCell<Option<Arc<PreparedTexturedSectionRecords>>>,
+    records_dirty: Cell<bool>,
     // Slice G: reusable per-eye cull scratch (cleared each call). `RefCell`
     // because the render path borrows `&self`; the scratch is only ever touched
     // synchronously inside one cull call, never aliased.
@@ -1540,8 +1545,8 @@ impl TexturedSectionDrawResources {
             visibility_sections: BTreeMap::new(),
             traversal_ready_sections: BTreeSet::new(),
             atlas,
-            cached_records: None,
-            records_dirty: true,
+            cached_records: RefCell::new(None),
+            records_dirty: Cell::new(true),
             cull_scratch: RefCell::new(CullScratch::default()),
         };
         let _ = resources.update_sections(device, sections)?;
@@ -1574,7 +1579,7 @@ impl TexturedSectionDrawResources {
     ) -> Result<TexturedSectionUploadReport> {
         // Slice F: the section set / meshes change here, so the cached culling
         // records must be rebuilt on the next prepare.
-        self.records_dirty = true;
+        self.records_dirty.set(true);
         let mut report = TexturedSectionUploadReport::default();
         for key in removed {
             if self.sections.remove(key).is_some() {
@@ -1611,7 +1616,7 @@ impl TexturedSectionDrawResources {
 
     pub fn set_traversal_ready_sections(&mut self, ready_sections: &BTreeSet<RenderSectionKey>) {
         // Slice F: readiness flips change the cached records' `traversal_ready`.
-        self.records_dirty = true;
+        self.records_dirty.set(true);
         self.traversal_ready_sections = self
             .visibility_sections
             .keys()
@@ -1680,14 +1685,23 @@ impl TexturedSectionDrawResources {
         Ok((stats, timing))
     }
 
-    pub fn prepare_render_records(&mut self) -> Arc<PreparedTexturedSectionRecords> {
-        // Slice F: rebuild only when the section set / readiness changed since the
-        // last build; otherwise hand back the cached records (an O(1) Arc clone).
-        if self.records_dirty || self.cached_records.is_none() {
-            self.cached_records = Some(Arc::new(self.build_prepared_records()));
-            self.records_dirty = false;
+    /// Shared cache accessor (Slice F): rebuild only when the section set /
+    /// readiness changed since the last build; otherwise hand back the cached
+    /// records (an O(1) `Arc` clone). Takes `&self` via interior mutability so
+    /// both the XR stereo path and the single-view `render_with_options_inner`
+    /// path reuse one cache.
+    pub fn prepare_render_records(&self) -> Arc<PreparedTexturedSectionRecords> {
+        if self.records_dirty.get() || self.cached_records.borrow().is_none() {
+            let rebuilt = Arc::new(self.build_prepared_records());
+            *self.cached_records.borrow_mut() = Some(rebuilt);
+            self.records_dirty.set(false);
         }
-        Arc::clone(self.cached_records.as_ref().expect("records cached above"))
+        Arc::clone(
+            self.cached_records
+                .borrow()
+                .as_ref()
+                .expect("records cached above"),
+        )
     }
 
     pub fn render_prepared_with_options(
@@ -1747,8 +1761,10 @@ impl TexturedSectionDrawResources {
         let records: &PreparedTexturedSectionRecords = match prepared_records {
             Some(records) => records,
             None => {
+                // Slice F shared with all single-view clients: go through the
+                // cross-frame cache instead of rebuilding the records every frame.
                 let records_start = timing.as_ref().map(|_| Instant::now());
-                records_storage = self.build_prepared_records();
+                records_storage = self.prepare_render_records();
                 if let (Some(timing), Some(records_start)) = (&mut timing, records_start) {
                     timing.records_ms = elapsed_ms(records_start.elapsed());
                 }

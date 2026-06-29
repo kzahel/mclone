@@ -74,6 +74,34 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-29 - Standalone Quest 3 Frozen RD10 Shared Record Cache (Slice F follow-up)
+
+Benchmarked code commit: this shared-cache-refactor commit. Captured immediately
+before commit from the same worktree, based on the Slice G commit.
+
+Moved the Slice F cross-frame record cache onto the shared `&self` render path
+(`render_with_options_inner`'s `None` branch, via `RefCell`/`Cell` interior
+mutability) so it is no longer reached only through the XR-only
+`prepare_render_records` entry point. Every single-view client (flat desktop,
+flat Android, web, headless) that culls through `TexturedSectionDrawResources`
+now reuses the same cross-frame cache — the same "lives on the one shared path"
+mechanism that gave flat the Slice G cull win for free.
+
+Validation: `cargo check --target aarch64-linux-android` and host clean; 79
+`mclone-render` tests pass; `pnpm native:timedemo:smoke` (flat render path)
+exercises the shared cache with correct cull math (drawn `89.8` + graph-culled
+`303.9` ~= frustum `393.7`). On-device frozen RD10 re-confirmed the XR path is
+unregressed: `shared_records` max `0.021ms` (cache still hits), per-eye cull
+`1.42`/`1.35ms`, frame p50 `13.838ms` (poll `8.915ms`, cooler device),
+`drawn_sections=179` unchanged (`drawn_indices` `1,356,102` is within the usual
+~0.3% settle-time section-set jitter). Cleanup verified: `pidof` empty,
+`mWakefulness=Asleep`, `mHoldingDisplaySuspendBlocker=false`.
+
+The flat win is the same shape as XR's: on camera-only frames (no section
+upload/removal/readiness change) the `~1.5ms`/frame record rebuild is skipped;
+it is largest at high flat render distance. A dedicated flat records-cost marker
+would quantify it; correctness and the cache-hit path are confirmed here.
+
 ### 2026-06-29 - Standalone Quest 3 Frozen RD10 Fast-Hash Cull Scratch (Slice G)
 
 Benchmarked code commit: this Slice G commit (replace the per-eye cull
