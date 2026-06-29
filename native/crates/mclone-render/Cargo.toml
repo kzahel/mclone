@@ -13,6 +13,7 @@ mclone-assets.workspace = true
 mclone-core.workspace = true
 mclone-mesh.workspace = true
 mclone-ui.workspace = true
+rustc-hash = "1"
 wgpu.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

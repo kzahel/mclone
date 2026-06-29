@@ -1378,6 +1378,7 @@ dependencies = [
  "mclone-mesh",
  "mclone-ui",
  "pollster",
+ "rustc-hash",
  "wgpu",
  "winit",
 ]

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
@@ -6,6 +7,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Vec3, Vec4};
+use rustc_hash::{FxHashMap, FxHashSet};
 use mclone_core::{
     block_to_chunk_coord, block_to_section_coord, chunk_middle_block_coord, chunk_min_block_coord,
 };
@@ -408,7 +410,8 @@ pub fn textured_section_visibility_stats_with_options_and_ready_sections(
         loaded_section_count,
         loaded_index_count,
     };
-    cull_textured_sections(&prepared, render_view, options).stats
+    let mut scratch = CullScratch::default();
+    cull_textured_sections(&prepared, render_view, options, &mut scratch).stats
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -432,7 +435,31 @@ pub struct PreparedTexturedSectionRecords {
 #[derive(Clone, Debug)]
 struct TexturedSectionCullingResult {
     stats: TexturedSectionRenderStats,
-    drawn_keys: BTreeSet<RenderSectionKey>,
+    drawn_keys: FxHashSet<RenderSectionKey>,
+}
+
+// Slice G (docs/tactical/106): the per-eye cull previously allocated three
+// `BTreeSet`s + a `BTreeMap` + a `VecDeque` every eye every frame, and every
+// membership test/insert paid `O(log n)` plus pointer chasing. `RenderSectionKey`
+// is a 12-byte `Copy` key, so a flat fast-hash set/map is a much better fit. We
+// also keep these scratch containers alive across calls (cleared, capacity
+// retained) so the steady-state frozen frame does no cull-side allocation at all.
+// `drawn_keys` is returned to the encode loop, so it is built fresh per call.
+#[derive(Default)]
+struct CullScratch {
+    frustum_keys: FxHashSet<RenderSectionKey>,
+    ready_frustum_keys: FxHashSet<RenderSectionKey>,
+    queue: VecDeque<RenderSectionKey>,
+    infos: FxHashMap<RenderSectionKey, RenderSectionTraversalInfo>,
+}
+
+impl CullScratch {
+    fn reset(&mut self) {
+        self.frustum_keys.clear();
+        self.ready_frustum_keys.clear();
+        self.queue.clear();
+        self.infos.clear();
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -473,6 +500,7 @@ fn cull_textured_sections(
     prepared: &PreparedTexturedSectionRecords,
     render_view: ChunkRenderView,
     options: TexturedSectionRenderOptions,
+    scratch: &mut CullScratch,
 ) -> TexturedSectionCullingResult {
     let records = &prepared.records;
     let frustum = ClipFrustum::from_render_view(render_view);
@@ -485,8 +513,15 @@ fn cull_textured_sections(
         ..TexturedSectionRenderStats::default()
     };
 
-    let mut frustum_keys = BTreeSet::new();
-    let mut ready_frustum_keys = BTreeSet::new();
+    // Slice G: reuse scratch capacity (cleared) instead of allocating three sets
+    // + a map + a queue per eye per frame; fast-hash membership instead of BTree.
+    scratch.reset();
+    let CullScratch {
+        frustum_keys,
+        ready_frustum_keys,
+        queue,
+        infos,
+    } = scratch;
     for (key, record) in records {
         if frustum.is_render_section_visible(*key) {
             frustum_keys.insert(*key);
@@ -504,7 +539,7 @@ fn cull_textured_sections(
         }
     }
 
-    let start_keys = traversal_start_keys(records, &frustum_keys, render_view.camera_position);
+    let start_keys = traversal_start_keys(records, frustum_keys, render_view.camera_position);
     if start_keys.is_empty() {
         stats.drawn_section_count = ready_frustum_keys
             .iter()
@@ -519,13 +554,12 @@ fn cull_textured_sections(
             .sum();
         return TexturedSectionCullingResult {
             stats,
-            drawn_keys: ready_frustum_keys,
+            // `ready_frustum_keys` is reused scratch, so hand back an owned copy.
+            drawn_keys: ready_frustum_keys.iter().copied().collect(),
         };
     }
 
-    let mut queue = VecDeque::new();
-    let mut infos = BTreeMap::new();
-    let mut drawn_keys = BTreeSet::new();
+    let mut drawn_keys = FxHashSet::default();
     for start_key in start_keys {
         infos.insert(start_key, RenderSectionTraversalInfo::start());
         queue.push_back(start_key);
@@ -599,7 +633,7 @@ fn cull_textured_sections(
 
 fn traversal_start_keys(
     records: &BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
-    frustum_keys: &BTreeSet<RenderSectionKey>,
+    frustum_keys: &FxHashSet<RenderSectionKey>,
     camera_position: Vec3,
 ) -> Vec<RenderSectionKey> {
     let Some(camera_key) = render_section_key_containing(camera_position) else {
@@ -617,7 +651,7 @@ fn traversal_start_keys(
 
 fn outside_retained_section_start_keys(
     records: &BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
-    frustum_keys: &BTreeSet<RenderSectionKey>,
+    frustum_keys: &FxHashSet<RenderSectionKey>,
     camera_position: Vec3,
 ) -> Vec<RenderSectionKey> {
     if !camera_position.is_finite() {
@@ -1468,6 +1502,10 @@ pub struct TexturedSectionDrawResources {
     // per-frame handout an O(1) refcount bump rather than a deep clone.
     cached_records: Option<Arc<PreparedTexturedSectionRecords>>,
     records_dirty: bool,
+    // Slice G: reusable per-eye cull scratch (cleared each call). `RefCell`
+    // because the render path borrows `&self`; the scratch is only ever touched
+    // synchronously inside one cull call, never aliased.
+    cull_scratch: RefCell<CullScratch>,
 }
 
 impl TexturedSectionDrawResources {
@@ -1490,6 +1528,7 @@ impl TexturedSectionDrawResources {
             atlas,
             cached_records: None,
             records_dirty: true,
+            cull_scratch: RefCell::new(CullScratch::default()),
         };
         let _ = resources.update_sections(device, sections)?;
         Ok(resources)
@@ -1707,7 +1746,10 @@ impl TexturedSectionDrawResources {
             }
         };
         let cull_start = timing.as_ref().map(|_| Instant::now());
-        let culling = cull_textured_sections(records, render_view, options);
+        let culling = {
+            let mut scratch = self.cull_scratch.borrow_mut();
+            cull_textured_sections(records, render_view, options, &mut scratch)
+        };
         if let (Some(timing), Some(cull_start)) = (&mut timing, cull_start) {
             timing.cull_ms = elapsed_ms(cull_start.elapsed());
         }

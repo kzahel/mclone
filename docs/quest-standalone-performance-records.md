@@ -74,6 +74,53 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-29 - Standalone Quest 3 Frozen RD10 Fast-Hash Cull Scratch (Slice G)
+
+Benchmarked code commit: this Slice G commit (replace the per-eye cull
+`BTreeSet`/`BTreeMap`/`VecDeque` with reused `rustc-hash` `FxHashSet`/`FxHashMap`
+scratch; `drawn_keys` is also `FxHashSet`). Captured immediately before commit
+from the same worktree, based on the Slice F commit. Validation: `cargo check
+--target aarch64-linux-android` clean; `cargo test -p mclone-render` 74 passed
+(cull/visibility/traversal/frustum tests included). Cleanup verified: `pidof`
+empty, `mWakefulness=Asleep`, `mHoldingDisplaySuspendBlocker=false`.
+
+Lane `native:android-xr:perf:frozen:rd10`. Drawn counts unchanged: `179`
+sections / `1,352,166` indices (behavior-preserving).
+
+Comparison to the original baseline (both runs at comparable GPU poll
+`~10.5-10.9ms`, so GPU-thermal-neutral) and to Slice F:
+
+| Metric | Baseline | Slice F | Slice G |
+|---|---:|---:|---:|
+| Frame avg / p50 / p95 / p99 | `15.62`/`15.66`/`17.29`/`18.09` | `16.44`/`16.54`/`17.97`/`18.82` | `13.995`/`13.866`/`15.056`/`16.013` |
+| Over budget / sample frames | `1167`/`1240` | `1198`/`1213` | `689`/`1425` |
+| Shared records max | `1.537` | `0.006` | `0.017` |
+| Left / right eye cull max | `2.277`/`2.340` | `2.820`/`2.295` | `1.653`/`1.479` |
+| Left / right eye wall max | `4.530`/`4.262` | `4.831`/`4.258` | `3.738`/`2.933` |
+| Stereo poll wait max (GPU) | `10.543` | `12.146` | `10.896` |
+
+Interpretation:
+
+- **Slice G cut per-eye cull from `~2.3ms` to `~1.5ms`** (`-0.6` to `-0.9ms`/eye
+  vs baseline; `-1.2ms`/eye vs the thermally-hot Slice F run). The win is the
+  fast-hash membership/insert replacing `BTreeSet`/`BTreeMap` `O(log n)` +
+  pointer chasing, plus reused scratch capacity — exactly the container-bound
+  cost 106 predicted. Behavior-preserving: drawn counts and the
+  cull/visibility/traversal unit tests are unchanged.
+- **Frame p50 dropped from `15.66` (baseline) to `13.866ms`, crossing under the
+  `13.889ms` 72Hz budget at the median**, with the GPU poll essentially
+  unchanged (`10.54` -> `10.90ms`). Because the GPU half was constant, this
+  `~1.8ms` p50 improvement is a clean CPU win from E3 (Slice F shared-records
+  `-1.5ms` + Slice G cull `-1.5ms` combined), not thermal.
+- **But RD10 is not yet *comfortably* 72Hz.** `frame_p95` is `15.056ms` and
+  `689/1425` (`~48%`) of frames are still over budget. With the serial
+  `CPU + GPU` structure and a `~9.5-10.9ms` GPU poll, the tail (GPU spikes +
+  heavier frames) still misses. Reaching solid 72Hz needs CPU/GPU overlap
+  (E2/Slice K — hide the now-small CPU behind the GPU poll) and/or GPU-side
+  reduction (multiview Slice I, FFR). E3 narrowed the CPU half enough that
+  overlap would now leave the frame gated by the `~10.7ms` GPU, comfortably
+  under budget.
+
 ### 2026-06-29 - Standalone Quest 3 Frozen RD10 Cached Prepared Records (Slice F)
 
 Benchmarked code commit: this Slice F commit (cache prepared culling records
