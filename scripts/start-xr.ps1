@@ -16,6 +16,8 @@ param(
     [switch]$AllowUnsupported,
     [string]$RuntimeJson,
     [string]$ViewPose,
+    [ValidateSet("midpoint", "per-eye")]
+    [string]$XrUnderwaterMode,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$McloneArgs
 )
@@ -173,6 +175,12 @@ try {
     }
     if ($ViewPose) {
         $appArgs += @("--view-pose", $ViewPose)
+    }
+    if ($XrUnderwaterMode) {
+        if ($Smoke -ne "mclone") {
+            Write-Error "-XrUnderwaterMode requires -Smoke mclone."
+        }
+        $appArgs += @("--xr-underwater-mode", $XrUnderwaterMode)
     }
     $appArgs += $McloneArgs
     $runCommand = $cargoRun + @("--") + $appArgs

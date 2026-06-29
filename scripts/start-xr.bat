@@ -142,6 +142,22 @@ if /I "%~1"=="-Forever" (
 )
 if /I "%~1"=="--view-pose" goto parse_view_pose
 if /I "%~1"=="-ViewPose" goto parse_view_pose
+if /I "%~1"=="--xr-underwater-mode" (
+    call :require_value "%~1" "%~2" || goto exit_with_status
+    call :append_arg "-XrUnderwaterMode"
+    call :append_arg "%~2"
+    shift
+    shift
+    goto parse_args
+)
+if /I "%~1"=="-XrUnderwaterMode" (
+    call :require_value "%~1" "%~2" || goto exit_with_status
+    call :append_arg "-XrUnderwaterMode"
+    call :append_arg "%~2"
+    shift
+    shift
+    goto parse_args
+)
 if /I "%~1"=="--no-quest-launch" (
     call :append_arg "-NoQuestLaunch"
     shift

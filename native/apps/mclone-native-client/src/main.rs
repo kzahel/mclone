@@ -28,7 +28,8 @@ use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessDualViewOptions,
     HeadlessScreenshotOptions, HeadlessScreenshotUi, MovementPerfOptions,
     RendererRebuildSmokeOptions, SceneOptions, TimedemoOptions, WindowStartIntent,
-    XrClearSmokeOptions, XrMcloneSmokeOptions, XrViewPose, parse_screenshot_ui_arg,
+    XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
+    parse_screenshot_ui_arg,
 };
 use crate::headless::{
     run_headless_screenshot, run_renderer_rebuild_smoke, write_headless_dual_view,
@@ -495,6 +496,7 @@ mod tests {
                         position: [8.0, 72.0, -12.0],
                         yaw_degrees: 180.0,
                     }),
+                    underwater_mode: XrUnderwaterMode::Midpoint,
                 },
             }
         );
@@ -516,6 +518,30 @@ mod tests {
                     render_options: TexturedSectionRenderOptions::default(),
                     frame_limit: Some(120),
                     view_pose: None,
+                    underwater_mode: XrUnderwaterMode::Midpoint,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_xr_underwater_mode() {
+        let cli = Cli::parse([
+            "--xr-mclone-smoke".to_owned(),
+            "--xr-underwater-mode".to_owned(),
+            "per-eye".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::XrMcloneSmoke {
+                options: XrMcloneSmokeOptions {
+                    scene: SceneOptions::default(),
+                    render_options: TexturedSectionRenderOptions::default(),
+                    frame_limit: Some(120),
+                    view_pose: None,
+                    underwater_mode: XrUnderwaterMode::PerEye,
                 },
             }
         );
@@ -541,6 +567,7 @@ mod tests {
                         position: [0.0, 78.0, -96.0],
                         yaw_degrees: 180.0,
                     }),
+                    underwater_mode: XrUnderwaterMode::Midpoint,
                 },
             }
         );
@@ -598,6 +625,15 @@ mod tests {
             .to_string();
 
         assert!(err.contains("--view-pose requires --xr-mclone-smoke"));
+    }
+
+    #[test]
+    fn cli_rejects_xr_underwater_mode_without_mclone_smoke() {
+        let err = Cli::parse(["--xr-underwater-mode".to_owned(), "per-eye".to_owned()])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("--xr-underwater-mode requires --xr-mclone-smoke"));
     }
 
     #[test]

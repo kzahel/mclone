@@ -19,6 +19,7 @@ use mclone_xr_host::{
 #[cfg(not(target_os = "android"))]
 use mclone_xr_scene::{
     XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
+    XrUnderwaterDetectionMode,
 };
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
@@ -27,7 +28,7 @@ use crate::cli::{SceneOptions, XrClearSmokeOptions, XrMcloneSmokeOptions};
 #[cfg(not(target_os = "android"))]
 use crate::remote_session::RemoteServerSession;
 #[cfg(not(target_os = "android"))]
-use crate::render_cache::{load_asset_source, load_textured_mesh_assets};
+use crate::render_cache::load_asset_source;
 #[cfg(not(target_os = "android"))]
 use crate::scene_runtime::{
     native_window_scene_runtime, native_window_scene_runtime_with_mesh_assets,
@@ -35,7 +36,9 @@ use crate::scene_runtime::{
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::local_single_view::NativeSingleViewSessionRuntime;
 #[cfg(not(target_os = "android"))]
-use mclone_app_runtime::render_assets::load_actor_texture_assets_from_asset_source;
+use mclone_app_runtime::render_assets::{
+    load_actor_texture_assets_from_asset_source, load_textured_mesh_assets_from_source,
+};
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 #[cfg(not(target_os = "android"))]
@@ -676,7 +679,7 @@ fn create_mclone_terrain_state(
             None
         }
     };
-    let scene = xr_scene_options_from_desktop_scene(&options.scene)?;
+    let scene = xr_scene_options_from_desktop_scene(&options.scene, options.underwater_mode)?;
     let startup_view_pose = options.view_pose.map(|view_pose| XrStartupViewPose {
         position: view_pose.position,
         yaw_degrees: view_pose.yaw_degrees,
@@ -695,6 +698,7 @@ fn create_mclone_terrain_state(
             runtime,
             options.render_options,
             actor_assets.atlas,
+            &asset_source,
             startup_view_pose,
         )
     } else {
@@ -704,8 +708,9 @@ fn create_mclone_terrain_state(
             XR_COLOR_FORMAT,
             scene,
             options.render_options,
-            load_textured_mesh_assets()?,
+            load_textured_mesh_assets_from_source(&asset_source)?,
             actor_assets.atlas,
+            &asset_source,
             startup_view_pose,
         )
     }
@@ -730,7 +735,10 @@ fn session_start_request_for_desktop_scene(scene: &SceneOptions) -> SessionStart
 }
 
 #[cfg(not(target_os = "android"))]
-fn xr_scene_options_from_desktop_scene(scene: &SceneOptions) -> Result<XrSceneOptions> {
+fn xr_scene_options_from_desktop_scene(
+    scene: &SceneOptions,
+    underwater_mode: crate::cli::XrUnderwaterMode,
+) -> Result<XrSceneOptions> {
     XrSceneOptions {
         seed: scene.seed,
         chunk_x: scene.chunk_x,
@@ -741,8 +749,19 @@ fn xr_scene_options_from_desktop_scene(scene: &SceneOptions) -> Result<XrSceneOp
         day_time_override: scene.day_time_override,
         freeze_time: scene.freeze_time,
         lighting_enabled: scene.lighting_enabled,
+        underwater_detection_mode: xr_underwater_mode_from_desktop(underwater_mode),
     }
     .validated()
+}
+
+#[cfg(not(target_os = "android"))]
+fn xr_underwater_mode_from_desktop(
+    mode: crate::cli::XrUnderwaterMode,
+) -> XrUnderwaterDetectionMode {
+    match mode {
+        crate::cli::XrUnderwaterMode::Midpoint => XrUnderwaterDetectionMode::Midpoint,
+        crate::cli::XrUnderwaterMode::PerEye => XrUnderwaterDetectionMode::PerEye,
+    }
 }
 
 #[cfg(not(target_os = "android"))]

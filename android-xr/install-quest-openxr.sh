@@ -18,6 +18,7 @@ SKIP_BUILD=0
 LAUNCH_APP=0
 WAKE_HEADSET="${MCLONE_ANDROID_XR_WAKE:-0}"
 START_VIEW_POSE="${MCLONE_ANDROID_XR_VIEW_POSE:-}"
+XR_UNDERWATER_MODE="${MCLONE_ANDROID_XR_UNDERWATER_MODE:-}"
 REMOTE_ADDR="${MCLONE_ANDROID_XR_REMOTE_ADDR:-}"
 STARTUP_ARGV=()
 
@@ -41,6 +42,8 @@ Options:
   --skip-assets    Do not stage the packed Minecraft assets after install.
   --view-pose X,Y,Z,YAW_DEGREES
                   Set debug.mclone.xr_view_pose before launch.
+  --xr-underwater-mode midpoint|per-eye
+                  Add --xr-underwater-mode MODE to startup argv.
   --remote-addr ADDR
                   Add --remote-addr ADDR to the launch-scoped mclone.startup.argv.
   --seed SEED      Add --seed SEED to the launch-scoped mclone.startup.argv.
@@ -122,6 +125,11 @@ while [[ $# -gt 0 ]]; do
             START_VIEW_POSE="$2"
             shift 2
             ;;
+        --xr-underwater-mode)
+            require_arg "$1" "${2:-}"
+            XR_UNDERWATER_MODE="$2"
+            shift 2
+            ;;
         --remote-addr)
             require_arg "$1" "${2:-}"
             REMOTE_ADDR="$2"
@@ -160,6 +168,13 @@ case "$BUILD_TYPE" in
         ;;
 esac
 APK_PATH="${APK_PATH:-$DEFAULT_APK_PATH}"
+case "$XR_UNDERWATER_MODE" in
+    ""|midpoint|per-eye)
+        ;;
+    *)
+        mclone_die "unsupported --xr-underwater-mode '$XR_UNDERWATER_MODE'; expected midpoint or per-eye"
+        ;;
+esac
 
 cd "$REPO_ROOT"
 ADB="$(mclone_android_tool adb platform-tools/adb)"
@@ -199,6 +214,9 @@ if [[ -n "$START_VIEW_POSE" ]]; then
 fi
 if [[ -n "$REMOTE_ADDR" ]]; then
     STARTUP_ARGV+=(--remote-addr "$REMOTE_ADDR")
+fi
+if [[ -n "$XR_UNDERWATER_MODE" ]]; then
+    STARTUP_ARGV+=(--xr-underwater-mode "$XR_UNDERWATER_MODE")
 fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"

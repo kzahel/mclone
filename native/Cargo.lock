@@ -1482,6 +1482,7 @@ dependencies = [
  "glam",
  "log",
  "mclone-app-runtime",
+ "mclone-assets",
  "mclone-audio",
  "mclone-client",
  "mclone-core",

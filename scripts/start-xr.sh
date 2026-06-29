@@ -21,6 +21,9 @@ Script options:
   --runtime-json PATH    Runtime manifest to use with --runtime json.
   --view-pose X,Y,Z,YAW  Map the first tracked headset pose to this mclone
                          world pose. Requires --smoke mclone.
+  --xr-underwater-mode midpoint|per-eye
+                         Select XR underwater detection. Requires --smoke
+                         mclone. Default: midpoint.
   --wivrn-usb            Start/reuse the local macOS WiVRn host, install an ADB
                          reverse tunnel, and launch the Quest WiVRn client.
   --frames N             Set the XR smoke frame budget. Default: 120.

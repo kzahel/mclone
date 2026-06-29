@@ -24,6 +24,7 @@ LOGCAT_PID=""
 SKIP_BUILD=0
 SESSION_ONLY=0
 START_VIEW_POSE="${MCLONE_ANDROID_XR_VIEW_POSE:-0}"
+XR_UNDERWATER_MODE="${MCLONE_ANDROID_XR_UNDERWATER_MODE:-}"
 REMOTE_ADDR="${MCLONE_ANDROID_XR_REMOTE_ADDR:-}"
 START_SERVER=0
 SERVER_LISTEN="${MCLONE_ANDROID_XR_SERVER_LISTEN:-0.0.0.0:25565}"
@@ -71,6 +72,8 @@ Options:
                      for the first submitted stereo frame.
   --view-pose X,Y,Z,YAW_DEGREES
                      Set debug.mclone.xr_view_pose before launch.
+  --xr-underwater-mode midpoint|per-eye
+                     Add --xr-underwater-mode MODE to startup argv.
   --remote-addr ADDR
                      Add --remote-addr ADDR to mclone.startup.argv.
   --adb-reverse      Install adb reverse tcp:PORT tcp:PORT for USB validation.
@@ -335,6 +338,11 @@ while [[ $# -gt 0 ]]; do
             START_VIEW_POSE="$2"
             shift 2
             ;;
+        --xr-underwater-mode)
+            require_arg "$1" "${2:-}"
+            XR_UNDERWATER_MODE="$2"
+            shift 2
+            ;;
         --remote-addr)
             require_arg "$1" "${2:-}"
             REMOTE_ADDR="$2"
@@ -461,6 +469,13 @@ case "$SESSION_SMOKE" in
         mclone_die "unsupported --session-smoke '$SESSION_SMOKE'; expected new-world"
         ;;
 esac
+case "$XR_UNDERWATER_MODE" in
+    ""|midpoint|per-eye)
+        ;;
+    *)
+        mclone_die "unsupported --xr-underwater-mode '$XR_UNDERWATER_MODE'; expected midpoint or per-eye"
+        ;;
+esac
 if [[ -n "$SESSION_SMOKE" && "$SESSION_ONLY" == "1" ]]; then
     mclone_die "--session-smoke requires submitted-frame validation; remove --session-only"
 fi
@@ -559,6 +574,9 @@ if [[ -n "$START_VIEW_POSE" ]]; then
 fi
 if [[ -n "$REMOTE_ADDR" ]]; then
     STARTUP_ARGV+=(--remote-addr "$REMOTE_ADDR")
+fi
+if [[ -n "$XR_UNDERWATER_MODE" ]]; then
+    STARTUP_ARGV+=(--xr-underwater-mode "$XR_UNDERWATER_MODE")
 fi
 if [[ -n "$SESSION_SMOKE" ]]; then
     STARTUP_ARGV+=(--session-smoke "$SESSION_SMOKE")

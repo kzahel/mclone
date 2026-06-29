@@ -142,12 +142,20 @@ pub(crate) struct XrMcloneSmokeOptions {
     pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) frame_limit: Option<u32>,
     pub(crate) view_pose: Option<XrViewPose>,
+    pub(crate) underwater_mode: XrUnderwaterMode,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct XrViewPose {
     pub(crate) position: [f32; 3],
     pub(crate) yaw_degrees: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum XrUnderwaterMode {
+    #[default]
+    Midpoint,
+    PerEye,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -361,6 +369,8 @@ impl Cli {
         let mut xr_frame_limit = Some(DEFAULT_XR_CLEAR_SMOKE_FRAMES);
         let mut xr_view_pose_explicit = false;
         let mut xr_view_pose = None;
+        let mut xr_underwater_mode_explicit = false;
+        let mut xr_underwater_mode = XrUnderwaterMode::default();
         let mut rebuild_render_scale = None;
         let mut args = args.into_iter();
 
@@ -563,6 +573,10 @@ impl Cli {
                     xr_view_pose =
                         parse_xr_view_pose_value("--view-pose", &arg["--view-pose=".len()..])?;
                 }
+                "--xr-underwater-mode" => {
+                    xr_underwater_mode_explicit = true;
+                    xr_underwater_mode = parse_xr_underwater_mode_arg(&arg, args.next())?;
+                }
                 "--help" | "-h" => {
                     print_help();
                     std::process::exit(0);
@@ -607,6 +621,9 @@ impl Cli {
         }
         if xr_view_pose_explicit && !xr_mclone_smoke {
             bail!("--view-pose requires --xr-mclone-smoke");
+        }
+        if xr_underwater_mode_explicit && !xr_mclone_smoke {
+            bail!("--xr-underwater-mode requires --xr-mclone-smoke");
         }
         if rebuild_render_scale.is_some()
             && !matches!(mode, Some(HeadlessMode::RendererRebuildSmoke(_)))
@@ -720,6 +737,7 @@ impl Cli {
                     render_options,
                     frame_limit: xr_frame_limit,
                     view_pose: xr_view_pose,
+                    underwater_mode: xr_underwater_mode,
                 },
             }),
             None => Ok(Self::Window {
@@ -779,6 +797,15 @@ fn parse_xr_smoke_frames_arg(flag: &str, value: Option<String>) -> Result<u32> {
         bail!("{flag} must be between 1 and {MAX_XR_SMOKE_FRAMES}");
     }
     Ok(parsed)
+}
+
+fn parse_xr_underwater_mode_arg(flag: &str, value: Option<String>) -> Result<XrUnderwaterMode> {
+    let value = value.with_context(|| format!("{flag} requires midpoint or per-eye"))?;
+    match value.trim() {
+        "midpoint" | "middle" | "center" | "both" => Ok(XrUnderwaterMode::Midpoint),
+        "per-eye" | "per_eye" | "eye" | "eyes" => Ok(XrUnderwaterMode::PerEye),
+        value => bail!("{flag} must be midpoint or per-eye, got `{value}`"),
+    }
 }
 
 fn parse_xr_view_pose_arg(flag: &str, value: Option<String>) -> Result<Option<XrViewPose>> {
@@ -961,7 +988,7 @@ fn print_help() {
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
-           mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+           mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
          Window mode streams chunks around a collision-backed local player with WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }

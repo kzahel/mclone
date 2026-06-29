@@ -38,7 +38,7 @@ mod android {
     };
     use mclone_xr_scene::{
         MAX_XR_RENDER_DISTANCE, XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose,
-        XrTerrainEyeTarget,
+        XrTerrainEyeTarget, XrUnderwaterDetectionMode,
     };
     use openxr as xr;
 
@@ -278,6 +278,7 @@ mod android {
             android_xr_startup_scene_defaults(),
             TexturedSectionRenderOptions::default(),
         );
+        let mut underwater_detection_mode = XrUnderwaterDetectionMode::default();
         let mut argv = argv.into_iter();
         while let Some(arg) = argv.next() {
             if shared_args.parse_next_arg(
@@ -293,6 +294,12 @@ mod android {
                         &mut argv,
                         "--session-smoke",
                     )?)?);
+                }
+                "--xr-underwater-mode" => {
+                    underwater_detection_mode = XrUnderwaterDetectionMode::parse_label(
+                        "--xr-underwater-mode",
+                        &parse_next_string(&mut argv, "--xr-underwater-mode")?,
+                    )?;
                 }
                 "--perf-seconds" => {
                     let seconds = parse_next::<u64>(&mut argv, "--perf-seconds")?;
@@ -333,7 +340,9 @@ mod android {
         }
         let shared_options = shared_args.finish();
         options.remote_addr = shared_options.scene.remote_addr.clone();
-        options.scene = android_xr_scene_options_from_startup(shared_options.scene).validated()?;
+        let mut scene = android_xr_scene_options_from_startup(shared_options.scene);
+        scene.underwater_detection_mode = underwater_detection_mode;
+        options.scene = scene.validated()?;
         options.render_options = shared_options.render_options;
         if options.perf_flight.is_some() && options.perf_seconds.is_none() {
             bail!("--perf-flight requires --perf-seconds");
@@ -391,6 +400,7 @@ mod android {
             day_time_override: scene.day_time_override,
             freeze_time: scene.freeze_time,
             lighting_enabled: scene.lighting_enabled,
+            underwater_detection_mode: XrUnderwaterDetectionMode::default(),
         }
     }
 
@@ -1035,6 +1045,7 @@ mod android {
                 runtime,
                 render_options,
                 actor_assets.atlas,
+                &asset_source,
                 startup_view_pose,
             )?
         } else {
@@ -1046,6 +1057,7 @@ mod android {
                 render_options,
                 mesh_assets,
                 actor_assets.atlas,
+                &asset_source,
                 startup_view_pose,
             )?
         };

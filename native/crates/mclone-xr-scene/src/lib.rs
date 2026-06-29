@@ -19,6 +19,7 @@ use mclone_app_runtime::session::{
     ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
 };
 use mclone_app_runtime::{RuntimePollDiagnostics, debug_block_palette_overlay, elapsed_ms};
+use mclone_assets::AssetSource;
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
 use mclone_client::{BlockInteractionTarget, ClientInteractionController};
 use mclone_core::{BlockStateId, ChunkPos, Vec3d, time};
@@ -30,6 +31,9 @@ use mclone_render::chunk::{
 };
 use mclone_render::entity::ActorDrawResources;
 use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiRenderer};
+use mclone_render::screen_effect::{
+    ScreenEffectsRenderer, UnderwaterEffectState, UnderwaterOverlay,
+};
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky::overworld_clear_color;
 use mclone_render::sky_render::SkyRenderer;
@@ -138,6 +142,30 @@ enum XrUiPanelAnchor {
     LeftHand,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum XrUnderwaterDetectionMode {
+    #[default]
+    Midpoint,
+    PerEye,
+}
+
+impl XrUnderwaterDetectionMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Midpoint => "midpoint",
+            Self::PerEye => "per-eye",
+        }
+    }
+
+    pub fn parse_label(flag: &str, value: &str) -> Result<Self> {
+        match value.trim() {
+            "midpoint" | "middle" | "center" | "both" => Ok(Self::Midpoint),
+            "per-eye" | "per_eye" | "eye" | "eyes" => Ok(Self::PerEye),
+            value => bail!("{flag} must be midpoint or per-eye, got `{value}`"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct XrSceneOptions {
     pub seed: i64,
@@ -148,6 +176,7 @@ pub struct XrSceneOptions {
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
     pub lighting_enabled: bool,
+    pub underwater_detection_mode: XrUnderwaterDetectionMode,
 }
 
 impl Default for XrSceneOptions {
@@ -161,6 +190,7 @@ impl Default for XrSceneOptions {
             day_time_override: None,
             freeze_time: false,
             lighting_enabled: true,
+            underwater_detection_mode: XrUnderwaterDetectionMode::default(),
         }
     }
 }
@@ -396,6 +426,9 @@ where
     ui: GameUi,
     session_status: StatusOverlay,
     sky: SkyRenderer,
+    screen_effects: ScreenEffectsRenderer,
+    underwater_effects: XrUnderwaterEffectStates,
+    last_underwater_update: Option<Instant>,
     render_stats: RenderStreamStats,
     tracking_origin: Option<XrTrackingOrigin>,
     locomotion_mode: XrLocomotionMode,
@@ -416,6 +449,12 @@ where
     seed_reroll_state: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct XrUnderwaterEffectStates {
+    midpoint: UnderwaterEffectState,
+    eyes: [UnderwaterEffectState; 2],
+}
+
 impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
     pub fn new(
         device: &wgpu::Device,
@@ -425,6 +464,7 @@ impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
         render_options: TexturedSectionRenderOptions,
         mesh_assets: TexturedMeshAssets,
         actor_atlas: ActorTextureImage,
+        asset_source: &impl AssetSource,
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
         let scene = scene.validated()?;
@@ -436,6 +476,7 @@ impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
             render_options,
             mesh_assets,
             actor_atlas,
+            asset_source,
             startup_view_pose,
         )
     }
@@ -453,6 +494,7 @@ where
         render_options: TexturedSectionRenderOptions,
         mesh_assets: TexturedMeshAssets,
         actor_atlas: ActorTextureImage,
+        asset_source: &impl AssetSource,
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
         let scene = scene.validated()?;
@@ -513,6 +555,10 @@ where
                 color_format,
                 render_options.color_profile,
             ),
+            screen_effects: ScreenEffectsRenderer::new(device, queue, color_format, asset_source)
+                .context("initialize XR screen effects renderer")?,
+            underwater_effects: XrUnderwaterEffectStates::default(),
+            last_underwater_update: None,
             render_stats: RenderStreamStats::default(),
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),
@@ -542,6 +588,7 @@ where
         runtime: NativeSingleViewSessionRuntime<S>,
         render_options: TexturedSectionRenderOptions,
         actor_atlas: ActorTextureImage,
+        asset_source: &impl AssetSource,
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
         let scene = scene.validated()?;
@@ -588,6 +635,10 @@ where
                 color_format,
                 render_options.color_profile,
             ),
+            screen_effects: ScreenEffectsRenderer::new(device, queue, color_format, asset_source)
+                .context("initialize XR screen effects renderer")?,
+            underwater_effects: XrUnderwaterEffectStates::default(),
+            last_underwater_update: None,
             render_stats: started.render_stats,
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),
@@ -759,6 +810,7 @@ where
         let sky_clear_color = self.sky_clear_color();
         let time_of_day = self.time_of_day();
         let sun_angle = self.sun_angle();
+        let underwater_overlays = self.underwater_overlays(render_views);
         let actor_instances = self.runtime.as_ref().map_or_else(Vec::new, |runtime| {
             actor_instances_from_presentations(
                 &runtime.client().actor_presentations(),
@@ -781,6 +833,7 @@ where
             sky_clear_color,
             time_of_day,
             sun_angle,
+            underwater_overlays[0],
             "left",
             LEFT_EYE_VIEW_SLOT,
         )?;
@@ -798,6 +851,7 @@ where
             sky_clear_color,
             time_of_day,
             sun_angle,
+            underwater_overlays[1],
             "right",
             RIGHT_EYE_VIEW_SLOT,
         )?;
@@ -1148,6 +1202,72 @@ where
         }
     }
 
+    fn underwater_overlays(
+        &mut self,
+        render_views: [ChunkRenderView; 2],
+    ) -> [Option<UnderwaterOverlay>; 2] {
+        let dt_seconds = self.underwater_effect_dt_seconds();
+        match self.scene.underwater_detection_mode {
+            XrUnderwaterDetectionMode::Midpoint => {
+                let center_position =
+                    (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+                let underwater = self.camera_inside_water(center_position);
+                let effect = self
+                    .underwater_effects
+                    .midpoint
+                    .update(underwater, dt_seconds);
+                let overlay = underwater.then(|| {
+                    let forward = average_unit_direction(
+                        render_views[0].camera_forward,
+                        render_views[1].camera_forward,
+                        Vec3::Z,
+                    );
+                    underwater_overlay_from_forward(
+                        forward,
+                        effect.water_vision,
+                        effect.effect_strength,
+                    )
+                });
+                [overlay, overlay]
+            }
+            XrUnderwaterDetectionMode::PerEye => {
+                let left_underwater = self.camera_inside_water(render_views[0].camera_position);
+                let right_underwater = self.camera_inside_water(render_views[1].camera_position);
+                let left_effect =
+                    self.underwater_effects.eyes[0].update(left_underwater, dt_seconds);
+                let right_effect =
+                    self.underwater_effects.eyes[1].update(right_underwater, dt_seconds);
+                [
+                    left_underwater.then(|| {
+                        underwater_overlay_from_forward(
+                            render_views[0].camera_forward,
+                            left_effect.water_vision,
+                            left_effect.effect_strength,
+                        )
+                    }),
+                    right_underwater.then(|| {
+                        underwater_overlay_from_forward(
+                            render_views[1].camera_forward,
+                            right_effect.water_vision,
+                            right_effect.effect_strength,
+                        )
+                    }),
+                ]
+            }
+        }
+    }
+
+    fn underwater_effect_dt_seconds(&mut self) -> f32 {
+        let now = Instant::now();
+        let dt_seconds = self
+            .last_underwater_update
+            .replace(now)
+            .map_or(0.0, |last| {
+                now.saturating_duration_since(last).as_secs_f32()
+            });
+        dt_seconds.min(0.1)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn render_eye_target(
         &mut self,
@@ -1161,6 +1281,7 @@ where
         sky_clear_color: wgpu::Color,
         time_of_day: f32,
         sun_angle: f32,
+        underwater_overlay: Option<UnderwaterOverlay>,
         label: &'static str,
         view_slot: PerViewSlot,
     ) -> Result<XrRenderedEye> {
@@ -1203,11 +1324,11 @@ where
                 &mut self.draw,
                 prepared_records,
                 Some(&mut self.actors),
-                None,
+                Some(&mut self.screen_effects),
                 None,
                 render_view,
                 actor_instances,
-                None,
+                underwater_overlay,
                 sky_clear_color,
                 time_of_day,
                 sun_angle,
@@ -1225,11 +1346,11 @@ where
                 &mut self.draw,
                 prepared_records,
                 Some(&mut self.actors),
-                None,
+                Some(&mut self.screen_effects),
                 None,
                 render_view,
                 actor_instances,
-                None,
+                underwater_overlay,
                 sky_clear_color,
                 time_of_day,
                 sun_angle,
@@ -2012,6 +2133,8 @@ where
     fn clear_transient_world_state(&mut self) {
         self.tracking_origin = None;
         self.last_locomotion_update = None;
+        self.underwater_effects = XrUnderwaterEffectStates::default();
+        self.last_underwater_update = None;
         self.latest_controllers.clear();
         self.first_eye_summary = None;
         self.rendered_frames = 0;
@@ -2255,6 +2378,12 @@ where
             return false;
         };
         runtime.mesh_assets().catalog.occludes(state_id)
+    }
+
+    fn camera_inside_water(&self, position: Vec3) -> bool {
+        self.runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.camera_inside_water(position))
     }
 
     fn record_eye0_summary(&mut self, summary: FullFrameRenderSummary) {
@@ -3180,6 +3309,22 @@ fn xr_game_ui_panel_height_blocks() -> f32 {
     XR_GAME_UI_PANEL_WIDTH_BLOCKS * XR_MENU_PANEL_PIXELS[1] as f32 / XR_MENU_PANEL_PIXELS[0] as f32
 }
 
+fn underwater_overlay_from_forward(
+    forward: Vec3,
+    water_vision: f32,
+    effect_strength: f32,
+) -> UnderwaterOverlay {
+    let forward = if forward.is_finite() && forward.length_squared() > f32::EPSILON {
+        forward.normalize()
+    } else {
+        Vec3::Z
+    };
+    let yaw = engine_movement_yaw_from_forward(forward).unwrap_or(0.0);
+    let pitch = forward.y.clamp(-1.0, 1.0).asin();
+    UnderwaterOverlay::vanilla_from_native_camera(yaw, pitch)
+        .with_effect(water_vision, effect_strength)
+}
+
 fn average_unit_direction(a: Vec3, b: Vec3, fallback: Vec3) -> Vec3 {
     let direction = (a + b) * 0.5;
     if direction.is_finite() && direction.length_squared() > f32::EPSILON {
@@ -3247,12 +3392,50 @@ mod tests {
         assert_eq!(options.seed, 12_345);
         assert_eq!(options.center(), ChunkPos::new(0, 0));
         assert_eq!(options.render_distance, 2);
+        assert_eq!(
+            options.underwater_detection_mode,
+            XrUnderwaterDetectionMode::Midpoint
+        );
     }
 
     #[test]
     fn startup_view_pose_alignment_mode_is_explicit() {
         assert_eq!(XrViewAlignmentMode::PlayerSpawn.label(), "player-spawn");
         assert_eq!(XrViewAlignmentMode::ViewPose.label(), "view-pose");
+    }
+
+    #[test]
+    fn xr_underwater_detection_mode_labels_parse() {
+        assert_eq!(XrUnderwaterDetectionMode::Midpoint.label(), "midpoint");
+        assert_eq!(XrUnderwaterDetectionMode::PerEye.label(), "per-eye");
+        assert_eq!(
+            XrUnderwaterDetectionMode::parse_label("--xr-underwater-mode", "both").unwrap(),
+            XrUnderwaterDetectionMode::Midpoint
+        );
+        assert_eq!(
+            XrUnderwaterDetectionMode::parse_label("--xr-underwater-mode", "per_eye").unwrap(),
+            XrUnderwaterDetectionMode::PerEye
+        );
+        assert!(
+            XrUnderwaterDetectionMode::parse_label("--xr-underwater-mode", "split")
+                .unwrap_err()
+                .to_string()
+                .contains("midpoint or per-eye")
+        );
+    }
+
+    #[test]
+    fn xr_underwater_overlay_uses_view_forward() {
+        let overlay = underwater_overlay_from_forward(Vec3::new(1.0, 0.0, 0.0), 0.5, 0.25);
+
+        assert_eq!(overlay.water_vision, 0.5);
+        assert_eq!(overlay.effect_strength, 0.25);
+        assert_eq!(
+            overlay.alpha,
+            mclone_render::screen_effect::VANILLA_UNDERWATER_ALPHA * 0.25
+        );
+        assert!(overlay.uv_offset[0].is_finite());
+        assert!(overlay.uv_offset[1].is_finite());
     }
 
     #[test]
