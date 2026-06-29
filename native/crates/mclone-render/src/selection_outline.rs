@@ -5,6 +5,7 @@ use wgpu::util::DeviceExt;
 use crate::{
     chunk::{ChunkDepthTarget, ChunkRenderView, DEPTH_FORMAT},
     target::RenderFrameTarget,
+    uniform::{PerViewUniformBuffer, SINGLE_VIEW_UNIFORM_SLOT},
 };
 
 const OUTLINE_WGSL: &str = r#"
@@ -79,7 +80,7 @@ impl SelectionOutline {
 
 pub struct SelectionOutlineRenderer {
     pipeline: wgpu::RenderPipeline,
-    uniform_buffer: wgpu::Buffer,
+    uniforms: PerViewUniformBuffer,
     bind_group: wgpu::BindGroup,
     vertex_buffer: Option<wgpu::Buffer>,
     vertex_buffer_size: wgpu::BufferAddress,
@@ -91,32 +92,16 @@ impl SelectionOutlineRenderer {
             label: Some("mclone_selection_outline_shader"),
             source: wgpu::ShaderSource::Wgsl(OUTLINE_WGSL.into()),
         });
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mclone_selection_outline_uniforms"),
-            size: 64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniforms =
+            PerViewUniformBuffer::new(device, "mclone_selection_outline_uniforms", 64, 1);
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_selection_outline_bind_group_layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
+            entries: &[uniforms.layout_entry(0, wgpu::ShaderStages::VERTEX)],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("mclone_selection_outline_bind_group"),
             layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
+            entries: &[uniforms.bind_group_entry(0)],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mclone_selection_outline_pipeline_layout"),
@@ -175,7 +160,7 @@ impl SelectionOutlineRenderer {
         });
         Self {
             pipeline,
-            uniform_buffer,
+            uniforms,
             bind_group,
             vertex_buffer: None,
             vertex_buffer_size: 0,
@@ -203,9 +188,9 @@ impl SelectionOutlineRenderer {
             return;
         }
         self.upload_vertices(device, queue, &vertices);
-        queue.write_buffer(
-            &self.uniform_buffer,
-            0,
+        let uniform_offset = self.uniforms.write_slot(
+            queue,
+            SINGLE_VIEW_UNIFORM_SLOT,
             &matrix_bytes(render_view.view_projection),
         );
 
@@ -230,7 +215,7 @@ impl SelectionOutlineRenderer {
             ..Default::default()
         });
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_bind_group(0, &self.bind_group, &[uniform_offset]);
         pass.set_vertex_buffer(
             0,
             self.vertex_buffer

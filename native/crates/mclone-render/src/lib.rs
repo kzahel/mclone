@@ -16,6 +16,7 @@ pub mod sky;
 pub mod sky_render;
 pub mod target;
 mod texture_mips;
+pub mod uniform;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod headless;

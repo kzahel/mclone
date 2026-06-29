@@ -1,6 +1,6 @@
 # 107: XR Stereo Uniform Ownership and Multiview
 
-Status: active high-priority prerequisite; Slice A landed. Created after
+Status: active high-priority prerequisite; Slices A-B landed. Created after
 `d0c5161` (`Restore XR per-eye command submission`) rolled back the unsafe
 single-submit Quest XR optimization from `264c723`.
 
@@ -155,6 +155,15 @@ scene stubs are inert. Either remove the lanes, or make them fail fast with a
 message pointing to 106/107 and `d0c5161`.
 
 ### Slice B - Add the Uniform Ownership Helper
+
+**Landed 2026-06-29.** Added `mclone_render::uniform::PerViewUniformBuffer`, a
+shared dynamic-offset uniform helper that owns 256-byte-aligned slot sizing,
+bind-group layout/resource creation, and slot writes. `SelectionOutlineRenderer`
+is the first migrated per-view renderer; it still uses slot `0` on the existing
+flat/per-eye-submit paths, but its bind group now uses a dynamic uniform offset.
+This proves the helper without changing stereo submission behavior. Slice C must
+still migrate the remaining per-view renderers before any one-submit path is
+allowed.
 
 Create the shared render helper and convert one renderer behind the existing
 per-eye-submit path first. The helper should expose a small API that hides
