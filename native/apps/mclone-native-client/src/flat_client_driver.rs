@@ -25,7 +25,7 @@ use mclone_render::chunk::{
 use mclone_render::color_profile::RenderConfig;
 use mclone_render::entity::ActorInstance;
 use mclone_render::entity::ActorTextureAtlas;
-use mclone_render::screen_effect::UnderwaterOverlay;
+use mclone_render::screen_effect::{UnderwaterEffectState, UnderwaterOverlay};
 use mclone_render::selection_outline::SelectionOutline;
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
@@ -94,6 +94,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) render_resources: Option<FlatRenderResources>,
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
+    underwater_effect: UnderwaterEffectState,
     seed_reroll_state: u64,
 }
 
@@ -250,6 +251,7 @@ impl FlatClientDriver {
             render_resources: None,
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
+            underwater_effect: UnderwaterEffectState::new(),
             seed_reroll_state: initial_seed_reroll_state(scene.seed),
         }
     }
@@ -1189,18 +1191,25 @@ impl FlatClientDriver {
     }
 
     pub(crate) fn underwater_overlay(
-        &self,
+        &mut self,
         camera_view: FlatClientCameraView,
     ) -> Option<UnderwaterOverlay> {
-        self.runtime
-            .as_ref()?
-            .camera_inside_water(camera_view.eye)
-            .then(|| {
-                UnderwaterOverlay::vanilla_from_native_camera(
-                    camera_view.snapshot.yaw_radians as f32,
-                    camera_view.snapshot.pitch_radians as f32,
-                )
-            })
+        let underwater = self
+            .runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.camera_inside_water(camera_view.eye));
+        let dt_seconds = (self.render_stats.last_frame_ms * 0.001).min(0.1);
+        let underwater_effect = self.underwater_effect.update(underwater, dt_seconds);
+        underwater.then(|| {
+            UnderwaterOverlay::vanilla_from_native_camera(
+                camera_view.snapshot.yaw_radians as f32,
+                camera_view.snapshot.pitch_radians as f32,
+            )
+            .with_effect(
+                underwater_effect.water_vision,
+                underwater_effect.effect_strength,
+            )
+        })
     }
 
     pub(crate) fn interpolated_actor_instances(&mut self) -> Vec<ActorInstance> {
@@ -1630,6 +1639,7 @@ impl FlatClientDriver {
         self.interaction = ClientInteractionController::new();
         self.render_stats = RenderStreamStats::default();
         self.frame_timing = FrameTimingStats::default();
+        self.underwater_effect.reset();
     }
 }
 

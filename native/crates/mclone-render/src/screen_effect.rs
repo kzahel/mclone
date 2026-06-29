@@ -5,34 +5,154 @@ use wgpu::util::DeviceExt;
 use crate::target::RenderFrameTarget;
 
 pub const VANILLA_UNDERWATER_ALPHA: f32 = 0.1;
+pub const VANILLA_UNDERWATER_FOV_MULTIPLIER: f32 = 0.85714287;
 pub const VANILLA_UNDERWATER_UV_TILE: f32 = 4.0;
 const FLOATS_PER_VERTEX: usize = 8;
 const VERTEX_SIZE: wgpu::BufferAddress =
     (FLOATS_PER_VERTEX * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
 const UNDERWATER_TEXTURE_PATH: &str = "assets/minecraft/textures/misc/underwater.png";
+const WATER_VISION_MAX_TICKS: f32 = 600.0;
+const WATER_VISION_QUICK_TICKS: f32 = 100.0;
+const WATER_VISION_QUICK_PERCENT: f32 = 0.6;
+const WATER_VISION_EXIT_TICK_SCALE: f32 = 10.0;
+const UNDERWATER_EFFECT_FADE_IN_SECONDS: f32 = 0.35;
+const UNDERWATER_EFFECT_FADE_OUT_SECONDS: f32 = 0.15;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UnderwaterOverlay {
     pub brightness: f32,
     pub alpha: f32,
     pub uv_offset: [f32; 2],
+    pub water_vision: f32,
+    pub effect_strength: f32,
 }
 
 impl UnderwaterOverlay {
     pub fn vanilla_from_native_camera(yaw_radians: f32, pitch_radians: f32) -> Self {
+        Self::vanilla_from_native_camera_with_water_vision(yaw_radians, pitch_radians, 1.0)
+    }
+
+    pub fn vanilla_from_native_camera_with_water_vision(
+        yaw_radians: f32,
+        pitch_radians: f32,
+        water_vision: f32,
+    ) -> Self {
         Self::new(
             1.0,
-            VANILLA_UNDERWATER_ALPHA,
+            VANILLA_UNDERWATER_ALPHA * water_vision,
             underwater_uv_offset_from_native_radians(yaw_radians, pitch_radians),
+            water_vision,
         )
     }
 
-    pub fn new(brightness: f32, alpha: f32, uv_offset: [f32; 2]) -> Self {
+    pub fn new(brightness: f32, alpha: f32, uv_offset: [f32; 2], water_vision: f32) -> Self {
+        let effect_strength = if VANILLA_UNDERWATER_ALPHA > 0.0 {
+            alpha / VANILLA_UNDERWATER_ALPHA
+        } else {
+            0.0
+        };
         Self {
             brightness: clamp_unit(brightness),
             alpha: clamp_unit(alpha),
             uv_offset,
+            water_vision: clamp_unit(water_vision),
+            effect_strength: clamp_unit(effect_strength),
         }
+    }
+
+    pub fn with_water_vision(self, water_vision: f32) -> Self {
+        self.with_effect(water_vision, water_vision)
+    }
+
+    pub fn with_effect(self, water_vision: f32, effect_strength: f32) -> Self {
+        let water_vision = clamp_unit(water_vision);
+        let effect_strength = clamp_unit(effect_strength);
+        Self {
+            alpha: VANILLA_UNDERWATER_ALPHA * effect_strength,
+            water_vision,
+            effect_strength,
+            ..self
+        }
+    }
+
+    pub fn fov_multiplier(self) -> f32 {
+        lerp(self.effect_strength, 1.0, VANILLA_UNDERWATER_FOV_MULTIPLIER)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UnderwaterEffectState {
+    water_vision_ticks: f32,
+    effect_strength: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UnderwaterEffect {
+    pub water_vision: f32,
+    pub effect_strength: f32,
+}
+
+impl UnderwaterEffectState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn reset(&mut self) {
+        self.water_vision_ticks = 0.0;
+        self.effect_strength = 0.0;
+    }
+
+    pub fn update(&mut self, underwater: bool, dt_seconds: f32) -> UnderwaterEffect {
+        let delta_ticks = if dt_seconds.is_finite() {
+            (dt_seconds.max(0.0) * 20.0).min(WATER_VISION_MAX_TICKS)
+        } else {
+            0.0
+        };
+        let dt_seconds = if dt_seconds.is_finite() {
+            dt_seconds.max(0.0)
+        } else {
+            0.0
+        };
+        if underwater {
+            self.water_vision_ticks =
+                (self.water_vision_ticks + delta_ticks).min(WATER_VISION_MAX_TICKS);
+            self.effect_strength =
+                (self.effect_strength + dt_seconds / UNDERWATER_EFFECT_FADE_IN_SECONDS).min(1.0);
+        } else {
+            self.water_vision_ticks =
+                (self.water_vision_ticks - delta_ticks * WATER_VISION_EXIT_TICK_SCALE).max(0.0);
+            self.effect_strength =
+                (self.effect_strength - dt_seconds / UNDERWATER_EFFECT_FADE_OUT_SECONDS).max(0.0);
+        }
+        UnderwaterEffect {
+            water_vision: self.water_vision(),
+            effect_strength: self.effect_strength,
+        }
+    }
+
+    pub fn water_vision(self) -> f32 {
+        water_vision_from_ticks(self.water_vision_ticks)
+    }
+}
+
+pub fn water_vision_from_ticks(ticks: f32) -> f32 {
+    let ticks = if ticks.is_finite() {
+        ticks.clamp(0.0, WATER_VISION_MAX_TICKS)
+    } else {
+        0.0
+    };
+    if ticks >= WATER_VISION_MAX_TICKS {
+        1.0
+    } else {
+        let quick = (ticks / WATER_VISION_QUICK_TICKS).clamp(0.0, 1.0);
+        let slow = if ticks < WATER_VISION_QUICK_TICKS {
+            0.0
+        } else {
+            ((ticks - WATER_VISION_QUICK_TICKS)
+                / (WATER_VISION_MAX_TICKS - WATER_VISION_QUICK_TICKS))
+                .clamp(0.0, 1.0)
+        };
+        quick * WATER_VISION_QUICK_PERCENT + slow * (1.0 - WATER_VISION_QUICK_PERCENT)
     }
 }
 
@@ -390,6 +510,10 @@ fn clamp_unit(value: f32) -> f32 {
     }
 }
 
+fn lerp(t: f32, from: f32, to: f32) -> f32 {
+    from + (to - from) * clamp_unit(t)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,7 +537,8 @@ mod tests {
 
     #[test]
     fn underwater_vertices_tile_fullscreen_quad_with_color_alpha() {
-        let vertices = underwater_quad_vertices(UnderwaterOverlay::new(0.75, 0.25, [0.5, 0.25]));
+        let vertices =
+            underwater_quad_vertices(UnderwaterOverlay::new(0.75, 0.25, [0.5, 0.25], 1.0));
 
         assert_eq!(vertices.len(), 6 * FLOATS_PER_VERTEX);
         assert_eq!(
@@ -424,5 +549,37 @@ mod tests {
             &vertices[16..24],
             &[1.0, 1.0, 0.5, 0.25, 0.75, 0.75, 0.75, 0.25]
         );
+    }
+
+    #[test]
+    fn water_vision_matches_java_piecewise_curve() {
+        assert_eq!(water_vision_from_ticks(0.0), 0.0);
+        assert!((water_vision_from_ticks(50.0) - 0.3).abs() < 1.0e-6);
+        assert!((water_vision_from_ticks(100.0) - 0.6).abs() < 1.0e-6);
+        assert_eq!(water_vision_from_ticks(600.0), 1.0);
+    }
+
+    #[test]
+    fn underwater_effect_state_enters_and_exits_at_java_rates() {
+        let mut state = UnderwaterEffectState::new();
+
+        let entered = state.update(true, 5.0);
+        assert!((entered.water_vision - 0.6).abs() < 1.0e-6);
+        assert_eq!(entered.effect_strength, 1.0);
+
+        let exited = state.update(false, 0.5);
+        assert_eq!(exited.water_vision, 0.0);
+        assert_eq!(exited.effect_strength, 0.0);
+    }
+
+    #[test]
+    fn underwater_overlay_scales_alpha_and_fov_with_effect_strength() {
+        let overlay =
+            UnderwaterOverlay::vanilla_from_native_camera_with_water_vision(0.0, 0.0, 0.5)
+                .with_effect(0.5, 0.25);
+
+        assert_eq!(overlay.water_vision, 0.5);
+        assert_eq!(overlay.alpha, VANILLA_UNDERWATER_ALPHA * 0.25);
+        assert!((overlay.fov_multiplier() - 0.96428573).abs() < 1.0e-6);
     }
 }

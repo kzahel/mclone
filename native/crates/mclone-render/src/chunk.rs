@@ -7,7 +7,6 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Vec3, Vec4};
-use rustc_hash::{FxHashMap, FxHashSet};
 use mclone_core::{
     block_to_chunk_coord, block_to_section_coord, chunk_middle_block_coord, chunk_min_block_coord,
 };
@@ -16,6 +15,7 @@ use mclone_mesh::{
     TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibilitySet, VisibleChunkMesh,
     quad_face_count_from_indices,
 };
+use rustc_hash::{FxHashMap, FxHashSet};
 use wgpu::util::DeviceExt;
 
 use crate::color_profile::{RenderColorProfile, RenderConfig};
@@ -180,6 +180,20 @@ pub struct ChunkRenderView {
 impl ChunkRenderView {
     pub fn uniform_matrix(self) -> [[f32; 4]; 4] {
         self.view_projection.to_cols_array_2d()
+    }
+
+    pub fn with_fov_multiplier(self, multiplier: f32) -> Self {
+        if !multiplier.is_finite() || multiplier <= 0.0 {
+            return self;
+        }
+        let fov_y_radians = self.fov_y_radians * multiplier;
+        let projection = Mat4::perspective_rh(fov_y_radians, self.aspect, self.z_near, self.z_far);
+        Self {
+            projection,
+            view_projection: projection * self.view,
+            fov_y_radians,
+            ..self
+        }
     }
 
     /// View-projection with the camera translation dropped, so geometry rendered
@@ -1673,11 +1687,7 @@ impl TexturedSectionDrawResources {
             self.cached_records = Some(Arc::new(self.build_prepared_records()));
             self.records_dirty = false;
         }
-        Arc::clone(
-            self.cached_records
-                .as_ref()
-                .expect("records cached above"),
-        )
+        Arc::clone(self.cached_records.as_ref().expect("records cached above"))
     }
 
     pub fn render_prepared_with_options(
@@ -2038,6 +2048,25 @@ mod tests {
             shifted.sky_view_projection(),
             0.0001,
         );
+    }
+
+    #[test]
+    fn render_view_can_apply_underwater_fov_multiplier() {
+        let camera = ChunkCamera {
+            eye: [0.0, 64.0, 0.0],
+            target: [0.0, 64.0, -1.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 70.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 256.0,
+        };
+        let base = camera.render_view(1280, 720);
+        let narrowed = base.with_fov_multiplier(0.85714287);
+
+        assert!((narrowed.fov_y_radians - 60.0_f32.to_radians()).abs() < 1.0e-5);
+        assert_eq!(narrowed.view, base.view);
+        assert_ne!(narrowed.projection, base.projection);
+        assert_ne!(narrowed.view_projection, base.view_projection);
     }
 
     #[test]

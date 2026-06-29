@@ -954,13 +954,26 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(mesh.stats().face_count(), 6);
+        assert_eq!(mesh.stats().face_count(), 7);
         assert_eq!(mesh.opaque_index_count(), 0);
         assert_eq!(mesh.translucent_index_count(), mesh.stats().index_count);
         assert!(mesh.vertices.iter().any(|vertex| vertex.color[3] < 1.0));
         assert!(mesh.vertices.iter().all(
             |vertex| (0.0..=1.0).contains(&vertex.uv[0]) && (0.0..=1.0).contains(&vertex.uv[1])
         ));
+    }
+
+    #[test]
+    fn textured_liquid_top_emits_reverse_face_for_underwater_surface_visibility() {
+        let catalog = liquid_textured_catalog();
+        let blocks = textured_chunk_blocks(16, &[(0, 0, 0, BlockStateId(2))]);
+        let mesh = build_textured_visible_chunk_mesh(
+            TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+            &catalog,
+        )
+        .unwrap();
+
+        assert_eq!(&mesh.indices[0..12], &[0, 1, 2, 0, 2, 3, 4, 7, 6, 4, 6, 5]);
     }
 
     #[test]
@@ -993,7 +1006,7 @@ mod tests {
             })
             .count();
 
-        assert_eq!(water_top_vertices, 4);
+        assert_eq!(water_top_vertices, 8);
     }
 
     #[test]
@@ -1009,7 +1022,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(mesh.stats().face_count(), 10);
+        assert_eq!(mesh.stats().face_count(), 12);
         assert_eq!(mesh.opaque_index_count(), 0);
         assert_eq!(mesh.translucent_index_count(), mesh.stats().index_count);
     }

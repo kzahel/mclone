@@ -10,6 +10,7 @@ impl RenderFog {
     pub const WATER_COLOR: [f32; 3] = rgb_from_u24(0x050533);
     pub const WATER_START: f32 = -8.0;
     pub const WATER_END: f32 = 96.0;
+    pub const WATER_MIN_VISION: f32 = 0.25;
 
     pub const fn none() -> Self {
         Self {
@@ -26,6 +27,20 @@ impl RenderFog {
             color: Self::WATER_COLOR,
             start: Self::WATER_START,
             end: Self::WATER_END,
+        }
+    }
+
+    pub fn underwater_with_water_vision(water_vision: f32) -> Self {
+        let vision = if water_vision.is_finite() {
+            water_vision.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        Self {
+            enabled: true,
+            color: Self::WATER_COLOR,
+            start: Self::WATER_START,
+            end: Self::WATER_END * vision.max(Self::WATER_MIN_VISION),
         }
     }
 
@@ -65,5 +80,17 @@ mod tests {
         assert_eq!(fog.color, [5.0 / 255.0, 5.0 / 255.0, 51.0 / 255.0]);
         assert_eq!(fog.start, -8.0);
         assert_eq!(fog.end, 96.0);
+    }
+
+    #[test]
+    fn underwater_fog_uses_java_water_vision_distance_ramp() {
+        let entering = RenderFog::underwater_with_water_vision(0.0);
+        let half = RenderFog::underwater_with_water_vision(0.5);
+        let clear = RenderFog::underwater_with_water_vision(1.0);
+
+        assert_eq!(entering.start, -8.0);
+        assert_eq!(entering.end, 24.0);
+        assert_eq!(half.end, 48.0);
+        assert_eq!(clear.end, 96.0);
     }
 }

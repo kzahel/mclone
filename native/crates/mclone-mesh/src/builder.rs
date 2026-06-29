@@ -657,26 +657,43 @@ fn add_textured_liquid_block_to_mesh(
         h01 = (h01 - LIQUID_EPSILON).max(0.0);
         h11 = (h11 - LIQUID_EPSILON).max(0.0);
         h10 = (h10 - LIQUID_EPSILON).max(0.0);
+        let top_corners = [
+            [0.0, h00, 0.0],
+            [0.0, h01, 1.0],
+            [1.0, h11, 1.0],
+            [1.0, h10, 0.0],
+        ];
+        let top_uvs = [
+            fluid.still.map(0.0, 0.0),
+            fluid.still.map(0.0, 16.0),
+            fluid.still.map(16.0, 16.0),
+            fluid.still.map(16.0, 0.0),
+        ];
+        let top_color = liquid_color(fluid.kind, 1.0);
+        let top_light = liquid_packed_light(area, world_x, world_y, world_z);
         add_textured_liquid_quad(
             mesh,
             world_x,
             world_y,
             world_z,
-            [
-                [0.0, h00, 0.0],
-                [0.0, h01, 1.0],
-                [1.0, h11, 1.0],
-                [1.0, h10, 0.0],
-            ],
-            [
-                fluid.still.map(0.0, 0.0),
-                fluid.still.map(0.0, 16.0),
-                fluid.still.map(16.0, 16.0),
-                fluid.still.map(16.0, 0.0),
-            ],
-            liquid_color(fluid.kind, 1.0),
-            liquid_packed_light(area, world_x, world_y, world_z),
+            top_corners,
+            top_uvs,
+            top_color,
+            top_light,
         );
+        if should_render_backward_up_face(area, catalog, world_x, world_y + 1, world_z, fluid.kind)
+        {
+            add_textured_liquid_quad_reversed(
+                mesh,
+                world_x,
+                world_y,
+                world_z,
+                top_corners,
+                top_uvs,
+                top_color,
+                top_light,
+            );
+        }
     }
 
     if render_bottom {
@@ -803,6 +820,54 @@ fn add_textured_liquid_quad(
     color: [f32; 4],
     packed_light: u32,
 ) {
+    add_textured_liquid_quad_with_winding(
+        mesh,
+        world_x,
+        world_y,
+        world_z,
+        corners,
+        uvs,
+        color,
+        packed_light,
+        false,
+    );
+}
+
+fn add_textured_liquid_quad_reversed(
+    mesh: &mut TexturedVisibleChunkMesh,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    corners: [[f32; 3]; 4],
+    uvs: [[f32; 2]; 4],
+    color: [f32; 4],
+    packed_light: u32,
+) {
+    add_textured_liquid_quad_with_winding(
+        mesh,
+        world_x,
+        world_y,
+        world_z,
+        corners,
+        uvs,
+        color,
+        packed_light,
+        true,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_textured_liquid_quad_with_winding(
+    mesh: &mut TexturedVisibleChunkMesh,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    corners: [[f32; 3]; 4],
+    uvs: [[f32; 2]; 4],
+    color: [f32; 4],
+    packed_light: u32,
+    reversed: bool,
+) {
     let base_index = mesh.vertices.len() as u32;
     for index in 0..4 {
         let corner = corners[index];
@@ -817,14 +882,25 @@ fn add_textured_liquid_quad(
             packed_light,
         });
     }
-    mesh.indices.extend_from_slice(&[
-        base_index,
-        base_index + 1,
-        base_index + 2,
-        base_index,
-        base_index + 2,
-        base_index + 3,
-    ]);
+    if reversed {
+        mesh.indices.extend_from_slice(&[
+            base_index,
+            base_index + 3,
+            base_index + 2,
+            base_index,
+            base_index + 2,
+            base_index + 1,
+        ]);
+    } else {
+        mesh.indices.extend_from_slice(&[
+            base_index,
+            base_index + 1,
+            base_index + 2,
+            base_index,
+            base_index + 2,
+            base_index + 3,
+        ]);
+    }
 }
 
 fn same_fluid_at(
@@ -868,6 +944,33 @@ fn liquid_face_occluded_by_neighbor(
         ModelFaceDirection::Up => face_height >= 1.0,
         _ => face_height > 0.0,
     }
+}
+
+fn should_render_backward_up_face(
+    area: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    kind: TexturedFluidKind,
+) -> bool {
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            let sample_x = world_x + dx;
+            let sample_z = world_z + dz;
+            let state_id = block_state_at_world_or_air(area, sample_x, world_y, sample_z);
+            let same_fluid = catalog
+                .fluid(state_id)
+                .is_some_and(|fluid| fluid.kind == kind);
+            let solid_render = catalog
+                .get(state_id)
+                .is_some_and(|model| model.solid_render);
+            if !same_fluid && !solid_render {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn fluid_height_at(

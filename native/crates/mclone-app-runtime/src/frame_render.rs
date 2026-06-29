@@ -319,6 +319,8 @@ impl FlatRenderResources {
             .as_ref()
             .map_or(target, |scaled| scaled.render_target());
         let render_view = camera.render_view(render_target.size[0], render_target.size[1]);
+        let selection_render_view =
+            render_view_with_underwater_effect(render_view, underwater_overlay);
         let render_frame = RenderFrameContext::new(device, queue, encoder, render_target);
         let summary = render_full_frame_for_view(
             render_frame,
@@ -345,7 +347,7 @@ impl FlatRenderResources {
             encoder,
             render_target,
             &self.depth,
-            render_view,
+            selection_render_view,
             selection_outline,
         );
         if let (Some(scaled), Some(presenter)) = (&self.scaled_color, &self.scale_presenter) {
@@ -560,6 +562,15 @@ fn needs_scaled_target(render_config: RenderConfig) -> bool {
     (render_config.render_scale - DEFAULT_RENDER_SCALE).abs() > SCALE_EPSILON
 }
 
+pub fn render_view_with_underwater_effect(
+    render_view: ChunkRenderView,
+    underwater_overlay: Option<UnderwaterOverlay>,
+) -> ChunkRenderView {
+    underwater_overlay
+        .map(|overlay| render_view.with_fov_multiplier(overlay.fov_multiplier()))
+        .unwrap_or(render_view)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn render_full_frame<BuildGuiDraw>(
     frame: RenderFrameContext<'_>,
@@ -628,6 +639,7 @@ pub fn render_full_frame_for_view<BuildGuiDraw>(
 where
     BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
 {
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
     render_full_frame_for_view_inner(
         frame,
         depth,
@@ -675,6 +687,7 @@ where
     BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
 {
     let mut timing = FullFrameRenderTiming::default();
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
     let summary = render_full_frame_for_view_inner(
         frame,
         depth,
@@ -723,6 +736,7 @@ pub fn render_full_frame_for_view_with_prepared_records<BuildGuiDraw>(
 where
     BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
 {
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
     render_full_frame_for_view_inner(
         frame,
         depth,
@@ -821,8 +835,7 @@ where
     BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
 {
     let fog = underwater_overlay
-        .is_some()
-        .then(RenderFog::underwater)
+        .map(|overlay| RenderFog::underwater_with_water_vision(overlay.water_vision))
         .unwrap_or_default();
     let render_options = render_options
         .with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day))
