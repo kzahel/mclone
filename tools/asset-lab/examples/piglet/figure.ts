@@ -1,6 +1,6 @@
 import { figure } from "../../src/dsl";
 
-export default figure("piglet", ({ mat, asciiTexture, part, box, capsule, sphere, clip }) => {
+export default figure("piglet", ({ mat, asciiTexture, part, box, capsule, sphere, walkCycle, swing, bob }) => {
   mat("skin", "#d88a92");
   mat("skin_dark", "#bd6f7b");
   mat("hoof", "#4a3033");
@@ -74,35 +74,19 @@ export default figure("piglet", ({ mat, asciiTexture, part, box, capsule, sphere
 
   part("tail", sphere({ parent: "body", at: [0, 0.14, 0.47], radius: 0.09, material: "skin_dark" }));
 
-  clip("walk", {
+  walkCycle("walk", {
     fps: 12,
+    duration: 1,
     loop: true,
-    keys: [
-      ["body", 0.0, { at: [0, 0.0, 0] }],
-      ["body", 0.5, { at: [0, 0.025, 0] }],
-      ["body", 1.0, { at: [0, 0.0, 0] }],
-
-      ["head", 0.0, { rot: [0, -4, 0] }],
-      ["head", 0.5, { rot: [0, 4, 0] }],
-      ["head", 1.0, { rot: [0, -4, 0] }],
-
-      ["leg_fl", 0.0, { rot: [22, 0, 0] }],
-      ["leg_fl", 0.5, { rot: [-22, 0, 0] }],
-      ["leg_fl", 1.0, { rot: [22, 0, 0] }],
-      ["leg_br", 0.0, { rot: [22, 0, 0] }],
-      ["leg_br", 0.5, { rot: [-22, 0, 0] }],
-      ["leg_br", 1.0, { rot: [22, 0, 0] }],
-
-      ["leg_fr", 0.0, { rot: [-22, 0, 0] }],
-      ["leg_fr", 0.5, { rot: [22, 0, 0] }],
-      ["leg_fr", 1.0, { rot: [-22, 0, 0] }],
-      ["leg_bl", 0.0, { rot: [-22, 0, 0] }],
-      ["leg_bl", 0.5, { rot: [22, 0, 0] }],
-      ["leg_bl", 1.0, { rot: [-22, 0, 0] }],
-
-      ["tail", 0.0, { rot: [0, 0, -15] }],
-      ["tail", 0.5, { rot: [0, 0, 15] }],
-      ["tail", 1.0, { rot: [0, 0, -15] }],
+    samples: 9,
+    tracks: [
+      bob("body", { axis: "y", amount: 0.0125, center: 0.0125, phase: 0.5 }),
+      swing("head", { axis: "y", degrees: 4, phase: 0.5 }),
+      swing("leg_fl", { axis: "x", degrees: 20 }),
+      swing("leg_br", { axis: "x", degrees: 20 }),
+      swing("leg_fr", { axis: "x", degrees: 20, phase: 0.5 }),
+      swing("leg_bl", { axis: "x", degrees: 20, phase: 0.5 }),
+      swing("tail", { axis: "z", degrees: 15, phase: 0.5 }),
     ],
   });
 });

@@ -108,7 +108,8 @@ The exported asset should contain only simple data:
 - parent relationships and local transforms
 - optional joint/pivot metadata, with `joint.pivot` measured from the part's
   unrotated local center
-- simple animation clips
+- simple animation clips generated either by raw keyframes or procedural
+  `walkCycle` tracks such as `swing` and `bob`
 
 ## Initial Primitive Set
 
@@ -231,6 +232,8 @@ profile the harness before adding animation-sheet captures.
       `north`, `south`, `east`, `west`, `up`, or `down`.
 - [x] Add real pivot-group rendering so animated parts rotate around
       `joint.pivot` instead of their mesh center.
+- [x] Add procedural walk-cycle authoring helpers for common `swing` and `bob`
+      tracks while keeping exported clips as ordinary keyframes.
 - [ ] Add a validation report that points to the asset file and part names.
 - [ ] Add starter prompts and examples for sheep, dog, cat, butterfly, and
       player stand-in variants.

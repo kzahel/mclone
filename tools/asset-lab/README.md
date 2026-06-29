@@ -52,3 +52,21 @@ part("leg_fl", capsule({
   material: "skin",
 }));
 ```
+
+Use cycle helpers for common walk motion instead of hand-writing every keyframe.
+`swing` rotates around an axis in degrees, `bob` translates along an axis, and
+`phase: 0.5` makes a track move opposite another track. The helper exports
+ordinary clip keys.
+
+```ts
+walkCycle("walk", {
+  fps: 12,
+  duration: 1,
+  samples: 9,
+  tracks: [
+    bob("body", { axis: "y", amount: 0.0125, center: 0.0125, phase: 0.5 }),
+    swing("leg_fl", { axis: "x", degrees: 20 }),
+    swing("leg_fr", { axis: "x", degrees: 20, phase: 0.5 }),
+  ],
+});
+```

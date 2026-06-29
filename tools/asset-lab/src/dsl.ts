@@ -107,11 +107,42 @@ export interface ClipSpec {
   keys: ClipKey[];
 }
 
+export type AxisName = "x" | "y" | "z";
+
+export interface SwingOptions {
+  axis?: AxisName;
+  degrees: number;
+  center?: number;
+  phase?: number;
+}
+
+export interface BobOptions {
+  axis?: AxisName;
+  amount: number;
+  center?: number;
+  phase?: number;
+}
+
+export type CycleTrack =
+  | ({ kind: "swing"; part: string } & SwingOptions)
+  | ({ kind: "bob"; part: string } & BobOptions);
+
+export interface WalkCycleSpec {
+  duration?: number;
+  fps?: number;
+  loop?: boolean;
+  samples?: number;
+  tracks: CycleTrack[];
+}
+
 export interface FigureApi {
   mat(name: string, colorOrSpec: string | MaterialSpec): void;
   asciiTexture(name: string, texture: AsciiTextureSpec): void;
   part(name: string, draft: PartDraft): void;
   clip(name: string, spec: ClipSpec): void;
+  walkCycle(name: string, spec: WalkCycleSpec): void;
+  swing(part: string, options: SwingOptions): CycleTrack;
+  bob(part: string, options: BobOptions): CycleTrack;
   box(options: BoxOptions): PartDraft;
   sphere(options: SphereOptions): PartDraft;
   capsule(options: CapsuleOptions): PartDraft;
@@ -200,6 +231,9 @@ class FigureBuilder {
       asciiTexture: (name, texture) => this.asciiTexture(name, texture),
       part: (name, draft) => this.part(name, draft),
       clip: (name, spec) => this.clip(name, spec),
+      walkCycle: (name, spec) => this.clip(name, buildWalkCycleClip(spec)),
+      swing,
+      bob,
       box,
       sphere,
       capsule,
@@ -283,6 +317,137 @@ function cylinder(options: CylinderOptions): PartDraft {
     primitive.radialSegments = radialSegments;
   }
   return { ...rest, primitive };
+}
+
+function swing(part: string, options: SwingOptions): CycleTrack {
+  const track: CycleTrack = { kind: "swing", part, degrees: options.degrees };
+  if (options.axis !== undefined) {
+    track.axis = options.axis;
+  }
+  if (options.center !== undefined) {
+    track.center = options.center;
+  }
+  if (options.phase !== undefined) {
+    track.phase = options.phase;
+  }
+  return track;
+}
+
+function bob(part: string, options: BobOptions): CycleTrack {
+  const track: CycleTrack = { kind: "bob", part, amount: options.amount };
+  if (options.axis !== undefined) {
+    track.axis = options.axis;
+  }
+  if (options.center !== undefined) {
+    track.center = options.center;
+  }
+  if (options.phase !== undefined) {
+    track.phase = options.phase;
+  }
+  return track;
+}
+
+function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
+  const duration = spec.duration ?? 1;
+  const samples = spec.samples ?? 9;
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error("walkCycle duration must be positive");
+  }
+  if (!Number.isInteger(samples) || samples < 2) {
+    throw new Error("walkCycle samples must be an integer >= 2");
+  }
+  if (spec.fps !== undefined && (!Number.isFinite(spec.fps) || spec.fps <= 0)) {
+    throw new Error("walkCycle fps must be positive");
+  }
+  if (spec.tracks.length === 0) {
+    throw new Error("walkCycle requires at least one track");
+  }
+
+  const frameParts = Array.from({ length: samples }, () => new Map<string, TransformKey>());
+  for (const track of spec.tracks) {
+    validateCycleTrack(track);
+    for (let index = 0; index < samples; index += 1) {
+      const progress = index / (samples - 1);
+      const value = cycleValue(progress, track.phase ?? 0, track.center ?? 0, track.kind === "swing" ? track.degrees : track.amount);
+      const transform = ensureFrameTransform(frameParts[index], track.part);
+      if (track.kind === "swing") {
+        const rot = mutableVec(transform.rot);
+        setAxis(rot, track.axis ?? "x", value);
+        transform.rot = rot;
+      } else {
+        const at = mutableVec(transform.at);
+        setAxis(at, track.axis ?? "y", value);
+        transform.at = at;
+      }
+    }
+  }
+
+  const keys: ClipKey[] = [];
+  for (const [index, parts] of frameParts.entries()) {
+    const time = (duration * index) / (samples - 1);
+    for (const [part, transform] of parts.entries()) {
+      keys.push([part, time, transform]);
+    }
+  }
+
+  const clip: ClipSpec = {
+    loop: spec.loop ?? true,
+    keys,
+  };
+  if (spec.fps !== undefined) {
+    clip.fps = spec.fps;
+  }
+  return clip;
+}
+
+function validateCycleTrack(track: CycleTrack): void {
+  if (!track.part.trim()) {
+    throw new Error("walkCycle track part is required");
+  }
+  if (track.axis !== undefined && !["x", "y", "z"].includes(track.axis)) {
+    throw new Error(`walkCycle track '${track.part}' has invalid axis '${track.axis}'`);
+  }
+  const amount = track.kind === "swing" ? track.degrees : track.amount;
+  if (!Number.isFinite(amount)) {
+    throw new Error(`walkCycle track '${track.part}' amount must be finite`);
+  }
+  if (track.center !== undefined && !Number.isFinite(track.center)) {
+    throw new Error(`walkCycle track '${track.part}' center must be finite`);
+  }
+  if (track.phase !== undefined && !Number.isFinite(track.phase)) {
+    throw new Error(`walkCycle track '${track.part}' phase must be finite`);
+  }
+}
+
+function ensureFrameTransform(frame: Map<string, TransformKey> | undefined, part: string): TransformKey {
+  if (!frame) {
+    throw new Error("Missing walkCycle frame");
+  }
+  const existing = frame.get(part);
+  if (existing) {
+    return existing;
+  }
+  const transform: TransformKey = {};
+  frame.set(part, transform);
+  return transform;
+}
+
+function cycleValue(progress: number, phase: number, center: number, amount: number): number {
+  return center + Math.cos((progress + phase) * Math.PI * 2) * amount;
+}
+
+function mutableVec(value: Vec3 | undefined): [number, number, number] {
+  return value ? [value[0], value[1], value[2]] : [0, 0, 0];
+}
+
+function setAxis(value: [number, number, number], axis: AxisName, amount: number): void {
+  if (axis === "x") {
+    value[0] = amount;
+  } else if (axis === "y") {
+    value[1] = amount;
+  } else {
+    value[2] = amount;
+  }
 }
 
 function validateAsciiTexture(name: string, texture: AsciiTextureSpec, errors: string[]): void {
