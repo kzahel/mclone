@@ -12,6 +12,7 @@ mod android {
 
     use anyhow::{Context, Result, bail};
     use glam::Vec3;
+    use mclone_app_runtime::debug_hotbar_icons;
     use mclone_app_runtime::frame_render::{
         FullFrameGui, RenderStreamStats, record_render_section_update_stats,
         render_full_frame_for_view,
@@ -53,10 +54,11 @@ mod android {
         EngineCameraMovementMode, EngineRenderCamera,
     };
     use mclone_ui::{
-        DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameFramePacingMode, GameUi,
-        GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay,
-        TouchJoystickOverlay, TouchOverlay, render_flat_hud, touch_action_button_rects,
-        touch_hotbar_slot_rects, touch_menu_button_rect, touch_movement_zone_rect,
+        DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, FlatHud,
+        GameFramePacingMode, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey,
+        GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay, render_flat_hud,
+        touch_action_button_rects, touch_hotbar_slot_rects, touch_menu_button_rect,
+        touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -307,6 +309,7 @@ mod android {
                 hotbar_visible: true,
                 selected_hotbar_slot,
                 hotbar_pressed_slot: self.hotbar_pressed_slot,
+                hotbar_icons: EMPTY_HOTBAR_ICONS,
             }
         }
 
@@ -563,12 +566,15 @@ mod android {
                     None
                 }
             };
+            let mut gui = GuiRenderer::new(device, format);
+            gui.upload_texture_atlas(device, queue, started.scene.mesh_assets().atlas.as_upload())
+                .context("upload Android GUI atlas")?;
 
             Ok(Self {
                 depth,
                 sky,
                 draw: started.draw,
-                gui: GuiRenderer::new(device, format),
+                gui,
                 scene_options: scene_options.clone(),
                 scene: started.scene,
                 camera: started.camera,
@@ -1123,6 +1129,9 @@ mod android {
                 }
             };
 
+            self.gui
+                .upload_texture_atlas(device, queue, started.scene.mesh_assets().atlas.as_upload())
+                .context("upload replacement Android GUI atlas")?;
             self.scene_options = options;
             self.scene = started.scene;
             self.camera = started.camera;
@@ -1333,8 +1342,13 @@ mod android {
                 .touch_controls
                 .overlay(self.interaction.selected_hotbar_slot());
             touch.menu_pressed = self.touch_menu_pressed;
+            let hotbar_icons = debug_hotbar_icons(&self.scene.mesh_assets().catalog);
+            touch.hotbar_icons = hotbar_icons;
             let mut hud = FlatHud::new(self.input_capabilities.resolve(self.input_preferences));
-            hud.hotbar = FlatHotbarOverlay::selected(self.interaction.selected_hotbar_slot());
+            hud.hotbar = FlatHotbarOverlay::selected_with_icons(
+                self.interaction.selected_hotbar_slot(),
+                hotbar_icons,
+            );
             hud.touch = touch;
             hud.status = self.session_status.clone();
             render_flat_hud(gui_scale, &mut draw, &hud);

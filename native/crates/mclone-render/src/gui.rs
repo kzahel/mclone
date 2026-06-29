@@ -1,14 +1,31 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use glam::{Mat4, Vec3};
 use mclone_ui::{ClipRect, Color, GuiDrawCommand, GuiDrawList, Rect};
 use wgpu::util::DeviceExt;
 
-use crate::chunk::ChunkRenderView;
+use crate::chunk::{ChunkRenderView, ChunkTextureAtlas};
 use crate::target::RenderFrameTarget;
 
-const FLOATS_PER_VERTEX: usize = 6;
+const FLOATS_PER_VERTEX: usize = 8;
 const VERTEX_SIZE: wgpu::BufferAddress =
     (FLOATS_PER_VERTEX * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
+const GUI_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 3] = [
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x2,
+        offset: 0,
+        shader_location: 0,
+    },
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x2,
+        offset: 8,
+        shader_location: 1,
+    },
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x4,
+        offset: 16,
+        shader_location: 2,
+    },
+];
 const QUAD_VERTEX_COUNT: u32 = 6;
 const WORLD_PANEL_FLOATS_PER_VERTEX: usize = 5;
 const WORLD_PANEL_VERTEX_SIZE: wgpu::BufferAddress =
@@ -27,7 +44,8 @@ struct VertexOut {
 @vertex
 fn vertex_main(
   @location(0) position: vec2f,
-  @location(1) color: vec4f,
+  @location(1) uv: vec2f,
+  @location(2) color: vec4f,
 ) -> VertexOut {
   var out: VertexOut;
   out.position = vec4f(position, 0.0, 1.0);
@@ -38,6 +56,35 @@ fn vertex_main(
 @fragment
 fn fragment_main(input: VertexOut) -> @location(0) vec4f {
   return input.color;
+}
+"#;
+
+const GUI_TEXTURED_WGSL: &str = r#"
+@group(0) @binding(0) var gui_texture: texture_2d<f32>;
+@group(0) @binding(1) var gui_sampler: sampler;
+
+struct VertexOut {
+  @builtin(position) position: vec4f,
+  @location(0) uv: vec2f,
+  @location(1) color: vec4f,
+};
+
+@vertex
+fn vertex_main(
+  @location(0) position: vec2f,
+  @location(1) uv: vec2f,
+  @location(2) color: vec4f,
+) -> VertexOut {
+  var out: VertexOut;
+  out.position = vec4f(position, 0.0, 1.0);
+  out.uv = uv;
+  out.color = color;
+  return out;
+}
+
+@fragment
+fn fragment_main(input: VertexOut) -> @location(0) vec4f {
+  return textureSample(gui_texture, gui_sampler, input.uv) * input.color;
 }
 "#;
 
@@ -119,50 +166,117 @@ impl GuiRenderOptions {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+enum PreparedDrawKind {
+    Solid,
+    Textured,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct PreparedDraw {
+    kind: PreparedDrawKind,
     first_vertex: u32,
     vertex_count: u32,
     clip: Option<ClipRect>,
 }
 
 pub struct GuiRenderer {
-    pipeline: wgpu::RenderPipeline,
+    solid_pipeline: wgpu::RenderPipeline,
+    textured_pipeline: wgpu::RenderPipeline,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
+    texture_atlas: Option<GuiTextureAtlas>,
     vertex_buffer: Option<wgpu::Buffer>,
     vertex_buffer_size: wgpu::BufferAddress,
 }
 
 impl GuiRenderer {
     pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_gui_texture_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let solid_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_gui_solid_shader"),
             source: wgpu::ShaderSource::Wgsl(GUI_SOLID_WGSL.into()),
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let solid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("mclone_gui_solid_pipeline"),
             layout: None,
             vertex: wgpu::VertexState {
-                module: &module,
+                module: &solid_module,
                 entry_point: Some("vertex_main"),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: VERTEX_SIZE,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            shader_location: 0,
-                            offset: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                        },
-                        wgpu::VertexAttribute {
-                            shader_location: 1,
-                            offset: 8,
-                            format: wgpu::VertexFormat::Float32x4,
-                        },
-                    ],
-                }],
+                buffers: &[gui_vertex_buffer_layout()],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &module,
+                module: &solid_module,
+                entry_point: Some("fragment_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
+        let textured_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_gui_textured_shader"),
+            source: wgpu::ShaderSource::Wgsl(GUI_TEXTURED_WGSL.into()),
+        });
+        let textured_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("mclone_gui_textured_pipeline_layout"),
+                bind_group_layouts: &[&texture_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let textured_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mclone_gui_textured_pipeline"),
+            layout: Some(&textured_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &textured_module,
+                entry_point: Some("vertex_main"),
+                buffers: &[gui_vertex_buffer_layout()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &textured_module,
                 entry_point: Some("fragment_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: color_format,
@@ -193,10 +307,28 @@ impl GuiRenderer {
             cache: None,
         });
         Self {
-            pipeline,
+            solid_pipeline,
+            textured_pipeline,
+            texture_bind_group_layout,
+            texture_atlas: None,
             vertex_buffer: None,
             vertex_buffer_size: 0,
         }
+    }
+
+    pub fn upload_texture_atlas(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        atlas: ChunkTextureAtlas<'_>,
+    ) -> Result<()> {
+        self.texture_atlas = Some(GuiTextureAtlas::new(
+            device,
+            queue,
+            &self.texture_bind_group_layout,
+            atlas,
+        )?);
+        Ok(())
     }
 
     pub fn render(
@@ -251,10 +383,21 @@ impl GuiRenderer {
             .vertex_buffer
             .as_ref()
             .expect("GUI vertex buffer exists");
-        pass.set_pipeline(&self.pipeline);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         for draw in prepared.draws {
             apply_scissor(&mut pass, target.size, gui_size, draw.clip);
+            match draw.kind {
+                PreparedDrawKind::Solid => {
+                    pass.set_pipeline(&self.solid_pipeline);
+                }
+                PreparedDrawKind::Textured => {
+                    let Some(atlas) = &self.texture_atlas else {
+                        continue;
+                    };
+                    pass.set_pipeline(&self.textured_pipeline);
+                    pass.set_bind_group(0, &atlas.bind_group, &[]);
+                }
+            }
             pass.draw(
                 draw.first_vertex..draw.first_vertex + draw.vertex_count,
                 0..1,
@@ -282,6 +425,99 @@ impl GuiRenderer {
         } else if let Some(buffer) = &self.vertex_buffer {
             queue.write_buffer(buffer, 0, &bytes);
         }
+    }
+}
+
+struct GuiTextureAtlas {
+    _texture: wgpu::Texture,
+    _view: wgpu::TextureView,
+    _sampler: wgpu::Sampler,
+    bind_group: wgpu::BindGroup,
+}
+
+impl GuiTextureAtlas {
+    fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        atlas: ChunkTextureAtlas<'_>,
+    ) -> Result<Self> {
+        let width = atlas.width.max(1);
+        let height = atlas.height.max(1);
+        let expected_len = width as usize * height as usize * 4;
+        if atlas.rgba.len() != expected_len {
+            bail!(
+                "GUI texture atlas has {} bytes; expected {expected_len} for {}x{} RGBA",
+                atlas.rgba.len(),
+                width,
+                height
+            );
+        }
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_gui_texture_atlas"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: Default::default(),
+                aspect: Default::default(),
+            },
+            atlas.rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&Default::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("mclone_gui_texture_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_gui_texture_bind_group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        Ok(Self {
+            _texture: texture,
+            _view: view,
+            _sampler: sampler,
+            bind_group,
+        })
     }
 }
 
@@ -519,6 +755,15 @@ impl WorldGuiRenderer {
         }
     }
 
+    pub fn upload_texture_atlas(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        atlas: ChunkTextureAtlas<'_>,
+    ) -> Result<()> {
+        self.gui_renderer.upload_texture_atlas(device, queue, atlas)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn render_panel(
         &mut self,
@@ -751,8 +996,9 @@ fn prepare_draws(commands: &[GuiDrawCommand], gui_size: [f32; 2]) -> PreparedDra
         match *command {
             GuiDrawCommand::SolidRect { rect, color, clip } => {
                 let first_vertex = (vertices.len() / FLOATS_PER_VERTEX) as u32;
-                push_quad(&mut vertices, gui_size, rect, color, color);
+                push_solid_quad(&mut vertices, gui_size, rect, color, color);
                 draws.push(PreparedDraw {
+                    kind: PreparedDrawKind::Solid,
                     first_vertex,
                     vertex_count: QUAD_VERTEX_COUNT,
                     clip,
@@ -765,8 +1011,24 @@ fn prepare_draws(commands: &[GuiDrawCommand], gui_size: [f32; 2]) -> PreparedDra
                 clip,
             } => {
                 let first_vertex = (vertices.len() / FLOATS_PER_VERTEX) as u32;
-                push_quad(&mut vertices, gui_size, rect, top, bottom);
+                push_solid_quad(&mut vertices, gui_size, rect, top, bottom);
                 draws.push(PreparedDraw {
+                    kind: PreparedDrawKind::Solid,
+                    first_vertex,
+                    vertex_count: QUAD_VERTEX_COUNT,
+                    clip,
+                });
+            }
+            GuiDrawCommand::TextureRect {
+                rect,
+                uv,
+                color,
+                clip,
+            } => {
+                let first_vertex = (vertices.len() / FLOATS_PER_VERTEX) as u32;
+                push_textured_quad(&mut vertices, gui_size, rect, uv, color);
+                draws.push(PreparedDraw {
+                    kind: PreparedDrawKind::Textured,
                     first_vertex,
                     vertex_count: QUAD_VERTEX_COUNT,
                     clip,
@@ -777,23 +1039,65 @@ fn prepare_draws(commands: &[GuiDrawCommand], gui_size: [f32; 2]) -> PreparedDra
     PreparedDraws { vertices, draws }
 }
 
-fn push_quad(vertices: &mut Vec<f32>, gui_size: [f32; 2], rect: Rect, top: Color, bottom: Color) {
+fn gui_vertex_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: VERTEX_SIZE,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &GUI_VERTEX_ATTRIBUTES,
+    }
+}
+
+fn push_solid_quad(
+    vertices: &mut Vec<f32>,
+    gui_size: [f32; 2],
+    rect: Rect,
+    top: Color,
+    bottom: Color,
+) {
+    push_quad(vertices, gui_size, rect, [0.0, 0.0, 0.0, 0.0], top, bottom);
+}
+
+fn push_textured_quad(
+    vertices: &mut Vec<f32>,
+    gui_size: [f32; 2],
+    rect: Rect,
+    uv: mclone_ui::GuiTextureUv,
+    color: Color,
+) {
+    push_quad(
+        vertices,
+        gui_size,
+        rect,
+        [uv.u0, uv.v0, uv.u1, uv.v1],
+        color,
+        color,
+    );
+}
+
+fn push_quad(
+    vertices: &mut Vec<f32>,
+    gui_size: [f32; 2],
+    rect: Rect,
+    uv: [f32; 4],
+    top: Color,
+    bottom: Color,
+) {
     let left = clip_x(rect.x, gui_size[0]);
     let right = clip_x(rect.right(), gui_size[0]);
     let top_y = clip_y(rect.y, gui_size[1]);
     let bottom_y = clip_y(rect.bottom(), gui_size[1]);
     let top = top.to_linear_f32();
     let bottom = bottom.to_linear_f32();
-    push_vertex(vertices, left, top_y, top);
-    push_vertex(vertices, right, top_y, top);
-    push_vertex(vertices, right, bottom_y, bottom);
-    push_vertex(vertices, left, top_y, top);
-    push_vertex(vertices, right, bottom_y, bottom);
-    push_vertex(vertices, left, bottom_y, bottom);
+    push_vertex(vertices, left, top_y, [uv[0], uv[1]], top);
+    push_vertex(vertices, right, top_y, [uv[2], uv[1]], top);
+    push_vertex(vertices, right, bottom_y, [uv[2], uv[3]], bottom);
+    push_vertex(vertices, left, top_y, [uv[0], uv[1]], top);
+    push_vertex(vertices, right, bottom_y, [uv[2], uv[3]], bottom);
+    push_vertex(vertices, left, bottom_y, [uv[0], uv[3]], bottom);
 }
 
-fn push_vertex(vertices: &mut Vec<f32>, x: f32, y: f32, color: [f32; 4]) {
-    vertices.extend_from_slice(&[x, y, color[0], color[1], color[2], color[3]]);
+fn push_vertex(vertices: &mut Vec<f32>, x: f32, y: f32, uv: [f32; 2], color: [f32; 4]) {
+    vertices.extend_from_slice(&[x, y, uv[0], uv[1], color[0], color[1], color[2], color[3]]);
 }
 
 fn clip_x(x: f32, width: f32) -> f32 {
@@ -895,6 +1199,31 @@ mod tests {
         let prepared = prepare_draws(draw.commands(), [100.0, 100.0]);
         assert_eq!(prepared.draws.len(), 1);
         assert_eq!(prepared.vertices.len(), 6 * FLOATS_PER_VERTEX);
+    }
+
+    #[test]
+    fn prepares_textured_quad_with_uvs() {
+        let mut draw = GuiDrawList::new();
+        draw.texture(
+            Rect::new(0.0, 0.0, 10.0, 10.0),
+            mclone_ui::GuiTextureUv::new(0.25, 0.5, 0.75, 1.0),
+            Color::WHITE,
+        );
+
+        let prepared = prepare_draws(draw.commands(), [100.0, 100.0]);
+
+        assert_eq!(prepared.draws.len(), 1);
+        assert_eq!(prepared.draws[0].kind, PreparedDrawKind::Textured);
+        assert_eq!(prepared.vertices.len(), 6 * FLOATS_PER_VERTEX);
+        assert_eq!(&prepared.vertices[2..4], &[0.25, 0.5]);
+        assert_eq!(
+            &prepared.vertices[FLOATS_PER_VERTEX + 2..FLOATS_PER_VERTEX + 4],
+            &[0.75, 0.5]
+        );
+        assert_eq!(
+            &prepared.vertices[FLOATS_PER_VERTEX * 2 + 2..FLOATS_PER_VERTEX * 2 + 4],
+            &[0.75, 1.0]
+        );
     }
 
     #[test]

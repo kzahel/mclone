@@ -13,7 +13,7 @@ use mclone_protocol::{
     PlayerActionKind, ServerUpdate, SetCarriedItemCommand, UseItemOnCommand,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
-use mclone_worldgen::block::RawBlockId;
+use mclone_worldgen::block::{RawBlockId, generated_block_state_id};
 
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
@@ -590,15 +590,20 @@ impl IntegratedServer {
         };
         Ok(context
             .may_place_at(placement.pos)
-            .then_some((placement.pos, block_state)))
+            .then_some((placement.pos, generated_block_state_id(placement.block))))
     }
 
     fn set_block_debug(&mut self, pos: BlockPos, block_state: BlockStateId) -> bool {
         let Some(block_id) = raw_block_id_from_block_state(block_state) else {
             return false;
         };
+        let before = self.scheduler.block_at_world(pos);
         let changed = self.scheduler.set_block_at_world(pos, block_id);
         if changed {
+            if let Some(before) = before {
+                self.scheduler
+                    .refresh_runtime_lighting_after_block_change(pos, before, block_id);
+            }
             for request in self
                 .scheduler
                 .fluid_tick_requests_after_block_change(pos, block_id)
@@ -991,13 +996,18 @@ mod tests {
     use std::collections::BTreeSet;
 
     use crate::ChunkHolder;
-    use mclone_core::{BlockHitResult, BlockStateId, Direction, Vec3d};
+    use mclone_core::{
+        BlockHitResult, BlockStateId, ChunkSnapshot, Direction, PackedLightSection, Vec3d,
+        block_to_section_coord, local_block_coord, local_section_block_coord,
+    };
+    use mclone_light::LightLayer;
     use mclone_protocol::{
         AcceptTeleportCommand, EntityId, EntityKind, EntitySnapshot, EntityUpdate,
         PlayerPositionRelativeFlags, RemotePlayerId, RemotePlayerUpdate, ServerUpdate,
     };
     use mclone_worldgen::block::{
-        AIR, BRICKS, DIRT, GRASS, SNOW, STONE, WATER, has_fluid, material_blocks_motion,
+        AIR, BRICKS, DIRT, GRASS, OAK_LOG_X, OAK_LOG_Z, SNOW, STONE, WATER, has_fluid,
+        material_blocks_motion,
     };
 
     fn last_time_update(report: &ServerSimulationTickReport) -> u64 {
@@ -1243,6 +1253,33 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    fn snapshot_update_for(updates: &[ServerUpdate], pos: ChunkPos) -> Option<&ChunkSnapshot> {
+        updates.iter().rev().find_map(|update| match update {
+            ServerUpdate::ChunkSnapshot(snapshot) if snapshot.pos == pos => Some(snapshot),
+            _ => None,
+        })
+    }
+
+    fn sample_sky_light(sections: &[PackedLightSection], pos: BlockPos) -> u8 {
+        let section_y = block_to_section_coord(pos.y);
+        let Some(section) = sections
+            .iter()
+            .find(|section| section.section_y == section_y)
+        else {
+            return 0;
+        };
+        let Some(data_layer) =
+            mclone_light::packed_light_section_layer(section, LightLayer::Sky).unwrap()
+        else {
+            return 0;
+        };
+        data_layer.get(
+            local_block_coord(pos.x),
+            local_section_block_coord(pos.y),
+            local_block_coord(pos.z),
+        )
     }
 
     fn has_chunk_unload(updates: &[ServerUpdate], pos: ChunkPos) -> bool {
@@ -2032,6 +2069,44 @@ mod tests {
     }
 
     #[test]
+    fn debug_break_command_refreshes_lighting_after_opacity_change() {
+        let mut server = IntegratedServer::new(0);
+        load_chunk_view_with_lighting(&mut server, ChunkPos::new(0, 0), true);
+        let pos = BlockPos::new(8, 120, 8);
+        let chunk_pos = pos.chunk_pos();
+        if server.scheduler().block_at_world(pos) != Some(AIR) {
+            assert!(server.scheduler_mut().set_block_at_world(pos, AIR));
+        }
+        assert!(server.scheduler_mut().set_block_at_world(pos, STONE));
+        assert!(
+            server
+                .scheduler_mut()
+                .refresh_runtime_lighting_after_block_change(pos, AIR, STONE)
+        );
+        server.scheduler_mut().drain_pending_block_delta_events();
+        let covered = server
+            .scheduler()
+            .client_visible_snapshot(chunk_pos)
+            .expect("lit chunk should stay visible");
+        assert_eq!(sample_sky_light(&covered.light_sections, pos), 0);
+
+        sync_player(&mut server, Vec3d::new(8.5, 120.0, 8.5));
+        let updates = server
+            .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
+                pos,
+                direction: Direction::Up,
+                kind: PlayerActionKind::DebugInstantBreak,
+            }))
+            .expect("break command");
+
+        assert_eq!(server.scheduler().block_at_world(pos), Some(AIR));
+        assert!(has_section_block_updates(&updates));
+        let snapshot = snapshot_update_for(&updates, chunk_pos)
+            .expect("opacity-changing break should publish refreshed light");
+        assert_eq!(sample_sky_light(&snapshot.light_sections, pos), 15);
+    }
+
+    #[test]
     fn debug_break_reschedules_neighbor_water_to_refill_removed_block() {
         let mut server = IntegratedServer::new(0);
         load_center_chunk(&mut server);
@@ -2159,6 +2234,63 @@ mod tests {
                 ServerUpdate::SectionBlockUpdates { updates, .. } => updates
                     .iter()
                     .any(|update| update.block_state == BlockStateId(BRICKS as u32)),
+                _ => false,
+            }
+        }));
+    }
+
+    #[test]
+    fn debug_place_command_orients_log_to_clicked_face_axis() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
+        sync_carried_slot(&mut server, 4);
+        let clicked = BlockPos::new(8, 80, 8);
+        let east_target = clicked.relative(Direction::East);
+        let north_target = clicked.relative(Direction::North);
+        assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let east_updates = server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(9.0, 80.5, 8.5),
+                Direction::East,
+                clicked,
+                false,
+            )))
+            .expect("place east-facing log");
+
+        assert_eq!(
+            server.scheduler().block_at_world(east_target),
+            Some(OAK_LOG_X)
+        );
+        assert!(east_updates.iter().any(|update| {
+            match update {
+                ServerUpdate::SectionBlockUpdates { updates, .. } => updates
+                    .iter()
+                    .any(|update| update.block_state == BlockStateId(OAK_LOG_X as u32)),
+                _ => false,
+            }
+        }));
+
+        let north_updates = server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.5, 80.5, 8.0),
+                Direction::North,
+                clicked,
+                false,
+            )))
+            .expect("place north-facing log");
+
+        assert_eq!(
+            server.scheduler().block_at_world(north_target),
+            Some(OAK_LOG_Z)
+        );
+        assert!(north_updates.iter().any(|update| {
+            match update {
+                ServerUpdate::SectionBlockUpdates { updates, .. } => updates
+                    .iter()
+                    .any(|update| update.block_state == BlockStateId(OAK_LOG_Z as u32)),
                 _ => false,
             }
         }));

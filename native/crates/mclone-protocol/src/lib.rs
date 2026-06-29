@@ -11,6 +11,18 @@ use mclone_core::{
 
 pub const PROTOCOL_VERSION: u32 = 11;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
+pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
+pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
+    Some(BlockStateId(1)),
+    Some(BlockStateId(5)),
+    Some(BlockStateId(4)),
+    Some(BlockStateId(6)),
+    Some(BlockStateId(41)),
+    Some(BlockStateId(42)),
+    Some(BlockStateId(8)),
+    Some(BlockStateId(91)),
+    None,
+];
 
 const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
 const CLIENT_COMMAND_PLAYER_ACTION: u8 = 2;

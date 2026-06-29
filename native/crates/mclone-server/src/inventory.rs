@@ -1,22 +1,7 @@
 use mclone_core::BlockStateId;
-use mclone_protocol::{HOTBAR_SLOT_COUNT, SetCarriedItemCommand};
-use mclone_worldgen::block::{
-    BRICKS, DIRT, GRASS_BLOCK, OAK_LEAVES, OAK_LOG, SAND, SNOW, STONE, generated_block_state_id,
+use mclone_protocol::{
+    DEFAULT_DEBUG_HOTBAR, HOTBAR_SLOT_COUNT, HOTBAR_SLOT_COUNT_USIZE, SetCarriedItemCommand,
 };
-
-const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
-
-const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
-    Some(generated_block_state_id(STONE)),
-    Some(generated_block_state_id(DIRT)),
-    Some(generated_block_state_id(GRASS_BLOCK)),
-    Some(generated_block_state_id(SAND)),
-    Some(generated_block_state_id(OAK_LOG)),
-    Some(generated_block_state_id(OAK_LEAVES)),
-    Some(generated_block_state_id(SNOW)),
-    Some(generated_block_state_id(BRICKS)),
-    None,
-];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ServerInventory {
@@ -55,6 +40,7 @@ impl ServerInventory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_worldgen::block::{BRICKS, DIRT, STONE, generated_block_state_id};
 
     #[test]
     fn carried_item_packet_updates_only_valid_hotbar_slots() {

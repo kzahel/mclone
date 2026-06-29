@@ -7,6 +7,7 @@ use super::{
     SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED,
     WebIntegratedServerRunnerConfig, WebRuntime,
 };
+use mclone_app_runtime::debug_hotbar_icons;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
     SessionFailure, SessionStartRequest, SessionStartResult, StartedGameSession,
@@ -2445,6 +2446,7 @@ impl WebChunkRenderSession {
             hotbar_visible: false,
             selected_hotbar_slot: self.interaction.selected_hotbar_slot(),
             hotbar_pressed_slot: None,
+            hotbar_icons: mclone_ui::EMPTY_HOTBAR_ICONS,
         };
         self.ui_status_to_js_value().map_err(JsValue::from)
     }
@@ -3118,7 +3120,13 @@ impl WebChunkRenderSession {
             mesh_assets.actor_atlas.as_upload(),
         )
         .map_err(|error| format!("failed to upload packed actor textures: {error:#}"))?;
-        let gui = GuiRenderer::new(&context.device, context.format);
+        let mut gui = GuiRenderer::new(&context.device, context.format);
+        gui.upload_texture_atlas(
+            &context.device,
+            &context.queue,
+            atlas_upload(&mesh_assets.atlas),
+        )
+        .map_err(|error| format!("failed to upload GUI atlas: {error:#}"))?;
         let mut ui = GameUi::new_ingame();
         match &session_request {
             SessionStartRequest::NewLocalWorld { seed } => {
@@ -4103,8 +4111,14 @@ impl WebChunkRenderSession {
         let mut hud = FlatHud::new(self.resolved_flat_input_for_hud());
         hud.world_hud_visible = !ui_active;
         hud.crosshair_visible = !ui_active;
-        hud.hotbar = FlatHotbarOverlay::selected(self.interaction.selected_hotbar_slot());
-        hud.touch = self.touch_overlay;
+        let hotbar_icons = debug_hotbar_icons(&self.mesh_assets.catalog);
+        hud.hotbar = FlatHotbarOverlay::selected_with_icons(
+            self.interaction.selected_hotbar_slot(),
+            hotbar_icons,
+        );
+        let mut touch = self.touch_overlay;
+        touch.hotbar_icons = hotbar_icons;
+        hud.touch = touch;
         hud.status = self.effective_status_overlay();
         render_flat_hud(self.ui.scale(), &mut ui_draw, &hud);
         let gui_command_count = ui_draw.commands().len();

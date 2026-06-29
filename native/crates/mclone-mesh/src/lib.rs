@@ -45,7 +45,7 @@ mod tests {
     use crate::builder::block_at_world_or_air;
     use mclone_assets::{
         AssetPath, BlockModelLibrary, BlockStateAssetIndex, BlockStateRecord, BlockStateRegistry,
-        MemoryAssetSource, ResourceLocation, TextureAtlasPlan, TextureMaterial,
+        MemoryAssetSource, ModelFaceDirection, ResourceLocation, TextureAtlasPlan, TextureMaterial,
     };
     use mclone_core::{AIR_BLOCK_STATE_ID, PackedLightSection, chunk_block_index};
     use mclone_light::{DataLayer, FULL_BRIGHT, pack_light};
@@ -590,8 +590,160 @@ mod tests {
         TexturedMeshCatalog::from_assets(&registry, &index, &library, &atlas).unwrap()
     }
 
+    fn log_axis_textured_catalog() -> TexturedMeshCatalog {
+        let mut registry = BlockStateRegistry::new();
+        for (id, axis) in [
+            (BlockStateId(1), "y"),
+            (BlockStateId(2), "z"),
+            (BlockStateId(3), "x"),
+        ] {
+            registry
+                .register(BlockStateRecord::new(
+                    id,
+                    ResourceLocation::parse("minecraft:oak_log").unwrap(),
+                    [("axis", axis)],
+                ))
+                .unwrap();
+        }
+
+        let mut source = MemoryAssetSource::new();
+        source.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/oak_log.json"),
+            r#"{
+              "variants":{
+                "axis=x":{"model":"minecraft:block/oak_log_horizontal","x":90,"y":90},
+                "axis=y":{"model":"minecraft:block/oak_log"},
+                "axis=z":{"model":"minecraft:block/oak_log_horizontal","x":90}
+              }
+            }"#,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/block.json"),
+            "{}",
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/cube_column.json"),
+            r##"{
+              "parent":"minecraft:block/cube",
+              "textures":{
+                "particle":"#side",
+                "down":"#end",
+                "up":"#end",
+                "north":"#side",
+                "east":"#side",
+                "south":"#side",
+                "west":"#side"
+              }
+            }"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/cube_column_horizontal.json"),
+            r##"{
+              "parent":"minecraft:block/block",
+              "elements":[{
+                "from":[0,0,0],
+                "to":[16,16,16],
+                "faces":{
+                  "down":{"texture":"#down","cullface":"down"},
+                  "up":{"texture":"#up","rotation":180,"cullface":"up"},
+                  "north":{"texture":"#north","cullface":"north"},
+                  "south":{"texture":"#south","cullface":"south"},
+                  "west":{"texture":"#west","cullface":"west"},
+                  "east":{"texture":"#east","cullface":"east"}
+                }
+              }],
+              "textures":{
+                "particle":"#side",
+                "down":"#end",
+                "up":"#end",
+                "north":"#side",
+                "east":"#side",
+                "south":"#side",
+                "west":"#side"
+              }
+            }"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/cube.json"),
+            r##"{
+              "parent":"minecraft:block/block",
+              "elements":[{
+                "from":[0,0,0],
+                "to":[16,16,16],
+                "faces":{
+                  "down":{"texture":"#down","cullface":"down"},
+                  "up":{"texture":"#up","cullface":"up"},
+                  "north":{"texture":"#north","cullface":"north"},
+                  "south":{"texture":"#south","cullface":"south"},
+                  "west":{"texture":"#west","cullface":"west"},
+                  "east":{"texture":"#east","cullface":"east"}
+                }
+              }]
+            }"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/oak_log.json"),
+            r##"{
+              "parent":"minecraft:block/cube_column",
+              "textures":{
+                "end":"minecraft:block/oak_log_top",
+                "side":"minecraft:block/oak_log"
+              }
+            }"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/oak_log_horizontal.json"),
+            r##"{
+              "parent":"minecraft:block/cube_column_horizontal",
+              "textures":{
+                "end":"minecraft:block/oak_log_top",
+                "side":"minecraft:block/oak_log"
+              }
+            }"##,
+        );
+        source.insert(
+            AssetPath::new("assets/minecraft/textures/block/oak_log.png"),
+            png_header(16, 16),
+        );
+        source.insert(
+            AssetPath::new("assets/minecraft/textures/block/oak_log_top.png"),
+            png_header(16, 16),
+        );
+
+        let index = BlockStateAssetIndex::load_namespace(&source, "minecraft").unwrap();
+        let library = BlockModelLibrary::load_for_blockstates(&source, &index).unwrap();
+        let materials = library
+            .collect_materials_for_models(
+                index
+                    .assets()
+                    .flat_map(|asset| asset.model_refs.iter().cloned()),
+            )
+            .unwrap();
+        let atlas = TextureAtlasPlan::build(&source, materials).unwrap();
+        TexturedMeshCatalog::from_assets(&registry, &index, &library, &atlas).unwrap()
+    }
+
+    fn model_face_sprite(
+        model: &TexturedBlockModel,
+        direction: ModelFaceDirection,
+    ) -> AtlasSpriteUv {
+        model
+            .faces
+            .iter()
+            .find(|face| face.direction == direction)
+            .unwrap()
+            .sprite
+    }
+
     fn liquid_textured_catalog() -> TexturedMeshCatalog {
         let mut registry = BlockStateRegistry::new();
+        registry
+            .register(BlockStateRecord::new(
+                BlockStateId(1),
+                ResourceLocation::parse("minecraft:stone").unwrap(),
+                [] as [(&str, &str); 0],
+            ))
+            .unwrap();
         for (id, block, properties) in [
             (BlockStateId(2), "minecraft:water", [("level", "0")]),
             (BlockStateId(9), "minecraft:lava", [("level", "0")]),
@@ -612,12 +764,53 @@ mod tests {
             r#"{"variants":{"":{"model":"minecraft:block/water"}}}"#,
         );
         source.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/stone.json"),
+            r#"{"variants":{"":{"model":"minecraft:block/stone"}}}"#,
+        );
+        source.insert_text(
             AssetPath::new("assets/minecraft/blockstates/lava.json"),
             r#"{"variants":{"":{"model":"minecraft:block/lava"}}}"#,
         );
         source.insert_text(
             AssetPath::new("assets/minecraft/models/block/block.json"),
             "{}",
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/cube.json"),
+            r##"{
+              "parent":"minecraft:block/block",
+              "elements":[{
+                "from":[0,0,0],
+                "to":[16,16,16],
+                "faces":{
+                  "down":{"texture":"#down","cullface":"down"},
+                  "up":{"texture":"#up","cullface":"up"},
+                  "north":{"texture":"#north","cullface":"north"},
+                  "south":{"texture":"#south","cullface":"south"},
+                  "west":{"texture":"#west","cullface":"west"},
+                  "east":{"texture":"#east","cullface":"east"}
+                }
+              }]
+            }"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/cube_all.json"),
+            r##"{
+              "parent":"minecraft:block/cube",
+              "textures":{
+                "particle":"#all",
+                "down":"#all",
+                "up":"#all",
+                "north":"#all",
+                "east":"#all",
+                "south":"#all",
+                "west":"#all"
+              }
+            }"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/stone.json"),
+            r##"{"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/stone"}}"##,
         );
         source.insert_text(
             AssetPath::new("assets/minecraft/models/block/water.json"),
@@ -633,6 +826,10 @@ mod tests {
                 png_header(16, 16),
             );
         }
+        source.insert(
+            AssetPath::new("assets/minecraft/textures/block/stone.png"),
+            png_header(16, 16),
+        );
 
         let index = BlockStateAssetIndex::load_namespace(&source, "minecraft").unwrap();
         let library = BlockModelLibrary::load_for_blockstates(&source, &index).unwrap();
@@ -676,6 +873,42 @@ mod tests {
         assert!(mesh.vertices.iter().all(
             |vertex| (0.0..=1.0).contains(&vertex.uv[0]) && (0.0..=1.0).contains(&vertex.uv[1])
         ));
+    }
+
+    #[test]
+    fn catalog_applies_blockstate_variant_rotation_to_log_axis_faces() {
+        let catalog = log_axis_textured_catalog();
+        let y_axis = catalog.get(BlockStateId(1)).unwrap();
+        let z_axis = catalog.get(BlockStateId(2)).unwrap();
+        let x_axis = catalog.get(BlockStateId(3)).unwrap();
+        let end_sprite = model_face_sprite(y_axis, ModelFaceDirection::Up);
+        let side_sprite = model_face_sprite(y_axis, ModelFaceDirection::North);
+
+        assert_ne!(end_sprite, side_sprite);
+        assert_eq!(
+            model_face_sprite(z_axis, ModelFaceDirection::North),
+            end_sprite
+        );
+        assert_eq!(
+            model_face_sprite(z_axis, ModelFaceDirection::South),
+            end_sprite
+        );
+        assert_eq!(
+            model_face_sprite(z_axis, ModelFaceDirection::Up),
+            side_sprite
+        );
+        assert_eq!(
+            model_face_sprite(x_axis, ModelFaceDirection::East),
+            end_sprite
+        );
+        assert_eq!(
+            model_face_sprite(x_axis, ModelFaceDirection::West),
+            end_sprite
+        );
+        assert_eq!(
+            model_face_sprite(x_axis, ModelFaceDirection::Up),
+            side_sprite
+        );
     }
 
     #[test]
@@ -728,6 +961,39 @@ mod tests {
         assert!(mesh.vertices.iter().all(
             |vertex| (0.0..=1.0).contains(&vertex.uv[0]) && (0.0..=1.0).contains(&vertex.uv[1])
         ));
+    }
+
+    #[test]
+    fn textured_liquid_top_renders_below_overhanging_solid_block() {
+        let catalog = liquid_textured_catalog();
+        let blocks = textured_chunk_blocks(
+            16,
+            &[(0, 0, 0, BlockStateId(2)), (0, 1, 0, BlockStateId(1))],
+        );
+        let mesh = build_textured_visible_chunk_mesh(
+            TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+            &catalog,
+        )
+        .unwrap();
+        let water_top_color = [
+            0x3f as f32 / 255.0,
+            0x76 as f32 / 255.0,
+            0xe4 as f32 / 255.0,
+            0.72,
+        ];
+        let water_top_vertices = mesh
+            .vertices
+            .iter()
+            .filter(|vertex| {
+                vertex
+                    .color
+                    .iter()
+                    .zip(water_top_color)
+                    .all(|(actual, expected)| (actual - expected).abs() < 0.0001)
+            })
+            .count();
+
+        assert_eq!(water_top_vertices, 4);
     }
 
     #[test]

@@ -455,6 +455,10 @@ where
             mesh_assets.atlas.as_upload(),
         )
         .context("initialize empty XR terrain draw resources")?;
+        let mut world_gui_renderer = WorldGuiRenderer::new(device, color_format);
+        world_gui_renderer
+            .upload_texture_atlas(device, queue, mesh_assets.atlas.as_upload())
+            .context("upload initial XR GUI atlas")?;
         let pump = LocalSingleViewStartupPump::with_mesh_assets(
             local_single_view_options(scene),
             mesh_assets,
@@ -485,7 +489,7 @@ where
             actors: ActorDrawResources::new(device, queue, color_format, actor_atlas.as_upload())
                 .context("initialize XR terrain actor draw resources")?,
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
-            world_gui_renderer: WorldGuiRenderer::new(device, color_format),
+            world_gui_renderer,
             ui,
             session_status: StatusOverlay::new(request.starting_message(), true),
             sky: SkyRenderer::new_with_color_profile(
@@ -532,6 +536,14 @@ where
             startup_view_pose,
         )?;
         let ui = xr_game_ui_for_session(started.runtime.active_session(), scene.seed);
+        let mut world_gui_renderer = WorldGuiRenderer::new(device, color_format);
+        world_gui_renderer
+            .upload_texture_atlas(
+                device,
+                queue,
+                started.runtime.mesh_assets().atlas.as_upload(),
+            )
+            .context("upload XR GUI atlas")?;
         let state = Self {
             scene,
             color_format,
@@ -550,7 +562,7 @@ where
             actors: ActorDrawResources::new(device, queue, color_format, actor_atlas.as_upload())
                 .context("initialize XR terrain actor draw resources")?,
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
-            world_gui_renderer: WorldGuiRenderer::new(device, color_format),
+            world_gui_renderer,
             ui,
             session_status: StatusOverlay::hidden(),
             sky: SkyRenderer::new_with_color_profile(

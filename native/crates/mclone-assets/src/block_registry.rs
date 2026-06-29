@@ -363,7 +363,9 @@ fn normalized_rotation(value: i32) -> AssetResult<i32> {
 
 const EMPTY_PROPS: &[(&str, &str)] = &[];
 const SNOWY_FALSE: &[(&str, &str)] = &[("snowy", "false")];
+const AXIS_X: &[(&str, &str)] = &[("axis", "x")];
 const AXIS_Y: &[(&str, &str)] = &[("axis", "y")];
+const AXIS_Z: &[(&str, &str)] = &[("axis", "z")];
 const LAYERS_1: &[(&str, &str)] = &[("layers", "1")];
 const HALF_LOWER: &[(&str, &str)] = &[("half", "lower")];
 const HALF_UPPER: &[(&str, &str)] = &[("half", "upper")];
@@ -474,6 +476,14 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (89, "minecraft:dripstone_block", EMPTY_PROPS),
     (90, "minecraft:pointed_dripstone", POINTED_DRIPSTONE_UP_TIP),
     (91, "minecraft:bricks", EMPTY_PROPS),
+    (92, "minecraft:oak_log", AXIS_X),
+    (93, "minecraft:oak_log", AXIS_Z),
+    (94, "minecraft:birch_log", AXIS_X),
+    (95, "minecraft:birch_log", AXIS_Z),
+    (96, "minecraft:spruce_log", AXIS_X),
+    (97, "minecraft:spruce_log", AXIS_Z),
+    (98, "minecraft:deepslate", AXIS_X),
+    (99, "minecraft:deepslate", AXIS_Z),
 ];
 
 #[cfg(test)]
@@ -485,7 +495,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 92);
+        assert_eq!(registry.len(), 100);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -539,12 +549,28 @@ mod tests {
             "minecraft:oak_log[axis=y]"
         );
         assert_eq!(
+            registry.id_for_key("minecraft:oak_log[axis=x]"),
+            Some(BlockStateId(92))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:oak_log[axis=z]"),
+            Some(BlockStateId(93))
+        );
+        assert_eq!(
             registry.id_for_key("minecraft:poppy"),
             Some(BlockStateId(45))
         );
         assert_eq!(
             registry.by_id(BlockStateId(48)).unwrap().canonical_key(),
             "minecraft:spruce_log[axis=y]"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:birch_log[axis=x]"),
+            Some(BlockStateId(94))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:spruce_log[axis=z]"),
+            Some(BlockStateId(97))
         );
         assert_eq!(
             registry.id_for_key("minecraft:dead_bush"),
@@ -557,6 +583,10 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:deepslate[axis=y]"),
             Some(BlockStateId(53))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:deepslate[axis=x]"),
+            Some(BlockStateId(98))
         );
         assert_eq!(
             registry.by_id(BlockStateId(53)).unwrap().canonical_key(),

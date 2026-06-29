@@ -94,6 +94,14 @@ pub const CLAY: RawBlockId = 88;
 pub const DRIPSTONE_BLOCK: RawBlockId = 89;
 pub const POINTED_DRIPSTONE: RawBlockId = 90;
 pub const BRICKS: RawBlockId = 91;
+pub const OAK_LOG_X: RawBlockId = 92;
+pub const OAK_LOG_Z: RawBlockId = 93;
+pub const BIRCH_LOG_X: RawBlockId = 94;
+pub const BIRCH_LOG_Z: RawBlockId = 95;
+pub const SPRUCE_LOG_X: RawBlockId = 96;
+pub const SPRUCE_LOG_Z: RawBlockId = 97;
+pub const DEEPSLATE_X: RawBlockId = 98;
+pub const DEEPSLATE_Z: RawBlockId = 99;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -195,6 +203,16 @@ pub const fn block_light_emission(block_id: RawBlockId) -> u8 {
             GLOW_LICHEN => 7,
             _ => 0,
         }
+    }
+}
+
+pub const fn base_block_id(block_id: RawBlockId) -> RawBlockId {
+    match block_id {
+        OAK_LOG_X | OAK_LOG_Z => OAK_LOG,
+        BIRCH_LOG_X | BIRCH_LOG_Z => BIRCH_LOG,
+        SPRUCE_LOG_X | SPRUCE_LOG_Z => SPRUCE_LOG,
+        DEEPSLATE_X | DEEPSLATE_Z => DEEPSLATE,
+        _ => block_id,
     }
 }
 
@@ -311,19 +329,19 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         RED_SAND => "minecraft:red_sand",
         ICE => "minecraft:ice",
         SNOW_BLOCK => "minecraft:snow_block",
-        OAK_LOG => "minecraft:oak_log",
+        OAK_LOG | OAK_LOG_X | OAK_LOG_Z => "minecraft:oak_log",
         OAK_LEAVES => "minecraft:oak_leaves",
         GRASS => "minecraft:grass",
         DANDELION => "minecraft:dandelion",
         POPPY => "minecraft:poppy",
-        BIRCH_LOG => "minecraft:birch_log",
+        BIRCH_LOG | BIRCH_LOG_X | BIRCH_LOG_Z => "minecraft:birch_log",
         BIRCH_LEAVES => "minecraft:birch_leaves",
-        SPRUCE_LOG => "minecraft:spruce_log",
+        SPRUCE_LOG | SPRUCE_LOG_X | SPRUCE_LOG_Z => "minecraft:spruce_log",
         SPRUCE_LEAVES => "minecraft:spruce_leaves",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
-        DEEPSLATE => "minecraft:deepslate",
+        DEEPSLATE | DEEPSLATE_X | DEEPSLATE_Z => "minecraft:deepslate",
         COAL_ORE => "minecraft:coal_ore",
         DEEPSLATE_COAL_ORE => "minecraft:deepslate_coal_ore",
         COPPER_ORE => "minecraft:copper_ore",

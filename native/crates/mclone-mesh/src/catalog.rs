@@ -4,7 +4,7 @@ use std::fmt;
 
 use mclone_assets::{
     AssetError, BakedBlockModelFace, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry,
-    ModelFaceDirection, ResourceLocation, TextureAtlasPlan, TextureMaterial,
+    BlockStateVariant, ModelFaceDirection, ResourceLocation, TextureAtlasPlan, TextureMaterial,
 };
 use mclone_core::BlockStateId;
 
@@ -44,15 +44,19 @@ impl TexturedBlockFace {
     fn from_baked(
         face: &BakedBlockModelFace,
         atlas: &TextureAtlasPlan,
+        rotation: BlockStateModelRotation,
     ) -> Result<Self, TexturedMeshError> {
         let sprite = atlas
             .sprite(&face.texture)
             .ok_or_else(|| TexturedMeshError::MissingSprite(face.texture.clone()))?;
+        let (from, to) = rotation.rotate_bounds(face.from, face.to);
         Ok(Self {
-            direction: face.direction,
-            cullface: face.cullface,
-            from: face.from,
-            to: face.to,
+            direction: rotation.rotate_direction(face.direction),
+            cullface: face
+                .cullface
+                .map(|direction| rotation.rotate_direction(direction)),
+            from,
+            to,
             uv: face.uv,
             uv_rotation: face.uv_rotation,
             sprite: AtlasSpriteUv {
@@ -68,6 +72,81 @@ impl TexturedBlockFace {
 
     pub fn is_full_cube_side(&self) -> bool {
         face_is_full_cube_side(self)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct BlockStateModelRotation {
+    x_steps: u8,
+    y_steps: u8,
+}
+
+impl BlockStateModelRotation {
+    fn from_variant(variant: &BlockStateVariant) -> Self {
+        Self {
+            x_steps: (variant.x.rem_euclid(360) / 90) as u8,
+            y_steps: (variant.y.rem_euclid(360) / 90) as u8,
+        }
+    }
+
+    fn rotate_direction(self, direction: ModelFaceDirection) -> ModelFaceDirection {
+        let vector = match direction {
+            ModelFaceDirection::Down => [0, -1, 0],
+            ModelFaceDirection::Up => [0, 1, 0],
+            ModelFaceDirection::North => [0, 0, -1],
+            ModelFaceDirection::South => [0, 0, 1],
+            ModelFaceDirection::West => [-1, 0, 0],
+            ModelFaceDirection::East => [1, 0, 0],
+        };
+        match self.rotate_i32_vector(vector) {
+            [0, -1, 0] => ModelFaceDirection::Down,
+            [0, 1, 0] => ModelFaceDirection::Up,
+            [0, 0, -1] => ModelFaceDirection::North,
+            [0, 0, 1] => ModelFaceDirection::South,
+            [-1, 0, 0] => ModelFaceDirection::West,
+            [1, 0, 0] => ModelFaceDirection::East,
+            other => panic!("invalid rotated face direction vector {other:?}"),
+        }
+    }
+
+    fn rotate_bounds(self, from: [f32; 3], to: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+        let mut min = [f32::INFINITY; 3];
+        let mut max = [f32::NEG_INFINITY; 3];
+
+        for x in [from[0], to[0]] {
+            for y in [from[1], to[1]] {
+                for z in [from[2], to[2]] {
+                    let rotated = self.rotate_point([x, y, z]);
+                    for axis in 0..3 {
+                        min[axis] = min[axis].min(rotated[axis]);
+                        max[axis] = max[axis].max(rotated[axis]);
+                    }
+                }
+            }
+        }
+
+        (min, max)
+    }
+
+    fn rotate_point(self, point: [f32; 3]) -> [f32; 3] {
+        let mut vector = [point[0] - 8.0, point[1] - 8.0, point[2] - 8.0];
+        for _ in 0..self.x_steps {
+            vector = [vector[0], vector[2], -vector[1]];
+        }
+        for _ in 0..self.y_steps {
+            vector = [-vector[2], vector[1], vector[0]];
+        }
+        [vector[0] + 8.0, vector[1] + 8.0, vector[2] + 8.0]
+    }
+
+    fn rotate_i32_vector(self, mut vector: [i32; 3]) -> [i32; 3] {
+        for _ in 0..self.x_steps {
+            vector = [vector[0], vector[2], -vector[1]];
+        }
+        for _ in 0..self.y_steps {
+            vector = [-vector[2], vector[1], vector[0]];
+        }
+        vector
     }
 }
 
@@ -119,21 +198,27 @@ impl TexturedMeshCatalog {
             let variant_key = record
                 .asset_variant_key(asset)
                 .unwrap_or_else(|| record.variant_key());
-            let model = if let Some(variants) = asset.variants_for_key(&variant_key) {
-                variants
-                    .first()
-                    .map(|variant| &variant.model)
-                    .ok_or_else(|| TexturedMeshError::MissingBlockStateVariant {
-                        block: record.block.clone(),
-                        variant_key: variant_key.clone(),
-                    })?
-            } else if variant_key.is_empty() {
-                asset.model_refs.iter().next().ok_or_else(|| {
+            let (model, rotation) = if let Some(variants) = asset.variants_for_key(&variant_key) {
+                let variant = variants.first().ok_or_else(|| {
                     TexturedMeshError::MissingBlockStateVariant {
                         block: record.block.clone(),
                         variant_key: variant_key.clone(),
                     }
-                })?
+                })?;
+                (
+                    &variant.model,
+                    BlockStateModelRotation::from_variant(variant),
+                )
+            } else if variant_key.is_empty() {
+                (
+                    asset.model_refs.iter().next().ok_or_else(|| {
+                        TexturedMeshError::MissingBlockStateVariant {
+                            block: record.block.clone(),
+                            variant_key: variant_key.clone(),
+                        }
+                    })?,
+                    BlockStateModelRotation::default(),
+                )
             } else {
                 return Err(TexturedMeshError::MissingBlockStateVariant {
                     block: record.block.clone(),
@@ -144,7 +229,7 @@ impl TexturedMeshCatalog {
             let faces = baked
                 .faces
                 .iter()
-                .map(|face| TexturedBlockFace::from_baked(face, atlas))
+                .map(|face| TexturedBlockFace::from_baked(face, atlas, rotation))
                 .collect::<Result<Vec<_>, _>>()?;
             let fluid = textured_fluid_model(record, atlas)?;
             let full_cube_occluder = full_cube_occluder(&faces);
@@ -171,6 +256,19 @@ impl TexturedMeshCatalog {
 
     pub fn get(&self, state_id: BlockStateId) -> Option<&TexturedBlockModel> {
         self.blocks.get(&state_id)
+    }
+
+    pub fn gui_icon_uv(&self, state_id: BlockStateId) -> Option<AtlasSpriteUv> {
+        let model = self.blocks.get(&state_id)?;
+        if let Some(fluid) = model.fluid {
+            return Some(fluid.still);
+        }
+        model
+            .faces
+            .iter()
+            .find(|face| face.direction == ModelFaceDirection::Up)
+            .or_else(|| model.faces.first())
+            .map(|face| face.sprite)
     }
 
     pub fn occludes(&self, state_id: BlockStateId) -> bool {

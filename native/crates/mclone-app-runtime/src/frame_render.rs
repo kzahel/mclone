@@ -197,7 +197,9 @@ impl FlatRenderResources {
             ScreenEffectsRenderer::new(device, queue, render_config.color_format, asset_source)
                 .context("failed to initialize screen effects renderer")?;
         let selection_outline = SelectionOutlineRenderer::new(device, render_config.color_format);
-        let gui = GuiRenderer::new(device, render_config.color_format);
+        let mut gui = GuiRenderer::new(device, render_config.color_format);
+        gui.upload_texture_atlas(device, queue, chunk_atlas)
+            .context("failed to initialize GUI texture atlas")?;
         Ok(Self {
             render_config,
             depth,

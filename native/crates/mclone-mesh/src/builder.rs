@@ -575,18 +575,70 @@ fn add_textured_liquid_block_to_mesh(
     world_z: i32,
     fluid: TexturedFluidModel,
 ) {
+    let mut h00 = fluid_height_at(area, catalog, world_x, world_y, world_z, fluid.kind);
+    let mut h01 = fluid_height_at(area, catalog, world_x, world_y, world_z + 1, fluid.kind);
+    let mut h11 = fluid_height_at(area, catalog, world_x + 1, world_y, world_z + 1, fluid.kind);
+    let mut h10 = fluid_height_at(area, catalog, world_x + 1, world_y, world_z, fluid.kind);
     let render_top = !same_fluid_at(area, catalog, world_x, world_y + 1, world_z, fluid.kind)
-        && !liquid_face_occluded(area, catalog, world_x, world_y + 1, world_z);
+        && !liquid_face_occluded_by_neighbor(
+            area,
+            catalog,
+            world_x,
+            world_y + 1,
+            world_z,
+            ModelFaceDirection::Up,
+            h00.min(h01).min(h11).min(h10),
+        );
     let render_bottom = !same_fluid_at(area, catalog, world_x, world_y - 1, world_z, fluid.kind)
-        && !liquid_face_occluded(area, catalog, world_x, world_y - 1, world_z);
+        && !liquid_face_occluded_by_neighbor(
+            area,
+            catalog,
+            world_x,
+            world_y - 1,
+            world_z,
+            ModelFaceDirection::Down,
+            MAX_FLUID_HEIGHT,
+        );
     let render_north = !same_fluid_at(area, catalog, world_x, world_y, world_z - 1, fluid.kind)
-        && !liquid_face_occluded(area, catalog, world_x, world_y, world_z - 1);
+        && !liquid_face_occluded_by_neighbor(
+            area,
+            catalog,
+            world_x,
+            world_y,
+            world_z - 1,
+            ModelFaceDirection::North,
+            h00.max(h10),
+        );
     let render_south = !same_fluid_at(area, catalog, world_x, world_y, world_z + 1, fluid.kind)
-        && !liquid_face_occluded(area, catalog, world_x, world_y, world_z + 1);
+        && !liquid_face_occluded_by_neighbor(
+            area,
+            catalog,
+            world_x,
+            world_y,
+            world_z + 1,
+            ModelFaceDirection::South,
+            h01.max(h11),
+        );
     let render_west = !same_fluid_at(area, catalog, world_x - 1, world_y, world_z, fluid.kind)
-        && !liquid_face_occluded(area, catalog, world_x - 1, world_y, world_z);
+        && !liquid_face_occluded_by_neighbor(
+            area,
+            catalog,
+            world_x - 1,
+            world_y,
+            world_z,
+            ModelFaceDirection::West,
+            h00.max(h01),
+        );
     let render_east = !same_fluid_at(area, catalog, world_x + 1, world_y, world_z, fluid.kind)
-        && !liquid_face_occluded(area, catalog, world_x + 1, world_y, world_z);
+        && !liquid_face_occluded_by_neighbor(
+            area,
+            catalog,
+            world_x + 1,
+            world_y,
+            world_z,
+            ModelFaceDirection::East,
+            h10.max(h11),
+        );
 
     if !render_top
         && !render_bottom
@@ -598,10 +650,6 @@ fn add_textured_liquid_block_to_mesh(
         return;
     }
 
-    let mut h00 = fluid_height_at(area, catalog, world_x, world_y, world_z, fluid.kind);
-    let mut h01 = fluid_height_at(area, catalog, world_x, world_y, world_z + 1, fluid.kind);
-    let mut h11 = fluid_height_at(area, catalog, world_x + 1, world_y, world_z + 1, fluid.kind);
-    let mut h10 = fluid_height_at(area, catalog, world_x + 1, world_y, world_z, fluid.kind);
     let bottom_y = if render_bottom { LIQUID_EPSILON } else { 0.0 };
 
     if render_top {
@@ -801,15 +849,25 @@ fn fluid_at_world(
     catalog.fluid(state_id)
 }
 
-fn liquid_face_occluded(
+fn liquid_face_occluded_by_neighbor(
     area: &[TexturedChunkMeshInput<'_>],
     catalog: &TexturedMeshCatalog,
     world_x: i32,
     world_y: i32,
     world_z: i32,
+    direction: ModelFaceDirection,
+    face_height: f32,
 ) -> bool {
     let state_id = block_state_at_world_or_air(area, world_x, world_y, world_z);
-    catalog.occludes(state_id)
+    if !catalog.occludes(state_id) {
+        return false;
+    }
+    // Java LiquidBlockRenderer occludes against the liquid box height, not the
+    // whole block cell. A full block above only hides a liquid top at height 1.0.
+    match direction {
+        ModelFaceDirection::Up => face_height >= 1.0,
+        _ => face_height > 0.0,
+    }
 }
 
 fn fluid_height_at(

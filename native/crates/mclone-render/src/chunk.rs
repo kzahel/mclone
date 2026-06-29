@@ -847,6 +847,7 @@ fn draw_textured_mesh_range(
     pass.draw_indexed(index_range, 0, 0..1);
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct ChunkTextureAtlas<'a> {
     pub width: u32,
     pub height: u32,

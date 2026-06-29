@@ -23,8 +23,11 @@ use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockStateId, ChunkPos, ChunkSnapshot, ChunkStatus, block_to_section_coord,
     local_block_coord, local_section_block_coord,
 };
-use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
-use mclone_protocol::{ChunkView, ClientCommand, PlayerPositionUpdate, ServerUpdate};
+use mclone_mesh::{RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionMesh};
+use mclone_protocol::{
+    ChunkView, ClientCommand, DEFAULT_DEBUG_HOTBAR, HOTBAR_SLOT_COUNT_USIZE, PlayerPositionUpdate,
+    ServerUpdate,
+};
 use mclone_render_session::{
     EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompiler, RenderSectionRemovalMode,
     RenderSectionSession, build_client_textured_sections, render_section_chunk_pos,
@@ -35,7 +38,9 @@ use mclone_server::{
     ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ServerRunnerDiagnostics,
     ServerRunnerKind,
 };
-use mclone_ui::{LoadingProgressCell, LoadingProgressCellStatus, LoadingProgressOverlay};
+use mclone_ui::{
+    GuiTextureUv, LoadingProgressCell, LoadingProgressCellStatus, LoadingProgressOverlay,
+};
 
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const JAVA_MIN_TRACKING_RENDER_DISTANCE: u32 = 2;
@@ -61,6 +66,15 @@ pub fn chunk_view(center: ChunkPos, render_distance: u32, chunk_tracking_radius:
         render_distance,
         chunk_tracking_radius,
     }
+}
+
+pub fn debug_hotbar_icons(
+    catalog: &TexturedMeshCatalog,
+) -> [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE] {
+    DEFAULT_DEBUG_HOTBAR.map(|state_id| {
+        let uv = catalog.gui_icon_uv(state_id?)?;
+        Some(GuiTextureUv::new(uv.u0, uv.v0, uv.u1, uv.v1))
+    })
 }
 
 pub fn loading_progress_overlay_from_diagnostics(

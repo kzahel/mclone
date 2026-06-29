@@ -2,6 +2,10 @@
 
 use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, InputPromptKind, ResolvedFlatInput, TouchControlsMode};
 
+pub const HOTBAR_SLOT_COUNT_USIZE: usize = FLAT_HOTBAR_SLOT_COUNT as usize;
+pub const EMPTY_HOTBAR_ICONS: [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE] =
+    [None; HOTBAR_SLOT_COUNT_USIZE];
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GuiScale {
     pub scale: u32,
@@ -143,6 +147,20 @@ impl From<Rect> for ClipRect {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GuiTextureUv {
+    pub u0: f32,
+    pub v0: f32,
+    pub u1: f32,
+    pub v1: f32,
+}
+
+impl GuiTextureUv {
+    pub const fn new(u0: f32, v0: f32, u1: f32, v1: f32) -> Self {
+        Self { u0, v0, u1, v1 }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GuiDrawCommand {
     SolidRect {
         rect: Rect,
@@ -153,6 +171,12 @@ pub enum GuiDrawCommand {
         rect: Rect,
         top: Color,
         bottom: Color,
+        clip: Option<ClipRect>,
+    },
+    TextureRect {
+        rect: Rect,
+        uv: GuiTextureUv,
+        color: Color,
         clip: Option<ClipRect>,
     },
 }
@@ -196,6 +220,18 @@ impl GuiDrawList {
             rect,
             top,
             bottom,
+            clip: self.current_clip(),
+        });
+    }
+
+    pub fn texture(&mut self, rect: Rect, uv: GuiTextureUv, color: Color) {
+        if rect.width <= 0.0 || rect.height <= 0.0 || color.a == 0 {
+            return;
+        }
+        self.commands.push(GuiDrawCommand::TextureRect {
+            rect,
+            uv,
+            color,
             clip: self.current_clip(),
         });
     }
@@ -1246,6 +1282,7 @@ pub struct TouchOverlay {
     pub hotbar_visible: bool,
     pub selected_hotbar_slot: u8,
     pub hotbar_pressed_slot: Option<u8>,
+    pub hotbar_icons: [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE],
 }
 
 impl TouchOverlay {
@@ -1265,6 +1302,7 @@ pub struct TouchJoystickOverlay {
 pub struct FlatHotbarOverlay {
     pub visible: bool,
     pub selected_slot: u8,
+    pub icons: [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE],
 }
 
 impl FlatHotbarOverlay {
@@ -1272,6 +1310,7 @@ impl FlatHotbarOverlay {
         Self {
             visible: false,
             selected_slot: 0,
+            icons: EMPTY_HOTBAR_ICONS,
         }
     }
 
@@ -1279,6 +1318,18 @@ impl FlatHotbarOverlay {
         Self {
             visible: true,
             selected_slot,
+            icons: EMPTY_HOTBAR_ICONS,
+        }
+    }
+
+    pub fn selected_with_icons(
+        selected_slot: u8,
+        icons: [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE],
+    ) -> Self {
+        Self {
+            visible: true,
+            selected_slot,
+            icons,
         }
     }
 }
@@ -2610,13 +2661,7 @@ fn render_touch_hotbar(
         if overlay.selected_hotbar_slot == slot {
             draw.outline(rect.inset(-2.0), Color::rgba(245, 250, 255, 215));
         }
-        font.draw_centered(
-            draw,
-            &(index + 1).to_string(),
-            rect.center_x(),
-            rect.y + ((rect.height - font.line_height()) * 0.5).floor(),
-            Color::rgba(245, 250, 255, 210),
-        );
+        render_hotbar_slot_contents(draw, font, rect, overlay.hotbar_icons[index], index, 20.0);
     }
 }
 
@@ -2635,14 +2680,40 @@ fn render_flat_hotbar(
         if selected_slot == slot {
             draw.outline(rect.inset(-2.0), Color::rgba(245, 250, 255, 225));
         }
-        font.draw_centered(
-            draw,
-            &(index + 1).to_string(),
-            rect.center_x(),
-            rect.y + ((rect.height - font.line_height()) * 0.5).floor(),
-            Color::rgba(245, 250, 255, 210),
-        );
+        render_hotbar_slot_contents(draw, font, rect, hotbar.icons[index], index, 16.0);
     }
+}
+
+fn render_hotbar_slot_contents(
+    draw: &mut GuiDrawList,
+    font: &Font,
+    rect: Rect,
+    icon: Option<GuiTextureUv>,
+    index: usize,
+    icon_size: f32,
+) {
+    if let Some(icon) = icon {
+        let icon_size = icon_size.min(rect.width - 4.0).min(rect.height - 4.0);
+        draw.texture(
+            Rect::new(
+                (rect.center_x() - icon_size * 0.5).floor(),
+                (rect.y + (rect.height - icon_size) * 0.5).floor(),
+                icon_size,
+                icon_size,
+            ),
+            icon,
+            Color::WHITE,
+        );
+        return;
+    }
+
+    font.draw_centered(
+        draw,
+        &(index + 1).to_string(),
+        rect.center_x(),
+        rect.y + ((rect.height - font.line_height()) * 0.5).floor(),
+        Color::rgba(245, 250, 255, 210),
+    );
 }
 
 fn render_gamepad_hud(
@@ -3372,6 +3443,7 @@ mod tests {
             hotbar_visible: true,
             selected_hotbar_slot: 2,
             hotbar_pressed_slot: None,
+            hotbar_icons: EMPTY_HOTBAR_ICONS,
         };
         hud.status = StatusOverlay::new("ready", true);
 
@@ -3398,6 +3470,23 @@ mod tests {
         render_flat_hud(GuiScale::from_pixels(960, 540), &mut draw, &hud);
 
         assert!(draw.commands().len() > 4);
+    }
+
+    #[test]
+    fn flat_hotbar_renders_icon_textures_when_present() {
+        let mut draw = GuiDrawList::new();
+        let mut hud = FlatHud::new(resolved_flat_input(false));
+        let icon = GuiTextureUv::new(0.1, 0.2, 0.3, 0.4);
+        let mut icons = EMPTY_HOTBAR_ICONS;
+        icons[0] = Some(icon);
+        hud.hotbar = FlatHotbarOverlay::selected_with_icons(0, icons);
+
+        render_flat_hud(GuiScale::from_pixels(960, 540), &mut draw, &hud);
+
+        assert!(draw.commands().iter().any(|command| matches!(
+            command,
+            GuiDrawCommand::TextureRect { uv, .. } if *uv == icon
+        )));
     }
 
     #[test]
@@ -3449,6 +3538,7 @@ mod tests {
             hotbar_visible: true,
             selected_hotbar_slot: 2,
             hotbar_pressed_slot: Some(4),
+            hotbar_icons: EMPTY_HOTBAR_ICONS,
         };
 
         render_touch_overlay(GuiScale::from_pixels(780, 1688), &mut draw, &overlay);

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use mclone_app_runtime::debug_hotbar_icons;
 use mclone_assets::AssetSource;
 #[cfg(test)]
 use mclone_core::Vec3d;
@@ -383,7 +384,10 @@ impl ChunkApp {
         );
         hud.world_hud_visible = !ui_active && self.driver.runtime.is_some();
         hud.crosshair_visible = hud.world_hud_visible;
-        hud.hotbar = FlatHotbarOverlay::selected(self.driver.interaction.selected_hotbar_slot());
+        hud.hotbar = FlatHotbarOverlay::selected_with_icons(
+            self.driver.interaction.selected_hotbar_slot(),
+            debug_hotbar_icons(&self.assets.mesh_assets.catalog),
+        );
         hud.status = status;
         hud
     }

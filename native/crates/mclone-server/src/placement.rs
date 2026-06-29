@@ -1,7 +1,9 @@
 use mclone_core::{BlockHitResult, BlockPos, Direction};
 use mclone_worldgen::block::{
-    AIR, CAVE_AIR, DANDELION, DEAD_BUSH, FERN, GLOW_LICHEN, GRASS, LARGE_FERN_LOWER,
-    LARGE_FERN_UPPER, POPPY, RawBlockId, SNOW, has_fluid,
+    AIR, BIRCH_LOG, BIRCH_LOG_X, BIRCH_LOG_Z, CAVE_AIR, DANDELION, DEAD_BUSH, DEEPSLATE,
+    DEEPSLATE_X, DEEPSLATE_Z, FERN, GLOW_LICHEN, GRASS, LARGE_FERN_LOWER, LARGE_FERN_UPPER,
+    OAK_LOG, OAK_LOG_X, OAK_LOG_Z, POPPY, RawBlockId, SNOW, SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z,
+    base_block_id, has_fluid,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -113,8 +115,12 @@ impl DebugBlockItem {
         };
         context.can_place(target_block).then_some(BlockPlacement {
             pos: context.clicked_pos(),
-            block: self.block,
+            block: self.placement_block(context),
         })
+    }
+
+    fn placement_block(self, context: BlockPlaceContext) -> RawBlockId {
+        rotated_pillar_block_for_axis(self.block, context.use_on.clicked_face())
     }
 }
 
@@ -134,7 +140,7 @@ fn can_be_replaced(
         SNOW if item_in_hand.block() == SNOW => {
             !replacing_clicked || use_on.clicked_face() == Direction::Up
         }
-        _ if existing == item_in_hand.block() => false,
+        _ if base_block_id(existing) == base_block_id(item_in_hand.block()) => false,
         AIR | CAVE_AIR => true,
         SNOW => true,
         GRASS | FERN | DANDELION | POPPY | DEAD_BUSH | LARGE_FERN_LOWER | LARGE_FERN_UPPER
@@ -144,11 +150,41 @@ fn can_be_replaced(
     }
 }
 
+fn rotated_pillar_block_for_axis(block: RawBlockId, clicked_face: Direction) -> RawBlockId {
+    let axis = clicked_face_axis(clicked_face);
+    match (block, axis) {
+        (OAK_LOG, PlacementAxis::X) => OAK_LOG_X,
+        (OAK_LOG, PlacementAxis::Z) => OAK_LOG_Z,
+        (BIRCH_LOG, PlacementAxis::X) => BIRCH_LOG_X,
+        (BIRCH_LOG, PlacementAxis::Z) => BIRCH_LOG_Z,
+        (SPRUCE_LOG, PlacementAxis::X) => SPRUCE_LOG_X,
+        (SPRUCE_LOG, PlacementAxis::Z) => SPRUCE_LOG_Z,
+        (DEEPSLATE, PlacementAxis::X) => DEEPSLATE_X,
+        (DEEPSLATE, PlacementAxis::Z) => DEEPSLATE_Z,
+        _ => block,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PlacementAxis {
+    X,
+    Y,
+    Z,
+}
+
+fn clicked_face_axis(direction: Direction) -> PlacementAxis {
+    match direction {
+        Direction::East | Direction::West => PlacementAxis::X,
+        Direction::Up | Direction::Down => PlacementAxis::Y,
+        Direction::North | Direction::South => PlacementAxis::Z,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use mclone_core::Vec3d;
-    use mclone_worldgen::block::{DIRT, STONE, WATER};
+    use mclone_worldgen::block::{DIRT, OAK_LOG, OAK_LOG_X, OAK_LOG_Z, STONE, WATER};
 
     fn block_hit(pos: BlockPos, direction: Direction) -> BlockHitResult {
         BlockHitResult::new(
@@ -223,6 +259,51 @@ mod tests {
         );
         assert_eq!(
             item(DIRT).use_on(block_hit(clicked, Direction::Up), STONE, Some(STONE)),
+            None
+        );
+    }
+
+    #[test]
+    fn rotated_pillar_placement_uses_clicked_face_axis() {
+        let clicked = BlockPos::new(0, 80, 0);
+
+        assert_eq!(
+            item(OAK_LOG).use_on(block_hit(clicked, Direction::Up), STONE, Some(AIR)),
+            Some(BlockPlacement {
+                pos: BlockPos::new(0, 81, 0),
+                block: OAK_LOG,
+            })
+        );
+        assert_eq!(
+            item(OAK_LOG).use_on(block_hit(clicked, Direction::East), STONE, Some(AIR)),
+            Some(BlockPlacement {
+                pos: BlockPos::new(1, 80, 0),
+                block: OAK_LOG_X,
+            })
+        );
+        assert_eq!(
+            item(OAK_LOG).use_on(block_hit(clicked, Direction::North), STONE, Some(AIR)),
+            Some(BlockPlacement {
+                pos: BlockPos::new(0, 80, -1),
+                block: OAK_LOG_Z,
+            })
+        );
+    }
+
+    #[test]
+    fn rotated_pillar_variants_do_not_replace_same_base_block() {
+        let clicked = BlockPos::new(0, 80, 0);
+
+        assert_eq!(
+            item(OAK_LOG).use_on(block_hit(clicked, Direction::Up), STONE, Some(OAK_LOG_X)),
+            None
+        );
+        assert_eq!(
+            item(OAK_LOG).use_on(
+                block_hit(clicked, Direction::East),
+                OAK_LOG_Z,
+                Some(OAK_LOG_X)
+            ),
             None
         );
     }

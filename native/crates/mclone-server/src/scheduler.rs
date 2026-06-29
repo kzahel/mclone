@@ -14,11 +14,13 @@ use std::time::Duration;
 
 use mclone_core::{
     BlockStateId, CHUNK_SECTION_VOLUME, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus,
-    block_to_section_coord, chunk_section_index, local_block_coord, local_section_block_coord,
+    PackedLightSection, block_to_section_coord, chunk_section_index, local_block_coord,
+    local_section_block_coord,
 };
 use mclone_protocol::{ChunkView, SectionBlockUpdate};
 use mclone_worldgen::block::{
-    OBSIDIAN, RawBlockId, STONE, generated_block_state_id, is_water, material_blocks_motion,
+    OBSIDIAN, RawBlockId, STONE, block_light_emission, block_light_opacity,
+    generated_block_state_id, is_water, material_blocks_motion,
 };
 use mclone_worldgen::feature::{FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF};
 use mclone_worldgen::levelgen::{
@@ -41,6 +43,8 @@ use crate::light_mailbox::{CompletedLightStatus, LightStatusMailbox};
 use crate::light_status::{
     PendingLightStatus, PendingLightStatusBatch, hydrate_loaded_light_snapshot,
 };
+use crate::light_world::RetainedInitialLightState;
+use crate::lighting_seed::provisional_sky_light_includes_chunk;
 use crate::loading_progress::{
     ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
 };
@@ -347,6 +351,7 @@ pub struct ChunkScheduler {
     max_light_status_compute_us: u128,
     light_status_timing: LevelLightComputationTiming,
     pending_block_deltas: BTreeMap<(ChunkPos, i32), BTreeMap<usize, BlockStateId>>,
+    pending_runtime_light_snapshots: VecDeque<ChunkSnapshot>,
     dirty_chunks: BTreeSet<ChunkPos>,
     next_job_id: u64,
     next_revision: u64,
@@ -378,6 +383,7 @@ impl ChunkScheduler {
             max_light_status_compute_us: 0,
             light_status_timing: LevelLightComputationTiming::default(),
             pending_block_deltas: BTreeMap::new(),
+            pending_runtime_light_snapshots: VecDeque::new(),
             dirty_chunks: BTreeSet::new(),
             next_job_id: 1,
             next_revision: 1,
@@ -410,6 +416,7 @@ impl ChunkScheduler {
             max_light_status_compute_us: 0,
             light_status_timing: LevelLightComputationTiming::default(),
             pending_block_deltas: BTreeMap::new(),
+            pending_runtime_light_snapshots: VecDeque::new(),
             dirty_chunks: BTreeSet::new(),
             next_job_id: 1,
             next_revision: 1,
@@ -948,6 +955,100 @@ impl ChunkScheduler {
         true
     }
 
+    pub(crate) fn refresh_runtime_lighting_after_block_change(
+        &mut self,
+        pos: WorldBlockPos,
+        old_block: RawBlockId,
+        new_block: RawBlockId,
+    ) -> bool {
+        if !self.lighting_enabled || !block_change_affects_light(old_block, new_block) {
+            return false;
+        }
+
+        let chunk_pos = pos.chunk_pos();
+        let Some(status) = self.runtime_light_status_for_chunk(chunk_pos) else {
+            return false;
+        };
+
+        let mut light_state = RetainedInitialLightState::new();
+        let mut completed = light_state.compute_batch(PendingLightStatusBatch::new(vec![status]));
+        let Some((_status, light_sections, _timing)) = completed.pop() else {
+            return false;
+        };
+
+        self.publish_runtime_light_sections(chunk_pos, light_sections)
+    }
+
+    fn runtime_light_status_for_chunk(&self, target_pos: ChunkPos) -> Option<PendingLightStatus> {
+        let holder = self.holders.get(&target_pos)?;
+        let snapshot = holder.published_snapshot.as_ref()?;
+        if snapshot.status < ChunkStatus::Light || !snapshot.light_correct {
+            return None;
+        }
+        let raw_blocks = holder.live_blocks.as_ref()?;
+        if raw_blocks.min_y != snapshot.min_y || raw_blocks.height != snapshot.height {
+            return None;
+        }
+
+        let neighbor_blocks = self
+            .holders
+            .iter()
+            .filter_map(|(neighbor_pos, neighbor)| {
+                if *neighbor_pos == target_pos
+                    || !provisional_sky_light_includes_chunk(target_pos, *neighbor_pos)
+                {
+                    return None;
+                }
+                let blocks = neighbor
+                    .live_blocks
+                    .as_ref()
+                    .or(neighbor.dependency_buffer.as_ref())?;
+                if blocks.min_y != snapshot.min_y || blocks.height != snapshot.height {
+                    return None;
+                }
+                Some((*neighbor_pos, blocks.blocks.clone()))
+            })
+            .collect();
+
+        Some(PendingLightStatus::from_parts(
+            target_pos,
+            snapshot.clone(),
+            raw_blocks.blocks.clone(),
+            neighbor_blocks,
+        ))
+    }
+
+    fn publish_runtime_light_sections(
+        &mut self,
+        pos: ChunkPos,
+        light_sections: Vec<PackedLightSection>,
+    ) -> bool {
+        let revision = ChunkRevision(self.next_revision);
+        self.next_revision = self.next_revision.saturating_add(1);
+
+        let Some(holder) = self.holders.get_mut(&pos) else {
+            return false;
+        };
+        let Some(snapshot) = holder.published_snapshot.as_mut() else {
+            return false;
+        };
+        if snapshot.status < ChunkStatus::Light {
+            return false;
+        }
+
+        let status = snapshot.status;
+        let mut updated = snapshot.clone().with_light_sections(true, light_sections);
+        updated.revision = revision;
+        *snapshot = updated.clone();
+        holder.mark_ready(status, Some(revision));
+        holder.dirty = true;
+        self.dirty_chunks.insert(pos);
+        if holder.client_visible {
+            self.pending_runtime_light_snapshots.push_back(updated);
+        }
+        true
+    }
+
     pub(crate) fn fluid_tick_requests_after_block_change(
         &self,
         pos: WorldBlockPos,
@@ -987,28 +1088,35 @@ impl ChunkScheduler {
     }
 
     pub(crate) fn drain_pending_block_delta_events(&mut self) -> Vec<ChunkSchedulerEvent> {
+        let mut events = self
+            .pending_runtime_light_snapshots
+            .drain(..)
+            .map(ChunkSchedulerEvent::SnapshotReady)
+            .collect::<Vec<_>>();
         let pending = std::mem::take(&mut self.pending_block_deltas);
-        pending
-            .into_iter()
-            .filter_map(|((pos, section_y), section_updates)| {
-                if !self.holders.get(&pos).is_some_and(|holder| {
-                    holder.client_visible && holder.published_snapshot.is_some()
-                }) {
-                    return None;
-                }
-                let updates = section_updates
-                    .into_iter()
-                    .map(|(local_index, block_state)| {
-                        section_block_update_from_index(local_index, block_state)
+        events.extend(
+            pending
+                .into_iter()
+                .filter_map(|((pos, section_y), section_updates)| {
+                    if !self.holders.get(&pos).is_some_and(|holder| {
+                        holder.client_visible && holder.published_snapshot.is_some()
+                    }) {
+                        return None;
+                    }
+                    let updates = section_updates
+                        .into_iter()
+                        .map(|(local_index, block_state)| {
+                            section_block_update_from_index(local_index, block_state)
+                        })
+                        .collect::<Vec<_>>();
+                    (!updates.is_empty()).then_some(ChunkSchedulerEvent::SectionBlockUpdates {
+                        pos,
+                        section_y,
+                        updates,
                     })
-                    .collect::<Vec<_>>();
-                (!updates.is_empty()).then_some(ChunkSchedulerEvent::SectionBlockUpdates {
-                    pos,
-                    section_y,
-                    updates,
-                })
-            })
-            .collect()
+                }),
+        );
+        events
     }
 
     fn tick_fluid(&mut self, pos: WorldBlockPos, fluid: FluidKind) -> FluidMutationReport {
@@ -2144,6 +2252,13 @@ fn fluid_tick_event_from_generated_tick(tick: &ScheduledTick) -> Option<ChunkSch
         fluid: FluidKind::from_target(&tick.target)?,
         delay: tick.delay,
     })
+}
+
+fn block_change_affects_light(old_block: RawBlockId, new_block: RawBlockId) -> bool {
+    // Java Level.setBlock / ProtoChunk#setBlockState call checkBlock when light
+    // opacity or emission changes; shape occlusion parity is still block-model work.
+    block_light_opacity(old_block) != block_light_opacity(new_block)
+        || block_light_emission(old_block) != block_light_emission(new_block)
 }
 
 fn feature_job_positions(
