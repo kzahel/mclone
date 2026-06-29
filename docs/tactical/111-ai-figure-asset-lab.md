@@ -1,6 +1,6 @@
 # 111 - AI Figure Asset Lab
 
-Status: active; Slice 2 locomotion review metadata landed.
+Status: active; Slice 2 starter animal batch landed.
 
 ## Purpose
 
@@ -262,8 +262,9 @@ profile the harness before adding animation-sheet captures.
 - [x] Make sheet and MP4 review floors scroll from locomotion metadata, with
       MP4 output defaulting to several cycles.
 - [ ] Add a validation report that points to the asset file and part names.
-- [ ] Add starter prompts and examples for sheep, dog, cat, butterfly, and
-      player stand-in variants.
+- [x] Add starter examples for sheep, dog, cat, and butterfly.
+- [ ] Add starter prompts for sheep, dog, cat, butterfly, and player stand-in
+      variants.
 
 Landed validation:
 

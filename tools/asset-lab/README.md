@@ -16,6 +16,7 @@ pnpm asset-lab:export
 pnpm asset-lab:smoke
 pnpm asset-lab:sheet
 pnpm asset-lab:video
+pnpm asset-lab:batch
 pnpm asset-lab:preview
 ```
 
@@ -29,6 +30,10 @@ write a multi-cycle MP4 animation review at
 `/tmp/mclone-asset-lab/piglet-walk.mp4`. Walk clips keep the figure centered and
 move the floor backward by the authored cycle distance so foot sliding is easy
 to see.
+
+The batch command discovers `examples/*/figure.ts`, exports each asset, renders
+each sheet, and writes MP4 reviews under `/tmp/mclone-asset-lab/`. The initial
+batch contains `piglet`, `sheep`, `dog`, `cat`, and `butterfly`.
 
 Asset files should use the DSL from `src/dsl.ts`. Three.js is an implementation
 detail of the preview, not the source format.
