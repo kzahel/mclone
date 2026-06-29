@@ -79,10 +79,14 @@ Minimum:
 
 Headset follow-up:
 
-- Desktop OpenXR midpoint:
-  `scripts/start-xr.sh --smoke mclone --xr-underwater-mode midpoint --view-pose ...`
-- Desktop OpenXR per-eye:
-  `scripts/start-xr.sh --smoke mclone --xr-underwater-mode per-eye --view-pose ...`
+- Desktop OpenXR on macOS/WiVRn midpoint:
+  `pnpm native:xr:mac:wivrn:underwater:midpoint -- --view-pose ...`
+- Desktop OpenXR on macOS/WiVRn per-eye:
+  `pnpm native:xr:mac:wivrn:underwater:per-eye -- --view-pose ...`
+- Desktop OpenXR on Windows/Virtual Desktop midpoint:
+  `pnpm native:xr:windows:underwater:midpoint:connected -- --view-pose ...`
+- Desktop OpenXR on Windows/Virtual Desktop per-eye:
+  `pnpm native:xr:windows:underwater:per-eye:connected -- --view-pose ...`
 - Quest midpoint/per-eye through:
   `android-xr/validate-quest-openxr.sh --xr-underwater-mode midpoint|per-eye ...`
 
