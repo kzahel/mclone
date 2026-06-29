@@ -234,6 +234,7 @@ mod android {
         multiview_proof: bool,
         terrain_multiview_proof: bool,
         terrain_multiview_perf: bool,
+        sky_terrain_multiview_perf: bool,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -251,6 +252,7 @@ mod android {
                 multiview_proof: false,
                 terrain_multiview_proof: false,
                 terrain_multiview_perf: false,
+                sky_terrain_multiview_perf: false,
             }
         }
     }
@@ -349,6 +351,9 @@ mod android {
                 "--terrain-multiview-perf" => {
                     options.terrain_multiview_perf = true;
                 }
+                "--sky-terrain-multiview-perf" => {
+                    options.sky_terrain_multiview_perf = true;
+                }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
         }
@@ -376,14 +381,18 @@ mod android {
         if options.multiview_proof && options.terrain_multiview_proof {
             bail!("--multiview-proof cannot be combined with --terrain-multiview-proof");
         }
-        if options.terrain_multiview_perf
+        if options.terrain_multiview_perf && options.sky_terrain_multiview_perf {
+            bail!("--terrain-multiview-perf cannot be combined with --sky-terrain-multiview-perf");
+        }
+        if (options.terrain_multiview_perf || options.sky_terrain_multiview_perf)
             && (options.multiview_proof || options.terrain_multiview_proof)
         {
-            bail!("--terrain-multiview-perf cannot be combined with multiview proof modes");
+            bail!("multiview perf modes cannot be combined with multiview proof modes");
         }
         if options.multiview_proof
             || options.terrain_multiview_proof
             || options.terrain_multiview_perf
+            || options.sky_terrain_multiview_perf
         {
             if options.session_smoke.is_some() {
                 bail!("multiview proof modes cannot be combined with --session-smoke");
@@ -655,6 +664,10 @@ mod android {
             startup_options.terrain_multiview_perf
         );
         log::info!(
+            "Android XR sky terrain multiview perf: {}",
+            startup_options.sky_terrain_multiview_perf
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -696,6 +709,7 @@ mod android {
             startup_options.multiview_proof,
             startup_options.terrain_multiview_proof,
             startup_options.terrain_multiview_perf,
+            startup_options.sky_terrain_multiview_perf,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -718,6 +732,7 @@ mod android {
         multiview_proof: bool,
         terrain_multiview_proof: bool,
         terrain_multiview_perf: bool,
+        sky_terrain_multiview_perf: bool,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -1001,7 +1016,7 @@ mod android {
             );
         }
 
-        if terrain_multiview_perf {
+        if terrain_multiview_perf || sky_terrain_multiview_perf {
             log::info!("MCLONE_ANDROID_XR_SESSION_READY");
             let mut terrain = create_android_xr_terrain_state(
                 &graphics.device,
@@ -1022,6 +1037,7 @@ mod android {
                 eye_width,
                 eye_height,
                 &mut terrain,
+                sky_terrain_multiview_perf,
             );
         }
 
@@ -1559,6 +1575,7 @@ mod android {
         eye_width: u32,
         eye_height: u32,
         terrain: &mut AndroidXrTerrainState,
+        include_sky: bool,
     ) -> Result<()> {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
@@ -1625,6 +1642,7 @@ mod android {
                     frame_state.predicted_display_time,
                     &targets,
                     terrain,
+                    include_sky,
                 );
                 let end_result = mclone_xr_host::end_frame_with_layers(
                     &mut graphics.frame_stream,
@@ -1645,8 +1663,14 @@ mod android {
                     let stereo = summary.stereo_stats();
                     let multiview = summary.multiview_stats();
                     let delta_ms = stereo.avg_ms - multiview.avg_ms;
+                    let marker = if include_sky {
+                        "MCLONE_ANDROID_XR_SKY_TERRAIN_MULTIVIEW_PERF_SUMMARY"
+                    } else {
+                        "MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PERF_SUMMARY"
+                    };
                     log::info!(
-                        "MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PERF_SUMMARY samples={} warmup={} eye={}x{} sections={} left_drawn_sections={} right_drawn_sections={} left_drawn_indices={} right_drawn_indices={} stereo_avg_ms={:.3} stereo_min_ms={:.3} stereo_p50_ms={:.3} stereo_p95_ms={:.3} stereo_max_ms={:.3} multiview_avg_ms={:.3} multiview_min_ms={:.3} multiview_p50_ms={:.3} multiview_p95_ms={:.3} multiview_max_ms={:.3} delta_avg_ms={:.3} speedup={:.3}",
+                        "{} samples={} warmup={} eye={}x{} sections={} left_drawn_sections={} right_drawn_sections={} left_drawn_indices={} right_drawn_indices={} stereo_avg_ms={:.3} stereo_min_ms={:.3} stereo_p50_ms={:.3} stereo_p95_ms={:.3} stereo_max_ms={:.3} multiview_avg_ms={:.3} multiview_min_ms={:.3} multiview_p50_ms={:.3} multiview_p95_ms={:.3} multiview_max_ms={:.3} delta_avg_ms={:.3} speedup={:.3}",
+                        marker,
                         TERRAIN_MULTIVIEW_PERF_SAMPLE_FRAMES,
                         TERRAIN_MULTIVIEW_PERF_WARMUP_FRAMES,
                         eye_width,
@@ -1688,6 +1712,7 @@ mod android {
         predicted_display_time: xr::Time,
         targets: &TerrainPerfTargets,
         terrain: &mut AndroidXrTerrainState,
+        include_sky: bool,
     ) -> Result<Option<TerrainMultiviewPerfSummary>> {
         let stereo_views =
             mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
@@ -1710,19 +1735,38 @@ mod android {
         }
 
         for _ in 0..TERRAIN_MULTIVIEW_PERF_WARMUP_FRAMES {
-            let _ = terrain.render_terrain_stereo_frame_frozen(
-                &graphics.device,
-                &graphics.queue,
-                [stereo_views.left, stereo_views.right],
-                targets.left.target(),
-                targets.right.target(),
-            )?;
-            let _ = terrain.render_terrain_multiview_frame_frozen(
-                &graphics.device,
-                &graphics.queue,
-                [stereo_views.left, stereo_views.right],
-                targets.multiview.target(),
-            )?;
+            if include_sky {
+                let _ = terrain.render_sky_terrain_stereo_frame_frozen(
+                    &graphics.device,
+                    &graphics.queue,
+                    [stereo_views.left, stereo_views.right],
+                    targets.left.target(),
+                    targets.right.target(),
+                )?;
+            } else {
+                let _ = terrain.render_terrain_stereo_frame_frozen(
+                    &graphics.device,
+                    &graphics.queue,
+                    [stereo_views.left, stereo_views.right],
+                    targets.left.target(),
+                    targets.right.target(),
+                )?;
+            }
+            if include_sky {
+                let _ = terrain.render_sky_terrain_multiview_frame_frozen(
+                    &graphics.device,
+                    &graphics.queue,
+                    [stereo_views.left, stereo_views.right],
+                    targets.multiview.target(),
+                )?;
+            } else {
+                let _ = terrain.render_terrain_multiview_frame_frozen(
+                    &graphics.device,
+                    &graphics.queue,
+                    [stereo_views.left, stereo_views.right],
+                    targets.multiview.target(),
+                )?;
+            }
         }
 
         let mut stereo_ms = Vec::with_capacity(TERRAIN_MULTIVIEW_PERF_SAMPLE_FRAMES);
@@ -1736,6 +1780,7 @@ mod android {
                     [stereo_views.left, stereo_views.right],
                     targets,
                     terrain,
+                    include_sky,
                 )?);
                 let (elapsed_ms, summary) = measure_terrain_multiview_frame(
                     &graphics.device,
@@ -1743,6 +1788,7 @@ mod android {
                     [stereo_views.left, stereo_views.right],
                     targets,
                     terrain,
+                    include_sky,
                 )?;
                 multiview_ms.push(elapsed_ms);
                 latest_summary = summary;
@@ -1753,6 +1799,7 @@ mod android {
                     [stereo_views.left, stereo_views.right],
                     targets,
                     terrain,
+                    include_sky,
                 )?;
                 multiview_ms.push(elapsed_ms);
                 latest_summary = summary;
@@ -1762,6 +1809,7 @@ mod android {
                     [stereo_views.left, stereo_views.right],
                     targets,
                     terrain,
+                    include_sky,
                 )?);
             }
         }
@@ -1779,15 +1827,26 @@ mod android {
         views: [xr::View; 2],
         targets: &TerrainPerfTargets,
         terrain: &mut AndroidXrTerrainState,
+        include_sky: bool,
     ) -> Result<f64> {
         let start = Instant::now();
-        let _summary = terrain.render_terrain_stereo_frame_frozen(
-            device,
-            queue,
-            views,
-            targets.left.target(),
-            targets.right.target(),
-        )?;
+        if include_sky {
+            let _summary = terrain.render_sky_terrain_stereo_frame_frozen(
+                device,
+                queue,
+                views,
+                targets.left.target(),
+                targets.right.target(),
+            )?;
+        } else {
+            let _summary = terrain.render_terrain_stereo_frame_frozen(
+                device,
+                queue,
+                views,
+                targets.left.target(),
+                targets.right.target(),
+            )?;
+        }
         Ok(start.elapsed().as_secs_f64() * 1000.0)
     }
 
@@ -1797,14 +1856,24 @@ mod android {
         views: [xr::View; 2],
         targets: &TerrainPerfTargets,
         terrain: &mut AndroidXrTerrainState,
+        include_sky: bool,
     ) -> Result<(f64, mclone_xr_scene::XrTerrainMultiviewFrameSummary)> {
         let start = Instant::now();
-        let summary = terrain.render_terrain_multiview_frame_frozen(
-            device,
-            queue,
-            views,
-            targets.multiview.target(),
-        )?;
+        let summary = if include_sky {
+            terrain.render_sky_terrain_multiview_frame_frozen(
+                device,
+                queue,
+                views,
+                targets.multiview.target(),
+            )?
+        } else {
+            terrain.render_terrain_multiview_frame_frozen(
+                device,
+                queue,
+                views,
+                targets.multiview.target(),
+            )?
+        };
         Ok((start.elapsed().as_secs_f64() * 1000.0, summary))
     }
 

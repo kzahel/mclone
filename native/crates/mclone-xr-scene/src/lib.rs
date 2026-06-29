@@ -1138,7 +1138,7 @@ where
             self.frozen_runtime_upload_summary()
         };
 
-        self.render_prepared_terrain_multiview_frame_with_upload_inner(
+        self.render_prepared_terrain_multiview_frame_with_upload(
             device,
             queue,
             render_views,

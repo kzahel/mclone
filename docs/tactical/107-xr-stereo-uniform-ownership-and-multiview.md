@@ -1,15 +1,16 @@
 # 107: XR Stereo Uniform Ownership and Multiview
 
 Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
-proof landed, and Slice E's headless, Android XR, and terrain-chunk multiview
-proof paths exist. Quest now exposes `wgpu::Features::MULTIVIEW` after enabling
+proof landed, and Slice E's headless, Android XR, terrain-chunk, sky background,
+and terrain+sky multiview proof/perf paths exist. Quest now exposes
+`wgpu::Features::MULTIVIEW` after enabling
 `VK_KHR_get_physical_device_properties2` on the OpenXR Vulkan instance and
 threading `VK_KHR_multiview` into the wgpu-wrapped device extension list, and
 the on-device proofs now validate true multiview layer writes/readback, the
 left/right stereo projection guard, and chunk-terrain rendering through a
 two-layer OpenXR swapchain. The production headset frame remains on the correct
-per-eye submit path until sky/entities/GUI/screen effects migrate too. Created
-after `d0c5161` (`Restore XR per-eye command submission`) rolled back the unsafe
+per-eye submit path until entities/GUI/screen effects migrate too. Created after
+`d0c5161` (`Restore XR per-eye command submission`) rolled back the unsafe
 single-submit Quest XR optimization from `264c723`.
 
 ## Goal
@@ -410,8 +411,9 @@ a separate multiview shader/pipeline path using a `[2]` view uniform array
 selected by `@builtin(view_index)`, plus a two-layer chunk depth target. The
 proof mode renders prepared terrain sections into one two-layer OpenXR color
 swapchain, culls each eye independently, draws the union of visible sections in
-one multiview pass, and reads both swapchain layers back. The normal headset
-frame still uses the safe per-eye submit path.
+one multiview pass, and reads both swapchain layers back. The sky background
+then gained the same multiview shape in `9be4fec` (`Add sky multiview rendering
+path`). The normal headset frame still uses the safe per-eye submit path.
 
 Validation command:
 
@@ -468,10 +470,38 @@ headset frame loop.
 Release APK SHA-256 for the perf runs:
 `3c95848259dda09f80abd92271f6f51452a57016eb1bb23e0db9f6596cdc2a2b`.
 
+**Sky+terrain A/B perf probe added 2026-06-29.** Android XR now also has a
+diagnostic launch mode that measures the current per-eye sky+terrain shape
+against one multiview sky pass plus one multiview terrain pass:
+
+```bash
+pnpm native:android-xr:sky-terrain-multiview-perf
+```
+
+Quest 3 results keep the same pattern as terrain-only: the tiny/default case is
+flat, while the RD10 frozen pose shows a positive microbenchmark signal.
+
+```text
+Default tiny scene:
+MCLONE_ANDROID_XR_SKY_TERRAIN_MULTIVIEW_PERF_SUMMARY samples=60 warmup=12 eye=1680x1760 sections=6 left_drawn_sections=2 right_drawn_sections=2 left_drawn_indices=15924 right_drawn_indices=15924 stereo_avg_ms=2.035 stereo_p50_ms=1.870 stereo_p95_ms=2.742 multiview_avg_ms=2.015 multiview_p50_ms=1.898 multiview_p95_ms=2.453 delta_avg_ms=0.020 speedup=1.010
+
+RD10 frozen pose 0,120,-96,180:
+MCLONE_ANDROID_XR_SKY_TERRAIN_MULTIVIEW_PERF_SUMMARY samples=60 warmup=12 eye=1680x1760 sections=6 left_drawn_sections=3 right_drawn_sections=3 left_drawn_indices=4644 right_drawn_indices=4644 stereo_avg_ms=1.090 stereo_p50_ms=1.007 stereo_p95_ms=1.411 multiview_avg_ms=0.693 multiview_p50_ms=0.636 multiview_p95_ms=1.248 delta_avg_ms=0.397 speedup=1.574
+```
+
+Interpretation: sky itself does not turn the tiny/default case into a win, but
+the RD10 pose improves more strongly than the terrain-only row at the same pose
+(`1.57x` vs `1.36x`). This is still an offscreen microbenchmark. It says the
+multiview path is worth continuing, not that normal headset frame pacing has
+improved yet.
+
+Release APK SHA-256 for the sky+terrain perf runs:
+`8d2b302ff8865038b09ed4f2831ea06d4e4cd25403dcf996ccf8bbf714dd0aa9`.
+
 Move from proof-of-correctness one-submit to the real target:
 
-- migrate sky, actors/entities, selection outline, world GUI, and screen effects
-  to multiview-capable paths;
+- migrate actors/entities, selection outline, world GUI, and screen effects to
+  multiview-capable paths;
 - decide whether terrain's union-of-eye-culls policy is acceptable for the first
   production path or should be tightened before enabling;
 - shared draw list feeding both eye layers.
