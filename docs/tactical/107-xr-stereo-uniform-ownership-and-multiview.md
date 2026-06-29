@@ -1,8 +1,8 @@
 # 107: XR Stereo Uniform Ownership and Multiview
 
-Status: proposed high-priority prerequisite. Created after `d0c5161`
-(`Restore XR per-eye command submission`) rolled back the unsafe single-submit
-Quest XR optimization from `264c723`.
+Status: active high-priority prerequisite; Slice A landed. Created after
+`d0c5161` (`Restore XR per-eye command submission`) rolled back the unsafe
+single-submit Quest XR optimization from `264c723`.
 
 ## Goal
 
@@ -129,6 +129,16 @@ Required validation before reintroducing one-submit or multiview:
 ## Ordered Slices
 
 ### Slice A - Fence or Remove Orphaned E1/E2 Surfaces
+
+**Landed 2026-06-29.** The dead E1/E2 surfaces no longer produce fake data:
+`native:android-xr:perf:frozen:rd10:gpu` and `:contention` package lanes were
+removed; `--perf-gpu-timestamps` and `--perf-poll-contention` were removed from
+the Quest validator and Android XR startup parser, so attempts to use them now
+fail instead of running inert stubs; the Android app no longer emits
+`MCLONE_ANDROID_XR_PERF_GPU=0.000` or the inactive contention marker; the
+always-zero scene/app GPU timing fields, `poll_contention_active`, contention
+buckets, no-op scene setters, and unused OpenXR timestamp-query feature request
+were removed. Historical E1/E2 records remain in docs only.
 
 `d0c5161` removed the E1 GPU timestamp and E2 poll-contention implementations,
 but some command-line and package-script surface may still exist. Audit:

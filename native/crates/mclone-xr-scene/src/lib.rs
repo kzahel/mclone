@@ -231,20 +231,6 @@ pub struct XrTerrainFrameTiming {
     pub stereo_finish_ms: f64,
     pub stereo_submit_ms: f64,
     pub stereo_poll_wait_ms: f64,
-    /// E1: real GPU execution time for the whole stereo frame (both eyes plus
-    /// sky/UI/selection passes), measured via wgpu timestamp queries bracketing
-    /// the stereo command encoder. Zero unless GPU timestamps are enabled and
-    /// the OpenXR Vulkan adapter supports `TIMESTAMP_QUERY`.
-    pub gpu_stereo_total_ms: f64,
-    pub gpu_left_eye_ms: f64,
-    pub gpu_right_eye_ms: f64,
-    /// E2 (docs/tactical/106): true when a CPU memory-bandwidth load ran on a
-    /// worker concurrently with this frame's blocking stereo poll (the probe
-    /// alternates loaded/control frames). Always false unless the poll-contention
-    /// probe is enabled. The app buckets `stereo_poll_wait_ms` /
-    /// `gpu_stereo_total_ms` by this flag; the loaded-minus-control delta is the
-    /// measured unified-memory contention cost.
-    pub poll_contention_active: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -799,7 +785,6 @@ where
             timing.left_eye_render.submit_ms + timing.right_eye_render.submit_ms;
         timing.stereo_poll_wait_ms =
             timing.left_eye_render.poll_wait_ms + timing.right_eye_render.poll_wait_ms;
-        timing.poll_contention_active = false;
         self.record_eye0_summary(left_eye.summary);
         Ok(self.frame_summary_with_timing(timing, upload))
     }
@@ -818,22 +803,6 @@ where
 
     pub fn set_render_split_timing_enabled(&mut self, enabled: bool) {
         self.render_split_timing_enabled = enabled;
-    }
-
-    pub fn set_gpu_timestamps_enabled(&mut self, enabled: bool) {
-        if enabled {
-            log::warn!(
-                "XR GPU timestamp instrumentation is disabled while XR uses per-eye command submission"
-            );
-        }
-    }
-
-    pub fn set_poll_contention_enabled(&mut self, enabled: bool) {
-        if enabled {
-            log::warn!(
-                "XR poll-contention probe is disabled while XR uses per-eye command submission"
-            );
-        }
     }
 
     pub fn camera_snapshot(&self) -> EngineCameraSnapshot {

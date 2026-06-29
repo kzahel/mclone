@@ -188,14 +188,7 @@ pub mod vulkan {
         let exposed_adapter = hal_instance
             .expose_adapter(vk_physical_device)
             .context("expose OpenXR Vulkan physical device to wgpu")?;
-        // E1 (docs/tactical/106): enable GPU timestamp queries when the OpenXR
-        // Vulkan adapter advertises them so the stereo render can be bracketed
-        // for a real GPU-vs-CPU/submit split of the blocking poll wait. Masking
-        // by `exposed_adapter.features` keeps this safe when unsupported, and
-        // enabling the capability is free; the per-frame timestamp write/resolve
-        // /readback stays opt-in (XrMcloneTerrainState::set_gpu_timestamps_enabled).
-        let required_features = exposed_adapter.features
-            & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS);
+        let required_features = wgpu::Features::empty();
         let hal_device = unsafe {
             exposed_adapter.adapter.device_from_raw(
                 vk_device,
