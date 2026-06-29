@@ -89,6 +89,11 @@
     "assets:pack": "node ./scripts/run-python.mjs ./tools/minecraft_assets/asset_pack.py",
     "assets:pack:check": "node ./scripts/run-python.mjs ./tools/minecraft_assets/asset_pack.py --check-lock",
     "assets:pack:write-lock": "node ./scripts/run-python.mjs ./tools/minecraft_assets/asset_pack.py --write-lock",
+    "asset-lab:install": "pnpm --dir ./tools/asset-lab install",
+    "asset-lab:typecheck": "pnpm --dir ./tools/asset-lab typecheck",
+    "asset-lab:export": "pnpm --dir ./tools/asset-lab export",
+    "asset-lab:smoke": "pnpm --dir ./tools/asset-lab smoke",
+    "asset-lab:preview": "pnpm --dir ./tools/asset-lab preview",
     "typecheck": "pnpm native:web:typecheck",
     "oracle:gen": "bash ./oracle/run.sh"
   },
