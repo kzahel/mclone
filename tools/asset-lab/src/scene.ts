@@ -14,6 +14,7 @@ export interface FigureSceneOptions {
 interface PartObject {
   part: PartSpec;
   group: THREE.Group;
+  content: THREE.Group;
   basePosition: THREE.Vector3;
   baseRotation: THREE.Euler;
 }
@@ -43,31 +44,38 @@ export function createFigureScene(asset: FigureAsset, clipName?: string, options
   const parts = new Map<string, PartObject>();
 
   for (const part of asset.parts) {
+    const pivot = partPivot(part);
     const group = new THREE.Group();
     group.name = part.name;
-    group.position.copy(toVector(part.at ?? [0, 0, 0]));
+    group.position.copy(toVector(part.at ?? [0, 0, 0]).add(pivot));
     group.rotation.copy(toEuler(part.rot ?? [0, 0, 0]));
+
+    const content = new THREE.Group();
+    content.name = `${part.name}_content`;
+    content.position.copy(pivot.clone().multiplyScalar(-1));
+    group.add(content);
 
     const mesh = new THREE.Mesh(createGeometry(part), createMaterials(part, materialMap, textureMap));
     mesh.name = `${part.name}_mesh`;
-    group.add(mesh);
+    content.add(mesh);
 
     if (options.debug) {
-      group.add(createWireframe(mesh.geometry));
+      content.add(createWireframe(mesh.geometry));
       if (part.joint) {
-        group.add(createPivotMarker(part.joint.pivot ?? [0, 0, 0]));
+        group.add(createPivotMarker());
         group.add(createAxisMarker(0.18));
       }
       if (options.labels) {
-        group.add(createLabel(part.name));
+        content.add(createLabel(part.name));
       }
     } else if (part.joint?.pivot) {
-      group.add(createPivotMarker(part.joint.pivot));
+      group.add(createPivotMarker());
     }
 
     parts.set(part.name, {
       part,
       group,
+      content,
       basePosition: group.position.clone(),
       baseRotation: group.rotation.clone(),
     });
@@ -76,7 +84,7 @@ export function createFigureScene(asset: FigureAsset, clipName?: string, options
   for (const item of parts.values()) {
     const parent = item.part.parent ? parts.get(item.part.parent) : undefined;
     if (parent) {
-      parent.group.add(item.group);
+      parent.content.add(item.group);
     } else {
       root.add(item.group);
     }
@@ -153,6 +161,10 @@ function createMaterials(
   return createMaterial(part, undefined, materialMap, textureMap);
 }
 
+function partPivot(part: PartSpec): THREE.Vector3 {
+  return toVector(part.joint?.pivot ?? part.pivot ?? [0, 0, 0]);
+}
+
 function createMaterial(
   part: PartSpec,
   face: FaceSpec | undefined,
@@ -208,13 +220,12 @@ function asciiTextureToCanvasTexture(palette: Record<string, string>, pixels: st
   return texture;
 }
 
-function createPivotMarker(pivot: Vec3): THREE.Object3D {
+function createPivotMarker(): THREE.Object3D {
   const marker = new THREE.Mesh(
     new THREE.SphereGeometry(0.035, 8, 4),
     new THREE.MeshBasicMaterial({ color: new THREE.Color("#1d4ed8") }),
   );
   marker.name = "pivot";
-  marker.position.copy(toVector(pivot));
   return marker;
 }
 

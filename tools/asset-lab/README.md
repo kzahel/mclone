@@ -37,3 +37,18 @@ part("head", box({
   },
 }));
 ```
+
+Animated parts can rotate around an explicit local pivot. The pivot is measured
+from the part's unrotated local center, so a vertical capsule leg with
+`length: 0.42` uses `pivot: [0, 0.21, 0]` to swing from its top.
+
+```ts
+part("leg_fl", capsule({
+  parent: "body",
+  at: [-0.42, -0.53, -0.26],
+  radius: 0.09,
+  length: 0.42,
+  joint: { pivot: [0, 0.21, 0], axis: [1, 0, 0] },
+  material: "skin",
+}));
+```

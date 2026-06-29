@@ -62,10 +62,10 @@ export default figure("piglet", ({ mat, asciiTexture, part, box, capsule, sphere
   part("ear_l", box({ parent: "head", at: [-0.29, 0.32, -0.08], rot: [0, 0, -10], size: [0.16, 0.22, 0.08], material: "skin" }));
   part("ear_r", box({ parent: "head", at: [0.29, 0.32, -0.08], rot: [0, 0, 10], size: [0.16, 0.22, 0.08], material: "skin" }));
 
-  part("leg_fl", capsule({ parent: "body", at: [-0.42, -0.53, -0.26], radius: 0.09, length: 0.42, material: "skin", joint: { axis: [1, 0, 0] } }));
-  part("leg_fr", capsule({ parent: "body", at: [0.42, -0.53, -0.26], radius: 0.09, length: 0.42, material: "skin", joint: { axis: [1, 0, 0] } }));
-  part("leg_bl", capsule({ parent: "body", at: [-0.42, -0.53, 0.28], radius: 0.09, length: 0.42, material: "skin", joint: { axis: [1, 0, 0] } }));
-  part("leg_br", capsule({ parent: "body", at: [0.42, -0.53, 0.28], radius: 0.09, length: 0.42, material: "skin", joint: { axis: [1, 0, 0] } }));
+  part("leg_fl", capsule({ parent: "body", at: [-0.42, -0.53, -0.26], radius: 0.09, length: 0.42, material: "skin", joint: { pivot: [0, 0.21, 0], axis: [1, 0, 0] } }));
+  part("leg_fr", capsule({ parent: "body", at: [0.42, -0.53, -0.26], radius: 0.09, length: 0.42, material: "skin", joint: { pivot: [0, 0.21, 0], axis: [1, 0, 0] } }));
+  part("leg_bl", capsule({ parent: "body", at: [-0.42, -0.53, 0.28], radius: 0.09, length: 0.42, material: "skin", joint: { pivot: [0, 0.21, 0], axis: [1, 0, 0] } }));
+  part("leg_br", capsule({ parent: "body", at: [0.42, -0.53, 0.28], radius: 0.09, length: 0.42, material: "skin", joint: { pivot: [0, 0.21, 0], axis: [1, 0, 0] } }));
 
   part("hoof_fl", box({ parent: "leg_fl", at: [0, -0.28, 0], size: [0.16, 0.08, 0.16], material: "hoof" }));
   part("hoof_fr", box({ parent: "leg_fr", at: [0, -0.28, 0], size: [0.16, 0.08, 0.16], material: "hoof" }));
