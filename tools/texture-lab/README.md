@@ -1,8 +1,8 @@
 # Mclone Texture Lab
 
 Disposable TypeScript lab for authoring an original Minecraft-style texture
-pack. Three.js block previews are planned after the first 2D export/review
-loop.
+pack. The first block preview is a deterministic software isometric renderer;
+browser-based previews remain optional later tooling.
 
 The goal is to make it cheap for an agent or human to generate, preview,
 validate, and revise block textures without distributing Mojang-owned PNGs.
@@ -117,7 +117,7 @@ The review sheet should include:
 - 3x3 or 5x5 seamless tile view.
 - seam view that highlights left/right and top/bottom discontinuities.
 - 16x16 downsample and mip chain preview.
-- isolated Three.js cube in three-quarter view.
+- isolated software-rendered cube in three-quarter view.
 - small terrain patch preview, because repetition problems often appear only
   across many blocks.
 - rotation and mirror preview for blocks that rely on deterministic model

@@ -1,6 +1,7 @@
 # 114 - AI Texture Pack Lab
 
-Status: active; first scaffold/export/sheet loop landed on 2026-06-30.
+Status: active; scaffold/export/sheet loop plus software cube and rotation-grid
+panels landed on 2026-06-30.
 
 ## Purpose
 
@@ -173,6 +174,7 @@ pnpm texture-lab:export
 - [x] Add 3x3 tile-repeat panels through the initial CLI sheet.
 - [ ] Add seam/error panels.
 - [x] Add 16x16 downsample and mip-strip panels through the initial CLI sheet.
+- [x] Add deterministic rotation-grid panel through the CLI sheet.
 - [ ] Add Playwright sheet capture under `/tmp/mclone-texture-lab/`.
 
 Validation:
@@ -186,7 +188,10 @@ texture.
 
 ### Slice 4 - Block And Terrain Preview
 
-- [ ] Add Three.js cube preview with nearest filtering and controlled lighting.
+- [x] Add software isometric cube preview for full-cube textures with nearest
+  sampling and face shading.
+- [ ] Add optional Three.js/browser preview later if interaction or non-cube
+  models need it.
 - [ ] Add small terrain-patch preview for repeated block faces.
 - [ ] Add per-face block bundles for `grass_block`.
 - [ ] Add tint swatches for grass and foliage previews.
@@ -201,7 +206,8 @@ pnpm texture-lab:preview
 
 ### Slice 5 - Rotation And Variant Experiments
 
-- [ ] Add deterministic preview of vanilla-style model rotations and mirrors.
+- [x] Add deterministic preview of vanilla-style model rotations.
+- [ ] Add mirror preview where blocks use mirrored model variants.
 - [ ] Add authored variant sets with weights.
 - [ ] Render comparison panels for auto-rotation, authored variants, and no
   rotation.
