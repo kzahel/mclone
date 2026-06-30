@@ -56,9 +56,9 @@ export function makeMetadataReportMarkdown(pack: TexturePackAsset): string {
     for (const [name, block] of blockEntries) {
       lines.push(`### ${name}`);
       lines.push("");
-      lines.push(`Sheet: \`${name}-sheet.png\``);
+      lines.push(`Sheet: \`${blockSheetPath(pack, name)}\``);
       if (block.faces.side && block.faces.overlay) {
-        lines.push(`Side context sheet: \`${name}-side-sheet.png\``);
+        lines.push(`Side context sheet: \`${blockSideSheetPath(pack, name)}\``);
       }
       lines.push("");
       lines.push("| Face Role | Texture | Source | Tint Role | Preview Tiling |");
@@ -164,14 +164,22 @@ function blockReport(pack: TexturePackAsset, name: string, block: BlockSpec): Re
   const report: Record<string, unknown> = {
     name,
     kind: block.kind,
-    sheetPath: `${name}-sheet.png`,
+    sheetPath: blockSheetPath(pack, name),
     faces: blockFaces(block, pack),
     composition: blockComposition(block, pack),
   };
   if (block.faces.side && block.faces.overlay) {
-    report.sideContextSheetPath = `${name}-side-sheet.png`;
+    report.sideContextSheetPath = blockSideSheetPath(pack, name);
   }
   return report;
+}
+
+function blockSheetPath(pack: TexturePackAsset, blockName: string): string {
+  return pack.textures[blockName] ? `${blockName}-block-sheet.png` : `${blockName}-sheet.png`;
+}
+
+function blockSideSheetPath(pack: TexturePackAsset, blockName: string): string {
+  return pack.textures[blockName] ? `${blockName}-block-side-sheet.png` : `${blockName}-side-sheet.png`;
 }
 
 function blockFaces(block: BlockSpec, pack: TexturePackAsset): FaceReport[] {

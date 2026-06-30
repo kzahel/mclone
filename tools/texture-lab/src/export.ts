@@ -43,13 +43,15 @@ for (const texture of textures) {
 }
 
 for (const [blockName, block] of Object.entries(pack.blocks)) {
-  const sheetPath = path.join(args.outDir, `${blockName}-sheet.png`);
+  const blockSheetName = texturesByName.has(blockName) ? `${blockName}-block-sheet.png` : `${blockName}-sheet.png`;
+  const sheetPath = path.join(args.outDir, blockSheetName);
   await fs.writeFile(sheetPath, encodePng(makeBlockReviewSheet(blockName, block, texturesByName)));
   console.log(`Wrote ${sheetPath}`);
 
   const sideSheet = makeBlockSideReviewSheet(blockName, block, texturesByName);
   if (sideSheet) {
-    const sideSheetPath = path.join(args.outDir, `${blockName}-side-sheet.png`);
+    const sideSheetName = texturesByName.has(blockName) ? `${blockName}-block-side-sheet.png` : `${blockName}-side-sheet.png`;
+    const sideSheetPath = path.join(args.outDir, sideSheetName);
     await fs.writeFile(sideSheetPath, encodePng(sideSheet));
     console.log(`Wrote ${sideSheetPath}`);
   }

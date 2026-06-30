@@ -45,6 +45,7 @@ Accepted pack source is committed under:
 tools/texture-lab/packs/mclone-default/texture.ts
 tools/texture-lab/packs/mclone-default/block/dirt.ts
 tools/texture-lab/packs/mclone-default/block/grass-block.ts
+tools/texture-lab/packs/mclone-default/block/stone.ts
 ```
 
 These TypeScript files are the source of truth. They define palettes, tint
@@ -61,11 +62,23 @@ sheets to:
 /tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_side.png
 /tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_side_overlay.png
 /tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_bottom.png
+/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/stone.png
+/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/coal_ore.png
+/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/iron_ore.png
 /tmp/mclone-texture-lab/grass-block-sheet.png
 /tmp/mclone-texture-lab/grass-block-side-sheet.png
+/tmp/mclone-texture-lab/stone-sheet.png
+/tmp/mclone-texture-lab/stone-block-sheet.png
+/tmp/mclone-texture-lab/coal_ore-sheet.png
+/tmp/mclone-texture-lab/coal-ore-sheet.png
+/tmp/mclone-texture-lab/iron_ore-sheet.png
+/tmp/mclone-texture-lab/iron-ore-sheet.png
 /tmp/mclone-texture-lab/mclone-default-metadata.md
 /tmp/mclone-texture-lab/mclone-default-metadata.json
 ```
+
+When a block name collides with a texture name, such as `stone`, the texture
+sheet keeps `stone-sheet.png` and the block sheet uses `stone-block-sheet.png`.
 
 The runtime-compatible export also writes vanilla-path texture overrides:
 
@@ -75,6 +88,9 @@ The runtime-compatible export also writes vanilla-path texture overrides:
 /tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_side.png
 /tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_side_overlay.png
 /tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_bottom.png
+/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/stone.png
+/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/coal_ore.png
+/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/iron_ore.png
 ```
 
 This is a development bridge, not a standalone distributable pack. It overrides
@@ -181,8 +197,9 @@ The starter DSL now includes broader authored structure beyond speckles:
 All procedural helpers that target fully tiled textures should be periodic by
 construction. Rotation-safe materials should avoid one-way lighting or streaks;
 orientation-aware materials should declare that directionality explicitly.
-The first dirt/grass pass proves the mechanism but is not final art; generated
-repeat panels still need human review for visible macro-pattern stamping.
+The first dirt/grass/stone pass proves the mechanism but is not final art;
+generated repeat panels still need human review for visible macro-pattern
+stamping.
 
 ## Resolution
 
@@ -225,6 +242,7 @@ Useful first bundles:
 - `dirt`: single tile, rotation/mirror preview.
 - `grass_block`: top, side, bottom, tinted side overlay, biome tint previews.
 - `stone`: tile plus mirrored/rotated variants.
+- `coal_ore` / `iron_ore`: base stone material plus authored ore masks.
 - `oak_log`: side, top rings, axis rotation previews.
 - `sand`: subtle tile, mip/noise review.
 - `leaves`: alpha/cutout preview and foliage tint.

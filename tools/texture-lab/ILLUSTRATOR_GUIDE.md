@@ -146,6 +146,11 @@ Ore textures should be composed from the base stone or deepslate material plus
 ore masks, so they inherit palette and noise from the host rock instead of
 becoming unrelated standalone tiles.
 
+For ore masks, keep the host rock layer identical to the base block, then add
+only the mineral shape. Avoid placing ore pixels directly on tile edges unless
+the cluster is intentionally wrapping; edge fragments are easy to spot in the
+seam and repeat panels.
+
 ## Reviewing Sheets
 
 Individual texture sheets are source-first:

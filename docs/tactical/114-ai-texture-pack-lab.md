@@ -2,8 +2,9 @@
 
 Status: active; scaffold/export/sheet loop, software cube, rotation-grid panels,
 first grass-block bundle, primary-tint terrain patch, source/tint split review
-sheets, texture illustrator guide, DSL tint-role metadata, and metadata reports
-plus seam diagnostics landed on 2026-06-30.
+sheets, texture illustrator guide, DSL tint-role metadata, metadata reports,
+seam diagnostics, macro/mask layers, and first stone/ore composition pass
+landed on 2026-06-30.
 
 ## Purpose
 
@@ -172,7 +173,7 @@ git diff --check
 - [x] Export derived PNGs to `/tmp/mclone-texture-lab/pack/`.
 - [x] Export Markdown and JSON metadata reports for texture roles, tint roles,
   preview modes, sheet paths, and block composition.
-- [ ] Add `stone` example at 32x32. The first landed example is `dirt`.
+- [x] Add `stone` example at 32x32.
 
 Validation:
 
@@ -276,7 +277,7 @@ structure.
 - [x] Let ASCII masks drive opacity and overlay color instead of only painting
   final pixels.
 - [ ] Let ASCII masks drive palette-ramp selection and procedural placement.
-- [ ] Add compositional texture definitions so ores and related blocks can
+- [x] Add compositional texture definitions so ores and related blocks can
   reuse a base material plus an authored ore/mineral mask.
 - [x] Add texture-class guidance for natural full tiles, layered blocks, ore
   overlays, directional blocks, cutout plants, and fluids/emissive materials.
@@ -287,6 +288,12 @@ use broad periodic noise, virtual-resolution masks, and lighter speckle detail.
 The generated sheets show better macro structure, but the broad fields are
 still visibly synthetic in repeat panels; future art passes should tune masks
 and noise per material before producing a large block batch.
+
+Status 2026-06-30: `stone`, `coal_ore`, and `iron_ore` landed in the default
+pack. Coal and iron ore reuse the same source-level stone layer stack and add
+only ore masks, proving base-material-plus-mask composition. This is not yet a
+first-class DSL combinator; promote it only if more block families need the
+same composition pattern.
 
 Acceptance: the next stone/ground textures show broad, intentional material
 forms in sheets and terrain preview, not just high-frequency grain.
