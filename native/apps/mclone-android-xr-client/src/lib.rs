@@ -238,6 +238,7 @@ mod android {
         sky_terrain_actors_multiview_perf: bool,
         full_frame_multiview: bool,
         overlap_eye_submits: bool,
+        overlap_runtime_prefetch: bool,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -259,6 +260,7 @@ mod android {
                 sky_terrain_actors_multiview_perf: false,
                 full_frame_multiview: false,
                 overlap_eye_submits: false,
+                overlap_runtime_prefetch: false,
             }
         }
     }
@@ -369,6 +371,9 @@ mod android {
                 "--xr-overlap-eye-submits" => {
                     options.overlap_eye_submits = true;
                 }
+                "--xr-overlap-runtime-prefetch" => {
+                    options.overlap_runtime_prefetch = true;
+                }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
         }
@@ -435,6 +440,19 @@ mod android {
                 || options.sky_terrain_actors_multiview_perf)
         {
             bail!("--xr-overlap-eye-submits only applies to the per-eye full-frame path");
+        }
+        if options.overlap_runtime_prefetch
+            && (options.full_frame_multiview
+                || options.multiview_proof
+                || options.terrain_multiview_proof
+                || options.terrain_multiview_perf
+                || options.sky_terrain_multiview_perf
+                || options.sky_terrain_actors_multiview_perf)
+        {
+            bail!("--xr-overlap-runtime-prefetch only applies to the per-eye full-frame path");
+        }
+        if options.overlap_runtime_prefetch && options.perf_frozen_render {
+            bail!("--xr-overlap-runtime-prefetch cannot be combined with --perf-frozen-render");
         }
         if options.multiview_proof
             || options.terrain_multiview_proof
@@ -728,6 +746,10 @@ mod android {
             startup_options.overlap_eye_submits
         );
         log::info!(
+            "Android XR overlap runtime prefetch: {}",
+            startup_options.overlap_runtime_prefetch
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -773,6 +795,7 @@ mod android {
             startup_options.sky_terrain_actors_multiview_perf,
             startup_options.full_frame_multiview,
             startup_options.overlap_eye_submits,
+            startup_options.overlap_runtime_prefetch,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -799,6 +822,7 @@ mod android {
         sky_terrain_actors_multiview_perf: bool,
         full_frame_multiview: bool,
         overlap_eye_submits: bool,
+        overlap_runtime_prefetch: bool,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -1239,10 +1263,15 @@ mod android {
         let terrain_summary = terrain.frame_summary();
         terrain.set_display_refresh_hz(display_refresh.current_rate);
         terrain.set_render_split_timing_enabled(perf_seconds.is_some());
-        terrain.set_defer_eye_waits_enabled(overlap_eye_submits);
+        terrain.set_defer_eye_waits_enabled(overlap_eye_submits || overlap_runtime_prefetch);
+        terrain.set_overlap_runtime_prefetch_enabled(overlap_runtime_prefetch);
         log::info!(
             "Android XR per-eye submit overlap active: {}",
             overlap_eye_submits
+        );
+        log::info!(
+            "Android XR per-eye runtime prefetch active: {}",
+            overlap_runtime_prefetch
         );
         log::info!(
             "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={} actors={}",
@@ -1260,6 +1289,7 @@ mod android {
                 left_eye: &mut left_eye,
                 right_eye: &mut right_eye,
                 overlap_eye_submits,
+                overlap_runtime_prefetch,
             },
             &mut terrain,
             &controller_actions,
@@ -2666,6 +2696,7 @@ mod android {
     enum AndroidXrRenderPath {
         PerEye,
         PerEyeOverlap,
+        PerEyePrefetch,
         Multiview,
     }
 
@@ -2674,6 +2705,7 @@ mod android {
             match self {
                 Self::PerEye => "per-eye",
                 Self::PerEyeOverlap => "per-eye-overlap",
+                Self::PerEyePrefetch => "per-eye-prefetch",
                 Self::Multiview => "multiview",
             }
         }
@@ -2684,6 +2716,7 @@ mod android {
             left_eye: &'a mut graphics_vulkan::OpenXrEyeState,
             right_eye: &'a mut graphics_vulkan::OpenXrEyeState,
             overlap_eye_submits: bool,
+            overlap_runtime_prefetch: bool,
         },
         Multiview {
             stereo_target: &'a mut graphics_vulkan::OpenXrStereoState,
@@ -2696,9 +2729,12 @@ mod android {
             match self {
                 Self::PerEye {
                     overlap_eye_submits,
+                    overlap_runtime_prefetch,
                     ..
                 } => {
-                    if *overlap_eye_submits {
+                    if *overlap_runtime_prefetch {
+                        AndroidXrRenderPath::PerEyePrefetch
+                    } else if *overlap_eye_submits {
                         AndroidXrRenderPath::PerEyeOverlap
                     } else {
                         AndroidXrRenderPath::PerEye
@@ -2753,6 +2789,11 @@ mod android {
         terrain_stereo_finish_ms: f64,
         terrain_stereo_submit_ms: f64,
         terrain_stereo_poll_wait_ms: f64,
+        terrain_overlap_runtime_prefetch_ms: f64,
+        terrain_overlap_runtime_prefetch_poll_ms: f64,
+        terrain_overlap_runtime_prefetch_sync_ms: f64,
+        terrain_overlap_runtime_prefetch_gpu_upload_ms: f64,
+        terrain_overlap_runtime_prefetch_ready_sections_ms: f64,
         terrain_multiview_sky_ms: f64,
         terrain_multiview_terrain_ms: f64,
         terrain_multiview_actor_ms: f64,
@@ -3150,6 +3191,16 @@ mod android {
                 self.max_render.terrain_right_eye_translucent_sort_ms
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_OVERLAP max_runtime_prefetch_ms={:.3} max_runtime_prefetch_poll_ms={:.3} max_runtime_prefetch_sync_ms={:.3} max_runtime_prefetch_gpu_upload_ms={:.3} max_runtime_prefetch_ready_sections_ms={:.3}",
+                self.max_render.terrain_overlap_runtime_prefetch_ms,
+                self.max_render.terrain_overlap_runtime_prefetch_poll_ms,
+                self.max_render.terrain_overlap_runtime_prefetch_sync_ms,
+                self.max_render
+                    .terrain_overlap_runtime_prefetch_gpu_upload_ms,
+                self.max_render
+                    .terrain_overlap_runtime_prefetch_ready_sections_ms
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_MULTIVIEW max_multiview_sky_ms={:.3} max_multiview_terrain_ms={:.3} max_multiview_actor_ms={:.3} max_multiview_screen_effect_ms={:.3} max_multiview_world_overlays_ms={:.3} max_multiview_submit_ms={:.3} max_multiview_poll_wait_ms={:.3}",
                 self.max_render.terrain_multiview_sky_ms,
                 self.max_render.terrain_multiview_terrain_ms,
@@ -3348,6 +3399,21 @@ mod android {
             terrain_stereo_poll_wait_ms: a
                 .terrain_stereo_poll_wait_ms
                 .max(b.terrain_stereo_poll_wait_ms),
+            terrain_overlap_runtime_prefetch_ms: a
+                .terrain_overlap_runtime_prefetch_ms
+                .max(b.terrain_overlap_runtime_prefetch_ms),
+            terrain_overlap_runtime_prefetch_poll_ms: a
+                .terrain_overlap_runtime_prefetch_poll_ms
+                .max(b.terrain_overlap_runtime_prefetch_poll_ms),
+            terrain_overlap_runtime_prefetch_sync_ms: a
+                .terrain_overlap_runtime_prefetch_sync_ms
+                .max(b.terrain_overlap_runtime_prefetch_sync_ms),
+            terrain_overlap_runtime_prefetch_gpu_upload_ms: a
+                .terrain_overlap_runtime_prefetch_gpu_upload_ms
+                .max(b.terrain_overlap_runtime_prefetch_gpu_upload_ms),
+            terrain_overlap_runtime_prefetch_ready_sections_ms: a
+                .terrain_overlap_runtime_prefetch_ready_sections_ms
+                .max(b.terrain_overlap_runtime_prefetch_ready_sections_ms),
             terrain_multiview_sky_ms: a.terrain_multiview_sky_ms.max(b.terrain_multiview_sky_ms),
             terrain_multiview_terrain_ms: a
                 .terrain_multiview_terrain_ms
@@ -3815,6 +3881,15 @@ mod android {
         timing.terrain_stereo_finish_ms = scene_timing.stereo_finish_ms;
         timing.terrain_stereo_submit_ms = scene_timing.stereo_submit_ms;
         timing.terrain_stereo_poll_wait_ms = scene_timing.stereo_poll_wait_ms;
+        timing.terrain_overlap_runtime_prefetch_ms = scene_timing.overlap_runtime_prefetch_ms;
+        timing.terrain_overlap_runtime_prefetch_poll_ms =
+            scene_timing.overlap_runtime_prefetch_poll_ms;
+        timing.terrain_overlap_runtime_prefetch_sync_ms =
+            scene_timing.overlap_runtime_prefetch_sync_ms;
+        timing.terrain_overlap_runtime_prefetch_gpu_upload_ms =
+            scene_timing.overlap_runtime_prefetch_gpu_upload_ms;
+        timing.terrain_overlap_runtime_prefetch_ready_sections_ms =
+            scene_timing.overlap_runtime_prefetch_ready_sections_ms;
         timing.terrain_multiview_sky_ms = scene_timing.multiview_sky_ms;
         timing.terrain_multiview_terrain_ms = scene_timing.multiview_terrain_ms;
         timing.terrain_multiview_actor_ms = scene_timing.multiview_actor_ms;

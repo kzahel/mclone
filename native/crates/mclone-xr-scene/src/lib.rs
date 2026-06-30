@@ -282,6 +282,11 @@ pub struct XrTerrainFrameTiming {
     pub stereo_finish_ms: f64,
     pub stereo_submit_ms: f64,
     pub stereo_poll_wait_ms: f64,
+    pub overlap_runtime_prefetch_ms: f64,
+    pub overlap_runtime_prefetch_poll_ms: f64,
+    pub overlap_runtime_prefetch_sync_ms: f64,
+    pub overlap_runtime_prefetch_gpu_upload_ms: f64,
+    pub overlap_runtime_prefetch_ready_sections_ms: f64,
     pub multiview_sky_ms: f64,
     pub multiview_terrain_ms: f64,
     pub multiview_actor_ms: f64,
@@ -478,6 +483,7 @@ where
     display_refresh_hz: Option<f32>,
     render_split_timing_enabled: bool,
     defer_eye_waits_enabled: bool,
+    overlap_runtime_prefetch_enabled: bool,
     per_view_uniform_frame: u32,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
@@ -621,6 +627,7 @@ where
             display_refresh_hz: None,
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
+            overlap_runtime_prefetch_enabled: false,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
             menu_toggle_down: false,
@@ -712,6 +719,7 @@ where
             display_refresh_hz: None,
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
+            overlap_runtime_prefetch_enabled: false,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
             menu_toggle_down: false,
@@ -1308,6 +1316,23 @@ where
         timing.stereo_submit_ms =
             timing.left_eye_render.submit_ms + timing.right_eye_render.submit_ms;
         if defer_eye_waits {
+            if self.overlap_runtime_prefetch_enabled
+                && matches!(runtime_mode, XrTerrainRuntimeUpdateMode::Live)
+                && self.local_startup.is_none()
+                && self.runtime.is_some()
+            {
+                let prefetch_start = Instant::now();
+                let mut prefetch_timing = XrTerrainFrameTiming::default();
+                self.poll_runtime_and_upload(device, center_position, &mut prefetch_timing)
+                    .context("prefetch XR runtime upload before deferred stereo wait")?;
+                timing.overlap_runtime_prefetch_ms = elapsed_ms(prefetch_start.elapsed());
+                timing.overlap_runtime_prefetch_poll_ms = prefetch_timing.runtime_poll_ms;
+                timing.overlap_runtime_prefetch_sync_ms = prefetch_timing.runtime_sync_ms;
+                timing.overlap_runtime_prefetch_gpu_upload_ms =
+                    prefetch_timing.runtime_gpu_upload_ms;
+                timing.overlap_runtime_prefetch_ready_sections_ms =
+                    prefetch_timing.runtime_ready_sections_ms;
+            }
             let submission = right_eye
                 .submission
                 .take()
@@ -1905,6 +1930,10 @@ where
 
     pub fn set_defer_eye_waits_enabled(&mut self, enabled: bool) {
         self.defer_eye_waits_enabled = enabled;
+    }
+
+    pub fn set_overlap_runtime_prefetch_enabled(&mut self, enabled: bool) {
+        self.overlap_runtime_prefetch_enabled = enabled;
     }
 
     pub fn camera_snapshot(&self) -> EngineCameraSnapshot {

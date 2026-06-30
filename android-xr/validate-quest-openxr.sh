@@ -51,6 +51,7 @@ SKY_TERRAIN_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_SKY_TERRAIN_MULTIVIEW_PERF:-0}"
 SKY_TERRAIN_ACTORS_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF:-0}"
 XR_FULL_FRAME_MULTIVIEW="${MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW:-0}"
 XR_OVERLAP_EYE_SUBMITS="${MCLONE_ANDROID_XR_OVERLAP_EYE_SUBMITS:-0}"
+XR_OVERLAP_RUNTIME_PREFETCH="${MCLONE_ANDROID_XR_OVERLAP_RUNTIME_PREFETCH:-0}"
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     PERF_SETTLED_STATIONARY=1
 fi
@@ -170,6 +171,11 @@ Options:
                      Per-eye path only: submit each eye as soon as encoded,
                      defer the GPU wait until both eyes are submitted, and
                      report render_path=per-eye-overlap in perf summaries.
+  --xr-overlap-runtime-prefetch
+                     Per-eye path only: submit both eyes with a deferred GPU
+                     wait, run one runtime/render-section prefetch while that
+                     submission is in flight, and report
+                     render_path=per-eye-prefetch in perf summaries.
   -h, --help         Show this help.
 USAGE
 }
@@ -495,6 +501,10 @@ while [[ $# -gt 0 ]]; do
             XR_OVERLAP_EYE_SUBMITS=1
             shift
             ;;
+        --xr-overlap-runtime-prefetch)
+            XR_OVERLAP_RUNTIME_PREFETCH=1
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -620,6 +630,14 @@ fi
 if [[ "$XR_OVERLAP_EYE_SUBMITS" == "1" ]]; then
     if [[ "$XR_FULL_FRAME_MULTIVIEW" == "1" || "$MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
         mclone_die "--xr-overlap-eye-submits only applies to the per-eye full-frame path"
+    fi
+fi
+if [[ "$XR_OVERLAP_RUNTIME_PREFETCH" == "1" ]]; then
+    if [[ "$XR_FULL_FRAME_MULTIVIEW" == "1" || "$MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
+        mclone_die "--xr-overlap-runtime-prefetch only applies to the per-eye full-frame path"
+    fi
+    if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
+        mclone_die "--xr-overlap-runtime-prefetch cannot be combined with --perf-frozen-render"
     fi
 fi
 if [[ -n "$PERF_SECONDS" ]]; then
@@ -751,6 +769,9 @@ if [[ "$XR_FULL_FRAME_MULTIVIEW" == "1" ]]; then
 fi
 if [[ "$XR_OVERLAP_EYE_SUBMITS" == "1" ]]; then
     STARTUP_ARGV+=(--xr-overlap-eye-submits)
+fi
+if [[ "$XR_OVERLAP_RUNTIME_PREFETCH" == "1" ]]; then
+    STARTUP_ARGV+=(--xr-overlap-runtime-prefetch)
 fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"
@@ -935,12 +956,20 @@ if [[ -n "$PERF_SECONDS" ]]; then
         if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*render_path=multiview" "$LOG_PATH" >/dev/null 2>&1; then
             mclone_die "Android XR full-frame multiview perf summary marker was not seen; see $LOG_PATH"
         fi
+    elif [[ "$XR_OVERLAP_RUNTIME_PREFETCH" == "1" ]]; then
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_START .*render_path=per-eye-prefetch" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR runtime-prefetch perf-start marker was not seen; see $LOG_PATH"
+        fi
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*render_path=per-eye-prefetch" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR runtime-prefetch perf summary marker was not seen; see $LOG_PATH"
+        fi
     fi
     for marker in \
         MCLONE_ANDROID_XR_PERF_SUMMARY \
         MCLONE_ANDROID_XR_PERF_STAGES \
         MCLONE_ANDROID_XR_PERF_TERRAIN \
         MCLONE_ANDROID_XR_PERF_TERRAIN_PREP \
+        MCLONE_ANDROID_XR_PERF_OVERLAP \
         MCLONE_ANDROID_XR_PERF_MULTIVIEW \
         MCLONE_ANDROID_XR_PERF_UPLOAD_MAX \
         MCLONE_ANDROID_XR_PERF_RUNTIME_MAX \
