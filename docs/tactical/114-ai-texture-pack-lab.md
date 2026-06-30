@@ -1,8 +1,8 @@
 # 114 - AI Texture Pack Lab
 
 Status: active; scaffold/export/sheet loop, software cube, rotation-grid panels,
-first grass-block bundle, primary-tint terrain patch, and source/tint split
-review sheets landed on 2026-06-30.
+first grass-block bundle, primary-tint terrain patch, source/tint split review
+sheets, and texture illustrator guide landed on 2026-06-30.
 
 ## Purpose
 
@@ -61,6 +61,7 @@ shared asset/meshing task and is not required for the initial lab.
 Authoring files:
 
 ```text
+tools/texture-lab/ILLUSTRATOR_GUIDE.md
 tools/texture-lab/examples/dirt/texture.ts
 tools/texture-lab/examples/grass-block/texture.ts
 ```
@@ -106,6 +107,8 @@ Required concepts:
 - indexed textures from ASCII rows
 - generated tileable textures from deterministic helpers
 - texture roles: `all`, `top`, `bottom`, `side`, `overlay`, `particle`
+- illustrator guidance for relationship graphs, palette discipline, tint roles,
+  and agent briefs before drawing a block family
 - preview-only texture metadata for tint, checkerboard transparency, tiling
   mode, and disabling misleading cube/rotation panels
 - block preview metadata: cube, cross-plane plant, log axis, cutout/alpha mode
@@ -205,6 +208,8 @@ texture.
   tintless while repeat/mip/rotation/block-style panels can use preview tint.
 - [x] Add a grass-side context sheet showing dirt side base, raw transparent
   overlay, and final composed tinted side together.
+- [x] Add an illustrator guide covering final-color vs tintable source art,
+  grass tint relationships, palette discipline, and agent brief shape.
 - [x] Keep alternate grass biome tint previews compact so source texture review
   remains primary.
 - [ ] Add foliage/water tint swatches once those texture families exist.

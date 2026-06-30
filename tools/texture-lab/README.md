@@ -33,6 +33,9 @@ pnpm texture-lab:typecheck
 pnpm texture-lab:export
 ```
 
+For authoring rules, palette discipline, tint roles, and AI-agent brief shape,
+see [`ILLUSTRATOR_GUIDE.md`](ILLUSTRATOR_GUIDE.md).
+
 The export command writes the starter dirt and grass-block PNGs plus review
 sheets to:
 
