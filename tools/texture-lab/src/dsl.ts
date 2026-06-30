@@ -51,7 +51,8 @@ export interface CubeFaceTextures {
   overlay?: string;
 }
 
-export type TextureLayerSpec = SpecklesLayerSpec | AsciiLayerSpec;
+export type TextureLayerSpec = SpecklesLayerSpec | AsciiLayerSpec | MacroNoiseLayerSpec | MaskLayerSpec;
+export type MaskUpscaleMode = "nearest" | "linear" | "bicubic" | "smooth";
 
 export interface SpecklesLayerSpec {
   kind: "speckles";
@@ -70,12 +71,34 @@ export interface AsciiLayerSpec {
   opacity?: number;
 }
 
+export interface MacroNoiseLayerSpec {
+  kind: "macroNoise";
+  seed: string;
+  colors: string[];
+  frequency: number;
+  octaves?: number;
+  opacity?: number;
+  contrast?: number;
+  bias?: number;
+}
+
+export interface MaskLayerSpec {
+  kind: "mask";
+  pixels: string[];
+  colors: Record<string, string>;
+  skip?: string;
+  opacity?: number;
+  upscale?: MaskUpscaleMode;
+}
+
 export interface TextureLabApi {
   tint(name: string, tint: TintSpec): void;
   palette(name: string, colors: PaletteSpec): void;
   texture(name: string, texture: TextureSpec): void;
   block(name: string, block: BlockSpec): void;
   ascii(layer: Omit<AsciiLayerSpec, "kind">): AsciiLayerSpec;
+  mask(layer: Omit<MaskLayerSpec, "kind">): MaskLayerSpec;
+  macroNoise(layer: Omit<MacroNoiseLayerSpec, "kind">): MacroNoiseLayerSpec;
   speckles(layer: Omit<SpecklesLayerSpec, "kind">): SpecklesLayerSpec;
 }
 
@@ -212,6 +235,8 @@ class TexturePackBuilder {
         this.blocks[name] = block;
       },
       ascii: (layer) => ({ kind: "ascii", ...layer }),
+      mask: (layer) => ({ kind: "mask", ...layer }),
+      macroNoise: (layer) => ({ kind: "macroNoise", ...layer }),
       speckles: (layer) => ({ kind: "speckles", ...layer }),
     };
   }
@@ -278,12 +303,44 @@ function validateLayer(
     return;
   }
 
-  if (layer.pixels.length !== size) {
-    errors.push(`texture '${textureName}' layer ${layerIndex} has ${layer.pixels.length} rows, expected ${size}`);
+  if (layer.kind === "macroNoise") {
+    if (!Number.isInteger(layer.frequency) || layer.frequency <= 0) {
+      errors.push(`texture '${textureName}' layer ${layerIndex} frequency must be a positive integer`);
+    }
+    if (layer.octaves !== undefined && (!Number.isInteger(layer.octaves) || layer.octaves <= 0)) {
+      errors.push(`texture '${textureName}' layer ${layerIndex} octaves must be a positive integer`);
+    }
+    if (layer.opacity !== undefined && (!Number.isFinite(layer.opacity) || layer.opacity < 0 || layer.opacity > 1)) {
+      errors.push(`texture '${textureName}' layer ${layerIndex} opacity must be 0..1`);
+    }
+    if (layer.contrast !== undefined && (!Number.isFinite(layer.contrast) || layer.contrast < 0)) {
+      errors.push(`texture '${textureName}' layer ${layerIndex} contrast must be non-negative`);
+    }
+    if (layer.bias !== undefined && !Number.isFinite(layer.bias)) {
+      errors.push(`texture '${textureName}' layer ${layerIndex} bias must be finite`);
+    }
+    if (layer.colors.length === 0) {
+      errors.push(`texture '${textureName}' layer ${layerIndex} has no macroNoise colors`);
+    }
+    for (const color of layer.colors) {
+      if (!palette[color] && !isHexColor(color)) {
+        errors.push(`texture '${textureName}' layer ${layerIndex} references missing color '${color}'`);
+      }
+    }
+    return;
   }
+
+  const exactSize = layer.kind === "ascii";
+  const expectedRows = exactSize ? size : "at least 1";
+  if (layer.pixels.length === 0 || (exactSize && layer.pixels.length !== size)) {
+    errors.push(`texture '${textureName}' layer ${layerIndex} has ${layer.pixels.length} rows, expected ${expectedRows}`);
+  }
+  const expectedWidth = exactSize ? size : layer.pixels[0]?.length;
   for (const [rowIndex, row] of layer.pixels.entries()) {
-    if (row.length !== size) {
-      errors.push(`texture '${textureName}' layer ${layerIndex} row ${rowIndex} has width ${row.length}, expected ${size}`);
+    if (row.length === 0 || row.length !== expectedWidth) {
+      errors.push(
+        `texture '${textureName}' layer ${layerIndex} row ${rowIndex} has width ${row.length}, expected ${expectedWidth}`,
+      );
     }
     for (const symbol of row) {
       if (symbol === (layer.skip ?? ".")) {
@@ -299,6 +356,16 @@ function validateLayer(
   }
   if (layer.opacity !== undefined && (!Number.isFinite(layer.opacity) || layer.opacity < 0 || layer.opacity > 1)) {
     errors.push(`texture '${textureName}' layer ${layerIndex} opacity must be 0..1`);
+  }
+  if (
+    layer.kind === "mask" &&
+    layer.upscale !== undefined &&
+    layer.upscale !== "nearest" &&
+    layer.upscale !== "linear" &&
+    layer.upscale !== "bicubic" &&
+    layer.upscale !== "smooth"
+  ) {
+    errors.push(`texture '${textureName}' layer ${layerIndex} upscale must be 'nearest', 'linear', 'bicubic', or 'smooth'`);
   }
 }
 

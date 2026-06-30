@@ -256,6 +256,41 @@ creates visible artifacts before runtime support is attempted.
   `tools/texture-lab/examples/` remains for small wrapper entrypoints.
 - [x] Add tactical 115 for shared runtime overlay-pack loading.
 
+### Slice 7 - Authoring Vocabulary Quality Pass
+
+The first dirt/grass textures prove the loop, but they read too much like
+uniform speckle fields. Before drawing a large ground/stone batch, improve the
+DSL so authored textures can carry broader shapes and more intentional human
+structure.
+
+- [x] Add tileable low-frequency value/perlin-style noise for broad clods,
+  stone clouds, sand bands, and material patches.
+- [x] Keep `macroNoise` procedural fields periodic by construction so full-XY
+  tile textures wrap cleanly at left/right and top/bottom edges.
+- [ ] Add explicit rotation-safety metadata for generators: avoid
+  directional highlights for rotation-safe tiles, but allow directionality for
+  orientation-aware faces such as logs and planks.
+- [x] Add virtual-resolution ASCII masks: author `8x8`, `16x16`, or `32x32`
+  masks and upscale them to texture size.
+- [x] Support mask upscale modes: `nearest`, `linear`, `bicubic`, and `smooth`.
+- [x] Let ASCII masks drive opacity and overlay color instead of only painting
+  final pixels.
+- [ ] Let ASCII masks drive palette-ramp selection and procedural placement.
+- [ ] Add compositional texture definitions so ores and related blocks can
+  reuse a base material plus an authored ore/mineral mask.
+- [x] Add texture-class guidance for natural full tiles, layered blocks, ore
+  overlays, directional blocks, cutout plants, and fluids/emissive materials.
+
+Status 2026-06-30: `macroNoise(...)` and `mask(...)` landed in the DSL,
+renderer, and metadata report. The dirt and grass-block starter textures now
+use broad periodic noise, virtual-resolution masks, and lighter speckle detail.
+The generated sheets show better macro structure, but the broad fields are
+still visibly synthetic in repeat panels; future art passes should tune masks
+and noise per material before producing a large block batch.
+
+Acceptance: the next stone/ground textures show broad, intentional material
+forms in sheets and terrain preview, not just high-frequency grain.
+
 ## Open Questions
 
 - Whether 32x32 should remain the default for all natural blocks or only for

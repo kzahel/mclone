@@ -2,6 +2,8 @@ import {
   isHexColor,
   type AsciiLayerSpec,
   type BlockSpec,
+  type MacroNoiseLayerSpec,
+  type MaskLayerSpec,
   type PaletteSpec,
   type TextureSourceCategory,
   type TexturePackAsset,
@@ -39,8 +41,12 @@ export function renderTexture(pack: TexturePackAsset, name: string, texture: Tex
   for (const layer of texture.layers ?? []) {
     if (layer.kind === "speckles") {
       renderSpeckles(data, size, palette, layer.seed, layer.density, layer.colors, layer.opacity ?? 1, layer.radius ?? 0);
-    } else {
+    } else if (layer.kind === "ascii") {
       renderAsciiLayer(data, size, palette, layer);
+    } else if (layer.kind === "mask") {
+      renderMaskLayer(data, size, palette, layer);
+    } else {
+      renderMacroNoiseLayer(data, size, palette, layer);
     }
   }
 
@@ -267,6 +273,220 @@ function renderAsciiLayer(data: Uint8Array, size: number, palette: PaletteSpec, 
       blendPixel(data, size, x, y, resolveColor(palette, colorName), opacity);
     }
   }
+}
+
+function renderMaskLayer(data: Uint8Array, size: number, palette: PaletteSpec, layer: MaskLayerSpec): void {
+  const opacity = layer.opacity ?? 1;
+  const upscale = layer.upscale ?? "nearest";
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const color = sampleMaskLayer(palette, layer, x, y, size, upscale);
+      if (color[3] === 0) {
+        continue;
+      }
+      blendPixel(data, size, x, y, color, opacity);
+    }
+  }
+}
+
+function renderMacroNoiseLayer(
+  data: Uint8Array,
+  size: number,
+  palette: PaletteSpec,
+  layer: MacroNoiseLayerSpec,
+): void {
+  const opacity = layer.opacity ?? 1;
+  const octaves = layer.octaves ?? 1;
+  const contrast = layer.contrast ?? 1;
+  const bias = layer.bias ?? 0;
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const noise = periodicValueNoise(layer.seed, x, y, size, layer.frequency, octaves);
+      const value = clamp01((noise - 0.5) * contrast + 0.5 + bias);
+      blendPixel(data, size, x, y, colorRamp(palette, layer.colors, value), opacity);
+    }
+  }
+}
+
+function sampleMaskLayer(
+  palette: PaletteSpec,
+  layer: MaskLayerSpec,
+  x: number,
+  y: number,
+  size: number,
+  upscale: NonNullable<MaskLayerSpec["upscale"]>,
+): Rgba {
+  const maskHeight = layer.pixels.length;
+  const maskWidth = layer.pixels[0]?.length ?? 0;
+  if (maskWidth === 0 || maskHeight === 0) {
+    return [0, 0, 0, 0];
+  }
+
+  if (upscale === "nearest") {
+    const maskX = Math.min(maskWidth - 1, Math.floor(x * maskWidth / size));
+    const maskY = Math.min(maskHeight - 1, Math.floor(y * maskHeight / size));
+    return maskCellColor(palette, layer, maskX, maskY);
+  }
+
+  const u = x * maskWidth / size;
+  const v = y * maskHeight / size;
+  if (upscale === "bicubic") {
+    return unpremultiply(cubicMaskSample(palette, layer, u, v));
+  }
+
+  const x0 = Math.floor(u);
+  const y0 = Math.floor(v);
+  const tx = upscale === "smooth" ? smoothStep(u - x0) : u - x0;
+  const ty = upscale === "smooth" ? smoothStep(v - y0) : v - y0;
+  const sample = lerpPremul(
+    lerpPremul(
+      premultiply(maskCellColor(palette, layer, x0, y0)),
+      premultiply(maskCellColor(palette, layer, x0 + 1, y0)),
+      tx,
+    ),
+    lerpPremul(
+      premultiply(maskCellColor(palette, layer, x0, y0 + 1)),
+      premultiply(maskCellColor(palette, layer, x0 + 1, y0 + 1)),
+      tx,
+    ),
+    ty,
+  );
+  if (upscale === "smooth") {
+    sample[3] = smoothStep(sample[3]);
+  }
+  return unpremultiply(sample);
+}
+
+function maskCellColor(palette: PaletteSpec, layer: MaskLayerSpec, x: number, y: number): Rgba {
+  const skip = layer.skip ?? ".";
+  const maskHeight = layer.pixels.length;
+  const maskWidth = layer.pixels[0]?.length ?? 0;
+  if (maskWidth === 0 || maskHeight === 0) {
+    return [0, 0, 0, 0];
+  }
+  const symbol = layer.pixels[wrap(y, maskHeight)]?.[wrap(x, maskWidth)] ?? skip;
+  if (symbol === skip) {
+    return [0, 0, 0, 0];
+  }
+  const colorName = layer.colors[symbol];
+  return colorName ? resolveColor(palette, colorName) : [0, 0, 0, 0];
+}
+
+function periodicValueNoise(seed: string, x: number, y: number, size: number, frequency: number, octaves: number): number {
+  let value = 0;
+  let amplitude = 1;
+  let amplitudeTotal = 0;
+  for (let octave = 0; octave < octaves; octave += 1) {
+    value += samplePeriodicValueNoise(`${seed}:octave-${octave}`, x, y, size, frequency * 2 ** octave) * amplitude;
+    amplitudeTotal += amplitude;
+    amplitude *= 0.5;
+  }
+  return amplitudeTotal > 0 ? value / amplitudeTotal : 0;
+}
+
+function samplePeriodicValueNoise(seed: string, x: number, y: number, size: number, frequency: number): number {
+  const coordinateScale = size <= 1 ? 0 : 1 / (size - 1);
+  const u = x * coordinateScale * frequency;
+  const v = y * coordinateScale * frequency;
+  const x0 = Math.floor(u);
+  const y0 = Math.floor(v);
+  const tx = smoothStep(u - x0);
+  const ty = smoothStep(v - y0);
+  const top = lerp(
+    periodicGridValue(seed, x0, y0, frequency),
+    periodicGridValue(seed, x0 + 1, y0, frequency),
+    tx,
+  );
+  const bottom = lerp(
+    periodicGridValue(seed, x0, y0 + 1, frequency),
+    periodicGridValue(seed, x0 + 1, y0 + 1, frequency),
+    tx,
+  );
+  return lerp(top, bottom, ty);
+}
+
+function periodicGridValue(seed: string, x: number, y: number, frequency: number): number {
+  return random01(seed, wrap(x, frequency), wrap(y, frequency));
+}
+
+function colorRamp(palette: PaletteSpec, colors: string[], value: number): Rgba {
+  if (colors.length === 1) {
+    return resolveColor(palette, colors[0]!);
+  }
+  const position = clamp01(value) * (colors.length - 1);
+  const lowIndex = Math.floor(position);
+  const highIndex = Math.min(colors.length - 1, lowIndex + 1);
+  const alpha = position - lowIndex;
+  return lerpRgba(resolveColor(palette, colors[lowIndex]!), resolveColor(palette, colors[highIndex]!), alpha);
+}
+
+type PremultipliedRgba = [number, number, number, number];
+
+function cubicMaskSample(palette: PaletteSpec, layer: MaskLayerSpec, u: number, v: number): PremultipliedRgba {
+  const x0 = Math.floor(u);
+  const y0 = Math.floor(v);
+  const tx = u - x0;
+  const ty = v - y0;
+  const rows: PremultipliedRgba[] = [];
+  for (let row = -1; row <= 2; row += 1) {
+    const samples: PremultipliedRgba[] = [];
+    for (let column = -1; column <= 2; column += 1) {
+      samples.push(premultiply(maskCellColor(palette, layer, x0 + column, y0 + row)));
+    }
+    rows.push(cubicPremul(samples[0]!, samples[1]!, samples[2]!, samples[3]!, tx));
+  }
+  return cubicPremul(rows[0]!, rows[1]!, rows[2]!, rows[3]!, ty);
+}
+
+function premultiply(color: Rgba): PremultipliedRgba {
+  const alpha = color[3] / 255;
+  return [color[0] * alpha, color[1] * alpha, color[2] * alpha, alpha];
+}
+
+function unpremultiply(color: PremultipliedRgba): Rgba {
+  const alpha = clamp01(color[3]);
+  if (alpha <= 0) {
+    return [0, 0, 0, 0];
+  }
+  return [
+    clampByte(color[0] / alpha),
+    clampByte(color[1] / alpha),
+    clampByte(color[2] / alpha),
+    clampByte(alpha * 255),
+  ];
+}
+
+function lerpPremul(a: PremultipliedRgba, b: PremultipliedRgba, alpha: number): PremultipliedRgba {
+  return [
+    lerp(a[0], b[0], alpha),
+    lerp(a[1], b[1], alpha),
+    lerp(a[2], b[2], alpha),
+    lerp(a[3], b[3], alpha),
+  ];
+}
+
+function cubicPremul(
+  p0: PremultipliedRgba,
+  p1: PremultipliedRgba,
+  p2: PremultipliedRgba,
+  p3: PremultipliedRgba,
+  alpha: number,
+): PremultipliedRgba {
+  return [
+    cubic(p0[0], p1[0], p2[0], p3[0], alpha),
+    cubic(p0[1], p1[1], p2[1], p3[1], alpha),
+    cubic(p0[2], p1[2], p2[2], p3[2], alpha),
+    cubic(p0[3], p1[3], p2[3], p3[3], alpha),
+  ];
+}
+
+function lerpRgba(a: Rgba, b: Rgba, alpha: number): Rgba {
+  return [
+    clampByte(lerp(a[0], b[0], alpha)),
+    clampByte(lerp(a[1], b[1], alpha)),
+    clampByte(lerp(a[2], b[2], alpha)),
+    clampByte(lerp(a[3], b[3], alpha)),
+  ];
 }
 
 function fill(data: Uint8Array, color: Rgba): void {
@@ -714,6 +934,26 @@ function colorDistance(a: Rgba, b: Rgba): number {
   const db = a[2] - b[2];
   const da = a[3] - b[3];
   return Math.sqrt(dr * dr + dg * dg + db * db + da * da) / 510;
+}
+
+function cubic(p0: number, p1: number, p2: number, p3: number, alpha: number): number {
+  return p1 + 0.5 * alpha * (
+    p2 - p0 +
+    alpha * (2 * p0 - 5 * p1 + 4 * p2 - p3 + alpha * (3 * (p1 - p2) + p3 - p0))
+  );
+}
+
+function lerp(a: number, b: number, alpha: number): number {
+  return a + (b - a) * alpha;
+}
+
+function smoothStep(value: number): number {
+  const alpha = clamp01(value);
+  return alpha * alpha * (3 - 2 * alpha);
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }
 
 function clampByte(value: number): number {

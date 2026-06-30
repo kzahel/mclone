@@ -121,6 +121,31 @@ Avoid fixing one texture by inventing a standalone color that only works in one
 sheet. If a grass side overlay needs to match the grass top, fix the shared
 tintable source range or the tint role, not just one isolated swatch.
 
+## Authoring Structure
+
+A natural texture should have macro, mid, and detail layers. Speckles alone are
+not enough.
+
+Use low-frequency periodic noise or virtual-resolution ASCII masks for broad
+shapes, then add grain and sparse accents. Fully tiled textures need every
+procedural field and mask to wrap cleanly. Rotation-safe textures should avoid
+directional lighting or one-way streaks; orientation-aware textures should
+declare their directionality explicitly.
+
+ASCII masks may be authored below final texture resolution, such as `8x8` or
+`16x16`, then upscaled. Use nearest upscaling for chunky pixel forms and
+smoothed modes for soft organic masks. Masks can drive opacity and overlay
+color now; palette-ramp selection and procedural placement are planned next.
+
+In the current DSL, use `macroNoise(...)` before detail grain and `mask(...)`
+for virtual-resolution authored forms. Treat both as structural layers. If the
+repeat or rotation sheet shows an obvious stamped motif, reduce opacity, change
+the mask scale, or revise the mask before adding more speckles.
+
+Ore textures should be composed from the base stone or deepslate material plus
+ore masks, so they inherit palette and noise from the host rock instead of
+becoming unrelated standalone tiles.
+
 ## Reviewing Sheets
 
 Individual texture sheets are source-first:

@@ -1,6 +1,6 @@
 import type { TextureLabApi } from "../../../src/dsl";
 
-export function defineDirtTextures({ palette, texture, speckles, ascii }: TextureLabApi): void {
+export function defineDirtTextures({ palette, texture, macroNoise, mask, speckles, ascii }: TextureLabApi): void {
   palette("dirt", {
     base: "#755139",
     warm: "#8b6646",
@@ -18,21 +18,57 @@ export function defineDirtTextures({ palette, texture, speckles, ascii }: Textur
     base: "base",
     exportPath: "assets/mclone/textures/block/dirt.png",
     layers: [
+      macroNoise({
+        seed: "dirt-broad-clods",
+        frequency: 4,
+        octaves: 2,
+        colors: ["shadow", "cool", "base", "warm", "light"],
+        opacity: 0.34,
+        contrast: 1.18,
+      }),
+      mask({
+        colors: {
+          c: "cool",
+          w: "warm",
+          s: "shadow",
+          l: "light",
+        },
+        opacity: 0.22,
+        upscale: "smooth",
+        pixels: [
+          "..c.....w.......",
+          ".....s......l...",
+          ".w..............",
+          ".......cc....s..",
+          "...l.......w....",
+          "..........s.....",
+          "c....w..........",
+          "......l.....c...",
+          "...s...........w",
+          "........cc......",
+          ".l.........s....",
+          ".....w.........c",
+          ".........l......",
+          "..c........w....",
+          "......s.........",
+          "....w......c....",
+        ],
+      }),
       speckles({
         seed: "dirt-dark-grain",
-        density: 0.34,
+        density: 0.22,
         colors: ["shadow", "cool", "dark"],
-        opacity: 0.72,
+        opacity: 0.62,
       }),
       speckles({
         seed: "dirt-warm-grain",
-        density: 0.18,
+        density: 0.11,
         colors: ["warm", "light"],
-        opacity: 0.58,
+        opacity: 0.48,
       }),
       speckles({
         seed: "dirt-small-clods",
-        density: 0.045,
+        density: 0.026,
         colors: ["shadow", "warm"],
         opacity: 0.48,
         radius: 1,

@@ -132,11 +132,24 @@ function textureReport(pack: TexturePackAsset, name: string, texture: TextureSpe
           radius: layer.radius ?? 0,
         };
       }
+      if (layer.kind === "macroNoise") {
+        return {
+          kind: layer.kind,
+          seed: layer.seed,
+          frequency: layer.frequency,
+          octaves: layer.octaves ?? 1,
+          colors: layer.colors,
+          opacity: layer.opacity ?? 1,
+          contrast: layer.contrast ?? 1,
+          bias: layer.bias ?? 0,
+        };
+      }
       return {
         kind: layer.kind,
         rows: layer.pixels.length,
         symbols: Object.keys(layer.colors).sort(),
         opacity: layer.opacity ?? 1,
+        upscale: layer.kind === "mask" ? layer.upscale ?? "nearest" : undefined,
       };
     }),
   };

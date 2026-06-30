@@ -168,6 +168,22 @@ is 1024 cells per face; asking an agent to hand-paint every cell is slow and
 usually less coherent than combining a small palette, a few masks, and seeded
 tileable noise.
 
+The starter DSL now includes broader authored structure beyond speckles:
+
+- `macroNoise(...)` for tileable low-frequency noise: clods, stone clouds,
+  bands, and patches
+- virtual-resolution ASCII masks authored at 8x8, 16x16, or 32x32
+- `mask(...)` upscale modes: nearest, linear, bicubic, and smooth
+- masks that drive opacity and overlay color; palette-ramp and procedural
+  placement drivers are future extensions
+- compositional textures, such as base stone plus ore/mineral masks
+
+All procedural helpers that target fully tiled textures should be periodic by
+construction. Rotation-safe materials should avoid one-way lighting or streaks;
+orientation-aware materials should declare that directionality explicitly.
+The first dirt/grass pass proves the mechanism but is not final art; generated
+repeat panels still need human review for visible macro-pattern stamping.
+
 ## Resolution
 
 Default original source resolution should start at 32x32 per vanilla block
@@ -183,7 +199,18 @@ texture("dirt", {
   size: 32,
   palette: "dirt",
   layers: [
-    noise({ scale: 5, colors: ["base", "shadow", "warm"] }),
+    macroNoise({
+      seed: "dirt-broad-clods",
+      frequency: 4,
+      colors: ["shadow", "base", "warm"],
+      opacity: 0.3,
+    }),
+    mask({
+      pixels: ["..c.....", ".....w..", "...s....", "........"],
+      colors: { c: "cool", w: "warm", s: "shadow" },
+      upscale: "smooth",
+      opacity: 0.25,
+    }),
     speckles({ density: 0.16, colors: ["dark", "light"] }),
   ],
 });
@@ -201,6 +228,19 @@ Useful first bundles:
 - `oak_log`: side, top rings, axis rotation previews.
 - `sand`: subtle tile, mip/noise review.
 - `leaves`: alpha/cutout preview and foliage tint.
+
+Texture families should be treated differently:
+
+- natural full tiles: dirt, stone, gravel, and sand need wrap-safe macro and
+  micro structure
+- layered blocks: grass, podzol, mycelium, and snow sides need face
+  relationships plus overlays
+- ore blocks: base stone/deepslate material plus authored ore masks
+- directional blocks: logs and planks can be directional, but must declare face
+  and axis expectations
+- cutout plants: grass, ferns, and flowers should be mask-heavy
+- fluids/emissive textures: water, lava, and glow lichen need tint/animation or
+  light-related rules later
 
 A grass block bundle should model the real rendering problem:
 
