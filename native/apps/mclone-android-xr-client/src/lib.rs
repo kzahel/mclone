@@ -2711,6 +2711,13 @@ mod android {
         terrain_stereo_finish_ms: f64,
         terrain_stereo_submit_ms: f64,
         terrain_stereo_poll_wait_ms: f64,
+        terrain_multiview_sky_ms: f64,
+        terrain_multiview_terrain_ms: f64,
+        terrain_multiview_actor_ms: f64,
+        terrain_multiview_screen_effect_ms: f64,
+        terrain_multiview_world_overlays_ms: f64,
+        terrain_multiview_submit_ms: f64,
+        terrain_multiview_poll_wait_ms: f64,
         release_eyes_ms: f64,
         end_frame_ms: f64,
     }
@@ -3101,6 +3108,16 @@ mod android {
                 self.max_render.terrain_right_eye_translucent_sort_ms
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_MULTIVIEW max_multiview_sky_ms={:.3} max_multiview_terrain_ms={:.3} max_multiview_actor_ms={:.3} max_multiview_screen_effect_ms={:.3} max_multiview_world_overlays_ms={:.3} max_multiview_submit_ms={:.3} max_multiview_poll_wait_ms={:.3}",
+                self.max_render.terrain_multiview_sky_ms,
+                self.max_render.terrain_multiview_terrain_ms,
+                self.max_render.terrain_multiview_actor_ms,
+                self.max_render.terrain_multiview_screen_effect_ms,
+                self.max_render.terrain_multiview_world_overlays_ms,
+                self.max_render.terrain_multiview_submit_ms,
+                self.max_render.terrain_multiview_poll_wait_ms
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_UPLOAD_MAX work_frames={} rebuilt_sections={} removed_sections={} rebuilt_vertices={} rebuilt_indices={} uploaded_sections={} upload_removed_sections={} uploaded_vertices={} uploaded_indices={} ready_sections={}",
                 self.upload_work_frames,
                 self.max_upload.rebuilt_section_count,
@@ -3289,6 +3306,25 @@ mod android {
             terrain_stereo_poll_wait_ms: a
                 .terrain_stereo_poll_wait_ms
                 .max(b.terrain_stereo_poll_wait_ms),
+            terrain_multiview_sky_ms: a.terrain_multiview_sky_ms.max(b.terrain_multiview_sky_ms),
+            terrain_multiview_terrain_ms: a
+                .terrain_multiview_terrain_ms
+                .max(b.terrain_multiview_terrain_ms),
+            terrain_multiview_actor_ms: a
+                .terrain_multiview_actor_ms
+                .max(b.terrain_multiview_actor_ms),
+            terrain_multiview_screen_effect_ms: a
+                .terrain_multiview_screen_effect_ms
+                .max(b.terrain_multiview_screen_effect_ms),
+            terrain_multiview_world_overlays_ms: a
+                .terrain_multiview_world_overlays_ms
+                .max(b.terrain_multiview_world_overlays_ms),
+            terrain_multiview_submit_ms: a
+                .terrain_multiview_submit_ms
+                .max(b.terrain_multiview_submit_ms),
+            terrain_multiview_poll_wait_ms: a
+                .terrain_multiview_poll_wait_ms
+                .max(b.terrain_multiview_poll_wait_ms),
             release_eyes_ms: a.release_eyes_ms.max(b.release_eyes_ms),
             end_frame_ms: a.end_frame_ms.max(b.end_frame_ms),
         }
@@ -3737,6 +3773,13 @@ mod android {
         timing.terrain_stereo_finish_ms = scene_timing.stereo_finish_ms;
         timing.terrain_stereo_submit_ms = scene_timing.stereo_submit_ms;
         timing.terrain_stereo_poll_wait_ms = scene_timing.stereo_poll_wait_ms;
+        timing.terrain_multiview_sky_ms = scene_timing.multiview_sky_ms;
+        timing.terrain_multiview_terrain_ms = scene_timing.multiview_terrain_ms;
+        timing.terrain_multiview_actor_ms = scene_timing.multiview_actor_ms;
+        timing.terrain_multiview_screen_effect_ms = scene_timing.multiview_screen_effect_ms;
+        timing.terrain_multiview_world_overlays_ms = scene_timing.multiview_world_overlays_ms;
+        timing.terrain_multiview_submit_ms = scene_timing.multiview_submit_ms;
+        timing.terrain_multiview_poll_wait_ms = scene_timing.multiview_poll_wait_ms;
     }
 
     fn acquire_eye_target(

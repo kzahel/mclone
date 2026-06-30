@@ -622,17 +622,35 @@ MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.013 mode=stationary-frozen-rend
 
 This is a correctness/coverage milestone, not a decisive performance win: avg
 improved by only `0.074 ms` (`1.005x`), p50 was effectively unchanged, and
-over-budget count stayed similar. The multiview lane currently reports total
-`terrain_render_frame_ms`, but detailed per-pass terrain timing fields are still
-per-eye-oriented and zero in the multiview perf marker; add multiview-specific
-timing before making deeper attribution claims.
+over-budget count stayed similar.
+
+**Multiview timing markers added 2026-06-30.** The full-frame multiview path now
+records dedicated CPU-side max buckets for sky, terrain chunks, actors,
+underwater screen effect, world overlays, queue submit, and GPU poll wait. The
+Quest perf validator requires `MCLONE_ANDROID_XR_PERF_MULTIVIEW` for every perf
+run and writes it to the durable perf summary file.
+
+First passed Quest 3 RD10 frozen multiview run with the new marker:
+
+```text
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.013 mode=stationary-frozen-render render_path=multiview render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=34.844 settle_min_seconds=5.000 settle_frames=2411 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1441 submitted_delta=1441 runtime_delta=1441 skipped_delta=0 frame_avg_ms=13.834 frame_min_ms=12.525 frame_p50_ms=13.812 frame_p95_ms=14.415 frame_p99_ms=14.703 frame_max_ms=17.929 over_budget=565 over_2x_budget=0 over_4x_budget=0
+MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_render_frame_ms=14.547 max_terrain_render_views_ms=0.021 max_terrain_menu_pointer_ms=0.000 max_terrain_runtime_upload_ms=0.000 max_runtime_poll_ms=0.000 max_runtime_sync_ms=0.000 max_runtime_gpu_upload_ms=0.000 max_runtime_ready_sections_ms=0.000 max_terrain_shared_records_ms=0.025 max_terrain_left_eye_ms=0.000 max_terrain_right_eye_ms=0.000 max_terrain_left_eye_prepare_ms=0.000 max_terrain_left_eye_encode_ms=0.000 max_terrain_left_eye_section_encode_ms=0.000 max_terrain_left_eye_submit_ms=0.000 max_terrain_left_eye_poll_wait_ms=0.000 max_terrain_right_eye_prepare_ms=0.000 max_terrain_right_eye_encode_ms=0.000 max_terrain_right_eye_section_encode_ms=0.000 max_terrain_right_eye_submit_ms=0.000 max_terrain_right_eye_poll_wait_ms=0.000 max_terrain_stereo_finish_ms=0.000 max_terrain_stereo_submit_ms=0.000 max_terrain_stereo_poll_wait_ms=0.000
+MCLONE_ANDROID_XR_PERF_MULTIVIEW max_multiview_sky_ms=0.517 max_multiview_terrain_ms=4.059 max_multiview_actor_ms=0.789 max_multiview_screen_effect_ms=0.043 max_multiview_world_overlays_ms=0.151 max_multiview_submit_ms=0.709 max_multiview_poll_wait_ms=10.751
+```
+
+That marker makes the current shape clearer: the worst sampled frame spent about
+`4.1 ms` CPU-side encoding terrain/section work and `10.8 ms` waiting for the
+submitted multiview work to retire. The next performance decision needs a fresh
+per-eye run with the same marker set and then either tighter culling/CPU-prep
+work or a scoped E4 overlap experiment; multiview alone still has not shown a
+large full-frame win.
 
 Move from proof-of-correctness one-submit to the real target:
 
 - keep the default production path on per-eye submit until headset visual
   validation and timing attribution justify a switch;
-- add multiview-specific timing buckets for terrain/sky/actors/overlays and
-  presentation so production perf results are attributable;
+- keep multiview timing markers in every Quest perf summary so production perf
+  results remain attributable;
 - decide whether terrain's union-of-eye-culls policy is acceptable if this path
   ever becomes the default;
 - if full-frame multiview remains flat, pivot the next perf work toward cull/CPU

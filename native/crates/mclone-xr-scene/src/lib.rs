@@ -280,6 +280,13 @@ pub struct XrTerrainFrameTiming {
     pub stereo_finish_ms: f64,
     pub stereo_submit_ms: f64,
     pub stereo_poll_wait_ms: f64,
+    pub multiview_sky_ms: f64,
+    pub multiview_terrain_ms: f64,
+    pub multiview_actor_ms: f64,
+    pub multiview_screen_effect_ms: f64,
+    pub multiview_world_overlays_ms: f64,
+    pub multiview_submit_ms: f64,
+    pub multiview_poll_wait_ms: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1168,6 +1175,7 @@ where
                 true,
                 true,
                 true,
+                Some(&mut timing),
             )
             .context("render XR full-frame multiview")?;
         Ok(self.frame_summary_from_multiview(multiview, timing))
@@ -1496,6 +1504,7 @@ where
             include_sky,
             include_actors,
             include_overlays,
+            None,
         )
     }
 
@@ -1516,6 +1525,7 @@ where
             false,
             false,
             false,
+            None,
         )
     }
 
@@ -1529,6 +1539,7 @@ where
         include_sky: bool,
         include_actors: bool,
         include_overlays: bool,
+        mut timing: Option<&mut XrTerrainFrameTiming>,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
         let (terrain_views, terrain_options, underwater_overlays) =
             self.terrain_render_views_and_options(render_views);
@@ -1537,7 +1548,11 @@ where
         } else {
             Vec::new()
         };
+        let records_start = Instant::now();
         let prepared_records = self.draw.prepare_render_records();
+        if let Some(timing) = timing.as_deref_mut() {
+            timing.shared_records_ms = elapsed_ms(records_start.elapsed());
+        }
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("mclone_xr_terrain_multiview_encoder"),
         });
@@ -1548,6 +1563,7 @@ where
             self.sky_clear_color(),
         );
         if include_sky {
+            let sky_start = Instant::now();
             self.sky.render_multiview(
                 device,
                 queue,
@@ -1561,8 +1577,12 @@ where
                 self.time_of_day(),
                 self.sun_angle(),
             )?;
+            if let Some(timing) = timing.as_deref_mut() {
+                timing.multiview_sky_ms = elapsed_ms(sky_start.elapsed());
+            }
             render_target = render_target.with_loaded_color();
         }
+        let terrain_start = Instant::now();
         let stats = self
             .draw
             .render_prepared_multiview_with_options(
@@ -1575,8 +1595,13 @@ where
                 terrain_options,
             )
             .context("render XR terrain multiview chunks")?;
+        if let Some(timing) = timing.as_deref_mut() {
+            timing.multiview_terrain_ms = elapsed_ms(terrain_start.elapsed());
+        }
         let actor_stats = if include_actors {
-            self.actors
+            let actor_start = Instant::now();
+            let actor_stats = self
+                .actors
                 .render_multiview(
                     device,
                     queue,
@@ -1587,11 +1612,16 @@ where
                     terrain_options,
                     &actor_instances,
                 )
-                .context("render XR actor multiview pass")?
+                .context("render XR actor multiview pass")?;
+            if let Some(timing) = timing.as_deref_mut() {
+                timing.multiview_actor_ms = elapsed_ms(actor_start.elapsed());
+            }
+            actor_stats
         } else {
             ActorRenderStats::default()
         };
         if include_overlays {
+            let screen_effect_start = Instant::now();
             self.screen_effects
                 .render_underwater_multiview(
                     device,
@@ -1601,6 +1631,10 @@ where
                     underwater_overlays,
                 )
                 .context("render XR underwater screen effect multiview")?;
+            if let Some(timing) = timing.as_deref_mut() {
+                timing.multiview_screen_effect_ms = elapsed_ms(screen_effect_start.elapsed());
+            }
+            let overlays_start = Instant::now();
             self.render_xr_world_overlays_multiview(
                 device,
                 queue,
@@ -1609,8 +1643,16 @@ where
                 render_views,
             )
             .context("render XR multiview world overlays")?;
+            if let Some(timing) = timing.as_deref_mut() {
+                timing.multiview_world_overlays_ms = elapsed_ms(overlays_start.elapsed());
+            }
         }
+        let submit_start = Instant::now();
         let submission = queue.submit(Some(encoder.finish()));
+        if let Some(timing) = timing.as_deref_mut() {
+            timing.multiview_submit_ms = elapsed_ms(submit_start.elapsed());
+        }
+        let poll_wait_start = Instant::now();
         device
             .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
             .map(|_| ())
@@ -1619,6 +1661,9 @@ where
             .poll(wgpu::PollType::Wait)
             .map(|_| ())
             .context("wait for XR terrain multiview device idle")?;
+        if let Some(timing) = timing.as_deref_mut() {
+            timing.multiview_poll_wait_ms = elapsed_ms(poll_wait_start.elapsed());
+        }
 
         self.render_stats.drawn_section_count = stats[0].drawn_section_count;
         self.render_stats.drawn_face_count = stats[0].drawn_face_count();
