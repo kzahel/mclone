@@ -342,14 +342,45 @@ OpenXR wait/present overlap from this result. The useful signal is that the live
 flight tail is dominated by bursty runtime/render-section work
 (`runtime_upload_ms`, `runtime_sync_ms`, `gpu_upload_ms`, and ready-section
 application), and moving that work into the safe wait window can lengthen the
-frame instead of hiding it. The next small, measurable probe should therefore be
-a shared render-section sync/upload budget lane for XR flight: expose the
-existing `sync_render_sections_with_budget` path to the XR scene, run it as an
-opt-in perf flag/lane with small chunk budgets, and compare against
-`native:android-xr:perf:flight:rd10:metrics`. A good result would reduce p95,
-p99, max, and motion-to-photon without starving visible chunk fill. If that does
-not move the tails, fall back to Slice J's arena + indirect batching, which
+frame instead of hiding it. The next small, measurable probe should therefore
+smooth completed render-section upload/application work in XR flight and compare
+against `native:android-xr:perf:flight:rd10:metrics`. A good result would reduce
+p95, p99, max, and motion-to-photon without starving visible chunk fill. If that
+does not move the tails, fall back to Slice J's arena + indirect batching, which
 attacks the steady per-section draw cost instead of the live streaming bursts.
+
+Important correction for that follow-up: the shared compile submission path is
+already chunk-budgeted at `DEFAULT_RENDER_CHUNK_MESH_BUDGET = 1`, so merely
+exposing `sync_render_sections_with_budget(..., 1)` to XR would be a no-op. The
+new probe targets the later burst instead: completed section meshes are queued in
+the XR scene and only a bounded number are uploaded to GPU draw resources per
+live frame. Removals still apply immediately so stale chunks do not linger.
+
+Implementation status: the opt-in flag is
+`--xr-render-section-upload-budget N`, perf markers stamp
+`render_section_upload_budget=<N|unbounded>`, and
+`MCLONE_ANDROID_XR_PERF_UPLOAD_MAX` includes `queued_upload_sections` /
+`queued_upload_removed_sections` so starvation is visible. The repeatable first
+probe lane is `native:android-xr:perf:flight:rd10:upload-budget8`.
+
+Initial Quest 3 result, RD10 flight, fixed pose `0,120,-96,180`,
+`--perf-metrics`, same APK build:
+
+| Path | avg | p50 | p95 | p99 | max | over 2x | MTP | app GPU | queued uploads |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| unbounded | `14.722ms` | `13.933ms` | `28.904ms` | `46.438ms` | `74.961ms` | 71 | `32.128ms` | `2.961ms` | 0 |
+| budget 4 | `14.466ms` | `13.862ms` | `26.129ms` | `41.733ms` | `62.810ms` | 62 | `26.002ms` | `2.967ms` | 46 |
+| budget 8 | `14.472ms` | `13.956ms` | `24.065ms` | `40.213ms` | `105.262ms` | 54 | `25.601ms` | `2.335ms` | 16 |
+
+This is a real but not-yet-shippable signal. Budgeting completed-section uploads
+can improve p95/p99, 2x-budget misses, motion-to-photon, and app GPU time, but
+it can also leave uploads queued and it increases repeated render-record rebuild
+cost while the queue drains (`max_terrain_shared_records_ms` rose to `26.598ms`
+at budget 8 and `47.361ms` at budget 4). Keep the flag as a diagnostic/tuning
+path for now. The likely next useful slice is to make section upload and render
+record maintenance incremental together, or to move to Slice J's section arena so
+updating a few sections does not force expensive per-section buffer churn and
+full record rebuild spikes.
 
 ## Post-Validation Rollback (landed 2026-06-29)
 

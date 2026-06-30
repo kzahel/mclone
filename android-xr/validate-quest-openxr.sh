@@ -52,6 +52,7 @@ SKY_TERRAIN_ACTORS_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIV
 XR_FULL_FRAME_MULTIVIEW="${MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW:-0}"
 XR_OVERLAP_EYE_SUBMITS="${MCLONE_ANDROID_XR_OVERLAP_EYE_SUBMITS:-0}"
 XR_OVERLAP_RUNTIME_PREFETCH="${MCLONE_ANDROID_XR_OVERLAP_RUNTIME_PREFETCH:-0}"
+XR_RENDER_SECTION_UPLOAD_BUDGET="${MCLONE_ANDROID_XR_RENDER_SECTION_UPLOAD_BUDGET:-}"
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     PERF_SETTLED_STATIONARY=1
 fi
@@ -176,6 +177,10 @@ Options:
                      wait, run one runtime/render-section prefetch while that
                      submission is in flight, and report
                      render_path=per-eye-prefetch in perf summaries.
+  --xr-render-section-upload-budget N
+                     Upload at most N rebuilt render sections per live XR frame.
+                     Removals still apply immediately. This is an opt-in probe
+                     for smoothing runtime/render-section upload bursts.
   -h, --help         Show this help.
 USAGE
 }
@@ -505,6 +510,11 @@ while [[ $# -gt 0 ]]; do
             XR_OVERLAP_RUNTIME_PREFETCH=1
             shift
             ;;
+        --xr-render-section-upload-budget)
+            require_arg "$1" "${2:-}"
+            XR_RENDER_SECTION_UPLOAD_BUDGET="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -640,6 +650,9 @@ if [[ "$XR_OVERLAP_RUNTIME_PREFETCH" == "1" ]]; then
         mclone_die "--xr-overlap-runtime-prefetch cannot be combined with --perf-frozen-render"
     fi
 fi
+if [[ -n "$XR_RENDER_SECTION_UPLOAD_BUDGET" ]]; then
+    validate_positive_integer "--xr-render-section-upload-budget" "$XR_RENDER_SECTION_UPLOAD_BUDGET"
+fi
 if [[ -n "$PERF_SECONDS" ]]; then
     validate_positive_integer "--perf-seconds" "$PERF_SECONDS"
     if [[ "$SESSION_ONLY" == "1" ]]; then
@@ -772,6 +785,9 @@ if [[ "$XR_OVERLAP_EYE_SUBMITS" == "1" ]]; then
 fi
 if [[ "$XR_OVERLAP_RUNTIME_PREFETCH" == "1" ]]; then
     STARTUP_ARGV+=(--xr-overlap-runtime-prefetch)
+fi
+if [[ -n "$XR_RENDER_SECTION_UPLOAD_BUDGET" ]]; then
+    STARTUP_ARGV+=(--xr-render-section-upload-budget "$XR_RENDER_SECTION_UPLOAD_BUDGET")
 fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"
@@ -962,6 +978,14 @@ if [[ -n "$PERF_SECONDS" ]]; then
         fi
         if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*render_path=per-eye-prefetch" "$LOG_PATH" >/dev/null 2>&1; then
             mclone_die "Android XR runtime-prefetch perf summary marker was not seen; see $LOG_PATH"
+        fi
+    fi
+    if [[ -n "$XR_RENDER_SECTION_UPLOAD_BUDGET" ]]; then
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_START .*render_section_upload_budget=${XR_RENDER_SECTION_UPLOAD_BUDGET}" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR render-section upload budget perf-start marker was not seen; see $LOG_PATH"
+        fi
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*render_section_upload_budget=${XR_RENDER_SECTION_UPLOAD_BUDGET}" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR render-section upload budget perf summary marker was not seen; see $LOG_PATH"
         fi
     fi
     for marker in \

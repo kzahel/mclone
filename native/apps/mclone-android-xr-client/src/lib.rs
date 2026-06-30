@@ -239,6 +239,7 @@ mod android {
         full_frame_multiview: bool,
         overlap_eye_submits: bool,
         overlap_runtime_prefetch: bool,
+        render_section_upload_budget: Option<usize>,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -261,6 +262,7 @@ mod android {
                 full_frame_multiview: false,
                 overlap_eye_submits: false,
                 overlap_runtime_prefetch: false,
+                render_section_upload_budget: None,
             }
         }
     }
@@ -373,6 +375,14 @@ mod android {
                 }
                 "--xr-overlap-runtime-prefetch" => {
                     options.overlap_runtime_prefetch = true;
+                }
+                "--xr-render-section-upload-budget" => {
+                    let budget =
+                        parse_next::<usize>(&mut argv, "--xr-render-section-upload-budget")?;
+                    if budget == 0 {
+                        bail!("--xr-render-section-upload-budget must be greater than zero");
+                    }
+                    options.render_section_upload_budget = Some(budget);
                 }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
@@ -750,6 +760,10 @@ mod android {
             startup_options.overlap_runtime_prefetch
         );
         log::info!(
+            "Android XR render section upload budget: {}",
+            format_optional_usize(startup_options.render_section_upload_budget)
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -796,6 +810,7 @@ mod android {
             startup_options.full_frame_multiview,
             startup_options.overlap_eye_submits,
             startup_options.overlap_runtime_prefetch,
+            startup_options.render_section_upload_budget,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -823,6 +838,7 @@ mod android {
         full_frame_multiview: bool,
         overlap_eye_submits: bool,
         overlap_runtime_prefetch: bool,
+        render_section_upload_budget: Option<usize>,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -1179,6 +1195,7 @@ mod android {
             let terrain_summary = terrain.frame_summary();
             terrain.set_display_refresh_hz(display_refresh.current_rate);
             terrain.set_render_split_timing_enabled(perf_seconds.is_some());
+            terrain.set_render_section_upload_budget(render_section_upload_budget);
             log::info!(
                 "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={} actors={}",
                 terrain_summary.section_count,
@@ -1206,6 +1223,7 @@ mod android {
                 startup_view_pose,
                 scene_options.render_distance,
                 display_refresh,
+                render_section_upload_budget,
             );
         }
 
@@ -1265,6 +1283,7 @@ mod android {
         terrain.set_render_split_timing_enabled(perf_seconds.is_some());
         terrain.set_defer_eye_waits_enabled(overlap_eye_submits || overlap_runtime_prefetch);
         terrain.set_overlap_runtime_prefetch_enabled(overlap_runtime_prefetch);
+        terrain.set_render_section_upload_budget(render_section_upload_budget);
         log::info!(
             "Android XR per-eye submit overlap active: {}",
             overlap_eye_submits
@@ -1302,6 +1321,7 @@ mod android {
             startup_view_pose,
             scene_options.render_distance,
             display_refresh,
+            render_section_upload_budget,
         )
     }
 
@@ -2405,6 +2425,7 @@ mod android {
         fixed_render_view_pose: Option<XrStartupViewPose>,
         render_distance: u32,
         display_refresh: XrDisplayRefreshSnapshot,
+        render_section_upload_budget: Option<usize>,
     ) -> Result<()> {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
@@ -2418,6 +2439,7 @@ mod android {
             render_distance,
             display_refresh,
             render_path,
+            render_section_upload_budget,
         );
         let mut performance_metrics_probe = if perf_metrics {
             let probe = perf_metrics::XrPerformanceMetricsProbe::new(
@@ -2813,6 +2835,7 @@ mod android {
         render_distance: u32,
         display_refresh: XrDisplayRefreshSnapshot,
         render_path: AndroidXrRenderPath,
+        render_section_upload_budget: Option<usize>,
         target_hz: f64,
         settle_started: Option<Instant>,
         settle_frames: u64,
@@ -2830,6 +2853,7 @@ mod android {
             render_distance: u32,
             display_refresh: XrDisplayRefreshSnapshot,
             render_path: AndroidXrRenderPath,
+            render_section_upload_budget: Option<usize>,
         ) -> Self {
             let target_hz = display_refresh
                 .current_rate
@@ -2844,6 +2868,7 @@ mod android {
                 render_distance,
                 display_refresh,
                 render_path,
+                render_section_upload_budget,
                 target_hz,
                 settle_started: None,
                 settle_frames: 0,
@@ -2910,10 +2935,11 @@ mod android {
                 );
             }
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} render_distance={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} render_section_upload_budget={} render_distance={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
                 seconds,
                 mode,
                 self.render_path.label(),
+                format_optional_usize(self.render_section_upload_budget),
                 self.render_distance,
                 flight_speed,
                 settle_seconds,
@@ -2948,6 +2974,7 @@ mod android {
                 display_refresh: self.display_refresh.clone(),
                 target_hz: self.target_hz,
                 render_path: self.render_path,
+                render_section_upload_budget: self.render_section_upload_budget,
                 mode_label: mode,
                 flight_speed_blocks_per_second: self
                     .flight
@@ -3043,6 +3070,7 @@ mod android {
         display_refresh: XrDisplayRefreshSnapshot,
         target_hz: f64,
         render_path: AndroidXrRenderPath,
+        render_section_upload_budget: Option<usize>,
         mode_label: &'static str,
         flight_speed_blocks_per_second: Option<f64>,
         settle_seconds: f64,
@@ -3110,10 +3138,11 @@ mod android {
                 camera_distance_blocks(self.start_camera, self.latest_camera);
             let latest_upload = self.latest_summary.upload;
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={}",
                 sample_seconds,
                 self.mode_label,
                 self.render_path.label(),
+                format_optional_usize(self.render_section_upload_budget),
                 self.render_distance,
                 flight_speed,
                 flight_distance_blocks,
@@ -3211,7 +3240,7 @@ mod android {
                 self.max_render.terrain_multiview_poll_wait_ms
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_UPLOAD_MAX work_frames={} rebuilt_sections={} removed_sections={} rebuilt_vertices={} rebuilt_indices={} uploaded_sections={} upload_removed_sections={} uploaded_vertices={} uploaded_indices={} ready_sections={}",
+                "MCLONE_ANDROID_XR_PERF_UPLOAD_MAX work_frames={} rebuilt_sections={} removed_sections={} rebuilt_vertices={} rebuilt_indices={} uploaded_sections={} upload_removed_sections={} uploaded_vertices={} uploaded_indices={} queued_upload_sections={} queued_upload_removed_sections={} ready_sections={}",
                 self.upload_work_frames,
                 self.max_upload.rebuilt_section_count,
                 self.max_upload.removed_section_count,
@@ -3221,6 +3250,8 @@ mod android {
                 self.max_upload.upload_removed_section_count,
                 self.max_upload.uploaded_vertex_count,
                 self.max_upload.uploaded_index_count,
+                self.max_upload.queued_upload_section_count,
+                self.max_upload.queued_upload_removed_section_count,
                 self.max_upload.traversal_ready_section_count
             );
             log::info!(
@@ -3307,6 +3338,12 @@ mod android {
     fn format_optional_hz(rate: Option<f32>) -> String {
         rate.map(|hz| format!("{hz:.1}"))
             .unwrap_or_else(|| "unknown".to_owned())
+    }
+
+    fn format_optional_usize(value: Option<usize>) -> String {
+        value
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unbounded".to_owned())
     }
 
     fn format_supported_hz(rates: &[f32]) -> String {
@@ -3557,6 +3594,12 @@ mod android {
                 .max(b.upload_removed_section_count),
             uploaded_vertex_count: a.uploaded_vertex_count.max(b.uploaded_vertex_count),
             uploaded_index_count: a.uploaded_index_count.max(b.uploaded_index_count),
+            queued_upload_section_count: a
+                .queued_upload_section_count
+                .max(b.queued_upload_section_count),
+            queued_upload_removed_section_count: a
+                .queued_upload_removed_section_count
+                .max(b.queued_upload_removed_section_count),
             traversal_ready_section_count: a
                 .traversal_ready_section_count
                 .max(b.traversal_ready_section_count),

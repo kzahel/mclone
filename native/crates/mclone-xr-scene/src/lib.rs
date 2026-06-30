@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use std::collections::{BTreeSet, VecDeque};
 use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -27,7 +28,7 @@ use mclone_assets::AssetSource;
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
 use mclone_client::{BlockInteractionTarget, ClientInteractionController};
 use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
-use mclone_mesh::quad_face_count_from_indices;
+use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
     ChunkDepthTarget, ChunkMultiviewDepthTarget, ChunkMultiviewRenderTarget, ChunkProjectionKind,
@@ -362,6 +363,8 @@ pub struct XrTerrainUploadSummary {
     pub upload_removed_section_count: usize,
     pub uploaded_vertex_count: u32,
     pub uploaded_index_count: u32,
+    pub queued_upload_section_count: usize,
+    pub queued_upload_removed_section_count: usize,
     pub traversal_ready_section_count: usize,
     pub visibility_graph_build_count: usize,
     pub visibility_graph_total_ms: f64,
@@ -471,6 +474,8 @@ where
     player_collision_box_visible: bool,
     player_model: GamePlayerModel,
     draw: TexturedSectionDrawResources,
+    pending_section_uploads: VecDeque<TexturedRenderSectionMesh>,
+    pending_section_removals: BTreeSet<RenderSectionKey>,
     actors: ActorDrawResources,
     selection_outline: SelectionOutlineRenderer,
     world_gui_renderer: WorldGuiRenderer,
@@ -487,6 +492,7 @@ where
     render_split_timing_enabled: bool,
     defer_eye_waits_enabled: bool,
     overlap_runtime_prefetch_enabled: bool,
+    render_section_upload_budget: Option<usize>,
     per_view_uniform_frame: u32,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
@@ -603,6 +609,8 @@ where
             player_collision_box_visible: false,
             player_model: GamePlayerModel::default(),
             draw,
+            pending_section_uploads: VecDeque::new(),
+            pending_section_removals: BTreeSet::new(),
             actors: ActorDrawResources::new(
                 device,
                 queue,
@@ -631,6 +639,7 @@ where
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
             overlap_runtime_prefetch_enabled: false,
+            render_section_upload_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
             menu_toggle_down: false,
@@ -695,6 +704,8 @@ where
             player_collision_box_visible: false,
             player_model: GamePlayerModel::default(),
             draw: started.draw,
+            pending_section_uploads: VecDeque::new(),
+            pending_section_removals: BTreeSet::new(),
             actors: ActorDrawResources::new(
                 device,
                 queue,
@@ -723,6 +734,7 @@ where
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
             overlap_runtime_prefetch_enabled: false,
+            render_section_upload_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
             menu_toggle_down: false,
@@ -1939,6 +1951,14 @@ where
         self.overlap_runtime_prefetch_enabled = enabled;
     }
 
+    pub fn set_render_section_upload_budget(&mut self, budget: Option<usize>) {
+        self.render_section_upload_budget = budget.filter(|budget| *budget > 0);
+    }
+
+    pub fn render_section_upload_budget(&self) -> Option<usize> {
+        self.render_section_upload_budget
+    }
+
     pub fn camera_snapshot(&self) -> EngineCameraSnapshot {
         self.camera.snapshot()
     }
@@ -2226,7 +2246,8 @@ where
             .as_ref()
             .expect("runtime presence checked before poll");
         let poll_summary = xr_poll_diagnostics_upload_summary(runtime.last_poll_diagnostics());
-        if !poll_changed && !runtime.has_pending_render_work(camera_position) {
+        let has_runtime_render_work = runtime.has_pending_render_work(camera_position);
+        if !poll_changed && !has_runtime_render_work && !self.has_pending_section_upload_work() {
             let ready_start = Instant::now();
             let ready_sections = runtime.traversal_ready_render_section_keys(camera_position);
             timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
@@ -2238,24 +2259,36 @@ where
                 pending_render_chunks_after: runtime.pending_render_chunk_count(),
                 pending_compile_jobs_before,
                 pending_compile_jobs_after: runtime.render_compile_pending_job_count(),
+                queued_upload_section_count: self.pending_section_uploads.len(),
+                queued_upload_removed_section_count: self.pending_section_removals.len(),
                 traversal_ready_section_count,
                 ..poll_summary
             });
         }
         let sync_start = Instant::now();
-        let section_update = self
-            .sync_render_sections(camera_position)
-            .context("sync XR terrain render sections")?;
+        let section_update = if poll_changed || has_runtime_render_work {
+            self.sync_render_sections(camera_position)
+                .context("sync XR terrain render sections")?
+        } else {
+            mclone_render_session::RenderSectionCacheUpdate::default()
+        };
         timing.runtime_sync_ms = elapsed_ms(sync_start.elapsed());
+        let rebuilt_section_count = section_update.rebuilt_section_count();
+        let removed_section_count = section_update.removed_section_count();
+        let rebuilt_vertex_count = section_update.rebuilt_vertex_count;
+        let rebuilt_index_count = section_update.rebuilt_index_count;
+        let neighbor_ready_section_count = section_update.neighbor_ready_section_count;
+        let near_exception_section_count = section_update.near_exception_section_count;
+        let deferred_section_count = section_update.deferred_section_count;
+        let submitted_compile_section_count = section_update.submitted_compile_section_count;
+        let completed_compile_section_count = section_update.completed_compile_section_count;
+        let stale_compile_section_count = section_update.stale_compile_section_count;
+        let pending_compile_jobs_after_sync = section_update.pending_compile_jobs;
+        let visibility_graph_build_count = section_update.visibility_graph_stats.build_count;
+        let visibility_graph_total_ms = section_update.visibility_graph_stats.total_ms;
+        let visibility_graph_worst_ms = section_update.visibility_graph_stats.worst_ms;
         let upload_start = Instant::now();
-        let upload_report = self
-            .draw
-            .apply_section_updates(
-                device,
-                &section_update.rebuilt_sections,
-                &section_update.removed_section_keys,
-            )
-            .context("upload XR terrain render section updates")?;
+        let upload_report = self.apply_section_update_uploads(device, section_update)?;
         timing.runtime_gpu_upload_ms = elapsed_ms(upload_start.elapsed());
         let ready_start = Instant::now();
         let runtime = self
@@ -2269,33 +2302,110 @@ where
         self.render_stats.section_count = self.draw.section_count();
         self.render_stats.index_count = self.draw.index_count();
         self.render_stats.face_count = quad_face_count_from_indices(self.render_stats.index_count);
-        record_render_section_update_stats(&mut self.render_stats, &section_update, upload_report);
+        self.render_stats.last_rebuilt_section_count = rebuilt_section_count;
+        self.render_stats.last_removed_section_count = removed_section_count;
+        self.render_stats.last_rebuilt_vertex_count = rebuilt_vertex_count;
+        self.render_stats.last_rebuilt_face_count =
+            quad_face_count_from_indices(rebuilt_index_count);
+        self.render_stats.last_rebuilt_index_count = rebuilt_index_count;
+        self.render_stats.last_neighbor_ready_section_count = neighbor_ready_section_count;
+        self.render_stats.last_near_exception_section_count = near_exception_section_count;
+        self.render_stats.last_deferred_section_count = deferred_section_count;
+        self.render_stats.last_submitted_compile_section_count = submitted_compile_section_count;
+        self.render_stats.last_completed_compile_section_count = completed_compile_section_count;
+        self.render_stats.last_stale_compile_section_count = stale_compile_section_count;
+        self.render_stats.last_pending_compile_jobs = pending_compile_jobs_after_sync;
+        self.render_stats.last_visibility_graph_build_count = visibility_graph_build_count;
+        self.render_stats.last_visibility_graph_total_ms = visibility_graph_total_ms;
+        self.render_stats.last_visibility_graph_worst_ms = visibility_graph_worst_ms;
+        self.render_stats.last_uploaded_section_count = upload_report.uploaded_section_count;
+        self.render_stats.last_upload_removed_section_count = upload_report.removed_section_count;
+        self.render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;
+        self.render_stats.last_uploaded_face_count = upload_report.uploaded_face_count();
+        self.render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
         Ok(XrTerrainUploadSummary {
             poll_changed,
             pending_render_chunks_before,
             pending_render_chunks_after: runtime.pending_render_chunk_count(),
             pending_compile_jobs_before,
-            pending_compile_jobs_after: runtime.render_compile_pending_job_count(),
-            rebuilt_section_count: section_update.rebuilt_section_count(),
-            removed_section_count: section_update.removed_section_count(),
-            rebuilt_vertex_count: section_update.rebuilt_vertex_count,
-            rebuilt_index_count: section_update.rebuilt_index_count,
-            neighbor_ready_section_count: section_update.neighbor_ready_section_count,
-            near_exception_section_count: section_update.near_exception_section_count,
-            deferred_section_count: section_update.deferred_section_count,
-            submitted_compile_section_count: section_update.submitted_compile_section_count,
-            completed_compile_section_count: section_update.completed_compile_section_count,
-            stale_compile_section_count: section_update.stale_compile_section_count,
+            pending_compile_jobs_after: pending_compile_jobs_after_sync,
+            rebuilt_section_count,
+            removed_section_count,
+            rebuilt_vertex_count,
+            rebuilt_index_count,
+            neighbor_ready_section_count,
+            near_exception_section_count,
+            deferred_section_count,
+            submitted_compile_section_count,
+            completed_compile_section_count,
+            stale_compile_section_count,
             uploaded_section_count: upload_report.uploaded_section_count,
             upload_removed_section_count: upload_report.removed_section_count,
             uploaded_vertex_count: upload_report.uploaded_vertex_count,
             uploaded_index_count: upload_report.uploaded_index_count,
+            queued_upload_section_count: self.pending_section_uploads.len(),
+            queued_upload_removed_section_count: self.pending_section_removals.len(),
             traversal_ready_section_count,
-            visibility_graph_build_count: section_update.visibility_graph_stats.build_count,
-            visibility_graph_total_ms: section_update.visibility_graph_stats.total_ms,
-            visibility_graph_worst_ms: section_update.visibility_graph_stats.worst_ms,
+            visibility_graph_build_count,
+            visibility_graph_total_ms,
+            visibility_graph_worst_ms,
             ..poll_summary
         })
+    }
+
+    fn has_pending_section_upload_work(&self) -> bool {
+        !self.pending_section_uploads.is_empty() || !self.pending_section_removals.is_empty()
+    }
+
+    fn enqueue_section_update_uploads(
+        &mut self,
+        section_update: mclone_render_session::RenderSectionCacheUpdate,
+    ) {
+        for key in section_update.removed_section_keys {
+            self.pending_section_uploads
+                .retain(|section| section.key != key);
+            self.pending_section_removals.insert(key);
+        }
+        for section in section_update.rebuilt_sections {
+            self.pending_section_uploads
+                .retain(|pending| pending.key != section.key);
+            self.pending_section_removals.remove(&section.key);
+            self.pending_section_uploads.push_back(section);
+        }
+    }
+
+    fn apply_section_update_uploads(
+        &mut self,
+        device: &wgpu::Device,
+        section_update: mclone_render_session::RenderSectionCacheUpdate,
+    ) -> Result<TexturedSectionUploadReport> {
+        if self.render_section_upload_budget.is_none() && !self.has_pending_section_upload_work() {
+            return self
+                .draw
+                .apply_section_updates(
+                    device,
+                    &section_update.rebuilt_sections,
+                    &section_update.removed_section_keys,
+                )
+                .context("upload XR terrain render section updates");
+        }
+
+        self.enqueue_section_update_uploads(section_update);
+        let upload_budget = self.render_section_upload_budget.unwrap_or(usize::MAX);
+        let upload_count = upload_budget.min(self.pending_section_uploads.len());
+        let mut sections = Vec::with_capacity(upload_count);
+        for _ in 0..upload_count {
+            if let Some(section) = self.pending_section_uploads.pop_front() {
+                sections.push(section);
+            }
+        }
+        let removed = std::mem::take(&mut self.pending_section_removals);
+        if sections.is_empty() && removed.is_empty() {
+            return Ok(TexturedSectionUploadReport::default());
+        }
+        self.draw
+            .apply_section_updates(device, &sections, &removed)
+            .context("upload budgeted XR terrain render section updates")
     }
 
     fn frozen_runtime_upload_summary(&self) -> XrTerrainUploadSummary {
@@ -2312,6 +2422,8 @@ where
             pending_render_chunks_after: pending_render_chunks,
             pending_compile_jobs_before: pending_compile_jobs,
             pending_compile_jobs_after: pending_compile_jobs,
+            queued_upload_section_count: self.pending_section_uploads.len(),
+            queued_upload_removed_section_count: self.pending_section_removals.len(),
             traversal_ready_section_count: self.draw.traversal_ready_section_count(),
             ..XrTerrainUploadSummary::default()
         }
