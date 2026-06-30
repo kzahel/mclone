@@ -12,6 +12,7 @@ mod frame_pacing;
 mod headless;
 mod offscreen_flat_client;
 mod perf;
+mod remote_player_visual_smoke;
 mod remote_session;
 mod render_cache;
 mod scene_runtime;
@@ -27,8 +28,8 @@ use crate::cli::Cli;
 use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessActorReviewSheetOptions,
     HeadlessDualViewOptions, HeadlessScreenshotOptions, HeadlessScreenshotUi, MovementPerfOptions,
-    RendererRebuildSmokeOptions, SceneOptions, TimedemoOptions, WindowStartIntent,
-    XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
+    RemotePlayerVisualSmokeOptions, RendererRebuildSmokeOptions, SceneOptions, TimedemoOptions,
+    WindowStartIntent, XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
     parse_screenshot_ui_arg,
 };
 use crate::headless::{
@@ -36,6 +37,7 @@ use crate::headless::{
     write_headless_dual_view,
 };
 use crate::perf::{run_frame_budget_probe, run_movement_perf_smoke, run_timedemo};
+use crate::remote_player_visual_smoke::run_remote_player_visual_smoke;
 use anyhow::Result;
 #[cfg(test)]
 use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, ChunkPos, ChunkSnapshot};
@@ -159,6 +161,21 @@ fn main() -> Result<()> {
                 report.config_changed,
                 report.before_render_size,
                 report.after_render_size
+            );
+            Ok(())
+        }
+        Cli::RemotePlayerVisualSmoke { options } => {
+            let report = run_remote_player_visual_smoke(&options)?;
+            println!(
+                "remote player visual smoke saved to {} ({}x{}, {} bytes, {} remote players, {} actors, {} drawn actors, remote figures={:?})",
+                report.path.display(),
+                report.width,
+                report.height,
+                report.byte_len,
+                report.remote_player_count,
+                report.actor_count,
+                report.drawn_actor_count,
+                report.remote_actor_figures
             );
             Ok(())
         }
@@ -444,6 +461,45 @@ mod tests {
                         ..TexturedSectionRenderOptions::default()
                     },
                     rebuild_render_scale: Some(0.5),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_remote_player_visual_smoke_options() {
+        let cli = Cli::parse([
+            "--remote-player-visual-smoke".to_owned(),
+            "/tmp/mclone-remote-player-visual-smoke.png".to_owned(),
+            "--width".to_owned(),
+            "800".to_owned(),
+            "--height".to_owned(),
+            "450".to_owned(),
+            "--seed".to_owned(),
+            "77".to_owned(),
+            "--lighting".to_owned(),
+            "false".to_owned(),
+            "--fullbright".to_owned(),
+            "true".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::RemotePlayerVisualSmoke {
+                options: RemotePlayerVisualSmokeOptions {
+                    path: PathBuf::from("/tmp/mclone-remote-player-visual-smoke.png"),
+                    width: 800,
+                    height: 450,
+                    scene: SceneOptions {
+                        seed: 77,
+                        lighting_enabled: false,
+                        ..SceneOptions::default()
+                    },
+                    render_options: TexturedSectionRenderOptions {
+                        force_fullbright: true,
+                        ..TexturedSectionRenderOptions::default()
+                    },
                 },
             }
         );

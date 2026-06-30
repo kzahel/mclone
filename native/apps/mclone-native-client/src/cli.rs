@@ -142,6 +142,15 @@ pub(crate) struct RendererRebuildSmokeOptions {
     pub(crate) rebuild_render_scale: Option<f32>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RemotePlayerVisualSmokeOptions {
+    pub(crate) path: PathBuf,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) scene: SceneOptions,
+    pub(crate) render_options: TexturedSectionRenderOptions,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct XrClearSmokeOptions {
     pub(crate) frame_limit: Option<u32>,
@@ -327,6 +336,9 @@ pub(crate) enum Cli {
     RendererRebuildSmoke {
         options: RendererRebuildSmokeOptions,
     },
+    RemotePlayerVisualSmoke {
+        options: RemotePlayerVisualSmokeOptions,
+    },
     MovementPerf {
         options: MovementPerfOptions,
     },
@@ -351,6 +363,7 @@ enum HeadlessMode {
     DualView(PathBuf),
     Screenshot(PathBuf),
     RendererRebuildSmoke(PathBuf),
+    RemotePlayerVisualSmoke(PathBuf),
 }
 
 impl Cli {
@@ -516,6 +529,16 @@ impl Cli {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::RendererRebuildSmoke(path))?;
+                }
+                "--remote-player-visual-smoke" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--remote-player-visual-smoke requires an output PNG path")?;
+                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                        bail!("headless output modes cannot be combined with perf modes");
+                    }
+                    set_headless_mode(&mut mode, HeadlessMode::RemotePlayerVisualSmoke(path))?;
                 }
                 "--rebuild-render-scale" => {
                     rebuild_render_scale = Some(parse_rebuild_render_scale_arg(&arg, args.next())?);
@@ -683,6 +706,7 @@ impl Cli {
                             | HeadlessMode::ActorReviewSheet(_)
                             | HeadlessMode::DualView(_)
                             | HeadlessMode::RendererRebuildSmoke(_)
+                            | HeadlessMode::RemotePlayerVisualSmoke(_)
                     )
                 ))
         {
@@ -743,6 +767,17 @@ impl Cli {
                     rebuild_render_scale,
                 },
             }),
+            Some(HeadlessMode::RemotePlayerVisualSmoke(path)) => {
+                Ok(Self::RemotePlayerVisualSmoke {
+                    options: RemotePlayerVisualSmokeOptions {
+                        path,
+                        width: width.unwrap_or(960),
+                        height: height.unwrap_or(540),
+                        scene,
+                        render_options,
+                    },
+                })
+            }
             None if movement_perf => Ok(Self::MovementPerf {
                 options: MovementPerfOptions {
                     scene,
@@ -1045,6 +1080,7 @@ fn print_help() {
           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\
+           mclone-native-client --remote-player-visual-smoke /tmp/mclone-remote-player-visual-smoke.png [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--day-time 6000] [--freeze-time] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\

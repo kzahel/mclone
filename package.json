@@ -18,6 +18,7 @@
     "native:movement:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --movement-perf",
     "native:movement:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- --movement-perf",
     "native:remote:smoke": "node ./scripts/native-remote-client-smoke.mjs",
+    "native:remote-player-visual-smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --remote-player-visual-smoke /tmp/mclone-remote-player-visual-smoke.png --width 960 --height 540 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --lighting false --fullbright true",
     "native:desktop-offscreen:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-desktop-offscreen.png --width 2560 --height 1600 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time",
     "native:timedemo:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --timedemo --timedemo-frames 60",
     "native:timedemo:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- --timedemo --timedemo-frames 240",

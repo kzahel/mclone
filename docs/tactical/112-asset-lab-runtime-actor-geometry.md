@@ -240,6 +240,31 @@ cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --targ
 pnpm native:web:build
 ```
 
+### Slice 2d - Remote Player Visual Smoke
+
+- [x] Add a repeatable native client smoke command that starts a loopback
+      dedicated server, connects a synthetic upright-bear player, and captures
+      an offscreen observer PNG.
+- [x] Keep the smoke scoped to native client validation while exercising real
+      native TCP protocol frames and server-side remote-player publication.
+- [x] Assert that the capture contains a remote player, submitted/drawn actor
+      geometry, and the `mclone:upright_bear` figure id.
+- [x] Expose the smoke through `pnpm native:remote-player-visual-smoke`.
+
+Validation:
+
+```powershell
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+pnpm native:remote-player-visual-smoke
+git diff --check
+```
+
+Review output inspected:
+
+```text
+/tmp/mclone-remote-player-visual-smoke.png
+```
+
 ### Slice 3 - Animation Metadata Import
 
 - [ ] Load exported walk clips and locomotion metadata.

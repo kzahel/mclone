@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_app_runtime::{debug_block_palette_overlay, frame_render::FullFrameRenderSummary};
-use mclone_client::ClientHost;
+use mclone_client::{ActorPresentationId, ClientHost};
 use mclone_input::{FlatInputAction, FlatInputFrame, FlatInputIntent};
 use mclone_protocol::{ClientCommand, MovePlayerCommand};
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
@@ -37,6 +37,7 @@ pub(crate) struct OffscreenFlatClientScreenshotReport {
     pub(crate) byte_len: usize,
     pub(crate) summary: FullFrameRenderSummary,
     pub(crate) remote_player_count: usize,
+    pub(crate) remote_actor_figures: Vec<mclone_assets::ActorFigureId>,
     pub(crate) entity_count: usize,
     pub(crate) underwater: bool,
 }
@@ -582,6 +583,22 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         .runtime
         .as_ref()
         .map_or(0, |runtime| runtime.client().remote_player_count());
+    let remote_actor_figures = host
+        .driver
+        .runtime
+        .as_ref()
+        .map_or_else(Vec::new, |runtime| {
+            runtime
+                .client()
+                .actor_presentations()
+                .into_iter()
+                .filter_map(|actor| {
+                    matches!(actor.id, ActorPresentationId::RemotePlayer(_))
+                        .then_some(actor.appearance.figure)
+                        .flatten()
+                })
+                .collect()
+        });
     let entity_count = host
         .driver
         .runtime
@@ -596,6 +613,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         byte_len: pixels.len(),
         summary,
         remote_player_count,
+        remote_actor_figures,
         entity_count,
         underwater,
     })
