@@ -42,8 +42,8 @@ export function renderTexture(pack: TexturePackAsset, name: string, texture: Tex
 export function makeReviewSheet(texture: RenderedTexture): RgbaImage {
   const background: Rgba = [32, 34, 34, 255];
   const panel: Rgba = [52, 54, 54, 255];
-  const sheetWidth = 840;
-  const sheetHeight = 328;
+  const sheetWidth = 1040;
+  const sheetHeight = 672;
   const sheet = solidImage(sheetWidth, sheetHeight, background);
 
   drawRect(sheet, 16, 16, 264, 264, panel);
@@ -60,6 +60,12 @@ export function makeReviewSheet(texture: RenderedTexture): RgbaImage {
 
   drawRect(sheet, 624, 232, 200, 80, panel);
   drawMipStrip(sheet, texture, 632, 240);
+
+  drawRect(sheet, 840, 16, 184, 296, panel);
+  drawIsometricCube(sheet, texture, 868, 48);
+
+  drawRect(sheet, 16, 328, 328, 328, panel);
+  drawRotatedTiledScaled(sheet, texture, 20, 332, 5, 5, 2, "vanilla-dirt-rotation-preview");
 
   return sheet;
 }
@@ -165,6 +171,61 @@ function drawTiledScaled(
   }
 }
 
+function drawRotatedTiledScaled(
+  target: RgbaImage,
+  source: RgbaImage,
+  targetX: number,
+  targetY: number,
+  tilesX: number,
+  tilesY: number,
+  scale: number,
+  seed: string,
+): void {
+  for (let tileY = 0; tileY < tilesY; tileY += 1) {
+    for (let tileX = 0; tileX < tilesX; tileX += 1) {
+      const rotation = Math.floor(random01(seed, tileX, tileY) * 4) % 4;
+      drawRotatedScaled(
+        target,
+        source,
+        targetX + tileX * source.width * scale,
+        targetY + tileY * source.height * scale,
+        scale,
+        rotation,
+      );
+    }
+  }
+}
+
+function drawRotatedScaled(
+  target: RgbaImage,
+  source: RgbaImage,
+  targetX: number,
+  targetY: number,
+  scale: number,
+  rotation: number,
+): void {
+  for (let y = 0; y < source.height; y += 1) {
+    for (let x = 0; x < source.width; x += 1) {
+      const [sourceX, sourceY] = rotatedSourceCoordinate(source.width, source.height, x, y, rotation);
+      const color = readPixel(source, sourceX, sourceY);
+      drawRect(target, targetX + x * scale, targetY + y * scale, scale, scale, color);
+    }
+  }
+}
+
+function rotatedSourceCoordinate(width: number, height: number, x: number, y: number, rotation: number): [number, number] {
+  if (rotation === 1) {
+    return [y, height - 1 - x];
+  }
+  if (rotation === 2) {
+    return [width - 1 - x, height - 1 - y];
+  }
+  if (rotation === 3) {
+    return [width - 1 - y, x];
+  }
+  return [x, y];
+}
+
 function drawMipStrip(target: RgbaImage, source: RgbaImage, targetX: number, targetY: number): void {
   const levels = [
     { size: 16, scale: 3 },
@@ -179,6 +240,142 @@ function drawMipStrip(target: RgbaImage, source: RgbaImage, targetX: number, tar
     drawScaled(target, image, x, targetY, level.scale);
     x += level.size * level.scale + 12;
   }
+}
+
+function drawIsometricCube(target: RgbaImage, texture: RgbaImage, targetX: number, targetY: number): void {
+  const halfWidth = 64;
+  const halfDepth = 32;
+  const height = 84;
+  const originX = targetX + halfWidth;
+  const originY = targetY + height;
+
+  drawCubeFace(target, texture, 0.68, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 1 - v, 1));
+  drawCubeFace(target, texture, 0.78, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, 1, 1 - v, u));
+  drawCubeFace(target, texture, 1.08, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 1, v));
+  drawCubeOutline(target, [
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0, 1, 0),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 1, 1, 0),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 1, 1, 1),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0, 1, 1),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 0, 0, 1),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 1, 0, 1),
+    projectIso(originX, originY, halfWidth, halfDepth, height, 1, 0, 0),
+  ]);
+}
+
+function drawCubeFace(
+  target: RgbaImage,
+  texture: RgbaImage,
+  shade: number,
+  map: (u: number, v: number) => Point,
+): void {
+  for (let y = 0; y < texture.height; y += 1) {
+    for (let x = 0; x < texture.width; x += 1) {
+      const u0 = x / texture.width;
+      const v0 = y / texture.height;
+      const u1 = (x + 1) / texture.width;
+      const v1 = (y + 1) / texture.height;
+      fillPolygon(
+        target,
+        [map(u0, v0), map(u1, v0), map(u1, v1), map(u0, v1)],
+        shadeColor(readPixel(texture, x, y), shade),
+      );
+    }
+  }
+}
+
+function projectIso(
+  originX: number,
+  originY: number,
+  halfWidth: number,
+  halfDepth: number,
+  height: number,
+  x: number,
+  y: number,
+  z: number,
+): Point {
+  return {
+    x: originX + (x - z) * halfWidth,
+    y: originY + (x + z) * halfDepth - y * height,
+  };
+}
+
+function drawCubeOutline(target: RgbaImage, points: Point[]): void {
+  const outline: Rgba = [24, 22, 20, 255];
+  const [topFront, topRight, topBack, topLeft, bottomLeft, bottomBack, bottomRight] = points;
+  drawLine(target, topFront!, topRight!, outline);
+  drawLine(target, topRight!, topBack!, outline);
+  drawLine(target, topBack!, topLeft!, outline);
+  drawLine(target, topLeft!, topFront!, outline);
+  drawLine(target, topLeft!, bottomLeft!, outline);
+  drawLine(target, topBack!, bottomBack!, outline);
+  drawLine(target, topRight!, bottomRight!, outline);
+  drawLine(target, bottomLeft!, bottomBack!, outline);
+  drawLine(target, bottomBack!, bottomRight!, outline);
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+function fillPolygon(target: RgbaImage, polygon: Point[], color: Rgba): void {
+  const minX = Math.max(0, Math.floor(Math.min(...polygon.map((point) => point.x))));
+  const maxX = Math.min(target.width - 1, Math.ceil(Math.max(...polygon.map((point) => point.x))));
+  const minY = Math.max(0, Math.floor(Math.min(...polygon.map((point) => point.y))));
+  const maxY = Math.min(target.height - 1, Math.ceil(Math.max(...polygon.map((point) => point.y))));
+
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      if (pointInPolygon(x + 0.5, y + 0.5, polygon)) {
+        writePixel(target.data, target.width, x, y, color);
+      }
+    }
+  }
+}
+
+function pointInPolygon(x: number, y: number, polygon: Point[]): boolean {
+  let inside = false;
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current, current += 1) {
+    const currentPoint = polygon[current]!;
+    const previousPoint = polygon[previous]!;
+    const crosses = currentPoint.y > y !== previousPoint.y > y;
+    if (!crosses) {
+      continue;
+    }
+    const intersectionX =
+      ((previousPoint.x - currentPoint.x) * (y - currentPoint.y)) / (previousPoint.y - currentPoint.y) +
+      currentPoint.x;
+    if (x < intersectionX) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function drawLine(target: RgbaImage, from: Point, to: Point, color: Rgba): void {
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y));
+  for (let step = 0; step <= steps; step += 1) {
+    const alpha = steps === 0 ? 0 : step / steps;
+    const x = Math.round(from.x + (to.x - from.x) * alpha);
+    const y = Math.round(from.y + (to.y - from.y) * alpha);
+    if (x >= 0 && x < target.width && y >= 0 && y < target.height) {
+      writePixel(target.data, target.width, x, y, color);
+    }
+  }
+}
+
+function shadeColor(color: Rgba, shade: number): Rgba {
+  return [
+    clampByte(color[0] * shade),
+    clampByte(color[1] * shade),
+    clampByte(color[2] * shade),
+    color[3],
+  ];
+}
+
+function clampByte(value: number): number {
+  return Math.max(0, Math.min(255, Math.round(value)));
 }
 
 function drawGrid(target: RgbaImage, targetX: number, targetY: number, width: number, height: number, scale: number, color: Rgba): void {
