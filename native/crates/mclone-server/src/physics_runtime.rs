@@ -16,8 +16,10 @@ use mclone_physics::{
 use crate::{ChunkScheduler, ServerPhysicsTickDiagnostics};
 
 const SERVER_GAMEPLAY_TICKS_PER_SECOND: f64 = 20.0;
+#[cfg(test)]
 const SERVER_GAMEPLAY_DT_SECONDS: f64 = 1.0 / SERVER_GAMEPLAY_TICKS_PER_SECOND;
 const SERVER_PHYSICS_STEPS_PER_SECOND: f64 = 60.0;
+#[cfg(test)]
 const SERVER_PHYSICS_SUBSTEPS_PER_SERVER_TICK: usize = 3;
 const SERVER_PHYSICS_SUBSTEP_DT_SECONDS: f64 = 1.0 / SERVER_PHYSICS_STEPS_PER_SECOND;
 const SERVER_PHYSICS_MINECRAFT_GRAVITY_BLOCKS_PER_TICK: f64 = 0.08;
@@ -134,15 +136,23 @@ impl ServerPhysicsRuntime {
         true
     }
 
+    #[cfg(test)]
     pub(crate) fn step(&mut self) -> ServerPhysicsTickDiagnostics {
+        self.step_steps(SERVER_PHYSICS_SUBSTEPS_PER_SERVER_TICK as u32)
+    }
+
+    pub(crate) fn step_steps(&mut self, steps: u32) -> ServerPhysicsTickDiagnostics {
+        if steps == 0 {
+            return self.last_diagnostics;
+        }
         let mut report = PhysicsStepReport::default();
         let mut body_pose_update_count = 0;
-        for _ in 0..SERVER_PHYSICS_SUBSTEPS_PER_SERVER_TICK {
+        for _ in 0..steps {
             report = self.world.step(SERVER_PHYSICS_SUBSTEP_DT_SECONDS);
             body_pose_update_count += report.body_pose_update_count;
         }
         report.body_pose_update_count = body_pose_update_count;
-        self.apply_debug_cube_vertical_drag(SERVER_GAMEPLAY_DT_SECONDS);
+        self.apply_debug_cube_vertical_drag(SERVER_PHYSICS_SUBSTEP_DT_SECONDS * f64::from(steps));
         self.last_diagnostics = self.diagnostics_from_report(report);
         self.last_diagnostics
     }

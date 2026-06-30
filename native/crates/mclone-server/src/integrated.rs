@@ -39,9 +39,9 @@ use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
     ChunkLoadingProgress, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkScheduler,
     ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, FluidKind,
-    FluidTickList, NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics,
-    ServerPhysicsTickDiagnostics, ServerSimulationTickReport, ServerSimulationTickTiming,
-    ServerTickReport, ServerTickTiming, WorldBlockPos,
+    FluidTickList, NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics, ServerPhysicsStepReport,
+    ServerPhysicsStepTiming, ServerPhysicsTickDiagnostics, ServerSimulationTickReport,
+    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBlockPos,
 };
 
 #[cfg(feature = "physics-rapier")]
@@ -52,6 +52,7 @@ const DEBUG_PHYSICS_CUBE_SPAWN_DISTANCE: f64 = 1.25;
 const DEBUG_PHYSICS_CUBE_LAUNCH_SPEED: f64 = 14.0;
 #[cfg(feature = "physics-rapier")]
 const DEBUG_PHYSICS_CUBE_HALF_EXTENT: f64 = 0.5;
+const DEFAULT_PHYSICS_STEPS_PER_GAMEPLAY_TICK: u32 = 3;
 
 #[derive(Debug)]
 pub struct IntegratedServer {
@@ -390,9 +391,30 @@ impl IntegratedServer {
         self.try_simulation_tick_report_for_target(CommandTarget::Dedicated(player_id))
     }
 
+    pub(crate) fn try_simulation_tick_report_with_physics_steps(
+        &mut self,
+        physics_steps: u32,
+    ) -> ChunkStoreResult<ServerSimulationTickReport> {
+        self.try_simulation_tick_report_for_target_with_physics_steps(
+            CommandTarget::Local,
+            physics_steps,
+        )
+    }
+
     fn try_simulation_tick_report_for_target(
         &mut self,
         target: CommandTarget,
+    ) -> ChunkStoreResult<ServerSimulationTickReport> {
+        self.try_simulation_tick_report_for_target_with_physics_steps(
+            target,
+            DEFAULT_PHYSICS_STEPS_PER_GAMEPLAY_TICK,
+        )
+    }
+
+    fn try_simulation_tick_report_for_target_with_physics_steps(
+        &mut self,
+        target: CommandTarget,
+        physics_steps: u32,
     ) -> ChunkStoreResult<ServerSimulationTickReport> {
         let total_start = simulation_timing_start();
         let scheduler_start = simulation_timing_start();
@@ -438,13 +460,18 @@ impl IntegratedServer {
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
         let physics_tick_start = simulation_timing_start();
-        #[cfg(feature = "physics-rapier")]
-        self.sync_debug_physics_player_collider();
-        let physics = self.step_physics();
-        #[cfg(feature = "physics-rapier")]
-        if let Some(entity) = self.sync_debug_physics_cube_entity(simulation_tick, physics) {
-            entity_updates.push(entity);
-        }
+        let physics = if physics_steps == 0 {
+            self.physics_diagnostics()
+        } else {
+            #[cfg(feature = "physics-rapier")]
+            self.sync_debug_physics_player_collider();
+            let physics = self.step_physics_steps(physics_steps);
+            #[cfg(feature = "physics-rapier")]
+            if let Some(entity) = self.sync_debug_physics_cube_entity(simulation_tick, physics) {
+                entity_updates.push(entity);
+            }
+            physics
+        };
         let physics_tick_us = simulation_timing_elapsed_us(physics_tick_start);
 
         let mut updates = tick_report.updates;
@@ -497,6 +524,55 @@ impl IntegratedServer {
         })
     }
 
+    pub(crate) fn try_physics_step_report(
+        &mut self,
+        physics_steps: u32,
+    ) -> ChunkStoreResult<ServerPhysicsStepReport> {
+        self.try_physics_step_report_for_target(CommandTarget::Local, physics_steps)
+    }
+
+    fn try_physics_step_report_for_target(
+        &mut self,
+        target: CommandTarget,
+        physics_steps: u32,
+    ) -> ChunkStoreResult<ServerPhysicsStepReport> {
+        self.ensure_target_exists(target)?;
+        let total_start = simulation_timing_start();
+
+        let physics_tick_start = simulation_timing_start();
+        #[cfg(feature = "physics-rapier")]
+        if physics_steps > 0 {
+            self.sync_debug_physics_player_collider();
+        }
+        let physics = self.step_physics_steps(physics_steps);
+        let physics_tick_us = simulation_timing_elapsed_us(physics_tick_start);
+
+        let physics_event_apply_start = simulation_timing_start();
+        #[cfg(feature = "physics-rapier")]
+        if physics_steps > 0 {
+            if let Some(entity) = self.sync_debug_physics_cube_entity(self.simulation_tick, physics)
+            {
+                self.reconcile_entity_subjects(std::iter::once(entity), true);
+            }
+        }
+        let updates = self.drain_chunk_updates_for_target(target)?;
+        let physics_event_apply_us = simulation_timing_elapsed_us(physics_event_apply_start);
+        let chunk_tracking = self.chunk_tracking_diagnostics();
+
+        Ok(ServerPhysicsStepReport {
+            simulation_tick: self.simulation_tick,
+            physics_steps,
+            physics,
+            chunk_tracking,
+            updates,
+            timing: ServerPhysicsStepTiming {
+                total_us: simulation_timing_elapsed_us(total_start),
+                physics_tick_us,
+                physics_event_apply_us,
+            },
+        })
+    }
+
     pub fn loaded_chunk_count(&self) -> usize {
         self.scheduler.loaded_chunk_count()
     }
@@ -529,13 +605,14 @@ impl IntegratedServer {
         &mut self.scheduler
     }
 
-    fn step_physics(&mut self) -> ServerPhysicsTickDiagnostics {
+    fn step_physics_steps(&mut self, physics_steps: u32) -> ServerPhysicsTickDiagnostics {
         #[cfg(feature = "physics-rapier")]
         {
-            self.physics.step()
+            self.physics.step_steps(physics_steps)
         }
         #[cfg(not(feature = "physics-rapier"))]
         {
+            let _ = physics_steps;
             ServerPhysicsTickDiagnostics::default()
         }
     }
@@ -1439,6 +1516,30 @@ mod tests {
         load_chunk_view(server, ChunkPos::new(0, 0));
     }
 
+    #[cfg(feature = "physics-rapier")]
+    fn prepare_debug_physics_floor(server: &mut IntegratedServer) {
+        load_center_chunk(server);
+
+        for y in 0..16 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    let block = if y == 0 { STONE } else { AIR };
+                    server
+                        .scheduler_mut()
+                        .set_block_at_world(BlockPos::new(x, y, z), block);
+                }
+            }
+        }
+        server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                position: Vec3d::new(8.0, 3.0, 6.0),
+                y_rot_degrees: 0.0,
+                x_rot_degrees: 0.0,
+                on_ground: false,
+            }))
+            .expect("move player before debug shot");
+    }
+
     #[test]
     fn local_chunk_view_routes_status_events_into_loading_progress() {
         let mut server = IntegratedServer::new(0);
@@ -2267,26 +2368,7 @@ mod tests {
     #[test]
     fn shoot_debug_physics_cube_command_publishes_debug_entity() {
         let mut server = IntegratedServer::new(0);
-        load_center_chunk(&mut server);
-
-        for y in 0..16 {
-            for z in 0..16 {
-                for x in 0..16 {
-                    let block = if y == 0 { STONE } else { AIR };
-                    server
-                        .scheduler_mut()
-                        .set_block_at_world(BlockPos::new(x, y, z), block);
-                }
-            }
-        }
-        server
-            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
-                position: Vec3d::new(8.0, 3.0, 6.0),
-                y_rot_degrees: 0.0,
-                x_rot_degrees: 0.0,
-                on_ground: false,
-            }))
-            .expect("move player before debug shot");
+        prepare_debug_physics_floor(&mut server);
 
         let updates = server
             .try_handle_command(ClientCommand::ShootDebugPhysicsCube)
@@ -2336,6 +2418,50 @@ mod tests {
 
         assert_ne!(second_snapshot.id, snapshot.id);
         assert!(has_entity_remove(&second_updates, snapshot.id));
+    }
+
+    #[cfg(feature = "physics-rapier")]
+    #[test]
+    fn physics_step_report_advances_debug_cube_without_gameplay_tick() {
+        let mut server = IntegratedServer::new(0);
+        prepare_debug_physics_floor(&mut server);
+
+        let updates = server
+            .try_handle_command(ClientCommand::ShootDebugPhysicsCube)
+            .expect("shoot debug physics cube");
+        let snapshot = first_entity_snapshot_of_kind(&updates, EntityKind::DebugCube)
+            .expect("debug cube entity snapshot");
+        let spawned_body_position = server
+            .debug_physics_cube_pose()
+            .expect("debug cube body pose")
+            .position;
+
+        let gameplay = server
+            .try_simulation_tick_report_with_physics_steps(0)
+            .expect("gameplay tick without physics");
+        assert_eq!(gameplay.simulation_tick, 1);
+        assert_eq!(server.simulation_tick(), 1);
+        assert_eq!(
+            gameplay.physics.test_cube_position,
+            Some(spawned_body_position)
+        );
+        assert!(first_entity_update(&gameplay.updates, snapshot.id).is_none());
+
+        let physics = server
+            .try_physics_step_report(1)
+            .expect("physics-only step");
+        assert_eq!(physics.simulation_tick, 1);
+        assert_eq!(server.simulation_tick(), 1);
+        assert_eq!(physics.physics_steps, 1);
+        assert!(physics.physics.test_cube_spawned);
+        let update = first_entity_update(&physics.updates, snapshot.id)
+            .expect("physics-only step should publish debug cube update");
+        assert!(
+            update.position.y < snapshot.position.y || update.position.z > snapshot.position.z,
+            "debug cube should move on a physics-only step, got {:?} from {:?}",
+            update.position,
+            snapshot.position
+        );
     }
 
     #[cfg(feature = "physics-rapier")]

@@ -788,26 +788,66 @@ mod native {
             }
 
             let frame = cadence.advance_host_frame();
-            // The physics lane is still executed inside `IntegratedServer`'s
-            // full gameplay tick. A later slice will consume `physics_steps`
-            // on host frames that do not run vanilla gameplay.
+            let mut last_gameplay_tick = None;
             for _ in 0..frame.gameplay_ticks {
                 let wall_start = Instant::now();
-                let report = server.try_simulation_tick_report()?;
+                let report = server.try_simulation_tick_report_with_physics_steps(0)?;
                 let wall_us = wall_start.elapsed().as_micros();
                 publish_updates(&update_tx, update_queue_depth, &report.updates)?;
-                let force_detail_after_tick = should_force_detail_after_tick(&report);
+                last_gameplay_tick = Some((report, wall_us));
+            }
+
+            let mut physics_wall_us = 0;
+            let mut physics_report = None;
+            if frame.physics_steps > 0 {
+                let wall_start = Instant::now();
+                let report = server.try_physics_step_report(frame.physics_steps)?;
+                physics_wall_us = wall_start.elapsed().as_micros();
+                publish_updates(&update_tx, update_queue_depth, &report.updates)?;
+                physics_report = Some(report);
+            }
+
+            if let Some((mut report, wall_us)) = last_gameplay_tick {
+                let mut force_detail_after_tick = should_force_detail_after_tick(&report);
+                if let Some(physics_report) = physics_report {
+                    report.physics = physics_report.physics;
+                    report.timing.physics_tick_us = report
+                        .timing
+                        .physics_tick_us
+                        .saturating_add(physics_report.timing.physics_tick_us);
+                    report.timing.total_us = report
+                        .timing
+                        .total_us
+                        .saturating_add(physics_report.timing.total_us);
+                    force_detail_after_tick |= !physics_report.updates.is_empty();
+                }
                 refresh_diagnostics(
                     diagnostics,
                     server,
                     command_queue_depth,
                     update_queue_depth,
                     diagnostics_detail_sampler,
-                    Some(ServerRunnerTickDiagnostics::from_report(&report, wall_us)),
+                    Some(ServerRunnerTickDiagnostics::from_report(
+                        &report,
+                        wall_us.saturating_add(physics_wall_us),
+                    )),
                     true,
                     Some(false),
                     None,
                     force_detail_after_tick,
+                );
+            } else if let Some(physics_report) = physics_report {
+                refresh_diagnostics(
+                    diagnostics,
+                    server,
+                    command_queue_depth,
+                    update_queue_depth,
+                    diagnostics_detail_sampler,
+                    None,
+                    true,
+                    Some(false),
+                    None,
+                    !physics_report.updates.is_empty(),
                 );
             }
 

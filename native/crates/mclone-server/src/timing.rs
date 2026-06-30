@@ -96,6 +96,23 @@ pub struct ServerSimulationTickReport {
     pub timing: ServerSimulationTickTiming,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ServerPhysicsStepTiming {
+    pub total_us: u128,
+    pub physics_tick_us: u128,
+    pub physics_event_apply_us: u128,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ServerPhysicsStepReport {
+    pub simulation_tick: u64,
+    pub physics_steps: u32,
+    pub physics: ServerPhysicsTickDiagnostics,
+    pub chunk_tracking: PlayerChunkTrackingDiagnostics,
+    pub updates: Vec<ServerUpdate>,
+    pub timing: ServerPhysicsStepTiming,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ServerPhysicsTickDiagnostics {
     pub enabled: bool,

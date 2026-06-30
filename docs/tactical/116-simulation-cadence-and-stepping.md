@@ -2,9 +2,9 @@
 
 Status: active; initial architecture note recorded, 60 Hz physics substeps landed
 inside the existing 20 Hz server tick, the first shared server cadence primitive
-landed, and the native server runner now consumes that cadence for gameplay
-ticks while preserving default 20 Hz behavior. Cadence configs now reject uneven
-fractional lane pacing by default.
+landed, cadence configs now reject uneven fractional lane pacing by default, and
+the native server runner now consumes separate gameplay and physics lane work
+while preserving default 20 Hz gameplay behavior.
 
 ## Purpose
 
@@ -63,12 +63,13 @@ Minecraft-like default, not an architectural ceiling.
 ## Landed Slices
 
 For the debug physics experiment, keep the server runner at 20 Hz and step
-Rapier three times at 1/60 second per server tick. Publish entity state once per
-server tick for now.
+Rapier three times at 1/60 second per server tick in the default profile.
+Alternate clean cadence profiles can run physics on host frames where gameplay
+does not advance.
 
 The expected benefit is better collision/contact integration and more stable
-settling. Visual smoothness remains limited by the 20 Hz entity publication path
-and the current actor interpolation model.
+settling. Visual smoothness for authoritative updates now depends on the host
+cadence, entity publication policy, and the current actor interpolation model.
 
 - Added `SimulationCadence` in `mclone-server` as the first host/lane stepping
   primitive. It maps one configurable host frame into fixed-rate gameplay and
@@ -99,8 +100,8 @@ cargo check --manifest-path native/Cargo.toml -p mclone-server
 - The runner config now carries a cadence config and rejects invalid cadence
   values before reporting the server thread ready.
 - `frame.physics_steps` is intentionally not consumed by the runner yet because
-  physics still runs inside the full `IntegratedServer` gameplay tick. Splitting
-  physics-only host frames is the next implementation slice.
+  physics still runs inside the full `IntegratedServer` gameplay tick. This was
+  superseded by the later split below.
 
 Validation:
 
@@ -137,6 +138,34 @@ cargo test --manifest-path native/Cargo.toml -p mclone-server --quiet
 cargo check --manifest-path native/Cargo.toml -p mclone-server
 ```
 
+- Split physics stepping out of the monolithic `IntegratedServer` gameplay tick.
+  The public compatibility tick path still runs three 60 Hz physics steps for
+  one 20 Hz gameplay tick, while the native runner now runs gameplay ticks with
+  zero embedded physics and consumes `frame.physics_steps` through a separate
+  physics-lane report.
+- Added `ServerPhysicsStepReport` and fixed-count physics stepping so a host
+  frame can publish debug physics entity updates without incrementing gameplay
+  tick, day time, scheduled block/fluid ticks, or entity age.
+- Runner diagnostics merge physics diagnostics back into the gameplay tick when
+  both lanes run on the same host frame. Physics-only frames refresh runner
+  diagnostics without pretending a gameplay tick occurred.
+- The native runner still has an explicit wall-clock `tick_interval`; the next
+  host-rate slice should configure or derive that interval together with the
+  cadence profile so `60/20/60` means both 60 scheduled host frames and 60 Hz
+  physics work.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-server -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-server --quiet
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier --quiet
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier physics_step_report_advances_debug_cube_without_gameplay_tick -- --nocapture
+cargo check --manifest-path native/Cargo.toml -p mclone-server
+cargo check --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
+```
+
 ## Follow-Up Work
 
 - Add explicit diagnostics for physics substep count and physics lane timing.
@@ -145,8 +174,7 @@ cargo check --manifest-path native/Cargo.toml -p mclone-server
 - Evaluate active-physics presentation options: higher-rate snapshots for local
   integrated play, velocity/angular-velocity extrapolation, or a shared
   prediction path.
-- Split physics-only server work out of the full gameplay tick so non-gameplay
-  host frames can consume `frame.physics_steps`.
-- Add a dev-only configurable host pump rate without changing the default 20 Hz
-  vanilla gameplay lane.
+- Add a dev-only configurable cadence profile / host pump rate and make the
+  native runner derive or validate wall-clock `tick_interval` from the selected
+  host rate.
 - Decide which entity classes can opt into higher-rate network snapshots.
