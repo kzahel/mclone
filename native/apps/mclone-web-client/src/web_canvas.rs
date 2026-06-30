@@ -38,8 +38,8 @@ use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
 use mclone_render::actor_assets::{ActorTextureImage, load_actor_texture_assets};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
-    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderStats,
-    TexturedSectionUploadReport,
+    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderPhase,
+    TexturedSectionRenderStats, TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
 use mclone_render::entity::{ActorDrawResources, ActorFigure, ActorInstance};
@@ -4155,6 +4155,7 @@ impl WebChunkRenderSession {
                     label: Some("mclone_web_generated_textured_chunk_encoder"),
                 });
         let mut actor_stats = mclone_render::entity::ActorRenderStats::default();
+        let split_translucent_terrain = !actor_instances.is_empty();
         let render_stats = if ui_covers_world {
             TexturedSectionRenderStats::default()
         } else {
@@ -4179,12 +4180,18 @@ impl WebChunkRenderSession {
                     sky_clear_color,
                 )
                 .with_loaded_color();
-                draw.render_with_options(
+                draw.render_with_options_phase_in_slot(
                     &self.context.queue,
                     &mut encoder,
                     render_target,
                     render_view,
                     render_options,
+                    mclone_render::uniform::SINGLE_VIEW_SLOT,
+                    if split_translucent_terrain {
+                        TexturedSectionRenderPhase::Opaque
+                    } else {
+                        TexturedSectionRenderPhase::All
+                    },
                 )
                 .map_err(|error| format!("failed to render generated section meshes: {error:#}"))?
             } else {
@@ -4205,6 +4212,32 @@ impl WebChunkRenderSession {
                     &actor_instances,
                 )
                 .map_err(|error| format!("failed to render browser actor meshes: {error:#}"))?;
+            if has_sections && split_translucent_terrain {
+                let draw = self
+                    .draw
+                    .as_ref()
+                    .ok_or_else(|| "textured draw resources were not initialized".to_owned())?;
+                let translucent_target = ChunkRenderTarget::new(
+                    &view,
+                    &self.depth.view,
+                    [self.context.width, self.context.height],
+                    sky_clear_color,
+                )
+                .with_loaded_color()
+                .with_loaded_depth();
+                draw.render_with_options_phase_in_slot(
+                    &self.context.queue,
+                    &mut encoder,
+                    translucent_target,
+                    render_view,
+                    render_options,
+                    mclone_render::uniform::SINGLE_VIEW_SLOT,
+                    TexturedSectionRenderPhase::Translucent,
+                )
+                .map_err(|error| {
+                    format!("failed to render generated translucent section meshes: {error:#}")
+                })?;
+            }
             render_stats
         };
         let mut ui_draw = self.ui.render_draw_list(ui_render_state);

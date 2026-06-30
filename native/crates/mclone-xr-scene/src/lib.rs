@@ -29,8 +29,8 @@ use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
     ChunkDepthTarget, ChunkMultiviewDepthTarget, ChunkMultiviewRenderTarget, ChunkProjectionKind,
     ChunkRenderTarget, ChunkRenderView, PreparedTexturedSectionStereoDraw,
-    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderStats,
-    TexturedSectionUploadReport,
+    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderPhase,
+    TexturedSectionRenderStats, TexturedSectionUploadReport,
 };
 use mclone_render::entity::{ActorDrawResources, ActorFigure, ActorInstance, ActorRenderStats};
 use mclone_render::fog::RenderFog;
@@ -1459,9 +1459,15 @@ where
             );
             render_target = render_target.with_loaded_color();
         }
+        let split_translucent_terrain = include_actors && !actor_instances.is_empty();
+        let terrain_phase = if split_translucent_terrain {
+            TexturedSectionRenderPhase::Opaque
+        } else {
+            TexturedSectionRenderPhase::All
+        };
         let stats = self
             .draw
-            .render_prepared_stereo_draw_with_options_in_slot(
+            .render_prepared_stereo_draw_phase_with_options_in_slot(
                 prepared_draw,
                 queue,
                 &mut encoder,
@@ -1469,6 +1475,7 @@ where
                 render_view,
                 render_options,
                 view_slot,
+                terrain_phase,
             )
             .context("render XR terrain-only chunks")?;
         if include_actors {
@@ -1485,6 +1492,20 @@ where
                     view_slot,
                 )
                 .context("render XR terrain-only actors")?;
+        }
+        if split_translucent_terrain {
+            self.draw
+                .render_prepared_stereo_draw_phase_with_options_in_slot(
+                    prepared_draw,
+                    queue,
+                    &mut encoder,
+                    render_target.with_loaded_color().with_loaded_depth(),
+                    render_view,
+                    render_options,
+                    view_slot,
+                    TexturedSectionRenderPhase::Translucent,
+                )
+                .context("render XR terrain-only translucent chunks")?;
         }
         let submission = queue.submit(Some(encoder.finish()));
         device
@@ -1642,9 +1663,15 @@ where
         let prepared_stereo_draw =
             self.draw
                 .prepare_stereo_draw(&prepared_records, terrain_views, terrain_options);
+        let split_translucent_terrain = include_actors && !actor_instances.is_empty();
+        let terrain_phase = if split_translucent_terrain {
+            TexturedSectionRenderPhase::Opaque
+        } else {
+            TexturedSectionRenderPhase::All
+        };
         let stats = self
             .draw
-            .render_prepared_multiview_stereo_draw_with_options(
+            .render_prepared_multiview_stereo_draw_phase_with_options(
                 &prepared_stereo_draw,
                 device,
                 queue,
@@ -1652,6 +1679,7 @@ where
                 render_target,
                 terrain_views,
                 terrain_options,
+                terrain_phase,
             )
             .context("render XR terrain multiview chunks")?;
         if let Some(timing) = timing.as_deref_mut() {
@@ -1674,6 +1702,24 @@ where
                 .context("render XR actor multiview pass")?;
             if let Some(timing) = timing.as_deref_mut() {
                 timing.multiview_actor_ms = elapsed_ms(actor_start.elapsed());
+            }
+            if split_translucent_terrain {
+                let translucent_start = Instant::now();
+                self.draw
+                    .render_prepared_multiview_stereo_draw_phase_with_options(
+                        &prepared_stereo_draw,
+                        device,
+                        queue,
+                        &mut encoder,
+                        render_target.with_loaded_color().with_loaded_depth(),
+                        terrain_views,
+                        terrain_options,
+                        TexturedSectionRenderPhase::Translucent,
+                    )
+                    .context("render XR terrain multiview translucent chunks")?;
+                if let Some(timing) = timing.as_deref_mut() {
+                    timing.multiview_terrain_ms += elapsed_ms(translucent_start.elapsed());
+                }
             }
             actor_stats
         } else {

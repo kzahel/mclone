@@ -3,7 +3,8 @@ use mclone_assets::AssetSource;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
     DEPTH_FORMAT, PreparedTexturedSectionRecords, PreparedTexturedSectionStereoDraw,
-    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionUploadReport,
+    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderPhase,
+    TexturedSectionRenderStats, TexturedSectionRenderTiming, TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::entity::{
@@ -612,6 +613,109 @@ pub fn render_view_with_underwater_effect(
         .unwrap_or(render_view)
 }
 
+fn add_terrain_timing(frame: &mut FullFrameRenderTiming, terrain: TexturedSectionRenderTiming) {
+    frame.terrain_records_ms += terrain.records_ms;
+    frame.terrain_cull_ms += terrain.cull_ms;
+    frame.terrain_uniform_write_ms += terrain.uniform_write_ms;
+    frame.terrain_translucent_collect_ms += terrain.translucent_collect_ms;
+    frame.terrain_translucent_sort_ms += terrain.translucent_sort_ms;
+    frame.terrain_prepare_ms += terrain.prepare_ms;
+    frame.terrain_encode_ms += terrain.encode_ms;
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_terrain_phase(
+    draw: &TexturedSectionDrawResources,
+    queue: &wgpu::Queue,
+    encoder: &mut wgpu::CommandEncoder,
+    target: ChunkRenderTarget<'_>,
+    render_view: ChunkRenderView,
+    render_options: TexturedSectionRenderOptions,
+    view_slot: PerViewSlot,
+    prepared_records: Option<&PreparedTexturedSectionRecords>,
+    prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
+    phase: TexturedSectionRenderPhase,
+    mut timing: Option<&mut FullFrameRenderTiming>,
+) -> Result<TexturedSectionRenderStats> {
+    match (
+        timing.as_deref_mut(),
+        prepared_stereo_draw,
+        prepared_records,
+    ) {
+        (Some(timing), Some(prepared_draw), _) => {
+            let (stats, terrain_timing) = draw.render_prepared_stereo_draw_phase_timed_in_slot(
+                prepared_draw,
+                queue,
+                encoder,
+                target,
+                render_view,
+                render_options,
+                view_slot,
+                phase,
+            )?;
+            add_terrain_timing(timing, terrain_timing);
+            Ok(stats)
+        }
+        (Some(timing), None, Some(records)) => {
+            let (stats, terrain_timing) = draw.render_prepared_phase_with_options_timed_in_slot(
+                records,
+                queue,
+                encoder,
+                target,
+                render_view,
+                render_options,
+                view_slot,
+                phase,
+            )?;
+            add_terrain_timing(timing, terrain_timing);
+            Ok(stats)
+        }
+        (Some(timing), None, None) => {
+            let (stats, terrain_timing) = draw.render_with_options_phase_timed_in_slot(
+                queue,
+                encoder,
+                target,
+                render_view,
+                render_options,
+                view_slot,
+                phase,
+            )?;
+            add_terrain_timing(timing, terrain_timing);
+            Ok(stats)
+        }
+        (None, Some(prepared_draw), _) => draw
+            .render_prepared_stereo_draw_phase_with_options_in_slot(
+                prepared_draw,
+                queue,
+                encoder,
+                target,
+                render_view,
+                render_options,
+                view_slot,
+                phase,
+            ),
+        (None, None, Some(records)) => draw.render_prepared_phase_with_options_in_slot(
+            records,
+            queue,
+            encoder,
+            target,
+            render_view,
+            render_options,
+            view_slot,
+            phase,
+        ),
+        (None, None, None) => draw.render_with_options_phase_in_slot(
+            queue,
+            encoder,
+            target,
+            render_view,
+            render_options,
+            view_slot,
+            phase,
+        ),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn render_full_frame<BuildGuiDraw>(
     frame: RenderFrameContext<'_>,
@@ -1209,93 +1313,25 @@ where
             background_clear_color,
         )?
         .with_loaded_color();
-        let frame_stats = match (
-            timing.as_deref_mut(),
-            prepared_stereo_draw,
-            prepared_records,
-        ) {
-            (Some(timing), Some(prepared_draw), _) => {
-                let (frame_stats, terrain_timing) = draw
-                    .render_prepared_stereo_draw_timed_in_slot(
-                        prepared_draw,
-                        frame.queue,
-                        frame.encoder,
-                        render_target,
-                        render_view,
-                        render_options,
-                        view_slot,
-                    )?;
-                timing.terrain_uniform_write_ms += terrain_timing.uniform_write_ms;
-                timing.terrain_prepare_ms += terrain_timing.prepare_ms;
-                timing.terrain_encode_ms += terrain_timing.encode_ms;
-                frame_stats
-            }
-            (Some(timing), None, Some(records)) => {
-                let (frame_stats, terrain_timing) = draw
-                    .render_prepared_with_options_timed_in_slot(
-                        records,
-                        frame.queue,
-                        frame.encoder,
-                        render_target,
-                        render_view,
-                        render_options,
-                        view_slot,
-                    )?;
-                timing.terrain_records_ms += terrain_timing.records_ms;
-                timing.terrain_cull_ms += terrain_timing.cull_ms;
-                timing.terrain_uniform_write_ms += terrain_timing.uniform_write_ms;
-                timing.terrain_translucent_collect_ms += terrain_timing.translucent_collect_ms;
-                timing.terrain_translucent_sort_ms += terrain_timing.translucent_sort_ms;
-                timing.terrain_prepare_ms += terrain_timing.prepare_ms;
-                timing.terrain_encode_ms += terrain_timing.encode_ms;
-                frame_stats
-            }
-            (Some(timing), None, None) => {
-                let (frame_stats, terrain_timing) = draw.render_with_options_timed_in_slot(
-                    frame.queue,
-                    frame.encoder,
-                    render_target,
-                    render_view,
-                    render_options,
-                    view_slot,
-                )?;
-                timing.terrain_records_ms += terrain_timing.records_ms;
-                timing.terrain_cull_ms += terrain_timing.cull_ms;
-                timing.terrain_uniform_write_ms += terrain_timing.uniform_write_ms;
-                timing.terrain_translucent_collect_ms += terrain_timing.translucent_collect_ms;
-                timing.terrain_translucent_sort_ms += terrain_timing.translucent_sort_ms;
-                timing.terrain_prepare_ms += terrain_timing.prepare_ms;
-                timing.terrain_encode_ms += terrain_timing.encode_ms;
-                frame_stats
-            }
-            (None, Some(prepared_draw), _) => draw
-                .render_prepared_stereo_draw_with_options_in_slot(
-                    prepared_draw,
-                    frame.queue,
-                    frame.encoder,
-                    render_target,
-                    render_view,
-                    render_options,
-                    view_slot,
-                )?,
-            (None, None, Some(records)) => draw.render_prepared_with_options_in_slot(
-                records,
-                frame.queue,
-                frame.encoder,
-                render_target,
-                render_view,
-                render_options,
-                view_slot,
-            )?,
-            (None, None, None) => draw.render_with_options_in_slot(
-                frame.queue,
-                frame.encoder,
-                render_target,
-                render_view,
-                render_options,
-                view_slot,
-            )?,
+        let split_translucent_terrain = !actor_instances.is_empty();
+        let terrain_phase = if split_translucent_terrain {
+            TexturedSectionRenderPhase::Opaque
+        } else {
+            TexturedSectionRenderPhase::All
         };
+        let frame_stats = render_terrain_phase(
+            draw,
+            frame.queue,
+            frame.encoder,
+            render_target,
+            render_view,
+            render_options,
+            view_slot,
+            prepared_records,
+            prepared_stereo_draw,
+            terrain_phase,
+            timing.as_deref_mut(),
+        )?;
         render_stats.drawn_section_count = frame_stats.drawn_section_count;
         render_stats.drawn_face_count = frame_stats.drawn_face_count();
         render_stats.drawn_index_count = frame_stats.drawn_index_count;
@@ -1312,6 +1348,22 @@ where
                     actor_instances,
                     view_slot,
                 )?;
+        }
+        if split_translucent_terrain {
+            let translucent_target = render_target.with_loaded_color().with_loaded_depth();
+            let _ = render_terrain_phase(
+                draw,
+                frame.queue,
+                frame.encoder,
+                translucent_target,
+                render_view,
+                render_options,
+                view_slot,
+                prepared_records,
+                prepared_stereo_draw,
+                TexturedSectionRenderPhase::Translucent,
+                timing.as_deref_mut(),
+            )?;
         }
         if let Some(overlay) = underwater_overlay {
             screen_effects

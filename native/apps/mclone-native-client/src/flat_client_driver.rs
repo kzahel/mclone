@@ -548,13 +548,13 @@ impl FlatClientDriver {
             return FlatClientSessionUpdate::default();
         }
 
-        let camera_eye = self.camera_view().eye;
+        let render_eye = self.camera_view().render_eye;
         let step = match self
             .startup
             .as_mut()
             .expect("startup presence checked")
             .pump
-            .step(camera_eye)
+            .step(render_eye)
         {
             Ok(step) => step,
             Err(err) => {
@@ -1265,7 +1265,7 @@ impl FlatClientDriver {
         let underwater = self
             .runtime
             .as_ref()
-            .is_some_and(|runtime| runtime.camera_inside_water(camera_view.eye));
+            .is_some_and(|runtime| runtime.camera_inside_water(camera_view.render_eye));
         let dt_seconds = (self.render_stats.last_frame_ms * 0.001).min(0.1);
         let underwater_effect = self.underwater_effect.update(underwater, dt_seconds);
         underwater.then(|| {
@@ -1308,7 +1308,7 @@ impl FlatClientDriver {
                 needs_section_upload: false,
             });
         }
-        let camera_eye = self.camera_view().eye;
+        let render_eye = self.camera_view().render_eye;
         let changed = {
             let runtime = self.runtime.as_mut().expect("runtime presence checked");
             runtime.poll()?
@@ -1317,7 +1317,7 @@ impl FlatClientDriver {
         let needs_pending_upload = self
             .runtime
             .as_ref()
-            .is_some_and(|runtime| runtime.has_pending_render_work(camera_eye));
+            .is_some_and(|runtime| runtime.has_pending_render_work(render_eye));
         Ok(FlatClientRuntimePoll {
             needs_section_upload: changed || needs_pending_upload,
         })
@@ -1332,7 +1332,7 @@ impl FlatClientDriver {
             return Ok(None);
         };
         let remesh_start = std::time::Instant::now();
-        let section_update = runtime.sync_render_sections(camera_view.eye)?;
+        let section_update = runtime.sync_render_sections(camera_view.render_eye)?;
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let loaded_chunk_count = runtime.client().loaded_chunk_count();
         Ok(Some(FlatClientSectionSync {
@@ -1351,7 +1351,7 @@ impl FlatClientDriver {
             return Ok(None);
         };
         let remesh_start = std::time::Instant::now();
-        let section_update = runtime.sync_all_render_sections(camera_view.eye)?;
+        let section_update = runtime.sync_all_render_sections(camera_view.render_eye)?;
         let sections = runtime.cached_sections();
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         Ok(Some(FlatClientFullSectionSync {
@@ -1835,6 +1835,18 @@ mod tests {
             from_pointer_click: true,
             fallback_remote_addr: Some("10.0.0.9:25565"),
         }
+    }
+
+    #[test]
+    fn flat_camera_view_exposes_third_person_render_eye() {
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(8.0, 70.0, 8.0), 0.0, 0.0, 24.0);
+        camera.set_view_mode(EngineCameraViewMode::ThirdPersonBack);
+
+        let view = FlatClientCameraView::from_camera(&camera);
+
+        assert_eq!(view.eye, glam::vec3(8.0, 70.0, 8.0));
+        assert_eq!(view.render_eye, glam::vec3(8.0, 70.0, 4.0));
     }
 
     #[test]

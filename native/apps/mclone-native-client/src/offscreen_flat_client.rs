@@ -628,10 +628,9 @@ fn configure_screenshot_scene(
 
 impl OffscreenFlatClientHost {
     fn underwater(&self) -> bool {
-        self.driver
-            .runtime
-            .as_ref()
-            .is_some_and(|runtime| runtime.camera_inside_water(self.driver.camera_view().eye))
+        self.driver.runtime.as_ref().is_some_and(|runtime| {
+            runtime.camera_inside_water(self.driver.camera_view().render_eye)
+        })
     }
 }
 

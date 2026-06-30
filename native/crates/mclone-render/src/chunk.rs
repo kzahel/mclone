@@ -235,6 +235,9 @@ pub struct ChunkRenderTarget<'a> {
     /// When `true`, the color attachment is loaded instead of cleared — used when
     /// an earlier pass (the sky dome) has already drawn the background.
     pub load_color: bool,
+    /// When `true`, the depth attachment is loaded instead of cleared — used by
+    /// late translucent terrain passes after actors have written depth.
+    pub load_depth: bool,
 }
 
 impl<'a> ChunkRenderTarget<'a> {
@@ -251,6 +254,7 @@ impl<'a> ChunkRenderTarget<'a> {
             clear_color,
             clear_depth: 1.0,
             load_color: false,
+            load_depth: false,
         }
     }
 
@@ -276,11 +280,24 @@ impl<'a> ChunkRenderTarget<'a> {
         self
     }
 
+    pub fn with_loaded_depth(mut self) -> Self {
+        self.load_depth = true;
+        self
+    }
+
     fn color_load_op(self) -> wgpu::LoadOp<wgpu::Color> {
         if self.load_color {
             wgpu::LoadOp::Load
         } else {
             wgpu::LoadOp::Clear(self.clear_color)
+        }
+    }
+
+    fn depth_load_op(self) -> wgpu::LoadOp<f32> {
+        if self.load_depth {
+            wgpu::LoadOp::Load
+        } else {
+            wgpu::LoadOp::Clear(self.clear_depth)
         }
     }
 }
@@ -300,6 +317,24 @@ pub struct TexturedSectionRenderStats {
     pub frustum_index_count: u32,
     pub readiness_culled_index_count: u32,
     pub graph_culled_index_count: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TexturedSectionRenderPhase {
+    #[default]
+    All,
+    Opaque,
+    Translucent,
+}
+
+impl TexturedSectionRenderPhase {
+    const fn draws_opaque(self) -> bool {
+        matches!(self, Self::All | Self::Opaque)
+    }
+
+    const fn draws_translucent(self) -> bool {
+        matches!(self, Self::All | Self::Translucent)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -1870,7 +1905,7 @@ impl ChunkDrawResources {
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: target.depth_view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(target.clear_depth),
+                    load: target.depth_load_op(),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -1967,7 +2002,7 @@ impl TexturedChunkDrawResources {
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: target.depth_view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(target.clear_depth),
+                    load: target.depth_load_op(),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -1992,6 +2027,7 @@ pub struct ChunkMultiviewRenderTarget<'a> {
     pub clear_color: wgpu::Color,
     pub clear_depth: f32,
     pub load_color: bool,
+    pub load_depth: bool,
 }
 
 impl<'a> ChunkMultiviewRenderTarget<'a> {
@@ -2008,6 +2044,7 @@ impl<'a> ChunkMultiviewRenderTarget<'a> {
             clear_color,
             clear_depth: 1.0,
             load_color: false,
+            load_depth: false,
         }
     }
 
@@ -2016,11 +2053,24 @@ impl<'a> ChunkMultiviewRenderTarget<'a> {
         self
     }
 
+    pub fn with_loaded_depth(mut self) -> Self {
+        self.load_depth = true;
+        self
+    }
+
     fn color_load_op(self) -> wgpu::LoadOp<wgpu::Color> {
         if self.load_color {
             wgpu::LoadOp::Load
         } else {
             wgpu::LoadOp::Clear(self.clear_color)
+        }
+    }
+
+    fn depth_load_op(self) -> wgpu::LoadOp<f32> {
+        if self.load_depth {
+            wgpu::LoadOp::Load
+        } else {
+            wgpu::LoadOp::Clear(self.clear_depth)
         }
     }
 }
@@ -2204,6 +2254,27 @@ impl TexturedSectionDrawResources {
         options: TexturedSectionRenderOptions,
         view_slot: PerViewSlot,
     ) -> Result<TexturedSectionRenderStats> {
+        self.render_with_options_phase_in_slot(
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            view_slot,
+            TexturedSectionRenderPhase::All,
+        )
+    }
+
+    pub fn render_with_options_phase_in_slot(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+        phase: TexturedSectionRenderPhase,
+    ) -> Result<TexturedSectionRenderStats> {
         self.render_with_options_inner(
             queue,
             encoder,
@@ -2213,6 +2284,7 @@ impl TexturedSectionDrawResources {
             view_slot,
             None,
             None,
+            phase,
         )
     }
 
@@ -2243,6 +2315,27 @@ impl TexturedSectionDrawResources {
         options: TexturedSectionRenderOptions,
         view_slot: PerViewSlot,
     ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
+        self.render_with_options_phase_timed_in_slot(
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            view_slot,
+            TexturedSectionRenderPhase::All,
+        )
+    }
+
+    pub fn render_with_options_phase_timed_in_slot(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+        phase: TexturedSectionRenderPhase,
+    ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
         let mut timing = TexturedSectionRenderTiming::default();
         let stats = self.render_with_options_inner(
             queue,
@@ -2253,6 +2346,7 @@ impl TexturedSectionDrawResources {
             view_slot,
             None,
             Some(&mut timing),
+            phase,
         )?;
         Ok((stats, timing))
     }
@@ -2330,6 +2424,29 @@ impl TexturedSectionDrawResources {
         options: TexturedSectionRenderOptions,
         view_slot: PerViewSlot,
     ) -> Result<TexturedSectionRenderStats> {
+        self.render_prepared_phase_with_options_in_slot(
+            records,
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            view_slot,
+            TexturedSectionRenderPhase::All,
+        )
+    }
+
+    pub fn render_prepared_phase_with_options_in_slot(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+        phase: TexturedSectionRenderPhase,
+    ) -> Result<TexturedSectionRenderStats> {
         self.render_with_options_inner(
             queue,
             encoder,
@@ -2339,6 +2456,7 @@ impl TexturedSectionDrawResources {
             view_slot,
             Some(records),
             None,
+            phase,
         )
     }
 
@@ -2372,6 +2490,29 @@ impl TexturedSectionDrawResources {
         options: TexturedSectionRenderOptions,
         view_slot: PerViewSlot,
     ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
+        self.render_prepared_phase_with_options_timed_in_slot(
+            records,
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            view_slot,
+            TexturedSectionRenderPhase::All,
+        )
+    }
+
+    pub fn render_prepared_phase_with_options_timed_in_slot(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+        phase: TexturedSectionRenderPhase,
+    ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
         let mut timing = TexturedSectionRenderTiming::default();
         let stats = self.render_with_options_inner(
             queue,
@@ -2382,6 +2523,7 @@ impl TexturedSectionDrawResources {
             view_slot,
             Some(records),
             Some(&mut timing),
+            phase,
         )?;
         Ok((stats, timing))
     }
@@ -2396,6 +2538,29 @@ impl TexturedSectionDrawResources {
         options: TexturedSectionRenderOptions,
         view_slot: PerViewSlot,
     ) -> Result<TexturedSectionRenderStats> {
+        self.render_prepared_stereo_draw_phase_with_options_in_slot(
+            prepared_draw,
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            view_slot,
+            TexturedSectionRenderPhase::All,
+        )
+    }
+
+    pub fn render_prepared_stereo_draw_phase_with_options_in_slot(
+        &self,
+        prepared_draw: &PreparedTexturedSectionStereoDraw,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+        phase: TexturedSectionRenderPhase,
+    ) -> Result<TexturedSectionRenderStats> {
         self.render_prepared_stereo_draw_inner(
             prepared_draw,
             queue,
@@ -2405,6 +2570,7 @@ impl TexturedSectionDrawResources {
             options,
             view_slot,
             None,
+            phase,
         )
     }
 
@@ -2418,6 +2584,29 @@ impl TexturedSectionDrawResources {
         options: TexturedSectionRenderOptions,
         view_slot: PerViewSlot,
     ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
+        self.render_prepared_stereo_draw_phase_timed_in_slot(
+            prepared_draw,
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            view_slot,
+            TexturedSectionRenderPhase::All,
+        )
+    }
+
+    pub fn render_prepared_stereo_draw_phase_timed_in_slot(
+        &self,
+        prepared_draw: &PreparedTexturedSectionStereoDraw,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+        phase: TexturedSectionRenderPhase,
+    ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
         let mut timing = TexturedSectionRenderTiming::default();
         let stats = self.render_prepared_stereo_draw_inner(
             prepared_draw,
@@ -2428,6 +2617,7 @@ impl TexturedSectionDrawResources {
             options,
             view_slot,
             Some(&mut timing),
+            phase,
         )?;
         Ok((stats, timing))
     }
@@ -2464,6 +2654,29 @@ impl TexturedSectionDrawResources {
         render_views: [ChunkRenderView; 2],
         options: [TexturedSectionRenderOptions; 2],
     ) -> Result<[TexturedSectionRenderStats; 2]> {
+        self.render_prepared_multiview_stereo_draw_phase_with_options(
+            prepared_draw,
+            device,
+            queue,
+            encoder,
+            target,
+            render_views,
+            options,
+            TexturedSectionRenderPhase::All,
+        )
+    }
+
+    pub fn render_prepared_multiview_stereo_draw_phase_with_options(
+        &self,
+        prepared_draw: &PreparedTexturedSectionStereoDraw,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkMultiviewRenderTarget<'_>,
+        render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+        phase: TexturedSectionRenderPhase,
+    ) -> Result<[TexturedSectionRenderStats; 2]> {
         let renderer = self.renderer.multiview_renderer(device)?;
         renderer.write_uniforms(queue, render_views, options, self.renderer.color_format);
         {
@@ -2480,7 +2693,7 @@ impl TexturedSectionDrawResources {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: target.depth_view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(target.clear_depth),
+                        load: target.depth_load_op(),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -2489,17 +2702,21 @@ impl TexturedSectionDrawResources {
             });
             pass.set_bind_group(0, &renderer.bind_group, &[]);
             pass.set_bind_group(1, &self.atlas.bind_group, &[]);
-            pass.set_pipeline(&renderer.opaque_pipeline);
-            for (key, mesh) in &self.sections {
-                if !prepared_draw.drawn_keys.contains(key) {
-                    continue;
+            if phase.draws_opaque() {
+                pass.set_pipeline(&renderer.opaque_pipeline);
+                for (key, mesh) in &self.sections {
+                    if !prepared_draw.drawn_keys.contains(key) {
+                        continue;
+                    }
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
                 }
-                draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
             }
-            pass.set_pipeline(&renderer.translucent_pipeline);
-            for key in &prepared_draw.translucent_keys {
-                if let Some(mesh) = self.sections.get(key) {
-                    draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+            if phase.draws_translucent() {
+                pass.set_pipeline(&renderer.translucent_pipeline);
+                for key in &prepared_draw.translucent_keys {
+                    if let Some(mesh) = self.sections.get(key) {
+                        draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+                    }
                 }
             }
         }
@@ -2516,6 +2733,7 @@ impl TexturedSectionDrawResources {
         view_slot: PerViewSlot,
         prepared_records: Option<&PreparedTexturedSectionRecords>,
         mut timing: Option<&mut TexturedSectionRenderTiming>,
+        phase: TexturedSectionRenderPhase,
     ) -> Result<TexturedSectionRenderStats> {
         let prepare_start = timing.as_ref().map(|_| Instant::now());
         let records_storage;
@@ -2549,26 +2767,30 @@ impl TexturedSectionDrawResources {
         if let (Some(timing), Some(uniform_start)) = (&mut timing, uniform_start) {
             timing.uniform_write_ms = elapsed_ms(uniform_start.elapsed());
         }
-        let translucent_collect_start = timing.as_ref().map(|_| Instant::now());
-        let mut translucent_sections = self
-            .sections
-            .iter()
-            .filter(|(key, mesh)| {
-                culling.drawn_keys.contains(key) && !mesh.translucent_index_range().is_empty()
-            })
-            .collect::<Vec<_>>();
-        if let (Some(timing), Some(translucent_collect_start)) =
-            (&mut timing, translucent_collect_start)
-        {
-            timing.translucent_collect_ms = elapsed_ms(translucent_collect_start.elapsed());
-        }
-        let translucent_sort_start = timing.as_ref().map(|_| Instant::now());
-        translucent_sections.sort_by(|(left_key, _), (right_key, _)| {
-            compare_translucent_sections(**left_key, **right_key, render_view)
-        });
-        if let (Some(timing), Some(translucent_sort_start)) = (&mut timing, translucent_sort_start)
-        {
-            timing.translucent_sort_ms = elapsed_ms(translucent_sort_start.elapsed());
+        let mut translucent_sections = Vec::new();
+        if phase.draws_translucent() {
+            let translucent_collect_start = timing.as_ref().map(|_| Instant::now());
+            translucent_sections = self
+                .sections
+                .iter()
+                .filter(|(key, mesh)| {
+                    culling.drawn_keys.contains(key) && !mesh.translucent_index_range().is_empty()
+                })
+                .collect::<Vec<_>>();
+            if let (Some(timing), Some(translucent_collect_start)) =
+                (&mut timing, translucent_collect_start)
+            {
+                timing.translucent_collect_ms = elapsed_ms(translucent_collect_start.elapsed());
+            }
+            let translucent_sort_start = timing.as_ref().map(|_| Instant::now());
+            translucent_sections.sort_by(|(left_key, _), (right_key, _)| {
+                compare_translucent_sections(**left_key, **right_key, render_view)
+            });
+            if let (Some(timing), Some(translucent_sort_start)) =
+                (&mut timing, translucent_sort_start)
+            {
+                timing.translucent_sort_ms = elapsed_ms(translucent_sort_start.elapsed());
+            }
         }
         if let (Some(timing), Some(prepare_start)) = (&mut timing, prepare_start) {
             timing.prepare_ms = elapsed_ms(prepare_start.elapsed());
@@ -2589,7 +2811,7 @@ impl TexturedSectionDrawResources {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: target.depth_view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(target.clear_depth),
+                        load: target.depth_load_op(),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -2598,16 +2820,20 @@ impl TexturedSectionDrawResources {
             });
             pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
             pass.set_bind_group(1, &self.atlas.bind_group, &[]);
-            pass.set_pipeline(&self.renderer.opaque_pipeline);
-            for (key, mesh) in &self.sections {
-                if !culling.drawn_keys.contains(key) {
-                    continue;
+            if phase.draws_opaque() {
+                pass.set_pipeline(&self.renderer.opaque_pipeline);
+                for (key, mesh) in &self.sections {
+                    if !culling.drawn_keys.contains(key) {
+                        continue;
+                    }
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
                 }
-                draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
             }
-            pass.set_pipeline(&self.renderer.translucent_pipeline);
-            for (_, mesh) in translucent_sections {
-                draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+            if phase.draws_translucent() {
+                pass.set_pipeline(&self.renderer.translucent_pipeline);
+                for (_, mesh) in translucent_sections {
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+                }
             }
         }
         if let (Some(timing), Some(encode_start)) = (&mut timing, encode_start) {
@@ -2677,6 +2903,7 @@ impl TexturedSectionDrawResources {
         options: TexturedSectionRenderOptions,
         view_slot: PerViewSlot,
         mut timing: Option<&mut TexturedSectionRenderTiming>,
+        phase: TexturedSectionRenderPhase,
     ) -> Result<TexturedSectionRenderStats> {
         let prepare_start = timing.as_ref().map(|_| Instant::now());
         let uniform_start = timing.as_ref().map(|_| Instant::now());
@@ -2707,7 +2934,7 @@ impl TexturedSectionDrawResources {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: target.depth_view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(target.clear_depth),
+                        load: target.depth_load_op(),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -2716,20 +2943,24 @@ impl TexturedSectionDrawResources {
             });
             pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
             pass.set_bind_group(1, &self.atlas.bind_group, &[]);
-            pass.set_pipeline(&self.renderer.opaque_pipeline);
-            for (key, mesh) in &self.sections {
-                if !prepared_draw.draws_in_slot(*key, view_slot) {
-                    continue;
+            if phase.draws_opaque() {
+                pass.set_pipeline(&self.renderer.opaque_pipeline);
+                for (key, mesh) in &self.sections {
+                    if !prepared_draw.draws_in_slot(*key, view_slot) {
+                        continue;
+                    }
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
                 }
-                draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
             }
-            pass.set_pipeline(&self.renderer.translucent_pipeline);
-            for key in &prepared_draw.translucent_keys {
-                if !prepared_draw.draws_in_slot(*key, view_slot) {
-                    continue;
-                }
-                if let Some(mesh) = self.sections.get(key) {
-                    draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+            if phase.draws_translucent() {
+                pass.set_pipeline(&self.renderer.translucent_pipeline);
+                for key in &prepared_draw.translucent_keys {
+                    if !prepared_draw.draws_in_slot(*key, view_slot) {
+                        continue;
+                    }
+                    if let Some(mesh) = self.sections.get(key) {
+                        draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+                    }
                 }
             }
         }
