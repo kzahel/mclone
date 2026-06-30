@@ -236,6 +236,7 @@ mod android {
         terrain_multiview_perf: bool,
         sky_terrain_multiview_perf: bool,
         sky_terrain_actors_multiview_perf: bool,
+        full_frame_multiview: bool,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -255,6 +256,7 @@ mod android {
                 terrain_multiview_perf: false,
                 sky_terrain_multiview_perf: false,
                 sky_terrain_actors_multiview_perf: false,
+                full_frame_multiview: false,
             }
         }
     }
@@ -359,6 +361,9 @@ mod android {
                 "--sky-terrain-actors-multiview-perf" => {
                     options.sky_terrain_actors_multiview_perf = true;
                 }
+                "--xr-full-frame-multiview" => {
+                    options.full_frame_multiview = true;
+                }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
         }
@@ -404,6 +409,17 @@ mod android {
             && (options.multiview_proof || options.terrain_multiview_proof)
         {
             bail!("multiview perf modes cannot be combined with multiview proof modes");
+        }
+        if options.full_frame_multiview
+            && (options.multiview_proof
+                || options.terrain_multiview_proof
+                || options.terrain_multiview_perf
+                || options.sky_terrain_multiview_perf
+                || options.sky_terrain_actors_multiview_perf)
+        {
+            bail!(
+                "--xr-full-frame-multiview cannot be combined with multiview proof or microbenchmark modes"
+            );
         }
         if options.multiview_proof
             || options.terrain_multiview_proof
@@ -689,6 +705,10 @@ mod android {
             startup_options.sky_terrain_actors_multiview_perf
         );
         log::info!(
+            "Android XR full-frame multiview: {}",
+            startup_options.full_frame_multiview
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -732,6 +752,7 @@ mod android {
             startup_options.terrain_multiview_perf,
             startup_options.sky_terrain_multiview_perf,
             startup_options.sky_terrain_actors_multiview_perf,
+            startup_options.full_frame_multiview,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -756,6 +777,7 @@ mod android {
         terrain_multiview_perf: bool,
         sky_terrain_multiview_perf: bool,
         sky_terrain_actors_multiview_perf: bool,
+        full_frame_multiview: bool,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -1066,6 +1088,82 @@ mod android {
             );
         }
 
+        if full_frame_multiview {
+            let mut stereo_target = graphics_vulkan::create_stereo(
+                &graphics.device,
+                &graphics.session,
+                eye_width,
+                eye_height,
+                XR_COLOR_FORMAT,
+                XR_SAMPLE_COUNT,
+            )
+            .context("create OpenXR full-frame multiview stereo array swapchain")?;
+            let mut multiview_depth =
+                ChunkMultiviewDepthTarget::new(&graphics.device, eye_width, eye_height);
+            log::info!(
+                "OpenXR full-frame multiview swapchain: color_format={XR_COLOR_FORMAT:?} eye={}x{} images={} layers={}",
+                eye_width,
+                eye_height,
+                stereo_target.texture_count(),
+                stereo_target.array_size()
+            );
+            let controller_actions = OpenXrControllerActions::create_with_binding_logger(
+                graphics.session.instance(),
+                &graphics.session,
+                |profile, err| {
+                    log::warn!("OpenXR binding suggestion unavailable for {profile}: {err:?}");
+                },
+            )
+            .context("initialize Android XR controller actions")?;
+            log::info!(
+                "Android XR controller actions: requested binding profiles=simple_controller, oculus_touch, valve_index, htc_vive, microsoft_motion_controller"
+            );
+            log::info!("MCLONE_ANDROID_XR_CONTROLLERS_READY");
+            log::info!("MCLONE_ANDROID_XR_SESSION_READY");
+
+            let mut terrain = create_android_xr_terrain_state(
+                &graphics.device,
+                &graphics.queue,
+                runtime_assets,
+                startup_view_pose,
+                scene_options,
+                render_options,
+                remote_addr,
+            )
+            .context("initialize Android XR full-frame multiview terrain runtime")?;
+            let terrain_summary = terrain.frame_summary();
+            terrain.set_display_refresh_hz(display_refresh.current_rate);
+            terrain.set_render_split_timing_enabled(perf_seconds.is_some());
+            log::info!(
+                "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={} actors={}",
+                terrain_summary.section_count,
+                terrain_summary.index_count,
+                terrain_summary.actor_count
+            );
+
+            return run_mclone_frame_loop(
+                app,
+                &mut graphics,
+                &stage,
+                environment_blend_mode,
+                AndroidXrFrameTargets::Multiview {
+                    stereo_target: &mut stereo_target,
+                    depth: &mut multiview_depth,
+                },
+                &mut terrain,
+                &controller_actions,
+                session_smoke,
+                perf_seconds,
+                perf_flight,
+                perf_settled_stationary,
+                perf_frozen_render,
+                perf_metrics,
+                startup_view_pose,
+                scene_options.render_distance,
+                display_refresh,
+            );
+        }
+
         let mut left_eye = graphics_vulkan::create_eye(
             &graphics.device,
             &graphics.session,
@@ -1132,8 +1230,10 @@ mod android {
             &mut graphics,
             &stage,
             environment_blend_mode,
-            &mut left_eye,
-            &mut right_eye,
+            AndroidXrFrameTargets::PerEye {
+                left_eye: &mut left_eye,
+                right_eye: &mut right_eye,
+            },
             &mut terrain,
             &controller_actions,
             session_smoke,
@@ -2234,8 +2334,7 @@ mod android {
         graphics: &mut graphics_vulkan::VulkanGraphicsSession,
         stage: &xr::Space,
         environment_blend_mode: xr::EnvironmentBlendMode,
-        left_eye: &mut graphics_vulkan::OpenXrEyeState,
-        right_eye: &mut graphics_vulkan::OpenXrEyeState,
+        mut frame_targets: AndroidXrFrameTargets<'_>,
         terrain: &mut AndroidXrTerrainState,
         controller_actions: &OpenXrControllerActions,
         session_smoke: Option<AndroidXrSessionSmoke>,
@@ -2251,6 +2350,7 @@ mod android {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
         let mut frame_stats = XrFrameStats::default();
+        let render_path = frame_targets.render_path();
         let mut perf_probe = AndroidXrPerfProbe::new(
             perf_seconds,
             perf_flight,
@@ -2258,6 +2358,7 @@ mod android {
             perf_frozen_render,
             render_distance,
             display_refresh,
+            render_path,
         );
         let mut performance_metrics_probe = if perf_metrics {
             let probe = perf_metrics::XrPerformanceMetricsProbe::new(
@@ -2364,18 +2465,38 @@ mod android {
                             );
                         }
                         let render_start = Instant::now();
-                        let result = render_mclone_frame(
-                            graphics,
-                            stage,
-                            environment_blend_mode,
-                            frame_state.predicted_display_time,
-                            left_eye,
-                            right_eye,
-                            terrain,
-                            &controllers,
-                            perf_probe.automation(),
-                            fixed_render_view_pose,
-                        );
+                        let result = match &mut frame_targets {
+                            AndroidXrFrameTargets::PerEye {
+                                left_eye,
+                                right_eye,
+                            } => render_mclone_frame(
+                                graphics,
+                                stage,
+                                environment_blend_mode,
+                                frame_state.predicted_display_time,
+                                left_eye,
+                                right_eye,
+                                terrain,
+                                &controllers,
+                                perf_probe.automation(),
+                                fixed_render_view_pose,
+                            ),
+                            AndroidXrFrameTargets::Multiview {
+                                stereo_target,
+                                depth,
+                            } => render_mclone_multiview_frame(
+                                graphics,
+                                stage,
+                                environment_blend_mode,
+                                frame_state.predicted_display_time,
+                                stereo_target,
+                                depth,
+                                terrain,
+                                &controllers,
+                                perf_probe.automation(),
+                                fixed_render_view_pose,
+                            ),
+                        };
                         frame_timing.render_mclone_frame_ms = elapsed_ms(render_start);
                         result
                     }
@@ -2393,7 +2514,8 @@ mod android {
                         if !logged_first_frame {
                             logged_first_frame = true;
                             log::info!(
-                                "Android XR terrain first-frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={} local_startup_active={}",
+                                "Android XR terrain first-frame summary: render_path={} frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={} local_startup_active={}",
+                                render_path.label(),
                                 summary.rendered_frames,
                                 summary.section_count,
                                 summary.drawn_section_count,
@@ -2407,7 +2529,8 @@ mod android {
                         if !logged_ready && !summary.local_startup_active {
                             logged_ready = true;
                             log::info!(
-                                "Android XR terrain ready summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+                                "Android XR terrain ready summary: render_path={} frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+                                render_path.label(),
                                 summary.rendered_frames,
                                 summary.section_count,
                                 summary.drawn_section_count,
@@ -2417,6 +2540,18 @@ mod android {
                                 summary.drawn_actor_count
                             );
                             log::info!("MCLONE_ANDROID_XR_READY");
+                            if render_path == AndroidXrRenderPath::Multiview {
+                                log::info!(
+                                    "MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW_READY frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={}",
+                                    summary.rendered_frames,
+                                    summary.section_count,
+                                    summary.drawn_section_count,
+                                    summary.index_count,
+                                    summary.drawn_index_count,
+                                    summary.actor_count,
+                                    summary.drawn_actor_count
+                                );
+                            }
                             if session_smoke.is_some() {
                                 session_smoke_pending_start = true;
                             }
@@ -2497,6 +2632,41 @@ mod android {
         timing: AndroidXrRenderFrameTiming,
     }
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum AndroidXrRenderPath {
+        PerEye,
+        Multiview,
+    }
+
+    impl AndroidXrRenderPath {
+        const fn label(self) -> &'static str {
+            match self {
+                Self::PerEye => "per-eye",
+                Self::Multiview => "multiview",
+            }
+        }
+    }
+
+    enum AndroidXrFrameTargets<'a> {
+        PerEye {
+            left_eye: &'a mut graphics_vulkan::OpenXrEyeState,
+            right_eye: &'a mut graphics_vulkan::OpenXrEyeState,
+        },
+        Multiview {
+            stereo_target: &'a mut graphics_vulkan::OpenXrStereoState,
+            depth: &'a mut ChunkMultiviewDepthTarget,
+        },
+    }
+
+    impl AndroidXrFrameTargets<'_> {
+        fn render_path(&self) -> AndroidXrRenderPath {
+            match self {
+                Self::PerEye { .. } => AndroidXrRenderPath::PerEye,
+                Self::Multiview { .. } => AndroidXrRenderPath::Multiview,
+            }
+        }
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq)]
     enum AndroidXrPerfAutomation {
         Flight { speed_blocks_per_second: f64 },
@@ -2552,6 +2722,7 @@ mod android {
         frozen_render: bool,
         render_distance: u32,
         display_refresh: XrDisplayRefreshSnapshot,
+        render_path: AndroidXrRenderPath,
         target_hz: f64,
         settle_started: Option<Instant>,
         settle_frames: u64,
@@ -2568,6 +2739,7 @@ mod android {
             frozen_render: bool,
             render_distance: u32,
             display_refresh: XrDisplayRefreshSnapshot,
+            render_path: AndroidXrRenderPath,
         ) -> Self {
             let target_hz = display_refresh
                 .current_rate
@@ -2581,6 +2753,7 @@ mod android {
                 frozen_render,
                 render_distance,
                 display_refresh,
+                render_path,
                 target_hz,
                 settle_started: None,
                 settle_frames: 0,
@@ -2647,9 +2820,10 @@ mod android {
                 );
             }
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_distance={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} render_distance={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
                 seconds,
                 mode,
+                self.render_path.label(),
                 self.render_distance,
                 flight_speed,
                 settle_seconds,
@@ -2683,6 +2857,7 @@ mod android {
                 render_distance: self.render_distance,
                 display_refresh: self.display_refresh.clone(),
                 target_hz: self.target_hz,
+                render_path: self.render_path,
                 mode_label: mode,
                 flight_speed_blocks_per_second: self
                     .flight
@@ -2777,6 +2952,7 @@ mod android {
         render_distance: u32,
         display_refresh: XrDisplayRefreshSnapshot,
         target_hz: f64,
+        render_path: AndroidXrRenderPath,
         mode_label: &'static str,
         flight_speed_blocks_per_second: Option<f64>,
         settle_seconds: f64,
@@ -2844,9 +3020,10 @@ mod android {
                 camera_distance_blocks(self.start_camera, self.latest_camera);
             let latest_upload = self.latest_summary.upload;
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={}",
                 sample_seconds,
                 self.mode_label,
+                self.render_path.label(),
                 self.render_distance,
                 flight_speed,
                 flight_distance_blocks,
@@ -3395,45 +3572,7 @@ mod android {
         let right_release_result = right_target.release();
         timing.release_eyes_ms = elapsed_ms(release_start);
         let frame_summary = frame_summary?;
-        timing.terrain_render_views_ms = frame_summary.timing.render_views_ms;
-        timing.terrain_menu_pointer_ms = frame_summary.timing.menu_pointer_ms;
-        timing.terrain_runtime_upload_ms = frame_summary.timing.runtime_upload_ms;
-        timing.terrain_runtime_poll_ms = frame_summary.timing.runtime_poll_ms;
-        timing.terrain_runtime_sync_ms = frame_summary.timing.runtime_sync_ms;
-        timing.terrain_runtime_gpu_upload_ms = frame_summary.timing.runtime_gpu_upload_ms;
-        timing.terrain_runtime_ready_sections_ms = frame_summary.timing.runtime_ready_sections_ms;
-        timing.terrain_shared_records_ms = frame_summary.timing.shared_records_ms;
-        timing.terrain_left_eye_ms = frame_summary.timing.left_eye_ms;
-        timing.terrain_right_eye_ms = frame_summary.timing.right_eye_ms;
-        timing.terrain_left_eye_prepare_ms = frame_summary.timing.left_eye_render.prepare_ms;
-        timing.terrain_left_eye_cull_ms = frame_summary.timing.left_eye_render.cull_ms;
-        timing.terrain_left_eye_uniform_write_ms =
-            frame_summary.timing.left_eye_render.uniform_write_ms;
-        timing.terrain_left_eye_translucent_collect_ms =
-            frame_summary.timing.left_eye_render.translucent_collect_ms;
-        timing.terrain_left_eye_translucent_sort_ms =
-            frame_summary.timing.left_eye_render.translucent_sort_ms;
-        timing.terrain_left_eye_encode_ms = frame_summary.timing.left_eye_render.encode_ms;
-        timing.terrain_left_eye_section_encode_ms =
-            frame_summary.timing.left_eye_render.section_encode_ms;
-        timing.terrain_left_eye_submit_ms = frame_summary.timing.left_eye_render.submit_ms;
-        timing.terrain_left_eye_poll_wait_ms = frame_summary.timing.left_eye_render.poll_wait_ms;
-        timing.terrain_right_eye_prepare_ms = frame_summary.timing.right_eye_render.prepare_ms;
-        timing.terrain_right_eye_cull_ms = frame_summary.timing.right_eye_render.cull_ms;
-        timing.terrain_right_eye_uniform_write_ms =
-            frame_summary.timing.right_eye_render.uniform_write_ms;
-        timing.terrain_right_eye_translucent_collect_ms =
-            frame_summary.timing.right_eye_render.translucent_collect_ms;
-        timing.terrain_right_eye_translucent_sort_ms =
-            frame_summary.timing.right_eye_render.translucent_sort_ms;
-        timing.terrain_right_eye_encode_ms = frame_summary.timing.right_eye_render.encode_ms;
-        timing.terrain_right_eye_section_encode_ms =
-            frame_summary.timing.right_eye_render.section_encode_ms;
-        timing.terrain_right_eye_submit_ms = frame_summary.timing.right_eye_render.submit_ms;
-        timing.terrain_right_eye_poll_wait_ms = frame_summary.timing.right_eye_render.poll_wait_ms;
-        timing.terrain_stereo_finish_ms = frame_summary.timing.stereo_finish_ms;
-        timing.terrain_stereo_submit_ms = frame_summary.timing.stereo_submit_ms;
-        timing.terrain_stereo_poll_wait_ms = frame_summary.timing.stereo_poll_wait_ms;
+        copy_terrain_frame_timing(&mut timing, frame_summary.timing);
         left_release_result?;
         right_release_result?;
 
@@ -3453,6 +3592,151 @@ mod android {
             camera: terrain.camera_snapshot(),
             timing,
         })
+    }
+
+    fn render_mclone_multiview_frame(
+        graphics: &mut graphics_vulkan::VulkanGraphicsSession,
+        stage: &xr::Space,
+        environment_blend_mode: xr::EnvironmentBlendMode,
+        predicted_display_time: xr::Time,
+        stereo_target: &mut graphics_vulkan::OpenXrStereoState,
+        depth: &mut ChunkMultiviewDepthTarget,
+        terrain: &mut AndroidXrTerrainState,
+        controllers: &[XrControllerSnapshot],
+        automation: Option<AndroidXrPerfAutomation>,
+        fixed_render_view_pose: Option<XrStartupViewPose>,
+    ) -> Result<AndroidXrRenderedFrame> {
+        let mut timing = AndroidXrRenderFrameTiming::default();
+        let locate_views_start = Instant::now();
+        let stereo_views =
+            mclone_xr_host::locate_stereo_views(&graphics.session, stage, predicted_display_time)?;
+        timing.locate_views_ms = elapsed_ms(locate_views_start);
+        let locomotion_start = Instant::now();
+        let mut frozen_render = false;
+        match automation {
+            Some(AndroidXrPerfAutomation::Flight {
+                speed_blocks_per_second,
+            }) => {
+                terrain
+                    .apply_automated_flight_input(
+                        [stereo_views.left, stereo_views.right],
+                        speed_blocks_per_second,
+                    )
+                    .context("apply Android XR automated flight locomotion")?;
+            }
+            Some(AndroidXrPerfAutomation::Stationary {
+                frozen_render: freeze_runtime,
+            }) => {
+                frozen_render = freeze_runtime;
+                terrain.apply_automated_stationary_input();
+            }
+            None => {
+                terrain
+                    .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
+                    .context("apply Android XR controller locomotion")?;
+            }
+        }
+        timing.locomotion_ms = elapsed_ms(locomotion_start);
+
+        let target_width = stereo_target.width;
+        let target_height = stereo_target.height;
+        if depth.width != target_width || depth.height != target_height {
+            *depth = ChunkMultiviewDepthTarget::new(&graphics.device, target_width, target_height);
+        }
+        let acquire_start = Instant::now();
+        let target = acquire_stereo_target(stereo_target)
+            .context("acquire full-frame multiview OpenXR image")?;
+        timing.acquire_left_ms = elapsed_ms(acquire_start);
+        let terrain_render_start = Instant::now();
+        let terrain_target = XrTerrainMultiviewTarget {
+            color_view: target.color_array_view(),
+            depth,
+            size: [target_width, target_height],
+        };
+        let frame_summary = if frozen_render {
+            let fixed_render_view_pose = fixed_render_view_pose.with_context(
+                || "Android XR multiview frozen render probe requires a fixed startup view pose",
+            )?;
+            terrain.render_frame_multiview_frozen_runtime_at_view_pose(
+                &graphics.device,
+                &graphics.queue,
+                fixed_render_view_pose,
+                [stereo_views.left.fov, stereo_views.right.fov],
+                terrain_target,
+            )
+        } else {
+            terrain.render_frame_multiview(
+                &graphics.device,
+                &graphics.queue,
+                [stereo_views.left, stereo_views.right],
+                terrain_target,
+            )
+        };
+        timing.terrain_render_frame_ms = elapsed_ms(terrain_render_start);
+        let release_start = Instant::now();
+        let release_result = target.release();
+        timing.release_eyes_ms = elapsed_ms(release_start);
+        let frame_summary = frame_summary?;
+        copy_terrain_frame_timing(&mut timing, frame_summary.timing);
+        release_result?;
+
+        let end_frame_start = Instant::now();
+        mclone_xr_host::end_multiview_projection_frame(
+            &mut graphics.frame_stream,
+            predicted_display_time,
+            environment_blend_mode,
+            stage,
+            stereo_views,
+            stereo_target,
+        )?;
+        timing.end_frame_ms = elapsed_ms(end_frame_start);
+        Ok(AndroidXrRenderedFrame {
+            summary: frame_summary,
+            camera: terrain.camera_snapshot(),
+            timing,
+        })
+    }
+
+    fn copy_terrain_frame_timing(
+        timing: &mut AndroidXrRenderFrameTiming,
+        scene_timing: mclone_xr_scene::XrTerrainFrameTiming,
+    ) {
+        timing.terrain_render_views_ms = scene_timing.render_views_ms;
+        timing.terrain_menu_pointer_ms = scene_timing.menu_pointer_ms;
+        timing.terrain_runtime_upload_ms = scene_timing.runtime_upload_ms;
+        timing.terrain_runtime_poll_ms = scene_timing.runtime_poll_ms;
+        timing.terrain_runtime_sync_ms = scene_timing.runtime_sync_ms;
+        timing.terrain_runtime_gpu_upload_ms = scene_timing.runtime_gpu_upload_ms;
+        timing.terrain_runtime_ready_sections_ms = scene_timing.runtime_ready_sections_ms;
+        timing.terrain_shared_records_ms = scene_timing.shared_records_ms;
+        timing.terrain_left_eye_ms = scene_timing.left_eye_ms;
+        timing.terrain_right_eye_ms = scene_timing.right_eye_ms;
+        timing.terrain_left_eye_prepare_ms = scene_timing.left_eye_render.prepare_ms;
+        timing.terrain_left_eye_cull_ms = scene_timing.left_eye_render.cull_ms;
+        timing.terrain_left_eye_uniform_write_ms = scene_timing.left_eye_render.uniform_write_ms;
+        timing.terrain_left_eye_translucent_collect_ms =
+            scene_timing.left_eye_render.translucent_collect_ms;
+        timing.terrain_left_eye_translucent_sort_ms =
+            scene_timing.left_eye_render.translucent_sort_ms;
+        timing.terrain_left_eye_encode_ms = scene_timing.left_eye_render.encode_ms;
+        timing.terrain_left_eye_section_encode_ms = scene_timing.left_eye_render.section_encode_ms;
+        timing.terrain_left_eye_submit_ms = scene_timing.left_eye_render.submit_ms;
+        timing.terrain_left_eye_poll_wait_ms = scene_timing.left_eye_render.poll_wait_ms;
+        timing.terrain_right_eye_prepare_ms = scene_timing.right_eye_render.prepare_ms;
+        timing.terrain_right_eye_cull_ms = scene_timing.right_eye_render.cull_ms;
+        timing.terrain_right_eye_uniform_write_ms = scene_timing.right_eye_render.uniform_write_ms;
+        timing.terrain_right_eye_translucent_collect_ms =
+            scene_timing.right_eye_render.translucent_collect_ms;
+        timing.terrain_right_eye_translucent_sort_ms =
+            scene_timing.right_eye_render.translucent_sort_ms;
+        timing.terrain_right_eye_encode_ms = scene_timing.right_eye_render.encode_ms;
+        timing.terrain_right_eye_section_encode_ms =
+            scene_timing.right_eye_render.section_encode_ms;
+        timing.terrain_right_eye_submit_ms = scene_timing.right_eye_render.submit_ms;
+        timing.terrain_right_eye_poll_wait_ms = scene_timing.right_eye_render.poll_wait_ms;
+        timing.terrain_stereo_finish_ms = scene_timing.stereo_finish_ms;
+        timing.terrain_stereo_submit_ms = scene_timing.stereo_submit_ms;
+        timing.terrain_stereo_poll_wait_ms = scene_timing.stereo_poll_wait_ms;
     }
 
     fn acquire_eye_target(

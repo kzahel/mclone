@@ -3,15 +3,18 @@
 Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
 proof landed, and Slice E's headless, Android XR, terrain-chunk proof, sky,
 actor, selection-outline, world-GUI, and screen-effect render paths, and
-terrain+sky / terrain+sky+actor multiview perf paths exist. Quest now exposes
-`wgpu::Features::MULTIVIEW` after enabling
+terrain+sky / terrain+sky+actor multiview perf paths exist. A full-frame
+Android XR multiview validation/perf lane now also renders the normal headset
+frame through one two-layer OpenXR swapchain, but it remains opt-in because the
+first frozen RD10 production-style comparison was effectively flat. Quest now
+exposes `wgpu::Features::MULTIVIEW` after enabling
 `VK_KHR_get_physical_device_properties2` on the OpenXR Vulkan instance and
 threading `VK_KHR_multiview` into the wgpu-wrapped device extension list, and
-the on-device proofs now validate true multiview layer writes/readback, the
-left/right stereo projection guard, chunk-terrain rendering, and synthetic
-selection/world-GUI/screen-effect overlay rendering through a two-layer OpenXR
-swapchain. The production headset frame remains on the correct per-eye submit
-path until the full-frame multiview switch is made and measured. Created after
+the on-device proofs validate true multiview layer writes/readback, the
+left/right stereo projection guard, chunk-terrain rendering, synthetic
+selection/world-GUI/screen-effect overlay rendering, and opt-in full-frame
+presentation through a two-layer OpenXR swapchain. The default production
+headset frame remains on the correct per-eye submit path. Created after
 `d0c5161` (`Restore XR per-eye command submission`) rolled back the unsafe
 single-submit Quest XR optimization from `264c723`.
 
@@ -575,13 +578,59 @@ MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY submitted=208 runtime_frames=208
 Release APK SHA-256 for that proof run:
 `0f4d24cfbfac13387c90355d6b5fa4a0c794cdeae650650f81437bce92fcee70`.
 
+**Full-frame Android XR multiview lane added 2026-06-30.** Android XR now has
+an opt-in `--xr-full-frame-multiview` startup flag and package smoke lane:
+
+```sh
+pnpm native:android-xr:full-frame-multiview
+```
+
+This path creates one two-layer OpenXR swapchain, renders the normal headset
+frame through the full multiview renderer stack, presents layer 0/1 through the
+normal stereo projection views, and requires
+`MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW_READY`. The ordinary perf markers now
+carry `render_path=per-eye|multiview`, and the matching RD10 frozen lane is:
+
+```sh
+pnpm native:android-xr:perf:frozen:rd10:multiview
+```
+
+Quest 3 full-frame smoke passed:
+
+```text
+OpenXR full-frame multiview swapchain: color_format=Rgba8Unorm eye=1680x1760 images=3 layers=2
+Android XR terrain ready summary: render_path=multiview frames=1 sections=6 drawn_sections=2 indices=23130 drawn_indices=15924 actors=1 drawn_actors=1
+MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW_READY frames=1 sections=6 drawn_sections=2 indices=23130 drawn_indices=15924 actors=1 drawn_actors=1
+```
+
+Release APK SHA-256 for the smoke/perf runs:
+`c3c4f40c7a988f51f2d7e8627effcd746412d883464087ef154fe5da83c09ed0`.
+
+Direct frozen RD10 comparison on the same tree:
+
+| path | avg | p50 | p95 | p99 | max | over budget |
+|---|---:|---:|---:|---:|---:|---:|
+| per-eye | 13.916 ms | 13.805 ms | 14.860 ms | 17.443 ms | 26.208 ms | 613 |
+| full-frame multiview | 13.842 ms | 13.832 ms | 14.468 ms | 14.829 ms | 16.192 ms | 628 |
+
+This is a correctness/coverage milestone, not a decisive performance win: avg
+improved by only `0.074 ms` (`1.005x`), p50 was effectively unchanged, and
+over-budget count stayed similar. The multiview lane currently reports total
+`terrain_render_frame_ms`, but detailed per-pass terrain timing fields are still
+per-eye-oriented and zero in the multiview perf marker; add multiview-specific
+timing before making deeper attribution claims.
+
 Move from proof-of-correctness one-submit to the real target:
 
-- switch a full production XR frame to the multiview renderer stack behind a
-  validation/perf lane;
-- decide whether terrain's union-of-eye-culls policy is acceptable for the first
-  production path or should be tightened before enabling;
-- shared draw list feeding both eye layers.
+- keep the default production path on per-eye submit until headset visual
+  validation and timing attribution justify a switch;
+- add multiview-specific timing buckets for terrain/sky/actors/overlays and
+  presentation so production perf results are attributable;
+- decide whether terrain's union-of-eye-culls policy is acceptable if this path
+  ever becomes the default;
+- if full-frame multiview remains flat, pivot the next perf work toward cull/CPU
+  prep and the optional E4 overlap toggle rather than assuming multiview alone
+  will pay off.
 
 Acceptance:
 

@@ -768,6 +768,44 @@ where
         )
     }
 
+    pub fn render_frame_multiview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        target: XrTerrainMultiviewTarget<'_>,
+    ) -> Result<XrTerrainFrameSummary> {
+        self.render_frame_multiview_inner(
+            device,
+            queue,
+            views,
+            target,
+            XrTerrainRuntimeUpdateMode::Live,
+        )
+    }
+
+    pub fn render_frame_multiview_frozen_runtime_at_view_pose(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view_pose: XrStartupViewPose,
+        eye_fovs: [xr::Fovf; 2],
+        target: XrTerrainMultiviewTarget<'_>,
+    ) -> Result<XrTerrainFrameSummary> {
+        let mut timing = XrTerrainFrameTiming::default();
+        let render_views_start = Instant::now();
+        let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs)?;
+        timing.render_views_ms = elapsed_ms(render_views_start.elapsed());
+        self.render_prepared_frame_multiview(
+            device,
+            queue,
+            render_views,
+            target,
+            XrTerrainRuntimeUpdateMode::Frozen,
+            timing,
+        )
+    }
+
     pub fn render_terrain_multiview_frame(
         &mut self,
         device: &wgpu::Device,
@@ -1052,6 +1090,87 @@ where
             runtime_mode,
             timing,
         )
+    }
+
+    fn render_frame_multiview_inner(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        views: [xr::View; 2],
+        target: XrTerrainMultiviewTarget<'_>,
+        runtime_mode: XrTerrainRuntimeUpdateMode,
+    ) -> Result<XrTerrainFrameSummary> {
+        let mut timing = XrTerrainFrameTiming::default();
+        let render_views_start = Instant::now();
+        let mut render_views = self.render_views(&views)?;
+        timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
+        self.update_menu_panel_pose(render_views);
+        let menu_pointer_start = Instant::now();
+        if self
+            .apply_menu_pointer_input(device, queue)
+            .context("apply XR menu pointer input for multiview frame")?
+        {
+            timing.menu_pointer_ms += elapsed_ms(menu_pointer_start.elapsed());
+            let render_views_start = Instant::now();
+            render_views = self.render_views(&views)?;
+            timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
+            self.update_menu_panel_pose(render_views);
+        } else {
+            timing.menu_pointer_ms += elapsed_ms(menu_pointer_start.elapsed());
+        }
+        if self.advance_local_startup(device, queue)? {
+            let render_views_start = Instant::now();
+            render_views = self.render_views(&views)?;
+            timing.render_views_ms += elapsed_ms(render_views_start.elapsed());
+            self.update_menu_panel_pose(render_views);
+        }
+        self.render_prepared_frame_multiview(
+            device,
+            queue,
+            render_views,
+            target,
+            runtime_mode,
+            timing,
+        )
+    }
+
+    fn render_prepared_frame_multiview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        render_views: [ChunkRenderView; 2],
+        target: XrTerrainMultiviewTarget<'_>,
+        runtime_mode: XrTerrainRuntimeUpdateMode,
+        mut timing: XrTerrainFrameTiming,
+    ) -> Result<XrTerrainFrameSummary> {
+        let center_position =
+            (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+        let upload = match runtime_mode {
+            XrTerrainRuntimeUpdateMode::Live
+                if self.local_startup.is_none() && self.runtime.is_some() =>
+            {
+                let runtime_upload_start = Instant::now();
+                let upload = self.poll_runtime_and_upload(device, center_position, &mut timing)?;
+                timing.runtime_upload_ms = elapsed_ms(runtime_upload_start.elapsed());
+                upload
+            }
+            XrTerrainRuntimeUpdateMode::Live | XrTerrainRuntimeUpdateMode::Frozen => {
+                self.frozen_runtime_upload_summary()
+            }
+        };
+        let multiview = self
+            .render_prepared_terrain_multiview_frame_with_upload_inner(
+                device,
+                queue,
+                render_views,
+                target,
+                upload,
+                true,
+                true,
+                true,
+            )
+            .context("render XR full-frame multiview")?;
+        Ok(self.frame_summary_from_multiview(multiview, timing))
     }
 
     fn render_prepared_frame(
@@ -1750,6 +1869,27 @@ where
             drawn_actor_count: self.render_stats.drawn_actor_count,
             timing,
             upload,
+        }
+    }
+
+    fn frame_summary_from_multiview(
+        &self,
+        summary: XrTerrainMultiviewFrameSummary,
+        timing: XrTerrainFrameTiming,
+    ) -> XrTerrainFrameSummary {
+        XrTerrainFrameSummary {
+            rendered_frames: summary.rendered_frames,
+            section_count: summary.section_count,
+            drawn_section_count: summary.left.drawn_section_count,
+            index_count: self.render_stats.index_count,
+            drawn_index_count: summary.left.drawn_index_count,
+            gui_command_count: 0,
+            ui_active: self.ui.is_active(),
+            local_startup_active: self.local_startup.is_some(),
+            actor_count: summary.actor_count,
+            drawn_actor_count: summary.drawn_actor_count,
+            timing,
+            upload: summary.upload,
         }
     }
 
