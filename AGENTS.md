@@ -78,6 +78,22 @@ Default shared routing:
   and transient effects, entity AI/spawning, localization: define or extend a
   shared contract before adding app-local behavior.
 
+## XR render-path guardrail
+
+World-space or per-view visual features must be multiview-aware. Prefer routing
+new debug visuals, overlays, outlines, actors, screen effects, and world UI
+through existing renderers that already support single-view/per-eye and XR
+multiview paths. If a new renderer, shader, uniform, render pass, or command path
+is added, it must either:
+
+- implement both the normal per-eye path and the full-frame multiview path, or
+- document why the feature is intentionally unavailable in one path.
+
+Do not land a new XR-visible render feature that only appears in per-eye
+rendering when it should also appear in full-frame multiview. For per-view data,
+preserve the invariant that each eye/layer uses its own view/projection data;
+never share mutable per-eye uniforms across one submission.
+
 ## Reference-porting policy
 
 For vanilla parity ports, every class or system has a 1:1 counterpart in `reference/minecraft-1.17.1/src/`. **Always read the source file before writing the port.** The default is direct translation: same field names where practical, same method names where practical, same logic flow. This applies to client graphics behavior as well as simulation and content systems. Diverge only when the target platform, runtime ownership, or Rust type system forces it.
