@@ -281,6 +281,7 @@ mod tests {
         AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus,
         LIGHT_DATA_LAYER_BYTE_COUNT, PackedLightSection, chunk_section_index,
     };
+    use mclone_protocol::{PlayerAppearance, PlayerModelKind};
 
     #[test]
     fn distinguishes_local_and_remote_hosts() {
@@ -410,6 +411,7 @@ mod tests {
         }));
         runtime.apply_update(ServerUpdate::RemotePlayerAdd(RemotePlayerUpdate {
             id: RemotePlayerId(42),
+            appearance: PlayerAppearance::default(),
             position: mclone_core::Vec3d::new(4.0, 64.0, 5.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -484,6 +486,7 @@ mod tests {
         let id = RemotePlayerId(7);
         let initial = RemotePlayerUpdate {
             id,
+            appearance: PlayerAppearance::default(),
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 45.0,
             x_rot_degrees: 5.0,
@@ -491,6 +494,7 @@ mod tests {
         };
         let moved = RemotePlayerUpdate {
             id,
+            appearance: PlayerAppearance::default(),
             position: mclone_core::Vec3d::new(3.0, 65.0, 4.0),
             y_rot_degrees: 90.0,
             x_rot_degrees: -10.0,
@@ -567,6 +571,9 @@ mod tests {
         let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
         let update = RemotePlayerUpdate {
             id: RemotePlayerId(3),
+            appearance: PlayerAppearance {
+                model: PlayerModelKind::UprightBear,
+            },
             position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: -90.0,
             x_rot_degrees: 15.0,
@@ -580,7 +587,7 @@ mod tests {
             vec![ActorPresentation {
                 id: ActorPresentationId::RemotePlayer(update.id),
                 kind: ActorPresentationKind::RemotePlayer,
-                appearance: ActorAppearance::default_player(),
+                appearance: ActorAppearance::figure(mclone_assets::upright_bear_figure_id()),
                 feet_position: update.position,
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,

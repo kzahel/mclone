@@ -1446,6 +1446,7 @@ mod tests {
         remote.apply_update(mclone_protocol::ServerUpdate::RemotePlayerAdd(
             mclone_protocol::RemotePlayerUpdate {
                 id: mclone_protocol::RemotePlayerId(9),
+                appearance: mclone_protocol::PlayerAppearance::default(),
                 position: Vec3d::new(1.0, 64.0, 2.0),
                 y_rot_degrees: -90.0,
                 x_rot_degrees: 0.0,

@@ -25,7 +25,8 @@ use mclone_core::{
 };
 use mclone_mesh::{RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionMesh};
 use mclone_protocol::{
-    ChunkView, ClientCommand, HOTBAR_SLOT_COUNT_USIZE, PlayerPositionUpdate, ServerUpdate,
+    ChunkView, ClientCommand, HOTBAR_SLOT_COUNT_USIZE, PlayerAppearance, PlayerModelKind,
+    PlayerPositionUpdate, ServerUpdate, SetPlayerAppearanceCommand,
 };
 use mclone_render_session::{
     EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompiler, RenderSectionRemovalMode,
@@ -38,8 +39,8 @@ use mclone_server::{
     ServerRunnerKind,
 };
 use mclone_ui::{
-    BlockPaletteEntry, BlockPaletteOverlay, EMPTY_BLOCK_PALETTE_ENTRIES, GuiTextureUv,
-    LoadingProgressCell, LoadingProgressCellStatus, LoadingProgressOverlay,
+    BlockPaletteEntry, BlockPaletteOverlay, EMPTY_BLOCK_PALETTE_ENTRIES, GamePlayerModel,
+    GuiTextureUv, LoadingProgressCell, LoadingProgressCellStatus, LoadingProgressOverlay,
 };
 
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
@@ -66,6 +67,25 @@ pub fn chunk_view(center: ChunkPos, render_distance: u32, chunk_tracking_radius:
         render_distance,
         chunk_tracking_radius,
     }
+}
+
+pub const fn player_model_kind_for_ui_model(model: GamePlayerModel) -> PlayerModelKind {
+    match model {
+        GamePlayerModel::Player => PlayerModelKind::Player,
+        GamePlayerModel::UprightBear => PlayerModelKind::UprightBear,
+    }
+}
+
+pub const fn player_appearance_for_ui_model(model: GamePlayerModel) -> PlayerAppearance {
+    PlayerAppearance {
+        model: player_model_kind_for_ui_model(model),
+    }
+}
+
+pub const fn set_player_appearance_command_for_ui_model(model: GamePlayerModel) -> ClientCommand {
+    ClientCommand::SetPlayerAppearance(SetPlayerAppearanceCommand {
+        appearance: player_appearance_for_ui_model(model),
+    })
 }
 
 const DEBUG_BLOCK_PALETTE: &[(BlockStateId, &str)] = &[

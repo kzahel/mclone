@@ -11,6 +11,7 @@ use mclone_app_runtime::session::{
     RemoteSessionEndpoint, SessionFailure, SessionStartRequest, SessionStartResult,
     StartedGameSession,
 };
+use mclone_app_runtime::set_player_appearance_command_for_ui_model;
 use mclone_assets::{ActorFigureId, AssetSource};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
@@ -680,6 +681,9 @@ impl FlatClientDriver {
                     model.label(),
                     actor_figure_id_for_player_model(model).as_str()
                 );
+                if let Err(err) = self.sync_player_appearance() {
+                    log::warn!("failed to sync player appearance to server: {err:#}");
+                }
             }
             GameUiAction::SetMovementMode(movement_mode) => {
                 self.camera
@@ -879,6 +883,8 @@ impl FlatClientDriver {
         let (initial_poll_count, initial_poll_ms) = poll_window_runtime_until_idle(&mut runtime)
             .context("failed to load initial light-ready chunks")?;
         self.runtime = Some(runtime);
+        self.sync_player_appearance()
+            .context("failed to sync initial player appearance")?;
         match self.apply_pending_player_position_updates() {
             Ok(true) => {}
             Ok(false) => self.place_spectator_above_loaded_surface(),
@@ -958,6 +964,8 @@ impl FlatClientDriver {
             .active_descriptor()
             .context("unsupported local session start")?;
         self.runtime = Some(startup.pump.into_runtime());
+        self.sync_player_appearance()
+            .context("failed to sync initial player appearance")?;
         match self.apply_pending_player_position_updates() {
             Ok(true) => {}
             Ok(false) => self.place_spectator_above_loaded_surface(),
@@ -1204,6 +1212,17 @@ impl FlatClientDriver {
             return Ok(false);
         };
         runtime.send_gameplay_command(command).map_err(Into::into)
+    }
+
+    pub(crate) fn sync_player_appearance(&mut self) -> anyhow::Result<bool> {
+        let Some(runtime) = &mut self.runtime else {
+            return Ok(false);
+        };
+        runtime
+            .send_gameplay_command(set_player_appearance_command_for_ui_model(
+                self.player_model,
+            ))
+            .map_err(Into::into)
     }
 
     pub(crate) fn shoot_debug_physics_cube(&mut self) -> anyhow::Result<bool> {

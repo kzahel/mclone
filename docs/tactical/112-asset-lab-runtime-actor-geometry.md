@@ -1,7 +1,8 @@
 # 112 - Asset Lab Runtime Actor Geometry
 
 Status: active; Slice 2 end-to-end actor figure registry, Slice 2b player
-model selection, and Slice 3a first-person body toggle landed.
+model selection, Slice 2c networked player appearance, and Slice 3a
+first-person body toggle landed.
 
 ## Purpose
 
@@ -213,6 +214,30 @@ Review output inspected:
 ```text
 /tmp/mclone-actor-model-options-review-sheet.png
 /tmp/mclone-options-player-model.png
+```
+
+### Slice 2c - Networked Player Appearance
+
+- [x] Add first-party player appearance to the shared protocol without making
+      `mclone-protocol` depend on asset registries.
+- [x] Add a `SetPlayerAppearance` client command and publish appearance on
+      remote-player add/update messages.
+- [x] Store dedicated-player appearance on the authoritative server player
+      entry.
+- [x] Route appearance-only changes to visible remote-player observers.
+- [x] Map remote-player protocol appearance back to first-party actor figure
+      ids in `mclone-client`.
+- [x] Send the selected Options model from desktop flat, web, flat Android, and
+      XR clients when a runtime is available.
+
+Validation:
+
+```powershell
+cargo test --manifest-path native/Cargo.toml -p mclone-protocol -p mclone-client -p mclone-server -p mclone-app-runtime -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-ui
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+pnpm native:web:build
 ```
 
 ### Slice 3 - Animation Metadata Import

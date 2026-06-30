@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use mclone_core::{ChunkPos, Vec3d};
+use mclone_protocol::PlayerAppearance;
 
 use crate::inventory::ServerInventory;
 use crate::player::ServerPlayerState;
@@ -34,6 +35,7 @@ impl fmt::Display for ServerPlayerId {
 pub(crate) struct ServerPlayerEntry {
     pub(crate) state: ServerPlayerState,
     pub(crate) inventory: ServerInventory,
+    pub(crate) appearance: PlayerAppearance,
     pub(crate) initial_spawn_center: Option<ChunkPos>,
 }
 
@@ -42,6 +44,7 @@ impl Default for ServerPlayerEntry {
         Self {
             state: ServerPlayerState::default(),
             inventory: ServerInventory::default(),
+            appearance: PlayerAppearance::default(),
             initial_spawn_center: None,
         }
     }

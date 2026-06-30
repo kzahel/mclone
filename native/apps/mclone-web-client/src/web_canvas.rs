@@ -14,7 +14,9 @@ use mclone_app_runtime::session::{
 use mclone_app_runtime::startup_args::{
     RenderDistanceLimits, STARTUP_QUERY_KEYS, StartupArgState, StartupOptions, StartupSceneOptions,
 };
-use mclone_app_runtime::{debug_block_palette_overlay, debug_hotbar_icons};
+use mclone_app_runtime::{
+    debug_block_palette_overlay, debug_hotbar_icons, set_player_appearance_command_for_ui_model,
+};
 use mclone_assets::PackedAssetSource;
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ClientInteractionController, ClientRuntime,
@@ -2949,6 +2951,11 @@ impl WebChunkRenderSession {
             }
             GameUiAction::SetPlayerModel(model) => {
                 self.player_model = model;
+                if let Err(error) = self.sync_player_appearance_deferred() {
+                    web_sys::console::warn_1(
+                        &format!("failed to sync browser player appearance: {error}").into(),
+                    );
+                }
             }
             GameUiAction::AssignHotbarBlock { slot, block_state } => {
                 if let Some(command) = self
@@ -3324,6 +3331,7 @@ impl WebChunkRenderSession {
         self.session
             .apply_start_result(&Ok(StartedGameSession::new(descriptor, ())));
         self.reset_runtime_view_state(&request);
+        self.sync_player_appearance_deferred()?;
         Ok(())
     }
 
@@ -3551,6 +3559,15 @@ impl WebChunkRenderSession {
             .send_gameplay_command_async(command)
             .await
             .map_err(|error| format!("failed to sync browser carried item: {error}"))?;
+        Ok(true)
+    }
+
+    fn sync_player_appearance_deferred(&mut self) -> Result<bool, String> {
+        self.runtime
+            .send_gameplay_command_deferred(set_player_appearance_command_for_ui_model(
+                self.player_model,
+            ))
+            .map_err(|error| format!("failed to sync browser player appearance: {error}"))?;
         Ok(true)
     }
 

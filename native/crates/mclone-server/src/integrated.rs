@@ -11,7 +11,7 @@ use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, Vec3d};
 use mclone_protocol::{
     ChunkView, ClientCommand, InteractionHand, MovePlayerCommand, PlayerActionCommand,
     PlayerActionKind, ServerUpdate, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
-    UseItemOnCommand,
+    SetPlayerAppearanceCommand, UseItemOnCommand,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::{AIR, RawBlockId, generated_block_state_id};
@@ -280,6 +280,9 @@ impl IntegratedServer {
             }
             ClientCommand::SetDebugHotbarSlot(command) => {
                 self.handle_set_debug_hotbar_slot_for_target(target, command)
+            }
+            ClientCommand::SetPlayerAppearance(command) => {
+                self.handle_set_player_appearance_for_target(target, command)
             }
             ClientCommand::PlayerAction(command) => {
                 self.handle_player_action_for_target(target, command)
@@ -615,6 +618,24 @@ impl IntegratedServer {
         Ok(Vec::new())
     }
 
+    fn handle_set_player_appearance_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: SetPlayerAppearanceCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        let Some(player_id) = target.dedicated_player_id() else {
+            return Ok(Vec::new());
+        };
+        let Some(player) = self.dedicated_players.get_mut(player_id) else {
+            return Err(unknown_player_error(player_id));
+        };
+        if player.appearance != command.appearance {
+            player.appearance = command.appearance;
+            self.reconcile_remote_player_subject(player_id, true);
+        }
+        Ok(Vec::new())
+    }
+
     fn handle_set_debug_hotbar_slot_for_target(
         &mut self,
         target: CommandTarget,
@@ -916,6 +937,7 @@ impl IntegratedServer {
         let player = self.dedicated_players.get(player_id)?;
         Some(RemotePlayerState {
             player_id,
+            appearance: player.appearance,
             position: player.state.position(),
             y_rot_degrees: player.state.y_rot_degrees(),
             x_rot_degrees: player.state.x_rot_degrees(),
@@ -1283,6 +1305,7 @@ fn run_noop_simulation_phase(chunks: &[ChunkPos]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_protocol::{PlayerAppearance, PlayerModelKind};
     use std::collections::BTreeSet;
 
     use crate::ChunkHolder;
@@ -1781,6 +1804,7 @@ mod tests {
         let add_a =
             remote_player_add(&updates_b, player_a).expect("player b should receive player a add");
         assert_eq!(add_a.id, RemotePlayerId(player_a.as_u64()));
+        assert_eq!(add_a.appearance, PlayerAppearance::default());
 
         let updates_a = server.try_poll_for_player(player_a).expect("poll player a");
         let add_b = remote_player_add(&updates_a, player_b)
@@ -1807,6 +1831,25 @@ mod tests {
         assert_eq!(moved_a.y_rot_degrees, 90.0);
         assert_eq!(moved_a.x_rot_degrees, -15.0);
         assert!(moved_a.on_ground);
+
+        let bear_appearance = PlayerAppearance {
+            model: PlayerModelKind::UprightBear,
+        };
+        let updates_a = server
+            .try_handle_command_for_player(
+                player_a,
+                ClientCommand::SetPlayerAppearance(SetPlayerAppearanceCommand {
+                    appearance: bear_appearance,
+                }),
+            )
+            .expect("set player a appearance");
+        assert!(updates_a.is_empty());
+
+        let updates_b = server.try_poll_for_player(player_b).expect("poll player b");
+        let appearance_a = remote_player_update(&updates_b, player_a)
+            .expect("player b should receive player a appearance update");
+        assert_eq!(appearance_a.position, moved);
+        assert_eq!(appearance_a.appearance, bear_appearance);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
@@ -32,6 +32,7 @@ const CLIENT_COMMAND_SET_CARRIED_ITEM: u8 = 5;
 const CLIENT_COMMAND_ACCEPT_TELEPORT: u8 = 6;
 const CLIENT_COMMAND_SET_DEBUG_HOTBAR_SLOT: u8 = 7;
 const CLIENT_COMMAND_SHOOT_DEBUG_PHYSICS_CUBE: u8 = 8;
+const CLIENT_COMMAND_SET_PLAYER_APPEARANCE: u8 = 9;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
@@ -58,9 +59,27 @@ pub enum ClientCommand {
     AcceptTeleport(AcceptTeleportCommand),
     SetCarriedItem(SetCarriedItemCommand),
     SetDebugHotbarSlot(SetDebugHotbarSlotCommand),
+    SetPlayerAppearance(SetPlayerAppearanceCommand),
     PlayerAction(PlayerActionCommand),
     UseItemOn(UseItemOnCommand),
     ShootDebugPhysicsCube,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PlayerModelKind {
+    #[default]
+    Player,
+    UprightBear,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PlayerAppearance {
+    pub model: PlayerModelKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SetPlayerAppearanceCommand {
+    pub appearance: PlayerAppearance,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -203,6 +222,7 @@ pub struct RemotePlayerId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RemotePlayerUpdate {
     pub id: RemotePlayerId,
+    pub appearance: PlayerAppearance,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
@@ -320,6 +340,7 @@ pub enum ProtocolCodecError {
     UnknownDirection(u8),
     UnknownEntityKind(u8),
     UnknownInteractionHand(u8),
+    UnknownPlayerModelKind(u8),
     UnknownPlayerActionKind(u8),
     LengthOverflow { field: &'static str, len: usize },
     InvalidData(&'static str),
@@ -352,6 +373,9 @@ impl fmt::Display for ProtocolCodecError {
             }
             Self::UnknownInteractionHand(hand) => {
                 write!(f, "unknown interaction hand tag {hand}")
+            }
+            Self::UnknownPlayerModelKind(kind) => {
+                write!(f, "unknown player model kind tag {kind}")
             }
             Self::UnknownPlayerActionKind(kind) => {
                 write!(f, "unknown player action kind tag {kind}")
@@ -391,6 +415,10 @@ pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec
             writer.write_u8(CLIENT_COMMAND_SET_DEBUG_HOTBAR_SLOT);
             writer.write_set_debug_hotbar_slot(command);
         }
+        ClientCommand::SetPlayerAppearance(command) => {
+            writer.write_u8(CLIENT_COMMAND_SET_PLAYER_APPEARANCE);
+            writer.write_set_player_appearance(command);
+        }
         ClientCommand::PlayerAction(command) => {
             writer.write_u8(CLIENT_COMMAND_PLAYER_ACTION);
             writer.write_player_action(command);
@@ -429,6 +457,9 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
         }
         CLIENT_COMMAND_SET_DEBUG_HOTBAR_SLOT => {
             ClientCommand::SetDebugHotbarSlot(reader.read_set_debug_hotbar_slot()?)
+        }
+        CLIENT_COMMAND_SET_PLAYER_APPEARANCE => {
+            ClientCommand::SetPlayerAppearance(reader.read_set_player_appearance()?)
         }
         CLIENT_COMMAND_PLAYER_ACTION => ClientCommand::PlayerAction(reader.read_player_action()?),
         CLIENT_COMMAND_USE_ITEM_ON => ClientCommand::UseItemOn(reader.read_use_item_on()?),
@@ -773,6 +804,21 @@ impl ByteWriter {
         }
     }
 
+    fn write_player_model_kind(&mut self, kind: PlayerModelKind) {
+        self.write_u8(match kind {
+            PlayerModelKind::Player => 0,
+            PlayerModelKind::UprightBear => 1,
+        });
+    }
+
+    fn write_player_appearance(&mut self, appearance: PlayerAppearance) {
+        self.write_player_model_kind(appearance.model);
+    }
+
+    fn write_set_player_appearance(&mut self, command: &SetPlayerAppearanceCommand) {
+        self.write_player_appearance(command.appearance);
+    }
+
     fn write_player_action(&mut self, command: &PlayerActionCommand) {
         self.write_block_pos(command.pos);
         self.write_direction(command.direction);
@@ -867,6 +913,7 @@ impl ByteWriter {
 
     fn write_remote_player_update(&mut self, update: &RemotePlayerUpdate) {
         self.write_remote_player_id(update.id);
+        self.write_player_appearance(update.appearance);
         self.write_vec3d(update.position);
         self.write_f32(update.y_rot_degrees);
         self.write_f32(update.x_rot_degrees);
@@ -1103,6 +1150,26 @@ impl<'a> ByteReader<'a> {
         Ok(SetDebugHotbarSlotCommand { slot, block_state })
     }
 
+    fn read_player_model_kind(&mut self) -> ProtocolCodecResult<PlayerModelKind> {
+        match self.read_u8()? {
+            0 => Ok(PlayerModelKind::Player),
+            1 => Ok(PlayerModelKind::UprightBear),
+            kind => Err(ProtocolCodecError::UnknownPlayerModelKind(kind)),
+        }
+    }
+
+    fn read_player_appearance(&mut self) -> ProtocolCodecResult<PlayerAppearance> {
+        Ok(PlayerAppearance {
+            model: self.read_player_model_kind()?,
+        })
+    }
+
+    fn read_set_player_appearance(&mut self) -> ProtocolCodecResult<SetPlayerAppearanceCommand> {
+        Ok(SetPlayerAppearanceCommand {
+            appearance: self.read_player_appearance()?,
+        })
+    }
+
     fn read_player_action(&mut self) -> ProtocolCodecResult<PlayerActionCommand> {
         let pos = self.read_block_pos()?;
         let direction = self.read_direction()?;
@@ -1241,6 +1308,7 @@ impl<'a> ByteReader<'a> {
 
     fn read_remote_player_update(&mut self) -> ProtocolCodecResult<RemotePlayerUpdate> {
         let id = self.read_remote_player_id()?;
+        let appearance = self.read_player_appearance()?;
         let position = self.read_vec3d()?;
         let y_rot_degrees = self.read_f32()?;
         let x_rot_degrees = self.read_f32()?;
@@ -1251,6 +1319,7 @@ impl<'a> ByteReader<'a> {
         }
         Ok(RemotePlayerUpdate {
             id,
+            appearance,
             position,
             y_rot_degrees,
             x_rot_degrees,
@@ -1444,6 +1513,19 @@ mod tests {
     }
 
     #[test]
+    fn client_command_codec_round_trips_set_player_appearance() {
+        let command = ClientCommand::SetPlayerAppearance(SetPlayerAppearanceCommand {
+            appearance: PlayerAppearance {
+                model: PlayerModelKind::UprightBear,
+            },
+        });
+
+        let bytes = encode_client_command(&command).unwrap();
+
+        assert_eq!(decode_client_command(&bytes).unwrap(), command);
+    }
+
+    #[test]
     fn client_command_codec_round_trips_player_action() {
         let command = ClientCommand::PlayerAction(PlayerActionCommand {
             pos: BlockPos::new(-1, 64, 12),
@@ -1550,6 +1632,9 @@ mod tests {
     fn server_update_codec_round_trips_remote_player_updates() {
         let update = RemotePlayerUpdate {
             id: RemotePlayerId(42),
+            appearance: PlayerAppearance {
+                model: PlayerModelKind::UprightBear,
+            },
             position: Vec3d::new(12.5, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -1604,6 +1689,7 @@ mod tests {
     fn remote_player_update_codec_rejects_non_finite_values() {
         let update = ServerUpdate::RemotePlayerUpdate(RemotePlayerUpdate {
             id: RemotePlayerId(42),
+            appearance: PlayerAppearance::default(),
             position: Vec3d::new(f64::NAN, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,

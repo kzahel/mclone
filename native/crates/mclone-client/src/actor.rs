@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use mclone_assets::{ActorFigureId, default_player_figure_id};
+use mclone_assets::{ActorFigureId, default_player_figure_id, upright_bear_figure_id};
 use mclone_core::Vec3d;
-use mclone_protocol::{EntityId, EntityKind, EntitySnapshot, RemotePlayerId, RemotePlayerUpdate};
+use mclone_protocol::{
+    EntityId, EntityKind, EntitySnapshot, PlayerAppearance, PlayerModelKind, RemotePlayerId,
+    RemotePlayerUpdate,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ActorPresentationId {
@@ -35,6 +38,15 @@ impl ActorAppearance {
     }
 }
 
+pub const fn actor_appearance_for_player_appearance(
+    appearance: PlayerAppearance,
+) -> ActorAppearance {
+    match appearance.model {
+        PlayerModelKind::Player => ActorAppearance::figure(default_player_figure_id()),
+        PlayerModelKind::UprightBear => ActorAppearance::figure(upright_bear_figure_id()),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ActorPresentation {
     pub id: ActorPresentationId,
@@ -54,7 +66,7 @@ impl ActorPresentation {
         Self {
             id: ActorPresentationId::RemotePlayer(update.id),
             kind: ActorPresentationKind::RemotePlayer,
-            appearance: ActorAppearance::default_player(),
+            appearance: actor_appearance_for_player_appearance(update.appearance),
             feet_position: update.position,
             y_rot_degrees: update.y_rot_degrees,
             x_rot_degrees: update.x_rot_degrees,
@@ -235,6 +247,7 @@ mod tests {
     fn actor_presentation_converts_remote_player_update() {
         let update = RemotePlayerUpdate {
             id: RemotePlayerId(3),
+            appearance: PlayerAppearance::default(),
             position: Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: -90.0,
             x_rot_degrees: 15.0,

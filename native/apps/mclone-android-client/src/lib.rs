@@ -27,7 +27,9 @@ mod android {
     use mclone_app_runtime::startup_args::{
         RenderDistanceLimits, StartupArgState, StartupSceneOptions,
     };
-    use mclone_app_runtime::{debug_block_palette_overlay, debug_hotbar_icons};
+    use mclone_app_runtime::{
+        debug_block_palette_overlay, debug_hotbar_icons, set_player_appearance_command_for_ui_model,
+    };
     use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
     use mclone_client::ClientInteractionController;
     use mclone_core::{BlockStateId, ChunkPos, Vec3d};
@@ -1144,6 +1146,8 @@ mod android {
             self.draw = started.draw;
             self.render_stats = started.render_stats;
             self.frame_index = 0;
+            self.sync_player_appearance()
+                .context("sync Android replacement player appearance")?;
             self.clear_touch_state();
             self.clear_keyboard_mouse_state();
             self.session_status = StatusOverlay::hidden();
@@ -1262,6 +1266,9 @@ mod android {
                 GameUiAction::SetPlayerModel(model) => {
                     self.player_model = model;
                     log::info!("Mclone Android player model set to {}", model.label());
+                    if let Err(error) = self.sync_player_appearance() {
+                        log::warn!("failed to sync Android player appearance: {error:#}");
+                    }
                 }
                 GameUiAction::Quit => {
                     result.quit = true;
@@ -1517,6 +1524,14 @@ mod android {
             self.scene
                 .send_gameplay_command(command)
                 .context("failed to sync Android carried item to server")
+        }
+
+        fn sync_player_appearance(&mut self) -> Result<bool> {
+            self.scene
+                .send_gameplay_command(set_player_appearance_command_for_ui_model(
+                    self.player_model,
+                ))
+                .context("failed to sync Android player appearance to server")
         }
 
         fn handle_world_flat_action(&mut self, action: FlatInputAction) -> Result<()> {

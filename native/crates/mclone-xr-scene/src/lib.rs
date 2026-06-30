@@ -19,7 +19,10 @@ use mclone_app_runtime::render_assets::TexturedMeshAssets;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
 };
-use mclone_app_runtime::{RuntimePollDiagnostics, debug_block_palette_overlay, elapsed_ms};
+use mclone_app_runtime::{
+    RuntimePollDiagnostics, debug_block_palette_overlay, elapsed_ms,
+    set_player_appearance_command_for_ui_model,
+};
 use mclone_assets::AssetSource;
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
 use mclone_client::{BlockInteractionTarget, ClientInteractionController};
@@ -2871,6 +2874,17 @@ where
             .context("failed to sync XR carried item to server")
     }
 
+    fn sync_player_appearance(&mut self) -> Result<bool> {
+        let Some(runtime) = &mut self.runtime else {
+            return Ok(false);
+        };
+        runtime
+            .send_gameplay_command(set_player_appearance_command_for_ui_model(
+                self.player_model,
+            ))
+            .context("failed to sync XR player appearance to server")
+    }
+
     fn assign_debug_hotbar_slot(&mut self, slot: u8, block_state: BlockStateId) -> Result<bool> {
         let Some(command) = self
             .interaction
@@ -3213,6 +3227,8 @@ where
             face_count,
             ..RenderStreamStats::default()
         };
+        self.sync_player_appearance()
+            .context("sync XR local startup player appearance")?;
         self.clear_transient_world_state();
         self.session_status = StatusOverlay::hidden();
         match descriptor {
@@ -3326,6 +3342,8 @@ where
         self.camera = started.camera;
         self.draw = started.draw;
         self.render_stats = started.render_stats;
+        self.sync_player_appearance()
+            .context("sync XR replacement player appearance")?;
         self.clear_transient_world_state();
         self.clear_menu_input_state();
         self.session_status = StatusOverlay::hidden();
@@ -3439,6 +3457,9 @@ where
             GameUiAction::SetPlayerModel(model) => {
                 self.player_model = model;
                 log::info!("XR player model set to {}", model.label());
+                if let Err(error) = self.sync_player_appearance() {
+                    log::warn!("failed to sync XR player appearance: {error:#}");
+                }
             }
             GameUiAction::Quit => {
                 log::info!("XR menu quit action ignored by shared scene");

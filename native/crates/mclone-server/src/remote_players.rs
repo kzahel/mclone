@@ -8,13 +8,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
-use mclone_protocol::{RemotePlayerId, RemotePlayerUpdate, ServerUpdate};
+use mclone_protocol::{PlayerAppearance, RemotePlayerId, RemotePlayerUpdate, ServerUpdate};
 
 use crate::players::ServerPlayerId;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct RemotePlayerState {
     pub(crate) player_id: ServerPlayerId,
+    pub(crate) appearance: PlayerAppearance,
     pub(crate) position: Vec3d,
     pub(crate) y_rot_degrees: f32,
     pub(crate) x_rot_degrees: f32,
@@ -30,6 +31,7 @@ impl RemotePlayerState {
     fn protocol_update(self) -> RemotePlayerUpdate {
         RemotePlayerUpdate {
             id: remote_player_id(self.player_id),
+            appearance: self.appearance,
             position: self.position,
             y_rot_degrees: self.y_rot_degrees,
             x_rot_degrees: self.x_rot_degrees,
@@ -164,6 +166,7 @@ mod tests {
     fn state(player_id: ServerPlayerId, x: f64, z: f64) -> RemotePlayerState {
         RemotePlayerState {
             player_id,
+            appearance: PlayerAppearance::default(),
             position: Vec3d::new(x, 64.0, z),
             y_rot_degrees: 45.0,
             x_rot_degrees: 10.0,
