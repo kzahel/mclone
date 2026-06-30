@@ -325,6 +325,14 @@ impl PhysicsWorld {
         self.backend.set_body_pose(id, pose)
     }
 
+    pub fn gravity(&self) -> Vec3d {
+        self.backend.gravity()
+    }
+
+    pub fn set_gravity(&mut self, gravity: Vec3d) -> bool {
+        self.backend.set_gravity(gravity)
+    }
+
     pub fn add_terrain_patch(&mut self, patch: PhysicsTerrainPatch) -> PhysicsColliderId {
         self.backend.add_terrain_patch(patch)
     }
@@ -420,6 +428,22 @@ impl PhysicsWorldBackend {
         }
     }
 
+    fn gravity(&self) -> Vec3d {
+        match self {
+            Self::Noop(backend) => backend.gravity(),
+            #[cfg(feature = "rapier")]
+            Self::Rapier(backend) => backend.gravity(),
+        }
+    }
+
+    fn set_gravity(&mut self, gravity: Vec3d) -> bool {
+        match self {
+            Self::Noop(backend) => backend.set_gravity(gravity),
+            #[cfg(feature = "rapier")]
+            Self::Rapier(backend) => backend.set_gravity(gravity),
+        }
+    }
+
     fn add_terrain_patch(&mut self, patch: PhysicsTerrainPatch) -> PhysicsColliderId {
         match self {
             Self::Noop(backend) => backend.add_terrain_patch(patch),
@@ -501,6 +525,7 @@ impl PhysicsWorldBackend {
 struct NoopPhysicsWorld {
     next_body_id: u64,
     next_collider_id: u64,
+    gravity: Vec3d,
     bodies: BTreeMap<PhysicsBodyId, PhysicsBodySpawn>,
     terrain_patches: BTreeMap<PhysicsColliderId, PhysicsTerrainPatch>,
     terrain_sections: BTreeMap<PhysicsColliderId, PhysicsTerrainSection>,
@@ -511,6 +536,7 @@ impl NoopPhysicsWorld {
         Self {
             next_body_id: 1,
             next_collider_id: 1,
+            gravity: Vec3d::new(0.0, -9.81, 0.0),
             bodies: BTreeMap::new(),
             terrain_patches: BTreeMap::new(),
             terrain_sections: BTreeMap::new(),
@@ -541,6 +567,18 @@ impl NoopPhysicsWorld {
             return false;
         };
         body.pose = pose;
+        true
+    }
+
+    const fn gravity(&self) -> Vec3d {
+        self.gravity
+    }
+
+    fn set_gravity(&mut self, gravity: Vec3d) -> bool {
+        if !gravity.is_finite() {
+            return false;
+        }
+        self.gravity = gravity;
         true
     }
 
@@ -727,6 +765,18 @@ impl RapierPhysicsWorld {
         };
         body.set_position(rapier_pose(pose), true);
         record.spawn.pose = pose;
+        true
+    }
+
+    fn gravity(&self) -> Vec3d {
+        physics_vec(self.gravity)
+    }
+
+    fn set_gravity(&mut self, gravity: Vec3d) -> bool {
+        if !gravity.is_finite() {
+            return false;
+        }
+        self.gravity = rapier_vec(gravity);
         true
     }
 
@@ -1043,6 +1093,11 @@ fn rapier_vec(value: Vec3d) -> rapier::Vector {
         to_rapier_real(value.y),
         to_rapier_real(value.z),
     )
+}
+
+#[cfg(feature = "rapier")]
+fn physics_vec(value: rapier::Vector) -> Vec3d {
+    Vec3d::new(f64::from(value.x), f64::from(value.y), f64::from(value.z))
 }
 
 #[cfg(feature = "rapier")]
@@ -1407,6 +1462,19 @@ mod tests {
     }
 
     #[test]
+    fn noop_world_tracks_configured_gravity() {
+        let mut world = PhysicsWorld::noop();
+        assert_eq!(world.gravity(), Vec3d::new(0.0, -9.81, 0.0));
+
+        let gravity = Vec3d::new(0.0, -32.0, 0.0);
+        assert!(world.set_gravity(gravity));
+        assert_eq!(world.gravity(), gravity);
+
+        assert!(!world.set_gravity(Vec3d::new(f64::NAN, 0.0, 0.0)));
+        assert_eq!(world.gravity(), gravity);
+    }
+
+    #[test]
     fn noop_world_tracks_terrain_patch_lifecycle() {
         let mut world = PhysicsWorld::noop();
         let first = world.add_terrain_patch(patch(1, 12));
@@ -1555,6 +1623,32 @@ mod tests {
             pose.position.y
         );
         assert_eq!(world.terrain_section(terrain), Some(&section));
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_world_uses_configured_gravity_for_dynamic_bodies() {
+        fn body_y_after_one_tick(gravity: Vec3d) -> f64 {
+            let mut world = PhysicsWorld::new(PhysicsBackendKind::Rapier);
+            assert!(world.set_gravity(gravity));
+            assert!(world.gravity().distance_to_sqr(gravity) < 1.0e-10);
+            let body = world.spawn_body(PhysicsBodySpawn::dynamic_cube(
+                Vec3d::new(0.0, 8.0, 0.0),
+                0.5,
+                Vec3d::ZERO,
+            ));
+
+            world.step(0.05);
+            world.body_pose(body).expect("body pose").position.y
+        }
+
+        let default_gravity_y = body_y_after_one_tick(Vec3d::new(0.0, -9.81, 0.0));
+        let minecraft_gravity_y = body_y_after_one_tick(Vec3d::new(0.0, -32.0, 0.0));
+
+        assert!(
+            minecraft_gravity_y < default_gravity_y,
+            "stronger Minecraft gravity should move the body farther down: default={default_gravity_y}, minecraft={minecraft_gravity_y}"
+        );
     }
 
     #[cfg(feature = "rapier")]

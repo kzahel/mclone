@@ -1,14 +1,14 @@
 # 110: Shared Physics Backend Experiment
 
-Status: active; Slices 1-4c landed with the shared `mclone-physics` facade,
+Status: active; Slices 1-4d landed with the shared `mclone-physics` facade,
 no-op backend, optional Rapier backend, synthetic cuboid/static-patch
 simulation test, section terrain collider probe, feature-gated live
 chunk-to-physics terrain conversion, server-owned debug cube physics runtime,
 debug cube protocol/entity publication, desktop `F7` diagnostic launch wiring,
 fresh debug cube entity IDs on repeated throws, one-way debug player AABB
-collision, and `mclone-server` / native-client intent feature wiring. App
-binary-size measurement is deferred until the physics path is promoted beyond
-diagnostics.
+collision, Minecraft-strength debug physics gravity, and `mclone-server` /
+native-client intent feature wiring. App binary-size measurement is deferred
+until the physics path is promoted beyond diagnostics.
 
 ## Purpose
 
@@ -467,6 +467,35 @@ cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics
 cargo test --manifest-path native/Cargo.toml -p mclone-server
 cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
 cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
+cargo check --manifest-path native/Cargo.toml
+```
+
+Recorded Slice 4d result:
+
+- Added a small `mclone-physics` gravity getter/setter so gravity policy stays
+  outside the backend implementation and can be owned by the server/runtime
+  slice using the physics world.
+- Kept world units as block units. The debug server physics runtime now uses
+  Minecraft-shaped gravity derived from the player controller constant:
+  `0.08 blocks/tick * 20 ticks/sec * 20 ticks/sec = 32 blocks/sec^2`.
+- The Rapier backend still defaults to a generic Earth-like `-9.81` vector when
+  used directly; `mclone-server` explicitly configures `-32.0` on the Y axis for
+  the current debug cube runtime.
+- Added tests that no-op worlds retain configured gravity and Rapier dynamic
+  bodies fall farther under the Minecraft-strength gravity than under the
+  generic default.
+
+Slice 4d validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-physics -p mclone-server -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier gravity -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier debug_physics_cube -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-physics
+cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier
+cargo test --manifest-path native/Cargo.toml -p mclone-server
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
 cargo check --manifest-path native/Cargo.toml
 ```

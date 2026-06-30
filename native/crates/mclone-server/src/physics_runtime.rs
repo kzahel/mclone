@@ -15,7 +15,16 @@ use mclone_physics::{
 
 use crate::{ChunkScheduler, ServerPhysicsTickDiagnostics};
 
-const SERVER_PHYSICS_DT_SECONDS: f64 = 1.0 / 20.0;
+const SERVER_PHYSICS_TICKS_PER_SECOND: f64 = 20.0;
+const SERVER_PHYSICS_DT_SECONDS: f64 = 1.0 / SERVER_PHYSICS_TICKS_PER_SECOND;
+const SERVER_PHYSICS_MINECRAFT_GRAVITY_BLOCKS_PER_TICK: f64 = 0.08;
+const SERVER_PHYSICS_GRAVITY: Vec3d = Vec3d::new(
+    0.0,
+    -SERVER_PHYSICS_MINECRAFT_GRAVITY_BLOCKS_PER_TICK
+        * SERVER_PHYSICS_TICKS_PER_SECOND
+        * SERVER_PHYSICS_TICKS_PER_SECOND,
+    0.0,
+);
 const DEBUG_CUBE_HALF_EXTENT: f64 = 0.5;
 const DEBUG_CUBE_TERRAIN_SECTION_RADIUS_XZ: i32 = 1;
 const DEBUG_CUBE_TERRAIN_SECTION_RADIUS_Y: i32 = 1;
@@ -32,8 +41,10 @@ pub(crate) struct ServerPhysicsRuntime {
 
 impl ServerPhysicsRuntime {
     pub(crate) fn new() -> Self {
+        let mut world = PhysicsWorld::new(PhysicsBackendKind::Rapier);
+        let _ = world.set_gravity(SERVER_PHYSICS_GRAVITY);
         Self {
-            world: PhysicsWorld::new(PhysicsBackendKind::Rapier),
+            world,
             debug_cube_body: None,
             debug_player_body: None,
             debug_cube_terrain: Vec::new(),
