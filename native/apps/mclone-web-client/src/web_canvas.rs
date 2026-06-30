@@ -65,9 +65,9 @@ use mclone_ui::{
     DebugOverlay, FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts,
     FlatDebugMeshCounts, FlatDebugOverlay, FlatDebugRenderOptions, FlatDebugRunner,
     FlatDebugTarget, FlatDebugView, FlatHotbarOverlay, FlatHud, GameFramePacingMode,
-    GameHelpParent, GameMovementMode, GameOptionsParent, GameScreen, GameTouchSettings, GameUi,
-    GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay,
-    TouchOverlay, render_debug_overlay_at, render_flat_hud,
+    GameHelpParent, GameMovementMode, GameOptionsParent, GamePlayerModel, GameScreen,
+    GameTouchSettings, GameUi, GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point,
+    StatusOverlay, TouchJoystickOverlay, TouchOverlay, render_debug_overlay_at, render_flat_hud,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -2386,6 +2386,7 @@ pub struct WebChunkRenderSession {
     section_occlusion_culling: bool,
     force_fullbright: bool,
     player_collision_box_visible: bool,
+    player_model: GamePlayerModel,
     render_color_profile: RenderColorProfile,
     input_preferences: InputPreferences,
     touch_look_sensitivity: f32,
@@ -2851,6 +2852,7 @@ impl WebChunkRenderSession {
             self.section_occlusion_culling,
         )?;
         set_bool(object, "forceFullbright", self.force_fullbright)?;
+        set_string(object, "playerModel", self.player_model.label())?;
         set_string(
             object,
             "renderColorProfile",
@@ -2944,6 +2946,9 @@ impl WebChunkRenderSession {
             GameUiAction::SetMovementSpeed(multiplier) => {
                 self.camera
                     .set_movement_speed_multiplier(f64::from(multiplier));
+            }
+            GameUiAction::SetPlayerModel(model) => {
+                self.player_model = model;
             }
             GameUiAction::AssignHotbarBlock { slot, block_state } => {
                 if let Some(command) = self
@@ -3049,6 +3054,7 @@ impl WebChunkRenderSession {
                 | GameUiAction::ToggleFullbright
                 | GameUiAction::TogglePlayerCollisionBox
                 | GameUiAction::ToggleFirstPersonPlayer
+                | GameUiAction::SetPlayerModel(_)
                 | GameUiAction::SetMovementMode(_)
                 | GameUiAction::SetFlySpeed(_)
                 | GameUiAction::CycleFramePacing
@@ -3069,6 +3075,7 @@ impl WebChunkRenderSession {
             force_fullbright: self.force_fullbright,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
+            player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
@@ -3262,6 +3269,7 @@ impl WebChunkRenderSession {
             section_occlusion_culling: render_options.section_occlusion_culling,
             force_fullbright: render_options.force_fullbright,
             player_collision_box_visible: false,
+            player_model: GamePlayerModel::default(),
             render_color_profile,
             input_preferences: InputPreferences::AUTO,
             touch_look_sensitivity: WEB_TOUCH_LOOK_SENSITIVITY_DEFAULT,
@@ -4720,6 +4728,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::ToggleFullbright => "toggleFullbright",
         GameUiAction::TogglePlayerCollisionBox => "togglePlayerCollisionBox",
         GameUiAction::ToggleFirstPersonPlayer => "toggleFirstPersonPlayer",
+        GameUiAction::SetPlayerModel(_) => "setPlayerModel",
         GameUiAction::SetMovementMode(_) => "setMovementMode",
         GameUiAction::CycleFramePacing => "cycleFramePacing",
         GameUiAction::CycleFpsCap => "cycleFpsCap",

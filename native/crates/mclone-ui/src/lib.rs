@@ -780,6 +780,29 @@ impl GameMovementMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GamePlayerModel {
+    #[default]
+    Player,
+    UprightBear,
+}
+
+impl GamePlayerModel {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Player => "Player",
+            Self::UprightBear => "Bear",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Player => Self::UprightBear,
+            Self::UprightBear => Self::Player,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GameUiAction {
     StartWorld,
@@ -801,6 +824,7 @@ pub enum GameUiAction {
     ToggleFullbright,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
+    SetPlayerModel(GamePlayerModel),
     SetMovementMode(GameMovementMode),
     CycleFramePacing,
     CycleFpsCap,
@@ -887,6 +911,7 @@ pub struct GameUiRenderState {
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
+    pub player_model: GamePlayerModel,
     pub movement_mode: GameMovementMode,
     pub fly_speed_multiplier: f32,
     pub min_fly_speed_multiplier: f32,
@@ -911,6 +936,7 @@ impl Default for GameUiRenderState {
             force_fullbright: false,
             player_collision_box_visible: false,
             first_person_player_visible: false,
+            player_model: GamePlayerModel::Player,
             movement_mode: GameMovementMode::Walk,
             fly_speed_multiplier: 1.0,
             min_fly_speed_multiplier: 0.5,
@@ -1889,6 +1915,7 @@ const ID_HELP_BACK: WidgetId = WidgetId(24);
 const ID_OPTIONS_PLAYER_BOX: WidgetId = WidgetId(25);
 const ID_OPTIONS_CONTROLS: WidgetId = WidgetId(26);
 const ID_OPTIONS_FIRST_PERSON_PLAYER: WidgetId = WidgetId(27);
+const ID_OPTIONS_PLAYER_MODEL: WidgetId = WidgetId(28);
 const ID_BLOCK_PALETTE_BASE: u64 = 1000;
 
 const BLOCK_PALETTE_COLUMNS: usize = 10;
@@ -2123,6 +2150,7 @@ impl GameUi {
             | GameUiAction::ToggleFullbright
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
+            | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
@@ -2188,6 +2216,8 @@ impl GameUi {
                     Some(ID_OPTIONS_PLAYER_BOX)
                 } else if rects.first_person_player.contains(point) {
                     Some(ID_OPTIONS_FIRST_PERSON_PLAYER)
+                } else if rects.player_model.contains(point) {
+                    Some(ID_OPTIONS_PLAYER_MODEL)
                 } else if rects.movement_mode.contains(point) {
                     Some(ID_OPTIONS_MOVEMENT_MODE)
                 } else if rects.frame_pacing.contains(point) {
@@ -2252,6 +2282,9 @@ impl GameUi {
             ID_OPTIONS_FULLBRIGHT => Some(GameUiAction::ToggleFullbright),
             ID_OPTIONS_PLAYER_BOX => Some(GameUiAction::TogglePlayerCollisionBox),
             ID_OPTIONS_FIRST_PERSON_PLAYER => Some(GameUiAction::ToggleFirstPersonPlayer),
+            ID_OPTIONS_PLAYER_MODEL => {
+                Some(GameUiAction::SetPlayerModel(state.player_model.next()))
+            }
             ID_OPTIONS_MOVEMENT_MODE => {
                 Some(GameUiAction::SetMovementMode(state.movement_mode.next()))
             }
@@ -2587,6 +2620,13 @@ impl GameUi {
         )
         .render(draw, &self.font, self.interaction());
         CycleButton::new(
+            ID_OPTIONS_PLAYER_MODEL,
+            widgets.player_model,
+            "Player Model",
+            state.player_model.label(),
+        )
+        .render(draw, &self.font, self.interaction());
+        CycleButton::new(
             ID_OPTIONS_MOVEMENT_MODE,
             widgets.movement_mode,
             "Movement",
@@ -2669,6 +2709,7 @@ struct OptionWidgetRects {
     fullbright: Rect,
     player_box: Rect,
     first_person_player: Rect,
+    player_model: Rect,
     movement_mode: Rect,
     frame_pacing: Rect,
     fps_cap: Rect,
@@ -2995,6 +3036,8 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
     y += 20.0;
     let first_person_player = Rect::new(check_x, y, 190.0, 18.0);
     y += 20.0;
+    let player_model = Rect::new(row_x, y, 192.0, 20.0);
+    y += 22.0;
     let movement_mode = Rect::new(row_x, y, 192.0, 20.0);
     y += 22.0;
     let frame_pacing = Rect::new(row_x, y, 192.0, 20.0);
@@ -3031,6 +3074,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
         fullbright,
         player_box,
         first_person_player,
+        player_model,
         movement_mode,
         frame_pacing,
         fps_cap,
@@ -3047,7 +3091,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
 fn options_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
     let touch_rows =
         u8::from(state.touch_controls_mode.is_some()) + u8::from(state.touch_settings.is_some());
-    centered_panel(scale, 242.0, 306.0 + f32::from(touch_rows) * 22.0)
+    centered_panel(scale, 242.0, 328.0 + f32::from(touch_rows) * 22.0)
 }
 
 fn render_distance_slider_value(state: GameUiRenderState) -> f32 {
@@ -4493,6 +4537,31 @@ mod tests {
         assert!(ui.pointer_down(point, state));
         let (_handled, action) = ui.pointer_up(point, state);
         assert_eq!(action, Some(GameUiAction::ToggleFirstPersonPlayer));
+    }
+
+    #[test]
+    fn game_ui_options_player_model_emits_next_model_action() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            player_model: GamePlayerModel::Player,
+            ..GameUiRenderState::default()
+        };
+
+        let player_model = option_widgets(ui.scale(), state).player_model;
+        let point = Point {
+            x: player_model.x + player_model.width * 0.5,
+            y: player_model.y + player_model.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(
+            action,
+            Some(GameUiAction::SetPlayerModel(GamePlayerModel::UprightBear))
+        );
     }
 
     #[test]

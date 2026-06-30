@@ -228,19 +228,20 @@ fn render_actor_review_panel(
 ) -> Result<()> {
     let depth = ChunkDepthTarget::new(frame.device, frame.target.size[0], frame.target.size[1]);
     clear_actor_review_frame(frame.encoder, frame.target, &depth);
-    let actor = ActorInstance::local_player(Vec3::ZERO, 0.0);
-    let camera = actor_review_views()
+    let views = actor_review_views();
+    let view = views
         .get(index)
-        .map(|view| view.camera)
         .context("actor review panel index out of range")?;
+    let actors = actor_review_actors(view.name);
     let stats = state.actors.render(
         frame.device,
         frame.queue,
         frame.encoder,
         frame.target.with_depth(&depth.view),
-        camera.render_view(frame.target.size[0], frame.target.size[1]),
+        view.camera
+            .render_view(frame.target.size[0], frame.target.size[1]),
         state.render_options,
-        &[actor],
+        &actors,
     )?;
     state.stats.push(stats);
     Ok(())
@@ -288,17 +289,35 @@ fn actor_review_views() -> [ActorReviewView; 3] {
     [
         ActorReviewView {
             name: "front",
-            camera: actor_review_camera(Vec3::new(0.0, 0.96, 4.2)),
+            camera: actor_review_camera(Vec3::new(0.0, 1.0, 5.2)),
         },
         ActorReviewView {
             name: "side",
-            camera: actor_review_camera(Vec3::new(4.2, 0.96, 0.0)),
+            camera: actor_review_camera(Vec3::new(5.2, 1.0, 0.0)),
         },
         ActorReviewView {
             name: "three_quarter",
-            camera: actor_review_camera(Vec3::new(3.0, 1.0, 3.0)),
+            camera: actor_review_camera(Vec3::new(4.0, 1.1, 4.0)),
         },
     ]
+}
+
+fn actor_review_actors(view_name: &str) -> Vec<ActorInstance> {
+    let count = mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS.len();
+    let spacing = 0.75;
+    let center = (count.saturating_sub(1)) as f32 * spacing * 0.5;
+    mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS
+        .iter()
+        .enumerate()
+        .map(|(index, figure)| {
+            let offset = index as f32 * spacing - center;
+            let position = match view_name {
+                "side" => Vec3::new(0.0, 0.0, offset),
+                _ => Vec3::new(offset, 0.0, 0.0),
+            };
+            ActorInstance::local_player_with_figure(position, 0.0, *figure)
+        })
+        .collect()
 }
 
 fn actor_review_camera(eye: Vec3) -> ChunkCamera {
@@ -778,6 +797,7 @@ fn render_renderer_rebuild_smoke_frame(
         movement_speed_multiplier: 1.0,
         player_collision_box_visible: false,
         first_person_player_visible: false,
+        player_model: Default::default(),
     });
     let gui_scale = state.ui.scale();
     let gui_state = FullFrameGui::new(
@@ -856,9 +876,32 @@ mod tests {
             views.map(|view| view.name),
             ["front", "side", "three_quarter"]
         );
-        assert_eq!(views[0].camera.eye, [0.0, 0.96, 4.2]);
-        assert_eq!(views[1].camera.eye, [4.2, 0.96, 0.0]);
+        assert_eq!(views[0].camera.eye, [0.0, 1.0, 5.2]);
+        assert_eq!(views[1].camera.eye, [5.2, 1.0, 0.0]);
         assert_eq!(views[2].camera.target, [0.0, 0.92, 0.0]);
+    }
+
+    #[test]
+    fn actor_review_actors_include_first_party_figures() {
+        let actors = actor_review_actors("front");
+
+        assert_eq!(
+            actors.len(),
+            mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS.len()
+        );
+        assert_eq!(
+            actors[0].shape,
+            mclone_render::entity::ActorInstanceShape::Figure(
+                mclone_assets::default_player_figure_id()
+            )
+        );
+        assert_eq!(
+            actors[1].shape,
+            mclone_render::entity::ActorInstanceShape::Figure(
+                mclone_assets::upright_bear_figure_id()
+            )
+        );
+        assert!(actors[0].feet_position.x < actors[1].feet_position.x);
     }
 
     #[test]

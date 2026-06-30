@@ -54,10 +54,18 @@ pub enum ActorInstanceShape {
 
 impl ActorInstance {
     pub fn local_player(feet_position: Vec3, y_rot_degrees: f32) -> Self {
+        Self::local_player_with_figure(feet_position, y_rot_degrees, default_player_figure_id())
+    }
+
+    pub fn local_player_with_figure(
+        feet_position: Vec3,
+        y_rot_degrees: f32,
+        figure: ActorFigureId,
+    ) -> Self {
         Self {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
-            shape: ActorInstanceShape::Figure(default_player_figure_id()),
+            shape: ActorInstanceShape::Figure(figure),
             first_person_body_only: false,
             width: 0.6,
             height: 1.8,

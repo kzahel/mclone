@@ -1,0 +1,381 @@
+{
+  "schemaVersion": 1,
+  "name": "upright_bear",
+  "materials": {
+    "fur": {
+      "color": "#6b4a32"
+    },
+    "fur_dark": {
+      "color": "#3f2a1d"
+    },
+    "muzzle": {
+      "color": "#b98f65"
+    },
+    "nose": {
+      "color": "#17100c"
+    },
+    "vest": {
+      "color": "#2e6e62"
+    },
+    "vest_dark": {
+      "color": "#1d4842"
+    },
+    "pants": {
+      "color": "#303f4a"
+    },
+    "boot": {
+      "color": "#241c18"
+    }
+  },
+  "textures": {
+    "face": {
+      "palette": {
+        ".": "#6b4a32",
+        "e": "#0f0b08",
+        "m": "#b98f65",
+        "n": "#17100c",
+        "d": "#3f2a1d"
+      },
+      "pixels": [
+        "dddddddd",
+        "d......d",
+        ".ee..ee.",
+        ".ee..ee.",
+        "..mmmm..",
+        "..mnnm..",
+        "..mmmm..",
+        "........"
+      ]
+    }
+  },
+  "parts": [
+    {
+      "name": "torso",
+      "at": [
+        0,
+        0.78,
+        0
+      ],
+      "material": "fur",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.62,
+          0.74,
+          0.34
+        ]
+      }
+    },
+    {
+      "name": "vest_panel",
+      "parent": "torso",
+      "at": [
+        0,
+        0.02,
+        -0.01
+      ],
+      "material": "vest",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.5,
+          0.64,
+          0.36
+        ]
+      }
+    },
+    {
+      "name": "vest_band",
+      "parent": "torso",
+      "at": [
+        0,
+        -0.31,
+        -0.012
+      ],
+      "material": "vest_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.64,
+          0.08,
+          0.37
+        ]
+      }
+    },
+    {
+      "name": "bear_head",
+      "parent": "torso",
+      "at": [
+        0,
+        0.63,
+        0
+      ],
+      "material": "fur",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.54,
+          0.48,
+          0.5
+        ],
+        "faces": {
+          "north": {
+            "texture": "face"
+          }
+        }
+      }
+    },
+    {
+      "name": "snout",
+      "parent": "bear_head",
+      "at": [
+        0,
+        -0.06,
+        -0.28
+      ],
+      "material": "muzzle",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.28,
+          0.16,
+          0.14
+        ],
+        "faces": {
+          "north": {
+            "material": "nose"
+          }
+        }
+      }
+    },
+    {
+      "name": "ear_l",
+      "parent": "bear_head",
+      "at": [
+        -0.22,
+        0.28,
+        0.02
+      ],
+      "material": "fur_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.16,
+          0.18,
+          0.14
+        ]
+      }
+    },
+    {
+      "name": "ear_r",
+      "parent": "bear_head",
+      "at": [
+        0.22,
+        0.28,
+        0.02
+      ],
+      "material": "fur_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.16,
+          0.18,
+          0.14
+        ]
+      }
+    },
+    {
+      "name": "arm_l",
+      "parent": "torso",
+      "at": [
+        -0.47,
+        0.08,
+        0
+      ],
+      "material": "fur",
+      "joint": {
+        "pivot": [
+          0,
+          0.32,
+          0
+        ],
+        "axis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.22,
+          0.66,
+          0.24
+        ]
+      }
+    },
+    {
+      "name": "arm_r",
+      "parent": "torso",
+      "at": [
+        0.47,
+        0.08,
+        0
+      ],
+      "material": "fur",
+      "joint": {
+        "pivot": [
+          0,
+          0.32,
+          0
+        ],
+        "axis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.22,
+          0.66,
+          0.24
+        ]
+      }
+    },
+    {
+      "name": "paw_l",
+      "parent": "arm_l",
+      "at": [
+        0,
+        -0.36,
+        -0.01
+      ],
+      "material": "fur_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.24,
+          0.13,
+          0.26
+        ]
+      }
+    },
+    {
+      "name": "paw_r",
+      "parent": "arm_r",
+      "at": [
+        0,
+        -0.36,
+        -0.01
+      ],
+      "material": "fur_dark",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.24,
+          0.13,
+          0.26
+        ]
+      }
+    },
+    {
+      "name": "leg_l",
+      "parent": "torso",
+      "at": [
+        -0.17,
+        -0.7,
+        0
+      ],
+      "material": "pants",
+      "joint": {
+        "pivot": [
+          0,
+          0.34,
+          0
+        ],
+        "axis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.22,
+          0.68,
+          0.24
+        ]
+      }
+    },
+    {
+      "name": "leg_r",
+      "parent": "torso",
+      "at": [
+        0.17,
+        -0.7,
+        0
+      ],
+      "material": "pants",
+      "joint": {
+        "pivot": [
+          0,
+          0.34,
+          0
+        ],
+        "axis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.22,
+          0.68,
+          0.24
+        ]
+      }
+    },
+    {
+      "name": "foot_l",
+      "parent": "leg_l",
+      "at": [
+        0,
+        -0.38,
+        -0.05
+      ],
+      "material": "boot",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.25,
+          0.11,
+          0.32
+        ]
+      }
+    },
+    {
+      "name": "foot_r",
+      "parent": "leg_r",
+      "at": [
+        0,
+        -0.38,
+        -0.05
+      ],
+      "material": "boot",
+      "primitive": {
+        "kind": "box",
+        "size": [
+          0.25,
+          0.11,
+          0.32
+        ]
+      }
+    }
+  ],
+  "clips": {}
+}

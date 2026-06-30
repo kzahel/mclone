@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
+use mclone_assets::ActorFigureId;
 use mclone_client::{
     ActorPresentation, ActorPresentationKind, BlockInteractionTarget, ClientInteractionController,
     ClientRuntime, HAND_PUSH_DEFAULT_HAND_RADIUS, HandPushLocomotionController,
@@ -144,15 +145,17 @@ pub fn actor_instances_from_presentations(
 pub fn local_player_actor_instance(
     camera: &EngineCameraController,
     client: &ClientRuntime,
+    figure: ActorFigureId,
 ) -> ActorInstance {
     let pose = camera.player().pose();
     let packed_light = client.packed_light_at_world_or_fullbright(BlockPos::containing(
         pose.position
             .add(Vec3d::new(0.0, LOCAL_PLAYER_STANDING_HEIGHT * 0.5, 0.0)),
     ));
-    ActorInstance::local_player(
+    ActorInstance::local_player_with_figure(
         glam_vec3_from_vec3d(pose.position),
         pose.y_rot_degrees as f32,
+        figure,
     )
     .with_packed_light(packed_light)
 }
@@ -160,12 +163,15 @@ pub fn local_player_actor_instance(
 pub fn local_player_actor_instance_for_view(
     camera: &EngineCameraController,
     client: &ClientRuntime,
+    figure: ActorFigureId,
 ) -> Option<ActorInstance> {
     match camera.view_mode() {
-        EngineCameraViewMode::ThirdPersonBack => Some(local_player_actor_instance(camera, client)),
-        EngineCameraViewMode::FirstPerson if camera.first_person_player_visible() => {
-            Some(local_player_actor_instance(camera, client).with_first_person_body_only(true))
+        EngineCameraViewMode::ThirdPersonBack => {
+            Some(local_player_actor_instance(camera, client, figure))
         }
+        EngineCameraViewMode::FirstPerson if camera.first_person_player_visible() => Some(
+            local_player_actor_instance(camera, client, figure).with_first_person_body_only(true),
+        ),
         EngineCameraViewMode::FirstPerson => None,
     }
 }
@@ -3524,6 +3530,7 @@ impl CachedTexturedRenderSections {
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
+    use mclone_assets::default_player_figure_id;
     use mclone_core::{
         AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision,
         ChunkStatus, HitResultType, chunk_section_index,
@@ -4133,14 +4140,29 @@ mod tests {
             24.0,
         );
 
-        let actor = local_player_actor_instance(&camera, &client);
+        let actor = local_player_actor_instance(&camera, &client, default_player_figure_id());
 
         assert_eq!(actor.feet_position, Vec3::new(1.25, 69.0, -3.5));
         assert!((actor.yaw_radians - std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
         assert_eq!(
             actor.shape,
+            mclone_render::entity::ActorInstanceShape::Figure(default_player_figure_id())
+        );
+    }
+
+    #[test]
+    fn local_player_actor_instance_uses_selected_figure() {
+        let client = ClientRuntime::local_integrated();
+        let camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(1.25, 70.62, -3.5), 0.0, 0.0, 24.0);
+
+        let actor =
+            local_player_actor_instance(&camera, &client, mclone_assets::upright_bear_figure_id());
+
+        assert_eq!(
+            actor.shape,
             mclone_render::entity::ActorInstanceShape::Figure(
-                mclone_assets::default_player_figure_id()
+                mclone_assets::upright_bear_figure_id()
             )
         );
     }
@@ -4151,7 +4173,10 @@ mod tests {
         let camera =
             EngineCameraController::from_eye_pose(Vec3d::new(1.25, 70.62, -3.5), 0.0, 0.0, 24.0);
 
-        assert!(local_player_actor_instance_for_view(&camera, &client).is_none());
+        assert!(
+            local_player_actor_instance_for_view(&camera, &client, default_player_figure_id())
+                .is_none()
+        );
     }
 
     #[test]
@@ -4161,7 +4186,9 @@ mod tests {
             EngineCameraController::from_eye_pose(Vec3d::new(1.25, 70.62, -3.5), 0.0, 0.0, 24.0);
         camera.set_first_person_player_visible(true);
 
-        let actor = local_player_actor_instance_for_view(&camera, &client).unwrap();
+        let actor =
+            local_player_actor_instance_for_view(&camera, &client, default_player_figure_id())
+                .unwrap();
 
         assert_eq!(actor.feet_position, Vec3::new(1.25, 69.0, -3.5));
         assert!(actor.first_person_body_only);
@@ -4175,7 +4202,9 @@ mod tests {
         camera.set_view_mode(EngineCameraViewMode::ThirdPersonBack);
         camera.set_first_person_player_visible(true);
 
-        let actor = local_player_actor_instance_for_view(&camera, &client).unwrap();
+        let actor =
+            local_player_actor_instance_for_view(&camera, &client, default_player_figure_id())
+                .unwrap();
 
         assert!(!actor.first_person_body_only);
     }

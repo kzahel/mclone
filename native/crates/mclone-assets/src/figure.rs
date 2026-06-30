@@ -5,8 +5,11 @@ use serde::Deserialize;
 use crate::{AssetError, AssetPath, AssetResult, AssetSource};
 
 pub const DEFAULT_PLAYER_FIGURE_PATH: &str = "assets/mclone/figures/player.figure.json";
+pub const UPRIGHT_BEAR_FIGURE_PATH: &str = "assets/mclone/figures/upright_bear.figure.json";
 pub const DEFAULT_PLAYER_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:player");
-pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 1] = [DEFAULT_PLAYER_FIGURE_ID];
+pub const UPRIGHT_BEAR_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:upright_bear");
+pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 2] =
+    [DEFAULT_PLAYER_FIGURE_ID, UPRIGHT_BEAR_FIGURE_ID];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ActorFigureId(&'static str);
@@ -82,13 +85,22 @@ pub fn default_player_figure_path() -> AssetPath {
     AssetPath::new(DEFAULT_PLAYER_FIGURE_PATH)
 }
 
+pub fn upright_bear_figure_path() -> AssetPath {
+    AssetPath::new(UPRIGHT_BEAR_FIGURE_PATH)
+}
+
 pub const fn default_player_figure_id() -> ActorFigureId {
     DEFAULT_PLAYER_FIGURE_ID
+}
+
+pub const fn upright_bear_figure_id() -> ActorFigureId {
+    UPRIGHT_BEAR_FIGURE_ID
 }
 
 pub fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
     match id.as_str() {
         "mclone:player" => Some(default_player_figure_path()),
+        "mclone:upright_bear" => Some(upright_bear_figure_path()),
         _ => None,
     }
 }
@@ -144,6 +156,11 @@ mod tests {
         assert_eq!(
             actor_figure_path(default_player_figure_id()).unwrap(),
             default_player_figure_path()
+        );
+        assert_eq!(upright_bear_figure_id().as_str(), "mclone:upright_bear");
+        assert_eq!(
+            actor_figure_path(upright_bear_figure_id()).unwrap(),
+            upright_bear_figure_path()
         );
         assert!(actor_figure_path(ActorFigureId::from_static("mclone:missing")).is_none());
     }

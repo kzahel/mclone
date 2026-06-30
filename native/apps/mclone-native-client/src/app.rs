@@ -409,6 +409,7 @@ impl ChunkApp {
             movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
             player_collision_box_visible: self.driver.player_collision_box_visible,
             first_person_player_visible: self.driver.camera.first_person_player_visible(),
+            player_model: self.driver.player_model,
         });
         state.touch_controls_mode = Some(self.input_preferences.touch_controls);
         state.block_palette = debug_block_palette_overlay(
@@ -1200,6 +1201,7 @@ impl ApplicationHandler for ChunkApp {
                         as f32,
                     player_collision_box_visible: self.driver.player_collision_box_visible,
                     first_person_player_visible: self.driver.camera.first_person_player_visible(),
+                    player_model: self.driver.player_model,
                 };
                 let ui_frame = FlatClientUiFrame {
                     render_options: ui_render_options,

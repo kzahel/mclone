@@ -283,6 +283,7 @@ impl OffscreenFlatClientHost {
                 movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
                 player_collision_box_visible: self.driver.player_collision_box_visible,
                 first_person_player_visible: self.driver.camera.first_person_player_visible(),
+                player_model: self.driver.player_model,
             },
             block_palette: debug_block_palette_overlay(
                 &self.assets.mesh_assets.catalog,

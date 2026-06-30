@@ -202,7 +202,10 @@ struct RgbaTexture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_assets::{default_player_figure_id, default_player_figure_path};
+    use mclone_assets::{
+        default_player_figure_id, default_player_figure_path, upright_bear_figure_id,
+        upright_bear_figure_path,
+    };
     use std::io::Cursor;
 
     fn actor_asset_test_source() -> mclone_assets::MemoryAssetSource {
@@ -211,6 +214,10 @@ mod tests {
         source.insert_text(
             default_player_figure_path(),
             include_str!("../../../../assets/mclone/figures/player.figure.json"),
+        );
+        source.insert_text(
+            upright_bear_figure_path(),
+            include_str!("../../../../assets/mclone/figures/upright_bear.figure.json"),
         );
         source
     }
@@ -249,6 +256,7 @@ mod tests {
         let assets = load_actor_texture_assets(&source).unwrap();
 
         assert!(assets.figures.get(default_player_figure_id()).is_some());
-        assert_eq!(assets.figures.len(), 1);
+        assert!(assets.figures.get(upright_bear_figure_id()).is_some());
+        assert_eq!(assets.figures.len(), 2);
     }
 }

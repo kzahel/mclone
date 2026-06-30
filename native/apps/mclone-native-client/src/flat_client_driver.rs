@@ -11,7 +11,7 @@ use mclone_app_runtime::session::{
     RemoteSessionEndpoint, SessionFailure, SessionStartRequest, SessionStartResult,
     StartedGameSession,
 };
-use mclone_assets::AssetSource;
+use mclone_assets::{ActorFigureId, AssetSource};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
     ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
@@ -36,8 +36,8 @@ use mclone_render_session::{
 };
 use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameHelpParent,
-    GameMovementMode, GameScreen, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey,
-    GuiScale, LoadingProgressOverlay, Point, StatusOverlay, render_flat_hud,
+    GameMovementMode, GamePlayerModel, GameScreen, GameUi, GameUiAction, GameUiRenderState,
+    GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, StatusOverlay, render_flat_hud,
     render_loading_progress_overlay, render_loading_progress_panel_at, touch_controls_mode_label,
 };
 
@@ -106,6 +106,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) interaction: ClientInteractionController,
     pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) player_collision_box_visible: bool,
+    pub(crate) player_model: GamePlayerModel,
     pub(crate) render_resources: Option<FlatRenderResources>,
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
@@ -199,6 +200,7 @@ pub(crate) struct FlatClientUiRenderOptions {
     pub(crate) movement_speed_multiplier: f32,
     pub(crate) player_collision_box_visible: bool,
     pub(crate) first_person_player_visible: bool,
+    pub(crate) player_model: GamePlayerModel,
 }
 
 #[derive(Clone, Debug)]
@@ -269,6 +271,7 @@ impl FlatClientDriver {
             interaction: ClientInteractionController::new(),
             render_options,
             player_collision_box_visible: false,
+            player_model: GamePlayerModel::default(),
             render_resources: None,
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
@@ -668,6 +671,14 @@ impl FlatClientDriver {
                 log::info!(
                     "first-person player body {}",
                     if visible { "visible" } else { "hidden" }
+                );
+            }
+            GameUiAction::SetPlayerModel(model) => {
+                self.player_model = model;
+                log::info!(
+                    "player model set to {} ({})",
+                    model.label(),
+                    actor_figure_id_for_player_model(model).as_str()
                 );
             }
             GameUiAction::SetMovementMode(movement_mode) => {
@@ -1298,6 +1309,7 @@ impl FlatClientDriver {
         .chain(local_player_actor_instance_for_view(
             &self.camera,
             runtime.client(),
+            actor_figure_id_for_player_model(self.player_model),
         ))
         .collect()
     }
@@ -1736,6 +1748,7 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         force_fullbright: options.render_options.force_fullbright,
         player_collision_box_visible: options.player_collision_box_visible,
         first_person_player_visible: options.first_person_player_visible,
+        player_model: options.player_model,
         movement_mode: options.movement_mode,
         fly_speed_multiplier: options.fly_speed_multiplier,
         min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
@@ -1764,6 +1777,13 @@ pub(crate) const fn engine_movement_mode(mode: GameMovementMode) -> EngineCamera
         GameMovementMode::Walk => EngineCameraMovementMode::Walking,
         GameMovementMode::Fly => EngineCameraMovementMode::NoClip,
         GameMovementMode::HandPush => EngineCameraMovementMode::HandPush,
+    }
+}
+
+pub(crate) const fn actor_figure_id_for_player_model(model: GamePlayerModel) -> ActorFigureId {
+    match model {
+        GamePlayerModel::Player => mclone_assets::DEFAULT_PLAYER_FIGURE_ID,
+        GamePlayerModel::UprightBear => mclone_assets::UPRIGHT_BEAR_FIGURE_ID,
     }
 }
 
@@ -1941,6 +1961,25 @@ mod tests {
         assert!(result.host_action.is_none());
         assert!(driver.scene.first_person_player_visible);
         assert!(driver.camera.first_person_player_visible());
+    }
+
+    #[test]
+    fn ui_action_sets_player_model() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        assert_eq!(driver.player_model, GamePlayerModel::Player);
+        let result = driver.apply_ui_action(
+            GameUiAction::SetPlayerModel(GamePlayerModel::UprightBear),
+            ui_action_context(),
+        );
+
+        assert!(result.host_action.is_none());
+        assert_eq!(driver.player_model, GamePlayerModel::UprightBear);
+        assert_eq!(
+            actor_figure_id_for_player_model(driver.player_model),
+            mclone_assets::upright_bear_figure_id()
+        );
     }
 
     #[test]

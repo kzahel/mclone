@@ -1,7 +1,7 @@
 # 112 - Asset Lab Runtime Actor Geometry
 
-Status: active; Slice 2 end-to-end actor figure registry, figure-id selection,
-and Slice 3a first-person body toggle landed.
+Status: active; Slice 2 end-to-end actor figure registry, Slice 2b player
+model selection, and Slice 3a first-person body toggle landed.
 
 ## Purpose
 
@@ -175,6 +175,44 @@ Review output inspected:
 /tmp/mclone-actor-review-sheet.png
 /tmp/mclone-actor-figure-id-review-sheet.png
 /tmp/mclone-actor-registry-review-sheet.png
+```
+
+### Slice 2b - First-Party Player Model Selection
+
+- [x] Add a second first-party authored figure (`mclone:upright_bear`) using
+      the current box/material/ASCII-face subset.
+- [x] Include the new figure in the first-party actor figure registry and asset
+      pack lockfile.
+- [x] Render every first-party figure in the native actor review sheet.
+- [x] Add a shared Options menu `Player Model` cycle control.
+- [x] Route the flat desktop setting into local-player actor figure selection.
+- [x] Keep web, flat Android, and XR UI action/state handling coherent while
+      those targets defer applying the selected model to their local actor
+      render paths.
+- [x] Fix the Android XR caller that still used the removed
+      `ActorTextureAssets.player_figure` compatibility field.
+
+Validation:
+
+```powershell
+cargo test --manifest-path native/Cargo.toml -p mclone-assets -p mclone-render -p mclone-render-session -p mclone-ui -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+pnpm assets:pack
+pnpm assets:pack:write-lock
+pnpm assets:pack:check
+pnpm native:web:build
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --actor-review-sheet /tmp/mclone-actor-model-options-review-sheet.png --width 1152 --height 512
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-options-player-model.png --width 890 --height 1024 --screenshot-ui options-pause --startup-wait idle --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
+git diff --check
+```
+
+Review output inspected:
+
+```text
+/tmp/mclone-actor-model-options-review-sheet.png
+/tmp/mclone-options-player-model.png
 ```
 
 ### Slice 3 - Animation Metadata Import

@@ -54,9 +54,9 @@ use mclone_render_session::{
     actor_instances_from_presentations, engine_debug_world_lines,
 };
 use mclone_ui::{
-    Color, DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameMovementMode, GameScreen, GameUi,
-    GameUiAction, GameUiRenderState, GuiDrawList, GuiScale, Point, Rect, StatusOverlay,
-    render_loading_progress_overlay, render_status_overlay,
+    Color, DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameMovementMode, GamePlayerModel,
+    GameScreen, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiScale, Point, Rect,
+    StatusOverlay, render_loading_progress_overlay, render_status_overlay,
 };
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
@@ -461,6 +461,7 @@ where
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
     player_collision_box_visible: bool,
+    player_model: GamePlayerModel,
     draw: TexturedSectionDrawResources,
     actors: ActorDrawResources,
     selection_outline: SelectionOutlineRenderer,
@@ -591,6 +592,7 @@ where
             },
             render_options,
             player_collision_box_visible: false,
+            player_model: GamePlayerModel::default(),
             draw,
             actors: ActorDrawResources::new(
                 device,
@@ -681,6 +683,7 @@ where
             },
             render_options,
             player_collision_box_visible: false,
+            player_model: GamePlayerModel::default(),
             draw: started.draw,
             actors: ActorDrawResources::new(
                 device,
@@ -2648,6 +2651,7 @@ where
             force_fullbright: self.render_options.force_fullbright,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
+            player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
@@ -3402,6 +3406,10 @@ where
                     "XR movement speed multiplier set to {:.1}x",
                     self.camera.movement_speed_multiplier()
                 );
+            }
+            GameUiAction::SetPlayerModel(model) => {
+                self.player_model = model;
+                log::info!("XR player model set to {}", model.label());
             }
             GameUiAction::Quit => {
                 log::info!("XR menu quit action ignored by shared scene");

@@ -55,8 +55,8 @@ mod android {
     };
     use mclone_ui::{
         DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, FlatHud,
-        GameFramePacingMode, GameHelpParent, GameMovementMode, GameUi, GameUiAction,
-        GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay,
+        GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel, GameUi,
+        GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay,
         TouchJoystickOverlay, TouchOverlay, render_flat_hud, touch_action_button_rects,
         touch_hotbar_slot_rects, touch_menu_button_rect, touch_movement_zone_rect,
     };
@@ -190,6 +190,7 @@ mod android {
         keyboard_mouse: KeyboardMouseInputAdapter,
         render_options: TexturedSectionRenderOptions,
         player_collision_box_visible: bool,
+        player_model: GamePlayerModel,
         ui: GameUi,
         session_status: StatusOverlay,
         touch_menu_touch_id: Option<u64>,
@@ -588,6 +589,7 @@ mod android {
                 keyboard_mouse: KeyboardMouseInputAdapter::new(),
                 render_options,
                 player_collision_box_visible: false,
+                player_model: GamePlayerModel::default(),
                 ui: android_game_ui_for_scene(&scene_options),
                 session_status: StatusOverlay::hidden(),
                 touch_menu_touch_id: None,
@@ -1257,6 +1259,10 @@ mod android {
                         self.camera.movement_speed_multiplier()
                     );
                 }
+                GameUiAction::SetPlayerModel(model) => {
+                    self.player_model = model;
+                    log::info!("Mclone Android player model set to {}", model.label());
+                }
                 GameUiAction::Quit => {
                     result.quit = true;
                 }
@@ -1348,6 +1354,7 @@ mod android {
                 force_fullbright: self.render_options.force_fullbright,
                 player_collision_box_visible: self.player_collision_box_visible,
                 first_person_player_visible: self.camera.first_person_player_visible(),
+                player_model: self.player_model,
                 movement_mode: game_movement_mode(self.camera.movement_mode()),
                 fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
                 min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,

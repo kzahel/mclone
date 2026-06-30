@@ -642,10 +642,15 @@ mod tests {
         let source = mclone_assets::FilesystemAssetSource::new("../../..");
         let figures = load_first_party_actor_figures(&source).unwrap();
 
-        assert_eq!(figures.len(), 1);
+        assert_eq!(figures.len(), 2);
         assert!(
             figures
                 .get(mclone_assets::default_player_figure_id())
+                .is_some()
+        );
+        assert!(
+            figures
+                .get(mclone_assets::upright_bear_figure_id())
                 .is_some()
         );
     }
