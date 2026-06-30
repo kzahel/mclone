@@ -296,6 +296,8 @@ single-view scratch uploads.
 
 ## Runtime Prefetch Overlap Probe (landed 2026-06-30)
 
+Implementation commit: `22c1551` (`Add XR runtime prefetch overlap probe`).
+
 This slice adds an opt-in safe overlap path:
 `--xr-overlap-runtime-prefetch` submits both eyes with the deferred-wait path,
 runs one runtime/render-section prefetch while that GPU submission is in flight,
