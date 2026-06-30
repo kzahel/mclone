@@ -1,7 +1,7 @@
 # 114 - AI Texture Pack Lab
 
 Status: active; scaffold/export/sheet loop, software cube, rotation-grid panels,
-and first grass-block bundle landed on 2026-06-30.
+first grass-block bundle, and primary-tint terrain patch landed on 2026-06-30.
 
 ## Purpose
 
@@ -193,12 +193,14 @@ texture.
   sampling and face shading.
 - [ ] Add optional Three.js/browser preview later if interaction or non-cube
   models need it.
-- [ ] Add small terrain-patch preview for repeated block faces.
+- [x] Add small terrain-patch preview for repeated grass/dirt block tops.
 - [x] Add per-face block bundle for `grass_block`.
 - [x] Add tint swatches for grass previews.
 - [x] Add transparent overlay preview for grass side textures.
 - [x] Add preview-only tint/checker controls so neutral grass and transparent
   overlay source textures render meaningfully in individual sheets.
+- [x] Keep alternate grass biome tint previews compact so source texture review
+  remains primary.
 - [ ] Add foliage/water tint swatches once those texture families exist.
 
 Validation:

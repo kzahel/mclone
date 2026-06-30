@@ -139,6 +139,10 @@ The review sheet should include:
 Screenshots and review sheets should be written under `/tmp/mclone-texture-lab/`
 by default.
 
+Biome tint previews should stay secondary. The grass block sheet uses one
+primary tint for texture review and keeps alternate tint swatches compact so
+they do not distract from source texture quality.
+
 ## Variants And Rotation
 
 Vanilla commonly hides repetition by deterministic model rotation or mirroring,

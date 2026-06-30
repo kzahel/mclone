@@ -118,23 +118,24 @@ export function makeBlockReviewSheet(
   const panel: Rgba = [52, 54, 54, 255];
   const sheet = solidImage(1040, 672, background);
   const tintColors = block.tint?.grass?.map(parseHexColor) ?? [[116, 167, 69, 255] satisfies Rgba];
+  const primaryTint = tintColors[0]!;
 
   drawRect(sheet, 16, 16, 300, 300, panel);
-  drawIsometricCubeFaces(sheet, cubeFaces(block, texturesByName, tintColors[0]!), 82, 58);
+  drawIsometricCubeFaces(sheet, cubeFaces(block, texturesByName, primaryTint), 82, 58);
 
   const top = textureForFace(block, texturesByName, "top");
   drawRect(sheet, 340, 16, 328, 328, panel);
-  drawRotatedTiledScaled(sheet, tintTexture(top, tintColors[0]!), 344, 20, 5, 5, 2, `${blockName}:top-rotation`);
+  drawRotatedTiledScaled(sheet, tintTexture(top, primaryTint), 344, 20, 5, 5, 2, `${blockName}:top-rotation`);
 
-  const side = compositeSideTexture(block, texturesByName, tintColors[0]!);
+  const side = compositeSideTexture(block, texturesByName, primaryTint);
   drawRect(sheet, 692, 16, 328, 328, panel);
   drawTiledScaled(sheet, side, 696, 20, 3, 3, 3);
 
   drawRect(sheet, 16, 360, 1008, 280, panel);
+  drawTerrainPatch(sheet, block, texturesByName, primaryTint, 32, 372);
+  drawIsometricCubeFaces(sheet, cubeFaces(block, texturesByName, primaryTint), 760, 410);
   for (const [index, tint] of tintColors.slice(0, 4).entries()) {
-    const x = 56 + index * 230;
-    drawIsometricCubeFaces(sheet, cubeFaces(block, texturesByName, tint), x, 400);
-    drawTintSwatch(sheet, x + 40, 588, tint);
+    drawTintSwatch(sheet, 890, 412 + index * 34, tint);
   }
 
   return sheet;
@@ -386,6 +387,28 @@ function compositeSideTexture(block: BlockSpec, texturesByName: Map<string, Rend
     throw new Error(`Block overlay references missing rendered texture '${overlayName}'`);
   }
   return compositeImages(side, tintTexture(overlay, tint));
+}
+
+function drawTerrainPatch(
+  target: RgbaImage,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+  tint: Rgba,
+  targetX: number,
+  targetY: number,
+): void {
+  const top = tintTexture(textureForFace(block, texturesByName, "top"), tint);
+  const dirt = textureForFace(block, texturesByName, "bottom");
+  const tileScale = 2;
+  const tileSize = top.width * tileScale;
+  for (let row = 0; row < 4; row += 1) {
+    for (let column = 0; column < 10; column += 1) {
+      const useDirt = random01("terrain-patch-dirt", column, row) < 0.12;
+      const image = useDirt ? dirt : top;
+      const rotation = useDirt ? 0 : Math.floor(random01("terrain-patch-grass-rotation", column, row) * 4) % 4;
+      drawRotatedScaled(target, image, targetX + column * tileSize, targetY + row * tileSize, tileScale, rotation);
+    }
+  }
 }
 
 function drawCubeFace(
