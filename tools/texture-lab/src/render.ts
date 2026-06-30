@@ -67,7 +67,11 @@ export function renderTexture(pack: TexturePackAsset, name: string, texture: Tex
   return rendered;
 }
 
-export function makeReviewSheet(texture: RenderedTexture): RgbaImage {
+export interface ReviewSheetOptions {
+  reference?: RgbaImage;
+}
+
+export function makeReviewSheet(texture: RenderedTexture, options: ReviewSheetOptions = {}): RgbaImage {
   const background: Rgba = [32, 34, 34, 255];
   const panel: Rgba = [52, 54, 54, 255];
   const sheetWidth = 1040;
@@ -130,6 +134,10 @@ export function makeReviewSheet(texture: RenderedTexture): RgbaImage {
   if (tiling !== "none") {
     drawRect(sheet, 360, 328, 328, 328, panel);
     drawSeamDiagnostic(sheet, displayTexture, 360, 328, 328, 328, tiling, displayCheckerboard);
+  }
+
+  if (options.reference) {
+    drawReferencePanel(sheet, options.reference, 704, 328, 320, 328);
   }
 
   return sheet;
@@ -642,6 +650,50 @@ function drawSeamDiagnostic(
   if (tiling === "xy") {
     const horizontalSeamY = previewY + source.height * scale - Math.floor(seamWidth / 2);
     drawHorizontalSeamError(target, source, previewX, horizontalSeamY, tilesX, scale, seamWidth);
+  }
+}
+
+function drawReferencePanel(
+  target: RgbaImage,
+  reference: RgbaImage,
+  panelX: number,
+  panelY: number,
+  panelWidth: number,
+  panelHeight: number,
+): void {
+  const panel: Rgba = [52, 54, 54, 255];
+  const border: Rgba = [116, 119, 116, 255];
+  drawRect(target, panelX, panelY, panelWidth, panelHeight, panel);
+  drawRect(target, panelX, panelY, panelWidth, 2, border);
+  drawRect(target, panelX, panelY + panelHeight - 2, panelWidth, 2, border);
+  drawRect(target, panelX, panelY, 2, panelHeight, border);
+  drawRect(target, panelX + panelWidth - 2, panelY, 2, panelHeight, border);
+
+  const checkerboard = hasTransparency(reference);
+  const enlargedScale = Math.max(1, Math.floor(Math.min(128 / reference.width, 128 / reference.height)));
+  const enlargedWidth = reference.width * enlargedScale;
+  const enlargedHeight = reference.height * enlargedScale;
+  const enlargedX = panelX + 18;
+  const enlargedY = panelY + 18;
+  if (checkerboard) {
+    drawCheckerboard(target, enlargedX, enlargedY, enlargedWidth, enlargedHeight, Math.max(4, enlargedScale));
+  }
+  drawScaled(target, reference, enlargedX, enlargedY, enlargedScale);
+  drawGrid(target, enlargedX, enlargedY, reference.width, reference.height, enlargedScale, [86, 89, 88, 255]);
+
+  const repeatScale = Math.max(1, Math.floor(Math.min(144 / (reference.width * 3), 144 / (reference.height * 3))));
+  const repeatWidth = reference.width * 3 * repeatScale;
+  const repeatHeight = reference.height * 3 * repeatScale;
+  const repeatX = panelX + panelWidth - repeatWidth - 18;
+  const repeatY = panelY + 18;
+  if (checkerboard) {
+    drawCheckerboard(target, repeatX, repeatY, repeatWidth, repeatHeight, Math.max(4, repeatScale * 2));
+  }
+  drawTiledScaled(target, reference, repeatX, repeatY, 3, 3, repeatScale);
+
+  const mipY = panelY + Math.max(enlargedHeight, repeatHeight) + 40;
+  if (mipY + 64 < panelY + panelHeight) {
+    drawMipStrip(target, reference, panelX + 18, mipY, checkerboard);
   }
 }
 

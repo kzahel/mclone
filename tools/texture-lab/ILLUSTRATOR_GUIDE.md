@@ -184,6 +184,11 @@ The grass side context sheet shows the important three-part relationship:
 Judge final grass-side color from that context sheet or the full block sheet,
 not from the raw side texture alone.
 
+When local vanilla assets exist, individual texture sheets include a bordered
+reference panel. Use it to judge density, value range, material scale, and the
+kind of shapes the texture needs. Do not trace, recolor, or mechanically copy
+the reference; the authored source must remain original.
+
 ## Tiling And Rotation
 
 A texture may be intended for full XY tiling, horizontal strip tiling, or no

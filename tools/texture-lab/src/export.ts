@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadTexturePack } from "./load";
-import { encodePng } from "./png";
+import { decodePng, encodePng, type RgbaImage } from "./png";
 import { makeMetadataReportJson, makeMetadataReportMarkdown } from "./report";
 import { makeBlockReviewSheet, makeBlockSideReviewSheet, makeReviewSheet, renderAllTextures } from "./render";
 
@@ -10,6 +10,8 @@ interface ExportArgs {
   outDir: string;
   sheetOnly: boolean;
   runtimeCompat: boolean;
+  includeReference: boolean;
+  referenceRoot: string | undefined;
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -38,7 +40,8 @@ for (const texture of textures) {
   }
 
   const sheetPath = path.join(args.outDir, `${texture.name}-sheet.png`);
-  await fs.writeFile(sheetPath, encodePng(makeReviewSheet(texture)));
+  const reference = await loadReferenceTexture(texture.exportPath);
+  await fs.writeFile(sheetPath, encodePng(makeReviewSheet(texture, reference ? { reference } : {})));
   console.log(`Wrote ${sheetPath}`);
 }
 
@@ -68,31 +71,78 @@ console.log(`Wrote ${reportJsonPath}`);
 function parseArgs(argv: string[]): ExportArgs {
   const input = argv[0];
   if (!input || input.startsWith("-")) {
-    throw new Error("Usage: tsx src/export.ts <texture.ts> [--out <dir>] [--sheet-only] [--runtime-compat]");
+    throw new Error(
+      "Usage: tsx src/export.ts <texture.ts> [--out <dir>] [--sheet-only] [--runtime-compat] [--reference-root <dir>] [--no-reference]",
+    );
   }
 
   let outDir = path.join("/tmp", "mclone-texture-lab");
   let sheetOnly = false;
   let runtimeCompat = false;
+  let includeReference = true;
+  let referenceRoot: string | undefined;
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--out") {
+    if (arg === "--") {
+      continue;
+    } else if (arg === "--out") {
       const next = argv[index + 1];
       if (!next) {
         throw new Error("--out requires a directory");
       }
       outDir = next;
       index += 1;
+    } else if (arg === "--reference-root") {
+      const next = argv[index + 1];
+      if (!next) {
+        throw new Error("--reference-root requires a directory");
+      }
+      referenceRoot = next;
+      index += 1;
     } else if (arg === "--sheet-only") {
       sheetOnly = true;
     } else if (arg === "--runtime-compat") {
       runtimeCompat = true;
+    } else if (arg === "--no-reference") {
+      includeReference = false;
     } else {
       throw new Error(`Unknown argument '${arg}'`);
     }
   }
 
-  return { input, outDir, sheetOnly, runtimeCompat };
+  return { input, outDir, sheetOnly, runtimeCompat, includeReference, referenceRoot };
+}
+
+async function loadReferenceTexture(exportPath: string): Promise<RgbaImage | undefined> {
+  if (!args.includeReference) {
+    return undefined;
+  }
+  const compatPath = runtimeCompatTexturePath(exportPath);
+  if (!compatPath) {
+    return undefined;
+  }
+  for (const root of referenceRoots()) {
+    const referencePath = path.join(root, compatPath);
+    try {
+      return decodePng(await fs.readFile(referencePath));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        throw new Error(`Failed to load reference texture '${referencePath}': ${(error as Error).message}`);
+      }
+    }
+  }
+  return undefined;
+}
+
+function referenceRoots(): string[] {
+  if (args.referenceRoot) {
+    return [path.resolve(args.referenceRoot)];
+  }
+  return [
+    path.resolve("..", "..", "reference", "minecraft-1.17.1", "extracted"),
+    path.resolve("..", "..", "reference", "minecraft-1.17.1", "src"),
+  ];
 }
 
 function runtimeCompatTexturePath(exportPath: string): string | null {

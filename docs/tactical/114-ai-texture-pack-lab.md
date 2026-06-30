@@ -190,6 +190,8 @@ pnpm texture-lab:export
 - [x] Add seam/error panels with left-right and top-bottom mismatch overlays.
 - [x] Add 16x16 downsample and mip-strip panels through the initial CLI sheet.
 - [x] Add deterministic rotation-grid panel through the CLI sheet.
+- [x] Add local-only vanilla reference panels when gitignored reference assets
+  exist.
 - [ ] Add Playwright sheet capture under `/tmp/mclone-texture-lab/`.
 
 Validation:
@@ -300,6 +302,12 @@ it still read as flat gray plus speckles. The stone base now uses a stronger
 authored facet mask, longer dark/light edge strokes, and reduced speckle
 density. This confirms the authoring rule: rock textures need structural masks
 before grain, not procedural grain as the primary visual identity.
+
+Status 2026-06-30: individual texture sheets now include a bordered lower-right
+local vanilla reference panel when `reference/minecraft-1.17.1/extracted/` or
+`reference/minecraft-1.17.1/src/` is present. The panel is private review
+context only; reference pixels are never exported into the source pack,
+runtime-compatible overrides, or overlay `.pbp`.
 
 Acceptance: the next stone/ground textures show broad, intentional material
 forms in sheets and terrain preview, not just high-frequency grain.

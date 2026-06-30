@@ -79,6 +79,17 @@ sheets to:
 
 When a block name collides with a texture name, such as `stone`, the texture
 sheet keeps `stone-sheet.png` and the block sheet uses `stone-block-sheet.png`.
+If `reference/minecraft-1.17.1/extracted/` or `reference/minecraft-1.17.1/src/`
+exists, individual texture sheets also draw the matching local vanilla texture
+in a bordered lower-right reference panel. That panel is for private review
+only and is never written into exported pack PNGs or overlay packs.
+
+Reference panels can be disabled or pointed at another local extraction:
+
+```sh
+pnpm --dir tools/texture-lab export -- --no-reference
+pnpm --dir tools/texture-lab export -- --reference-root /path/to/extracted
+```
 
 The runtime-compatible export also writes vanilla-path texture overrides:
 
@@ -282,8 +293,8 @@ The review sheet should include:
 - rotation and mirror preview for blocks that rely on deterministic model
   variants.
 - optional biome tint swatches for grass, foliage, and water-tinted textures.
-- optional local-only vanilla reference panel when the gitignored reference
-  assets exist; never export or commit that panel as pack source.
+- local-only vanilla reference panel when the gitignored reference assets
+  exist; never export or commit that panel as pack source.
 
 Screenshots and review sheets should be written under `/tmp/mclone-texture-lab/`
 by default.
