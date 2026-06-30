@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "export": "tsx src/export.ts examples/dirt/texture.ts",
-    "sheet": "tsx src/export.ts examples/dirt/texture.ts --sheet-only"
+    "export": "tsx src/export.ts examples/dirt/texture.ts && tsx src/export.ts examples/grass-block/texture.ts",
+    "sheet": "tsx src/export.ts examples/dirt/texture.ts --sheet-only && tsx src/export.ts examples/grass-block/texture.ts --sheet-only"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

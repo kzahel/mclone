@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { loadTexturePack } from "./load";
 import { encodePng } from "./png";
-import { makeReviewSheet, renderAllTextures } from "./render";
+import { makeBlockReviewSheet, makeReviewSheet, renderAllTextures } from "./render";
 
 interface ExportArgs {
   input: string;
@@ -13,6 +13,7 @@ interface ExportArgs {
 const args = parseArgs(process.argv.slice(2));
 const pack = await loadTexturePack(args.input);
 const textures = renderAllTextures(pack);
+const texturesByName = new Map(textures.map((texture) => [texture.name, texture]));
 
 await fs.mkdir(args.outDir, { recursive: true });
 
@@ -26,6 +27,12 @@ for (const texture of textures) {
 
   const sheetPath = path.join(args.outDir, `${texture.name}-sheet.png`);
   await fs.writeFile(sheetPath, encodePng(makeReviewSheet(texture)));
+  console.log(`Wrote ${sheetPath}`);
+}
+
+for (const [blockName, block] of Object.entries(pack.blocks)) {
+  const sheetPath = path.join(args.outDir, `${blockName}-sheet.png`);
+  await fs.writeFile(sheetPath, encodePng(makeBlockReviewSheet(blockName, block, texturesByName)));
   console.log(`Wrote ${sheetPath}`);
 }
 

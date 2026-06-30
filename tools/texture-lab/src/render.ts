@@ -1,4 +1,11 @@
-import { isHexColor, type AsciiLayerSpec, type PaletteSpec, type TexturePackAsset, type TextureSpec } from "./dsl";
+import {
+  isHexColor,
+  type AsciiLayerSpec,
+  type BlockSpec,
+  type PaletteSpec,
+  type TexturePackAsset,
+  type TextureSpec,
+} from "./dsl";
 import type { RgbaImage } from "./png";
 
 export interface RenderedTexture extends RgbaImage {
@@ -66,6 +73,37 @@ export function makeReviewSheet(texture: RenderedTexture): RgbaImage {
 
   drawRect(sheet, 16, 328, 328, 328, panel);
   drawRotatedTiledScaled(sheet, texture, 20, 332, 5, 5, 2, "vanilla-dirt-rotation-preview");
+
+  return sheet;
+}
+
+export function makeBlockReviewSheet(
+  blockName: string,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+): RgbaImage {
+  const background: Rgba = [32, 34, 34, 255];
+  const panel: Rgba = [52, 54, 54, 255];
+  const sheet = solidImage(1040, 672, background);
+  const tintColors = block.tint?.grass?.map(parseHexColor) ?? [[116, 167, 69, 255] satisfies Rgba];
+
+  drawRect(sheet, 16, 16, 300, 300, panel);
+  drawIsometricCubeFaces(sheet, cubeFaces(block, texturesByName, tintColors[0]!), 82, 58);
+
+  const top = textureForFace(block, texturesByName, "top");
+  drawRect(sheet, 340, 16, 328, 328, panel);
+  drawRotatedTiledScaled(sheet, tintTexture(top, tintColors[0]!), 344, 20, 5, 5, 2, `${blockName}:top-rotation`);
+
+  const side = compositeSideTexture(block, texturesByName, tintColors[0]!);
+  drawRect(sheet, 692, 16, 328, 328, panel);
+  drawTiledScaled(sheet, side, 696, 20, 3, 3, 3);
+
+  drawRect(sheet, 16, 360, 1008, 280, panel);
+  for (const [index, tint] of tintColors.slice(0, 4).entries()) {
+    const x = 56 + index * 230;
+    drawIsometricCubeFaces(sheet, cubeFaces(block, texturesByName, tint), x, 400);
+    drawTintSwatch(sheet, x + 40, 588, tint);
+  }
 
   return sheet;
 }
@@ -243,15 +281,34 @@ function drawMipStrip(target: RgbaImage, source: RgbaImage, targetX: number, tar
 }
 
 function drawIsometricCube(target: RgbaImage, texture: RgbaImage, targetX: number, targetY: number): void {
+  drawIsometricCubeFaces(
+    target,
+    {
+      top: texture,
+      left: texture,
+      right: texture,
+    },
+    targetX,
+    targetY,
+  );
+}
+
+interface CubeFaceImages {
+  top: RgbaImage;
+  left: RgbaImage;
+  right: RgbaImage;
+}
+
+function drawIsometricCubeFaces(target: RgbaImage, faces: CubeFaceImages, targetX: number, targetY: number): void {
   const halfWidth = 64;
   const halfDepth = 32;
   const height = 84;
   const originX = targetX + halfWidth;
   const originY = targetY + height;
 
-  drawCubeFace(target, texture, 0.68, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 1 - v, 1));
-  drawCubeFace(target, texture, 0.78, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, 1, 1 - v, u));
-  drawCubeFace(target, texture, 1.08, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 1, v));
+  drawCubeFace(target, faces.left, 0.68, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 1 - v, 1));
+  drawCubeFace(target, faces.right, 0.78, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, 1, 1 - v, u));
+  drawCubeFace(target, faces.top, 1.08, (u, v) => projectIso(originX, originY, halfWidth, halfDepth, height, u, 1, v));
   drawCubeOutline(target, [
     projectIso(originX, originY, halfWidth, halfDepth, height, 0, 1, 0),
     projectIso(originX, originY, halfWidth, halfDepth, height, 1, 1, 0),
@@ -261,6 +318,39 @@ function drawIsometricCube(target: RgbaImage, texture: RgbaImage, targetX: numbe
     projectIso(originX, originY, halfWidth, halfDepth, height, 1, 0, 1),
     projectIso(originX, originY, halfWidth, halfDepth, height, 1, 0, 0),
   ]);
+}
+
+function cubeFaces(block: BlockSpec, texturesByName: Map<string, RenderedTexture>, tint: Rgba): CubeFaceImages {
+  return {
+    top: tintTexture(textureForFace(block, texturesByName, "top"), tint),
+    left: compositeSideTexture(block, texturesByName, tint),
+    right: compositeSideTexture(block, texturesByName, tint),
+  };
+}
+
+function textureForFace(block: BlockSpec, texturesByName: Map<string, RenderedTexture>, face: "top" | "bottom" | "side"): RenderedTexture {
+  const textureName = block.faces[face] ?? block.faces.all ?? block.faces.side;
+  if (!textureName) {
+    throw new Error(`Block face '${face}' has no texture`);
+  }
+  const texture = texturesByName.get(textureName);
+  if (!texture) {
+    throw new Error(`Block face '${face}' references missing rendered texture '${textureName}'`);
+  }
+  return texture;
+}
+
+function compositeSideTexture(block: BlockSpec, texturesByName: Map<string, RenderedTexture>, tint: Rgba): RgbaImage {
+  const side = cloneImage(textureForFace(block, texturesByName, "side"));
+  const overlayName = block.faces.overlay;
+  if (!overlayName) {
+    return side;
+  }
+  const overlay = texturesByName.get(overlayName);
+  if (!overlay) {
+    throw new Error(`Block overlay references missing rendered texture '${overlayName}'`);
+  }
+  return compositeImages(side, tintTexture(overlay, tint));
 }
 
 function drawCubeFace(
@@ -328,7 +418,7 @@ function fillPolygon(target: RgbaImage, polygon: Point[], color: Rgba): void {
   for (let y = minY; y <= maxY; y += 1) {
     for (let x = minX; x <= maxX; x += 1) {
       if (pointInPolygon(x + 0.5, y + 0.5, polygon)) {
-        writePixel(target.data, target.width, x, y, color);
+        blendPixel(target.data, target.width, x, y, color, 1);
       }
     }
   }
@@ -394,7 +484,7 @@ function drawRect(target: RgbaImage, x: number, y: number, width: number, height
   const y1 = Math.min(target.height, y + height);
   for (let py = y0; py < y1; py += 1) {
     for (let px = x0; px < x1; px += 1) {
-      writePixel(target.data, target.width, px, py, color);
+      blendPixel(target.data, target.width, px, py, color, 1);
     }
   }
 }
@@ -410,6 +500,42 @@ function writePixel(data: Uint8Array, width: number, x: number, y: number, color
   data[index + 1] = color[1];
   data[index + 2] = color[2];
   data[index + 3] = color[3];
+}
+
+function cloneImage(image: RgbaImage): RgbaImage {
+  return {
+    width: image.width,
+    height: image.height,
+    data: new Uint8Array(image.data),
+  };
+}
+
+function tintTexture(image: RgbaImage, tint: Rgba): RgbaImage {
+  const out = cloneImage(image);
+  for (let index = 0; index < out.data.length; index += 4) {
+    out.data[index] = Math.round(out.data[index]! * tint[0] / 255);
+    out.data[index + 1] = Math.round(out.data[index + 1]! * tint[1] / 255);
+    out.data[index + 2] = Math.round(out.data[index + 2]! * tint[2] / 255);
+  }
+  return out;
+}
+
+function compositeImages(base: RgbaImage, overlay: RgbaImage): RgbaImage {
+  if (base.width !== overlay.width || base.height !== overlay.height) {
+    throw new Error(`Cannot composite ${base.width}x${base.height} with ${overlay.width}x${overlay.height}`);
+  }
+  const out = cloneImage(base);
+  for (let y = 0; y < overlay.height; y += 1) {
+    for (let x = 0; x < overlay.width; x += 1) {
+      blendPixel(out.data, out.width, x, y, readPixel(overlay, x, y), 1);
+    }
+  }
+  return out;
+}
+
+function drawTintSwatch(target: RgbaImage, x: number, y: number, color: Rgba): void {
+  drawRect(target, x, y, 64, 20, [24, 26, 26, 255]);
+  drawRect(target, x + 2, y + 2, 60, 16, color);
 }
 
 function copyPixel(
@@ -432,11 +558,20 @@ function copyPixel(
 
 function blendPixel(data: Uint8Array, width: number, x: number, y: number, color: Rgba, opacity: number): void {
   const index = (y * width + x) * 4;
-  const alpha = (color[3] / 255) * opacity;
-  data[index] = Math.round(data[index]! * (1 - alpha) + color[0] * alpha);
-  data[index + 1] = Math.round(data[index + 1]! * (1 - alpha) + color[1] * alpha);
-  data[index + 2] = Math.round(data[index + 2]! * (1 - alpha) + color[2] * alpha);
-  data[index + 3] = 255;
+  const sourceAlpha = (color[3] / 255) * opacity;
+  const destAlpha = data[index + 3]! / 255;
+  const outAlpha = sourceAlpha + destAlpha * (1 - sourceAlpha);
+  if (outAlpha <= 0) {
+    data[index] = 0;
+    data[index + 1] = 0;
+    data[index + 2] = 0;
+    data[index + 3] = 0;
+    return;
+  }
+  data[index] = Math.round((color[0] * sourceAlpha + data[index]! * destAlpha * (1 - sourceAlpha)) / outAlpha);
+  data[index + 1] = Math.round((color[1] * sourceAlpha + data[index + 1]! * destAlpha * (1 - sourceAlpha)) / outAlpha);
+  data[index + 2] = Math.round((color[2] * sourceAlpha + data[index + 2]! * destAlpha * (1 - sourceAlpha)) / outAlpha);
+  data[index + 3] = clampByte(outAlpha * 255);
 }
 
 function resolveColor(palette: PaletteSpec, color: string): Rgba {

@@ -4,6 +4,7 @@ export interface TexturePackAsset {
   defaultSize: number;
   palettes: Record<string, PaletteSpec>;
   textures: Record<string, TextureSpec>;
+  blocks: Record<string, BlockSpec>;
 }
 
 export type PaletteSpec = Record<string, string>;
@@ -14,6 +15,28 @@ export interface TextureSpec {
   base: string;
   exportPath: string;
   layers?: TextureLayerSpec[];
+}
+
+export interface BlockSpec {
+  kind: "cube";
+  faces: CubeFaceTextures;
+  tint?: BlockTintSpec;
+}
+
+export interface CubeFaceTextures {
+  all?: string;
+  top?: string;
+  bottom?: string;
+  side?: string;
+  north?: string;
+  south?: string;
+  east?: string;
+  west?: string;
+  overlay?: string;
+}
+
+export interface BlockTintSpec {
+  grass?: string[];
 }
 
 export type TextureLayerSpec = SpecklesLayerSpec | AsciiLayerSpec;
@@ -38,6 +61,7 @@ export interface AsciiLayerSpec {
 export interface TextureLabApi {
   palette(name: string, colors: PaletteSpec): void;
   texture(name: string, texture: TextureSpec): void;
+  block(name: string, block: BlockSpec): void;
   ascii(layer: Omit<AsciiLayerSpec, "kind">): AsciiLayerSpec;
   speckles(layer: Omit<SpecklesLayerSpec, "kind">): SpecklesLayerSpec;
 }
@@ -100,6 +124,10 @@ export function assertValidTexturePack(asset: TexturePackAsset): void {
   if (Object.keys(asset.textures).length === 0) {
     errors.push("texture pack has no textures");
   }
+  for (const [blockName, block] of Object.entries(asset.blocks)) {
+    validateName("block", blockName, errors);
+    validateBlock(blockName, block, asset.textures, errors);
+  }
   if (errors.length > 0) {
     throw new Error(`Invalid texture pack '${asset.name}':\n${errors.map((error) => `- ${error}`).join("\n")}`);
   }
@@ -108,6 +136,7 @@ export function assertValidTexturePack(asset: TexturePackAsset): void {
 class TexturePackBuilder {
   private readonly palettes: Record<string, PaletteSpec> = {};
   private readonly textures: Record<string, TextureSpec> = {};
+  private readonly blocks: Record<string, BlockSpec> = {};
 
   constructor(
     private readonly name: string,
@@ -122,6 +151,9 @@ class TexturePackBuilder {
       texture: (name, texture) => {
         this.textures[name] = texture;
       },
+      block: (name, block) => {
+        this.blocks[name] = block;
+      },
       ascii: (layer) => ({ kind: "ascii", ...layer }),
       speckles: (layer) => ({ kind: "speckles", ...layer }),
     };
@@ -134,7 +166,28 @@ class TexturePackBuilder {
       defaultSize: this.defaultSize,
       palettes: this.palettes,
       textures: this.textures,
+      blocks: this.blocks,
     };
+  }
+}
+
+function validateBlock(
+  blockName: string,
+  block: BlockSpec,
+  textures: Record<string, TextureSpec>,
+  errors: string[],
+): void {
+  if (block.kind !== "cube") {
+    errors.push(`block '${blockName}' has unsupported kind '${block.kind}'`);
+  }
+  const textureNames = Object.values(block.faces).flatMap((value) => (Array.isArray(value) ? value : [value]));
+  if (textureNames.length === 0) {
+    errors.push(`block '${blockName}' has no face textures`);
+  }
+  for (const textureName of textureNames) {
+    if (textureName && !textures[textureName]) {
+      errors.push(`block '${blockName}' references missing texture '${textureName}'`);
+    }
   }
 }
 

@@ -1,7 +1,7 @@
 # 114 - AI Texture Pack Lab
 
-Status: active; scaffold/export/sheet loop plus software cube and rotation-grid
-panels landed on 2026-06-30.
+Status: active; scaffold/export/sheet loop, software cube, rotation-grid panels,
+and first grass-block bundle landed on 2026-06-30.
 
 ## Purpose
 
@@ -151,8 +151,7 @@ git diff --check
 
 ### Slice 2 - Minimal DSL And 2D Export
 
-- [x] Define pack, palette, and texture DSL types. Block-bundle DSL types remain
-  pending.
+- [x] Define pack, palette, texture, and cube block-bundle DSL types.
 - [x] Validate texture dimensions, palette symbols, resource names, alpha mode,
   and tileability flags.
 - [x] Implement indexed ASCII texture rendering to PNG.
@@ -193,9 +192,10 @@ texture.
 - [ ] Add optional Three.js/browser preview later if interaction or non-cube
   models need it.
 - [ ] Add small terrain-patch preview for repeated block faces.
-- [ ] Add per-face block bundles for `grass_block`.
-- [ ] Add tint swatches for grass and foliage previews.
-- [ ] Add transparent overlay preview for grass side and cutout-style textures.
+- [x] Add per-face block bundle for `grass_block`.
+- [x] Add tint swatches for grass previews.
+- [x] Add transparent overlay preview for grass side textures.
+- [ ] Add foliage/water tint swatches once those texture families exist.
 
 Validation:
 

@@ -33,11 +33,17 @@ pnpm texture-lab:typecheck
 pnpm texture-lab:export
 ```
 
-The export command writes the starter dirt PNG and review sheet to:
+The export command writes the starter dirt and grass-block PNGs plus review
+sheets to:
 
 ```text
 /tmp/mclone-texture-lab/pack/assets/mclone/textures/block/dirt.png
 /tmp/mclone-texture-lab/dirt-sheet.png
+/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_top.png
+/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_side.png
+/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_side_overlay.png
+/tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_bottom.png
+/tmp/mclone-texture-lab/grass-block-sheet.png
 ```
 
 ## Source Format
@@ -51,7 +57,7 @@ Use a constrained TypeScript DSL, following the same broad pattern as
 - Exported files are derived artifacts; the editable source remains compact and
   reviewable.
 
-The first source format should be hybrid:
+The first source format is hybrid:
 
 - Indexed ASCII textures for small pixel-art masks, icons, overlays, and
   simple 16x16 or 32x32 surfaces.
@@ -61,6 +67,7 @@ The first source format should be hybrid:
   speckles, pebbles, scratches, cracks, roots, moss, and edge blending.
 - Explicit masks and overlays for blocks with multiple layers, such as grass
   side base plus tinted overlay.
+- Cube block bundles for reviewing a full block from named texture roles.
 
 Pure ASCII is useful, but it should not be the only tool. A 32x32 natural block
 is 1024 cells per face; asking an agent to hand-paint every cell is slow and
