@@ -337,6 +337,20 @@ fixed the validator's compact perf summary extraction so future perf-summary
 files include `MCLONE_ANDROID_XR_PERF_OVERLAP` and the Meta
 `MCLONE_ANDROID_XR_PERF_METRICS` line.
 
+Follow-up direction recorded after commit `5ceebac`: do not pursue deeper
+OpenXR wait/present overlap from this result. The useful signal is that the live
+flight tail is dominated by bursty runtime/render-section work
+(`runtime_upload_ms`, `runtime_sync_ms`, `gpu_upload_ms`, and ready-section
+application), and moving that work into the safe wait window can lengthen the
+frame instead of hiding it. The next small, measurable probe should therefore be
+a shared render-section sync/upload budget lane for XR flight: expose the
+existing `sync_render_sections_with_budget` path to the XR scene, run it as an
+opt-in perf flag/lane with small chunk budgets, and compare against
+`native:android-xr:perf:flight:rd10:metrics`. A good result would reduce p95,
+p99, max, and motion-to-photon without starving visible chunk fill. If that does
+not move the tails, fall back to Slice J's arena + indirect batching, which
+attacks the steady per-section draw cost instead of the live streaming bursts.
+
 ## Post-Validation Rollback (landed 2026-06-29)
 
 Commit `d0c5161` (`Restore XR per-eye command submission`) reverted the risky
