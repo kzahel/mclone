@@ -31,14 +31,23 @@ Current first loop:
 pnpm texture-lab:install
 pnpm texture-lab:typecheck
 pnpm texture-lab:export
+pnpm texture-lab:analyze
 pnpm texture-lab:runtime-compat
 pnpm texture-lab:pack-overlay
 pnpm texture-lab:coverage
 ```
 
-For authoring rules, palette discipline, tint roles, and AI-agent brief shape,
-see [`ILLUSTRATOR_GUIDE.md`](ILLUSTRATOR_GUIDE.md). For local measurements of
-typical vanilla block texture palette sizes, see
+`texture-lab:analyze` is the feedback step of the authoring loop: it reports
+objective structural, color, and defect features for each candidate against its
+local vanilla counterpart, and ends with a `biggest gaps vs vanilla` list to
+drive the next revision. The candidate is downsampled to the vanilla grid first,
+so a 32x32 tile and a 16x16 vanilla texture are compared apples-to-apples. The
+numbers are directional guidance, not a pass/fail gate. Scope it to one or a few
+textures with `--texture <name>`, or add `--json` for tool consumption.
+
+For authoring rules, palette discipline, tint roles, the iteration loop, and
+AI-agent brief shape, see [`ILLUSTRATOR_GUIDE.md`](ILLUSTRATOR_GUIDE.md). For
+local measurements of typical vanilla block texture palette sizes, see
 [`VANILLA_COLOR_COUNTS.md`](VANILLA_COLOR_COUNTS.md).
 
 Accepted pack source is committed under:

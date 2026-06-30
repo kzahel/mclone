@@ -19,6 +19,56 @@ export function downsampleNearest(image: RgbaImage, width: number, height: numbe
   return { width, height, data: out };
 }
 
+// Alpha-weighted box (area) downsample. Used to bring a 32x32 candidate down to
+// the 16x16 vanilla grid before comparing features, so scale-sensitive measures
+// (banding, local contrast, blob sizes) are apples-to-apples instead of being
+// skewed by the candidate simply having 4x the pixels. Averaging is weighted by
+// alpha so transparent overlays (e.g. grass fringe) do not bleed black into the
+// edges. Falls back to nearest when the ratio is not an integer; returns a clone
+// when the target is not smaller, so callers can always downsample blindly.
+export function areaDownsample(image: RgbaImage, targetWidth: number, targetHeight: number): RgbaImage {
+  if (targetWidth >= image.width && targetHeight >= image.height) {
+    return cloneImage(image);
+  }
+  if (image.width % targetWidth !== 0 || image.height % targetHeight !== 0) {
+    return downsampleNearest(image, targetWidth, targetHeight);
+  }
+  const factorX = image.width / targetWidth;
+  const factorY = image.height / targetHeight;
+  const out = new Uint8Array(targetWidth * targetHeight * 4);
+  for (let oy = 0; oy < targetHeight; oy += 1) {
+    for (let ox = 0; ox < targetWidth; ox += 1) {
+      let sumR = 0;
+      let sumG = 0;
+      let sumB = 0;
+      let sumA = 0;
+      for (let dy = 0; dy < factorY; dy += 1) {
+        for (let dx = 0; dx < factorX; dx += 1) {
+          const source = ((oy * factorY + dy) * image.width + (ox * factorX + dx)) * 4;
+          const alpha = image.data[source + 3]! / 255;
+          sumR += image.data[source]! * alpha;
+          sumG += image.data[source + 1]! * alpha;
+          sumB += image.data[source + 2]! * alpha;
+          sumA += alpha;
+        }
+      }
+      const target = (oy * targetWidth + ox) * 4;
+      if (sumA <= 0) {
+        out[target] = 0;
+        out[target + 1] = 0;
+        out[target + 2] = 0;
+        out[target + 3] = 0;
+        continue;
+      }
+      out[target] = clampByte(sumR / sumA);
+      out[target + 1] = clampByte(sumG / sumA);
+      out[target + 2] = clampByte(sumB / sumA);
+      out[target + 3] = clampByte((sumA / (factorX * factorY)) * 255);
+    }
+  }
+  return { width: targetWidth, height: targetHeight, data: out };
+}
+
 export function premultiply(color: Rgba): PremultipliedRgba {
   const alpha = color[3] / 255;
   return [color[0] * alpha, color[1] * alpha, color[2] * alpha, alpha];

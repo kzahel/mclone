@@ -1,5 +1,7 @@
-import { analyzeTexture, formatComparison, type TextureFeatures } from "./analysis";
+import { analyzeTexture, featureGaps, formatComparison, type TextureFeatures } from "./analysis";
+import { areaDownsample } from "./image";
 import { loadTexturePack } from "./load";
+import type { RgbaImage } from "./png";
 import { loadReferenceTexture } from "./reference";
 import { renderAllTextures } from "./render";
 
@@ -23,6 +25,9 @@ if (textures.length === 0) {
 
 interface AnalyzedTexture {
   name: string;
+  candidateNative: string;
+  referenceNative?: string | undefined;
+  comparedAt: string;
   candidate: TextureFeatures;
   reference?: TextureFeatures | undefined;
 }
@@ -33,22 +38,60 @@ for (const texture of textures) {
     include: args.includeReference,
     referenceRoot: args.referenceRoot,
   });
+  // Bring both tiles onto a shared grid (the smaller of the two, usually the
+  // 16x16 vanilla size) before measuring, so scale-sensitive features compare
+  // apples-to-apples instead of rewarding the candidate for having more pixels.
+  const matched = matchResolution(texture, reference);
   results.push({
     name: texture.name,
-    candidate: analyzeTexture(texture),
-    reference: reference ? analyzeTexture(reference) : undefined,
+    candidateNative: `${texture.width}x${texture.height}`,
+    referenceNative: reference ? `${reference.width}x${reference.height}` : undefined,
+    comparedAt: `${matched.width}x${matched.height}`,
+    candidate: analyzeTexture(matched.candidate),
+    reference: matched.reference ? analyzeTexture(matched.reference) : undefined,
   });
 }
 
 if (args.json) {
-  console.log(JSON.stringify(results, null, 2));
+  const enriched = results.map((result) => ({
+    ...result,
+    gaps: result.reference ? featureGaps(result.candidate, result.reference) : [],
+  }));
+  console.log(JSON.stringify(enriched, null, 2));
 } else {
   for (const [index, result] of results.entries()) {
     if (index > 0) {
       console.log("");
     }
-    console.log(formatComparison(result.name, result.candidate, result.reference));
+    console.log(
+      formatComparison(result.name, result.candidate, result.reference, {
+        candidateNative: result.candidateNative,
+        referenceNative: result.referenceNative,
+        comparedAt: result.comparedAt,
+      }),
+    );
   }
+}
+
+interface MatchedResolution {
+  candidate: RgbaImage;
+  reference: RgbaImage | undefined;
+  width: number;
+  height: number;
+}
+
+function matchResolution(candidate: RgbaImage, reference: RgbaImage | undefined): MatchedResolution {
+  if (!reference) {
+    return { candidate, reference: undefined, width: candidate.width, height: candidate.height };
+  }
+  const width = Math.min(candidate.width, reference.width);
+  const height = Math.min(candidate.height, reference.height);
+  return {
+    candidate: areaDownsample(candidate, width, height),
+    reference: areaDownsample(reference, width, height),
+    width,
+    height,
+  };
 }
 
 function parseArgs(argv: string[]): AnalyzeArgs {

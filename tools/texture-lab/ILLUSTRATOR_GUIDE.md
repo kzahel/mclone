@@ -193,6 +193,65 @@ reference panel. Use it to judge density, value range, material scale, and the
 kind of shapes the texture needs. Do not trace, recolor, or mechanically copy
 the reference; the authored source must remain original.
 
+## Texture Iteration Loop
+
+The lab is meant to be run as a loop, not a one-shot. An agent that renders one
+texture, looks at it, and decides "good enough" will almost always stop too
+early: an LLM's absolute "is this good?" judgment is lenient and unreliable. The
+same model is far more reliable at *comparison* — "which of these is closer to
+vanilla?" and "did this change shrink the gap?" Drive the loop on measured gaps
+and comparison, never on an absolute verdict.
+
+Run the analyzer to get objective numbers for a candidate against its local
+vanilla counterpart:
+
+```sh
+pnpm texture-lab:analyze --texture stone --texture dirt
+```
+
+The candidate is area-downsampled to the vanilla grid (usually 16x16) before
+measuring, so every number is apples-to-apples — a 32x32 tile is neither
+rewarded nor punished for simply having four times the pixels. Beyond value and
+structure, the report now also measures **color** (dominant hue, hue spread,
+saturation, warm-cool cast) and common **defects** (sparkle pixels, one-way
+lighting bias). Each report ends with a `biggest gaps vs vanilla` list: the
+features the candidate sits furthest from vanilla on, worst first.
+
+The loop:
+
+1. Author or revise the source, export, and analyze.
+2. Read the `biggest gaps` list. Change the source to shrink the **top** gap —
+   not everything at once.
+3. Re-export, re-analyze, and confirm that gap moved without opening new ones.
+4. Compare against your **previous attempt**, not just vanilla: is this version
+   closer? Keep the better one; discard regressions.
+5. Repeat for at least a few rounds. Stop on **diminishing returns** (the gaps
+   stop shrinking), not when the texture "looks fine".
+6. Before calling a texture done, state the **top three remaining differences**
+   from vanilla out loud. If you cannot, you have not read the numbers.
+
+The numbers guide; they do not gate. The `vs` column and the gap list are
+directional hints (`↑` higher than vanilla, `↓` lower, `•` close). A strong
+texture can legitimately sit outside the vanilla range — an outlier is
+information to look at, not a failure. There is deliberately no pass/fail
+threshold. The goal is an informed decision, not a number you hit.
+
+Defects are different from taste. A broken seam (`seam left-right` /
+`seam top-bottom` well above 0), `sparkle pixels`, a one-way `lighting bias`, or
+an oversized `dark/light blob max %` are usually authoring mistakes, not style
+choices. Treat those as must-fix-or-justify even when the aesthetic features
+look right. Hue, saturation, contrast, and scale are taste — keep those
+directional and use judgment.
+
+### Presenting Options
+
+When a block matters, or when the right direction is ambiguous, do not silently
+commit one texture. Produce two or three distinct candidates, analyze each, and
+present them to the user with their measured differences and a short
+recommendation, so the user makes the final call or asks for "more of that one".
+Comparing a few concrete options is a more reliable judgment than scoring one in
+isolation — both for the agent and for the user.
+
 ## Tiling And Rotation
 
 A texture may be intended for full XY tiling, horizontal strip tiling, or no
@@ -242,9 +301,15 @@ Tiling mode:
 Rotation/mirror expectation:
 Related textures that must match:
 Known problem from the latest sheet:
+Latest analyzer gaps (from texture-lab:analyze):
 Allowed edits:
 Do not change:
 ```
+
+Do not treat one pass as the deliverable. Iterate against the analyzer's
+`biggest gaps` list until the gaps stop shrinking, then present two or three
+candidates with their measured differences for the user to choose. See
+[Texture Iteration Loop](#texture-iteration-loop).
 
 For grass changes, always include both `grass_block_top` and
 `grass_block_side_overlay` in context when the final green relationship matters.

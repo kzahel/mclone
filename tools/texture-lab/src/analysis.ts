@@ -6,10 +6,18 @@ import type { RgbaImage } from "./png";
 // AGGREGATE statistics — never a per-pixel comparison to the reference — so they
 // guide and guard authoring without becoming a way to trace the original art.
 //
+// IMPORTANT: comparison happens at a shared resolution. The candidate is area-
+// downsampled to the vanilla grid (usually 16x16) before this runs, so scale-
+// sensitive measures (banding, local contrast, blob sizes) are apples-to-apples
+// instead of being skewed by a 32x32 tile simply having 4x the pixels. See
+// matchResolution in analyze.ts.
+//
 // What each group answers, in plain terms:
 // - palette:   how many tones, how wide the value range, is there a dominant mid
+// - color:     what hue/saturation/temperature the material sits at (not just value)
 // - banding:   is structure horizontal, vertical, or isotropic (the row/col test)
 // - scale:     is the variation large-scale or fine noise (does it survive shrink)
+// - defects:   sparkle pixels and one-way lighting gradients (authoring mistakes)
 // - blobs:     how big are the darkest/lightest clusters (catches oversized pits)
 // - seam:      does the tile wrap cleanly left-right and top-bottom
 
@@ -30,8 +38,13 @@ export interface TextureFeatures {
   opaquePixels: number;
   transparentShare: number;
   distinctColors: number;
+  quantizedColors: number;
   distinctLevels: number;
   luminance: LuminanceStats;
+  meanHueDeg: number;
+  hueSpreadDeg: number;
+  meanSaturation: number;
+  warmCool: number;
   dominantColorShare: number;
   dominantBinShare: number;
   rowBandStd: number;
@@ -42,10 +55,15 @@ export interface TextureFeatures {
   stdQuarter: number;
   coarseRetention: number;
   localContrast: number;
+  sparklePixels: number;
+  lightingBiasLR: number;
+  lightingBiasTB: number;
   darkBlobMax: number;
+  darkBlobMaxShare: number;
   darkBlobMean: number;
   darkBlobCount: number;
   lightBlobMax: number;
+  lightBlobMaxShare: number;
   lightBlobMean: number;
   lightBlobCount: number;
   seamLeftRight: number;
@@ -55,6 +73,14 @@ export interface TextureFeatures {
 const DARK_PERCENTILE = 12;
 const LIGHT_PERCENTILE = 88;
 const LUMINANCE_BINS = 8;
+// A pixel brighter (or darker) than all four neighbours by more than this many
+// luminance steps is a "sparkle" — the kind of lone high-contrast pixel that
+// twinkles at distance. Measured on the shared comparison grid.
+const SPARKLE_THRESHOLD = 40;
+// Channel rounding for the perceptual-ish color count. Exact RGBA counts explode
+// after opacity blending and noise; bucketing to 16-level channels collapses the
+// near-duplicates so the number tracks "how many real tones" more honestly.
+const COLOR_QUANTIZE_STEP = 16;
 
 export function analyzeTexture(image: RgbaImage): TextureFeatures {
   const { width, height, data } = image;
@@ -63,9 +89,16 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
   // Per-pixel luminance grid; transparent pixels are filled with the opaque
   // mean afterwards so they do not invent structure in banding/scale measures.
   const grid = new Float64Array(pixelCount);
+  const opaqueAlpha = new Uint8Array(pixelCount);
   const opaqueLum: number[] = [];
   const colorCounts = new Map<string, number>();
+  const quantizedColors = new Set<string>();
   let transparent = 0;
+  let sumSaturation = 0;
+  let sumWarmCool = 0;
+  let hueSin = 0;
+  let hueCos = 0;
+  let hueWeight = 0;
 
   for (let i = 0; i < pixelCount; i += 1) {
     const r = data[i * 4]!;
@@ -78,15 +111,29 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
       transparent += 1;
       continue;
     }
+    opaqueAlpha[i] = 1;
     opaqueLum.push(l);
     const key = `${r},${g},${b},${a}`;
     colorCounts.set(key, (colorCounts.get(key) ?? 0) + 1);
+    quantizedColors.add(`${quantize(r)},${quantize(g)},${quantize(b)}`);
+
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const chroma = max - min;
+    sumSaturation += max > 0 ? chroma / max : 0;
+    sumWarmCool += (r - b) / 255;
+    if (chroma > 0) {
+      const hueRad = (hueDegrees(r, g, b, max, chroma) * Math.PI) / 180;
+      hueSin += chroma * Math.sin(hueRad);
+      hueCos += chroma * Math.cos(hueRad);
+      hueWeight += chroma;
+    }
   }
 
   const opaqueCount = opaqueLum.length;
   const mean = opaqueCount > 0 ? average(opaqueLum) : 0;
   for (let i = 0; i < pixelCount; i += 1) {
-    if (data[i * 4 + 3]! === 0) {
+    if (opaqueAlpha[i] === 0) {
       grid[i] = mean;
     }
   }
@@ -110,12 +157,15 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
   const dark = blobStats(grid, width, height, (l) => l <= darkThreshold);
   const light = blobStats(grid, width, height, (l) => l >= lightThreshold);
 
+  const bias = lightingBias(grid, width, height);
+
   return {
     width,
     height,
     opaquePixels: opaqueCount,
     transparentShare: pixelCount > 0 ? transparent / pixelCount : 0,
     distinctColors: colorCounts.size,
+    quantizedColors: quantizedColors.size,
     distinctLevels: levels.size,
     luminance: {
       min: sorted[0] ?? 0,
@@ -127,6 +177,10 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
       p50: percentile(sorted, 50),
       p90: percentile(sorted, 90),
     },
+    meanHueDeg: hueWeight > 0 ? wrapDegrees((Math.atan2(hueSin, hueCos) * 180) / Math.PI) : Number.NaN,
+    hueSpreadDeg: hueWeight > 0 ? hueSpread(hueSin, hueCos, hueWeight) : Number.NaN,
+    meanSaturation: opaqueCount > 0 ? sumSaturation / opaqueCount : 0,
+    warmCool: opaqueCount > 0 ? sumWarmCool / opaqueCount : 0,
     dominantColorShare: opaqueCount > 0 ? maxCount(colorCounts) / opaqueCount : 0,
     dominantBinShare: dominantLuminanceBinShare(opaqueLum),
     rowBandStd,
@@ -137,10 +191,15 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
     stdQuarter,
     coarseRetention: stdFull > 0 ? stdQuarter / stdFull : 0,
     localContrast: localContrast(grid, width, height),
+    sparklePixels: sparkleCount(grid, opaqueAlpha, width, height),
+    lightingBiasLR: bias.leftRight,
+    lightingBiasTB: bias.topBottom,
     darkBlobMax: dark.max,
+    darkBlobMaxShare: pixelCount > 0 ? dark.max / pixelCount : 0,
     darkBlobMean: dark.mean,
     darkBlobCount: dark.count,
     lightBlobMax: light.max,
+    lightBlobMaxShare: pixelCount > 0 ? light.max / pixelCount : 0,
     lightBlobMean: light.mean,
     lightBlobCount: light.count,
     seamLeftRight: edgeDistance(data, width, height, "leftRight"),
@@ -150,6 +209,38 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
 
 function luminance(r: number, g: number, b: number): number {
   return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+function quantize(value: number): number {
+  return Math.round(value / COLOR_QUANTIZE_STEP) * COLOR_QUANTIZE_STEP;
+}
+
+// Standard HSV hue in degrees [0,360) given the precomputed max and chroma.
+function hueDegrees(r: number, g: number, b: number, max: number, chroma: number): number {
+  let hue: number;
+  if (max === r) {
+    hue = ((g - b) / chroma) % 6;
+  } else if (max === g) {
+    hue = (b - r) / chroma + 2;
+  } else {
+    hue = (r - g) / chroma + 4;
+  }
+  return wrapDegrees(hue * 60);
+}
+
+function wrapDegrees(value: number): number {
+  return ((value % 360) + 360) % 360;
+}
+
+// Circular standard deviation (degrees) from accumulated chroma-weighted sin/cos.
+// Near-zero resultant length means the hue is spread all the way around the
+// wheel; a resultant length near 1 means a tight, well-defined hue.
+function hueSpread(sin: number, cos: number, weight: number): number {
+  const resultant = Math.min(1, Math.sqrt(sin * sin + cos * cos) / weight);
+  if (resultant <= 1e-9) {
+    return 180;
+  }
+  return (Math.sqrt(-2 * Math.log(resultant)) * 180) / Math.PI;
 }
 
 function average(values: number[]): number {
@@ -274,6 +365,54 @@ function localContrast(grid: Float64Array, width: number, height: number): numbe
   return samples > 0 ? sum / samples : 0;
 }
 
+// Lone high-contrast pixels: opaque cells that sit further than SPARKLE_THRESHOLD
+// from every one of their four neighbours, in the same direction. These are the
+// single pixels that sparkle/twinkle as the texture mips down at distance.
+function sparkleCount(grid: Float64Array, opaqueAlpha: Uint8Array, width: number, height: number): number {
+  let count = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (opaqueAlpha[index] === 0) {
+        continue;
+      }
+      const here = grid[index]!;
+      const right = grid[y * width + ((x + 1) % width)]!;
+      const left = grid[y * width + ((x - 1 + width) % width)]!;
+      const down = grid[((y + 1) % height) * width + x]!;
+      const up = grid[((y - 1 + height) % height) * width + x]!;
+      const maxNeighbor = Math.max(right, left, down, up);
+      const minNeighbor = Math.min(right, left, down, up);
+      if (here - maxNeighbor > SPARKLE_THRESHOLD || minNeighbor - here > SPARKLE_THRESHOLD) {
+        count += 1;
+      }
+    }
+  }
+  return count;
+}
+
+// Mean luminance difference across the tile: left edge vs right edge, top vs
+// bottom. A value far from zero is a one-way lighting gradient baked into the
+// art, which tiles into visible stripes and breaks rotation-safety.
+function lightingBias(grid: Float64Array, width: number, height: number): { leftRight: number; topBottom: number } {
+  let left = 0;
+  let right = 0;
+  for (let y = 0; y < height; y += 1) {
+    left += grid[y * width]!;
+    right += grid[y * width + (width - 1)]!;
+  }
+  let top = 0;
+  let bottom = 0;
+  for (let x = 0; x < width; x += 1) {
+    top += grid[x]!;
+    bottom += grid[(height - 1) * width + x]!;
+  }
+  return {
+    leftRight: height > 0 ? (left - right) / height : 0,
+    topBottom: width > 0 ? (top - bottom) / width : 0,
+  };
+}
+
 interface BlobStats {
   max: number;
   mean: number;
@@ -354,65 +493,176 @@ interface FeatureRow {
   value: (f: TextureFeatures) => number;
   digits?: number;
   hint?: string;
+  // Soft step size: roughly one "notable" difference in this feature's units.
+  // Used only to draw the ↑/↓/• hint and to rank the biggest gaps. It is NOT a
+  // pass/fail threshold — a strong texture can legitimately sit outside it.
+  scale?: number;
+  // Hue lives on a circle, so its candidate-vs-reference delta wraps at 360.
+  circular?: boolean;
+  // Display as a percentage rather than a raw fraction.
+  percent?: boolean;
+  // Counted/inspected but excluded from the ↑/↓ hint and gap ranking because the
+  // raw number is known to be noisy (exact post-blend color count).
+  informational?: boolean;
 }
 
 const FEATURE_ROWS: FeatureRow[] = [
-  { label: "distinct colors", value: (f) => f.distinctColors, digits: 0, hint: "vanilla rock uses few" },
-  { label: "distinct levels", value: (f) => f.distinctLevels, digits: 0 },
-  { label: "luminance span", value: (f) => f.luminance.span, digits: 0, hint: "value range; narrow = subtle" },
-  { label: "luminance mean", value: (f) => f.luminance.mean, digits: 0 },
-  { label: "luminance std", value: (f) => f.luminance.std, digits: 1, hint: "overall contrast" },
-  { label: "dominant color share", value: (f) => f.dominantColorShare, digits: 2, hint: "is there a main tone" },
-  { label: "dominant bin share", value: (f) => f.dominantBinShare, digits: 2 },
-  { label: "row-band std", value: (f) => f.rowBandStd, digits: 2, hint: "horizontal structure" },
-  { label: "col-band std", value: (f) => f.colBandStd, digits: 2, hint: "vertical structure" },
-  { label: "anisotropy (row/col)", value: (f) => f.anisotropy, digits: 2, hint: ">1 horizontal, <1 vertical" },
-  { label: "std full", value: (f) => f.stdFull, digits: 1 },
-  { label: "std quarter", value: (f) => f.stdQuarter, digits: 1 },
-  { label: "coarse retention", value: (f) => f.coarseRetention, digits: 2, hint: "high = large-scale, low = fine noise" },
-  { label: "local contrast", value: (f) => f.localContrast, digits: 1, hint: "grain busyness" },
-  { label: "dark blob max", value: (f) => f.darkBlobMax, digits: 0, hint: "biggest dark cluster (px)" },
-  { label: "dark blob mean", value: (f) => f.darkBlobMean, digits: 1 },
-  { label: "light blob max", value: (f) => f.lightBlobMax, digits: 0, hint: "biggest light cluster (px)" },
-  { label: "light blob mean", value: (f) => f.lightBlobMean, digits: 1 },
-  { label: "seam left-right", value: (f) => f.seamLeftRight, digits: 3, hint: "0 = perfect wrap" },
-  { label: "seam top-bottom", value: (f) => f.seamTopBottom, digits: 3 },
+  { label: "distinct colors", value: (f) => f.distinctColors, digits: 0, informational: true, hint: "exact RGBA; noisy after blending" },
+  { label: "quantized colors", value: (f) => f.quantizedColors, digits: 0, scale: 4, hint: "tones at 16-level buckets" },
+  { label: "distinct levels", value: (f) => f.distinctLevels, digits: 0, informational: true, hint: "exact levels; inflated by resample" },
+  { label: "luminance span", value: (f) => f.luminance.span, digits: 0, scale: 15, hint: "value range; narrow = subtle" },
+  { label: "luminance mean", value: (f) => f.luminance.mean, digits: 0, scale: 15 },
+  { label: "luminance std", value: (f) => f.luminance.std, digits: 1, scale: 4, hint: "overall contrast" },
+  { label: "dominant hue (deg)", value: (f) => f.meanHueDeg, digits: 0, scale: 8, circular: true, hint: "n/a if near-neutral" },
+  { label: "hue spread (deg)", value: (f) => f.hueSpreadDeg, digits: 0, scale: 10, hint: "how varied the hue is" },
+  { label: "mean saturation", value: (f) => f.meanSaturation, digits: 3, scale: 0.04, hint: "chroma; rock is low" },
+  { label: "warm-cool (R-B)", value: (f) => f.warmCool, digits: 3, scale: 0.05, hint: ">0 warm, <0 cool" },
+  { label: "dominant bin share", value: (f) => f.dominantBinShare, digits: 2, scale: 0.1, hint: "is there a main tone" },
+  { label: "row-band std", value: (f) => f.rowBandStd, digits: 2, scale: 1.5, hint: "horizontal structure" },
+  { label: "col-band std", value: (f) => f.colBandStd, digits: 2, scale: 1.5, hint: "vertical structure" },
+  { label: "anisotropy (row/col)", value: (f) => f.anisotropy, digits: 2, scale: 0.3, hint: ">1 horizontal, <1 vertical" },
+  { label: "coarse retention", value: (f) => f.coarseRetention, digits: 2, scale: 0.08, hint: "high = large-scale, low = fine noise" },
+  { label: "local contrast", value: (f) => f.localContrast, digits: 1, scale: 4, hint: "grain busyness" },
+  { label: "sparkle pixels", value: (f) => f.sparklePixels, digits: 0, scale: 2, hint: "lone twinkly pixels; lower is safer" },
+  { label: "lighting bias L-R", value: (f) => f.lightingBiasLR, digits: 1, scale: 6, hint: "one-way gradient; near 0 is flat" },
+  { label: "lighting bias T-B", value: (f) => f.lightingBiasTB, digits: 1, scale: 6 },
+  { label: "dark blob max %", value: (f) => f.darkBlobMaxShare, digits: 2, scale: 0.02, percent: true, hint: "biggest dark cluster (tile %)" },
+  { label: "light blob max %", value: (f) => f.lightBlobMaxShare, digits: 2, scale: 0.02, percent: true, hint: "biggest light cluster (tile %)" },
+  { label: "seam left-right", value: (f) => f.seamLeftRight, digits: 3, scale: 0.04, hint: "0 = perfect wrap" },
+  { label: "seam top-bottom", value: (f) => f.seamTopBottom, digits: 3, scale: 0.04 },
 ];
 
-export function formatComparison(name: string, candidate: TextureFeatures, reference?: TextureFeatures): string {
+export interface FeatureGap {
+  label: string;
+  direction: "higher" | "lower";
+  candidate: number;
+  reference: number;
+  deviation: number;
+}
+
+export interface ComparisonSizes {
+  candidateNative?: string | undefined;
+  referenceNative?: string | undefined;
+  comparedAt?: string | undefined;
+}
+
+// Signed deviation in "scale" units: how many notable steps the candidate sits
+// from the reference. Sign gives the ↑/↓ direction; magnitude ranks the gaps.
+function deviation(row: FeatureRow, candidate: TextureFeatures, reference: TextureFeatures): number {
+  const cand = row.value(candidate);
+  const ref = row.value(reference);
+  if (!Number.isFinite(cand) || !Number.isFinite(ref) || !row.scale) {
+    return Number.NaN;
+  }
+  const delta = row.circular ? circularDelta(cand, ref) : cand - ref;
+  return delta / row.scale;
+}
+
+function circularDelta(a: number, b: number): number {
+  return ((a - b + 540) % 360) - 180;
+}
+
+function readHint(dev: number): string {
+  if (!Number.isFinite(dev)) {
+    return " ";
+  }
+  if (Math.abs(dev) <= 1) {
+    return "•";
+  }
+  return dev > 0 ? "↑" : "↓";
+}
+
+// Rank the features the candidate is furthest from vanilla on. This is the
+// worst-offender list an iteration loop attacks first — work the top item, then
+// re-measure. Informational and undefined-delta rows are excluded.
+export function featureGaps(candidate: TextureFeatures, reference: TextureFeatures, limit = 3): FeatureGap[] {
+  const gaps: FeatureGap[] = [];
+  for (const row of FEATURE_ROWS) {
+    if (row.informational) {
+      continue;
+    }
+    const dev = deviation(row, candidate, reference);
+    if (!Number.isFinite(dev) || Math.abs(dev) <= 1) {
+      continue;
+    }
+    gaps.push({
+      label: row.label,
+      direction: dev > 0 ? "higher" : "lower",
+      candidate: row.value(candidate),
+      reference: row.value(reference),
+      deviation: dev,
+    });
+  }
+  gaps.sort((a, b) => Math.abs(b.deviation) - Math.abs(a.deviation));
+  return gaps.slice(0, limit);
+}
+
+export function formatComparison(
+  name: string,
+  candidate: TextureFeatures,
+  reference?: TextureFeatures,
+  sizes: ComparisonSizes = {},
+): string {
   const lines: string[] = [];
-  lines.push(`# ${name}  (${candidate.width}x${candidate.height})`);
+  const candidateSize = sizes.candidateNative ?? `${candidate.width}x${candidate.height}`;
+  lines.push(`# ${name}  (candidate ${candidateSize})`);
   if (reference) {
-    lines.push(`reference: ${reference.width}x${reference.height} vanilla`);
+    const referenceSize = sizes.referenceNative ?? `${reference.width}x${reference.height}`;
+    const comparedAt = sizes.comparedAt ?? `${candidate.width}x${candidate.height}`;
+    lines.push(`reference: ${referenceSize} vanilla   ·   compared at ${comparedAt} (apples-to-apples)`);
   } else {
     lines.push("reference: none found (showing candidate only)");
   }
   lines.push("");
   const labelWidth = Math.max(...FEATURE_ROWS.map((row) => row.label.length));
-  const header = `${"feature".padEnd(labelWidth)}  ${"reference".padStart(10)}  ${"candidate".padStart(10)}  ${"Δ".padStart(9)}   notes`;
+  const header = `${"feature".padEnd(labelWidth)}  ${"reference".padStart(10)}  ${"candidate".padStart(10)}  ${"vs".padStart(3)}   notes`;
   lines.push(header);
   lines.push("-".repeat(header.length));
   for (const row of FEATURE_ROWS) {
-    const cand = row.value(candidate);
-    const candText = fmt(cand, row.digits ?? 1);
+    const candText = formatValue(row, row.value(candidate));
     if (reference) {
-      const ref = row.value(reference);
-      const refText = fmt(ref, row.digits ?? 1);
-      const delta = cand - ref;
-      const deltaText = (delta >= 0 ? "+" : "") + fmt(delta, row.digits ?? 1);
+      const refText = formatValue(row, row.value(reference));
+      const read = row.informational ? " " : readHint(deviation(row, candidate, reference));
       lines.push(
-        `${row.label.padEnd(labelWidth)}  ${refText.padStart(10)}  ${candText.padStart(10)}  ${deltaText.padStart(9)}   ${row.hint ?? ""}`,
+        `${row.label.padEnd(labelWidth)}  ${refText.padStart(10)}  ${candText.padStart(10)}  ${read.padStart(3)}   ${row.hint ?? ""}`,
       );
     } else {
-      lines.push(`${row.label.padEnd(labelWidth)}  ${"—".padStart(10)}  ${candText.padStart(10)}  ${"—".padStart(9)}   ${row.hint ?? ""}`);
+      lines.push(`${row.label.padEnd(labelWidth)}  ${"—".padStart(10)}  ${candText.padStart(10)}  ${"—".padStart(3)}   ${row.hint ?? ""}`);
     }
+  }
+
+  lines.push("");
+  if (reference) {
+    const gaps = featureGaps(candidate, reference);
+    if (gaps.length === 0) {
+      lines.push("biggest gaps vs vanilla: none stand out — candidate sits close on every measure.");
+    } else {
+      lines.push("biggest gaps vs vanilla (work these first):");
+      for (const [index, gap] of gaps.entries()) {
+        const arrow = gap.direction === "higher" ? "↑" : "↓";
+        const candText = formatGapValue(gap.label, gap.candidate);
+        const refText = formatGapValue(gap.label, gap.reference);
+        lines.push(`  ${index + 1}. ${gap.label.padEnd(labelWidth)} ${arrow}  ${candText} vs ${refText}`);
+      }
+    }
+    lines.push("(directional guidance, not a pass/fail — a strong texture can sit outside these.)");
+  } else {
+    lines.push("biggest gaps: no vanilla reference found — candidate values only.");
   }
   return lines.join("\n");
 }
 
-function fmt(value: number, digits: number): string {
+function formatValue(row: FeatureRow, value: number): string {
   if (Number.isNaN(value)) {
     return "n/a";
   }
-  return value.toFixed(digits);
+  if (row.percent) {
+    return `${(value * 100).toFixed(row.digits ?? 1)}%`;
+  }
+  return value.toFixed(row.digits ?? 1);
+}
+
+function formatGapValue(label: string, value: number): string {
+  const row = FEATURE_ROWS.find((candidate) => candidate.label === label);
+  return row ? formatValue(row, value) : value.toFixed(1);
 }
