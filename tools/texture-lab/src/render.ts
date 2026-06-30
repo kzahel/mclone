@@ -23,6 +23,7 @@ export interface RenderedTexture extends RgbaImage {
 
 type Rgba = [number, number, number, number];
 type TilingMode = "xy" | "x" | "none";
+const SEAM_ERROR_THRESHOLD = 0.04;
 
 export function renderAllTextures(pack: TexturePackAsset): RenderedTexture[] {
   return Object.entries(pack.textures).map(([name, texture]) => renderTexture(pack, name, texture));
@@ -152,6 +153,7 @@ export function makeReviewSheet(texture: RenderedTexture, options: ReviewSheetOp
   }
   if (tiling !== "none") {
     drawPanelLabel(sheet, tiling === "x" ? "SEAM 2X1" : "SEAM 2X2", 360, 328, 328);
+    drawSeamSummary(sheet, displayTexture, tiling, 360, 328, 328, 328);
   }
 
   return sheet;
@@ -679,6 +681,69 @@ function drawSeamDiagnostic(
   }
 }
 
+interface SeamStats {
+  score: number;
+  xMarks: number;
+  yMarks: number;
+  meanDiff: number;
+  maxDiff: number;
+}
+
+function seamStats(source: RgbaImage, tiling: TilingMode): SeamStats {
+  let totalDiff = 0;
+  let maxDiff = 0;
+  let samples = 0;
+  let xMarks = 0;
+  let yMarks = 0;
+
+  for (let y = 0; y < source.height; y += 1) {
+    const diff = colorDistance(readPixel(source, source.width - 1, y), readPixel(source, 0, y));
+    totalDiff += diff;
+    maxDiff = Math.max(maxDiff, diff);
+    samples += 1;
+    if (diff >= SEAM_ERROR_THRESHOLD) {
+      xMarks += 1;
+    }
+  }
+
+  if (tiling === "xy") {
+    for (let x = 0; x < source.width; x += 1) {
+      const diff = colorDistance(readPixel(source, x, source.height - 1), readPixel(source, x, 0));
+      totalDiff += diff;
+      maxDiff = Math.max(maxDiff, diff);
+      samples += 1;
+      if (diff >= SEAM_ERROR_THRESHOLD) {
+        yMarks += 1;
+      }
+    }
+  }
+
+  const meanDiff = samples > 0 ? totalDiff / samples : 0;
+  const score = Math.round(100 * clamp01(1 - Math.max(meanDiff / 0.08, maxDiff / 0.32)));
+  return { score, xMarks, yMarks, meanDiff, maxDiff };
+}
+
+function drawSeamSummary(
+  target: RgbaImage,
+  source: RgbaImage,
+  tiling: TilingMode,
+  panelX: number,
+  panelY: number,
+  panelWidth: number,
+  panelHeight: number,
+): void {
+  const stats = seamStats(source, tiling);
+  const y = panelY + panelHeight - 42;
+  drawRect(target, panelX + 2, y, panelWidth - 4, 40, [42, 44, 44, 235]);
+  drawPixelText(target, `CONTINUITY ${pad3(stats.score)} 100 BEST`, panelX + 10, y + 7, 1, [214, 218, 210, 255]);
+  drawRect(target, panelX + 10, y + 24, 9, 9, [255, 56, 24, 255]);
+  drawPixelText(target, `RED X ${pad3(stats.xMarks)}`, panelX + 24, y + 25, 1, [214, 218, 210, 255]);
+  if (tiling === "xy") {
+    drawRect(target, panelX + 120, y + 24, 9, 9, [24, 148, 255, 255]);
+    drawPixelText(target, `BLUE Y ${pad3(stats.yMarks)}`, panelX + 134, y + 25, 1, [214, 218, 210, 255]);
+  }
+}
+
 function tilingLabel(tiling: TilingMode): string {
   if (tiling === "xy") {
     return "TILED 3X3";
@@ -774,6 +839,10 @@ function drawPixelText(target: RgbaImage, text: string, x: number, y: number, sc
 
 function textPixelWidth(text: string, scale: number): number {
   return Math.max(0, text.length * 6 * scale - scale);
+}
+
+function pad3(value: number): string {
+  return Math.max(0, Math.min(999, Math.round(value))).toString().padStart(3, "0");
 }
 
 const PIXEL_FONT: Record<string, string[]> = {
@@ -1136,7 +1205,7 @@ function drawHorizontalSeamError(
 
 function seamErrorColor(a: Rgba, b: Rgba, axis: "x" | "y"): Rgba {
   const diff = colorDistance(a, b);
-  if (diff < 0.04) {
+  if (diff < SEAM_ERROR_THRESHOLD) {
     return [0, 0, 0, 0];
   }
   const alpha = clampByte(Math.min(0.9, diff * 1.8) * 255);
