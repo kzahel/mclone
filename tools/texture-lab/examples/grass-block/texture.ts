@@ -63,6 +63,11 @@ export default texturePack("mclone-grass-block-starter", ({ palette, texture, bl
     palette: "grass_side",
     base: "dirt",
     exportPath: "assets/mclone/textures/block/grass_block_side.png",
+    preview: {
+      cube: false,
+      rotation: false,
+      tiling: "x",
+    },
     layers: [
       speckles({
         seed: "grass-side-dirt-grain",
@@ -130,6 +135,7 @@ export default texturePack("mclone-grass-block-starter", ({ palette, texture, bl
       checkerboard: true,
       cube: false,
       rotation: false,
+      tiling: "x",
     },
     layers: [
       ascii({

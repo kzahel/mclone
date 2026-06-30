@@ -69,7 +69,8 @@ The first source format is hybrid:
   side base plus tinted overlay.
 - Cube block bundles for reviewing a full block from named texture roles.
 - Preview-only metadata for tinting neutral source textures, showing alpha on a
-  checkerboard, or disabling cube/rotation panels where they are misleading.
+  checkerboard, controlling tiling mode, or disabling cube/rotation panels
+  where they are misleading.
 
 Pure ASCII is useful, but it should not be the only tool. A 32x32 natural block
 is 1024 cells per face; asking an agent to hand-paint every cell is slow and

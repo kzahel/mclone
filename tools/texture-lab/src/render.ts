@@ -58,6 +58,7 @@ export function makeReviewSheet(texture: RenderedTexture): RgbaImage {
   const useCheckerboard = texture.preview?.checkerboard ?? hasTransparency(displayTexture);
   const showCube = texture.preview?.cube ?? !hasTransparency(displayTexture);
   const showRotation = texture.preview?.rotation ?? !hasTransparency(displayTexture);
+  const tiling = texture.preview?.tiling ?? "xy";
 
   drawRect(sheet, 16, 16, 264, 264, panel);
   if (useCheckerboard) {
@@ -67,10 +68,22 @@ export function makeReviewSheet(texture: RenderedTexture): RgbaImage {
   drawGrid(sheet, 20, 20, displayTexture.width, displayTexture.height, 8, [86, 89, 88, 255]);
 
   drawRect(sheet, 304, 16, 296, 296, panel);
-  if (useCheckerboard) {
+  if (useCheckerboard && tiling !== "none") {
     drawCheckerboard(sheet, 308, 20, displayTexture.width * 3 * 3, displayTexture.height * 3 * 3, 12);
   }
-  drawTiledScaled(sheet, displayTexture, 308, 20, 3, 3, 3);
+  if (tiling === "xy") {
+    drawTiledScaled(sheet, displayTexture, 308, 20, 3, 3, 3);
+  } else if (tiling === "x") {
+    if (useCheckerboard) {
+      drawCheckerboard(sheet, 308, 20, displayTexture.width * 3 * 3, displayTexture.height * 3, 12);
+    }
+    drawTiledScaled(sheet, displayTexture, 308, 20, 3, 1, 3);
+  } else {
+    if (useCheckerboard) {
+      drawCheckerboard(sheet, 308, 20, displayTexture.width * 3, displayTexture.height * 3, 12);
+    }
+    drawScaled(sheet, displayTexture, 308, 20, 3);
+  }
 
   const downsampled = downsampleNearest(displayTexture, 16, 16);
   drawRect(sheet, 624, 16, 200, 200, panel);

@@ -23,6 +23,7 @@ export interface TexturePreviewSpec {
   checkerboard?: boolean;
   cube?: boolean;
   rotation?: boolean;
+  tiling?: "xy" | "x" | "none";
 }
 
 export interface BlockSpec {
@@ -127,6 +128,14 @@ export function assertValidTexturePack(asset: TexturePackAsset): void {
     }
     if (texture.preview?.tint !== undefined && !isHexColor(texture.preview.tint)) {
       errors.push(`texture '${textureName}' preview tint has invalid color '${texture.preview.tint}'`);
+    }
+    if (
+      texture.preview?.tiling !== undefined &&
+      texture.preview.tiling !== "xy" &&
+      texture.preview.tiling !== "x" &&
+      texture.preview.tiling !== "none"
+    ) {
+      errors.push(`texture '${textureName}' preview tiling must be 'xy', 'x', or 'none'`);
     }
     for (const [layerIndex, layer] of (texture.layers ?? []).entries()) {
       validateLayer(textureName, layerIndex, layer, palette, size, errors);

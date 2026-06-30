@@ -104,8 +104,8 @@ Required concepts:
 - indexed textures from ASCII rows
 - generated tileable textures from deterministic helpers
 - texture roles: `all`, `top`, `bottom`, `side`, `overlay`, `particle`
-- preview-only texture metadata for tint, checkerboard transparency, and
-  disabling misleading cube/rotation panels
+- preview-only texture metadata for tint, checkerboard transparency, tiling
+  mode, and disabling misleading cube/rotation panels
 - block preview metadata: cube, cross-plane plant, log axis, cutout/alpha mode
 - tint metadata for grass/foliage/water-style review
 - variant metadata for preview: rotations, mirrors, authored variants, weights
