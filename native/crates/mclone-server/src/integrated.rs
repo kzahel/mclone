@@ -53,6 +53,7 @@ const DEBUG_PHYSICS_CUBE_LAUNCH_SPEED: f64 = 14.0;
 #[cfg(feature = "physics-rapier")]
 const DEBUG_PHYSICS_CUBE_HALF_EXTENT: f64 = 0.5;
 const DEFAULT_PHYSICS_STEPS_PER_GAMEPLAY_TICK: u32 = 3;
+const DEFAULT_PHYSICS_STEP_DT_SECONDS: f64 = 1.0 / 60.0;
 
 #[derive(Debug)]
 pub struct IntegratedServer {
@@ -391,13 +392,27 @@ impl IntegratedServer {
         self.try_simulation_tick_report_for_target(CommandTarget::Dedicated(player_id))
     }
 
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) fn try_simulation_tick_report_with_physics_steps(
         &mut self,
         physics_steps: u32,
     ) -> ChunkStoreResult<ServerSimulationTickReport> {
+        self.try_simulation_tick_report_with_physics_steps_and_step_dt(
+            physics_steps,
+            DEFAULT_PHYSICS_STEP_DT_SECONDS,
+        )
+    }
+
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn try_simulation_tick_report_with_physics_steps_and_step_dt(
+        &mut self,
+        physics_steps: u32,
+        physics_step_dt_seconds: f64,
+    ) -> ChunkStoreResult<ServerSimulationTickReport> {
         self.try_simulation_tick_report_for_target_with_physics_steps(
             CommandTarget::Local,
             physics_steps,
+            physics_step_dt_seconds,
         )
     }
 
@@ -408,6 +423,7 @@ impl IntegratedServer {
         self.try_simulation_tick_report_for_target_with_physics_steps(
             target,
             DEFAULT_PHYSICS_STEPS_PER_GAMEPLAY_TICK,
+            DEFAULT_PHYSICS_STEP_DT_SECONDS,
         )
     }
 
@@ -415,6 +431,7 @@ impl IntegratedServer {
         &mut self,
         target: CommandTarget,
         physics_steps: u32,
+        physics_step_dt_seconds: f64,
     ) -> ChunkStoreResult<ServerSimulationTickReport> {
         let total_start = simulation_timing_start();
         let scheduler_start = simulation_timing_start();
@@ -465,7 +482,7 @@ impl IntegratedServer {
         } else {
             #[cfg(feature = "physics-rapier")]
             self.sync_debug_physics_player_collider();
-            let physics = self.step_physics_steps(physics_steps);
+            let physics = self.step_physics_steps(physics_steps, physics_step_dt_seconds);
             #[cfg(feature = "physics-rapier")]
             if let Some(entity) = self.sync_debug_physics_cube_entity(simulation_tick, physics) {
                 entity_updates.push(entity);
@@ -524,17 +541,31 @@ impl IntegratedServer {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn try_physics_step_report(
         &mut self,
         physics_steps: u32,
     ) -> ChunkStoreResult<ServerPhysicsStepReport> {
-        self.try_physics_step_report_for_target(CommandTarget::Local, physics_steps)
+        self.try_physics_step_report_with_step_dt(physics_steps, DEFAULT_PHYSICS_STEP_DT_SECONDS)
+    }
+
+    pub(crate) fn try_physics_step_report_with_step_dt(
+        &mut self,
+        physics_steps: u32,
+        physics_step_dt_seconds: f64,
+    ) -> ChunkStoreResult<ServerPhysicsStepReport> {
+        self.try_physics_step_report_for_target(
+            CommandTarget::Local,
+            physics_steps,
+            physics_step_dt_seconds,
+        )
     }
 
     fn try_physics_step_report_for_target(
         &mut self,
         target: CommandTarget,
         physics_steps: u32,
+        physics_step_dt_seconds: f64,
     ) -> ChunkStoreResult<ServerPhysicsStepReport> {
         self.ensure_target_exists(target)?;
         let total_start = simulation_timing_start();
@@ -544,7 +575,7 @@ impl IntegratedServer {
         if physics_steps > 0 {
             self.sync_debug_physics_player_collider();
         }
-        let physics = self.step_physics_steps(physics_steps);
+        let physics = self.step_physics_steps(physics_steps, physics_step_dt_seconds);
         let physics_tick_us = simulation_timing_elapsed_us(physics_tick_start);
 
         let physics_event_apply_start = simulation_timing_start();
@@ -605,14 +636,20 @@ impl IntegratedServer {
         &mut self.scheduler
     }
 
-    fn step_physics_steps(&mut self, physics_steps: u32) -> ServerPhysicsTickDiagnostics {
+    fn step_physics_steps(
+        &mut self,
+        physics_steps: u32,
+        physics_step_dt_seconds: f64,
+    ) -> ServerPhysicsTickDiagnostics {
         #[cfg(feature = "physics-rapier")]
         {
-            self.physics.step_steps(physics_steps)
+            self.physics
+                .step_steps(physics_steps, physics_step_dt_seconds)
         }
         #[cfg(not(feature = "physics-rapier"))]
         {
             let _ = physics_steps;
+            let _ = physics_step_dt_seconds;
             ServerPhysicsTickDiagnostics::default()
         }
     }

@@ -2985,6 +2985,7 @@ impl WebChunkRenderSession {
             | GameUiAction::CloseHelp(_)
             | GameUiAction::OpenNewWorld
             | GameUiAction::OpenJoinRemote
+            | GameUiAction::OpenServerSettings(_)
             | GameUiAction::RerollSeed
             | GameUiAction::Resume
             | GameUiAction::OpenOptions(_)
@@ -2993,6 +2994,7 @@ impl WebChunkRenderSession {
             | GameUiAction::QuitToTitle
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
+            | GameUiAction::SetServerSimulationCadence(_)
             | GameUiAction::SetRenderDistance(_) => {}
         }
         self.ui.apply_action(action);
@@ -3036,6 +3038,9 @@ impl WebChunkRenderSession {
                         touch_controls_mode_js_label(mode),
                     )?;
                 }
+                GameUiAction::SetServerSimulationCadence(cadence) => {
+                    set_string(&object, "serverCadence", &cadence.label())?;
+                }
                 GameUiAction::AssignHotbarBlock { slot, block_state } => {
                     set_number(&object, "slot", f64::from(slot))?;
                     set_number(&object, "blockState", f64::from(block_state))?;
@@ -3052,6 +3057,7 @@ impl WebChunkRenderSession {
                 | GameUiAction::CloseHelp(_)
                 | GameUiAction::OpenNewWorld
                 | GameUiAction::OpenJoinRemote
+                | GameUiAction::OpenServerSettings(_)
                 | GameUiAction::RerollSeed
                 | GameUiAction::Resume
                 | GameUiAction::BackToTitle
@@ -3092,6 +3098,7 @@ impl WebChunkRenderSession {
             max_movement_speed_multiplier: ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: WEB_FIXED_FPS_CAP,
+            server_cadence: None,
             touch_controls_mode: Some(self.input_preferences.touch_controls),
             touch_settings: self
                 .touch_settings_available
@@ -4714,6 +4721,7 @@ fn ui_screen_label(screen: Option<GameScreen>) -> &'static str {
         Some(GameScreen::Help { .. }) => "help",
         Some(GameScreen::BlockPalette) => "blockPalette",
         Some(GameScreen::Options { .. }) => "options",
+        Some(GameScreen::ServerSettings { .. }) => "serverSettings",
         None => "none",
     }
 }
@@ -4738,6 +4746,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::JoinRemote => "joinRemote",
         GameUiAction::Resume => "resume",
         GameUiAction::OpenOptions(_) => "openOptions",
+        GameUiAction::OpenServerSettings(_) => "openServerSettings",
         GameUiAction::BackToTitle => "backToTitle",
         GameUiAction::BackToPause => "backToPause",
         GameUiAction::QuitToTitle => "quitToTitle",
@@ -4754,6 +4763,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::SetMovementSpeed(_) => "setMovementSpeed",
         GameUiAction::SetTouchLookSensitivity(_) => "setTouchLookSensitivity",
         GameUiAction::SetTouchControlsMode(_) => "setTouchControlsMode",
+        GameUiAction::SetServerSimulationCadence(_) => "setServerSimulationCadence",
         GameUiAction::AssignHotbarBlock { .. } => "assignHotbarBlock",
         GameUiAction::Quit => "quit",
     }

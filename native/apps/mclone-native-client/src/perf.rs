@@ -1417,6 +1417,7 @@ pub(crate) fn run_frame_budget_probe(
                 player_collision_box_visible: false,
                 first_person_player_visible: false,
                 player_model: Default::default(),
+                server_cadence: None,
             });
             let gui_scale = state.ui.scale();
             let gui_state = FullFrameGui::new(

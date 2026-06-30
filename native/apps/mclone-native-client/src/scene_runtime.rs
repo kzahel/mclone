@@ -24,6 +24,7 @@ use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 #[cfg(test)]
 use mclone_protocol::ServerUpdate;
 use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
+use mclone_server::SimulationCadenceConfig;
 #[cfg(test)]
 use mclone_server::{IntegratedServer, ServerRunnerKind};
 use mclone_ui::LoadingProgressOverlay;
@@ -216,6 +217,17 @@ impl WindowSceneRuntime {
 
     pub(crate) fn render_distance(&self) -> u32 {
         self.scene.render_distance()
+    }
+
+    pub(crate) fn simulation_cadence(&self) -> Option<SimulationCadenceConfig> {
+        self.scene.simulation_cadence()
+    }
+
+    pub(crate) fn set_simulation_cadence(
+        &mut self,
+        cadence: SimulationCadenceConfig,
+    ) -> Result<bool> {
+        self.scene.set_simulation_cadence(cadence)
     }
 
     pub(crate) fn chunk_tracking_radius(&self) -> u32 {

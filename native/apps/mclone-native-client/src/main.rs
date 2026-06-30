@@ -1000,6 +1000,11 @@ mod tests {
             parse_screenshot_ui_arg("--screenshot-ui", Some("options".to_owned())).unwrap(),
             HeadlessScreenshotUi::OptionsPause
         );
+        assert_eq!(
+            parse_screenshot_ui_arg("--screenshot-ui", Some("server-settings-pause".to_owned()))
+                .unwrap(),
+            HeadlessScreenshotUi::ServerSettingsPause
+        );
         assert!(parse_screenshot_ui_arg("--screenshot-ui", Some("bad".to_owned())).is_err());
     }
 

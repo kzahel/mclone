@@ -2941,6 +2941,7 @@ where
                 .display_refresh_hz
                 .map(|hz| hz.round().clamp(1.0, 999.0) as u32)
                 .unwrap_or(XR_UI_FPS_CAP),
+            server_cadence: None,
             touch_controls_mode: None,
             touch_settings: None,
             block_palette,
@@ -3773,7 +3774,8 @@ where
             GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetTouchLookSensitivity(_)
-            | GameUiAction::SetTouchControlsMode(_) => {}
+            | GameUiAction::SetTouchControlsMode(_)
+            | GameUiAction::SetServerSimulationCadence(_) => {}
             GameUiAction::BackToTitle | GameUiAction::QuitToTitle => {
                 self.session_status = StatusOverlay::hidden();
             }
@@ -3782,6 +3784,7 @@ where
             | GameUiAction::OpenHelp(_)
             | GameUiAction::CloseHelp(_)
             | GameUiAction::OpenOptions(_)
+            | GameUiAction::OpenServerSettings(_)
             | GameUiAction::BackToPause => {}
             GameUiAction::OpenBlockPalette => {
                 self.menu_panel_anchor = XrUiPanelAnchor::LeftHand;

@@ -7,7 +7,9 @@ the native server runner now consumes separate gameplay and physics lane work
 while preserving default 20 Hz gameplay behavior. Native local play now exposes
 a developer cadence profile option that derives the runner host interval from
 the selected host rate, and the native runner can apply a new cadence profile
-while running.
+while running. The shared in-game options UI now exposes local integrated-server
+cadence controls for host, world tick, and physics rates; native flat local
+captures validate the settings screen at the default 20/20/60 profile.
 
 ## Purpose
 
@@ -33,10 +35,10 @@ Minecraft-like default, not an architectural ceiling.
   ticks, fluid ticks, random ticks, entity age, and parity-sensitive world rules
   belong here. Custom/high-fidelity profiles may raise this lane, such as a
   60 Hz gameplay server, as an explicit gameplay-policy choice.
-- Physics lane: fixed at 60 Hz for the first Rapier-backed implementation, with
-  room for 120 Hz later if stability or tunneling requires it. Physics can
-  substep inside a 20 Hz host tick or run once per host frame in a 60 Hz host
-  mode.
+- Physics lane: default 60 Hz for the first Rapier-backed implementation, with
+  lower-CPU 30 Hz and higher-fidelity 120 Hz profiles available for local
+  integrated experiments. Physics can substep inside a lower-rate host tick or
+  run once per host frame in a matching host mode.
 - AI lane: lower-frequency decision cadence, likely 5-10 Hz for expensive
   thinking, with movement intents fed into the normal authoritative simulation.
 - Networking lane: snapshot and event publication rates are selected per entity
@@ -221,11 +223,69 @@ cargo check --manifest-path native/Cargo.toml -p mclone-server --features physic
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
 ```
 
+- Added a shared `mclone-ui` server settings screen reachable from Options for
+  active local integrated worlds. It exposes cycle controls for Host Rate, World
+  Tick Rate, and Physics Rate, and each control emits a full valid clean-ratio
+  cadence rather than an invalid partial lane change.
+- Threaded local integrated cadence read/apply methods through
+  `LocalSingleViewSceneRuntime`, `NativeSingleViewSceneRuntime`, and the native
+  window runtime. Remote dedicated sessions intentionally expose no editable
+  cadence from this client-side path.
+- The native flat client now maps `SetServerSimulationCadence` UI actions to the
+  live local runner control and also updates the scene preset so future local
+  starts keep the selected cadence.
+- Rapier debug physics now receives a physics step duration derived from the
+  active physics lane rate. The compatibility tick path remains three 1/60
+  steps for one 20 Hz gameplay tick, while live cadence profiles such as
+  60/20/120 now run 120 Hz physics at 1/120 second per step instead of doubling
+  simulation speed.
+- Added a native headless `server-settings-pause` screenshot target and routed
+  headless UI render state through the live local runtime cadence so automated
+  captures can inspect the actual integrated-server controls.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-ui -p mclone-server -p mclone-app-runtime -p mclone-native-client
+cargo fmt --manifest-path native/Cargo.toml -p mclone-ui -p mclone-server -p mclone-app-runtime -p mclone-native-client -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-ui server_cadence -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui server_settings -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui --quiet
+cargo test --manifest-path native/Cargo.toml -p mclone-server --quiet
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime --quiet
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client --quiet
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client parse_screenshot_ui_accepts_named_screens -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client ui_action_sets_server_simulation_cadence_preset_without_runtime -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime local_single_view_runtime_applies_simulation_cadence_control -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server native_runner_applies_live_simulation_cadence_control -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server native_runner_rejects_invalid_live_simulation_cadence_control -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier --quiet
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier physics_step_report_advances_debug_cube_without_gameplay_tick -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier debug_physics_cube_applies_minecraft_vertical_drag -- --nocapture
+cargo check --manifest-path native/Cargo.toml -p mclone-server
+cargo check --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
+pnpm native:web:build
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-server-settings-ui.png --width 1280 --height 720 --startup-wait playable --screenshot-ui server-settings-pause --seed 111 --render-distance 2 --simulation-cadence 20/20/60 --lighting false --fullbright true
+```
+
+Screenshot inspection: `/tmp/mclone-server-settings-ui.png` rendered the Server
+Settings menu with Host Rate 20 Hz, World Tick Rate 20 Hz, Physics Rate 60 Hz,
+and no visible text/control overlap at 1280x720.
+
+Residual validation failure: `pnpm native:web:smoke` still fails with the
+top-level canvas aggregate reporting `canvas.ok: false`. The same run reports
+browser threading, shared memory, WebGPU readiness, WASM runtime, chunk compile,
+textures, sky, actor rendering, and worker runner diagnostics as OK, so this is
+tracked as a pre-existing web canvas smoke issue rather than a cadence-control
+blocker.
+
 ## Follow-Up Work
 
-- Add a local integrated-server settings UI that presents valid Host Rate, World
-  Tick Rate, and Physics Rate combinations, then calls the live runner cadence
-  control.
+- Decide whether cadence selections should persist as user preferences or remain
+  per-session developer controls.
 - Add explicit diagnostics for physics substep count and physics lane timing.
 - Extend the full-orientation path with angular velocity or buffered orientation
   samples if active physics presentation still looks too 20 Hz.

@@ -11,7 +11,8 @@ use mclone_protocol::{ClientCommand, ServerUpdate};
 use mclone_render_session::RenderSectionCacheUpdate;
 use mclone_server::{
     IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
-    ServerRunnerDiagnostics, SimulationCadenceConfig, initial_spawn_center_for_seed,
+    ServerRunnerDiagnostics, SimulationCadenceConfig, host_tick_interval_for_rate_hz,
+    initial_spawn_center_for_seed,
 };
 use mclone_ui::LoadingProgressOverlay;
 
@@ -94,6 +95,7 @@ pub struct LocalSingleViewSceneRuntime {
     server_runner: NativeIntegratedServerRunner,
     mesh_assets: TexturedMeshAssets,
     render_compile_worker: RenderSectionCompileWorker,
+    simulation_cadence: SimulationCadenceConfig,
     last_runner_diagnostics: Option<ServerRunnerDiagnostics>,
     last_runner_diagnostics_poll_at: Option<Instant>,
 }
@@ -227,6 +229,7 @@ impl LocalSingleViewSceneRuntime {
             server_runner,
             mesh_assets,
             render_compile_worker,
+            simulation_cadence: options.cadence,
             last_runner_diagnostics: None,
             last_runner_diagnostics_poll_at: None,
         };
@@ -259,6 +262,25 @@ impl LocalSingleViewSceneRuntime {
 
     pub fn render_distance(&self) -> u32 {
         self.core.render_distance()
+    }
+
+    pub const fn simulation_cadence(&self) -> SimulationCadenceConfig {
+        self.simulation_cadence
+    }
+
+    pub fn set_simulation_cadence(&mut self, cadence: SimulationCadenceConfig) -> Result<bool> {
+        if cadence == self.simulation_cadence {
+            return Ok(false);
+        }
+        self.server_runner
+            .set_simulation_cadence(cadence)
+            .context("failed to set local single-view simulation cadence")?;
+        self.simulation_cadence = cadence;
+        if let Some(diagnostics) = self.last_runner_diagnostics.as_mut() {
+            diagnostics.simulation_cadence = cadence;
+            diagnostics.host_tick_interval = host_tick_interval_for_rate_hz(cadence.host_rate_hz);
+        }
+        Ok(true)
     }
 
     pub fn loaded_chunk_count(&self) -> usize {
@@ -340,6 +362,7 @@ impl LocalSingleViewSceneRuntime {
                 .server_runner
                 .poll_diagnostics()
                 .context("failed to poll local single-view integrated server diagnostics")?;
+            self.simulation_cadence = runner_diagnostics.simulation_cadence;
             poll_diagnostics_ms = elapsed_ms(diagnostics_start.elapsed());
             self.last_runner_diagnostics = Some(runner_diagnostics);
             self.last_runner_diagnostics_poll_at = Some(Instant::now());
@@ -537,6 +560,20 @@ where
 
     pub fn render_distance(&self) -> u32 {
         self.core().render_distance()
+    }
+
+    pub const fn simulation_cadence(&self) -> Option<SimulationCadenceConfig> {
+        match self {
+            Self::Local(scene) => Some(scene.simulation_cadence()),
+            Self::RemoteDedicated(_) => None,
+        }
+    }
+
+    pub fn set_simulation_cadence(&mut self, cadence: SimulationCadenceConfig) -> Result<bool> {
+        match self {
+            Self::Local(scene) => scene.set_simulation_cadence(cadence),
+            Self::RemoteDedicated(_) => Ok(false),
+        }
     }
 
     pub fn chunk_tracking_radius(&self) -> u32 {
@@ -1127,6 +1164,48 @@ mod tests {
                 .chunk_snapshot(ChunkPos::new(0, 0))
                 .is_some()
         );
+    }
+
+    #[test]
+    fn local_single_view_runtime_applies_simulation_cadence_control() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let mut runtime = LocalSingleViewSceneRuntime::new(
+            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+                .with_lighting_enabled(false),
+        )
+        .unwrap();
+        let cadence = SimulationCadenceConfig::new(60, 20, 120);
+
+        assert_eq!(
+            runtime.simulation_cadence(),
+            SimulationCadenceConfig::default()
+        );
+        assert!(runtime.set_simulation_cadence(cadence).unwrap());
+        assert_eq!(runtime.simulation_cadence(), cadence);
+        assert!(!runtime.set_simulation_cadence(cadence).unwrap());
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            runtime.poll().unwrap();
+            if runtime
+                .last_runner_diagnostics
+                .as_ref()
+                .is_some_and(|diagnostics| {
+                    diagnostics.command_queue_depth == 0
+                        && diagnostics.simulation_cadence == cadence
+                })
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for runtime cadence diagnostics"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     #[test]

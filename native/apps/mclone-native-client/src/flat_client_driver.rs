@@ -35,11 +35,13 @@ use mclone_render_session::{
     RenderSectionCacheUpdate, actor_instances_from_presentations, engine_debug_world_lines,
     local_player_actor_instance_for_view, render_camera_from_snapshot_with_view_mode,
 };
+use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameHelpParent,
-    GameMovementMode, GamePlayerModel, GameScreen, GameUi, GameUiAction, GameUiRenderState,
-    GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, StatusOverlay, render_flat_hud,
-    render_loading_progress_overlay, render_loading_progress_panel_at, touch_controls_mode_label,
+    GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameUi, GameUiAction,
+    GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, StatusOverlay,
+    render_flat_hud, render_loading_progress_overlay, render_loading_progress_panel_at,
+    touch_controls_mode_label,
 };
 
 use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
@@ -202,6 +204,7 @@ pub(crate) struct FlatClientUiRenderOptions {
     pub(crate) player_collision_box_visible: bool,
     pub(crate) first_person_player_visible: bool,
     pub(crate) player_model: GamePlayerModel,
+    pub(crate) server_cadence: Option<GameSimulationCadence>,
 }
 
 #[derive(Clone, Debug)]
@@ -302,6 +305,13 @@ impl FlatClientDriver {
             .map_or(fallback_render_scale, |resources| {
                 resources.render_config().render_scale
             })
+    }
+
+    pub(crate) fn server_simulation_cadence(&self) -> Option<GameSimulationCadence> {
+        self.runtime
+            .as_ref()
+            .and_then(WindowSceneRuntime::simulation_cadence)
+            .map(game_simulation_cadence_from_config)
     }
 
     pub(crate) fn tick_frame_timing(&mut self, frame_ms: f64, target_frame_ms: Option<f64>) {
@@ -618,6 +628,7 @@ impl FlatClientDriver {
                     | GameUiAction::SetMovementSpeed(_)
                     | GameUiAction::SetTouchLookSensitivity(_)
                     | GameUiAction::SetTouchControlsMode(_)
+                    | GameUiAction::SetServerSimulationCadence(_)
             ),
             clear_gameplay_input: true,
         };
@@ -740,6 +751,31 @@ impl FlatClientDriver {
                 result.host_action = Some(FlatClientHostAction::SetTouchControlsMode(mode));
                 log::info!("touch controls set to {}", touch_controls_mode_label(mode));
             }
+            GameUiAction::SetServerSimulationCadence(cadence) => {
+                if !cadence.is_valid() {
+                    log::error!("invalid server cadence requested from UI: {cadence:?}");
+                    return result;
+                }
+                let config = simulation_cadence_config_from_game(cadence);
+                if let Some(runtime) = &mut self.runtime {
+                    match runtime.set_simulation_cadence(config) {
+                        Ok(true) => {
+                            self.scene.simulation_cadence = config;
+                            log::info!("local server cadence set to {}", cadence.label());
+                        }
+                        Ok(false) => {
+                            self.scene.simulation_cadence = config;
+                        }
+                        Err(err) => {
+                            log::error!("failed to set local server cadence: {err:#}");
+                            return result;
+                        }
+                    }
+                } else {
+                    self.scene.simulation_cadence = config;
+                    log::info!("local server cadence preset set to {}", cadence.label());
+                }
+            }
             GameUiAction::CycleFramePacing => {
                 result.host_action = Some(FlatClientHostAction::CycleFramePacing);
             }
@@ -802,6 +838,7 @@ impl FlatClientDriver {
             | GameUiAction::OpenHelp(_)
             | GameUiAction::CloseHelp(_)
             | GameUiAction::OpenOptions(_)
+            | GameUiAction::OpenServerSettings(_)
             | GameUiAction::BackToPause
             | GameUiAction::SetTouchLookSensitivity(_) => {}
         }
@@ -1777,10 +1814,31 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         max_movement_speed_multiplier: ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32,
         frame_pacing_mode: game_frame_pacing_mode(options.frame_pacing.mode),
         fps_cap: options.frame_pacing.fps_cap,
+        server_cadence: options.server_cadence,
         touch_controls_mode: None,
         touch_settings: None,
         block_palette: Default::default(),
     }
+}
+
+pub(crate) const fn game_simulation_cadence_from_config(
+    cadence: SimulationCadenceConfig,
+) -> GameSimulationCadence {
+    GameSimulationCadence::new(
+        cadence.host_rate_hz,
+        cadence.gameplay_rate_hz,
+        cadence.physics_rate_hz,
+    )
+}
+
+pub(crate) const fn simulation_cadence_config_from_game(
+    cadence: GameSimulationCadence,
+) -> SimulationCadenceConfig {
+    SimulationCadenceConfig::new(
+        cadence.host_rate_hz,
+        cadence.gameplay_rate_hz,
+        cadence.physics_rate_hz,
+    )
 }
 
 pub(crate) const fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovementMode {
@@ -1998,6 +2056,25 @@ mod tests {
         assert_eq!(
             actor_figure_id_for_player_model(driver.player_model),
             mclone_assets::upright_bear_figure_id()
+        );
+    }
+
+    #[test]
+    fn ui_action_sets_server_simulation_cadence_preset_without_runtime() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+        let cadence = GameSimulationCadence::new(60, 20, 120);
+
+        let result = driver.apply_ui_action(
+            GameUiAction::SetServerSimulationCadence(cadence),
+            ui_action_context(),
+        );
+
+        assert!(result.host_action.is_none());
+        assert!(result.preserve_pointer_state);
+        assert_eq!(
+            driver.scene.simulation_cadence,
+            SimulationCadenceConfig::new(60, 20, 120)
         );
     }
 

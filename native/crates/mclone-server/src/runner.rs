@@ -15,11 +15,13 @@ use mclone_protocol::{
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::IntegratedServer;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::SimulationCadence;
 use crate::{
     ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkSchedulerMetrics,
     ChunkStoreError, LightStatusMailboxKind, PlayerChunkTrackingDiagnostics,
     ServerPhysicsTickDiagnostics, ServerSimulationTickReport, ServerSimulationTickTiming,
-    SimulationCadence, SimulationCadenceConfig, WorldgenMailboxKind,
+    SimulationCadenceConfig, WorldgenMailboxKind,
 };
 
 pub type ServerRunnerResult<T> = Result<T, ServerRunnerError>;
@@ -587,6 +589,10 @@ mod native {
             self.tick_interval = tick_interval;
             Ok(())
         }
+
+        fn physics_step_dt_seconds(&self) -> f64 {
+            1.0 / f64::from(self.cadence_config.physics_rate_hz)
+        }
     }
 
     #[derive(Debug)]
@@ -892,7 +898,10 @@ mod native {
             let mut physics_report = None;
             if frame.physics_steps > 0 {
                 let wall_start = Instant::now();
-                let report = server.try_physics_step_report(frame.physics_steps)?;
+                let report = server.try_physics_step_report_with_step_dt(
+                    frame.physics_steps,
+                    timing_state.physics_step_dt_seconds(),
+                )?;
                 physics_wall_us = wall_start.elapsed().as_micros();
                 publish_updates(&update_tx, update_queue_depth, &report.updates)?;
                 physics_report = Some(report);

@@ -199,6 +199,9 @@ impl HeadlessScreenshotUi {
             Self::OptionsPause => Some(GameScreen::Options {
                 parent: GameOptionsParent::Pause,
             }),
+            Self::ServerSettingsPause => Some(GameScreen::ServerSettings {
+                parent: GameOptionsParent::Pause,
+            }),
         }
     }
 }

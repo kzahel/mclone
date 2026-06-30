@@ -286,6 +286,7 @@ impl OffscreenFlatClientHost {
                 player_collision_box_visible: self.driver.player_collision_box_visible,
                 first_person_player_visible: self.driver.camera.first_person_player_visible(),
                 player_model: self.driver.player_model,
+                server_cadence: self.driver.server_simulation_cadence(),
             },
             block_palette: debug_block_palette_overlay(
                 &self.assets.mesh_assets.catalog,

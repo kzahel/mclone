@@ -1318,7 +1318,8 @@ mod android {
                 }
                 GameUiAction::CycleFramePacing
                 | GameUiAction::CycleFpsCap
-                | GameUiAction::SetTouchLookSensitivity(_) => {}
+                | GameUiAction::SetTouchLookSensitivity(_)
+                | GameUiAction::SetServerSimulationCadence(_) => {}
                 GameUiAction::AssignHotbarBlock { slot, block_state } => {
                     if let Err(err) = self.assign_debug_hotbar_slot(slot, BlockStateId(block_state))
                     {
@@ -1341,6 +1342,7 @@ mod android {
                 | GameUiAction::OpenHelp(_)
                 | GameUiAction::CloseHelp(_)
                 | GameUiAction::OpenOptions(_)
+                | GameUiAction::OpenServerSettings(_)
                 | GameUiAction::BackToPause => {}
             }
             self.ui.apply_action(action);
@@ -1371,6 +1373,7 @@ mod android {
                 max_movement_speed_multiplier: ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32,
                 frame_pacing_mode: GameFramePacingMode::Vsync,
                 fps_cap: ANDROID_FIXED_FPS_CAP,
+                server_cadence: None,
                 touch_controls_mode: Some(self.input_preferences.touch_controls),
                 touch_settings: None,
                 block_palette: Default::default(),

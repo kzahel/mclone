@@ -31,7 +31,9 @@ use crate::cli::{
     HeadlessActorReviewSheetOptions, HeadlessActorWalkReviewOptions, HeadlessDualViewOptions,
     HeadlessScreenshotOptions, RendererRebuildSmokeOptions,
 };
-use crate::flat_client_driver::{FlatClientUiRenderOptions, game_ui_render_state};
+use crate::flat_client_driver::{
+    FlatClientUiRenderOptions, game_simulation_cadence_from_config, game_ui_render_state,
+};
 use crate::frame_pacing::FramePacingUiState;
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
@@ -1183,6 +1185,10 @@ fn render_renderer_rebuild_smoke_frame(
         &state.actor_interpolation.presentations(),
         state.runtime.client(),
     );
+    let server_cadence = state
+        .runtime
+        .simulation_cadence()
+        .map(game_simulation_cadence_from_config);
     let ui_render_state = game_ui_render_state(FlatClientUiRenderOptions {
         render_distance: state.runtime.render_distance() as i32,
         render_options: state.render_options,
@@ -1193,6 +1199,7 @@ fn render_renderer_rebuild_smoke_frame(
         player_collision_box_visible: false,
         first_person_player_visible: false,
         player_model: Default::default(),
+        server_cadence,
     });
     let gui_scale = state.ui.scale();
     let gui_state = FullFrameGui::new(

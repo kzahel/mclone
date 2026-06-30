@@ -696,6 +696,7 @@ pub enum GameScreen {
     Help { parent: GameHelpParent },
     BlockPalette,
     Options { parent: GameOptionsParent },
+    ServerSettings { parent: GameOptionsParent },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -749,7 +750,13 @@ const fn help_parent_for_screen(screen: Option<GameScreen>) -> GameHelpParent {
         }) => GameHelpParent::OptionsTitle,
         Some(GameScreen::Options {
             parent: GameOptionsParent::Pause,
+        })
+        | Some(GameScreen::ServerSettings {
+            parent: GameOptionsParent::Pause,
         }) => GameHelpParent::OptionsPause,
+        Some(GameScreen::ServerSettings {
+            parent: GameOptionsParent::Title,
+        }) => GameHelpParent::OptionsTitle,
         Some(GameScreen::Help { parent }) => parent,
     }
 }
@@ -803,6 +810,132 @@ impl GamePlayerModel {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GameSimulationCadence {
+    pub host_rate_hz: u32,
+    pub gameplay_rate_hz: u32,
+    pub physics_rate_hz: u32,
+}
+
+impl GameSimulationCadence {
+    pub const fn new(host_rate_hz: u32, gameplay_rate_hz: u32, physics_rate_hz: u32) -> Self {
+        Self {
+            host_rate_hz,
+            gameplay_rate_hz,
+            physics_rate_hz,
+        }
+    }
+
+    pub const fn is_valid(self) -> bool {
+        self.host_rate_hz > 0
+            && self.gameplay_rate_hz > 0
+            && self.physics_rate_hz > 0
+            && lane_rate_is_clean(self.host_rate_hz, self.gameplay_rate_hz)
+            && lane_rate_is_clean(self.host_rate_hz, self.physics_rate_hz)
+    }
+
+    pub fn next_host_rate(self) -> Self {
+        let host_rate_hz = next_rate(self.host_rate_hz, &SERVER_HOST_RATE_OPTIONS);
+        Self {
+            host_rate_hz,
+            gameplay_rate_hz: closest_clean_rate(
+                host_rate_hz,
+                self.gameplay_rate_hz,
+                &SERVER_GAMEPLAY_RATE_OPTIONS,
+            ),
+            physics_rate_hz: closest_clean_rate(
+                host_rate_hz,
+                self.physics_rate_hz,
+                &SERVER_PHYSICS_RATE_OPTIONS,
+            ),
+        }
+    }
+
+    pub fn next_gameplay_rate(self) -> Self {
+        Self {
+            gameplay_rate_hz: next_clean_rate(
+                self.host_rate_hz,
+                self.gameplay_rate_hz,
+                &SERVER_GAMEPLAY_RATE_OPTIONS,
+            ),
+            ..self
+        }
+    }
+
+    pub fn next_physics_rate(self) -> Self {
+        Self {
+            physics_rate_hz: next_clean_rate(
+                self.host_rate_hz,
+                self.physics_rate_hz,
+                &SERVER_PHYSICS_RATE_OPTIONS,
+            ),
+            ..self
+        }
+    }
+
+    pub fn label(self) -> String {
+        format!(
+            "{}/{}/{} Hz",
+            self.host_rate_hz, self.gameplay_rate_hz, self.physics_rate_hz
+        )
+    }
+}
+
+impl Default for GameSimulationCadence {
+    fn default() -> Self {
+        Self::new(20, 20, 60)
+    }
+}
+
+pub const SERVER_HOST_RATE_OPTIONS: [u32; 3] = [20, 30, 60];
+pub const SERVER_GAMEPLAY_RATE_OPTIONS: [u32; 4] = [10, 20, 30, 60];
+pub const SERVER_PHYSICS_RATE_OPTIONS: [u32; 3] = [30, 60, 120];
+
+fn next_rate(current: u32, options: &[u32]) -> u32 {
+    if options.is_empty() {
+        return current;
+    }
+    let index = options
+        .iter()
+        .position(|rate| *rate == current)
+        .map_or(0, |index| {
+            if index + 1 >= options.len() {
+                0
+            } else {
+                index + 1
+            }
+        });
+    options[index]
+}
+
+fn next_clean_rate(host_rate_hz: u32, current: u32, options: &[u32]) -> u32 {
+    let clean = options
+        .iter()
+        .copied()
+        .filter(|rate| lane_rate_is_clean(host_rate_hz, *rate))
+        .collect::<Vec<_>>();
+    next_rate(current, &clean)
+}
+
+fn closest_clean_rate(host_rate_hz: u32, desired: u32, options: &[u32]) -> u32 {
+    options
+        .iter()
+        .copied()
+        .filter(|rate| lane_rate_is_clean(host_rate_hz, *rate))
+        .min_by_key(|rate| (rate.abs_diff(desired), *rate < desired))
+        .unwrap_or(desired)
+}
+
+const fn lane_rate_is_clean(host_rate_hz: u32, lane_rate_hz: u32) -> bool {
+    if host_rate_hz == 0 || lane_rate_hz == 0 {
+        false
+    } else if lane_rate_hz >= host_rate_hz {
+        lane_rate_hz % host_rate_hz == 0
+    } else {
+        host_rate_hz % lane_rate_hz == 0
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GameUiAction {
     StartWorld,
@@ -817,6 +950,7 @@ pub enum GameUiAction {
     CloseHelp(GameHelpParent),
     AssignHotbarBlock { slot: u8, block_state: u32 },
     OpenOptions(GameOptionsParent),
+    OpenServerSettings(GameOptionsParent),
     BackToTitle,
     BackToPause,
     QuitToTitle,
@@ -833,6 +967,7 @@ pub enum GameUiAction {
     SetMovementSpeed(f32),
     SetTouchLookSensitivity(f32),
     SetTouchControlsMode(TouchControlsMode),
+    SetServerSimulationCadence(GameSimulationCadence),
     Quit,
 }
 
@@ -921,6 +1056,7 @@ pub struct GameUiRenderState {
     pub max_movement_speed_multiplier: f32,
     pub frame_pacing_mode: GameFramePacingMode,
     pub fps_cap: u32,
+    pub server_cadence: Option<GameSimulationCadence>,
     pub touch_controls_mode: Option<TouchControlsMode>,
     pub touch_settings: Option<GameTouchSettings>,
     pub block_palette: BlockPaletteOverlay,
@@ -946,6 +1082,7 @@ impl Default for GameUiRenderState {
             max_movement_speed_multiplier: 8.0,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: 120,
+            server_cadence: None,
             touch_controls_mode: None,
             touch_settings: None,
             block_palette: BlockPaletteOverlay::hidden(),
@@ -1916,6 +2053,11 @@ const ID_OPTIONS_PLAYER_BOX: WidgetId = WidgetId(25);
 const ID_OPTIONS_CONTROLS: WidgetId = WidgetId(26);
 const ID_OPTIONS_FIRST_PERSON_PLAYER: WidgetId = WidgetId(27);
 const ID_OPTIONS_PLAYER_MODEL: WidgetId = WidgetId(28);
+const ID_OPTIONS_SERVER_SETTINGS: WidgetId = WidgetId(29);
+const ID_SERVER_SETTINGS_HOST_RATE: WidgetId = WidgetId(30);
+const ID_SERVER_SETTINGS_GAMEPLAY_RATE: WidgetId = WidgetId(31);
+const ID_SERVER_SETTINGS_PHYSICS_RATE: WidgetId = WidgetId(32);
+const ID_SERVER_SETTINGS_BACK: WidgetId = WidgetId(33);
 const ID_BLOCK_PALETTE_BASE: u64 = 1000;
 
 const BLOCK_PALETTE_COLUMNS: usize = 10;
@@ -2099,6 +2241,9 @@ impl GameUi {
                 GameOptionsParent::Title => (true, Some(GameUiAction::BackToTitle)),
                 GameOptionsParent::Pause => (true, Some(GameUiAction::BackToPause)),
             },
+            (GameScreen::ServerSettings { parent }, GuiKey::Escape) => {
+                (true, Some(GameUiAction::OpenOptions(parent)))
+            }
             (GameScreen::Title, GuiKey::Escape) => (true, None),
         }
     }
@@ -2132,6 +2277,10 @@ impl GameUi {
                 self.screen = Some(GameScreen::Options { parent });
                 self.pressed = None;
             }
+            GameUiAction::OpenServerSettings(parent) => {
+                self.screen = Some(GameScreen::ServerSettings { parent });
+                self.pressed = None;
+            }
             GameUiAction::BackToTitle => {
                 self.screen = Some(GameScreen::Title);
                 self.pressed = None;
@@ -2159,6 +2308,7 @@ impl GameUi {
             | GameUiAction::SetMovementSpeed(_)
             | GameUiAction::SetTouchLookSensitivity(_)
             | GameUiAction::SetTouchControlsMode(_)
+            | GameUiAction::SetServerSimulationCadence(_)
             | GameUiAction::Quit => {}
         }
     }
@@ -2174,6 +2324,9 @@ impl GameUi {
             Some(GameScreen::BlockPalette) => self.render_block_palette(&mut draw, state),
             Some(GameScreen::Options { parent }) => {
                 self.render_options_screen(&mut draw, state, parent)
+            }
+            Some(GameScreen::ServerSettings { parent }) => {
+                self.render_server_settings_screen(&mut draw, state, parent)
             }
             None => {}
         }
@@ -2239,8 +2392,27 @@ impl GameUi {
                     Some(ID_OPTIONS_TOUCH_LOOK)
                 } else if rects.controls.contains(point) {
                     Some(ID_OPTIONS_CONTROLS)
+                } else if rects
+                    .server_settings
+                    .is_some_and(|rect| rect.contains(point))
+                {
+                    Some(ID_OPTIONS_SERVER_SETTINGS)
                 } else if rects.back.contains(point) {
                     Some(ID_OPTIONS_BACK)
+                } else {
+                    None
+                }
+            }
+            GameScreen::ServerSettings { .. } => {
+                let rects = server_setting_widgets(self.scale, state);
+                if rects.host_rate.is_some_and(|rect| rect.contains(point)) {
+                    Some(ID_SERVER_SETTINGS_HOST_RATE)
+                } else if rects.gameplay_rate.is_some_and(|rect| rect.contains(point)) {
+                    Some(ID_SERVER_SETTINGS_GAMEPLAY_RATE)
+                } else if rects.physics_rate.is_some_and(|rect| rect.contains(point)) {
+                    Some(ID_SERVER_SETTINGS_PHYSICS_RATE)
+                } else if rects.back.contains(point) {
+                    Some(ID_SERVER_SETTINGS_BACK)
                 } else {
                     None
                 }
@@ -2297,6 +2469,12 @@ impl GameUi {
             ID_OPTIONS_CONTROLS => {
                 Some(GameUiAction::OpenHelp(help_parent_for_screen(self.screen)))
             }
+            ID_OPTIONS_SERVER_SETTINGS => match self.screen {
+                Some(GameScreen::Options { parent }) if state.server_cadence.is_some() => {
+                    Some(GameUiAction::OpenServerSettings(parent))
+                }
+                _ => None,
+            },
             ID_OPTIONS_BACK => match self.screen {
                 Some(GameScreen::Options {
                     parent: GameOptionsParent::Title,
@@ -2304,6 +2482,24 @@ impl GameUi {
                 Some(GameScreen::Options {
                     parent: GameOptionsParent::Pause,
                 }) => Some(GameUiAction::BackToPause),
+                _ => None,
+            },
+            ID_SERVER_SETTINGS_HOST_RATE => state
+                .server_cadence
+                .map(GameSimulationCadence::next_host_rate)
+                .map(GameUiAction::SetServerSimulationCadence),
+            ID_SERVER_SETTINGS_GAMEPLAY_RATE => state
+                .server_cadence
+                .map(GameSimulationCadence::next_gameplay_rate)
+                .map(GameUiAction::SetServerSimulationCadence),
+            ID_SERVER_SETTINGS_PHYSICS_RATE => state
+                .server_cadence
+                .map(GameSimulationCadence::next_physics_rate)
+                .map(GameUiAction::SetServerSimulationCadence),
+            ID_SERVER_SETTINGS_BACK => match self.screen {
+                Some(GameScreen::ServerSettings { parent }) => {
+                    Some(GameUiAction::OpenOptions(parent))
+                }
                 _ => None,
             },
             _ => None,
@@ -2691,8 +2887,88 @@ impl GameUi {
             &self.font,
             self.interaction(),
         );
+        if let Some(rect) = widgets.server_settings {
+            Button::new(ID_OPTIONS_SERVER_SETTINGS, rect, "Server Settings").render(
+                draw,
+                &self.font,
+                self.interaction(),
+            );
+        }
         Button::new(
             ID_OPTIONS_BACK,
+            widgets.back,
+            match parent {
+                GameOptionsParent::Title => "Back",
+                GameOptionsParent::Pause => "Done",
+            },
+        )
+        .render(draw, &self.font, self.interaction());
+    }
+
+    fn render_server_settings_screen(
+        &self,
+        draw: &mut GuiDrawList,
+        state: GameUiRenderState,
+        parent: GameOptionsParent,
+    ) {
+        draw.fill(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(0, 0, 0, 150),
+        );
+        let panel = server_settings_panel(self.scale, state);
+        draw.fill_gradient(
+            panel,
+            Color::rgba(33, 45, 47, 245),
+            Color::rgba(15, 20, 22, 245),
+        );
+        draw.outline(panel, Color::rgba(130, 166, 154, 255));
+        self.font.draw_centered(
+            draw,
+            "SERVER SETTINGS",
+            panel.center_x(),
+            panel.y + 12.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        let widgets = server_setting_widgets(self.scale, state);
+        if let Some(cadence) = state.server_cadence {
+            if let Some(rect) = widgets.host_rate {
+                CycleButton::new(
+                    ID_SERVER_SETTINGS_HOST_RATE,
+                    rect,
+                    "Host Rate",
+                    format!("{} Hz", cadence.host_rate_hz),
+                )
+                .render(draw, &self.font, self.interaction());
+            }
+            if let Some(rect) = widgets.gameplay_rate {
+                CycleButton::new(
+                    ID_SERVER_SETTINGS_GAMEPLAY_RATE,
+                    rect,
+                    "World Tick Rate",
+                    format!("{} Hz", cadence.gameplay_rate_hz),
+                )
+                .render(draw, &self.font, self.interaction());
+            }
+            if let Some(rect) = widgets.physics_rate {
+                CycleButton::new(
+                    ID_SERVER_SETTINGS_PHYSICS_RATE,
+                    rect,
+                    "Physics Rate",
+                    format!("{} Hz", cadence.physics_rate_hz),
+                )
+                .render(draw, &self.font, self.interaction());
+            }
+        } else {
+            self.font.draw_centered(
+                draw,
+                "LOCAL SERVER ONLY",
+                panel.center_x(),
+                panel.y + 42.0,
+                Color::rgba(185, 212, 198, 255),
+            );
+        }
+        Button::new(
+            ID_SERVER_SETTINGS_BACK,
             widgets.back,
             match parent {
                 GameOptionsParent::Title => "Back",
@@ -2719,6 +2995,15 @@ struct OptionWidgetRects {
     touch_controls: Option<Rect>,
     touch_look: Option<Rect>,
     controls: Rect,
+    server_settings: Option<Rect>,
+    back: Rect,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ServerSettingWidgetRects {
+    host_rate: Option<Rect>,
+    gameplay_rate: Option<Rect>,
+    physics_rate: Option<Rect>,
     back: Rect,
 }
 
@@ -3064,6 +3349,13 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
     } else {
         None
     };
+    let server_settings = if state.server_cadence.is_some() {
+        let rect = Rect::new(row_x, y, 192.0, 20.0);
+        y += 22.0;
+        Some(rect)
+    } else {
+        None
+    };
     y += 6.0;
     let controls = Rect::new(panel.center_x() - 55.0, y, 110.0, 20.0);
     y += 22.0;
@@ -3084,14 +3376,50 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
         touch_controls,
         touch_look,
         controls,
+        server_settings,
         back,
     }
 }
 
 fn options_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
-    let touch_rows =
+    let extra_rows =
         u8::from(state.touch_controls_mode.is_some()) + u8::from(state.touch_settings.is_some());
-    centered_panel(scale, 242.0, 328.0 + f32::from(touch_rows) * 22.0)
+    let extra_rows = extra_rows + u8::from(state.server_cadence.is_some());
+    centered_panel(scale, 242.0, 328.0 + f32::from(extra_rows) * 22.0)
+}
+
+fn server_setting_widgets(scale: GuiScale, state: GameUiRenderState) -> ServerSettingWidgetRects {
+    let panel = server_settings_panel(scale, state);
+    let row_x = panel.x + 25.0;
+    let mut y = panel.y + 38.0;
+    let (host_rate, gameplay_rate, physics_rate) = if state.server_cadence.is_some() {
+        let host_rate = Rect::new(row_x, y, 192.0, 20.0);
+        y += 22.0;
+        let gameplay_rate = Rect::new(row_x, y, 192.0, 20.0);
+        y += 22.0;
+        let physics_rate = Rect::new(row_x, y, 192.0, 20.0);
+        y += 28.0;
+        (Some(host_rate), Some(gameplay_rate), Some(physics_rate))
+    } else {
+        y += 34.0;
+        (None, None, None)
+    };
+    let back = Rect::new(panel.center_x() - 55.0, y, 110.0, 20.0);
+    ServerSettingWidgetRects {
+        host_rate,
+        gameplay_rate,
+        physics_rate,
+        back,
+    }
+}
+
+fn server_settings_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
+    let height = if state.server_cadence.is_some() {
+        138.0
+    } else {
+        96.0
+    };
+    centered_panel(scale, 242.0, height)
 }
 
 fn render_distance_slider_value(state: GameUiRenderState) -> f32 {
@@ -4626,5 +4954,104 @@ mod tests {
         assert!(ui.pointer_down(point, state));
         let (_handled, action) = ui.pointer_up(point, state);
         assert_eq!(action, Some(GameUiAction::SetMovementSpeed(0.125)));
+    }
+
+    #[test]
+    fn server_cadence_cycles_only_emit_valid_cadences() {
+        let cadence = GameSimulationCadence::new(20, 20, 60);
+
+        assert_eq!(
+            cadence.next_host_rate(),
+            GameSimulationCadence::new(30, 30, 60)
+        );
+        assert!(cadence.next_host_rate().is_valid());
+        assert_eq!(
+            cadence.next_gameplay_rate(),
+            GameSimulationCadence::new(20, 60, 60)
+        );
+        assert!(cadence.next_gameplay_rate().is_valid());
+        assert_eq!(
+            cadence.next_physics_rate(),
+            GameSimulationCadence::new(20, 20, 120)
+        );
+        assert!(cadence.next_physics_rate().is_valid());
+
+        let normalized = GameSimulationCadence::new(60, 30, 30).next_host_rate();
+        assert_eq!(normalized, GameSimulationCadence::new(20, 20, 60));
+        assert!(normalized.is_valid());
+    }
+
+    #[test]
+    fn options_server_settings_button_opens_server_settings_screen() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            server_cadence: Some(GameSimulationCadence::default()),
+            ..GameUiRenderState::default()
+        };
+        let server_settings = option_widgets(ui.scale(), state)
+            .server_settings
+            .expect("server cadence should expose server settings button");
+        let point = Point {
+            x: server_settings.center_x(),
+            y: server_settings.y + server_settings.height * 0.5,
+        };
+
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(
+            action,
+            Some(GameUiAction::OpenServerSettings(GameOptionsParent::Pause))
+        );
+        ui.apply_action(action.unwrap());
+        assert_eq!(
+            ui.screen(),
+            Some(GameScreen::ServerSettings {
+                parent: GameOptionsParent::Pause
+            })
+        );
+    }
+
+    #[test]
+    fn server_settings_controls_emit_cadence_actions() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::ServerSettings {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            server_cadence: Some(GameSimulationCadence::new(20, 20, 60)),
+            ..GameUiRenderState::default()
+        };
+        let widgets = server_setting_widgets(ui.scale(), state);
+        let host = widgets.host_rate.expect("host rate control");
+        let point = Point {
+            x: host.center_x(),
+            y: host.y + host.height * 0.5,
+        };
+
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(
+            action,
+            Some(GameUiAction::SetServerSimulationCadence(
+                GameSimulationCadence::new(30, 30, 60)
+            ))
+        );
+
+        let back = widgets.back;
+        let point = Point {
+            x: back.center_x(),
+            y: back.y + back.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(
+            action,
+            Some(GameUiAction::OpenOptions(GameOptionsParent::Pause))
+        );
     }
 }

@@ -790,6 +790,7 @@ fn desktop_scene_options_for_xr_request(
         chunk_z: scene.chunk_z,
         render_distance: scene.render_distance as i32,
         movement_speed_multiplier: scene.movement_speed_multiplier,
+        simulation_cadence: Default::default(),
         remote_addr,
         day_time_override: scene.day_time_override,
         freeze_time: scene.freeze_time,
