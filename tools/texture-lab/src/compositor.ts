@@ -37,6 +37,7 @@ export interface RenderedTexture extends RgbaImage {
   tintRole?: string;
   tint?: TintSpec;
   preview: TextureSpec["preview"];
+  catalog: TextureSpec["catalog"];
   authoring: RenderedAuthoringPreview[];
 }
 
@@ -86,6 +87,7 @@ export function renderTexture(pack: TexturePackAsset, name: string, texture: Tex
     height: size,
     data,
     preview: texture.preview,
+    catalog: texture.catalog,
     authoring: renderAuthoringPreviews(palette, texture.layers ?? []),
   };
   if (texture.tintRole) {

@@ -27,11 +27,69 @@ import { drawPixelText, pad3, textPixelWidth } from "./text";
 import type { AuthoringPreviewEntry, RenderedAuthoringPreview, RenderedTexture } from "./compositor";
 
 type TilingMode = "xy" | "x" | "none";
+type RotationPreviewMode = "none" | "y180" | "y90";
 
 const SEAM_ERROR_THRESHOLD = 0.04;
 
 export interface ReviewSheetOptions {
   reference?: RgbaImage;
+}
+
+function effectiveTiling(texture: RenderedTexture, displayTexture: RgbaImage): TilingMode {
+  if (texture.preview?.tiling) {
+    return texture.preview.tiling;
+  }
+  const catalogTiling = texture.catalog?.tiling;
+  if (catalogTiling === "xy" || catalogTiling === "x" || catalogTiling === "none") {
+    return catalogTiling;
+  }
+  return hasTransparency(displayTexture) ? "none" : "xy";
+}
+
+function effectiveRotationPreview(texture: RenderedTexture): RotationPreviewMode {
+  if (texture.preview?.rotation === false) {
+    return "none";
+  }
+  if (texture.preview?.rotation === true) {
+    return texture.catalog?.rotation === "y180-safe" ? "y180" : "y90";
+  }
+  if (texture.catalog?.rotation === "y90-safe") {
+    return "y90";
+  }
+  if (texture.catalog?.rotation === "y180-safe") {
+    return "y180";
+  }
+  return "none";
+}
+
+function drawTilingPreview(
+  target: RgbaImage,
+  texture: RgbaImage,
+  targetX: number,
+  targetY: number,
+  tiling: TilingMode,
+): void {
+  if (tiling === "xy") {
+    drawTiledScaled(target, texture, targetX, targetY, 3, 3, 3);
+  } else if (tiling === "x") {
+    drawTiledScaled(target, texture, targetX, targetY, 3, 1, 3);
+  } else {
+    drawScaled(target, texture, targetX, targetY, 8);
+  }
+}
+
+function rotationPanelLabel(mode: RotationPreviewMode): string {
+  return mode === "y180" ? "ROTATION 180 5X5" : "ROTATION 90 5X5";
+}
+
+function texturePanelLabel(prefix: string, tiling: TilingMode): string {
+  if (tiling === "xy") {
+    return `${prefix} TILED 3X3`;
+  }
+  if (tiling === "x") {
+    return `${prefix} TILED 3X1`;
+  }
+  return `${prefix} TEXTURE`;
 }
 
 export function makeReviewSheet(texture: RenderedTexture, options: ReviewSheetOptions = {}): RgbaImage {
@@ -46,8 +104,9 @@ export function makeReviewSheet(texture: RenderedTexture, options: ReviewSheetOp
   const rawCheckerboard = texture.preview?.checkerboard ?? hasTransparency(rawTexture);
   const displayCheckerboard = texture.preview?.checkerboard ?? hasTransparency(displayTexture);
   const showCube = texture.preview?.cube ?? !hasTransparency(displayTexture);
-  const showRotation = texture.preview?.rotation ?? !hasTransparency(displayTexture);
-  const tiling = texture.preview?.tiling ?? "xy";
+  const rotationPreview = effectiveRotationPreview(texture);
+  const showRotation = rotationPreview !== "none";
+  const tiling = effectiveTiling(texture, displayTexture);
 
   drawRect(sheet, 16, 16, 264, 264, panel);
   if (rawCheckerboard) {
@@ -92,7 +151,7 @@ export function makeReviewSheet(texture: RenderedTexture, options: ReviewSheetOp
 
   if (showRotation) {
     drawRect(sheet, 16, 328, 328, 328, panel);
-    drawRotatedTiledScaled(sheet, displayTexture, 20, 332, 5, 5, 2, `${texture.name}:rotation-preview`);
+    drawRotatedTiledScaled(sheet, displayTexture, 20, 332, 5, 5, 2, `${texture.name}:rotation-preview`, rotationPreview);
   }
 
   if (tiling !== "none") {
@@ -101,7 +160,7 @@ export function makeReviewSheet(texture: RenderedTexture, options: ReviewSheetOp
   }
 
   if (options.reference) {
-    drawReferencePanel(sheet, options.reference, 704, 328, 320, 328);
+    drawReferencePanel(sheet, options.reference, tiling, 704, 328, 320, 328);
   }
 
   if (structurePreview) {
@@ -116,7 +175,7 @@ export function makeReviewSheet(texture: RenderedTexture, options: ReviewSheetOp
     drawPanelLabel(sheet, "CUBE", 840, 16, 184);
   }
   if (showRotation) {
-    drawPanelLabel(sheet, "ROTATION 5X5", 16, 328, 328);
+    drawPanelLabel(sheet, rotationPanelLabel(rotationPreview), 16, 328, 328);
   }
   if (tiling !== "none") {
     drawPanelLabel(sheet, tiling === "x" ? "SEAM 2X1" : "SEAM 2X2", 360, 328, 328);
@@ -141,12 +200,20 @@ export function makeBlockReviewSheet(
   drawIsometricCubeFaces(sheet, cubeFaces(block, texturesByName, primaryTint), 82, 58);
 
   const top = textureForFace(block, texturesByName, "top");
+  const topDisplay = applyRoleTint(top, primaryTint);
+  const topRotation = effectiveRotationPreview(top);
+  const topTiling = effectiveTiling(top, topDisplay);
   drawRect(sheet, 340, 16, 328, 328, panel);
-  drawRotatedTiledScaled(sheet, applyRoleTint(top, primaryTint), 344, 20, 5, 5, 2, `${blockName}:top-rotation`);
+  if (topRotation !== "none") {
+    drawRotatedTiledScaled(sheet, topDisplay, 344, 20, 5, 5, 2, `${blockName}:top-rotation`, topRotation);
+  } else {
+    drawTilingPreview(sheet, topDisplay, 344, 20, topTiling);
+  }
 
   const side = compositeSideTexture(block, texturesByName, primaryTint);
+  const sideTiling = effectiveTiling(textureForFace(block, texturesByName, "side"), side);
   drawRect(sheet, 692, 16, 328, 328, panel);
-  drawTiledScaled(sheet, side, 696, 20, 3, 3, 3);
+  drawTilingPreview(sheet, side, 696, 20, sideTiling);
 
   drawRect(sheet, 16, 360, 1008, 280, panel);
   drawTerrainPatch(sheet, block, texturesByName, primaryTint, 32, 372);
@@ -156,8 +223,8 @@ export function makeBlockReviewSheet(
   }
 
   drawPanelLabel(sheet, "BLOCK PREVIEW", 16, 16, 300);
-  drawPanelLabel(sheet, "TOP ROTATION 5X5", 340, 16, 328);
-  drawPanelLabel(sheet, "SIDE TILED 3X3", 692, 16, 328);
+  drawPanelLabel(sheet, topRotation !== "none" ? `TOP ${rotationPanelLabel(topRotation)}` : texturePanelLabel("TOP", topTiling), 340, 16, 328);
+  drawPanelLabel(sheet, texturePanelLabel("SIDE", sideTiling), 692, 16, 328);
   drawPanelLabel(sheet, "TERRAIN PATCH", 16, 360, 1008);
   drawPanelLabel(sheet, "FINAL CUBE", 744, 386, 160, 1);
   drawPanelLabel(sheet, "TINTS", 880, 386, 100, 1);
@@ -226,10 +293,11 @@ function drawRotatedTiledScaled(
   tilesY: number,
   scale: number,
   seed: string,
+  mode: RotationPreviewMode,
 ): void {
   for (let tileY = 0; tileY < tilesY; tileY += 1) {
     for (let tileX = 0; tileX < tilesX; tileX += 1) {
-      const rotation = Math.floor(random01(seed, tileX, tileY) * 4) % 4;
+      const rotation = rotatedTileStep(seed, tileX, tileY, mode);
       drawRotatedScaled(
         target,
         source,
@@ -240,6 +308,13 @@ function drawRotatedTiledScaled(
       );
     }
   }
+}
+
+function rotatedTileStep(seed: string, tileX: number, tileY: number, mode: RotationPreviewMode): number {
+  if (mode === "y180") {
+    return random01(seed, tileX, tileY) < 0.5 ? 0 : 2;
+  }
+  return Math.floor(random01(seed, tileX, tileY) * 4) % 4;
 }
 
 function drawRotatedScaled(
@@ -448,6 +523,7 @@ function drawPanelLabel(
 function drawReferencePanel(
   target: RgbaImage,
   reference: RgbaImage,
+  tiling: TilingMode,
   panelX: number,
   panelY: number,
   panelWidth: number,
@@ -476,16 +552,25 @@ function drawReferencePanel(
   drawScaled(target, reference, enlargedX, enlargedY, enlargedScale);
   drawGrid(target, enlargedX, enlargedY, reference.width, reference.height, enlargedScale, [86, 89, 88, 255]);
 
-  const repeatScale = Math.max(1, Math.floor(Math.min(144 / (reference.width * 3), 144 / (reference.height * 3))));
-  const repeatWidth = reference.width * 3 * repeatScale;
-  const repeatHeight = reference.height * 3 * repeatScale;
+  const repeatTilesX = tiling === "none" ? 1 : 3;
+  const repeatTilesY = tiling === "xy" ? 3 : 1;
+  const repeatScale = Math.max(
+    1,
+    Math.floor(Math.min(144 / (reference.width * repeatTilesX), 144 / (reference.height * repeatTilesY))),
+  );
+  const repeatWidth = reference.width * repeatTilesX * repeatScale;
+  const repeatHeight = reference.height * repeatTilesY * repeatScale;
   const repeatX = panelX + panelWidth - repeatWidth - 18;
   const repeatY = panelY + 42;
-  drawPixelText(target, "TILED 3X3", repeatX, panelY + 30, 1, [214, 218, 210, 255]);
+  drawPixelText(target, tilingLabel(tiling), repeatX, panelY + 30, 1, [214, 218, 210, 255]);
   if (checkerboard) {
     drawCheckerboard(target, repeatX, repeatY, repeatWidth, repeatHeight, Math.max(4, repeatScale * 2));
   }
-  drawTiledScaled(target, reference, repeatX, repeatY, 3, 3, repeatScale);
+  if (tiling === "none") {
+    drawScaled(target, reference, repeatX, repeatY, repeatScale);
+  } else {
+    drawTiledScaled(target, reference, repeatX, repeatY, repeatTilesX, repeatTilesY, repeatScale);
+  }
 
   const lowerY = panelY + 42 + Math.max(enlargedHeight, repeatHeight) + 20;
   if (lowerY + 100 < panelY + panelHeight) {

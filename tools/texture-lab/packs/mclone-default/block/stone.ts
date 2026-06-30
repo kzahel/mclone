@@ -26,6 +26,10 @@ export function defineStoneTextures(api: TextureLabApi): void {
     palette: "stone",
     base: "base",
     exportPath: "assets/mclone/textures/block/stone.png",
+    catalog: {
+      tiling: "xy",
+      rotation: "y180-safe",
+    },
     layers: stoneBaseLayers(api),
   });
 
@@ -35,6 +39,10 @@ export function defineStoneTextures(api: TextureLabApi): void {
     palette: "stone",
     base: "base",
     exportPath: "assets/mclone/textures/block/coal_ore.png",
+    catalog: {
+      tiling: "xy",
+      rotation: "fixed",
+    },
     layers: [
       ...stoneBaseLayers(api),
       mask({
@@ -73,6 +81,10 @@ export function defineStoneTextures(api: TextureLabApi): void {
     palette: "stone",
     base: "base",
     exportPath: "assets/mclone/textures/block/iron_ore.png",
+    catalog: {
+      tiling: "xy",
+      rotation: "fixed",
+    },
     layers: [
       ...stoneBaseLayers(api),
       mask({

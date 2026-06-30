@@ -12,7 +12,7 @@ export type PaletteSpec = Record<string, string>;
 export type TextureSourceCategory = "final-color" | "tintable";
 export type TextureCatalogStatus = "draft" | "reviewed" | "accepted";
 export type TextureCatalogTiling = "xy" | "x" | "none" | "unknown";
-export type TextureCatalogRotation = "free" | "y90-safe" | "fixed" | "model-driven" | "unknown";
+export type TextureCatalogRotation = "free" | "y90-safe" | "y180-safe" | "fixed" | "model-driven" | "unknown";
 
 export interface TintSpec {
   normal: string;
@@ -428,12 +428,13 @@ function validateTextureCatalogMetadata(
     catalog.rotation !== undefined &&
     catalog.rotation !== "free" &&
     catalog.rotation !== "y90-safe" &&
+    catalog.rotation !== "y180-safe" &&
     catalog.rotation !== "fixed" &&
     catalog.rotation !== "model-driven" &&
     catalog.rotation !== "unknown"
   ) {
     errors.push(
-      `texture '${textureName}' catalog.rotation must be 'free', 'y90-safe', 'fixed', 'model-driven', or 'unknown'`,
+      `texture '${textureName}' catalog.rotation must be 'free', 'y90-safe', 'y180-safe', 'fixed', 'model-driven', or 'unknown'`,
     );
   }
   for (const [index, tag] of (catalog.tags ?? []).entries()) {

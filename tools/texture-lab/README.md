@@ -213,8 +213,8 @@ stays under `/tmp`.
 Catalog fields are intentionally split by ownership:
 
 - vanilla-derived facts: texture path, size, alpha mode, animation, model
-  families, block/model/face uses, tint indexes, blockstate rotations, face UV
-  rotations, and render layers
+  families, alpha visual bounds, block/model/face uses, tint indexes,
+  blockstate rotations, face UV rotations, and render layers
 - inferred authoring constraints: tiling, rotation safety, alpha/render-layer
   class, and tint role hints
 - mclone status: authored replacement path, source category, tint role,

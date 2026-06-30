@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadTexturePack } from "./load";
-import { decodePng } from "./png";
+import { decodePng, type RgbaImage } from "./png";
 import { referenceRoots, runtimeCompatTexturePath } from "./reference";
 import type { TexturePackAsset, TextureSpec } from "./dsl";
 
@@ -9,7 +9,7 @@ type AlphaMode = "opaque" | "cutout" | "translucent";
 type RenderLayer = "solid" | "cutout" | "cutoutMipped" | "translucent" | "tripwire" | "fluid" | "unknown";
 type UsageShape = "full-cube" | "cross-plant" | "partial-model" | "particle-only" | "fluid-sprite";
 type CatalogTiling = "xy" | "x" | "none" | "unknown";
-type CatalogRotation = "free" | "y90-safe" | "fixed" | "model-driven" | "unknown";
+type CatalogRotation = "free" | "y90-safe" | "y180-safe" | "fixed" | "model-driven" | "unknown";
 
 interface CatalogArgs {
   input: string;
@@ -35,6 +35,7 @@ interface CatalogSummary {
   authoredRuntimeOverrides: number;
   missingAuthoredRuntimeOverrides: number;
   cutoutOrTranslucentTextures: number;
+  nonFullVisualBoundsTextures: number;
   tintedTextures: number;
   animatedTextures: number;
 }
@@ -64,6 +65,35 @@ interface AlphaSummary {
   transparentPixels: number;
   translucentPixels: number;
   opaquePixels: number;
+  visiblePixels: number;
+  visibleCoverage: number;
+  visibleBounds: VisibleBounds | null;
+  frameBounds: FrameBoundsSummary | null;
+}
+
+interface VisibleBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  area: number;
+  boxFillRatio: number;
+  fillsTexture: boolean;
+  touches: {
+    left: boolean;
+    right: boolean;
+    top: boolean;
+    bottom: boolean;
+  };
+}
+
+interface FrameBoundsSummary {
+  frameWidth: number;
+  frameHeight: number;
+  frameCount: number;
+  visiblePixels: number;
+  visibleCoverage: number;
+  visibleBounds: VisibleBounds | null;
 }
 
 interface AnimationSummary {
@@ -321,13 +351,14 @@ async function loadVanillaBlockTextures(root: string): Promise<VanillaTexture[]>
     const relative = normalizePath(path.relative(root, file));
     const name = normalizePath(path.relative(textureRoot, file)).replace(/\.png$/u, "");
     const image = decodePng(await fs.readFile(file));
+    const animation = await loadAnimationMetadata(file);
     textures.push({
       texture: `minecraft:block/${name}`,
       pngPath: relative,
-      alpha: analyzeAlpha(image.data),
+      alpha: analyzeAlpha(image, animation ? image.width : null),
       width: image.width,
       height: image.height,
-      animation: await loadAnimationMetadata(file),
+      animation,
     });
   }
   return textures;
@@ -753,7 +784,19 @@ function inferRotation(texture: string, shapes: UsageShape[], uses: TextureUse[]
     return "fixed";
   }
   const yRotations = uniqueSorted(uses.map((use) => use.variant.y));
-  if (yRotations.length > 1 && yRotations.every((value) => value === 0 || value === 90 || value === 180 || value === 270)) {
+  const xRotations = uniqueSorted(uses.map((use) => use.variant.x));
+  if (
+    yRotations.length > 1 &&
+    xRotations.every((value) => value === 0) &&
+    yRotations.every((value) => value === 0 || value === 180)
+  ) {
+    return "y180-safe";
+  }
+  if (
+    yRotations.length > 1 &&
+    xRotations.every((value) => value === 0) &&
+    yRotations.every((value) => value === 0 || value === 90 || value === 180 || value === 270)
+  ) {
     return "y90-safe";
   }
   if (
@@ -824,6 +867,10 @@ function summarizeCatalog(entries: TextureCatalogEntry[]): CatalogSummary {
     authoredRuntimeOverrides,
     missingAuthoredRuntimeOverrides: entries.length - authoredRuntimeOverrides,
     cutoutOrTranslucentTextures: entries.filter((entry) => entry.alpha.mode !== "opaque" || entry.renderLayers.some((layer) => layer === "cutout" || layer === "cutoutMipped" || layer === "translucent")).length,
+    nonFullVisualBoundsTextures: entries.filter((entry) => {
+      const bounds = reportVisibleBounds(entry);
+      return bounds && !bounds.fillsTexture;
+    }).length,
     tintedTextures: entries.filter((entry) => entry.tintIndexes.length > 0).length,
     animatedTextures: entries.filter((entry) => entry.animation !== null).length,
   };
@@ -842,6 +889,7 @@ function catalogMarkdown(catalog: TextureCatalog): string {
   lines.push(`- Authored runtime overrides: ${catalog.summary.authoredRuntimeOverrides}`);
   lines.push(`- Missing runtime overrides: ${catalog.summary.missingAuthoredRuntimeOverrides}`);
   lines.push(`- Cutout/translucent or alpha-bearing textures: ${catalog.summary.cutoutOrTranslucentTextures}`);
+  lines.push(`- Non-full visual bounds: ${catalog.summary.nonFullVisualBoundsTextures}`);
   lines.push(`- Tinted textures: ${catalog.summary.tintedTextures}`);
   lines.push(`- Animated textures: ${catalog.summary.animatedTextures}`);
   lines.push("");
@@ -869,9 +917,9 @@ function catalogMarkdown(catalog: TextureCatalog): string {
   lines.push("## Matrix");
   lines.push("");
   lines.push(
-    "| Texture | Authored | Layer | Alpha | Tint | Tiling | Rotation | Shape | Uses | Size | Animation | Families |",
+    "| Texture | Authored | Layer | Alpha | Bounds | Tint | Tiling | Rotation | Shape | Uses | Size | Animation | Families |",
   );
-  lines.push("|---|---|---|---|---|---|---|---|---:|---|---|---|");
+  lines.push("|---|---|---|---|---|---|---|---|---|---:|---|---|---|");
   for (const entry of catalog.textures) {
     lines.push(matrixRow(entry));
   }
@@ -886,14 +934,15 @@ function pushPrioritySection(lines: string[], title: string, entries: TextureCat
     lines.push("");
     return;
   }
-  lines.push("| Texture | Layer | Alpha | Tint | Tiling | Rotation | Shape | Uses | Families |");
-  lines.push("|---|---|---|---|---|---|---|---:|---|");
+  lines.push("| Texture | Layer | Alpha | Bounds | Tint | Tiling | Rotation | Shape | Uses | Families |");
+  lines.push("|---|---|---|---|---|---|---|---|---:|---|");
   for (const entry of entries.slice(0, limit)) {
     lines.push(
       [
         md(entry.texture),
         md(joinOrDash(entry.renderLayers)),
         md(entry.alpha.mode),
+        md(formatVisibleBounds(entry)),
         md(joinOrDash(entry.inferredTintRoles.length > 0 ? entry.inferredTintRoles : entry.tintIndexes.map(String))),
         md(entry.constraints.tiling),
         md(entry.constraints.rotation),
@@ -904,7 +953,7 @@ function pushPrioritySection(lines: string[], title: string, entries: TextureCat
     );
   }
   if (entries.length > limit) {
-    lines.push(`| ... | ${entries.length - limit} more omitted from this priority section; see Matrix below. | | | | | | | |`);
+    lines.push(`| ... | ${entries.length - limit} more omitted from this priority section; see Matrix below. | | | | | | | | |`);
   }
   lines.push("");
 }
@@ -915,6 +964,7 @@ function matrixRow(entry: TextureCatalogEntry): string {
     md(entry.authored.status === "missing" ? "missing" : entry.authored.textureName ?? entry.authored.status),
     md(joinOrDash(entry.renderLayers)),
     md(entry.alpha.mode),
+    md(formatVisibleBounds(entry)),
     md(joinOrDash(entry.inferredTintRoles.length > 0 ? entry.inferredTintRoles : entry.tintIndexes.map(String))),
     md(entry.constraints.tiling),
     md(entry.constraints.rotation),
@@ -926,26 +976,138 @@ function matrixRow(entry: TextureCatalogEntry): string {
   ].join(" | ").replace(/^/u, "| ").replace(/$/u, " |");
 }
 
-function analyzeAlpha(data: Uint8Array): AlphaSummary {
+function formatVisibleBounds(entry: TextureCatalogEntry): string {
+  const frameBounds = entry.alpha.frameBounds;
+  const bounds = frameBounds?.visibleBounds ?? entry.alpha.visibleBounds;
+  if (!bounds) {
+    return "-";
+  }
+  const coverage = frameBounds?.visibleCoverage ?? entry.alpha.visibleCoverage;
+  const suffix = frameBounds ? "/frame" : "";
+  if (bounds.fillsTexture) {
+    return `full ${formatPercent(coverage)}${suffix}`;
+  }
+  return `${bounds.x},${bounds.y} ${bounds.width}x${bounds.height} ${formatPercent(coverage)}${suffix}`;
+}
+
+function reportVisibleBounds(entry: TextureCatalogEntry): VisibleBounds | null {
+  return entry.alpha.frameBounds?.visibleBounds ?? entry.alpha.visibleBounds;
+}
+
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function analyzeAlpha(image: RgbaImage, animationFrameHeight: number | null): AlphaSummary {
+  const data = image.data;
   let transparentPixels = 0;
   let translucentPixels = 0;
   let opaquePixels = 0;
+  let minX = image.width;
+  let minY = image.height;
+  let maxX = -1;
+  let maxY = -1;
   for (let index = 3; index < data.length; index += 4) {
     const alpha = data[index]!;
+    const pixel = (index - 3) / 4;
+    const x = pixel % image.width;
+    const y = Math.floor(pixel / image.width);
     if (alpha === 0) {
       transparentPixels += 1;
-    } else if (alpha === 255) {
-      opaquePixels += 1;
     } else {
-      translucentPixels += 1;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      if (alpha === 255) {
+        opaquePixels += 1;
+      } else {
+        translucentPixels += 1;
+      }
     }
   }
   const mode: AlphaMode = translucentPixels > 0 ? "translucent" : transparentPixels > 0 ? "cutout" : "opaque";
+  const visiblePixels = opaquePixels + translucentPixels;
+  const visibleBounds = visiblePixels > 0 ? makeVisibleBounds(image.width, image.height, minX, minY, maxX, maxY, visiblePixels) : null;
   return {
     mode,
     transparentPixels,
     translucentPixels,
     opaquePixels,
+    visiblePixels,
+    visibleCoverage: visiblePixels / (image.width * image.height),
+    visibleBounds,
+    frameBounds: animationFrameHeight ? analyzeFrameBounds(image, animationFrameHeight) : null,
+  };
+}
+
+function analyzeFrameBounds(image: RgbaImage, frameHeight: number): FrameBoundsSummary | null {
+  if (frameHeight <= 0 || image.height % frameHeight !== 0) {
+    return null;
+  }
+  const frameCount = image.height / frameHeight;
+  if (frameCount <= 1) {
+    return null;
+  }
+  let minX = image.width;
+  let minY = frameHeight;
+  let maxX = -1;
+  let maxY = -1;
+  let visiblePixels = 0;
+  const visibleFrameCells = new Set<number>();
+  for (let y = 0; y < image.height; y += 1) {
+    const frameY = y % frameHeight;
+    for (let x = 0; x < image.width; x += 1) {
+      const alpha = image.data[(y * image.width + x) * 4 + 3]!;
+      if (alpha === 0) {
+        continue;
+      }
+      visiblePixels += 1;
+      visibleFrameCells.add(frameY * image.width + x);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, frameY);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, frameY);
+    }
+  }
+  return {
+    frameWidth: image.width,
+    frameHeight,
+    frameCount,
+    visiblePixels,
+    visibleCoverage: visiblePixels / (image.width * frameHeight * frameCount),
+    visibleBounds: visiblePixels > 0
+      ? makeVisibleBounds(image.width, frameHeight, minX, minY, maxX, maxY, visibleFrameCells.size)
+      : null,
+  };
+}
+
+function makeVisibleBounds(
+  textureWidth: number,
+  textureHeight: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  visiblePixels: number,
+): VisibleBounds {
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const area = width * height;
+  return {
+    x: minX,
+    y: minY,
+    width,
+    height,
+    area,
+    boxFillRatio: visiblePixels / area,
+    fillsTexture: minX === 0 && minY === 0 && width === textureWidth && height === textureHeight,
+    touches: {
+      left: minX === 0,
+      right: maxX === textureWidth - 1,
+      top: minY === 0,
+      bottom: maxY === textureHeight - 1,
+    },
   };
 }
 
@@ -1079,7 +1241,14 @@ function isCatalogTiling(value: string | null): value is CatalogTiling {
 }
 
 function isCatalogRotation(value: string | null): value is CatalogRotation {
-  return value === "free" || value === "y90-safe" || value === "fixed" || value === "model-driven" || value === "unknown";
+  return (
+    value === "free" ||
+    value === "y90-safe" ||
+    value === "y180-safe" ||
+    value === "fixed" ||
+    value === "model-driven" ||
+    value === "unknown"
+  );
 }
 
 function numberField(object: Record<string, unknown>, key: string, fallback: number): number {

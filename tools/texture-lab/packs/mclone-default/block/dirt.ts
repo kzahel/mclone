@@ -17,6 +17,10 @@ export function defineDirtTextures({ palette, texture, macroNoise, mask, speckle
     palette: "dirt",
     base: "base",
     exportPath: "assets/mclone/textures/block/dirt.png",
+    catalog: {
+      tiling: "xy",
+      rotation: "y90-safe",
+    },
     layers: [
       macroNoise({
         seed: "dirt-broad-clods",

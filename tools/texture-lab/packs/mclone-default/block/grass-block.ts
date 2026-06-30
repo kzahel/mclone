@@ -47,6 +47,10 @@ export function defineGrassBlockTextures({
     palette: "grass_top",
     base: "base",
     exportPath: "assets/mclone/textures/block/grass_block_top.png",
+    catalog: {
+      tiling: "xy",
+      rotation: "y90-safe",
+    },
     layers: [
       macroNoise({
         seed: "grass-top-broad-tufts",
@@ -111,6 +115,10 @@ export function defineGrassBlockTextures({
     palette: "grass_side",
     base: "dirt",
     exportPath: "assets/mclone/textures/block/grass_block_side.png",
+    catalog: {
+      tiling: "x",
+      rotation: "fixed",
+    },
     preview: {
       cube: false,
       rotation: false,
@@ -173,6 +181,10 @@ export function defineGrassBlockTextures({
     palette: "grass_overlay",
     base: "transparent",
     exportPath: "assets/mclone/textures/block/grass_block_side_overlay.png",
+    catalog: {
+      tiling: "x",
+      rotation: "fixed",
+    },
     preview: {
       checkerboard: true,
       cube: false,
@@ -214,6 +226,10 @@ export function defineGrassBlockTextures({
     palette: "grass_side",
     base: "dirt",
     exportPath: "assets/mclone/textures/block/grass_block_bottom.png",
+    catalog: {
+      tiling: "xy",
+      rotation: "y90-safe",
+    },
     layers: [
       macroNoise({
         seed: "grass-bottom-dirt-broad-clods",
