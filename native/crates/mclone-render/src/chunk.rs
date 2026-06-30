@@ -472,23 +472,67 @@ struct TexturedSectionCullingResult {
 }
 
 #[derive(Clone, Debug)]
-pub struct PreparedTexturedSectionStereoDraw {
-    stats: [TexturedSectionRenderStats; 2],
+struct TexturedSectionStereoCullingResult {
+    stats: TexturedSectionRenderStats,
+    eye_stats: [TexturedSectionRenderStats; 2],
     drawn_keys: FxHashSet<RenderSectionKey>,
+    draw_masks: FxHashMap<RenderSectionKey, StereoDrawMask>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct StereoDrawMask(u8);
+
+impl StereoDrawMask {
+    const LEFT: Self = Self(0b01);
+    const RIGHT: Self = Self(0b10);
+
+    fn for_slot(view_slot: PerViewSlot) -> Self {
+        if view_slot == RIGHT_EYE_VIEW_SLOT {
+            Self::RIGHT
+        } else {
+            Self::LEFT
+        }
+    }
+
+    fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
+    fn contains(self, other: Self) -> bool {
+        self.0 & other.0 != 0
+    }
+
+    fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PreparedTexturedSectionStereoDraw {
+    union_stats: [TexturedSectionRenderStats; 2],
+    eye_stats: [TexturedSectionRenderStats; 2],
+    drawn_keys: FxHashSet<RenderSectionKey>,
+    draw_masks: FxHashMap<RenderSectionKey, StereoDrawMask>,
     translucent_keys: Vec<RenderSectionKey>,
 }
 
 impl PreparedTexturedSectionStereoDraw {
     pub fn stats(&self) -> [TexturedSectionRenderStats; 2] {
-        self.stats
+        self.union_stats
     }
 
     fn stats_for_slot(&self, view_slot: PerViewSlot) -> TexturedSectionRenderStats {
         if view_slot == RIGHT_EYE_VIEW_SLOT {
-            self.stats[1]
+            self.eye_stats[1]
         } else {
-            self.stats[0]
+            self.eye_stats[0]
         }
+    }
+
+    fn draws_in_slot(&self, key: RenderSectionKey, view_slot: PerViewSlot) -> bool {
+        self.draw_masks
+            .get(&key)
+            .is_some_and(|mask| mask.contains(StereoDrawMask::for_slot(view_slot)))
     }
 }
 
@@ -502,6 +546,7 @@ impl PreparedTexturedSectionStereoDraw {
 #[derive(Default)]
 struct CullScratch {
     frustum_keys: FxHashSet<RenderSectionKey>,
+    frustum_masks: FxHashMap<RenderSectionKey, StereoDrawMask>,
     ready_frustum_keys: FxHashSet<RenderSectionKey>,
     queue: VecDeque<RenderSectionKey>,
     infos: FxHashMap<RenderSectionKey, RenderSectionTraversalInfo>,
@@ -510,6 +555,7 @@ struct CullScratch {
 impl CullScratch {
     fn reset(&mut self) {
         self.frustum_keys.clear();
+        self.frustum_masks.clear();
         self.ready_frustum_keys.clear();
         self.queue.clear();
         self.infos.clear();
@@ -572,6 +618,7 @@ fn cull_textured_sections(
     scratch.reset();
     let CullScratch {
         frustum_keys,
+        frustum_masks: _,
         ready_frustum_keys,
         queue,
         infos,
@@ -690,7 +737,7 @@ fn cull_textured_sections_stereo_union(
     render_views: [ChunkRenderView; 2],
     options: [TexturedSectionRenderOptions; 2],
     scratch: &mut CullScratch,
-) -> TexturedSectionCullingResult {
+) -> TexturedSectionStereoCullingResult {
     let records = &prepared.records;
     let frustums = render_views.map(ClipFrustum::from_render_view);
     let section_occlusion_culling =
@@ -703,20 +750,44 @@ fn cull_textured_sections_stereo_union(
         loaded_index_count: prepared.loaded_index_count,
         ..TexturedSectionRenderStats::default()
     };
+    let mut eye_stats = std::array::from_fn(|eye| TexturedSectionRenderStats {
+        section_occlusion_culling: options[eye].section_occlusion_culling,
+        force_fullbright: options[eye].force_fullbright,
+        loaded_section_count: prepared.loaded_section_count,
+        loaded_index_count: prepared.loaded_index_count,
+        ..TexturedSectionRenderStats::default()
+    });
 
     scratch.reset();
     let CullScratch {
         frustum_keys,
+        frustum_masks,
         ready_frustum_keys,
         queue,
         infos,
     } = scratch;
     for (key, record) in records {
-        if frustums
-            .iter()
-            .any(|frustum| frustum.is_render_section_visible(*key))
-        {
+        let mut mask = StereoDrawMask::default();
+        for eye in 0..2 {
+            if frustums[eye].is_render_section_visible(*key) {
+                mask.insert(if eye == 0 {
+                    StereoDrawMask::LEFT
+                } else {
+                    StereoDrawMask::RIGHT
+                });
+                if record.drawable {
+                    eye_stats[eye].frustum_section_count += 1;
+                    eye_stats[eye].frustum_index_count += record.index_count;
+                    if !record.traversal_ready {
+                        eye_stats[eye].readiness_culled_section_count += 1;
+                        eye_stats[eye].readiness_culled_index_count += record.index_count;
+                    }
+                }
+            }
+        }
+        if !mask.is_empty() {
             frustum_keys.insert(*key);
+            frustum_masks.insert(*key, mask);
             if record.traversal_ready {
                 ready_frustum_keys.insert(*key);
             }
@@ -745,9 +816,14 @@ fn cull_textured_sections_stereo_union(
             .filter(|record| record.drawable)
             .map(|record| record.index_count)
             .sum();
-        return TexturedSectionCullingResult {
+        let drawn_keys = ready_frustum_keys.iter().copied().collect::<FxHashSet<_>>();
+        let draw_masks = stereo_draw_masks_from_frustum_masks(&drawn_keys, frustum_masks);
+        finalize_stereo_eye_stats(&mut eye_stats, records, &draw_masks, false);
+        return TexturedSectionStereoCullingResult {
             stats,
-            drawn_keys: ready_frustum_keys.iter().copied().collect(),
+            eye_stats,
+            drawn_keys,
+            draw_masks,
         };
     }
 
@@ -800,6 +876,9 @@ fn cull_textured_sections_stereo_union(
     }
 
     stats.graph_cull_enabled = section_occlusion_culling;
+    for stats in &mut eye_stats {
+        stats.graph_cull_enabled = section_occlusion_culling;
+    }
     stats.drawn_section_count = drawn_keys
         .iter()
         .filter_map(|key| records.get(key))
@@ -820,7 +899,74 @@ fn cull_textured_sections_stereo_union(
         .saturating_sub(stats.readiness_culled_index_count)
         .saturating_sub(stats.drawn_index_count);
 
-    TexturedSectionCullingResult { stats, drawn_keys }
+    let draw_masks = stereo_draw_masks_from_frustum_masks(&drawn_keys, frustum_masks);
+    finalize_stereo_eye_stats(
+        &mut eye_stats,
+        records,
+        &draw_masks,
+        section_occlusion_culling,
+    );
+    TexturedSectionStereoCullingResult {
+        stats,
+        eye_stats,
+        drawn_keys,
+        draw_masks,
+    }
+}
+
+fn stereo_draw_masks_from_frustum_masks(
+    drawn_keys: &FxHashSet<RenderSectionKey>,
+    frustum_masks: &FxHashMap<RenderSectionKey, StereoDrawMask>,
+) -> FxHashMap<RenderSectionKey, StereoDrawMask> {
+    let mut masks = FxHashMap::default();
+    for key in drawn_keys {
+        if let Some(mask) = frustum_masks.get(key).copied() {
+            masks.insert(*key, mask);
+        }
+    }
+    masks
+}
+
+fn finalize_stereo_eye_stats(
+    eye_stats: &mut [TexturedSectionRenderStats; 2],
+    records: &BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
+    draw_masks: &FxHashMap<RenderSectionKey, StereoDrawMask>,
+    graph_cull_enabled: bool,
+) {
+    for stats in eye_stats.iter_mut() {
+        stats.graph_cull_enabled = graph_cull_enabled;
+        stats.drawn_section_count = 0;
+        stats.drawn_index_count = 0;
+    }
+
+    for (key, mask) in draw_masks {
+        let Some(record) = records.get(key) else {
+            continue;
+        };
+        if !record.drawable {
+            continue;
+        }
+        for (eye, eye_mask) in [StereoDrawMask::LEFT, StereoDrawMask::RIGHT]
+            .into_iter()
+            .enumerate()
+        {
+            if mask.contains(eye_mask) {
+                eye_stats[eye].drawn_section_count += 1;
+                eye_stats[eye].drawn_index_count += record.index_count;
+            }
+        }
+    }
+
+    for stats in eye_stats.iter_mut() {
+        stats.graph_culled_section_count = stats
+            .frustum_section_count
+            .saturating_sub(stats.readiness_culled_section_count)
+            .saturating_sub(stats.drawn_section_count);
+        stats.graph_culled_index_count = stats
+            .frustum_index_count
+            .saturating_sub(stats.readiness_culled_index_count)
+            .saturating_sub(stats.drawn_index_count);
+    }
 }
 
 fn traversal_start_keys(
@@ -2511,14 +2657,12 @@ impl TexturedSectionDrawResources {
         if let (Some(timing), Some(prepare_start)) = (&mut timing, prepare_start) {
             timing.prepare_ms = elapsed_ms(prepare_start.elapsed());
         }
-        let mut stats = [culling.stats; 2];
-        stats[0].section_occlusion_culling = options[0].section_occlusion_culling;
-        stats[0].force_fullbright = options[0].force_fullbright;
-        stats[1].section_occlusion_culling = options[1].section_occlusion_culling;
-        stats[1].force_fullbright = options[1].force_fullbright;
+        let union_stats = stereo_union_stats_for_options(culling.stats, options);
         PreparedTexturedSectionStereoDraw {
-            stats,
+            union_stats,
+            eye_stats: culling.eye_stats,
             drawn_keys: culling.drawn_keys,
+            draw_masks: culling.draw_masks,
             translucent_keys,
         }
     }
@@ -2574,13 +2718,16 @@ impl TexturedSectionDrawResources {
             pass.set_bind_group(1, &self.atlas.bind_group, &[]);
             pass.set_pipeline(&self.renderer.opaque_pipeline);
             for (key, mesh) in &self.sections {
-                if !prepared_draw.drawn_keys.contains(key) {
+                if !prepared_draw.draws_in_slot(*key, view_slot) {
                     continue;
                 }
                 draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
             }
             pass.set_pipeline(&self.renderer.translucent_pipeline);
             for key in &prepared_draw.translucent_keys {
+                if !prepared_draw.draws_in_slot(*key, view_slot) {
+                    continue;
+                }
                 if let Some(mesh) = self.sections.get(key) {
                     draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
                 }
@@ -2624,6 +2771,18 @@ impl TexturedSectionDrawResources {
 
 fn elapsed_ms(duration: std::time::Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
+}
+
+fn stereo_union_stats_for_options(
+    stats: TexturedSectionRenderStats,
+    options: [TexturedSectionRenderOptions; 2],
+) -> [TexturedSectionRenderStats; 2] {
+    let mut stats = [stats; 2];
+    stats[0].section_occlusion_culling = options[0].section_occlusion_culling;
+    stats[0].force_fullbright = options[0].force_fullbright;
+    stats[1].section_occlusion_culling = options[1].section_occlusion_culling;
+    stats[1].force_fullbright = options[1].force_fullbright;
+    stats
 }
 
 fn stereo_center_position(render_views: [ChunkRenderView; 2]) -> Vec3 {
@@ -3377,8 +3536,15 @@ mod tests {
         assert!(expected.contains(&west));
         assert!(expected.contains(&east));
         assert_eq!(stereo.drawn_keys, expected);
+        assert_eq!(stereo.draw_masks.get(&west), Some(&StereoDrawMask::LEFT));
+        assert_eq!(stereo.draw_masks.get(&east), Some(&StereoDrawMask::RIGHT));
         assert_eq!(stereo.stats.drawn_section_count, expected.len());
         assert_eq!(stereo.stats.drawn_index_count, 12);
+
+        assert_eq!(stereo.eye_stats[0].drawn_section_count, 1);
+        assert_eq!(stereo.eye_stats[0].drawn_index_count, 6);
+        assert_eq!(stereo.eye_stats[1].drawn_section_count, 1);
+        assert_eq!(stereo.eye_stats[1].drawn_index_count, 6);
     }
 
     #[test]
