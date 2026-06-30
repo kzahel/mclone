@@ -1,12 +1,14 @@
 # 110: Shared Physics Backend Experiment
 
-Status: active; Slices 1-4b landed with the shared `mclone-physics` facade,
+Status: active; Slices 1-4c landed with the shared `mclone-physics` facade,
 no-op backend, optional Rapier backend, synthetic cuboid/static-patch
 simulation test, section terrain collider probe, feature-gated live
 chunk-to-physics terrain conversion, server-owned debug cube physics runtime,
 debug cube protocol/entity publication, desktop `F7` diagnostic launch wiring,
-and `mclone-server` / native-client intent feature wiring. App binary-size
-measurement is deferred until the physics path is promoted beyond diagnostics.
+fresh debug cube entity IDs on repeated throws, one-way debug player AABB
+collision, and `mclone-server` / native-client intent feature wiring. App
+binary-size measurement is deferred until the physics path is promoted beyond
+diagnostics.
 
 ## Purpose
 
@@ -439,6 +441,35 @@ Screenshot inspected:
 The current offscreen smoke validates the composed native frame and actor path,
 but it does not yet press `F7` or include physics diagnostics in its printed
 report. A dedicated scripted physics screenshot/smoke remains pending.
+
+Recorded Slice 4c result:
+
+- Repeated `ShootDebugPhysicsCube` commands now allocate a fresh debug cube
+  entity ID and publish an `EntityRemove` for the previous debug cube entity.
+  This keeps client actor interpolation from treating a new throw as a smooth
+  continuation of the old cube.
+- Per-tick physics synchronization still updates the current debug cube entity
+  in place, so ordinary movement interpolation remains available after spawn.
+- The feature-gated server physics runtime now owns a fixed player AABB
+  collider using the current player dimensions, updated before physics steps
+  for the player that launched the cube.
+- The player collider is intentionally one-way for this diagnostic slice: the
+  cube collides with the player body, but physics does not push, correct, or
+  otherwise author player movement.
+- Added `physics-rapier` server tests covering fresh debug cube entity IDs,
+  previous-entity removal, and cube collision against the player AABB.
+
+Slice 4c validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-server -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier debug_physics_cube -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
+cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
+cargo check --manifest-path native/Cargo.toml
+```
 
 ### Slice 5 - Web Worker Viability
 

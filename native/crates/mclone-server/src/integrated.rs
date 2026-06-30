@@ -70,6 +70,8 @@ pub struct IntegratedServer {
     entity_tracking: EntityTracking,
     #[cfg(feature = "physics-rapier")]
     physics: ServerPhysicsRuntime,
+    #[cfg(feature = "physics-rapier")]
+    debug_physics_player_target: Option<CommandTarget>,
     loading_progress: ChunkLoadingProgress,
 }
 
@@ -125,6 +127,8 @@ impl IntegratedServer {
             entity_tracking: EntityTracking::default(),
             #[cfg(feature = "physics-rapier")]
             physics: ServerPhysicsRuntime::new(),
+            #[cfg(feature = "physics-rapier")]
+            debug_physics_player_target: None,
             loading_progress,
         }
     }
@@ -192,8 +196,9 @@ impl IntegratedServer {
 
     #[cfg(feature = "physics-rapier")]
     pub fn spawn_debug_physics_cube(&mut self, position: Vec3d, velocity: Vec3d) -> bool {
+        self.debug_physics_player_target = None;
         self.physics
-            .spawn_debug_cube(&self.scheduler, position, velocity)
+            .spawn_debug_cube(&self.scheduler, position, velocity, None)
     }
 
     #[cfg(feature = "physics-rapier")]
@@ -428,6 +433,8 @@ impl IntegratedServer {
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
         let physics_tick_start = simulation_timing_start();
+        #[cfg(feature = "physics-rapier")]
+        self.sync_debug_physics_player_collider();
         let physics = self.step_physics();
         #[cfg(feature = "physics-rapier")]
         if let Some(entity) = self.sync_debug_physics_cube_entity(simulation_tick, physics) {
@@ -666,15 +673,22 @@ impl IntegratedServer {
                 )
             };
             let launch = debug_physics_cube_launch(position, y_rot_degrees, x_rot_degrees);
-            if self
-                .physics
-                .spawn_debug_cube(&self.scheduler, launch.position, launch.velocity)
-            {
+            if self.physics.spawn_debug_cube(
+                &self.scheduler,
+                launch.position,
+                launch.velocity,
+                Some(position),
+            ) {
+                self.debug_physics_player_target = Some(target);
                 let physics = self.physics.diagnostics();
-                if let Some(entity) =
-                    self.sync_debug_physics_cube_entity(self.simulation_tick, physics)
+                if let Some(entity_spawn) =
+                    self.spawn_debug_physics_cube_entity(self.simulation_tick, physics)
                 {
-                    self.reconcile_entity_subjects([entity], true);
+                    let subjects = entity_spawn
+                        .removed
+                        .into_iter()
+                        .chain(std::iter::once(entity_spawn.current));
+                    self.reconcile_entity_subjects(subjects, true);
                     return self.drain_chunk_updates_for_target(target);
                 }
             }
@@ -942,6 +956,19 @@ impl IntegratedServer {
     }
 
     #[cfg(feature = "physics-rapier")]
+    fn spawn_debug_physics_cube_entity(
+        &mut self,
+        age_ticks: u64,
+        physics: ServerPhysicsTickDiagnostics,
+    ) -> Option<crate::entities::DebugPhysicsCubeEntitySpawn> {
+        let position =
+            physics
+                .test_cube_position?
+                .add(Vec3d::new(0.0, -DEBUG_PHYSICS_CUBE_HALF_EXTENT, 0.0));
+        Some(self.entities.spawn_debug_physics_cube(position, age_ticks))
+    }
+
+    #[cfg(feature = "physics-rapier")]
     fn sync_debug_physics_cube_entity(
         &mut self,
         age_ticks: u64,
@@ -952,6 +979,18 @@ impl IntegratedServer {
                 .test_cube_position?
                 .add(Vec3d::new(0.0, -DEBUG_PHYSICS_CUBE_HALF_EXTENT, 0.0));
         Some(self.entities.upsert_debug_physics_cube(position, age_ticks))
+    }
+
+    #[cfg(feature = "physics-rapier")]
+    fn sync_debug_physics_player_collider(&mut self) {
+        let Some(target) = self.debug_physics_player_target else {
+            return;
+        };
+        let Ok(player) = self.player_for_target(target) else {
+            self.debug_physics_player_target = None;
+            return;
+        };
+        self.physics.sync_player_collider(player.position());
     }
 
     fn player_observers(&self) -> Vec<ServerPlayerId> {
@@ -2108,6 +2147,60 @@ mod tests {
         assert!(report.physics.test_cube_spawned);
         assert_eq!(update.id, snapshot.id);
         assert!(update.position.y < snapshot.position.y);
+
+        let second_updates = server
+            .try_handle_command(ClientCommand::ShootDebugPhysicsCube)
+            .expect("shoot second debug physics cube");
+        let second_snapshot = first_entity_snapshot_of_kind(&second_updates, EntityKind::DebugCube)
+            .expect("second debug cube entity snapshot");
+
+        assert_ne!(second_snapshot.id, snapshot.id);
+        assert!(has_entity_remove(&second_updates, snapshot.id));
+    }
+
+    #[cfg(feature = "physics-rapier")]
+    #[test]
+    fn debug_physics_cube_collides_with_player_collider() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+
+        for y in 0..16 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    let block = if y == 0 { STONE } else { AIR };
+                    server
+                        .scheduler_mut()
+                        .set_block_at_world(BlockPos::new(x, y, z), block);
+                }
+            }
+        }
+
+        let player_position = Vec3d::new(8.0, 1.0, 8.0);
+        {
+            let scheduler = &server.scheduler;
+            let physics = &mut server.physics;
+            assert!(physics.spawn_debug_cube(
+                scheduler,
+                Vec3d::new(5.0, 2.0, 8.0),
+                Vec3d::new(12.0, 0.0, 0.0),
+                Some(player_position),
+            ));
+        }
+
+        for _ in 0..20 {
+            server.physics.sync_player_collider(player_position);
+            server.physics.step();
+        }
+
+        let final_x = server
+            .debug_physics_cube_pose()
+            .expect("debug cube pose")
+            .position
+            .x;
+        assert!(
+            final_x < 7.4,
+            "debug cube should collide with player AABB before passing through, got x={final_x}"
+        );
     }
 
     #[test]

@@ -65,6 +65,13 @@ pub(crate) struct ServerEntityStore {
     debug_physics_cube_id: Option<EntityId>,
 }
 
+#[cfg(feature = "physics-rapier")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DebugPhysicsCubeEntitySpawn {
+    pub(crate) removed: Option<ServerEntityState>,
+    pub(crate) current: ServerEntityState,
+}
+
 impl ServerEntityStore {
     pub(crate) fn ensure_starter_passive_near_spawn(&mut self, spawn_position: Vec3d) -> EntityId {
         if let Some(id) = self.starter_passive_id {
@@ -92,31 +99,42 @@ impl ServerEntityStore {
     }
 
     #[cfg(feature = "physics-rapier")]
+    pub(crate) fn spawn_debug_physics_cube(
+        &mut self,
+        position: Vec3d,
+        age_ticks: u64,
+    ) -> DebugPhysicsCubeEntitySpawn {
+        let removed = self
+            .debug_physics_cube_id
+            .take()
+            .and_then(|id| self.entities.remove(&id))
+            .map(|mut state| {
+                state.alive = false;
+                state
+            });
+        let current = self.insert_debug_physics_cube(position, age_ticks);
+        DebugPhysicsCubeEntitySpawn { removed, current }
+    }
+
+    #[cfg(feature = "physics-rapier")]
     pub(crate) fn upsert_debug_physics_cube(
         &mut self,
         position: Vec3d,
         age_ticks: u64,
     ) -> ServerEntityState {
-        let id = match self.debug_physics_cube_id {
-            Some(id) => id,
-            None => {
-                let id = self.allocate_entity_id();
-                self.debug_physics_cube_id = Some(id);
-                id
-            }
-        };
-        let state = ServerEntityState {
-            id,
-            kind: EntityKind::DebugCube,
-            position,
-            y_rot_degrees: 0.0,
-            x_rot_degrees: 0.0,
-            on_ground: false,
-            width: 1.0,
-            height: 1.0,
-            age_ticks,
-            alive: true,
-        };
+        if let Some(id) = self.debug_physics_cube_id {
+            let state = debug_physics_cube_state(id, position, age_ticks);
+            self.entities.insert(id, state);
+            return state;
+        }
+        self.insert_debug_physics_cube(position, age_ticks)
+    }
+
+    #[cfg(feature = "physics-rapier")]
+    fn insert_debug_physics_cube(&mut self, position: Vec3d, age_ticks: u64) -> ServerEntityState {
+        let id = self.allocate_entity_id();
+        self.debug_physics_cube_id = Some(id);
+        let state = debug_physics_cube_state(id, position, age_ticks);
         self.entities.insert(id, state);
         state
     }
@@ -155,6 +173,22 @@ impl ServerEntityStore {
     fn allocate_entity_id(&mut self) -> EntityId {
         self.next_entity_id = self.next_entity_id.saturating_add(1);
         EntityId(self.next_entity_id)
+    }
+}
+
+#[cfg(feature = "physics-rapier")]
+fn debug_physics_cube_state(id: EntityId, position: Vec3d, age_ticks: u64) -> ServerEntityState {
+    ServerEntityState {
+        id,
+        kind: EntityKind::DebugCube,
+        position,
+        y_rot_degrees: 0.0,
+        x_rot_degrees: 0.0,
+        on_ground: false,
+        width: 1.0,
+        height: 1.0,
+        age_ticks,
+        alive: true,
     }
 }
 

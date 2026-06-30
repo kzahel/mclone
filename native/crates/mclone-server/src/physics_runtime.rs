@@ -8,8 +8,9 @@ use std::fmt;
 
 use mclone_core::{BlockPos, ChunkPos, Vec3d, block_to_section_coord};
 use mclone_physics::{
-    PhysicsBackendKind, PhysicsBodyId, PhysicsBodyPose, PhysicsBodySpawn, PhysicsColliderId,
-    PhysicsStepReport, PhysicsTerrainSection, PhysicsWorld,
+    PhysicsBackendKind, PhysicsBodyId, PhysicsBodyKind, PhysicsBodyPose, PhysicsBodySpawn,
+    PhysicsBodyVelocity, PhysicsColliderId, PhysicsRotation, PhysicsShape, PhysicsStepReport,
+    PhysicsTerrainSection, PhysicsWorld,
 };
 
 use crate::{ChunkScheduler, ServerPhysicsTickDiagnostics};
@@ -18,10 +19,13 @@ const SERVER_PHYSICS_DT_SECONDS: f64 = 1.0 / 20.0;
 const DEBUG_CUBE_HALF_EXTENT: f64 = 0.5;
 const DEBUG_CUBE_TERRAIN_SECTION_RADIUS_XZ: i32 = 1;
 const DEBUG_CUBE_TERRAIN_SECTION_RADIUS_Y: i32 = 1;
+const DEBUG_PLAYER_WIDTH: f64 = 0.6;
+const DEBUG_PLAYER_HEIGHT: f64 = 1.8;
 
 pub(crate) struct ServerPhysicsRuntime {
     world: PhysicsWorld,
     debug_cube_body: Option<PhysicsBodyId>,
+    debug_player_body: Option<PhysicsBodyId>,
     debug_cube_terrain: Vec<PhysicsColliderId>,
     last_diagnostics: ServerPhysicsTickDiagnostics,
 }
@@ -31,6 +35,7 @@ impl ServerPhysicsRuntime {
         Self {
             world: PhysicsWorld::new(PhysicsBackendKind::Rapier),
             debug_cube_body: None,
+            debug_player_body: None,
             debug_cube_terrain: Vec::new(),
             last_diagnostics: ServerPhysicsTickDiagnostics {
                 enabled: true,
@@ -44,6 +49,7 @@ impl ServerPhysicsRuntime {
         scheduler: &ChunkScheduler,
         position: Vec3d,
         velocity: Vec3d,
+        player_position: Option<Vec3d>,
     ) -> bool {
         if !position.is_finite() || !velocity.is_finite() {
             return false;
@@ -55,6 +61,11 @@ impl ServerPhysicsRuntime {
         }
 
         self.clear_debug_cube();
+        if let Some(player_position) = player_position {
+            self.sync_player_collider(player_position);
+        } else {
+            self.clear_player_collider();
+        }
         self.debug_cube_terrain = terrain_sections
             .into_iter()
             .map(|section| self.world.add_terrain_section(section))
@@ -67,6 +78,33 @@ impl ServerPhysicsRuntime {
         self.debug_cube_body = Some(body);
         let report = self.world.step(0.0);
         self.last_diagnostics = self.diagnostics_from_report(report);
+        true
+    }
+
+    pub(crate) fn sync_player_collider(&mut self, player_position: Vec3d) -> bool {
+        if !player_position.is_finite() {
+            return false;
+        }
+        let pose = PhysicsBodyPose::new(
+            player_position.add(Vec3d::new(0.0, DEBUG_PLAYER_HEIGHT * 0.5, 0.0)),
+            PhysicsRotation::IDENTITY,
+        );
+        if let Some(body) = self.debug_player_body {
+            return self.world.set_body_pose(body, pose);
+        }
+        let body = self.world.spawn_body(PhysicsBodySpawn {
+            kind: PhysicsBodyKind::Fixed,
+            shape: PhysicsShape::Cuboid {
+                half_extents: Vec3d::new(
+                    DEBUG_PLAYER_WIDTH * 0.5,
+                    DEBUG_PLAYER_HEIGHT * 0.5,
+                    DEBUG_PLAYER_WIDTH * 0.5,
+                ),
+            },
+            pose,
+            velocity: PhysicsBodyVelocity::default(),
+        });
+        self.debug_player_body = Some(body);
         true
     }
 
@@ -91,6 +129,12 @@ impl ServerPhysicsRuntime {
         }
         for terrain in self.debug_cube_terrain.drain(..) {
             self.world.remove_terrain_section(terrain);
+        }
+    }
+
+    fn clear_player_collider(&mut self) {
+        if let Some(body) = self.debug_player_body.take() {
+            self.world.remove_body(body);
         }
     }
 
@@ -151,6 +195,7 @@ impl fmt::Debug for ServerPhysicsRuntime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ServerPhysicsRuntime")
             .field("debug_cube_body", &self.debug_cube_body)
+            .field("debug_player_body", &self.debug_player_body)
             .field("debug_cube_terrain", &self.debug_cube_terrain)
             .field("last_diagnostics", &self.last_diagnostics)
             .finish_non_exhaustive()
