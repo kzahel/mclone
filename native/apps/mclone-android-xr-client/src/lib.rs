@@ -14,6 +14,7 @@ mod android {
 
     use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
     use anyhow::{Context, Result, bail};
+    use mclone_app_runtime::frame_render::scaled_frame_size;
     use mclone_app_runtime::host_mode::{RemoteDedicatedServerSession, SingleViewHostOptions};
     use mclone_app_runtime::local_single_view::{
         LocalSingleViewSceneOptions, NativeSingleViewSessionRuntime,
@@ -79,6 +80,9 @@ mod android {
     const ANDROID_XR_PERF_SETTLE_PROGRESS_FRAMES: u64 = 120;
     const TERRAIN_MULTIVIEW_PERF_WARMUP_FRAMES: usize = 12;
     const TERRAIN_MULTIVIEW_PERF_SAMPLE_FRAMES: usize = 60;
+    const ANDROID_XR_DEFAULT_RENDER_SCALE: f32 = 1.0;
+    const ANDROID_XR_MIN_RENDER_SCALE: f32 = 0.25;
+    const ANDROID_XR_MAX_RENDER_SCALE: f32 = 1.0;
 
     #[allow(unsafe_code)]
     #[link(name = "log")]
@@ -241,6 +245,7 @@ mod android {
         overlap_runtime_prefetch: bool,
         render_section_upload_budget: Option<usize>,
         xr_foveation: AndroidXrFoveation,
+        xr_render_scale: f32,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -265,6 +270,7 @@ mod android {
                 overlap_runtime_prefetch: false,
                 render_section_upload_budget: None,
                 xr_foveation: AndroidXrFoveation::Off,
+                xr_render_scale: ANDROID_XR_DEFAULT_RENDER_SCALE,
             }
         }
     }
@@ -316,6 +322,38 @@ mod android {
                 dynamic: xr::FoveationDynamicFB::DISABLED,
             })
         }
+    }
+
+    fn parse_android_xr_render_scale(flag: &str, value: &str) -> Result<f32> {
+        let value = value.trim();
+        let scale = if let Some(percent) = value.strip_suffix('%') {
+            parse_render_scale_number(flag, percent)? / 100.0
+        } else if let Some(scale) = value.strip_suffix('x') {
+            parse_render_scale_number(flag, scale)?
+        } else if let Some(scale) = value.strip_suffix('X') {
+            parse_render_scale_number(flag, scale)?
+        } else {
+            parse_render_scale_number(flag, value)?
+        };
+        if !(ANDROID_XR_MIN_RENDER_SCALE..=ANDROID_XR_MAX_RENDER_SCALE).contains(&scale) {
+            bail!(
+                "{flag} must be between {:.2} and {:.2}, got `{value}`",
+                ANDROID_XR_MIN_RENDER_SCALE,
+                ANDROID_XR_MAX_RENDER_SCALE
+            );
+        }
+        Ok(scale)
+    }
+
+    fn parse_render_scale_number(flag: &str, value: &str) -> Result<f32> {
+        let scale = value
+            .trim()
+            .parse::<f32>()
+            .with_context(|| format!("parse {flag} value `{value}`"))?;
+        if !scale.is_finite() {
+            bail!("{flag} must be finite, got `{value}`");
+        }
+        Ok(scale)
     }
 
     #[derive(Clone, Copy, Debug, PartialEq)]
@@ -439,6 +477,12 @@ mod android {
                     options.xr_foveation = AndroidXrFoveation::parse_label(
                         "--xr-foveation",
                         &parse_next_string(&mut argv, "--xr-foveation")?,
+                    )?;
+                }
+                "--xr-render-scale" => {
+                    options.xr_render_scale = parse_android_xr_render_scale(
+                        "--xr-render-scale",
+                        &parse_next_string(&mut argv, "--xr-render-scale")?,
                     )?;
                 }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
@@ -825,6 +869,10 @@ mod android {
             startup_options.xr_foveation.label()
         );
         log::info!(
+            "Android XR render scale: {:.3}",
+            startup_options.xr_render_scale
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -873,6 +921,7 @@ mod android {
             startup_options.overlap_runtime_prefetch,
             startup_options.render_section_upload_budget,
             startup_options.xr_foveation,
+            startup_options.xr_render_scale,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -902,6 +951,7 @@ mod android {
         overlap_runtime_prefetch: bool,
         render_section_upload_budget: Option<usize>,
         xr_foveation: AndroidXrFoveation,
+        xr_render_scale: f32,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -1145,7 +1195,20 @@ mod android {
         let stage = mclone_xr_host::create_stage_reference_space(&graphics.session)?;
         log::info!("OpenXR reference space: STAGE");
 
-        let (eye_width, eye_height) = stereo_config.primary_eye_size();
+        let (recommended_eye_width, recommended_eye_height) = stereo_config.primary_eye_size();
+        let [eye_width, eye_height] = scaled_frame_size(
+            [recommended_eye_width, recommended_eye_height],
+            xr_render_scale,
+        );
+        log::info!(
+            "OpenXR render scale: scale={:.3} recommended_eye={}x{} active_eye={}x{} pixel_fraction={:.3}",
+            xr_render_scale,
+            recommended_eye_width,
+            recommended_eye_height,
+            eye_width,
+            eye_height,
+            xr_render_scale * xr_render_scale
+        );
         if multiview_proof || terrain_multiview_proof {
             let mut stereo_target = graphics_vulkan::create_stereo(
                 &graphics.device,
@@ -1301,6 +1364,7 @@ mod android {
                 display_refresh,
                 render_section_upload_budget,
                 xr_foveation,
+                xr_render_scale,
             );
         }
 
@@ -1402,6 +1466,7 @@ mod android {
             display_refresh,
             render_section_upload_budget,
             xr_foveation,
+            xr_render_scale,
         )
     }
 
@@ -2507,11 +2572,13 @@ mod android {
         display_refresh: XrDisplayRefreshSnapshot,
         render_section_upload_budget: Option<usize>,
         xr_foveation: AndroidXrFoveation,
+        xr_render_scale: f32,
     ) -> Result<()> {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
         let mut frame_stats = XrFrameStats::default();
         let render_path = frame_targets.render_path();
+        let xr_eye_size = frame_targets.eye_size();
         let mut perf_probe = AndroidXrPerfProbe::new(
             perf_seconds,
             perf_flight,
@@ -2522,6 +2589,8 @@ mod android {
             render_path,
             render_section_upload_budget,
             xr_foveation,
+            xr_render_scale,
+            xr_eye_size,
         );
         let mut performance_metrics_probe = if perf_metrics {
             let probe = perf_metrics::XrPerformanceMetricsProbe::new(
@@ -2847,6 +2916,15 @@ mod android {
                 Self::Multiview { .. } => AndroidXrRenderPath::Multiview,
             }
         }
+
+        fn eye_size(&self) -> [u32; 2] {
+            match self {
+                Self::PerEye { left_eye, .. } => [left_eye.width, left_eye.height],
+                Self::Multiview { stereo_target, .. } => {
+                    [stereo_target.width, stereo_target.height]
+                }
+            }
+        }
     }
 
     #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2919,6 +2997,8 @@ mod android {
         render_path: AndroidXrRenderPath,
         render_section_upload_budget: Option<usize>,
         xr_foveation: AndroidXrFoveation,
+        xr_render_scale: f32,
+        xr_eye_size: [u32; 2],
         target_hz: f64,
         settle_started: Option<Instant>,
         settle_frames: u64,
@@ -2938,6 +3018,8 @@ mod android {
             render_path: AndroidXrRenderPath,
             render_section_upload_budget: Option<usize>,
             xr_foveation: AndroidXrFoveation,
+            xr_render_scale: f32,
+            xr_eye_size: [u32; 2],
         ) -> Self {
             let target_hz = display_refresh
                 .current_rate
@@ -2954,6 +3036,8 @@ mod android {
                 render_path,
                 render_section_upload_budget,
                 xr_foveation,
+                xr_render_scale,
+                xr_eye_size,
                 target_hz,
                 settle_started: None,
                 settle_frames: 0,
@@ -3041,8 +3125,11 @@ mod android {
                 frame_stats.skipped_frames
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_CONFIG xr_foveation={}",
-                self.xr_foveation.label()
+                "MCLONE_ANDROID_XR_PERF_CONFIG xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{}",
+                self.xr_foveation.label(),
+                self.xr_render_scale,
+                self.xr_eye_size[0],
+                self.xr_eye_size[1]
             );
             self.active = Some(AndroidXrActivePerfProbe {
                 requested: Duration::from_secs(seconds),
@@ -3065,6 +3152,8 @@ mod android {
                 render_path: self.render_path,
                 render_section_upload_budget: self.render_section_upload_budget,
                 xr_foveation: self.xr_foveation,
+                xr_render_scale: self.xr_render_scale,
+                xr_eye_size: self.xr_eye_size,
                 mode_label: mode,
                 flight_speed_blocks_per_second: self
                     .flight
@@ -3162,6 +3251,8 @@ mod android {
         render_path: AndroidXrRenderPath,
         render_section_upload_budget: Option<usize>,
         xr_foveation: AndroidXrFoveation,
+        xr_render_scale: f32,
+        xr_eye_size: [u32; 2],
         mode_label: &'static str,
         flight_speed_blocks_per_second: Option<f64>,
         settle_seconds: f64,
@@ -3229,12 +3320,15 @@ mod android {
                 camera_distance_blocks(self.start_camera, self.latest_camera);
             let latest_upload = self.latest_summary.upload;
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} xr_foveation={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={}",
                 sample_seconds,
                 self.mode_label,
                 self.render_path.label(),
                 format_optional_usize(self.render_section_upload_budget),
                 self.xr_foveation.label(),
+                self.xr_render_scale,
+                self.xr_eye_size[0],
+                self.xr_eye_size[1],
                 self.render_distance,
                 flight_speed,
                 flight_distance_blocks,

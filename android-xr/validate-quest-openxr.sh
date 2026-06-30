@@ -54,6 +54,7 @@ XR_OVERLAP_EYE_SUBMITS="${MCLONE_ANDROID_XR_OVERLAP_EYE_SUBMITS:-0}"
 XR_OVERLAP_RUNTIME_PREFETCH="${MCLONE_ANDROID_XR_OVERLAP_RUNTIME_PREFETCH:-0}"
 XR_RENDER_SECTION_UPLOAD_BUDGET="${MCLONE_ANDROID_XR_RENDER_SECTION_UPLOAD_BUDGET:-}"
 XR_FOVEATION="${MCLONE_ANDROID_XR_FOVEATION:-off}"
+XR_RENDER_SCALE="${MCLONE_ANDROID_XR_RENDER_SCALE:-}"
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     PERF_SETTLED_STATIONARY=1
 fi
@@ -185,6 +186,9 @@ Options:
   --xr-foveation off|low|medium|high
                      Apply XR_FB_foveation to submitted eye swapchains. Default:
                      off. Use high for the RD10 fixed-foveated-rendering probe.
+  --xr-render-scale SCALE
+                     Scale OpenXR eye swapchain dimensions before rendering.
+                     Accepts 0.25..1.0 or percent values like 85%.
   -h, --help         Show this help.
 USAGE
 }
@@ -220,6 +224,27 @@ validate_positive_number() {
     local value="$2"
     [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]] || mclone_die "$label must be a positive number, got '$value'"
     awk -v value="$value" 'BEGIN { exit !(value > 0) }' || mclone_die "$label must be greater than zero"
+}
+
+validate_xr_render_scale() {
+    local label="$1"
+    local value="$2"
+    local numeric="$value"
+    local scale
+    if [[ "$numeric" == *% ]]; then
+        numeric="${numeric%\%}"
+        [[ "$numeric" =~ ^[0-9]+([.][0-9]+)?$ ]] || mclone_die "$label must be a scale or percent, got '$value'"
+        scale="$(awk -v value="$numeric" 'BEGIN { printf "%.6f", value / 100.0 }')"
+    elif [[ "$numeric" == *x || "$numeric" == *X ]]; then
+        numeric="${numeric%[xX]}"
+        [[ "$numeric" =~ ^[0-9]+([.][0-9]+)?$ ]] || mclone_die "$label must be a scale or percent, got '$value'"
+        scale="$numeric"
+    else
+        [[ "$numeric" =~ ^[0-9]+([.][0-9]+)?$ ]] || mclone_die "$label must be a scale or percent, got '$value'"
+        scale="$numeric"
+    fi
+    awk -v value="$scale" 'BEGIN { exit !(value >= 0.25 && value <= 1.0) }' \
+        || mclone_die "$label must be between 0.25 and 1.0, got '$value'"
 }
 
 derive_adb_reverse_port() {
@@ -524,6 +549,11 @@ while [[ $# -gt 0 ]]; do
             XR_FOVEATION="$2"
             shift 2
             ;;
+        --xr-render-scale)
+            require_arg "$1" "${2:-}"
+            XR_RENDER_SCALE="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -669,6 +699,9 @@ case "$XR_FOVEATION" in
         mclone_die "unsupported --xr-foveation '$XR_FOVEATION'; expected off, low, medium, or high"
         ;;
 esac
+if [[ -n "$XR_RENDER_SCALE" ]]; then
+    validate_xr_render_scale "--xr-render-scale" "$XR_RENDER_SCALE"
+fi
 if [[ -n "$PERF_SECONDS" ]]; then
     validate_positive_integer "--perf-seconds" "$PERF_SECONDS"
     if [[ "$SESSION_ONLY" == "1" ]]; then
@@ -807,6 +840,9 @@ if [[ -n "$XR_RENDER_SECTION_UPLOAD_BUDGET" ]]; then
 fi
 if [[ "$XR_FOVEATION" != "off" ]]; then
     STARTUP_ARGV+=(--xr-foveation "$XR_FOVEATION")
+fi
+if [[ -n "$XR_RENDER_SCALE" ]]; then
+    STARTUP_ARGV+=(--xr-render-scale "$XR_RENDER_SCALE")
 fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"
