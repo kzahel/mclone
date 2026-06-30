@@ -1,11 +1,13 @@
 import {
   isHexColor,
+  type AuthoringLayerRole,
   type AsciiLayerSpec,
   type BlockSpec,
   type MacroNoiseLayerSpec,
   type MaskLayerSpec,
   type PaletteSpec,
   type TextureSourceCategory,
+  type TextureLayerSpec,
   type TexturePackAsset,
   type TextureSpec,
   type TintSpec,
@@ -19,6 +21,19 @@ export interface RenderedTexture extends RgbaImage {
   tintRole?: string;
   tint?: TintSpec;
   preview: TextureSpec["preview"];
+  authoring: RenderedAuthoringPreview[];
+}
+
+interface RenderedAuthoringPreview extends RgbaImage {
+  role: AuthoringLayerRole;
+  label: string;
+  entries: AuthoringPreviewEntry[];
+}
+
+interface AuthoringPreviewEntry {
+  symbol: string;
+  name: string;
+  color: Rgba;
 }
 
 type Rgba = [number, number, number, number];
@@ -59,6 +74,7 @@ export function renderTexture(pack: TexturePackAsset, name: string, texture: Tex
     height: size,
     data,
     preview: texture.preview,
+    authoring: renderAuthoringPreviews(palette, texture.layers ?? []),
   };
   if (texture.tintRole) {
     rendered.tintRole = texture.tintRole;
@@ -68,6 +84,56 @@ export function renderTexture(pack: TexturePackAsset, name: string, texture: Tex
   return rendered;
 }
 
+function renderAuthoringPreviews(
+  palette: PaletteSpec,
+  layers: TextureLayerSpec[],
+): RenderedAuthoringPreview[] {
+  const previews: RenderedAuthoringPreview[] = [];
+  for (const layer of layers) {
+    if ((layer.kind === "ascii" || layer.kind === "mask") && layer.authoring) {
+      previews.push(renderAuthoringLayerPreview(palette, layer));
+    }
+  }
+  return previews;
+}
+
+function renderAuthoringLayerPreview(
+  palette: PaletteSpec,
+  layer: AsciiLayerSpec | MaskLayerSpec,
+): RenderedAuthoringPreview {
+  const width = layer.pixels[0]?.length ?? 0;
+  const height = layer.pixels.length;
+  const data = new Uint8Array(width * height * 4);
+  const skip = layer.skip ?? ".";
+
+  for (let y = 0; y < height; y += 1) {
+    const row = layer.pixels[y] ?? "";
+    for (let x = 0; x < width; x += 1) {
+      const symbol = row[x] ?? skip;
+      if (symbol === skip) {
+        writePixel(data, width, x, y, [0, 0, 0, 0]);
+        continue;
+      }
+      const colorName = layer.colors[symbol];
+      writePixel(data, width, x, y, colorName ? resolveColor(palette, colorName) : [0, 0, 0, 0]);
+    }
+  }
+
+  const entries = Object.entries(layer.colors).map(([symbol, colorName]) => ({
+    symbol,
+    name: colorName,
+    color: resolveColor(palette, colorName),
+  }));
+  return {
+    role: layer.authoring!.role,
+    label: layer.authoring!.label ?? "AUTHOR STRUCTURE",
+    entries,
+    width,
+    height,
+    data,
+  };
+}
+
 export interface ReviewSheetOptions {
   reference?: RgbaImage;
 }
@@ -75,8 +141,9 @@ export interface ReviewSheetOptions {
 export function makeReviewSheet(texture: RenderedTexture, options: ReviewSheetOptions = {}): RgbaImage {
   const background: Rgba = [32, 34, 34, 255];
   const panel: Rgba = [52, 54, 54, 255];
+  const structurePreview = texture.authoring.find((preview) => preview.role === "structure");
   const sheetWidth = 1040;
-  const sheetHeight = 672;
+  const sheetHeight = structurePreview ? 864 : 672;
   const sheet = solidImage(sheetWidth, sheetHeight, background);
   const rawTexture = texture;
   const displayTexture = previewTexture(texture);
@@ -139,6 +206,10 @@ export function makeReviewSheet(texture: RenderedTexture, options: ReviewSheetOp
 
   if (options.reference) {
     drawReferencePanel(sheet, options.reference, 704, 328, 320, 328);
+  }
+
+  if (structurePreview) {
+    drawAuthoringPreviewPanel(sheet, structurePreview, 16, 672, 1008, 176);
   }
 
   drawPanelLabel(sheet, "SOURCE PIXELS", 16, 16, 264);
@@ -846,6 +917,71 @@ function drawReferencePanel(
       drawSmallIsometricCube(target, reference, cubeX, lowerY);
     }
   }
+}
+
+function drawAuthoringPreviewPanel(
+  target: RgbaImage,
+  preview: RenderedAuthoringPreview,
+  panelX: number,
+  panelY: number,
+  panelWidth: number,
+  panelHeight: number,
+): void {
+  const panel: Rgba = [52, 54, 54, 255];
+  const labelColor: Rgba = [214, 218, 210, 255];
+  const border: Rgba = [86, 89, 88, 255];
+  drawRect(target, panelX, panelY, panelWidth, panelHeight, panel);
+  drawPanelLabel(target, preview.label, panelX, panelY, panelWidth);
+
+  const contentY = panelY + 44;
+  const checkerboard = hasTransparency(preview);
+  const sourceScale = Math.max(1, Math.floor(Math.min(128 / preview.width, 128 / preview.height)));
+  const sourceX = panelX + 18;
+  drawPixelText(target, `SOURCE ${preview.width}X${preview.height}`, sourceX, panelY + 32, 1, labelColor);
+  if (checkerboard) {
+    drawCheckerboard(target, sourceX, contentY, preview.width * sourceScale, preview.height * sourceScale, sourceScale);
+  }
+  drawScaled(target, preview, sourceX, contentY, sourceScale);
+  drawGrid(target, sourceX, contentY, preview.width, preview.height, sourceScale, border);
+
+  const tiledScale = Math.max(1, Math.floor(Math.min(112 / (preview.width * 3), 112 / (preview.height * 3))));
+  const tiledX = panelX + 180;
+  const tiledWidth = preview.width * 3 * tiledScale;
+  const tiledHeight = preview.height * 3 * tiledScale;
+  drawPixelText(target, "MASK TILED 3X3", tiledX, panelY + 32, 1, labelColor);
+  if (checkerboard) {
+    drawCheckerboard(target, tiledX, contentY, tiledWidth, tiledHeight, Math.max(4, tiledScale * 2));
+  }
+  drawTiledScaled(target, preview, tiledX, contentY, 3, 3, tiledScale);
+
+  drawPixelText(target, "SYMBOLS", panelX + 340, panelY + 32, 1, labelColor);
+  drawAuthoringLegend(target, preview.entries, panelX + 340, contentY);
+}
+
+function drawAuthoringLegend(
+  target: RgbaImage,
+  entries: AuthoringPreviewEntry[],
+  x: number,
+  y: number,
+): void {
+  const sorted = [...entries].sort((a, b) => a.symbol.localeCompare(b.symbol));
+  const rowHeight = 18;
+  const columnWidth = 164;
+  const rowsPerColumn = 7;
+  for (const [index, entry] of sorted.entries()) {
+    const column = Math.floor(index / rowsPerColumn);
+    const row = index % rowsPerColumn;
+    const entryX = x + column * columnWidth;
+    const entryY = y + row * rowHeight;
+    drawRect(target, entryX, entryY, 14, 14, [24, 26, 26, 255]);
+    drawRect(target, entryX + 2, entryY + 2, 10, 10, entry.color);
+    drawPixelText(target, authoringLegendText(entry), entryX + 20, entryY + 3, 1, [214, 218, 210, 255]);
+  }
+}
+
+function authoringLegendText(entry: AuthoringPreviewEntry): string {
+  const name = isHexColor(entry.name) ? "COLOR" : entry.name.replace(/_/g, " ");
+  return `${entry.symbol} ${name}`;
 }
 
 function drawPixelText(target: RgbaImage, text: string, x: number, y: number, scale: number, color: Rgba): void {

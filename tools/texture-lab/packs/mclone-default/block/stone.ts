@@ -149,6 +149,10 @@ function stoneBaseLayers({ macroNoise, mask, speckles, ascii }: TextureLabApi): 
       },
       opacity: 0.66,
       upscale: "nearest",
+      authoring: {
+        role: "structure",
+        label: "AUTHOR STRUCTURE MASK",
+      },
       pixels: [
         "bbccbbbllbbbccbb",
         "bcccccblbbbbbccb",

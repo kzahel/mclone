@@ -53,6 +53,12 @@ export interface CubeFaceTextures {
 
 export type TextureLayerSpec = SpecklesLayerSpec | AsciiLayerSpec | MacroNoiseLayerSpec | MaskLayerSpec;
 export type MaskUpscaleMode = "nearest" | "linear" | "bicubic" | "smooth";
+export type AuthoringLayerRole = "structure";
+
+export interface LayerAuthoringSpec {
+  role: AuthoringLayerRole;
+  label?: string;
+}
 
 export interface SpecklesLayerSpec {
   kind: "speckles";
@@ -69,6 +75,7 @@ export interface AsciiLayerSpec {
   colors: Record<string, string>;
   skip?: string;
   opacity?: number;
+  authoring?: LayerAuthoringSpec;
 }
 
 export interface MacroNoiseLayerSpec {
@@ -89,6 +96,7 @@ export interface MaskLayerSpec {
   skip?: string;
   opacity?: number;
   upscale?: MaskUpscaleMode;
+  authoring?: LayerAuthoringSpec;
 }
 
 export interface TextureLabApi {
@@ -356,6 +364,15 @@ function validateLayer(
   }
   if (layer.opacity !== undefined && (!Number.isFinite(layer.opacity) || layer.opacity < 0 || layer.opacity > 1)) {
     errors.push(`texture '${textureName}' layer ${layerIndex} opacity must be 0..1`);
+  }
+  if (
+    layer.authoring !== undefined &&
+    layer.authoring.role !== "structure"
+  ) {
+    errors.push(`texture '${textureName}' layer ${layerIndex} authoring role must be 'structure'`);
+  }
+  if (layer.authoring?.label !== undefined && layer.authoring.label.trim().length === 0) {
+    errors.push(`texture '${textureName}' layer ${layerIndex} authoring label must not be empty`);
   }
   if (
     layer.kind === "mask" &&
