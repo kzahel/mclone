@@ -32,6 +32,7 @@ pub struct ActorInstance {
     /// Native world yaw in radians. Local actor +Z is the forward/front side.
     pub yaw_radians: f32,
     pub shape: ActorInstanceShape,
+    pub first_person_body_only: bool,
     pub width: f32,
     pub height: f32,
     pub body_color: [f32; 4],
@@ -54,6 +55,7 @@ impl ActorInstance {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             shape: ActorInstanceShape::AssetLabPlayer,
+            first_person_body_only: false,
             width: 0.6,
             height: 1.8,
             body_color: [0.18, 0.38, 0.82, 1.0],
@@ -67,6 +69,7 @@ impl ActorInstance {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             shape: ActorInstanceShape::AssetLabPlayer,
+            first_person_body_only: false,
             width: 0.6,
             height: 1.8,
             body_color: [0.10, 0.58, 0.68, 1.0],
@@ -85,6 +88,7 @@ impl ActorInstance {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             shape: ActorInstanceShape::QuadrupedPlaceholder,
+            first_person_body_only: false,
             width,
             height,
             body_color: [0.33, 0.19, 0.10, 1.0],
@@ -98,6 +102,7 @@ impl ActorInstance {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             shape: ActorInstanceShape::CowModel,
+            first_person_body_only: false,
             width,
             height,
             body_color: [0.28, 0.17, 0.10, 1.0],
@@ -116,6 +121,7 @@ impl ActorInstance {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             shape: ActorInstanceShape::QuadrupedPlaceholder,
+            first_person_body_only: false,
             width,
             height,
             body_color: [0.92, 0.90, 0.82, 1.0],
@@ -129,6 +135,7 @@ impl ActorInstance {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             shape: ActorInstanceShape::DebugCube,
+            first_person_body_only: false,
             width,
             height,
             body_color: [0.13, 0.48, 0.72, 1.0],
@@ -139,6 +146,11 @@ impl ActorInstance {
 
     pub fn with_packed_light(mut self, packed_light: u32) -> Self {
         self.packed_light = packed_light;
+        self
+    }
+
+    pub fn with_first_person_body_only(mut self, first_person_body_only: bool) -> Self {
+        self.first_person_body_only = first_person_body_only;
         self
     }
 }
@@ -797,6 +809,9 @@ fn append_asset_lab_player_model(
     let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
     let model_scale = actor.height.max(0.1);
     for cuboid in &figure.cuboids {
+        if actor.first_person_body_only && !cuboid.first_person_visible {
+            continue;
+        }
         append_box(
             mesh,
             actor,
@@ -807,6 +822,9 @@ fn append_asset_lab_player_model(
         );
     }
     for cuboid in &figure.overlay_cuboids {
+        if actor.first_person_body_only && !cuboid.first_person_visible {
+            continue;
+        }
         append_box(
             mesh,
             actor,
@@ -1622,6 +1640,29 @@ mod tests {
                 .filter(|vertex| vertex.color == [25.0 / 255.0, 18.0 / 255.0, 14.0 / 255.0, 1.0])
                 .all(|vertex| vertex.position[2] > 0.18)
         );
+    }
+
+    #[test]
+    fn first_person_asset_lab_player_model_hides_head_and_face_details() {
+        let actor = ActorInstance::local_player(Vec3::ZERO, 0.0).with_first_person_body_only(true);
+        let figure = test_player_figure();
+        let mesh = actor_mesh(
+            &[actor],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+            Some(&figure),
+        );
+
+        assert_eq!(mesh.vertices.len(), 10 * 6 * 4);
+        assert_eq!(mesh.indices.len(), 10 * 6 * 6);
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| vertex.color != [25.0 / 255.0, 18.0 / 255.0, 14.0 / 255.0, 1.0])
+        );
+
+        let bounds = mesh_bounds(&mesh);
+        assert!(bounds.max.y < 1.62);
     }
 
     #[test]

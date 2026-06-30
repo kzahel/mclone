@@ -143,6 +143,19 @@ pub fn local_player_actor_instance(
     .with_packed_light(packed_light)
 }
 
+pub fn local_player_actor_instance_for_view(
+    camera: &EngineCameraController,
+    client: &ClientRuntime,
+) -> Option<ActorInstance> {
+    match camera.view_mode() {
+        EngineCameraViewMode::ThirdPersonBack => Some(local_player_actor_instance(camera, client)),
+        EngineCameraViewMode::FirstPerson if camera.first_person_player_visible() => {
+            Some(local_player_actor_instance(camera, client).with_first_person_body_only(true))
+        }
+        EngineCameraViewMode::FirstPerson => None,
+    }
+}
+
 pub fn actor_light_probe_block_pos(actor: &ActorPresentation) -> BlockPos {
     BlockPos::containing(actor.feet_position.add(Vec3d::new(
         0.0,
@@ -1195,6 +1208,7 @@ pub struct EngineCameraController {
     last_hand_push_input: Option<EngineHandPushInput>,
     movement_mode: EngineCameraMovementMode,
     view_mode: EngineCameraViewMode,
+    first_person_player_visible: bool,
     speed_blocks_per_second: f64,
     movement_speed_multiplier: f64,
     landing_events: Vec<LandingEvent>,
@@ -1235,6 +1249,7 @@ impl EngineCameraController {
             last_hand_push_input: None,
             movement_mode: EngineCameraMovementMode::Walking,
             view_mode: EngineCameraViewMode::FirstPerson,
+            first_person_player_visible: false,
             speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER,
             landing_events: Vec::new(),
@@ -1274,6 +1289,14 @@ impl EngineCameraController {
     pub fn toggle_view_mode(&mut self) -> EngineCameraViewMode {
         self.set_view_mode(self.view_mode.toggled());
         self.view_mode
+    }
+
+    pub const fn first_person_player_visible(&self) -> bool {
+        self.first_person_player_visible
+    }
+
+    pub fn set_first_person_player_visible(&mut self, visible: bool) {
+        self.first_person_player_visible = visible;
     }
 
     pub fn set_movement_mode(&mut self, movement_mode: EngineCameraMovementMode) {
@@ -4104,6 +4127,41 @@ mod tests {
             actor.shape,
             mclone_render::entity::ActorInstanceShape::AssetLabPlayer
         );
+    }
+
+    #[test]
+    fn local_player_actor_for_view_hides_first_person_by_default() {
+        let client = ClientRuntime::local_integrated();
+        let camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(1.25, 70.62, -3.5), 0.0, 0.0, 24.0);
+
+        assert!(local_player_actor_instance_for_view(&camera, &client).is_none());
+    }
+
+    #[test]
+    fn local_player_actor_for_view_can_render_first_person_body_only() {
+        let client = ClientRuntime::local_integrated();
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(1.25, 70.62, -3.5), 0.0, 0.0, 24.0);
+        camera.set_first_person_player_visible(true);
+
+        let actor = local_player_actor_instance_for_view(&camera, &client).unwrap();
+
+        assert_eq!(actor.feet_position, Vec3::new(1.25, 69.0, -3.5));
+        assert!(actor.first_person_body_only);
+    }
+
+    #[test]
+    fn local_player_actor_for_view_keeps_third_person_full_body() {
+        let client = ClientRuntime::local_integrated();
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(1.25, 70.62, -3.5), 0.0, 0.0, 24.0);
+        camera.set_view_mode(EngineCameraViewMode::ThirdPersonBack);
+        camera.set_first_person_player_visible(true);
+
+        let actor = local_player_actor_instance_for_view(&camera, &client).unwrap();
+
+        assert!(!actor.first_person_body_only);
     }
 
     #[test]

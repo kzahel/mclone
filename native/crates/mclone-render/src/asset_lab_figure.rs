@@ -20,6 +20,7 @@ pub(crate) struct CompiledCuboid {
     pub min: Vec3,
     pub max: Vec3,
     pub face_colors: [[f32; 4]; 6],
+    pub first_person_visible: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,6 +28,7 @@ pub(crate) struct CompiledOverlayCuboid {
     pub min: Vec3,
     pub max: Vec3,
     pub color: [f32; 4],
+    pub first_person_visible: bool,
 }
 
 pub(crate) fn load_compiled_player_figure(
@@ -53,6 +55,8 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
     let part_names = part_name_map(&asset.parts)?;
     let mut origin_cache = vec![None; asset.parts.len()];
     let mut visiting = vec![false; asset.parts.len()];
+    let mut first_person_visible_cache = vec![None; asset.parts.len()];
+    let mut first_person_visible_visiting = vec![false; asset.parts.len()];
     let mut raw_cuboids = Vec::new();
     let mut raw_overlay_cuboids = Vec::new();
 
@@ -95,6 +99,13 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
             &mut origin_cache,
             &mut visiting,
         )?;
+        let first_person_visible = part_first_person_visible(
+            part_index,
+            &asset.parts,
+            &part_names,
+            &mut first_person_visible_cache,
+            &mut first_person_visible_visiting,
+        )?;
         let base_color = part
             .material
             .as_deref()
@@ -120,6 +131,7 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
             min,
             max,
             face_colors,
+            first_person_visible,
         });
 
         if let Some(texture_name) = part.texture.as_deref() {
@@ -131,6 +143,7 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
                     face,
                     &asset,
                     texture_name,
+                    first_person_visible,
                 )?;
             }
         }
@@ -144,6 +157,7 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
                         parse_box_face(face_name)?,
                         &asset,
                         texture_name,
+                        first_person_visible,
                     )?;
                 }
             }
@@ -218,6 +232,45 @@ fn part_origin(
     Ok(origin)
 }
 
+fn part_first_person_visible(
+    index: usize,
+    parts: &[FigurePart],
+    part_names: &HashMap<String, usize>,
+    visible_cache: &mut [Option<bool>],
+    visiting: &mut [bool],
+) -> Result<bool> {
+    if let Some(visible) = visible_cache[index] {
+        return Ok(visible);
+    }
+    if visiting[index] {
+        bail!(
+            "asset-lab figure has a parent cycle at part '{}'",
+            parts[index].name
+        );
+    }
+    visiting[index] = true;
+
+    let mut visible = !is_first_person_hidden_part_name(&parts[index].name);
+    if visible && let Some(parent_name) = parts[index].parent.as_deref() {
+        let parent_index = *part_names.get(parent_name).with_context(|| {
+            format!(
+                "part '{}' has unknown parent '{}'",
+                parts[index].name, parent_name
+            )
+        })?;
+        visible =
+            part_first_person_visible(parent_index, parts, part_names, visible_cache, visiting)?;
+    }
+
+    visiting[index] = false;
+    visible_cache[index] = Some(visible);
+    Ok(visible)
+}
+
+fn is_first_person_hidden_part_name(name: &str) -> bool {
+    name == "head" || name.ends_with("_head")
+}
+
 fn append_texture_overlay_cuboids(
     overlay_cuboids: &mut Vec<CompiledOverlayCuboid>,
     box_origin: Vec3,
@@ -225,6 +278,7 @@ fn append_texture_overlay_cuboids(
     face: BoxFace,
     asset: &FigureAsset,
     texture_name: &str,
+    first_person_visible: bool,
 ) -> Result<()> {
     let texture = asset.textures.get(texture_name).with_context(|| {
         format!(
@@ -258,7 +312,12 @@ fn append_texture_overlay_cuboids(
                 texture_height,
             );
             let (min, max) = lab_box_bounds_to_actor_local(min, max);
-            overlay_cuboids.push(CompiledOverlayCuboid { min, max, color });
+            overlay_cuboids.push(CompiledOverlayCuboid {
+                min,
+                max,
+                color,
+                first_person_visible,
+            });
         }
     }
     Ok(())
@@ -375,6 +434,7 @@ fn normalize_figure(
                 min: (cuboid.min - origin) * inv_height,
                 max: (cuboid.max - origin) * inv_height,
                 face_colors: cuboid.face_colors,
+                first_person_visible: cuboid.first_person_visible,
             })
             .collect(),
         overlay_cuboids: overlay_cuboids
@@ -383,6 +443,7 @@ fn normalize_figure(
                 min: (cuboid.min - origin) * inv_height,
                 max: (cuboid.max - origin) * inv_height,
                 color: cuboid.color,
+                first_person_visible: cuboid.first_person_visible,
             })
             .collect(),
     })
@@ -552,6 +613,28 @@ mod tests {
         assert_eq!(eye_cuboids.len(), 8);
         assert!(eye_cuboids.iter().all(|cuboid| cuboid.min.z > 0.10));
         assert!(eye_cuboids.iter().all(|cuboid| cuboid.max.y > 0.68));
+    }
+
+    #[test]
+    fn player_head_details_are_hidden_for_first_person_body() {
+        let figure = compile_test_player_figure();
+
+        assert_eq!(
+            figure
+                .cuboids
+                .iter()
+                .filter(|cuboid| !cuboid.first_person_visible)
+                .count(),
+            2
+        );
+        assert_eq!(
+            figure
+                .overlay_cuboids
+                .iter()
+                .filter(|cuboid| !cuboid.first_person_visible)
+                .count(),
+            64
+        );
     }
 
     #[test]

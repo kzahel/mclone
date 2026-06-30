@@ -32,7 +32,7 @@ use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
     EngineCameraMovementMode, EngineCameraViewMode, EngineDebugVisualOptions,
     RenderSectionCacheUpdate, actor_instances_from_presentations, engine_debug_world_lines,
-    local_player_actor_instance, render_camera_from_snapshot_with_view_mode,
+    local_player_actor_instance_for_view, render_camera_from_snapshot_with_view_mode,
 };
 use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameHelpParent,
@@ -251,8 +251,11 @@ impl FlatClientDriver {
         ui: GameUi,
     ) -> Self {
         let spectator = SpectatorCamera::spawn_for_scene(scene);
-        let camera =
-            engine_camera_controller_from_spectator(&spectator, scene.movement_speed_multiplier);
+        let camera = engine_camera_controller_from_spectator(
+            &spectator,
+            scene.movement_speed_multiplier,
+            scene.first_person_player_visible,
+        );
         Self {
             scene: scene.clone(),
             runtime: None,
@@ -1282,10 +1285,10 @@ impl FlatClientDriver {
             runtime.client(),
         )
         .into_iter()
-        .chain(
-            (self.camera.view_mode() == EngineCameraViewMode::ThirdPersonBack)
-                .then(|| local_player_actor_instance(&self.camera, runtime.client())),
-        )
+        .chain(local_player_actor_instance_for_view(
+            &self.camera,
+            runtime.client(),
+        ))
         .collect()
     }
 
@@ -1688,10 +1691,14 @@ impl FlatClientDriver {
         &mut self,
         spectator: SpectatorCamera,
         movement_speed_multiplier: f32,
+        first_person_player_visible: bool,
     ) {
         self.spectator = spectator;
-        self.camera =
-            engine_camera_controller_from_spectator(&self.spectator, movement_speed_multiplier);
+        self.camera = engine_camera_controller_from_spectator(
+            &self.spectator,
+            movement_speed_multiplier,
+            first_person_player_visible,
+        );
     }
 
     pub(crate) fn reset_world_state(&mut self) {
@@ -1700,6 +1707,7 @@ impl FlatClientDriver {
         self.camera = engine_camera_controller_from_spectator(
             &self.spectator,
             self.scene.movement_speed_multiplier,
+            self.scene.first_person_player_visible,
         );
         self.actor_interpolation = ActorInterpolationState::new();
         self.interaction = ClientInteractionController::new();
@@ -1936,6 +1944,7 @@ pub(crate) fn glam_vec3_from_vec3d(value: Vec3d) -> glam::Vec3 {
 pub(crate) fn engine_camera_controller_from_spectator(
     spectator: &SpectatorCamera,
     movement_speed_multiplier: f32,
+    first_person_player_visible: bool,
 ) -> EngineCameraController {
     let mut camera = EngineCameraController::from_eye_pose(
         vec3d_from_glam(spectator.position),
@@ -1944,6 +1953,7 @@ pub(crate) fn engine_camera_controller_from_spectator(
         f64::from(spectator.speed),
     );
     camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
+    camera.set_first_person_player_visible(first_person_player_visible);
     camera
 }
 

@@ -1,6 +1,6 @@
 # 112 - Asset Lab Runtime Actor Geometry
 
-Status: active; Slice 2a asset-owned player figure landed.
+Status: active; Slice 3a first-person local body visibility landed.
 
 ## Purpose
 
@@ -170,6 +170,34 @@ Review output inspected:
 - [ ] Preserve gait cycle distance/contact metadata for future movement-speed
       matching.
 - [ ] Add visual smoke captures for side-view walk review.
+
+### Slice 3a - First-Person Local Body Visibility
+
+- [x] Add a default-off first-person local player visibility option.
+- [x] Render the local actor in first person as body-only geometry.
+- [x] Hide authored head-descendant figure parts and face overlays in body-only
+      mode.
+- [x] Preserve Java standing eye height alignment at `1.62` blocks above feet.
+- [x] Add screenshot CLI coverage through `--first-person-player true|false`.
+
+Validation:
+
+```powershell
+cargo test --manifest-path native/Cargo.toml -p mclone-render -p mclone-render-session -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+pnpm native:web:build
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-first-person-player.png --width 1280 --height 720 --startup-wait idle --screenshot-camera-view first-person --first-person-player true --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --fullbright true
+```
+
+Review output inspected:
+
+```text
+/tmp/mclone-first-person-player.png
+```
+
+The default forward first-person camera does not show much body because the
+local actor is below the view direction, but the render summary submits the
+local body actor and the head-hidden mesh tests verify body-only geometry.
 
 ### Slice 4 - Broader Primitive Set
 

@@ -893,6 +893,7 @@ mod tests {
                     day_time_override: None,
                     freeze_time: false,
                     movement_speed_multiplier: 1.0,
+                    first_person_player_visible: false,
                     lighting_enabled: true,
                 },
                 TexturedSectionRenderOptions::default(),
@@ -939,6 +940,29 @@ mod tests {
                 "/tmp/mclone-frame.png",
                 SceneOptions {
                     movement_speed_multiplier: 2.25,
+                    ..SceneOptions::default()
+                },
+                TexturedSectionRenderOptions::default(),
+            )
+        );
+    }
+
+    #[test]
+    fn cli_parses_first_person_player_visibility() {
+        let cli = Cli::parse([
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
+            "--first-person-player".to_owned(),
+            "true".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            screenshot_cli(
+                "/tmp/mclone-frame.png",
+                SceneOptions {
+                    first_person_player_visible: true,
                     ..SceneOptions::default()
                 },
                 TexturedSectionRenderOptions::default(),

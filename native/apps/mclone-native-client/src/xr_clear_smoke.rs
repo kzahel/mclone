@@ -793,6 +793,7 @@ fn desktop_scene_options_for_xr_request(
         remote_addr,
         day_time_override: scene.day_time_override,
         freeze_time: scene.freeze_time,
+        first_person_player_visible: false,
         lighting_enabled: scene.lighting_enabled,
     }
 }

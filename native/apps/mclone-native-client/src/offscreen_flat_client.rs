@@ -222,8 +222,11 @@ impl OffscreenFlatClientHost {
         startup_scene.chunk_x = spawn.x;
         startup_scene.chunk_z = spawn.z;
         let spectator = SpectatorCamera::spawn_for_scene(&startup_scene);
-        self.driver
-            .set_spectator_camera(spectator, scene.movement_speed_multiplier);
+        self.driver.set_spectator_camera(
+            spectator,
+            scene.movement_speed_multiplier,
+            scene.first_person_player_visible,
+        );
     }
 
     pub(crate) fn render_frame(
@@ -480,8 +483,11 @@ impl OffscreenFlatClientHost {
         if let Some(runtime) = self.driver.runtime.as_ref() {
             frame_first_actor(runtime, &mut spectator);
         }
-        self.driver
-            .set_spectator_camera(spectator, self.driver.scene.movement_speed_multiplier);
+        self.driver.set_spectator_camera(
+            spectator,
+            self.driver.scene.movement_speed_multiplier,
+            self.driver.scene.first_person_player_visible,
+        );
     }
 
     fn set_eye_override(&mut self, eye: [f32; 3]) {
@@ -491,8 +497,11 @@ impl OffscreenFlatClientHost {
     fn set_camera_position(&mut self, position: Vec3) {
         let mut spectator = self.driver.spectator.clone();
         spectator.position = position;
-        self.driver
-            .set_spectator_camera(spectator, self.driver.scene.movement_speed_multiplier);
+        self.driver.set_spectator_camera(
+            spectator,
+            self.driver.scene.movement_speed_multiplier,
+            self.driver.scene.first_person_player_visible,
+        );
     }
 
     fn set_camera_pose(&mut self, position: Vec3, yaw: f32, pitch: f32) {
@@ -500,15 +509,21 @@ impl OffscreenFlatClientHost {
         spectator.position = position;
         spectator.yaw = yaw;
         spectator.pitch = pitch;
-        self.driver
-            .set_spectator_camera(spectator, self.driver.scene.movement_speed_multiplier);
+        self.driver.set_spectator_camera(
+            spectator,
+            self.driver.scene.movement_speed_multiplier,
+            self.driver.scene.first_person_player_visible,
+        );
     }
 
     fn set_camera_look_at(&mut self, eye: Vec3, target: Vec3) {
         let mut spectator = self.driver.spectator.clone();
         aim_spectator_at(&mut spectator, eye, target);
-        self.driver
-            .set_spectator_camera(spectator, self.driver.scene.movement_speed_multiplier);
+        self.driver.set_spectator_camera(
+            spectator,
+            self.driver.scene.movement_speed_multiplier,
+            self.driver.scene.first_person_player_visible,
+        );
     }
 }
 

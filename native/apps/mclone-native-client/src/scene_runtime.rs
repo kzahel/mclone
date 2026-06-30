@@ -1068,6 +1068,7 @@ mod tests {
             day_time_override: None,
             freeze_time: false,
             movement_speed_multiplier: 1.0,
+            first_person_player_visible: false,
             lighting_enabled: true,
         }
         .chunk_positions()
