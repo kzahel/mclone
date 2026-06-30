@@ -1,5 +1,13 @@
 # 096: Standalone Android XR Quest Performance
 
+> **Closed — retained as reference.** This delivered the Quest perf measurement
+> harness (logcat perf probe; flight/stationary/frozen RD lanes; real OpenXR
+> refresh state; runtime-poll attribution) that the whole RD10 effort runs on.
+> The remaining diagnostic sub-slices (in-headset overlay, XR menu perf section,
+> movement/interpolation diagnosis, validator budget gate) are optional
+> follow-ups, not on the RD10 critical path. Active perf work continues in
+> [`117`](117-android-xr-rd10-gpu-floor-and-frame-overlap.md).
+
 Status: active; Slice 1 logcat perf probe and automated flight sample landed
 on 2026-06-27.
 

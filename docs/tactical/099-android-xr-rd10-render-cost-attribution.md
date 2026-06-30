@@ -1,5 +1,14 @@
 # 099: Android XR RD10 Render-Cost Attribution And CPU-Bound Submission
 
+> **Closed — retained as reference.** Delivered the Meta perf-metrics probe,
+> Slice A per-eye render split, and Slices C1/C2 shared section-record prep.
+> Note its headline conclusion ("GPU has headroom, RD10 is CPU-bound") was based
+> on the Meta `app/gpu_frametime` counter and was **later corrected by
+> [`106`](106-android-xr-static-render-cpu-reduction.md)'s E1**: the true GPU
+> floor is `~10.7ms`, so the frame is a balanced serial `CPU + GPU`. The forward
+> levers (Slice D batching, Slice E GPU timestamps) carried into 106 and now
+> [`117`](117-android-xr-rd10-gpu-floor-and-frame-overlap.md).
+
 Status: active; diagnostics landed (opt-in Meta performance-metrics probe,
 commit `0df8733`, and Slice A render split); Slice B single-submit stereo path
 landed; Slices C1/C2 (shared section-record prep + prepare sub-bucket attribution)

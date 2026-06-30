@@ -1,5 +1,14 @@
 # 107: XR Stereo Uniform Ownership and Multiview
 
+> **Closed — retained as reference.** Delivered the per-view uniform frame ring
+> and migrated all per-view renderers, fixing the shared-uniform clobber that
+> broke the reverted single-submit path — this is the **prerequisite** that
+> makes any overlap/multiview/single-submit path safe. Multiview is
+> correctness-validated on Quest but performance-flat, so production stays on
+> masked per-eye submit. The open item (Slice F, E4 frame pipelining) is carried
+> into [`117`](117-android-xr-rd10-gpu-floor-and-frame-overlap.md). Standing
+> rule remains: do not re-land bare single-submit.
+
 Status: active high-priority prerequisite; Slices A-C landed, Slice D desktop
 proof landed, and Slice E's headless, Android XR, terrain-chunk proof, sky,
 actor, selection-outline, world-GUI, and screen-effect render paths, and

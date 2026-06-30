@@ -93,8 +93,16 @@ left-eye projection/uniform-lifetime bug; the new gating plan is
 E1/E2 perf surfaces have been removed/fenced, and all current per-view
 renderers now have slotted uniform/view-data ownership. Headset validation
 confirmed the per-eye-submit baseline after that migration, and a desktop
-one-submit slot proof exists; next is multiview before optional frame
-pipelining, not re-landing bare one-submit as a performance feature.
+one-submit slot proof exists. Multiview then landed and was validated on Quest
+but measured **performance-flat** (it still renders the per-eye union), so
+production stays on masked per-eye submit. With the cheap CPU wins (Slices F/G/H)
+landed and RD10 only borderline, the active plan pivots to the `~10.7ms` GPU
+floor and CPU/GPU overlap in
+[`117`](../tactical/117-android-xr-rd10-gpu-floor-and-frame-overlap.md):
+fill-vs-geometry probe, render-scale, fixed-foveated rendering (enabled but never
+applied today), a solid render layer that drops the early-Z-defeating `discard`,
+frame overlap (E4), batching, greedy meshing, app spacewarp, and a ship-distance
+decision. 096/099/106/107 are closed references.
 
 ## Priority Queue
 
@@ -107,7 +115,7 @@ pipelining, not re-landing bare one-submit as a performance feature.
 | P4 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | deferred | Native now avoids stale queued backlog and accepts unchanged sections. This remains useful for stress-orbit streaming, but current radius-5 evidence no longer puts render compile cancellation ahead of startup presentation or lighting parity. |
 | P5 | GPU upload budgeting and buffer reuse | Broadly | [`024`](../tactical/024-render-section-dirty-cache-and-upload-diffs.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | conditional | Native uploads changed sections incrementally, and movement probes show upload cost is small. Do this when probes show upload/allocation cost is material again. |
 | P6 | Release perf budgets and durable records | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`../performance-records.md`](../performance-records.md) | ongoing | Once baselines stabilize, add budget thresholds that catch regressions without failing on normal host noise. |
-| PX | Quest RD10 serial CPU+GPU render frame | Native policy | [`099`](../tactical/099-android-xr-rd10-render-cost-attribution.md), [`106`](../tactical/106-android-xr-static-render-cpu-reduction.md), [`107`](../tactical/107-xr-stereo-uniform-ownership-and-multiview.md) | active; per-eye-submit correctness restored by `d0c5161`; Slices A-C landed and Slice D desktop proof landed | E1 (historical GPU timestamps) shows RD10 is a balanced serial `CPU(~9ms)+GPU(~10.7ms)` frame — the Meta `7ms` GPU counter under-reported and the poll wait is real GPU. The unsafe single-submit path was reverted after a deterministic left-eye uniform lifetime bug. Current baseline has slotted chunk, sky, actors, GUI, outline, and screen-effect paths, plus a desktop one-submit slot proof; production still uses per-eye submits. Ordered next step: pursue multiview as the real GPU-side reduction with per-eye/layer validation. CPU/GPU overlap remains optional and must be re-measured on a correct stereo path. Quest-only lane, separate from the desktop priority order above. |
+| PX | Quest RD10 72 Hz: GPU-floor reduction + CPU/GPU overlap | Native policy | [`117`](../tactical/117-android-xr-rd10-gpu-floor-and-frame-overlap.md) (active); [`099`](../tactical/099-android-xr-rd10-render-cost-attribution.md), [`106`](../tactical/106-android-xr-static-render-cpu-reduction.md), [`107`](../tactical/107-xr-stereo-uniform-ownership-and-multiview.md) (closed refs) | active in 117; CPU wins (Slices F/G/H) and multiview correctness landed; RD10 still borderline | E1 showed RD10 is a balanced serial `CPU(~9ms, now ~4ms) + GPU(~10.7ms)` frame (Meta `7ms` GPU counter under-reported; the poll wait is real GPU), so CPU-only work cannot reach 72 Hz alone. Multiview landed but is perf-flat (renders the union); production stays on masked per-eye submit. The two remaining levers are lowering the `~10.7ms` GPU floor and overlapping CPU/GPU. Priority order in 117: (L) fill-vs-geometry probe, (M) render-scale, (N) fixed-foveated rendering — enabled but never applied today, (O) solid render layer dropping the early-Z-defeating `discard`, (K/E4) frame overlap, (J) batching, (P) greedy meshing, (Q) app spacewarp, (R) ship-distance / dynamic RD. Quest-only lane, separate from the desktop priority order above. |
 
 ## Java Reference Anchors
 
@@ -202,6 +210,7 @@ Primary performance tacticals:
 - [`099-android-xr-rd10-render-cost-attribution.md`](../tactical/099-android-xr-rd10-render-cost-attribution.md)
 - [`106-android-xr-static-render-cpu-reduction.md`](../tactical/106-android-xr-static-render-cpu-reduction.md)
 - [`107-xr-stereo-uniform-ownership-and-multiview.md`](../tactical/107-xr-stereo-uniform-ownership-and-multiview.md)
+- [`117-android-xr-rd10-gpu-floor-and-frame-overlap.md`](../tactical/117-android-xr-rd10-gpu-floor-and-frame-overlap.md)
 
 Related subsystem tacticals:
 

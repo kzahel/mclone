@@ -1,5 +1,13 @@
 # 106: Android XR Static-Render CPU Reduction (Cull, Records, Stereo Encode)
 
+> **Closed — retained as reference.** Delivered the key diagnosis (E1: frame is
+> serial `CPU + GPU`, true GPU floor `~10.7ms`, Meta counter under-reports; E2:
+> SoC contention bounded at `~+1.9ms`) and the CPU wins (Slices F/G/H), plus
+> opt-in multiview (Slice I). The conclusion that CPU-only work cannot reach RD10
+> 72 Hz alone motivates the pivot to GPU-floor + overlap levers. The open items
+> here — Slice J batching, Slice K/E4 overlap, FFR, ASW — are carried into
+> [`117`](117-android-xr-rd10-gpu-floor-and-frame-overlap.md).
+
 Status: active tactical. Slices F, G, and H have landed; Slice I full-frame
 multiview is available behind the opt-in path and measured as correctness-ready
 but not a decisive standalone performance win. Continues
