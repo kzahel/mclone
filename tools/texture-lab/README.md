@@ -93,7 +93,7 @@ transparent overlay, not either source texture alone.
 Each export also writes a metadata report next to the sheets. The Markdown
 report is for quick human review; the JSON report is for future agent/tool
 checks. Both list tint roles, texture source categories, preview tiling modes,
-sheet paths, and block face composition.
+seam diagnostic modes, sheet paths, and block face composition.
 
 The grass starter encodes that relationship directly:
 
@@ -180,6 +180,11 @@ by default.
 Biome tint previews should stay secondary. The grass block sheet uses one
 primary tint for texture review and keeps alternate tint swatches compact so
 they do not distract from source texture quality.
+
+The individual texture sheet seam panel shows the texture repeated across the
+wrap boundary. Red/orange marks left-right edge mismatch; blue marks top-bottom
+edge mismatch. Textures marked with horizontal-only tiling show only the
+left-right diagnostic.
 
 ## Variants And Rotation
 

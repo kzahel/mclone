@@ -20,6 +20,7 @@ export interface RenderedTexture extends RgbaImage {
 }
 
 type Rgba = [number, number, number, number];
+type TilingMode = "xy" | "x" | "none";
 
 export function renderAllTextures(pack: TexturePackAsset): RenderedTexture[] {
   return Object.entries(pack.textures).map(([name, texture]) => renderTexture(pack, name, texture));
@@ -120,6 +121,11 @@ export function makeReviewSheet(texture: RenderedTexture): RgbaImage {
     drawRotatedTiledScaled(sheet, displayTexture, 20, 332, 5, 5, 2, `${texture.name}:rotation-preview`);
   }
 
+  if (tiling !== "none") {
+    drawRect(sheet, 360, 328, 328, 328, panel);
+    drawSeamDiagnostic(sheet, displayTexture, 360, 328, 328, 328, tiling, displayCheckerboard);
+  }
+
   return sheet;
 }
 
@@ -139,7 +145,7 @@ export function makeBlockReviewSheet(
 
   const top = textureForFace(block, texturesByName, "top");
   drawRect(sheet, 340, 16, 328, 328, panel);
-  drawRotatedTiledScaled(sheet, tintTexture(top, primaryTint), 344, 20, 5, 5, 2, `${blockName}:top-rotation`);
+  drawRotatedTiledScaled(sheet, applyRoleTint(top, primaryTint), 344, 20, 5, 5, 2, `${blockName}:top-rotation`);
 
   const side = compositeSideTexture(block, texturesByName, primaryTint);
   drawRect(sheet, 692, 16, 328, 328, panel);
@@ -377,6 +383,97 @@ function drawMipStrip(target: RgbaImage, source: RgbaImage, targetX: number, tar
   }
 }
 
+function drawSeamDiagnostic(
+  target: RgbaImage,
+  source: RgbaImage,
+  panelX: number,
+  panelY: number,
+  panelWidth: number,
+  panelHeight: number,
+  tiling: TilingMode,
+  checkerboard: boolean,
+): void {
+  const tilesX = 2;
+  const tilesY = tiling === "xy" ? 2 : 1;
+  const padding = 28;
+  const scale = Math.max(
+    1,
+    Math.floor(
+      Math.min(
+        (panelWidth - padding * 2) / (source.width * tilesX),
+        (panelHeight - padding * 2) / (source.height * tilesY),
+      ),
+    ),
+  );
+  const previewWidth = source.width * tilesX * scale;
+  const previewHeight = source.height * tilesY * scale;
+  const previewX = panelX + Math.floor((panelWidth - previewWidth) / 2);
+  const previewY = panelY + Math.floor((panelHeight - previewHeight) / 2);
+
+  if (checkerboard) {
+    drawCheckerboard(target, previewX, previewY, previewWidth, previewHeight, Math.max(4, scale * 2));
+  }
+  drawTiledScaled(target, source, previewX, previewY, tilesX, tilesY, scale);
+
+  const seamWidth = Math.max(2, Math.floor(scale / 2));
+  const verticalSeamX = previewX + source.width * scale - Math.floor(seamWidth / 2);
+  drawVerticalSeamError(target, source, verticalSeamX, previewY, tilesY, scale, seamWidth);
+
+  if (tiling === "xy") {
+    const horizontalSeamY = previewY + source.height * scale - Math.floor(seamWidth / 2);
+    drawHorizontalSeamError(target, source, previewX, horizontalSeamY, tilesX, scale, seamWidth);
+  }
+}
+
+function drawVerticalSeamError(
+  target: RgbaImage,
+  source: RgbaImage,
+  targetX: number,
+  targetY: number,
+  tilesY: number,
+  scale: number,
+  seamWidth: number,
+): void {
+  for (let y = 0; y < source.height; y += 1) {
+    const color = seamErrorColor(readPixel(source, source.width - 1, y), readPixel(source, 0, y), "x");
+    if (color[3] === 0) {
+      continue;
+    }
+    for (let tileY = 0; tileY < tilesY; tileY += 1) {
+      drawRect(target, targetX, targetY + (tileY * source.height + y) * scale, seamWidth, scale, color);
+    }
+  }
+}
+
+function drawHorizontalSeamError(
+  target: RgbaImage,
+  source: RgbaImage,
+  targetX: number,
+  targetY: number,
+  tilesX: number,
+  scale: number,
+  seamWidth: number,
+): void {
+  for (let x = 0; x < source.width; x += 1) {
+    const color = seamErrorColor(readPixel(source, x, source.height - 1), readPixel(source, x, 0), "y");
+    if (color[3] === 0) {
+      continue;
+    }
+    for (let tileX = 0; tileX < tilesX; tileX += 1) {
+      drawRect(target, targetX + (tileX * source.width + x) * scale, targetY, scale, seamWidth, color);
+    }
+  }
+}
+
+function seamErrorColor(a: Rgba, b: Rgba, axis: "x" | "y"): Rgba {
+  const diff = colorDistance(a, b);
+  if (diff < 0.04) {
+    return [0, 0, 0, 0];
+  }
+  const alpha = clampByte(Math.min(0.9, diff * 1.8) * 255);
+  return axis === "x" ? [255, 56, 24, alpha] : [24, 148, 255, alpha];
+}
+
 function drawIsometricCube(target: RgbaImage, texture: RgbaImage, targetX: number, targetY: number): void {
   drawIsometricCubeFaces(
     target,
@@ -609,6 +706,14 @@ function shadeColor(color: Rgba, shade: number): Rgba {
     clampByte(color[2] * shade),
     color[3],
   ];
+}
+
+function colorDistance(a: Rgba, b: Rgba): number {
+  const dr = a[0] - b[0];
+  const dg = a[1] - b[1];
+  const db = a[2] - b[2];
+  const da = a[3] - b[3];
+  return Math.sqrt(dr * dr + dg * dg + db * db + da * da) / 510;
 }
 
 function clampByte(value: number): number {

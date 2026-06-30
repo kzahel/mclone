@@ -125,6 +125,8 @@ Individual texture sheets are source-first:
 - repeat, mip, rotation, and cube-style panels: preview-tinted when a preview
   tint is defined
 - checkerboard: transparent source or overlay review
+- seam diagnostic: red/orange marks left-right wrap mismatch, blue marks
+  top-bottom wrap mismatch
 
 Block sheets are composition-first:
 

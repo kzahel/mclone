@@ -29,8 +29,8 @@ export function makeMetadataReportMarkdown(pack: TexturePackAsset): string {
   lines.push("");
   lines.push("## Textures");
   lines.push("");
-  lines.push("| Texture | Source | Tint Role | Size | Palette | Tiling | Sheet |");
-  lines.push("|---|---|---|---|---|---|---|");
+  lines.push("| Texture | Source | Tint Role | Size | Palette | Tiling | Seam Diagnostic | Sheet |");
+  lines.push("|---|---|---|---|---|---|---|---|");
   for (const [name, texture] of Object.entries(pack.textures)) {
     const source = sourceCategory(texture);
     lines.push(
@@ -41,6 +41,7 @@ export function makeMetadataReportMarkdown(pack: TexturePackAsset): string {
         `${textureSize(pack, texture)}x${textureSize(pack, texture)}`,
         md(texture.palette),
         md(texture.preview?.tiling ?? "xy"),
+        md(seamDiagnosticMode(texture)),
         md(`${name}-sheet.png`),
       ].join(" | ").replace(/^/, "| ").replace(/$/, " |"),
     );
@@ -115,6 +116,7 @@ function textureReport(pack: TexturePackAsset, name: string, texture: TextureSpe
     sheetPath: `${name}-sheet.png`,
     preview: {
       tiling: texture.preview?.tiling ?? "xy",
+      seamDiagnostic: seamDiagnosticMode(texture),
       checkerboard: texture.preview?.checkerboard ?? false,
       cube: texture.preview?.cube ?? "auto",
       rotation: texture.preview?.rotation ?? "auto",
@@ -210,6 +212,17 @@ function textureExpression(textureName: string, pack: TexturePackAsset): string 
 
 function textureSize(pack: TexturePackAsset, texture: TextureSpec): number {
   return texture.size ?? pack.defaultSize;
+}
+
+function seamDiagnosticMode(texture: TextureSpec): string {
+  const tiling = texture.preview?.tiling ?? "xy";
+  if (tiling === "none") {
+    return "disabled";
+  }
+  if (tiling === "x") {
+    return "left-right";
+  }
+  return "left-right/top-bottom";
 }
 
 function sourceCategory(texture: TextureSpec): "final-color" | "tintable" {

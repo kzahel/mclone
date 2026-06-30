@@ -3,7 +3,7 @@
 Status: active; scaffold/export/sheet loop, software cube, rotation-grid panels,
 first grass-block bundle, primary-tint terrain patch, source/tint split review
 sheets, texture illustrator guide, DSL tint-role metadata, and metadata reports
-landed on 2026-06-30.
+plus seam diagnostics landed on 2026-06-30.
 
 ## Purpose
 
@@ -186,7 +186,7 @@ pnpm texture-lab:export
 - [ ] Build a browser preview backed by the DSL output.
 - [x] Add 1x/enlarged pixel panels through the initial CLI sheet.
 - [x] Add 3x3 tile-repeat panels through the initial CLI sheet.
-- [ ] Add seam/error panels.
+- [x] Add seam/error panels with left-right and top-bottom mismatch overlays.
 - [x] Add 16x16 downsample and mip-strip panels through the initial CLI sheet.
 - [x] Add deterministic rotation-grid panel through the CLI sheet.
 - [ ] Add Playwright sheet capture under `/tmp/mclone-texture-lab/`.
