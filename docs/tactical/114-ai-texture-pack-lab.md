@@ -295,6 +295,12 @@ only ore masks, proving base-material-plus-mask composition. This is not yet a
 first-class DSL combinator; promote it only if more block families need the
 same composition pattern.
 
+Status 2026-06-30: the first stone pass was revised after sheet review because
+it still read as flat gray plus speckles. The stone base now uses a stronger
+authored facet mask, longer dark/light edge strokes, and reduced speckle
+density. This confirms the authoring rule: rock textures need structural masks
+before grain, not procedural grain as the primary visual identity.
+
 Acceptance: the next stone/ground textures show broad, intentional material
 forms in sheets and terrain preview, not just high-frequency grain.
 

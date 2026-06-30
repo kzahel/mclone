@@ -151,6 +151,11 @@ only the mineral shape. Avoid placing ore pixels directly on tile edges unless
 the cluster is intentionally wrapping; edge fragments are easy to spot in the
 seam and repeat panels.
 
+For stone and rock, do not rely on speckles as the main form. Start with
+connected planes or chunks, add short dark/light edge pairs for shallow relief,
+then use speckles only as final grain. If the enlarged source panel looks like a
+flat gray field with dots, the texture is not structurally authored yet.
+
 ## Reviewing Sheets
 
 Individual texture sheets are source-first:
