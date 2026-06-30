@@ -26,7 +26,10 @@ use mclone_app_runtime::{
 };
 use mclone_assets::AssetSource;
 use mclone_audio::{AudioEngine, landing_playback_for_impact};
-use mclone_client::{BlockInteractionTarget, ClientInteractionController};
+use mclone_client::{
+    BlockInteractionTarget, ClientInteractionController, HAND_PUSH_DEFAULT_HEAD_RADIUS,
+    sphere_intersects_solid_blocks,
+};
 use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_render::actor_assets::ActorTextureImage;
@@ -40,7 +43,7 @@ use mclone_render::entity::{ActorDrawResources, ActorFigureSet, ActorInstance, A
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiRenderer};
 use mclone_render::screen_effect::{
-    ScreenEffectsRenderer, UnderwaterEffectState, UnderwaterOverlay,
+    ScreenEffectsRenderer, ScreenFadeOverlay, UnderwaterEffectState, UnderwaterOverlay,
 };
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky::overworld_clear_color;
@@ -55,7 +58,7 @@ use mclone_render_session::{
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MOUSE_SENSITIVITY,
     EngineCameraController, EngineCameraInput, EngineCameraMovementImpulse,
     EngineCameraMovementMode, EngineCameraSnapshot, EngineDebugVisualOptions, EngineHandPushInput,
-    actor_instances_from_presentations, engine_debug_world_lines,
+    EngineRoomScaleReconciliation, actor_instances_from_presentations, engine_debug_world_lines,
 };
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameMovementMode, GamePlayerModel,
@@ -96,6 +99,12 @@ const XR_FIXED_RENDER_EYE_SEPARATION_BLOCKS: f32 = 0.064;
 const XR_MENU_LEFT_RAY_COLOR: [f32; 4] = [0.18, 0.85, 1.0, 0.95];
 const XR_MENU_RIGHT_RAY_COLOR: [f32; 4] = [0.2, 1.0, 0.45, 0.95];
 const XR_MENU_TRIGGER_RAY_COLOR: [f32; 4] = [1.0, 0.42, 0.12, 1.0];
+const XR_HEAD_COMFORT_RESIDUAL_DEAD_ZONE_BLOCKS: f64 = 0.15;
+const XR_HEAD_COMFORT_RESIDUAL_FULL_BLOCKS: f64 = 0.6;
+const XR_HEAD_COMFORT_HEAD_PENETRATION_ALPHA: f32 = 0.65;
+const XR_HEAD_COMFORT_MAX_ALPHA: f32 = 0.9;
+const XR_HEAD_COMFORT_FADE_IN_SECONDS: f32 = 0.12;
+const XR_HEAD_COMFORT_FADE_OUT_SECONDS: f32 = 0.22;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum XrLocomotionMode {
@@ -238,6 +247,57 @@ pub struct XrStartupViewPose {
     pub yaw_degrees: f32,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct XrHeadComfortState {
+    pub alpha: f32,
+    pub target_alpha: f32,
+    pub blocked_residual: bool,
+    pub head_penetrating: bool,
+}
+
+impl XrHeadComfortState {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn update(&mut self, target: XrHeadComfortTarget, dt_seconds: f64) {
+        self.target_alpha = target.alpha;
+        self.blocked_residual = target.blocked_residual;
+        self.head_penetrating = target.head_penetrating;
+
+        let dt_seconds = if dt_seconds.is_finite() {
+            dt_seconds.clamp(0.0, XR_LOCOMOTION_MAX_FRAME_SECONDS) as f32
+        } else {
+            0.0
+        };
+        let fade_seconds = if target.alpha > self.alpha {
+            XR_HEAD_COMFORT_FADE_IN_SECONDS
+        } else {
+            XR_HEAD_COMFORT_FADE_OUT_SECONDS
+        };
+        let t = if fade_seconds > 0.0 {
+            (dt_seconds / fade_seconds).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        self.alpha += (target.alpha - self.alpha) * t;
+        if target.alpha == 0.0 && self.alpha < 0.005 {
+            self.alpha = 0.0;
+        }
+    }
+
+    fn overlay(self) -> Option<ScreenFadeOverlay> {
+        (self.alpha > 0.005).then(|| ScreenFadeOverlay::black(self.alpha))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct XrHeadComfortTarget {
+    alpha: f32,
+    blocked_residual: bool,
+    head_penetrating: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum XrViewAlignmentMode {
     PlayerSpawn,
@@ -265,6 +325,7 @@ pub struct XrTerrainFrameSummary {
     pub local_startup_active: bool,
     pub actor_count: usize,
     pub drawn_actor_count: usize,
+    pub head_comfort: XrHeadComfortState,
     pub timing: XrTerrainFrameTiming,
     pub upload: XrTerrainUploadSummary,
 }
@@ -485,6 +546,7 @@ where
     screen_effects: ScreenEffectsRenderer,
     underwater_effects: XrUnderwaterEffectStates,
     last_underwater_update: Option<Instant>,
+    head_comfort: XrHeadComfortState,
     render_stats: RenderStreamStats,
     tracking_origin: Option<XrTrackingOrigin>,
     locomotion_mode: XrLocomotionMode,
@@ -632,6 +694,7 @@ where
                 .context("initialize XR screen effects renderer")?,
             underwater_effects: XrUnderwaterEffectStates::default(),
             last_underwater_update: None,
+            head_comfort: XrHeadComfortState::default(),
             render_stats: RenderStreamStats::default(),
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),
@@ -727,6 +790,7 @@ where
                 .context("initialize XR screen effects renderer")?,
             underwater_effects: XrUnderwaterEffectStates::default(),
             last_underwater_update: None,
+            head_comfort: XrHeadComfortState::default(),
             render_stats: started.render_stats,
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),
@@ -1797,6 +1861,15 @@ where
                     underwater_overlays,
                 )
                 .context("render XR underwater screen effect multiview")?;
+            self.screen_effects
+                .render_fade_multiview(
+                    device,
+                    queue,
+                    &mut encoder,
+                    RenderFrameTarget::color(target.color_view, target.size),
+                    xr_head_comfort_fade_overlays(self.head_comfort),
+                )
+                .context("render XR head comfort fade multiview")?;
             if let Some(timing) = timing.as_deref_mut() {
                 timing.multiview_screen_effect_ms = elapsed_ms(screen_effect_start.elapsed());
             }
@@ -1983,11 +2056,14 @@ where
         let gameplay_interaction_edges = self.update_gameplay_interaction_buttons(controllers);
         let suppress_gameplay_interaction = ui_was_active != ui_active;
         if self.runtime.is_none() {
+            self.head_comfort.reset();
             return Ok(());
         }
         let transform = self
             .reconcile_room_scale_body_to_headset(&views)
             .context("reconcile XR room-scale body pose")?;
+        self.update_head_comfort_state(transform, &views, dt_seconds)
+            .context("update XR head comfort fade state")?;
         if self.ui.is_active() {
             self.commit_engine_camera_player_pose()
                 .context("sync XR room-scale player pose")?;
@@ -2027,6 +2103,7 @@ where
         self.menu_panel_pose = None;
         self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = false;
+        self.head_comfort.reset();
         let now = Instant::now();
         let dt_seconds = self
             .last_locomotion_update
@@ -2059,6 +2136,7 @@ where
         self.menu_panel_pose = None;
         self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = false;
+        self.head_comfort.reset();
         self.last_locomotion_update = Some(Instant::now());
     }
 
@@ -2086,6 +2164,7 @@ where
                 local_startup_active: self.local_startup.is_some(),
                 actor_count: summary.actor_count,
                 drawn_actor_count: summary.drawn_actor_count,
+                head_comfort: self.head_comfort,
                 timing,
                 upload,
             };
@@ -2101,6 +2180,7 @@ where
             local_startup_active: self.local_startup.is_some(),
             actor_count: self.render_stats.actor_count,
             drawn_actor_count: self.render_stats.drawn_actor_count,
+            head_comfort: self.head_comfort,
             timing,
             upload,
         }
@@ -2122,6 +2202,7 @@ where
             local_startup_active: self.local_startup.is_some(),
             actor_count: summary.actor_count,
             drawn_actor_count: summary.drawn_actor_count,
+            head_comfort: self.head_comfort,
             timing,
             upload: summary.upload,
         }
@@ -2198,6 +2279,27 @@ where
         let origin = origin.consume_world_movement(consumed_world, transform);
         self.tracking_origin = Some(origin);
         XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())
+    }
+
+    fn update_head_comfort_state(
+        &mut self,
+        transform: XrStageToWorld,
+        views: &[xr::View],
+        dt_seconds: f64,
+    ) -> Result<()> {
+        let headset_stage_position = xr_headset_stage_position_from_views(views)?;
+        let headset_world_position = transform.transform_position(headset_stage_position);
+        let Some(runtime) = self.runtime.as_ref() else {
+            self.head_comfort.reset();
+            return Ok(());
+        };
+        let target = xr_head_comfort_target(
+            self.camera.last_room_scale_reconciliation(),
+            headset_world_position,
+            runtime.client(),
+        );
+        self.head_comfort.update(target, dt_seconds);
+        Ok(())
     }
 
     fn locomotion_movement_yaw_radians(&mut self, views: &[xr::View]) -> Result<Option<f64>> {
@@ -2600,6 +2702,16 @@ where
             .map(|summary| (summary, Default::default()))
         }
         .with_context(|| format!("render XR terrain {label} eye"))?;
+        if let Some(overlay) = self.head_comfort.overlay() {
+            self.screen_effects.render_fade_in_slot(
+                device,
+                queue,
+                &mut encoder,
+                RenderFrameTarget::color(target.color_view, target.size),
+                overlay,
+                view_slot,
+            );
+        }
         self.selection_outline.render_in_slot(
             device,
             queue,
@@ -3416,6 +3528,7 @@ where
         self.last_locomotion_update = None;
         self.underwater_effects = XrUnderwaterEffectStates::default();
         self.last_underwater_update = None;
+        self.head_comfort.reset();
         self.latest_controllers.clear();
         self.first_eye_summary = None;
         self.rendered_frames = 0;
@@ -4715,6 +4828,57 @@ fn underwater_overlay_from_forward(
         .with_effect(water_vision, effect_strength)
 }
 
+fn xr_head_comfort_target(
+    reconciliation: Option<EngineRoomScaleReconciliation>,
+    headset_world_position: Vec3,
+    client: &mclone_client::ClientRuntime,
+) -> XrHeadComfortTarget {
+    let horizontal_residual = reconciliation
+        .map(|reconciliation| reconciliation.residual_horizontal_length_sqr().sqrt())
+        .unwrap_or(0.0);
+    let head_penetrating = sphere_intersects_solid_blocks(
+        client,
+        vec3d_from_glam(headset_world_position),
+        HAND_PUSH_DEFAULT_HEAD_RADIUS,
+    );
+    xr_head_comfort_target_from_inputs(horizontal_residual, head_penetrating)
+}
+
+fn xr_head_comfort_target_from_inputs(
+    horizontal_residual: f64,
+    head_penetrating: bool,
+) -> XrHeadComfortTarget {
+    let blocked_residual = horizontal_residual.is_finite()
+        && horizontal_residual > XR_HEAD_COMFORT_RESIDUAL_DEAD_ZONE_BLOCKS;
+    let mut alpha = xr_head_comfort_residual_alpha(horizontal_residual);
+    if head_penetrating {
+        alpha = alpha.max(XR_HEAD_COMFORT_HEAD_PENETRATION_ALPHA);
+    }
+    XrHeadComfortTarget {
+        alpha: alpha.min(XR_HEAD_COMFORT_MAX_ALPHA),
+        blocked_residual,
+        head_penetrating,
+    }
+}
+
+fn xr_head_comfort_residual_alpha(horizontal_residual: f64) -> f32 {
+    if !horizontal_residual.is_finite()
+        || horizontal_residual <= XR_HEAD_COMFORT_RESIDUAL_DEAD_ZONE_BLOCKS
+    {
+        return 0.0;
+    }
+    let span = XR_HEAD_COMFORT_RESIDUAL_FULL_BLOCKS - XR_HEAD_COMFORT_RESIDUAL_DEAD_ZONE_BLOCKS;
+    let t = ((horizontal_residual - XR_HEAD_COMFORT_RESIDUAL_DEAD_ZONE_BLOCKS) / span)
+        .clamp(0.0, 1.0) as f32;
+    let smooth = t * t * (3.0 - 2.0 * t);
+    smooth * XR_HEAD_COMFORT_MAX_ALPHA
+}
+
+fn xr_head_comfort_fade_overlays(state: XrHeadComfortState) -> [Option<ScreenFadeOverlay>; 2] {
+    let overlay = state.overlay();
+    [overlay, overlay]
+}
+
 fn average_unit_direction(a: Vec3, b: Vec3, fallback: Vec3) -> Vec3 {
     let direction = (a + b) * 0.5;
     if direction.is_finite() && direction.length_squared() > f32::EPSILON {
@@ -4826,6 +4990,91 @@ mod tests {
         );
         assert!(overlay.uv_offset[0].is_finite());
         assert!(overlay.uv_offset[1].is_finite());
+    }
+
+    #[test]
+    fn xr_head_comfort_residual_dead_zone_and_cap() {
+        assert_eq!(
+            xr_head_comfort_target_from_inputs(
+                XR_HEAD_COMFORT_RESIDUAL_DEAD_ZONE_BLOCKS * 0.5,
+                false
+            ),
+            XrHeadComfortTarget::default()
+        );
+
+        let partial = xr_head_comfort_target_from_inputs(0.375, false);
+        assert!(partial.blocked_residual);
+        assert!(!partial.head_penetrating);
+        assert!(partial.alpha > 0.0);
+        assert!(partial.alpha < XR_HEAD_COMFORT_MAX_ALPHA);
+
+        let capped = xr_head_comfort_target_from_inputs(2.0, false);
+        assert_eq!(capped.alpha, XR_HEAD_COMFORT_MAX_ALPHA);
+    }
+
+    #[test]
+    fn xr_head_comfort_vertical_offset_alone_does_not_fade() {
+        let target = xr_head_comfort_target_from_inputs(0.0, false);
+
+        assert_eq!(target.alpha, 0.0);
+        assert!(!target.blocked_residual);
+        assert!(!target.head_penetrating);
+    }
+
+    #[test]
+    fn xr_head_comfort_head_penetration_sets_floor_alpha() {
+        let target = xr_head_comfort_target_from_inputs(0.0, true);
+
+        assert_eq!(target.alpha, XR_HEAD_COMFORT_HEAD_PENETRATION_ALPHA);
+        assert!(!target.blocked_residual);
+        assert!(target.head_penetrating);
+    }
+
+    #[test]
+    fn xr_head_comfort_state_smooths_in_and_out() {
+        let mut state = XrHeadComfortState::default();
+        state.update(
+            XrHeadComfortTarget {
+                alpha: XR_HEAD_COMFORT_MAX_ALPHA,
+                blocked_residual: true,
+                head_penetrating: false,
+            },
+            f64::from(XR_HEAD_COMFORT_FADE_IN_SECONDS) * 0.5,
+        );
+
+        assert!(state.alpha > 0.0);
+        assert!(state.alpha < XR_HEAD_COMFORT_MAX_ALPHA);
+        assert_eq!(state.target_alpha, XR_HEAD_COMFORT_MAX_ALPHA);
+        assert!(state.blocked_residual);
+
+        for _ in 0..8 {
+            state.update(
+                XrHeadComfortTarget::default(),
+                XR_LOCOMOTION_MAX_FRAME_SECONDS,
+            );
+        }
+
+        assert_eq!(state.alpha, 0.0);
+        assert_eq!(state.target_alpha, 0.0);
+        assert!(!state.blocked_residual);
+    }
+
+    #[test]
+    fn xr_head_comfort_fade_uses_same_alpha_for_both_eyes() {
+        let mut state = XrHeadComfortState::default();
+        state.update(
+            XrHeadComfortTarget {
+                alpha: 0.5,
+                blocked_residual: true,
+                head_penetrating: false,
+            },
+            f64::from(XR_HEAD_COMFORT_FADE_IN_SECONDS),
+        );
+
+        let [left, right] = xr_head_comfort_fade_overlays(state);
+
+        assert_eq!(left, right);
+        assert!(left.expect("fade overlay").alpha > 0.0);
     }
 
     #[test]

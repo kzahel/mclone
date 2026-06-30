@@ -1581,6 +1581,16 @@ pub fn collide_movement(client: &ClientRuntime, bounding_box: Aabb, movement: Ve
     collide_with_aabbs(bounding_box, movement, &solid_blocks)
 }
 
+pub fn sphere_intersects_solid_blocks(client: &ClientRuntime, center: Vec3d, radius: f64) -> bool {
+    if !center.is_finite() || !radius.is_finite() || radius <= 0.0 {
+        return false;
+    }
+    let radius_sqr = radius * radius;
+    solid_block_aabbs_in(client, hand_probe_aabb(center, radius))
+        .into_iter()
+        .any(|solid| point_aabb_distance_sqr(center, solid) <= radius_sqr)
+}
+
 fn collide_with_aabbs(mut bounding_box: Aabb, movement: Vec3d, solids: &[Aabb]) -> Vec3d {
     let mut x = movement.x;
     let mut y = movement.y;
@@ -1613,6 +1623,31 @@ fn collide_with_aabbs(mut bounding_box: Aabb, movement: Vec3d, solids: &[Aabb]) 
     }
 
     Vec3d::new(x, y, z)
+}
+
+fn point_aabb_distance_sqr(point: Vec3d, aabb: Aabb) -> f64 {
+    let dx = if point.x < aabb.min_x {
+        aabb.min_x - point.x
+    } else if point.x > aabb.max_x {
+        point.x - aabb.max_x
+    } else {
+        0.0
+    };
+    let dy = if point.y < aabb.min_y {
+        aabb.min_y - point.y
+    } else if point.y > aabb.max_y {
+        point.y - aabb.max_y
+    } else {
+        0.0
+    };
+    let dz = if point.z < aabb.min_z {
+        aabb.min_z - point.z
+    } else if point.z > aabb.max_z {
+        point.z - aabb.max_z
+    } else {
+        0.0
+    };
+    dx * dx + dy * dy + dz * dz
 }
 
 fn solid_block_aabbs_in(client: &ClientRuntime, area: Aabb) -> Vec<Aabb> {
@@ -2505,6 +2540,33 @@ mod tests {
             assert!(!result.vertical_collision, "{state:?}");
             assert_eq!(controller.pose().position, Vec3d::new(2.5, 0.0, 0.5));
         }
+    }
+
+    #[test]
+    fn sphere_intersection_detects_solid_collision_shape() {
+        let client = client_with_blocks(&[(BlockPos::new(1, 1, 0), BlockStateId(7))]);
+
+        assert!(sphere_intersects_solid_blocks(
+            &client,
+            Vec3d::new(1.5, 1.5, 0.5),
+            0.2
+        ));
+        assert!(!sphere_intersects_solid_blocks(
+            &client,
+            Vec3d::new(0.5, 1.5, 0.5),
+            0.2
+        ));
+    }
+
+    #[test]
+    fn sphere_intersection_uses_sphere_distance_not_probe_box_corners() {
+        let client = client_with_blocks(&[(BlockPos::new(1, 1, 1), BlockStateId(7))]);
+
+        assert!(!sphere_intersects_solid_blocks(
+            &client,
+            Vec3d::new(0.8, 1.5, 0.8),
+            0.25
+        ));
     }
 
     #[test]

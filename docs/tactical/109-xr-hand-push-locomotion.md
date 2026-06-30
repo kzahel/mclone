@@ -1,9 +1,8 @@
 # 109: XR Hand-Push Locomotion
 
-Status: active; Slice 4 room-scale horizontal head/body reconciliation landed
-as a first implementation chunk. Quest standalone headset validation remains
-the preferred feel gate, especially for head/body pose sync and comfort fade
-thresholds.
+Status: active; Slice 5 head comfort fade landed as the first obstruction
+comfort chunk. Quest standalone headset validation remains the preferred feel
+gate, especially for head/body pose sync, fade thresholds, and hand-push tuning.
 
 ## Purpose
 
@@ -96,6 +95,35 @@ height policy, or different world scale, but those should be explicit features
 with their own thresholds and validation. They should not fall out of
 room-scale reconciliation accidentally.
 
+## XR Comfort Fade Policy
+
+Comfort fade is a communication layer, not locomotion authority. The engine
+still tries to reconcile the body to the headset through shared collision
+first. Fade communicates the cases where the view is not currently trustworthy:
+the room-scale horizontal residual is collision-blocked, or the headset/head
+sphere overlaps world collision.
+
+First-pass rules:
+
+- The fade target is computed from the stereo headset center and applied with
+  the same alpha to both eyes. Per-eye alpha is forbidden for this effect.
+- Vertical HMD offset alone does not fade. Sitting, crouching, and standing are
+  view-height behavior until we intentionally add a body-height policy.
+- Horizontal residual has a dead zone, ramps smoothly, and caps below full
+  blackout so the player never fully loses the world.
+- Head-sphere penetration forces a visible baseline fade even when horizontal
+  residual is small.
+- Alpha is smoothed over short in/out windows so brief frame jitter does not
+  flash the display.
+- The visual uses `ScreenEffectsRenderer`, including its full-frame multiview
+  path. It is not a one-eye or app-local render pass.
+- World debug lines, selection outlines, and menu panels render after the fade
+  so the player can still see diagnostics and recover.
+
+Thresholds are intentionally conservative until Quest validation: residual
+dead zone `0.15` blocks, full ramp by `0.6` blocks, penetration alpha `0.65`,
+and max opacity `0.9`.
+
 ## Slice 1 - Shared Baseline
 
 - [x] Add a shared `HandPushLocomotionController` in `mclone-client`.
@@ -149,9 +177,23 @@ room-scale reconciliation accidentally.
 - [x] Add focused tests for clear-space room-scale catch-up, blocked horizontal
   reconciliation, transform rebuild ordering, and "vertical HMD offset does
   not auto-step" behavior.
-- [ ] Add a first comfort state hook for head penetration or excessive
-  residual offset. Rendering the actual fade/blackout can be a follow-up if
-  the state is observable and tested.
+
+## Slice 5 - Head Comfort Fade
+
+- [x] Add a shared collision helper to test whether a head sphere intersects
+  solid world collision without over-detecting from the sphere probe AABB
+  corners.
+- [x] Add a reusable solid-color `ScreenFadeOverlay` to `ScreenEffectsRenderer`
+  with both per-eye and full-frame multiview render paths.
+- [x] Add XR comfort state that derives target alpha from blocked horizontal
+  residual offset and head-sphere penetration, then smooths the visible alpha.
+- [x] Apply the same comfort fade alpha to both eyes; expose the state in
+  `XrTerrainFrameSummary` for non-visual diagnostics.
+- [x] Keep fade ordering before world overlays/menu panels so debug lines and
+  recovery UI remain visible.
+- [x] Add focused tests for residual threshold/cap behavior, vertical offset
+  not fading, penetration alpha, smoothing, same-eye alpha, screen-effect
+  multiview uniforms, and shared sphere/world collision.
 
 ## Known Gaps
 
@@ -165,9 +207,11 @@ room-scale reconciliation accidentally.
 - The player collision box wireframe is opt-in because it is diagnostic noise;
   hand collider spheres are automatic in `Hand Push` mode because they are part
   of understanding and tuning the movement feel.
-- XR body/head drift is now reconciled horizontally, but the comfort
-  fade/blackout state for blocked residual offset and head penetration is not
-  implemented yet.
+- Head comfort fade is implemented, but the thresholds and subjective comfort
+  need Quest standalone validation. It currently fades to black, not a
+  Half-Life-style gray or vignette.
+- Dynamic body height, crouch policy, step assist, and optional auto-jump are
+  intentionally deferred.
 
 ## Validation
 
@@ -228,12 +272,28 @@ tracking-origin consumption without double-counting the headset pose. The
 headless screenshot visually confirmed the existing player-box world overlay
 still renders after the residual-line path was added.
 
+Additional validation for Slice 5:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-client -p mclone-render -p mclone-render-session -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-head-comfort-fade-sanity.png --width 960 --height 540 --startup-wait frames:2 --screenshot-player-box true --screenshot-camera-view third-person --fullbright true
+```
+
+Slice 5 unit coverage validates shared sphere/head obstruction checks,
+comfort-fade target thresholds, smoothing, same-alpha stereo overlays, and
+screen-effect multiview uniform serialization. The screenshot sanity check
+visually confirmed the normal native frame still renders with the player
+collision-box world overlay after the screen-effect renderer extension.
+
 ## Next Slice
 
-Add the comfort/obstruction state for excessive residual offset and head-sphere
-penetration, then run Quest standalone with `Hand Push` and `Player Box`
-enabled. Validate that physical room-scale walking in empty space keeps the
-collision box magnetized to the headset, while leaning into blocked geometry
-leaves only collision-explained residual offset and exposes comfort/debug
-state. Only after that should we tune arm length, hand/head radii, unstick
-distance, and velocity fling thresholds.
+Run Quest standalone with `Hand Push` and `Player Box` enabled. Validate that
+physical room-scale walking in empty space keeps the collision box magnetized
+to the headset, while leaning into blocked geometry leaves only
+collision-explained residual offset and fades both eyes evenly. Tune fade
+thresholds before changing arm length, hand/head radii, unstick distance, or
+velocity fling thresholds.

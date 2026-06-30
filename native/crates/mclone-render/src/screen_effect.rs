@@ -25,6 +25,25 @@ const UNDERWATER_EFFECT_FADE_IN_SECONDS: f32 = 0.35;
 const UNDERWATER_EFFECT_FADE_OUT_SECONDS: f32 = 0.15;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScreenFadeOverlay {
+    pub color: [f32; 3],
+    pub alpha: f32,
+}
+
+impl ScreenFadeOverlay {
+    pub fn black(alpha: f32) -> Self {
+        Self::new([0.0, 0.0, 0.0], alpha)
+    }
+
+    pub fn new(color: [f32; 3], alpha: f32) -> Self {
+        Self {
+            color: color.map(clamp_unit),
+            alpha: clamp_unit(alpha),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UnderwaterOverlay {
     pub brightness: f32,
     pub alpha: f32,
@@ -176,6 +195,7 @@ pub struct ScreenEffectsRenderer {
     pipeline: wgpu::RenderPipeline,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     underwater_texture: GpuScreenEffectTexture,
+    solid_texture: GpuScreenEffectTexture,
     color_format: wgpu::TextureFormat,
     multiview: Option<ScreenEffectsMultiviewRenderer>,
     vertex_buffer: Option<wgpu::Buffer>,
@@ -217,6 +237,8 @@ impl ScreenEffectsRenderer {
             &texture_bind_group_layout,
             assets,
         )?;
+        let solid_texture =
+            create_solid_color_texture_bind_group(device, queue, &texture_bind_group_layout);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_screen_effect_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/screen_effect.wgsl").into()),
@@ -291,6 +313,7 @@ impl ScreenEffectsRenderer {
             pipeline,
             texture_bind_group_layout,
             underwater_texture,
+            solid_texture,
             color_format,
             multiview: None,
             vertex_buffer: None,
@@ -345,6 +368,56 @@ impl ScreenEffectsRenderer {
         pass.draw(0..6, 0..1);
     }
 
+    pub fn render_fade(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        overlay: ScreenFadeOverlay,
+    ) {
+        self.render_fade_in_slot(device, queue, encoder, target, overlay, SINGLE_VIEW_SLOT);
+    }
+
+    pub fn render_fade_in_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        overlay: ScreenFadeOverlay,
+        view_slot: PerViewSlot,
+    ) {
+        if overlay.alpha <= 0.0 {
+            return;
+        }
+        let vertices = screen_fade_quad_vertices(overlay);
+        let vertex_range = self.upload_vertices(device, queue, view_slot, &vertices);
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_screen_fade_effect_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &self.solid_texture.bind_group, &[]);
+        pass.set_vertex_buffer(
+            0,
+            self.vertex_buffer
+                .as_ref()
+                .expect("screen effect vertex buffer exists")
+                .slice(vertex_range),
+        );
+        pass.draw(0..6, 0..1);
+    }
+
     pub fn render_underwater_multiview(
         &mut self,
         device: &wgpu::Device,
@@ -383,6 +456,59 @@ impl ScreenEffectsRenderer {
         });
         pass.set_pipeline(&renderer.pipeline);
         pass.set_bind_group(0, &self.underwater_texture.bind_group, &[]);
+        pass.set_bind_group(1, &renderer.uniform_bind_group, &[]);
+        pass.set_vertex_buffer(
+            0,
+            self.vertex_buffer
+                .as_ref()
+                .expect("screen effect vertex buffer exists")
+                .slice(vertex_range),
+        );
+        pass.draw(0..6, 0..1);
+        Ok(())
+    }
+
+    pub fn render_fade_multiview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        overlays: [Option<ScreenFadeOverlay>; 2],
+    ) -> Result<()> {
+        if overlays
+            .iter()
+            .all(|overlay| overlay.is_none_or(|overlay| overlay.alpha <= 0.0))
+        {
+            return Ok(());
+        }
+        let vertices = screen_fade_multiview_quad_vertices();
+        let vertex_range = self.upload_vertices(device, queue, SINGLE_VIEW_SLOT, &vertices);
+        self.ensure_multiview_renderer(device)?;
+        let renderer = self
+            .multiview
+            .as_ref()
+            .expect("screen effect multiview renderer initialized above");
+        queue.write_buffer(
+            &renderer.uniform_buffer,
+            0,
+            &screen_fade_multiview_uniform_bytes(overlays),
+        );
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_screen_fade_effect_multiview_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        pass.set_pipeline(&renderer.pipeline);
+        pass.set_bind_group(0, &self.solid_texture.bind_group, &[]);
         pass.set_bind_group(1, &renderer.uniform_bind_group, &[]);
         pass.set_vertex_buffer(
             0,
@@ -661,6 +787,119 @@ fn create_underwater_texture_bind_group(
     })
 }
 
+fn create_solid_color_texture_bind_group(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+) -> GpuScreenEffectTexture {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mclone_solid_screen_effect_texture"),
+        size: wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: Default::default(),
+            aspect: Default::default(),
+        },
+        &[255, 255, 255, 255],
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4),
+            rows_per_image: Some(1),
+        },
+        wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+    );
+    let view = texture.create_view(&Default::default());
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("mclone_solid_screen_effect_sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("mclone_solid_screen_effect_bind_group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+        ],
+    });
+    GpuScreenEffectTexture {
+        _texture: texture,
+        _view: view,
+        _sampler: sampler,
+        bind_group,
+    }
+}
+
+fn screen_fade_quad_vertices(overlay: ScreenFadeOverlay) -> Vec<f32> {
+    let color = [
+        overlay.color[0],
+        overlay.color[1],
+        overlay.color[2],
+        overlay.alpha,
+    ];
+    let mut vertices = Vec::with_capacity(6 * FLOATS_PER_VERTEX);
+    push_vertex(&mut vertices, [-1.0, -1.0], [0.0, 0.0], color);
+    push_vertex(&mut vertices, [1.0, -1.0], [0.0, 0.0], color);
+    push_vertex(&mut vertices, [1.0, 1.0], [0.0, 0.0], color);
+    push_vertex(&mut vertices, [-1.0, -1.0], [0.0, 0.0], color);
+    push_vertex(&mut vertices, [1.0, 1.0], [0.0, 0.0], color);
+    push_vertex(&mut vertices, [-1.0, 1.0], [0.0, 0.0], color);
+    vertices
+}
+
+fn screen_fade_multiview_quad_vertices() -> Vec<f32> {
+    screen_fade_quad_vertices(ScreenFadeOverlay::new([1.0, 1.0, 1.0], 1.0))
+}
+
+fn screen_fade_multiview_uniform_bytes(overlays: [Option<ScreenFadeOverlay>; 2]) -> [u8; 64] {
+    let mut bytes = [0_u8; MULTIVIEW_UNIFORM_SIZE as usize];
+    let mut offset = 0;
+    for overlay in overlays {
+        let color = overlay.map_or([0.0, 0.0, 0.0, 0.0], |overlay| {
+            [
+                overlay.color[0],
+                overlay.color[1],
+                overlay.color[2],
+                overlay.alpha,
+            ]
+        });
+        let values = [0.0, 0.0, 0.0, 0.0, color[0], color[1], color[2], color[3]];
+        for value in values {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+            offset += 4;
+        }
+    }
+    bytes
+}
+
 fn underwater_quad_vertices(overlay: UnderwaterOverlay) -> Vec<f32> {
     let [u, v] = overlay.uv_offset;
     let color = [
@@ -813,6 +1052,21 @@ mod tests {
     }
 
     #[test]
+    fn screen_fade_vertices_draw_solid_fullscreen_quad() {
+        let vertices = screen_fade_quad_vertices(ScreenFadeOverlay::new([0.0, 0.1, 0.2], 0.75));
+
+        assert_eq!(vertices.len(), 6 * FLOATS_PER_VERTEX);
+        assert_eq!(
+            &vertices[0..8],
+            &[-1.0, -1.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.75]
+        );
+        assert_eq!(
+            &vertices[16..24],
+            &[1.0, 1.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.75]
+        );
+    }
+
+    #[test]
     fn underwater_multiview_uniform_serializes_distinct_eye_overlays() {
         let left = UnderwaterOverlay::new(0.75, 0.2, [0.5, 0.25], 1.0);
         let bytes = underwater_multiview_uniform_bytes([
@@ -838,6 +1092,25 @@ mod tests {
     fn underwater_multiview_uniform_serializes_missing_eye_as_transparent() {
         let bytes = underwater_multiview_uniform_bytes([None, None]);
         assert!(bytes.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn screen_fade_multiview_uniform_serializes_eye_overlays() {
+        let overlay = ScreenFadeOverlay::black(0.65);
+        let bytes = screen_fade_multiview_uniform_bytes([Some(overlay), Some(overlay)]);
+        let floats = bytes
+            .chunks_exact(4)
+            .map(|chunk| f32::from_ne_bytes(chunk.try_into().unwrap()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            &floats[0..MULTIVIEW_UNIFORM_FLOATS_PER_VIEW],
+            &[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.65]
+        );
+        assert_eq!(
+            &floats[MULTIVIEW_UNIFORM_FLOATS_PER_VIEW..MULTIVIEW_UNIFORM_FLOATS_PER_VIEW * 2],
+            &[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.65]
+        );
     }
 
     #[test]

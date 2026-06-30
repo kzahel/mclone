@@ -36,7 +36,8 @@ pub use player::{
     LOCAL_PLAYER_VERTICAL_DRAG, LOCAL_PLAYER_X_ROT_LIMIT_DEGREES, LocalPlayerController,
     LocalPlayerPose, MOVING_SLOW_FACTOR, NO_CLIP_BOOST_MULTIPLIER, NoClipMovementStep, PlayerInput,
     PlayerInputKey, PlayerInputKeys, WalkingMovementResult, WalkingMovementStep, collide_movement,
-    no_clip_displacement, view_vector, view_vector_from_rot_degrees,
+    no_clip_displacement, sphere_intersects_solid_blocks, view_vector,
+    view_vector_from_rot_degrees,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
