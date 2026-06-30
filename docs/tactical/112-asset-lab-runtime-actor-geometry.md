@@ -1,6 +1,6 @@
 # 112 - Asset Lab Runtime Actor Geometry
 
-Status: active; Slice 3a first-person local body visibility landed.
+Status: active; Slice 3a first-person local body visibility and Options toggle landed.
 
 ## Purpose
 
@@ -179,20 +179,25 @@ Review output inspected:
       mode.
 - [x] Preserve Java standing eye height alignment at `1.62` blocks above feet.
 - [x] Add screenshot CLI coverage through `--first-person-player true|false`.
+- [x] Expose the setting in the in-game Options menu as `First Person Body`.
 
 Validation:
 
 ```powershell
 cargo test --manifest-path native/Cargo.toml -p mclone-render -p mclone-render-session -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-native-client
 cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
 pnpm native:web:build
 cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-first-person-player.png --width 1280 --height 720 --startup-wait idle --screenshot-camera-view first-person --first-person-player true --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --fullbright true
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-options-first-person-body.png --width 890 --height 1024 --screenshot-ui options-pause --startup-wait idle --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 ```
 
 Review output inspected:
 
 ```text
 /tmp/mclone-first-person-player.png
+/tmp/mclone-options-first-person-body.png
 ```
 
 The default forward first-person camera does not show much body because the

@@ -198,6 +198,7 @@ pub(crate) struct FlatClientUiRenderOptions {
     pub(crate) fly_speed_multiplier: f32,
     pub(crate) movement_speed_multiplier: f32,
     pub(crate) player_collision_box_visible: bool,
+    pub(crate) first_person_player_visible: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -658,6 +659,15 @@ impl FlatClientDriver {
                     } else {
                         "hidden"
                     }
+                );
+            }
+            GameUiAction::ToggleFirstPersonPlayer => {
+                let visible = !self.camera.first_person_player_visible();
+                self.camera.set_first_person_player_visible(visible);
+                self.scene.first_person_player_visible = visible;
+                log::info!(
+                    "first-person player body {}",
+                    if visible { "visible" } else { "hidden" }
                 );
             }
             GameUiAction::SetMovementMode(movement_mode) => {
@@ -1725,6 +1735,7 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         section_occlusion_culling: options.render_options.section_occlusion_culling,
         force_fullbright: options.render_options.force_fullbright,
         player_collision_box_visible: options.player_collision_box_visible,
+        first_person_player_visible: options.first_person_player_visible,
         movement_mode: options.movement_mode,
         fly_speed_multiplier: options.fly_speed_multiplier,
         min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
@@ -1903,6 +1914,21 @@ mod tests {
 
         assert!(result.host_action.is_none());
         assert!(driver.player_collision_box_visible);
+    }
+
+    #[test]
+    fn ui_action_toggles_first_person_player_body() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        assert!(!driver.scene.first_person_player_visible);
+        assert!(!driver.camera.first_person_player_visible());
+        let result =
+            driver.apply_ui_action(GameUiAction::ToggleFirstPersonPlayer, ui_action_context());
+
+        assert!(result.host_action.is_none());
+        assert!(driver.scene.first_person_player_visible);
+        assert!(driver.camera.first_person_player_visible());
     }
 
     #[test]

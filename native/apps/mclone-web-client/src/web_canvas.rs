@@ -2924,6 +2924,10 @@ impl WebChunkRenderSession {
             GameUiAction::TogglePlayerCollisionBox => {
                 self.player_collision_box_visible = !self.player_collision_box_visible;
             }
+            GameUiAction::ToggleFirstPersonPlayer => {
+                let visible = !self.camera.first_person_player_visible();
+                self.camera.set_first_person_player_visible(visible);
+            }
             GameUiAction::SetTouchLookSensitivity(look_sensitivity) => {
                 self.touch_look_sensitivity = clamp_touch_look_sensitivity(look_sensitivity);
             }
@@ -3044,6 +3048,7 @@ impl WebChunkRenderSession {
                 | GameUiAction::ToggleSectionOcclusion
                 | GameUiAction::ToggleFullbright
                 | GameUiAction::TogglePlayerCollisionBox
+                | GameUiAction::ToggleFirstPersonPlayer
                 | GameUiAction::SetMovementMode(_)
                 | GameUiAction::SetFlySpeed(_)
                 | GameUiAction::CycleFramePacing
@@ -3063,6 +3068,7 @@ impl WebChunkRenderSession {
             section_occlusion_culling: self.section_occlusion_culling,
             force_fullbright: self.force_fullbright,
             player_collision_box_visible: self.player_collision_box_visible,
+            first_person_player_visible: self.camera.first_person_player_visible(),
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
@@ -4680,6 +4686,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
         GameUiAction::ToggleFullbright => "toggleFullbright",
         GameUiAction::TogglePlayerCollisionBox => "togglePlayerCollisionBox",
+        GameUiAction::ToggleFirstPersonPlayer => "toggleFirstPersonPlayer",
         GameUiAction::SetMovementMode(_) => "setMovementMode",
         GameUiAction::CycleFramePacing => "cycleFramePacing",
         GameUiAction::CycleFpsCap => "cycleFpsCap",

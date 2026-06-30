@@ -2539,6 +2539,7 @@ where
             section_occlusion_culling: self.render_options.section_occlusion_culling,
             force_fullbright: self.render_options.force_fullbright,
             player_collision_box_visible: self.player_collision_box_visible,
+            first_person_player_visible: self.camera.first_person_player_visible(),
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
@@ -3243,6 +3244,14 @@ where
                     } else {
                         "hidden"
                     }
+                );
+            }
+            GameUiAction::ToggleFirstPersonPlayer => {
+                let visible = !self.camera.first_person_player_visible();
+                self.camera.set_first_person_player_visible(visible);
+                log::info!(
+                    "XR first-person player body {}",
+                    if visible { "visible" } else { "hidden" }
                 );
             }
             GameUiAction::SetRenderDistance(render_distance) => {

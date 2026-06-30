@@ -1415,6 +1415,7 @@ pub(crate) fn run_frame_budget_probe(
                 fly_speed_multiplier: 1.0,
                 movement_speed_multiplier: 1.0,
                 player_collision_box_visible: false,
+                first_person_player_visible: false,
             });
             let gui_scale = state.ui.scale();
             let gui_state = FullFrameGui::new(
