@@ -74,6 +74,48 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-30 - Standalone Quest 3 Frozen RD10 Per-Eye Draw Masks vs Multiview
+
+Benchmarked code commit: `ecb502f` (`Show raw and tinted grass previews`), which
+includes `894bacf` (`Mask shared stereo terrain draws per eye`). Captured from a
+clean temporary worktree with the fixed frozen RD10 pose `0,80,-96,180`,
+`--perf-metrics`, and the same staged asset pack for both runs. The per-eye run
+used the default path; the multiview run used `--xr-full-frame-multiview`.
+
+Summary:
+
+| Path | Sample | FPS | Frames | p50 | p95 | p99 | Max | Over 1x | Drawn sections | Drawn indices | App GPU | MTP | Key marker |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| per-eye draw masks | `20.013s` | `71.8` | 1,433 | `13.746ms` | `15.166ms` | `18.813ms` | `27.472ms` | 567 | 179 | 1,356,102 | `1.555ms` | `27.821ms` | stereo poll `10.774ms` |
+| full-frame multiview | `20.012s` | `72.0` | 1,440 | `13.799ms` | `14.546ms` | `15.520ms` | `25.007ms` | 593 | 203 | 1,523,148 | `2.057ms` | `23.326ms` | multiview terrain `3.646ms`; poll `12.034ms` |
+
+Raw summary markers:
+
+```text
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.013 mode=stationary-frozen-render render_path=per-eye render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=34.678 settle_min_seconds=5.000 settle_frames=2434 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1433 submitted_delta=1433 runtime_delta=1433 skipped_delta=0 frame_avg_ms=13.918 frame_min_ms=11.093 frame_p50_ms=13.746 frame_p95_ms=15.166 frame_p99_ms=18.813 frame_max_ms=27.472 over_budget=567 over_2x_budget=0 over_4x_budget=0
+MCLONE_ANDROID_XR_PERF_DRAW sections=1133 drawn_sections=179 indices=5396736 drawn_indices=1356102 actors=1 drawn_actors=1
+MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms=1.555 app_cpu_ms=n/a compositor_gpu_ms=0.664 compositor_cpu_ms=n/a gpu_util_pct=18.012 cpu_util_avg_pct=90.956 cpu_util_worst_pct=93.000 motion_to_photon_ms=27.821 dropped_frames=100.000 stale_frames=n/a counters=17 any_valid=true attempt=1/8 per_query_us=0.39
+
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.012 mode=stationary-frozen-render render_path=multiview render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=34.702 settle_min_seconds=5.000 settle_frames=2447 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1440 submitted_delta=1440 runtime_delta=1440 skipped_delta=0 frame_avg_ms=13.844 frame_min_ms=11.419 frame_p50_ms=13.799 frame_p95_ms=14.546 frame_p99_ms=15.520 frame_max_ms=25.007 over_budget=593 over_2x_budget=0 over_4x_budget=0
+MCLONE_ANDROID_XR_PERF_MULTIVIEW max_multiview_sky_ms=0.606 max_multiview_terrain_ms=3.646 max_multiview_actor_ms=0.667 max_multiview_screen_effect_ms=0.017 max_multiview_world_overlays_ms=0.064 max_multiview_submit_ms=0.928 max_multiview_poll_wait_ms=12.034
+MCLONE_ANDROID_XR_PERF_DRAW sections=1133 drawn_sections=203 indices=5396316 drawn_indices=1523148 actors=1 drawn_actors=1
+MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms=2.057 app_cpu_ms=n/a compositor_gpu_ms=0.644 compositor_cpu_ms=n/a gpu_util_pct=18.109 cpu_util_avg_pct=95.333 cpu_util_worst_pct=98.000 motion_to_photon_ms=23.326 dropped_frames=56.000 stale_frames=n/a counters=17 any_valid=true attempt=1/8 per_query_us=0.38
+```
+
+Interpretation:
+
+- Per-eye draw masks reduce terrain work from the prior shared-union `203`
+  sections / `1.523M` indices to `179` sections / `1.356M` indices in this pose.
+  This is the durable win from `894bacf`.
+- Full-frame multiview still renders the exact stereo union, so it gives back
+  that per-eye overdraw reduction. It is slightly better on avg/p95 here
+  (`13.844ms` / `14.546ms` versus `13.918ms` / `15.166ms`) but worse on p50,
+  over-budget count, and sampled app GPU frametime.
+- Treat this as another "multiview is correct and useful to keep" record, not a
+  reason to switch the default. The next primary RD10 performance lever should
+  be a runtime-toggleable overlap experiment or deeper draw/submit batching,
+  using this masked per-eye path as the baseline.
+
 ### 2026-06-30 - Standalone Quest 3 Frozen RD10 Shared Stereo Terrain Prep (Slice H)
 
 Benchmarked code: current Slice H worktree, based on `1c8fdd2`, committed in the

@@ -684,6 +684,25 @@ for the paired Quest run: multiview terrain CPU max moved from `4.059ms` to
 p95). That confirms terrain-prep sharing is useful architecture cleanup, not the
 remaining primary performance lever.
 
+**Per-eye draw-mask recheck captured 2026-06-30.** Commit `894bacf` keeps the
+shared stereo traversal/prep but stores a draw mask per section so the default
+per-eye path does not draw sections outside that eye's frustum. On the fixed
+frozen RD10 pose, the masked per-eye path draws `179` sections / `1.356M`
+indices instead of the shared-union `203` / `1.523M`. A matched current-HEAD
+comparison at `ecb502f` showed:
+
+| path | avg | p50 | p95 | p99 | over budget | drawn sections | drawn indices | app GPU |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| masked per-eye | 13.918 ms | 13.746 ms | 15.166 ms | 18.813 ms | 567 | 179 | 1,356,102 | 1.555 ms |
+| full-frame multiview | 13.844 ms | 13.799 ms | 14.546 ms | 15.520 ms | 593 | 203 | 1,523,148 | 2.057 ms |
+
+The important change is not that multiview won or lost by a large amount; it did
+not. Multiview remained slightly better on avg and p95, but worse on p50,
+over-budget count, and sampled app GPU frametime because it still renders the
+union. The masked per-eye path is now the fair default baseline for future RD10
+work. Full-frame multiview remains a correctness-ready alternate path and useful
+platform capability, but not the next primary performance bet by itself.
+
 Move from proof-of-correctness one-submit to the real target:
 
 - keep the default production path on per-eye submit until headset visual
