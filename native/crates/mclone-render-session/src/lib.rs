@@ -105,6 +105,7 @@ pub fn actor_instances_from_presentations(
                                 glam_vec3_from_vec3d(actor.feet_position),
                                 actor.y_rot_degrees,
                             )
+                            .with_walk_animation_distance(actor.walk_animation_distance)
                         },
                         |figure| {
                             ActorInstance::remote_player_with_figure(
@@ -112,6 +113,7 @@ pub fn actor_instances_from_presentations(
                                 actor.y_rot_degrees,
                                 figure,
                             )
+                            .with_walk_animation_distance(actor.walk_animation_distance)
                         },
                     )
                     .with_packed_light(packed_light),

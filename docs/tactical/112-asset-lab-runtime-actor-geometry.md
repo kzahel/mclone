@@ -267,11 +267,38 @@ Review output inspected:
 
 ### Slice 3 - Animation Metadata Import
 
-- [ ] Load exported walk clips and locomotion metadata.
-- [ ] Sample joint rotations on the native side.
-- [ ] Preserve gait cycle distance/contact metadata for future movement-speed
+- [x] Load exported walk clips and locomotion metadata.
+- [x] Sample joint rotations on the native side.
+- [x] Preserve gait cycle distance/contact metadata for future movement-speed
       matching.
-- [ ] Add visual smoke captures for side-view walk review.
+- [x] Drive remote-player actor rendering from accumulated network movement
+      distance so multiplayer players can visibly use imported walk clips.
+- [x] Add an authored upright-bear walk clip and include it in the first-party
+      asset lockfile.
+- [x] Make the remote-player visual smoke assert a positive walk animation
+      distance in addition to drawn actor geometry.
+- [ ] Add side-view and MP4 walk review captures for detailed gait critique.
+
+Validation:
+
+```powershell
+cargo test --manifest-path native/Cargo.toml -p mclone-assets -p mclone-render -p mclone-client -p mclone-render-session -p mclone-native-client
+pnpm assets:pack
+pnpm assets:pack:write-lock
+pnpm assets:pack:check
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+pnpm native:remote-player-visual-smoke
+```
+
+Review output inspected:
+
+```text
+/tmp/mclone-remote-player-visual-smoke.png
+```
+
+The remote smoke now reports a positive walk distance, for example
+`walk distances=[0.55999994]`, which proves the observer received movement
+updates and sampled the walk clip rather than only drawing a static figure.
 
 ### Slice 3a - First-Person Local Body Visibility
 

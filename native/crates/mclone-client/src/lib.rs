@@ -53,6 +53,7 @@ pub struct ClientRuntime {
     day_time: u64,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
     remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
+    remote_player_walk_distances: BTreeMap<RemotePlayerId, f32>,
     entities: BTreeMap<EntityId, EntitySnapshot>,
 }
 
@@ -65,6 +66,7 @@ impl ClientRuntime {
             day_time: 0,
             player_position_updates: VecDeque::new(),
             remote_players: BTreeMap::new(),
+            remote_player_walk_distances: BTreeMap::new(),
             entities: BTreeMap::new(),
         }
     }
@@ -108,11 +110,25 @@ impl ClientRuntime {
             ServerUpdate::PlayerPosition(update) => {
                 self.player_position_updates.push_back(update);
             }
-            ServerUpdate::RemotePlayerAdd(update) | ServerUpdate::RemotePlayerUpdate(update) => {
+            ServerUpdate::RemotePlayerAdd(update) => {
+                self.remote_player_walk_distances
+                    .entry(update.id)
+                    .or_default();
+                self.remote_players.insert(update.id, update);
+            }
+            ServerUpdate::RemotePlayerUpdate(update) => {
+                if let Some(previous) = self.remote_players.get(&update.id) {
+                    let distance = remote_player_horizontal_distance(previous, &update);
+                    *self
+                        .remote_player_walk_distances
+                        .entry(update.id)
+                        .or_default() += distance;
+                }
                 self.remote_players.insert(update.id, update);
             }
             ServerUpdate::RemotePlayerRemove { id } => {
                 self.remote_players.remove(&id);
+                self.remote_player_walk_distances.remove(&id);
             }
             ServerUpdate::EntitySnapshot(snapshot) => {
                 self.entities.insert(snapshot.id, snapshot);
@@ -159,6 +175,7 @@ impl ClientRuntime {
         self.chunks.clear();
         self.player_position_updates.clear();
         self.remote_players.clear();
+        self.remote_player_walk_distances.clear();
         self.entities.clear();
     }
 
@@ -186,7 +203,15 @@ impl ClientRuntime {
         self.remote_players
             .values()
             .copied()
-            .map(ActorPresentation::remote_player)
+            .map(|update| {
+                ActorPresentation::remote_player(
+                    update,
+                    self.remote_player_walk_distances
+                        .get(&update.id)
+                        .copied()
+                        .unwrap_or_default(),
+                )
+            })
             .chain(
                 self.entities
                     .values()
@@ -262,6 +287,18 @@ impl ClientRuntime {
         self.entities
             .retain(|_, snapshot| BlockPos::containing(snapshot.position).chunk_pos() != pos);
     }
+}
+
+fn remote_player_horizontal_distance(
+    previous: &RemotePlayerUpdate,
+    next: &RemotePlayerUpdate,
+) -> f32 {
+    if !previous.on_ground || !next.on_ground {
+        return 0.0;
+    }
+    let dx = next.position.x - previous.position.x;
+    let dz = next.position.z - previous.position.z;
+    (dx.mul_add(dx, dz * dz).sqrt()) as f32
 }
 
 fn packed_light_from_snapshot_or_fullbright(snapshot: &ChunkSnapshot, pos: BlockPos) -> u32 {
@@ -517,6 +554,35 @@ mod tests {
     }
 
     #[test]
+    fn client_runtime_accumulates_remote_player_walk_distance() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let id = RemotePlayerId(7);
+        let initial = RemotePlayerUpdate {
+            id,
+            appearance: PlayerAppearance::default(),
+            position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+        };
+        let moved = RemotePlayerUpdate {
+            position: mclone_core::Vec3d::new(4.0, 64.0, 6.0),
+            ..initial
+        };
+
+        runtime.apply_update(ServerUpdate::RemotePlayerAdd(initial));
+        runtime.apply_update(ServerUpdate::RemotePlayerUpdate(moved));
+
+        let presentation = runtime.actor_presentations().remove(0);
+        assert!((presentation.walk_animation_distance - 5.0).abs() < 1.0e-6);
+
+        runtime.apply_update(ServerUpdate::RemotePlayerRemove { id });
+        runtime.apply_update(ServerUpdate::RemotePlayerAdd(initial));
+        let presentation = runtime.actor_presentations().remove(0);
+        assert_eq!(presentation.walk_animation_distance, 0.0);
+    }
+
+    #[test]
     fn client_runtime_tracks_entity_lifecycle_and_unloads_by_chunk() {
         let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
         let id = EntityId(7);
@@ -605,6 +671,7 @@ mod tests {
                 on_ground: update.on_ground,
                 width: 0.6,
                 height: 1.8,
+                walk_animation_distance: 0.0,
             }]
         );
 
@@ -644,6 +711,7 @@ mod tests {
                 on_ground: snapshot.on_ground,
                 width: snapshot.width,
                 height: snapshot.height,
+                walk_animation_distance: 0.0,
             }]
         );
     }

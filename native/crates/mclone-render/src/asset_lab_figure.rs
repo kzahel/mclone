@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_assets::{
-    ActorFigureId, FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAsciiTexture, FigureAsset, FigurePart,
-    FigurePrimitive, actor_figure_path, load_figure_asset,
+    ActorFigureId, FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAsciiTexture, FigureAsset, FigureClip,
+    FigureClipLocomotion, FigureClipTransform, FigurePart, FigurePrimitive, actor_figure_path,
+    load_figure_asset,
 };
 
 const TEXTURE_OVERLAY_DEPTH: f32 = 0.004;
@@ -13,6 +14,10 @@ const TEXTURE_OVERLAY_DEPTH: f32 = 0.004;
 pub struct CompiledFigure {
     pub(crate) cuboids: Vec<CompiledCuboid>,
     pub(crate) overlay_cuboids: Vec<CompiledOverlayCuboid>,
+    pub(crate) parts: Vec<CompiledFigurePart>,
+    pub(crate) clips: BTreeMap<String, CompiledFigureClip>,
+    pub(crate) normalization_origin: Vec3,
+    pub(crate) inv_height: f32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -56,6 +61,71 @@ pub(crate) struct CompiledOverlayCuboid {
     pub first_person_visible: bool,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CompiledFigurePart {
+    pub name: String,
+    pub parent: Option<usize>,
+    pub base_position: Vec3,
+    pub base_rotation_radians: Vec3,
+    pub pivot: Vec3,
+    pub cuboids: Vec<CompiledLocalCuboid>,
+    pub overlay_cuboids: Vec<CompiledLocalOverlayCuboid>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CompiledLocalCuboid {
+    pub min: Vec3,
+    pub max: Vec3,
+    pub face_colors: [[f32; 4]; 6],
+    pub first_person_visible: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CompiledLocalOverlayCuboid {
+    pub min: Vec3,
+    pub max: Vec3,
+    pub color: [f32; 4],
+    pub first_person_visible: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CompiledFigureClip {
+    pub duration_seconds: f32,
+    pub looped: bool,
+    pub tracks: BTreeMap<usize, Vec<CompiledFigureKey>>,
+    pub locomotion: Option<CompiledFigureLocomotion>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CompiledFigureKey {
+    pub time_seconds: f32,
+    pub transform: CompiledFigureTransform,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct CompiledFigureTransform {
+    pub at: Option<Vec3>,
+    pub rot_radians: Option<Vec3>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CompiledFigureLocomotion {
+    pub kind: String,
+    pub cycle_distance: f32,
+    pub speed: Option<f32>,
+    pub direction: Option<Vec3>,
+    pub contacts: Vec<CompiledFigureContact>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CompiledFigureContact {
+    pub part_index: usize,
+    pub phase_start: f32,
+    pub phase_end: f32,
+    pub role: Option<String>,
+    pub stance_ratio: f32,
+}
+
 pub(crate) fn load_first_party_actor_figures(
     source: &impl mclone_assets::AssetSource,
 ) -> Result<ActorFigureSet> {
@@ -96,15 +166,9 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
     let mut first_person_visible_visiting = vec![false; asset.parts.len()];
     let mut raw_cuboids = Vec::new();
     let mut raw_overlay_cuboids = Vec::new();
+    let mut compiled_parts = Vec::with_capacity(asset.parts.len());
 
     for (part_index, part) in asset.parts.iter().enumerate() {
-        if has_nonzero_rotation(part.rot) {
-            bail!(
-                "asset-lab figure '{}' part '{}' has unsupported static rotation",
-                asset.name,
-                part.name
-            );
-        }
         let FigurePrimitive { kind, size, faces } = &part.primitive;
         if kind != "box" {
             bail!(
@@ -143,6 +207,23 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
             &mut first_person_visible_cache,
             &mut first_person_visible_visiting,
         )?;
+        let parent = part
+            .parent
+            .as_deref()
+            .map(|parent_name| {
+                part_names.get(parent_name).copied().with_context(|| {
+                    format!("part '{}' has unknown parent '{}'", part.name, parent_name)
+                })
+            })
+            .transpose()?;
+        let local_at = Vec3::from_array(part.at.unwrap_or([0.0, 0.0, 0.0]));
+        let pivot = Vec3::from_array(
+            part.joint
+                .as_ref()
+                .and_then(|joint| joint.pivot)
+                .unwrap_or([0.0, 0.0, 0.0]),
+        );
+        let base_rotation_radians = euler_degrees_to_radians(part.rot.unwrap_or([0.0, 0.0, 0.0]));
         let base_color = part
             .material
             .as_deref()
@@ -163,6 +244,13 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
         }
 
         let half_size = size * 0.5;
+        let mut local_cuboids = vec![CompiledLocalCuboid {
+            min: -half_size,
+            max: half_size,
+            face_colors,
+            first_person_visible,
+        }];
+        let mut local_overlay_cuboids = Vec::new();
         let (min, max) = lab_box_bounds_to_actor_local(origin - half_size, origin + half_size);
         raw_cuboids.push(CompiledCuboid {
             min,
@@ -176,6 +264,15 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
                 append_texture_overlay_cuboids(
                     &mut raw_overlay_cuboids,
                     origin,
+                    size,
+                    face,
+                    &asset,
+                    texture_name,
+                    first_person_visible,
+                )?;
+                append_texture_overlay_cuboids(
+                    &mut local_overlay_cuboids,
+                    Vec3::ZERO,
                     size,
                     face,
                     &asset,
@@ -196,15 +293,45 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
                         texture_name,
                         first_person_visible,
                     )?;
+                    append_texture_overlay_cuboids(
+                        &mut local_overlay_cuboids,
+                        Vec3::ZERO,
+                        size,
+                        parse_box_face(face_name)?,
+                        &asset,
+                        texture_name,
+                        first_person_visible,
+                    )?;
                 }
             }
         }
+        compiled_parts.push(CompiledFigurePart {
+            name: part.name.clone(),
+            parent,
+            base_position: local_at + pivot,
+            base_rotation_radians,
+            pivot,
+            cuboids: std::mem::take(&mut local_cuboids),
+            overlay_cuboids: local_overlay_cuboids
+                .into_iter()
+                .map(|cuboid| {
+                    let (min, max) = actor_local_bounds_to_lab(cuboid.min, cuboid.max);
+                    CompiledLocalOverlayCuboid {
+                        min,
+                        max,
+                        color: cuboid.color,
+                        first_person_visible: cuboid.first_person_visible,
+                    }
+                })
+                .collect(),
+        });
     }
 
     if raw_cuboids.is_empty() {
         bail!("asset-lab figure '{}' compiled to no cuboids", asset.name);
     }
-    normalize_figure(raw_cuboids, raw_overlay_cuboids)
+    let clips = compile_clips(asset, &part_names)?;
+    normalize_figure(raw_cuboids, raw_overlay_cuboids, compiled_parts, clips)
 }
 
 fn compile_materials(asset: &FigureAsset) -> Result<HashMap<String, [f32; 4]>> {
@@ -306,6 +433,188 @@ fn part_first_person_visible(
 
 fn is_first_person_hidden_part_name(name: &str) -> bool {
     name == "head" || name.ends_with("_head")
+}
+
+fn compile_clips(
+    asset: &FigureAsset,
+    part_names: &HashMap<String, usize>,
+) -> Result<BTreeMap<String, CompiledFigureClip>> {
+    let mut clips = BTreeMap::new();
+    for (name, clip) in &asset.clips {
+        clips.insert(name.clone(), compile_clip(asset, name, clip, part_names)?);
+    }
+    Ok(clips)
+}
+
+fn compile_clip(
+    asset: &FigureAsset,
+    clip_name: &str,
+    clip: &FigureClip,
+    part_names: &HashMap<String, usize>,
+) -> Result<CompiledFigureClip> {
+    let mut tracks: BTreeMap<usize, Vec<CompiledFigureKey>> = BTreeMap::new();
+    let mut duration_seconds = 0.0_f32;
+    for key in &clip.keys {
+        let part_index = *part_names.get(&key.0).with_context(|| {
+            format!(
+                "asset-lab figure '{}' clip '{}' references unknown part '{}'",
+                asset.name, clip_name, key.0
+            )
+        })?;
+        if !key.1.is_finite() || key.1 < 0.0 {
+            bail!(
+                "asset-lab figure '{}' clip '{}' has invalid key time {}",
+                asset.name,
+                clip_name,
+                key.1
+            );
+        }
+        duration_seconds = duration_seconds.max(key.1);
+        tracks
+            .entry(part_index)
+            .or_default()
+            .push(CompiledFigureKey {
+                time_seconds: key.1,
+                transform: compile_clip_transform(asset, clip_name, &key.2)?,
+            });
+    }
+    if clip.keys.is_empty() {
+        bail!(
+            "asset-lab figure '{}' clip '{}' has no keys",
+            asset.name,
+            clip_name
+        );
+    }
+    for keys in tracks.values_mut() {
+        keys.sort_by(|left, right| {
+            left.time_seconds
+                .partial_cmp(&right.time_seconds)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+    Ok(CompiledFigureClip {
+        duration_seconds,
+        looped: clip.r#loop,
+        tracks,
+        locomotion: clip
+            .locomotion
+            .as_ref()
+            .map(|locomotion| compile_locomotion(asset, clip_name, locomotion, part_names))
+            .transpose()?,
+    })
+}
+
+fn compile_clip_transform(
+    asset: &FigureAsset,
+    clip_name: &str,
+    transform: &FigureClipTransform,
+) -> Result<CompiledFigureTransform> {
+    if let Some(scale) = transform.scale {
+        if scale.iter().any(|value| !value.is_finite()) {
+            bail!(
+                "asset-lab figure '{}' clip '{}' has non-finite scale key",
+                asset.name,
+                clip_name
+            );
+        }
+        if scale.iter().any(|value| (value - 1.0).abs() > 1.0e-6) {
+            bail!(
+                "asset-lab figure '{}' clip '{}' uses animated scale, which is not supported yet",
+                asset.name,
+                clip_name
+            );
+        }
+    }
+    let at = transform.at.map(Vec3::from_array);
+    if let Some(at) = at
+        && !at.is_finite()
+    {
+        bail!(
+            "asset-lab figure '{}' clip '{}' has non-finite at key",
+            asset.name,
+            clip_name
+        );
+    }
+    let rot_radians = transform.rot.map(euler_degrees_to_radians);
+    if let Some(rot_radians) = rot_radians
+        && !rot_radians.is_finite()
+    {
+        bail!(
+            "asset-lab figure '{}' clip '{}' has non-finite rot key",
+            asset.name,
+            clip_name
+        );
+    }
+    Ok(CompiledFigureTransform { at, rot_radians })
+}
+
+fn compile_locomotion(
+    asset: &FigureAsset,
+    clip_name: &str,
+    locomotion: &FigureClipLocomotion,
+    part_names: &HashMap<String, usize>,
+) -> Result<CompiledFigureLocomotion> {
+    if !locomotion.cycle_distance.is_finite() || locomotion.cycle_distance <= 0.0 {
+        bail!(
+            "asset-lab figure '{}' clip '{}' locomotion cycleDistance must be positive",
+            asset.name,
+            clip_name
+        );
+    }
+    if let Some(speed) = locomotion.speed
+        && (!speed.is_finite() || speed <= 0.0)
+    {
+        bail!(
+            "asset-lab figure '{}' clip '{}' locomotion speed must be positive",
+            asset.name,
+            clip_name
+        );
+    }
+    let direction = locomotion.direction.map(Vec3::from_array);
+    if let Some(direction) = direction
+        && (!direction.is_finite() || direction.length_squared() <= f32::EPSILON)
+    {
+        bail!(
+            "asset-lab figure '{}' clip '{}' locomotion direction must be finite and nonzero",
+            asset.name,
+            clip_name
+        );
+    }
+    let mut contacts = Vec::with_capacity(locomotion.contacts.len());
+    for contact in &locomotion.contacts {
+        let part_index = *part_names.get(&contact.part).with_context(|| {
+            format!(
+                "asset-lab figure '{}' clip '{}' locomotion contact references unknown part '{}'",
+                asset.name, clip_name, contact.part
+            )
+        })?;
+        if !contact.phase_start.is_finite()
+            || !contact.phase_end.is_finite()
+            || !contact.stance_ratio.is_finite()
+            || !(0.0..=1.0).contains(&contact.stance_ratio)
+        {
+            bail!(
+                "asset-lab figure '{}' clip '{}' locomotion contact '{}' has invalid phase metadata",
+                asset.name,
+                clip_name,
+                contact.part
+            );
+        }
+        contacts.push(CompiledFigureContact {
+            part_index,
+            phase_start: contact.phase_start,
+            phase_end: contact.phase_end,
+            role: contact.role.clone(),
+            stance_ratio: contact.stance_ratio,
+        });
+    }
+    Ok(CompiledFigureLocomotion {
+        kind: locomotion.kind.clone(),
+        cycle_distance: locomotion.cycle_distance,
+        speed: locomotion.speed,
+        direction,
+        contacts,
+    })
 }
 
 fn append_texture_overlay_cuboids(
@@ -452,6 +761,8 @@ fn texture_cell_lab_bounds(
 fn normalize_figure(
     cuboids: Vec<CompiledCuboid>,
     overlay_cuboids: Vec<CompiledOverlayCuboid>,
+    parts: Vec<CompiledFigurePart>,
+    clips: BTreeMap<String, CompiledFigureClip>,
 ) -> Result<CompiledFigure> {
     let bounds = cuboid_bounds(&cuboids);
     let height = bounds.max.y - bounds.min.y;
@@ -465,6 +776,10 @@ fn normalize_figure(
     );
     let inv_height = 1.0 / height;
     Ok(CompiledFigure {
+        normalization_origin: origin,
+        inv_height,
+        parts,
+        clips,
         cuboids: cuboids
             .into_iter()
             .map(|cuboid| CompiledCuboid {
@@ -515,13 +830,23 @@ fn parse_box_face(face: &str) -> Result<BoxFace> {
     }
 }
 
-fn has_nonzero_rotation(rotation: Option<[f32; 3]>) -> bool {
-    rotation
-        .map(|rotation| rotation.iter().any(|value| value.abs() > f32::EPSILON))
-        .unwrap_or(false)
+fn euler_degrees_to_radians(rotation: [f32; 3]) -> Vec3 {
+    Vec3::new(
+        rotation[0].to_radians(),
+        rotation[1].to_radians(),
+        rotation[2].to_radians(),
+    )
 }
 
 fn lab_box_bounds_to_actor_local(min: Vec3, max: Vec3) -> (Vec3, Vec3) {
+    mirror_z_bounds(min, max)
+}
+
+fn actor_local_bounds_to_lab(min: Vec3, max: Vec3) -> (Vec3, Vec3) {
+    mirror_z_bounds(min, max)
+}
+
+fn mirror_z_bounds(min: Vec3, max: Vec3) -> (Vec3, Vec3) {
     let a = Vec3::new(min.x, min.y, -min.z);
     let b = Vec3::new(max.x, max.y, -max.z);
     (a.min(b), a.max(b))
@@ -628,6 +953,11 @@ mod tests {
 
         assert_eq!(figure.cuboids.len(), 12);
         assert_eq!(figure.overlay_cuboids.len(), 64);
+        assert_eq!(figure.parts.len(), 12);
+        assert!(figure.clips.contains_key("walk"));
+        let walk = figure.clips.get("walk").unwrap();
+        assert!((walk.duration_seconds - 0.9).abs() < 1.0e-6);
+        assert_eq!(walk.locomotion.as_ref().unwrap().contacts.len(), 2);
 
         let bounds = compiled_bounds(&figure);
         assert!((bounds.min.y - 0.0).abs() < 1.0e-6);
@@ -703,6 +1033,33 @@ mod tests {
                 .count(),
             64
         );
+    }
+
+    #[test]
+    fn rejects_animated_scale_keys_until_supported() {
+        let json = r##"
+        {
+          "schemaVersion": 1,
+          "name": "bad_scale",
+          "materials": { "skin": { "color": "#ffffff" } },
+          "textures": {},
+          "parts": [
+            { "name": "body", "material": "skin", "primitive": { "kind": "box", "size": [1, 1, 1] } }
+          ],
+          "clips": {
+            "walk": {
+              "loop": true,
+              "keys": [
+                ["body", 0, { "scale": [2, 1, 1] }]
+              ]
+            }
+          }
+        }
+        "##;
+
+        let asset: FigureAsset = serde_json::from_str(json).unwrap();
+        let error = compile_figure_asset(&asset).unwrap_err().to_string();
+        assert!(error.contains("uses animated scale"));
     }
 
     #[test]

@@ -36,7 +36,7 @@ pub struct FigureAsset {
     #[serde(default)]
     pub parts: Vec<FigurePart>,
     #[serde(default)]
-    pub clips: HashMap<String, serde_json::Value>,
+    pub clips: HashMap<String, FigureClip>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -79,6 +79,50 @@ pub struct FigurePrimitive {
 pub struct FigureFace {
     pub material: Option<String>,
     pub texture: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct FigureClip {
+    pub fps: Option<f32>,
+    #[serde(default)]
+    pub r#loop: bool,
+    pub locomotion: Option<FigureClipLocomotion>,
+    #[serde(default)]
+    pub keys: Vec<FigureClipKey>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct FigureClipKey(pub String, pub f32, pub FigureClipTransform);
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct FigureClipTransform {
+    pub at: Option<[f32; 3]>,
+    pub rot: Option<[f32; 3]>,
+    pub scale: Option<[f32; 3]>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct FigureClipLocomotion {
+    pub kind: String,
+    #[serde(rename = "cycleDistance")]
+    pub cycle_distance: f32,
+    #[serde(default)]
+    pub contacts: Vec<FigureClipContact>,
+    pub direction: Option<[f32; 3]>,
+    pub speed: Option<f32>,
+    pub units: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct FigureClipContact {
+    pub part: String,
+    #[serde(rename = "phaseStart")]
+    pub phase_start: f32,
+    #[serde(rename = "phaseEnd")]
+    pub phase_end: f32,
+    pub role: Option<String>,
+    #[serde(rename = "stanceRatio")]
+    pub stance_ratio: f32,
 }
 
 pub fn default_player_figure_path() -> AssetPath {
@@ -148,6 +192,28 @@ mod tests {
         assert_eq!(asset.schema_version, 1);
         assert_eq!(asset.name, "tiny");
         assert_eq!(asset.parts[0].primitive.kind, "box");
+    }
+
+    #[test]
+    fn loads_exported_walk_clip_metadata() {
+        let mut source = MemoryAssetSource::new();
+        source.insert_text(
+            default_player_figure_path(),
+            include_str!("../../../../assets/mclone/figures/player.figure.json"),
+        );
+
+        let asset = load_figure_asset(&source, &default_player_figure_path()).unwrap();
+        let walk = asset.clips.get("walk").unwrap();
+
+        assert!(walk.r#loop);
+        assert_eq!(walk.fps, Some(12.0));
+        assert!(!walk.keys.is_empty());
+        assert_eq!(walk.keys[0].0, "leg_l");
+        let locomotion = walk.locomotion.as_ref().unwrap();
+        assert_eq!(locomotion.kind, "biped-walk");
+        assert!((locomotion.cycle_distance - 0.86).abs() < 1.0e-6);
+        assert_eq!(locomotion.contacts.len(), 2);
+        assert_eq!(locomotion.contacts[0].part, "foot_l");
     }
 
     #[test]

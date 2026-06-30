@@ -27,10 +27,12 @@ use crate::cli::{
 use crate::offscreen_flat_client::run_offscreen_flat_client_screenshot;
 
 const REMOTE_SETTLE_MS: u64 = 250;
+const REMOTE_ACTOR_MOVE_STEP_MS: u64 = 50;
+const REMOTE_ACTOR_MOVE_STEP_BLOCKS: f64 = 0.08;
 const SMOKE_READY_TIMEOUT: Duration = Duration::from_secs(120);
 const SERVER_JOB_TIMEOUT: Duration = Duration::from_secs(120);
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RemotePlayerVisualSmokeReport {
     pub(crate) path: PathBuf,
     pub(crate) width: u32,
@@ -40,6 +42,7 @@ pub(crate) struct RemotePlayerVisualSmokeReport {
     pub(crate) actor_count: usize,
     pub(crate) drawn_actor_count: usize,
     pub(crate) remote_actor_figures: Vec<String>,
+    pub(crate) remote_actor_walk_animation_distances: Vec<f32>,
 }
 
 pub(crate) fn run_remote_player_visual_smoke(
@@ -102,6 +105,7 @@ pub(crate) fn run_remote_player_visual_smoke(
         actor_count: screenshot.summary.actor_count,
         drawn_actor_count: screenshot.summary.drawn_actor_count,
         remote_actor_figures,
+        remote_actor_walk_animation_distances: screenshot.remote_actor_walk_animation_distances,
     })
 }
 
@@ -126,6 +130,16 @@ fn validate_remote_player_visual_smoke(
         bail!(
             "remote player visual smoke expected remote actor figure `{expected}`, got {:?}",
             remote_actor_figures
+        );
+    }
+    if !screenshot
+        .remote_actor_walk_animation_distances
+        .iter()
+        .any(|distance| distance.is_finite() && *distance > 0.0)
+    {
+        bail!(
+            "remote player visual smoke expected positive walk animation distance, got {:?}",
+            screenshot.remote_actor_walk_animation_distances
         );
     }
     Ok(())
@@ -506,7 +520,29 @@ fn run_remote_actor_client(
             position: current_position,
         }))
         .map_err(|_| anyhow!("remote actor ready receiver dropped"))?;
-    let _ = release_rx.recv_timeout(SMOKE_READY_TIMEOUT);
+    loop {
+        match release_rx.recv_timeout(Duration::from_millis(REMOTE_ACTOR_MOVE_STEP_MS)) {
+            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        let next_position = Vec3d::new(
+            current_position.x,
+            current_position.y,
+            current_position.z + REMOTE_ACTOR_MOVE_STEP_BLOCKS,
+        );
+        let updates = session
+            .send_command(&ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                position: next_position,
+                y_rot_degrees: 180.0,
+                x_rot_degrees: 0.0,
+                on_ground: true,
+            }))
+            .context("remote actor failed to publish walking position")?;
+        let position_update =
+            accept_player_position_updates(&mut session, &updates, next_position, saw_position)?;
+        current_position = position_update.position;
+        saw_position = position_update.saw_position;
+    }
     Ok(())
 }
 

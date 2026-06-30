@@ -60,10 +60,11 @@ pub struct ActorPresentation {
     pub on_ground: bool,
     pub width: f32,
     pub height: f32,
+    pub walk_animation_distance: f32,
 }
 
 impl ActorPresentation {
-    pub fn remote_player(update: RemotePlayerUpdate) -> Self {
+    pub fn remote_player(update: RemotePlayerUpdate, walk_animation_distance: f32) -> Self {
         Self {
             id: ActorPresentationId::RemotePlayer(update.id),
             kind: ActorPresentationKind::RemotePlayer,
@@ -75,6 +76,7 @@ impl ActorPresentation {
             on_ground: update.on_ground,
             width: 0.6,
             height: 1.8,
+            walk_animation_distance,
         }
     }
 
@@ -90,6 +92,7 @@ impl ActorPresentation {
             on_ground: snapshot.on_ground,
             width: snapshot.width,
             height: snapshot.height,
+            walk_animation_distance: 0.0,
         }
     }
 }
@@ -176,6 +179,7 @@ impl ActorTrack {
         self.rendered.on_ground = actor.on_ground;
         self.rendered.width = actor.width;
         self.rendered.height = actor.height;
+        self.rendered.walk_animation_distance = actor.walk_animation_distance;
     }
 
     fn step(&mut self, factor: f32) {
@@ -296,6 +300,7 @@ mod tests {
             on_ground: true,
             width: 0.6,
             height: 1.8,
+            walk_animation_distance: 0.0,
         }
     }
 
@@ -311,7 +316,7 @@ mod tests {
         };
 
         assert_eq!(
-            ActorPresentation::remote_player(update),
+            ActorPresentation::remote_player(update, 1.25),
             ActorPresentation {
                 id: ActorPresentationId::RemotePlayer(update.id),
                 kind: ActorPresentationKind::RemotePlayer,
@@ -323,6 +328,7 @@ mod tests {
                 on_ground: update.on_ground,
                 width: 0.6,
                 height: 1.8,
+                walk_animation_distance: 1.25,
             }
         );
     }
@@ -355,6 +361,7 @@ mod tests {
                 on_ground: snapshot.on_ground,
                 width: snapshot.width,
                 height: snapshot.height,
+                walk_animation_distance: 0.0,
             }
         );
     }

@@ -29,7 +29,7 @@ use crate::ui::DebugPaneStats;
 const DEFAULT_OFFSCREEN_FRAME_MS: f64 = 1000.0 / 60.0;
 const MAX_OFFSCREEN_PLAYABLE_STARTUP_STEPS: usize = 65_536;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct OffscreenFlatClientScreenshotReport {
     pub(crate) path: PathBuf,
     pub(crate) width: u32,
@@ -38,6 +38,7 @@ pub(crate) struct OffscreenFlatClientScreenshotReport {
     pub(crate) summary: FullFrameRenderSummary,
     pub(crate) remote_player_count: usize,
     pub(crate) remote_actor_figures: Vec<mclone_assets::ActorFigureId>,
+    pub(crate) remote_actor_walk_animation_distances: Vec<f32>,
     pub(crate) entity_count: usize,
     pub(crate) underwater: bool,
 }
@@ -583,22 +584,26 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         .runtime
         .as_ref()
         .map_or(0, |runtime| runtime.client().remote_player_count());
-    let remote_actor_figures = host
+    let remote_actor_presentations = host
         .driver
         .runtime
         .as_ref()
-        .map_or_else(Vec::new, |runtime| {
-            runtime
-                .client()
-                .actor_presentations()
-                .into_iter()
-                .filter_map(|actor| {
-                    matches!(actor.id, ActorPresentationId::RemotePlayer(_))
-                        .then_some(actor.appearance.figure)
-                        .flatten()
-                })
-                .collect()
-        });
+        .map_or_else(Vec::new, |runtime| runtime.client().actor_presentations());
+    let remote_actor_figures = remote_actor_presentations
+        .iter()
+        .filter_map(|actor| {
+            matches!(actor.id, ActorPresentationId::RemotePlayer(_))
+                .then_some(actor.appearance.figure)
+                .flatten()
+        })
+        .collect();
+    let remote_actor_walk_animation_distances = remote_actor_presentations
+        .iter()
+        .filter_map(|actor| {
+            matches!(actor.id, ActorPresentationId::RemotePlayer(_))
+                .then_some(actor.walk_animation_distance)
+        })
+        .collect();
     let entity_count = host
         .driver
         .runtime
@@ -614,6 +619,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         summary,
         remote_player_count,
         remote_actor_figures,
+        remote_actor_walk_animation_distances,
         entity_count,
         underwater,
     })

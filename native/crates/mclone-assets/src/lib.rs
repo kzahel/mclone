@@ -17,7 +17,8 @@ pub use block_registry::{
 };
 pub use figure::{
     ActorFigureId, DEFAULT_PLAYER_FIGURE_ID, DEFAULT_PLAYER_FIGURE_PATH,
-    FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAsciiTexture, FigureAsset, FigureFace, FigureJoint,
+    FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAsciiTexture, FigureAsset, FigureClip, FigureClipContact,
+    FigureClipKey, FigureClipLocomotion, FigureClipTransform, FigureFace, FigureJoint,
     FigureMaterial, FigurePart, FigurePrimitive, UPRIGHT_BEAR_FIGURE_ID, UPRIGHT_BEAR_FIGURE_PATH,
     actor_figure_path, default_player_figure_id, default_player_figure_path, load_figure_asset,
     upright_bear_figure_id, upright_bear_figure_path,

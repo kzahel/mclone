@@ -167,7 +167,7 @@ fn main() -> Result<()> {
         Cli::RemotePlayerVisualSmoke { options } => {
             let report = run_remote_player_visual_smoke(&options)?;
             println!(
-                "remote player visual smoke saved to {} ({}x{}, {} bytes, {} remote players, {} actors, {} drawn actors, remote figures={:?})",
+                "remote player visual smoke saved to {} ({}x{}, {} bytes, {} remote players, {} actors, {} drawn actors, remote figures={:?}, walk distances={:?})",
                 report.path.display(),
                 report.width,
                 report.height,
@@ -175,7 +175,8 @@ fn main() -> Result<()> {
                 report.remote_player_count,
                 report.actor_count,
                 report.drawn_actor_count,
-                report.remote_actor_figures
+                report.remote_actor_figures,
+                report.remote_actor_walk_animation_distances
             );
             Ok(())
         }

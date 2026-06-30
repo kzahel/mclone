@@ -2,10 +2,11 @@ use std::cell::RefCell;
 use std::num::{NonZeroU32, NonZeroU64};
 
 use anyhow::{Context, Result, bail};
-use glam::{Quat, Vec3};
+use glam::{EulerRot, Mat4, Quat, Vec3};
 use mclone_assets::{ActorFigureId, default_player_figure_id};
 use wgpu::util::DeviceExt;
 
+use crate::asset_lab_figure::{CompiledFigureClip, CompiledFigureTransform};
 use crate::chunk::{ChunkRenderView, DEPTH_FORMAT, TexturedSectionRenderOptions};
 use crate::light_texture::FULL_BRIGHT;
 use crate::target::RenderFrameTarget;
@@ -44,6 +45,7 @@ pub struct ActorInstance {
     pub body_color: [f32; 4],
     pub accent_color: [f32; 4],
     pub packed_light: u32,
+    pub animation: Option<ActorAnimation>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -53,6 +55,17 @@ pub enum ActorInstanceShape {
     QuadrupedPlaceholder,
     CowModel,
     DebugCube,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ActorAnimation {
+    pub clip: ActorAnimationClip,
+    pub distance: f32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActorAnimationClip {
+    Walk,
 }
 
 impl ActorInstance {
@@ -78,6 +91,7 @@ impl ActorInstance {
             body_color: [0.18, 0.38, 0.82, 1.0],
             accent_color: [0.92, 0.70, 0.54, 1.0],
             packed_light: FULL_BRIGHT,
+            animation: None,
         }
     }
 
@@ -95,6 +109,7 @@ impl ActorInstance {
             body_color: [0.10, 0.58, 0.68, 1.0],
             accent_color: [0.95, 0.80, 0.24, 1.0],
             packed_light: FULL_BRIGHT,
+            animation: None,
         }
     }
 
@@ -128,6 +143,7 @@ impl ActorInstance {
             body_color: [0.33, 0.19, 0.10, 1.0],
             accent_color: [0.92, 0.86, 0.74, 1.0],
             packed_light: FULL_BRIGHT,
+            animation: None,
         }
     }
 
@@ -145,6 +161,7 @@ impl ActorInstance {
             body_color: [0.28, 0.17, 0.10, 1.0],
             accent_color: [0.90, 0.86, 0.72, 1.0],
             packed_light: FULL_BRIGHT,
+            animation: None,
         }
     }
 
@@ -167,6 +184,7 @@ impl ActorInstance {
             body_color: [0.92, 0.90, 0.82, 1.0],
             accent_color: [0.92, 0.18, 0.12, 1.0],
             packed_light: FULL_BRIGHT,
+            animation: None,
         }
     }
 
@@ -191,6 +209,7 @@ impl ActorInstance {
             body_color: [0.13, 0.48, 0.72, 1.0],
             accent_color: [0.95, 0.78, 0.22, 1.0],
             packed_light: FULL_BRIGHT,
+            animation: None,
         }
     }
 
@@ -201,6 +220,16 @@ impl ActorInstance {
 
     pub fn with_first_person_body_only(mut self, first_person_body_only: bool) -> Self {
         self.first_person_body_only = first_person_body_only;
+        self
+    }
+
+    pub fn with_walk_animation_distance(mut self, distance: f32) -> Self {
+        if distance.is_finite() {
+            self.animation = Some(ActorAnimation {
+                clip: ActorAnimationClip::Walk,
+                distance,
+            });
+        }
         self
     }
 }
@@ -856,32 +885,223 @@ fn append_asset_lab_figure_model(
 
     let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
     let model_scale = actor.height.max(0.1);
-    for cuboid in &figure.cuboids {
-        if actor.first_person_body_only && !cuboid.first_person_visible {
-            continue;
+    let sampled_transforms = sampled_figure_part_transforms(figure, actor.animation);
+    let content_matrices = figure_content_matrices(figure, &sampled_transforms);
+    for (part_index, part) in figure.parts.iter().enumerate() {
+        let content_matrix = content_matrices[part_index];
+        for cuboid in &part.cuboids {
+            if actor.first_person_body_only && !cuboid.first_person_visible {
+                continue;
+            }
+            append_asset_lab_local_box(
+                mesh,
+                actor,
+                figure,
+                content_matrix,
+                cuboid.min,
+                cuboid.max,
+                white_uv,
+                lab_order_face_colors(cuboid.face_colors),
+                model_scale,
+            );
         }
-        append_box(
-            mesh,
-            actor,
-            cuboid.min * model_scale,
-            cuboid.max * model_scale,
-            white_uv,
-            cuboid.face_colors,
-        );
-    }
-    for cuboid in &figure.overlay_cuboids {
-        if actor.first_person_body_only && !cuboid.first_person_visible {
-            continue;
+        for cuboid in &part.overlay_cuboids {
+            if actor.first_person_body_only && !cuboid.first_person_visible {
+                continue;
+            }
+            append_asset_lab_local_box(
+                mesh,
+                actor,
+                figure,
+                content_matrix,
+                cuboid.min,
+                cuboid.max,
+                white_uv,
+                [cuboid.color; 6],
+                model_scale,
+            );
         }
-        append_box(
-            mesh,
-            actor,
-            cuboid.min * model_scale,
-            cuboid.max * model_scale,
-            white_uv,
-            [cuboid.color; 6],
-        );
     }
+}
+
+fn sampled_figure_part_transforms(
+    figure: &ActorFigure,
+    animation: Option<ActorAnimation>,
+) -> Vec<CompiledFigureTransform> {
+    let mut transforms = vec![CompiledFigureTransform::default(); figure.parts.len()];
+    let Some(animation) = animation else {
+        return transforms;
+    };
+    let clip = match animation.clip {
+        ActorAnimationClip::Walk => figure.clips.get("walk"),
+    };
+    let Some(clip) = clip else {
+        return transforms;
+    };
+    let time_seconds = clip_time_for_animation_distance(clip, animation.distance);
+    for (part_index, keys) in &clip.tracks {
+        if *part_index < transforms.len() {
+            transforms[*part_index] = sample_clip_track(keys, time_seconds, clip);
+        }
+    }
+    transforms
+}
+
+fn clip_time_for_animation_distance(clip: &CompiledFigureClip, distance: f32) -> f32 {
+    if clip.duration_seconds <= 0.0 {
+        return 0.0;
+    }
+    if let Some(locomotion) = &clip.locomotion
+        && locomotion.cycle_distance > 0.0
+    {
+        return (distance.max(0.0) / locomotion.cycle_distance) * clip.duration_seconds;
+    }
+    distance.max(0.0)
+}
+
+fn sample_clip_track(
+    keys: &[crate::asset_lab_figure::CompiledFigureKey],
+    time_seconds: f32,
+    clip: &CompiledFigureClip,
+) -> CompiledFigureTransform {
+    let Some(first) = keys.first() else {
+        return CompiledFigureTransform::default();
+    };
+    let local_time = if clip.looped && clip.duration_seconds > 0.0 {
+        time_seconds.rem_euclid(clip.duration_seconds)
+    } else {
+        time_seconds.clamp(0.0, clip.duration_seconds)
+    };
+    let mut left = first;
+    let mut right = keys.last().unwrap_or(first);
+    for (index, current) in keys.iter().enumerate() {
+        let next = keys.get(index + 1);
+        if next.is_none_or(|next| local_time < next.time_seconds) {
+            left = current;
+            right = next.unwrap_or(current);
+            break;
+        }
+    }
+    let alpha = if (right.time_seconds - left.time_seconds).abs() <= f32::EPSILON {
+        0.0
+    } else {
+        ((local_time - left.time_seconds) / (right.time_seconds - left.time_seconds))
+            .clamp(0.0, 1.0)
+    };
+    CompiledFigureTransform {
+        at: mix_optional_vec3(left.transform.at, right.transform.at, alpha),
+        rot_radians: mix_optional_vec3(
+            left.transform.rot_radians,
+            right.transform.rot_radians,
+            alpha,
+        ),
+    }
+}
+
+fn mix_optional_vec3(left: Option<Vec3>, right: Option<Vec3>, alpha: f32) -> Option<Vec3> {
+    match (left, right) {
+        (None, None) => None,
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (Some(left), Some(right)) => Some(left + (right - left) * alpha),
+    }
+}
+
+fn figure_content_matrices(
+    figure: &ActorFigure,
+    transforms: &[CompiledFigureTransform],
+) -> Vec<Mat4> {
+    let mut cache = vec![None; figure.parts.len()];
+    for index in 0..figure.parts.len() {
+        let _ = figure_content_matrix(index, figure, transforms, &mut cache);
+    }
+    cache
+        .into_iter()
+        .map(|matrix| matrix.unwrap_or(Mat4::IDENTITY))
+        .collect()
+}
+
+fn figure_content_matrix(
+    index: usize,
+    figure: &ActorFigure,
+    transforms: &[CompiledFigureTransform],
+    cache: &mut [Option<Mat4>],
+) -> Mat4 {
+    if let Some(matrix) = cache[index] {
+        return matrix;
+    }
+    let part = &figure.parts[index];
+    let parent_content = part
+        .parent
+        .map(|parent| figure_content_matrix(parent, figure, transforms, cache))
+        .unwrap_or(Mat4::IDENTITY);
+    let transform = transforms.get(index).copied().unwrap_or_default();
+    let position = part.base_position + transform.at.unwrap_or(Vec3::ZERO);
+    let rotation = part.base_rotation_radians + transform.rot_radians.unwrap_or(Vec3::ZERO);
+    let group = parent_content
+        * Mat4::from_translation(position)
+        * Mat4::from_quat(Quat::from_euler(
+            EulerRot::XYZ,
+            rotation.x,
+            rotation.y,
+            rotation.z,
+        ));
+    let content = group * Mat4::from_translation(-part.pivot);
+    cache[index] = Some(content);
+    content
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_asset_lab_local_box(
+    mesh: &mut ActorMesh,
+    actor: ActorInstance,
+    figure: &ActorFigure,
+    content_matrix: Mat4,
+    min: Vec3,
+    max: Vec3,
+    uv: [f32; 2],
+    face_colors: [[f32; 4]; 6],
+    model_scale: f32,
+) {
+    let corners = [
+        Vec3::new(min.x, min.y, min.z),
+        Vec3::new(max.x, min.y, min.z),
+        Vec3::new(max.x, max.y, min.z),
+        Vec3::new(min.x, max.y, min.z),
+        Vec3::new(min.x, min.y, max.z),
+        Vec3::new(max.x, min.y, max.z),
+        Vec3::new(max.x, max.y, max.z),
+        Vec3::new(min.x, max.y, max.z),
+    ];
+    append_transformed_box(
+        mesh,
+        face_colors,
+        [[uv; 4]; 6],
+        actor.packed_light,
+        |corner_index| {
+            let lab_position = content_matrix.transform_point3(corners[corner_index]);
+            actor_world_position(
+                actor,
+                lab_point_to_actor_local(figure, lab_position) * model_scale,
+            )
+        },
+    );
+}
+
+fn lab_point_to_actor_local(figure: &ActorFigure, point: Vec3) -> Vec3 {
+    let normalized = (point - figure.normalization_origin) * figure.inv_height;
+    Vec3::new(normalized.x, normalized.y, -normalized.z)
+}
+
+fn lab_order_face_colors(actor_order: [[f32; 4]; 6]) -> [[f32; 4]; 6] {
+    [
+        actor_order[1],
+        actor_order[0],
+        actor_order[2],
+        actor_order[3],
+        actor_order[4],
+        actor_order[5],
+    ]
 }
 
 fn append_humanoid_model(
@@ -1703,6 +1923,27 @@ mod tests {
                 .filter(|vertex| vertex.color == [25.0 / 255.0, 18.0 / 255.0, 14.0 / 255.0, 1.0])
                 .all(|vertex| vertex.position[2] > 0.18)
         );
+    }
+
+    #[test]
+    fn asset_lab_player_walk_animation_changes_vertices() {
+        let figures = test_player_figures();
+        let static_mesh = actor_mesh(
+            &[ActorInstance::remote_player(Vec3::ZERO, 0.0)],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+            &figures,
+        );
+        let animated_mesh = actor_mesh(
+            &[ActorInstance::remote_player(Vec3::ZERO, 0.0).with_walk_animation_distance(0.25)],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+            &figures,
+        );
+
+        assert_eq!(animated_mesh.vertices.len(), static_mesh.vertices.len());
+        assert_eq!(animated_mesh.indices.len(), static_mesh.indices.len());
+        assert_ne!(animated_mesh.vertices, static_mesh.vertices);
     }
 
     #[test]
