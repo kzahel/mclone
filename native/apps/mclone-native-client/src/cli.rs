@@ -20,6 +20,12 @@ use crate::{
 
 const MAX_SCREENSHOT_REMOTE_SETTLE_MS: u64 = 10_000;
 const MAX_STARTUP_WAIT_FRAMES: u32 = 4096;
+const DEFAULT_ACTOR_WALK_REVIEW_FRAMES: usize = 24;
+const MAX_ACTOR_WALK_REVIEW_FRAMES: usize = 240;
+const DEFAULT_ACTOR_WALK_REVIEW_FPS: u32 = 12;
+const MAX_ACTOR_WALK_REVIEW_FPS: u32 = 120;
+const DEFAULT_ACTOR_WALK_REVIEW_CYCLES: f32 = 2.0;
+const MAX_ACTOR_WALK_REVIEW_CYCLES: f32 = 16.0;
 const DEFAULT_XR_CLEAR_SMOKE_FRAMES: u32 = 120;
 const MAX_XR_SMOKE_FRAMES: u32 = 4096;
 
@@ -129,6 +135,18 @@ pub(crate) struct HeadlessActorReviewSheetOptions {
     pub(crate) path: PathBuf,
     pub(crate) width: u32,
     pub(crate) height: u32,
+    pub(crate) render_options: TexturedSectionRenderOptions,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct HeadlessActorWalkReviewOptions {
+    pub(crate) sheet_path: PathBuf,
+    pub(crate) video_path: Option<PathBuf>,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) frames: usize,
+    pub(crate) fps: u32,
+    pub(crate) cycles: f32,
     pub(crate) render_options: TexturedSectionRenderOptions,
 }
 
@@ -333,6 +351,9 @@ pub(crate) enum Cli {
     HeadlessActorReviewSheet {
         options: HeadlessActorReviewSheetOptions,
     },
+    HeadlessActorWalkReview {
+        options: HeadlessActorWalkReviewOptions,
+    },
     RendererRebuildSmoke {
         options: RendererRebuildSmokeOptions,
     },
@@ -359,6 +380,7 @@ pub(crate) enum Cli {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum HeadlessMode {
     ActorReviewSheet(PathBuf),
+    ActorWalkReview(PathBuf),
     Clear(PathBuf),
     DualView(PathBuf),
     Screenshot(PathBuf),
@@ -382,6 +404,11 @@ impl Cli {
         let mut screenshot_remote_settle_ms = 0;
         let mut screenshot_eye = None;
         let mut screenshot_camera_view = EngineCameraViewMode::FirstPerson;
+        let mut actor_walk_review_video = None;
+        let mut actor_walk_review_options_explicit = false;
+        let mut actor_walk_review_frames = DEFAULT_ACTOR_WALK_REVIEW_FRAMES;
+        let mut actor_walk_review_fps = DEFAULT_ACTOR_WALK_REVIEW_FPS;
+        let mut actor_walk_review_cycles = DEFAULT_ACTOR_WALK_REVIEW_CYCLES;
         let mut first_person_player_visible = false;
         let mut window_start_intent = WindowStartIntent::InWorld;
         let mut startup_wait = None;
@@ -499,6 +526,37 @@ impl Cli {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::ActorReviewSheet(path))?;
+                }
+                "--actor-walk-review" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--actor-walk-review requires an output PNG path")?;
+                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                        bail!("headless output modes cannot be combined with perf modes");
+                    }
+                    set_headless_mode(&mut mode, HeadlessMode::ActorWalkReview(path))?;
+                }
+                "--actor-walk-review-video" => {
+                    actor_walk_review_video = Some(
+                        args.next()
+                            .map(PathBuf::from)
+                            .context("--actor-walk-review-video requires an output MP4 path")?,
+                    );
+                }
+                "--walk-review-frames" => {
+                    actor_walk_review_options_explicit = true;
+                    actor_walk_review_frames =
+                        parse_actor_walk_review_frames_arg(&arg, args.next())?;
+                }
+                "--walk-review-fps" => {
+                    actor_walk_review_options_explicit = true;
+                    actor_walk_review_fps = parse_actor_walk_review_fps_arg(&arg, args.next())?;
+                }
+                "--walk-review-cycles" => {
+                    actor_walk_review_options_explicit = true;
+                    actor_walk_review_cycles =
+                        parse_actor_walk_review_cycles_arg(&arg, args.next())?;
                 }
                 "--headless-dual-view" => {
                     let path = args
@@ -695,6 +753,11 @@ impl Cli {
         {
             bail!("--rebuild-render-scale requires --renderer-rebuild-smoke");
         }
+        if (actor_walk_review_video.is_some() || actor_walk_review_options_explicit)
+            && !matches!(mode, Some(HeadlessMode::ActorWalkReview(_)))
+        {
+            bail!("actor walk review options require --actor-walk-review");
+        }
         if startup_wait.is_some()
             && (perf_mode_count > 0
                 || xr_clear_smoke
@@ -704,6 +767,7 @@ impl Cli {
                     Some(
                         HeadlessMode::Clear(_)
                             | HeadlessMode::ActorReviewSheet(_)
+                            | HeadlessMode::ActorWalkReview(_)
                             | HeadlessMode::DualView(_)
                             | HeadlessMode::RendererRebuildSmoke(_)
                             | HeadlessMode::RemotePlayerVisualSmoke(_)
@@ -727,6 +791,18 @@ impl Cli {
                     path,
                     width: width.unwrap_or(1152),
                     height: height.unwrap_or(512),
+                    render_options,
+                },
+            }),
+            Some(HeadlessMode::ActorWalkReview(sheet_path)) => Ok(Self::HeadlessActorWalkReview {
+                options: HeadlessActorWalkReviewOptions {
+                    sheet_path,
+                    video_path: actor_walk_review_video,
+                    width: width.unwrap_or(360),
+                    height: height.unwrap_or(360),
+                    frames: actor_walk_review_frames,
+                    fps: actor_walk_review_fps,
+                    cycles: actor_walk_review_cycles,
                     render_options,
                 },
             }),
@@ -876,6 +952,36 @@ fn parse_frame_budget_frames_arg(flag: &str, value: Option<String>) -> Result<us
         .with_context(|| format!("{flag} requires an unsigned integer, got `{value}`"))?;
     if !(1..=MAX_FRAME_BUDGET_PROBE_FRAMES).contains(&parsed) {
         bail!("{flag} must be between 1 and {MAX_FRAME_BUDGET_PROBE_FRAMES}");
+    }
+    Ok(parsed)
+}
+
+fn parse_actor_walk_review_frames_arg(flag: &str, value: Option<String>) -> Result<usize> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    let parsed = value
+        .parse::<usize>()
+        .with_context(|| format!("{flag} requires an unsigned integer, got `{value}`"))?;
+    if !(2..=MAX_ACTOR_WALK_REVIEW_FRAMES).contains(&parsed) {
+        bail!("{flag} must be between 2 and {MAX_ACTOR_WALK_REVIEW_FRAMES}");
+    }
+    Ok(parsed)
+}
+
+fn parse_actor_walk_review_fps_arg(flag: &str, value: Option<String>) -> Result<u32> {
+    let parsed = parse_u32_arg(flag, value)?;
+    if !(1..=MAX_ACTOR_WALK_REVIEW_FPS).contains(&parsed) {
+        bail!("{flag} must be between 1 and {MAX_ACTOR_WALK_REVIEW_FPS}");
+    }
+    Ok(parsed)
+}
+
+fn parse_actor_walk_review_cycles_arg(flag: &str, value: Option<String>) -> Result<f32> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    let parsed = value
+        .parse::<f32>()
+        .with_context(|| format!("{flag} requires a positive number, got `{value}`"))?;
+    if !parsed.is_finite() || !(0.25..=MAX_ACTOR_WALK_REVIEW_CYCLES).contains(&parsed) {
+        bail!("{flag} must be between 0.25 and {MAX_ACTOR_WALK_REVIEW_CYCLES}");
     }
     Ok(parsed)
 }
@@ -1074,9 +1180,10 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-          mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
+           mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\

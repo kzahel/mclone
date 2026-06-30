@@ -27,14 +27,15 @@ use crate::cli::Cli;
 #[cfg(test)]
 use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessActorReviewSheetOptions,
-    HeadlessDualViewOptions, HeadlessScreenshotOptions, HeadlessScreenshotUi, MovementPerfOptions,
-    RemotePlayerVisualSmokeOptions, RendererRebuildSmokeOptions, SceneOptions, TimedemoOptions,
-    WindowStartIntent, XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
+    HeadlessActorWalkReviewOptions, HeadlessDualViewOptions, HeadlessScreenshotOptions,
+    HeadlessScreenshotUi, MovementPerfOptions, RemotePlayerVisualSmokeOptions,
+    RendererRebuildSmokeOptions, SceneOptions, TimedemoOptions, WindowStartIntent,
+    XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
     parse_screenshot_ui_arg,
 };
 use crate::headless::{
     run_headless_screenshot, run_renderer_rebuild_smoke, write_actor_review_sheet,
-    write_headless_dual_view,
+    write_actor_walk_review, write_headless_dual_view,
 };
 use crate::perf::{run_frame_budget_probe, run_movement_perf_smoke, run_timedemo};
 use crate::remote_player_visual_smoke::run_remote_player_visual_smoke;
@@ -139,6 +140,31 @@ fn main() -> Result<()> {
                 report.non_clear_rgb_pixel_count,
                 report.actor_count,
                 report.drawn_actor_count
+            );
+            Ok(())
+        }
+        Cli::HeadlessActorWalkReview { options } => {
+            let report = write_actor_walk_review(&options)?;
+            println!(
+                "actor walk review saved to {} (sheet {}x{}, frame {}x{}, {} frames, {} fps, {:.2} cycles, {} bytes, {} non-clear RGB pixels, {} actors, {} drawn actors, video={} video_bytes={:?})",
+                report.sheet_path.display(),
+                report.sheet_width,
+                report.frame_height,
+                report.frame_width,
+                report.frame_height,
+                report.frame_count,
+                report.fps,
+                report.cycles,
+                report.sheet_byte_len,
+                report.non_clear_rgb_pixel_count,
+                report.actor_count,
+                report.drawn_actor_count,
+                report
+                    .video_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "none".to_owned()),
+                report.video_byte_len
             );
             Ok(())
         }
@@ -786,6 +812,60 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn cli_parses_actor_walk_review_options() {
+        let cli = Cli::parse([
+            "--actor-walk-review".to_owned(),
+            "/tmp/mclone-actor-walk-review.png".to_owned(),
+            "--actor-walk-review-video".to_owned(),
+            "/tmp/mclone-actor-walk-review.mp4".to_owned(),
+            "--width".to_owned(),
+            "320".to_owned(),
+            "--height".to_owned(),
+            "240".to_owned(),
+            "--walk-review-frames".to_owned(),
+            "16".to_owned(),
+            "--walk-review-fps".to_owned(),
+            "8".to_owned(),
+            "--walk-review-cycles".to_owned(),
+            "3.5".to_owned(),
+            "--fullbright".to_owned(),
+            "false".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::HeadlessActorWalkReview {
+                options: HeadlessActorWalkReviewOptions {
+                    sheet_path: PathBuf::from("/tmp/mclone-actor-walk-review.png"),
+                    video_path: Some(PathBuf::from("/tmp/mclone-actor-walk-review.mp4")),
+                    width: 320,
+                    height: 240,
+                    frames: 16,
+                    fps: 8,
+                    cycles: 3.5,
+                    render_options: TexturedSectionRenderOptions {
+                        force_fullbright: false,
+                        ..TexturedSectionRenderOptions::default()
+                    },
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_rejects_actor_walk_review_video_without_sheet() {
+        let error = Cli::parse([
+            "--actor-walk-review-video".to_owned(),
+            "/tmp/mclone-actor-walk-review.mp4".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("actor walk review options require --actor-walk-review"));
     }
 
     #[test]

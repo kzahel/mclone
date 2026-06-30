@@ -277,7 +277,9 @@ Review output inspected:
       asset lockfile.
 - [x] Make the remote-player visual smoke assert a positive walk animation
       distance in addition to drawn actor geometry.
-- [ ] Add side-view and MP4 walk review captures for detailed gait critique.
+- [x] Add native side-view PNG strip and MP4 walk review captures for detailed
+      gait critique.
+- [x] Expose the walk review through `pnpm native:actor-walk-review`.
 
 Validation:
 
@@ -288,17 +290,23 @@ pnpm assets:pack:write-lock
 pnpm assets:pack:check
 cargo test --manifest-path native/Cargo.toml -p mclone-native-client
 pnpm native:remote-player-visual-smoke
+pnpm native:actor-walk-review
 ```
 
 Review output inspected:
 
 ```text
 /tmp/mclone-remote-player-visual-smoke.png
+/tmp/mclone-actor-walk-review.png
+/tmp/mclone-actor-walk-review.mp4
 ```
 
 The remote smoke now reports a positive walk distance, for example
 `walk distances=[0.55999994]`, which proves the observer received movement
 updates and sampled the walk clip rather than only drawing a static figure.
+The native walk review strip renders full side-view frames with a floor guide,
+and the MP4 encodes the same native-rendered frames. The default script writes a
+24-frame, 12 fps, 2-cycle review video.
 
 ### Slice 3a - First-Person Local Body Visibility
 

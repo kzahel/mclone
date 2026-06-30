@@ -1,7 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
-use glam::Vec3;
+use glam::{Vec3, Vec4};
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats, render_full_frame_for_view,
@@ -26,8 +28,8 @@ use mclone_ui::{GameMovementMode, GameUi, GuiDrawList, GuiScale};
 use crate::actor_assets::load_actor_texture_assets;
 use crate::camera::SpectatorCamera;
 use crate::cli::{
-    HeadlessActorReviewSheetOptions, HeadlessDualViewOptions, HeadlessScreenshotOptions,
-    RendererRebuildSmokeOptions,
+    HeadlessActorReviewSheetOptions, HeadlessActorWalkReviewOptions, HeadlessDualViewOptions,
+    HeadlessScreenshotOptions, RendererRebuildSmokeOptions,
 };
 use crate::flat_client_driver::{FlatClientUiRenderOptions, game_ui_render_state};
 use crate::frame_pacing::FramePacingUiState;
@@ -73,6 +75,23 @@ pub(crate) struct HeadlessActorReviewSheetReport {
     pub(crate) height: u32,
     pub(crate) byte_len: usize,
     pub(crate) view_count: usize,
+    pub(crate) non_clear_rgb_pixel_count: usize,
+    pub(crate) actor_count: usize,
+    pub(crate) drawn_actor_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct HeadlessActorWalkReviewReport {
+    pub(crate) sheet_path: PathBuf,
+    pub(crate) video_path: Option<PathBuf>,
+    pub(crate) frame_width: u32,
+    pub(crate) frame_height: u32,
+    pub(crate) sheet_width: u32,
+    pub(crate) frame_count: usize,
+    pub(crate) fps: u32,
+    pub(crate) cycles: f32,
+    pub(crate) sheet_byte_len: usize,
+    pub(crate) video_byte_len: Option<u64>,
     pub(crate) non_clear_rgb_pixel_count: usize,
     pub(crate) actor_count: usize,
     pub(crate) drawn_actor_count: usize,
@@ -221,6 +240,133 @@ pub(crate) fn write_actor_review_sheet(
     })
 }
 
+pub(crate) fn write_actor_walk_review(
+    options: &HeadlessActorWalkReviewOptions,
+) -> Result<HeadlessActorWalkReviewReport> {
+    let frame_width = options.width.max(1);
+    let frame_height = options.height.max(1);
+    let frame_count = options.frames.max(1);
+    let sheet_width = frame_width
+        .checked_mul(frame_count as u32)
+        .context("actor walk review sheet width overflowed")?;
+    let mut render_options = options.render_options;
+    render_options.force_fullbright = true;
+    let actor_assets =
+        load_actor_texture_assets().context("failed to load actor assets for walk review")?;
+    let asset_source =
+        load_asset_source().context("failed to load asset source for walk review")?;
+    let specs = actor_walk_review_specs(&asset_source)?;
+
+    let (loop_report, mut frame_pixels, state) = run_headless_capture_loop(
+        HeadlessFrameLoopOptions {
+            width: frame_width,
+            height: frame_height,
+            frame_count,
+        },
+        move |device, queue, format, _size| {
+            Ok(ActorReviewSheetState {
+                actors: ActorDrawResources::new(
+                    device,
+                    queue,
+                    format,
+                    actor_assets.atlas.as_upload(),
+                    Some(&actor_assets.figures),
+                )?,
+                stats: Vec::with_capacity(frame_count),
+                render_options,
+            })
+        },
+        |index, frame, state| {
+            render_actor_walk_review_frame(index, frame, state, &specs, frame_count, options.cycles)
+        },
+    )?;
+    if frame_pixels.len() != frame_count {
+        bail!(
+            "actor walk review rendered {} frames but expected {frame_count}",
+            frame_pixels.len()
+        );
+    }
+
+    for pixels in &mut frame_pixels {
+        draw_actor_walk_review_overlay(
+            pixels,
+            frame_width,
+            frame_height,
+            actor_review_side_camera(),
+        );
+    }
+
+    let sheet_pixels = stitch_actor_review_panels(&frame_pixels, frame_width, frame_height);
+    save_rgba_png(
+        &options.sheet_path,
+        sheet_width,
+        frame_height,
+        &sheet_pixels,
+    )?;
+    let video_byte_len = options
+        .video_path
+        .as_deref()
+        .map(|path| {
+            write_actor_walk_review_video(
+                path,
+                &frame_pixels,
+                frame_width,
+                frame_height,
+                options.fps,
+            )
+        })
+        .transpose()?;
+
+    Ok(HeadlessActorWalkReviewReport {
+        sheet_path: options.sheet_path.clone(),
+        video_path: options.video_path.clone(),
+        frame_width,
+        frame_height,
+        sheet_width,
+        frame_count: loop_report.frame_count,
+        fps: options.fps,
+        cycles: options.cycles,
+        sheet_byte_len: sheet_pixels.len(),
+        video_byte_len,
+        non_clear_rgb_pixel_count: non_clear_rgb_pixel_count(&sheet_pixels),
+        actor_count: state
+            .stats
+            .iter()
+            .map(|stats| stats.submitted_actor_count)
+            .sum(),
+        drawn_actor_count: state
+            .stats
+            .iter()
+            .map(|stats| stats.drawn_actor_count)
+            .sum(),
+    })
+}
+
+fn render_actor_walk_review_frame(
+    index: usize,
+    frame: mclone_render::target::RenderFrameContext<'_>,
+    state: &mut ActorReviewSheetState,
+    specs: &[ActorWalkReviewFigureSpec],
+    frame_count: usize,
+    cycles: f32,
+) -> Result<()> {
+    let depth = ChunkDepthTarget::new(frame.device, frame.target.size[0], frame.target.size[1]);
+    clear_actor_review_frame(frame.encoder, frame.target, &depth);
+    let phase = actor_walk_review_phase(index, frame_count, cycles);
+    let actors = actor_walk_review_actors(specs, phase);
+    let stats = state.actors.render(
+        frame.device,
+        frame.queue,
+        frame.encoder,
+        frame.target.with_depth(&depth.view),
+        actor_review_side_camera().render_view(frame.target.size[0], frame.target.size[1]),
+        state.render_options,
+        &actors,
+    )?;
+    state.stats.push(stats);
+    Ok(())
+}
+
 fn render_actor_review_panel(
     index: usize,
     frame: mclone_render::target::RenderFrameContext<'_>,
@@ -293,13 +439,74 @@ fn actor_review_views() -> [ActorReviewView; 3] {
         },
         ActorReviewView {
             name: "side",
-            camera: actor_review_camera(Vec3::new(5.2, 1.0, 0.0)),
+            camera: actor_review_side_camera(),
         },
         ActorReviewView {
             name: "three_quarter",
             camera: actor_review_camera(Vec3::new(4.0, 1.1, 4.0)),
         },
     ]
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ActorWalkReviewFigureSpec {
+    figure: mclone_assets::ActorFigureId,
+    cycle_distance: f32,
+}
+
+fn actor_walk_review_specs(
+    source: &impl mclone_assets::AssetSource,
+) -> Result<Vec<ActorWalkReviewFigureSpec>> {
+    mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS
+        .iter()
+        .map(|figure| {
+            let path = mclone_assets::actor_figure_path(*figure)
+                .with_context(|| format!("unknown first-party actor figure {}", figure.as_str()))?;
+            let asset = mclone_assets::load_figure_asset(source, &path)
+                .with_context(|| format!("failed to load actor figure {}", figure.as_str()))?;
+            let walk = asset
+                .clips
+                .get("walk")
+                .with_context(|| format!("actor figure {} has no walk clip", figure.as_str()))?;
+            let locomotion = walk.locomotion.as_ref().with_context(|| {
+                format!(
+                    "actor figure {} walk clip has no locomotion metadata",
+                    figure.as_str()
+                )
+            })?;
+            if !locomotion.cycle_distance.is_finite() || locomotion.cycle_distance <= 0.0 {
+                bail!(
+                    "actor figure {} walk cycleDistance must be positive",
+                    figure.as_str()
+                );
+            }
+            Ok(ActorWalkReviewFigureSpec {
+                figure: *figure,
+                cycle_distance: locomotion.cycle_distance,
+            })
+        })
+        .collect()
+}
+
+fn actor_walk_review_phase(index: usize, frame_count: usize, cycles: f32) -> f32 {
+    (index as f32 / frame_count.max(1) as f32) * cycles.max(0.0)
+}
+
+fn actor_walk_review_actors(
+    specs: &[ActorWalkReviewFigureSpec],
+    phase_cycles: f32,
+) -> Vec<ActorInstance> {
+    let spacing = 0.9;
+    let center = (specs.len().saturating_sub(1)) as f32 * spacing * 0.5;
+    specs
+        .iter()
+        .enumerate()
+        .map(|(index, spec)| {
+            let offset = index as f32 * spacing - center;
+            ActorInstance::local_player_with_figure(Vec3::new(0.0, 0.0, offset), 0.0, spec.figure)
+                .with_walk_animation_distance(phase_cycles * spec.cycle_distance)
+        })
+        .collect()
 }
 
 fn actor_review_actors(view_name: &str) -> Vec<ActorInstance> {
@@ -318,6 +525,10 @@ fn actor_review_actors(view_name: &str) -> Vec<ActorInstance> {
             ActorInstance::local_player_with_figure(position, 0.0, *figure)
         })
         .collect()
+}
+
+fn actor_review_side_camera() -> ChunkCamera {
+    actor_review_camera(Vec3::new(5.2, 1.0, 0.0))
 }
 
 fn actor_review_camera(eye: Vec3) -> ChunkCamera {
@@ -347,6 +558,190 @@ fn stitch_actor_review_panels(panel_pixels: &[Vec<u8>], panel_width: u32, height
         }
     }
     sheet
+}
+
+fn draw_actor_walk_review_overlay(pixels: &mut [u8], width: u32, height: u32, camera: ChunkCamera) {
+    let guide_color = [59, 64, 69, 255];
+    let tick_color = [92, 98, 104, 255];
+    for z in [
+        -1.25, -1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0, 1.25,
+    ] {
+        draw_projected_line(
+            pixels,
+            width,
+            height,
+            camera,
+            Vec3::new(0.0, 0.0, z),
+            Vec3::new(0.0, 0.08, z),
+            tick_color,
+        );
+    }
+    draw_projected_line(
+        pixels,
+        width,
+        height,
+        camera,
+        Vec3::new(0.0, 0.0, -1.35),
+        Vec3::new(0.0, 0.0, 1.35),
+        guide_color,
+    );
+}
+
+fn draw_projected_line(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    camera: ChunkCamera,
+    start: Vec3,
+    end: Vec3,
+    color: [u8; 4],
+) {
+    let view = camera.render_view(width, height);
+    let Some(start) = project_world_to_pixel(view.view_projection, width, height, start) else {
+        return;
+    };
+    let Some(end) = project_world_to_pixel(view.view_projection, width, height, end) else {
+        return;
+    };
+    draw_line_2d(pixels, width, height, start, end, color);
+}
+
+fn project_world_to_pixel(
+    view_projection: glam::Mat4,
+    width: u32,
+    height: u32,
+    point: Vec3,
+) -> Option<[i32; 2]> {
+    let clip = view_projection * Vec4::new(point.x, point.y, point.z, 1.0);
+    if clip.w.abs() <= f32::EPSILON {
+        return None;
+    }
+    let ndc = clip.truncate() / clip.w;
+    if !ndc.is_finite() {
+        return None;
+    }
+    let x = ((ndc.x * 0.5 + 0.5) * width as f32).round() as i32;
+    let y = ((1.0 - (ndc.y * 0.5 + 0.5)) * height as f32).round() as i32;
+    Some([x, y])
+}
+
+fn draw_line_2d(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    start: [i32; 2],
+    end: [i32; 2],
+    color: [u8; 4],
+) {
+    let mut x0 = start[0];
+    let mut y0 = start[1];
+    let x1 = end[0];
+    let y1 = end[1];
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+    loop {
+        put_pixel(pixels, width, height, x0, y0, color);
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
+        let err2 = err * 2;
+        if err2 >= dy {
+            err += dy;
+            x0 += sx;
+        }
+        if err2 <= dx {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+fn put_pixel(pixels: &mut [u8], width: u32, height: u32, x: i32, y: i32, color: [u8; 4]) {
+    if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
+        return;
+    }
+    let start = ((y as u32 * width + x as u32) * 4) as usize;
+    let Some(pixel) = pixels.get_mut(start..start + 4) else {
+        return;
+    };
+    pixel.copy_from_slice(&color);
+}
+
+fn write_actor_walk_review_video(
+    video_path: &Path,
+    frame_pixels: &[Vec<u8>],
+    width: u32,
+    height: u32,
+    fps: u32,
+) -> Result<u64> {
+    ensure_parent_dir(video_path)?;
+    let frame_dir = temporary_actor_walk_review_frame_dir();
+    std::fs::create_dir_all(&frame_dir)
+        .with_context(|| format!("failed to create `{}`", frame_dir.display()))?;
+    for (index, pixels) in frame_pixels.iter().enumerate() {
+        let path = frame_dir.join(format!("frame-{index:04}.png"));
+        save_rgba_png(&path, width, height, pixels)?;
+    }
+
+    let input_pattern = frame_dir.join("frame-%04d.png");
+    let fps_arg = fps.to_string();
+    let output = Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-framerate")
+        .arg(&fps_arg)
+        .arg("-i")
+        .arg(&input_pattern)
+        .arg("-vf")
+        .arg("pad=ceil(iw/2)*2:ceil(ih/2)*2")
+        .arg("-c:v")
+        .arg("libx264")
+        .arg("-pix_fmt")
+        .arg("yuv420p")
+        .arg("-movflags")
+        .arg("+faststart")
+        .arg(video_path)
+        .output()
+        .with_context(|| {
+            format!(
+                "failed to run ffmpeg for actor walk review video `{}`",
+                video_path.display()
+            )
+        })?;
+    let _ = std::fs::remove_dir_all(&frame_dir);
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("ffmpeg failed for actor walk review video: {stderr}");
+    }
+    Ok(std::fs::metadata(video_path)
+        .with_context(|| format!("failed to stat `{}`", video_path.display()))?
+        .len())
+}
+
+fn temporary_actor_walk_review_frame_dir() -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    std::env::temp_dir().join(format!(
+        "mclone-actor-walk-review-{}-{nanos}",
+        std::process::id()
+    ))
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<()> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create `{}`", parent.display()))?;
+    }
+    Ok(())
 }
 
 fn non_clear_rgb_pixel_count(pixels: &[u8]) -> usize {
@@ -902,6 +1297,50 @@ mod tests {
             )
         );
         assert!(actors[0].feet_position.x < actors[1].feet_position.x);
+    }
+
+    #[test]
+    fn actor_walk_review_actors_scale_distance_by_cycle() {
+        let specs = [
+            ActorWalkReviewFigureSpec {
+                figure: mclone_assets::default_player_figure_id(),
+                cycle_distance: 0.5,
+            },
+            ActorWalkReviewFigureSpec {
+                figure: mclone_assets::upright_bear_figure_id(),
+                cycle_distance: 1.25,
+            },
+        ];
+
+        let actors = actor_walk_review_actors(&specs, 1.5);
+
+        assert_eq!(actors.len(), 2);
+        assert_eq!(
+            actors[0].shape,
+            mclone_render::entity::ActorInstanceShape::Figure(
+                mclone_assets::default_player_figure_id()
+            )
+        );
+        assert_eq!(actors[0].animation.unwrap().distance, 0.75);
+        assert_eq!(actors[1].animation.unwrap().distance, 1.875);
+        assert!(actors[0].feet_position.z < actors[1].feet_position.z);
+    }
+
+    #[test]
+    fn actor_walk_review_phase_spans_configured_cycles_without_duplicate_loop_frame() {
+        assert_eq!(actor_walk_review_phase(0, 4, 2.0), 0.0);
+        assert_eq!(actor_walk_review_phase(3, 4, 2.0), 1.5);
+    }
+
+    #[test]
+    fn actor_walk_review_overlay_draws_floor_guide_pixels() {
+        let width = 80;
+        let height = 80;
+        let mut pixels = vec![158, 168, 179, 255].repeat((width * height) as usize);
+
+        draw_actor_walk_review_overlay(&mut pixels, width, height, actor_review_side_camera());
+
+        assert!(non_clear_rgb_pixel_count(&pixels) > 0);
     }
 
     #[test]
