@@ -20,6 +20,8 @@ export function decodePng(buffer: Uint8Array): RgbaImage {
   let colorType = 0;
   let interlace = 0;
   const idatChunks: Buffer[] = [];
+  let palette: Buffer | undefined;
+  let paletteAlpha: Buffer | undefined;
 
   let offset = PNG_SIGNATURE.length;
   while (offset < bytes.length) {
@@ -36,6 +38,10 @@ export function decodePng(buffer: Uint8Array): RgbaImage {
       interlace = data[12]!;
     } else if (type === "IDAT") {
       idatChunks.push(data);
+    } else if (type === "PLTE") {
+      palette = Buffer.from(data);
+    } else if (type === "tRNS") {
+      paletteAlpha = Buffer.from(data);
     } else if (type === "IEND") {
       break;
     }
@@ -44,11 +50,18 @@ export function decodePng(buffer: Uint8Array): RgbaImage {
   if (width <= 0 || height <= 0) {
     throw new Error("PNG is missing IHDR dimensions");
   }
-  if (bitDepth !== 8 || interlace !== 0 || (colorType !== 6 && colorType !== 2)) {
+  if (
+    bitDepth !== 8 ||
+    interlace !== 0 ||
+    (colorType !== 6 && colorType !== 4 && colorType !== 3 && colorType !== 2 && colorType !== 0)
+  ) {
     throw new Error(`Unsupported PNG format: bitDepth=${bitDepth} colorType=${colorType} interlace=${interlace}`);
   }
+  if (colorType === 3 && (!palette || palette.length === 0 || palette.length % 3 !== 0)) {
+    throw new Error("Indexed PNG is missing a valid PLTE chunk");
+  }
 
-  const bytesPerPixel = colorType === 6 ? 4 : 3;
+  const bytesPerPixel = colorType === 6 ? 4 : colorType === 4 ? 2 : colorType === 2 ? 3 : 1;
   const scanlineLength = width * bytesPerPixel;
   const inflated = zlib.inflateSync(Buffer.concat(idatChunks));
   const expectedLength = height * (scanlineLength + 1);
@@ -74,10 +87,31 @@ export function decodePng(buffer: Uint8Array): RgbaImage {
     for (let x = 0; x < width; x += 1) {
       const source = y * scanlineLength + x * bytesPerPixel;
       const target = (y * width + x) * 4;
-      data[target] = rows[source]!;
-      data[target + 1] = rows[source + 1]!;
-      data[target + 2] = rows[source + 2]!;
-      data[target + 3] = colorType === 6 ? rows[source + 3]! : 255;
+      if (colorType === 3) {
+        const paletteIndex = rows[source]!;
+        const paletteOffset = paletteIndex * 3;
+        data[target] = palette![paletteOffset] ?? 0;
+        data[target + 1] = palette![paletteOffset + 1] ?? 0;
+        data[target + 2] = palette![paletteOffset + 2] ?? 0;
+        data[target + 3] = paletteAlpha?.[paletteIndex] ?? 255;
+      } else if (colorType === 4) {
+        const gray = rows[source]!;
+        data[target] = gray;
+        data[target + 1] = gray;
+        data[target + 2] = gray;
+        data[target + 3] = rows[source + 1]!;
+      } else if (colorType === 0) {
+        const gray = rows[source]!;
+        data[target] = gray;
+        data[target + 1] = gray;
+        data[target + 2] = gray;
+        data[target + 3] = 255;
+      } else {
+        data[target] = rows[source]!;
+        data[target + 1] = rows[source + 1]!;
+        data[target + 2] = rows[source + 2]!;
+        data[target + 3] = colorType === 6 ? rows[source + 3]! : 255;
+      }
     }
   }
 

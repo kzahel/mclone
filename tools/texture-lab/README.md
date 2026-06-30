@@ -32,6 +32,7 @@ pnpm texture-lab:install
 pnpm texture-lab:typecheck
 pnpm texture-lab:export
 pnpm texture-lab:analyze
+pnpm texture-lab:catalog
 pnpm texture-lab:runtime-compat
 pnpm texture-lab:pack-overlay
 pnpm texture-lab:coverage
@@ -98,6 +99,8 @@ sheets to:
 /tmp/mclone-texture-lab/iron-ore-sheet.png
 /tmp/mclone-texture-lab/mclone-default-metadata.md
 /tmp/mclone-texture-lab/mclone-default-metadata.json
+/tmp/mclone-texture-lab/mclone-default-texture-catalog.md
+/tmp/mclone-texture-lab/mclone-default-texture-catalog.json
 ```
 
 When a block name collides with a texture name, such as `stone`, the texture
@@ -197,6 +200,29 @@ Each export also writes a metadata report next to the sheets. The Markdown
 report is for quick human review; the JSON report is for future agent/tool
 checks. Both list tint roles, texture source categories, preview tiling modes,
 seam diagnostic modes, sheet paths, and block face composition.
+
+`texture-lab:catalog` writes a wider generated matrix for planning the full
+Minecraft block texture atlas. It reads the local vanilla 1.17.1 extraction,
+blockstate JSON, block model JSON, PNG alpha/animation metadata, and the Java
+`ItemBlockRenderTypes` render-layer map when the decompiled source is present.
+It then joins those facts to the current mclone pack by runtime-compatible
+texture path. The editable source remains the TypeScript pack plus optional
+per-texture `catalog` metadata; the large Markdown/JSON matrix is derived and
+stays under `/tmp`.
+
+Catalog fields are intentionally split by ownership:
+
+- vanilla-derived facts: texture path, size, alpha mode, animation, model
+  families, block/model/face uses, tint indexes, blockstate rotations, face UV
+  rotations, and render layers
+- inferred authoring constraints: tiling, rotation safety, alpha/render-layer
+  class, and tint role hints
+- mclone status: authored replacement path, source category, tint role,
+  optional status, tags, and notes
+
+This is the place to answer questions such as "which cutout decorations are
+still missing?", "which textures must survive 90-degree blockstate rotation?",
+and "which tint-index textures need grass or foliage review?"
 
 The `mclone-default` grass block module encodes that relationship directly:
 

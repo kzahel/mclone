@@ -10,6 +10,9 @@ export interface TexturePackAsset {
 
 export type PaletteSpec = Record<string, string>;
 export type TextureSourceCategory = "final-color" | "tintable";
+export type TextureCatalogStatus = "draft" | "reviewed" | "accepted";
+export type TextureCatalogTiling = "xy" | "x" | "none" | "unknown";
+export type TextureCatalogRotation = "free" | "y90-safe" | "fixed" | "model-driven" | "unknown";
 
 export interface TintSpec {
   normal: string;
@@ -25,6 +28,15 @@ export interface TextureSpec {
   exportPath: string;
   layers?: TextureLayerSpec[];
   preview?: TexturePreviewSpec;
+  catalog?: TextureCatalogMetadataSpec;
+}
+
+export interface TextureCatalogMetadataSpec {
+  status?: TextureCatalogStatus;
+  tiling?: TextureCatalogTiling;
+  rotation?: TextureCatalogRotation;
+  tags?: string[];
+  notes?: string[];
 }
 
 export interface TexturePreviewSpec {
@@ -201,6 +213,7 @@ export function assertValidTexturePack(asset: TexturePackAsset): void {
     ) {
       errors.push(`texture '${textureName}' preview tiling must be 'xy', 'x', or 'none'`);
     }
+    validateTextureCatalogMetadata(textureName, texture.catalog, errors);
     for (const [layerIndex, layer] of (texture.layers ?? []).entries()) {
       validateLayer(textureName, layerIndex, layer, palette, size, errors);
     }
@@ -383,6 +396,55 @@ function validateLayer(
     layer.upscale !== "smooth"
   ) {
     errors.push(`texture '${textureName}' layer ${layerIndex} upscale must be 'nearest', 'linear', 'bicubic', or 'smooth'`);
+  }
+}
+
+function validateTextureCatalogMetadata(
+  textureName: string,
+  catalog: TextureCatalogMetadataSpec | undefined,
+  errors: string[],
+): void {
+  if (!catalog) {
+    return;
+  }
+  if (
+    catalog.status !== undefined &&
+    catalog.status !== "draft" &&
+    catalog.status !== "reviewed" &&
+    catalog.status !== "accepted"
+  ) {
+    errors.push(`texture '${textureName}' catalog.status must be 'draft', 'reviewed', or 'accepted'`);
+  }
+  if (
+    catalog.tiling !== undefined &&
+    catalog.tiling !== "xy" &&
+    catalog.tiling !== "x" &&
+    catalog.tiling !== "none" &&
+    catalog.tiling !== "unknown"
+  ) {
+    errors.push(`texture '${textureName}' catalog.tiling must be 'xy', 'x', 'none', or 'unknown'`);
+  }
+  if (
+    catalog.rotation !== undefined &&
+    catalog.rotation !== "free" &&
+    catalog.rotation !== "y90-safe" &&
+    catalog.rotation !== "fixed" &&
+    catalog.rotation !== "model-driven" &&
+    catalog.rotation !== "unknown"
+  ) {
+    errors.push(
+      `texture '${textureName}' catalog.rotation must be 'free', 'y90-safe', 'fixed', 'model-driven', or 'unknown'`,
+    );
+  }
+  for (const [index, tag] of (catalog.tags ?? []).entries()) {
+    if (!tag.trim()) {
+      errors.push(`texture '${textureName}' catalog.tags[${index}] must not be empty`);
+    }
+  }
+  for (const [index, note] of (catalog.notes ?? []).entries()) {
+    if (!note.trim()) {
+      errors.push(`texture '${textureName}' catalog.notes[${index}] must not be empty`);
+    }
   }
 }
 
