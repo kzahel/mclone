@@ -1,13 +1,14 @@
 # 110: Shared Physics Backend Experiment
 
-Status: active; Slices 1-4f landed with the shared `mclone-physics` facade,
+Status: active; Slices 1-4g landed with the shared `mclone-physics` facade,
 no-op backend, optional Rapier backend, synthetic cuboid/static-patch
 simulation test, section terrain collider probe, feature-gated live
 chunk-to-physics terrain conversion, server-owned debug cube physics runtime,
 debug cube protocol/entity publication, desktop `F7` diagnostic launch wiring,
 fresh debug cube entity IDs on repeated throws, one-way debug player AABB
 collision, Minecraft-strength debug physics gravity/vertical drag, deterministic
-debug cube spin, and `mclone-server` / native-client intent feature wiring. App binary-size
+debug cube spin, 60 Hz physics substeps inside the 20 Hz server tick, and
+`mclone-server` / native-client intent feature wiring. App binary-size
 measurement is deferred until the physics path is promoted beyond diagnostics.
 
 ## Purpose
@@ -556,6 +557,34 @@ cargo test --manifest-path native/Cargo.toml -p mclone-render-session
 cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
 cargo check --manifest-path native/Cargo.toml
+```
+
+Recorded Slice 4g result:
+
+- Added the cadence direction in
+  [`116-simulation-cadence-and-stepping.md`](116-simulation-cadence-and-stepping.md):
+  configurable host pump long-term, with fixed-rate gameplay, physics, AI,
+  networking, and render lanes instead of one global tick meaning every kind of
+  time.
+- The debug Rapier runtime now steps three times at 1/60 second inside each
+  20 Hz server tick.
+- Minecraft-strength vertical drag remains a game-feel policy applied over the
+  full 20 Hz gameplay tick, preserving the current one-tick gravity/drag
+  envelope while improving contact integration.
+- Physics diagnostics now aggregate debug-cube pose updates across the three
+  substeps before publishing the normal once-per-server-tick entity state.
+- Visual smoothness is still limited by 20 Hz entity publication and the current
+  actor interpolation path. Higher-rate active physics presentation remains a
+  later replication/prediction slice.
+
+Slice 4g validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-server -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier physics_substeps_cover_one_gameplay_tick -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier debug_physics_cube -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
 ```
 
 ### Slice 5 - Web Worker Viability

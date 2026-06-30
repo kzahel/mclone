@@ -2287,9 +2287,10 @@ mod tests {
             .expect("debug cube pose")
             .position
             .x;
+        let player_left_face_x = player_position.x - 0.3;
         assert!(
-            final_x < 7.4,
-            "debug cube should collide with player AABB before passing through, got x={final_x}"
+            final_x < player_left_face_x,
+            "debug cube should collide before its center passes into the player AABB, got x={final_x}"
         );
     }
 

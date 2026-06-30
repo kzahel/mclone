@@ -15,14 +15,17 @@ use mclone_physics::{
 
 use crate::{ChunkScheduler, ServerPhysicsTickDiagnostics};
 
-const SERVER_PHYSICS_TICKS_PER_SECOND: f64 = 20.0;
-const SERVER_PHYSICS_DT_SECONDS: f64 = 1.0 / SERVER_PHYSICS_TICKS_PER_SECOND;
+const SERVER_GAMEPLAY_TICKS_PER_SECOND: f64 = 20.0;
+const SERVER_GAMEPLAY_DT_SECONDS: f64 = 1.0 / SERVER_GAMEPLAY_TICKS_PER_SECOND;
+const SERVER_PHYSICS_STEPS_PER_SECOND: f64 = 60.0;
+const SERVER_PHYSICS_SUBSTEPS_PER_SERVER_TICK: usize = 3;
+const SERVER_PHYSICS_SUBSTEP_DT_SECONDS: f64 = 1.0 / SERVER_PHYSICS_STEPS_PER_SECOND;
 const SERVER_PHYSICS_MINECRAFT_GRAVITY_BLOCKS_PER_TICK: f64 = 0.08;
 const SERVER_PHYSICS_GRAVITY: Vec3d = Vec3d::new(
     0.0,
     -SERVER_PHYSICS_MINECRAFT_GRAVITY_BLOCKS_PER_TICK
-        * SERVER_PHYSICS_TICKS_PER_SECOND
-        * SERVER_PHYSICS_TICKS_PER_SECOND,
+        * SERVER_GAMEPLAY_TICKS_PER_SECOND
+        * SERVER_GAMEPLAY_TICKS_PER_SECOND,
     0.0,
 );
 const SERVER_PHYSICS_MINECRAFT_VERTICAL_DRAG: f64 = 0.98;
@@ -132,8 +135,14 @@ impl ServerPhysicsRuntime {
     }
 
     pub(crate) fn step(&mut self) -> ServerPhysicsTickDiagnostics {
-        let report = self.world.step(SERVER_PHYSICS_DT_SECONDS);
-        self.apply_debug_cube_vertical_drag(SERVER_PHYSICS_DT_SECONDS);
+        let mut report = PhysicsStepReport::default();
+        let mut body_pose_update_count = 0;
+        for _ in 0..SERVER_PHYSICS_SUBSTEPS_PER_SERVER_TICK {
+            report = self.world.step(SERVER_PHYSICS_SUBSTEP_DT_SECONDS);
+            body_pose_update_count += report.body_pose_update_count;
+        }
+        report.body_pose_update_count = body_pose_update_count;
+        self.apply_debug_cube_vertical_drag(SERVER_GAMEPLAY_DT_SECONDS);
         self.last_diagnostics = self.diagnostics_from_report(report);
         self.last_diagnostics
     }
@@ -175,7 +184,7 @@ impl ServerPhysicsRuntime {
         let Some(mut velocity) = self.world.body_velocity(body) else {
             return;
         };
-        let tick_scale = dt_seconds * SERVER_PHYSICS_TICKS_PER_SECOND;
+        let tick_scale = dt_seconds * SERVER_GAMEPLAY_TICKS_PER_SECOND;
         if tick_scale <= 0.0 {
             return;
         }
@@ -244,5 +253,18 @@ impl fmt::Debug for ServerPhysicsRuntime {
             .field("debug_cube_terrain", &self.debug_cube_terrain)
             .field("last_diagnostics", &self.last_diagnostics)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn physics_substeps_cover_one_gameplay_tick() {
+        assert_eq!(SERVER_PHYSICS_SUBSTEPS_PER_SERVER_TICK, 3);
+        let substep_seconds =
+            SERVER_PHYSICS_SUBSTEP_DT_SECONDS * SERVER_PHYSICS_SUBSTEPS_PER_SERVER_TICK as f64;
+        assert!((substep_seconds - SERVER_GAMEPLAY_DT_SECONDS).abs() < f64::EPSILON);
     }
 }
