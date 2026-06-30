@@ -1,14 +1,14 @@
 # 110: Shared Physics Backend Experiment
 
-Status: active; Slices 1-4d landed with the shared `mclone-physics` facade,
+Status: active; Slices 1-4e landed with the shared `mclone-physics` facade,
 no-op backend, optional Rapier backend, synthetic cuboid/static-patch
 simulation test, section terrain collider probe, feature-gated live
 chunk-to-physics terrain conversion, server-owned debug cube physics runtime,
 debug cube protocol/entity publication, desktop `F7` diagnostic launch wiring,
 fresh debug cube entity IDs on repeated throws, one-way debug player AABB
-collision, Minecraft-strength debug physics gravity, and `mclone-server` /
-native-client intent feature wiring. App binary-size measurement is deferred
-until the physics path is promoted beyond diagnostics.
+collision, Minecraft-strength debug physics gravity/vertical drag, and
+`mclone-server` / native-client intent feature wiring. App binary-size
+measurement is deferred until the physics path is promoted beyond diagnostics.
 
 ## Purpose
 
@@ -491,6 +491,36 @@ Slice 4d validation:
 ```bash
 cargo fmt --manifest-path native/Cargo.toml -p mclone-physics -p mclone-server -- --check
 cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier gravity -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier debug_physics_cube -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-physics
+cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier
+cargo test --manifest-path native/Cargo.toml -p mclone-server
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
+cargo check --manifest-path native/Cargo.toml
+```
+
+Recorded Slice 4e result:
+
+- Added `PhysicsWorld::body_velocity(...)` and
+  `PhysicsWorld::set_body_velocity(...)` to the shared facade so runtime-owned
+  game-feel policy can adjust velocities without exposing Rapier handles.
+- The debug server physics runtime now applies Minecraft-style vertical drag to
+  the debug cube after each physics step:
+  `velocity.y *= 0.98.powf(dt_seconds * 20.0)`.
+- This keeps Rapier responsible for rigid-body collision/impulses while making
+  the thrown cube's falling arc use the same gravity-and-drag envelope as the
+  current player movement controller.
+- Added no-op and Rapier velocity API tests, plus a server integration test that
+  verifies the first debug-cube physics tick produces
+  `(-32.0 * 0.05) * 0.98 = -1.568 blocks/sec` vertical velocity before any
+  terrain collision.
+
+Slice 4e validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-physics -p mclone-server -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier -- --nocapture
 cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier debug_physics_cube -- --nocapture
 cargo test --manifest-path native/Cargo.toml -p mclone-physics
 cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier

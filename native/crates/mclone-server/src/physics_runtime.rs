@@ -25,6 +25,7 @@ const SERVER_PHYSICS_GRAVITY: Vec3d = Vec3d::new(
         * SERVER_PHYSICS_TICKS_PER_SECOND,
     0.0,
 );
+const SERVER_PHYSICS_MINECRAFT_VERTICAL_DRAG: f64 = 0.98;
 const DEBUG_CUBE_HALF_EXTENT: f64 = 0.5;
 const DEBUG_CUBE_TERRAIN_SECTION_RADIUS_XZ: i32 = 1;
 const DEBUG_CUBE_TERRAIN_SECTION_RADIUS_Y: i32 = 1;
@@ -121,6 +122,7 @@ impl ServerPhysicsRuntime {
 
     pub(crate) fn step(&mut self) -> ServerPhysicsTickDiagnostics {
         let report = self.world.step(SERVER_PHYSICS_DT_SECONDS);
+        self.apply_debug_cube_vertical_drag(SERVER_PHYSICS_DT_SECONDS);
         self.last_diagnostics = self.diagnostics_from_report(report);
         self.last_diagnostics
     }
@@ -132,6 +134,12 @@ impl ServerPhysicsRuntime {
     pub(crate) fn debug_cube_pose(&self) -> Option<PhysicsBodyPose> {
         self.debug_cube_body
             .and_then(|body| self.world.body_pose(body))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_cube_velocity(&self) -> Option<PhysicsBodyVelocity> {
+        self.debug_cube_body
+            .and_then(|body| self.world.body_velocity(body))
     }
 
     fn clear_debug_cube(&mut self) {
@@ -147,6 +155,21 @@ impl ServerPhysicsRuntime {
         if let Some(body) = self.debug_player_body.take() {
             self.world.remove_body(body);
         }
+    }
+
+    fn apply_debug_cube_vertical_drag(&mut self, dt_seconds: f64) {
+        let Some(body) = self.debug_cube_body else {
+            return;
+        };
+        let Some(mut velocity) = self.world.body_velocity(body) else {
+            return;
+        };
+        let tick_scale = dt_seconds * SERVER_PHYSICS_TICKS_PER_SECOND;
+        if tick_scale <= 0.0 {
+            return;
+        }
+        velocity.linear.y *= SERVER_PHYSICS_MINECRAFT_VERTICAL_DRAG.powf(tick_scale);
+        self.world.set_body_velocity(body, velocity);
     }
 
     fn diagnostics_from_report(&self, report: PhysicsStepReport) -> ServerPhysicsTickDiagnostics {

@@ -321,8 +321,16 @@ impl PhysicsWorld {
         self.backend.body(id).map(|body| body.pose)
     }
 
+    pub fn body_velocity(&self, id: PhysicsBodyId) -> Option<PhysicsBodyVelocity> {
+        self.backend.body_velocity(id)
+    }
+
     pub fn set_body_pose(&mut self, id: PhysicsBodyId, pose: PhysicsBodyPose) -> bool {
         self.backend.set_body_pose(id, pose)
+    }
+
+    pub fn set_body_velocity(&mut self, id: PhysicsBodyId, velocity: PhysicsBodyVelocity) -> bool {
+        self.backend.set_body_velocity(id, velocity)
     }
 
     pub fn gravity(&self) -> Vec3d {
@@ -420,11 +428,27 @@ impl PhysicsWorldBackend {
         }
     }
 
+    fn body_velocity(&self, id: PhysicsBodyId) -> Option<PhysicsBodyVelocity> {
+        match self {
+            Self::Noop(backend) => backend.body_velocity(id),
+            #[cfg(feature = "rapier")]
+            Self::Rapier(backend) => backend.body_velocity(id),
+        }
+    }
+
     fn set_body_pose(&mut self, id: PhysicsBodyId, pose: PhysicsBodyPose) -> bool {
         match self {
             Self::Noop(backend) => backend.set_body_pose(id, pose),
             #[cfg(feature = "rapier")]
             Self::Rapier(backend) => backend.set_body_pose(id, pose),
+        }
+    }
+
+    fn set_body_velocity(&mut self, id: PhysicsBodyId, velocity: PhysicsBodyVelocity) -> bool {
+        match self {
+            Self::Noop(backend) => backend.set_body_velocity(id, velocity),
+            #[cfg(feature = "rapier")]
+            Self::Rapier(backend) => backend.set_body_velocity(id, velocity),
         }
     }
 
@@ -562,11 +586,26 @@ impl NoopPhysicsWorld {
         self.bodies.get(&id)
     }
 
+    fn body_velocity(&self, id: PhysicsBodyId) -> Option<PhysicsBodyVelocity> {
+        self.bodies.get(&id).map(|body| body.velocity)
+    }
+
     fn set_body_pose(&mut self, id: PhysicsBodyId, pose: PhysicsBodyPose) -> bool {
         let Some(body) = self.bodies.get_mut(&id) else {
             return false;
         };
         body.pose = pose;
+        true
+    }
+
+    fn set_body_velocity(&mut self, id: PhysicsBodyId, velocity: PhysicsBodyVelocity) -> bool {
+        if !velocity.linear.is_finite() || !velocity.angular.is_finite() {
+            return false;
+        }
+        let Some(body) = self.bodies.get_mut(&id) else {
+            return false;
+        };
+        body.velocity = velocity;
         true
     }
 
@@ -756,6 +795,12 @@ impl RapierPhysicsWorld {
         self.bodies.get(&id).map(|record| &record.spawn)
     }
 
+    fn body_velocity(&self, id: PhysicsBodyId) -> Option<PhysicsBodyVelocity> {
+        let record = self.bodies.get(&id)?;
+        let body = self.rigid_body_set.get(record.handle)?;
+        Some(physics_body_velocity(body))
+    }
+
     fn set_body_pose(&mut self, id: PhysicsBodyId, pose: PhysicsBodyPose) -> bool {
         let Some(record) = self.bodies.get_mut(&id) else {
             return false;
@@ -765,6 +810,22 @@ impl RapierPhysicsWorld {
         };
         body.set_position(rapier_pose(pose), true);
         record.spawn.pose = pose;
+        true
+    }
+
+    fn set_body_velocity(&mut self, id: PhysicsBodyId, velocity: PhysicsBodyVelocity) -> bool {
+        if !velocity.linear.is_finite() || !velocity.angular.is_finite() {
+            return false;
+        }
+        let Some(record) = self.bodies.get_mut(&id) else {
+            return false;
+        };
+        let Some(body) = self.rigid_body_set.get_mut(record.handle) else {
+            return false;
+        };
+        body.set_linvel(rapier_vec(velocity.linear), true);
+        body.set_angvel(rapier_vec(velocity.angular), true);
+        record.spawn.velocity = velocity;
         true
     }
 
@@ -1061,6 +1122,14 @@ fn physics_pose(body: &rapier::RigidBody) -> PhysicsBodyPose {
             z: f64::from(rotation.z),
             w: f64::from(rotation.w),
         },
+    }
+}
+
+#[cfg(feature = "rapier")]
+fn physics_body_velocity(body: &rapier::RigidBody) -> PhysicsBodyVelocity {
+    PhysicsBodyVelocity {
+        linear: physics_vec(body.linvel()),
+        angular: physics_vec(body.angvel()),
     }
 }
 
@@ -1448,10 +1517,23 @@ mod tests {
             0.5,
             Vec3d::new(100.0, 0.0, 0.0),
         ));
+        assert_eq!(
+            world.body_velocity(body),
+            Some(PhysicsBodyVelocity {
+                linear: Vec3d::new(100.0, 0.0, 0.0),
+                angular: Vec3d::ZERO,
+            })
+        );
 
         let pose = PhysicsBodyPose::new(Vec3d::new(8.0, 9.0, 10.0), PhysicsRotation::IDENTITY);
         assert!(world.set_body_pose(body, pose));
         assert_eq!(world.body_pose(body), Some(pose));
+        let velocity = PhysicsBodyVelocity {
+            linear: Vec3d::new(1.0, 2.0, 3.0),
+            angular: Vec3d::new(0.1, 0.2, 0.3),
+        };
+        assert!(world.set_body_velocity(body, velocity));
+        assert_eq!(world.body_velocity(body), Some(velocity));
 
         let report = world.step(1.0 / 20.0);
         assert_eq!(report.body_count, 1);
@@ -1459,6 +1541,7 @@ mod tests {
         assert_eq!(report.body_pose_update_count, 0);
         assert_eq!(world.body_pose(body), Some(pose));
         assert!(!world.set_body_pose(PhysicsBodyId(99), pose));
+        assert!(!world.set_body_velocity(PhysicsBodyId(99), velocity));
     }
 
     #[test]
@@ -1649,6 +1732,26 @@ mod tests {
             minecraft_gravity_y < default_gravity_y,
             "stronger Minecraft gravity should move the body farther down: default={default_gravity_y}, minecraft={minecraft_gravity_y}"
         );
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_world_sets_body_velocity() {
+        let mut world = PhysicsWorld::new(PhysicsBackendKind::Rapier);
+        let body = world.spawn_body(PhysicsBodySpawn::dynamic_cube(
+            Vec3d::ZERO,
+            0.5,
+            Vec3d::ZERO,
+        ));
+        let velocity = PhysicsBodyVelocity {
+            linear: Vec3d::new(3.0, 4.0, 5.0),
+            angular: Vec3d::new(0.25, 0.5, 0.75),
+        };
+
+        assert!(world.set_body_velocity(body, velocity));
+        let actual = world.body_velocity(body).expect("body velocity");
+        assert!(actual.linear.distance_to_sqr(velocity.linear) < 1.0e-10);
+        assert!(actual.angular.distance_to_sqr(velocity.angular) < 1.0e-10);
     }
 
     #[cfg(feature = "rapier")]

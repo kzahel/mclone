@@ -2107,6 +2107,45 @@ mod tests {
 
     #[cfg(feature = "physics-rapier")]
     #[test]
+    fn debug_physics_cube_applies_minecraft_vertical_drag() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+
+        for y in 0..16 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    let block = if y == 0 { STONE } else { AIR };
+                    server
+                        .scheduler_mut()
+                        .set_block_at_world(BlockPos::new(x, y, z), block);
+                }
+            }
+        }
+
+        assert!(server.spawn_debug_physics_cube(Vec3d::new(8.0, 6.0, 8.0), Vec3d::ZERO));
+        let initial_velocity = server
+            .physics
+            .debug_cube_velocity()
+            .expect("initial debug cube velocity");
+        assert_eq!(initial_velocity.linear, Vec3d::ZERO);
+
+        server.physics.step();
+
+        let velocity = server
+            .physics
+            .debug_cube_velocity()
+            .expect("debug cube velocity after physics step");
+        let expected_y = (-32.0 * 0.05) * 0.98;
+        assert!(
+            (velocity.linear.y - expected_y).abs() < 1.0e-5,
+            "debug cube vertical velocity should apply Minecraft gravity and vertical drag, got {} expected {}",
+            velocity.linear.y,
+            expected_y
+        );
+    }
+
+    #[cfg(feature = "physics-rapier")]
+    #[test]
     fn shoot_debug_physics_cube_command_publishes_debug_entity() {
         let mut server = IntegratedServer::new(0);
         load_center_chunk(&mut server);
