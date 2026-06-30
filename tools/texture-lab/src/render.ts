@@ -639,6 +639,31 @@ function drawMipStrip(target: RgbaImage, source: RgbaImage, targetX: number, tar
   }
 }
 
+function drawCompactMipStrip(
+  target: RgbaImage,
+  source: RgbaImage,
+  targetX: number,
+  targetY: number,
+  checkerboard: boolean,
+): void {
+  const levels = [
+    { size: 16, scale: 2 },
+    { size: 8, scale: 3 },
+    { size: 4, scale: 4 },
+    { size: 2, scale: 5 },
+    { size: 1, scale: 8 },
+  ];
+  let x = targetX;
+  for (const level of levels) {
+    const image = downsampleNearest(source, level.size, level.size);
+    if (checkerboard) {
+      drawCheckerboard(target, x, targetY, level.size * level.scale, level.size * level.scale, level.scale);
+    }
+    drawScaled(target, image, x, targetY, level.scale);
+    x += level.size * level.scale + 10;
+  }
+}
+
 function drawSeamDiagnostic(
   target: RgbaImage,
   source: RgbaImage,
@@ -810,10 +835,16 @@ function drawReferencePanel(
   }
   drawTiledScaled(target, reference, repeatX, repeatY, 3, 3, repeatScale);
 
-  const mipY = panelY + Math.max(enlargedHeight, repeatHeight) + 40;
-  if (mipY + 64 < panelY + panelHeight) {
-    drawPixelText(target, "MIPS", panelX + 18, mipY - 12, 1, [214, 218, 210, 255]);
-    drawMipStrip(target, reference, panelX + 18, mipY, checkerboard);
+  const lowerY = panelY + 42 + Math.max(enlargedHeight, repeatHeight) + 20;
+  if (lowerY + 100 < panelY + panelHeight) {
+    drawPixelText(target, "MIPS", panelX + 18, lowerY - 12, 1, [214, 218, 210, 255]);
+    drawCompactMipStrip(target, reference, panelX + 18, lowerY, checkerboard);
+
+    if (!checkerboard) {
+      const cubeX = panelX + panelWidth - 108;
+      drawPixelText(target, "CUBE", cubeX, lowerY - 12, 1, [214, 218, 210, 255]);
+      drawSmallIsometricCube(target, reference, cubeX, lowerY);
+    }
   }
 }
 
@@ -1225,6 +1256,22 @@ function drawIsometricCube(target: RgbaImage, texture: RgbaImage, targetX: numbe
   );
 }
 
+function drawSmallIsometricCube(target: RgbaImage, texture: RgbaImage, targetX: number, targetY: number): void {
+  drawIsometricCubeFacesSized(
+    target,
+    {
+      top: texture,
+      left: texture,
+      right: texture,
+    },
+    targetX,
+    targetY,
+    42,
+    21,
+    56,
+  );
+}
+
 interface CubeFaceImages {
   top: RgbaImage;
   left: RgbaImage;
@@ -1232,9 +1279,18 @@ interface CubeFaceImages {
 }
 
 function drawIsometricCubeFaces(target: RgbaImage, faces: CubeFaceImages, targetX: number, targetY: number): void {
-  const halfWidth = 64;
-  const halfDepth = 32;
-  const height = 84;
+  drawIsometricCubeFacesSized(target, faces, targetX, targetY, 64, 32, 84);
+}
+
+function drawIsometricCubeFacesSized(
+  target: RgbaImage,
+  faces: CubeFaceImages,
+  targetX: number,
+  targetY: number,
+  halfWidth: number,
+  halfDepth: number,
+  height: number,
+): void {
   const originX = targetX + halfWidth;
   const originY = targetY + height;
 
