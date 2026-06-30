@@ -668,13 +668,15 @@ function drawReferencePanel(
   drawRect(target, panelX, panelY + panelHeight - 2, panelWidth, 2, border);
   drawRect(target, panelX, panelY, 2, panelHeight, border);
   drawRect(target, panelX + panelWidth - 2, panelY, 2, panelHeight, border);
+  drawRect(target, panelX + 2, panelY + 2, panelWidth - 4, 22, [42, 44, 44, 255]);
+  drawPixelText(target, "MINECRAFT REFERENCE", panelX + 18, panelY + 8, 2, [214, 218, 210, 255]);
 
   const checkerboard = hasTransparency(reference);
   const enlargedScale = Math.max(1, Math.floor(Math.min(128 / reference.width, 128 / reference.height)));
   const enlargedWidth = reference.width * enlargedScale;
   const enlargedHeight = reference.height * enlargedScale;
   const enlargedX = panelX + 18;
-  const enlargedY = panelY + 18;
+  const enlargedY = panelY + 42;
   if (checkerboard) {
     drawCheckerboard(target, enlargedX, enlargedY, enlargedWidth, enlargedHeight, Math.max(4, enlargedScale));
   }
@@ -685,7 +687,7 @@ function drawReferencePanel(
   const repeatWidth = reference.width * 3 * repeatScale;
   const repeatHeight = reference.height * 3 * repeatScale;
   const repeatX = panelX + panelWidth - repeatWidth - 18;
-  const repeatY = panelY + 18;
+  const repeatY = panelY + 42;
   if (checkerboard) {
     drawCheckerboard(target, repeatX, repeatY, repeatWidth, repeatHeight, Math.max(4, repeatScale * 2));
   }
@@ -696,6 +698,119 @@ function drawReferencePanel(
     drawMipStrip(target, reference, panelX + 18, mipY, checkerboard);
   }
 }
+
+function drawPixelText(target: RgbaImage, text: string, x: number, y: number, scale: number, color: Rgba): void {
+  let cursorX = x;
+  for (const character of text.toUpperCase()) {
+    const glyph = PIXEL_FONT[character] ?? PIXEL_FONT[" "];
+    if (!glyph) {
+      cursorX += 6 * scale;
+      continue;
+    }
+    for (let gy = 0; gy < glyph.length; gy += 1) {
+      const row = glyph[gy]!;
+      for (let gx = 0; gx < row.length; gx += 1) {
+        if (row[gx] === "1") {
+          drawRect(target, cursorX + gx * scale, y + gy * scale, scale, scale, color);
+        }
+      }
+    }
+    cursorX += 6 * scale;
+  }
+}
+
+const PIXEL_FONT: Record<string, string[]> = {
+  " ": [
+    "00000",
+    "00000",
+    "00000",
+    "00000",
+    "00000",
+    "00000",
+    "00000",
+  ],
+  A: [
+    "01110",
+    "10001",
+    "10001",
+    "11111",
+    "10001",
+    "10001",
+    "10001",
+  ],
+  C: [
+    "01111",
+    "10000",
+    "10000",
+    "10000",
+    "10000",
+    "10000",
+    "01111",
+  ],
+  E: [
+    "11111",
+    "10000",
+    "10000",
+    "11110",
+    "10000",
+    "10000",
+    "11111",
+  ],
+  F: [
+    "11111",
+    "10000",
+    "10000",
+    "11110",
+    "10000",
+    "10000",
+    "10000",
+  ],
+  I: [
+    "11111",
+    "00100",
+    "00100",
+    "00100",
+    "00100",
+    "00100",
+    "11111",
+  ],
+  M: [
+    "10001",
+    "11011",
+    "10101",
+    "10101",
+    "10001",
+    "10001",
+    "10001",
+  ],
+  N: [
+    "10001",
+    "11001",
+    "10101",
+    "10011",
+    "10001",
+    "10001",
+    "10001",
+  ],
+  R: [
+    "11110",
+    "10001",
+    "10001",
+    "11110",
+    "10100",
+    "10010",
+    "10001",
+  ],
+  T: [
+    "11111",
+    "00100",
+    "00100",
+    "00100",
+    "00100",
+    "00100",
+    "00100",
+  ],
+};
 
 function drawVerticalSeamError(
   target: RgbaImage,
