@@ -112,6 +112,7 @@
     "texture-lab:export": "pnpm --dir ./tools/texture-lab export",
     "texture-lab:runtime-compat": "pnpm --dir ./tools/texture-lab runtime-compat",
     "texture-lab:pack-overlay": "pnpm texture-lab:runtime-compat && node ./scripts/run-python.mjs ./tools/minecraft_assets/overlay_pack.py",
+    "texture-lab:coverage": "pnpm texture-lab:pack-overlay && cargo run --manifest-path native/Cargo.toml -p mclone-app-runtime --bin terrain_texture_coverage -- --overlay-pack /tmp/mclone-texture-lab/mclone-default-overlay.pbp --output /tmp/mclone-texture-lab/mclone-default-overlay-coverage.md",
     "texture-lab:sheet": "pnpm --dir ./tools/texture-lab sheet",
     "typecheck": "pnpm native:web:typecheck",
     "oracle:gen": "bash ./oracle/run.sh"

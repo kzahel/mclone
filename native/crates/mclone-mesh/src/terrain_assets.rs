@@ -135,6 +135,19 @@ pub fn load_textured_terrain_assets(
     })
 }
 
+pub fn collect_textured_terrain_materials(
+    source: &impl AssetSource,
+) -> Result<BTreeSet<TextureMaterial>, TexturedTerrainAssetError> {
+    let registry = BlockStateRegistry::terrain_mvp();
+    let blockstates = BlockStateAssetIndex::load_namespace(source, "minecraft")?;
+    registry.validate_blockstate_assets(&blockstates)?;
+    let selected_model_refs = selected_model_refs(&registry, &blockstates)?;
+    let models = BlockModelLibrary::load_model_tree(source, selected_model_refs.iter().cloned())?;
+    let mut materials = models.collect_materials_for_models(selected_model_refs.iter().cloned())?;
+    insert_fluid_materials(&mut materials);
+    Ok(materials)
+}
+
 fn selected_model_refs(
     registry: &BlockStateRegistry,
     blockstates: &BlockStateAssetIndex,

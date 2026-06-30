@@ -33,6 +33,7 @@ pnpm texture-lab:typecheck
 pnpm texture-lab:export
 pnpm texture-lab:runtime-compat
 pnpm texture-lab:pack-overlay
+pnpm texture-lab:coverage
 ```
 
 For authoring rules, palette discipline, tint roles, and AI-agent brief shape,
@@ -97,6 +98,13 @@ To try the packed overlay:
 
 ```sh
 MCLONE_ASSET_OVERLAY_PACK=/tmp/mclone-texture-lab/mclone-default-overlay.pbp pnpm native:timedemo:smoke
+```
+
+The coverage command compares that overlay pack against the texture materials
+the native terrain atlas currently requests:
+
+```text
+/tmp/mclone-texture-lab/mclone-default-overlay-coverage.md
 ```
 
 ## Source Format
@@ -261,6 +269,7 @@ Initial exports should be derived and disposable:
 /tmp/mclone-texture-lab/pack/
 /tmp/mclone-texture-lab/runtime-pack/
 /tmp/mclone-texture-lab/mclone-default-overlay.pbp
+/tmp/mclone-texture-lab/mclone-default-overlay-coverage.md
 /tmp/mclone-texture-lab/sheets/
 ```
 

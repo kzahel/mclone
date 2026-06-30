@@ -80,6 +80,13 @@ The native runtime can apply it as a mod-pack-style overlay:
 MCLONE_ASSET_OVERLAY_PACK=/tmp/mclone-texture-lab/mclone-default-overlay.pbp pnpm native:timedemo:smoke
 ```
 
+`pnpm texture-lab:coverage` compares that overlay pack against the texture
+materials the native terrain atlas actually requests and writes:
+
+```text
+/tmp/mclone-texture-lab/mclone-default-overlay-coverage.md
+```
+
 ## Slice 1 - Runtime-Compatible Texture-Lab Export
 
 Add a texture-lab export mode that writes derived PNGs to:
@@ -138,7 +145,9 @@ Do not use that mixed pack as the public distribution boundary.
 ## Slice 3 - Standalone Terrain Coverage
 
 A real distributable default cannot depend on Mojang model or blockstate JSON.
-Before calling the first-party pack standalone, add one of:
+The overlay coverage report now makes this work measurable by listing required,
+covered, missing, and unused block texture paths. Before calling the first-party
+pack standalone, add one of:
 
 - repo-owned generated blockstate/model JSON for the terrain MVP set
 - a native fallback model catalog for simple block shapes
@@ -186,6 +195,10 @@ stone, logs, leaves, plants, fluids, snow, ores, and other states.
 - Verified `/tmp/mclone-texture-lab/mclone-default-overlay.pbp` directly and
   inspected `/tmp/mclone-texture-overlay-pack.png`; packed-overlay rendering
   matches the loose runtime-pack bridge.
+- Added `terrain_texture_coverage` and `pnpm texture-lab:coverage`; the first
+  generated report showed 4 of 87 native terrain atlas textures covered by the
+  overlay pack, with `grass_block_bottom.png` unused by the current vanilla
+  model path.
 
 Validation:
 
@@ -198,4 +211,5 @@ MCLONE_FIRST_PARTY_ASSET_ROOT=/tmp/mclone-texture-lab/runtime-pack pnpm native:t
 MCLONE_FIRST_PARTY_ASSET_ROOT=/tmp/mclone-texture-lab/runtime-pack cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-texture-runtime-compat.png --width 1280 --height 720 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 MCLONE_ASSET_OVERLAY_PACK=/tmp/mclone-texture-lab/mclone-default-overlay.pbp pnpm native:timedemo:smoke
 MCLONE_ASSET_OVERLAY_PACK=/tmp/mclone-texture-lab/mclone-default-overlay.pbp cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-texture-overlay-pack.png --width 1280 --height 720 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
+pnpm texture-lab:coverage
 ```

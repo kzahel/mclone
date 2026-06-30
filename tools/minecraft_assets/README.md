@@ -9,6 +9,7 @@ pnpm assets:pack
 pnpm assets:pack:check
 pnpm assets:pack:write-lock
 pnpm texture-lab:pack-overlay
+pnpm texture-lab:coverage
 ```
 
 The checked freshness lock lives in:
@@ -36,4 +37,11 @@ in the rest of the asset chain:
 
 ```bash
 MCLONE_ASSET_OVERLAY_PACK=/tmp/mclone-texture-lab/mclone-default-overlay.pbp pnpm native:timedemo:smoke
+```
+
+`pnpm texture-lab:coverage` compares the first-party overlay pack against the
+native terrain atlas material set and writes:
+
+```text
+/tmp/mclone-texture-lab/mclone-default-overlay-coverage.md
 ```
