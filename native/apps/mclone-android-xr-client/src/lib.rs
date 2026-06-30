@@ -10,6 +10,7 @@ mod perf_metrics;
 mod android {
     use std::ffi::{CStr, CString, c_char, c_int};
     use std::sync::Once;
+    use std::thread;
     use std::time::{Duration, Instant};
 
     use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
@@ -246,6 +247,7 @@ mod android {
         render_section_upload_budget: Option<usize>,
         xr_foveation: AndroidXrFoveation,
         xr_render_scale: f32,
+        xr_display_refresh_rate: Option<f32>,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -271,6 +273,7 @@ mod android {
                 render_section_upload_budget: None,
                 xr_foveation: AndroidXrFoveation::Off,
                 xr_render_scale: ANDROID_XR_DEFAULT_RENDER_SCALE,
+                xr_display_refresh_rate: None,
             }
         }
     }
@@ -485,6 +488,11 @@ mod android {
                         &parse_next_string(&mut argv, "--xr-render-scale")?,
                     )?;
                 }
+                "--xr-display-refresh-rate" => {
+                    options.xr_display_refresh_rate = Some(validate_display_refresh_rate(
+                        parse_next::<f32>(&mut argv, "--xr-display-refresh-rate")?,
+                    )?);
+                }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
         }
@@ -620,6 +628,13 @@ mod android {
             bail!("--perf-flight-speed must be a finite positive number");
         }
         Ok(speed_blocks_per_second)
+    }
+
+    fn validate_display_refresh_rate(rate: f32) -> Result<f32> {
+        if !rate.is_finite() || rate <= 0.0 {
+            bail!("--xr-display-refresh-rate must be a finite positive number");
+        }
+        Ok(rate)
     }
 
     fn parse_session_smoke_arg(value: String) -> Result<AndroidXrSessionSmoke> {
@@ -922,6 +937,7 @@ mod android {
             startup_options.render_section_upload_budget,
             startup_options.xr_foveation,
             startup_options.xr_render_scale,
+            startup_options.xr_display_refresh_rate,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -952,6 +968,7 @@ mod android {
         render_section_upload_budget: Option<usize>,
         xr_foveation: AndroidXrFoveation,
         xr_render_scale: f32,
+        xr_display_refresh_rate: Option<f32>,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -1176,7 +1193,7 @@ mod android {
             multiview.wgpu_adapter_multiview,
             multiview.wgpu_device_multiview
         );
-        let display_refresh = mclone_xr_host::query_display_refresh_snapshot(
+        let mut display_refresh = mclone_xr_host::query_display_refresh_snapshot(
             &graphics.session,
             available.fb_display_refresh_rate,
         );
@@ -1191,6 +1208,9 @@ mod android {
             }
         } else {
             log::info!("OpenXR display refresh extension unavailable");
+        }
+        if let Some(rate) = xr_display_refresh_rate {
+            request_display_refresh_rate(&graphics.session, &mut display_refresh, rate)?;
         }
         let stage = mclone_xr_host::create_stage_reference_space(&graphics.session)?;
         log::info!("OpenXR reference space: STAGE");
@@ -1581,6 +1601,46 @@ mod android {
 
     fn android_xr_host_options(scene: XrSceneOptions) -> SingleViewHostOptions {
         SingleViewHostOptions::new(scene.center(), scene.render_distance)
+    }
+
+    fn request_display_refresh_rate(
+        session: &xr::Session<graphics_vulkan::AppGraphics>,
+        display_refresh: &mut XrDisplayRefreshSnapshot,
+        requested_rate: f32,
+    ) -> Result<()> {
+        if !display_refresh.extension_supported {
+            bail!("--xr-display-refresh-rate requires XR_FB_display_refresh_rate");
+        }
+        if !display_refresh
+            .supported_rates
+            .iter()
+            .any(|rate| mclone_xr_host::refresh_rates_match(*rate, requested_rate))
+        {
+            bail!(
+                "--xr-display-refresh-rate {requested_rate:.1} is not in supported rates: {}",
+                mclone_xr_host::display_refresh_rates_label(&display_refresh.supported_rates)
+            );
+        }
+        log::info!("Requesting OpenXR display refresh: {requested_rate:.1} Hz");
+        session
+            .request_display_refresh_rate(requested_rate)
+            .with_context(|| format!("request OpenXR display refresh {requested_rate:.1} Hz"))?;
+        for _ in 0..30 {
+            let current = mclone_xr_host::query_current_display_refresh_rate(session);
+            display_refresh.current_rate = current;
+            if current.is_some_and(|rate| mclone_xr_host::refresh_rates_match(rate, requested_rate))
+            {
+                log::info!("OpenXR display refresh after request: {requested_rate:.1} Hz");
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        log::warn!(
+            "OpenXR display refresh query stayed at {} after requesting {requested_rate:.1} Hz; using requested rate for perf budget",
+            format_optional_hz(display_refresh.current_rate)
+        );
+        display_refresh.current_rate = Some(requested_rate);
+        Ok(())
     }
 
     #[derive(Debug)]
@@ -2670,13 +2730,17 @@ mod android {
                 session_smoke_pending_start = false;
             }
 
-            let wait_begin_start = Instant::now();
-            let frame_state = mclone_xr_host::wait_begin_frame(
-                &mut graphics.frame_wait,
-                &mut graphics.frame_stream,
-                &mut frame_stats,
-            )?;
-            frame_timing.wait_begin_ms = elapsed_ms(wait_begin_start);
+            let wait_frame_start = Instant::now();
+            let frame_state = graphics.frame_wait.wait().context("wait OpenXR frame")?;
+            frame_timing.wait_frame_ms = elapsed_ms(wait_frame_start);
+            let begin_frame_start = Instant::now();
+            graphics
+                .frame_stream
+                .begin()
+                .context("begin OpenXR frame")?;
+            frame_timing.begin_frame_ms = elapsed_ms(begin_frame_start);
+            frame_timing.wait_begin_ms = frame_timing.wait_frame_ms + frame_timing.begin_frame_ms;
+            frame_stats.record_runtime_frame();
 
             let mut rendered_frame = None;
             let mut perf_started_after_ready = false;
@@ -2852,6 +2916,8 @@ mod android {
     #[derive(Clone, Copy, Debug, Default)]
     struct AndroidXrFrameTiming {
         frame_wall_ms: f64,
+        wait_frame_ms: f64,
+        begin_frame_ms: f64,
         wait_begin_ms: f64,
         controller_poll_ms: f64,
         render_mclone_frame_ms: f64,
@@ -3136,13 +3202,18 @@ mod android {
                 started: Instant::now(),
                 start_stats: frame_stats,
                 frame_wall_ms: Vec::new(),
+                wait_frame_ms: Vec::new(),
+                app_work_ms: Vec::new(),
                 max_wait_begin_ms: 0.0,
+                max_wait_frame_ms: 0.0,
+                max_begin_frame_ms: 0.0,
                 max_controller_poll_ms: 0.0,
                 max_render_mclone_frame_ms: 0.0,
                 max_render: AndroidXrRenderFrameTiming::default(),
                 max_upload: mclone_xr_scene::XrTerrainUploadSummary::default(),
                 upload_work_frames: 0,
                 diagnostics_refresh_frames: 0,
+                app_over_period_frames: 0,
                 over_budget_frames: 0,
                 over_2x_budget_frames: 0,
                 over_4x_budget_frames: 0,
@@ -3235,13 +3306,18 @@ mod android {
         started: Instant,
         start_stats: XrFrameStats,
         frame_wall_ms: Vec<f64>,
+        wait_frame_ms: Vec<f64>,
+        app_work_ms: Vec<f64>,
         max_wait_begin_ms: f64,
+        max_wait_frame_ms: f64,
+        max_begin_frame_ms: f64,
         max_controller_poll_ms: f64,
         max_render_mclone_frame_ms: f64,
         max_render: AndroidXrRenderFrameTiming,
         max_upload: mclone_xr_scene::XrTerrainUploadSummary,
         upload_work_frames: u64,
         diagnostics_refresh_frames: u64,
+        app_over_period_frames: u64,
         over_budget_frames: u64,
         over_2x_budget_frames: u64,
         over_4x_budget_frames: u64,
@@ -3271,6 +3347,12 @@ mod android {
         ) {
             let budget_ms = perf_budget_ms(self.target_hz);
             self.frame_wall_ms.push(timing.frame_wall_ms);
+            self.wait_frame_ms.push(timing.wait_frame_ms);
+            let app_work_ms = (timing.frame_wall_ms - timing.wait_frame_ms).max(0.0);
+            self.app_work_ms.push(app_work_ms);
+            if app_work_ms > budget_ms {
+                self.app_over_period_frames += 1;
+            }
             if timing.frame_wall_ms > budget_ms {
                 self.over_budget_frames += 1;
             }
@@ -3281,6 +3363,8 @@ mod android {
                 self.over_4x_budget_frames += 1;
             }
             self.max_wait_begin_ms = self.max_wait_begin_ms.max(timing.wait_begin_ms);
+            self.max_wait_frame_ms = self.max_wait_frame_ms.max(timing.wait_frame_ms);
+            self.max_begin_frame_ms = self.max_begin_frame_ms.max(timing.begin_frame_ms);
             self.max_controller_poll_ms =
                 self.max_controller_poll_ms.max(timing.controller_poll_ms);
             self.max_render_mclone_frame_ms = self
@@ -3303,18 +3387,41 @@ mod android {
         fn log_summary(&mut self, frame_stats: XrFrameStats) {
             let mut sorted = self.frame_wall_ms.clone();
             sorted.sort_by(|a, b| a.total_cmp(b));
+            let mut sorted_wait_frame = self.wait_frame_ms.clone();
+            sorted_wait_frame.sort_by(|a, b| a.total_cmp(b));
+            let mut sorted_app_work = self.app_work_ms.clone();
+            sorted_app_work.sort_by(|a, b| a.total_cmp(b));
             let sample_seconds = self.started.elapsed().as_secs_f64();
             let frame_count = self.frame_wall_ms.len() as u64;
             let submitted_delta = frame_stats.submitted_frames - self.start_stats.submitted_frames;
             let runtime_delta = frame_stats.runtime_frames - self.start_stats.runtime_frames;
             let skipped_delta = frame_stats.skipped_frames - self.start_stats.skipped_frames;
-            let average_frame_ms = if self.frame_wall_ms.is_empty() {
-                0.0
-            } else {
-                self.frame_wall_ms.iter().sum::<f64>() / self.frame_wall_ms.len() as f64
-            };
+            let average_frame_ms = average_ms(&self.frame_wall_ms);
             let min_frame_ms = sorted.first().copied().unwrap_or(0.0);
             let max_frame_ms = sorted.last().copied().unwrap_or(0.0);
+            let budget_ms = perf_budget_ms(self.target_hz);
+            let average_wait_frame_ms = average_ms(&self.wait_frame_ms);
+            let average_app_work_ms = average_ms(&self.app_work_ms);
+            let min_app_work_ms = sorted_app_work.first().copied().unwrap_or(0.0);
+            let max_app_work_ms = sorted_app_work.last().copied().unwrap_or(0.0);
+            let app_work_p50_ms = percentile(&sorted_app_work, 0.50);
+            let app_work_p95_ms = percentile(&sorted_app_work, 0.95);
+            let app_work_p99_ms = percentile(&sorted_app_work, 0.99);
+            let app_over_period_pct = if self.app_work_ms.is_empty() {
+                0.0
+            } else {
+                self.app_over_period_frames as f64 * 100.0 / self.app_work_ms.len() as f64
+            };
+            let runtime_fps = if sample_seconds > 0.0 {
+                runtime_delta as f64 / sample_seconds
+            } else {
+                0.0
+            };
+            let submitted_fps = if sample_seconds > 0.0 {
+                submitted_delta as f64 / sample_seconds
+            } else {
+                0.0
+            };
             let flight_speed = self.flight_speed_blocks_per_second.unwrap_or(0.0);
             let flight_distance_blocks =
                 camera_distance_blocks(self.start_camera, self.latest_camera);
@@ -3340,7 +3447,7 @@ mod android {
                 format_optional_hz(self.display_refresh.current_rate),
                 format_supported_hz(&self.display_refresh.supported_rates),
                 self.target_hz,
-                perf_budget_ms(self.target_hz),
+                budget_ms,
                 frame_count,
                 submitted_delta,
                 runtime_delta,
@@ -3356,8 +3463,42 @@ mod android {
                 self.over_4x_budget_frames
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_STAGES max_wait_begin_ms={:.3} max_controller_poll_ms={:.3} max_render_mclone_frame_ms={:.3} max_locate_views_ms={:.3} max_locomotion_ms={:.3} max_acquire_left_ms={:.3} max_acquire_right_ms={:.3} max_release_eyes_ms={:.3} max_end_frame_ms={:.3}",
+                "MCLONE_ANDROID_XR_PERF_HEADROOM sample_seconds={:.3} mode={} render_path={} xr_render_scale={:.3} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} submitted_fps={:.2} runtime_fps={:.2} wait_frame_avg_ms={:.3} wait_frame_p50_ms={:.3} wait_frame_p95_ms={:.3} wait_frame_max_ms={:.3} app_work_avg_ms={:.3} app_work_min_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} app_work_p99_ms={:.3} app_work_max_ms={:.3} headroom_avg_ms={:.3} headroom_p50_ms={:.3} headroom_p05_ms={:.3} headroom_p01_ms={:.3} headroom_min_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
+                sample_seconds,
+                self.mode_label,
+                self.render_path.label(),
+                self.xr_render_scale,
+                self.target_hz,
+                budget_ms,
+                frame_count,
+                submitted_delta,
+                runtime_delta,
+                skipped_delta,
+                submitted_fps,
+                runtime_fps,
+                average_wait_frame_ms,
+                percentile(&sorted_wait_frame, 0.50),
+                percentile(&sorted_wait_frame, 0.95),
+                sorted_wait_frame.last().copied().unwrap_or(0.0),
+                average_app_work_ms,
+                min_app_work_ms,
+                app_work_p50_ms,
+                app_work_p95_ms,
+                app_work_p99_ms,
+                max_app_work_ms,
+                budget_ms - average_app_work_ms,
+                budget_ms - app_work_p50_ms,
+                budget_ms - app_work_p95_ms,
+                budget_ms - app_work_p99_ms,
+                budget_ms - max_app_work_ms,
+                self.app_over_period_frames,
+                app_over_period_pct
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_STAGES max_wait_begin_ms={:.3} max_wait_frame_ms={:.3} max_begin_frame_ms={:.3} max_controller_poll_ms={:.3} max_render_mclone_frame_ms={:.3} max_locate_views_ms={:.3} max_locomotion_ms={:.3} max_acquire_left_ms={:.3} max_acquire_right_ms={:.3} max_release_eyes_ms={:.3} max_end_frame_ms={:.3}",
                 self.max_wait_begin_ms,
+                self.max_wait_frame_ms,
+                self.max_begin_frame_ms,
                 self.max_controller_poll_ms,
                 self.max_render_mclone_frame_ms,
                 self.max_render.locate_views_ms,
@@ -3822,6 +3963,14 @@ mod android {
 
     fn elapsed_ms(start: Instant) -> f64 {
         start.elapsed().as_secs_f64() * 1000.0
+    }
+
+    fn average_ms(samples: &[f64]) -> f64 {
+        if samples.is_empty() {
+            0.0
+        } else {
+            samples.iter().sum::<f64>() / samples.len() as f64
+        }
     }
 
     fn percentile(sorted: &[f64], percentile: f64) -> f64 {

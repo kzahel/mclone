@@ -55,6 +55,7 @@ XR_OVERLAP_RUNTIME_PREFETCH="${MCLONE_ANDROID_XR_OVERLAP_RUNTIME_PREFETCH:-0}"
 XR_RENDER_SECTION_UPLOAD_BUDGET="${MCLONE_ANDROID_XR_RENDER_SECTION_UPLOAD_BUDGET:-}"
 XR_FOVEATION="${MCLONE_ANDROID_XR_FOVEATION:-off}"
 XR_RENDER_SCALE="${MCLONE_ANDROID_XR_RENDER_SCALE:-}"
+XR_DISPLAY_REFRESH_RATE="${MCLONE_ANDROID_XR_DISPLAY_REFRESH_RATE:-}"
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     PERF_SETTLED_STATIONARY=1
 fi
@@ -189,6 +190,9 @@ Options:
   --xr-render-scale SCALE
                      Scale OpenXR eye swapchain dimensions before rendering.
                      Accepts 0.25..1.0 or percent values like 85%.
+  --xr-display-refresh-rate HZ
+                     Request an XR_FB_display_refresh_rate before validation.
+                     Use 90 for a 90 Hz Quest performance probe.
   -h, --help         Show this help.
 USAGE
 }
@@ -554,6 +558,11 @@ while [[ $# -gt 0 ]]; do
             XR_RENDER_SCALE="$2"
             shift 2
             ;;
+        --xr-display-refresh-rate)
+            require_arg "$1" "${2:-}"
+            XR_DISPLAY_REFRESH_RATE="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -702,6 +711,9 @@ esac
 if [[ -n "$XR_RENDER_SCALE" ]]; then
     validate_xr_render_scale "--xr-render-scale" "$XR_RENDER_SCALE"
 fi
+if [[ -n "$XR_DISPLAY_REFRESH_RATE" ]]; then
+    validate_positive_number "--xr-display-refresh-rate" "$XR_DISPLAY_REFRESH_RATE"
+fi
 if [[ -n "$PERF_SECONDS" ]]; then
     validate_positive_integer "--perf-seconds" "$PERF_SECONDS"
     if [[ "$SESSION_ONLY" == "1" ]]; then
@@ -843,6 +855,9 @@ if [[ "$XR_FOVEATION" != "off" ]]; then
 fi
 if [[ -n "$XR_RENDER_SCALE" ]]; then
     STARTUP_ARGV+=(--xr-render-scale "$XR_RENDER_SCALE")
+fi
+if [[ -n "$XR_DISPLAY_REFRESH_RATE" ]]; then
+    STARTUP_ARGV+=(--xr-display-refresh-rate "$XR_DISPLAY_REFRESH_RATE")
 fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"
@@ -1045,6 +1060,7 @@ if [[ -n "$PERF_SECONDS" ]]; then
     fi
     for marker in \
         MCLONE_ANDROID_XR_PERF_SUMMARY \
+        MCLONE_ANDROID_XR_PERF_HEADROOM \
         MCLONE_ANDROID_XR_PERF_STAGES \
         MCLONE_ANDROID_XR_PERF_TERRAIN \
         MCLONE_ANDROID_XR_PERF_TERRAIN_PREP \
@@ -1085,8 +1101,8 @@ if [[ -n "$PERF_SECONDS" ]]; then
         fi
     fi
     mkdir -p "$(dirname "$PERF_SUMMARY_PATH")"
-    grep -E "MCLONE_ANDROID_XR_PERF_(SUMMARY|STAGES|TERRAIN|TERRAIN_PREP|OVERLAP|MULTIVIEW|UPLOAD_MAX|RUNTIME_MAX|QUEUE_MAX|COMPILE_MAX|UPLOAD_LAST|DRAW)([[:space:]]|$)|MCLONE_ANDROID_XR_PERF_METRICS[[:space:]]" "$LOG_PATH" \
-        | tail -n 13 > "$PERF_SUMMARY_PATH"
+    grep -E "MCLONE_ANDROID_XR_PERF_(SUMMARY|HEADROOM|STAGES|TERRAIN|TERRAIN_PREP|OVERLAP|MULTIVIEW|UPLOAD_MAX|RUNTIME_MAX|QUEUE_MAX|COMPILE_MAX|UPLOAD_LAST|DRAW)([[:space:]]|$)|MCLONE_ANDROID_XR_PERF_METRICS[[:space:]]" "$LOG_PATH" \
+        | tail -n 14 > "$PERF_SUMMARY_PATH"
     mclone_note "Perf summary: $PERF_SUMMARY_PATH"
 fi
 
