@@ -318,6 +318,25 @@ rather than frozen-render perf lanes for this test, because frozen render
 intentionally disables the runtime polling and render-section upload work this
 mode tries to hide.
 
+Initial Quest 3 A/B, RD10 flight, fixed pose `0,120,-96,180`, `--perf-metrics`:
+
+| Path | avg | p50 | p95 | p99 | max | over budget | MTP | app GPU | overlap marker |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| per-eye metrics | `14.281ms` | `14.018ms` | `22.052ms` | `36.908ms` | `63.479ms` | 749/1397 | `25.589ms` | `2.715ms` | `0.000ms` |
+| per-eye-prefetch | `14.427ms` | `13.917ms` | `25.323ms` | `42.622ms` | `69.710ms` | 697/1383 | `31.946ms` | `2.577ms` | `28.795ms` |
+
+The mode works mechanically: the prefetch run reports
+`max_runtime_prefetch_ms=28.795` (`poll=3.804`, `sync=25.227`,
+`gpu_upload=4.829`, `ready_sections=6.944`) and per-eye poll waits move to zero.
+But this sample is not a practical win. Average, p95, p99, max, 2x/4x budget
+misses, and motion-to-photon got worse; only p50 and raw over-budget count moved
+slightly in the right direction. Treat runtime prefetch as a diagnostic probe,
+not a shipping path, unless repeat measurements show a different result after
+the render-section/runtime workload is made less bursty. This follow-up also
+fixed the validator's compact perf summary extraction so future perf-summary
+files include `MCLONE_ANDROID_XR_PERF_OVERLAP` and the Meta
+`MCLONE_ANDROID_XR_PERF_METRICS` line.
+
 ## Post-Validation Rollback (landed 2026-06-29)
 
 Commit `d0c5161` (`Restore XR per-eye command submission`) reverted the risky
