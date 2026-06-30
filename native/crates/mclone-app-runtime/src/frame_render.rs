@@ -7,7 +7,7 @@ use mclone_render::chunk::{
 };
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::entity::{
-    ActorDrawResources, ActorInstance, ActorRenderStats, ActorTextureAtlas,
+    ActorDrawResources, ActorFigure, ActorInstance, ActorRenderStats, ActorTextureAtlas,
 };
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
@@ -166,6 +166,7 @@ impl FlatRenderResources {
         render_config: RenderConfig,
         chunk_atlas: ChunkTextureAtlas<'_>,
         actor_atlas: ActorTextureAtlas<'_>,
+        actor_figure: Option<&ActorFigure>,
         asset_source: &impl AssetSource,
     ) -> Result<Self> {
         let render_config = Self::validate_supported_config(render_config)?;
@@ -191,9 +192,14 @@ impl FlatRenderResources {
         )
         .context("failed to initialize chunk draw resources")?;
         let sky = SkyRenderer::new_with_config(device, render_config);
-        let actors =
-            ActorDrawResources::new(device, queue, render_config.color_format, actor_atlas)
-                .context("failed to initialize actor draw resources")?;
+        let actors = ActorDrawResources::new(
+            device,
+            queue,
+            render_config.color_format,
+            actor_atlas,
+            actor_figure,
+        )
+        .context("failed to initialize actor draw resources")?;
         let screen_effects =
             ScreenEffectsRenderer::new(device, queue, render_config.color_format, asset_source)
                 .context("failed to initialize screen effects renderer")?;

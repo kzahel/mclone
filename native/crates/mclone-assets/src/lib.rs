@@ -2,6 +2,7 @@
 
 mod atlas;
 mod block_registry;
+mod figure;
 mod model;
 mod pack;
 mod resource;
@@ -13,6 +14,10 @@ use std::fmt;
 pub use atlas::{TextureAtlasPlan, TextureAtlasSprite, TextureSpriteInfo};
 pub use block_registry::{
     BlockStateAsset, BlockStateAssetIndex, BlockStateRecord, BlockStateRegistry, BlockStateVariant,
+};
+pub use figure::{
+    DEFAULT_PLAYER_FIGURE_PATH, FigureAsciiTexture, FigureAsset, FigureFace, FigureJoint,
+    FigureMaterial, FigurePart, FigurePrimitive, default_player_figure_path, load_figure_asset,
 };
 pub use model::{
     BakedBlockModel, BakedBlockModelFace, BlockModel, BlockModelElement, BlockModelFace,

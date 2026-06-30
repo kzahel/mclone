@@ -10,6 +10,8 @@ use crate::light_texture::FULL_BRIGHT;
 use crate::target::RenderFrameTarget;
 use crate::uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
 
+pub use crate::asset_lab_figure::CompiledFigure as ActorFigure;
+
 const ACTOR_VERTEX_BYTE_LEN: usize = 3 * std::mem::size_of::<f32>()
     + 2 * std::mem::size_of::<f32>()
     + 4 * std::mem::size_of::<f32>()
@@ -176,6 +178,7 @@ pub struct ActorDrawResources {
     atlas: GpuActorTextureAtlas,
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
+    asset_lab_player: Option<ActorFigure>,
 }
 
 impl ActorDrawResources {
@@ -184,6 +187,7 @@ impl ActorDrawResources {
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
         atlas: ActorTextureAtlas<'_>,
+        asset_lab_player: Option<&ActorFigure>,
     ) -> Result<Self> {
         let renderer = ActorRenderer::new(device, color_format);
         let gpu_atlas =
@@ -193,6 +197,7 @@ impl ActorDrawResources {
             atlas: gpu_atlas,
             texture_layout: atlas.layout,
             atlas_size: [atlas.width.max(1), atlas.height.max(1)],
+            asset_lab_player: asset_lab_player.cloned(),
         })
     }
 
@@ -236,7 +241,12 @@ impl ActorDrawResources {
         let depth_view = target
             .depth_view
             .context("actor render pass requires a depth attachment")?;
-        let mesh = actor_mesh(actors, self.texture_layout, self.atlas_size);
+        let mesh = actor_mesh(
+            actors,
+            self.texture_layout,
+            self.atlas_size,
+            self.asset_lab_player.as_ref(),
+        );
         if mesh.vertices.is_empty() || mesh.indices.is_empty() {
             return Ok(ActorRenderStats {
                 submitted_actor_count: actors.len(),
@@ -312,7 +322,12 @@ impl ActorDrawResources {
         let depth_view = target
             .depth_view
             .context("actor multiview render pass requires a depth attachment")?;
-        let mesh = actor_mesh(actors, self.texture_layout, self.atlas_size);
+        let mesh = actor_mesh(
+            actors,
+            self.texture_layout,
+            self.atlas_size,
+            self.asset_lab_player.as_ref(),
+        );
         if mesh.vertices.is_empty() || mesh.indices.is_empty() {
             return Ok(ActorRenderStats {
                 submitted_actor_count: actors.len(),
@@ -730,10 +745,17 @@ fn actor_mesh(
     actors: &[ActorInstance],
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
+    asset_lab_player: Option<&ActorFigure>,
 ) -> ActorMesh {
     let mut mesh = ActorMesh::default();
     for actor in actors {
-        append_actor(&mut mesh, *actor, texture_layout, atlas_size);
+        append_actor(
+            &mut mesh,
+            *actor,
+            texture_layout,
+            atlas_size,
+            asset_lab_player,
+        );
     }
     mesh
 }
@@ -743,10 +765,11 @@ fn append_actor(
     actor: ActorInstance,
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
+    asset_lab_player: Option<&ActorFigure>,
 ) {
     match actor.shape {
         ActorInstanceShape::AssetLabPlayer => {
-            append_asset_lab_player_model(mesh, actor, texture_layout, atlas_size)
+            append_asset_lab_player_model(mesh, actor, texture_layout, atlas_size, asset_lab_player)
         }
         ActorInstanceShape::Humanoid => {
             append_humanoid_model(mesh, actor, texture_layout, atlas_size)
@@ -764,8 +787,9 @@ fn append_asset_lab_player_model(
     actor: ActorInstance,
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
+    figure: Option<&ActorFigure>,
 ) {
-    let Ok(figure) = crate::asset_lab_figure::player_figure() else {
+    let Some(figure) = figure else {
         append_humanoid_model(mesh, actor, texture_layout, atlas_size);
         return;
     };
@@ -1543,12 +1567,20 @@ mod tests {
         [65, 32]
     }
 
+    fn test_player_figure() -> ActorFigure {
+        let json = include_str!("../../../../assets/mclone/figures/player.figure.json");
+        let asset: mclone_assets::FigureAsset = serde_json::from_str(json).unwrap();
+        crate::asset_lab_figure::compile_figure_asset(&asset).unwrap()
+    }
+
     #[test]
     fn actor_mesh_emits_asset_lab_player_model() {
+        let figure = test_player_figure();
         let mesh = actor_mesh(
             &[ActorInstance::remote_player(Vec3::new(1.0, 2.0, 3.0), 0.0)],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
+            Some(&figure),
         );
 
         assert_eq!(mesh.vertices.len(), 76 * 6 * 4);
@@ -1570,10 +1602,12 @@ mod tests {
     #[test]
     fn asset_lab_player_model_has_front_face_details() {
         let actor = ActorInstance::remote_player(Vec3::ZERO, 0.0);
+        let figure = test_player_figure();
         let mesh = actor_mesh(
             &[actor],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
+            Some(&figure),
         );
         let dark_detail_vertices = mesh
             .vertices
@@ -1600,6 +1634,7 @@ mod tests {
             &[actor],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
+            None,
         );
 
         assert_eq!(mesh.vertices.len(), 12 * 6 * 4);
@@ -1617,6 +1652,7 @@ mod tests {
             )],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
+            None,
         );
 
         assert_eq!(mesh.vertices.len(), 6 * 6 * 4);
@@ -1629,6 +1665,7 @@ mod tests {
             &[ActorInstance::debug_cube(Vec3::ZERO, 0.0, 1.0, 1.0)],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
+            None,
         );
 
         assert_eq!(mesh.vertices.len(), 6 * 4);
@@ -1730,6 +1767,7 @@ mod tests {
             &[ActorInstance::cow_model(Vec3::ZERO, 0.0, 0.9, 1.4)],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
+            None,
         );
 
         assert_eq!(mesh.vertices.len(), 9 * 6 * 4);
@@ -1748,6 +1786,7 @@ mod tests {
             &[ActorInstance::cow_model(Vec3::ZERO, 0.0, 0.9, 1.4)],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
+            None,
         );
         let white_uv = [0.5 / 65.0, 0.5 / 32.0];
 

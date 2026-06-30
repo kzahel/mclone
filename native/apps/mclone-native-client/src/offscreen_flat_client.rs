@@ -132,6 +132,7 @@ impl OffscreenFlatClientHost {
             render_config,
             assets.mesh_assets.atlas.as_upload(),
             assets.actor_textures.atlas.as_upload(),
+            Some(&assets.actor_textures.player_figure),
             &asset_source,
         )?;
         Ok(Self {

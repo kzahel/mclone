@@ -19,6 +19,7 @@ LOCK_FORMAT_VERSION = 1
 PACK_MANIFEST_PATH = "mclone-pack.json"
 DEFAULT_VERSION = "1.17.1"
 DEFAULT_PACK_NAME = "extracted.zip"
+FIRST_PARTY_ASSET_DIR = "assets"
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 TEXT_SUFFIXES = {".json", ".mcmeta", ".txt", ".lang", ".fsh", ".vsh"}
 PORTABLE_FINGERPRINT_ID = "portable_json_text_v1"
@@ -52,6 +53,10 @@ def reference_dir(version: str) -> Path:
 
 def asset_dir(version: str) -> Path:
     return reference_dir(version) / "extracted"
+
+
+def first_party_asset_dir() -> Path:
+    return REPO_ROOT / FIRST_PARTY_ASSET_DIR
 
 
 def asset_set_name(version: str) -> str:
@@ -170,14 +175,16 @@ def collect_files(root: Path) -> list[str]:
     return sorted(files)
 
 
-def build_entries(root: Path, files: list[str]) -> list[PackEntry]:
+def build_entries(root: Path, files: list[str], path_prefix: str = "") -> list[PackEntry]:
     entries = []
     for rel in files:
         source_path = root / rel
+        pack_path = f"{path_prefix}/{rel}" if path_prefix else rel
+        validate_pack_path(pack_path)
         data = pack_file_bytes(source_path)
         entries.append(
             PackEntry(
-                path=rel,
+                path=pack_path,
                 source_path=source_path,
                 bytes=len(data),
                 sha256=hashlib.sha256(data).hexdigest(),
@@ -185,6 +192,40 @@ def build_entries(root: Path, files: list[str]) -> list[PackEntry]:
             )
         )
     return entries
+
+
+def build_first_party_entries() -> list[PackEntry]:
+    root = first_party_asset_dir()
+    if not root.is_dir():
+        return []
+    return build_entries(root, collect_files(root), FIRST_PARTY_ASSET_DIR)
+
+
+def assert_unique_entries(entries: list[PackEntry]) -> None:
+    seen = set()
+    for entry in sorted(entries, key=lambda item: item.path):
+        if entry.path in seen:
+            raise SystemExit(f"Duplicate pack path from source roots: {entry.path}")
+        seen.add(entry.path)
+
+
+def source_root_records(version: str) -> list[dict[str, str]]:
+    roots = [
+        {
+            "name": "minecraft_extracted",
+            "root": repo_relative(asset_dir(version)),
+            "pack_path_prefix": "",
+        }
+    ]
+    if first_party_asset_dir().is_dir():
+        roots.append(
+            {
+                "name": "mclone_first_party",
+                "root": repo_relative(first_party_asset_dir()),
+                "pack_path_prefix": FIRST_PARTY_ASSET_DIR,
+            }
+        )
+    return roots
 
 
 def portable_file_record(path: str, data: bytes) -> dict[str, Any]:
@@ -292,6 +333,7 @@ def build_manifest(version: str, entries: list[PackEntry]) -> dict[str, Any]:
         "minecraft_version": version,
         "tool": TOOL_PATH,
         "source_root": repo_relative(asset_dir(version)),
+        "source_roots": source_root_records(version),
         "fingerprints": build_fingerprints(entries),
         "file_count": len(entries),
         "files": [
@@ -427,6 +469,7 @@ def build_source_record(version: str, entries: list[PackEntry], *, full: bool) -
     portable, payload = fingerprint_records(entries)
     record: dict[str, Any] = {
         "root": repo_relative(asset_dir(version)),
+        "roots": source_root_records(version),
         "file_count": len(entries),
     }
     if full:
@@ -545,7 +588,12 @@ def check_lock(version: str, output: Path, sidecar: Path, entries: list[PackEntr
 def build_pack(version: str, output: Path, sidecar: Path, entries: list[PackEntry], dry_run: bool) -> int:
     manifest = build_manifest(version, entries)
     print(f"Asset set: {asset_set_name(version)}")
-    print(f"Source root: {repo_relative(asset_dir(version))}")
+    for root_record in source_root_records(version):
+        print(
+            "Source root: "
+            f"{root_record['name']}={root_record['root']} "
+            f"(pack prefix {root_record['pack_path_prefix'] or '<root>'})"
+        )
     print(f"Packed files: {len(entries)}")
     print(f"Output: {repo_relative(output)}")
     print(f"Sidecar manifest: {repo_relative(sidecar)}")
@@ -586,6 +634,8 @@ def main(argv: list[str] | None = None) -> int:
     if not files:
         raise SystemExit(f"{root} did not contain any files")
     entries = build_entries(root, files)
+    entries.extend(build_first_party_entries())
+    assert_unique_entries(entries)
 
     if args.check_lock:
         return check_lock(args.version, output, sidecar, entries)

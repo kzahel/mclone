@@ -1,6 +1,6 @@
 # 112 - Asset Lab Runtime Actor Geometry
 
-Status: active; Slice 1b actor review sheet landed.
+Status: active; Slice 2a asset-owned player figure landed.
 
 ## Purpose
 
@@ -134,11 +134,34 @@ Review output inspected:
 
 ### Slice 2 - Real Asset Ownership
 
-- [ ] Move figure JSON loading behind `mclone-assets` or a small shared
+- [x] Move figure JSON loading behind `mclone-assets` or a small shared
       content-registry contract.
+- [x] Store the promoted player figure under first-party asset content.
+- [x] Include first-party figure content in the asset pack lockfile.
+- [x] Remove the runtime `include_str!` figure ownership from `mclone-render`.
+- [x] Load the player figure through the same asset source chain as actor
+      textures.
 - [ ] Define how actor presentations select a figure asset id.
 - [ ] Keep platform apps out of the model-selection policy.
 - [ ] Add missing asset diagnostics for unknown figure ids.
+
+Validation:
+
+```powershell
+cargo test --manifest-path native/Cargo.toml -p mclone-assets -p mclone-render
+pnpm assets:pack
+pnpm assets:pack:write-lock
+pnpm assets:pack:check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -p mclone-xr-scene -p mclone-native-client
+pnpm native:web:build
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --actor-review-sheet /tmp/mclone-actor-review-sheet.png --width 1152 --height 512
+```
+
+Review output inspected:
+
+```text
+/tmp/mclone-actor-review-sheet.png
+```
 
 ### Slice 3 - Animation Metadata Import
 

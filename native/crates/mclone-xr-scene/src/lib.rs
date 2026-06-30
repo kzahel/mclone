@@ -32,7 +32,7 @@ use mclone_render::chunk::{
     TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderStats,
     TexturedSectionUploadReport,
 };
-use mclone_render::entity::{ActorDrawResources, ActorInstance, ActorRenderStats};
+use mclone_render::entity::{ActorDrawResources, ActorFigure, ActorInstance, ActorRenderStats};
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiRenderer};
 use mclone_render::screen_effect::{
@@ -502,6 +502,7 @@ impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
         render_options: TexturedSectionRenderOptions,
         mesh_assets: TexturedMeshAssets,
         actor_atlas: ActorTextureImage,
+        actor_figure: ActorFigure,
         asset_source: &impl AssetSource,
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
@@ -514,6 +515,7 @@ impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
             render_options,
             mesh_assets,
             actor_atlas,
+            actor_figure,
             asset_source,
             startup_view_pose,
         )
@@ -532,6 +534,7 @@ where
         render_options: TexturedSectionRenderOptions,
         mesh_assets: TexturedMeshAssets,
         actor_atlas: ActorTextureImage,
+        actor_figure: ActorFigure,
         asset_source: &impl AssetSource,
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
@@ -582,8 +585,14 @@ where
             },
             render_options,
             draw,
-            actors: ActorDrawResources::new(device, queue, color_format, actor_atlas.as_upload())
-                .context("initialize XR terrain actor draw resources")?,
+            actors: ActorDrawResources::new(
+                device,
+                queue,
+                color_format,
+                actor_atlas.as_upload(),
+                Some(&actor_figure),
+            )
+            .context("initialize XR terrain actor draw resources")?,
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
             ui,
@@ -626,6 +635,7 @@ where
         runtime: NativeSingleViewSessionRuntime<S>,
         render_options: TexturedSectionRenderOptions,
         actor_atlas: ActorTextureImage,
+        actor_figure: ActorFigure,
         asset_source: &impl AssetSource,
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
@@ -662,8 +672,14 @@ where
             },
             render_options,
             draw: started.draw,
-            actors: ActorDrawResources::new(device, queue, color_format, actor_atlas.as_upload())
-                .context("initialize XR terrain actor draw resources")?,
+            actors: ActorDrawResources::new(
+                device,
+                queue,
+                color_format,
+                actor_atlas.as_upload(),
+                Some(&actor_figure),
+            )
+            .context("initialize XR terrain actor draw resources")?,
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
             ui,

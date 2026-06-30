@@ -1290,6 +1290,7 @@ pub(crate) fn run_frame_budget_probe(
                 queue,
                 format,
                 runtime.actor_textures.atlas.as_upload(),
+                Some(&runtime.actor_textures.player_figure),
             )?;
             let asset_source = load_asset_source()?;
             let screen_effects = ScreenEffectsRenderer::new(device, queue, format, &asset_source)?;

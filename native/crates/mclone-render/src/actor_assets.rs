@@ -1,8 +1,9 @@
 use std::error::Error;
 use std::fmt;
 
-use mclone_assets::{AssetError, AssetPath, AssetSource};
+use mclone_assets::{AssetError, AssetPath, AssetSource, default_player_figure_path};
 
+use crate::asset_lab_figure::{CompiledFigure, load_compiled_player_figure};
 use crate::entity::{ActorTextureAtlas, ActorTextureLayout, ActorTextureRegion};
 
 const COW_TEXTURE_PATH: &str = "assets/minecraft/textures/entity/cow/cow.png";
@@ -12,6 +13,7 @@ const COW_TEXTURE_HEIGHT: u32 = 32;
 #[derive(Clone, Debug)]
 pub struct ActorTextureAssets {
     pub atlas: ActorTextureImage,
+    pub player_figure: CompiledFigure,
 }
 
 #[derive(Clone, Debug)]
@@ -47,8 +49,17 @@ pub fn load_actor_texture_assets(
         COW_TEXTURE_HEIGHT,
     )?;
     let atlas = stitch_actor_texture_atlas(&cow);
+    let figure_path = default_player_figure_path();
+    let player_figure =
+        load_compiled_player_figure(source).map_err(|source| ActorTextureAssetError::Figure {
+            path: figure_path,
+            source,
+        })?;
 
-    Ok(ActorTextureAssets { atlas })
+    Ok(ActorTextureAssets {
+        atlas,
+        player_figure,
+    })
 }
 
 #[derive(Debug)]
@@ -64,6 +75,10 @@ pub enum ActorTextureAssetError {
         decoded_height: u32,
         expected_width: u32,
         expected_height: u32,
+    },
+    Figure {
+        path: AssetPath,
+        source: anyhow::Error,
     },
 }
 
@@ -93,6 +108,9 @@ impl fmt::Display for ActorTextureAssetError {
                 expected_width,
                 expected_height
             ),
+            Self::Figure { path, source } => {
+                write!(f, "failed to load actor figure {}: {source}", path.as_str())
+            }
         }
     }
 }
@@ -103,6 +121,7 @@ impl Error for ActorTextureAssetError {
             Self::Asset(error) => Some(error),
             Self::TextureDecode { source, .. } => Some(source),
             Self::TextureDimensions { .. } => None,
+            Self::Figure { source, .. } => Some(source.as_ref()),
         }
     }
 }

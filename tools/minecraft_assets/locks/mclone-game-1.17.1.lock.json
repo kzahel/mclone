@@ -1,24 +1,24 @@
 {
   "asset_set": "mclone-game-1.17.1",
   "format_version": 1,
-  "generated_at": "2026-06-26T19:23:18.025601Z",
+  "generated_at": "2026-06-30T06:24:21.222390Z",
   "minecraft_version": "1.17.1",
   "pack": {
     "asset_set": "mclone-game-1.17.1",
-    "content_manifest_sha256": "041b6d3fe15fd8b7cb7a951f628ed416ec6878fd1b9825e1fe74aa0a17fc3ad0",
-    "file_count": 6982,
+    "content_manifest_sha256": "18d15f950dad6bc0a7faf2e5459c0f8de0ba86ba0dbbeb6b45a588b6030870f8",
+    "file_count": 6983,
     "fingerprints": {
       "payload_raw_v1": {
         "algorithm": "sha256",
-        "bytes": 6108288,
-        "file_count": 6982,
-        "sha256": "05012bcef0986bd2dc0a48a6d971d5710165acbe3663fbbd21b919e3704a6003"
+        "bytes": 6125653,
+        "file_count": 6983,
+        "sha256": "04637a1902c68d9c9cb9a4f9daa5702a7541e42e4ae3ddb7a1358e7a7a537621"
       },
       "portable_json_text_v1": {
         "algorithm": "sha256",
         "excluded_file_count": 3073,
-        "fingerprinted_file_count": 3909,
-        "sha256": "041b6d3fe15fd8b7cb7a951f628ed416ec6878fd1b9825e1fe74aa0a17fc3ad0"
+        "fingerprinted_file_count": 3910,
+        "sha256": "18d15f950dad6bc0a7faf2e5459c0f8de0ba86ba0dbbeb6b45a588b6030870f8"
       }
     },
     "manifest_path": "reference/minecraft-1.17.1/extracted.zip.json",
@@ -26,6 +26,11 @@
     "payload_raw_manifest": {
       "algorithm": "sha256",
       "files": [
+        {
+          "bytes": 17365,
+          "path": "assets/mclone/figures/player.figure.json",
+          "sha256": "3e5f885ed57fa86051e647cb98ca8c2238285e2fc14b511159601acb33f300fc"
+        },
         {
           "bytes": 3232,
           "path": "assets/minecraft/blockstates/acacia_button.json",
@@ -34941,33 +34946,45 @@
     }
   },
   "source": {
-    "file_count": 6982,
+    "file_count": 6983,
     "fingerprints": {
       "payload_raw_v1": {
         "algorithm": "sha256",
-        "bytes": 6108288,
-        "file_count": 6982,
-        "sha256": "05012bcef0986bd2dc0a48a6d971d5710165acbe3663fbbd21b919e3704a6003"
+        "bytes": 6125653,
+        "file_count": 6983,
+        "sha256": "04637a1902c68d9c9cb9a4f9daa5702a7541e42e4ae3ddb7a1358e7a7a537621"
       },
       "portable_json_text_v1": {
         "algorithm": "sha256",
         "excluded_file_count": 3073,
-        "fingerprinted_file_count": 3909,
-        "sha256": "041b6d3fe15fd8b7cb7a951f628ed416ec6878fd1b9825e1fe74aa0a17fc3ad0"
+        "fingerprinted_file_count": 3910,
+        "sha256": "18d15f950dad6bc0a7faf2e5459c0f8de0ba86ba0dbbeb6b45a588b6030870f8"
       }
     },
-    "root": "reference/minecraft-1.17.1/extracted"
+    "root": "reference/minecraft-1.17.1/extracted",
+    "roots": [
+      {
+        "name": "minecraft_extracted",
+        "pack_path_prefix": "",
+        "root": "reference/minecraft-1.17.1/extracted"
+      },
+      {
+        "name": "mclone_first_party",
+        "pack_path_prefix": "assets",
+        "root": "assets"
+      }
+    ]
   },
   "tool": "tools/minecraft_assets/asset_pack.py",
   "tool_fingerprint": {
     "algorithm": "sha256",
     "files": [
       {
-        "normalized_bytes": 20807,
+        "normalized_bytes": 22441,
         "path": "tools/minecraft_assets/asset_pack.py",
-        "sha256": "2813feac8606f3f84b5c0b5d2b86571f7f3d07b9fffa078e2b428d87656d9681"
+        "sha256": "65f6fcdf39815f7b8819f873928c9740e5c6a2a99db3d2b76d00740792c65670"
       }
     ],
-    "sha256": "a71217f6dac9e69e989537c4255abcc11cdebeeecf7e53115a8228db437ebcb3"
+    "sha256": "51021fc21836a9d930f84aa52876ce582dea5edb3f74e9d2e11c6cc45f939794"
   }
 }

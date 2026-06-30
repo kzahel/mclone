@@ -545,6 +545,7 @@ impl ChunkApp {
             render_config,
             self.assets.mesh_assets.atlas.as_upload(),
             self.assets.actor_textures.atlas.as_upload(),
+            Some(&self.assets.actor_textures.player_figure),
             asset_source,
         )?;
         if let Some(surface) = &mut self.surface {

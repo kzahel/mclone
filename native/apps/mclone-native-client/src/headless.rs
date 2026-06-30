@@ -13,10 +13,7 @@ use mclone_render::chunk::{
     TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::RenderConfig;
-use mclone_render::entity::{
-    ActorDrawResources, ActorInstance, ActorRenderStats, ActorTextureAtlas, ActorTextureLayout,
-    ActorTextureRegion,
-};
+use mclone_render::entity::{ActorDrawResources, ActorInstance, ActorRenderStats};
 use mclone_render::headless::{
     HEADLESS_FORMAT, HeadlessFrameLoopOptions, HeadlessFrameOptions, run_headless_capture_loop,
     save_rgba_png, write_headless_frame_png,
@@ -26,6 +23,7 @@ use mclone_render::sky_render::SkyRenderer;
 use mclone_render_session::actor_instances_from_presentations;
 use mclone_ui::{GameMovementMode, GameUi, GuiDrawList, GuiScale};
 
+use crate::actor_assets::load_actor_texture_assets;
 use crate::camera::SpectatorCamera;
 use crate::cli::{
     HeadlessActorReviewSheetOptions, HeadlessDualViewOptions, HeadlessScreenshotOptions,
@@ -170,6 +168,8 @@ pub(crate) fn write_actor_review_sheet(
     let sheet_width = panel_width * view_count as u32;
     let mut render_options = options.render_options;
     render_options.force_fullbright = true;
+    let actor_assets =
+        load_actor_texture_assets().context("failed to load actor assets for actor review sheet")?;
 
     let (loop_report, panel_pixels, state) = run_headless_capture_loop(
         HeadlessFrameLoopOptions {
@@ -183,7 +183,8 @@ pub(crate) fn write_actor_review_sheet(
                     device,
                     queue,
                     format,
-                    actor_review_texture_atlas(),
+                    actor_assets.atlas.as_upload(),
+                    Some(&actor_assets.player_figure),
                 )?,
                 stats: Vec::with_capacity(view_count),
                 render_options,
@@ -300,29 +301,6 @@ fn actor_review_camera(eye: Vec3) -> ChunkCamera {
         fov_y_radians: 28.0_f32.to_radians(),
         z_near: 0.05,
         z_far: 16.0,
-    }
-}
-
-fn actor_review_texture_atlas() -> ActorTextureAtlas<'static> {
-    static WHITE_PIXEL: [u8; 4] = [255, 255, 255, 255];
-    ActorTextureAtlas {
-        width: 1,
-        height: 1,
-        rgba: &WHITE_PIXEL,
-        layout: ActorTextureLayout {
-            white: ActorTextureRegion {
-                x: 0,
-                y: 0,
-                width: 1,
-                height: 1,
-            },
-            cow: ActorTextureRegion {
-                x: 0,
-                y: 0,
-                width: 1,
-                height: 1,
-            },
-        },
     }
 }
 
@@ -578,6 +556,7 @@ pub(crate) fn run_renderer_rebuild_smoke(
                 render_config,
                 runtime.mesh_assets().atlas.as_upload(),
                 runtime.actor_textures.atlas.as_upload(),
+                Some(&runtime.actor_textures.player_figure),
                 &asset_source,
             )?;
             resources
@@ -711,6 +690,7 @@ fn rebuild_renderer_rebuild_smoke_resources(
         render_config,
         state.runtime.mesh_assets().atlas.as_upload(),
         state.runtime.actor_textures.atlas.as_upload(),
+        Some(&state.runtime.actor_textures.player_figure),
         &state.asset_source,
     )?;
     let upload_report = resources

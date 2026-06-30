@@ -1,19 +1,18 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
-use serde::Deserialize;
+use mclone_assets::{
+    FigureAsciiTexture, FigureAsset, FigurePart, FigurePrimitive, default_player_figure_path,
+    load_figure_asset,
+};
 
-const PLAYER_FIGURE_JSON: &str = include_str!("figures/player.figure.json");
 const TEXTURE_OVERLAY_DEPTH: f32 = 0.004;
 
-static PLAYER_FIGURE: OnceLock<Result<CompiledFigure, String>> = OnceLock::new();
-
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct CompiledFigure {
-    pub cuboids: Vec<CompiledCuboid>,
-    pub overlay_cuboids: Vec<CompiledOverlayCuboid>,
+pub struct CompiledFigure {
+    pub(crate) cuboids: Vec<CompiledCuboid>,
+    pub(crate) overlay_cuboids: Vec<CompiledOverlayCuboid>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -30,18 +29,16 @@ pub(crate) struct CompiledOverlayCuboid {
     pub color: [f32; 4],
 }
 
-pub(crate) fn player_figure() -> Result<&'static CompiledFigure, &'static str> {
-    match PLAYER_FIGURE
-        .get_or_init(|| compile_figure_json(PLAYER_FIGURE_JSON).map_err(|error| error.to_string()))
-    {
-        Ok(figure) => Ok(figure),
-        Err(error) => Err(error.as_str()),
-    }
+pub(crate) fn load_compiled_player_figure(
+    source: &impl mclone_assets::AssetSource,
+) -> Result<CompiledFigure> {
+    let path = default_player_figure_path();
+    let asset = load_figure_asset(source, &path)
+        .with_context(|| format!("failed to load player figure asset {}", path.as_str()))?;
+    compile_figure_asset(&asset)
 }
 
-fn compile_figure_json(json: &str) -> Result<CompiledFigure> {
-    let asset: RawFigureAsset =
-        serde_json::from_str(json).context("failed to parse asset-lab figure JSON")?;
+pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure> {
     if asset.schema_version != 1 {
         bail!(
             "unsupported asset-lab figure schema version {}",
@@ -67,7 +64,7 @@ fn compile_figure_json(json: &str) -> Result<CompiledFigure> {
                 part.name
             );
         }
-        let RawPrimitive { kind, size, faces } = &part.primitive;
+        let FigurePrimitive { kind, size, faces } = &part.primitive;
         if kind != "box" {
             bail!(
                 "asset-lab figure '{}' part '{}' uses unsupported primitive kind '{}'",
@@ -159,7 +156,7 @@ fn compile_figure_json(json: &str) -> Result<CompiledFigure> {
     normalize_figure(raw_cuboids, raw_overlay_cuboids)
 }
 
-fn compile_materials(asset: &RawFigureAsset) -> Result<HashMap<String, [f32; 4]>> {
+fn compile_materials(asset: &FigureAsset) -> Result<HashMap<String, [f32; 4]>> {
     let mut materials = HashMap::with_capacity(asset.materials.len());
     for (name, material) in &asset.materials {
         materials.insert(
@@ -175,7 +172,7 @@ fn compile_materials(asset: &RawFigureAsset) -> Result<HashMap<String, [f32; 4]>
     Ok(materials)
 }
 
-fn part_name_map(parts: &[RawPart]) -> Result<HashMap<String, usize>> {
+fn part_name_map(parts: &[FigurePart]) -> Result<HashMap<String, usize>> {
     let mut names = HashMap::with_capacity(parts.len());
     for (index, part) in parts.iter().enumerate() {
         if names.insert(part.name.clone(), index).is_some() {
@@ -187,7 +184,7 @@ fn part_name_map(parts: &[RawPart]) -> Result<HashMap<String, usize>> {
 
 fn part_origin(
     index: usize,
-    parts: &[RawPart],
+    parts: &[FigurePart],
     part_names: &HashMap<String, usize>,
     origin_cache: &mut [Option<Vec3>],
     visiting: &mut [bool],
@@ -226,7 +223,7 @@ fn append_texture_overlay_cuboids(
     box_origin: Vec3,
     box_size: Vec3,
     face: BoxFace,
-    asset: &RawFigureAsset,
+    asset: &FigureAsset,
     texture_name: &str,
 ) -> Result<()> {
     let texture = asset.textures.get(texture_name).with_context(|| {
@@ -267,7 +264,7 @@ fn append_texture_overlay_cuboids(
     Ok(())
 }
 
-fn validate_texture(name: &str, texture: &RawAsciiTexture) -> Result<usize> {
+fn validate_texture(name: &str, texture: &FigureAsciiTexture) -> Result<usize> {
     let Some(first_row) = texture.pixels.first() else {
         bail!("asset-lab texture '{}' has no rows", name);
     };
@@ -520,61 +517,16 @@ struct Bounds {
     max: Vec3,
 }
 
-#[derive(Debug, Deserialize)]
-struct RawFigureAsset {
-    #[serde(rename = "schemaVersion")]
-    schema_version: u32,
-    name: String,
-    #[serde(default)]
-    materials: HashMap<String, RawMaterial>,
-    #[serde(default)]
-    textures: HashMap<String, RawAsciiTexture>,
-    #[serde(default)]
-    parts: Vec<RawPart>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawMaterial {
-    color: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawAsciiTexture {
-    palette: HashMap<String, String>,
-    pixels: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawPart {
-    name: String,
-    parent: Option<String>,
-    at: Option<[f32; 3]>,
-    rot: Option<[f32; 3]>,
-    material: Option<String>,
-    texture: Option<String>,
-    primitive: RawPrimitive,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawPrimitive {
-    kind: String,
-    size: Option<[f32; 3]>,
-    faces: Option<HashMap<String, RawFace>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawFace {
-    material: Option<String>,
-    texture: Option<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const PLAYER_FIGURE_JSON: &str =
+        include_str!("../../../../assets/mclone/figures/player.figure.json");
+
     #[test]
-    fn compiles_embedded_player_figure() {
-        let figure = compile_figure_json(PLAYER_FIGURE_JSON).unwrap();
+    fn compiles_player_figure_asset() {
+        let figure = compile_test_player_figure();
 
         assert_eq!(figure.cuboids.len(), 12);
         assert_eq!(figure.overlay_cuboids.len(), 64);
@@ -589,7 +541,7 @@ mod tests {
 
     #[test]
     fn compiles_face_texture_as_front_overlay() {
-        let figure = compile_figure_json(PLAYER_FIGURE_JSON).unwrap();
+        let figure = compile_test_player_figure();
         let eye_color = parse_hex_color("#19120e").unwrap();
         let eye_cuboids: Vec<_> = figure
             .overlay_cuboids
@@ -617,8 +569,14 @@ mod tests {
         }
         "##;
 
-        let error = compile_figure_json(json).unwrap_err().to_string();
+        let asset: FigureAsset = serde_json::from_str(json).unwrap();
+        let error = compile_figure_asset(&asset).unwrap_err().to_string();
         assert!(error.contains("unsupported primitive kind 'sphere'"));
+    }
+
+    fn compile_test_player_figure() -> CompiledFigure {
+        let asset: FigureAsset = serde_json::from_str(PLAYER_FIGURE_JSON).unwrap();
+        compile_figure_asset(&asset).unwrap()
     }
 
     fn compiled_bounds(figure: &CompiledFigure) -> Bounds {

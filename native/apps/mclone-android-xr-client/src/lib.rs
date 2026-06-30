@@ -1282,7 +1282,8 @@ mod android {
                 scene_options,
                 runtime,
                 render_options,
-                actor_assets.atlas,
+                actor_assets.atlas.clone(),
+                actor_assets.player_figure.clone(),
                 &asset_source,
                 startup_view_pose,
             )?
@@ -1294,7 +1295,8 @@ mod android {
                 scene_options,
                 render_options,
                 mesh_assets,
-                actor_assets.atlas,
+                actor_assets.atlas.clone(),
+                actor_assets.player_figure.clone(),
                 &asset_source,
                 startup_view_pose,
             )?

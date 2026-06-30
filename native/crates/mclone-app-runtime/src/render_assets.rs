@@ -22,6 +22,7 @@ pub const DEFAULT_REFERENCE_ASSET_VERSION: &str = "1.17.1";
 pub const DEFAULT_REFERENCE_PACK_FILE: &str = "extracted.zip";
 pub const DEFAULT_NAMED_PACK_FILE: &str = "mclone-game-1.17.1.pbp";
 pub const DEFAULT_ANDROID_APP_ID: &str = "com.kzahel.mclone";
+pub const DEFAULT_FIRST_PARTY_ASSET_DIR: &str = "assets";
 
 #[derive(Clone, Debug)]
 pub struct SceneTexturedSections {
@@ -237,6 +238,9 @@ pub fn load_asset_source() -> Result<AssetSourceChain> {
 
     match mode {
         AssetMode::LooseFirst => {
+            if let Some(first_party) = load_first_party_asset_source()? {
+                source.push(first_party);
+            }
             if let Some(loose) = load_loose_asset_source()? {
                 source.push(loose);
             }
@@ -247,6 +251,9 @@ pub fn load_asset_source() -> Result<AssetSourceChain> {
         AssetMode::PackFirst => {
             if let Some(pack) = load_pack_asset_source(false)? {
                 source.push(pack);
+            }
+            if let Some(first_party) = load_first_party_asset_source()? {
+                source.push(first_party);
             }
             if let Some(loose) = load_loose_asset_source()? {
                 source.push(loose);
@@ -260,6 +267,9 @@ pub fn load_asset_source() -> Result<AssetSourceChain> {
             })?);
         }
         AssetMode::LooseOnly => {
+            if let Some(first_party) = load_first_party_asset_source()? {
+                source.push(first_party);
+            }
             source.push(load_loose_asset_source()?.ok_or_else(|| {
                 anyhow::anyhow!(
                     "missing extracted Minecraft assets at {}; run ./scripts/decompile-mc.sh from the repository root",
@@ -315,6 +325,26 @@ fn load_loose_asset_source() -> Result<Option<FilesystemAssetSource>> {
         if root.join("assets").is_dir() {
             return Ok(Some(FilesystemAssetSource::new(root)));
         }
+    }
+    Ok(None)
+}
+
+fn load_first_party_asset_source() -> Result<Option<FilesystemAssetSource>> {
+    if let Some(root) = env_path("MCLONE_FIRST_PARTY_ASSET_ROOT") {
+        if root.join(DEFAULT_FIRST_PARTY_ASSET_DIR).is_dir() {
+            log::info!("loaded first-party assets {}", root.display());
+            return Ok(Some(FilesystemAssetSource::new(root)));
+        }
+        bail!(
+            "MCLONE_FIRST_PARTY_ASSET_ROOT points to {}, but it does not contain an assets/ directory",
+            root.display()
+        );
+    }
+
+    let root = repo_root();
+    if root.join(DEFAULT_FIRST_PARTY_ASSET_DIR).is_dir() {
+        log::info!("loaded first-party assets {}", root.display());
+        return Ok(Some(FilesystemAssetSource::new(root)));
     }
     Ok(None)
 }
