@@ -19,7 +19,7 @@ use crate::{
     ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkSchedulerMetrics,
     ChunkStoreError, LightStatusMailboxKind, PlayerChunkTrackingDiagnostics,
     ServerPhysicsTickDiagnostics, ServerSimulationTickReport, ServerSimulationTickTiming,
-    WorldgenMailboxKind,
+    SimulationCadence, SimulationCadenceConfig, WorldgenMailboxKind,
 };
 
 pub type ServerRunnerResult<T> = Result<T, ServerRunnerError>;
@@ -477,6 +477,7 @@ mod native {
         pub day_time: Option<u64>,
         pub day_time_frozen: bool,
         pub tick_interval: Duration,
+        pub cadence: SimulationCadenceConfig,
     }
 
     impl NativeIntegratedServerRunnerConfig {
@@ -487,6 +488,7 @@ mod native {
                 day_time: None,
                 day_time_frozen: false,
                 tick_interval: Duration::from_millis(50),
+                cadence: SimulationCadenceConfig::new(20, 20, 60),
             }
         }
 
@@ -507,6 +509,11 @@ mod native {
 
         pub const fn with_tick_interval(mut self, tick_interval: Duration) -> Self {
             self.tick_interval = tick_interval;
+            self
+        }
+
+        pub const fn with_cadence(mut self, cadence: SimulationCadenceConfig) -> Self {
+            self.cadence = cadence;
             self
         }
 
@@ -693,6 +700,10 @@ mod native {
         if let Some(day_time) = config.day_time {
             server.set_day_time(day_time);
         }
+        let Some(cadence) = SimulationCadence::new(config.cadence) else {
+            let _ = ready_tx.send(Err("invalid native server cadence config".to_owned()));
+            return Ok(());
+        };
         let mut diagnostics_detail_sampler = DiagnosticsDetailSampler::default();
         refresh_diagnostics(
             &diagnostics,
@@ -711,6 +722,7 @@ mod native {
         let result = run_native_integrated_server_loop(
             &mut server,
             config.tick_interval,
+            cadence,
             command_rx,
             update_tx,
             &command_queue_depth,
@@ -736,6 +748,7 @@ mod native {
     fn run_native_integrated_server_loop(
         server: &mut IntegratedServer,
         tick_interval: Duration,
+        mut cadence: SimulationCadence,
         command_rx: mpsc::Receiver<NativeRunnerControl>,
         update_tx: mpsc::Sender<Vec<u8>>,
         command_queue_depth: &AtomicUsize,
@@ -774,23 +787,29 @@ mod native {
                 return Ok(());
             }
 
-            let wall_start = Instant::now();
-            let report = server.try_simulation_tick_report()?;
-            let wall_us = wall_start.elapsed().as_micros();
-            publish_updates(&update_tx, update_queue_depth, &report.updates)?;
-            let force_detail_after_tick = should_force_detail_after_tick(&report);
-            refresh_diagnostics(
-                diagnostics,
-                server,
-                command_queue_depth,
-                update_queue_depth,
-                diagnostics_detail_sampler,
-                Some(ServerRunnerTickDiagnostics::from_report(&report, wall_us)),
-                true,
-                Some(false),
-                None,
-                force_detail_after_tick,
-            );
+            let frame = cadence.advance_host_frame();
+            // The physics lane is still executed inside `IntegratedServer`'s
+            // full gameplay tick. A later slice will consume `physics_steps`
+            // on host frames that do not run vanilla gameplay.
+            for _ in 0..frame.gameplay_ticks {
+                let wall_start = Instant::now();
+                let report = server.try_simulation_tick_report()?;
+                let wall_us = wall_start.elapsed().as_micros();
+                publish_updates(&update_tx, update_queue_depth, &report.updates)?;
+                let force_detail_after_tick = should_force_detail_after_tick(&report);
+                refresh_diagnostics(
+                    diagnostics,
+                    server,
+                    command_queue_depth,
+                    update_queue_depth,
+                    diagnostics_detail_sampler,
+                    Some(ServerRunnerTickDiagnostics::from_report(&report, wall_us)),
+                    true,
+                    Some(false),
+                    None,
+                    force_detail_after_tick,
+                );
+            }
 
             next_tick += tick_interval;
             if next_tick <= Instant::now() {
@@ -1023,6 +1042,36 @@ mod native {
             );
 
             runner.join_shutdown().unwrap();
+        }
+
+        #[test]
+        fn native_runner_config_defaults_to_twenty_hz_cadence() {
+            let config = NativeIntegratedServerRunnerConfig::new(0);
+
+            assert_eq!(config.cadence, SimulationCadenceConfig::default());
+            assert_eq!(
+                SimulationCadence::new(config.cadence)
+                    .expect("default native cadence")
+                    .advance_host_frame(),
+                crate::SimulationCadenceFrame {
+                    gameplay_ticks: 1,
+                    physics_steps: 3,
+                }
+            );
+        }
+
+        #[test]
+        fn native_runner_rejects_invalid_cadence_config() {
+            let result = NativeIntegratedServerRunner::new(
+                NativeIntegratedServerRunnerConfig::new(0)
+                    .with_cadence(SimulationCadenceConfig::new(0, 20, 60)),
+            );
+
+            assert!(matches!(
+                result,
+                Err(ServerRunnerError::ThreadStart(message))
+                    if message == "invalid native server cadence config"
+            ));
         }
 
         #[test]
