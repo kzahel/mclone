@@ -22,7 +22,9 @@ use crate::color_profile::{
     color_transform_wgpu,
 };
 use crate::sky::sunrise_color;
-use crate::uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
+use crate::uniform::{
+    PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
+};
 
 const SKY_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = 64;
 const SKY_MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = SKY_UNIFORM_BYTE_SIZE * 2;
@@ -86,7 +88,7 @@ impl SkyRenderer {
             device,
             "mclone_sky_uniforms",
             SKY_UNIFORM_BYTE_SIZE,
-            STEREO_VIEW_SLOT_COUNT,
+            PER_VIEW_UNIFORM_SLOT_COUNT,
         );
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_sky_bind_group_layout"),

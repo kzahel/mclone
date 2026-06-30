@@ -5,7 +5,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use mclone_assets::{AssetPath, AssetSource};
 
 use crate::target::RenderFrameTarget;
-use crate::uniform::{PerViewSlot, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
+use crate::uniform::{PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, SINGLE_VIEW_SLOT};
 
 pub const VANILLA_UNDERWATER_ALPHA: f32 = 0.1;
 pub const VANILLA_UNDERWATER_FOV_MULTIPLIER: f32 = 0.85714287;
@@ -418,8 +418,8 @@ impl ScreenEffectsRenderer {
     ) -> Range<wgpu::BufferAddress> {
         let slot_index = slot.index();
         assert!(
-            slot_index < STEREO_VIEW_SLOT_COUNT,
-            "screen effect vertex slot {slot_index} is outside slot count {STEREO_VIEW_SLOT_COUNT}"
+            slot_index < PER_VIEW_UNIFORM_SLOT_COUNT,
+            "screen effect vertex slot {slot_index} is outside slot count {PER_VIEW_UNIFORM_SLOT_COUNT}"
         );
         let bytes = f32_bytes_vec(vertices);
         let required_slot_size = bytes.len().max(4) as wgpu::BufferAddress;
@@ -431,7 +431,8 @@ impl ScreenEffectsRenderer {
             self.vertex_buffer_slot_size = required_slot_size;
             self.vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("mclone_screen_effect_vertices"),
-                size: self.vertex_buffer_slot_size * STEREO_VIEW_SLOT_COUNT as wgpu::BufferAddress,
+                size: self.vertex_buffer_slot_size
+                    * PER_VIEW_UNIFORM_SLOT_COUNT as wgpu::BufferAddress,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));

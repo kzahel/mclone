@@ -264,6 +264,28 @@ headroom in the current per-eye path, but it does not replace the real E4 work:
 true frame pipelining still needs per-eye/per-frame immutable uniform slots
 before next-frame CPU work can safely run while the previous frame is in flight.
 
+## Per-View Uniform Frame Ring (landed 2026-06-30)
+
+The first E4 prerequisite is now in place for the per-eye path: dynamic
+per-view uniform buffers allocate a three-frame ring (`3 frames x 2 eyes`), and
+the XR per-eye render paths rotate through those frame slots. This preserves the
+left/right dynamic-offset protection from 107 while also preventing frame N+1
+view-projection writes from reusing frame N's uniform regions when a later
+latency-toggleable pipeline allows a previous frame to remain in flight. The
+covered per-view uniforms are chunk terrain, sky, actors, selection outline, and
+world GUI. The underwater screen-effect vertex upload also uses the same
+per-view frame slot count, because that overlay is generated per view.
+
+This is still **not** the full E4 implementation and should not be treated as a
+green light to overlap command encoding across frames by itself. Remaining
+mutable GPU upload resources need the same in-flight lifetime audit before true
+frame pipelining is enabled, especially sky/glow vertex buffers, selection
+outline vertices, world-GUI vertices/line vertices, and the world-GUI panel
+texture. Actor geometry is already uploaded into fresh per-render buffers, and
+terrain section meshes are persistent. The next slice should either ring/snapshot
+those remaining transient uploads or constrain E4's overlap boundary so next
+frame work cannot write them before the previous frame's submission is complete.
+
 ## Post-Validation Rollback (landed 2026-06-29)
 
 Commit `d0c5161` (`Restore XR per-eye command submission`) reverted the risky

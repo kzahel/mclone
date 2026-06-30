@@ -24,8 +24,7 @@ use crate::fog::RenderFog;
 use crate::target::RenderFrameTarget;
 use crate::texture_mips::generate_rgba_mip_chain;
 use crate::uniform::{
-    PerViewSlot, PerViewUniformBuffer, RIGHT_EYE_VIEW_SLOT, SINGLE_VIEW_SLOT,
-    STEREO_VIEW_SLOT_COUNT,
+    PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
 };
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
@@ -522,7 +521,7 @@ impl StereoDrawMask {
     const RIGHT: Self = Self(0b10);
 
     fn for_slot(view_slot: PerViewSlot) -> Self {
-        if view_slot == RIGHT_EYE_VIEW_SLOT {
+        if view_slot.is_right_eye() {
             Self::RIGHT
         } else {
             Self::LEFT
@@ -557,7 +556,7 @@ impl PreparedTexturedSectionStereoDraw {
     }
 
     fn stats_for_slot(&self, view_slot: PerViewSlot) -> TexturedSectionRenderStats {
-        if view_slot == RIGHT_EYE_VIEW_SLOT {
+        if view_slot.is_right_eye() {
             self.eye_stats[1]
         } else {
             self.eye_stats[0]
@@ -1477,7 +1476,7 @@ impl ChunkRenderer {
             device,
             "mclone_chunk_uniforms",
             UNIFORM_BYTE_SIZE,
-            STEREO_VIEW_SLOT_COUNT,
+            PER_VIEW_UNIFORM_SLOT_COUNT,
         );
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_chunk_bind_group_layout"),
@@ -1571,7 +1570,7 @@ impl TexturedChunkRenderer {
             device,
             "mclone_textured_chunk_uniforms",
             UNIFORM_BYTE_SIZE,
-            STEREO_VIEW_SLOT_COUNT,
+            PER_VIEW_UNIFORM_SLOT_COUNT,
         );
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

@@ -8,7 +8,9 @@ use wgpu::util::DeviceExt;
 
 use crate::chunk::{ChunkRenderView, ChunkTextureAtlas};
 use crate::target::RenderFrameTarget;
-use crate::uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
+use crate::uniform::{
+    PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
+};
 
 const FLOATS_PER_VERTEX: usize = 8;
 const VERTEX_SIZE: wgpu::BufferAddress =
@@ -674,7 +676,7 @@ impl WorldGuiRenderer {
             device,
             "mclone_world_gui_uniforms",
             64,
-            STEREO_VIEW_SLOT_COUNT,
+            PER_VIEW_UNIFORM_SLOT_COUNT,
         );
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

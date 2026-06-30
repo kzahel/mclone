@@ -42,7 +42,9 @@ use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRendere
 use mclone_render::sky::overworld_clear_color;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
-use mclone_render::uniform::{LEFT_EYE_VIEW_SLOT, PerViewSlot, RIGHT_EYE_VIEW_SLOT};
+use mclone_render::uniform::{
+    LEFT_EYE_VIEW_SLOT, PER_VIEW_UNIFORM_FRAME_COUNT, PerViewSlot, RIGHT_EYE_VIEW_SLOT,
+};
 use mclone_render_session::{
     ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
@@ -475,6 +477,7 @@ where
     display_refresh_hz: Option<f32>,
     render_split_timing_enabled: bool,
     defer_eye_waits_enabled: bool,
+    per_view_uniform_frame: u32,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
     game_ui_toggle_down: bool,
@@ -616,6 +619,7 @@ where
             display_refresh_hz: None,
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
+            per_view_uniform_frame: 0,
             last_locomotion_update: None,
             menu_toggle_down: false,
             game_ui_toggle_down: false,
@@ -705,6 +709,7 @@ where
             display_refresh_hz: None,
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
+            per_view_uniform_frame: 0,
             last_locomotion_update: None,
             menu_toggle_down: false,
             game_ui_toggle_down: false,
@@ -1252,6 +1257,9 @@ where
             )
         };
         let defer_eye_waits = self.defer_eye_waits_enabled;
+        let uniform_frame = self.next_per_view_uniform_frame();
+        let left_view_slot = LEFT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
+        let right_view_slot = RIGHT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
         let left_eye_start = Instant::now();
         let left_eye = self.render_eye_target(
             device,
@@ -1266,7 +1274,7 @@ where
             sun_angle,
             underwater_overlays[0],
             "left",
-            LEFT_EYE_VIEW_SLOT,
+            left_view_slot,
             !defer_eye_waits,
         )?;
         timing.left_eye_ms = elapsed_ms(left_eye_start.elapsed());
@@ -1289,7 +1297,7 @@ where
             sun_angle,
             underwater_overlays[1],
             "right",
-            RIGHT_EYE_VIEW_SLOT,
+            right_view_slot,
             !defer_eye_waits,
         )?;
         timing.right_eye_ms = elapsed_ms(right_eye_start.elapsed());
@@ -1311,6 +1319,13 @@ where
         }
         self.record_eye0_summary(left_eye.summary);
         Ok(self.frame_summary_with_timing(timing, upload))
+    }
+
+    fn next_per_view_uniform_frame(&mut self) -> u32 {
+        let frame = self.per_view_uniform_frame;
+        self.per_view_uniform_frame =
+            (self.per_view_uniform_frame + 1) % PER_VIEW_UNIFORM_FRAME_COUNT;
+        frame
     }
 
     fn terrain_render_views_and_options(
@@ -1380,6 +1395,9 @@ where
         let prepared_stereo_draw =
             self.draw
                 .prepare_stereo_draw(&prepared_records, terrain_views, terrain_options);
+        let uniform_frame = self.next_per_view_uniform_frame();
+        let left_view_slot = LEFT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
+        let right_view_slot = RIGHT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
         let left = self.render_terrain_eye_only_target(
             device,
             queue,
@@ -1389,7 +1407,7 @@ where
             terrain_options[0],
             &actor_instances,
             "left",
-            LEFT_EYE_VIEW_SLOT,
+            left_view_slot,
             include_sky,
             include_actors,
         )?;
@@ -1402,7 +1420,7 @@ where
             terrain_options[1],
             &actor_instances,
             "right",
-            RIGHT_EYE_VIEW_SLOT,
+            right_view_slot,
             include_sky,
             include_actors,
         )?;

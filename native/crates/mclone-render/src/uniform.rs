@@ -11,12 +11,30 @@ impl PerViewSlot {
     pub const fn index(self) -> u32 {
         self.0
     }
+
+    pub const fn view_index(self) -> u32 {
+        self.0 % STEREO_VIEW_SLOT_COUNT
+    }
+
+    pub const fn is_right_eye(self) -> bool {
+        self.view_index() == Self::RIGHT_EYE.view_index()
+    }
+
+    pub fn in_uniform_frame(self, frame_index: u32) -> Self {
+        assert!(
+            frame_index < PER_VIEW_UNIFORM_FRAME_COUNT,
+            "uniform frame {frame_index} is outside frame ring count {PER_VIEW_UNIFORM_FRAME_COUNT}"
+        );
+        Self(frame_index * STEREO_VIEW_SLOT_COUNT + self.view_index())
+    }
 }
 
 pub const SINGLE_VIEW_SLOT: PerViewSlot = PerViewSlot::SINGLE;
 pub const LEFT_EYE_VIEW_SLOT: PerViewSlot = PerViewSlot::LEFT_EYE;
 pub const RIGHT_EYE_VIEW_SLOT: PerViewSlot = PerViewSlot::RIGHT_EYE;
 pub const STEREO_VIEW_SLOT_COUNT: u32 = 2;
+pub const PER_VIEW_UNIFORM_FRAME_COUNT: u32 = 3;
+pub const PER_VIEW_UNIFORM_SLOT_COUNT: u32 = STEREO_VIEW_SLOT_COUNT * PER_VIEW_UNIFORM_FRAME_COUNT;
 
 /// Uniform buffer storage for per-view data that may need multiple live copies
 /// inside one GPU submission.
@@ -129,5 +147,23 @@ mod tests {
         assert_eq!(align_to(64, 256), 256);
         assert_eq!(align_to(256, 256), 256);
         assert_eq!(align_to(257, 256), 512);
+    }
+
+    #[test]
+    fn per_view_slot_maps_view_into_uniform_frame() {
+        let left = LEFT_EYE_VIEW_SLOT.in_uniform_frame(2);
+        let right = RIGHT_EYE_VIEW_SLOT.in_uniform_frame(2);
+        assert_eq!(left.index(), 4);
+        assert_eq!(right.index(), 5);
+        assert_eq!(left.view_index(), 0);
+        assert_eq!(right.view_index(), 1);
+        assert!(!left.is_right_eye());
+        assert!(right.is_right_eye());
+    }
+
+    #[test]
+    #[should_panic(expected = "outside frame ring count")]
+    fn per_view_slot_rejects_out_of_range_uniform_frame() {
+        let _ = LEFT_EYE_VIEW_SLOT.in_uniform_frame(PER_VIEW_UNIFORM_FRAME_COUNT);
     }
 }

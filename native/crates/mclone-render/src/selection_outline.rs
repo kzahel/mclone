@@ -9,7 +9,7 @@ use wgpu::util::DeviceExt;
 use crate::{
     chunk::{ChunkDepthTarget, ChunkMultiviewDepthTarget, ChunkRenderView, DEPTH_FORMAT},
     target::RenderFrameTarget,
-    uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT},
+    uniform::{PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT},
 };
 
 const OUTLINE_WGSL: &str = r#"
@@ -138,7 +138,7 @@ impl SelectionOutlineRenderer {
             device,
             "mclone_selection_outline_uniforms",
             64,
-            STEREO_VIEW_SLOT_COUNT,
+            PER_VIEW_UNIFORM_SLOT_COUNT,
         );
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_selection_outline_bind_group_layout"),

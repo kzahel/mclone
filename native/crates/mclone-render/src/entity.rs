@@ -9,7 +9,9 @@ use wgpu::util::DeviceExt;
 use crate::chunk::{ChunkRenderView, DEPTH_FORMAT, TexturedSectionRenderOptions};
 use crate::light_texture::FULL_BRIGHT;
 use crate::target::RenderFrameTarget;
-use crate::uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
+use crate::uniform::{
+    PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
+};
 
 pub use crate::asset_lab_figure::{ActorFigureSet, CompiledFigure as ActorFigure};
 
@@ -447,7 +449,7 @@ impl ActorRenderer {
             device,
             "mclone_actor_uniforms",
             UNIFORM_BYTE_SIZE,
-            STEREO_VIEW_SLOT_COUNT,
+            PER_VIEW_UNIFORM_SLOT_COUNT,
         );
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_actor_bind_group_layout"),
