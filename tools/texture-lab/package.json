@@ -1,0 +1,20 @@
+{
+  "name": "@mclone/texture-lab",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "export": "tsx src/export.ts examples/dirt/texture.ts",
+    "sheet": "tsx src/export.ts examples/dirt/texture.ts --sheet-only"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.1"
+}

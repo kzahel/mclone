@@ -103,6 +103,10 @@
     "asset-lab:video": "pnpm --dir ./tools/asset-lab video",
     "asset-lab:batch": "pnpm --dir ./tools/asset-lab batch",
     "asset-lab:preview": "pnpm --dir ./tools/asset-lab preview",
+    "texture-lab:install": "pnpm --dir ./tools/texture-lab install",
+    "texture-lab:typecheck": "pnpm --dir ./tools/texture-lab typecheck",
+    "texture-lab:export": "pnpm --dir ./tools/texture-lab export",
+    "texture-lab:sheet": "pnpm --dir ./tools/texture-lab sheet",
     "typecheck": "pnpm native:web:typecheck",
     "oracle:gen": "bash ./oracle/run.sh"
   },
