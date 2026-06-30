@@ -305,7 +305,9 @@ then waits before releasing the OpenXR images and ending the frame. The default
 path is unchanged, the existing `--xr-overlap-eye-submits` probe remains
 separate, and perf summaries report `render_path=per-eye-prefetch` plus
 `MCLONE_ANDROID_XR_PERF_OVERLAP` timing. The package lane is
-`native:android-xr:perf:flight:rd10:prefetch`.
+`native:android-xr:perf:flight:rd10:prefetch`; compare against
+`native:android-xr:perf:flight:rd10:metrics` so both samples include
+motion-to-photon counters.
 
 This is intentionally **not** a raw no-wait OpenXR present path. Releasing an
 OpenXR swapchain image before `wgpu` work is known complete would need explicit
