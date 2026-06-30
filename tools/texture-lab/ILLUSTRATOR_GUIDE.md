@@ -224,7 +224,17 @@ The loop:
    not everything at once.
 3. Re-export, re-analyze, and confirm that gap moved without opening new ones.
 4. Compare against your **previous attempt**, not just vanilla: is this version
-   closer? Keep the better one; discard regressions.
+   closer? Keep the better one; discard regressions. Let the tool decide it
+   mechanically rather than by eye:
+
+   ```sh
+   pnpm texture-lab:analyze --compare prev.png next.png
+   ```
+
+   It ranks both against the vanilla counterpart (inferred from the filename, or
+   set with `--reference-name <block>` / `--reference-png <path>`) and prints a
+   per-feature `closer` column and a `verdict` for which one to keep iterating
+   from.
 5. Repeat for at least a few rounds. Stop on **diminishing returns** (the gaps
    stop shrinking), not when the texture "looks fine".
 6. Before calling a texture done, state the **top three remaining differences**
@@ -246,11 +256,12 @@ directional and use judgment.
 ### Presenting Options
 
 When a block matters, or when the right direction is ambiguous, do not silently
-commit one texture. Produce two or three distinct candidates, analyze each, and
-present them to the user with their measured differences and a short
-recommendation, so the user makes the final call or asks for "more of that one".
-Comparing a few concrete options is a more reliable judgment than scoring one in
-isolation — both for the agent and for the user.
+commit one texture. Produce two or three distinct candidates, rank them with
+`analyze --compare` (pairwise against the vanilla counterpart), and present them
+to the user with their measured differences and a short recommendation, so the
+user makes the final call or asks for "more of that one". Comparing a few
+concrete options is a more reliable judgment than scoring one in isolation —
+both for the agent and for the user.
 
 ## Tiling And Rotation
 

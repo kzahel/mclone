@@ -652,6 +652,170 @@ export function formatComparison(
   return lines.join("\n");
 }
 
+// --- A/B candidate comparison ----------------------------------------------
+
+// Two candidates count as tied on a feature unless their distances to vanilla
+// differ by more than this many scale units, so noise does not decide a winner.
+const CLOSENESS_MARGIN = 0.25;
+
+export type Closer = "a" | "b" | "tie" | "n/a";
+
+export interface FeatureClosenessRow {
+  label: string;
+  reference: number;
+  a: number;
+  b: number;
+  devA: number;
+  devB: number;
+  closer: Closer;
+}
+
+export interface CandidateComparison {
+  hasReference: boolean;
+  rows: FeatureClosenessRow[];
+  aWins: number;
+  bWins: number;
+  ties: number;
+  totalDistanceA: number;
+  totalDistanceB: number;
+  winner: Closer;
+}
+
+// Rank two candidates by how close each sits to the same vanilla reference,
+// feature by feature. The winner is decided by how many scored features each is
+// closer on, tie-broken by total distance to vanilla. This is the mechanical
+// tiebreaker for the tournament step of the iteration loop: pick the closer
+// candidate, then keep iterating from it. With no reference it still reports the
+// raw a-vs-b differences but declares no winner.
+export function compareCandidates(
+  a: TextureFeatures,
+  b: TextureFeatures,
+  reference?: TextureFeatures,
+): CandidateComparison {
+  const rows: FeatureClosenessRow[] = [];
+  let aWins = 0;
+  let bWins = 0;
+  let ties = 0;
+  let totalDistanceA = 0;
+  let totalDistanceB = 0;
+
+  for (const row of FEATURE_ROWS) {
+    if (row.informational || !row.scale) {
+      continue;
+    }
+    const aValue = row.value(a);
+    const bValue = row.value(b);
+    if (!reference) {
+      rows.push({ label: row.label, reference: Number.NaN, a: aValue, b: bValue, devA: Number.NaN, devB: Number.NaN, closer: "n/a" });
+      continue;
+    }
+    const devA = deviation(row, a, reference);
+    const devB = deviation(row, b, reference);
+    if (!Number.isFinite(devA) || !Number.isFinite(devB)) {
+      rows.push({ label: row.label, reference: row.value(reference), a: aValue, b: bValue, devA, devB, closer: "n/a" });
+      continue;
+    }
+    const absA = Math.abs(devA);
+    const absB = Math.abs(devB);
+    totalDistanceA += absA;
+    totalDistanceB += absB;
+    let closer: Closer;
+    if (Math.abs(absA - absB) <= CLOSENESS_MARGIN) {
+      closer = "tie";
+      ties += 1;
+    } else if (absA < absB) {
+      closer = "a";
+      aWins += 1;
+    } else {
+      closer = "b";
+      bWins += 1;
+    }
+    rows.push({ label: row.label, reference: row.value(reference), a: aValue, b: bValue, devA, devB, closer });
+  }
+
+  let winner: Closer = "tie";
+  if (!reference) {
+    winner = "n/a";
+  } else if (aWins > bWins) {
+    winner = "a";
+  } else if (bWins > aWins) {
+    winner = "b";
+  } else if (totalDistanceA < totalDistanceB) {
+    winner = "a";
+  } else if (totalDistanceB < totalDistanceA) {
+    winner = "b";
+  }
+
+  return { hasReference: Boolean(reference), rows, aWins, bWins, ties, totalDistanceA, totalDistanceB, winner };
+}
+
+export function formatCandidateComparison(
+  labelA: string,
+  labelB: string,
+  comparison: CandidateComparison,
+  sizes: ComparisonSizes & { referenceName?: string | undefined } = {},
+): string {
+  const lines: string[] = [];
+  lines.push("# compare candidates");
+  lines.push(`  a: ${labelA}`);
+  lines.push(`  b: ${labelB}`);
+  if (comparison.hasReference) {
+    const name = sizes.referenceName ? `${sizes.referenceName} ` : "";
+    const refSize = sizes.referenceNative ? `${sizes.referenceNative} ` : "";
+    const comparedAt = sizes.comparedAt ? `   ·   compared at ${sizes.comparedAt}` : "";
+    lines.push(`reference: ${name}${refSize}vanilla${comparedAt}`);
+  } else {
+    lines.push("reference: none — showing a vs b only (pass --reference-name <block> or --reference-png <path> to rank vs vanilla)");
+  }
+  lines.push("");
+
+  const labelWidth = Math.max(...comparison.rows.map((row) => row.label.length), "feature".length);
+  if (comparison.hasReference) {
+    const header = `${"feature".padEnd(labelWidth)}  ${"vanilla".padStart(9)}  ${"a".padStart(9)}  ${"b".padStart(9)}  closer`;
+    lines.push(header);
+    lines.push("-".repeat(header.length));
+    for (const row of comparison.rows) {
+      lines.push(
+        `${row.label.padEnd(labelWidth)}  ${formatGapValue(row.label, row.reference).padStart(9)}  ${formatGapValue(row.label, row.a).padStart(9)}  ${formatGapValue(row.label, row.b).padStart(9)}  ${row.closer}`,
+      );
+    }
+  } else {
+    const header = `${"feature".padEnd(labelWidth)}  ${"a".padStart(9)}  ${"b".padStart(9)}  ${"Δ(b-a)".padStart(9)}`;
+    lines.push(header);
+    lines.push("-".repeat(header.length));
+    for (const row of comparison.rows) {
+      const delta = row.b - row.a;
+      const deltaText = (delta >= 0 ? "+" : "") + formatGapValue(row.label, Math.abs(delta));
+      lines.push(
+        `${row.label.padEnd(labelWidth)}  ${formatGapValue(row.label, row.a).padStart(9)}  ${formatGapValue(row.label, row.b).padStart(9)}  ${(delta >= 0 ? deltaText : `-${formatGapValue(row.label, Math.abs(delta))}`).padStart(9)}`,
+      );
+    }
+  }
+
+  lines.push("");
+  if (!comparison.hasReference) {
+    lines.push("verdict: no vanilla reference, so no winner — differences only.");
+    return lines.join("\n");
+  }
+  if (comparison.winner === "a" || comparison.winner === "b") {
+    const winLetter = comparison.winner;
+    const loseLetter = winLetter === "a" ? "b" : "a";
+    const winLabel = winLetter === "a" ? labelA : labelB;
+    const winCount = winLetter === "a" ? comparison.aWins : comparison.bWins;
+    const loseCount = winLetter === "a" ? comparison.bWins : comparison.aWins;
+    lines.push(
+      `verdict: ${winLetter} (${winLabel}) is closer to vanilla — closer on ${winCount} features, ${loseLetter} on ${loseCount}, ${comparison.ties} tie(s).`,
+    );
+  } else {
+    lines.push(`verdict: too close to call — a closer on ${comparison.aWins}, b on ${comparison.bWins}, ${comparison.ties} tie(s).`);
+  }
+  lines.push(
+    `         total distance to vanilla: a ${comparison.totalDistanceA.toFixed(1)}, b ${comparison.totalDistanceB.toFixed(1)} (lower is closer)`,
+  );
+  lines.push("(tiebreaker guidance, not a pass/fail — use it to pick which candidate to keep iterating from.)");
+  return lines.join("\n");
+}
+
 function formatValue(row: FeatureRow, value: number): string {
   if (Number.isNaN(value)) {
     return "n/a";

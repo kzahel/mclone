@@ -45,6 +45,18 @@ so a 32x32 tile and a 16x16 vanilla texture are compared apples-to-apples. The
 numbers are directional guidance, not a pass/fail gate. Scope it to one or a few
 textures with `--texture <name>`, or add `--json` for tool consumption.
 
+To choose between two candidate PNGs (for example two iterations or two
+variants), use compare mode:
+
+```sh
+pnpm texture-lab:analyze --compare a.png b.png
+```
+
+It ranks both against the vanilla counterpart — inferred from the filename, or
+set with `--reference-name <block>` or `--reference-png <path>` — and prints a
+per-feature `closer` column plus a `verdict` for which one to keep iterating
+from. This is the mechanical tiebreaker for the tournament step of the loop.
+
 For authoring rules, palette discipline, tint roles, the iteration loop, and
 AI-agent brief shape, see [`ILLUSTRATOR_GUIDE.md`](ILLUSTRATOR_GUIDE.md). For
 local measurements of typical vanilla block texture palette sizes, see
