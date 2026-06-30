@@ -395,6 +395,9 @@ pub struct SingleViewRuntime {
     interest_center: ChunkPos,
     command_count: usize,
     update_count: usize,
+    snapshot_update_count: usize,
+    section_block_update_count: usize,
+    unload_update_count: usize,
     protocol_codec_roundtrip: bool,
     transport_drained: bool,
     last_tick: u64,
@@ -427,6 +430,9 @@ impl SingleViewRuntime {
             interest_center,
             command_count: 0,
             update_count: 0,
+            snapshot_update_count: 0,
+            section_block_update_count: 0,
+            unload_update_count: 0,
             protocol_codec_roundtrip: true,
             transport_drained: true,
             last_tick: 0,
@@ -516,6 +522,18 @@ impl SingleViewRuntime {
         self.update_count
     }
 
+    pub const fn snapshot_update_count(&self) -> usize {
+        self.snapshot_update_count
+    }
+
+    pub const fn section_block_update_count(&self) -> usize {
+        self.section_block_update_count
+    }
+
+    pub const fn unload_update_count(&self) -> usize {
+        self.unload_update_count
+    }
+
     pub const fn protocol_codec_roundtrip(&self) -> bool {
         self.protocol_codec_roundtrip
     }
@@ -580,6 +598,9 @@ impl SingleViewRuntime {
         self.transport_drained &= exchange.transport_drained;
         let update_apply = self.apply_server_updates_report(exchange.updates);
         self.update_count += update_apply.updates;
+        self.snapshot_update_count += update_apply.snapshot_updates;
+        self.section_block_update_count += update_apply.section_block_updates;
+        self.unload_update_count += update_apply.unload_updates;
         let step = RuntimeStepReport {
             command_count: exchange.command_count,
             update_count: update_apply.updates,
@@ -1240,6 +1261,45 @@ mod tests {
         assert_eq!(report.update_count, 1);
         assert_eq!(runtime.command_count(), 1);
         assert_eq!(runtime.update_count(), 1);
+        assert_eq!(runtime.snapshot_update_count(), 0);
+        assert_eq!(runtime.section_block_update_count(), 0);
+        assert_eq!(runtime.unload_update_count(), 0);
         assert_eq!(runtime.day_time(), 6000);
+
+        let block_state_ids = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Full,
+            ChunkRevision(1),
+            0,
+            16,
+            &block_state_ids,
+        );
+        let report = runtime.apply_exchange(RuntimeExchange::updates(
+            vec![
+                ServerUpdate::ChunkSnapshot(snapshot),
+                ServerUpdate::SectionBlockUpdates {
+                    pos: ChunkPos::new(0, 0),
+                    section_y: 0,
+                    updates: vec![mclone_protocol::SectionBlockUpdate {
+                        local_x: 1,
+                        local_y: 2,
+                        local_z: 3,
+                        block_state: BlockStateId(1),
+                    }],
+                },
+                ServerUpdate::ChunkUnload {
+                    pos: ChunkPos::new(0, 0),
+                },
+            ],
+            true,
+        ));
+
+        assert_eq!(report.command_count, 0);
+        assert_eq!(report.update_count, 3);
+        assert_eq!(runtime.update_count(), 4);
+        assert_eq!(runtime.snapshot_update_count(), 1);
+        assert_eq!(runtime.section_block_update_count(), 1);
+        assert_eq!(runtime.unload_update_count(), 1);
     }
 }

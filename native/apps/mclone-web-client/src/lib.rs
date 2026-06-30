@@ -311,6 +311,18 @@ impl WebRuntime {
         self.core.update_count()
     }
 
+    pub const fn snapshot_update_count(&self) -> usize {
+        self.core.snapshot_update_count()
+    }
+
+    pub const fn section_block_update_count(&self) -> usize {
+        self.core.section_block_update_count()
+    }
+
+    pub const fn unload_update_count(&self) -> usize {
+        self.core.unload_update_count()
+    }
+
     pub const fn protocol_codec_roundtrip(&self) -> bool {
         self.core.protocol_codec_roundtrip()
     }

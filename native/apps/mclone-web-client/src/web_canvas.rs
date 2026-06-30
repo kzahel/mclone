@@ -927,6 +927,9 @@ struct GeneratedChunkRenderReport {
     sky_rendered: bool,
     command_count: usize,
     update_count: usize,
+    snapshot_update_count: usize,
+    section_block_update_count: usize,
+    unload_update_count: usize,
     loaded_chunk_count: usize,
     loaded_section_key_count: usize,
     resident_section_count: usize,
@@ -1051,6 +1054,21 @@ impl GeneratedChunkRenderReport {
         set_number(&object, "sunAngle", f64::from(self.sun_angle))?;
         set_number(&object, "commandCount", self.command_count as f64)?;
         set_number(&object, "updateCount", self.update_count as f64)?;
+        set_number(
+            &object,
+            "snapshotUpdateCount",
+            self.snapshot_update_count as f64,
+        )?;
+        set_number(
+            &object,
+            "sectionBlockUpdateCount",
+            self.section_block_update_count as f64,
+        )?;
+        set_number(
+            &object,
+            "unloadUpdateCount",
+            self.unload_update_count as f64,
+        )?;
         set_number(&object, "loadedChunkCount", self.loaded_chunk_count as f64)?;
         set_number(
             &object,
@@ -2162,10 +2180,16 @@ struct WebBlockInteractionReport {
     changed: bool,
     command_count_delta: usize,
     update_count_delta: usize,
+    snapshot_update_count_delta: usize,
+    section_block_update_count_delta: usize,
+    unload_update_count_delta: usize,
     interaction_command_count: usize,
     interaction_update_count: usize,
     total_command_count: usize,
     total_update_count: usize,
+    total_snapshot_update_count: usize,
+    total_section_block_update_count: usize,
+    total_unload_update_count: usize,
     pending_compile_job_count: usize,
 }
 
@@ -2211,6 +2235,21 @@ impl WebBlockInteractionReport {
         set_number(&object, "updateCountDelta", self.update_count_delta as f64)?;
         set_number(
             &object,
+            "snapshotUpdateCountDelta",
+            self.snapshot_update_count_delta as f64,
+        )?;
+        set_number(
+            &object,
+            "sectionBlockUpdateCountDelta",
+            self.section_block_update_count_delta as f64,
+        )?;
+        set_number(
+            &object,
+            "unloadUpdateCountDelta",
+            self.unload_update_count_delta as f64,
+        )?;
+        set_number(
+            &object,
             "interactionCommandCount",
             self.interaction_command_count as f64,
         )?;
@@ -2221,6 +2260,21 @@ impl WebBlockInteractionReport {
         )?;
         set_number(&object, "commandCount", self.total_command_count as f64)?;
         set_number(&object, "updateCount", self.total_update_count as f64)?;
+        set_number(
+            &object,
+            "snapshotUpdateCount",
+            self.total_snapshot_update_count as f64,
+        )?;
+        set_number(
+            &object,
+            "sectionBlockUpdateCount",
+            self.total_section_block_update_count as f64,
+        )?;
+        set_number(
+            &object,
+            "unloadUpdateCount",
+            self.total_unload_update_count as f64,
+        )?;
         set_number(
             &object,
             "pendingCompileJobCount",
@@ -3299,6 +3353,9 @@ impl WebChunkRenderSession {
     ) -> Result<WebBlockInteractionReport, String> {
         let command_count_before = self.runtime.command_count();
         let update_count_before = self.runtime.update_count();
+        let snapshot_update_count_before = self.runtime.snapshot_update_count();
+        let section_block_update_count_before = self.runtime.section_block_update_count();
+        let unload_update_count_before = self.runtime.unload_update_count();
         self.sync_camera_pose_to_server().await?;
         let carried_item_synced = self.sync_carried_item().await?;
 
@@ -3325,10 +3382,19 @@ impl WebChunkRenderSession {
                 changed: false,
                 command_count_delta: self.runtime.command_count() - command_count_before,
                 update_count_delta: self.runtime.update_count() - update_count_before,
+                snapshot_update_count_delta: self.runtime.snapshot_update_count()
+                    - snapshot_update_count_before,
+                section_block_update_count_delta: self.runtime.section_block_update_count()
+                    - section_block_update_count_before,
+                unload_update_count_delta: self.runtime.unload_update_count()
+                    - unload_update_count_before,
                 interaction_command_count: 0,
                 interaction_update_count: 0,
                 total_command_count: self.runtime.command_count(),
                 total_update_count: self.runtime.update_count(),
+                total_snapshot_update_count: self.runtime.snapshot_update_count(),
+                total_section_block_update_count: self.runtime.section_block_update_count(),
+                total_unload_update_count: self.runtime.unload_update_count(),
                 pending_compile_job_count: self.render_compiler.pending_job_count(),
             });
         };
@@ -3355,10 +3421,19 @@ impl WebChunkRenderSession {
             changed: step.update_count > 0,
             command_count_delta: self.runtime.command_count() - command_count_before,
             update_count_delta: self.runtime.update_count() - update_count_before,
+            snapshot_update_count_delta: self.runtime.snapshot_update_count()
+                - snapshot_update_count_before,
+            section_block_update_count_delta: self.runtime.section_block_update_count()
+                - section_block_update_count_before,
+            unload_update_count_delta: self.runtime.unload_update_count()
+                - unload_update_count_before,
             interaction_command_count: step.command_count,
             interaction_update_count: step.update_count,
             total_command_count: self.runtime.command_count(),
             total_update_count: self.runtime.update_count(),
+            total_snapshot_update_count: self.runtime.snapshot_update_count(),
+            total_section_block_update_count: self.runtime.section_block_update_count(),
+            total_unload_update_count: self.runtime.unload_update_count(),
             pending_compile_job_count: self.render_compiler.pending_job_count(),
         })
     }
@@ -4197,6 +4272,9 @@ impl WebChunkRenderSession {
             sky_rendered: !ui_covers_world,
             command_count: self.runtime.command_count(),
             update_count: self.runtime.update_count(),
+            snapshot_update_count: self.runtime.snapshot_update_count(),
+            section_block_update_count: self.runtime.section_block_update_count(),
+            unload_update_count: self.runtime.unload_update_count(),
             loaded_chunk_count: self.runtime.client().loaded_chunk_count(),
             loaded_section_key_count: current_section_keys.len(),
             resident_section_count: render_stats.loaded_section_count,

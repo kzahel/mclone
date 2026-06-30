@@ -37,9 +37,12 @@ const bindgenOutDir = join(
 );
 const movementPerf = process.argv.includes("--movement-perf")
   || process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF === "1";
+const blockEditProbe = process.argv.includes("--block-edit-probe")
+  || process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE === "1";
 const remoteWebSocket = process.argv.includes("--remote-websocket")
   || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
 const appLoop = movementPerf
+  || blockEditProbe
   || remoteWebSocket
   || process.argv.includes("--app-loop")
   || process.argv.includes("--mobile-app-loop")
@@ -52,12 +55,16 @@ const serveOnly = process.argv.includes("--serve")
 const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
   ?? (movementPerf
     ? "/tmp/mclone-native-web-movement-perf.png"
+    : blockEditProbe
+    ? "/tmp/mclone-native-web-block-edit-probe.png"
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app.png"
     : appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
 const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
   ?? (movementPerf
     ? "/tmp/mclone-native-web-movement-perf-canvas.png"
+    : blockEditProbe
+    ? "/tmp/mclone-native-web-block-edit-probe-canvas.png"
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app-canvas.png"
     : appLoop ? "/tmp/mclone-native-web-app-canvas.png" : "/tmp/mclone-native-web-canvas.png");
@@ -69,9 +76,15 @@ const mobileNativeOptionsCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_MO
   ?? "/tmp/mclone-native-web-mobile-options-canvas.png";
 const movementPerfReportPath = process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_REPORT
   ?? "/tmp/mclone-native-web-movement-perf.json";
+const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-block-edit-probe.json";
 const movementPerfChunkBoundaries = Math.max(
   1,
   Number.parseInt(process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_CHUNKS ?? "3", 10) || 3,
+);
+const blockEditProbeBreaks = Math.max(
+  1,
+  Number.parseInt(process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_BREAKS ?? "1", 10) || 1,
 );
 const requireChunk = process.argv.includes("--require-chunk")
   || process.env.MCLONE_NATIVE_WEB_REQUIRE_CHUNK === "1";
@@ -169,6 +182,38 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (blockEditProbe) {
+        const blockEditProbeResult = await runBlockEditProbe(page, canvas);
+        const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        let pageScreenshotCaptured = false;
+        try {
+          await page.screenshot({ path: screenshotPath, fullPage: false, timeout: 5_000 });
+          pageScreenshotCaptured = true;
+        } catch (error) {
+          console.warn(`page screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
+        const canvasPixels = analyzePng(canvasPng);
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          blockEditProbeReportPath,
+          appLoop,
+          blockEditProbe,
+          blockEditProbeBreaks,
+          remoteWebSocket,
+          remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
+          canvasPixels,
+          blockEditProbeResult,
+          result,
+        };
+        await writeFile(blockEditProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
+        assertBlockEditProbeResult(report, pageErrors, canvasPixels);
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (movementPerf) {
         const movementPerfProbe = await runMovementPerfProbe(page, canvas);
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
@@ -626,6 +671,130 @@ async function runMovementPerfProbe(page, canvas) {
     movementCompileTimings: end.movementCompileTimings,
     compileTimings: end.compileTimings,
   };
+}
+
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @returns {Promise<any>}
+ */
+async function runBlockEditProbe(page, canvas) {
+  await canvas.evaluate((element) => element.focus());
+  await canvas.click({ position: { x: 640, y: 360 } });
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      const report = state?.lastReport;
+      return state?.ok === true
+        && state.ready === true
+        && state.streamingSettled === true
+        && state.currentTarget?.ok === true
+        && state.currentTarget.hit === true
+        && state.pendingCompileJobCount === 0
+        && Number.isFinite(Number(report?.snapshotUpdateCount))
+        && Number.isFinite(Number(report?.sectionBlockUpdateCount))
+        && Number.isFinite(Number(report?.unloadUpdateCount));
+    },
+    undefined,
+    { timeout: 60_000 },
+  );
+
+  const start = await captureBlockEditTelemetry(page);
+  /** @type {any[]} */
+  const interactions = [];
+  /** @type {any[]} */
+  const placements = [];
+  for (let i = 0; i < blockEditProbeBreaks; i += 1) {
+    await page.keyboard.press("2");
+    await page.waitForFunction(
+      () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 1,
+      undefined,
+      { timeout: 10_000 },
+    );
+    const placement = await clickBlockInteraction(page, canvas, "right", "place", {
+      expectedSelectedHotbarSlot: 1,
+      expectedResultBlockStateId: DIRT_BLOCK_STATE_ID,
+      expectedCarriedItemSynced: true,
+    });
+    placements.push(placement);
+    const interaction = await clickBlockInteraction(page, canvas, "left", "break");
+    interactions.push(interaction);
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.ok === true
+          && state.pendingCompileJobCount === 0
+          && state.lastCompileReport?.pendingCompileJobCount === 0;
+      },
+      undefined,
+      { timeout: 60_000 },
+    );
+  }
+
+  await waitForWebAppStreamingSettled(page);
+  const end = await captureBlockEditTelemetry(page);
+  const updateDeltas = {
+    updateCount: end.updateCount - start.updateCount,
+    snapshotUpdateCount: end.snapshotUpdateCount - start.snapshotUpdateCount,
+    sectionBlockUpdateCount: end.sectionBlockUpdateCount - start.sectionBlockUpdateCount,
+    unloadUpdateCount: end.unloadUpdateCount - start.unloadUpdateCount,
+  };
+  const interactionDeltas = interactions.map((interaction) => ({
+    action: interaction?.interaction?.action ?? null,
+    ok: interaction?.ok === true,
+    updateCountDelta: Number(interaction?.interaction?.updateCountDelta) || 0,
+    snapshotUpdateCountDelta: Number(interaction?.interaction?.snapshotUpdateCountDelta) || 0,
+    sectionBlockUpdateCountDelta: Number(interaction?.interaction?.sectionBlockUpdateCountDelta) || 0,
+    unloadUpdateCountDelta: Number(interaction?.interaction?.unloadUpdateCountDelta) || 0,
+  }));
+  return {
+    ok: interactions.length === blockEditProbeBreaks
+      && interactions.every((interaction) => interaction?.ok === true)
+      && placements.every((placement) => placement?.ok === true)
+      && updateDeltas.sectionBlockUpdateCount >= blockEditProbeBreaks
+      && end.frameCount > start.frameCount
+      && end.renderCount > start.renderCount,
+    breaksRequested: blockEditProbeBreaks,
+    breaksCompleted: interactions.length,
+    observedSnapshotDuringBreaks: interactionDeltas.some(
+      (delta) => delta.snapshotUpdateCountDelta > 0,
+    ),
+    observedSnapshotDuringProbeWindow: updateDeltas.snapshotUpdateCount > 0,
+    start,
+    end,
+    updateDeltas,
+    interactionDeltas,
+    interactions,
+    placements,
+    frameCountDelta: end.frameCount - start.frameCount,
+    renderCountDelta: end.renderCount - start.renderCount,
+  };
+}
+
+/** @param {Page} page */
+async function captureBlockEditTelemetry(page) {
+  return page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    const report = state.lastReport ?? {};
+    return {
+      frameCount: Number(state.frameCount) || 0,
+      renderCount: Number(state.renderCount) || 0,
+      compileTimingCount: Number(state.compileTimingCount) || 0,
+      lastFrameGapMs: Number(state.lastFrameGapMs) || 0,
+      maxFrameGapMs: Number(state.maxFrameGapMs) || 0,
+      commandCount: Number(report.commandCount) || 0,
+      updateCount: Number(report.updateCount) || 0,
+      snapshotUpdateCount: Number(report.snapshotUpdateCount) || 0,
+      sectionBlockUpdateCount: Number(report.sectionBlockUpdateCount) || 0,
+      unloadUpdateCount: Number(report.unloadUpdateCount) || 0,
+      pendingCompileJobCount: Number(state.pendingCompileJobCount) || 0,
+      renderDirtyChunkCount: Number(state.renderDirtyChunkCount) || 0,
+      renderDirtySectionCount: Number(state.renderDirtySectionCount) || 0,
+      renderInflightSectionCount: Number(state.renderInflightSectionCount) || 0,
+      lastCompileReport: state.lastCompileReport ?? null,
+      currentTarget: state.currentTarget ?? null,
+    };
+  });
 }
 
 /**
@@ -2079,6 +2248,51 @@ function assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouch
   }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
     throw new Error(`mobile app canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+/**
+ * @param {any} report
+ * @param {string[]} pageErrors
+ * @param {any} canvasPixels
+ */
+function assertBlockEditProbeResult(report, pageErrors, canvasPixels) {
+  if (pageErrors.length > 0) {
+    throw new Error(`browser block edit probe page errors:\n${pageErrors.join("\n")}`);
+  }
+  const probe = report?.blockEditProbeResult;
+  if (!probe?.ok) {
+    throw new Error(`native web block edit probe failed:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (
+    probe.breaksCompleted !== report.blockEditProbeBreaks
+    || !Array.isArray(probe.interactionDeltas)
+    || probe.interactionDeltas.length !== report.blockEditProbeBreaks
+    || !probe.interactionDeltas.every((/** @type {any} */ delta) => delta.ok === true)
+    || !Array.isArray(probe.placements)
+    || probe.placements.length !== report.blockEditProbeBreaks
+    || !probe.placements.every((/** @type {any} */ placement) => placement.ok === true)
+  ) {
+    throw new Error(`native web block edit probe did not complete every scripted break:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (
+    !Number.isFinite(Number(probe.start?.snapshotUpdateCount))
+    || !Number.isFinite(Number(probe.start?.sectionBlockUpdateCount))
+    || !Number.isFinite(Number(probe.end?.snapshotUpdateCount))
+    || !Number.isFinite(Number(probe.end?.sectionBlockUpdateCount))
+    || !Number.isFinite(Number(probe.updateDeltas?.snapshotUpdateCount))
+    || !Number.isFinite(Number(probe.updateDeltas?.sectionBlockUpdateCount))
+  ) {
+    throw new Error(`native web block edit probe did not expose update-kind counters:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (Number(probe.updateDeltas.sectionBlockUpdateCount) < report.blockEditProbeBreaks) {
+    throw new Error(`native web block edit probe did not observe section block update deltas for each break:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (Number(probe.frameCountDelta) <= 0 || Number(probe.renderCountDelta) <= 0) {
+    throw new Error(`native web block edit probe did not keep frames/renders advancing:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
+    throw new Error(`block edit probe canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
 }
 
