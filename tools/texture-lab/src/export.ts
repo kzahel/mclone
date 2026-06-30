@@ -9,6 +9,7 @@ interface ExportArgs {
   input: string;
   outDir: string;
   sheetOnly: boolean;
+  runtimeCompat: boolean;
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -24,6 +25,16 @@ for (const texture of textures) {
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
     await fs.writeFile(outputPath, encodePng(texture));
     console.log(`Wrote ${outputPath}`);
+
+    if (args.runtimeCompat) {
+      const compatPath = runtimeCompatTexturePath(texture.exportPath);
+      if (compatPath) {
+        const compatOutputPath = path.join(args.outDir, "runtime-pack", compatPath);
+        await fs.mkdir(path.dirname(compatOutputPath), { recursive: true });
+        await fs.writeFile(compatOutputPath, encodePng(texture));
+        console.log(`Wrote ${compatOutputPath}`);
+      }
+    }
   }
 
   const sheetPath = path.join(args.outDir, `${texture.name}-sheet.png`);
@@ -55,11 +66,12 @@ console.log(`Wrote ${reportJsonPath}`);
 function parseArgs(argv: string[]): ExportArgs {
   const input = argv[0];
   if (!input || input.startsWith("-")) {
-    throw new Error("Usage: tsx src/export.ts <texture.ts> [--out <dir>] [--sheet-only]");
+    throw new Error("Usage: tsx src/export.ts <texture.ts> [--out <dir>] [--sheet-only] [--runtime-compat]");
   }
 
   let outDir = path.join("/tmp", "mclone-texture-lab");
   let sheetOnly = false;
+  let runtimeCompat = false;
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--out") {
@@ -71,10 +83,20 @@ function parseArgs(argv: string[]): ExportArgs {
       index += 1;
     } else if (arg === "--sheet-only") {
       sheetOnly = true;
+    } else if (arg === "--runtime-compat") {
+      runtimeCompat = true;
     } else {
       throw new Error(`Unknown argument '${arg}'`);
     }
   }
 
-  return { input, outDir, sheetOnly };
+  return { input, outDir, sheetOnly, runtimeCompat };
+}
+
+function runtimeCompatTexturePath(exportPath: string): string | null {
+  const authoredPrefix = "assets/mclone/textures/block/";
+  if (!exportPath.startsWith(authoredPrefix)) {
+    return null;
+  }
+  return `assets/minecraft/textures/block/${exportPath.slice(authoredPrefix.length)}`;
 }

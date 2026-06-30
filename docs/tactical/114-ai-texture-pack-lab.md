@@ -250,9 +250,9 @@ creates visible artifacts before runtime support is attempted.
 - [ ] Export a local original resource-pack tree under `/tmp`.
 - [ ] Record a manifest of generated texture resource locations and source
   fingerprints.
-- [ ] Decide whether checked-in original source should live under
-  `tools/texture-lab/examples`, a new `assets/original/` tree, or another
-  repo-owned asset source.
+- [x] Decide checked-in original source location:
+  `tools/texture-lab/packs/mclone-default/` is the accepted overlay source tree;
+  `tools/texture-lab/examples/` remains for small wrapper entrypoints.
 - [ ] Only after the lab proves useful, add a tactical for shared runtime pack
   loading and variant selection.
 

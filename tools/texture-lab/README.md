@@ -31,12 +31,25 @@ Current first loop:
 pnpm texture-lab:install
 pnpm texture-lab:typecheck
 pnpm texture-lab:export
+pnpm texture-lab:runtime-compat
 ```
 
 For authoring rules, palette discipline, tint roles, and AI-agent brief shape,
 see [`ILLUSTRATOR_GUIDE.md`](ILLUSTRATOR_GUIDE.md).
 
-The export command writes the starter dirt and grass-block PNGs plus review
+Accepted pack source is committed under:
+
+```text
+tools/texture-lab/packs/mclone-default/texture.ts
+tools/texture-lab/packs/mclone-default/block/dirt.ts
+tools/texture-lab/packs/mclone-default/block/grass-block.ts
+```
+
+These TypeScript files are the source of truth. They define palettes, tint
+roles, seeded procedural layers, and ASCII masks. The generated PNGs and review
+sheets are deterministic derived artifacts and stay out of git by default.
+
+The export command writes the `mclone-default` overlay pack PNGs plus review
 sheets to:
 
 ```text
@@ -48,10 +61,27 @@ sheets to:
 /tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_bottom.png
 /tmp/mclone-texture-lab/grass-block-sheet.png
 /tmp/mclone-texture-lab/grass-block-side-sheet.png
-/tmp/mclone-texture-lab/mclone-dirt-starter-metadata.md
-/tmp/mclone-texture-lab/mclone-dirt-starter-metadata.json
-/tmp/mclone-texture-lab/mclone-grass-block-starter-metadata.md
-/tmp/mclone-texture-lab/mclone-grass-block-starter-metadata.json
+/tmp/mclone-texture-lab/mclone-default-metadata.md
+/tmp/mclone-texture-lab/mclone-default-metadata.json
+```
+
+The runtime-compatible export also writes vanilla-path texture overrides:
+
+```text
+/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/dirt.png
+/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_top.png
+/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_side.png
+/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_side_overlay.png
+/tmp/mclone-texture-lab/runtime-pack/assets/minecraft/textures/block/grass_block_bottom.png
+```
+
+This is a development bridge, not a standalone distributable pack. It overrides
+PNG textures while the native engine still reads local vanilla blockstate/model
+JSON from `reference/minecraft-1.17.1/extracted/` or `extracted.zip`. To try it
+with the native runtime:
+
+```sh
+MCLONE_FIRST_PARTY_ASSET_ROOT=/tmp/mclone-texture-lab/runtime-pack pnpm native:timedemo:smoke
 ```
 
 ## Source Format
@@ -95,7 +125,7 @@ report is for quick human review; the JSON report is for future agent/tool
 checks. Both list tint roles, texture source categories, preview tiling modes,
 seam diagnostic modes, sheet paths, and block face composition.
 
-The grass starter encodes that relationship directly:
+The `mclone-default` grass block module encodes that relationship directly:
 
 ```ts
 tint("grass", {
@@ -214,12 +244,13 @@ Initial exports should be derived and disposable:
 
 ```text
 /tmp/mclone-texture-lab/pack/
+/tmp/mclone-texture-lab/runtime-pack/
 /tmp/mclone-texture-lab/sheets/
 ```
 
-When the source format is proven, a later slice can add a checked-in original
-pack source tree and generated PNG export under a stable path. Do not place
-generated review screenshots in the repo.
+The checked-in original pack source tree lives under
+`tools/texture-lab/packs/mclone-default/`. Generated PNG export still goes to
+`/tmp` by default. Do not place generated review screenshots in the repo.
 
 Runtime adoption should go through shared owners such as `mclone-assets`,
 `mclone-render-session`, and `mclone-render`. The desktop app should only gain

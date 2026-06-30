@@ -4,6 +4,10 @@ This guide is for humans and AI agents authoring original Minecraft-style
 textures in `tools/texture-lab`. It describes how to keep related textures
 coherent before the renderer or DSL can enforce all of the relationships.
 
+Accepted overlay-pack source lives under
+`tools/texture-lab/packs/mclone-default/`. Use `tools/texture-lab/examples/`
+only for small single-block wrapper entrypoints or experiments.
+
 ## Core Rule
 
 Draw the source texture for its role, not just for how it looks in isolation.
