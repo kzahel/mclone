@@ -108,6 +108,10 @@ grass tint role to that face.
 ## Palette Discipline
 
 Use palettes as shared material contracts, not just local color buckets.
+Vanilla terrain textures often use small exact palettes; see
+[`VANILLA_COLOR_COUNTS.md`](VANILLA_COLOR_COUNTS.md) before assuming a weak
+texture needs more colors. For stone and dirt, authored value placement matters
+more than palette size.
 
 - Keep dirt browns coherent across dirt, grass side, grass bottom, coarse dirt,
   paths, roots, and muddy transitions.

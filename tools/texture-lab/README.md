@@ -37,7 +37,9 @@ pnpm texture-lab:coverage
 ```
 
 For authoring rules, palette discipline, tint roles, and AI-agent brief shape,
-see [`ILLUSTRATOR_GUIDE.md`](ILLUSTRATOR_GUIDE.md).
+see [`ILLUSTRATOR_GUIDE.md`](ILLUSTRATOR_GUIDE.md). For local measurements of
+typical vanilla block texture palette sizes, see
+[`VANILLA_COLOR_COUNTS.md`](VANILLA_COLOR_COUNTS.md).
 
 Accepted pack source is committed under:
 
