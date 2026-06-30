@@ -55,10 +55,10 @@ mod android {
     };
     use mclone_ui::{
         DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, FlatHud,
-        GameFramePacingMode, GameMovementMode, GameUi, GameUiAction, GameUiRenderState,
-        GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
-        render_flat_hud, touch_action_button_rects, touch_hotbar_slot_rects,
-        touch_menu_button_rect, touch_movement_zone_rect,
+        GameFramePacingMode, GameHelpParent, GameMovementMode, GameUi, GameUiAction,
+        GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay,
+        TouchJoystickOverlay, TouchOverlay, render_flat_hud, touch_action_button_rects,
+        touch_hotbar_slot_rects, touch_menu_button_rect, touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -662,6 +662,7 @@ mod android {
             if self.ui.is_active() {
                 self.keyboard_mouse.clear_held();
                 if state == ElementState::Pressed
+                    && !repeat
                     && let Some(gui_key) = gui_key_from_key_code(key_code)
                 {
                     let (handled, action) = self.ui.key_pressed(gui_key);
@@ -1316,6 +1317,8 @@ mod android {
                 GameUiAction::StartWorld
                 | GameUiAction::Resume
                 | GameUiAction::OpenBlockPalette
+                | GameUiAction::OpenHelp(_)
+                | GameUiAction::CloseHelp(_)
                 | GameUiAction::OpenOptions(_)
                 | GameUiAction::BackToPause => {}
             }
@@ -1422,6 +1425,17 @@ mod android {
                 self.clear_flat_gameplay_input();
                 self.ui.clear_input();
                 log::info!("Mclone Android block palette opened from keyboard");
+                return Ok(AndroidUiTouchResult {
+                    handled: true,
+                    quit: false,
+                });
+            }
+            if frame.open_help {
+                self.ui
+                    .apply_action(GameUiAction::OpenHelp(GameHelpParent::Game));
+                self.clear_flat_gameplay_input();
+                self.ui.clear_input();
+                log::info!("Mclone Android help opened from keyboard");
                 return Ok(AndroidUiTouchResult {
                     handled: true,
                     quit: false,
@@ -2449,6 +2463,7 @@ mod android {
     fn gui_key_from_key_code(key_code: KeyCode) -> Option<GuiKey> {
         match key_code {
             KeyCode::Escape => Some(GuiKey::Escape),
+            KeyCode::F1 => Some(GuiKey::F1),
             _ => None,
         }
     }
@@ -2468,6 +2483,7 @@ mod android {
             KeyCode::ControlLeft => Some(KeyboardKey::ControlLeft),
             KeyCode::ControlRight => Some(KeyboardKey::ControlRight),
             KeyCode::Escape => Some(KeyboardKey::Escape),
+            KeyCode::F1 => Some(KeyboardKey::F1),
             KeyCode::Digit1 => Some(KeyboardKey::Digit1),
             KeyCode::Digit2 => Some(KeyboardKey::Digit2),
             KeyCode::Digit3 => Some(KeyboardKey::Digit3),
@@ -2554,6 +2570,7 @@ mod android {
             (source.use_item, FlatInputAction::Use),
             (source.open_menu, FlatInputAction::OpenMenu),
             (source.open_block_palette, FlatInputAction::OpenBlockPalette),
+            (source.open_help, FlatInputAction::OpenHelp),
         ] {
             if pressed {
                 target.apply_intent(FlatInputIntent::Action {

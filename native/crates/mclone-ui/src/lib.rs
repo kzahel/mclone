@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
-use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, InputPromptKind, ResolvedFlatInput, TouchControlsMode};
+use mclone_input::{
+    FLAT_HOTBAR_SLOT_COUNT, InputPromptKind, ResolvedFlatInput, ShortcutHelpGroup, ShortcutHelpRow,
+    TouchControlsMode, default_keyboard_mouse_shortcut_rows, flat_runtime_shortcut_rows,
+};
 
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = FLAT_HOTBAR_SLOT_COUNT as usize;
 pub const EMPTY_HOTBAR_ICONS: [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE] =
@@ -681,6 +684,7 @@ impl CycleButton {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GuiKey {
     Escape,
+    F1,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -689,6 +693,7 @@ pub enum GameScreen {
     NewWorld,
     JoinRemote,
     Pause,
+    Help { parent: GameHelpParent },
     BlockPalette,
     Options { parent: GameOptionsParent },
 }
@@ -697,6 +702,56 @@ pub enum GameScreen {
 pub enum GameOptionsParent {
     Title,
     Pause,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameHelpParent {
+    Game,
+    Title,
+    NewWorld,
+    JoinRemote,
+    Pause,
+    OptionsTitle,
+    OptionsPause,
+}
+
+impl GameHelpParent {
+    const fn screen(self) -> Option<GameScreen> {
+        match self {
+            Self::Game => None,
+            Self::Title => Some(GameScreen::Title),
+            Self::NewWorld => Some(GameScreen::NewWorld),
+            Self::JoinRemote => Some(GameScreen::JoinRemote),
+            Self::Pause => Some(GameScreen::Pause),
+            Self::OptionsTitle => Some(GameScreen::Options {
+                parent: GameOptionsParent::Title,
+            }),
+            Self::OptionsPause => Some(GameScreen::Options {
+                parent: GameOptionsParent::Pause,
+            }),
+        }
+    }
+
+    const fn covers_world(self) -> bool {
+        matches!(self, Self::Title | Self::NewWorld | Self::JoinRemote)
+    }
+}
+
+const fn help_parent_for_screen(screen: Option<GameScreen>) -> GameHelpParent {
+    match screen {
+        None => GameHelpParent::Game,
+        Some(GameScreen::Title) => GameHelpParent::Title,
+        Some(GameScreen::NewWorld) => GameHelpParent::NewWorld,
+        Some(GameScreen::JoinRemote) => GameHelpParent::JoinRemote,
+        Some(GameScreen::Pause) | Some(GameScreen::BlockPalette) => GameHelpParent::Pause,
+        Some(GameScreen::Options {
+            parent: GameOptionsParent::Title,
+        }) => GameHelpParent::OptionsTitle,
+        Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }) => GameHelpParent::OptionsPause,
+        Some(GameScreen::Help { parent }) => parent,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -735,6 +790,8 @@ pub enum GameUiAction {
     JoinRemote,
     Resume,
     OpenBlockPalette,
+    OpenHelp(GameHelpParent),
+    CloseHelp(GameHelpParent),
     AssignHotbarBlock { slot: u8, block_state: u32 },
     OpenOptions(GameOptionsParent),
     BackToTitle,
@@ -1825,7 +1882,9 @@ const ID_JOIN_REMOTE_CONNECT: WidgetId = WidgetId(20);
 const ID_JOIN_REMOTE_BACK: WidgetId = WidgetId(21);
 const ID_OPTIONS_TOUCH_CONTROLS: WidgetId = WidgetId(22);
 const ID_OPTIONS_MOVEMENT_SPEED: WidgetId = WidgetId(23);
-const ID_OPTIONS_PLAYER_BOX: WidgetId = WidgetId(24);
+const ID_HELP_BACK: WidgetId = WidgetId(24);
+const ID_OPTIONS_PLAYER_BOX: WidgetId = WidgetId(25);
+const ID_OPTIONS_CONTROLS: WidgetId = WidgetId(26);
 const ID_BLOCK_PALETTE_BASE: u64 = 1000;
 
 const BLOCK_PALETTE_COLUMNS: usize = 10;
@@ -1905,6 +1964,9 @@ impl GameUi {
         matches!(
             self.screen,
             Some(GameScreen::Title | GameScreen::NewWorld | GameScreen::JoinRemote)
+        ) || matches!(
+            self.screen,
+            Some(GameScreen::Help { parent }) if parent.covers_world()
         )
     }
 
@@ -1991,6 +2053,13 @@ impl GameUi {
             return (false, None);
         };
         match (screen, key) {
+            (GameScreen::Help { parent }, GuiKey::Escape | GuiKey::F1) => {
+                (true, Some(GameUiAction::CloseHelp(parent)))
+            }
+            (screen, GuiKey::F1) => (
+                true,
+                Some(GameUiAction::OpenHelp(help_parent_for_screen(Some(screen)))),
+            ),
             (GameScreen::Pause, GuiKey::Escape) => (true, Some(GameUiAction::Resume)),
             (GameScreen::BlockPalette, GuiKey::Escape) => (true, Some(GameUiAction::Resume)),
             (GameScreen::NewWorld, GuiKey::Escape) => (true, Some(GameUiAction::BackToTitle)),
@@ -2014,6 +2083,14 @@ impl GameUi {
             }
             GameUiAction::OpenBlockPalette => {
                 self.screen = Some(GameScreen::BlockPalette);
+                self.pressed = None;
+            }
+            GameUiAction::OpenHelp(parent) => {
+                self.screen = Some(GameScreen::Help { parent });
+                self.pressed = None;
+            }
+            GameUiAction::CloseHelp(parent) => {
+                self.screen = parent.screen();
                 self.pressed = None;
             }
             GameUiAction::OpenJoinRemote => {
@@ -2060,6 +2137,7 @@ impl GameUi {
             Some(GameScreen::NewWorld) => self.render_new_world(&mut draw),
             Some(GameScreen::JoinRemote) => self.render_join_remote(&mut draw),
             Some(GameScreen::Pause) => self.render_pause(&mut draw),
+            Some(GameScreen::Help { parent }) => self.render_help(&mut draw, parent),
             Some(GameScreen::BlockPalette) => self.render_block_palette(&mut draw, state),
             Some(GameScreen::Options { parent }) => {
                 self.render_options_screen(&mut draw, state, parent)
@@ -2084,6 +2162,10 @@ impl GameUi {
                 .find(|button| button.contains(point))
                 .map(|button| button.id),
             GameScreen::Pause => pause_buttons(self.scale)
+                .into_iter()
+                .find(|button| button.contains(point))
+                .map(|button| button.id),
+            GameScreen::Help { .. } => help_buttons(self.scale)
                 .into_iter()
                 .find(|button| button.contains(point))
                 .map(|button| button.id),
@@ -2118,6 +2200,8 @@ impl GameUi {
                     Some(ID_OPTIONS_TOUCH_CONTROLS)
                 } else if rects.touch_look.is_some_and(|rect| rect.contains(point)) {
                     Some(ID_OPTIONS_TOUCH_LOOK)
+                } else if rects.controls.contains(point) {
+                    Some(ID_OPTIONS_CONTROLS)
                 } else if rects.back.contains(point) {
                     Some(ID_OPTIONS_BACK)
                 } else {
@@ -2141,6 +2225,10 @@ impl GameUi {
             ID_PAUSE_RESUME => Some(GameUiAction::Resume),
             ID_PAUSE_OPTIONS => Some(GameUiAction::OpenOptions(GameOptionsParent::Pause)),
             ID_PAUSE_TITLE => Some(GameUiAction::QuitToTitle),
+            ID_HELP_BACK => match self.screen {
+                Some(GameScreen::Help { parent }) => Some(GameUiAction::CloseHelp(parent)),
+                _ => None,
+            },
             id if block_palette_index_from_widget_id(id).is_some() => {
                 let index = block_palette_index_from_widget_id(id)?;
                 let entry = state
@@ -2165,6 +2253,9 @@ impl GameUi {
                 .touch_controls_mode
                 .map(next_touch_controls_mode)
                 .map(GameUiAction::SetTouchControlsMode),
+            ID_OPTIONS_CONTROLS => {
+                Some(GameUiAction::OpenHelp(help_parent_for_screen(self.screen)))
+            }
             ID_OPTIONS_BACK => match self.screen {
                 Some(GameScreen::Options {
                     parent: GameOptionsParent::Title,
@@ -2349,6 +2440,52 @@ impl GameUi {
         }
     }
 
+    fn render_help(&self, draw: &mut GuiDrawList, parent: GameHelpParent) {
+        if parent.covers_world() {
+            draw.fill_gradient(
+                Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+                Color::rgba(24, 44, 51, 255),
+                Color::rgba(7, 10, 12, 255),
+            );
+            draw.fill(
+                Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+                Color::rgba(0, 0, 0, 55),
+            );
+        } else {
+            draw.fill(
+                Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+                Color::rgba(0, 0, 0, 150),
+            );
+        }
+
+        let panel = help_panel(self.scale);
+        draw.fill_gradient(
+            panel,
+            Color::rgba(33, 45, 47, 245),
+            Color::rgba(15, 20, 22, 245),
+        );
+        draw.outline(panel, Color::rgba(130, 166, 154, 255));
+        self.font.draw_centered(
+            draw,
+            "CONTROLS",
+            panel.center_x(),
+            panel.y + 8.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        self.font.draw_centered(
+            draw,
+            "F1 / ESC BACK",
+            panel.center_x(),
+            panel.y + 20.0,
+            Color::rgba(185, 212, 198, 255),
+        );
+        render_controls_shortcut_table(draw, &self.font, panel);
+
+        for button in help_buttons(self.scale) {
+            button.render(draw, &self.font, self.interaction());
+        }
+    }
+
     fn render_block_palette(&self, draw: &mut GuiDrawList, state: GameUiRenderState) {
         let overlay = state.block_palette;
         if !overlay.visible {
@@ -2494,6 +2631,11 @@ impl GameUi {
             )
             .render(draw, &self.font, self.interaction());
         }
+        Button::new(ID_OPTIONS_CONTROLS, widgets.controls, "Controls").render(
+            draw,
+            &self.font,
+            self.interaction(),
+        );
         Button::new(
             ID_OPTIONS_BACK,
             widgets.back,
@@ -2519,6 +2661,7 @@ struct OptionWidgetRects {
     movement_speed: Rect,
     touch_controls: Option<Rect>,
     touch_look: Option<Rect>,
+    controls: Rect,
     back: Rect,
 }
 
@@ -2584,6 +2727,97 @@ fn pause_buttons(scale: GuiScale) -> [Button; 3] {
             "Quit To Title",
         ),
     ]
+}
+
+fn help_panel(scale: GuiScale) -> Rect {
+    centered_panel(scale, 432.0, 264.0)
+}
+
+fn help_buttons(scale: GuiScale) -> [Button; 1] {
+    let panel = help_panel(scale);
+    [Button::new(
+        ID_HELP_BACK,
+        Rect::new(panel.center_x() - 45.0, panel.bottom() - 25.0, 90.0, 20.0),
+        "Back",
+    )]
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ControlsHelpRow {
+    Group(ShortcutHelpGroup),
+    Shortcut(ShortcutHelpRow),
+}
+
+fn controls_help_rows() -> Vec<ControlsHelpRow> {
+    let mut rows = Vec::new();
+    rows.push(ControlsHelpRow::Group(ShortcutHelpGroup::KeyboardMouse));
+    rows.extend(
+        default_keyboard_mouse_shortcut_rows()
+            .into_iter()
+            .map(ControlsHelpRow::Shortcut),
+    );
+    rows.push(ControlsHelpRow::Group(ShortcutHelpGroup::RuntimeDebug));
+    rows.extend(
+        flat_runtime_shortcut_rows()
+            .into_iter()
+            .map(ControlsHelpRow::Shortcut),
+    );
+    rows
+}
+
+fn render_controls_shortcut_table(draw: &mut GuiDrawList, font: &Font, panel: Rect) {
+    let rows = controls_help_rows();
+    let split = (rows.len() + 1) / 2;
+    let column_gap = 10.0;
+    let column_width = (panel.width - 24.0 - column_gap) * 0.5;
+    let left_x = panel.x + 12.0;
+    let right_x = left_x + column_width + column_gap;
+    let y = panel.y + 34.0;
+    render_controls_shortcut_column(draw, font, left_x, y, column_width, &rows[..split]);
+    render_controls_shortcut_column(draw, font, right_x, y, column_width, &rows[split..]);
+}
+
+fn render_controls_shortcut_column(
+    draw: &mut GuiDrawList,
+    font: &Font,
+    x: f32,
+    y: f32,
+    width: f32,
+    rows: &[ControlsHelpRow],
+) {
+    let control_width = 72.0_f32.min(width * 0.45);
+    let mut row_y = y;
+    for row in rows {
+        match row {
+            ControlsHelpRow::Group(group) => {
+                font.draw_shadow(
+                    draw,
+                    group.label(),
+                    x,
+                    row_y,
+                    Color::rgba(220, 238, 220, 255),
+                );
+                row_y += font.line_height() + 2.0;
+            }
+            ControlsHelpRow::Shortcut(row) => {
+                font.draw_shadow(
+                    draw,
+                    &row.control,
+                    x,
+                    row_y,
+                    Color::rgba(185, 212, 198, 255),
+                );
+                font.draw_shadow(
+                    draw,
+                    &row.action,
+                    x + control_width,
+                    row_y,
+                    Color::rgba(214, 226, 218, 255),
+                );
+                row_y += font.line_height();
+            }
+        }
+    }
 }
 
 fn block_palette_widget_id(index: usize) -> WidgetId {
@@ -2770,6 +3004,8 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
         None
     };
     y += 6.0;
+    let controls = Rect::new(panel.center_x() - 55.0, y, 110.0, 20.0);
+    y += 22.0;
     let back = Rect::new(panel.center_x() - 55.0, y, 110.0, 20.0);
 
     OptionWidgetRects {
@@ -2784,6 +3020,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
         movement_speed,
         touch_controls,
         touch_look,
+        controls,
         back,
     }
 }
@@ -2791,7 +3028,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
 fn options_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
     let touch_rows =
         u8::from(state.touch_controls_mode.is_some()) + u8::from(state.touch_settings.is_some());
-    centered_panel(scale, 242.0, 264.0 + f32::from(touch_rows) * 22.0)
+    centered_panel(scale, 242.0, 286.0 + f32::from(touch_rows) * 22.0)
 }
 
 fn render_distance_slider_value(state: GameUiRenderState) -> f32 {
@@ -3580,6 +3817,86 @@ mod tests {
     }
 
     #[test]
+    fn game_ui_help_renders_and_returns_to_parent() {
+        let mut ui = GameUi::new_ingame();
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        ui.apply_action(GameUiAction::OpenHelp(GameHelpParent::Game));
+        assert_eq!(
+            ui.screen(),
+            Some(GameScreen::Help {
+                parent: GameHelpParent::Game
+            })
+        );
+        assert!(!ui.covers_world());
+        assert!(
+            !ui.render_draw_list(GameUiRenderState::default())
+                .commands()
+                .is_empty()
+        );
+
+        let (handled, action) = ui.key_pressed(GuiKey::Escape);
+        assert_eq!(handled, true);
+        assert_eq!(action, Some(GameUiAction::CloseHelp(GameHelpParent::Game)));
+        ui.apply_action(action.unwrap());
+        assert_eq!(ui.screen(), None);
+
+        ui.set_screen(Some(GameScreen::Title));
+        let (handled, action) = ui.key_pressed(GuiKey::F1);
+        assert_eq!(handled, true);
+        assert_eq!(action, Some(GameUiAction::OpenHelp(GameHelpParent::Title)));
+        ui.apply_action(action.unwrap());
+        assert!(ui.covers_world());
+
+        let (handled, action) = ui.key_pressed(GuiKey::F1);
+        assert_eq!(handled, true);
+        assert_eq!(action, Some(GameUiAction::CloseHelp(GameHelpParent::Title)));
+        ui.apply_action(action.unwrap());
+        assert_eq!(ui.screen(), Some(GameScreen::Title));
+    }
+
+    #[test]
+    fn game_ui_controls_rows_are_catalog_driven() {
+        let rows = controls_help_rows();
+
+        assert!(rows.contains(&ControlsHelpRow::Group(ShortcutHelpGroup::KeyboardMouse)));
+        assert!(rows.contains(&ControlsHelpRow::Group(ShortcutHelpGroup::RuntimeDebug)));
+        assert!(rows.iter().any(|row| matches!(
+            row,
+            ControlsHelpRow::Shortcut(shortcut)
+                if shortcut.control == "F1" && shortcut.action == "Open Controls"
+        )));
+        assert!(rows.iter().any(|row| matches!(
+            row,
+            ControlsHelpRow::Shortcut(shortcut)
+                if shortcut.control == "F8" && shortcut.action == "Renderer Rebuild"
+        )));
+    }
+
+    #[test]
+    fn options_controls_button_opens_controls_screen() {
+        let mut ui = GameUi::new();
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Title,
+        }));
+        let state = GameUiRenderState::default();
+        let controls = option_widgets(ui.scale(), state).controls;
+        let point = Point {
+            x: controls.center_x(),
+            y: controls.y + controls.height * 0.5,
+        };
+
+        assert!(ui.pointer_down(point, state));
+        let (handled, action) = ui.pointer_up(point, state);
+
+        assert!(handled);
+        assert_eq!(
+            action,
+            Some(GameUiAction::OpenHelp(GameHelpParent::OptionsTitle))
+        );
+    }
+
+    #[test]
     fn game_ui_new_world_flow_emits_seeded_create_action() {
         let mut ui = GameUi::new();
         ui.set_scale(GuiScale::from_pixels(960, 540));
@@ -3925,6 +4242,14 @@ mod tests {
         assert_eq!(
             ui.key_pressed(GuiKey::Escape),
             (true, Some(GameUiAction::BackToTitle))
+        );
+
+        assert_eq!(
+            ui.key_pressed(GuiKey::F1),
+            (
+                true,
+                Some(GameUiAction::OpenHelp(GameHelpParent::OptionsTitle))
+            )
         );
     }
 

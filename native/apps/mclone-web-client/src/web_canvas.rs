@@ -65,9 +65,9 @@ use mclone_ui::{
     DebugOverlay, FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts,
     FlatDebugMeshCounts, FlatDebugOverlay, FlatDebugRenderOptions, FlatDebugRunner,
     FlatDebugTarget, FlatDebugView, FlatHotbarOverlay, FlatHud, GameFramePacingMode,
-    GameMovementMode, GameOptionsParent, GameScreen, GameTouchSettings, GameUi, GameUiAction,
-    GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
-    render_debug_overlay_at, render_flat_hud,
+    GameHelpParent, GameMovementMode, GameOptionsParent, GameScreen, GameTouchSettings, GameUi,
+    GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay, TouchJoystickOverlay,
+    TouchOverlay, render_debug_overlay_at, render_flat_hud,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -2516,6 +2516,13 @@ impl WebChunkRenderSession {
         self.ui_status_to_js_value().map_err(JsValue::from)
     }
 
+    #[wasm_bindgen(js_name = openHelpUi)]
+    pub fn open_help_ui(&mut self) -> Result<JsValue, JsValue> {
+        self.ui
+            .apply_action(GameUiAction::OpenHelp(GameHelpParent::Game));
+        self.ui_status_to_js_value().map_err(JsValue::from)
+    }
+
     #[wasm_bindgen(js_name = openOptionsUi)]
     pub fn open_options_ui(&mut self, parent: &str) -> Result<JsValue, JsValue> {
         let parent = match parent {
@@ -2904,6 +2911,8 @@ impl WebChunkRenderSession {
             }
             GameUiAction::StartWorld
             | GameUiAction::OpenBlockPalette
+            | GameUiAction::OpenHelp(_)
+            | GameUiAction::CloseHelp(_)
             | GameUiAction::OpenNewWorld
             | GameUiAction::OpenJoinRemote
             | GameUiAction::RerollSeed
@@ -2969,6 +2978,8 @@ impl WebChunkRenderSession {
                 }
                 GameUiAction::StartWorld
                 | GameUiAction::OpenBlockPalette
+                | GameUiAction::OpenHelp(_)
+                | GameUiAction::CloseHelp(_)
                 | GameUiAction::OpenNewWorld
                 | GameUiAction::OpenJoinRemote
                 | GameUiAction::RerollSeed
@@ -4547,6 +4558,7 @@ fn started_web_session_coordinator(
 fn gui_key_from_label(label: &str) -> Option<GuiKey> {
     match label {
         "escape" | "Escape" => Some(GuiKey::Escape),
+        "f1" | "F1" => Some(GuiKey::F1),
         _ => None,
     }
 }
@@ -4557,6 +4569,7 @@ fn ui_screen_label(screen: Option<GameScreen>) -> &'static str {
         Some(GameScreen::NewWorld) => "newWorld",
         Some(GameScreen::JoinRemote) => "joinRemote",
         Some(GameScreen::Pause) => "pause",
+        Some(GameScreen::Help { .. }) => "help",
         Some(GameScreen::BlockPalette) => "blockPalette",
         Some(GameScreen::Options { .. }) => "options",
         None => "none",
@@ -4574,6 +4587,8 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
     match action {
         GameUiAction::StartWorld => "startWorld",
         GameUiAction::OpenBlockPalette => "openBlockPalette",
+        GameUiAction::OpenHelp(_) => "openHelp",
+        GameUiAction::CloseHelp(_) => "closeHelp",
         GameUiAction::OpenNewWorld => "openNewWorld",
         GameUiAction::OpenJoinRemote => "openJoinRemote",
         GameUiAction::RerollSeed => "rerollSeed",

@@ -29,6 +29,7 @@ export interface InputBindingApp {
   queueMouseDelta(dx: number, dy: number): void;
   interactBlock(action: string): Promise<any>;
   openNativePauseUi(): WasmReport | null;
+  openNativeHelpUi(): WasmReport | null;
   setNativeDebugOverlay(open: boolean): WasmReport | null;
   handleNativeUiKey(key: string): WasmReport | null;
   handleNativeUiPointerMove(clientX: number, clientY: number, pointerType?: string): WasmReport | null;
@@ -58,6 +59,19 @@ export function bindInput(
         app.handleNativeUiKey("escape");
       } else if (!event.repeat) {
         app.openNativePauseUi();
+      }
+      publishRuntimeState();
+      return;
+    }
+    if (isHelpKey(event)) {
+      event.preventDefault();
+      if (event.repeat) {
+        return;
+      }
+      if (runtimeState.uiActive === true) {
+        app.handleNativeUiKey("f1");
+      } else {
+        app.openNativeHelpUi();
       }
       publishRuntimeState();
       return;
@@ -210,6 +224,10 @@ export function bindInput(
 
 function isEscapeKey(event: KeyboardEvent): boolean {
   return keyboardCode(event) === "Escape" || (keyboardCode(event) === null && event.key === "Escape");
+}
+
+function isHelpKey(event: KeyboardEvent): boolean {
+  return keyboardCode(event) === "F1" || (keyboardCode(event) === null && event.key === "F1");
 }
 
 function inputNameForEvent(event: KeyboardEvent): string | null {

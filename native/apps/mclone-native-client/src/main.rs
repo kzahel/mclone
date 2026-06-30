@@ -844,6 +844,14 @@ mod tests {
             HeadlessScreenshotUi::JoinRemote
         );
         assert_eq!(
+            parse_screenshot_ui_arg("--screenshot-ui", Some("help".to_owned())).unwrap(),
+            HeadlessScreenshotUi::Help
+        );
+        assert_eq!(
+            parse_screenshot_ui_arg("--screenshot-ui", Some("controls".to_owned())).unwrap(),
+            HeadlessScreenshotUi::Help
+        );
+        assert_eq!(
             parse_screenshot_ui_arg("--screenshot-ui", Some("block-palette".to_owned())).unwrap(),
             HeadlessScreenshotUi::BlockPalette
         );

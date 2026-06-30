@@ -79,6 +79,7 @@ interface AppRuntime {
   previewBlockTarget?: () => WasmReport | null;
   openNativeTitleUi?: () => WasmReport | null;
   openNativePauseUi?: () => WasmReport | null;
+  openNativeHelpUi?: () => WasmReport | null;
   closeNativeUi?: () => WasmReport | null;
   handleNativeUiKey?: (key: string) => WasmReport | null;
   handleNativeUiPointerMove?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
@@ -231,6 +232,7 @@ async function boot(): Promise<WasmReport> {
   runtime.previewBlockTarget = () => runtime.state.currentTarget;
   runtime.openNativeTitleUi = () => app.openNativeTitleUi();
   runtime.openNativePauseUi = () => app.openNativePauseUi();
+  runtime.openNativeHelpUi = () => app.openNativeHelpUi();
   runtime.closeNativeUi = () => app.closeNativeUi();
   runtime.handleNativeUiKey = (key: string) => app.handleNativeUiKey(key);
   runtime.handleNativeUiPointerMove = (clientX: number, clientY: number, pointerType?: string) => (
@@ -427,6 +429,7 @@ class WebChunkApp {
       "interactBlock",
       "openTitleUi",
       "openPauseUi",
+      "openHelpUi",
       "closeUi",
       "uiStatus",
       "handleUiKey",
@@ -957,6 +960,19 @@ class WebChunkApp {
       return null;
     }
     const report = this.session.openPauseUi();
+    this.applyNativeUiReport(report);
+    return report;
+  }
+
+  openNativeHelpUi(): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    if (this.sessionBusy) {
+      setTimeout(() => this.openNativeHelpUi(), 0);
+      return null;
+    }
+    const report = this.session.openHelpUi();
     this.applyNativeUiReport(report);
     return report;
   }

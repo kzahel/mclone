@@ -3358,6 +3358,8 @@ where
             }
             GameUiAction::StartWorld
             | GameUiAction::Resume
+            | GameUiAction::OpenHelp(_)
+            | GameUiAction::CloseHelp(_)
             | GameUiAction::OpenOptions(_)
             | GameUiAction::BackToPause => {}
             GameUiAction::OpenBlockPalette => {

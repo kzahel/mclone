@@ -24,8 +24,8 @@ use mclone_render::chunk::{
     ChunkCamera, ChunkTextureAtlas, TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::RenderConfig;
-use mclone_render::entity::{ActorFigure, ActorInstance};
 use mclone_render::entity::ActorTextureAtlas;
+use mclone_render::entity::{ActorFigure, ActorInstance};
 use mclone_render::screen_effect::{UnderwaterEffectState, UnderwaterOverlay};
 use mclone_render::selection_outline::SelectionOutline;
 use mclone_render_session::{
@@ -35,10 +35,10 @@ use mclone_render_session::{
     local_player_actor_instance, render_camera_from_snapshot_with_view_mode,
 };
 use mclone_ui::{
-    BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameMovementMode,
-    GameScreen, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale,
-    LoadingProgressOverlay, Point, StatusOverlay, render_flat_hud, render_loading_progress_overlay,
-    render_loading_progress_panel_at, touch_controls_mode_label,
+    BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameHelpParent,
+    GameMovementMode, GameScreen, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey,
+    GuiScale, LoadingProgressOverlay, Point, StatusOverlay, render_flat_hud,
+    render_loading_progress_overlay, render_loading_progress_panel_at, touch_controls_mode_label,
 };
 
 use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
@@ -354,6 +354,10 @@ impl FlatClientDriver {
 
     pub(crate) fn open_pause_menu(&mut self) {
         self.ui.open_pause();
+    }
+
+    pub(crate) fn open_help(&mut self, parent: GameHelpParent) {
+        self.ui.apply_action(GameUiAction::OpenHelp(parent));
     }
 
     pub(crate) fn ui_key_pressed(&mut self, key: GuiKey) -> (bool, Option<GameUiAction>) {
@@ -767,6 +771,8 @@ impl FlatClientDriver {
             GameUiAction::StartWorld
             | GameUiAction::Resume
             | GameUiAction::OpenBlockPalette
+            | GameUiAction::OpenHelp(_)
+            | GameUiAction::CloseHelp(_)
             | GameUiAction::OpenOptions(_)
             | GameUiAction::BackToPause
             | GameUiAction::SetTouchLookSensitivity(_) => {}

@@ -4,8 +4,8 @@ use mclone_app_runtime::frame_render::RenderStreamStats;
 use mclone_core::ChunkPos;
 use mclone_ui::{
     FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts, FlatDebugOverlay,
-    FlatDebugRenderOptions, FlatDebugRunner, FlatDebugView, GameOptionsParent, GameScreen,
-    GuiDrawList, GuiScale, render_debug_overlay,
+    FlatDebugRenderOptions, FlatDebugRunner, FlatDebugView, GameHelpParent, GameOptionsParent,
+    GameScreen, GuiDrawList, GuiScale, render_debug_overlay,
 };
 
 use crate::cli::HeadlessScreenshotUi;
@@ -189,6 +189,9 @@ impl HeadlessScreenshotUi {
             Self::NewWorld => Some(GameScreen::NewWorld),
             Self::JoinRemote => Some(GameScreen::JoinRemote),
             Self::Pause => Some(GameScreen::Pause),
+            Self::Help => Some(GameScreen::Help {
+                parent: GameHelpParent::Game,
+            }),
             Self::BlockPalette => Some(GameScreen::BlockPalette),
             Self::OptionsTitle => Some(GameScreen::Options {
                 parent: GameOptionsParent::Title,

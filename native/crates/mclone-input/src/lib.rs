@@ -268,6 +268,17 @@ pub enum MovementDirection {
     Right,
 }
 
+impl MovementDirection {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Forward => "Move Forward",
+            Self::Backward => "Move Backward",
+            Self::Left => "Move Left",
+            Self::Right => "Move Right",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FlatInputAction {
@@ -279,6 +290,7 @@ pub enum FlatInputAction {
     Use,
     OpenMenu,
     OpenBlockPalette,
+    OpenHelp,
     ToggleCameraView,
 }
 
@@ -337,6 +349,8 @@ pub struct FlatInputFrame {
     pub use_item: bool,
     pub open_menu: bool,
     pub open_block_palette: bool,
+    #[serde(default)]
+    pub open_help: bool,
     #[serde(default)]
     pub toggle_camera_view: bool,
     pub selected_hotbar_slot: Option<u8>,
@@ -426,6 +440,7 @@ impl FlatInputFrame {
             FlatInputAction::Use => self.use_item = true,
             FlatInputAction::OpenMenu => self.open_menu = true,
             FlatInputAction::OpenBlockPalette => self.open_block_palette = true,
+            FlatInputAction::OpenHelp => self.open_help = true,
             FlatInputAction::ToggleCameraView => self.toggle_camera_view = true,
         }
     }
@@ -463,6 +478,9 @@ impl FlatInputFrame {
             InputBindingAction::OpenMenu => self.press_action(FlatInputAction::OpenMenu),
             InputBindingAction::OpenBlockPalette => {
                 self.press_action(FlatInputAction::OpenBlockPalette);
+            }
+            InputBindingAction::OpenHelp => {
+                self.press_action(FlatInputAction::OpenHelp);
             }
             InputBindingAction::ToggleCameraView => {
                 self.press_action(FlatInputAction::ToggleCameraView);
@@ -531,6 +549,7 @@ impl Default for KeyboardMouseBindings {
             KeyboardMouseBinding::key(KeyboardKey::Escape, InputBindingAction::OpenMenu),
             KeyboardMouseBinding::key(KeyboardKey::KeyE, InputBindingAction::OpenBlockPalette),
             KeyboardMouseBinding::key(KeyboardKey::KeyB, InputBindingAction::OpenBlockPalette),
+            KeyboardMouseBinding::key(KeyboardKey::F1, InputBindingAction::OpenHelp),
             KeyboardMouseBinding::key(KeyboardKey::F5, InputBindingAction::ToggleCameraView),
             KeyboardMouseBinding::mouse_button(PointerButton::Primary, InputBindingAction::Attack),
             KeyboardMouseBinding::mouse_button(PointerButton::Secondary, InputBindingAction::Use),
@@ -560,6 +579,138 @@ impl Default for KeyboardMouseBindings {
     }
 }
 
+impl KeyboardMouseBindings {
+    pub fn shortcut_rows(&self) -> Vec<ShortcutHelpRow> {
+        self.bindings
+            .iter()
+            .map(KeyboardMouseBinding::shortcut_row)
+            .collect()
+    }
+}
+
+pub fn default_keyboard_mouse_shortcut_rows() -> Vec<ShortcutHelpRow> {
+    KeyboardMouseBindings::default().shortcut_rows()
+}
+
+pub fn flat_runtime_shortcut_rows() -> Vec<ShortcutHelpRow> {
+    FLAT_RUNTIME_SHORTCUTS
+        .iter()
+        .map(RuntimeShortcutBinding::shortcut_row)
+        .collect()
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ShortcutHelpRow {
+    pub group: ShortcutHelpGroup,
+    pub control: String,
+    pub action: String,
+    pub remappable: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShortcutHelpGroup {
+    KeyboardMouse,
+    RuntimeDebug,
+}
+
+impl ShortcutHelpGroup {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::KeyboardMouse => "Keyboard / Mouse",
+            Self::RuntimeDebug => "Runtime / Debug",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeShortcutBinding {
+    pub control: KeyboardMouseControl,
+    pub action: RuntimeShortcutAction,
+}
+
+impl RuntimeShortcutBinding {
+    pub const fn new(control: KeyboardMouseControl, action: RuntimeShortcutAction) -> Self {
+        Self { control, action }
+    }
+
+    pub fn shortcut_row(&self) -> ShortcutHelpRow {
+        ShortcutHelpRow {
+            group: ShortcutHelpGroup::RuntimeDebug,
+            control: self.control.label(),
+            action: self.action.label().to_owned(),
+            remappable: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeShortcutAction {
+    ToggleMovementMode,
+    IncreaseFlySpeed,
+    DecreaseFlySpeed,
+    ToggleDebugPane,
+    ToggleSectionOcclusion,
+    ToggleFullbright,
+    ShootDebugPhysicsCube,
+    RebuildRenderResources,
+    CycleRenderScaleRebuild,
+}
+
+impl RuntimeShortcutAction {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ToggleMovementMode => "Movement Mode",
+            Self::IncreaseFlySpeed => "Increase Fly Speed",
+            Self::DecreaseFlySpeed => "Decrease Fly Speed",
+            Self::ToggleDebugPane => "Toggle Debug Pane",
+            Self::ToggleSectionOcclusion => "Occlusion Toggle",
+            Self::ToggleFullbright => "Toggle Fullbright",
+            Self::ShootDebugPhysicsCube => "Shoot Debug Cube",
+            Self::RebuildRenderResources => "Renderer Rebuild",
+            Self::CycleRenderScaleRebuild => "Render Scale Cycle",
+        }
+    }
+}
+
+pub const FLAT_RUNTIME_SHORTCUTS: &[RuntimeShortcutBinding] = &[
+    RuntimeShortcutBinding::new(
+        KeyboardMouseControl::Key(KeyboardKey::KeyN),
+        RuntimeShortcutAction::ToggleMovementMode,
+    ),
+    RuntimeShortcutBinding::new(
+        KeyboardMouseControl::MouseWheelUp,
+        RuntimeShortcutAction::IncreaseFlySpeed,
+    ),
+    RuntimeShortcutBinding::new(
+        KeyboardMouseControl::MouseWheelDown,
+        RuntimeShortcutAction::DecreaseFlySpeed,
+    ),
+    RuntimeShortcutBinding::new(
+        KeyboardMouseControl::Key(KeyboardKey::Backquote),
+        RuntimeShortcutAction::ToggleDebugPane,
+    ),
+    RuntimeShortcutBinding::new(
+        KeyboardMouseControl::Key(KeyboardKey::KeyO),
+        RuntimeShortcutAction::ToggleSectionOcclusion,
+    ),
+    RuntimeShortcutBinding::new(
+        KeyboardMouseControl::Key(KeyboardKey::KeyL),
+        RuntimeShortcutAction::ToggleFullbright,
+    ),
+    RuntimeShortcutBinding::new(
+        KeyboardMouseControl::Key(KeyboardKey::F7),
+        RuntimeShortcutAction::ShootDebugPhysicsCube,
+    ),
+    RuntimeShortcutBinding::new(
+        KeyboardMouseControl::Key(KeyboardKey::F8),
+        RuntimeShortcutAction::RebuildRenderResources,
+    ),
+    RuntimeShortcutBinding::new(
+        KeyboardMouseControl::Key(KeyboardKey::F9),
+        RuntimeShortcutAction::CycleRenderScaleRebuild,
+    ),
+];
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyboardMouseBinding {
@@ -581,6 +732,15 @@ impl KeyboardMouseBinding {
             action,
         }
     }
+
+    pub fn shortcut_row(&self) -> ShortcutHelpRow {
+        ShortcutHelpRow {
+            group: ShortcutHelpGroup::KeyboardMouse,
+            control: self.control.label(),
+            action: self.action.label(),
+            remappable: true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -593,6 +753,18 @@ pub enum KeyboardMouseControl {
     MouseWheelDown,
 }
 
+impl KeyboardMouseControl {
+    pub fn label(self) -> String {
+        match self {
+            Self::Key(key) => key.label().to_owned(),
+            Self::MouseButton(button) => button.label().to_owned(),
+            Self::MouseMotion => "Mouse Move".to_owned(),
+            Self::MouseWheelUp => "Wheel Up".to_owned(),
+            Self::MouseWheelDown => "Wheel Down".to_owned(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum KeyboardKey {
@@ -602,14 +774,22 @@ pub enum KeyboardKey {
     KeyD,
     KeyE,
     KeyB,
+    KeyL,
+    KeyN,
+    KeyO,
     KeyX,
+    Backquote,
     Space,
     ShiftLeft,
     ShiftRight,
     ControlLeft,
     ControlRight,
     Escape,
+    F1,
     F5,
+    F7,
+    F8,
+    F9,
     Digit1,
     Digit2,
     Digit3,
@@ -636,6 +816,42 @@ impl KeyboardKey {
             _ => None,
         }
     }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::KeyW => "W",
+            Self::KeyA => "A",
+            Self::KeyS => "S",
+            Self::KeyD => "D",
+            Self::KeyE => "E",
+            Self::KeyB => "B",
+            Self::KeyL => "L",
+            Self::KeyN => "N",
+            Self::KeyO => "O",
+            Self::KeyX => "X",
+            Self::Backquote => "`",
+            Self::Space => "Space",
+            Self::ShiftLeft => "Left Shift",
+            Self::ShiftRight => "Right Shift",
+            Self::ControlLeft => "Left Ctrl",
+            Self::ControlRight => "Right Ctrl",
+            Self::Escape => "Esc",
+            Self::F1 => "F1",
+            Self::F5 => "F5",
+            Self::F7 => "F7",
+            Self::F8 => "F8",
+            Self::F9 => "F9",
+            Self::Digit1 => "1",
+            Self::Digit2 => "2",
+            Self::Digit3 => "3",
+            Self::Digit4 => "4",
+            Self::Digit5 => "5",
+            Self::Digit6 => "6",
+            Self::Digit7 => "7",
+            Self::Digit8 => "8",
+            Self::Digit9 => "9",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -644,6 +860,16 @@ pub enum PointerButton {
     Primary,
     Secondary,
     Middle,
+}
+
+impl PointerButton {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Primary => "LMB",
+            Self::Secondary => "RMB",
+            Self::Middle => "MMB",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -880,6 +1106,7 @@ impl KeyboardMouseHeldState {
             | InputBindingAction::PreviousHotbarSlot
             | InputBindingAction::OpenMenu
             | InputBindingAction::OpenBlockPalette
+            | InputBindingAction::OpenHelp
             | InputBindingAction::ToggleCameraView => false,
         }
     }
@@ -1059,7 +1286,31 @@ pub enum InputBindingAction {
     PreviousHotbarSlot,
     OpenMenu,
     OpenBlockPalette,
+    OpenHelp,
     ToggleCameraView,
+}
+
+impl InputBindingAction {
+    pub fn label(self) -> String {
+        match self {
+            Self::Move(direction) => direction.label().to_owned(),
+            Self::MoveAnalog => "Move".to_owned(),
+            Self::Look => "Look".to_owned(),
+            Self::Jump => "Jump".to_owned(),
+            Self::Sprint => "Sprint".to_owned(),
+            Self::Sneak => "Sneak".to_owned(),
+            Self::Descend => "Descend".to_owned(),
+            Self::Attack => "Break / Attack".to_owned(),
+            Self::Use => "Use / Place".to_owned(),
+            Self::SelectHotbarSlot(slot) => format!("Hotbar Slot {}", u16::from(slot) + 1),
+            Self::NextHotbarSlot => "Next Hotbar Slot".to_owned(),
+            Self::PreviousHotbarSlot => "Prev Hotbar Slot".to_owned(),
+            Self::OpenMenu => "Open Menu".to_owned(),
+            Self::OpenBlockPalette => "Open Block Palette".to_owned(),
+            Self::OpenHelp => "Open Controls".to_owned(),
+            Self::ToggleCameraView => "Toggle Camera View".to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -1622,6 +1873,10 @@ mod tests {
             InputBindingAction::OpenBlockPalette
         )));
         assert!(bindings.bindings.contains(&KeyboardMouseBinding::key(
+            KeyboardKey::F1,
+            InputBindingAction::OpenHelp
+        )));
+        assert!(bindings.bindings.contains(&KeyboardMouseBinding::key(
             KeyboardKey::F5,
             InputBindingAction::ToggleCameraView
         )));
@@ -1637,6 +1892,49 @@ mod tests {
             KeyboardKey::Digit9,
             InputBindingAction::SelectHotbarSlot(8)
         )));
+    }
+
+    #[test]
+    fn default_keyboard_mouse_shortcut_rows_are_generated_from_bindings() {
+        let bindings = KeyboardMouseBindings::default();
+        let rows = bindings.shortcut_rows();
+
+        assert_eq!(rows.len(), bindings.bindings.len());
+        assert_eq!(default_keyboard_mouse_shortcut_rows(), rows);
+        for (binding, row) in bindings.bindings.iter().zip(rows.iter()) {
+            assert_eq!(row.group, ShortcutHelpGroup::KeyboardMouse);
+            assert_eq!(row.control, binding.control.label());
+            assert_eq!(row.action, binding.action.label());
+            assert!(row.remappable);
+            assert!(!row.control.is_empty());
+            assert!(!row.action.is_empty());
+        }
+    }
+
+    #[test]
+    fn flat_runtime_shortcut_rows_cover_current_debug_keys() {
+        let rows = flat_runtime_shortcut_rows();
+        let controls = FLAT_RUNTIME_SHORTCUTS
+            .iter()
+            .map(|binding| binding.control)
+            .collect::<Vec<_>>();
+
+        assert_eq!(rows.len(), FLAT_RUNTIME_SHORTCUTS.len());
+        assert!(controls.contains(&KeyboardMouseControl::Key(KeyboardKey::KeyN)));
+        assert!(controls.contains(&KeyboardMouseControl::MouseWheelUp));
+        assert!(controls.contains(&KeyboardMouseControl::MouseWheelDown));
+        assert!(controls.contains(&KeyboardMouseControl::Key(KeyboardKey::Backquote)));
+        assert!(controls.contains(&KeyboardMouseControl::Key(KeyboardKey::KeyO)));
+        assert!(controls.contains(&KeyboardMouseControl::Key(KeyboardKey::KeyL)));
+        assert!(controls.contains(&KeyboardMouseControl::Key(KeyboardKey::F7)));
+        assert!(controls.contains(&KeyboardMouseControl::Key(KeyboardKey::F8)));
+        assert!(controls.contains(&KeyboardMouseControl::Key(KeyboardKey::F9)));
+        for row in rows {
+            assert_eq!(row.group, ShortcutHelpGroup::RuntimeDebug);
+            assert!(!row.remappable);
+            assert!(!row.control.is_empty());
+            assert!(!row.action.is_empty());
+        }
     }
 
     #[test]
@@ -1695,6 +1993,16 @@ mod tests {
         assert!(palette.open_block_palette);
 
         let repeat = adapter.handle_key(KeyboardKey::KeyE, true, true);
+        assert!(repeat.handled);
+        assert!(repeat.frame.is_none());
+
+        let help = adapter
+            .handle_key(KeyboardKey::F1, true, false)
+            .frame
+            .expect("F1 should emit help frame");
+        assert!(help.open_help);
+
+        let repeat = adapter.handle_key(KeyboardKey::F1, true, true);
         assert!(repeat.handled);
         assert!(repeat.frame.is_none());
 

@@ -14,8 +14,8 @@ use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameScreen, GameUi, GameUiAction,
-    GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay,
+    DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameHelpParent, GameScreen, GameUi,
+    GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -94,6 +94,7 @@ fn next_desktop_render_scale(current: f32) -> f32 {
 fn gui_key_from_key_code(key_code: KeyCode) -> Option<GuiKey> {
     match key_code {
         KeyCode::Escape => Some(GuiKey::Escape),
+        KeyCode::F1 => Some(GuiKey::F1),
         _ => None,
     }
 }
@@ -329,6 +330,15 @@ impl ChunkApp {
         if frame.open_block_palette {
             self.mouse_lock_requested = false;
             self.driver.open_block_palette();
+            self.clear_flat_gameplay_input();
+            self.last_cursor = None;
+            self.sync_mouse_lock();
+            self.schedule_next_redraw(event_loop);
+            return true;
+        }
+        if frame.open_help {
+            self.mouse_lock_requested = false;
+            self.driver.open_help(GameHelpParent::Game);
             self.clear_flat_gameplay_input();
             self.last_cursor = None;
             self.sync_mouse_lock();
@@ -949,7 +959,9 @@ impl ApplicationHandler for ChunkApp {
                         return;
                     }
                     if event.state == ElementState::Pressed && self.driver.ui_is_active() {
-                        if let Some(gui_key) = gui_key_from_key_code(key_code) {
+                        if !event.repeat
+                            && let Some(gui_key) = gui_key_from_key_code(key_code)
+                        {
                             let (handled, action) = self.driver.ui_key_pressed(gui_key);
                             if let Some(action) = action {
                                 self.apply_ui_action(action, event_loop, false);
@@ -1272,6 +1284,7 @@ fn desktop_keyboard_key_from_key_code(key_code: KeyCode) -> Option<KeyboardKey> 
         KeyCode::ControlLeft => Some(KeyboardKey::ControlLeft),
         KeyCode::ControlRight => Some(KeyboardKey::ControlRight),
         KeyCode::Escape => Some(KeyboardKey::Escape),
+        KeyCode::F1 => Some(KeyboardKey::F1),
         KeyCode::F5 => Some(KeyboardKey::F5),
         KeyCode::Digit1 => Some(KeyboardKey::Digit1),
         KeyCode::Digit2 => Some(KeyboardKey::Digit2),
@@ -1683,6 +1696,10 @@ mod tests {
         assert_eq!(
             desktop_keyboard_key_from_key_code(KeyCode::ControlLeft),
             Some(KeyboardKey::ControlLeft)
+        );
+        assert_eq!(
+            desktop_keyboard_key_from_key_code(KeyCode::F1),
+            Some(KeyboardKey::F1)
         );
         assert_eq!(
             desktop_keyboard_key_from_key_code(KeyCode::F5),
