@@ -2,6 +2,7 @@
 
 #[cfg(test)]
 mod block_light_bridge;
+mod cadence;
 mod distance_manager;
 mod entities;
 mod falling_block;
@@ -45,6 +46,11 @@ use mclone_core::{
 use mclone_worldgen::block::RawBlockId;
 use mclone_worldgen::levelgen::MutableChunkBlockBuffer;
 
+pub use cadence::{
+    DEFAULT_GAMEPLAY_RATE_HZ, DEFAULT_HOST_RATE_HZ, DEFAULT_MAX_CATCH_UP_HOST_FRAMES,
+    DEFAULT_PHYSICS_RATE_HZ, SimulationCadence, SimulationCadenceAdvance, SimulationCadenceConfig,
+    SimulationCadenceFrame,
+};
 pub use holder::{ChunkHolder, ChunkStatusSlot};
 pub use integrated::{INITIAL_DAY_TIME, IntegratedServer};
 pub use job_codec::{

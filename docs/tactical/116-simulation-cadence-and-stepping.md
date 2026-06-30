@@ -1,7 +1,8 @@
 # 116: Simulation Cadence and Stepping
 
-Status: active; initial architecture note recorded, with 60 Hz physics substeps
-landed inside the existing 20 Hz server tick.
+Status: active; initial architecture note recorded, 60 Hz physics substeps landed
+inside the existing 20 Hz server tick, and the first shared server cadence
+primitive landed for future configurable host pump work.
 
 ## Purpose
 
@@ -50,7 +51,7 @@ vanilla system run more often.
 - Web/WASM remains part of the target shape: browser worker timing should map to
   the same lanes rather than becoming a reduced single-threaded design.
 
-## Current Slice
+## Landed Slices
 
 For the debug physics experiment, keep the server runner at 20 Hz and step
 Rapier three times at 1/60 second per server tick. Publish entity state once per
@@ -60,6 +61,27 @@ The expected benefit is better collision/contact integration and more stable
 settling. Visual smoothness remains limited by the 20 Hz entity publication path
 and the current actor interpolation model.
 
+- Added `SimulationCadence` in `mclone-server` as the first host/lane stepping
+  primitive. It maps one configurable host frame into fixed-rate gameplay and
+  physics lane work without changing live runner behavior yet.
+- Current tested mappings:
+  - 20 Hz host: one 20 Hz gameplay tick and three 60 Hz physics steps per host
+    frame.
+  - 60 Hz host: one 60 Hz physics step per host frame and one 20 Hz gameplay
+    tick every third host frame.
+  - 30 Hz host: deterministic fractional gameplay cadence with two 60 Hz physics
+    steps per host frame.
+- The elapsed-time wrapper accumulates partial host frames and caps catch-up
+  work so a long frame cannot force unlimited simulation work in one pump.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-server -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-server cadence -- --nocapture
+cargo check --manifest-path native/Cargo.toml -p mclone-server
+```
+
 ## Follow-Up Work
 
 - Add explicit diagnostics for physics substep count and physics lane timing.
@@ -68,6 +90,8 @@ and the current actor interpolation model.
 - Evaluate active-physics presentation options: higher-rate snapshots for local
   integrated play, velocity/angular-velocity extrapolation, or a shared
   prediction path.
-- Design configurable host pump rates without changing the default 20 Hz
+- Route the native server runner through `SimulationCadence` while preserving
+  the default 20 Hz host behavior.
+- Add a dev-only configurable host pump rate without changing the default 20 Hz
   vanilla gameplay lane.
 - Decide which entity classes can opt into higher-rate network snapshots.
