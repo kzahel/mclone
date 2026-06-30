@@ -140,6 +140,20 @@ export function makeReviewSheet(texture: RenderedTexture, options: ReviewSheetOp
     drawReferencePanel(sheet, options.reference, 704, 328, 320, 328);
   }
 
+  drawPanelLabel(sheet, "SOURCE PIXELS", 16, 16, 264);
+  drawPanelLabel(sheet, tilingLabel(tiling), 304, 16, 296);
+  drawPanelLabel(sheet, "16X16 VIEW", 624, 16, 200);
+  drawPanelLabel(sheet, "MIPS", 624, 232, 200, 1);
+  if (showCube) {
+    drawPanelLabel(sheet, "CUBE", 840, 16, 184);
+  }
+  if (showRotation) {
+    drawPanelLabel(sheet, "ROTATION 5X5", 16, 328, 328);
+  }
+  if (tiling !== "none") {
+    drawPanelLabel(sheet, tiling === "x" ? "SEAM 2X1" : "SEAM 2X2", 360, 328, 328);
+  }
+
   return sheet;
 }
 
@@ -171,6 +185,13 @@ export function makeBlockReviewSheet(
   for (const [index, tint] of tintColors.slice(0, 4).entries()) {
     drawTintSwatch(sheet, 890, 412 + index * 34, tint);
   }
+
+  drawPanelLabel(sheet, "BLOCK PREVIEW", 16, 16, 300);
+  drawPanelLabel(sheet, "TOP ROTATION 5X5", 340, 16, 328);
+  drawPanelLabel(sheet, "SIDE TILED 3X3", 692, 16, 328);
+  drawPanelLabel(sheet, "TERRAIN PATCH", 16, 360, 1008);
+  drawPanelLabel(sheet, "FINAL CUBE", 744, 386, 160, 1);
+  drawPanelLabel(sheet, "TINTS", 880, 386, 100, 1);
 
   return sheet;
 }
@@ -218,6 +239,11 @@ export function makeBlockSideReviewSheet(
   for (const [index, tint] of tintColors.slice(0, 4).entries()) {
     drawTintSwatch(sheet, 608, 296 + index * 26, tint);
   }
+
+  drawPanelLabel(sheet, "SIDE BASE PIXELS", 16, 16, 264);
+  drawPanelLabel(sheet, "OVERLAY PIXELS", 304, 16, 264);
+  drawPanelLabel(sheet, "FINAL SIDE 4X1", 592, 16, 432);
+  drawPanelLabel(sheet, "BLOCK CONTEXT", 592, 160, 432);
 
   return sheet;
 }
@@ -653,6 +679,30 @@ function drawSeamDiagnostic(
   }
 }
 
+function tilingLabel(tiling: TilingMode): string {
+  if (tiling === "xy") {
+    return "TILED 3X3";
+  }
+  if (tiling === "x") {
+    return "TILED 3X1";
+  }
+  return "SINGLE 1X";
+}
+
+function drawPanelLabel(
+  target: RgbaImage,
+  text: string,
+  panelX: number,
+  panelY: number,
+  panelWidth: number,
+  preferredScale = 2,
+): void {
+  const scale = textPixelWidth(text, preferredScale) > panelWidth - 20 ? 1 : preferredScale;
+  const labelHeight = 7 * scale + 8;
+  drawRect(target, panelX + 2, panelY + 2, panelWidth - 4, labelHeight, [42, 44, 44, 235]);
+  drawPixelText(target, text, panelX + 10, panelY + 6, scale, [214, 218, 210, 255]);
+}
+
 function drawReferencePanel(
   target: RgbaImage,
   reference: RgbaImage,
@@ -677,6 +727,7 @@ function drawReferencePanel(
   const enlargedHeight = reference.height * enlargedScale;
   const enlargedX = panelX + 18;
   const enlargedY = panelY + 42;
+  drawPixelText(target, "PIXELS", enlargedX, panelY + 30, 1, [214, 218, 210, 255]);
   if (checkerboard) {
     drawCheckerboard(target, enlargedX, enlargedY, enlargedWidth, enlargedHeight, Math.max(4, enlargedScale));
   }
@@ -688,6 +739,7 @@ function drawReferencePanel(
   const repeatHeight = reference.height * 3 * repeatScale;
   const repeatX = panelX + panelWidth - repeatWidth - 18;
   const repeatY = panelY + 42;
+  drawPixelText(target, "TILED 3X3", repeatX, panelY + 30, 1, [214, 218, 210, 255]);
   if (checkerboard) {
     drawCheckerboard(target, repeatX, repeatY, repeatWidth, repeatHeight, Math.max(4, repeatScale * 2));
   }
@@ -695,6 +747,7 @@ function drawReferencePanel(
 
   const mipY = panelY + Math.max(enlargedHeight, repeatHeight) + 40;
   if (mipY + 64 < panelY + panelHeight) {
+    drawPixelText(target, "MIPS", panelX + 18, mipY - 12, 1, [214, 218, 210, 255]);
     drawMipStrip(target, reference, panelX + 18, mipY, checkerboard);
   }
 }
@@ -717,6 +770,10 @@ function drawPixelText(target: RgbaImage, text: string, x: number, y: number, sc
     }
     cursorX += 6 * scale;
   }
+}
+
+function textPixelWidth(text: string, scale: number): number {
+  return Math.max(0, text.length * 6 * scale - scale);
 }
 
 const PIXEL_FONT: Record<string, string[]> = {
@@ -809,6 +866,231 @@ const PIXEL_FONT: Record<string, string[]> = {
     "00100",
     "00100",
     "00100",
+  ],
+  B: [
+    "11110",
+    "10001",
+    "10001",
+    "11110",
+    "10001",
+    "10001",
+    "11110",
+  ],
+  D: [
+    "11110",
+    "10001",
+    "10001",
+    "10001",
+    "10001",
+    "10001",
+    "11110",
+  ],
+  G: [
+    "01111",
+    "10000",
+    "10000",
+    "10011",
+    "10001",
+    "10001",
+    "01111",
+  ],
+  H: [
+    "10001",
+    "10001",
+    "10001",
+    "11111",
+    "10001",
+    "10001",
+    "10001",
+  ],
+  K: [
+    "10001",
+    "10010",
+    "10100",
+    "11000",
+    "10100",
+    "10010",
+    "10001",
+  ],
+  L: [
+    "10000",
+    "10000",
+    "10000",
+    "10000",
+    "10000",
+    "10000",
+    "11111",
+  ],
+  O: [
+    "01110",
+    "10001",
+    "10001",
+    "10001",
+    "10001",
+    "10001",
+    "01110",
+  ],
+  P: [
+    "11110",
+    "10001",
+    "10001",
+    "11110",
+    "10000",
+    "10000",
+    "10000",
+  ],
+  S: [
+    "01111",
+    "10000",
+    "10000",
+    "01110",
+    "00001",
+    "00001",
+    "11110",
+  ],
+  U: [
+    "10001",
+    "10001",
+    "10001",
+    "10001",
+    "10001",
+    "10001",
+    "01110",
+  ],
+  V: [
+    "10001",
+    "10001",
+    "10001",
+    "10001",
+    "10001",
+    "01010",
+    "00100",
+  ],
+  W: [
+    "10001",
+    "10001",
+    "10001",
+    "10101",
+    "10101",
+    "10101",
+    "01010",
+  ],
+  X: [
+    "10001",
+    "10001",
+    "01010",
+    "00100",
+    "01010",
+    "10001",
+    "10001",
+  ],
+  Y: [
+    "10001",
+    "10001",
+    "01010",
+    "00100",
+    "00100",
+    "00100",
+    "00100",
+  ],
+  Z: [
+    "11111",
+    "00001",
+    "00010",
+    "00100",
+    "01000",
+    "10000",
+    "11111",
+  ],
+  "0": [
+    "01110",
+    "10001",
+    "10011",
+    "10101",
+    "11001",
+    "10001",
+    "01110",
+  ],
+  "1": [
+    "00100",
+    "01100",
+    "00100",
+    "00100",
+    "00100",
+    "00100",
+    "01110",
+  ],
+  "2": [
+    "01110",
+    "10001",
+    "00001",
+    "00010",
+    "00100",
+    "01000",
+    "11111",
+  ],
+  "3": [
+    "11110",
+    "00001",
+    "00001",
+    "01110",
+    "00001",
+    "00001",
+    "11110",
+  ],
+  "4": [
+    "00010",
+    "00110",
+    "01010",
+    "10010",
+    "11111",
+    "00010",
+    "00010",
+  ],
+  "5": [
+    "11111",
+    "10000",
+    "10000",
+    "11110",
+    "00001",
+    "00001",
+    "11110",
+  ],
+  "6": [
+    "01110",
+    "10000",
+    "10000",
+    "11110",
+    "10001",
+    "10001",
+    "01110",
+  ],
+  "7": [
+    "11111",
+    "00001",
+    "00010",
+    "00100",
+    "01000",
+    "01000",
+    "01000",
+  ],
+  "8": [
+    "01110",
+    "10001",
+    "10001",
+    "01110",
+    "10001",
+    "10001",
+    "01110",
+  ],
+  "9": [
+    "01110",
+    "10001",
+    "10001",
+    "01111",
+    "00001",
+    "00001",
+    "01110",
   ],
 };
 
