@@ -6,8 +6,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
-    render_full_frame_for_view_with_prepared_records_in_slot,
-    render_full_frame_for_view_with_prepared_records_timed_in_slot,
+    render_full_frame_for_view_with_prepared_stereo_draw_in_slot,
+    render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot,
     render_view_with_underwater_effect,
 };
 use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
@@ -28,7 +28,7 @@ use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
     ChunkDepthTarget, ChunkMultiviewDepthTarget, ChunkMultiviewRenderTarget, ChunkProjectionKind,
-    ChunkRenderTarget, ChunkRenderView, PreparedTexturedSectionRecords,
+    ChunkRenderTarget, ChunkRenderView, PreparedTexturedSectionStereoDraw,
     TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderStats,
     TexturedSectionUploadReport,
 };
@@ -1216,11 +1216,23 @@ where
         let records_start = collect_split_timing.then(Instant::now);
         let prepared_records = self.draw.prepare_render_records();
         timing.shared_records_ms = records_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        let (terrain_views, terrain_options, _) =
+            self.terrain_render_views_and_options(render_views);
+        let (prepared_stereo_draw, stereo_draw_timing) = if collect_split_timing {
+            self.draw
+                .prepare_stereo_draw_timed(&prepared_records, terrain_views, terrain_options)
+        } else {
+            (
+                self.draw
+                    .prepare_stereo_draw(&prepared_records, terrain_views, terrain_options),
+                Default::default(),
+            )
+        };
         let left_eye_start = Instant::now();
         let left_eye = self.render_eye_target(
             device,
             queue,
-            &prepared_records,
+            &prepared_stereo_draw,
             left_target,
             render_views[0],
             &actor_instances,
@@ -1234,11 +1246,15 @@ where
         )?;
         timing.left_eye_ms = elapsed_ms(left_eye_start.elapsed());
         timing.left_eye_render = left_eye.timing;
+        timing.left_eye_render.cull_ms += stereo_draw_timing.cull_ms;
+        timing.left_eye_render.translucent_collect_ms += stereo_draw_timing.translucent_collect_ms;
+        timing.left_eye_render.translucent_sort_ms += stereo_draw_timing.translucent_sort_ms;
+        timing.left_eye_render.prepare_ms += stereo_draw_timing.prepare_ms;
         let right_eye_start = Instant::now();
         let right_eye = self.render_eye_target(
             device,
             queue,
-            &prepared_records,
+            &prepared_stereo_draw,
             right_target,
             render_views[1],
             &actor_instances,
@@ -1324,10 +1340,13 @@ where
             Vec::new()
         };
         let prepared_records = self.draw.prepare_render_records();
+        let prepared_stereo_draw =
+            self.draw
+                .prepare_stereo_draw(&prepared_records, terrain_views, terrain_options);
         let left = self.render_terrain_eye_only_target(
             device,
             queue,
-            &prepared_records,
+            &prepared_stereo_draw,
             left_target,
             terrain_views[0],
             terrain_options[0],
@@ -1340,7 +1359,7 @@ where
         let right = self.render_terrain_eye_only_target(
             device,
             queue,
-            &prepared_records,
+            &prepared_stereo_draw,
             right_target,
             terrain_views[1],
             terrain_options[1],
@@ -1367,7 +1386,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        prepared_records: &PreparedTexturedSectionRecords,
+        prepared_draw: &PreparedTexturedSectionStereoDraw,
         target: XrTerrainEyeTarget<'_>,
         render_view: ChunkRenderView,
         render_options: TexturedSectionRenderOptions,
@@ -1405,8 +1424,8 @@ where
         }
         let stats = self
             .draw
-            .render_prepared_with_options_in_slot(
-                prepared_records,
+            .render_prepared_stereo_draw_with_options_in_slot(
+                prepared_draw,
                 queue,
                 &mut encoder,
                 render_target,
@@ -1583,10 +1602,13 @@ where
             render_target = render_target.with_loaded_color();
         }
         let terrain_start = Instant::now();
+        let prepared_stereo_draw =
+            self.draw
+                .prepare_stereo_draw(&prepared_records, terrain_views, terrain_options);
         let stats = self
             .draw
-            .render_prepared_multiview_with_options(
-                &prepared_records,
+            .render_prepared_multiview_stereo_draw_with_options(
+                &prepared_stereo_draw,
                 device,
                 queue,
                 &mut encoder,
@@ -2207,7 +2229,7 @@ where
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        prepared_records: &PreparedTexturedSectionRecords,
+        prepared_draw: &PreparedTexturedSectionStereoDraw,
         target: XrTerrainEyeTarget<'_>,
         render_view: ChunkRenderView,
         actor_instances: &[mclone_render::entity::ActorInstance],
@@ -2251,12 +2273,12 @@ where
         let selection_outline = self.current_xr_selection_outline();
         let mut render_stats = self.render_stats;
         let (summary, frame_timing) = if collect_split_timing {
-            render_full_frame_for_view_with_prepared_records_timed_in_slot(
+            render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot(
                 frame,
                 target.depth,
                 &self.sky,
                 &mut self.draw,
-                prepared_records,
+                prepared_draw,
                 Some(&mut self.actors),
                 Some(&mut self.screen_effects),
                 None,
@@ -2273,12 +2295,12 @@ where
                 view_slot,
             )
         } else {
-            render_full_frame_for_view_with_prepared_records_in_slot(
+            render_full_frame_for_view_with_prepared_stereo_draw_in_slot(
                 frame,
                 target.depth,
                 &self.sky,
                 &mut self.draw,
-                prepared_records,
+                prepared_draw,
                 Some(&mut self.actors),
                 Some(&mut self.screen_effects),
                 None,

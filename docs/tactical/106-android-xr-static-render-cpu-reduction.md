@@ -1,6 +1,8 @@
 # 106: Android XR Static-Render CPU Reduction (Cull, Records, Stereo Encode)
 
-Status: proposed implementation plan. Continues
+Status: active tactical. Slices F, G, and H have landed; Slice I full-frame
+multiview is available behind the opt-in path and measured as correctness-ready
+but not a decisive standalone performance win. Continues
 [`099`](099-android-xr-rd10-render-cost-attribution.md) from the end of its
 Slice C2. 099 established, with on-device Meta metrics, that standalone Quest 3
 RD10 is **CPU draw-submission bound with ~40% GPU headroom**, and landed the
@@ -108,6 +110,49 @@ Measured on frozen RD10 against the original baseline at comparable GPU poll
 - **RD10 is now borderline, not solid, 72Hz.** p95 is `15.06ms` and ~48% of
   frames still miss budget: the serial `CPU(~3-4ms p50) + GPU(~9.5-10.9ms)`
   structure means GPU spikes and heavier frames push the tail over.
+
+## Slice H Result (landed 2026-06-30) - shared stereo terrain prep removes duplicate cull, but RD10 remains tail-limited
+
+Slice H builds one `PreparedTexturedSectionStereoDraw` per XR frame and feeds it
+to both eyes. The shared cull tests every candidate section against both eye
+frustums and keeps the exact union; translucent collect/sort also happens once
+from the midpoint view. The same prepared stereo draw now feeds the per-eye
+full-frame path, the frozen terrain-only probe, and the full-frame multiview
+path. This intentionally preserves the multiview-compatible shape: one terrain
+draw list can feed both layers. It does **not** yet batch section draws or avoid
+the conservative union draw set on the per-eye path.
+
+Timing attribution caveat: the existing per-eye terrain-prep marker has no
+shared-prep bucket, so the shared cull/collect/sort time is charged to the
+left-eye prep bucket and the right-eye cull/collect/sort buckets drop to
+`0.000ms`. Do not read that as "left eye got slower"; it is the shared stereo
+work.
+
+On-device Quest 3 validation (frozen RD10, fixed pose `0,80,-96,180`, based on
+`1c8fdd2`, captured before this Slice H commit) shows the structural shift but
+not a decisive end-to-end win:
+
+| Path | avg | p50 | p95 | p99 | max | over budget | key terrain bucket |
+|---|---:|---:|---:|---:|---:|---:|---|
+| per-eye + Slice H | `13.841ms` | `13.653ms` | `15.262ms` | `18.313ms` | `25.584ms` | 526/1440 | left shared cull `1.736ms`, right cull `0.000ms`, poll `10.011ms` |
+| multiview + Slice H | `13.843ms` | `13.728ms` | `14.776ms` | `17.892ms` | `25.715ms` | 546/1440 | multiview terrain `3.052ms`, poll `11.408ms` |
+
+Compared with the immediately prior matched multiview marker run in 107,
+multiview terrain CPU max moved from `4.059ms` to `3.052ms`, which is the
+expected shared-prep savings. Frame time barely moved because the lane is still
+dominated by submitted GPU/poll time and tail pacing. The conservative union draw
+set reports `203` drawn sections / `1,523,148` drawn indices in this run, versus
+the earlier per-eye cull's lower per-eye draw counts; that extra clipped edge
+work can offset some CPU savings on the GPU-bound path.
+
+Conclusion: Slice H is worth keeping as architecture cleanup and as a multiview
+prerequisite, but it does not make RD10 comfortable by itself. The next perf work
+should either cut per-section draw/GPU overhead (Slice J batching / indirect
+arena) or test the runtime-toggleable overlap path (Slice K/E4) with motion-to-
+photon measurement. If we keep optimizing the per-eye default before batching, a
+possible refinement is a shared stereo traversal that records per-eye draw masks
+so per-eye submit can avoid drawing the full union while multiview continues to
+use the union list.
 
 ### Recommendation on E2/E4/E5 (overlap): pursue E2/E4 next; defer E5
 
@@ -493,6 +538,15 @@ than iterating the drawn list — both deferred as lower-value follow-ups.
   workspace.
 
 ### Slice H - Single shared cull for both eyes
+
+**Landed 2026-06-30** as shared stereo terrain prep. The implementation builds
+one `PreparedTexturedSectionStereoDraw` from the exact union of both eye
+frustums, uses the midpoint view for traversal seeding and translucent ordering,
+and feeds that prepared draw to the per-eye full-frame, frozen terrain-only, and
+multiview paths. The current per-eye path draws the shared union in both eyes;
+that is correct but conservative, and it can raise clipped GPU work. The follow-
+up options are per-eye masks for the per-eye path, Slice J batching, or Slice K
+overlap.
 
 - Run the records iteration + occlusion BFS **once per frame** from the midpoint
   camera (`center_position` is already computed at `lib.rs:723-724`); both eyes

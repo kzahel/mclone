@@ -23,7 +23,10 @@ use crate::color_profile::{RenderColorProfile, RenderConfig};
 use crate::fog::RenderFog;
 use crate::target::RenderFrameTarget;
 use crate::texture_mips::generate_rgba_mip_chain;
-use crate::uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
+use crate::uniform::{
+    PerViewSlot, PerViewUniformBuffer, RIGHT_EYE_VIEW_SLOT, SINGLE_VIEW_SLOT,
+    STEREO_VIEW_SLOT_COUNT,
+};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
@@ -468,6 +471,27 @@ struct TexturedSectionCullingResult {
     drawn_keys: FxHashSet<RenderSectionKey>,
 }
 
+#[derive(Clone, Debug)]
+pub struct PreparedTexturedSectionStereoDraw {
+    stats: [TexturedSectionRenderStats; 2],
+    drawn_keys: FxHashSet<RenderSectionKey>,
+    translucent_keys: Vec<RenderSectionKey>,
+}
+
+impl PreparedTexturedSectionStereoDraw {
+    pub fn stats(&self) -> [TexturedSectionRenderStats; 2] {
+        self.stats
+    }
+
+    fn stats_for_slot(&self, view_slot: PerViewSlot) -> TexturedSectionRenderStats {
+        if view_slot == RIGHT_EYE_VIEW_SLOT {
+            self.stats[1]
+        } else {
+            self.stats[0]
+        }
+    }
+}
+
 // Slice G (docs/tactical/106): the per-eye cull previously allocated three
 // `BTreeSet`s + a `BTreeMap` + a `VecDeque` every eye every frame, and every
 // membership test/insert paid `O(log n)` plus pointer chasing. `RenderSectionKey`
@@ -638,6 +662,144 @@ fn cull_textured_sections(
     }
 
     stats.graph_cull_enabled = options.section_occlusion_culling;
+    stats.drawn_section_count = drawn_keys
+        .iter()
+        .filter_map(|key| records.get(key))
+        .filter(|record| record.drawable)
+        .count();
+    stats.drawn_index_count = drawn_keys
+        .iter()
+        .filter_map(|key| records.get(key))
+        .filter(|record| record.drawable)
+        .map(|record| record.index_count)
+        .sum();
+    stats.graph_culled_section_count = stats
+        .frustum_section_count
+        .saturating_sub(stats.readiness_culled_section_count)
+        .saturating_sub(stats.drawn_section_count);
+    stats.graph_culled_index_count = stats
+        .frustum_index_count
+        .saturating_sub(stats.readiness_culled_index_count)
+        .saturating_sub(stats.drawn_index_count);
+
+    TexturedSectionCullingResult { stats, drawn_keys }
+}
+
+fn cull_textured_sections_stereo_union(
+    prepared: &PreparedTexturedSectionRecords,
+    render_views: [ChunkRenderView; 2],
+    options: [TexturedSectionRenderOptions; 2],
+    scratch: &mut CullScratch,
+) -> TexturedSectionCullingResult {
+    let records = &prepared.records;
+    let frustums = render_views.map(ClipFrustum::from_render_view);
+    let section_occlusion_culling =
+        options[0].section_occlusion_culling && options[1].section_occlusion_culling;
+    let force_fullbright = options[0].force_fullbright || options[1].force_fullbright;
+    let mut stats = TexturedSectionRenderStats {
+        section_occlusion_culling,
+        force_fullbright,
+        loaded_section_count: prepared.loaded_section_count,
+        loaded_index_count: prepared.loaded_index_count,
+        ..TexturedSectionRenderStats::default()
+    };
+
+    scratch.reset();
+    let CullScratch {
+        frustum_keys,
+        ready_frustum_keys,
+        queue,
+        infos,
+    } = scratch;
+    for (key, record) in records {
+        if frustums
+            .iter()
+            .any(|frustum| frustum.is_render_section_visible(*key))
+        {
+            frustum_keys.insert(*key);
+            if record.traversal_ready {
+                ready_frustum_keys.insert(*key);
+            }
+            if record.drawable {
+                stats.frustum_section_count += 1;
+                stats.frustum_index_count += record.index_count;
+                if !record.traversal_ready {
+                    stats.readiness_culled_section_count += 1;
+                    stats.readiness_culled_index_count += record.index_count;
+                }
+            }
+        }
+    }
+
+    let center_position = stereo_center_position(render_views);
+    let start_keys = traversal_start_keys(records, frustum_keys, center_position);
+    if start_keys.is_empty() {
+        stats.drawn_section_count = ready_frustum_keys
+            .iter()
+            .filter_map(|key| records.get(key))
+            .filter(|record| record.drawable)
+            .count();
+        stats.drawn_index_count = ready_frustum_keys
+            .iter()
+            .filter_map(|key| records.get(key))
+            .filter(|record| record.drawable)
+            .map(|record| record.index_count)
+            .sum();
+        return TexturedSectionCullingResult {
+            stats,
+            drawn_keys: ready_frustum_keys.iter().copied().collect(),
+        };
+    }
+
+    let mut drawn_keys = FxHashSet::default();
+    for start_key in start_keys {
+        infos.insert(start_key, RenderSectionTraversalInfo::start());
+        queue.push_back(start_key);
+    }
+
+    while let Some(key) = queue.pop_front() {
+        let Some(record) = records.get(&key) else {
+            continue;
+        };
+        let Some(info) = infos.get(&key).copied() else {
+            continue;
+        };
+        if frustum_keys.contains(&key) {
+            drawn_keys.insert(key);
+        }
+
+        for direction in SectionFace::ALL {
+            if info.has_direction(direction.opposite()) {
+                continue;
+            }
+            if section_occlusion_culling
+                && info.has_source_directions()
+                && !can_see_through_source(record.visibility, info.source_directions, direction)
+            {
+                continue;
+            }
+
+            let neighbor_key = section_neighbor_key(key, direction);
+            let Some(neighbor_record) = records.get(&neighbor_key) else {
+                continue;
+            };
+            if !neighbor_record.traversal_ready || !frustum_keys.contains(&neighbor_key) {
+                continue;
+            }
+
+            if let Some(existing) = infos.get_mut(&neighbor_key) {
+                existing.add_source_direction(direction);
+            } else {
+                infos.insert(
+                    neighbor_key,
+                    RenderSectionTraversalInfo::from_parent(info.directions, direction),
+                );
+                queue.push_back(neighbor_key);
+            }
+        }
+    }
+
+    stats.graph_cull_enabled = section_occlusion_culling;
     stats.drawn_section_count = drawn_keys
         .iter()
         .filter_map(|key| records.get(key))
@@ -1968,6 +2130,30 @@ impl TexturedSectionDrawResources {
         )
     }
 
+    pub fn prepare_stereo_draw(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+    ) -> PreparedTexturedSectionStereoDraw {
+        self.prepare_stereo_draw_inner(records, render_views, options, None)
+    }
+
+    pub fn prepare_stereo_draw_timed(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+    ) -> (
+        PreparedTexturedSectionStereoDraw,
+        TexturedSectionRenderTiming,
+    ) {
+        let mut timing = TexturedSectionRenderTiming::default();
+        let prepared_draw =
+            self.prepare_stereo_draw_inner(records, render_views, options, Some(&mut timing));
+        (prepared_draw, timing)
+    }
+
     pub fn render_prepared_with_options(
         &self,
         records: &PreparedTexturedSectionRecords,
@@ -2054,6 +2240,52 @@ impl TexturedSectionDrawResources {
         Ok((stats, timing))
     }
 
+    pub fn render_prepared_stereo_draw_with_options_in_slot(
+        &self,
+        prepared_draw: &PreparedTexturedSectionStereoDraw,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+    ) -> Result<TexturedSectionRenderStats> {
+        self.render_prepared_stereo_draw_inner(
+            prepared_draw,
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            view_slot,
+            None,
+        )
+    }
+
+    pub fn render_prepared_stereo_draw_timed_in_slot(
+        &self,
+        prepared_draw: &PreparedTexturedSectionStereoDraw,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+    ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
+        let mut timing = TexturedSectionRenderTiming::default();
+        let stats = self.render_prepared_stereo_draw_inner(
+            prepared_draw,
+            queue,
+            encoder,
+            target,
+            render_view,
+            options,
+            view_slot,
+            Some(&mut timing),
+        )?;
+        Ok((stats, timing))
+    }
+
     pub fn render_prepared_multiview_with_options(
         &self,
         records: &PreparedTexturedSectionRecords,
@@ -2064,28 +2296,28 @@ impl TexturedSectionDrawResources {
         render_views: [ChunkRenderView; 2],
         options: [TexturedSectionRenderOptions; 2],
     ) -> Result<[TexturedSectionRenderStats; 2]> {
-        let left_culling = {
-            let mut scratch = self.cull_scratch.borrow_mut();
-            cull_textured_sections(records, render_views[0], options[0], &mut scratch)
-        };
-        let right_culling = {
-            let mut scratch = self.cull_scratch.borrow_mut();
-            cull_textured_sections(records, render_views[1], options[1], &mut scratch)
-        };
-        let mut drawn_keys = left_culling.drawn_keys.clone();
-        drawn_keys.extend(right_culling.drawn_keys.iter().copied());
+        let prepared_draw = self.prepare_stereo_draw(records, render_views, options);
+        self.render_prepared_multiview_stereo_draw_with_options(
+            &prepared_draw,
+            device,
+            queue,
+            encoder,
+            target,
+            render_views,
+            options,
+        )
+    }
 
-        let mut translucent_sections = self
-            .sections
-            .iter()
-            .filter(|(key, mesh)| {
-                drawn_keys.contains(key) && !mesh.translucent_index_range().is_empty()
-            })
-            .collect::<Vec<_>>();
-        translucent_sections.sort_by(|(left_key, _), (right_key, _)| {
-            compare_translucent_sections(**left_key, **right_key, render_views[0])
-        });
-
+    pub fn render_prepared_multiview_stereo_draw_with_options(
+        &self,
+        prepared_draw: &PreparedTexturedSectionStereoDraw,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkMultiviewRenderTarget<'_>,
+        render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+    ) -> Result<[TexturedSectionRenderStats; 2]> {
         let renderer = self.renderer.multiview_renderer(device)?;
         renderer.write_uniforms(queue, render_views, options, self.renderer.color_format);
         {
@@ -2113,17 +2345,19 @@ impl TexturedSectionDrawResources {
             pass.set_bind_group(1, &self.atlas.bind_group, &[]);
             pass.set_pipeline(&renderer.opaque_pipeline);
             for (key, mesh) in &self.sections {
-                if !drawn_keys.contains(key) {
+                if !prepared_draw.drawn_keys.contains(key) {
                     continue;
                 }
                 draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
             }
             pass.set_pipeline(&renderer.translucent_pipeline);
-            for (_, mesh) in translucent_sections {
-                draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+            for key in &prepared_draw.translucent_keys {
+                if let Some(mesh) = self.sections.get(key) {
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+                }
             }
         }
-        Ok([left_culling.stats, right_culling.stats])
+        Ok(prepared_draw.stats())
     }
 
     fn render_with_options_inner(
@@ -2236,6 +2470,128 @@ impl TexturedSectionDrawResources {
         Ok(culling.stats)
     }
 
+    fn prepare_stereo_draw_inner(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+        mut timing: Option<&mut TexturedSectionRenderTiming>,
+    ) -> PreparedTexturedSectionStereoDraw {
+        let prepare_start = timing.as_ref().map(|_| Instant::now());
+        let cull_start = timing.as_ref().map(|_| Instant::now());
+        let culling = {
+            let mut scratch = self.cull_scratch.borrow_mut();
+            cull_textured_sections_stereo_union(records, render_views, options, &mut scratch)
+        };
+        if let (Some(timing), Some(cull_start)) = (&mut timing, cull_start) {
+            timing.cull_ms = elapsed_ms(cull_start.elapsed());
+        }
+        let translucent_collect_start = timing.as_ref().map(|_| Instant::now());
+        let mut translucent_keys = self
+            .sections
+            .iter()
+            .filter(|(key, mesh)| {
+                culling.drawn_keys.contains(key) && !mesh.translucent_index_range().is_empty()
+            })
+            .map(|(key, _)| *key)
+            .collect::<Vec<_>>();
+        if let (Some(timing), Some(translucent_collect_start)) =
+            (&mut timing, translucent_collect_start)
+        {
+            timing.translucent_collect_ms = elapsed_ms(translucent_collect_start.elapsed());
+        }
+        let translucent_sort_start = timing.as_ref().map(|_| Instant::now());
+        let sort_view = stereo_translucent_sort_view(render_views);
+        translucent_keys
+            .sort_by(|left, right| compare_translucent_sections(*left, *right, sort_view));
+        if let (Some(timing), Some(translucent_sort_start)) = (&mut timing, translucent_sort_start)
+        {
+            timing.translucent_sort_ms = elapsed_ms(translucent_sort_start.elapsed());
+        }
+        if let (Some(timing), Some(prepare_start)) = (&mut timing, prepare_start) {
+            timing.prepare_ms = elapsed_ms(prepare_start.elapsed());
+        }
+        let mut stats = [culling.stats; 2];
+        stats[0].section_occlusion_culling = options[0].section_occlusion_culling;
+        stats[0].force_fullbright = options[0].force_fullbright;
+        stats[1].section_occlusion_culling = options[1].section_occlusion_culling;
+        stats[1].force_fullbright = options[1].force_fullbright;
+        PreparedTexturedSectionStereoDraw {
+            stats,
+            drawn_keys: culling.drawn_keys,
+            translucent_keys,
+        }
+    }
+
+    fn render_prepared_stereo_draw_inner(
+        &self,
+        prepared_draw: &PreparedTexturedSectionStereoDraw,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+        mut timing: Option<&mut TexturedSectionRenderTiming>,
+    ) -> Result<TexturedSectionRenderStats> {
+        let prepare_start = timing.as_ref().map(|_| Instant::now());
+        let uniform_start = timing.as_ref().map(|_| Instant::now());
+        let uniform_offset = self.renderer.uniforms.write_slot(
+            queue,
+            view_slot,
+            &uniform_bytes(render_view, options, self.renderer.color_format),
+        );
+        if let (Some(timing), Some(uniform_start)) = (&mut timing, uniform_start) {
+            timing.uniform_write_ms = elapsed_ms(uniform_start.elapsed());
+        }
+        if let (Some(timing), Some(prepare_start)) = (&mut timing, prepare_start) {
+            timing.prepare_ms = elapsed_ms(prepare_start.elapsed());
+        }
+
+        let encode_start = timing.as_ref().map(|_| Instant::now());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mclone_textured_section_stereo_prepared_render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target.color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: target.color_load_op(),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: target.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(target.clear_depth),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
+            pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+            pass.set_pipeline(&self.renderer.opaque_pipeline);
+            for (key, mesh) in &self.sections {
+                if !prepared_draw.drawn_keys.contains(key) {
+                    continue;
+                }
+                draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
+            }
+            pass.set_pipeline(&self.renderer.translucent_pipeline);
+            for key in &prepared_draw.translucent_keys {
+                if let Some(mesh) = self.sections.get(key) {
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+                }
+            }
+        }
+        if let (Some(timing), Some(encode_start)) = (&mut timing, encode_start) {
+            timing.encode_ms = elapsed_ms(encode_start.elapsed());
+        }
+        Ok(prepared_draw.stats_for_slot(view_slot))
+    }
+
     fn build_prepared_records(&self) -> PreparedTexturedSectionRecords {
         let mut records = BTreeMap::new();
         let mut loaded_section_count = 0usize;
@@ -2268,6 +2624,21 @@ impl TexturedSectionDrawResources {
 
 fn elapsed_ms(duration: std::time::Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
+}
+
+fn stereo_center_position(render_views: [ChunkRenderView; 2]) -> Vec3 {
+    (render_views[0].camera_position + render_views[1].camera_position) * 0.5
+}
+
+fn stereo_translucent_sort_view(render_views: [ChunkRenderView; 2]) -> ChunkRenderView {
+    let mut sort_view = render_views[0];
+    sort_view.camera_position = stereo_center_position(render_views);
+    let forward =
+        (render_views[0].camera_forward + render_views[1].camera_forward).normalize_or_zero();
+    if forward.length_squared() > 0.0 {
+        sort_view.camera_forward = forward;
+    }
+    sort_view
 }
 
 fn compare_translucent_sections(
@@ -2721,6 +3092,36 @@ mod tests {
         }
     }
 
+    fn prepared_records_for_sections(
+        sections: &[TexturedRenderSectionMesh],
+    ) -> PreparedTexturedSectionRecords {
+        let records = sections
+            .iter()
+            .map(|section| {
+                (
+                    section.key,
+                    TexturedSectionCullingRecord {
+                        index_count: section.stats().index_count,
+                        visibility: section.visibility,
+                        drawable: !section.is_empty(),
+                        traversal_ready: true,
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let loaded_section_count = records.values().filter(|record| record.drawable).count();
+        let loaded_index_count = records
+            .values()
+            .filter(|record| record.drawable)
+            .map(|record| record.index_count)
+            .sum();
+        PreparedTexturedSectionRecords {
+            records,
+            loaded_section_count,
+            loaded_index_count,
+        }
+    }
+
     #[test]
     fn textured_section_visibility_stats_seeds_visible_edge_when_camera_section_is_missing() {
         let sections = vec![
@@ -2943,6 +3344,41 @@ mod tests {
         assert_eq!(west_stats.frustum_section_count, 1);
         assert_eq!(west_stats.frustum_index_count, 6);
         assert_eq!(west_stats.drawn_section_count, 1);
+    }
+
+    #[test]
+    fn stereo_union_cull_matches_union_of_per_eye_host_views() {
+        let west = RenderSectionKey::new(-2, 0, 0);
+        let east = RenderSectionKey::new(2, 0, 0);
+        let sections = vec![
+            fake_section(west, 6, VisibilitySet::all_visible()),
+            fake_section(east, 6, VisibilitySet::all_visible()),
+        ];
+        let records = prepared_records_for_sections(&sections);
+        let eye = Vec3::new(8.0, 8.0, 8.0);
+        let left_view = test_render_view(eye, Vec3::new(-32.0, 8.0, 8.0), Vec3::Y, 800, 800);
+        let right_view = test_render_view(eye, Vec3::new(48.0, 8.0, 8.0), Vec3::Y, 800, 800);
+        let options = TexturedSectionRenderOptions {
+            section_occlusion_culling: false,
+            ..TexturedSectionRenderOptions::default()
+        };
+        let mut scratch = CullScratch::default();
+        let left = cull_textured_sections(&records, left_view, options, &mut scratch);
+        let right = cull_textured_sections(&records, right_view, options, &mut scratch);
+        let stereo = cull_textured_sections_stereo_union(
+            &records,
+            [left_view, right_view],
+            [options, options],
+            &mut scratch,
+        );
+        let mut expected = left.drawn_keys;
+        expected.extend(right.drawn_keys);
+
+        assert!(expected.contains(&west));
+        assert!(expected.contains(&east));
+        assert_eq!(stereo.drawn_keys, expected);
+        assert_eq!(stereo.stats.drawn_section_count, expected.len());
+        assert_eq!(stereo.stats.drawn_index_count, 12);
     }
 
     #[test]

@@ -2,8 +2,8 @@ use anyhow::{Context, Result, ensure};
 use mclone_assets::AssetSource;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
-    DEPTH_FORMAT, PreparedTexturedSectionRecords, TexturedSectionDrawResources,
-    TexturedSectionRenderOptions, TexturedSectionUploadReport,
+    DEPTH_FORMAT, PreparedTexturedSectionRecords, PreparedTexturedSectionStereoDraw,
+    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::entity::{
@@ -708,6 +708,7 @@ where
         view_slot,
         None,
         None,
+        None,
         render_stats,
     )
 }
@@ -801,6 +802,7 @@ where
         gui,
         build_gui_draw,
         view_slot,
+        None,
         None,
         Some(&mut timing),
         render_stats,
@@ -901,6 +903,58 @@ where
         view_slot,
         Some(prepared_records),
         None,
+        None,
+        render_stats,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_prepared_stereo_draw_in_slot<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    prepared_draw: &PreparedTexturedSectionStereoDraw,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    render_stats: &mut RenderStreamStats,
+    view_slot: PerViewSlot,
+) -> Result<FullFrameRenderSummary>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        view_slot,
+        None,
+        Some(prepared_draw),
+        None,
         render_stats,
     )
 }
@@ -998,6 +1052,60 @@ where
         build_gui_draw,
         view_slot,
         Some(prepared_records),
+        None,
+        Some(&mut timing),
+        render_stats,
+    )?;
+    Ok((summary, timing))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    prepared_draw: &PreparedTexturedSectionStereoDraw,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    render_stats: &mut RenderStreamStats,
+    view_slot: PerViewSlot,
+) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let mut timing = FullFrameRenderTiming::default();
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    let summary = render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        view_slot,
+        None,
+        Some(prepared_draw),
         Some(&mut timing),
         render_stats,
     )?;
@@ -1024,6 +1132,7 @@ fn render_full_frame_for_view_inner<BuildGuiDraw>(
     build_gui_draw: BuildGuiDraw,
     view_slot: PerViewSlot,
     prepared_records: Option<&PreparedTexturedSectionRecords>,
+    prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
     mut timing: Option<&mut FullFrameRenderTiming>,
     render_stats: &mut RenderStreamStats,
 ) -> Result<FullFrameRenderSummary>
@@ -1061,8 +1170,28 @@ where
             background_clear_color,
         )?
         .with_loaded_color();
-        let frame_stats = match (timing.as_deref_mut(), prepared_records) {
-            (Some(timing), Some(records)) => {
+        let frame_stats = match (
+            timing.as_deref_mut(),
+            prepared_stereo_draw,
+            prepared_records,
+        ) {
+            (Some(timing), Some(prepared_draw), _) => {
+                let (frame_stats, terrain_timing) = draw
+                    .render_prepared_stereo_draw_timed_in_slot(
+                        prepared_draw,
+                        frame.queue,
+                        frame.encoder,
+                        render_target,
+                        render_view,
+                        render_options,
+                        view_slot,
+                    )?;
+                timing.terrain_uniform_write_ms += terrain_timing.uniform_write_ms;
+                timing.terrain_prepare_ms += terrain_timing.prepare_ms;
+                timing.terrain_encode_ms += terrain_timing.encode_ms;
+                frame_stats
+            }
+            (Some(timing), None, Some(records)) => {
                 let (frame_stats, terrain_timing) = draw
                     .render_prepared_with_options_timed_in_slot(
                         records,
@@ -1082,7 +1211,7 @@ where
                 timing.terrain_encode_ms += terrain_timing.encode_ms;
                 frame_stats
             }
-            (Some(timing), None) => {
+            (Some(timing), None, None) => {
                 let (frame_stats, terrain_timing) = draw.render_with_options_timed_in_slot(
                     frame.queue,
                     frame.encoder,
@@ -1100,7 +1229,17 @@ where
                 timing.terrain_encode_ms += terrain_timing.encode_ms;
                 frame_stats
             }
-            (None, Some(records)) => draw.render_prepared_with_options_in_slot(
+            (None, Some(prepared_draw), _) => draw
+                .render_prepared_stereo_draw_with_options_in_slot(
+                    prepared_draw,
+                    frame.queue,
+                    frame.encoder,
+                    render_target,
+                    render_view,
+                    render_options,
+                    view_slot,
+                )?,
+            (None, None, Some(records)) => draw.render_prepared_with_options_in_slot(
                 records,
                 frame.queue,
                 frame.encoder,
@@ -1109,7 +1248,7 @@ where
                 render_options,
                 view_slot,
             )?,
-            (None, None) => draw.render_with_options_in_slot(
+            (None, None, None) => draw.render_with_options_in_slot(
                 frame.queue,
                 frame.encoder,
                 render_target,

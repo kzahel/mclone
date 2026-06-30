@@ -74,6 +74,65 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-30 - Standalone Quest 3 Frozen RD10 Shared Stereo Terrain Prep (Slice H)
+
+Benchmarked code: current Slice H worktree, based on `1c8fdd2`, committed in the
+Slice H commit that adds this record. The change builds one shared
+`PreparedTexturedSectionStereoDraw` per XR frame from the exact union of both eye
+frustums and feeds it to the per-eye full-frame, frozen terrain-only, and
+full-frame multiview paths. Validation before the Quest runs:
+`cargo test --manifest-path native/Cargo.toml -p mclone-render`,
+`cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -p mclone-xr-scene`,
+and `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`.
+The Quest validator cleanup was verified after
+the runs: `pidof com.kzahel.mclone.xr` empty, `mWakefulness=Asleep`,
+`mHoldingDisplaySuspendBlocker=false`.
+
+Lanes:
+
+- `native:android-xr:perf:frozen:rd10:metrics` for the per-eye default path.
+- `native:android-xr:perf:frozen:rd10:multiview` for the opt-in full-frame
+  multiview path.
+
+Summary:
+
+| Path | Sample | FPS | Frames | p50 | p95 | p99 | Max | Over 1x | Drawn sections | Drawn indices | Key CPU/GPU marker |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| per-eye | `20.001s` | `72.0` | 1,440 | `13.653ms` | `15.262ms` | `18.313ms` | `25.584ms` | 526 | 203 | 1,523,148 | shared cull charged to left `1.736ms`; right cull `0.000ms`; stereo poll `10.011ms` |
+| multiview | `20.010s` | `72.0` | 1,440 | `13.728ms` | `14.776ms` | `17.892ms` | `25.715ms` | 546 | 203 | 1,523,148 | multiview terrain `3.052ms`; multiview poll `11.408ms` |
+
+Per-eye marker block:
+
+```text
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.001 mode=stationary-frozen-render render_path=per-eye render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=34.944 settle_min_seconds=5.000 settle_frames=2401 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1440 submitted_delta=1440 runtime_delta=1440 skipped_delta=0 frame_avg_ms=13.841 frame_min_ms=11.511 frame_p50_ms=13.653 frame_p95_ms=15.262 frame_p99_ms=18.313 frame_max_ms=25.584 over_budget=526 over_2x_budget=0 over_4x_budget=0
+MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_render_frame_ms=14.515 max_terrain_render_views_ms=0.157 max_terrain_menu_pointer_ms=0.000 max_terrain_runtime_upload_ms=0.000 max_runtime_poll_ms=0.000 max_runtime_sync_ms=0.000 max_runtime_gpu_upload_ms=0.000 max_runtime_ready_sections_ms=0.000 max_terrain_shared_records_ms=0.051 max_terrain_left_eye_ms=7.636 max_terrain_right_eye_ms=7.088 max_terrain_left_eye_prepare_ms=1.811 max_terrain_left_eye_encode_ms=2.270 max_terrain_left_eye_section_encode_ms=1.149 max_terrain_left_eye_submit_ms=0.429 max_terrain_left_eye_poll_wait_ms=6.137 max_terrain_right_eye_prepare_ms=0.144 max_terrain_right_eye_encode_ms=2.108 max_terrain_right_eye_section_encode_ms=1.549 max_terrain_right_eye_submit_ms=0.302 max_terrain_right_eye_poll_wait_ms=5.833 max_terrain_stereo_finish_ms=0.000 max_terrain_stereo_submit_ms=0.577 max_terrain_stereo_poll_wait_ms=10.011
+MCLONE_ANDROID_XR_PERF_TERRAIN_PREP max_terrain_left_eye_cull_ms=1.736 max_terrain_left_eye_uniform_write_ms=0.174 max_terrain_left_eye_translucent_collect_ms=0.166 max_terrain_left_eye_translucent_sort_ms=0.105 max_terrain_right_eye_cull_ms=0.000 max_terrain_right_eye_uniform_write_ms=0.144 max_terrain_right_eye_translucent_collect_ms=0.000 max_terrain_right_eye_translucent_sort_ms=0.000
+MCLONE_ANDROID_XR_PERF_DRAW sections=1133 drawn_sections=203 indices=5396316 drawn_indices=1523148 actors=1 drawn_actors=1
+```
+
+Multiview marker block:
+
+```text
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.010 mode=stationary-frozen-render render_path=multiview render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=34.586 settle_min_seconds=5.000 settle_frames=2430 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1440 submitted_delta=1440 runtime_delta=1440 skipped_delta=0 frame_avg_ms=13.843 frame_min_ms=12.065 frame_p50_ms=13.728 frame_p95_ms=14.776 frame_p99_ms=17.892 frame_max_ms=25.715 over_budget=546 over_2x_budget=0 over_4x_budget=0
+MCLONE_ANDROID_XR_PERF_MULTIVIEW max_multiview_sky_ms=0.691 max_multiview_terrain_ms=3.052 max_multiview_actor_ms=0.675 max_multiview_screen_effect_ms=0.019 max_multiview_world_overlays_ms=0.069 max_multiview_submit_ms=2.800 max_multiview_poll_wait_ms=11.408
+MCLONE_ANDROID_XR_PERF_DRAW sections=1133 drawn_sections=203 indices=5396316 drawn_indices=1523148 actors=1 drawn_actors=1
+```
+
+Interpretation:
+
+- Slice H did remove the duplicate terrain prep structurally. In the per-eye
+  path, right-eye cull/collect/sort is now zero and the shared work is charged to
+  the left-eye marker. In the multiview path, `max_multiview_terrain_ms` dropped
+  from the immediately prior matched `4.059ms` marker run to `3.052ms`.
+- End-to-end RD10 remains borderline. Both paths still have p95 over the
+  `13.889ms` 72Hz budget, and the dominant tail is submitted GPU/poll time
+  (`10-11ms` max poll markers here).
+- The shared union list is conservative: both paths report `203` drawn sections
+  / `1.523M` drawn indices. That is correct for multiview and safe for per-eye,
+  but it can add clipped edge-section GPU work relative to independent per-eye
+  culls. If the default per-eye path is optimized further before batching,
+  consider keeping shared traversal/prep while storing per-eye draw masks.
+
 ### 2026-06-29 - Standalone Quest 3 Frozen RD10 Poll-Contention Probe (E2)
 
 Benchmarked code commit: this E2 commit (opt-in poll-contention probe,

@@ -674,6 +674,16 @@ input, render-session, and render changes present. They are useful as a matched
 A/B signal because both lanes used the same current tree, but they should not be
 treated as clean-release baseline numbers.
 
+**Shared terrain prep follow-up landed 2026-06-30.** Slice H from 106 now builds
+one exact-union `PreparedTexturedSectionStereoDraw` and feeds both the per-eye
+and full-frame multiview paths. See
+[`106`](106-android-xr-static-render-cpu-reduction.md) and
+[`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md)
+for the paired Quest run: multiview terrain CPU max moved from `4.059ms` to
+`3.052ms`, but end-to-end RD10 remained borderline (`~13.84ms` avg, `~14.8ms`
+p95). That confirms terrain-prep sharing is useful architecture cleanup, not the
+remaining primary performance lever.
+
 Move from proof-of-correctness one-submit to the real target:
 
 - keep the default production path on per-eye submit until headset visual
