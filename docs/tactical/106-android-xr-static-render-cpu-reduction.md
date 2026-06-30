@@ -276,15 +276,26 @@ covered per-view uniforms are chunk terrain, sky, actors, selection outline, and
 world GUI. The underwater screen-effect vertex upload also uses the same
 per-view frame slot count, because that overlay is generated per view.
 
-This is still **not** the full E4 implementation and should not be treated as a
-green light to overlap command encoding across frames by itself. Remaining
-mutable GPU upload resources need the same in-flight lifetime audit before true
-frame pipelining is enabled, especially sky/glow vertex buffers, selection
-outline vertices, world-GUI vertices/line vertices, and the world-GUI panel
-texture. Actor geometry is already uploaded into fresh per-render buffers, and
-terrain section meshes are persistent. The next slice should either ring/snapshot
-those remaining transient uploads or constrain E4's overlap boundary so next
-frame work cannot write them before the previous frame's submission is complete.
+## Transient Per-View Upload Ring (landed 2026-06-30)
+
+The second E4 prerequisite is now in place for the per-eye path: transient
+per-view upload resources use the same frame-ring slot as their draw uniforms.
+Sky disc/glow vertices, selection outline vertices, world-GUI panel vertices,
+world-GUI line vertices, the GUI vertices used to render the menu panel texture,
+and the world-GUI panel texture itself no longer reuse the same GPU region for
+frame N+1 while frame N may still be in flight. Actor geometry is already
+uploaded into fresh per-render buffers, terrain section meshes are persistent,
+and the underwater screen-effect vertex upload was covered by the prior uniform
+ring slice.
+
+This still does **not** enable true E4 by itself. The per-eye render resource
+lifetime is now structured for pipelining, but the app still waits in the current
+frame flow. The next slice is the runtime-toggleable one-frame-late scheduling
+mode itself: submit/present frame N while preparing frame N+1, keep the default
+off, report the mode in perf summaries, and measure both frame timing and
+motion-to-photon. If multiview ever gets the same cross-frame overlap treatment,
+mirror this resource lifetime audit for its separate multiview uniform buffers
+and single-view scratch uploads.
 
 ## Post-Validation Rollback (landed 2026-06-29)
 

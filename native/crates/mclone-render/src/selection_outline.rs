@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use std::num::{NonZeroU32, NonZeroU64};
+use std::ops::Range;
 
 use anyhow::{Result, bail};
 use glam::{Mat4, Vec3};
 use mclone_core::Aabb;
-use wgpu::util::DeviceExt;
 
 use crate::{
     chunk::{ChunkDepthTarget, ChunkMultiviewDepthTarget, ChunkRenderView, DEPTH_FORMAT},
@@ -125,7 +125,7 @@ pub struct SelectionOutlineRenderer {
     color_format: wgpu::TextureFormat,
     multiview: RefCell<Option<SelectionOutlineMultiviewRenderer>>,
     vertex_buffer: Option<wgpu::Buffer>,
-    vertex_buffer_size: wgpu::BufferAddress,
+    vertex_buffer_slot_size: wgpu::BufferAddress,
 }
 
 impl SelectionOutlineRenderer {
@@ -211,7 +211,7 @@ impl SelectionOutlineRenderer {
             color_format,
             multiview: RefCell::new(None),
             vertex_buffer: None,
-            vertex_buffer_size: 0,
+            vertex_buffer_slot_size: 0,
         }
     }
 
@@ -259,7 +259,7 @@ impl SelectionOutlineRenderer {
         if vertices.is_empty() {
             return;
         }
-        self.upload_vertices(device, queue, &vertices);
+        let vertex_range = self.upload_vertices(device, queue, view_slot, &vertices);
         let uniform_offset =
             self.uniforms
                 .write_slot(queue, view_slot, &matrix_bytes(render_view.view_projection));
@@ -291,7 +291,7 @@ impl SelectionOutlineRenderer {
             self.vertex_buffer
                 .as_ref()
                 .expect("selection outline vertex buffer exists")
-                .slice(..),
+                .slice(vertex_range),
         );
         pass.draw(0..(vertices.len() / OUTLINE_VERTEX_FLOATS) as u32, 0..1);
     }
@@ -316,7 +316,7 @@ impl SelectionOutlineRenderer {
         if vertices.is_empty() {
             return Ok(());
         }
-        self.upload_vertices(device, queue, &vertices);
+        let vertex_range = self.upload_vertices(device, queue, SINGLE_VIEW_SLOT, &vertices);
         let renderer = self.multiview_renderer(device)?;
         renderer.write_uniforms(queue, render_views);
 
@@ -347,7 +347,7 @@ impl SelectionOutlineRenderer {
             self.vertex_buffer
                 .as_ref()
                 .expect("selection outline vertex buffer exists")
-                .slice(..),
+                .slice(vertex_range),
         );
         pass.draw(0..(vertices.len() / OUTLINE_VERTEX_FLOATS) as u32, 0..1);
         Ok(())
@@ -371,25 +371,34 @@ impl SelectionOutlineRenderer {
         }))
     }
 
-    fn upload_vertices(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
+    fn upload_vertices(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view_slot: PerViewSlot,
+        vertices: &[f32],
+    ) -> Range<wgpu::BufferAddress> {
         let bytes = f32_bytes_vec(vertices);
-        let required_size = bytes.len() as wgpu::BufferAddress;
-        if self
+        let required_slot_size = bytes.len().max(4) as wgpu::BufferAddress;
+        let needs_recreate = self
             .vertex_buffer
             .as_ref()
-            .is_none_or(|_| self.vertex_buffer_size < required_size)
-        {
-            self.vertex_buffer = Some(device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("mclone_selection_outline_vertices"),
-                    contents: &bytes,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                },
-            ));
-            self.vertex_buffer_size = required_size;
-        } else if let Some(buffer) = &self.vertex_buffer {
-            queue.write_buffer(buffer, 0, &bytes);
+            .is_none_or(|_| self.vertex_buffer_slot_size < required_slot_size);
+        if needs_recreate {
+            self.vertex_buffer_slot_size = required_slot_size;
+            self.vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mclone_selection_outline_vertices"),
+                size: self.vertex_buffer_slot_size
+                    * PER_VIEW_UNIFORM_SLOT_COUNT as wgpu::BufferAddress,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
         }
+        let range = view_slot.byte_range(self.vertex_buffer_slot_size);
+        if let Some(buffer) = &self.vertex_buffer {
+            queue.write_buffer(buffer, range.start, &bytes);
+        }
+        range.start..range.start + bytes.len() as wgpu::BufferAddress
     }
 }
 

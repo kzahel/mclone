@@ -12,6 +12,7 @@
 
 use std::cell::RefCell;
 use std::num::{NonZeroU32, NonZeroU64};
+use std::ops::Range;
 
 use anyhow::{Result, bail};
 use glam::{Mat4, Quat, Vec3};
@@ -191,13 +192,15 @@ impl SkyRenderer {
         });
         let disc_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("mclone_sky_disc_vertices"),
-            size: SKY_VERTEX_BYTE_SIZE * DISC_VERTEX_COUNT as wgpu::BufferAddress,
+            size: sky_vertex_slot_size(DISC_VERTEX_COUNT)
+                * PER_VIEW_UNIFORM_SLOT_COUNT as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let glow_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("mclone_sky_glow_vertices"),
-            size: SKY_VERTEX_BYTE_SIZE * GLOW_VERTEX_COUNT as wgpu::BufferAddress,
+            size: sky_vertex_slot_size(GLOW_VERTEX_COUNT)
+                * PER_VIEW_UNIFORM_SLOT_COUNT as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -268,22 +271,27 @@ impl SkyRenderer {
             view_slot,
             &matrix_bytes(sky_view_projection.to_cols_array_2d()),
         );
+        let disc_range = sky_vertex_slot_range(view_slot, DISC_VERTEX_COUNT);
         queue.write_buffer(
             &self.disc_vertex_buffer,
-            0,
+            disc_range.start,
             &vertex_bytes(&disc_vertices(sky_color)),
         );
         let glow = sunrise_color(time_of_day);
-        if let Some(color) = glow {
+        let glow_range = if let Some(color) = glow {
+            let range = sky_vertex_slot_range(view_slot, GLOW_VERTEX_COUNT);
             queue.write_buffer(
                 &self.glow_vertex_buffer,
-                0,
+                range.start,
                 &vertex_bytes(&glow_vertices(
                     color_transform_rgba(color, self.color_transform),
                     sun_angle,
                 )),
             );
-        }
+            Some(range)
+        } else {
+            None
+        };
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_sky_render_pass"),
@@ -300,12 +308,12 @@ impl SkyRenderer {
         });
         pass.set_bind_group(0, &self.bind_group, &[uniform_offset]);
         pass.set_pipeline(&self.disc_pipeline);
-        pass.set_vertex_buffer(0, self.disc_vertex_buffer.slice(..));
+        pass.set_vertex_buffer(0, self.disc_vertex_buffer.slice(disc_range));
         pass.set_index_buffer(self.disc_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.disc_index_count, 0, 0..1);
-        if glow.is_some() {
+        if let Some(glow_range) = glow_range {
             pass.set_pipeline(&self.glow_pipeline);
-            pass.set_vertex_buffer(0, self.glow_vertex_buffer.slice(..));
+            pass.set_vertex_buffer(0, self.glow_vertex_buffer.slice(glow_range));
             pass.set_index_buffer(self.glow_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..self.glow_index_count, 0, 0..1);
         }
@@ -323,10 +331,10 @@ impl SkyRenderer {
         time_of_day: f32,
         sun_angle: f32,
     ) -> Result<()> {
-        let clear_color = self.prepare_vertices(queue, clear_color, time_of_day, sun_angle);
+        let (clear_color, disc_range, glow_range) =
+            self.prepare_vertices(queue, clear_color, time_of_day, sun_angle);
         let renderer = self.multiview_renderer(device)?;
         renderer.write_uniforms(queue, sky_view_projections);
-        let glow = sunrise_color(time_of_day);
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_sky_multiview_render_pass"),
@@ -343,12 +351,12 @@ impl SkyRenderer {
         });
         pass.set_bind_group(0, &renderer.bind_group, &[]);
         pass.set_pipeline(&renderer.disc_pipeline);
-        pass.set_vertex_buffer(0, self.disc_vertex_buffer.slice(..));
+        pass.set_vertex_buffer(0, self.disc_vertex_buffer.slice(disc_range));
         pass.set_index_buffer(self.disc_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.disc_index_count, 0, 0..1);
-        if glow.is_some() {
+        if let Some(glow_range) = glow_range {
             pass.set_pipeline(&renderer.glow_pipeline);
-            pass.set_vertex_buffer(0, self.glow_vertex_buffer.slice(..));
+            pass.set_vertex_buffer(0, self.glow_vertex_buffer.slice(glow_range));
             pass.set_index_buffer(self.glow_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..self.glow_index_count, 0, 0..1);
         }
@@ -361,29 +369,38 @@ impl SkyRenderer {
         clear_color: wgpu::Color,
         time_of_day: f32,
         sun_angle: f32,
-    ) -> wgpu::Color {
+    ) -> (
+        wgpu::Color,
+        Range<wgpu::BufferAddress>,
+        Option<Range<wgpu::BufferAddress>>,
+    ) {
         let clear_color = color_transform_wgpu(clear_color, self.color_transform);
         let sky_color = [
             clear_color.r as f32,
             clear_color.g as f32,
             clear_color.b as f32,
         ];
+        let disc_range = sky_vertex_slot_range(SINGLE_VIEW_SLOT, DISC_VERTEX_COUNT);
         queue.write_buffer(
             &self.disc_vertex_buffer,
-            0,
+            disc_range.start,
             &vertex_bytes(&disc_vertices(sky_color)),
         );
-        if let Some(color) = sunrise_color(time_of_day) {
+        let glow_range = if let Some(color) = sunrise_color(time_of_day) {
+            let range = sky_vertex_slot_range(SINGLE_VIEW_SLOT, GLOW_VERTEX_COUNT);
             queue.write_buffer(
                 &self.glow_vertex_buffer,
-                0,
+                range.start,
                 &vertex_bytes(&glow_vertices(
                     color_transform_rgba(color, self.color_transform),
                     sun_angle,
                 )),
             );
-        }
-        clear_color
+            Some(range)
+        } else {
+            None
+        };
+        (clear_color, disc_range, glow_range)
     }
 
     fn multiview_renderer(
@@ -403,6 +420,17 @@ impl SkyRenderer {
                 .expect("sky multiview renderer initialized above")
         }))
     }
+}
+
+fn sky_vertex_slot_size(vertex_count: usize) -> wgpu::BufferAddress {
+    SKY_VERTEX_BYTE_SIZE * vertex_count as wgpu::BufferAddress
+}
+
+fn sky_vertex_slot_range(
+    view_slot: PerViewSlot,
+    vertex_count: usize,
+) -> Range<wgpu::BufferAddress> {
+    view_slot.byte_range(sky_vertex_slot_size(vertex_count))
 }
 
 struct SkyMultiviewRenderer {

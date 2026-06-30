@@ -1,4 +1,5 @@
 use std::num::NonZeroU64;
+use std::ops::Range;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PerViewSlot(u32);
@@ -26,6 +27,22 @@ impl PerViewSlot {
             "uniform frame {frame_index} is outside frame ring count {PER_VIEW_UNIFORM_FRAME_COUNT}"
         );
         Self(frame_index * STEREO_VIEW_SLOT_COUNT + self.view_index())
+    }
+
+    pub fn byte_range(self, slot_size: wgpu::BufferAddress) -> Range<wgpu::BufferAddress> {
+        assert!(slot_size > 0, "per-view slot byte size must be non-zero");
+        let slot_index = self.index();
+        assert!(
+            slot_index < PER_VIEW_UNIFORM_SLOT_COUNT,
+            "per-view slot {slot_index} is outside slot count {PER_VIEW_UNIFORM_SLOT_COUNT}"
+        );
+        let start = slot_size
+            .checked_mul(slot_index as wgpu::BufferAddress)
+            .expect("per-view slot byte range start fits in u64");
+        let end = start
+            .checked_add(slot_size)
+            .expect("per-view slot byte range end fits in u64");
+        start..end
     }
 }
 
@@ -159,6 +176,13 @@ mod tests {
         assert_eq!(right.view_index(), 1);
         assert!(!left.is_right_eye());
         assert!(right.is_right_eye());
+    }
+
+    #[test]
+    fn per_view_slot_byte_range_uses_raw_slot_index() {
+        let right = RIGHT_EYE_VIEW_SLOT.in_uniform_frame(1);
+        assert_eq!(right.index(), 3);
+        assert_eq!(right.byte_range(64), 192..256);
     }
 
     #[test]

@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use std::num::{NonZeroU32, NonZeroU64};
+use std::ops::Range;
 
 use anyhow::{Result, bail};
 use glam::{Mat4, Vec3};
 use mclone_ui::{ClipRect, Color, GuiDrawCommand, GuiDrawList, Rect};
-use wgpu::util::DeviceExt;
 
 use crate::chunk::{ChunkRenderView, ChunkTextureAtlas};
 use crate::target::RenderFrameTarget;
@@ -261,7 +261,7 @@ pub struct GuiRenderer {
     texture_bind_group_layout: wgpu::BindGroupLayout,
     texture_atlas: Option<GuiTextureAtlas>,
     vertex_buffer: Option<wgpu::Buffer>,
-    vertex_buffer_size: wgpu::BufferAddress,
+    vertex_buffer_slot_size: wgpu::BufferAddress,
 }
 
 impl GuiRenderer {
@@ -388,7 +388,7 @@ impl GuiRenderer {
             texture_bind_group_layout,
             texture_atlas: None,
             vertex_buffer: None,
-            vertex_buffer_size: 0,
+            vertex_buffer_slot_size: 0,
         }
     }
 
@@ -417,6 +417,30 @@ impl GuiRenderer {
         gui: &GuiDrawList,
         options: GuiRenderOptions,
     ) -> Result<()> {
+        self.render_in_slot(
+            device,
+            queue,
+            encoder,
+            target,
+            gui_size,
+            gui,
+            options,
+            SINGLE_VIEW_SLOT,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_in_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        gui_size: [f32; 2],
+        gui: &GuiDrawList,
+        options: GuiRenderOptions,
+        view_slot: PerViewSlot,
+    ) -> Result<()> {
         let prepared = prepare_draws(gui.commands(), gui_size);
         let load = match options.clear_color {
             Some(color) => wgpu::LoadOp::Clear(color),
@@ -441,7 +465,7 @@ impl GuiRenderer {
             return Ok(());
         }
 
-        self.upload_vertices(device, queue, &prepared.vertices);
+        let vertex_range = self.upload_vertices(device, queue, view_slot, &prepared.vertices);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_gui_render_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -459,7 +483,7 @@ impl GuiRenderer {
             .vertex_buffer
             .as_ref()
             .expect("GUI vertex buffer exists");
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.set_vertex_buffer(0, vertex_buffer.slice(vertex_range));
         for draw in prepared.draws {
             apply_scissor(&mut pass, target.size, gui_size, draw.clip);
             match draw.kind {
@@ -482,25 +506,34 @@ impl GuiRenderer {
         Ok(())
     }
 
-    fn upload_vertices(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
+    fn upload_vertices(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view_slot: PerViewSlot,
+        vertices: &[f32],
+    ) -> Range<wgpu::BufferAddress> {
         let bytes = f32_bytes_vec(vertices);
-        let required_size = bytes.len().max(4) as wgpu::BufferAddress;
+        let required_slot_size = bytes.len().max(4) as wgpu::BufferAddress;
         let needs_recreate = self
             .vertex_buffer
             .as_ref()
-            .is_none_or(|_| self.vertex_buffer_size < required_size);
+            .is_none_or(|_| self.vertex_buffer_slot_size < required_slot_size);
         if needs_recreate {
-            self.vertex_buffer = Some(device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("mclone_gui_vertices"),
-                    contents: &bytes,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                },
-            ));
-            self.vertex_buffer_size = required_size;
-        } else if let Some(buffer) = &self.vertex_buffer {
-            queue.write_buffer(buffer, 0, &bytes);
+            self.vertex_buffer_slot_size = required_slot_size;
+            self.vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mclone_gui_vertices"),
+                size: self.vertex_buffer_slot_size
+                    * PER_VIEW_UNIFORM_SLOT_COUNT as wgpu::BufferAddress,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
         }
+        let range = view_slot.byte_range(self.vertex_buffer_slot_size);
+        if let Some(buffer) = &self.vertex_buffer {
+            queue.write_buffer(buffer, range.start, &bytes);
+        }
+        range.start..range.start + bytes.len() as wgpu::BufferAddress
     }
 }
 
@@ -642,10 +675,10 @@ pub struct WorldGuiRenderer {
     color_format: wgpu::TextureFormat,
     multiview: RefCell<Option<WorldGuiMultiviewRenderer>>,
     vertex_buffer: Option<wgpu::Buffer>,
-    vertex_buffer_size: wgpu::BufferAddress,
+    vertex_buffer_slot_size: wgpu::BufferAddress,
     line_vertex_buffer: Option<wgpu::Buffer>,
-    line_vertex_buffer_size: wgpu::BufferAddress,
-    panel_texture: Option<WorldGuiTexture>,
+    line_vertex_buffer_slot_size: wgpu::BufferAddress,
+    panel_textures: Vec<Option<WorldGuiTexture>>,
 }
 
 impl WorldGuiRenderer {
@@ -816,10 +849,10 @@ impl WorldGuiRenderer {
             color_format,
             multiview: RefCell::new(None),
             vertex_buffer: None,
-            vertex_buffer_size: 0,
+            vertex_buffer_slot_size: 0,
             line_vertex_buffer: None,
-            line_vertex_buffer_size: 0,
-            panel_texture: None,
+            line_vertex_buffer_slot_size: 0,
+            panel_textures: (0..PER_VIEW_UNIFORM_SLOT_COUNT).map(|_| None).collect(),
         }
     }
 
@@ -880,13 +913,15 @@ impl WorldGuiRenderer {
             return Ok(());
         }
         let panel_pixels = [panel_pixels[0].max(1), panel_pixels[1].max(1)];
-        self.ensure_panel_texture(device, panel_pixels);
+        self.ensure_panel_texture(device, panel_pixels, view_slot);
+        let panel_texture_index = panel_texture_index(view_slot);
         {
             let texture = self
-                .panel_texture
-                .as_ref()
+                .panel_textures
+                .get(panel_texture_index)
+                .and_then(Option::as_ref)
                 .expect("world GUI panel texture exists");
-            self.gui_renderer.render(
+            self.gui_renderer.render_in_slot(
                 device,
                 queue,
                 encoder,
@@ -894,15 +929,18 @@ impl WorldGuiRenderer {
                 gui_size,
                 gui,
                 GuiRenderOptions::clear(wgpu::Color::TRANSPARENT),
+                view_slot,
             )?;
         }
 
         let vertices = world_gui_panel_vertices(panel);
-        self.upload_world_vertices(device, queue, &vertices);
+        let vertex_range = self.upload_world_vertices(device, queue, view_slot, &vertices);
         let line_vertices = world_gui_line_vertices(lines);
-        if !line_vertices.is_empty() {
-            self.upload_world_line_vertices(device, queue, &line_vertices);
-        }
+        let line_vertex_range = if line_vertices.is_empty() {
+            None
+        } else {
+            Some(self.upload_world_line_vertices(device, queue, view_slot, &line_vertices))
+        };
         let uniform_offset =
             self.uniforms
                 .write_slot(queue, view_slot, &matrix_bytes(render_view.view_projection));
@@ -921,8 +959,9 @@ impl WorldGuiRenderer {
             ..Default::default()
         });
         let texture = self
-            .panel_texture
-            .as_ref()
+            .panel_textures
+            .get(panel_texture_index)
+            .and_then(Option::as_ref)
             .expect("world GUI panel texture exists");
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &texture.bind_group, &[]);
@@ -932,10 +971,10 @@ impl WorldGuiRenderer {
             self.vertex_buffer
                 .as_ref()
                 .expect("world GUI vertex buffer exists")
-                .slice(..),
+                .slice(vertex_range),
         );
         pass.draw(0..QUAD_VERTEX_COUNT, 0..1);
-        if !line_vertices.is_empty() {
+        if let Some(line_vertex_range) = line_vertex_range {
             pass.set_pipeline(&self.line_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[uniform_offset]);
             pass.set_vertex_buffer(
@@ -943,7 +982,7 @@ impl WorldGuiRenderer {
                 self.line_vertex_buffer
                     .as_ref()
                     .expect("world GUI line vertex buffer exists")
-                    .slice(..),
+                    .slice(line_vertex_range),
             );
             pass.draw(
                 0..(line_vertices.len() / WORLD_LINE_FLOATS_PER_VERTEX) as u32,
@@ -971,11 +1010,13 @@ impl WorldGuiRenderer {
             return Ok(());
         }
         let panel_pixels = [panel_pixels[0].max(1), panel_pixels[1].max(1)];
-        self.ensure_panel_texture(device, panel_pixels);
+        self.ensure_panel_texture(device, panel_pixels, SINGLE_VIEW_SLOT);
+        let panel_texture_index = panel_texture_index(SINGLE_VIEW_SLOT);
         {
             let texture = self
-                .panel_texture
-                .as_ref()
+                .panel_textures
+                .get(panel_texture_index)
+                .and_then(Option::as_ref)
                 .expect("world GUI panel texture exists");
             self.gui_renderer.render(
                 device,
@@ -989,11 +1030,13 @@ impl WorldGuiRenderer {
         }
 
         let vertices = world_gui_panel_vertices(panel);
-        self.upload_world_vertices(device, queue, &vertices);
+        let vertex_range = self.upload_world_vertices(device, queue, SINGLE_VIEW_SLOT, &vertices);
         let line_vertices = world_gui_line_vertices(lines);
-        if !line_vertices.is_empty() {
-            self.upload_world_line_vertices(device, queue, &line_vertices);
-        }
+        let line_vertex_range = if line_vertices.is_empty() {
+            None
+        } else {
+            Some(self.upload_world_line_vertices(device, queue, SINGLE_VIEW_SLOT, &line_vertices))
+        };
         let renderer = self.multiview_renderer(device)?;
         renderer.write_uniforms(queue, render_views);
 
@@ -1011,8 +1054,9 @@ impl WorldGuiRenderer {
             ..Default::default()
         });
         let texture = self
-            .panel_texture
-            .as_ref()
+            .panel_textures
+            .get(panel_texture_index)
+            .and_then(Option::as_ref)
             .expect("world GUI panel texture exists");
         pass.set_pipeline(&renderer.pipeline);
         pass.set_bind_group(0, &texture.bind_group, &[]);
@@ -1022,10 +1066,10 @@ impl WorldGuiRenderer {
             self.vertex_buffer
                 .as_ref()
                 .expect("world GUI vertex buffer exists")
-                .slice(..),
+                .slice(vertex_range),
         );
         pass.draw(0..QUAD_VERTEX_COUNT, 0..1);
-        if !line_vertices.is_empty() {
+        if let Some(line_vertex_range) = line_vertex_range {
             pass.set_pipeline(&renderer.line_pipeline);
             pass.set_bind_group(0, &renderer.uniform_bind_group, &[]);
             pass.set_vertex_buffer(
@@ -1033,7 +1077,7 @@ impl WorldGuiRenderer {
                 self.line_vertex_buffer
                     .as_ref()
                     .expect("world GUI line vertex buffer exists")
-                    .slice(..),
+                    .slice(line_vertex_range),
             );
             pass.draw(
                 0..(line_vertices.len() / WORLD_LINE_FLOATS_PER_VERTEX) as u32,
@@ -1057,7 +1101,8 @@ impl WorldGuiRenderer {
         if line_vertices.is_empty() {
             return Ok(());
         }
-        self.upload_world_line_vertices(device, queue, &line_vertices);
+        let line_vertex_range =
+            self.upload_world_line_vertices(device, queue, view_slot, &line_vertices);
         let uniform_offset =
             self.uniforms
                 .write_slot(queue, view_slot, &matrix_bytes(render_view.view_projection));
@@ -1082,7 +1127,7 @@ impl WorldGuiRenderer {
             self.line_vertex_buffer
                 .as_ref()
                 .expect("world GUI line vertex buffer exists")
-                .slice(..),
+                .slice(line_vertex_range),
         );
         pass.draw(
             0..(line_vertices.len() / WORLD_LINE_FLOATS_PER_VERTEX) as u32,
@@ -1104,7 +1149,8 @@ impl WorldGuiRenderer {
         if line_vertices.is_empty() {
             return Ok(());
         }
-        self.upload_world_line_vertices(device, queue, &line_vertices);
+        let line_vertex_range =
+            self.upload_world_line_vertices(device, queue, SINGLE_VIEW_SLOT, &line_vertices);
         let renderer = self.multiview_renderer(device)?;
         renderer.write_uniforms(queue, render_views);
 
@@ -1128,7 +1174,7 @@ impl WorldGuiRenderer {
             self.line_vertex_buffer
                 .as_ref()
                 .expect("world GUI line vertex buffer exists")
-                .slice(..),
+                .slice(line_vertex_range),
         );
         pass.draw(
             0..(line_vertices.len() / WORLD_LINE_FLOATS_PER_VERTEX) as u32,
@@ -1159,15 +1205,22 @@ impl WorldGuiRenderer {
         }))
     }
 
-    fn ensure_panel_texture(&mut self, device: &wgpu::Device, size: [u32; 2]) {
+    fn ensure_panel_texture(
+        &mut self,
+        device: &wgpu::Device,
+        size: [u32; 2],
+        view_slot: PerViewSlot,
+    ) {
+        let index = panel_texture_index(view_slot);
         if self
-            .panel_texture
-            .as_ref()
+            .panel_textures
+            .get(index)
+            .and_then(Option::as_ref)
             .is_some_and(|texture| texture.size == size)
         {
             return;
         }
-        self.panel_texture = Some(WorldGuiTexture::new(
+        self.panel_textures[index] = Some(WorldGuiTexture::new(
             device,
             &self.texture_bind_group_layout,
             size,
@@ -1178,53 +1231,70 @@ impl WorldGuiRenderer {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        view_slot: PerViewSlot,
         vertices: &[f32],
-    ) {
+    ) -> Range<wgpu::BufferAddress> {
         let bytes = f32_bytes_vec(vertices);
-        let required_size = bytes.len().max(4) as wgpu::BufferAddress;
+        let required_slot_size = bytes.len().max(4) as wgpu::BufferAddress;
         let needs_recreate = self
             .vertex_buffer
             .as_ref()
-            .is_none_or(|_| self.vertex_buffer_size < required_size);
+            .is_none_or(|_| self.vertex_buffer_slot_size < required_slot_size);
         if needs_recreate {
-            self.vertex_buffer = Some(device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("mclone_world_gui_vertices"),
-                    contents: &bytes,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                },
-            ));
-            self.vertex_buffer_size = required_size;
-        } else if let Some(buffer) = &self.vertex_buffer {
-            queue.write_buffer(buffer, 0, &bytes);
+            self.vertex_buffer_slot_size = required_slot_size;
+            self.vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mclone_world_gui_vertices"),
+                size: self.vertex_buffer_slot_size
+                    * PER_VIEW_UNIFORM_SLOT_COUNT as wgpu::BufferAddress,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
         }
+        let range = view_slot.byte_range(self.vertex_buffer_slot_size);
+        if let Some(buffer) = &self.vertex_buffer {
+            queue.write_buffer(buffer, range.start, &bytes);
+        }
+        range.start..range.start + bytes.len() as wgpu::BufferAddress
     }
 
     fn upload_world_line_vertices(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        view_slot: PerViewSlot,
         vertices: &[f32],
-    ) {
+    ) -> Range<wgpu::BufferAddress> {
         let bytes = f32_bytes_vec(vertices);
-        let required_size = bytes.len().max(4) as wgpu::BufferAddress;
+        let required_slot_size = bytes.len().max(4) as wgpu::BufferAddress;
         let needs_recreate = self
             .line_vertex_buffer
             .as_ref()
-            .is_none_or(|_| self.line_vertex_buffer_size < required_size);
+            .is_none_or(|_| self.line_vertex_buffer_slot_size < required_slot_size);
         if needs_recreate {
-            self.line_vertex_buffer = Some(device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("mclone_world_gui_line_vertices"),
-                    contents: &bytes,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                },
-            ));
-            self.line_vertex_buffer_size = required_size;
-        } else if let Some(buffer) = &self.line_vertex_buffer {
-            queue.write_buffer(buffer, 0, &bytes);
+            self.line_vertex_buffer_slot_size = required_slot_size;
+            self.line_vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mclone_world_gui_line_vertices"),
+                size: self.line_vertex_buffer_slot_size
+                    * PER_VIEW_UNIFORM_SLOT_COUNT as wgpu::BufferAddress,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
         }
+        let range = view_slot.byte_range(self.line_vertex_buffer_slot_size);
+        if let Some(buffer) = &self.line_vertex_buffer {
+            queue.write_buffer(buffer, range.start, &bytes);
+        }
+        range.start..range.start + bytes.len() as wgpu::BufferAddress
     }
+}
+
+fn panel_texture_index(view_slot: PerViewSlot) -> usize {
+    let index = view_slot.index();
+    assert!(
+        index < PER_VIEW_UNIFORM_SLOT_COUNT,
+        "world GUI panel texture slot {index} is outside slot count {PER_VIEW_UNIFORM_SLOT_COUNT}"
+    );
+    index as usize
 }
 
 struct WorldGuiMultiviewRenderer {
