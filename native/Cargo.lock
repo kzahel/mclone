@@ -1532,6 +1532,8 @@ dependencies = [
  "mclone-ui",
  "pollster",
  "rustc-hash",
+ "serde",
+ "serde_json",
  "wgpu",
  "winit",
 ]

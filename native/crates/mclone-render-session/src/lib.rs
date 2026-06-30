@@ -3931,7 +3931,7 @@ mod tests {
         assert!((actor.yaw_radians - std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
         assert_eq!(
             actor.shape,
-            mclone_render::entity::ActorInstanceShape::Humanoid
+            mclone_render::entity::ActorInstanceShape::AssetLabPlayer
         );
     }
 

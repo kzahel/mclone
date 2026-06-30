@@ -39,6 +39,7 @@ pub struct ActorInstance {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActorInstanceShape {
+    AssetLabPlayer,
     Humanoid,
     QuadrupedPlaceholder,
     CowModel,
@@ -50,7 +51,7 @@ impl ActorInstance {
         Self {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
-            shape: ActorInstanceShape::Humanoid,
+            shape: ActorInstanceShape::AssetLabPlayer,
             width: 0.6,
             height: 1.8,
             body_color: [0.18, 0.38, 0.82, 1.0],
@@ -63,7 +64,7 @@ impl ActorInstance {
         Self {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
-            shape: ActorInstanceShape::Humanoid,
+            shape: ActorInstanceShape::AssetLabPlayer,
             width: 0.6,
             height: 1.8,
             body_color: [0.10, 0.58, 0.68, 1.0],
@@ -744,6 +745,9 @@ fn append_actor(
     atlas_size: [u32; 2],
 ) {
     match actor.shape {
+        ActorInstanceShape::AssetLabPlayer => {
+            append_asset_lab_player_model(mesh, actor, texture_layout, atlas_size)
+        }
         ActorInstanceShape::Humanoid => {
             append_humanoid_model(mesh, actor, texture_layout, atlas_size)
         }
@@ -752,6 +756,41 @@ fn append_actor(
         }
         ActorInstanceShape::CowModel => append_cow_model(mesh, actor, texture_layout, atlas_size),
         ActorInstanceShape::DebugCube => append_debug_cube(mesh, actor, texture_layout, atlas_size),
+    }
+}
+
+fn append_asset_lab_player_model(
+    mesh: &mut ActorMesh,
+    actor: ActorInstance,
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
+) {
+    let Ok(figure) = crate::asset_lab_figure::player_figure() else {
+        append_humanoid_model(mesh, actor, texture_layout, atlas_size);
+        return;
+    };
+
+    let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
+    let model_scale = actor.height.max(0.1);
+    for cuboid in &figure.cuboids {
+        append_box(
+            mesh,
+            actor,
+            cuboid.min * model_scale,
+            cuboid.max * model_scale,
+            white_uv,
+            cuboid.face_colors,
+        );
+    }
+    for cuboid in &figure.overlay_cuboids {
+        append_box(
+            mesh,
+            actor,
+            cuboid.min * model_scale,
+            cuboid.max * model_scale,
+            white_uv,
+            [cuboid.color; 6],
+        );
     }
 }
 
@@ -1505,15 +1544,15 @@ mod tests {
     }
 
     #[test]
-    fn actor_mesh_emits_humanoid_player_model() {
+    fn actor_mesh_emits_asset_lab_player_model() {
         let mesh = actor_mesh(
             &[ActorInstance::remote_player(Vec3::new(1.0, 2.0, 3.0), 0.0)],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
         );
 
-        assert_eq!(mesh.vertices.len(), 12 * 6 * 4);
-        assert_eq!(mesh.indices.len(), 12 * 6 * 6);
+        assert_eq!(mesh.vertices.len(), 76 * 6 * 4);
+        assert_eq!(mesh.indices.len(), 76 * 6 * 6);
         assert!(
             mesh.vertices
                 .iter()
@@ -1522,14 +1561,14 @@ mod tests {
 
         let bounds = mesh_bounds(&mesh);
         assert!((bounds.min.y - 2.0).abs() < 1.0e-6);
-        assert!((bounds.max.y - 3.84).abs() < 1.0e-6);
+        assert!((bounds.max.y - 3.8).abs() < 1.0e-6);
         assert!(bounds.min.x < 0.56);
         assert!(bounds.max.x > 1.44);
-        assert!(bounds.max.z > 3.25);
+        assert!(bounds.max.z > 3.18);
     }
 
     #[test]
-    fn humanoid_player_model_has_front_face_details() {
+    fn asset_lab_player_model_has_front_face_details() {
         let actor = ActorInstance::remote_player(Vec3::ZERO, 0.0);
         let mesh = actor_mesh(
             &[actor],
@@ -1539,16 +1578,32 @@ mod tests {
         let dark_detail_vertices = mesh
             .vertices
             .iter()
-            .filter(|vertex| vertex.color == [0.04, 0.035, 0.03, 1.0])
+            .filter(|vertex| vertex.color == [25.0 / 255.0, 18.0 / 255.0, 14.0 / 255.0, 1.0])
             .count();
 
-        assert_eq!(dark_detail_vertices, 2 * 6 * 4);
+        assert_eq!(dark_detail_vertices, 8 * 6 * 4);
         assert!(
             mesh.vertices
                 .iter()
-                .filter(|vertex| vertex.color == [0.04, 0.035, 0.03, 1.0])
-                .all(|vertex| vertex.position[2] > 0.23)
+                .filter(|vertex| vertex.color == [25.0 / 255.0, 18.0 / 255.0, 14.0 / 255.0, 1.0])
+                .all(|vertex| vertex.position[2] > 0.18)
         );
+    }
+
+    #[test]
+    fn actor_mesh_still_emits_hardcoded_humanoid_debug_shape() {
+        let actor = ActorInstance {
+            shape: ActorInstanceShape::Humanoid,
+            ..ActorInstance::remote_player(Vec3::ZERO, 0.0)
+        };
+        let mesh = actor_mesh(
+            &[actor],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+        );
+
+        assert_eq!(mesh.vertices.len(), 12 * 6 * 4);
+        assert_eq!(mesh.indices.len(), 12 * 6 * 6);
     }
 
     #[test]
