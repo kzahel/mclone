@@ -1,13 +1,13 @@
 # 110: Shared Physics Backend Experiment
 
-Status: active; Slices 1-4e landed with the shared `mclone-physics` facade,
+Status: active; Slices 1-4f landed with the shared `mclone-physics` facade,
 no-op backend, optional Rapier backend, synthetic cuboid/static-patch
 simulation test, section terrain collider probe, feature-gated live
 chunk-to-physics terrain conversion, server-owned debug cube physics runtime,
 debug cube protocol/entity publication, desktop `F7` diagnostic launch wiring,
 fresh debug cube entity IDs on repeated throws, one-way debug player AABB
-collision, Minecraft-strength debug physics gravity/vertical drag, and
-`mclone-server` / native-client intent feature wiring. App binary-size
+collision, Minecraft-strength debug physics gravity/vertical drag, deterministic
+debug cube spin, and `mclone-server` / native-client intent feature wiring. App binary-size
 measurement is deferred until the physics path is promoted beyond diagnostics.
 
 ## Purpose
@@ -497,6 +497,7 @@ cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier
 cargo test --manifest-path native/Cargo.toml -p mclone-server
 cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier -- --screenshot /tmp/mclone-physics-spin-render-smoke.png --width 1280 --height 720 --seed 111 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 cargo check --manifest-path native/Cargo.toml
 ```
 
@@ -525,6 +526,33 @@ cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics
 cargo test --manifest-path native/Cargo.toml -p mclone-physics
 cargo test --manifest-path native/Cargo.toml -p mclone-physics --features rapier
 cargo test --manifest-path native/Cargo.toml -p mclone-server
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
+cargo check --manifest-path native/Cargo.toml
+```
+
+Recorded Slice 4f result:
+
+- Debug cubes now spawn with deterministic initial angular velocity on multiple
+  axes so the throwable cube visibly tumbles instead of behaving like a
+  translation-only test body.
+- The server maps the Rapier pose rotation into existing entity yaw/pitch
+  fields by rotating the cube's local forward vector. Roll is intentionally not
+  added to the protocol in this slice.
+- Shared actor rendering now applies debug cube pitch around the cube center
+  pivot, while existing player/passive actors remain pitch-zero and keep their
+  previous yaw-only body orientation.
+- Added tests that the debug cube starts with angular velocity, publishes
+  nonzero entity rotation after a physics tick, and that debug cube pitch rotates
+  render geometry around the cube center.
+
+Slice 4f validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-server -p mclone-render -p mclone-render-session -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier debug_physics_cube -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-render
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session
 cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
 cargo check --manifest-path native/Cargo.toml

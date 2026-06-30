@@ -34,6 +34,8 @@ pub struct ActorInstance {
     pub feet_position: Vec3,
     /// Native world yaw in radians. Local actor +Z is the forward/front side.
     pub yaw_radians: f32,
+    pub pitch_radians: f32,
+    pub rotation_pivot: Vec3,
     pub shape: ActorInstanceShape,
     pub first_person_body_only: bool,
     pub width: f32,
@@ -65,6 +67,8 @@ impl ActorInstance {
         Self {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
+            pitch_radians: 0.0,
+            rotation_pivot: Vec3::ZERO,
             shape: ActorInstanceShape::Figure(figure),
             first_person_body_only: false,
             width: 0.6,
@@ -79,6 +83,8 @@ impl ActorInstance {
         Self {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
+            pitch_radians: 0.0,
+            rotation_pivot: Vec3::ZERO,
             shape: ActorInstanceShape::Figure(default_player_figure_id()),
             first_person_body_only: false,
             width: 0.6,
@@ -109,6 +115,8 @@ impl ActorInstance {
         Self {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
+            pitch_radians: 0.0,
+            rotation_pivot: Vec3::ZERO,
             shape: ActorInstanceShape::QuadrupedPlaceholder,
             first_person_body_only: false,
             width,
@@ -123,6 +131,8 @@ impl ActorInstance {
         Self {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
+            pitch_radians: 0.0,
+            rotation_pivot: Vec3::ZERO,
             shape: ActorInstanceShape::CowModel,
             first_person_body_only: false,
             width,
@@ -142,6 +152,8 @@ impl ActorInstance {
         Self {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
+            pitch_radians: 0.0,
+            rotation_pivot: Vec3::ZERO,
             shape: ActorInstanceShape::QuadrupedPlaceholder,
             first_person_body_only: false,
             width,
@@ -152,10 +164,18 @@ impl ActorInstance {
         }
     }
 
-    pub fn debug_cube(feet_position: Vec3, y_rot_degrees: f32, width: f32, height: f32) -> Self {
+    pub fn debug_cube(
+        feet_position: Vec3,
+        y_rot_degrees: f32,
+        x_rot_degrees: f32,
+        width: f32,
+        height: f32,
+    ) -> Self {
         Self {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
+            pitch_radians: x_rot_degrees.to_radians(),
+            rotation_pivot: Vec3::new(0.0, height.max(0.1) * 0.5, 0.0),
             shape: ActorInstanceShape::DebugCube,
             first_person_body_only: false,
             width,
@@ -1479,12 +1499,20 @@ fn append_box(
 }
 
 fn actor_world_position(actor: ActorInstance, local: Vec3) -> Vec3 {
-    let (sin, cos) = actor.yaw_radians.sin_cos();
+    let local = local - actor.rotation_pivot;
+    let (pitch_sin, pitch_cos) = actor.pitch_radians.sin_cos();
+    let local = Vec3::new(
+        local.x,
+        local.y * pitch_cos - local.z * pitch_sin,
+        local.y * pitch_sin + local.z * pitch_cos,
+    );
+    let (yaw_sin, yaw_cos) = actor.yaw_radians.sin_cos();
     actor.feet_position
+        + actor.rotation_pivot
         + Vec3::new(
-            local.x * cos + local.z * sin,
+            local.x * yaw_cos + local.z * yaw_sin,
             local.y,
-            -local.x * sin + local.z * cos,
+            -local.x * yaw_sin + local.z * yaw_cos,
         )
 }
 
@@ -1745,7 +1773,7 @@ mod tests {
     #[test]
     fn actor_mesh_emits_debug_cube() {
         let mesh = actor_mesh(
-            &[ActorInstance::debug_cube(Vec3::ZERO, 0.0, 1.0, 1.0)],
+            &[ActorInstance::debug_cube(Vec3::ZERO, 0.0, 0.0, 1.0, 1.0)],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
             &ActorFigureSet::default(),
@@ -1753,6 +1781,18 @@ mod tests {
 
         assert_eq!(mesh.vertices.len(), 6 * 4);
         assert_eq!(mesh.indices.len(), 6 * 6);
+    }
+
+    #[test]
+    fn debug_cube_pitch_rotates_around_center() {
+        let actor = ActorInstance::debug_cube(Vec3::ZERO, 0.0, 90.0, 1.0, 1.0);
+        let bottom_center = actor_world_position(actor, Vec3::new(0.0, 0.0, 0.0));
+        let top_center = actor_world_position(actor, Vec3::new(0.0, 1.0, 0.0));
+
+        assert!((bottom_center.y - 0.5).abs() < 1.0e-6);
+        assert!((top_center.y - 0.5).abs() < 1.0e-6);
+        assert!((bottom_center.z + 0.5).abs() < 1.0e-6);
+        assert!((top_center.z - 0.5).abs() < 1.0e-6);
     }
 
     #[test]

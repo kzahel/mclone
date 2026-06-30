@@ -27,6 +27,7 @@ const SERVER_PHYSICS_GRAVITY: Vec3d = Vec3d::new(
 );
 const SERVER_PHYSICS_MINECRAFT_VERTICAL_DRAG: f64 = 0.98;
 const DEBUG_CUBE_HALF_EXTENT: f64 = 0.5;
+const DEBUG_CUBE_INITIAL_ANGULAR_VELOCITY: Vec3d = Vec3d::new(5.0, 3.0, -4.0);
 const DEBUG_CUBE_TERRAIN_SECTION_RADIUS_XZ: i32 = 1;
 const DEBUG_CUBE_TERRAIN_SECTION_RADIUS_Y: i32 = 1;
 const DEBUG_PLAYER_WIDTH: f64 = 0.6;
@@ -82,11 +83,21 @@ impl ServerPhysicsRuntime {
             .into_iter()
             .map(|section| self.world.add_terrain_section(section))
             .collect();
-        let body = self.world.spawn_body(PhysicsBodySpawn::dynamic_cube(
-            position,
-            DEBUG_CUBE_HALF_EXTENT,
-            velocity,
-        ));
+        let body = self.world.spawn_body(PhysicsBodySpawn {
+            kind: PhysicsBodyKind::Dynamic,
+            shape: PhysicsShape::Cuboid {
+                half_extents: Vec3d::new(
+                    DEBUG_CUBE_HALF_EXTENT,
+                    DEBUG_CUBE_HALF_EXTENT,
+                    DEBUG_CUBE_HALF_EXTENT,
+                ),
+            },
+            pose: PhysicsBodyPose::new(position, PhysicsRotation::IDENTITY),
+            velocity: PhysicsBodyVelocity {
+                linear: velocity,
+                angular: DEBUG_CUBE_INITIAL_ANGULAR_VELOCITY,
+            },
+        });
         self.debug_cube_body = Some(body);
         let report = self.world.step(0.0);
         self.last_diagnostics = self.diagnostics_from_report(report);

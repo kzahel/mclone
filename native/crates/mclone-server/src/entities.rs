@@ -102,6 +102,8 @@ impl ServerEntityStore {
     pub(crate) fn spawn_debug_physics_cube(
         &mut self,
         position: Vec3d,
+        y_rot_degrees: f32,
+        x_rot_degrees: f32,
         age_ticks: u64,
     ) -> DebugPhysicsCubeEntitySpawn {
         let removed = self
@@ -112,7 +114,8 @@ impl ServerEntityStore {
                 state.alive = false;
                 state
             });
-        let current = self.insert_debug_physics_cube(position, age_ticks);
+        let current =
+            self.insert_debug_physics_cube(position, y_rot_degrees, x_rot_degrees, age_ticks);
         DebugPhysicsCubeEntitySpawn { removed, current }
     }
 
@@ -120,21 +123,30 @@ impl ServerEntityStore {
     pub(crate) fn upsert_debug_physics_cube(
         &mut self,
         position: Vec3d,
+        y_rot_degrees: f32,
+        x_rot_degrees: f32,
         age_ticks: u64,
     ) -> ServerEntityState {
         if let Some(id) = self.debug_physics_cube_id {
-            let state = debug_physics_cube_state(id, position, age_ticks);
+            let state =
+                debug_physics_cube_state(id, position, y_rot_degrees, x_rot_degrees, age_ticks);
             self.entities.insert(id, state);
             return state;
         }
-        self.insert_debug_physics_cube(position, age_ticks)
+        self.insert_debug_physics_cube(position, y_rot_degrees, x_rot_degrees, age_ticks)
     }
 
     #[cfg(feature = "physics-rapier")]
-    fn insert_debug_physics_cube(&mut self, position: Vec3d, age_ticks: u64) -> ServerEntityState {
+    fn insert_debug_physics_cube(
+        &mut self,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        x_rot_degrees: f32,
+        age_ticks: u64,
+    ) -> ServerEntityState {
         let id = self.allocate_entity_id();
         self.debug_physics_cube_id = Some(id);
-        let state = debug_physics_cube_state(id, position, age_ticks);
+        let state = debug_physics_cube_state(id, position, y_rot_degrees, x_rot_degrees, age_ticks);
         self.entities.insert(id, state);
         state
     }
@@ -177,13 +189,19 @@ impl ServerEntityStore {
 }
 
 #[cfg(feature = "physics-rapier")]
-fn debug_physics_cube_state(id: EntityId, position: Vec3d, age_ticks: u64) -> ServerEntityState {
+fn debug_physics_cube_state(
+    id: EntityId,
+    position: Vec3d,
+    y_rot_degrees: f32,
+    x_rot_degrees: f32,
+    age_ticks: u64,
+) -> ServerEntityState {
     ServerEntityState {
         id,
         kind: EntityKind::DebugCube,
         position,
-        y_rot_degrees: 0.0,
-        x_rot_degrees: 0.0,
+        y_rot_degrees,
+        x_rot_degrees,
         on_ground: false,
         width: 1.0,
         height: 1.0,

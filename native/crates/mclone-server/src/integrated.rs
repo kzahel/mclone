@@ -961,11 +961,15 @@ impl IntegratedServer {
         age_ticks: u64,
         physics: ServerPhysicsTickDiagnostics,
     ) -> Option<crate::entities::DebugPhysicsCubeEntitySpawn> {
-        let position =
-            physics
-                .test_cube_position?
-                .add(Vec3d::new(0.0, -DEBUG_PHYSICS_CUBE_HALF_EXTENT, 0.0));
-        Some(self.entities.spawn_debug_physics_cube(position, age_ticks))
+        let pose = self.physics.debug_cube_pose()?;
+        let (position, y_rot_degrees, x_rot_degrees) = debug_physics_cube_entity_pose(pose);
+        debug_assert_eq!(physics.test_cube_position, Some(pose.position));
+        Some(self.entities.spawn_debug_physics_cube(
+            position,
+            y_rot_degrees,
+            x_rot_degrees,
+            age_ticks,
+        ))
     }
 
     #[cfg(feature = "physics-rapier")]
@@ -974,11 +978,15 @@ impl IntegratedServer {
         age_ticks: u64,
         physics: ServerPhysicsTickDiagnostics,
     ) -> Option<ServerEntityState> {
-        let position =
-            physics
-                .test_cube_position?
-                .add(Vec3d::new(0.0, -DEBUG_PHYSICS_CUBE_HALF_EXTENT, 0.0));
-        Some(self.entities.upsert_debug_physics_cube(position, age_ticks))
+        let pose = self.physics.debug_cube_pose()?;
+        let (position, y_rot_degrees, x_rot_degrees) = debug_physics_cube_entity_pose(pose);
+        debug_assert_eq!(physics.test_cube_position, Some(pose.position));
+        Some(self.entities.upsert_debug_physics_cube(
+            position,
+            y_rot_degrees,
+            x_rot_degrees,
+            age_ticks,
+        ))
     }
 
     #[cfg(feature = "physics-rapier")]
@@ -1214,6 +1222,42 @@ fn debug_physics_cube_launch(
             .add(direction.scale(DEBUG_PHYSICS_CUBE_SPAWN_DISTANCE)),
         velocity: direction.scale(DEBUG_PHYSICS_CUBE_LAUNCH_SPEED),
     }
+}
+
+#[cfg(feature = "physics-rapier")]
+fn debug_physics_cube_entity_pose(pose: mclone_physics::PhysicsBodyPose) -> (Vec3d, f32, f32) {
+    let position = pose
+        .position
+        .add(Vec3d::new(0.0, -DEBUG_PHYSICS_CUBE_HALF_EXTENT, 0.0));
+    let forward = rotate_debug_physics_vector(pose.rotation, Vec3d::new(0.0, 0.0, 1.0));
+    let horizontal_len = (forward.x * forward.x + forward.z * forward.z).sqrt();
+    let y_rot_degrees = (-forward.x).atan2(forward.z).to_degrees() as f32;
+    let x_rot_degrees = (-forward.y).atan2(horizontal_len).to_degrees() as f32;
+    (position, y_rot_degrees, x_rot_degrees)
+}
+
+#[cfg(feature = "physics-rapier")]
+fn rotate_debug_physics_vector(rotation: mclone_physics::PhysicsRotation, vector: Vec3d) -> Vec3d {
+    let len_sqr = rotation.x * rotation.x
+        + rotation.y * rotation.y
+        + rotation.z * rotation.z
+        + rotation.w * rotation.w;
+    if !len_sqr.is_finite() || len_sqr <= f64::EPSILON {
+        return vector;
+    }
+    let inv_len = len_sqr.sqrt().recip();
+    let qx = rotation.x * inv_len;
+    let qy = rotation.y * inv_len;
+    let qz = rotation.z * inv_len;
+    let qw = rotation.w * inv_len;
+    let tx = 2.0 * (qy * vector.z - qz * vector.y);
+    let ty = 2.0 * (qz * vector.x - qx * vector.z);
+    let tz = 2.0 * (qx * vector.y - qy * vector.x);
+    Vec3d::new(
+        vector.x + qw * tx + (qy * tz - qz * ty),
+        vector.y + qw * ty + (qz * tx - qx * tz),
+        vector.z + qw * tz + (qx * ty - qy * tx),
+    )
 }
 
 #[cfg(feature = "physics-rapier")]
@@ -2128,6 +2172,7 @@ mod tests {
             .debug_cube_velocity()
             .expect("initial debug cube velocity");
         assert_eq!(initial_velocity.linear, Vec3d::ZERO);
+        assert!(initial_velocity.angular.length_sqr() > 0.0);
 
         server.physics.step();
 
@@ -2186,6 +2231,12 @@ mod tests {
         assert!(report.physics.test_cube_spawned);
         assert_eq!(update.id, snapshot.id);
         assert!(update.position.y < snapshot.position.y);
+        assert!(
+            update.y_rot_degrees.abs() > 0.1 || update.x_rot_degrees.abs() > 0.1,
+            "debug cube should publish physics rotation after stepping, got y={} x={}",
+            update.y_rot_degrees,
+            update.x_rot_degrees
+        );
 
         let second_updates = server
             .try_handle_command(ClientCommand::ShootDebugPhysicsCube)

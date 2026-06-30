@@ -133,6 +133,7 @@ pub fn actor_instances_from_presentations(
                 ActorPresentationKind::Entity(EntityKind::DebugCube) => ActorInstance::debug_cube(
                     glam_vec3_from_vec3d(actor.feet_position),
                     actor.y_rot_degrees,
+                    actor.x_rot_degrees,
                     actor.width,
                     actor.height,
                 )
