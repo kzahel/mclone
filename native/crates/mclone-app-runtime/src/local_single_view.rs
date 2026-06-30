@@ -1037,16 +1037,7 @@ fn native_runner_config(
         .with_lighting_enabled(options.lighting_enabled)
         .with_day_time(options.day_time_override)
         .with_day_time_frozen(options.freeze_time)
-        .with_cadence(options.cadence)
-        .with_tick_interval(tick_interval_for_host_rate_hz(options.cadence.host_rate_hz))
-}
-
-fn tick_interval_for_host_rate_hz(host_rate_hz: u32) -> Duration {
-    if host_rate_hz == 0 {
-        return Duration::ZERO;
-    }
-    let host_rate_hz = u64::from(host_rate_hz);
-    Duration::from_nanos((1_000_000_000 + host_rate_hz / 2) / host_rate_hz)
+        .with_cadence_derived_tick_interval(options.cadence)
 }
 
 fn runner_idle(diagnostics: &ServerRunnerDiagnostics) -> bool {

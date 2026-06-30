@@ -6,7 +6,8 @@ landed, cadence configs now reject uneven fractional lane pacing by default, and
 the native server runner now consumes separate gameplay and physics lane work
 while preserving default 20 Hz gameplay behavior. Native local play now exposes
 a developer cadence profile option that derives the runner host interval from
-the selected host rate.
+the selected host rate, and the native runner can apply a new cadence profile
+while running.
 
 ## Purpose
 
@@ -193,8 +194,38 @@ cargo check --manifest-path native/Cargo.toml -p mclone-native-client
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
 ```
 
+- Added `NativeIntegratedServerRunner::set_simulation_cadence(...)` as the
+  runtime control hook for future local server settings UI. The method validates
+  cadence through `SimulationCadence`, derives the host `tick_interval` from the
+  selected host rate, and queues one runner-control message.
+- The native runner loop now owns a mutable timing state, so live cadence
+  changes replace the host interval and lane cadence together and reset the next
+  scheduled host frame.
+- `ServerRunnerDiagnostics` now exposes the active cadence profile and host tick
+  interval. This gives future UI a read path for the current integrated-server
+  settings.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-server -p mclone-app-runtime -p mclone-native-client -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-server native_runner_applies_live_simulation_cadence_control -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server native_runner_rejects_invalid_live_simulation_cadence_control -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server native_runner_config_can_derive_tick_interval_from_cadence -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime native_runner_config_derives_tick_interval_from_cadence_host_rate -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server --quiet
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime --quiet
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client --quiet
+cargo check --manifest-path native/Cargo.toml -p mclone-server
+cargo check --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
+```
+
 ## Follow-Up Work
 
+- Add a local integrated-server settings UI that presents valid Host Rate, World
+  Tick Rate, and Physics Rate combinations, then calls the live runner cadence
+  control.
 - Add explicit diagnostics for physics substep count and physics lane timing.
 - Extend the full-orientation path with angular velocity or buffered orientation
   samples if active physics presentation still looks too 20 Hz.

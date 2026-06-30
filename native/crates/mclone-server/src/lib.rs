@@ -116,7 +116,10 @@ use scheduler::{DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET, DEFAULT_PENDING_UNLOAD_B
 #[cfg(not(target_arch = "wasm32"))]
 pub use persistence::FilesystemChunkSnapshotStore;
 #[cfg(not(target_arch = "wasm32"))]
-pub use runner::{NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig};
+pub use runner::{
+    NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
+    host_tick_interval_for_rate_hz,
+};
 
 pub(crate) fn mutable_buffer_from_snapshot(snapshot: &ChunkSnapshot) -> MutableChunkBlockBuffer {
     let mut buffer = MutableChunkBlockBuffer::new(

@@ -255,6 +255,8 @@ pub struct ServerRunnerDiagnostics {
     pub running: bool,
     pub seed: i64,
     pub day_time: u64,
+    pub simulation_cadence: SimulationCadenceConfig,
+    pub host_tick_interval: std::time::Duration,
     pub awaiting_tick: bool,
     pub command_queue_depth: usize,
     pub update_queue_depth: usize,
@@ -286,6 +288,8 @@ impl ServerRunnerDiagnostics {
             running: false,
             seed,
             day_time,
+            simulation_cadence: SimulationCadenceConfig::default(),
+            host_tick_interval: std::time::Duration::from_millis(50),
             awaiting_tick: false,
             command_queue_depth: 0,
             update_queue_depth: 0,
@@ -319,6 +323,7 @@ pub enum ServerRunnerError {
     CommandChannelClosed,
     UpdateChannelClosed,
     DiagnosticsPoisoned,
+    InvalidCadenceConfig,
     ThreadSpawn(std::io::Error),
     ThreadStart(String),
     ThreadPanicked,
@@ -340,6 +345,7 @@ impl fmt::Display for ServerRunnerError {
             Self::DiagnosticsPoisoned => {
                 f.write_str("integrated server runner diagnostics were poisoned")
             }
+            Self::InvalidCadenceConfig => f.write_str("invalid integrated server runner cadence"),
             Self::ThreadSpawn(error) => write!(
                 f,
                 "failed to spawn integrated server runner thread: {error}"
@@ -361,6 +367,7 @@ impl Error for ServerRunnerError {
             Self::CommandChannelClosed
             | Self::UpdateChannelClosed
             | Self::DiagnosticsPoisoned
+            | Self::InvalidCadenceConfig
             | Self::ThreadStart(_)
             | Self::ThreadPanicked => None,
         }
@@ -517,6 +524,15 @@ mod native {
             self
         }
 
+        pub fn with_cadence_derived_tick_interval(
+            mut self,
+            cadence: SimulationCadenceConfig,
+        ) -> Self {
+            self.cadence = cadence;
+            self.tick_interval = host_tick_interval_for_rate_hz(cadence.host_rate_hz);
+            self
+        }
+
         const fn initial_day_time(self) -> u64 {
             match self.day_time {
                 Some(day_time) => day_time,
@@ -525,10 +541,52 @@ mod native {
         }
     }
 
+    pub fn host_tick_interval_for_rate_hz(host_rate_hz: u32) -> Duration {
+        if host_rate_hz == 0 {
+            return Duration::ZERO;
+        }
+        let host_rate_hz = u64::from(host_rate_hz);
+        Duration::from_nanos((1_000_000_000 + host_rate_hz / 2) / host_rate_hz)
+    }
+
     #[derive(Debug)]
     enum NativeRunnerControl {
         Command(Vec<u8>),
+        SetSimulationCadence {
+            cadence: SimulationCadenceConfig,
+            tick_interval: Duration,
+        },
         Shutdown,
+    }
+
+    #[derive(Clone, Debug)]
+    struct NativeRunnerTimingState {
+        tick_interval: Duration,
+        cadence: SimulationCadence,
+        cadence_config: SimulationCadenceConfig,
+    }
+
+    impl NativeRunnerTimingState {
+        fn new(tick_interval: Duration, cadence_config: SimulationCadenceConfig) -> Option<Self> {
+            Some(Self {
+                tick_interval,
+                cadence: SimulationCadence::new(cadence_config)?,
+                cadence_config,
+            })
+        }
+
+        fn set_cadence(
+            &mut self,
+            cadence_config: SimulationCadenceConfig,
+            tick_interval: Duration,
+        ) -> ServerRunnerResult<()> {
+            let cadence = SimulationCadence::new(cadence_config)
+                .ok_or(ServerRunnerError::InvalidCadenceConfig)?;
+            self.cadence = cadence;
+            self.cadence_config = cadence_config;
+            self.tick_interval = tick_interval;
+            Ok(())
+        }
     }
 
     #[derive(Debug)]
@@ -549,11 +607,14 @@ mod native {
             let (ready_tx, ready_rx) = mpsc::channel();
             let command_queue_depth = Arc::new(AtomicUsize::new(0));
             let update_queue_depth = Arc::new(AtomicUsize::new(0));
-            let diagnostics = Arc::new(Mutex::new(ServerRunnerDiagnostics::initial(
+            let mut initial_diagnostics = ServerRunnerDiagnostics::initial(
                 ServerRunnerKind::NativeThread,
                 config.seed,
                 config.initial_day_time(),
-            )));
+            );
+            initial_diagnostics.simulation_cadence = config.cadence;
+            initial_diagnostics.host_tick_interval = config.tick_interval;
+            let diagnostics = Arc::new(Mutex::new(initial_diagnostics));
 
             let thread_command_depth = Arc::clone(&command_queue_depth);
             let thread_update_depth = Arc::clone(&update_queue_depth);
@@ -605,6 +666,33 @@ mod native {
             if let Some(refreshed_at) = diagnostics.diagnostics_detail_refreshed_at {
                 diagnostics.diagnostics_detail_age_ms = duration_ms(refreshed_at.elapsed());
             }
+        }
+
+        pub fn set_simulation_cadence(
+            &mut self,
+            cadence: SimulationCadenceConfig,
+        ) -> ServerRunnerResult<()> {
+            if self.shutdown_requested {
+                return Err(ServerRunnerError::CommandChannelClosed);
+            }
+            if SimulationCadence::new(cadence).is_none() {
+                return Err(ServerRunnerError::InvalidCadenceConfig);
+            }
+            let tick_interval = host_tick_interval_for_rate_hz(cadence.host_rate_hz);
+            self.command_queue_depth.fetch_add(1, Ordering::SeqCst);
+            let send_result = self
+                .command_tx
+                .as_ref()
+                .ok_or(ServerRunnerError::CommandChannelClosed)?
+                .send(NativeRunnerControl::SetSimulationCadence {
+                    cadence,
+                    tick_interval,
+                });
+            if send_result.is_err() {
+                self.command_queue_depth.fetch_sub(1, Ordering::SeqCst);
+                return Err(ServerRunnerError::CommandChannelClosed);
+            }
+            Ok(())
         }
     }
 
@@ -700,7 +788,8 @@ mod native {
         if let Some(day_time) = config.day_time {
             server.set_day_time(day_time);
         }
-        let Some(cadence) = SimulationCadence::new(config.cadence) else {
+        let Some(timing_state) = NativeRunnerTimingState::new(config.tick_interval, config.cadence)
+        else {
             let _ = ready_tx.send(Err("invalid native server cadence config".to_owned()));
             return Ok(());
         };
@@ -721,8 +810,7 @@ mod native {
 
         let result = run_native_integrated_server_loop(
             &mut server,
-            config.tick_interval,
-            cadence,
+            timing_state,
             command_rx,
             update_tx,
             &command_queue_depth,
@@ -747,8 +835,7 @@ mod native {
 
     fn run_native_integrated_server_loop(
         server: &mut IntegratedServer,
-        tick_interval: Duration,
-        mut cadence: SimulationCadence,
+        mut timing_state: NativeRunnerTimingState,
         command_rx: mpsc::Receiver<NativeRunnerControl>,
         update_tx: mpsc::Sender<Vec<u8>>,
         command_queue_depth: &AtomicUsize,
@@ -769,6 +856,8 @@ mod native {
                     diagnostics,
                     diagnostics_detail_sampler,
                     next_tick - now,
+                    &mut timing_state,
+                    &mut next_tick,
                 )? {
                     return Ok(());
                 }
@@ -783,11 +872,13 @@ mod native {
                 update_queue_depth,
                 diagnostics,
                 diagnostics_detail_sampler,
+                &mut timing_state,
+                &mut next_tick,
             )? {
                 return Ok(());
             }
 
-            let frame = cadence.advance_host_frame();
+            let frame = timing_state.cadence.advance_host_frame();
             let mut last_gameplay_tick = None;
             for _ in 0..frame.gameplay_ticks {
                 let wall_start = Instant::now();
@@ -851,9 +942,9 @@ mod native {
                 );
             }
 
-            next_tick += tick_interval;
+            next_tick += timing_state.tick_interval;
             if next_tick <= Instant::now() {
-                next_tick = Instant::now() + tick_interval;
+                next_tick = Instant::now() + timing_state.tick_interval;
             }
         }
     }
@@ -867,6 +958,8 @@ mod native {
         diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
         diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
         timeout: Duration,
+        timing_state: &mut NativeRunnerTimingState,
+        next_tick: &mut Instant,
     ) -> ServerRunnerResult<bool> {
         match command_rx.recv_timeout(timeout) {
             Ok(control) => process_control(
@@ -877,6 +970,8 @@ mod native {
                 update_queue_depth,
                 diagnostics,
                 diagnostics_detail_sampler,
+                timing_state,
+                next_tick,
             ),
             Err(mpsc::RecvTimeoutError::Timeout) => Ok(true),
             Err(mpsc::RecvTimeoutError::Disconnected) => Ok(false),
@@ -891,6 +986,8 @@ mod native {
         update_queue_depth: &AtomicUsize,
         diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
         diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
+        timing_state: &mut NativeRunnerTimingState,
+        next_tick: &mut Instant,
     ) -> ServerRunnerResult<bool> {
         loop {
             match command_rx.try_recv() {
@@ -903,6 +1000,8 @@ mod native {
                         update_queue_depth,
                         diagnostics,
                         diagnostics_detail_sampler,
+                        timing_state,
+                        next_tick,
                     )? {
                         return Ok(false);
                     }
@@ -921,9 +1020,34 @@ mod native {
         update_queue_depth: &AtomicUsize,
         diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
         diagnostics_detail_sampler: &mut DiagnosticsDetailSampler,
+        timing_state: &mut NativeRunnerTimingState,
+        next_tick: &mut Instant,
     ) -> ServerRunnerResult<bool> {
         match control {
             NativeRunnerControl::Shutdown => Ok(false),
+            NativeRunnerControl::SetSimulationCadence {
+                cadence,
+                tick_interval,
+            } => {
+                let result = timing_state.set_cadence(cadence, tick_interval);
+                command_queue_depth.fetch_sub(1, Ordering::SeqCst);
+                result?;
+                *next_tick = Instant::now() + timing_state.tick_interval;
+                refresh_cadence_diagnostics(diagnostics, timing_state);
+                refresh_diagnostics(
+                    diagnostics,
+                    server,
+                    command_queue_depth,
+                    update_queue_depth,
+                    diagnostics_detail_sampler,
+                    None,
+                    true,
+                    Some(false),
+                    None,
+                    true,
+                );
+                Ok(true)
+            }
             NativeRunnerControl::Command(frame) => {
                 refresh_diagnostics(
                     diagnostics,
@@ -960,6 +1084,17 @@ mod native {
                 Ok(true)
             }
         }
+    }
+
+    fn refresh_cadence_diagnostics(
+        diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
+        timing_state: &NativeRunnerTimingState,
+    ) {
+        let Ok(mut diagnostics) = diagnostics.lock() else {
+            return;
+        };
+        diagnostics.simulation_cadence = timing_state.cadence_config;
+        diagnostics.host_tick_interval = timing_state.tick_interval;
     }
 
     fn publish_updates(
@@ -1090,6 +1225,10 @@ mod native {
 
             assert_eq!(config.cadence, SimulationCadenceConfig::default());
             assert_eq!(
+                host_tick_interval_for_rate_hz(60),
+                Duration::from_nanos(16_666_667)
+            );
+            assert_eq!(
                 SimulationCadence::new(config.cadence)
                     .expect("default native cadence")
                     .advance_host_frame(),
@@ -1112,6 +1251,65 @@ mod native {
                 Err(ServerRunnerError::ThreadStart(message))
                     if message == "invalid native server cadence config"
             ));
+        }
+
+        #[test]
+        fn native_runner_config_can_derive_tick_interval_from_cadence() {
+            let cadence = SimulationCadenceConfig::new(60, 20, 60);
+            let config = NativeIntegratedServerRunnerConfig::new(0)
+                .with_cadence_derived_tick_interval(cadence);
+
+            assert_eq!(config.cadence, cadence);
+            assert_eq!(config.tick_interval, Duration::from_nanos(16_666_667));
+        }
+
+        #[test]
+        fn native_runner_applies_live_simulation_cadence_control() {
+            let mut runner = NativeIntegratedServerRunner::new(
+                test_runner_config(0).with_tick_interval(Duration::from_secs(60)),
+            )
+            .unwrap();
+            let initial = runner.poll_diagnostics().unwrap();
+            assert_eq!(
+                initial.simulation_cadence,
+                SimulationCadenceConfig::default()
+            );
+            assert_eq!(initial.host_tick_interval, Duration::from_secs(60));
+
+            let cadence = SimulationCadenceConfig::new(60, 20, 60);
+            runner.set_simulation_cadence(cadence).unwrap();
+
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let diagnostics = runner.poll_diagnostics().unwrap();
+                if diagnostics.command_queue_depth == 0 && diagnostics.simulation_cadence == cadence
+                {
+                    assert_eq!(
+                        diagnostics.host_tick_interval,
+                        Duration::from_nanos(16_666_667)
+                    );
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "timed out waiting for live cadence control, diagnostics={diagnostics:?}"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+
+            runner.join_shutdown().unwrap();
+        }
+
+        #[test]
+        fn native_runner_rejects_invalid_live_simulation_cadence_control() {
+            let mut runner = NativeIntegratedServerRunner::new(test_runner_config(0)).unwrap();
+
+            let error = runner
+                .set_simulation_cadence(SimulationCadenceConfig::new(30, 20, 60))
+                .unwrap_err();
+
+            assert!(matches!(error, ServerRunnerError::InvalidCadenceConfig));
+            runner.join_shutdown().unwrap();
         }
 
         #[test]
@@ -1302,4 +1500,7 @@ mod native {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig};
+pub use native::{
+    NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
+    host_tick_interval_for_rate_hz,
+};
