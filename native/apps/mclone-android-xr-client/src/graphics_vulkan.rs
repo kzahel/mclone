@@ -98,6 +98,7 @@ pub(super) fn create_eye(
     color_format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
     sample_count: u32,
+    foveation: Option<xr::FoveationLevelProfile>,
 ) -> Result<OpenXrEyeState> {
     if sample_count != 1 {
         bail!("Android XR eye depth targets require sample_count=1, got {sample_count}");
@@ -117,6 +118,7 @@ pub(super) fn create_eye(
         color_format,
         sample_count,
         "mclone_android_xr_swapchain",
+        foveation,
     )?;
 
     Ok(OpenXrEyeState {
@@ -134,6 +136,7 @@ pub(super) fn create_stereo(
     eye_height: u32,
     color_format: wgpu::TextureFormat,
     sample_count: u32,
+    foveation: Option<xr::FoveationLevelProfile>,
 ) -> Result<OpenXrStereoState> {
     if sample_count != 1 {
         bail!("Android XR stereo array targets require sample_count=1, got {sample_count}");
@@ -147,6 +150,7 @@ pub(super) fn create_stereo(
         color_format,
         sample_count,
         "mclone_android_xr_stereo_array_swapchain",
+        foveation,
     )?;
 
     Ok(OpenXrStereoState {

@@ -53,6 +53,7 @@ XR_FULL_FRAME_MULTIVIEW="${MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW:-0}"
 XR_OVERLAP_EYE_SUBMITS="${MCLONE_ANDROID_XR_OVERLAP_EYE_SUBMITS:-0}"
 XR_OVERLAP_RUNTIME_PREFETCH="${MCLONE_ANDROID_XR_OVERLAP_RUNTIME_PREFETCH:-0}"
 XR_RENDER_SECTION_UPLOAD_BUDGET="${MCLONE_ANDROID_XR_RENDER_SECTION_UPLOAD_BUDGET:-}"
+XR_FOVEATION="${MCLONE_ANDROID_XR_FOVEATION:-off}"
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     PERF_SETTLED_STATIONARY=1
 fi
@@ -181,6 +182,9 @@ Options:
                      Upload at most N rebuilt render sections per live XR frame.
                      Removals still apply immediately. This is an opt-in probe
                      for smoothing runtime/render-section upload bursts.
+  --xr-foveation off|low|medium|high
+                     Apply XR_FB_foveation to submitted eye swapchains. Default:
+                     off. Use high for the RD10 fixed-foveated-rendering probe.
   -h, --help         Show this help.
 USAGE
 }
@@ -515,6 +519,11 @@ while [[ $# -gt 0 ]]; do
             XR_RENDER_SECTION_UPLOAD_BUDGET="$2"
             shift 2
             ;;
+        --xr-foveation)
+            require_arg "$1" "${2:-}"
+            XR_FOVEATION="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -653,6 +662,13 @@ fi
 if [[ -n "$XR_RENDER_SECTION_UPLOAD_BUDGET" ]]; then
     validate_positive_integer "--xr-render-section-upload-budget" "$XR_RENDER_SECTION_UPLOAD_BUDGET"
 fi
+case "$XR_FOVEATION" in
+    off|none|false|0|disabled|low|medium|med|high)
+        ;;
+    *)
+        mclone_die "unsupported --xr-foveation '$XR_FOVEATION'; expected off, low, medium, or high"
+        ;;
+esac
 if [[ -n "$PERF_SECONDS" ]]; then
     validate_positive_integer "--perf-seconds" "$PERF_SECONDS"
     if [[ "$SESSION_ONLY" == "1" ]]; then
@@ -788,6 +804,9 @@ if [[ "$XR_OVERLAP_RUNTIME_PREFETCH" == "1" ]]; then
 fi
 if [[ -n "$XR_RENDER_SECTION_UPLOAD_BUDGET" ]]; then
     STARTUP_ARGV+=(--xr-render-section-upload-budget "$XR_RENDER_SECTION_UPLOAD_BUDGET")
+fi
+if [[ "$XR_FOVEATION" != "off" ]]; then
+    STARTUP_ARGV+=(--xr-foveation "$XR_FOVEATION")
 fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"

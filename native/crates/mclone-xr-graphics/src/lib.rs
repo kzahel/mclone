@@ -37,6 +37,8 @@ pub mod vulkan {
 
     pub struct VulkanEyeSwapchain {
         swapchain: xr::Swapchain<AppGraphics>,
+        #[allow(dead_code)]
+        foveation_profile: Option<xr::FoveationProfileFB>,
         textures: Vec<wgpu::Texture>,
         width: u32,
         height: u32,
@@ -44,6 +46,8 @@ pub mod vulkan {
 
     pub struct VulkanStereoSwapchain {
         swapchain: xr::Swapchain<AppGraphics>,
+        #[allow(dead_code)]
+        foveation_profile: Option<xr::FoveationProfileFB>,
         textures: Vec<wgpu::Texture>,
         width: u32,
         height: u32,
@@ -435,6 +439,7 @@ pub mod vulkan {
         color_format: wgpu::TextureFormat,
         sample_count: u32,
         texture_label: &'static str,
+        foveation: Option<xr::FoveationLevelProfile>,
     ) -> Result<VulkanEyeSwapchain> {
         let vk_format = wgpu_format_to_vk_format(color_format)
             .ok_or_else(|| anyhow!("unsupported XR color format {color_format:?}"))?;
@@ -461,6 +466,12 @@ pub mod vulkan {
                 mip_count: 1,
             })
             .context("create OpenXR Vulkan eye swapchain")?;
+        let foveation_profile = create_and_apply_foveation_profile(
+            session,
+            &swapchain,
+            foveation,
+            "OpenXR Vulkan eye swapchain",
+        )?;
 
         let textures = swapchain
             .enumerate_images()
@@ -481,6 +492,7 @@ pub mod vulkan {
 
         Ok(VulkanEyeSwapchain {
             swapchain,
+            foveation_profile,
             textures,
             width: eye_width,
             height: eye_height,
@@ -495,6 +507,7 @@ pub mod vulkan {
         color_format: wgpu::TextureFormat,
         sample_count: u32,
         texture_label: &'static str,
+        foveation: Option<xr::FoveationLevelProfile>,
     ) -> Result<VulkanStereoSwapchain> {
         let vk_format = wgpu_format_to_vk_format(color_format)
             .ok_or_else(|| anyhow!("unsupported XR color format {color_format:?}"))?;
@@ -522,6 +535,12 @@ pub mod vulkan {
                 mip_count: 1,
             })
             .context("create OpenXR Vulkan stereo array swapchain")?;
+        let foveation_profile = create_and_apply_foveation_profile(
+            session,
+            &swapchain,
+            foveation,
+            "OpenXR Vulkan stereo array swapchain",
+        )?;
 
         let textures = swapchain
             .enumerate_images()
@@ -542,11 +561,57 @@ pub mod vulkan {
 
         Ok(VulkanStereoSwapchain {
             swapchain,
+            foveation_profile,
             textures,
             width: eye_width,
             height: eye_height,
             array_size,
         })
+    }
+
+    fn create_and_apply_foveation_profile(
+        session: &xr::Session<AppGraphics>,
+        swapchain: &xr::Swapchain<AppGraphics>,
+        foveation: Option<xr::FoveationLevelProfile>,
+        label: &str,
+    ) -> Result<Option<xr::FoveationProfileFB>> {
+        let Some(foveation) = foveation else {
+            return Ok(None);
+        };
+        let profile = session
+            .create_foveation_profile(Some(foveation))
+            .context("create OpenXR foveation profile")?;
+        apply_foveation_profile(swapchain, &profile, label)?;
+        Ok(Some(profile))
+    }
+
+    fn apply_foveation_profile(
+        swapchain: &xr::Swapchain<AppGraphics>,
+        profile: &xr::FoveationProfileFB,
+        label: &str,
+    ) -> Result<()> {
+        let fp = swapchain
+            .instance()
+            .exts()
+            .fb_swapchain_update_state
+            .as_ref()
+            .ok_or_else(|| anyhow!("OpenXR XR_FB_swapchain_update_state is not enabled"))?;
+        let state = xr::sys::SwapchainStateFoveationFB {
+            ty: xr::sys::SwapchainStateFoveationFB::TYPE,
+            next: std::ptr::null_mut(),
+            flags: xr::SwapchainStateFoveationFlagsFB::EMPTY,
+            profile: profile.as_raw(),
+        };
+        let result = unsafe {
+            (fp.update_swapchain)(
+                swapchain.as_raw(),
+                &state as *const _ as *const xr::sys::SwapchainStateBaseHeaderFB,
+            )
+        };
+        if result.into_raw() < 0 {
+            bail!("apply foveation profile to {label} failed: {result:?}");
+        }
+        Ok(())
     }
 
     fn load_vulkan_entry() -> Result<ash::Entry> {

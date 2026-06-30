@@ -240,6 +240,7 @@ mod android {
         overlap_eye_submits: bool,
         overlap_runtime_prefetch: bool,
         render_section_upload_budget: Option<usize>,
+        xr_foveation: AndroidXrFoveation,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -263,7 +264,57 @@ mod android {
                 overlap_eye_submits: false,
                 overlap_runtime_prefetch: false,
                 render_section_upload_budget: None,
+                xr_foveation: AndroidXrFoveation::Off,
             }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum AndroidXrFoveation {
+        Off,
+        Low,
+        Medium,
+        High,
+    }
+
+    impl AndroidXrFoveation {
+        fn parse_label(flag: &str, value: &str) -> Result<Self> {
+            match value.trim().to_ascii_lowercase().as_str() {
+                "off" | "none" | "false" | "0" | "disabled" => Ok(Self::Off),
+                "low" => Ok(Self::Low),
+                "medium" | "med" => Ok(Self::Medium),
+                "high" => Ok(Self::High),
+                value => bail!(
+                    "{flag} has unsupported value `{value}`; expected off, low, medium, or high"
+                ),
+            }
+        }
+
+        const fn label(self) -> &'static str {
+            match self {
+                Self::Off => "off",
+                Self::Low => "low",
+                Self::Medium => "medium",
+                Self::High => "high",
+            }
+        }
+
+        const fn is_enabled(self) -> bool {
+            !matches!(self, Self::Off)
+        }
+
+        fn level_profile(self) -> Option<xr::FoveationLevelProfile> {
+            let level = match self {
+                Self::Off => return None,
+                Self::Low => xr::FoveationLevelFB::LOW,
+                Self::Medium => xr::FoveationLevelFB::MEDIUM,
+                Self::High => xr::FoveationLevelFB::HIGH,
+            };
+            Some(xr::FoveationLevelProfile {
+                level,
+                vertical_offset: 0.0,
+                dynamic: xr::FoveationDynamicFB::DISABLED,
+            })
         }
     }
 
@@ -383,6 +434,12 @@ mod android {
                         bail!("--xr-render-section-upload-budget must be greater than zero");
                     }
                     options.render_section_upload_budget = Some(budget);
+                }
+                "--xr-foveation" => {
+                    options.xr_foveation = AndroidXrFoveation::parse_label(
+                        "--xr-foveation",
+                        &parse_next_string(&mut argv, "--xr-foveation")?,
+                    )?;
                 }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
@@ -764,6 +821,10 @@ mod android {
             format_optional_usize(startup_options.render_section_upload_budget)
         );
         log::info!(
+            "Android XR fixed foveation: {}",
+            startup_options.xr_foveation.label()
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -811,6 +872,7 @@ mod android {
             startup_options.overlap_eye_submits,
             startup_options.overlap_runtime_prefetch,
             startup_options.render_section_upload_budget,
+            startup_options.xr_foveation,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -839,6 +901,7 @@ mod android {
         overlap_eye_submits: bool,
         overlap_runtime_prefetch: bool,
         render_section_upload_budget: Option<usize>,
+        xr_foveation: AndroidXrFoveation,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -909,6 +972,17 @@ mod android {
             log::info!("Enabling XR_FB_foveation");
             log::info!("Enabling XR_FB_foveation_configuration");
             log::info!("Enabling XR_FB_foveation_vulkan");
+        }
+        if xr_foveation.is_enabled()
+            && !(available.fb_swapchain_update_state
+                && available.fb_foveation
+                && available.fb_foveation_configuration
+                && available.fb_foveation_vulkan)
+        {
+            bail!(
+                "--xr-foveation {} requires XR_FB_swapchain_update_state, XR_FB_foveation, XR_FB_foveation_configuration, and XR_FB_foveation_vulkan",
+                xr_foveation.label()
+            );
         }
         if available.fb_render_model {
             enabled_extensions.fb_render_model = true;
@@ -1080,6 +1154,7 @@ mod android {
                 eye_height,
                 XR_COLOR_FORMAT,
                 XR_SAMPLE_COUNT,
+                xr_foveation.level_profile(),
             )
             .context("create OpenXR stereo array swapchain")?;
             log::info!(
@@ -1157,6 +1232,7 @@ mod android {
                 eye_height,
                 XR_COLOR_FORMAT,
                 XR_SAMPLE_COUNT,
+                xr_foveation.level_profile(),
             )
             .context("create OpenXR full-frame multiview stereo array swapchain")?;
             let mut multiview_depth =
@@ -1224,6 +1300,7 @@ mod android {
                 scene_options.render_distance,
                 display_refresh,
                 render_section_upload_budget,
+                xr_foveation,
             );
         }
 
@@ -1235,6 +1312,7 @@ mod android {
             XR_COLOR_FORMAT,
             XR_DEPTH_FORMAT,
             XR_SAMPLE_COUNT,
+            xr_foveation.level_profile(),
         )
         .context("create OpenXR left-eye color swapchain")?;
         let mut right_eye = graphics_vulkan::create_eye(
@@ -1245,6 +1323,7 @@ mod android {
             XR_COLOR_FORMAT,
             XR_DEPTH_FORMAT,
             XR_SAMPLE_COUNT,
+            xr_foveation.level_profile(),
         )
         .context("create OpenXR right-eye color swapchain")?;
         log::info!(
@@ -1322,6 +1401,7 @@ mod android {
             scene_options.render_distance,
             display_refresh,
             render_section_upload_budget,
+            xr_foveation,
         )
     }
 
@@ -2426,6 +2506,7 @@ mod android {
         render_distance: u32,
         display_refresh: XrDisplayRefreshSnapshot,
         render_section_upload_budget: Option<usize>,
+        xr_foveation: AndroidXrFoveation,
     ) -> Result<()> {
         let mut event_storage = xr::EventDataBuffer::new();
         let mut session_running = false;
@@ -2440,6 +2521,7 @@ mod android {
             display_refresh,
             render_path,
             render_section_upload_budget,
+            xr_foveation,
         );
         let mut performance_metrics_probe = if perf_metrics {
             let probe = perf_metrics::XrPerformanceMetricsProbe::new(
@@ -2836,6 +2918,7 @@ mod android {
         display_refresh: XrDisplayRefreshSnapshot,
         render_path: AndroidXrRenderPath,
         render_section_upload_budget: Option<usize>,
+        xr_foveation: AndroidXrFoveation,
         target_hz: f64,
         settle_started: Option<Instant>,
         settle_frames: u64,
@@ -2854,6 +2937,7 @@ mod android {
             display_refresh: XrDisplayRefreshSnapshot,
             render_path: AndroidXrRenderPath,
             render_section_upload_budget: Option<usize>,
+            xr_foveation: AndroidXrFoveation,
         ) -> Self {
             let target_hz = display_refresh
                 .current_rate
@@ -2869,6 +2953,7 @@ mod android {
                 display_refresh,
                 render_path,
                 render_section_upload_budget,
+                xr_foveation,
                 target_hz,
                 settle_started: None,
                 settle_frames: 0,
@@ -2955,6 +3040,10 @@ mod android {
                 frame_stats.runtime_frames,
                 frame_stats.skipped_frames
             );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_CONFIG xr_foveation={}",
+                self.xr_foveation.label()
+            );
             self.active = Some(AndroidXrActivePerfProbe {
                 requested: Duration::from_secs(seconds),
                 started: Instant::now(),
@@ -2975,6 +3064,7 @@ mod android {
                 target_hz: self.target_hz,
                 render_path: self.render_path,
                 render_section_upload_budget: self.render_section_upload_budget,
+                xr_foveation: self.xr_foveation,
                 mode_label: mode,
                 flight_speed_blocks_per_second: self
                     .flight
@@ -3071,6 +3161,7 @@ mod android {
         target_hz: f64,
         render_path: AndroidXrRenderPath,
         render_section_upload_budget: Option<usize>,
+        xr_foveation: AndroidXrFoveation,
         mode_label: &'static str,
         flight_speed_blocks_per_second: Option<f64>,
         settle_seconds: f64,
@@ -3138,11 +3229,12 @@ mod android {
                 camera_distance_blocks(self.start_camera, self.latest_camera);
             let latest_upload = self.latest_summary.upload;
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} xr_foveation={} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={}",
                 sample_seconds,
                 self.mode_label,
                 self.render_path.label(),
                 format_optional_usize(self.render_section_upload_budget),
+                self.xr_foveation.label(),
                 self.render_distance,
                 flight_speed,
                 flight_distance_blocks,
