@@ -279,6 +279,7 @@ pub enum FlatInputAction {
     Use,
     OpenMenu,
     OpenBlockPalette,
+    ToggleCameraView,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -336,6 +337,8 @@ pub struct FlatInputFrame {
     pub use_item: bool,
     pub open_menu: bool,
     pub open_block_palette: bool,
+    #[serde(default)]
+    pub toggle_camera_view: bool,
     pub selected_hotbar_slot: Option<u8>,
     pub hotbar_step: i8,
 }
@@ -423,6 +426,7 @@ impl FlatInputFrame {
             FlatInputAction::Use => self.use_item = true,
             FlatInputAction::OpenMenu => self.open_menu = true,
             FlatInputAction::OpenBlockPalette => self.open_block_palette = true,
+            FlatInputAction::ToggleCameraView => self.toggle_camera_view = true,
         }
     }
 
@@ -459,6 +463,9 @@ impl FlatInputFrame {
             InputBindingAction::OpenMenu => self.press_action(FlatInputAction::OpenMenu),
             InputBindingAction::OpenBlockPalette => {
                 self.press_action(FlatInputAction::OpenBlockPalette);
+            }
+            InputBindingAction::ToggleCameraView => {
+                self.press_action(FlatInputAction::ToggleCameraView);
             }
         }
     }
@@ -524,6 +531,7 @@ impl Default for KeyboardMouseBindings {
             KeyboardMouseBinding::key(KeyboardKey::Escape, InputBindingAction::OpenMenu),
             KeyboardMouseBinding::key(KeyboardKey::KeyE, InputBindingAction::OpenBlockPalette),
             KeyboardMouseBinding::key(KeyboardKey::KeyB, InputBindingAction::OpenBlockPalette),
+            KeyboardMouseBinding::key(KeyboardKey::F5, InputBindingAction::ToggleCameraView),
             KeyboardMouseBinding::mouse_button(PointerButton::Primary, InputBindingAction::Attack),
             KeyboardMouseBinding::mouse_button(PointerButton::Secondary, InputBindingAction::Use),
             KeyboardMouseBinding {
@@ -601,6 +609,7 @@ pub enum KeyboardKey {
     ControlLeft,
     ControlRight,
     Escape,
+    F5,
     Digit1,
     Digit2,
     Digit3,
@@ -870,7 +879,8 @@ impl KeyboardMouseHeldState {
             | InputBindingAction::NextHotbarSlot
             | InputBindingAction::PreviousHotbarSlot
             | InputBindingAction::OpenMenu
-            | InputBindingAction::OpenBlockPalette => false,
+            | InputBindingAction::OpenBlockPalette
+            | InputBindingAction::ToggleCameraView => false,
         }
     }
 
@@ -1049,6 +1059,7 @@ pub enum InputBindingAction {
     PreviousHotbarSlot,
     OpenMenu,
     OpenBlockPalette,
+    ToggleCameraView,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -1610,6 +1621,10 @@ mod tests {
             KeyboardKey::KeyB,
             InputBindingAction::OpenBlockPalette
         )));
+        assert!(bindings.bindings.contains(&KeyboardMouseBinding::key(
+            KeyboardKey::F5,
+            InputBindingAction::ToggleCameraView
+        )));
         assert!(
             bindings
                 .bindings
@@ -1680,6 +1695,16 @@ mod tests {
         assert!(palette.open_block_palette);
 
         let repeat = adapter.handle_key(KeyboardKey::KeyE, true, true);
+        assert!(repeat.handled);
+        assert!(repeat.frame.is_none());
+
+        let view = adapter
+            .handle_key(KeyboardKey::F5, true, false)
+            .frame
+            .expect("F5 should emit camera view frame");
+        assert!(view.toggle_camera_view);
+
+        let repeat = adapter.handle_key(KeyboardKey::F5, true, true);
         assert!(repeat.handled);
         assert!(repeat.frame.is_none());
 

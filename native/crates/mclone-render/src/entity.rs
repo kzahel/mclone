@@ -46,6 +46,19 @@ pub enum ActorInstanceShape {
 }
 
 impl ActorInstance {
+    pub fn local_player(feet_position: Vec3, y_rot_degrees: f32) -> Self {
+        Self {
+            feet_position,
+            yaw_radians: -y_rot_degrees.to_radians(),
+            shape: ActorInstanceShape::Humanoid,
+            width: 0.6,
+            height: 1.8,
+            body_color: [0.18, 0.38, 0.82, 1.0],
+            accent_color: [0.92, 0.70, 0.54, 1.0],
+            packed_light: FULL_BRIGHT,
+        }
+    }
+
     pub fn remote_player(feet_position: Vec3, y_rot_degrees: f32) -> Self {
         Self {
             feet_position,
@@ -732,7 +745,7 @@ fn append_actor(
 ) {
     match actor.shape {
         ActorInstanceShape::Humanoid => {
-            append_humanoid_placeholder(mesh, actor, texture_layout, atlas_size)
+            append_humanoid_model(mesh, actor, texture_layout, atlas_size)
         }
         ActorInstanceShape::QuadrupedPlaceholder => {
             append_quadruped_placeholder(mesh, actor, texture_layout, atlas_size)
@@ -742,39 +755,126 @@ fn append_actor(
     }
 }
 
-fn append_humanoid_placeholder(
+fn append_humanoid_model(
     mesh: &mut ActorMesh,
     actor: ActorInstance,
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
 ) {
     let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
-    let dark = scale_color(actor.body_color, 0.58);
-    let side = scale_color(actor.body_color, 0.78);
-    let light = scale_color(actor.body_color, 1.12);
+    let clothing_dark = scale_color(actor.body_color, 0.48);
+    let clothing_side = scale_color(actor.body_color, 0.78);
+    let clothing_light = scale_color(actor.body_color, 1.10);
+    let skin_shadow = scale_color(actor.accent_color, 0.72);
+    let skin_side = scale_color(actor.accent_color, 0.88);
+    let skin_light = scale_color(actor.accent_color, 1.05);
+    let hair = scale_color(actor.body_color, 0.22);
+    let eye = [0.04, 0.035, 0.03, 1.0];
+    let mouth = [0.36, 0.11, 0.10, 1.0];
     append_box(
         mesh,
         actor,
-        Vec3::new(-0.22, 0.0, -0.13),
-        Vec3::new(-0.04, 0.76, 0.13),
+        Vec3::new(-0.21, 0.0, -0.12),
+        Vec3::new(-0.04, 0.76, 0.12),
         white_uv,
-        [dark, side, side, side, side, actor.body_color],
+        [
+            clothing_dark,
+            clothing_side,
+            clothing_side,
+            clothing_side,
+            clothing_side,
+            actor.body_color,
+        ],
     );
     append_box(
         mesh,
         actor,
-        Vec3::new(0.04, 0.0, -0.13),
-        Vec3::new(0.22, 0.76, 0.13),
+        Vec3::new(0.04, 0.0, -0.12),
+        Vec3::new(0.21, 0.76, 0.12),
         white_uv,
-        [dark, side, side, side, side, actor.body_color],
+        [
+            clothing_dark,
+            clothing_side,
+            clothing_side,
+            clothing_side,
+            clothing_side,
+            actor.body_color,
+        ],
     );
     append_box(
         mesh,
         actor,
-        Vec3::new(-0.30, 0.72, -0.16),
-        Vec3::new(0.30, 1.36, 0.16),
+        Vec3::new(-0.30, 0.74, -0.15),
+        Vec3::new(0.30, 1.36, 0.15),
         white_uv,
-        [dark, side, side, side, side, light],
+        [
+            clothing_dark,
+            clothing_side,
+            clothing_side,
+            clothing_side,
+            clothing_side,
+            clothing_light,
+        ],
+    );
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(-0.46, 0.62, -0.12),
+        Vec3::new(-0.31, 1.30, 0.12),
+        white_uv,
+        [
+            clothing_dark,
+            clothing_side,
+            clothing_side,
+            clothing_side,
+            clothing_side,
+            clothing_light,
+        ],
+    );
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(0.31, 0.62, -0.12),
+        Vec3::new(0.46, 1.30, 0.12),
+        white_uv,
+        [
+            clothing_dark,
+            clothing_side,
+            clothing_side,
+            clothing_side,
+            clothing_side,
+            clothing_light,
+        ],
+    );
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(-0.45, 0.48, -0.11),
+        Vec3::new(-0.32, 0.64, 0.11),
+        white_uv,
+        [
+            skin_shadow,
+            skin_side,
+            skin_side,
+            skin_side,
+            skin_side,
+            skin_light,
+        ],
+    );
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(0.32, 0.48, -0.11),
+        Vec3::new(0.45, 0.64, 0.11),
+        white_uv,
+        [
+            skin_shadow,
+            skin_side,
+            skin_side,
+            skin_side,
+            skin_side,
+            skin_light,
+        ],
     );
     append_box(
         mesh,
@@ -783,28 +883,52 @@ fn append_humanoid_placeholder(
         Vec3::new(0.24, 1.80, 0.24),
         white_uv,
         [
-            scale_color(actor.accent_color, 0.70),
-            scale_color(actor.accent_color, 0.86),
-            scale_color(actor.accent_color, 0.86),
-            scale_color(actor.accent_color, 0.92),
-            scale_color(actor.accent_color, 0.92),
-            actor.accent_color,
+            skin_shadow,
+            skin_side,
+            skin_side,
+            skin_side,
+            skin_side,
+            skin_light,
         ],
     );
     append_box(
         mesh,
         actor,
-        Vec3::new(-0.11, 1.05, 0.15),
-        Vec3::new(0.11, 1.22, 0.31),
+        Vec3::new(-0.255, 1.66, -0.255),
+        Vec3::new(0.255, 1.84, 0.255),
         white_uv,
         [
-            actor.accent_color,
-            actor.accent_color,
-            actor.accent_color,
-            actor.accent_color,
-            actor.accent_color,
-            [1.0, 0.98, 0.66, 1.0],
+            scale_color(hair, 0.70),
+            hair,
+            hair,
+            scale_color(hair, 1.12),
+            scale_color(hair, 0.92),
+            scale_color(hair, 1.18),
         ],
+    );
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(-0.135, 1.56, 0.236),
+        Vec3::new(-0.065, 1.635, 0.258),
+        white_uv,
+        [eye; 6],
+    );
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(0.065, 1.56, 0.236),
+        Vec3::new(0.135, 1.635, 0.258),
+        white_uv,
+        [eye; 6],
+    );
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(-0.075, 1.455, 0.237),
+        Vec3::new(0.075, 1.500, 0.258),
+        white_uv,
+        [mouth; 6],
     );
 }
 
@@ -1381,19 +1505,49 @@ mod tests {
     }
 
     #[test]
-    fn actor_mesh_emits_one_placeholder_per_actor() {
+    fn actor_mesh_emits_humanoid_player_model() {
         let mesh = actor_mesh(
             &[ActorInstance::remote_player(Vec3::new(1.0, 2.0, 3.0), 0.0)],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
         );
 
-        assert_eq!(mesh.vertices.len(), 5 * 6 * 4);
-        assert_eq!(mesh.indices.len(), 5 * 6 * 6);
+        assert_eq!(mesh.vertices.len(), 12 * 6 * 4);
+        assert_eq!(mesh.indices.len(), 12 * 6 * 6);
         assert!(
             mesh.vertices
                 .iter()
                 .all(|vertex| vertex.uv == [0.5 / 65.0, 0.5 / 32.0])
+        );
+
+        let bounds = mesh_bounds(&mesh);
+        assert!((bounds.min.y - 2.0).abs() < 1.0e-6);
+        assert!((bounds.max.y - 3.84).abs() < 1.0e-6);
+        assert!(bounds.min.x < 0.56);
+        assert!(bounds.max.x > 1.44);
+        assert!(bounds.max.z > 3.25);
+    }
+
+    #[test]
+    fn humanoid_player_model_has_front_face_details() {
+        let actor = ActorInstance::remote_player(Vec3::ZERO, 0.0);
+        let mesh = actor_mesh(
+            &[actor],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+        );
+        let dark_detail_vertices = mesh
+            .vertices
+            .iter()
+            .filter(|vertex| vertex.color == [0.04, 0.035, 0.03, 1.0])
+            .count();
+
+        assert_eq!(dark_detail_vertices, 2 * 6 * 4);
+        assert!(
+            mesh.vertices
+                .iter()
+                .filter(|vertex| vertex.color == [0.04, 0.035, 0.03, 1.0])
+                .all(|vertex| vertex.position[2] > 0.23)
         );
     }
 

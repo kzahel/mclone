@@ -8,8 +8,8 @@ use mclone_client::{
     ActorPresentation, ActorPresentationKind, BlockInteractionTarget, ClientInteractionController,
     ClientRuntime, HAND_PUSH_DEFAULT_HAND_RADIUS, HandPushLocomotionController,
     HandPushMovementStep, HandPushPose, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
-    LOCAL_PLAYER_TICKS_PER_SECOND, LocalPlayerController, LocalPlayerPose, NoClipMovementStep,
-    PlayerInputKey, WalkingMovementStep,
+    LOCAL_PLAYER_STANDING_HEIGHT, LOCAL_PLAYER_TICKS_PER_SECOND, LocalPlayerController,
+    LocalPlayerPose, NoClipMovementStep, PlayerInputKey, WalkingMovementStep,
 };
 use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockHitResult, BlockPos, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos,
@@ -30,6 +30,7 @@ use mclone_render::entity::ActorInstance;
 
 const PACKED_BUILD_REPORT_MAGIC: &[u8; 8] = b"MCRSBR1\0";
 pub const LANDING_MIN_IMPACT_SPEED: f64 = 0.5;
+const THIRD_PERSON_CAMERA_DISTANCE: f64 = 4.0;
 
 pub fn build_client_textured_sections(
     client: &ClientRuntime,
@@ -123,6 +124,22 @@ pub fn actor_instances_from_presentations(
             }
         })
         .collect()
+}
+
+pub fn local_player_actor_instance(
+    camera: &EngineCameraController,
+    client: &ClientRuntime,
+) -> ActorInstance {
+    let pose = camera.player().pose();
+    let packed_light = client.packed_light_at_world_or_fullbright(BlockPos::containing(
+        pose.position
+            .add(Vec3d::new(0.0, LOCAL_PLAYER_STANDING_HEIGHT * 0.5, 0.0)),
+    ));
+    ActorInstance::local_player(
+        glam_vec3_from_vec3d(pose.position),
+        pose.y_rot_degrees as f32,
+    )
+    .with_packed_light(packed_light)
 }
 
 pub fn actor_light_probe_block_pos(actor: &ActorPresentation) -> BlockPos {
@@ -1018,6 +1035,38 @@ impl EngineCameraMovementMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EngineCameraViewMode {
+    #[default]
+    FirstPerson,
+    ThirdPersonBack,
+}
+
+impl EngineCameraViewMode {
+    pub const fn toggled(self) -> Self {
+        match self {
+            Self::FirstPerson => Self::ThirdPersonBack,
+            Self::ThirdPersonBack => Self::FirstPerson,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::FirstPerson => "FIRST_PERSON",
+            Self::ThirdPersonBack => "THIRD_PERSON",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "first" | "first-person" | "first_person" | "1p" => Some(Self::FirstPerson),
+            "third" | "third-person" | "third_person" | "third-person-back"
+            | "third_person_back" | "3p" => Some(Self::ThirdPersonBack),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EngineCameraSnapshot {
     pub eye: Vec3d,
@@ -1062,6 +1111,7 @@ impl EngineCameraSnapshot {
 pub struct EngineCameraFrameState {
     pub camera: EngineCameraSnapshot,
     pub movement_mode: EngineCameraMovementMode,
+    pub view_mode: EngineCameraViewMode,
     pub on_ground: bool,
     pub horizontal_collision: bool,
     pub vertical_collision: bool,
@@ -1072,12 +1122,14 @@ impl EngineCameraFrameState {
     pub fn from_player(
         player: &LocalPlayerController,
         movement_mode: EngineCameraMovementMode,
+        view_mode: EngineCameraViewMode,
         speed_blocks_per_second: f64,
         selected_hotbar_slot: u8,
     ) -> Self {
         Self {
             camera: EngineCameraSnapshot::from_player(player, speed_blocks_per_second),
             movement_mode,
+            view_mode,
             on_ground: player.on_ground(),
             horizontal_collision: player.horizontal_collision(),
             vertical_collision: player.vertical_collision(),
@@ -1087,6 +1139,10 @@ impl EngineCameraFrameState {
 
     pub const fn movement_mode_label(&self) -> &'static str {
         self.movement_mode.label()
+    }
+
+    pub const fn view_mode_label(&self) -> &'static str {
+        self.view_mode.label()
     }
 }
 
@@ -1132,6 +1188,7 @@ pub struct EngineCameraController {
     player: LocalPlayerController,
     hand_push: HandPushLocomotionController,
     movement_mode: EngineCameraMovementMode,
+    view_mode: EngineCameraViewMode,
     speed_blocks_per_second: f64,
     movement_speed_multiplier: f64,
     landing_events: Vec<LandingEvent>,
@@ -1170,6 +1227,7 @@ impl EngineCameraController {
             player,
             hand_push: HandPushLocomotionController::default(),
             movement_mode: EngineCameraMovementMode::Walking,
+            view_mode: EngineCameraViewMode::FirstPerson,
             speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER,
             landing_events: Vec::new(),
@@ -1192,6 +1250,19 @@ impl EngineCameraController {
 
     pub const fn movement_mode(&self) -> EngineCameraMovementMode {
         self.movement_mode
+    }
+
+    pub const fn view_mode(&self) -> EngineCameraViewMode {
+        self.view_mode
+    }
+
+    pub fn set_view_mode(&mut self, view_mode: EngineCameraViewMode) {
+        self.view_mode = view_mode;
+    }
+
+    pub fn toggle_view_mode(&mut self) -> EngineCameraViewMode {
+        self.set_view_mode(self.view_mode.toggled());
+        self.view_mode
     }
 
     pub fn set_movement_mode(&mut self, movement_mode: EngineCameraMovementMode) {
@@ -1328,6 +1399,7 @@ impl EngineCameraController {
         EngineCameraFrameState::from_player(
             &self.player,
             self.movement_mode,
+            self.view_mode,
             self.speed_blocks_per_second,
             interaction.selected_hotbar_slot(),
         )
@@ -1612,7 +1684,7 @@ impl EngineCameraController {
     }
 
     pub fn render_camera(&self, render_distance: u32) -> EngineRenderCamera {
-        render_camera_from_snapshot(self.snapshot(), render_distance)
+        render_camera_from_snapshot_with_view_mode(self.snapshot(), self.view_mode, render_distance)
     }
 }
 
@@ -1620,10 +1692,28 @@ pub fn render_camera_from_snapshot(
     snapshot: EngineCameraSnapshot,
     render_distance: u32,
 ) -> EngineRenderCamera {
+    render_camera_from_snapshot_with_view_mode(
+        snapshot,
+        EngineCameraViewMode::FirstPerson,
+        render_distance,
+    )
+}
+
+pub fn render_camera_from_snapshot_with_view_mode(
+    snapshot: EngineCameraSnapshot,
+    view_mode: EngineCameraViewMode,
+    render_distance: u32,
+) -> EngineRenderCamera {
     let forward = view_forward(snapshot.yaw_radians, snapshot.pitch_radians);
-    let target = snapshot.eye.add(forward);
+    let eye = match view_mode {
+        EngineCameraViewMode::FirstPerson => snapshot.eye,
+        EngineCameraViewMode::ThirdPersonBack => snapshot
+            .eye
+            .add(forward.scale(-THIRD_PERSON_CAMERA_DISTANCE)),
+    };
+    let target = eye.add(forward);
     EngineRenderCamera {
-        eye: vec3d_to_f32_array(snapshot.eye),
+        eye: vec3d_to_f32_array(eye),
         target: vec3d_to_f32_array(target),
         up: [0.0, 1.0, 0.0],
         fov_y_radians: 64.0_f32.to_radians(),
@@ -3547,7 +3637,9 @@ mod tests {
 
         assert_eq!(state.camera, camera.snapshot());
         assert_eq!(state.movement_mode, EngineCameraMovementMode::NoClip);
+        assert_eq!(state.view_mode, EngineCameraViewMode::FirstPerson);
         assert_eq!(state.movement_mode_label(), "NOCLIP");
+        assert_eq!(state.view_mode_label(), "FIRST_PERSON");
         assert_eq!(state.on_ground, camera.on_ground());
         assert_eq!(state.horizontal_collision, camera.horizontal_collision());
         assert_eq!(state.vertical_collision, camera.vertical_collision());
@@ -3790,6 +3882,57 @@ mod tests {
                 "forward walk diverged from crosshair at yaw {yaw}: dot={dot}",
             );
         }
+    }
+
+    #[test]
+    fn engine_camera_view_mode_toggles_between_first_and_third_person() {
+        let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(0, 0));
+
+        assert_eq!(camera.view_mode(), EngineCameraViewMode::FirstPerson);
+        assert_eq!(
+            camera.toggle_view_mode(),
+            EngineCameraViewMode::ThirdPersonBack
+        );
+        assert_eq!(camera.toggle_view_mode(), EngineCameraViewMode::FirstPerson);
+    }
+
+    #[test]
+    fn third_person_render_camera_tracks_player_view_from_behind() {
+        let snapshot =
+            EngineCameraSnapshot::from_eye_pose(Vec3d::new(8.0, 70.0, 8.0), 0.0, 0.0, 24.0);
+
+        let first = render_camera_from_snapshot(snapshot, 2);
+        let third = render_camera_from_snapshot_with_view_mode(
+            snapshot,
+            EngineCameraViewMode::ThirdPersonBack,
+            2,
+        );
+
+        assert_eq!(first.eye, [8.0, 70.0, 8.0]);
+        assert_eq!(first.target, [8.0, 70.0, 9.0]);
+        assert_eq!(third.eye, [8.0, 70.0, 4.0]);
+        assert_eq!(third.target, [8.0, 70.0, 5.0]);
+        assert_eq!(third.z_far, first.z_far);
+    }
+
+    #[test]
+    fn local_player_actor_instance_uses_controller_feet_pose() {
+        let client = ClientRuntime::local_integrated();
+        let camera = EngineCameraController::from_eye_pose(
+            Vec3d::new(1.25, 70.62, -3.5),
+            std::f64::consts::FRAC_PI_2,
+            0.0,
+            24.0,
+        );
+
+        let actor = local_player_actor_instance(&camera, &client);
+
+        assert_eq!(actor.feet_position, Vec3::new(1.25, 69.0, -3.5));
+        assert!((actor.yaw_radians - std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
+        assert_eq!(
+            actor.shape,
+            mclone_render::entity::ActorInstanceShape::Humanoid
+        );
     }
 
     #[test]

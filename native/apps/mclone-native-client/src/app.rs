@@ -335,6 +335,12 @@ impl ChunkApp {
             self.schedule_next_redraw(event_loop);
             return true;
         }
+        if frame.toggle_camera_view {
+            let view_mode = self.driver.toggle_camera_view_mode();
+            log::info!("camera view mode {}", view_mode.label());
+            self.schedule_next_redraw(event_loop);
+            return true;
+        }
         if let Some(slot) = frame.selected_hotbar_slot {
             if self.driver.select_hotbar_slot(slot) {
                 log::info!("selected hotbar slot {}", slot + 1);
@@ -1263,6 +1269,7 @@ fn desktop_keyboard_key_from_key_code(key_code: KeyCode) -> Option<KeyboardKey> 
         KeyCode::ControlLeft => Some(KeyboardKey::ControlLeft),
         KeyCode::ControlRight => Some(KeyboardKey::ControlRight),
         KeyCode::Escape => Some(KeyboardKey::Escape),
+        KeyCode::F5 => Some(KeyboardKey::F5),
         KeyCode::Digit1 => Some(KeyboardKey::Digit1),
         KeyCode::Digit2 => Some(KeyboardKey::Digit2),
         KeyCode::Digit3 => Some(KeyboardKey::Digit3),
@@ -1673,6 +1680,10 @@ mod tests {
         assert_eq!(
             desktop_keyboard_key_from_key_code(KeyCode::ControlLeft),
             Some(KeyboardKey::ControlLeft)
+        );
+        assert_eq!(
+            desktop_keyboard_key_from_key_code(KeyCode::F5),
+            Some(KeyboardKey::F5)
         );
         assert_eq!(desktop_keyboard_key_from_key_code(NO_CLIP_TOGGLE_KEY), None);
         assert_eq!(

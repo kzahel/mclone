@@ -603,6 +603,7 @@ fn configure_screenshot_scene(
     if let Some(eye) = options.eye {
         host.set_eye_override(eye);
     }
+    host.driver.camera.set_view_mode(options.camera_view);
     Ok(())
 }
 

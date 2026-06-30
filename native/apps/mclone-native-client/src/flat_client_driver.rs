@@ -30,8 +30,9 @@ use mclone_render::screen_effect::{UnderwaterEffectState, UnderwaterOverlay};
 use mclone_render::selection_outline::SelectionOutline;
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
-    EngineCameraMovementMode, RenderSectionCacheUpdate, actor_instances_from_presentations,
-    render_camera_from_snapshot,
+    EngineCameraMovementMode, EngineCameraViewMode, RenderSectionCacheUpdate,
+    actor_instances_from_presentations, local_player_actor_instance,
+    render_camera_from_snapshot_with_view_mode,
 };
 use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameMovementMode,
@@ -60,13 +61,20 @@ const GROUND_PROBE_DISTANCE: f64 = 0.01;
 pub(crate) struct FlatClientCameraView {
     pub(crate) snapshot: mclone_render_session::EngineCameraSnapshot,
     pub(crate) eye: glam::Vec3,
+    pub(crate) render_eye: glam::Vec3,
+    pub(crate) view_mode: EngineCameraViewMode,
 }
 
 impl FlatClientCameraView {
-    pub(crate) fn from_snapshot(snapshot: mclone_render_session::EngineCameraSnapshot) -> Self {
+    pub(crate) fn from_camera(camera: &EngineCameraController) -> Self {
+        let snapshot = camera.snapshot();
+        let view_mode = camera.view_mode();
+        let render_camera = render_camera_from_snapshot_with_view_mode(snapshot, view_mode, 0);
         Self {
             snapshot,
             eye: glam_vec3_from_vec3d(snapshot.eye),
+            render_eye: glam::Vec3::from_array(render_camera.eye),
+            view_mode,
         }
     }
 
@@ -78,7 +86,11 @@ impl FlatClientCameraView {
     }
 
     pub(crate) fn chunk_camera(self, render_distance: u32) -> ChunkCamera {
-        chunk_camera_from_engine(render_camera_from_snapshot(self.snapshot, render_distance))
+        chunk_camera_from_engine(render_camera_from_snapshot_with_view_mode(
+            self.snapshot,
+            self.view_mode,
+            render_distance,
+        ))
     }
 }
 
@@ -259,7 +271,7 @@ impl FlatClientDriver {
     }
 
     pub(crate) fn camera_view(&self) -> FlatClientCameraView {
-        FlatClientCameraView::from_snapshot(self.camera.snapshot())
+        FlatClientCameraView::from_camera(&self.camera)
     }
 
     pub(crate) fn camera_frame_state(&self) -> EngineCameraFrameState {
@@ -1092,6 +1104,10 @@ impl FlatClientDriver {
         self.select_hotbar_slot(next)
     }
 
+    pub(crate) fn toggle_camera_view_mode(&mut self) -> EngineCameraViewMode {
+        self.camera.toggle_view_mode()
+    }
+
     pub(crate) fn apply_look_frame(&mut self, frame: FlatInputFrame) -> bool {
         if frame.look_delta.x == 0.0 && frame.look_delta.y == 0.0 {
             return false;
@@ -1202,7 +1218,7 @@ impl FlatClientDriver {
         effective_render_options_for_camera(
             self.render_options,
             self.runtime.as_ref().is_some_and(|runtime| {
-                runtime.camera_inside_occluding_block(self.camera_view().eye)
+                runtime.camera_inside_occluding_block(self.camera_view().render_eye)
             }),
         )
     }
@@ -1243,6 +1259,12 @@ impl FlatClientDriver {
             &self.actor_interpolation.presentations(),
             runtime.client(),
         )
+        .into_iter()
+        .chain(
+            (self.camera.view_mode() == EngineCameraViewMode::ThirdPersonBack)
+                .then(|| local_player_actor_instance(&self.camera, runtime.client())),
+        )
+        .collect()
     }
 
     pub(crate) fn poll_runtime(&mut self) -> anyhow::Result<FlatClientRuntimePoll> {
@@ -1319,7 +1341,7 @@ impl FlatClientDriver {
         camera_view: FlatClientCameraView,
     ) -> BTreeSet<RenderSectionKey> {
         self.runtime.as_ref().map_or_else(BTreeSet::new, |runtime| {
-            runtime.traversal_ready_render_section_keys(camera_view.eye)
+            runtime.traversal_ready_render_section_keys(camera_view.render_eye)
         })
     }
 
