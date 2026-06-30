@@ -1,6 +1,7 @@
 # 112 - Asset Lab Runtime Actor Geometry
 
-Status: active; Slice 2 actor figure-id selection and Slice 3a first-person body toggle landed.
+Status: active; Slice 2 end-to-end actor figure registry, figure-id selection,
+and Slice 3a first-person body toggle landed.
 
 ## Purpose
 
@@ -145,10 +146,11 @@ Review output inspected:
 - [x] Keep platform apps out of the model-selection policy.
 - [x] Add missing asset diagnostics for unknown figure ids.
 
-Slice 2 follow-up note: `ActorDrawResources::new` still accepts the legacy
-single default-player figure and internally builds a one-entry figure set. Use
-`ActorDrawResources::new_with_figures` in the next cleanup slice to pass the
-loaded registry through platform resource constructors directly.
+Slice 2 registry cleanup landed: platform resource constructors now pass
+`ActorFigureSet` directly, `ActorTextureAssets` no longer exposes the legacy
+single `player_figure`, and the temporary `AssetLabPlayer` instance shape was
+removed. Runtime actor selection is now id-based against the loaded first-party
+figure registry.
 
 Validation:
 
@@ -164,6 +166,7 @@ cargo check --manifest-path native/Cargo.toml -p mclone-android-client
 pnpm native:web:build
 cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --actor-review-sheet /tmp/mclone-actor-review-sheet.png --width 1152 --height 512
 cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --actor-review-sheet /tmp/mclone-actor-figure-id-review-sheet.png --width 1152 --height 512
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --actor-review-sheet /tmp/mclone-actor-registry-review-sheet.png --width 1152 --height 512
 ```
 
 Review output inspected:
@@ -171,6 +174,7 @@ Review output inspected:
 ```text
 /tmp/mclone-actor-review-sheet.png
 /tmp/mclone-actor-figure-id-review-sheet.png
+/tmp/mclone-actor-registry-review-sheet.png
 ```
 
 ### Slice 3 - Animation Metadata Import

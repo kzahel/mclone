@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_assets::{
     ActorFigureId, FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAsciiTexture, FigureAsset, FigurePart,
-    FigurePrimitive, actor_figure_path, default_player_figure_id, load_figure_asset,
+    FigurePrimitive, actor_figure_path, load_figure_asset,
 };
 
 const TEXTURE_OVERLAY_DEPTH: f32 = 0.004;
@@ -25,12 +25,6 @@ impl ActorFigureSet {
         Self {
             figures: figures.into_iter().collect(),
         }
-    }
-
-    pub fn from_default_player(figure: Option<CompiledFigure>) -> Self {
-        figure.map_or_else(Self::default, |figure| {
-            Self::new([(default_player_figure_id(), figure)])
-        })
     }
 
     pub fn get(&self, id: ActorFigureId) -> Option<&CompiledFigure> {
@@ -649,7 +643,11 @@ mod tests {
         let figures = load_first_party_actor_figures(&source).unwrap();
 
         assert_eq!(figures.len(), 1);
-        assert!(figures.get(default_player_figure_id()).is_some());
+        assert!(
+            figures
+                .get(mclone_assets::default_player_figure_id())
+                .is_some()
+        );
     }
 
     #[test]

@@ -698,7 +698,7 @@ fn create_mclone_terrain_state(
             runtime,
             options.render_options,
             actor_assets.atlas.clone(),
-            actor_assets.player_figure.clone(),
+            actor_assets.figures.clone(),
             &asset_source,
             startup_view_pose,
         )
@@ -711,7 +711,7 @@ fn create_mclone_terrain_state(
             options.render_options,
             load_textured_mesh_assets_from_source(&asset_source)?,
             actor_assets.atlas.clone(),
-            actor_assets.player_figure.clone(),
+            actor_assets.figures.clone(),
             &asset_source,
             startup_view_pose,
         )

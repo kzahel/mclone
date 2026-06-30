@@ -46,7 +46,6 @@ pub struct ActorInstance {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActorInstanceShape {
     Figure(ActorFigureId),
-    AssetLabPlayer,
     Humanoid,
     QuadrupedPlaceholder,
     CowModel,
@@ -210,25 +209,6 @@ pub struct ActorDrawResources {
 
 impl ActorDrawResources {
     pub fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        color_format: wgpu::TextureFormat,
-        atlas: ActorTextureAtlas<'_>,
-        asset_lab_player: Option<&ActorFigure>,
-    ) -> Result<Self> {
-        let renderer = ActorRenderer::new(device, color_format);
-        let gpu_atlas =
-            GpuActorTextureAtlas::new(device, queue, &renderer.texture_bind_group_layout, atlas)?;
-        Ok(Self {
-            renderer,
-            atlas: gpu_atlas,
-            texture_layout: atlas.layout,
-            atlas_size: [atlas.width.max(1), atlas.height.max(1)],
-            actor_figures: ActorFigureSet::from_default_player(asset_lab_player.cloned()),
-        })
-    }
-
-    pub fn new_with_figures(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
@@ -814,13 +794,6 @@ fn append_actor(
             texture_layout,
             atlas_size,
             actor_figures.get(figure),
-        ),
-        ActorInstanceShape::AssetLabPlayer => append_asset_lab_figure_model(
-            mesh,
-            actor,
-            texture_layout,
-            atlas_size,
-            actor_figures.get(default_player_figure_id()),
         ),
         ActorInstanceShape::Humanoid => {
             append_humanoid_model(mesh, actor, texture_layout, atlas_size)
@@ -1631,7 +1604,7 @@ mod tests {
     }
 
     fn test_player_figures() -> ActorFigureSet {
-        ActorFigureSet::from_default_player(Some(test_player_figure()))
+        ActorFigureSet::new([(default_player_figure_id(), test_player_figure())])
     }
 
     #[test]

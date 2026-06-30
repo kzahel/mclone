@@ -1,11 +1,9 @@
 use std::error::Error;
 use std::fmt;
 
-use mclone_assets::{
-    AssetError, AssetPath, AssetSource, default_player_figure_id, default_player_figure_path,
-};
+use mclone_assets::{AssetError, AssetPath, AssetSource};
 
-use crate::asset_lab_figure::{ActorFigureSet, CompiledFigure, load_first_party_actor_figures};
+use crate::asset_lab_figure::{ActorFigureSet, load_first_party_actor_figures};
 use crate::entity::{ActorTextureAtlas, ActorTextureLayout, ActorTextureRegion};
 
 const COW_TEXTURE_PATH: &str = "assets/minecraft/textures/entity/cow/cow.png";
@@ -16,7 +14,6 @@ const COW_TEXTURE_HEIGHT: u32 = 32;
 pub struct ActorTextureAssets {
     pub atlas: ActorTextureImage,
     pub figures: ActorFigureSet,
-    pub player_figure: CompiledFigure,
 }
 
 #[derive(Clone, Debug)]
@@ -52,19 +49,10 @@ pub fn load_actor_texture_assets(
         COW_TEXTURE_HEIGHT,
     )?;
     let atlas = stitch_actor_texture_atlas(&cow);
-    let figure_path = default_player_figure_path();
     let figures = load_first_party_actor_figures(source)
         .map_err(|source| ActorTextureAssetError::Figures { source })?;
-    let player_figure = figures
-        .get(default_player_figure_id())
-        .cloned()
-        .ok_or_else(|| ActorTextureAssetError::FigureMissingFromRegistry { path: figure_path })?;
 
-    Ok(ActorTextureAssets {
-        atlas,
-        figures,
-        player_figure,
-    })
+    Ok(ActorTextureAssets { atlas, figures })
 }
 
 #[derive(Debug)]
@@ -81,15 +69,8 @@ pub enum ActorTextureAssetError {
         expected_width: u32,
         expected_height: u32,
     },
-    Figure {
-        path: AssetPath,
-        source: anyhow::Error,
-    },
     Figures {
         source: anyhow::Error,
-    },
-    FigureMissingFromRegistry {
-        path: AssetPath,
     },
 }
 
@@ -119,17 +100,9 @@ impl fmt::Display for ActorTextureAssetError {
                 expected_width,
                 expected_height
             ),
-            Self::Figure { path, source } => {
-                write!(f, "failed to load actor figure {}: {source}", path.as_str())
-            }
             Self::Figures { source } => {
                 write!(f, "failed to load actor figure registry: {source}")
             }
-            Self::FigureMissingFromRegistry { path } => write!(
-                f,
-                "actor figure registry did not include required {}",
-                path.as_str()
-            ),
         }
     }
 }
@@ -140,9 +113,7 @@ impl Error for ActorTextureAssetError {
             Self::Asset(error) => Some(error),
             Self::TextureDecode { source, .. } => Some(source),
             Self::TextureDimensions { .. } => None,
-            Self::Figure { source, .. } => Some(source.as_ref()),
             Self::Figures { source } => Some(source.as_ref()),
-            Self::FigureMissingFromRegistry { .. } => None,
         }
     }
 }
@@ -231,6 +202,7 @@ struct RgbaTexture {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_assets::{default_player_figure_id, default_player_figure_path};
     use std::io::Cursor;
 
     fn actor_asset_test_source() -> mclone_assets::MemoryAssetSource {

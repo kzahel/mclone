@@ -25,7 +25,7 @@ use mclone_render::chunk::{
 };
 use mclone_render::color_profile::RenderConfig;
 use mclone_render::entity::ActorTextureAtlas;
-use mclone_render::entity::{ActorFigure, ActorInstance};
+use mclone_render::entity::{ActorFigureSet, ActorInstance};
 use mclone_render::screen_effect::{UnderwaterEffectState, UnderwaterOverlay};
 use mclone_render::selection_outline::SelectionOutline;
 use mclone_render_session::{
@@ -1064,7 +1064,7 @@ impl FlatClientDriver {
         render_config: RenderConfig,
         chunk_atlas: ChunkTextureAtlas<'_>,
         actor_atlas: ActorTextureAtlas<'_>,
-        actor_figure: Option<&ActorFigure>,
+        actor_figures: Option<&ActorFigureSet>,
         asset_source: &impl AssetSource,
     ) -> anyhow::Result<(Option<RenderConfig>, RenderConfig)> {
         let previous_config = self.render_config();
@@ -1075,7 +1075,7 @@ impl FlatClientDriver {
             render_config,
             chunk_atlas,
             actor_atlas,
-            actor_figure,
+            actor_figures,
             asset_source,
         )?;
         let next_config = resources.render_config();

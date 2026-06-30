@@ -42,7 +42,7 @@ use mclone_render::chunk::{
     TexturedSectionRenderStats, TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
-use mclone_render::entity::{ActorDrawResources, ActorFigure, ActorInstance};
+use mclone_render::entity::{ActorDrawResources, ActorFigureSet, ActorInstance};
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameTarget;
@@ -3215,7 +3215,7 @@ impl WebChunkRenderSession {
             &context.queue,
             context.format,
             mesh_assets.actor_atlas.as_upload(),
-            Some(&mesh_assets.player_figure),
+            Some(&mesh_assets.actor_figures),
         )
         .map_err(|error| format!("failed to upload packed actor textures: {error:#}"))?;
         let mut gui = GuiRenderer::new(&context.device, context.format);
@@ -4627,7 +4627,7 @@ struct WebTexturedMeshAssets {
     catalog: TexturedMeshCatalog,
     atlas: TextureAtlasImage,
     actor_atlas: ActorTextureImage,
-    player_figure: ActorFigure,
+    actor_figures: ActorFigureSet,
     atlas_sprite_count: usize,
     asset_pack_file_count: usize,
 }
@@ -4653,7 +4653,7 @@ fn load_textured_mesh_assets_from_pack(bytes: Vec<u8>) -> Result<WebTexturedMesh
         catalog: assets.catalog,
         atlas: assets.atlas,
         actor_atlas: actor_assets.atlas,
-        player_figure: actor_assets.player_figure,
+        actor_figures: actor_assets.figures,
         atlas_sprite_count: assets.atlas_sprite_count,
         asset_pack_file_count,
     })

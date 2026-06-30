@@ -168,8 +168,8 @@ pub(crate) fn write_actor_review_sheet(
     let sheet_width = panel_width * view_count as u32;
     let mut render_options = options.render_options;
     render_options.force_fullbright = true;
-    let actor_assets =
-        load_actor_texture_assets().context("failed to load actor assets for actor review sheet")?;
+    let actor_assets = load_actor_texture_assets()
+        .context("failed to load actor assets for actor review sheet")?;
 
     let (loop_report, panel_pixels, state) = run_headless_capture_loop(
         HeadlessFrameLoopOptions {
@@ -184,7 +184,7 @@ pub(crate) fn write_actor_review_sheet(
                     queue,
                     format,
                     actor_assets.atlas.as_upload(),
-                    Some(&actor_assets.player_figure),
+                    Some(&actor_assets.figures),
                 )?,
                 stats: Vec::with_capacity(view_count),
                 render_options,
@@ -208,8 +208,16 @@ pub(crate) fn write_actor_review_sheet(
         byte_len: sheet_pixels.len(),
         view_count: loop_report.frame_count,
         non_clear_rgb_pixel_count: non_clear_rgb_pixel_count(&sheet_pixels),
-        actor_count: state.stats.iter().map(|stats| stats.submitted_actor_count).sum(),
-        drawn_actor_count: state.stats.iter().map(|stats| stats.drawn_actor_count).sum(),
+        actor_count: state
+            .stats
+            .iter()
+            .map(|stats| stats.submitted_actor_count)
+            .sum(),
+        drawn_actor_count: state
+            .stats
+            .iter()
+            .map(|stats| stats.drawn_actor_count)
+            .sum(),
     })
 }
 
@@ -556,7 +564,7 @@ pub(crate) fn run_renderer_rebuild_smoke(
                 render_config,
                 runtime.mesh_assets().atlas.as_upload(),
                 runtime.actor_textures.atlas.as_upload(),
-                Some(&runtime.actor_textures.player_figure),
+                Some(&runtime.actor_textures.figures),
                 &asset_source,
             )?;
             resources
@@ -690,7 +698,7 @@ fn rebuild_renderer_rebuild_smoke_resources(
         render_config,
         state.runtime.mesh_assets().atlas.as_upload(),
         state.runtime.actor_textures.atlas.as_upload(),
-        Some(&state.runtime.actor_textures.player_figure),
+        Some(&state.runtime.actor_textures.figures),
         &state.asset_source,
     )?;
     let upload_report = resources
@@ -844,7 +852,10 @@ mod tests {
     fn actor_review_views_include_front_side_and_three_quarter() {
         let views = actor_review_views();
 
-        assert_eq!(views.map(|view| view.name), ["front", "side", "three_quarter"]);
+        assert_eq!(
+            views.map(|view| view.name),
+            ["front", "side", "three_quarter"]
+        );
         assert_eq!(views[0].camera.eye, [0.0, 0.96, 4.2]);
         assert_eq!(views[1].camera.eye, [4.2, 0.96, 0.0]);
         assert_eq!(views[2].camera.target, [0.0, 0.92, 0.0]);
@@ -861,8 +872,8 @@ mod tests {
         assert_eq!(
             sheet,
             vec![
-                255, 0, 0, 255, 250, 0, 0, 255, 0, 255, 0, 255, 0, 250, 0, 255, 0, 0, 255,
-                255, 0, 0, 250, 255,
+                255, 0, 0, 255, 250, 0, 0, 255, 0, 255, 0, 255, 0, 250, 0, 255, 0, 0, 255, 255, 0,
+                0, 250, 255,
             ]
         );
     }
