@@ -2,8 +2,8 @@
 
 Status: active; scaffold/export/sheet loop, software cube, rotation-grid panels,
 first grass-block bundle, primary-tint terrain patch, source/tint split review
-sheets, texture illustrator guide, and DSL tint-role metadata landed on
-2026-06-30.
+sheets, texture illustrator guide, DSL tint-role metadata, and metadata reports
+landed on 2026-06-30.
 
 ## Purpose
 
@@ -73,6 +73,8 @@ Generated review outputs:
 /tmp/mclone-texture-lab/dirt-sheet.png
 /tmp/mclone-texture-lab/grass-block-sheet.png
 /tmp/mclone-texture-lab/grass-block-side-sheet.png
+/tmp/mclone-texture-lab/*-metadata.md
+/tmp/mclone-texture-lab/*-metadata.json
 /tmp/mclone-texture-lab/pack/assets/mclone/textures/block/*.png
 ```
 
@@ -168,6 +170,8 @@ git diff --check
 - [x] Implement indexed ASCII texture rendering to PNG.
 - [x] Add deterministic tileable speckle helpers for natural materials.
 - [x] Export derived PNGs to `/tmp/mclone-texture-lab/pack/`.
+- [x] Export Markdown and JSON metadata reports for texture roles, tint roles,
+  preview modes, sheet paths, and block composition.
 - [ ] Add `stone` example at 32x32. The first landed example is `dirt`.
 
 Validation:

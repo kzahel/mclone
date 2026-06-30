@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { loadTexturePack } from "./load";
 import { encodePng } from "./png";
+import { makeMetadataReportJson, makeMetadataReportMarkdown } from "./report";
 import { makeBlockReviewSheet, makeBlockSideReviewSheet, makeReviewSheet, renderAllTextures } from "./render";
 
 interface ExportArgs {
@@ -42,6 +43,14 @@ for (const [blockName, block] of Object.entries(pack.blocks)) {
     console.log(`Wrote ${sideSheetPath}`);
   }
 }
+
+const reportMarkdownPath = path.join(args.outDir, `${pack.name}-metadata.md`);
+await fs.writeFile(reportMarkdownPath, makeMetadataReportMarkdown(pack));
+console.log(`Wrote ${reportMarkdownPath}`);
+
+const reportJsonPath = path.join(args.outDir, `${pack.name}-metadata.json`);
+await fs.writeFile(reportJsonPath, makeMetadataReportJson(pack));
+console.log(`Wrote ${reportJsonPath}`);
 
 function parseArgs(argv: string[]): ExportArgs {
   const input = argv[0];

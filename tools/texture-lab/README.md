@@ -48,6 +48,10 @@ sheets to:
 /tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_bottom.png
 /tmp/mclone-texture-lab/grass-block-sheet.png
 /tmp/mclone-texture-lab/grass-block-side-sheet.png
+/tmp/mclone-texture-lab/mclone-dirt-starter-metadata.md
+/tmp/mclone-texture-lab/mclone-dirt-starter-metadata.json
+/tmp/mclone-texture-lab/mclone-grass-block-starter-metadata.md
+/tmp/mclone-texture-lab/mclone-grass-block-starter-metadata.json
 ```
 
 ## Source Format
@@ -85,6 +89,11 @@ shows the raw, tintless source texture; repeat, mip, rotation, and block-context
 panels use the preview tint when one is defined. Grass side textures should be
 judged in block context because the final side is dirt base plus a tinted
 transparent overlay, not either source texture alone.
+
+Each export also writes a metadata report next to the sheets. The Markdown
+report is for quick human review; the JSON report is for future agent/tool
+checks. Both list tint roles, texture source categories, preview tiling modes,
+sheet paths, and block face composition.
 
 The grass starter encodes that relationship directly:
 
