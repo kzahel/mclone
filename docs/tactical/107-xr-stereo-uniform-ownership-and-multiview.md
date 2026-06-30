@@ -613,6 +613,13 @@ Direct frozen RD10 comparison on the same tree:
 | per-eye | 13.916 ms | 13.805 ms | 14.860 ms | 17.443 ms | 26.208 ms | 613 |
 | full-frame multiview | 13.842 ms | 13.832 ms | 14.468 ms | 14.829 ms | 16.192 ms | 628 |
 
+Raw summary markers:
+
+```text
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.011 mode=stationary-frozen-render render_path=per-eye render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=35.015 settle_min_seconds=5.000 settle_frames=2402 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1433 submitted_delta=1433 runtime_delta=1433 skipped_delta=0 frame_avg_ms=13.916 frame_min_ms=11.702 frame_p50_ms=13.805 frame_p95_ms=14.860 frame_p99_ms=17.443 frame_max_ms=26.208 over_budget=613 over_2x_budget=0 over_4x_budget=0
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.013 mode=stationary-frozen-render render_path=multiview render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=34.952 settle_min_seconds=5.000 settle_frames=2406 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1441 submitted_delta=1441 runtime_delta=1441 skipped_delta=0 frame_avg_ms=13.842 frame_min_ms=12.235 frame_p50_ms=13.832 frame_p95_ms=14.468 frame_p99_ms=14.829 frame_max_ms=16.192 over_budget=628 over_2x_budget=0 over_4x_budget=0
+```
+
 This is a correctness/coverage milestone, not a decisive performance win: avg
 improved by only `0.074 ms` (`1.005x`), p50 was effectively unchanged, and
 over-budget count stayed similar. The multiview lane currently reports total
