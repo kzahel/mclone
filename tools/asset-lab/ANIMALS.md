@@ -42,7 +42,7 @@ These unlock whole families, so they should be prioritized as their own slices:
 
 - [ ] **`swim` macro** → unlocks all marine life (fish, shark, dolphin, whale, octopus…). High leverage.
 - [ ] **`slither` macro** → unlocks snakes, eels, worms.
-- [ ] **`hop` macro** → rabbit, frog, kangaroo, grasshopper (cleaner than faking with contactSwing).
+- [ ] **`hop` macro** → rabbit, frog, kangaroo, grasshopper (cleaner than faking with contactSwing). *Rabbit currently ships a hand-authored approximation (`examples/rabbit`: synchronized `contactSwing` legs + phased body `bob`); this macro would replace it.*
 - [ ] **N-leg crawl** (generalize `quadrupedWalk`) → spiders (8), insects (6), crabs.
 - [ ] **roll-up / curl helper** (a pose, not a gait) → roly-poly, armadillo, pangolin.
 
@@ -72,11 +72,11 @@ gaps in the current eight figures.
 |---|---|---|---|---|---|
 | Pig | P0 | ✅ | Q | piglet ✅, adult pink, spotted, boar (tusks) | `examples/piglet` is the baby; adult is a quick scale-up |
 | Sheep | P0 | ✅ | Q | white ✅, black, brown, shorn (no wool), lamb, dyed (MC nod) | wool vs shorn is a fun material swap |
-| Cow | P0 | ☐ | Q | Holstein (black/white), brown (Jersey), calf, bull (horns) | flagship farm gap |
-| Chicken | P0 | ☐ | W | hen, rooster (comb/wattle/long tail), chick | small wings → mostly `wingFlap` flutter + walk |
-| Horse | P0 | ☐ | Q | brown, black, white, palomino, foal; pony | mane/tail are signature; large quadruped |
-| Goat | P1 | ☐ | Q | white, brown, kid, billy (horns + beard) | |
-| Rabbit | P1 | ☐ | H | brown, white, gray, black, lop-ear, kit | wants a `hop` macro |
+| Cow | P0 | ✅ | Q | Holstein (black/white), brown (Jersey), calf, bull (horns) | `examples/cow` — Holstein; horns, ears, muzzle, udder, tufted tail; `quadrupedWalk` |
+| Chicken | P0 | ✅ | W | hen, rooster (comb/wattle/long tail), chick | `examples/chicken` — hen; comb, wattle, beak, tail fan; `bipedWalk` + wing/head flutter |
+| Horse | P0 | ✅ | Q | brown, black, white, palomino, foal; pony | `examples/horse` — bay; mane, long tail, blaze, hooves; `quadrupedWalk` |
+| Goat | P1 | ✅ | Q | white, brown, kid, billy (horns + beard) | `examples/goat` — billy; swept horns, beard, cloven hooves; `quadrupedWalk` |
+| Rabbit | P1 | ✅ | H | brown, white, gray, black, lop-ear, kit | `examples/rabbit` — white; long ears, hind feet, cotton tail; hop approximated (synchronized `contactSwing` + phased body `bob`) pending a `hop` macro |
 | Donkey / Mule | P2 | ☐ | Q | donkey, mule | horse variant; big ears |
 | Duck | P2 | ☐ | W/S | mallard drake, hen, duckling | walks + paddles; pairs with swim work |
 | Turkey | P2 | ☐ | W | tom (fanned tail), hen | |
@@ -153,7 +153,7 @@ gaps in the current eight figures.
 |---|---|---|---|---|---|
 | Mouse / Rat | P2 | ☐ | Q | — | tiny; long tail |
 | Squirrel | P2 | ☐ | Q/H | gray, red; flying squirrel | huge tail |
-| Rabbit | P1 | ☐ | H | (see Farm) | |
+| Rabbit | P1 | ✅ | H | (see Farm) | `examples/rabbit` |
 | Hedgehog | P3 | ☐ | Q | — | spine texture |
 | Porcupine | P3 | ☐ | Q | — | quill texture; hedgehog cousin |
 | Raccoon | P2 | ☐ | Q | — | mask + ringed tail |
@@ -186,7 +186,7 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Chicken | P0 | ☐ | W | (see Farm) | |
+| Chicken | P0 | ✅ | W | (see Farm) | `examples/chicken` |
 | Toucan | P3 | ☐ | W | — | oversized colorful bill |
 | Owl | P1 | ☐ | W | brown, snowy (white) | |
 | Parrot | P1 | ☐ | W | red, green, blue, yellow morphs | color morphs are cheap variants |
@@ -345,9 +345,9 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Shipped (8):** piglet, sheep, dog, cat, butterfly, player, bearfolk, lionfolk.
+- **Shipped (13):** piglet, sheep, dog, cat, butterfly, player, bearfolk, lionfolk, **cow, chicken, horse, goat, rabbit** (farmyard wave).
 - **Macros ready:** `quadrupedWalk` (Q), `bipedWalk` (B), `wingFlap` (W).
-- **Macros to build:** `swim` (S), `slither` (SL), `hop` (H), N-leg crawl (C).
+- **Macros to build:** `swim` (S), `slither` (SL), `hop` (H — rabbit currently approximates it), N-leg crawl (C).
 - **Biggest single unlock:** the `swim` macro — gates the entire marine family.
-- **Lowest-effort wins next:** Cow, Chicken, Horse, Goat (round out the farm; all on existing macros).
+- **Lowest-effort wins next:** the farmyard is done; iconic wild quadrupeds (Wolf, Fox, Bear, Deer) are the cheapest next wave — all ride `quadrupedWalk`.
 - **Cheapest enemy wave:** humanoid baddies (skeleton, zombie, humanoid pig) — all reuse the `player`/`-folk` biped rig + `bipedWalk`, no new tooling.
