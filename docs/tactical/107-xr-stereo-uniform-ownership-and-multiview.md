@@ -638,12 +638,41 @@ MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_render_frame_ms=14.547 max_terrain_re
 MCLONE_ANDROID_XR_PERF_MULTIVIEW max_multiview_sky_ms=0.517 max_multiview_terrain_ms=4.059 max_multiview_actor_ms=0.789 max_multiview_screen_effect_ms=0.043 max_multiview_world_overlays_ms=0.151 max_multiview_submit_ms=0.709 max_multiview_poll_wait_ms=10.751
 ```
 
-That marker makes the current shape clearer: the worst sampled frame spent about
-`4.1 ms` CPU-side encoding terrain/section work and `10.8 ms` waiting for the
-submitted multiview work to retire. The next performance decision needs a fresh
-per-eye run with the same marker set and then either tighter culling/CPU-prep
-work or a scoped E4 overlap experiment; multiview alone still has not shown a
-large full-frame win.
+Matching per-eye run from the same current tree:
+
+```text
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.013 mode=stationary-frozen-render render_path=per-eye render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=35.003 settle_min_seconds=5.000 settle_frames=2414 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1434 submitted_delta=1434 runtime_delta=1434 skipped_delta=0 frame_avg_ms=13.907 frame_min_ms=10.980 frame_p50_ms=13.820 frame_p95_ms=14.783 frame_p99_ms=15.791 frame_max_ms=26.898 over_budget=644 over_2x_budget=0 over_4x_budget=0
+MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_render_frame_ms=14.755 max_terrain_render_views_ms=0.029 max_terrain_menu_pointer_ms=0.000 max_terrain_runtime_upload_ms=0.000 max_runtime_poll_ms=0.000 max_runtime_sync_ms=0.000 max_runtime_gpu_upload_ms=0.000 max_runtime_ready_sections_ms=0.000 max_terrain_shared_records_ms=0.015 max_terrain_left_eye_ms=8.454 max_terrain_right_eye_ms=7.394 max_terrain_left_eye_prepare_ms=1.627 max_terrain_left_eye_encode_ms=2.108 max_terrain_left_eye_section_encode_ms=1.391 max_terrain_left_eye_submit_ms=0.626 max_terrain_left_eye_poll_wait_ms=6.129 max_terrain_right_eye_prepare_ms=1.325 max_terrain_right_eye_encode_ms=2.024 max_terrain_right_eye_section_encode_ms=1.425 max_terrain_right_eye_submit_ms=0.598 max_terrain_right_eye_poll_wait_ms=5.643 max_terrain_stereo_finish_ms=0.000 max_terrain_stereo_submit_ms=0.790 max_terrain_stereo_poll_wait_ms=10.041
+MCLONE_ANDROID_XR_PERF_MULTIVIEW max_multiview_sky_ms=0.000 max_multiview_terrain_ms=0.000 max_multiview_actor_ms=0.000 max_multiview_screen_effect_ms=0.000 max_multiview_world_overlays_ms=0.000 max_multiview_submit_ms=0.000 max_multiview_poll_wait_ms=0.000
+```
+
+Matched comparison:
+
+| path | avg | p50 | p95 | p99 | max | over budget | max terrain frame | max poll wait |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| per-eye | 13.907 ms | 13.820 ms | 14.783 ms | 15.791 ms | 26.898 ms | 644 | 14.755 ms | 10.041 ms |
+| full-frame multiview | 13.834 ms | 13.812 ms | 14.415 ms | 14.703 ms | 17.929 ms | 565 | 14.547 ms | 10.751 ms |
+
+This confirms the prior signal: multiview is directionally positive in this
+frozen RD10 sample (`0.073 ms` avg, `0.368 ms` p95, `79` fewer over-budget
+frames), but the gain is too small to make multiview alone the next primary
+performance bet. The worst sampled multiview frame spent about `4.1 ms`
+CPU-side encoding terrain/section work and `10.8 ms` waiting for submitted GPU
+work to retire; the per-eye path reports comparable total terrain frame cost and
+about `10.0 ms` stereo poll wait. Treat this as a correctness-ready alternate
+render path, not a proven default.
+
+Next performance work should pivot to one of:
+
+- terrain culling/CPU-prep attribution and reduction, especially duplicated
+  per-eye prepare/cull/sort work;
+- a scoped, runtime-toggleable E4 overlap experiment, using these validated
+  per-eye and multiview markers as the comparison baseline.
+
+These runs were captured while the worktree also had unrelated native-client,
+input, render-session, and render changes present. They are useful as a matched
+A/B signal because both lanes used the same current tree, but they should not be
+treated as clean-release baseline numbers.
 
 Move from proof-of-correctness one-submit to the real target:
 
