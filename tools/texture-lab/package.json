@@ -6,6 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "export": "tsx src/export.ts packs/mclone-default/texture.ts",
+    "analyze": "tsx src/analyze.ts packs/mclone-default/texture.ts",
     "runtime-compat": "tsx src/export.ts packs/mclone-default/texture.ts --runtime-compat",
     "sheet": "tsx src/export.ts packs/mclone-default/texture.ts --sheet-only"
   },
