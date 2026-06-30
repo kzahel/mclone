@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { loadTexturePack } from "./load";
 import { encodePng } from "./png";
-import { makeBlockReviewSheet, makeReviewSheet, renderAllTextures } from "./render";
+import { makeBlockReviewSheet, makeBlockSideReviewSheet, makeReviewSheet, renderAllTextures } from "./render";
 
 interface ExportArgs {
   input: string;
@@ -34,6 +34,13 @@ for (const [blockName, block] of Object.entries(pack.blocks)) {
   const sheetPath = path.join(args.outDir, `${blockName}-sheet.png`);
   await fs.writeFile(sheetPath, encodePng(makeBlockReviewSheet(blockName, block, texturesByName)));
   console.log(`Wrote ${sheetPath}`);
+
+  const sideSheet = makeBlockSideReviewSheet(blockName, block, texturesByName);
+  if (sideSheet) {
+    const sideSheetPath = path.join(args.outDir, `${blockName}-side-sheet.png`);
+    await fs.writeFile(sideSheetPath, encodePng(sideSheet));
+    console.log(`Wrote ${sideSheetPath}`);
+  }
 }
 
 function parseArgs(argv: string[]): ExportArgs {

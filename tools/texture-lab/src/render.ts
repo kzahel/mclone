@@ -54,32 +54,34 @@ export function makeReviewSheet(texture: RenderedTexture): RgbaImage {
   const sheetWidth = 1040;
   const sheetHeight = 672;
   const sheet = solidImage(sheetWidth, sheetHeight, background);
+  const rawTexture = texture;
   const displayTexture = previewTexture(texture);
-  const useCheckerboard = texture.preview?.checkerboard ?? hasTransparency(displayTexture);
+  const rawCheckerboard = texture.preview?.checkerboard ?? hasTransparency(rawTexture);
+  const displayCheckerboard = texture.preview?.checkerboard ?? hasTransparency(displayTexture);
   const showCube = texture.preview?.cube ?? !hasTransparency(displayTexture);
   const showRotation = texture.preview?.rotation ?? !hasTransparency(displayTexture);
   const tiling = texture.preview?.tiling ?? "xy";
 
   drawRect(sheet, 16, 16, 264, 264, panel);
-  if (useCheckerboard) {
-    drawCheckerboard(sheet, 20, 20, displayTexture.width * 8, displayTexture.height * 8, 8);
+  if (rawCheckerboard) {
+    drawCheckerboard(sheet, 20, 20, rawTexture.width * 8, rawTexture.height * 8, 8);
   }
-  drawScaled(sheet, displayTexture, 20, 20, 8);
-  drawGrid(sheet, 20, 20, displayTexture.width, displayTexture.height, 8, [86, 89, 88, 255]);
+  drawScaled(sheet, rawTexture, 20, 20, 8);
+  drawGrid(sheet, 20, 20, rawTexture.width, rawTexture.height, 8, [86, 89, 88, 255]);
 
   drawRect(sheet, 304, 16, 296, 296, panel);
-  if (useCheckerboard && tiling !== "none") {
+  if (displayCheckerboard && tiling !== "none") {
     drawCheckerboard(sheet, 308, 20, displayTexture.width * 3 * 3, displayTexture.height * 3 * 3, 12);
   }
   if (tiling === "xy") {
     drawTiledScaled(sheet, displayTexture, 308, 20, 3, 3, 3);
   } else if (tiling === "x") {
-    if (useCheckerboard) {
+    if (displayCheckerboard) {
       drawCheckerboard(sheet, 308, 20, displayTexture.width * 3 * 3, displayTexture.height * 3, 12);
     }
     drawTiledScaled(sheet, displayTexture, 308, 20, 3, 1, 3);
   } else {
-    if (useCheckerboard) {
+    if (displayCheckerboard) {
       drawCheckerboard(sheet, 308, 20, displayTexture.width * 3, displayTexture.height * 3, 12);
     }
     drawScaled(sheet, displayTexture, 308, 20, 3);
@@ -87,14 +89,14 @@ export function makeReviewSheet(texture: RenderedTexture): RgbaImage {
 
   const downsampled = downsampleNearest(displayTexture, 16, 16);
   drawRect(sheet, 624, 16, 200, 200, panel);
-  if (useCheckerboard) {
+  if (displayCheckerboard) {
     drawCheckerboard(sheet, 628, 20, downsampled.width * 12, downsampled.height * 12, 12);
   }
   drawScaled(sheet, downsampled, 628, 20, 12);
   drawGrid(sheet, 628, 20, downsampled.width, downsampled.height, 12, [86, 89, 88, 255]);
 
   drawRect(sheet, 624, 232, 200, 80, panel);
-  drawMipStrip(sheet, displayTexture, 632, 240, useCheckerboard);
+  drawMipStrip(sheet, displayTexture, 632, 240, displayCheckerboard);
 
   if (showCube) {
     drawRect(sheet, 840, 16, 184, 296, panel);
@@ -136,6 +138,53 @@ export function makeBlockReviewSheet(
   drawIsometricCubeFaces(sheet, cubeFaces(block, texturesByName, primaryTint), 760, 410);
   for (const [index, tint] of tintColors.slice(0, 4).entries()) {
     drawTintSwatch(sheet, 890, 412 + index * 34, tint);
+  }
+
+  return sheet;
+}
+
+export function makeBlockSideReviewSheet(
+  blockName: string,
+  block: BlockSpec,
+  texturesByName: Map<string, RenderedTexture>,
+): RgbaImage | undefined {
+  if (!block.faces.side || !block.faces.overlay) {
+    return undefined;
+  }
+
+  const background: Rgba = [32, 34, 34, 255];
+  const panel: Rgba = [52, 54, 54, 255];
+  const sheet = solidImage(1040, 432, background);
+  const tintColors = block.tint?.grass?.map(parseHexColor) ?? [[116, 167, 69, 255] satisfies Rgba];
+  const primaryTint = tintColors[0]!;
+  const side = textureForFace(block, texturesByName, "side");
+  const overlay = texturesByName.get(block.faces.overlay);
+  if (!overlay) {
+    throw new Error(`Block '${blockName}' overlay references missing rendered texture '${block.faces.overlay}'`);
+  }
+  const composedSide = compositeImages(cloneImage(side), tintTexture(overlay, primaryTint));
+  const top = tintTexture(textureForFace(block, texturesByName, "top"), primaryTint);
+
+  drawRect(sheet, 16, 16, 264, 264, panel);
+  drawScaled(sheet, side, 20, 20, 8);
+  drawGrid(sheet, 20, 20, side.width, side.height, 8, [86, 89, 88, 255]);
+
+  drawRect(sheet, 304, 16, 264, 264, panel);
+  drawCheckerboard(sheet, 308, 20, overlay.width * 8, overlay.height * 8, 8);
+  drawScaled(sheet, overlay, 308, 20, 8);
+  drawGrid(sheet, 308, 20, overlay.width, overlay.height, 8, [86, 89, 88, 255]);
+
+  drawRect(sheet, 592, 16, 432, 128, panel);
+  drawTiledScaled(sheet, composedSide, 608, 32, 4, 1, 3);
+
+  drawRect(sheet, 592, 160, 432, 248, panel);
+  drawScaled(sheet, top, 608, 176, 3);
+  drawGrid(sheet, 608, 176, top.width, top.height, 3, [86, 89, 88, 255]);
+  drawScaled(sheet, composedSide, 728, 176, 3);
+  drawGrid(sheet, 728, 176, composedSide.width, composedSide.height, 3, [86, 89, 88, 255]);
+  drawIsometricCubeFaces(sheet, cubeFaces(block, texturesByName, primaryTint), 864, 216);
+  for (const [index, tint] of tintColors.slice(0, 4).entries()) {
+    drawTintSwatch(sheet, 608, 296 + index * 26, tint);
   }
 
   return sheet;

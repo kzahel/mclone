@@ -1,7 +1,8 @@
 # 114 - AI Texture Pack Lab
 
 Status: active; scaffold/export/sheet loop, software cube, rotation-grid panels,
-first grass-block bundle, and primary-tint terrain patch landed on 2026-06-30.
+first grass-block bundle, primary-tint terrain patch, and source/tint split
+review sheets landed on 2026-06-30.
 
 ## Purpose
 
@@ -69,6 +70,7 @@ Generated review outputs:
 ```text
 /tmp/mclone-texture-lab/dirt-sheet.png
 /tmp/mclone-texture-lab/grass-block-sheet.png
+/tmp/mclone-texture-lab/grass-block-side-sheet.png
 /tmp/mclone-texture-lab/pack/assets/mclone/textures/block/*.png
 ```
 
@@ -199,6 +201,10 @@ texture.
 - [x] Add transparent overlay preview for grass side textures.
 - [x] Add preview-only tint/checker controls so neutral grass and transparent
   overlay source textures render meaningfully in individual sheets.
+- [x] Keep texture sheets source-first: enlarged source panel stays raw and
+  tintless while repeat/mip/rotation/block-style panels can use preview tint.
+- [x] Add a grass-side context sheet showing dirt side base, raw transparent
+  overlay, and final composed tinted side together.
 - [x] Keep alternate grass biome tint previews compact so source texture review
   remains primary.
 - [ ] Add foliage/water tint swatches once those texture families exist.

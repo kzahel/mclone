@@ -44,6 +44,7 @@ sheets to:
 /tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_side_overlay.png
 /tmp/mclone-texture-lab/pack/assets/mclone/textures/block/grass_block_bottom.png
 /tmp/mclone-texture-lab/grass-block-sheet.png
+/tmp/mclone-texture-lab/grass-block-side-sheet.png
 ```
 
 ## Source Format
@@ -71,6 +72,12 @@ The first source format is hybrid:
 - Preview-only metadata for tinting neutral source textures, showing alpha on a
   checkerboard, controlling tiling mode, or disabling cube/rotation panels
   where they are misleading.
+
+Tintable textures are source-first in review sheets. The enlarged pixel panel
+shows the raw, tintless source texture; repeat, mip, rotation, and block-context
+panels use the preview tint when one is defined. Grass side textures should be
+judged in block context because the final side is dirt base plus a tinted
+transparent overlay, not either source texture alone.
 
 Pure ASCII is useful, but it should not be the only tool. A 32x32 natural block
 is 1024 cells per face; asking an agent to hand-paint every cell is slow and
