@@ -7,10 +7,11 @@ use glam::Vec3;
 use mclone_assets::ActorFigureId;
 use mclone_client::{
     ActorPresentation, ActorPresentationKind, BlockInteractionTarget, ClientInteractionController,
-    ClientRuntime, HAND_PUSH_DEFAULT_HAND_RADIUS, HandPushLocomotionController,
-    HandPushMovementStep, HandPushPose, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
-    LOCAL_PLAYER_STANDING_HEIGHT, LOCAL_PLAYER_TICKS_PER_SECOND, LocalPlayerController,
-    LocalPlayerPose, NoClipMovementStep, PlayerInputKey, WalkingMovementStep,
+    ClientRuntime, CollisionMovementResult, HAND_PUSH_DEFAULT_HAND_RADIUS,
+    HandPushLocomotionController, HandPushMovementStep, HandPushPose,
+    LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_STANDING_HEIGHT, LOCAL_PLAYER_TICKS_PER_SECOND,
+    LocalPlayerController, LocalPlayerPose, NoClipMovementStep, PlayerInputKey,
+    WalkingMovementStep,
 };
 use mclone_core::{
     AIR_BLOCK_STATE_ID, Aabb, BlockHitResult, BlockPos, CHUNK_SECTION_VOLUME, CHUNK_WIDTH,
@@ -961,6 +962,8 @@ const ENGINE_DEBUG_HAND_SPHERE_SEGMENTS: usize = 24;
 const ENGINE_DEBUG_PLAYER_BOX_COLOR: [f32; 4] = [0.1, 0.95, 0.65, 0.95];
 const ENGINE_DEBUG_LEFT_HAND_COLOR: [f32; 4] = [0.2, 0.55, 1.0, 0.95];
 const ENGINE_DEBUG_RIGHT_HAND_COLOR: [f32; 4] = [1.0, 0.62, 0.18, 0.95];
+const ENGINE_DEBUG_HEADSET_RESIDUAL_COLOR: [f32; 4] = [1.0, 0.15, 0.15, 0.95];
+const ENGINE_ROOM_SCALE_RECONCILE_EPSILON: f64 = 1.0e-9;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EngineCameraInput {
@@ -1023,6 +1026,36 @@ impl EngineHandPushInput {
             left_hand_position: self.left_hand_position,
             right_hand_position: self.right_hand_position,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EngineRoomScaleReconciliation {
+    pub body_eye_before: Vec3d,
+    pub headset_world_position: Vec3d,
+    pub requested_body_movement: Vec3d,
+    pub consumed_body_movement: Vec3d,
+    pub residual_head_offset: Vec3d,
+    pub body_eye_after: Vec3d,
+    pub collision: CollisionMovementResult,
+}
+
+impl EngineRoomScaleReconciliation {
+    fn no_op(body_eye: Vec3d, headset_world_position: Vec3d) -> Self {
+        Self {
+            body_eye_before: body_eye,
+            headset_world_position,
+            requested_body_movement: Vec3d::ZERO,
+            consumed_body_movement: Vec3d::ZERO,
+            residual_head_offset: headset_world_position.subtract(body_eye),
+            body_eye_after: body_eye,
+            collision: CollisionMovementResult::default(),
+        }
+    }
+
+    pub fn residual_horizontal_length_sqr(self) -> f64 {
+        self.residual_head_offset.x * self.residual_head_offset.x
+            + self.residual_head_offset.z * self.residual_head_offset.z
     }
 }
 
@@ -1227,6 +1260,7 @@ pub struct EngineCameraController {
     player: LocalPlayerController,
     hand_push: HandPushLocomotionController,
     last_hand_push_input: Option<EngineHandPushInput>,
+    last_room_scale_reconciliation: Option<EngineRoomScaleReconciliation>,
     movement_mode: EngineCameraMovementMode,
     view_mode: EngineCameraViewMode,
     first_person_player_visible: bool,
@@ -1268,6 +1302,7 @@ impl EngineCameraController {
             player,
             hand_push: HandPushLocomotionController::default(),
             last_hand_push_input: None,
+            last_room_scale_reconciliation: None,
             movement_mode: EngineCameraMovementMode::Walking,
             view_mode: EngineCameraViewMode::FirstPerson,
             first_person_player_visible: false,
@@ -1286,6 +1321,10 @@ impl EngineCameraController {
         self.last_hand_push_input
     }
 
+    pub const fn last_room_scale_reconciliation(&self) -> Option<EngineRoomScaleReconciliation> {
+        self.last_room_scale_reconciliation
+    }
+
     pub fn set_eye_pose(&mut self, eye: Vec3d, yaw_radians: f64, pitch_radians: f64) {
         self.player.set_pose(LocalPlayerPose::from_eye_position(
             eye,
@@ -1293,6 +1332,7 @@ impl EngineCameraController {
             -pitch_radians.to_degrees(),
             LOCAL_PLAYER_STANDING_EYE_HEIGHT,
         ));
+        self.last_room_scale_reconciliation = None;
     }
 
     pub const fn movement_mode(&self) -> EngineCameraMovementMode {
@@ -1554,6 +1594,54 @@ impl EngineCameraController {
             .move_colliding(client, Vec3d::new(0.0, -distance, 0.0));
     }
 
+    pub fn reconcile_room_scale_headset(
+        &mut self,
+        client: &ClientRuntime,
+        headset_world_position: Vec3d,
+    ) -> EngineRoomScaleReconciliation {
+        let body_eye_before = self.player.pose().eye_position();
+        if !headset_world_position.is_finite() {
+            let result = EngineRoomScaleReconciliation::no_op(body_eye_before, body_eye_before);
+            self.last_room_scale_reconciliation = Some(result);
+            return result;
+        }
+
+        let requested_body_movement = Vec3d::new(
+            headset_world_position.x - body_eye_before.x,
+            0.0,
+            headset_world_position.z - body_eye_before.z,
+        );
+        if requested_body_movement.length_sqr()
+            <= ENGINE_ROOM_SCALE_RECONCILE_EPSILON * ENGINE_ROOM_SCALE_RECONCILE_EPSILON
+        {
+            let result =
+                EngineRoomScaleReconciliation::no_op(body_eye_before, headset_world_position);
+            self.last_room_scale_reconciliation = Some(result);
+            return result;
+        }
+
+        let collision = self.player.move_colliding(client, requested_body_movement);
+        let body_eye_after = self.player.pose().eye_position();
+        let consumed_body_movement = Vec3d::new(collision.traveled.x, 0.0, collision.traveled.z);
+        let residual_head_offset = Vec3d::new(
+            requested_body_movement.x - consumed_body_movement.x,
+            headset_world_position.y - body_eye_after.y,
+            requested_body_movement.z - consumed_body_movement.z,
+        );
+
+        let result = EngineRoomScaleReconciliation {
+            body_eye_before,
+            headset_world_position,
+            requested_body_movement,
+            consumed_body_movement,
+            residual_head_offset,
+            body_eye_after,
+            collision,
+        };
+        self.last_room_scale_reconciliation = Some(result);
+        result
+    }
+
     fn apply_key_input(&mut self, input: EngineCameraInput) {
         self.set_key(PlayerInputKey::Forward, input.forward);
         self.set_key(PlayerInputKey::Backward, input.backward);
@@ -1770,6 +1858,19 @@ pub fn engine_debug_world_lines(
             camera.player().pose().bounding_box(),
             ENGINE_DEBUG_PLAYER_BOX_COLOR,
         );
+        if let Some(reconciliation) = camera.last_room_scale_reconciliation() {
+            if reconciliation.residual_head_offset.length_sqr()
+                > ENGINE_ROOM_SCALE_RECONCILE_EPSILON * ENGINE_ROOM_SCALE_RECONCILE_EPSILON
+            {
+                let start = reconciliation.body_eye_after;
+                let end = start.add(reconciliation.residual_head_offset);
+                lines.push(WorldGuiLine::new(
+                    glam_vec3_from_vec3d(start),
+                    glam_vec3_from_vec3d(end),
+                    ENGINE_DEBUG_HEADSET_RESIDUAL_COLOR,
+                ));
+            }
+        }
     }
     if camera.movement_mode() == EngineCameraMovementMode::HandPush {
         if let Some(input) = camera.last_hand_push_input() {
@@ -3544,6 +3645,13 @@ mod tests {
 
     use super::*;
 
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1.0e-9,
+            "expected {actual} to be approximately {expected}"
+        );
+    }
+
     fn test_build_report(
         keys: impl IntoIterator<Item = RenderSectionKey>,
     ) -> TexturedRenderSectionBuildReport {
@@ -3803,6 +3911,78 @@ mod tests {
         assert_eq!(hand_lines.len(), ENGINE_DEBUG_HAND_SPHERE_SEGMENTS * 3 * 2);
         let all_lines = engine_debug_world_lines(&camera, EngineDebugVisualOptions::new(true));
         assert_eq!(all_lines.len(), hand_lines.len() + 12);
+    }
+
+    #[test]
+    fn room_scale_reconciliation_moves_body_toward_headset_in_clear_space() {
+        let client = ClientRuntime::local_integrated();
+        let mut camera = EngineCameraController::from_eye_pose(
+            Vec3d::new(0.5, 2.62, 0.5),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+
+        let result = camera.reconcile_room_scale_headset(&client, Vec3d::new(0.85, 2.62, 0.3));
+
+        assert_close(result.requested_body_movement.x, 0.35);
+        assert_close(result.requested_body_movement.y, 0.0);
+        assert_close(result.requested_body_movement.z, -0.2);
+        assert_eq!(
+            result.consumed_body_movement,
+            result.requested_body_movement
+        );
+        assert_close(result.residual_head_offset.x, 0.0);
+        assert_close(result.residual_head_offset.y, 0.0);
+        assert_close(result.residual_head_offset.z, 0.0);
+        assert_close(camera.player().pose().eye_position().x, 0.85);
+        assert_close(camera.player().pose().eye_position().z, 0.3);
+    }
+
+    #[test]
+    fn room_scale_reconciliation_leaves_collision_residual_when_blocked() {
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(test_snapshot_with_block(
+            ChunkPos::new(0, 0),
+            BlockPos::new(1, 1, 0),
+            BlockStateId(7),
+        )));
+        let mut camera = EngineCameraController::from_eye_pose(
+            Vec3d::new(0.5, 2.62, 0.5),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+
+        let result = camera.reconcile_room_scale_headset(&client, Vec3d::new(1.5, 2.62, 0.5));
+
+        assert_close(result.requested_body_movement.x, 1.0);
+        assert_close(result.consumed_body_movement.x, 0.2);
+        assert_close(result.residual_head_offset.x, 0.8);
+        assert_close(result.residual_head_offset.y, 0.0);
+        assert!(result.collision.horizontal_collision);
+        assert_close(camera.player().pose().eye_position().x, 0.7);
+    }
+
+    #[test]
+    fn room_scale_reconciliation_does_not_auto_step_from_vertical_hmd_offset() {
+        let client = ClientRuntime::local_integrated();
+        let mut camera = EngineCameraController::from_eye_pose(
+            Vec3d::new(0.5, 2.62, 0.5),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+
+        let result = camera.reconcile_room_scale_headset(&client, Vec3d::new(0.75, 3.37, 0.5));
+
+        assert_close(result.requested_body_movement.x, 0.25);
+        assert_close(result.requested_body_movement.y, 0.0);
+        assert_close(result.consumed_body_movement.x, 0.25);
+        assert_close(result.consumed_body_movement.y, 0.0);
+        assert_close(result.body_eye_after.y, 2.62);
+        assert_close(result.residual_head_offset.y, 0.75);
+        assert_close(camera.player().pose().eye_position().y, 2.62);
     }
 
     #[test]

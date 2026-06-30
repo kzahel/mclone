@@ -1962,17 +1962,17 @@ where
         let ui_active = self.ui.is_active();
         let gameplay_interaction_edges = self.update_gameplay_interaction_buttons(controllers);
         let suppress_gameplay_interaction = ui_was_active != ui_active;
-        if self.ui.is_active() {
-            return Ok(());
-        }
         if self.runtime.is_none() {
             return Ok(());
         }
-        let tracking_origin = self
-            .tracking_origin_for_views(&views)
-            .context("resolve XR tracking origin")?;
-        let transform =
-            XrStageToWorld::from_tracking_origin(tracking_origin, self.camera.snapshot())?;
+        let transform = self
+            .reconcile_room_scale_body_to_headset(&views)
+            .context("reconcile XR room-scale body pose")?;
+        if self.ui.is_active() {
+            self.commit_engine_camera_player_pose()
+                .context("sync XR room-scale player pose")?;
+            return Ok(());
+        }
         let movement_yaw_radians = self
             .locomotion_movement_yaw_radians_with_transform(&views, transform)
             .context("resolve XR locomotion frame")?;
@@ -2157,6 +2157,27 @@ where
         );
         self.tracking_origin = Some(origin);
         Ok(origin)
+    }
+
+    fn reconcile_room_scale_body_to_headset(
+        &mut self,
+        views: &[xr::View],
+    ) -> Result<XrStageToWorld> {
+        let origin = self.tracking_origin_for_views(views)?;
+        let transform = XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())?;
+        let headset_stage_position = xr_headset_stage_position_from_views(views)?;
+        let headset_world_position = transform.transform_position(headset_stage_position);
+        let Some(runtime) = self.runtime.as_ref() else {
+            return Ok(transform);
+        };
+        let reconciliation = self.camera.reconcile_room_scale_headset(
+            runtime.client(),
+            vec3d_from_glam(headset_world_position),
+        );
+        let consumed_world = glam_vec3_from_vec3d(reconciliation.consumed_body_movement);
+        let origin = origin.consume_world_movement(consumed_world, transform);
+        self.tracking_origin = Some(origin);
+        XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())
     }
 
     fn locomotion_movement_yaw_radians(&mut self, views: &[xr::View]) -> Result<Option<f64>> {
@@ -3899,6 +3920,20 @@ impl XrTrackingOrigin {
     pub fn stage_yaw(self) -> f32 {
         self.stage_yaw
     }
+
+    pub fn consume_world_movement(self, world_movement: Vec3, transform: XrStageToWorld) -> Self {
+        if !world_movement.is_finite() || world_movement.length_squared() <= f32::EPSILON {
+            return self;
+        }
+        let stage_movement = transform.stage_direction_from_world(world_movement);
+        if !stage_movement.is_finite() {
+            return self;
+        }
+        Self {
+            origin_stage: self.origin_stage + stage_movement,
+            ..self
+        }
+    }
 }
 
 impl XrStageToWorld {
@@ -3941,6 +3976,21 @@ impl XrStageToWorld {
             .mul_vec3(stage_direction)
             .normalize_or_zero()
     }
+
+    pub fn stage_direction_from_world(self, world_direction: Vec3) -> Vec3 {
+        self.stage_to_world_rotation
+            .inverse()
+            .mul_vec3(world_direction)
+    }
+}
+
+pub fn xr_headset_stage_position_from_views(views: &[xr::View]) -> Result<Vec3> {
+    if views.len() < 2 {
+        bail!("OpenXR runtime returned fewer than two stereo views");
+    }
+    let left_pose = mclone_xr_host::view_pose(&views[0])?;
+    let right_pose = mclone_xr_host::view_pose(&views[1])?;
+    Ok((left_pose.position + right_pose.position) * 0.5)
 }
 
 pub fn xr_view_to_chunk_render_view(
@@ -5189,6 +5239,42 @@ mod tests {
         );
 
         assert!((world_position - Vec3::new(8.35, 72.0, -12.2)).length() < 1.0e-5);
+    }
+
+    #[test]
+    fn consumed_room_scale_movement_advances_stage_origin_without_double_counting_head() {
+        let origin = XrTrackingOrigin::from_stage_view(
+            Vec3::new(1.0, 1.6, -0.25),
+            Quat::IDENTITY,
+            XrViewAlignmentMode::ViewPose,
+        )
+        .unwrap();
+        let before_snapshot = EngineCameraSnapshot::from_eye_pose(
+            Vec3d::new(8.0, 72.0, -12.0),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+        let before_transform =
+            XrStageToWorld::from_tracking_origin(origin, before_snapshot).unwrap();
+        let current_head_stage = origin.origin_stage + Vec3::new(0.4, 0.2, -0.3);
+        let head_world_before = before_transform.transform_position(current_head_stage);
+
+        let consumed_world = Vec3::new(0.4, 0.0, -0.1);
+        let origin_after = origin.consume_world_movement(consumed_world, before_transform);
+        let after_snapshot = EngineCameraSnapshot::from_eye_pose(
+            Vec3d::new(8.4, 72.0, -12.1),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+        let after_transform =
+            XrStageToWorld::from_tracking_origin(origin_after, after_snapshot).unwrap();
+        let head_world_after = after_transform.transform_position(current_head_stage);
+        let body_eye_after = glam_vec3_from_vec3d(after_snapshot.eye);
+
+        assert!((head_world_after - head_world_before).length() < 1.0e-5);
+        assert!((head_world_after - body_eye_after - Vec3::new(0.0, 0.2, -0.2)).length() < 1.0e-5);
     }
 
     #[test]

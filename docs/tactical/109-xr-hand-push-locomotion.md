@@ -1,8 +1,9 @@
 # 109: XR Hand-Push Locomotion
 
-Status: active; Slice 3 shared debug visualization landed in code. Quest
-standalone headset validation remains the preferred feel gate, especially for
-head/body pose sync.
+Status: active; Slice 4 room-scale horizontal head/body reconciliation landed
+as a first implementation chunk. Quest standalone headset validation remains
+the preferred feel gate, especially for head/body pose sync and comfort fade
+thresholds.
 
 ## Purpose
 
@@ -35,6 +36,65 @@ regression testing.
   a synthetic two-hand cycle through the same engine controller.
 - Quest standalone validation is the correctness bar for real feel. Desktop
   emulation is for deterministic coverage and bring-up only.
+
+## XR Head/Body Reconciliation Policy
+
+Current diagnosis: the XR scene captures an initial OpenXR stage pose and maps
+that stage origin to the engine camera/player pose. Later physical room-scale
+headset motion affects rendered eye/controller poses, but the engine player
+collision box only moves from explicit locomotion input. That lets the headset
+view drift away from the body/collision box even when empty space would allow
+the body to follow.
+
+The durable invariant is:
+
+> The player body continuously attempts to reconcile to the headset's
+> room-scale horizontal position. Any remaining head/body offset must be
+> explainable by collision or explicit comfort blocking.
+
+Terminology:
+
+- **Body pose**: the authoritative local player collision box and server-synced
+  pose owned by the shared engine/client path.
+- **Tracking pose**: OpenXR headset/controllers inside local stage/room space.
+- **Stage-to-world transform**: the mapping from tracking space into world
+  space for rendering, controller input, UI rays, hand-push input, and debug
+  lines.
+- **Residual head offset**: the part of physical headset movement that could
+  not be consumed by body movement because collision blocked it.
+
+Horizontal policy:
+
+- Physical room-scale X/Z movement is always attempted before stick or
+  hand-push locomotion for the frame.
+- The engine computes the current headset world X/Z from the current
+  stage-to-world transform, compares it to the body/expected-head X/Z, and
+  tries to move the body by that delta through normal shared collision.
+- If collision allows the move, the body catches up and the stage-to-world
+  transform is rebuilt from the post-reconcile body pose before controller/head
+  poses feed locomotion, interaction, rendering, and debug overlays.
+- If collision blocks some or all of the delta, only that blocked remainder may
+  remain as residual head/body separation. If there is visible separation and
+  no collision is blocking reconciliation, that is a bug.
+
+Vertical policy:
+
+- Physical HMD Y does not directly lift or drop the player body.
+- Sitting, standing, crouching, and leaning are head/view behavior inside the
+  body envelope first; dynamic player-height policy is deferred.
+- Leaning or walking the headset forward into a one-meter block must not
+  implicitly jump, auto-step, or climb the body onto the block.
+- Body vertical movement remains explicit engine locomotion: jump, gravity,
+  falling, hand-push climbing, and later optional auto-jump/step-assist if we
+  intentionally add it.
+- Head collision is handled as comfort/diagnostic state first: when the head
+  sphere penetrates geometry or residual separation exceeds a threshold, fade
+  or gray/black out rather than silently desynchronizing or teleporting.
+
+Longer-term movement experiments can add XR-specific step assist, crouch
+height policy, or different world scale, but those should be explicit features
+with their own thresholds and validation. They should not fall out of
+room-scale reconciliation accidentally.
 
 ## Slice 1 - Shared Baseline
 
@@ -72,6 +132,27 @@ regression testing.
   world-space GUI line renderer instead of app-local debug geometry.
 - [x] Add a headless screenshot flag for player-box capture validation.
 
+## Slice 4 - Room-Scale Body Reconciliation
+
+- [x] Add a shared engine room-scale reconciliation API that accepts the
+  desired headset/world position, consumes horizontal X/Z offset through normal
+  player collision, and reports the consumed and residual offsets.
+- [x] Call reconciliation in `mclone-xr-scene` before stick/hand-push
+  locomotion, then rebuild the stage-to-world transform from the updated body
+  pose before deriving hand-push input, controller rays, render views, and
+  debug lines.
+- [x] Keep vertical HMD motion out of body movement in this slice; preserve
+  existing jump/gravity/hand-push vertical behavior.
+- [x] Extend the debug overlay with a body-eye-to-headset residual line or
+  marker so headset/body separation is inspectable alongside the player box
+  and hand colliders.
+- [x] Add focused tests for clear-space room-scale catch-up, blocked horizontal
+  reconciliation, transform rebuild ordering, and "vertical HMD offset does
+  not auto-step" behavior.
+- [ ] Add a first comfort state hook for head penetration or excessive
+  residual offset. Rendering the actual fade/blackout can be a follow-up if
+  the state is observable and tested.
+
 ## Known Gaps
 
 - The sweep helper is a first shared approximation of Unity-style spherecasts:
@@ -84,6 +165,9 @@ regression testing.
 - The player collision box wireframe is opt-in because it is diagnostic noise;
   hand collider spheres are automatic in `Hand Push` mode because they are part
   of understanding and tuning the movement feel.
+- XR body/head drift is now reconciled horizontally, but the comfort
+  fade/blackout state for blocked residual offset and head penetration is not
+  implemented yet.
 
 ## Validation
 
@@ -129,12 +213,27 @@ visually confirmed the player collision box wireframe in the world frame. The
 hand collider spheres are covered by shared line-builder unit coverage because
 the flat headless screenshot path does not synthesize live XR hand poses.
 
+Additional validation for Slice 4:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-room-scale-debug.png --width 960 --height 540 --startup-wait frames:2 --screenshot-player-box true --screenshot-camera-view third-person --fullbright true
+```
+
+Slice 4 unit coverage validates clear-space room-scale body catch-up, blocked
+horizontal residual offset, vertical HMD offset not auto-stepping the body, and
+tracking-origin consumption without double-counting the headset pose. The
+headless screenshot visually confirmed the existing player-box world overlay
+still renders after the residual-line path was added.
+
 ## Next Slice
 
-Run Quest standalone with the new `Hand Push` mode and the debug visuals:
-enable `Player Box`, then verify whether the headset eye pose, local collision
-box, and rendered hand colliders stay coherent while pushing, colliding, and
-unsticking. Use those notes to fix any pose-origin/body-sync issue before
-tuning arm length, hand/head radii, unstick distance, and velocity fling
-thresholds. Keep desktop emulation as an automated regression lane, but do not
-tune the final feel from desktop emulation alone.
+Add the comfort/obstruction state for excessive residual offset and head-sphere
+penetration, then run Quest standalone with `Hand Push` and `Player Box`
+enabled. Validate that physical room-scale walking in empty space keeps the
+collision box magnetized to the headset, while leaning into blocked geometry
+leaves only collision-explained residual offset and exposes comfort/debug
+state. Only after that should we tune arm length, hand/head radii, unstick
+distance, and velocity fling thresholds.
