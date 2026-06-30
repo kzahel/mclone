@@ -16,8 +16,10 @@ pub use block_registry::{
     BlockStateAsset, BlockStateAssetIndex, BlockStateRecord, BlockStateRegistry, BlockStateVariant,
 };
 pub use figure::{
-    DEFAULT_PLAYER_FIGURE_PATH, FigureAsciiTexture, FigureAsset, FigureFace, FigureJoint,
-    FigureMaterial, FigurePart, FigurePrimitive, default_player_figure_path, load_figure_asset,
+    ActorFigureId, DEFAULT_PLAYER_FIGURE_ID, DEFAULT_PLAYER_FIGURE_PATH,
+    FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAsciiTexture, FigureAsset, FigureFace, FigureJoint,
+    FigureMaterial, FigurePart, FigurePrimitive, actor_figure_path, default_player_figure_id,
+    default_player_figure_path, load_figure_asset,
 };
 pub use model::{
     BakedBlockModel, BakedBlockModelFace, BlockModel, BlockModelElement, BlockModelFace,

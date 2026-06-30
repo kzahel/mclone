@@ -19,8 +19,8 @@ use mclone_protocol::{
 };
 
 pub use actor::{
-    ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, ActorPresentationId,
-    ActorPresentationKind,
+    ActorAppearance, ActorInterpolationConfig, ActorInterpolationState, ActorPresentation,
+    ActorPresentationId, ActorPresentationKind,
 };
 pub use interaction::{BlockInteractionTarget, CREATIVE_PICK_RANGE, ClientInteractionController};
 pub use inventory::ClientInventory;
@@ -580,6 +580,7 @@ mod tests {
             vec![ActorPresentation {
                 id: ActorPresentationId::RemotePlayer(update.id),
                 kind: ActorPresentationKind::RemotePlayer,
+                appearance: ActorAppearance::default_player(),
                 feet_position: update.position,
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
@@ -616,6 +617,7 @@ mod tests {
             vec![ActorPresentation {
                 id: ActorPresentationId::Entity(snapshot.id),
                 kind: ActorPresentationKind::Entity(snapshot.kind),
+                appearance: ActorAppearance::NONE,
                 feet_position: snapshot.position,
                 y_rot_degrees: snapshot.y_rot_degrees,
                 x_rot_degrees: snapshot.x_rot_degrees,

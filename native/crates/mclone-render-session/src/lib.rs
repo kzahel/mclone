@@ -94,11 +94,25 @@ pub fn actor_instances_from_presentations(
             let packed_light =
                 client.packed_light_at_world_or_fullbright(actor_light_probe_block_pos(actor));
             match actor.kind {
-                ActorPresentationKind::RemotePlayer => ActorInstance::remote_player(
-                    glam_vec3_from_vec3d(actor.feet_position),
-                    actor.y_rot_degrees,
-                )
-                .with_packed_light(packed_light),
+                ActorPresentationKind::RemotePlayer => actor
+                    .appearance
+                    .figure
+                    .map_or_else(
+                        || {
+                            ActorInstance::remote_player(
+                                glam_vec3_from_vec3d(actor.feet_position),
+                                actor.y_rot_degrees,
+                            )
+                        },
+                        |figure| {
+                            ActorInstance::remote_player_with_figure(
+                                glam_vec3_from_vec3d(actor.feet_position),
+                                actor.y_rot_degrees,
+                                figure,
+                            )
+                        },
+                    )
+                    .with_packed_light(packed_light),
                 ActorPresentationKind::Entity(EntityKind::Cow) => ActorInstance::cow_model(
                     glam_vec3_from_vec3d(actor.feet_position),
                     actor.y_rot_degrees,
@@ -4125,7 +4139,9 @@ mod tests {
         assert!((actor.yaw_radians - std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
         assert_eq!(
             actor.shape,
-            mclone_render::entity::ActorInstanceShape::AssetLabPlayer
+            mclone_render::entity::ActorInstanceShape::Figure(
+                mclone_assets::default_player_figure_id()
+            )
         );
     }
 

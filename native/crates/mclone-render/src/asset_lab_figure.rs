@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_assets::{
-    FigureAsciiTexture, FigureAsset, FigurePart, FigurePrimitive, default_player_figure_path,
-    load_figure_asset,
+    ActorFigureId, FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAsciiTexture, FigureAsset, FigurePart,
+    FigurePrimitive, actor_figure_path, default_player_figure_id, load_figure_asset,
 };
 
 const TEXTURE_OVERLAY_DEPTH: f32 = 0.004;
@@ -13,6 +13,37 @@ const TEXTURE_OVERLAY_DEPTH: f32 = 0.004;
 pub struct CompiledFigure {
     pub(crate) cuboids: Vec<CompiledCuboid>,
     pub(crate) overlay_cuboids: Vec<CompiledOverlayCuboid>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ActorFigureSet {
+    figures: BTreeMap<ActorFigureId, CompiledFigure>,
+}
+
+impl ActorFigureSet {
+    pub fn new(figures: impl IntoIterator<Item = (ActorFigureId, CompiledFigure)>) -> Self {
+        Self {
+            figures: figures.into_iter().collect(),
+        }
+    }
+
+    pub fn from_default_player(figure: Option<CompiledFigure>) -> Self {
+        figure.map_or_else(Self::default, |figure| {
+            Self::new([(default_player_figure_id(), figure)])
+        })
+    }
+
+    pub fn get(&self, id: ActorFigureId) -> Option<&CompiledFigure> {
+        self.figures.get(&id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.figures.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.figures.is_empty()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,12 +62,24 @@ pub(crate) struct CompiledOverlayCuboid {
     pub first_person_visible: bool,
 }
 
-pub(crate) fn load_compiled_player_figure(
+pub(crate) fn load_first_party_actor_figures(
     source: &impl mclone_assets::AssetSource,
+) -> Result<ActorFigureSet> {
+    let mut figures = Vec::new();
+    for id in FIRST_PARTY_ACTOR_FIGURE_IDS {
+        figures.push((id, load_compiled_actor_figure(source, id)?));
+    }
+    Ok(ActorFigureSet::new(figures))
+}
+
+pub(crate) fn load_compiled_actor_figure(
+    source: &impl mclone_assets::AssetSource,
+    id: ActorFigureId,
 ) -> Result<CompiledFigure> {
-    let path = default_player_figure_path();
+    let path = actor_figure_path(id)
+        .with_context(|| format!("unknown actor figure id {}", id.as_str()))?;
     let asset = load_figure_asset(source, &path)
-        .with_context(|| format!("failed to load player figure asset {}", path.as_str()))?;
+        .with_context(|| format!("failed to load actor figure {} at {}", id.as_str(), path))?;
     compile_figure_asset(&asset)
 }
 
@@ -598,6 +641,28 @@ mod tests {
         assert!(bounds.min.x < -0.22);
         assert!(bounds.max.x > 0.22);
         assert!(bounds.max.z > 0.12);
+    }
+
+    #[test]
+    fn first_party_actor_figure_set_loads_default_player() {
+        let source = mclone_assets::FilesystemAssetSource::new("../../..");
+        let figures = load_first_party_actor_figures(&source).unwrap();
+
+        assert_eq!(figures.len(), 1);
+        assert!(figures.get(default_player_figure_id()).is_some());
+    }
+
+    #[test]
+    fn actor_figure_load_reports_unknown_ids() {
+        let source = mclone_assets::MemoryAssetSource::new();
+        let error = load_compiled_actor_figure(
+            &source,
+            mclone_assets::ActorFigureId::from_static("mclone:missing"),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("unknown actor figure id mclone:missing"));
     }
 
     #[test]

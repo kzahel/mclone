@@ -1461,7 +1461,9 @@ mod tests {
         assert!((actors[0].yaw_radians - 90.0_f32.to_radians()).abs() < 1.0e-6);
         assert_eq!(
             actors[0].shape,
-            mclone_render::entity::ActorInstanceShape::AssetLabPlayer
+            mclone_render::entity::ActorInstanceShape::Figure(
+                mclone_assets::default_player_figure_id()
+            )
         );
         assert_eq!(
             actors[0].packed_light,

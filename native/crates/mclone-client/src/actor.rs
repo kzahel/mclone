@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use mclone_assets::{ActorFigureId, default_player_figure_id};
 use mclone_core::Vec3d;
 use mclone_protocol::{EntityId, EntityKind, EntitySnapshot, RemotePlayerId, RemotePlayerUpdate};
 
@@ -15,10 +16,30 @@ pub enum ActorPresentationKind {
     Entity(EntityKind),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ActorAppearance {
+    pub figure: Option<ActorFigureId>,
+}
+
+impl ActorAppearance {
+    pub const NONE: Self = Self { figure: None };
+
+    pub const fn figure(figure: ActorFigureId) -> Self {
+        Self {
+            figure: Some(figure),
+        }
+    }
+
+    pub const fn default_player() -> Self {
+        Self::figure(default_player_figure_id())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ActorPresentation {
     pub id: ActorPresentationId,
     pub kind: ActorPresentationKind,
+    pub appearance: ActorAppearance,
     /// Authoritative or interpolated feet position in world coordinates.
     pub feet_position: Vec3d,
     pub y_rot_degrees: f32,
@@ -33,6 +54,7 @@ impl ActorPresentation {
         Self {
             id: ActorPresentationId::RemotePlayer(update.id),
             kind: ActorPresentationKind::RemotePlayer,
+            appearance: ActorAppearance::default_player(),
             feet_position: update.position,
             y_rot_degrees: update.y_rot_degrees,
             x_rot_degrees: update.x_rot_degrees,
@@ -46,6 +68,7 @@ impl ActorPresentation {
         Self {
             id: ActorPresentationId::Entity(snapshot.id),
             kind: ActorPresentationKind::Entity(snapshot.kind),
+            appearance: ActorAppearance::NONE,
             feet_position: snapshot.position,
             y_rot_degrees: snapshot.y_rot_degrees,
             x_rot_degrees: snapshot.x_rot_degrees,
@@ -134,6 +157,7 @@ impl ActorTrack {
         self.target = actor;
         self.rendered.id = actor.id;
         self.rendered.kind = actor.kind;
+        self.rendered.appearance = actor.appearance;
         self.rendered.on_ground = actor.on_ground;
         self.rendered.width = actor.width;
         self.rendered.height = actor.height;
@@ -197,6 +221,7 @@ mod tests {
         ActorPresentation {
             id: ActorPresentationId::RemotePlayer(RemotePlayerId(id)),
             kind: ActorPresentationKind::RemotePlayer,
+            appearance: ActorAppearance::default_player(),
             feet_position: Vec3d::new(x, 64.0, 2.0),
             y_rot_degrees,
             x_rot_degrees: 0.0,
@@ -221,6 +246,7 @@ mod tests {
             ActorPresentation {
                 id: ActorPresentationId::RemotePlayer(update.id),
                 kind: ActorPresentationKind::RemotePlayer,
+                appearance: ActorAppearance::default_player(),
                 feet_position: update.position,
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
@@ -250,6 +276,7 @@ mod tests {
             ActorPresentation {
                 id: ActorPresentationId::Entity(snapshot.id),
                 kind: ActorPresentationKind::Entity(snapshot.kind),
+                appearance: ActorAppearance::NONE,
                 feet_position: snapshot.position,
                 y_rot_degrees: snapshot.y_rot_degrees,
                 x_rot_degrees: snapshot.x_rot_degrees,

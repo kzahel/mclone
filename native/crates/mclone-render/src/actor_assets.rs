@@ -1,9 +1,11 @@
 use std::error::Error;
 use std::fmt;
 
-use mclone_assets::{AssetError, AssetPath, AssetSource, default_player_figure_path};
+use mclone_assets::{
+    AssetError, AssetPath, AssetSource, default_player_figure_id, default_player_figure_path,
+};
 
-use crate::asset_lab_figure::{CompiledFigure, load_compiled_player_figure};
+use crate::asset_lab_figure::{ActorFigureSet, CompiledFigure, load_first_party_actor_figures};
 use crate::entity::{ActorTextureAtlas, ActorTextureLayout, ActorTextureRegion};
 
 const COW_TEXTURE_PATH: &str = "assets/minecraft/textures/entity/cow/cow.png";
@@ -13,6 +15,7 @@ const COW_TEXTURE_HEIGHT: u32 = 32;
 #[derive(Clone, Debug)]
 pub struct ActorTextureAssets {
     pub atlas: ActorTextureImage,
+    pub figures: ActorFigureSet,
     pub player_figure: CompiledFigure,
 }
 
@@ -50,14 +53,16 @@ pub fn load_actor_texture_assets(
     )?;
     let atlas = stitch_actor_texture_atlas(&cow);
     let figure_path = default_player_figure_path();
-    let player_figure =
-        load_compiled_player_figure(source).map_err(|source| ActorTextureAssetError::Figure {
-            path: figure_path,
-            source,
-        })?;
+    let figures = load_first_party_actor_figures(source)
+        .map_err(|source| ActorTextureAssetError::Figures { source })?;
+    let player_figure = figures
+        .get(default_player_figure_id())
+        .cloned()
+        .ok_or_else(|| ActorTextureAssetError::FigureMissingFromRegistry { path: figure_path })?;
 
     Ok(ActorTextureAssets {
         atlas,
+        figures,
         player_figure,
     })
 }
@@ -79,6 +84,12 @@ pub enum ActorTextureAssetError {
     Figure {
         path: AssetPath,
         source: anyhow::Error,
+    },
+    Figures {
+        source: anyhow::Error,
+    },
+    FigureMissingFromRegistry {
+        path: AssetPath,
     },
 }
 
@@ -111,6 +122,14 @@ impl fmt::Display for ActorTextureAssetError {
             Self::Figure { path, source } => {
                 write!(f, "failed to load actor figure {}: {source}", path.as_str())
             }
+            Self::Figures { source } => {
+                write!(f, "failed to load actor figure registry: {source}")
+            }
+            Self::FigureMissingFromRegistry { path } => write!(
+                f,
+                "actor figure registry did not include required {}",
+                path.as_str()
+            ),
         }
     }
 }
@@ -122,6 +141,8 @@ impl Error for ActorTextureAssetError {
             Self::TextureDecode { source, .. } => Some(source),
             Self::TextureDimensions { .. } => None,
             Self::Figure { source, .. } => Some(source.as_ref()),
+            Self::Figures { source } => Some(source.as_ref()),
+            Self::FigureMissingFromRegistry { .. } => None,
         }
     }
 }
@@ -210,6 +231,26 @@ struct RgbaTexture {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+
+    fn actor_asset_test_source() -> mclone_assets::MemoryAssetSource {
+        let mut source = mclone_assets::MemoryAssetSource::new();
+        source.insert(AssetPath::new(COW_TEXTURE_PATH), solid_png_bytes(64, 32));
+        source.insert_text(
+            default_player_figure_path(),
+            include_str!("../../../../assets/mclone/figures/player.figure.json"),
+        );
+        source
+    }
+
+    fn solid_png_bytes(width: u32, height: u32) -> Vec<u8> {
+        let image = image::RgbaImage::from_pixel(width, height, image::Rgba([128, 128, 128, 255]));
+        let mut cursor = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut cursor, image::ImageFormat::Png)
+            .unwrap();
+        cursor.into_inner()
+    }
 
     #[test]
     fn actor_texture_atlas_stitches_white_pixel_and_cow_region() {
@@ -228,5 +269,14 @@ mod tests {
         assert_eq!(atlas.layout().cow.x, 1);
         assert_eq!(atlas.layout().cow.width, COW_TEXTURE_WIDTH);
         assert_eq!(atlas.layout().cow.height, COW_TEXTURE_HEIGHT);
+    }
+
+    #[test]
+    fn actor_texture_assets_expose_default_player_figure_registry() {
+        let source = actor_asset_test_source();
+        let assets = load_actor_texture_assets(&source).unwrap();
+
+        assert!(assets.figures.get(default_player_figure_id()).is_some());
+        assert_eq!(assets.figures.len(), 1);
     }
 }

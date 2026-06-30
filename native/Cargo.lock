@@ -1413,6 +1413,7 @@ dependencies = [
 name = "mclone-client"
 version = "0.0.0"
 dependencies = [
+ "mclone-assets",
  "mclone-core",
  "mclone-light",
  "mclone-protocol",
@@ -1544,6 +1545,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "glam 0.30.10",
+ "mclone-assets",
  "mclone-client",
  "mclone-core",
  "mclone-mesh",

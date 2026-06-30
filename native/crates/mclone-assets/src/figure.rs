@@ -5,6 +5,21 @@ use serde::Deserialize;
 use crate::{AssetError, AssetPath, AssetResult, AssetSource};
 
 pub const DEFAULT_PLAYER_FIGURE_PATH: &str = "assets/mclone/figures/player.figure.json";
+pub const DEFAULT_PLAYER_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:player");
+pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 1] = [DEFAULT_PLAYER_FIGURE_ID];
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ActorFigureId(&'static str);
+
+impl ActorFigureId {
+    pub const fn from_static(id: &'static str) -> Self {
+        Self(id)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct FigureAsset {
@@ -67,10 +82,18 @@ pub fn default_player_figure_path() -> AssetPath {
     AssetPath::new(DEFAULT_PLAYER_FIGURE_PATH)
 }
 
-pub fn load_figure_asset(
-    source: &impl AssetSource,
-    path: &AssetPath,
-) -> AssetResult<FigureAsset> {
+pub const fn default_player_figure_id() -> ActorFigureId {
+    DEFAULT_PLAYER_FIGURE_ID
+}
+
+pub fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
+    match id.as_str() {
+        "mclone:player" => Some(default_player_figure_path()),
+        _ => None,
+    }
+}
+
+pub fn load_figure_asset(source: &impl AssetSource, path: &AssetPath) -> AssetResult<FigureAsset> {
     let bytes = source
         .read(path)?
         .ok_or_else(|| AssetError::MissingAsset(path.clone()))?;
@@ -113,5 +136,15 @@ mod tests {
         assert_eq!(asset.schema_version, 1);
         assert_eq!(asset.name, "tiny");
         assert_eq!(asset.parts[0].primitive.kind, "box");
+    }
+
+    #[test]
+    fn default_actor_figure_id_resolves_to_player_asset_path() {
+        assert_eq!(default_player_figure_id().as_str(), "mclone:player");
+        assert_eq!(
+            actor_figure_path(default_player_figure_id()).unwrap(),
+            default_player_figure_path()
+        );
+        assert!(actor_figure_path(ActorFigureId::from_static("mclone:missing")).is_none());
     }
 }

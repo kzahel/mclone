@@ -3,6 +3,7 @@ use std::num::{NonZeroU32, NonZeroU64};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
+use mclone_assets::{ActorFigureId, default_player_figure_id};
 use wgpu::util::DeviceExt;
 
 use crate::chunk::{ChunkRenderView, DEPTH_FORMAT, TexturedSectionRenderOptions};
@@ -10,7 +11,7 @@ use crate::light_texture::FULL_BRIGHT;
 use crate::target::RenderFrameTarget;
 use crate::uniform::{PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT};
 
-pub use crate::asset_lab_figure::CompiledFigure as ActorFigure;
+pub use crate::asset_lab_figure::{ActorFigureSet, CompiledFigure as ActorFigure};
 
 const ACTOR_VERTEX_BYTE_LEN: usize = 3 * std::mem::size_of::<f32>()
     + 2 * std::mem::size_of::<f32>()
@@ -42,6 +43,7 @@ pub struct ActorInstance {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActorInstanceShape {
+    Figure(ActorFigureId),
     AssetLabPlayer,
     Humanoid,
     QuadrupedPlaceholder,
@@ -54,7 +56,7 @@ impl ActorInstance {
         Self {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
-            shape: ActorInstanceShape::AssetLabPlayer,
+            shape: ActorInstanceShape::Figure(default_player_figure_id()),
             first_person_body_only: false,
             width: 0.6,
             height: 1.8,
@@ -68,13 +70,24 @@ impl ActorInstance {
         Self {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
-            shape: ActorInstanceShape::AssetLabPlayer,
+            shape: ActorInstanceShape::Figure(default_player_figure_id()),
             first_person_body_only: false,
             width: 0.6,
             height: 1.8,
             body_color: [0.10, 0.58, 0.68, 1.0],
             accent_color: [0.95, 0.80, 0.24, 1.0],
             packed_light: FULL_BRIGHT,
+        }
+    }
+
+    pub fn remote_player_with_figure(
+        feet_position: Vec3,
+        y_rot_degrees: f32,
+        figure: ActorFigureId,
+    ) -> Self {
+        Self {
+            shape: ActorInstanceShape::Figure(figure),
+            ..Self::remote_player(feet_position, y_rot_degrees)
         }
     }
 
@@ -190,7 +203,7 @@ pub struct ActorDrawResources {
     atlas: GpuActorTextureAtlas,
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
-    asset_lab_player: Option<ActorFigure>,
+    actor_figures: ActorFigureSet,
 }
 
 impl ActorDrawResources {
@@ -209,7 +222,26 @@ impl ActorDrawResources {
             atlas: gpu_atlas,
             texture_layout: atlas.layout,
             atlas_size: [atlas.width.max(1), atlas.height.max(1)],
-            asset_lab_player: asset_lab_player.cloned(),
+            actor_figures: ActorFigureSet::from_default_player(asset_lab_player.cloned()),
+        })
+    }
+
+    pub fn new_with_figures(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        atlas: ActorTextureAtlas<'_>,
+        actor_figures: Option<&ActorFigureSet>,
+    ) -> Result<Self> {
+        let renderer = ActorRenderer::new(device, color_format);
+        let gpu_atlas =
+            GpuActorTextureAtlas::new(device, queue, &renderer.texture_bind_group_layout, atlas)?;
+        Ok(Self {
+            renderer,
+            atlas: gpu_atlas,
+            texture_layout: atlas.layout,
+            atlas_size: [atlas.width.max(1), atlas.height.max(1)],
+            actor_figures: actor_figures.cloned().unwrap_or_default(),
         })
     }
 
@@ -257,7 +289,7 @@ impl ActorDrawResources {
             actors,
             self.texture_layout,
             self.atlas_size,
-            self.asset_lab_player.as_ref(),
+            &self.actor_figures,
         );
         if mesh.vertices.is_empty() || mesh.indices.is_empty() {
             return Ok(ActorRenderStats {
@@ -338,7 +370,7 @@ impl ActorDrawResources {
             actors,
             self.texture_layout,
             self.atlas_size,
-            self.asset_lab_player.as_ref(),
+            &self.actor_figures,
         );
         if mesh.vertices.is_empty() || mesh.indices.is_empty() {
             return Ok(ActorRenderStats {
@@ -757,17 +789,11 @@ fn actor_mesh(
     actors: &[ActorInstance],
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
-    asset_lab_player: Option<&ActorFigure>,
+    actor_figures: &ActorFigureSet,
 ) -> ActorMesh {
     let mut mesh = ActorMesh::default();
     for actor in actors {
-        append_actor(
-            &mut mesh,
-            *actor,
-            texture_layout,
-            atlas_size,
-            asset_lab_player,
-        );
+        append_actor(&mut mesh, *actor, texture_layout, atlas_size, actor_figures);
     }
     mesh
 }
@@ -777,12 +803,23 @@ fn append_actor(
     actor: ActorInstance,
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
-    asset_lab_player: Option<&ActorFigure>,
+    actor_figures: &ActorFigureSet,
 ) {
     match actor.shape {
-        ActorInstanceShape::AssetLabPlayer => {
-            append_asset_lab_player_model(mesh, actor, texture_layout, atlas_size, asset_lab_player)
-        }
+        ActorInstanceShape::Figure(figure) => append_asset_lab_figure_model(
+            mesh,
+            actor,
+            texture_layout,
+            atlas_size,
+            actor_figures.get(figure),
+        ),
+        ActorInstanceShape::AssetLabPlayer => append_asset_lab_figure_model(
+            mesh,
+            actor,
+            texture_layout,
+            atlas_size,
+            actor_figures.get(default_player_figure_id()),
+        ),
         ActorInstanceShape::Humanoid => {
             append_humanoid_model(mesh, actor, texture_layout, atlas_size)
         }
@@ -794,7 +831,7 @@ fn append_actor(
     }
 }
 
-fn append_asset_lab_player_model(
+fn append_asset_lab_figure_model(
     mesh: &mut ActorMesh,
     actor: ActorInstance,
     texture_layout: ActorTextureLayout,
@@ -1591,14 +1628,18 @@ mod tests {
         crate::asset_lab_figure::compile_figure_asset(&asset).unwrap()
     }
 
+    fn test_player_figures() -> ActorFigureSet {
+        ActorFigureSet::from_default_player(Some(test_player_figure()))
+    }
+
     #[test]
     fn actor_mesh_emits_asset_lab_player_model() {
-        let figure = test_player_figure();
+        let figures = test_player_figures();
         let mesh = actor_mesh(
             &[ActorInstance::remote_player(Vec3::new(1.0, 2.0, 3.0), 0.0)],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
-            Some(&figure),
+            &figures,
         );
 
         assert_eq!(mesh.vertices.len(), 76 * 6 * 4);
@@ -1620,12 +1661,12 @@ mod tests {
     #[test]
     fn asset_lab_player_model_has_front_face_details() {
         let actor = ActorInstance::remote_player(Vec3::ZERO, 0.0);
-        let figure = test_player_figure();
+        let figures = test_player_figures();
         let mesh = actor_mesh(
             &[actor],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
-            Some(&figure),
+            &figures,
         );
         let dark_detail_vertices = mesh
             .vertices
@@ -1645,12 +1686,12 @@ mod tests {
     #[test]
     fn first_person_asset_lab_player_model_hides_head_and_face_details() {
         let actor = ActorInstance::local_player(Vec3::ZERO, 0.0).with_first_person_body_only(true);
-        let figure = test_player_figure();
+        let figures = test_player_figures();
         let mesh = actor_mesh(
             &[actor],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
-            Some(&figure),
+            &figures,
         );
 
         assert_eq!(mesh.vertices.len(), 10 * 6 * 4);
@@ -1675,7 +1716,25 @@ mod tests {
             &[actor],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
-            None,
+            &ActorFigureSet::default(),
+        );
+
+        assert_eq!(mesh.vertices.len(), 12 * 6 * 4);
+        assert_eq!(mesh.indices.len(), 12 * 6 * 6);
+    }
+
+    #[test]
+    fn actor_mesh_uses_humanoid_fallback_for_unknown_figure_ids() {
+        let actor = ActorInstance::remote_player_with_figure(
+            Vec3::ZERO,
+            0.0,
+            mclone_assets::ActorFigureId::from_static("mclone:missing"),
+        );
+        let mesh = actor_mesh(
+            &[actor],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+            &ActorFigureSet::default(),
         );
 
         assert_eq!(mesh.vertices.len(), 12 * 6 * 4);
@@ -1693,7 +1752,7 @@ mod tests {
             )],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
-            None,
+            &ActorFigureSet::default(),
         );
 
         assert_eq!(mesh.vertices.len(), 6 * 6 * 4);
@@ -1706,7 +1765,7 @@ mod tests {
             &[ActorInstance::debug_cube(Vec3::ZERO, 0.0, 1.0, 1.0)],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
-            None,
+            &ActorFigureSet::default(),
         );
 
         assert_eq!(mesh.vertices.len(), 6 * 4);
@@ -1808,7 +1867,7 @@ mod tests {
             &[ActorInstance::cow_model(Vec3::ZERO, 0.0, 0.9, 1.4)],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
-            None,
+            &ActorFigureSet::default(),
         );
 
         assert_eq!(mesh.vertices.len(), 9 * 6 * 4);
@@ -1827,7 +1886,7 @@ mod tests {
             &[ActorInstance::cow_model(Vec3::ZERO, 0.0, 0.9, 1.4)],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
-            None,
+            &ActorFigureSet::default(),
         );
         let white_uv = [0.5 / 65.0, 0.5 / 32.0];
 

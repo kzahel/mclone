@@ -1,6 +1,6 @@
 # 112 - Asset Lab Runtime Actor Geometry
 
-Status: active; Slice 3a first-person local body visibility and Options toggle landed.
+Status: active; Slice 2 actor figure-id selection and Slice 3a first-person body toggle landed.
 
 ## Purpose
 
@@ -141,26 +141,36 @@ Review output inspected:
 - [x] Remove the runtime `include_str!` figure ownership from `mclone-render`.
 - [x] Load the player figure through the same asset source chain as actor
       textures.
-- [ ] Define how actor presentations select a figure asset id.
-- [ ] Keep platform apps out of the model-selection policy.
-- [ ] Add missing asset diagnostics for unknown figure ids.
+- [x] Define how actor presentations select a figure asset id.
+- [x] Keep platform apps out of the model-selection policy.
+- [x] Add missing asset diagnostics for unknown figure ids.
+
+Slice 2 follow-up note: `ActorDrawResources::new` still accepts the legacy
+single default-player figure and internally builds a one-entry figure set. Use
+`ActorDrawResources::new_with_figures` in the next cleanup slice to pass the
+loaded registry through platform resource constructors directly.
 
 Validation:
 
 ```powershell
 cargo test --manifest-path native/Cargo.toml -p mclone-assets -p mclone-render
+cargo test --manifest-path native/Cargo.toml -p mclone-assets -p mclone-client -p mclone-render -p mclone-render-session -p mclone-native-client
 pnpm assets:pack
 pnpm assets:pack:write-lock
 pnpm assets:pack:check
 cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -p mclone-xr-scene -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
 pnpm native:web:build
 cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --actor-review-sheet /tmp/mclone-actor-review-sheet.png --width 1152 --height 512
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --actor-review-sheet /tmp/mclone-actor-figure-id-review-sheet.png --width 1152 --height 512
 ```
 
 Review output inspected:
 
 ```text
 /tmp/mclone-actor-review-sheet.png
+/tmp/mclone-actor-figure-id-review-sheet.png
 ```
 
 ### Slice 3 - Animation Metadata Import
