@@ -240,12 +240,30 @@ pub enum EntityKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EntityRotation {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+
+impl EntityRotation {
+    pub const IDENTITY: Self = Self {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        w: 1.0,
+    };
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EntitySnapshot {
     pub id: EntityId,
     pub kind: EntityKind,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
+    pub rotation: Option<EntityRotation>,
     pub on_ground: bool,
     pub width: f32,
     pub height: f32,
@@ -258,6 +276,7 @@ pub struct EntityUpdate {
     pub position: Vec3d,
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
+    pub rotation: Option<EntityRotation>,
     pub on_ground: bool,
     pub age_ticks: u64,
 }
@@ -637,6 +656,7 @@ fn validate_entity_snapshot(snapshot: &EntitySnapshot) -> ProtocolCodecResult<()
         position: snapshot.position,
         y_rot_degrees: snapshot.y_rot_degrees,
         x_rot_degrees: snapshot.x_rot_degrees,
+        rotation: snapshot.rotation,
         on_ground: snapshot.on_ground,
         age_ticks: snapshot.age_ticks,
     })?;
@@ -659,6 +679,32 @@ fn validate_entity_update(update: &EntityUpdate) -> ProtocolCodecResult<()> {
     {
         return Err(ProtocolCodecError::InvalidData(
             "entity update contains non-finite value",
+        ));
+    }
+    validate_optional_entity_rotation(update.rotation)?;
+    Ok(())
+}
+
+fn validate_optional_entity_rotation(rotation: Option<EntityRotation>) -> ProtocolCodecResult<()> {
+    let Some(rotation) = rotation else {
+        return Ok(());
+    };
+    if !rotation.x.is_finite()
+        || !rotation.y.is_finite()
+        || !rotation.z.is_finite()
+        || !rotation.w.is_finite()
+    {
+        return Err(ProtocolCodecError::InvalidData(
+            "entity rotation contains non-finite value",
+        ));
+    }
+    let len_sqr = rotation.x * rotation.x
+        + rotation.y * rotation.y
+        + rotation.z * rotation.z
+        + rotation.w * rotation.w;
+    if len_sqr <= f32::EPSILON {
+        return Err(ProtocolCodecError::InvalidData(
+            "entity rotation has zero length",
         ));
     }
     Ok(())
@@ -930,6 +976,7 @@ impl ByteWriter {
         self.write_vec3d(snapshot.position);
         self.write_f32(snapshot.y_rot_degrees);
         self.write_f32(snapshot.x_rot_degrees);
+        self.write_optional_entity_rotation(snapshot.rotation);
         self.write_bool(snapshot.on_ground);
         self.write_f32(snapshot.width);
         self.write_f32(snapshot.height);
@@ -941,8 +988,21 @@ impl ByteWriter {
         self.write_vec3d(update.position);
         self.write_f32(update.y_rot_degrees);
         self.write_f32(update.x_rot_degrees);
+        self.write_optional_entity_rotation(update.rotation);
         self.write_bool(update.on_ground);
         self.write_u64(update.age_ticks);
+    }
+
+    fn write_optional_entity_rotation(&mut self, rotation: Option<EntityRotation>) {
+        let Some(rotation) = rotation else {
+            self.write_bool(false);
+            return;
+        };
+        self.write_bool(true);
+        self.write_f32(rotation.x);
+        self.write_f32(rotation.y);
+        self.write_f32(rotation.z);
+        self.write_f32(rotation.w);
     }
 
     fn write_optional_light_layer(
@@ -1338,6 +1398,7 @@ impl<'a> ByteReader<'a> {
             position: self.read_vec3d()?,
             y_rot_degrees: self.read_f32()?,
             x_rot_degrees: self.read_f32()?,
+            rotation: self.read_optional_entity_rotation()?,
             on_ground: self.read_bool()?,
             width: self.read_f32()?,
             height: self.read_f32()?,
@@ -1353,11 +1414,24 @@ impl<'a> ByteReader<'a> {
             position: self.read_vec3d()?,
             y_rot_degrees: self.read_f32()?,
             x_rot_degrees: self.read_f32()?,
+            rotation: self.read_optional_entity_rotation()?,
             on_ground: self.read_bool()?,
             age_ticks: self.read_u64()?,
         };
         validate_entity_update(&update)?;
         Ok(update)
+    }
+
+    fn read_optional_entity_rotation(&mut self) -> ProtocolCodecResult<Option<EntityRotation>> {
+        if !self.read_bool()? {
+            return Ok(None);
+        }
+        Ok(Some(EntityRotation {
+            x: self.read_f32()?,
+            y: self.read_f32()?,
+            z: self.read_f32()?,
+            w: self.read_f32()?,
+        }))
     }
 
     fn read_optional_light_layer(&mut self) -> ProtocolCodecResult<Option<Vec<u8>>> {
@@ -1660,6 +1734,12 @@ mod tests {
             position: Vec3d::new(12.5, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
+            rotation: Some(EntityRotation {
+                x: 0.0,
+                y: 0.707_106_77,
+                z: 0.0,
+                w: 0.707_106_77,
+            }),
             on_ground: true,
             width: 1.0,
             height: 1.0,
@@ -1670,6 +1750,12 @@ mod tests {
             position: Vec3d::new(13.5, 70.0, -3.25),
             y_rot_degrees: 45.0,
             x_rot_degrees: 0.0,
+            rotation: Some(EntityRotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.382_683_43,
+                w: 0.923_879_5,
+            }),
             on_ground: true,
             age_ticks: 13,
         };
@@ -1711,6 +1797,7 @@ mod tests {
             position: Vec3d::new(f64::NAN, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
+            rotation: None,
             on_ground: true,
             age_ticks: 1,
         });
@@ -1727,6 +1814,7 @@ mod tests {
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
+            rotation: None,
             on_ground: true,
             width: 0.0,
             height: 0.7,
@@ -1736,6 +1824,27 @@ mod tests {
             encode_server_update(&invalid_dimensions),
             Err(ProtocolCodecError::InvalidData(
                 "entity snapshot contains invalid dimensions"
+            ))
+        );
+
+        let invalid_rotation = ServerUpdate::EntityUpdate(EntityUpdate {
+            id: EntityId(42),
+            position: Vec3d::new(1.0, 70.0, -3.25),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: -15.0,
+            rotation: Some(EntityRotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 0.0,
+            }),
+            on_ground: true,
+            age_ticks: 1,
+        });
+        assert_eq!(
+            encode_server_update(&invalid_rotation),
+            Err(ProtocolCodecError::InvalidData(
+                "entity rotation has zero length"
             ))
         );
     }

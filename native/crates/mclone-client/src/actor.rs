@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use mclone_assets::{ActorFigureId, default_player_figure_id, upright_bear_figure_id};
 use mclone_core::Vec3d;
 use mclone_protocol::{
-    EntityId, EntityKind, EntitySnapshot, PlayerAppearance, PlayerModelKind, RemotePlayerId,
-    RemotePlayerUpdate,
+    EntityId, EntityKind, EntityRotation, EntitySnapshot, PlayerAppearance, PlayerModelKind,
+    RemotePlayerId, RemotePlayerUpdate,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -56,6 +56,7 @@ pub struct ActorPresentation {
     pub feet_position: Vec3d,
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
+    pub rotation: Option<EntityRotation>,
     pub on_ground: bool,
     pub width: f32,
     pub height: f32,
@@ -70,6 +71,7 @@ impl ActorPresentation {
             feet_position: update.position,
             y_rot_degrees: update.y_rot_degrees,
             x_rot_degrees: update.x_rot_degrees,
+            rotation: None,
             on_ground: update.on_ground,
             width: 0.6,
             height: 1.8,
@@ -84,6 +86,7 @@ impl ActorPresentation {
             feet_position: snapshot.position,
             y_rot_degrees: snapshot.y_rot_degrees,
             x_rot_degrees: snapshot.x_rot_degrees,
+            rotation: snapshot.rotation,
             on_ground: snapshot.on_ground,
             width: snapshot.width,
             height: snapshot.height,
@@ -191,6 +194,8 @@ impl ActorTrack {
             self.target.x_rot_degrees,
             factor,
         );
+        self.rendered.rotation =
+            lerp_optional_entity_rotation(self.rendered.rotation, self.target.rotation, factor);
         self.rendered.on_ground = self.target.on_ground;
     }
 }
@@ -225,6 +230,56 @@ fn wrap_degrees(value: f32) -> f32 {
     wrapped
 }
 
+fn lerp_optional_entity_rotation(
+    from: Option<EntityRotation>,
+    to: Option<EntityRotation>,
+    factor: f32,
+) -> Option<EntityRotation> {
+    match (from, to) {
+        (Some(from), Some(to)) => Some(nlerp_entity_rotation(from, to, factor)),
+        (_, to) => to,
+    }
+}
+
+fn nlerp_entity_rotation(
+    from: EntityRotation,
+    mut to: EntityRotation,
+    factor: f32,
+) -> EntityRotation {
+    let factor = factor.clamp(0.0, 1.0);
+    let dot = from.x * to.x + from.y * to.y + from.z * to.z + from.w * to.w;
+    if dot < 0.0 {
+        to.x = -to.x;
+        to.y = -to.y;
+        to.z = -to.z;
+        to.w = -to.w;
+    }
+    normalize_entity_rotation(EntityRotation {
+        x: from.x + (to.x - from.x) * factor,
+        y: from.y + (to.y - from.y) * factor,
+        z: from.z + (to.z - from.z) * factor,
+        w: from.w + (to.w - from.w) * factor,
+    })
+    .unwrap_or(to)
+}
+
+fn normalize_entity_rotation(rotation: EntityRotation) -> Option<EntityRotation> {
+    let len_sqr = rotation.x * rotation.x
+        + rotation.y * rotation.y
+        + rotation.z * rotation.z
+        + rotation.w * rotation.w;
+    if !len_sqr.is_finite() || len_sqr <= f32::EPSILON {
+        return None;
+    }
+    let inv_len = len_sqr.sqrt().recip();
+    Some(EntityRotation {
+        x: rotation.x * inv_len,
+        y: rotation.y * inv_len,
+        z: rotation.z * inv_len,
+        w: rotation.w * inv_len,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,6 +292,7 @@ mod tests {
             feet_position: Vec3d::new(x, 64.0, 2.0),
             y_rot_degrees,
             x_rot_degrees: 0.0,
+            rotation: None,
             on_ground: true,
             width: 0.6,
             height: 1.8,
@@ -263,6 +319,7 @@ mod tests {
                 feet_position: update.position,
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
+                rotation: None,
                 on_ground: update.on_ground,
                 width: 0.6,
                 height: 1.8,
@@ -278,6 +335,7 @@ mod tests {
             position: Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: -90.0,
             x_rot_degrees: 0.0,
+            rotation: Some(EntityRotation::IDENTITY),
             on_ground: true,
             width: 0.9,
             height: 1.4,
@@ -293,6 +351,7 @@ mod tests {
                 feet_position: snapshot.position,
                 y_rot_degrees: snapshot.y_rot_degrees,
                 x_rot_degrees: snapshot.x_rot_degrees,
+                rotation: snapshot.rotation,
                 on_ground: snapshot.on_ground,
                 width: snapshot.width,
                 height: snapshot.height,
@@ -339,6 +398,39 @@ mod tests {
         let y_rot = state.presentations()[0].y_rot_degrees;
 
         assert!((y_rot - 180.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn actor_interpolation_nlerps_entity_rotation() {
+        let initial = ActorPresentation {
+            rotation: Some(EntityRotation::IDENTITY),
+            ..actor(1, 0.0, 0.0)
+        };
+        let target = ActorPresentation {
+            rotation: Some(EntityRotation {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+                w: 0.0,
+            }),
+            ..actor(1, 0.0, 0.0)
+        };
+        let mut state = ActorInterpolationState::from_authoritative([initial]);
+        state.reconcile_authoritative([target]);
+        state.step(
+            0.08,
+            ActorInterpolationConfig {
+                half_life_seconds: 0.08,
+            },
+        );
+
+        let rotation = state.presentations()[0]
+            .rotation
+            .expect("interpolated rotation");
+        assert!(rotation.x.abs() < 1.0e-6);
+        assert!(rotation.y.abs() < 1.0e-6);
+        assert!((rotation.z - 0.707_106_77).abs() < 1.0e-6);
+        assert!((rotation.w - 0.707_106_77).abs() < 1.0e-6);
     }
 
     #[test]

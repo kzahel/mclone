@@ -8,6 +8,8 @@
 use std::time::Duration;
 
 use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, Vec3d};
+#[cfg(feature = "physics-rapier")]
+use mclone_protocol::EntityRotation;
 use mclone_protocol::{
     ChunkView, ClientCommand, InteractionHand, MovePlayerCommand, PlayerActionCommand,
     PlayerActionKind, ServerUpdate, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
@@ -984,12 +986,14 @@ impl IntegratedServer {
         physics: ServerPhysicsTickDiagnostics,
     ) -> Option<crate::entities::DebugPhysicsCubeEntitySpawn> {
         let pose = self.physics.debug_cube_pose()?;
-        let (position, y_rot_degrees, x_rot_degrees) = debug_physics_cube_entity_pose(pose);
+        let (position, y_rot_degrees, x_rot_degrees, rotation) =
+            debug_physics_cube_entity_pose(pose);
         debug_assert_eq!(physics.test_cube_position, Some(pose.position));
         Some(self.entities.spawn_debug_physics_cube(
             position,
             y_rot_degrees,
             x_rot_degrees,
+            rotation,
             age_ticks,
         ))
     }
@@ -1001,12 +1005,14 @@ impl IntegratedServer {
         physics: ServerPhysicsTickDiagnostics,
     ) -> Option<ServerEntityState> {
         let pose = self.physics.debug_cube_pose()?;
-        let (position, y_rot_degrees, x_rot_degrees) = debug_physics_cube_entity_pose(pose);
+        let (position, y_rot_degrees, x_rot_degrees, rotation) =
+            debug_physics_cube_entity_pose(pose);
         debug_assert_eq!(physics.test_cube_position, Some(pose.position));
         Some(self.entities.upsert_debug_physics_cube(
             position,
             y_rot_degrees,
             x_rot_degrees,
+            rotation,
             age_ticks,
         ))
     }
@@ -1247,7 +1253,9 @@ fn debug_physics_cube_launch(
 }
 
 #[cfg(feature = "physics-rapier")]
-fn debug_physics_cube_entity_pose(pose: mclone_physics::PhysicsBodyPose) -> (Vec3d, f32, f32) {
+fn debug_physics_cube_entity_pose(
+    pose: mclone_physics::PhysicsBodyPose,
+) -> (Vec3d, f32, f32, EntityRotation) {
     let position = pose
         .position
         .add(Vec3d::new(0.0, -DEBUG_PHYSICS_CUBE_HALF_EXTENT, 0.0));
@@ -1255,7 +1263,30 @@ fn debug_physics_cube_entity_pose(pose: mclone_physics::PhysicsBodyPose) -> (Vec
     let horizontal_len = (forward.x * forward.x + forward.z * forward.z).sqrt();
     let y_rot_degrees = (-forward.x).atan2(forward.z).to_degrees() as f32;
     let x_rot_degrees = (-forward.y).atan2(horizontal_len).to_degrees() as f32;
-    (position, y_rot_degrees, x_rot_degrees)
+    (
+        position,
+        y_rot_degrees,
+        x_rot_degrees,
+        debug_physics_entity_rotation(pose.rotation),
+    )
+}
+
+#[cfg(feature = "physics-rapier")]
+fn debug_physics_entity_rotation(rotation: mclone_physics::PhysicsRotation) -> EntityRotation {
+    let len_sqr = rotation.x * rotation.x
+        + rotation.y * rotation.y
+        + rotation.z * rotation.z
+        + rotation.w * rotation.w;
+    if !len_sqr.is_finite() || len_sqr <= f64::EPSILON {
+        return EntityRotation::IDENTITY;
+    }
+    let inv_len = len_sqr.sqrt().recip();
+    EntityRotation {
+        x: (rotation.x * inv_len) as f32,
+        y: (rotation.y * inv_len) as f32,
+        z: (rotation.z * inv_len) as f32,
+        w: (rotation.w * inv_len) as f32,
+    }
 }
 
 #[cfg(feature = "physics-rapier")]
@@ -2266,6 +2297,7 @@ mod tests {
         assert_eq!(snapshot.width, 1.0);
         assert_eq!(snapshot.height, 1.0);
         assert_eq!(snapshot.position, Vec3d::new(8.0, 4.0, 7.25));
+        assert_eq!(snapshot.rotation, Some(EntityRotation::IDENTITY));
 
         let report = server.try_simulation_tick_report().expect("physics tick");
         let update = first_entity_update(&report.updates, snapshot.id)
@@ -2279,6 +2311,21 @@ mod tests {
             "debug cube should publish physics rotation after stepping, got y={} x={}",
             update.y_rot_degrees,
             update.x_rot_degrees
+        );
+        let update_rotation = update
+            .rotation
+            .expect("debug cube should publish full physics rotation");
+        let rotation_len_sqr = update_rotation.x * update_rotation.x
+            + update_rotation.y * update_rotation.y
+            + update_rotation.z * update_rotation.z
+            + update_rotation.w * update_rotation.w;
+        assert!((rotation_len_sqr - 1.0).abs() < 1.0e-5);
+        assert!(
+            update_rotation.x.abs() > 0.01
+                || update_rotation.y.abs() > 0.01
+                || update_rotation.z.abs() > 0.01,
+            "debug cube should publish non-identity quaternion after stepping, got {:?}",
+            update_rotation
         );
 
         let second_updates = server

@@ -253,6 +253,7 @@ impl ClientRuntime {
         snapshot.position = update.position;
         snapshot.y_rot_degrees = update.y_rot_degrees;
         snapshot.x_rot_degrees = update.x_rot_degrees;
+        snapshot.rotation = update.rotation;
         snapshot.on_ground = update.on_ground;
         snapshot.age_ticks = update.age_ticks;
     }
@@ -423,6 +424,7 @@ mod tests {
             position: mclone_core::Vec3d::new(4.0, 64.0, 5.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
+            rotation: None,
             on_ground: true,
             width: 0.9,
             height: 1.4,
@@ -524,6 +526,7 @@ mod tests {
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 45.0,
             x_rot_degrees: 5.0,
+            rotation: None,
             on_ground: true,
             width: 0.9,
             height: 1.4,
@@ -534,6 +537,12 @@ mod tests {
             position: mclone_core::Vec3d::new(3.0, 65.0, 4.0),
             y_rot_degrees: 90.0,
             x_rot_degrees: -10.0,
+            rotation: Some(mclone_protocol::EntityRotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.382_683_43,
+                w: 0.923_879_5,
+            }),
             on_ground: false,
             age_ticks: 13,
         };
@@ -548,6 +557,7 @@ mod tests {
         assert_eq!(updated.position, moved.position);
         assert_eq!(updated.y_rot_degrees, moved.y_rot_degrees);
         assert_eq!(updated.x_rot_degrees, moved.x_rot_degrees);
+        assert_eq!(updated.rotation, moved.rotation);
         assert_eq!(updated.on_ground, moved.on_ground);
         assert_eq!(updated.age_ticks, moved.age_ticks);
         assert_eq!(updated.kind, initial.kind);
@@ -591,6 +601,7 @@ mod tests {
                 feet_position: update.position,
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
+                rotation: None,
                 on_ground: update.on_ground,
                 width: 0.6,
                 height: 1.8,
@@ -611,6 +622,7 @@ mod tests {
             position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: -90.0,
             x_rot_degrees: 0.0,
+            rotation: Some(mclone_protocol::EntityRotation::IDENTITY),
             on_ground: true,
             width: 0.9,
             height: 1.4,
@@ -628,6 +640,7 @@ mod tests {
                 feet_position: snapshot.position,
                 y_rot_degrees: snapshot.y_rot_degrees,
                 x_rot_degrees: snapshot.x_rot_degrees,
+                rotation: snapshot.rotation,
                 on_ground: snapshot.on_ground,
                 width: snapshot.width,
                 height: snapshot.height,

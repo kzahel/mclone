@@ -63,7 +63,8 @@ and the current actor interpolation model.
 ## Follow-Up Work
 
 - Add explicit diagnostics for physics substep count and physics lane timing.
-- Publish full physics orientation for debug cubes instead of yaw/pitch only.
+- Extend the full-orientation path with angular velocity or buffered orientation
+  samples if active physics presentation still looks too 20 Hz.
 - Evaluate active-physics presentation options: higher-rate snapshots for local
   integrated play, velocity/angular-velocity extrapolation, or a shared
   prediction path.

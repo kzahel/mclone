@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::num::{NonZeroU32, NonZeroU64};
 
 use anyhow::{Context, Result, bail};
-use glam::Vec3;
+use glam::{Quat, Vec3};
 use mclone_assets::{ActorFigureId, default_player_figure_id};
 use wgpu::util::DeviceExt;
 
@@ -36,6 +36,7 @@ pub struct ActorInstance {
     pub yaw_radians: f32,
     pub pitch_radians: f32,
     pub rotation_pivot: Vec3,
+    pub orientation: Option<Quat>,
     pub shape: ActorInstanceShape,
     pub first_person_body_only: bool,
     pub width: f32,
@@ -69,6 +70,7 @@ impl ActorInstance {
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: 0.0,
             rotation_pivot: Vec3::ZERO,
+            orientation: None,
             shape: ActorInstanceShape::Figure(figure),
             first_person_body_only: false,
             width: 0.6,
@@ -85,6 +87,7 @@ impl ActorInstance {
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: 0.0,
             rotation_pivot: Vec3::ZERO,
+            orientation: None,
             shape: ActorInstanceShape::Figure(default_player_figure_id()),
             first_person_body_only: false,
             width: 0.6,
@@ -117,6 +120,7 @@ impl ActorInstance {
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: 0.0,
             rotation_pivot: Vec3::ZERO,
+            orientation: None,
             shape: ActorInstanceShape::QuadrupedPlaceholder,
             first_person_body_only: false,
             width,
@@ -133,6 +137,7 @@ impl ActorInstance {
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: 0.0,
             rotation_pivot: Vec3::ZERO,
+            orientation: None,
             shape: ActorInstanceShape::CowModel,
             first_person_body_only: false,
             width,
@@ -154,6 +159,7 @@ impl ActorInstance {
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: 0.0,
             rotation_pivot: Vec3::ZERO,
+            orientation: None,
             shape: ActorInstanceShape::QuadrupedPlaceholder,
             first_person_body_only: false,
             width,
@@ -168,6 +174,7 @@ impl ActorInstance {
         feet_position: Vec3,
         y_rot_degrees: f32,
         x_rot_degrees: f32,
+        orientation: Option<Quat>,
         width: f32,
         height: f32,
     ) -> Self {
@@ -176,6 +183,7 @@ impl ActorInstance {
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: x_rot_degrees.to_radians(),
             rotation_pivot: Vec3::new(0.0, height.max(0.1) * 0.5, 0.0),
+            orientation: orientation.map(|rotation| rotation.normalize()),
             shape: ActorInstanceShape::DebugCube,
             first_person_body_only: false,
             width,
@@ -1500,20 +1508,23 @@ fn append_box(
 
 fn actor_world_position(actor: ActorInstance, local: Vec3) -> Vec3 {
     let local = local - actor.rotation_pivot;
-    let (pitch_sin, pitch_cos) = actor.pitch_radians.sin_cos();
-    let local = Vec3::new(
-        local.x,
-        local.y * pitch_cos - local.z * pitch_sin,
-        local.y * pitch_sin + local.z * pitch_cos,
-    );
-    let (yaw_sin, yaw_cos) = actor.yaw_radians.sin_cos();
-    actor.feet_position
-        + actor.rotation_pivot
-        + Vec3::new(
+    let local = if let Some(orientation) = actor.orientation {
+        orientation * local
+    } else {
+        let (pitch_sin, pitch_cos) = actor.pitch_radians.sin_cos();
+        let local = Vec3::new(
+            local.x,
+            local.y * pitch_cos - local.z * pitch_sin,
+            local.y * pitch_sin + local.z * pitch_cos,
+        );
+        let (yaw_sin, yaw_cos) = actor.yaw_radians.sin_cos();
+        Vec3::new(
             local.x * yaw_cos + local.z * yaw_sin,
             local.y,
             -local.x * yaw_sin + local.z * yaw_cos,
         )
+    };
+    actor.feet_position + actor.rotation_pivot + local
 }
 
 fn scale_color(color: [f32; 4], factor: f32) -> [f32; 4] {
@@ -1773,7 +1784,14 @@ mod tests {
     #[test]
     fn actor_mesh_emits_debug_cube() {
         let mesh = actor_mesh(
-            &[ActorInstance::debug_cube(Vec3::ZERO, 0.0, 0.0, 1.0, 1.0)],
+            &[ActorInstance::debug_cube(
+                Vec3::ZERO,
+                0.0,
+                0.0,
+                None,
+                1.0,
+                1.0,
+            )],
             test_actor_texture_layout(),
             test_actor_texture_atlas_size(),
             &ActorFigureSet::default(),
@@ -1785,7 +1803,7 @@ mod tests {
 
     #[test]
     fn debug_cube_pitch_rotates_around_center() {
-        let actor = ActorInstance::debug_cube(Vec3::ZERO, 0.0, 90.0, 1.0, 1.0);
+        let actor = ActorInstance::debug_cube(Vec3::ZERO, 0.0, 90.0, None, 1.0, 1.0);
         let bottom_center = actor_world_position(actor, Vec3::new(0.0, 0.0, 0.0));
         let top_center = actor_world_position(actor, Vec3::new(0.0, 1.0, 0.0));
 
@@ -1793,6 +1811,25 @@ mod tests {
         assert!((top_center.y - 0.5).abs() < 1.0e-6);
         assert!((bottom_center.z + 0.5).abs() < 1.0e-6);
         assert!((top_center.z - 0.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn debug_cube_quaternion_orientation_rotates_around_center() {
+        let actor = ActorInstance::debug_cube(
+            Vec3::ZERO,
+            0.0,
+            0.0,
+            Some(Quat::from_rotation_z(90.0_f32.to_radians())),
+            1.0,
+            1.0,
+        );
+        let left_center = actor_world_position(actor, Vec3::new(-0.5, 0.5, 0.0));
+        let right_center = actor_world_position(actor, Vec3::new(0.5, 0.5, 0.0));
+
+        assert!((left_center.x - 0.0).abs() < 1.0e-6);
+        assert!((right_center.x - 0.0).abs() < 1.0e-6);
+        assert!((left_center.y - 0.0).abs() < 1.0e-6);
+        assert!((right_center.y - 1.0).abs() < 1.0e-6);
     }
 
     #[test]

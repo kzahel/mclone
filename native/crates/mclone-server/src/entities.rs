@@ -7,7 +7,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
-use mclone_protocol::{EntityId, EntityKind, EntitySnapshot, EntityUpdate, ServerUpdate};
+use mclone_protocol::{
+    EntityId, EntityKind, EntityRotation, EntitySnapshot, EntityUpdate, ServerUpdate,
+};
 
 use crate::players::ServerPlayerId;
 
@@ -18,6 +20,7 @@ pub(crate) struct ServerEntityState {
     pub(crate) position: Vec3d,
     pub(crate) y_rot_degrees: f32,
     pub(crate) x_rot_degrees: f32,
+    pub(crate) rotation: Option<EntityRotation>,
     pub(crate) on_ground: bool,
     pub(crate) width: f32,
     pub(crate) height: f32,
@@ -37,6 +40,7 @@ impl ServerEntityState {
             position: self.position,
             y_rot_degrees: self.y_rot_degrees,
             x_rot_degrees: self.x_rot_degrees,
+            rotation: self.rotation,
             on_ground: self.on_ground,
             width: self.width,
             height: self.height,
@@ -50,6 +54,7 @@ impl ServerEntityState {
             position: self.position,
             y_rot_degrees: self.y_rot_degrees,
             x_rot_degrees: self.x_rot_degrees,
+            rotation: self.rotation,
             on_ground: self.on_ground,
             age_ticks: self.age_ticks,
         }
@@ -87,6 +92,7 @@ impl ServerEntityStore {
                 position,
                 y_rot_degrees: 135.0,
                 x_rot_degrees: 0.0,
+                rotation: None,
                 on_ground: true,
                 width: 0.9,
                 height: 1.4,
@@ -104,6 +110,7 @@ impl ServerEntityStore {
         position: Vec3d,
         y_rot_degrees: f32,
         x_rot_degrees: f32,
+        rotation: EntityRotation,
         age_ticks: u64,
     ) -> DebugPhysicsCubeEntitySpawn {
         let removed = self
@@ -114,8 +121,13 @@ impl ServerEntityStore {
                 state.alive = false;
                 state
             });
-        let current =
-            self.insert_debug_physics_cube(position, y_rot_degrees, x_rot_degrees, age_ticks);
+        let current = self.insert_debug_physics_cube(
+            position,
+            y_rot_degrees,
+            x_rot_degrees,
+            rotation,
+            age_ticks,
+        );
         DebugPhysicsCubeEntitySpawn { removed, current }
     }
 
@@ -125,15 +137,22 @@ impl ServerEntityStore {
         position: Vec3d,
         y_rot_degrees: f32,
         x_rot_degrees: f32,
+        rotation: EntityRotation,
         age_ticks: u64,
     ) -> ServerEntityState {
         if let Some(id) = self.debug_physics_cube_id {
-            let state =
-                debug_physics_cube_state(id, position, y_rot_degrees, x_rot_degrees, age_ticks);
+            let state = debug_physics_cube_state(
+                id,
+                position,
+                y_rot_degrees,
+                x_rot_degrees,
+                rotation,
+                age_ticks,
+            );
             self.entities.insert(id, state);
             return state;
         }
-        self.insert_debug_physics_cube(position, y_rot_degrees, x_rot_degrees, age_ticks)
+        self.insert_debug_physics_cube(position, y_rot_degrees, x_rot_degrees, rotation, age_ticks)
     }
 
     #[cfg(feature = "physics-rapier")]
@@ -142,11 +161,19 @@ impl ServerEntityStore {
         position: Vec3d,
         y_rot_degrees: f32,
         x_rot_degrees: f32,
+        rotation: EntityRotation,
         age_ticks: u64,
     ) -> ServerEntityState {
         let id = self.allocate_entity_id();
         self.debug_physics_cube_id = Some(id);
-        let state = debug_physics_cube_state(id, position, y_rot_degrees, x_rot_degrees, age_ticks);
+        let state = debug_physics_cube_state(
+            id,
+            position,
+            y_rot_degrees,
+            x_rot_degrees,
+            rotation,
+            age_ticks,
+        );
         self.entities.insert(id, state);
         state
     }
@@ -194,6 +221,7 @@ fn debug_physics_cube_state(
     position: Vec3d,
     y_rot_degrees: f32,
     x_rot_degrees: f32,
+    rotation: EntityRotation,
     age_ticks: u64,
 ) -> ServerEntityState {
     ServerEntityState {
@@ -202,6 +230,7 @@ fn debug_physics_cube_state(
         position,
         y_rot_degrees,
         x_rot_degrees,
+        rotation: Some(rotation),
         on_ground: false,
         width: 1.0,
         height: 1.0,
@@ -320,6 +349,7 @@ mod tests {
             position: Vec3d::new(x, 64.0, z),
             y_rot_degrees: 45.0,
             x_rot_degrees: 0.0,
+            rotation: None,
             on_ground: true,
             width: 0.9,
             height: 1.4,

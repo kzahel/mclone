@@ -1,15 +1,16 @@
 # 110: Shared Physics Backend Experiment
 
-Status: active; Slices 1-4g landed with the shared `mclone-physics` facade,
+Status: active; Slices 1-4h landed with the shared `mclone-physics` facade,
 no-op backend, optional Rapier backend, synthetic cuboid/static-patch
 simulation test, section terrain collider probe, feature-gated live
 chunk-to-physics terrain conversion, server-owned debug cube physics runtime,
 debug cube protocol/entity publication, desktop `F7` diagnostic launch wiring,
 fresh debug cube entity IDs on repeated throws, one-way debug player AABB
 collision, Minecraft-strength debug physics gravity/vertical drag, deterministic
-debug cube spin, 60 Hz physics substeps inside the 20 Hz server tick, and
-`mclone-server` / native-client intent feature wiring. App binary-size
-measurement is deferred until the physics path is promoted beyond diagnostics.
+debug cube spin, 60 Hz physics substeps inside the 20 Hz server tick, full
+debug cube quaternion publication/rendering, and `mclone-server` / native-client
+intent feature wiring. App binary-size measurement is deferred until the physics
+path is promoted beyond diagnostics.
 
 ## Purpose
 
@@ -585,6 +586,37 @@ cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics
 cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier debug_physics_cube -- --nocapture
 cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
+```
+
+Recorded Slice 4h result:
+
+- Added optional `EntityRotation { x, y, z, w }` quaternion publication to
+  `EntitySnapshot` and `EntityUpdate`.
+- Debug physics cubes now publish Rapier's normalized full orientation in
+  addition to the existing yaw/pitch fallback fields. Passive actors and remote
+  players keep `rotation: None`.
+- Client actor presentation carries the optional quaternion and nlerps it across
+  authoritative updates when both source and target rotations are available.
+- Shared actor rendering applies the quaternion directly for debug cubes around
+  the cube center pivot, preserving existing yaw/pitch rendering for other
+  actors.
+- Added protocol, client interpolation, render transform, and server publication
+  tests for the full-orientation path.
+
+Slice 4h validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-protocol -p mclone-client -p mclone-server -p mclone-render -p mclone-render-session -p mclone-native-client -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-protocol
+cargo test --manifest-path native/Cargo.toml -p mclone-client
+cargo test --manifest-path native/Cargo.toml -p mclone-render
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier debug_physics_cube -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server --features physics-rapier
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client actor_instances_follow_client_actor_presentations -- --nocapture
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
+cargo check --manifest-path native/Cargo.toml
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier -- --screenshot /tmp/mclone-physics-quat-render-smoke.png --width 1280 --height 720 --seed 111 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 ```
 
 ### Slice 5 - Web Worker Viability

@@ -135,6 +135,7 @@ pub fn actor_instances_from_presentations(
                     glam_vec3_from_vec3d(actor.feet_position),
                     actor.y_rot_degrees,
                     actor.x_rot_degrees,
+                    actor.rotation.map(glam_quat_from_entity_rotation),
                     actor.width,
                     actor.height,
                 )
@@ -197,6 +198,10 @@ pub fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
 
 pub fn glam_vec3_from_vec3d(value: Vec3d) -> Vec3 {
     Vec3::new(value.x as f32, value.y as f32, value.z as f32)
+}
+
+fn glam_quat_from_entity_rotation(rotation: mclone_protocol::EntityRotation) -> glam::Quat {
+    glam::Quat::from_xyzw(rotation.x, rotation.y, rotation.z, rotation.w).normalize()
 }
 
 #[derive(Clone, Debug)]

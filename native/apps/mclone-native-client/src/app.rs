@@ -1482,6 +1482,7 @@ mod tests {
                 position: Vec3d::new(3.0, 64.0, 4.0),
                 y_rot_degrees: 45.0,
                 x_rot_degrees: 0.0,
+                rotation: None,
                 on_ground: true,
                 width: 0.9,
                 height: 1.4,
