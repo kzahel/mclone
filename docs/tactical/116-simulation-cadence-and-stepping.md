@@ -3,7 +3,8 @@
 Status: active; initial architecture note recorded, 60 Hz physics substeps landed
 inside the existing 20 Hz server tick, the first shared server cadence primitive
 landed, and the native server runner now consumes that cadence for gameplay
-ticks while preserving default 20 Hz behavior.
+ticks while preserving default 20 Hz behavior. Cadence configs now reject uneven
+fractional lane pacing by default.
 
 ## Purpose
 
@@ -16,17 +17,19 @@ block/fluid behavior, deterministic chunk work, and gameplay rules. It is a poor
 fit for rigid-body physics, high-speed collisions, camera/render smoothness, and
 eventual AI or networking policies that naturally want different cadences.
 
-The target architecture is a configurable host pump with named fixed-rate
-simulation lanes. A higher host cadence must not automatically make every
-vanilla system run more often.
+The target architecture is a configurable cadence profile with named fixed-rate
+lanes. A higher host cadence must not automatically make every lane run more
+often, but the gameplay lane itself is also configurable: 20 Hz is the
+Minecraft-like default, not an architectural ceiling.
 
 ## Cadence Lanes
 
 - Host/server pump: configurable long-term, with 20/30/60 Hz as plausible
   modes. This owns wall-clock pacing and command intake, not gameplay policy.
-- Vanilla gameplay lane: default 20 Hz. Scheduled block ticks, fluid ticks,
-  random ticks, entity age, and parity-sensitive world rules belong here unless
-  a specific tactical changes the vanilla target.
+- Gameplay lane: default 20 Hz for the Minecraft-like profile. Scheduled block
+  ticks, fluid ticks, random ticks, entity age, and parity-sensitive world rules
+  belong here. Custom/high-fidelity profiles may raise this lane, such as a
+  60 Hz gameplay server, as an explicit gameplay-policy choice.
 - Physics lane: fixed at 60 Hz for the first Rapier-backed implementation, with
   room for 120 Hz later if stability or tunneling requires it. Physics can
   substep inside a 20 Hz host tick or run once per host frame in a 60 Hz host
@@ -43,8 +46,13 @@ vanilla system run more often.
 ## Invariants
 
 - Do not use a single global `tick` value to mean all subsystem time.
-- The vanilla gameplay lane remains 20 Hz by default even if the host pump runs
-  faster.
+- The gameplay lane remains 20 Hz by default for the Minecraft-like profile, but
+  it is configurable as part of the cadence profile.
+- Default supported cadence profiles should use clean integer relationships:
+  lower-rate lanes divide the host rate, and higher-rate lanes are integer
+  substeps of each host frame.
+- Uneven fractional lane pacing, such as 20 Hz gameplay on a 30 Hz host, should
+  be rejected unless we explicitly add a future advanced fractional scheduler.
 - Physics substeps may improve authoritative simulation quality without
   increasing network snapshot frequency.
 - Client prediction or local render sampling is allowed only behind shared
@@ -65,13 +73,14 @@ and the current actor interpolation model.
 - Added `SimulationCadence` in `mclone-server` as the first host/lane stepping
   primitive. It maps one configurable host frame into fixed-rate gameplay and
   physics lane work without changing live runner behavior yet.
-- Current tested mappings:
+- Initial tested mappings for the first cadence primitive:
   - 20 Hz host: one 20 Hz gameplay tick and three 60 Hz physics steps per host
     frame.
   - 60 Hz host: one 60 Hz physics step per host frame and one 20 Hz gameplay
     tick every third host frame.
   - 30 Hz host: deterministic fractional gameplay cadence with two 60 Hz physics
-    steps per host frame.
+    steps per host frame. This was useful for proving deterministic scheduling,
+    but it is no longer the desired default validation shape.
 - The elapsed-time wrapper accumulates partial host frames and caps catch-up
   work so a long frame cannot force unlimited simulation work in one pump.
 
@@ -101,6 +110,29 @@ cargo test --manifest-path native/Cargo.toml -p mclone-server cadence -- --nocap
 cargo test --manifest-path native/Cargo.toml -p mclone-server native_runner_config_defaults_to_twenty_hz_cadence -- --nocapture
 cargo test --manifest-path native/Cargo.toml -p mclone-server native_runner_rejects_invalid_cadence_config -- --nocapture
 cargo test --manifest-path native/Cargo.toml -p mclone-server native_runner_crosses_commands_and_updates_over_frames -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server --quiet
+cargo check --manifest-path native/Cargo.toml -p mclone-server
+```
+
+- Tightened `SimulationCadenceConfig` so default-valid profiles require clean
+  integer lane relationships. Lower-rate lanes must divide the host rate, and
+  higher-rate lanes must be integer substeps of each host frame.
+- Replaced the per-lane fractional accumulator behavior with fixed interval /
+  substep lane scheduling. The wall-clock elapsed-time wrapper still accumulates
+  partial host frames and caps catch-up work.
+- Current tested valid profiles include 20 Hz host / 20 Hz gameplay / 60 Hz
+  physics, 60/20/60, 60/60/60, 30/30/60, and 20/10/60.
+- Uneven profiles such as 30 Hz host / 20 Hz gameplay / 60 Hz physics are now
+  rejected unless a future advanced fractional scheduler is explicitly added.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-server
+cargo fmt --manifest-path native/Cargo.toml -p mclone-server -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-server cadence -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server native_runner_config_defaults_to_twenty_hz_cadence -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-server native_runner_rejects_invalid_cadence_config -- --nocapture
 cargo test --manifest-path native/Cargo.toml -p mclone-server --quiet
 cargo check --manifest-path native/Cargo.toml -p mclone-server
 ```

@@ -155,6 +155,19 @@ The client runtime architecture must not bake in vanilla's 20 TPS rate or a brow
 - transport send/poll/push cadence
 - render frame and presentation interpolation cadence
 
+These rates are engine profile data, not hard-coded architecture. A
+Minecraft-like profile can default to a 20 Hz host/gameplay lane with higher
+rate physics substeps, while a high-fidelity profile may choose a 60 Hz host and
+60 Hz gameplay lane, and a lower-CPU profile may intentionally reduce host,
+gameplay, AI, or publication rates.
+
+The default scheduler should keep lane timing regular rather than quietly
+producing uneven fractional patterns. Preferred cadence profiles use clean
+integer relationships: lower-rate lanes divide the host rate, and higher-rate
+lanes are integer substeps of each host frame. Fractional scheduling can be
+added later as an explicit advanced mode, but it should not be the default shape
+for host/gameplay/physics/AI/network cadence.
+
 `ClientWorld` stores replicated facts and revisions. It should not decide high-rate movement timing. `PredictionService` may later run fixed quanta such as `1/120` or `1/128` over a bounded `ClientWorld` collision/entity view. The host may drain multiple movement commands inside one lower-rate world or network tick. Presentation may smooth or interpolate, but it must not become simulation truth.
 
 ## Layer model

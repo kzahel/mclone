@@ -163,6 +163,31 @@ renderer/render-world worker
 
 The host/session lane may be a browser worker for singleplayer or a Node runtime for dedicated hosting. Either way, it must keep player input, player ticks, and polling responsive while chunk jobs are active.
 
+## Cadence Profiles
+
+The host scheduler should treat cadence as a configurable profile, not as one
+global Minecraft-style tick. A profile names the wall-clock host pump rate and
+the rates of individual lanes such as gameplay, physics, AI, and snapshot
+publication.
+
+The default Minecraft-like profile may keep host/gameplay at 20 Hz and run
+physics as substeps. That is a compatibility default, not a permanent engine
+constraint. Other profiles should be able to run a higher-fidelity server, such
+as 60 Hz host and 60 Hz gameplay, or a lower-CPU server with lower host,
+gameplay, AI, or network publication rates.
+
+By default, supported rates should maintain regular spacing:
+
+- lower-rate lanes divide the host rate, such as 10 Hz AI on a 60 Hz host
+- higher-rate lanes are integer substeps of each host frame, such as 120 Hz
+  physics on a 60 Hz host
+- uneven fractional cadences, such as 20 Hz gameplay on a 30 Hz host, are
+  rejected unless a future tactical explicitly introduces an advanced fractional
+  scheduler
+
+This keeps the host pump independently configurable without making subsystems
+observe jittery or irregular lane intervals.
+
 ## Scheduling Priorities
 
 ### Highest Priority

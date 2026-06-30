@@ -41,6 +41,8 @@ impl SimulationCadenceConfig {
             && self.gameplay_rate_hz > 0
             && self.physics_rate_hz > 0
             && self.max_catch_up_host_frames > 0
+            && lane_rate_is_clean(self.host_rate_hz, self.gameplay_rate_hz)
+            && lane_rate_is_clean(self.host_rate_hz, self.physics_rate_hz)
     }
 }
 
@@ -71,17 +73,20 @@ pub struct SimulationCadenceAdvance {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SimulationCadence {
     config: SimulationCadenceConfig,
-    gameplay_accumulator: u32,
-    physics_accumulator: u32,
+    gameplay: FixedLaneCadence,
+    physics: FixedLaneCadence,
     host_frame_accumulator_nanos: u128,
 }
 
 impl SimulationCadence {
     pub fn new(config: SimulationCadenceConfig) -> Option<Self> {
-        config.is_valid().then_some(Self {
+        if !config.is_valid() {
+            return None;
+        }
+        Some(Self {
             config,
-            gameplay_accumulator: 0,
-            physics_accumulator: 0,
+            gameplay: FixedLaneCadence::new(config.host_rate_hz, config.gameplay_rate_hz)?,
+            physics: FixedLaneCadence::new(config.host_rate_hz, config.physics_rate_hz)?,
             host_frame_accumulator_nanos: 0,
         })
     }
@@ -92,16 +97,8 @@ impl SimulationCadence {
 
     pub fn advance_host_frame(&mut self) -> SimulationCadenceFrame {
         SimulationCadenceFrame {
-            gameplay_ticks: advance_lane(
-                &mut self.gameplay_accumulator,
-                self.config.gameplay_rate_hz,
-                self.config.host_rate_hz,
-            ),
-            physics_steps: advance_lane(
-                &mut self.physics_accumulator,
-                self.config.physics_rate_hz,
-                self.config.host_rate_hz,
-            ),
+            gameplay_ticks: self.gameplay.advance_host_frame(),
+            physics_steps: self.physics.advance_host_frame(),
         }
     }
 
@@ -139,11 +136,56 @@ impl Default for SimulationCadence {
     }
 }
 
-fn advance_lane(accumulator: &mut u32, lane_rate_hz: u32, host_rate_hz: u32) -> u32 {
-    *accumulator = accumulator.saturating_add(lane_rate_hz);
-    let steps = *accumulator / host_rate_hz;
-    *accumulator %= host_rate_hz;
-    steps
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FixedLaneCadence {
+    host_frames_per_step: u32,
+    steps_per_host_frame: u32,
+    frames_until_step: u32,
+}
+
+impl FixedLaneCadence {
+    fn new(host_rate_hz: u32, lane_rate_hz: u32) -> Option<Self> {
+        if !lane_rate_is_clean(host_rate_hz, lane_rate_hz) {
+            return None;
+        }
+        if lane_rate_hz >= host_rate_hz {
+            Some(Self {
+                host_frames_per_step: 1,
+                steps_per_host_frame: lane_rate_hz / host_rate_hz,
+                frames_until_step: 1,
+            })
+        } else {
+            let host_frames_per_step = host_rate_hz / lane_rate_hz;
+            Some(Self {
+                host_frames_per_step,
+                steps_per_host_frame: 0,
+                frames_until_step: host_frames_per_step,
+            })
+        }
+    }
+
+    fn advance_host_frame(&mut self) -> u32 {
+        if self.steps_per_host_frame > 0 {
+            return self.steps_per_host_frame;
+        }
+        if self.frames_until_step <= 1 {
+            self.frames_until_step = self.host_frames_per_step;
+            1
+        } else {
+            self.frames_until_step -= 1;
+            0
+        }
+    }
+}
+
+const fn lane_rate_is_clean(host_rate_hz: u32, lane_rate_hz: u32) -> bool {
+    if host_rate_hz == 0 || lane_rate_hz == 0 {
+        false
+    } else if lane_rate_hz >= host_rate_hz {
+        lane_rate_hz % host_rate_hz == 0
+    } else {
+        host_rate_hz % lane_rate_hz == 0
+    }
 }
 
 #[cfg(test)]
@@ -215,8 +257,37 @@ mod tests {
     }
 
     #[test]
-    fn thirty_hz_host_keeps_fractional_gameplay_cadence_deterministic() {
-        let mut cadence = cadence(30);
+    fn sixty_hz_host_can_run_sixty_hz_gameplay_and_physics() {
+        let mut cadence = SimulationCadence::new(SimulationCadenceConfig::new(60, 60, 60))
+            .expect("valid cadence");
+
+        let frames = (0..3)
+            .map(|_| cadence.advance_host_frame())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            frames,
+            vec![
+                SimulationCadenceFrame {
+                    gameplay_ticks: 1,
+                    physics_steps: 1,
+                },
+                SimulationCadenceFrame {
+                    gameplay_ticks: 1,
+                    physics_steps: 1,
+                },
+                SimulationCadenceFrame {
+                    gameplay_ticks: 1,
+                    physics_steps: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn thirty_hz_host_can_run_thirty_hz_gameplay_and_two_physics_steps() {
+        let mut cadence = SimulationCadence::new(SimulationCadenceConfig::new(30, 30, 60))
+            .expect("valid cadence");
 
         let frames = (0..6)
             .map(|_| cadence.advance_host_frame())
@@ -226,28 +297,60 @@ mod tests {
             frames,
             vec![
                 SimulationCadenceFrame {
+                    gameplay_ticks: 1,
+                    physics_steps: 2,
+                },
+                SimulationCadenceFrame {
+                    gameplay_ticks: 1,
+                    physics_steps: 2,
+                },
+                SimulationCadenceFrame {
+                    gameplay_ticks: 1,
+                    physics_steps: 2,
+                },
+                SimulationCadenceFrame {
+                    gameplay_ticks: 1,
+                    physics_steps: 2,
+                },
+                SimulationCadenceFrame {
+                    gameplay_ticks: 1,
+                    physics_steps: 2,
+                },
+                SimulationCadenceFrame {
+                    gameplay_ticks: 1,
+                    physics_steps: 2,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn twenty_hz_host_can_run_ten_hz_gameplay_and_sixty_hz_physics() {
+        let mut cadence = SimulationCadence::new(SimulationCadenceConfig::new(20, 10, 60))
+            .expect("valid cadence");
+
+        let frames = (0..4)
+            .map(|_| cadence.advance_host_frame())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            frames,
+            vec![
+                SimulationCadenceFrame {
                     gameplay_ticks: 0,
-                    physics_steps: 2,
+                    physics_steps: 3,
                 },
                 SimulationCadenceFrame {
                     gameplay_ticks: 1,
-                    physics_steps: 2,
-                },
-                SimulationCadenceFrame {
-                    gameplay_ticks: 1,
-                    physics_steps: 2,
+                    physics_steps: 3,
                 },
                 SimulationCadenceFrame {
                     gameplay_ticks: 0,
-                    physics_steps: 2,
+                    physics_steps: 3,
                 },
                 SimulationCadenceFrame {
                     gameplay_ticks: 1,
-                    physics_steps: 2,
-                },
-                SimulationCadenceFrame {
-                    gameplay_ticks: 1,
-                    physics_steps: 2,
+                    physics_steps: 3,
                 },
             ]
         );
@@ -295,6 +398,9 @@ mod tests {
         assert!(SimulationCadence::new(SimulationCadenceConfig::new(0, 20, 60)).is_none());
         assert!(SimulationCadence::new(SimulationCadenceConfig::new(60, 0, 60)).is_none());
         assert!(SimulationCadence::new(SimulationCadenceConfig::new(60, 20, 0)).is_none());
+        assert!(SimulationCadence::new(SimulationCadenceConfig::new(30, 20, 60)).is_none());
+        assert!(SimulationCadence::new(SimulationCadenceConfig::new(60, 7, 60)).is_none());
+        assert!(SimulationCadence::new(SimulationCadenceConfig::new(20, 20, 50)).is_none());
         assert!(
             SimulationCadence::new(
                 SimulationCadenceConfig::new(60, 20, 60).with_max_catch_up_host_frames(0)
