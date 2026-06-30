@@ -13,6 +13,7 @@ export default texturePack("mclone-dirt-starter", ({ palette, texture, speckles,
 
   texture("dirt", {
     size: 32,
+    source: "final-color",
     palette: "dirt",
     base: "base",
     exportPath: "assets/mclone/textures/block/dirt.png",

@@ -2,7 +2,8 @@
 
 Status: active; scaffold/export/sheet loop, software cube, rotation-grid panels,
 first grass-block bundle, primary-tint terrain patch, source/tint split review
-sheets, and texture illustrator guide landed on 2026-06-30.
+sheets, texture illustrator guide, and DSL tint-role metadata landed on
+2026-06-30.
 
 ## Purpose
 
@@ -103,14 +104,17 @@ scenes.
 Required concepts:
 
 - pack metadata: name, author/license notes, default resolution
+- pack-level tint roles with normal and alternate review colors
 - palettes and named palette ramps
 - indexed textures from ASCII rows
 - generated tileable textures from deterministic helpers
 - texture roles: `all`, `top`, `bottom`, `side`, `overlay`, `particle`
+- texture source categories: `final-color` or `tintable`
+- texture `tintRole` links for source art that receives a shared tint
 - illustrator guidance for relationship graphs, palette discipline, tint roles,
   and agent briefs before drawing a block family
-- preview-only texture metadata for tint, checkerboard transparency, tiling
-  mode, and disabling misleading cube/rotation panels
+- preview-only texture metadata for checkerboard transparency, tiling mode, and
+  disabling misleading cube/rotation panels
 - block preview metadata: cube, cross-plane plant, log axis, cutout/alpha mode
 - tint metadata for grass/foliage/water-style review
 - variant metadata for preview: rotations, mirrors, authored variants, weights
@@ -210,6 +214,8 @@ texture.
   overlay, and final composed tinted side together.
 - [x] Add an illustrator guide covering final-color vs tintable source art,
   grass tint relationships, palette discipline, and agent brief shape.
+- [x] Move grass preview tinting out of individual textures and into pack-level
+  tint roles plus texture-level `source` / `tintRole` metadata.
 - [x] Keep alternate grass biome tint previews compact so source texture review
   remains primary.
 - [ ] Add foliage/water tint swatches once those texture families exist.

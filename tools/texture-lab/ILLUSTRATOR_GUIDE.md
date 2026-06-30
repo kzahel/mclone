@@ -33,6 +33,10 @@ Write down the relationship graph first:
 - whether rotation or mirroring is expected to work
 - nearby blocks that should share material language
 
+Then encode that graph in the DSL with pack-level `tint(...)` declarations and
+texture-level `source` / `tintRole` fields. Do not put shared grass or foliage
+tints in individual `preview` metadata.
+
 For the current grass block starter, the graph is:
 
 ```text
@@ -50,6 +54,32 @@ composition:
 - final top = top multiplied by grass tint
 - final side = side base plus overlay multiplied by the same grass tint
 - final bottom = bottom as-authored
+```
+
+The same relationship appears in source as:
+
+```ts
+tint("grass", {
+  normal: "#79b34e",
+  alternates: ["#5fa343", "#98b85e", "#6fa35b"],
+});
+
+texture("grass_block_top", {
+  source: "tintable",
+  tintRole: "grass",
+  // ...
+});
+
+texture("grass_block_side", {
+  source: "final-color",
+  // ...
+});
+
+texture("grass_block_side_overlay", {
+  source: "tintable",
+  tintRole: "grass",
+  // ...
+});
 ```
 
 ## Tint Roles

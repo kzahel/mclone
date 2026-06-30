@@ -2,7 +2,12 @@ import { texturePack } from "../../src/dsl";
 
 const empty = "................................";
 
-export default texturePack("mclone-grass-block-starter", ({ palette, texture, block, speckles, ascii }) => {
+export default texturePack("mclone-grass-block-starter", ({ tint, palette, texture, block, speckles, ascii }) => {
+  tint("grass", {
+    normal: "#79b34e",
+    alternates: ["#5fa343", "#98b85e", "#6fa35b"],
+  });
+
   palette("grass_top", {
     base: "#d8dbc5",
     light: "#f1f0cf",
@@ -29,12 +34,11 @@ export default texturePack("mclone-grass-block-starter", ({ palette, texture, bl
 
   texture("grass_block_top", {
     size: 32,
+    source: "tintable",
+    tintRole: "grass",
     palette: "grass_top",
     base: "base",
     exportPath: "assets/mclone/textures/block/grass_block_top.png",
-    preview: {
-      tint: "#79b34e",
-    },
     layers: [
       speckles({
         seed: "grass-top-soft-blades",
@@ -60,6 +64,7 @@ export default texturePack("mclone-grass-block-starter", ({ palette, texture, bl
 
   texture("grass_block_side", {
     size: 32,
+    source: "final-color",
     palette: "grass_side",
     base: "dirt",
     exportPath: "assets/mclone/textures/block/grass_block_side.png",
@@ -127,11 +132,12 @@ export default texturePack("mclone-grass-block-starter", ({ palette, texture, bl
 
   texture("grass_block_side_overlay", {
     size: 32,
+    source: "tintable",
+    tintRole: "grass",
     palette: "grass_overlay",
     base: "transparent",
     exportPath: "assets/mclone/textures/block/grass_block_side_overlay.png",
     preview: {
-      tint: "#79b34e",
       checkerboard: true,
       cube: false,
       rotation: false,
@@ -183,6 +189,7 @@ export default texturePack("mclone-grass-block-starter", ({ palette, texture, bl
 
   texture("grass_block_bottom", {
     size: 32,
+    source: "final-color",
     palette: "grass_side",
     base: "dirt",
     exportPath: "assets/mclone/textures/block/grass_block_bottom.png",
@@ -209,9 +216,6 @@ export default texturePack("mclone-grass-block-starter", ({ palette, texture, bl
       side: "grass_block_side",
       bottom: "grass_block_bottom",
       overlay: "grass_block_side_overlay",
-    },
-    tint: {
-      grass: ["#79b34e", "#5fa343", "#98b85e", "#6fa35b"],
     },
   });
 });

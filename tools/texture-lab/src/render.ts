@@ -3,14 +3,19 @@ import {
   type AsciiLayerSpec,
   type BlockSpec,
   type PaletteSpec,
+  type TextureSourceCategory,
   type TexturePackAsset,
   type TextureSpec,
+  type TintSpec,
 } from "./dsl";
 import type { RgbaImage } from "./png";
 
 export interface RenderedTexture extends RgbaImage {
   name: string;
   exportPath: string;
+  source: TextureSourceCategory;
+  tintRole?: string;
+  tint?: TintSpec;
   preview: TextureSpec["preview"];
 }
 
@@ -38,14 +43,21 @@ export function renderTexture(pack: TexturePackAsset, name: string, texture: Tex
     }
   }
 
-  return {
+  const rendered: RenderedTexture = {
     name,
     exportPath: texture.exportPath,
+    source: texture.source ?? "final-color",
     width: size,
     height: size,
     data,
     preview: texture.preview,
   };
+  if (texture.tintRole) {
+    rendered.tintRole = texture.tintRole;
+    rendered.tint = pack.tints[texture.tintRole]!;
+  }
+
+  return rendered;
 }
 
 export function makeReviewSheet(texture: RenderedTexture): RgbaImage {
@@ -119,7 +131,7 @@ export function makeBlockReviewSheet(
   const background: Rgba = [32, 34, 34, 255];
   const panel: Rgba = [52, 54, 54, 255];
   const sheet = solidImage(1040, 672, background);
-  const tintColors = block.tint?.grass?.map(parseHexColor) ?? [[116, 167, 69, 255] satisfies Rgba];
+  const tintColors = tintColorsForBlock(block, texturesByName);
   const primaryTint = tintColors[0]!;
 
   drawRect(sheet, 16, 16, 300, 300, panel);
@@ -155,15 +167,15 @@ export function makeBlockSideReviewSheet(
   const background: Rgba = [32, 34, 34, 255];
   const panel: Rgba = [52, 54, 54, 255];
   const sheet = solidImage(1040, 432, background);
-  const tintColors = block.tint?.grass?.map(parseHexColor) ?? [[116, 167, 69, 255] satisfies Rgba];
+  const tintColors = tintColorsForBlock(block, texturesByName);
   const primaryTint = tintColors[0]!;
   const side = textureForFace(block, texturesByName, "side");
   const overlay = texturesByName.get(block.faces.overlay);
   if (!overlay) {
     throw new Error(`Block '${blockName}' overlay references missing rendered texture '${block.faces.overlay}'`);
   }
-  const composedSide = compositeImages(cloneImage(side), tintTexture(overlay, primaryTint));
-  const top = tintTexture(textureForFace(block, texturesByName, "top"), primaryTint);
+  const composedSide = compositeImages(cloneImage(side), applyRoleTint(overlay, primaryTint));
+  const top = applyRoleTint(textureForFace(block, texturesByName, "top"), primaryTint);
 
   drawRect(sheet, 16, 16, 264, 264, panel);
   drawScaled(sheet, side, 20, 20, 8);
@@ -407,10 +419,38 @@ function drawIsometricCubeFaces(target: RgbaImage, faces: CubeFaceImages, target
 
 function cubeFaces(block: BlockSpec, texturesByName: Map<string, RenderedTexture>, tint: Rgba): CubeFaceImages {
   return {
-    top: tintTexture(textureForFace(block, texturesByName, "top"), tint),
+    top: applyRoleTint(textureForFace(block, texturesByName, "top"), tint),
     left: compositeSideTexture(block, texturesByName, tint),
     right: compositeSideTexture(block, texturesByName, tint),
   };
+}
+
+function tintColorsForBlock(block: BlockSpec, texturesByName: Map<string, RenderedTexture>): Rgba[] {
+  const tint = tintSpecForBlock(block, texturesByName);
+  if (!tint) {
+    return [[255, 255, 255, 255]];
+  }
+  return [tint.normal, ...(tint.alternates ?? [])].map(parseHexColor);
+}
+
+function tintSpecForBlock(block: BlockSpec, texturesByName: Map<string, RenderedTexture>): TintSpec | undefined {
+  const textureNames = [
+    block.faces.top,
+    block.faces.overlay,
+    block.faces.side,
+    block.faces.bottom,
+    block.faces.all,
+  ];
+  for (const textureName of textureNames) {
+    if (!textureName) {
+      continue;
+    }
+    const texture = texturesByName.get(textureName);
+    if (texture?.tint) {
+      return texture.tint;
+    }
+  }
+  return undefined;
 }
 
 function textureForFace(block: BlockSpec, texturesByName: Map<string, RenderedTexture>, face: "top" | "bottom" | "side"): RenderedTexture {
@@ -435,7 +475,7 @@ function compositeSideTexture(block: BlockSpec, texturesByName: Map<string, Rend
   if (!overlay) {
     throw new Error(`Block overlay references missing rendered texture '${overlayName}'`);
   }
-  return compositeImages(side, tintTexture(overlay, tint));
+  return compositeImages(side, applyRoleTint(overlay, tint));
 }
 
 function drawTerrainPatch(
@@ -446,7 +486,7 @@ function drawTerrainPatch(
   targetX: number,
   targetY: number,
 ): void {
-  const top = tintTexture(textureForFace(block, texturesByName, "top"), tint);
+  const top = applyRoleTint(textureForFace(block, texturesByName, "top"), tint);
   const dirt = textureForFace(block, texturesByName, "bottom");
   const tileScale = 2;
   const tileSize = top.width * tileScale;
@@ -621,10 +661,17 @@ function writePixel(data: Uint8Array, width: number, x: number, y: number, color
 }
 
 function previewTexture(texture: RenderedTexture): RgbaImage {
-  if (!texture.preview?.tint) {
+  if (!texture.tint) {
     return texture;
   }
-  return tintTexture(texture, parseHexColor(texture.preview.tint));
+  return applyRoleTint(texture, parseHexColor(texture.tint.normal));
+}
+
+function applyRoleTint(texture: RenderedTexture, tint: Rgba): RgbaImage {
+  if (texture.source !== "tintable") {
+    return texture;
+  }
+  return tintTexture(texture, tint);
 }
 
 function hasTransparency(image: RgbaImage): boolean {

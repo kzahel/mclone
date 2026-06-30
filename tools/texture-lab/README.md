@@ -69,18 +69,37 @@ The first source format is hybrid:
   grays, sand yellows, and bark rings.
 - Small procedural texture helpers for natural materials: wraparound noise,
   speckles, pebbles, scratches, cracks, roots, moss, and edge blending.
+- Pack-level tint roles, such as `grass`, with normal and alternate review
+  colors.
+- Texture-level source categories: `final-color` or `tintable`.
+- Texture-level `tintRole` links for neutral source art that needs a shared
+  tint relationship.
 - Explicit masks and overlays for blocks with multiple layers, such as grass
   side base plus tinted overlay.
 - Cube block bundles for reviewing a full block from named texture roles.
-- Preview-only metadata for tinting neutral source textures, showing alpha on a
-  checkerboard, controlling tiling mode, or disabling cube/rotation panels
-  where they are misleading.
+- Preview-only metadata for showing alpha on a checkerboard, controlling tiling
+  mode, or disabling cube/rotation panels where they are misleading.
 
 Tintable textures are source-first in review sheets. The enlarged pixel panel
 shows the raw, tintless source texture; repeat, mip, rotation, and block-context
 panels use the preview tint when one is defined. Grass side textures should be
 judged in block context because the final side is dirt base plus a tinted
 transparent overlay, not either source texture alone.
+
+The grass starter encodes that relationship directly:
+
+```ts
+tint("grass", {
+  normal: "#79b34e",
+  alternates: ["#5fa343", "#98b85e", "#6fa35b"],
+});
+
+texture("grass_block_top", {
+  source: "tintable",
+  tintRole: "grass",
+  // ...
+});
+```
 
 Pure ASCII is useful, but it should not be the only tool. A 32x32 natural block
 is 1024 cells per face; asking an agent to hand-paint every cell is slow and

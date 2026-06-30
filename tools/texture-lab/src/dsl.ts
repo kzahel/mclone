@@ -2,15 +2,24 @@ export interface TexturePackAsset {
   schemaVersion: 1;
   name: string;
   defaultSize: number;
+  tints: Record<string, TintSpec>;
   palettes: Record<string, PaletteSpec>;
   textures: Record<string, TextureSpec>;
   blocks: Record<string, BlockSpec>;
 }
 
 export type PaletteSpec = Record<string, string>;
+export type TextureSourceCategory = "final-color" | "tintable";
+
+export interface TintSpec {
+  normal: string;
+  alternates?: string[];
+}
 
 export interface TextureSpec {
   size?: number;
+  source?: TextureSourceCategory;
+  tintRole?: string;
   palette: string;
   base: string;
   exportPath: string;
@@ -19,7 +28,6 @@ export interface TextureSpec {
 }
 
 export interface TexturePreviewSpec {
-  tint?: string;
   checkerboard?: boolean;
   cube?: boolean;
   rotation?: boolean;
@@ -29,7 +37,6 @@ export interface TexturePreviewSpec {
 export interface BlockSpec {
   kind: "cube";
   faces: CubeFaceTextures;
-  tint?: BlockTintSpec;
 }
 
 export interface CubeFaceTextures {
@@ -42,10 +49,6 @@ export interface CubeFaceTextures {
   east?: string;
   west?: string;
   overlay?: string;
-}
-
-export interface BlockTintSpec {
-  grass?: string[];
 }
 
 export type TextureLayerSpec = SpecklesLayerSpec | AsciiLayerSpec;
@@ -68,6 +71,7 @@ export interface AsciiLayerSpec {
 }
 
 export interface TextureLabApi {
+  tint(name: string, tint: TintSpec): void;
   palette(name: string, colors: PaletteSpec): void;
   texture(name: string, texture: TextureSpec): void;
   block(name: string, block: BlockSpec): void;
@@ -98,6 +102,21 @@ export function assertValidTexturePack(asset: TexturePackAsset): void {
   if (!Number.isInteger(asset.defaultSize) || asset.defaultSize <= 0) {
     errors.push(`default size must be a positive integer, got ${asset.defaultSize}`);
   }
+  if (!asset.tints || typeof asset.tints !== "object") {
+    errors.push("texture pack tints must be an object");
+  } else {
+    for (const [tintName, tint] of Object.entries(asset.tints)) {
+      validateName("tint", tintName, errors);
+      if (!isHexColor(tint.normal)) {
+        errors.push(`tint '${tintName}' normal color has invalid color '${tint.normal}'`);
+      }
+      for (const [alternateIndex, alternate] of (tint.alternates ?? []).entries()) {
+        if (!isHexColor(alternate)) {
+          errors.push(`tint '${tintName}' alternate ${alternateIndex} has invalid color '${alternate}'`);
+        }
+      }
+    }
+  }
   for (const [paletteName, palette] of Object.entries(asset.palettes)) {
     validateName("palette", paletteName, errors);
     for (const [colorName, color] of Object.entries(palette)) {
@@ -109,6 +128,19 @@ export function assertValidTexturePack(asset: TexturePackAsset): void {
   }
   for (const [textureName, texture] of Object.entries(asset.textures)) {
     validateName("texture", textureName, errors);
+    const source = texture.source ?? "final-color";
+    if (texture.source !== undefined && texture.source !== "final-color" && texture.source !== "tintable") {
+      errors.push(`texture '${textureName}' source must be 'final-color' or 'tintable'`);
+    }
+    if (source === "tintable") {
+      if (!texture.tintRole) {
+        errors.push(`texture '${textureName}' is tintable and must declare tintRole`);
+      } else if (!asset.tints?.[texture.tintRole]) {
+        errors.push(`texture '${textureName}' references missing tint role '${texture.tintRole}'`);
+      }
+    } else if (texture.tintRole) {
+      errors.push(`texture '${textureName}' declares tintRole but source is '${source}'`);
+    }
     const size = texture.size ?? asset.defaultSize;
     if (!Number.isInteger(size) || size <= 0) {
       errors.push(`texture '${textureName}' size must be a positive integer, got ${size}`);
@@ -126,8 +158,9 @@ export function assertValidTexturePack(asset: TexturePackAsset): void {
         `texture '${textureName}' exportPath must be an assets/**/*.png path, got '${texture.exportPath}'`,
       );
     }
-    if (texture.preview?.tint !== undefined && !isHexColor(texture.preview.tint)) {
-      errors.push(`texture '${textureName}' preview tint has invalid color '${texture.preview.tint}'`);
+    const preview = texture.preview as (TexturePreviewSpec & { tint?: unknown }) | undefined;
+    if (preview?.tint !== undefined) {
+      errors.push(`texture '${textureName}' preview.tint has been replaced by source/tintRole metadata`);
     }
     if (
       texture.preview?.tiling !== undefined &&
@@ -154,6 +187,7 @@ export function assertValidTexturePack(asset: TexturePackAsset): void {
 }
 
 class TexturePackBuilder {
+  private readonly tints: Record<string, TintSpec> = {};
   private readonly palettes: Record<string, PaletteSpec> = {};
   private readonly textures: Record<string, TextureSpec> = {};
   private readonly blocks: Record<string, BlockSpec> = {};
@@ -165,6 +199,9 @@ class TexturePackBuilder {
 
   api(): TextureLabApi {
     return {
+      tint: (name, tint) => {
+        this.tints[name] = tint;
+      },
       palette: (name, colors) => {
         this.palettes[name] = colors;
       },
@@ -184,6 +221,7 @@ class TexturePackBuilder {
       schemaVersion: 1,
       name: this.name,
       defaultSize: this.defaultSize,
+      tints: this.tints,
       palettes: this.palettes,
       textures: this.textures,
       blocks: this.blocks,
