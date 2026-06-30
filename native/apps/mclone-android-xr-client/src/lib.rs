@@ -237,6 +237,7 @@ mod android {
         sky_terrain_multiview_perf: bool,
         sky_terrain_actors_multiview_perf: bool,
         full_frame_multiview: bool,
+        overlap_eye_submits: bool,
     }
 
     impl Default for AndroidXrStartupOptions {
@@ -257,6 +258,7 @@ mod android {
                 sky_terrain_multiview_perf: false,
                 sky_terrain_actors_multiview_perf: false,
                 full_frame_multiview: false,
+                overlap_eye_submits: false,
             }
         }
     }
@@ -364,6 +366,9 @@ mod android {
                 "--xr-full-frame-multiview" => {
                     options.full_frame_multiview = true;
                 }
+                "--xr-overlap-eye-submits" => {
+                    options.overlap_eye_submits = true;
+                }
                 unknown => bail!("unsupported Android XR startup argument `{unknown}`"),
             }
         }
@@ -420,6 +425,16 @@ mod android {
             bail!(
                 "--xr-full-frame-multiview cannot be combined with multiview proof or microbenchmark modes"
             );
+        }
+        if options.overlap_eye_submits
+            && (options.full_frame_multiview
+                || options.multiview_proof
+                || options.terrain_multiview_proof
+                || options.terrain_multiview_perf
+                || options.sky_terrain_multiview_perf
+                || options.sky_terrain_actors_multiview_perf)
+        {
+            bail!("--xr-overlap-eye-submits only applies to the per-eye full-frame path");
         }
         if options.multiview_proof
             || options.terrain_multiview_proof
@@ -709,6 +724,10 @@ mod android {
             startup_options.full_frame_multiview
         );
         log::info!(
+            "Android XR overlap eye submits: {}",
+            startup_options.overlap_eye_submits
+        );
+        log::info!(
             "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
@@ -753,6 +772,7 @@ mod android {
             startup_options.sky_terrain_multiview_perf,
             startup_options.sky_terrain_actors_multiview_perf,
             startup_options.full_frame_multiview,
+            startup_options.overlap_eye_submits,
         ) {
             log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
         }
@@ -778,6 +798,7 @@ mod android {
         sky_terrain_multiview_perf: bool,
         sky_terrain_actors_multiview_perf: bool,
         full_frame_multiview: bool,
+        overlap_eye_submits: bool,
     ) -> Result<()> {
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
@@ -1218,6 +1239,11 @@ mod android {
         let terrain_summary = terrain.frame_summary();
         terrain.set_display_refresh_hz(display_refresh.current_rate);
         terrain.set_render_split_timing_enabled(perf_seconds.is_some());
+        terrain.set_defer_eye_waits_enabled(overlap_eye_submits);
+        log::info!(
+            "Android XR per-eye submit overlap active: {}",
+            overlap_eye_submits
+        );
         log::info!(
             "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={} actors={}",
             terrain_summary.section_count,
@@ -1233,6 +1259,7 @@ mod android {
             AndroidXrFrameTargets::PerEye {
                 left_eye: &mut left_eye,
                 right_eye: &mut right_eye,
+                overlap_eye_submits,
             },
             &mut terrain,
             &controller_actions,
@@ -2471,6 +2498,7 @@ mod android {
                             AndroidXrFrameTargets::PerEye {
                                 left_eye,
                                 right_eye,
+                                ..
                             } => render_mclone_frame(
                                 graphics,
                                 stage,
@@ -2637,6 +2665,7 @@ mod android {
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum AndroidXrRenderPath {
         PerEye,
+        PerEyeOverlap,
         Multiview,
     }
 
@@ -2644,6 +2673,7 @@ mod android {
         const fn label(self) -> &'static str {
             match self {
                 Self::PerEye => "per-eye",
+                Self::PerEyeOverlap => "per-eye-overlap",
                 Self::Multiview => "multiview",
             }
         }
@@ -2653,6 +2683,7 @@ mod android {
         PerEye {
             left_eye: &'a mut graphics_vulkan::OpenXrEyeState,
             right_eye: &'a mut graphics_vulkan::OpenXrEyeState,
+            overlap_eye_submits: bool,
         },
         Multiview {
             stereo_target: &'a mut graphics_vulkan::OpenXrStereoState,
@@ -2663,7 +2694,16 @@ mod android {
     impl AndroidXrFrameTargets<'_> {
         fn render_path(&self) -> AndroidXrRenderPath {
             match self {
-                Self::PerEye { .. } => AndroidXrRenderPath::PerEye,
+                Self::PerEye {
+                    overlap_eye_submits,
+                    ..
+                } => {
+                    if *overlap_eye_submits {
+                        AndroidXrRenderPath::PerEyeOverlap
+                    } else {
+                        AndroidXrRenderPath::PerEye
+                    }
+                }
                 Self::Multiview { .. } => AndroidXrRenderPath::Multiview,
             }
         }

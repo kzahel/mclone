@@ -50,6 +50,7 @@ TERRAIN_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PERF:-0}"
 SKY_TERRAIN_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_SKY_TERRAIN_MULTIVIEW_PERF:-0}"
 SKY_TERRAIN_ACTORS_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF:-0}"
 XR_FULL_FRAME_MULTIVIEW="${MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW:-0}"
+XR_OVERLAP_EYE_SUBMITS="${MCLONE_ANDROID_XR_OVERLAP_EYE_SUBMITS:-0}"
 if [[ "$PERF_FROZEN_RENDER" == "1" ]]; then
     PERF_SETTLED_STATIONARY=1
 fi
@@ -165,6 +166,10 @@ Options:
                      full-frame multiview stack and require
                      MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW_READY. Can be
                      combined with ordinary --perf-* probes.
+  --xr-overlap-eye-submits
+                     Per-eye path only: submit each eye as soon as encoded,
+                     defer the GPU wait until both eyes are submitted, and
+                     report render_path=per-eye-overlap in perf summaries.
   -h, --help         Show this help.
 USAGE
 }
@@ -486,6 +491,10 @@ while [[ $# -gt 0 ]]; do
             XR_FULL_FRAME_MULTIVIEW=1
             shift
             ;;
+        --xr-overlap-eye-submits)
+            XR_OVERLAP_EYE_SUBMITS=1
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -606,6 +615,11 @@ fi
 if [[ "$XR_FULL_FRAME_MULTIVIEW" == "1" ]]; then
     if [[ "$MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
         mclone_die "--xr-full-frame-multiview cannot be combined with multiview proof or microbenchmark modes"
+    fi
+fi
+if [[ "$XR_OVERLAP_EYE_SUBMITS" == "1" ]]; then
+    if [[ "$XR_FULL_FRAME_MULTIVIEW" == "1" || "$MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
+        mclone_die "--xr-overlap-eye-submits only applies to the per-eye full-frame path"
     fi
 fi
 if [[ -n "$PERF_SECONDS" ]]; then
@@ -734,6 +748,9 @@ if [[ "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
 fi
 if [[ "$XR_FULL_FRAME_MULTIVIEW" == "1" ]]; then
     STARTUP_ARGV+=(--xr-full-frame-multiview)
+fi
+if [[ "$XR_OVERLAP_EYE_SUBMITS" == "1" ]]; then
+    STARTUP_ARGV+=(--xr-overlap-eye-submits)
 fi
 mclone_xr_clear_startup_property "$SERIAL" "$REMOTE_ADDR_PROPERTY" >/dev/null 2>&1 || true
 mclone_note "Cleared legacy Android XR remote dedicated property $REMOTE_ADDR_PROPERTY"

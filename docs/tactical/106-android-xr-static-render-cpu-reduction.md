@@ -236,6 +236,34 @@ contention near the SoC power ceiling is untested and the hot-frame tail must be
 watched; (b) E4 adds `~1` frame of latency — measure motion-to-photon before/after
 and keep the comfort check (Slice K). Defer E5 as before.
 
+## Per-Eye Submit-Overlap Probe (landed 2026-06-30)
+
+Before implementing true one-frame-late E4, this slice tested a lower-risk
+overlap precursor on the correct per-eye submission path. The opt-in
+`--xr-overlap-eye-submits` mode submits the left eye immediately, records and
+submits the right eye while left-eye GPU work can already run, then waits once
+before releasing the OpenXR images. It does **not** overlap frame N+1 CPU work
+with frame N GPU work, does not add the E4 latency tradeoff, and does not require
+cross-frame uniform lifetime changes. The package lane is
+`native:android-xr:perf:frozen:rd10:overlap`.
+
+On Quest 3 frozen RD10, fixed pose `0,80,-96,180`, `--perf-metrics`, against a
+same-session default per-eye baseline:
+
+| Path | avg | p50 | p95 | p99 | max | over budget | key sync marker |
+|---|---:|---:|---:|---:|---:|---:|---|
+| per-eye baseline | `13.948ms` | `13.776ms` | `15.139ms` | `17.219ms` | `27.603ms` | 647/1430 | L/R poll `7.473`/`5.761ms`; stereo poll `11.223ms` |
+| per-eye-overlap | `13.851ms` | `13.865ms` | `14.918ms` | `15.373ms` | `24.825ms` | 700/1440 | L/R poll `0.000`/`0.000ms`; stereo poll `9.883ms` |
+
+The mechanical sync change worked: per-eye poll waits moved to zero and the
+single end-of-stereo wait was lower. The frame result is mixed: avg, p95, p99,
+max, sampled app GPU, and motion-to-photon improved, but p50 regressed slightly
+and over-budget frame count increased. Keep this mode as an opt-in diagnostic
+and A/B lane, not the default. It is useful evidence that there is some sync
+headroom in the current per-eye path, but it does not replace the real E4 work:
+true frame pipelining still needs per-eye/per-frame immutable uniform slots
+before next-frame CPU work can safely run while the previous frame is in flight.
+
 ## Post-Validation Rollback (landed 2026-06-29)
 
 Commit `d0c5161` (`Restore XR per-eye command submission`) reverted the risky

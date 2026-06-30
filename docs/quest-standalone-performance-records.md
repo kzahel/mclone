@@ -74,6 +74,49 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-06-30 - Standalone Quest 3 Frozen RD10 Per-Eye Submit-Overlap Probe
+
+Benchmarked code: current worktree for the per-eye submit-overlap slice, later
+committed as the slice commit. Captured with the fixed frozen RD10 pose
+`0,80,-96,180`, `--perf-metrics`, and the same staged asset pack. The baseline
+used the default per-eye path. The probe used `--xr-overlap-eye-submits`, which
+submits the left eye immediately, records/submits the right eye while left-eye
+GPU work can run, then waits once before releasing the OpenXR images. This is
+not full one-frame-late E4 pipelining.
+
+Summary:
+
+| Path | Sample | FPS | Frames | p50 | p95 | p99 | Max | Over 1x | Drawn sections | Drawn indices | App GPU | MTP | Key marker |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| per-eye baseline | `20.013s` | `71.5` | 1,430 | `13.776ms` | `15.139ms` | `17.219ms` | `27.603ms` | 647 | 179 | 1,356,102 | `1.592ms` | `26.913ms` | L/R poll `7.473`/`5.761ms`; stereo poll `11.223ms` |
+| per-eye-overlap | `20.012s` | `72.0` | 1,440 | `13.865ms` | `14.918ms` | `15.373ms` | `24.825ms` | 700 | 179 | 1,356,102 | `1.471ms` | `23.973ms` | L/R poll `0.000`/`0.000ms`; stereo poll `9.883ms` |
+
+Raw summary markers:
+
+```text
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.013 mode=stationary-frozen-render render_path=per-eye render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=34.758 settle_min_seconds=5.000 settle_frames=2438 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1430 submitted_delta=1430 runtime_delta=1430 skipped_delta=0 frame_avg_ms=13.948 frame_min_ms=11.902 frame_p50_ms=13.776 frame_p95_ms=15.139 frame_p99_ms=17.219 frame_max_ms=27.603 over_budget=647 over_2x_budget=0 over_4x_budget=0
+MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_left_eye_ms=8.884 max_terrain_right_eye_ms=7.206 max_terrain_left_eye_submit_ms=0.604 max_terrain_left_eye_poll_wait_ms=7.473 max_terrain_right_eye_submit_ms=0.378 max_terrain_right_eye_poll_wait_ms=5.761 max_terrain_stereo_submit_ms=0.787 max_terrain_stereo_poll_wait_ms=11.223
+MCLONE_ANDROID_XR_PERF_DRAW sections=1133 drawn_sections=179 indices=5396736 drawn_indices=1356102 actors=1 drawn_actors=1
+MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms=1.592 app_cpu_ms=n/a compositor_gpu_ms=0.676 compositor_cpu_ms=n/a gpu_util_pct=16.274 cpu_util_avg_pct=88.289 cpu_util_worst_pct=94.000 motion_to_photon_ms=26.913 dropped_frames=98.000 stale_frames=n/a counters=17 any_valid=true attempt=1/8 per_query_us=0.38
+
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.012 mode=stationary-frozen-render render_path=per-eye-overlap render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=34.818 settle_min_seconds=5.000 settle_frames=2479 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1440 submitted_delta=1440 runtime_delta=1440 skipped_delta=0 frame_avg_ms=13.851 frame_min_ms=11.629 frame_p50_ms=13.865 frame_p95_ms=14.918 frame_p99_ms=15.373 frame_max_ms=24.825 over_budget=700 over_2x_budget=0 over_4x_budget=0
+MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_left_eye_ms=3.838 max_terrain_right_eye_ms=5.093 max_terrain_left_eye_submit_ms=0.650 max_terrain_left_eye_poll_wait_ms=0.000 max_terrain_right_eye_submit_ms=0.612 max_terrain_right_eye_poll_wait_ms=0.000 max_terrain_stereo_submit_ms=0.852 max_terrain_stereo_poll_wait_ms=9.883
+MCLONE_ANDROID_XR_PERF_DRAW sections=1133 drawn_sections=179 indices=5396772 drawn_indices=1356102 actors=1 drawn_actors=1
+MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms=1.471 app_cpu_ms=n/a compositor_gpu_ms=0.661 compositor_cpu_ms=n/a gpu_util_pct=16.019 cpu_util_avg_pct=94.636 cpu_util_worst_pct=97.959 motion_to_photon_ms=23.973 dropped_frames=54.000 stale_frames=n/a counters=17 any_valid=true attempt=1/8 per_query_us=0.38
+```
+
+Interpretation:
+
+- The synchronization change behaved as intended: per-eye poll waits dropped to
+  `0.000ms`, and the single end-of-stereo wait was `9.883ms` instead of the
+  baseline `11.223ms` max marker.
+- End-to-end frame timing is mixed, not a default-switch signal: avg improved by
+  `0.097ms`, p95 by `0.221ms`, and p99/max improved materially, but p50 worsened
+  by `0.089ms` and over-budget frames increased.
+- Keep `--xr-overlap-eye-submits` as an opt-in diagnostic/perf lane. The next
+  decision should be based on another A/B or on deeper true frame pipelining /
+  batching work, not this single mixed run.
+
 ### 2026-06-30 - Standalone Quest 3 Frozen RD10 Per-Eye Draw Masks vs Multiview
 
 Benchmarked code commit: `ecb502f` (`Show raw and tinted grass previews`), which

@@ -400,6 +400,7 @@ pub struct XrTerrainStereoFrameSummary {
 struct XrRenderedEye {
     summary: FullFrameRenderSummary,
     timing: XrTerrainEyeRenderTiming,
+    submission: Option<wgpu::SubmissionIndex>,
 }
 
 type XrSessionRuntimeFactory<S> = Box<
@@ -473,6 +474,7 @@ where
     locomotion_mode: XrLocomotionMode,
     display_refresh_hz: Option<f32>,
     render_split_timing_enabled: bool,
+    defer_eye_waits_enabled: bool,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
     game_ui_toggle_down: bool,
@@ -613,6 +615,7 @@ where
             locomotion_mode: XrLocomotionMode::default(),
             display_refresh_hz: None,
             render_split_timing_enabled: false,
+            defer_eye_waits_enabled: false,
             last_locomotion_update: None,
             menu_toggle_down: false,
             game_ui_toggle_down: false,
@@ -701,6 +704,7 @@ where
             locomotion_mode: XrLocomotionMode::default(),
             display_refresh_hz: None,
             render_split_timing_enabled: false,
+            defer_eye_waits_enabled: false,
             last_locomotion_update: None,
             menu_toggle_down: false,
             game_ui_toggle_down: false,
@@ -1247,6 +1251,7 @@ where
                 Default::default(),
             )
         };
+        let defer_eye_waits = self.defer_eye_waits_enabled;
         let left_eye_start = Instant::now();
         let left_eye = self.render_eye_target(
             device,
@@ -1262,6 +1267,7 @@ where
             underwater_overlays[0],
             "left",
             LEFT_EYE_VIEW_SLOT,
+            !defer_eye_waits,
         )?;
         timing.left_eye_ms = elapsed_ms(left_eye_start.elapsed());
         timing.left_eye_render = left_eye.timing;
@@ -1270,7 +1276,7 @@ where
         timing.left_eye_render.translucent_sort_ms += stereo_draw_timing.translucent_sort_ms;
         timing.left_eye_render.prepare_ms += stereo_draw_timing.prepare_ms;
         let right_eye_start = Instant::now();
-        let right_eye = self.render_eye_target(
+        let mut right_eye = self.render_eye_target(
             device,
             queue,
             &prepared_stereo_draw,
@@ -1284,13 +1290,25 @@ where
             underwater_overlays[1],
             "right",
             RIGHT_EYE_VIEW_SLOT,
+            !defer_eye_waits,
         )?;
         timing.right_eye_ms = elapsed_ms(right_eye_start.elapsed());
         timing.right_eye_render = right_eye.timing;
         timing.stereo_submit_ms =
             timing.left_eye_render.submit_ms + timing.right_eye_render.submit_ms;
-        timing.stereo_poll_wait_ms =
-            timing.left_eye_render.poll_wait_ms + timing.right_eye_render.poll_wait_ms;
+        if defer_eye_waits {
+            let submission = right_eye
+                .submission
+                .take()
+                .context("deferred XR eye wait missing right-eye submission")?;
+            let poll_wait_start = Instant::now();
+            Self::wait_for_xr_submission(device, submission, "deferred XR terrain stereo render")
+                .context("wait for deferred XR terrain stereo render")?;
+            timing.stereo_poll_wait_ms = elapsed_ms(poll_wait_start.elapsed());
+        } else {
+            timing.stereo_poll_wait_ms =
+                timing.left_eye_render.poll_wait_ms + timing.right_eye_render.poll_wait_ms;
+        }
         self.record_eye0_summary(left_eye.summary);
         Ok(self.frame_summary_with_timing(timing, upload))
     }
@@ -1818,6 +1836,10 @@ where
         self.render_split_timing_enabled = enabled;
     }
 
+    pub fn set_defer_eye_waits_enabled(&mut self, enabled: bool) {
+        self.defer_eye_waits_enabled = enabled;
+    }
+
     pub fn camera_snapshot(&self) -> EngineCameraSnapshot {
         self.camera.snapshot()
     }
@@ -2266,6 +2288,7 @@ where
         underwater_overlay: Option<UnderwaterOverlay>,
         label: &'static str,
         view_slot: PerViewSlot,
+        wait_after_submit: bool,
     ) -> Result<XrRenderedEye> {
         let collect_split_timing = self.render_split_timing_enabled;
         let encode_start = collect_split_timing.then(Instant::now);
@@ -2406,15 +2429,19 @@ where
         let submission = queue.submit(Some(command_buffer));
         let submit_ms = submit_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         let poll_start = collect_split_timing.then(Instant::now);
-        device
-            .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
-            .map(|_| ())
-            .with_context(|| format!("wait for XR terrain {label}-eye render submission"))?;
-        device
-            .poll(wgpu::PollType::Wait)
-            .map(|_| ())
-            .with_context(|| format!("wait for XR terrain {label}-eye render device idle"))?;
-        let poll_wait_ms = poll_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        let (submission, poll_wait_ms) = if wait_after_submit {
+            Self::wait_for_xr_submission(
+                device,
+                submission,
+                &format!("XR terrain {label}-eye render"),
+            )?;
+            (
+                None,
+                poll_start.map_or(0.0, |start| elapsed_ms(start.elapsed())),
+            )
+        } else {
+            (Some(submission), 0.0)
+        };
         if label == "left" {
             self.render_stats = render_stats;
         }
@@ -2432,7 +2459,24 @@ where
                 submit_ms,
                 poll_wait_ms,
             },
+            submission,
         })
+    }
+
+    fn wait_for_xr_submission(
+        device: &wgpu::Device,
+        submission: wgpu::SubmissionIndex,
+        label: &str,
+    ) -> Result<()> {
+        device
+            .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+            .map(|_| ())
+            .with_context(|| format!("wait for {label} submission"))?;
+        device
+            .poll(wgpu::PollType::Wait)
+            .map(|_| ())
+            .with_context(|| format!("wait for {label} device idle"))?;
+        Ok(())
     }
 
     fn sync_render_sections(
