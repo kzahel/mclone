@@ -278,6 +278,7 @@ impl OffscreenFlatClientHost {
                 movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
                 fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
                 movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
+                player_collision_box_visible: self.driver.player_collision_box_visible,
             },
             block_palette: debug_block_palette_overlay(
                 &self.assets.mesh_assets.catalog,
@@ -604,6 +605,7 @@ fn configure_screenshot_scene(
     if let Some(eye) = options.eye {
         host.set_eye_override(eye);
     }
+    host.driver.player_collision_box_visible = options.player_collision_box;
     host.driver.camera.set_view_mode(options.camera_view);
     Ok(())
 }

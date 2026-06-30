@@ -1,8 +1,8 @@
 # 109: XR Hand-Push Locomotion
 
-Status: active; Slice 2 shared swept-sphere collision and head validation
-landed in code. Quest standalone headset validation remains the preferred feel
-gate.
+Status: active; Slice 3 shared debug visualization landed in code. Quest
+standalone headset validation remains the preferred feel gate, especially for
+head/body pose sync.
 
 ## Purpose
 
@@ -60,6 +60,18 @@ regression testing.
   desktop, Android, or XR app owns gameplay locomotion policy.
 - [x] Add focused coverage for hand sphere sweeps and head motion clamping.
 
+## Slice 3 - Shared Debug Visualization
+
+- [x] Add shared engine debug line generation for the local player collision
+  box and live hand-push hand collider spheres.
+- [x] Render hand collider spheres by default whenever `Hand Push` mode has
+  live hand input.
+- [x] Add a shared UI option to toggle the player collision box wireframe for
+  flat desktop, XR, web, and Android UI state.
+- [x] Wire native flat and shared XR scene rendering through the existing
+  world-space GUI line renderer instead of app-local debug geometry.
+- [x] Add a headless screenshot flag for player-box capture validation.
+
 ## Known Gaps
 
 - The sweep helper is a first shared approximation of Unity-style spherecasts:
@@ -69,6 +81,9 @@ regression testing.
 - The desktop emulator is intentionally crude. It validates plumbing and some
   collision response, not real arm/controller feel.
 - Quest standalone still needs headset testing and tuning.
+- The player collision box wireframe is opt-in because it is diagnostic noise;
+  hand collider spheres are automatic in `Hand Push` mode because they are part
+  of understanding and tuning the movement feel.
 
 ## Validation
 
@@ -96,10 +111,30 @@ cargo test --manifest-path native/Cargo.toml -p mclone-native-client
 git diff --check
 ```
 
+Additional validation for Slice 3:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session -p mclone-ui -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-player-box-debug.png --width 960 --height 540 --startup-wait frames:2 --screenshot-player-box true --screenshot-camera-view third-person --fullbright true
+git diff --check
+```
+
+Slice 3 screenshot validation wrote `/tmp/mclone-player-box-debug.png` and
+visually confirmed the player collision box wireframe in the world frame. The
+hand collider spheres are covered by shared line-builder unit coverage because
+the flat headless screenshot path does not synthesize live XR hand poses.
+
 ## Next Slice
 
-Run Quest standalone with the new `Hand Push` mode and capture headset notes.
-Use those notes to tune arm length, hand/head radii, unstick distance, and
-velocity fling thresholds before adding surface slip/material behavior. Keep
-desktop emulation as an automated regression lane, but do not tune the final
-feel from desktop emulation alone.
+Run Quest standalone with the new `Hand Push` mode and the debug visuals:
+enable `Player Box`, then verify whether the headset eye pose, local collision
+box, and rendered hand colliders stay coherent while pushing, colliding, and
+unsticking. Use those notes to fix any pose-origin/body-sync issue before
+tuning arm length, hand/head radii, unstick distance, and velocity fling
+thresholds. Keep desktop emulation as an automated regression lane, but do not
+tune the final feel from desktop emulation alone.

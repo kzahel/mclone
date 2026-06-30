@@ -48,8 +48,8 @@ use mclone_render_session::{
     ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MOUSE_SENSITIVITY,
     EngineCameraController, EngineCameraInput, EngineCameraMovementImpulse,
-    EngineCameraMovementMode, EngineCameraSnapshot, EngineHandPushInput,
-    actor_instances_from_presentations,
+    EngineCameraMovementMode, EngineCameraSnapshot, EngineDebugVisualOptions, EngineHandPushInput,
+    actor_instances_from_presentations, engine_debug_world_lines,
 };
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameMovementMode, GameScreen, GameUi,
@@ -457,6 +457,7 @@ where
     interaction: ClientInteractionController,
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
+    player_collision_box_visible: bool,
     draw: TexturedSectionDrawResources,
     actors: ActorDrawResources,
     selection_outline: SelectionOutlineRenderer,
@@ -584,6 +585,7 @@ where
                 XrViewAlignmentMode::PlayerSpawn
             },
             render_options,
+            player_collision_box_visible: false,
             draw,
             actors: ActorDrawResources::new(
                 device,
@@ -671,6 +673,7 @@ where
                 XrViewAlignmentMode::PlayerSpawn
             },
             render_options,
+            player_collision_box_visible: false,
             draw: started.draw,
             actors: ActorDrawResources::new(
                 device,
@@ -1739,10 +1742,17 @@ where
                 selection_outline.as_ref(),
             )
             .context("render XR selection outline multiview")?;
+        let mut world_lines = engine_debug_world_lines(
+            &self.camera,
+            EngineDebugVisualOptions::new(self.player_collision_box_visible),
+        );
         if let Some(gameplay_ray) = self
             .xr_gameplay_controller_ray_line()
             .context("build XR gameplay controller ray visual")?
         {
+            world_lines.push(gameplay_ray);
+        }
+        if !world_lines.is_empty() {
             self.world_gui_renderer
                 .render_lines_multiview(
                     device,
@@ -1750,9 +1760,9 @@ where
                     encoder,
                     overlay_target,
                     render_views,
-                    &[gameplay_ray],
+                    &world_lines,
                 )
-                .context("render XR gameplay ray multiview")?;
+                .context("render XR world debug lines multiview")?;
         }
         if !self.ui.is_active() {
             return Ok(());
@@ -2345,10 +2355,17 @@ where
             selection_outline.as_ref(),
             view_slot,
         );
+        let mut world_lines = engine_debug_world_lines(
+            &self.camera,
+            EngineDebugVisualOptions::new(self.player_collision_box_visible),
+        );
         if let Some(gameplay_ray) = self
             .xr_gameplay_controller_ray_line()
             .context("build XR gameplay controller ray visual")?
         {
+            world_lines.push(gameplay_ray);
+        }
+        if !world_lines.is_empty() {
             self.world_gui_renderer
                 .render_lines_in_slot(
                     device,
@@ -2356,10 +2373,10 @@ where
                     &mut encoder,
                     RenderFrameTarget::color(target.color_view, target.size),
                     render_view,
-                    &[gameplay_ray],
+                    &world_lines,
                     view_slot,
                 )
-                .with_context(|| format!("render XR gameplay ray for {label} eye"))?;
+                .with_context(|| format!("render XR world debug lines for {label} eye"))?;
         }
         if ui_active {
             if let Some(panel) = self.menu_panel_pose {
@@ -2521,6 +2538,7 @@ where
             max_render_distance: MAX_XR_RENDER_DISTANCE as i32,
             section_occlusion_culling: self.render_options.section_occlusion_culling,
             force_fullbright: self.render_options.force_fullbright,
+            player_collision_box_visible: self.player_collision_box_visible,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
@@ -3213,6 +3231,17 @@ where
                         "enabled"
                     } else {
                         "disabled"
+                    }
+                );
+            }
+            GameUiAction::TogglePlayerCollisionBox => {
+                self.player_collision_box_visible = !self.player_collision_box_visible;
+                log::info!(
+                    "XR player collision box debug {}",
+                    if self.player_collision_box_visible {
+                        "visible"
+                    } else {
+                        "hidden"
                     }
                 );
             }

@@ -742,6 +742,7 @@ pub enum GameUiAction {
     QuitToTitle,
     ToggleSectionOcclusion,
     ToggleFullbright,
+    TogglePlayerCollisionBox,
     SetMovementMode(GameMovementMode),
     CycleFramePacing,
     CycleFpsCap,
@@ -826,6 +827,7 @@ pub struct GameUiRenderState {
     pub max_render_distance: i32,
     pub section_occlusion_culling: bool,
     pub force_fullbright: bool,
+    pub player_collision_box_visible: bool,
     pub movement_mode: GameMovementMode,
     pub fly_speed_multiplier: f32,
     pub min_fly_speed_multiplier: f32,
@@ -848,6 +850,7 @@ impl Default for GameUiRenderState {
             max_render_distance: 16,
             section_occlusion_culling: true,
             force_fullbright: false,
+            player_collision_box_visible: false,
             movement_mode: GameMovementMode::Walk,
             fly_speed_multiplier: 1.0,
             min_fly_speed_multiplier: 0.5,
@@ -1822,6 +1825,7 @@ const ID_JOIN_REMOTE_CONNECT: WidgetId = WidgetId(20);
 const ID_JOIN_REMOTE_BACK: WidgetId = WidgetId(21);
 const ID_OPTIONS_TOUCH_CONTROLS: WidgetId = WidgetId(22);
 const ID_OPTIONS_MOVEMENT_SPEED: WidgetId = WidgetId(23);
+const ID_OPTIONS_PLAYER_BOX: WidgetId = WidgetId(24);
 const ID_BLOCK_PALETTE_BASE: u64 = 1000;
 
 const BLOCK_PALETTE_COLUMNS: usize = 10;
@@ -2036,6 +2040,7 @@ impl GameUi {
             GameUiAction::RerollSeed => {}
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::ToggleFullbright
+            | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::SetMovementMode(_)
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
@@ -2092,6 +2097,8 @@ impl GameUi {
                     Some(ID_OPTIONS_OCCLUSION)
                 } else if rects.fullbright.contains(point) {
                     Some(ID_OPTIONS_FULLBRIGHT)
+                } else if rects.player_box.contains(point) {
+                    Some(ID_OPTIONS_PLAYER_BOX)
                 } else if rects.movement_mode.contains(point) {
                     Some(ID_OPTIONS_MOVEMENT_MODE)
                 } else if rects.frame_pacing.contains(point) {
@@ -2148,6 +2155,7 @@ impl GameUi {
             }
             ID_OPTIONS_OCCLUSION => Some(GameUiAction::ToggleSectionOcclusion),
             ID_OPTIONS_FULLBRIGHT => Some(GameUiAction::ToggleFullbright),
+            ID_OPTIONS_PLAYER_BOX => Some(GameUiAction::TogglePlayerCollisionBox),
             ID_OPTIONS_MOVEMENT_MODE => {
                 Some(GameUiAction::SetMovementMode(state.movement_mode.next()))
             }
@@ -2419,6 +2427,13 @@ impl GameUi {
             state.force_fullbright,
         )
         .render(draw, &self.font, self.interaction());
+        Checkbox::new(
+            ID_OPTIONS_PLAYER_BOX,
+            widgets.player_box,
+            "Player Box",
+            state.player_collision_box_visible,
+        )
+        .render(draw, &self.font, self.interaction());
         CycleButton::new(
             ID_OPTIONS_MOVEMENT_MODE,
             widgets.movement_mode,
@@ -2495,6 +2510,7 @@ impl GameUi {
 struct OptionWidgetRects {
     occlusion: Rect,
     fullbright: Rect,
+    player_box: Rect,
     movement_mode: Rect,
     frame_pacing: Rect,
     fps_cap: Rect,
@@ -2725,6 +2741,8 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
     y += 20.0;
     let fullbright = Rect::new(check_x, y, 190.0, 18.0);
     y += 20.0;
+    let player_box = Rect::new(check_x, y, 190.0, 18.0);
+    y += 20.0;
     let movement_mode = Rect::new(row_x, y, 192.0, 20.0);
     y += 22.0;
     let frame_pacing = Rect::new(row_x, y, 192.0, 20.0);
@@ -2757,6 +2775,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
     OptionWidgetRects {
         occlusion,
         fullbright,
+        player_box,
         movement_mode,
         frame_pacing,
         fps_cap,
@@ -2772,7 +2791,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
 fn options_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
     let touch_rows =
         u8::from(state.touch_controls_mode.is_some()) + u8::from(state.touch_settings.is_some());
-    centered_panel(scale, 242.0, 244.0 + f32::from(touch_rows) * 22.0)
+    centered_panel(scale, 242.0, 264.0 + f32::from(touch_rows) * 22.0)
 }
 
 fn render_distance_slider_value(state: GameUiRenderState) -> f32 {
@@ -4086,6 +4105,28 @@ mod tests {
             action,
             Some(GameUiAction::SetMovementMode(GameMovementMode::Fly))
         );
+    }
+
+    #[test]
+    fn game_ui_options_player_box_emits_toggle_action() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            player_collision_box_visible: true,
+            ..GameUiRenderState::default()
+        };
+
+        let player_box = option_widgets(ui.scale(), state).player_box;
+        let point = Point {
+            x: player_box.x + player_box.width * 0.5,
+            y: player_box.y + player_box.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(action, Some(GameUiAction::TogglePlayerCollisionBox));
     }
 
     #[test]

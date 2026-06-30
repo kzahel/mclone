@@ -189,6 +189,7 @@ mod android {
         input_preferences: InputPreferences,
         keyboard_mouse: KeyboardMouseInputAdapter,
         render_options: TexturedSectionRenderOptions,
+        player_collision_box_visible: bool,
         ui: GameUi,
         session_status: StatusOverlay,
         touch_menu_touch_id: Option<u64>,
@@ -586,6 +587,7 @@ mod android {
                 input_preferences: InputPreferences::AUTO,
                 keyboard_mouse: KeyboardMouseInputAdapter::new(),
                 render_options,
+                player_collision_box_visible: false,
                 ui: android_game_ui_for_scene(&scene_options),
                 session_status: StatusOverlay::hidden(),
                 touch_menu_touch_id: None,
@@ -1190,6 +1192,17 @@ mod android {
                         }
                     );
                 }
+                GameUiAction::TogglePlayerCollisionBox => {
+                    self.player_collision_box_visible = !self.player_collision_box_visible;
+                    log::info!(
+                        "Mclone Android player collision box debug {}",
+                        if self.player_collision_box_visible {
+                            "visible"
+                        } else {
+                            "hidden"
+                        }
+                    );
+                }
                 GameUiAction::SetRenderDistance(render_distance) => {
                     let render_distance = render_distance
                         .clamp(ANDROID_MIN_RENDER_DISTANCE, ANDROID_MAX_RENDER_DISTANCE);
@@ -1322,6 +1335,7 @@ mod android {
                 max_render_distance: ANDROID_MAX_RENDER_DISTANCE,
                 section_occlusion_culling: self.render_options.section_occlusion_culling,
                 force_fullbright: self.render_options.force_fullbright,
+                player_collision_box_visible: self.player_collision_box_visible,
                 movement_mode: game_movement_mode(self.camera.movement_mode()),
                 fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
                 min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,

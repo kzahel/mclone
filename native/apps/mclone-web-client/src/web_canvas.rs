@@ -2331,6 +2331,7 @@ pub struct WebChunkRenderSession {
     status_overlay: StatusOverlay,
     section_occlusion_culling: bool,
     force_fullbright: bool,
+    player_collision_box_visible: bool,
     render_color_profile: RenderColorProfile,
     input_preferences: InputPreferences,
     touch_look_sensitivity: f32,
@@ -2859,6 +2860,9 @@ impl WebChunkRenderSession {
             GameUiAction::ToggleFullbright => {
                 self.force_fullbright = !self.force_fullbright;
             }
+            GameUiAction::TogglePlayerCollisionBox => {
+                self.player_collision_box_visible = !self.player_collision_box_visible;
+            }
             GameUiAction::SetTouchLookSensitivity(look_sensitivity) => {
                 self.touch_look_sensitivity = clamp_touch_look_sensitivity(look_sensitivity);
             }
@@ -2974,6 +2978,7 @@ impl WebChunkRenderSession {
                 | GameUiAction::QuitToTitle
                 | GameUiAction::ToggleSectionOcclusion
                 | GameUiAction::ToggleFullbright
+                | GameUiAction::TogglePlayerCollisionBox
                 | GameUiAction::SetMovementMode(_)
                 | GameUiAction::SetFlySpeed(_)
                 | GameUiAction::CycleFramePacing
@@ -2992,6 +2997,7 @@ impl WebChunkRenderSession {
             max_render_distance: WEB_MAX_RENDER_DISTANCE,
             section_occlusion_culling: self.section_occlusion_culling,
             force_fullbright: self.force_fullbright,
+            player_collision_box_visible: self.player_collision_box_visible,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
@@ -3184,6 +3190,7 @@ impl WebChunkRenderSession {
             status_overlay: StatusOverlay::hidden(),
             section_occlusion_culling: render_options.section_occlusion_culling,
             force_fullbright: render_options.force_fullbright,
+            player_collision_box_visible: false,
             render_color_profile,
             input_preferences: InputPreferences::AUTO,
             touch_look_sensitivity: WEB_TOUCH_LOOK_SENSITIVITY_DEFAULT,
@@ -4579,6 +4586,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::QuitToTitle => "quitToTitle",
         GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
         GameUiAction::ToggleFullbright => "toggleFullbright",
+        GameUiAction::TogglePlayerCollisionBox => "togglePlayerCollisionBox",
         GameUiAction::SetMovementMode(_) => "setMovementMode",
         GameUiAction::CycleFramePacing => "cycleFramePacing",
         GameUiAction::CycleFpsCap => "cycleFpsCap",

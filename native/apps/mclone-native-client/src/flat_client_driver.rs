@@ -30,9 +30,9 @@ use mclone_render::screen_effect::{UnderwaterEffectState, UnderwaterOverlay};
 use mclone_render::selection_outline::SelectionOutline;
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
-    EngineCameraMovementMode, EngineCameraViewMode, RenderSectionCacheUpdate,
-    actor_instances_from_presentations, local_player_actor_instance,
-    render_camera_from_snapshot_with_view_mode,
+    EngineCameraMovementMode, EngineCameraViewMode, EngineDebugVisualOptions,
+    RenderSectionCacheUpdate, actor_instances_from_presentations, engine_debug_world_lines,
+    local_player_actor_instance, render_camera_from_snapshot_with_view_mode,
 };
 use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameMovementMode,
@@ -105,6 +105,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) actor_interpolation: ActorInterpolationState,
     pub(crate) interaction: ClientInteractionController,
     pub(crate) render_options: TexturedSectionRenderOptions,
+    pub(crate) player_collision_box_visible: bool,
     pub(crate) render_resources: Option<FlatRenderResources>,
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
@@ -196,6 +197,7 @@ pub(crate) struct FlatClientUiRenderOptions {
     pub(crate) movement_mode: GameMovementMode,
     pub(crate) fly_speed_multiplier: f32,
     pub(crate) movement_speed_multiplier: f32,
+    pub(crate) player_collision_box_visible: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -262,6 +264,7 @@ impl FlatClientDriver {
             actor_interpolation: ActorInterpolationState::new(),
             interaction: ClientInteractionController::new(),
             render_options,
+            player_collision_box_visible: false,
             render_resources: None,
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
@@ -636,6 +639,17 @@ impl FlatClientDriver {
                         "enabled"
                     } else {
                         "disabled"
+                    }
+                );
+            }
+            GameUiAction::TogglePlayerCollisionBox => {
+                self.player_collision_box_visible = !self.player_collision_box_visible;
+                log::info!(
+                    "player collision box debug {}",
+                    if self.player_collision_box_visible {
+                        "visible"
+                    } else {
+                        "hidden"
                     }
                 );
             }
@@ -1580,6 +1594,10 @@ impl FlatClientDriver {
         BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
     {
         let frame_inputs = self.prepare_frame_inputs(fallback_render_distance, ui_active);
+        let world_debug_lines = engine_debug_world_lines(
+            &self.camera,
+            EngineDebugVisualOptions::new(self.player_collision_box_visible),
+        );
         let Some(render_resources) = &mut self.render_resources else {
             anyhow::bail!("flat client render resources are not initialized");
         };
@@ -1597,6 +1615,7 @@ impl FlatClientDriver {
             frame_inputs.sun_angle,
             frame_inputs.render_options,
             frame_inputs.selection_outline.as_ref(),
+            &world_debug_lines,
             gui_state,
             build_gui_draw,
             &mut render_stats,
@@ -1691,6 +1710,7 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         max_render_distance: MAX_RENDER_DISTANCE,
         section_occlusion_culling: options.render_options.section_occlusion_culling,
         force_fullbright: options.render_options.force_fullbright,
+        player_collision_box_visible: options.player_collision_box_visible,
         movement_mode: options.movement_mode,
         fly_speed_multiplier: options.fly_speed_multiplier,
         min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
@@ -1856,6 +1876,19 @@ mod tests {
         );
         assert!(pending.payload.arm_mouse_lock);
         assert_eq!(driver.ui_screen(), Some(GameScreen::JoinRemote));
+    }
+
+    #[test]
+    fn ui_action_toggles_player_collision_box_debug_lines() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        assert!(!driver.player_collision_box_visible);
+        let result =
+            driver.apply_ui_action(GameUiAction::TogglePlayerCollisionBox, ui_action_context());
+
+        assert!(result.host_action.is_none());
+        assert!(driver.player_collision_box_visible);
     }
 
     #[test]

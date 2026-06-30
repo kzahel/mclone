@@ -10,7 +10,7 @@ use mclone_render::entity::{
     ActorDrawResources, ActorFigure, ActorInstance, ActorRenderStats, ActorTextureAtlas,
 };
 use mclone_render::fog::RenderFog;
-use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
+use mclone_render::gui::{GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiRenderer};
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky_render::SkyRenderer;
@@ -145,6 +145,7 @@ pub struct FlatRenderResources {
     actors: ActorDrawResources,
     screen_effects: ScreenEffectsRenderer,
     selection_outline: SelectionOutlineRenderer,
+    world_gui: WorldGuiRenderer,
     gui: GuiRenderer,
 }
 
@@ -204,6 +205,7 @@ impl FlatRenderResources {
             ScreenEffectsRenderer::new(device, queue, render_config.color_format, asset_source)
                 .context("failed to initialize screen effects renderer")?;
         let selection_outline = SelectionOutlineRenderer::new(device, render_config.color_format);
+        let world_gui = WorldGuiRenderer::new(device, render_config.color_format);
         let mut gui = GuiRenderer::new(device, render_config.color_format);
         gui.upload_texture_atlas(device, queue, chunk_atlas)
             .context("failed to initialize GUI texture atlas")?;
@@ -217,6 +219,7 @@ impl FlatRenderResources {
             actors,
             screen_effects,
             selection_outline,
+            world_gui,
             gui,
         })
     }
@@ -308,6 +311,7 @@ impl FlatRenderResources {
         sun_angle: f32,
         render_options: TexturedSectionRenderOptions,
         selection_outline: Option<&SelectionOutline>,
+        world_debug_lines: &[WorldGuiLine],
         gui: FullFrameGui,
         build_gui_draw: BuildGuiDraw,
         render_stats: &mut RenderStreamStats,
@@ -358,6 +362,19 @@ impl FlatRenderResources {
             selection_outline,
             SINGLE_VIEW_SLOT,
         );
+        if !gui.covers_world && !world_debug_lines.is_empty() {
+            self.world_gui
+                .render_lines_in_slot(
+                    device,
+                    queue,
+                    encoder,
+                    render_target,
+                    selection_render_view,
+                    world_debug_lines,
+                    SINGLE_VIEW_SLOT,
+                )
+                .context("render flat world debug lines")?;
+        }
         if let (Some(scaled), Some(presenter)) = (&self.scaled_color, &self.scale_presenter) {
             presenter.present(encoder, scaled, target.color_view);
         }

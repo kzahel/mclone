@@ -12,8 +12,8 @@ use mclone_client::{
     LocalPlayerPose, NoClipMovementStep, PlayerInputKey, WalkingMovementStep,
 };
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, BlockHitResult, BlockPos, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos,
-    ChunkSnapshot, PackedLightSection, SECTION_HEIGHT, Vec3d, block_to_chunk_coord,
+    AIR_BLOCK_STATE_ID, Aabb, BlockHitResult, BlockPos, CHUNK_SECTION_VOLUME, CHUNK_WIDTH,
+    ChunkPos, ChunkSnapshot, PackedLightSection, SECTION_HEIGHT, Vec3d, block_to_chunk_coord,
     block_to_section_coord, chunk_block_coord, chunk_middle_block_coord,
 };
 use mclone_mesh::{
@@ -27,6 +27,7 @@ use mclone_protocol::{
     ClientCommand, EntityKind, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate,
 };
 use mclone_render::entity::ActorInstance;
+use mclone_render::gui::WorldGuiLine;
 
 const PACKED_BUILD_REPORT_MAGIC: &[u8; 8] = b"MCRSBR1\0";
 pub const LANDING_MIN_IMPACT_SPEED: f64 = 0.5;
@@ -922,6 +923,10 @@ const ENGINE_HAND_PUSH_EMULATION_HAND_SPACING: f64 = 0.34;
 const ENGINE_HAND_PUSH_EMULATION_FORWARD_REACH: f64 = 0.32;
 const ENGINE_HAND_PUSH_EMULATION_STROKE: f64 = 0.36;
 const ENGINE_HAND_PUSH_EMULATION_LIFT: f64 = 0.16;
+const ENGINE_DEBUG_HAND_SPHERE_SEGMENTS: usize = 24;
+const ENGINE_DEBUG_PLAYER_BOX_COLOR: [f32; 4] = [0.1, 0.95, 0.65, 0.95];
+const ENGINE_DEBUG_LEFT_HAND_COLOR: [f32; 4] = [0.2, 0.55, 1.0, 0.95];
+const ENGINE_DEBUG_RIGHT_HAND_COLOR: [f32; 4] = [1.0, 0.62, 0.18, 0.95];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EngineCameraInput {
@@ -1187,6 +1192,7 @@ pub struct LandingEvent {
 pub struct EngineCameraController {
     player: LocalPlayerController,
     hand_push: HandPushLocomotionController,
+    last_hand_push_input: Option<EngineHandPushInput>,
     movement_mode: EngineCameraMovementMode,
     view_mode: EngineCameraViewMode,
     speed_blocks_per_second: f64,
@@ -1226,6 +1232,7 @@ impl EngineCameraController {
         Self {
             player,
             hand_push: HandPushLocomotionController::default(),
+            last_hand_push_input: None,
             movement_mode: EngineCameraMovementMode::Walking,
             view_mode: EngineCameraViewMode::FirstPerson,
             speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
@@ -1237,6 +1244,10 @@ impl EngineCameraController {
 
     pub const fn player(&self) -> &LocalPlayerController {
         &self.player
+    }
+
+    pub const fn last_hand_push_input(&self) -> Option<EngineHandPushInput> {
+        self.last_hand_push_input
     }
 
     pub fn set_eye_pose(&mut self, eye: Vec3d, yaw_radians: f64, pitch_radians: f64) {
@@ -1269,6 +1280,7 @@ impl EngineCameraController {
         if self.movement_mode != movement_mode {
             self.player.clear_delta_movement();
             self.hand_push.reset();
+            self.last_hand_push_input = None;
             self.hand_push_emulation_phase = 0.0;
         }
         self.movement_mode = movement_mode;
@@ -1600,6 +1612,7 @@ impl EngineCameraController {
                 .then(|| self.emulated_hand_push_input(input, dt_seconds))
                 .flatten()
         });
+        self.last_hand_push_input = hand_input;
         let mut moved_by_hand = false;
         if let Some(hand_input) = hand_input {
             if let Some(result) = self.hand_push.tick(
@@ -1614,6 +1627,7 @@ impl EngineCameraController {
             }
         } else {
             self.hand_push.reset();
+            self.last_hand_push_input = None;
         }
 
         let pose = self.player.pose();
@@ -1685,6 +1699,127 @@ impl EngineCameraController {
 
     pub fn render_camera(&self, render_distance: u32) -> EngineRenderCamera {
         render_camera_from_snapshot_with_view_mode(self.snapshot(), self.view_mode, render_distance)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct EngineDebugVisualOptions {
+    pub player_collision_box: bool,
+}
+
+impl EngineDebugVisualOptions {
+    pub const fn new(player_collision_box: bool) -> Self {
+        Self {
+            player_collision_box,
+        }
+    }
+}
+
+pub fn engine_debug_world_lines(
+    camera: &EngineCameraController,
+    options: EngineDebugVisualOptions,
+) -> Vec<WorldGuiLine> {
+    let mut lines = Vec::new();
+    if options.player_collision_box {
+        push_aabb_wire_lines(
+            &mut lines,
+            camera.player().pose().bounding_box(),
+            ENGINE_DEBUG_PLAYER_BOX_COLOR,
+        );
+    }
+    if camera.movement_mode() == EngineCameraMovementMode::HandPush {
+        if let Some(input) = camera.last_hand_push_input() {
+            let radius = sanitize_debug_radius(
+                camera.hand_push.settings().hand_radius,
+                HAND_PUSH_DEFAULT_HAND_RADIUS,
+            );
+            push_sphere_wire_lines(
+                &mut lines,
+                input.left_hand_position,
+                radius,
+                ENGINE_DEBUG_LEFT_HAND_COLOR,
+            );
+            push_sphere_wire_lines(
+                &mut lines,
+                input.right_hand_position,
+                radius,
+                ENGINE_DEBUG_RIGHT_HAND_COLOR,
+            );
+        }
+    }
+    lines
+}
+
+fn push_aabb_wire_lines(lines: &mut Vec<WorldGuiLine>, aabb: Aabb, color: [f32; 4]) {
+    let corners = [
+        Vec3d::new(aabb.min_x, aabb.min_y, aabb.min_z),
+        Vec3d::new(aabb.max_x, aabb.min_y, aabb.min_z),
+        Vec3d::new(aabb.max_x, aabb.min_y, aabb.max_z),
+        Vec3d::new(aabb.min_x, aabb.min_y, aabb.max_z),
+        Vec3d::new(aabb.min_x, aabb.max_y, aabb.min_z),
+        Vec3d::new(aabb.max_x, aabb.max_y, aabb.min_z),
+        Vec3d::new(aabb.max_x, aabb.max_y, aabb.max_z),
+        Vec3d::new(aabb.min_x, aabb.max_y, aabb.max_z),
+    ];
+    for (start, end) in [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
+    ] {
+        lines.push(WorldGuiLine::new(
+            glam_vec3_from_vec3d(corners[start]),
+            glam_vec3_from_vec3d(corners[end]),
+            color,
+        ));
+    }
+}
+
+fn push_sphere_wire_lines(
+    lines: &mut Vec<WorldGuiLine>,
+    center: Vec3d,
+    radius: f64,
+    color: [f32; 4],
+) {
+    let radius = sanitize_debug_radius(radius, HAND_PUSH_DEFAULT_HAND_RADIUS);
+    for plane in 0..3 {
+        for segment in 0..ENGINE_DEBUG_HAND_SPHERE_SEGMENTS {
+            let start = debug_sphere_point(center, radius, plane, segment);
+            let end = debug_sphere_point(center, radius, plane, segment + 1);
+            lines.push(WorldGuiLine::new(
+                glam_vec3_from_vec3d(start),
+                glam_vec3_from_vec3d(end),
+                color,
+            ));
+        }
+    }
+}
+
+fn debug_sphere_point(center: Vec3d, radius: f64, plane: usize, segment: usize) -> Vec3d {
+    let angle = (segment % ENGINE_DEBUG_HAND_SPHERE_SEGMENTS) as f64 * std::f64::consts::TAU
+        / ENGINE_DEBUG_HAND_SPHERE_SEGMENTS as f64;
+    let sin = angle.sin() * radius;
+    let cos = angle.cos() * radius;
+    match plane {
+        0 => center.add(Vec3d::new(cos, sin, 0.0)),
+        1 => center.add(Vec3d::new(cos, 0.0, sin)),
+        _ => center.add(Vec3d::new(0.0, cos, sin)),
+    }
+}
+
+fn sanitize_debug_radius(radius: f64, fallback: f64) -> f64 {
+    if radius.is_finite() && radius > 0.0 {
+        radius
+    } else {
+        fallback
     }
 }
 
@@ -3587,6 +3722,42 @@ mod tests {
         assert_eq!(EngineCameraMovementMode::Walking.label(), "WALK");
         assert_eq!(EngineCameraMovementMode::NoClip.label(), "NOCLIP");
         assert_eq!(EngineCameraMovementMode::HandPush.label(), "HAND");
+    }
+
+    #[test]
+    fn engine_debug_world_lines_include_player_box_and_hand_colliders() {
+        let client = ClientRuntime::local_integrated();
+        let mut camera = EngineCameraController::from_eye_pose(
+            Vec3d::new(0.5, 2.62, 0.5),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+
+        assert!(engine_debug_world_lines(&camera, EngineDebugVisualOptions::default()).is_empty());
+        assert_eq!(
+            engine_debug_world_lines(&camera, EngineDebugVisualOptions::new(true)).len(),
+            12
+        );
+
+        camera.set_movement_mode(EngineCameraMovementMode::HandPush);
+        camera.apply_movement_input(
+            &client,
+            EngineCameraInput {
+                dt_seconds: 1.0 / 60.0,
+                hand_push: Some(EngineHandPushInput::new(
+                    Vec3d::new(0.5, 2.62, 0.5),
+                    Vec3d::new(0.25, 1.6, 0.45),
+                    Vec3d::new(0.75, 1.6, 0.45),
+                )),
+                ..EngineCameraInput::default()
+            },
+        );
+
+        let hand_lines = engine_debug_world_lines(&camera, EngineDebugVisualOptions::default());
+        assert_eq!(hand_lines.len(), ENGINE_DEBUG_HAND_SPHERE_SEGMENTS * 3 * 2);
+        let all_lines = engine_debug_world_lines(&camera, EngineDebugVisualOptions::new(true));
+        assert_eq!(all_lines.len(), hand_lines.len() + 12);
     }
 
     #[test]

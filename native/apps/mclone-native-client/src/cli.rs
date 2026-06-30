@@ -108,6 +108,7 @@ pub(crate) struct HeadlessScreenshotOptions {
     pub(crate) camera_view: EngineCameraViewMode,
     pub(crate) ui: HeadlessScreenshotUi,
     pub(crate) debug_pane: bool,
+    pub(crate) player_collision_box: bool,
     pub(crate) scripted_interaction: bool,
     pub(crate) remote_settle_ms: u64,
     pub(crate) eye: Option<[f32; 3]>,
@@ -359,6 +360,7 @@ impl Cli {
         );
         let mut screenshot_ui = HeadlessScreenshotUi::None;
         let mut screenshot_debug_pane = false;
+        let mut screenshot_player_collision_box = false;
         let mut screenshot_scripted_interaction = false;
         let mut screenshot_remote_settle_ms = 0;
         let mut screenshot_eye = None;
@@ -518,6 +520,10 @@ impl Cli {
                 }
                 "--screenshot-debug-pane" => {
                     screenshot_debug_pane = parse_bool_arg("--screenshot-debug-pane", args.next())?;
+                }
+                "--screenshot-player-box" => {
+                    screenshot_player_collision_box =
+                        parse_bool_arg("--screenshot-player-box", args.next())?;
                 }
                 "--screenshot-scripted-interaction" => {
                     screenshot_scripted_interaction =
@@ -711,6 +717,7 @@ impl Cli {
                     camera_view: screenshot_camera_view,
                     ui: screenshot_ui,
                     debug_pane: screenshot_debug_pane,
+                    player_collision_box: screenshot_player_collision_box,
                     scripted_interaction: screenshot_scripted_interaction,
                     remote_settle_ms: screenshot_remote_settle_ms,
                     eye: screenshot_eye,
@@ -1024,7 +1031,7 @@ fn print_help() {
           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|block-palette|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-camera-view first-person|third-person] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|block-palette|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-camera-view first-person|third-person] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
