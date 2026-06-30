@@ -15,6 +15,14 @@ export interface TextureSpec {
   base: string;
   exportPath: string;
   layers?: TextureLayerSpec[];
+  preview?: TexturePreviewSpec;
+}
+
+export interface TexturePreviewSpec {
+  tint?: string;
+  checkerboard?: boolean;
+  cube?: boolean;
+  rotation?: boolean;
 }
 
 export interface BlockSpec {
@@ -116,6 +124,9 @@ export function assertValidTexturePack(asset: TexturePackAsset): void {
       errors.push(
         `texture '${textureName}' exportPath must be an assets/**/*.png path, got '${texture.exportPath}'`,
       );
+    }
+    if (texture.preview?.tint !== undefined && !isHexColor(texture.preview.tint)) {
+      errors.push(`texture '${textureName}' preview tint has invalid color '${texture.preview.tint}'`);
     }
     for (const [layerIndex, layer] of (texture.layers ?? []).entries()) {
       validateLayer(textureName, layerIndex, layer, palette, size, errors);

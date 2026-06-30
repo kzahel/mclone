@@ -104,6 +104,8 @@ Required concepts:
 - indexed textures from ASCII rows
 - generated tileable textures from deterministic helpers
 - texture roles: `all`, `top`, `bottom`, `side`, `overlay`, `particle`
+- preview-only texture metadata for tint, checkerboard transparency, and
+  disabling misleading cube/rotation panels
 - block preview metadata: cube, cross-plane plant, log axis, cutout/alpha mode
 - tint metadata for grass/foliage/water-style review
 - variant metadata for preview: rotations, mirrors, authored variants, weights
@@ -195,6 +197,8 @@ texture.
 - [x] Add per-face block bundle for `grass_block`.
 - [x] Add tint swatches for grass previews.
 - [x] Add transparent overlay preview for grass side textures.
+- [x] Add preview-only tint/checker controls so neutral grass and transparent
+  overlay source textures render meaningfully in individual sheets.
 - [ ] Add foliage/water tint swatches once those texture families exist.
 
 Validation:

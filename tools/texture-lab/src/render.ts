@@ -11,6 +11,7 @@ import type { RgbaImage } from "./png";
 export interface RenderedTexture extends RgbaImage {
   name: string;
   exportPath: string;
+  preview: TextureSpec["preview"];
 }
 
 type Rgba = [number, number, number, number];
@@ -43,6 +44,7 @@ export function renderTexture(pack: TexturePackAsset, name: string, texture: Tex
     width: size,
     height: size,
     data,
+    preview: texture.preview,
   };
 }
 
@@ -52,27 +54,44 @@ export function makeReviewSheet(texture: RenderedTexture): RgbaImage {
   const sheetWidth = 1040;
   const sheetHeight = 672;
   const sheet = solidImage(sheetWidth, sheetHeight, background);
+  const displayTexture = previewTexture(texture);
+  const useCheckerboard = texture.preview?.checkerboard ?? hasTransparency(displayTexture);
+  const showCube = texture.preview?.cube ?? !hasTransparency(displayTexture);
+  const showRotation = texture.preview?.rotation ?? !hasTransparency(displayTexture);
 
   drawRect(sheet, 16, 16, 264, 264, panel);
-  drawScaled(sheet, texture, 20, 20, 8);
-  drawGrid(sheet, 20, 20, texture.width, texture.height, 8, [86, 89, 88, 255]);
+  if (useCheckerboard) {
+    drawCheckerboard(sheet, 20, 20, displayTexture.width * 8, displayTexture.height * 8, 8);
+  }
+  drawScaled(sheet, displayTexture, 20, 20, 8);
+  drawGrid(sheet, 20, 20, displayTexture.width, displayTexture.height, 8, [86, 89, 88, 255]);
 
   drawRect(sheet, 304, 16, 296, 296, panel);
-  drawTiledScaled(sheet, texture, 308, 20, 3, 3, 3);
+  if (useCheckerboard) {
+    drawCheckerboard(sheet, 308, 20, displayTexture.width * 3 * 3, displayTexture.height * 3 * 3, 12);
+  }
+  drawTiledScaled(sheet, displayTexture, 308, 20, 3, 3, 3);
 
-  const downsampled = downsampleNearest(texture, 16, 16);
+  const downsampled = downsampleNearest(displayTexture, 16, 16);
   drawRect(sheet, 624, 16, 200, 200, panel);
+  if (useCheckerboard) {
+    drawCheckerboard(sheet, 628, 20, downsampled.width * 12, downsampled.height * 12, 12);
+  }
   drawScaled(sheet, downsampled, 628, 20, 12);
   drawGrid(sheet, 628, 20, downsampled.width, downsampled.height, 12, [86, 89, 88, 255]);
 
   drawRect(sheet, 624, 232, 200, 80, panel);
-  drawMipStrip(sheet, texture, 632, 240);
+  drawMipStrip(sheet, displayTexture, 632, 240, useCheckerboard);
 
-  drawRect(sheet, 840, 16, 184, 296, panel);
-  drawIsometricCube(sheet, texture, 868, 48);
+  if (showCube) {
+    drawRect(sheet, 840, 16, 184, 296, panel);
+    drawIsometricCube(sheet, displayTexture, 868, 48);
+  }
 
-  drawRect(sheet, 16, 328, 328, 328, panel);
-  drawRotatedTiledScaled(sheet, texture, 20, 332, 5, 5, 2, "vanilla-dirt-rotation-preview");
+  if (showRotation) {
+    drawRect(sheet, 16, 328, 328, 328, panel);
+    drawRotatedTiledScaled(sheet, displayTexture, 20, 332, 5, 5, 2, `${texture.name}:rotation-preview`);
+  }
 
   return sheet;
 }
@@ -264,7 +283,7 @@ function rotatedSourceCoordinate(width: number, height: number, x: number, y: nu
   return [x, y];
 }
 
-function drawMipStrip(target: RgbaImage, source: RgbaImage, targetX: number, targetY: number): void {
+function drawMipStrip(target: RgbaImage, source: RgbaImage, targetX: number, targetY: number, checkerboard: boolean): void {
   const levels = [
     { size: 16, scale: 3 },
     { size: 8, scale: 4 },
@@ -275,6 +294,9 @@ function drawMipStrip(target: RgbaImage, source: RgbaImage, targetX: number, tar
   let x = targetX;
   for (const level of levels) {
     const image = downsampleNearest(source, level.size, level.size);
+    if (checkerboard) {
+      drawCheckerboard(target, x, targetY, level.size * level.scale, level.size * level.scale, level.scale);
+    }
     drawScaled(target, image, x, targetY, level.scale);
     x += level.size * level.scale + 12;
   }
@@ -477,6 +499,17 @@ function drawGrid(target: RgbaImage, targetX: number, targetY: number, width: nu
   }
 }
 
+function drawCheckerboard(target: RgbaImage, x: number, y: number, width: number, height: number, cellSize: number): void {
+  const light: Rgba = [74, 77, 75, 255];
+  const dark: Rgba = [45, 47, 46, 255];
+  for (let py = 0; py < height; py += 1) {
+    for (let px = 0; px < width; px += 1) {
+      const color = (Math.floor(px / cellSize) + Math.floor(py / cellSize)) % 2 === 0 ? light : dark;
+      writePixel(target.data, target.width, x + px, y + py, color);
+    }
+  }
+}
+
 function drawRect(target: RgbaImage, x: number, y: number, width: number, height: number, color: Rgba): void {
   const x0 = Math.max(0, x);
   const y0 = Math.max(0, y);
@@ -500,6 +533,22 @@ function writePixel(data: Uint8Array, width: number, x: number, y: number, color
   data[index + 1] = color[1];
   data[index + 2] = color[2];
   data[index + 3] = color[3];
+}
+
+function previewTexture(texture: RenderedTexture): RgbaImage {
+  if (!texture.preview?.tint) {
+    return texture;
+  }
+  return tintTexture(texture, parseHexColor(texture.preview.tint));
+}
+
+function hasTransparency(image: RgbaImage): boolean {
+  for (let index = 3; index < image.data.length; index += 4) {
+    if (image.data[index] !== 255) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function cloneImage(image: RgbaImage): RgbaImage {

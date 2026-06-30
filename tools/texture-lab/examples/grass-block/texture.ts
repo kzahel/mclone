@@ -32,6 +32,9 @@ export default texturePack("mclone-grass-block-starter", ({ palette, texture, bl
     palette: "grass_top",
     base: "base",
     exportPath: "assets/mclone/textures/block/grass_block_top.png",
+    preview: {
+      tint: "#79b34e",
+    },
     layers: [
       speckles({
         seed: "grass-top-soft-blades",
@@ -122,6 +125,12 @@ export default texturePack("mclone-grass-block-starter", ({ palette, texture, bl
     palette: "grass_overlay",
     base: "transparent",
     exportPath: "assets/mclone/textures/block/grass_block_side_overlay.png",
+    preview: {
+      tint: "#79b34e",
+      checkerboard: true,
+      cube: false,
+      rotation: false,
+    },
     layers: [
       ascii({
         colors: {
