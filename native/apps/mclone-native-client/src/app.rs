@@ -384,7 +384,18 @@ impl ChunkApp {
     }
 
     fn gui_point(&self, x: f64, y: f64) -> Option<Point> {
-        self.gui_scale().map(|scale| scale.client_to_gui(x, y))
+        let surface = self.surface.as_ref()?;
+        let window_size = self
+            .window
+            .as_ref()
+            .map(|window| window.inner_size())
+            .map(|size| [size.width, size.height])
+            .unwrap_or([surface.config.width, surface.config.height]);
+        Some(gui_point_from_physical_cursor(
+            (x, y),
+            window_size,
+            [surface.config.width, surface.config.height],
+        ))
     }
 
     fn current_ui_render_state(&self) -> GameUiRenderState {
@@ -1310,6 +1321,20 @@ fn desktop_pointer_button_from_mouse_button(button: MouseButton) -> Option<Point
     }
 }
 
+fn gui_point_from_physical_cursor(
+    cursor: (f64, f64),
+    window_size: [u32; 2],
+    surface_size: [u32; 2],
+) -> Point {
+    let surface_width = surface_size[0].max(1);
+    let surface_height = surface_size[1].max(1);
+    let window_width = window_size[0].max(1);
+    let window_height = window_size[1].max(1);
+    let surface_x = cursor.0 * f64::from(surface_width) / f64::from(window_width);
+    let surface_y = cursor.1 * f64::from(surface_height) / f64::from(window_height);
+    GuiScale::from_pixels(surface_width, surface_height).client_to_gui(surface_x, surface_y)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1381,6 +1406,28 @@ mod tests {
         assert_eq!(next_desktop_render_scale(0.75), 1.5);
         assert_eq!(next_desktop_render_scale(1.5), 1.0);
         assert_eq!(next_desktop_render_scale(1.25), 1.0);
+    }
+
+    #[test]
+    fn gui_point_from_physical_cursor_uses_surface_gui_scale() {
+        let point = gui_point_from_physical_cursor((640.0, 450.0), [1280, 900], [1280, 900]);
+
+        assert!((point.x - 640.0 / 3.0).abs() < f32::EPSILON);
+        assert_eq!(point.y, 150.0);
+    }
+
+    #[test]
+    fn gui_point_from_physical_cursor_maps_window_to_surface_size() {
+        let point = gui_point_from_physical_cursor((640.0, 360.0), [1280, 720], [2560, 1440]);
+        let scale = GuiScale::from_pixels(2560, 1440);
+
+        assert_eq!(
+            point,
+            Point {
+                x: scale.width * 0.5,
+                y: scale.height * 0.5,
+            }
+        );
     }
 
     #[test]

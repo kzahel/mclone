@@ -333,6 +333,7 @@ impl FlatRenderResources {
         let selection_render_view =
             render_view_with_underwater_effect(render_view, underwater_overlay);
         let render_frame = RenderFrameContext::new(device, queue, encoder, render_target);
+        let world_pass_gui = FullFrameGui::new(false, gui.covers_world, gui.scale);
         let summary = render_full_frame_for_view(
             render_frame,
             &self.depth,
@@ -348,37 +349,52 @@ impl FlatRenderResources {
             time_of_day,
             sun_angle,
             render_options,
+            world_pass_gui,
+            |_| GuiDrawList::new(),
+            render_stats,
+        )?;
+        if !gui.covers_world {
+            self.selection_outline.render_in_slot(
+                device,
+                queue,
+                encoder,
+                render_target,
+                &self.depth,
+                selection_render_view,
+                selection_outline,
+                SINGLE_VIEW_SLOT,
+            );
+            if !world_debug_lines.is_empty() {
+                self.world_gui
+                    .render_lines_in_slot(
+                        device,
+                        queue,
+                        encoder,
+                        render_target,
+                        selection_render_view,
+                        world_debug_lines,
+                        SINGLE_VIEW_SLOT,
+                    )
+                    .context("render flat world debug lines")?;
+            }
+            if let (Some(scaled), Some(presenter)) = (&self.scaled_color, &self.scale_presenter) {
+                presenter.present(encoder, scaled, target.color_view);
+            }
+        }
+        let gui_command_count = render_full_frame_gui(
+            device,
+            queue,
+            encoder,
+            target,
+            &mut self.gui,
             gui,
             build_gui_draw,
             render_stats,
         )?;
-        self.selection_outline.render_in_slot(
-            device,
-            queue,
-            encoder,
-            render_target,
-            &self.depth,
-            selection_render_view,
-            selection_outline,
-            SINGLE_VIEW_SLOT,
-        );
-        if !gui.covers_world && !world_debug_lines.is_empty() {
-            self.world_gui
-                .render_lines_in_slot(
-                    device,
-                    queue,
-                    encoder,
-                    render_target,
-                    selection_render_view,
-                    world_debug_lines,
-                    SINGLE_VIEW_SLOT,
-                )
-                .context("render flat world debug lines")?;
-        }
-        if let (Some(scaled), Some(presenter)) = (&self.scaled_color, &self.scale_presenter) {
-            presenter.present(encoder, scaled, target.color_view);
-        }
-        Ok(summary)
+        Ok(FullFrameRenderSummary {
+            gui_command_count,
+            ..summary
+        })
     }
 }
 
@@ -1347,6 +1363,39 @@ where
         actor_count: actor_instances.len(),
         drawn_actor_count: actor_stats.drawn_actor_count,
     })
+}
+
+fn render_full_frame_gui<BuildGuiDraw>(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    encoder: &mut wgpu::CommandEncoder,
+    target: mclone_render::target::RenderFrameTarget<'_>,
+    gui_renderer: &mut GuiRenderer,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    render_stats: &RenderStreamStats,
+) -> Result<usize>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let gui_draw = build_gui_draw(render_stats);
+    let gui_command_count = gui_draw.commands().len();
+    if gui.active {
+        gui_renderer.render(
+            device,
+            queue,
+            encoder,
+            target,
+            gui.scale,
+            &gui_draw,
+            if gui.covers_world {
+                GuiRenderOptions::clear(mclone_render::default_clear_color())
+            } else {
+                GuiRenderOptions::overlay()
+            },
+        )?;
+    }
+    Ok(gui_command_count)
 }
 
 pub fn record_render_section_update_stats(
