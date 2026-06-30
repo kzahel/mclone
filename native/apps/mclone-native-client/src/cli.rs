@@ -123,6 +123,14 @@ pub(crate) struct HeadlessDualViewOptions {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct HeadlessActorReviewSheetOptions {
+    pub(crate) path: PathBuf,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) render_options: TexturedSectionRenderOptions,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RendererRebuildSmokeOptions {
     pub(crate) directory: PathBuf,
     pub(crate) width: u32,
@@ -308,6 +316,9 @@ pub(crate) enum Cli {
     HeadlessDualView {
         options: HeadlessDualViewOptions,
     },
+    HeadlessActorReviewSheet {
+        options: HeadlessActorReviewSheetOptions,
+    },
     RendererRebuildSmoke {
         options: RendererRebuildSmokeOptions,
     },
@@ -330,6 +341,7 @@ pub(crate) enum Cli {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum HeadlessMode {
+    ActorReviewSheet(PathBuf),
     Clear(PathBuf),
     DualView(PathBuf),
     Screenshot(PathBuf),
@@ -457,6 +469,16 @@ impl Cli {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Clear(path))?;
+                }
+                "--actor-review-sheet" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--actor-review-sheet requires an output PNG path")?;
+                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                        bail!("headless output modes cannot be combined with perf modes");
+                    }
+                    set_headless_mode(&mut mode, HeadlessMode::ActorReviewSheet(path))?;
                 }
                 "--headless-dual-view" => {
                     let path = args
@@ -643,6 +665,7 @@ impl Cli {
                     mode,
                     Some(
                         HeadlessMode::Clear(_)
+                            | HeadlessMode::ActorReviewSheet(_)
                             | HeadlessMode::DualView(_)
                             | HeadlessMode::RendererRebuildSmoke(_)
                     )
@@ -658,6 +681,14 @@ impl Cli {
                 path,
                 width: width.unwrap_or(96),
                 height: height.unwrap_or(64),
+            }),
+            Some(HeadlessMode::ActorReviewSheet(path)) => Ok(Self::HeadlessActorReviewSheet {
+                options: HeadlessActorReviewSheetOptions {
+                    path,
+                    width: width.unwrap_or(1152),
+                    height: height.unwrap_or(512),
+                    render_options,
+                },
             }),
             Some(HeadlessMode::DualView(directory)) => Ok(Self::HeadlessDualView {
                 options: HeadlessDualViewOptions {
@@ -992,6 +1023,7 @@ fn print_help() {
          Usage:\n\
           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
+           mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|block-palette|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-camera-view first-person|third-person] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\

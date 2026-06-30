@@ -25,14 +25,15 @@ use crate::camera::SPECTATOR_BASE_SPEED;
 use crate::cli::Cli;
 #[cfg(test)]
 use crate::cli::{
-    FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessDualViewOptions,
-    HeadlessScreenshotOptions, HeadlessScreenshotUi, MovementPerfOptions,
+    FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessActorReviewSheetOptions,
+    HeadlessDualViewOptions, HeadlessScreenshotOptions, HeadlessScreenshotUi, MovementPerfOptions,
     RendererRebuildSmokeOptions, SceneOptions, TimedemoOptions, WindowStartIntent,
     XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
     parse_screenshot_ui_arg,
 };
 use crate::headless::{
-    run_headless_screenshot, run_renderer_rebuild_smoke, write_headless_dual_view,
+    run_headless_screenshot, run_renderer_rebuild_smoke, write_actor_review_sheet,
+    write_headless_dual_view,
 };
 use crate::perf::{run_frame_budget_probe, run_movement_perf_smoke, run_timedemo};
 use anyhow::Result;
@@ -122,6 +123,21 @@ fn main() -> Result<()> {
                     report.drawn_index_count
                 );
             }
+            Ok(())
+        }
+        Cli::HeadlessActorReviewSheet { options } => {
+            let report = write_actor_review_sheet(&options)?;
+            println!(
+                "actor review sheet saved to {} ({}x{}, {} bytes, {} views, {} non-clear RGB pixels, {} actors, {} drawn actors)",
+                report.path.display(),
+                report.width,
+                report.height,
+                report.byte_len,
+                report.view_count,
+                report.non_clear_rgb_pixel_count,
+                report.actor_count,
+                report.drawn_actor_count
+            );
             Ok(())
         }
         Cli::RendererRebuildSmoke { options } => {
@@ -680,6 +696,36 @@ mod tests {
                 path: PathBuf::from("/tmp/mclone.png"),
                 width: 32,
                 height: 16,
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_actor_review_sheet_options() {
+        let cli = Cli::parse([
+            "--actor-review-sheet".to_owned(),
+            "/tmp/mclone-actor-review.png".to_owned(),
+            "--width".to_owned(),
+            "900".to_owned(),
+            "--height".to_owned(),
+            "420".to_owned(),
+            "--fullbright".to_owned(),
+            "false".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::HeadlessActorReviewSheet {
+                options: HeadlessActorReviewSheetOptions {
+                    path: PathBuf::from("/tmp/mclone-actor-review.png"),
+                    width: 900,
+                    height: 420,
+                    render_options: TexturedSectionRenderOptions {
+                        force_fullbright: false,
+                        ..TexturedSectionRenderOptions::default()
+                    },
+                },
             }
         );
     }

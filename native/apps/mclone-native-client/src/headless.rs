@@ -13,6 +13,10 @@ use mclone_render::chunk::{
     TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::RenderConfig;
+use mclone_render::entity::{
+    ActorDrawResources, ActorInstance, ActorRenderStats, ActorTextureAtlas, ActorTextureLayout,
+    ActorTextureRegion,
+};
 use mclone_render::headless::{
     HEADLESS_FORMAT, HeadlessFrameLoopOptions, HeadlessFrameOptions, run_headless_capture_loop,
     save_rgba_png, write_headless_frame_png,
@@ -23,7 +27,10 @@ use mclone_render_session::actor_instances_from_presentations;
 use mclone_ui::{GameMovementMode, GameUi, GuiDrawList, GuiScale};
 
 use crate::camera::SpectatorCamera;
-use crate::cli::{HeadlessDualViewOptions, HeadlessScreenshotOptions, RendererRebuildSmokeOptions};
+use crate::cli::{
+    HeadlessActorReviewSheetOptions, HeadlessDualViewOptions, HeadlessScreenshotOptions,
+    RendererRebuildSmokeOptions,
+};
 use crate::flat_client_driver::{FlatClientUiRenderOptions, game_ui_render_state};
 use crate::frame_pacing::FramePacingUiState;
 use crate::render_cache::load_asset_source;
@@ -59,6 +66,18 @@ pub(crate) struct HeadlessDualViewReport {
     pub(crate) drawn_section_count: usize,
     pub(crate) index_count: u32,
     pub(crate) drawn_index_count: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct HeadlessActorReviewSheetReport {
+    pub(crate) path: PathBuf,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) byte_len: usize,
+    pub(crate) view_count: usize,
+    pub(crate) non_clear_rgb_pixel_count: usize,
+    pub(crate) actor_count: usize,
+    pub(crate) drawn_actor_count: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -134,6 +153,205 @@ struct RendererRebuildSmokeState {
     reuploaded_section_count: usize,
     state_preserved: bool,
     summary: Option<FullFrameRenderSummary>,
+}
+
+struct ActorReviewSheetState {
+    actors: ActorDrawResources,
+    stats: Vec<ActorRenderStats>,
+    render_options: TexturedSectionRenderOptions,
+}
+
+pub(crate) fn write_actor_review_sheet(
+    options: &HeadlessActorReviewSheetOptions,
+) -> Result<HeadlessActorReviewSheetReport> {
+    let view_count = actor_review_views().len();
+    let panel_width = (options.width.max(view_count as u32) / view_count as u32).max(1);
+    let panel_height = options.height.max(1);
+    let sheet_width = panel_width * view_count as u32;
+    let mut render_options = options.render_options;
+    render_options.force_fullbright = true;
+
+    let (loop_report, panel_pixels, state) = run_headless_capture_loop(
+        HeadlessFrameLoopOptions {
+            width: panel_width,
+            height: panel_height,
+            frame_count: view_count,
+        },
+        move |device, queue, format, _size| {
+            Ok(ActorReviewSheetState {
+                actors: ActorDrawResources::new(
+                    device,
+                    queue,
+                    format,
+                    actor_review_texture_atlas(),
+                )?,
+                stats: Vec::with_capacity(view_count),
+                render_options,
+            })
+        },
+        |index, frame, state| render_actor_review_panel(index, frame, state),
+    )?;
+    if panel_pixels.len() != view_count {
+        bail!(
+            "actor review rendered {} panels but expected {view_count}",
+            panel_pixels.len()
+        );
+    }
+
+    let sheet_pixels = stitch_actor_review_panels(&panel_pixels, panel_width, panel_height);
+    save_rgba_png(&options.path, sheet_width, panel_height, &sheet_pixels)?;
+    Ok(HeadlessActorReviewSheetReport {
+        path: options.path.clone(),
+        width: sheet_width,
+        height: panel_height,
+        byte_len: sheet_pixels.len(),
+        view_count: loop_report.frame_count,
+        non_clear_rgb_pixel_count: non_clear_rgb_pixel_count(&sheet_pixels),
+        actor_count: state.stats.iter().map(|stats| stats.submitted_actor_count).sum(),
+        drawn_actor_count: state.stats.iter().map(|stats| stats.drawn_actor_count).sum(),
+    })
+}
+
+fn render_actor_review_panel(
+    index: usize,
+    frame: mclone_render::target::RenderFrameContext<'_>,
+    state: &mut ActorReviewSheetState,
+) -> Result<()> {
+    let depth = ChunkDepthTarget::new(frame.device, frame.target.size[0], frame.target.size[1]);
+    clear_actor_review_frame(frame.encoder, frame.target, &depth);
+    let actor = ActorInstance::local_player(Vec3::ZERO, 0.0);
+    let camera = actor_review_views()
+        .get(index)
+        .map(|view| view.camera)
+        .context("actor review panel index out of range")?;
+    let stats = state.actors.render(
+        frame.device,
+        frame.queue,
+        frame.encoder,
+        frame.target.with_depth(&depth.view),
+        camera.render_view(frame.target.size[0], frame.target.size[1]),
+        state.render_options,
+        &[actor],
+    )?;
+    state.stats.push(stats);
+    Ok(())
+}
+
+fn clear_actor_review_frame(
+    encoder: &mut wgpu::CommandEncoder,
+    target: mclone_render::target::RenderFrameTarget<'_>,
+    depth: &ChunkDepthTarget,
+) {
+    let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("mclone_actor_review_clear_pass"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: target.color_view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color {
+                    r: 0.62,
+                    g: 0.66,
+                    b: 0.70,
+                    a: 1.0,
+                }),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: &depth.view,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        }),
+        ..Default::default()
+    });
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ActorReviewView {
+    name: &'static str,
+    camera: ChunkCamera,
+}
+
+fn actor_review_views() -> [ActorReviewView; 3] {
+    [
+        ActorReviewView {
+            name: "front",
+            camera: actor_review_camera(Vec3::new(0.0, 0.96, 4.2)),
+        },
+        ActorReviewView {
+            name: "side",
+            camera: actor_review_camera(Vec3::new(4.2, 0.96, 0.0)),
+        },
+        ActorReviewView {
+            name: "three_quarter",
+            camera: actor_review_camera(Vec3::new(3.0, 1.0, 3.0)),
+        },
+    ]
+}
+
+fn actor_review_camera(eye: Vec3) -> ChunkCamera {
+    ChunkCamera {
+        eye: eye.to_array(),
+        target: [0.0, 0.92, 0.0],
+        up: [0.0, 1.0, 0.0],
+        fov_y_radians: 28.0_f32.to_radians(),
+        z_near: 0.05,
+        z_far: 16.0,
+    }
+}
+
+fn actor_review_texture_atlas() -> ActorTextureAtlas<'static> {
+    static WHITE_PIXEL: [u8; 4] = [255, 255, 255, 255];
+    ActorTextureAtlas {
+        width: 1,
+        height: 1,
+        rgba: &WHITE_PIXEL,
+        layout: ActorTextureLayout {
+            white: ActorTextureRegion {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            cow: ActorTextureRegion {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+        },
+    }
+}
+
+fn stitch_actor_review_panels(panel_pixels: &[Vec<u8>], panel_width: u32, height: u32) -> Vec<u8> {
+    let view_count = panel_pixels.len();
+    let sheet_width = panel_width * view_count as u32;
+    let mut sheet = vec![0; (sheet_width * height * 4) as usize];
+    let panel_row_bytes = (panel_width * 4) as usize;
+    let sheet_row_bytes = (sheet_width * 4) as usize;
+    for (panel_index, panel) in panel_pixels.iter().enumerate() {
+        for row in 0..height as usize {
+            let source_start = row * panel_row_bytes;
+            let source_end = source_start + panel_row_bytes;
+            let dest_start = row * sheet_row_bytes + panel_index * panel_row_bytes;
+            let dest_end = dest_start + panel_row_bytes;
+            sheet[dest_start..dest_end].copy_from_slice(&panel[source_start..source_end]);
+        }
+    }
+    sheet
+}
+
+fn non_clear_rgb_pixel_count(pixels: &[u8]) -> usize {
+    let Some(clear) = pixels.get(0..3) else {
+        return 0;
+    };
+    pixels
+        .chunks_exact(4)
+        .filter(|pixel| &pixel[0..3] != clear)
+        .count()
 }
 
 pub(crate) fn write_headless_dual_view(
@@ -633,4 +851,36 @@ pub(crate) fn run_headless_screenshot(
         drawn_actor_count: report.summary.drawn_actor_count,
         underwater: report.underwater,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn actor_review_views_include_front_side_and_three_quarter() {
+        let views = actor_review_views();
+
+        assert_eq!(views.map(|view| view.name), ["front", "side", "three_quarter"]);
+        assert_eq!(views[0].camera.eye, [0.0, 0.96, 4.2]);
+        assert_eq!(views[1].camera.eye, [4.2, 0.96, 0.0]);
+        assert_eq!(views[2].camera.target, [0.0, 0.92, 0.0]);
+    }
+
+    #[test]
+    fn actor_review_sheet_stitches_panels_horizontally() {
+        let red = vec![255, 0, 0, 255, 250, 0, 0, 255];
+        let green = vec![0, 255, 0, 255, 0, 250, 0, 255];
+        let blue = vec![0, 0, 255, 255, 0, 0, 250, 255];
+
+        let sheet = stitch_actor_review_panels(&[red, green, blue], 2, 1);
+
+        assert_eq!(
+            sheet,
+            vec![
+                255, 0, 0, 255, 250, 0, 0, 255, 0, 255, 0, 255, 0, 250, 0, 255, 0, 0, 255,
+                255, 0, 0, 250, 255,
+            ]
+        );
+    }
 }

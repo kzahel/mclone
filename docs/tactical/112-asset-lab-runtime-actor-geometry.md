@@ -1,6 +1,6 @@
 # 112 - Asset Lab Runtime Actor Geometry
 
-Status: active; Slice 1 static authored player mesh landed.
+Status: active; Slice 1b actor review sheet landed.
 
 ## Purpose
 
@@ -103,11 +103,34 @@ Screenshot inspected:
 /tmp/mclone-asset-lab-player.png
 ```
 
-The screenshot path currently shows the authored player from behind because the
+The gameplay screenshot path shows the authored player from behind because the
 runtime camera exposes first-person and third-person-back only. Front-face ASCII
-eye/mouth placement is validated by mesh tests in this slice. A dedicated actor
-turntable or front/side screenshot lane should be added before judging authored
-face quality visually inside the engine.
+eye/mouth placement is validated by mesh tests in this slice and visually by the
+actor review sheet in Slice 1b.
+
+### Slice 1b - Actor Review Sheet
+
+- [x] Add a native `--actor-review-sheet` headless mode.
+- [x] Render the authored player through the same actor renderer used by
+      gameplay.
+- [x] Capture front, side, and three-quarter views into one PNG sheet.
+- [x] Use an actor-only neutral background so figure geometry is not hidden by
+      terrain or UI.
+- [x] Add CLI and pure sheet/camera tests.
+- [x] Capture and inspect the review sheet.
+
+Validation:
+
+```powershell
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --actor-review-sheet /tmp/mclone-actor-review-sheet.png --width 1152 --height 512
+```
+
+Review output inspected:
+
+```text
+/tmp/mclone-actor-review-sheet.png
+```
 
 ### Slice 2 - Real Asset Ownership
 
