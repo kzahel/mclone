@@ -21,6 +21,7 @@ use mclone_render_session::{
 pub const DEFAULT_REFERENCE_ASSET_VERSION: &str = "1.17.1";
 pub const DEFAULT_REFERENCE_PACK_FILE: &str = "extracted.zip";
 pub const DEFAULT_NAMED_PACK_FILE: &str = "mclone-game-1.17.1.pbp";
+pub const DEFAULT_OVERLAY_PACK_FILE: &str = "mclone-default-overlay.pbp";
 pub const DEFAULT_ANDROID_APP_ID: &str = "com.kzahel.mclone";
 pub const DEFAULT_FIRST_PARTY_ASSET_DIR: &str = "assets";
 
@@ -236,6 +237,10 @@ pub fn load_asset_source() -> Result<AssetSourceChain> {
     let mode = AssetMode::from_env()?;
     let mut source = AssetSourceChain::new();
 
+    for overlay_pack in load_overlay_pack_asset_sources()? {
+        source.push(overlay_pack);
+    }
+
     match mode {
         AssetMode::LooseFirst => {
             if let Some(first_party) = load_first_party_asset_source()? {
@@ -392,6 +397,48 @@ fn load_pack_asset_source(required: bool) -> Result<Option<PackedAssetSource>> {
     Ok(None)
 }
 
+fn load_overlay_pack_asset_sources() -> Result<Vec<PackedAssetSource>> {
+    let (candidates, explicit) = overlay_pack_candidates();
+    let mut packs = Vec::new();
+    for path in candidates {
+        if !path.is_file() {
+            if explicit {
+                bail!(
+                    "MCLONE_ASSET_OVERLAY_PACK entry is not a file: {}",
+                    path.display()
+                );
+            }
+            continue;
+        }
+        match PackedAssetSource::from_file(&path) {
+            Ok(pack) => {
+                log::info!(
+                    "loaded mclone asset overlay pack {} (asset_set={}, files={})",
+                    path.display(),
+                    pack.manifest().asset_set,
+                    pack.file_count()
+                );
+                packs.push(pack);
+            }
+            Err(error) if explicit => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "failed to load mclone asset overlay pack {}",
+                        path.display()
+                    )
+                });
+            }
+            Err(error) => {
+                log::warn!(
+                    "ignoring invalid optional mclone asset overlay pack {}: {error}",
+                    path.display()
+                );
+            }
+        }
+    }
+    Ok(packs)
+}
+
 fn load_local_sound_asset_source() -> Result<Option<FilesystemAssetSource>> {
     if let Some(root) = env_path("MCLONE_SOUND_ASSET_ROOT") {
         if root.join("assets").is_dir() {
@@ -451,6 +498,27 @@ fn asset_pack_candidates() -> Result<(Vec<PathBuf>, bool)> {
     candidates.push(root.join("assets/packs").join(DEFAULT_NAMED_PACK_FILE));
     candidates.push(root.join("assets/packs").join(DEFAULT_REFERENCE_PACK_FILE));
     Ok((dedup_paths(candidates), false))
+}
+
+fn overlay_pack_candidates() -> (Vec<PathBuf>, bool) {
+    let explicit = env::var_os("MCLONE_ASSET_OVERLAY_PACK");
+    if let Some(paths) = explicit {
+        if paths.is_empty() {
+            return (Vec::new(), false);
+        }
+        return (dedup_paths(env::split_paths(&paths).collect()), true);
+    }
+
+    let mut candidates = Vec::new();
+    for root in platform_configured_asset_roots() {
+        candidates.push(root.join("assets/packs").join(DEFAULT_OVERLAY_PACK_FILE));
+    }
+    candidates.push(
+        repo_root()
+            .join("assets/packs")
+            .join(DEFAULT_OVERLAY_PACK_FILE),
+    );
+    (dedup_paths(candidates), false)
 }
 
 fn platform_configured_asset_roots() -> Vec<PathBuf> {

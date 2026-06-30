@@ -32,6 +32,7 @@ pnpm texture-lab:install
 pnpm texture-lab:typecheck
 pnpm texture-lab:export
 pnpm texture-lab:runtime-compat
+pnpm texture-lab:pack-overlay
 ```
 
 For authoring rules, palette discipline, tint roles, and AI-agent brief shape,
@@ -82,6 +83,20 @@ with the native runtime:
 
 ```sh
 MCLONE_FIRST_PARTY_ASSET_ROOT=/tmp/mclone-texture-lab/runtime-pack pnpm native:timedemo:smoke
+```
+
+The packed overlay command builds the same overrides into a first-party-only
+`.pbp` file without reading the local Mojang extraction:
+
+```text
+/tmp/mclone-texture-lab/mclone-default-overlay.pbp
+/tmp/mclone-texture-lab/mclone-default-overlay.pbp.json
+```
+
+To try the packed overlay:
+
+```sh
+MCLONE_ASSET_OVERLAY_PACK=/tmp/mclone-texture-lab/mclone-default-overlay.pbp pnpm native:timedemo:smoke
 ```
 
 ## Source Format
@@ -245,6 +260,7 @@ Initial exports should be derived and disposable:
 ```text
 /tmp/mclone-texture-lab/pack/
 /tmp/mclone-texture-lab/runtime-pack/
+/tmp/mclone-texture-lab/mclone-default-overlay.pbp
 /tmp/mclone-texture-lab/sheets/
 ```
 

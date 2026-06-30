@@ -1,6 +1,6 @@
 # 115 - First-Party Texture Pack Integration
 
-Status: active; Slice 1 landed.
+Status: active; Slice 2 first-party overlay pack landed.
 
 ## Goal
 
@@ -30,6 +30,7 @@ platform-specific source discovery, staging, and user-facing selection.
 
 The native runtime already loads an ordered `AssetSourceChain`:
 
+- first-party overlay packs from `MCLONE_ASSET_OVERLAY_PACK`, when set
 - first-party loose `assets/` when present
 - local loose extracted assets
 - packed assets such as `reference/minecraft-1.17.1/extracted.zip`
@@ -67,6 +68,18 @@ Those files define palettes, tint roles, seeded procedural speckles, and ASCII
 masks. `pnpm texture-lab:runtime-compat` renders deterministic PNGs from that
 source into `/tmp/mclone-texture-lab/runtime-pack/`.
 
+`pnpm texture-lab:pack-overlay` then packs that runtime-compatible tree into:
+
+```text
+/tmp/mclone-texture-lab/mclone-default-overlay.pbp
+```
+
+The native runtime can apply it as a mod-pack-style overlay:
+
+```sh
+MCLONE_ASSET_OVERLAY_PACK=/tmp/mclone-texture-lab/mclone-default-overlay.pbp pnpm native:timedemo:smoke
+```
+
 ## Slice 1 - Runtime-Compatible Texture-Lab Export
 
 Add a texture-lab export mode that writes derived PNGs to:
@@ -99,19 +112,23 @@ pnpm texture-lab:runtime-compat
 MCLONE_FIRST_PARTY_ASSET_ROOT=/tmp/mclone-texture-lab/runtime-pack pnpm native:timedemo:smoke
 ```
 
-## Slice 2 - First-Party Pack Contract
+## Slice 2 - First-Party Overlay Pack Contract
 
-After the override loop is useful, split first-party pack production from the
-Mojang reference pack.
+Split first-party overlay pack production from the Mojang reference pack.
 
-Likely shape:
+Landed shape:
 
-- a repo-owned first-party pack output under `assets/packs/`
-- a separate lock or manifest that never fingerprints Mojang files
-- runtime source-chain logging that distinguishes first-party packs from local
-  reference packs
-- platform staging that can choose the first-party pack as the distributable
-  default while still allowing explicit user-provided vanilla packs
+- `tools/minecraft_assets/overlay_pack.py` packs any first-party root containing
+  `assets/`.
+- `pnpm texture-lab:pack-overlay` regenerates texture-lab runtime-compatible
+  PNGs and writes `/tmp/mclone-texture-lab/mclone-default-overlay.pbp`.
+- The overlay pack manifest records `source_kind: first_party_overlay` and
+  fingerprints only the first-party source tree.
+- Runtime `MCLONE_ASSET_OVERLAY_PACK` accepts a platform path-list of overlay
+  packs and pushes them before the rest of the asset source chain.
+
+This is still an overlay pack, not a standalone first-party pack. Local
+reference blockstates/models still fill in missing assets during development.
 
 The existing `tools/minecraft_assets/asset_pack.py` already writes
 `mclone-pack.json` manifests and can include repo `assets/`, but it currently
@@ -162,6 +179,13 @@ stone, logs, leaves, plants, fluids, snow, ores, and other states.
   ground.
 - Re-ran typecheck, named overlay export, timedemo, and screenshot validation
   after moving source definitions into `packs/mclone-default`.
+- Added `tools/minecraft_assets/overlay_pack.py` and
+  `pnpm texture-lab:pack-overlay` for first-party-only `.pbp` generation.
+- Added native runtime `MCLONE_ASSET_OVERLAY_PACK` support so packed overlays
+  shadow later loose/reference sources.
+- Verified `/tmp/mclone-texture-lab/mclone-default-overlay.pbp` directly and
+  inspected `/tmp/mclone-texture-overlay-pack.png`; packed-overlay rendering
+  matches the loose runtime-pack bridge.
 
 Validation:
 
@@ -169,6 +193,9 @@ Validation:
 pnpm texture-lab:typecheck
 node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); JSON.parse(require('fs').readFileSync('tools/texture-lab/package.json','utf8'))"
 pnpm texture-lab:runtime-compat
+pnpm texture-lab:pack-overlay
 MCLONE_FIRST_PARTY_ASSET_ROOT=/tmp/mclone-texture-lab/runtime-pack pnpm native:timedemo:smoke
 MCLONE_FIRST_PARTY_ASSET_ROOT=/tmp/mclone-texture-lab/runtime-pack cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-texture-runtime-compat.png --width 1280 --height 720 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
+MCLONE_ASSET_OVERLAY_PACK=/tmp/mclone-texture-lab/mclone-default-overlay.pbp pnpm native:timedemo:smoke
+MCLONE_ASSET_OVERLAY_PACK=/tmp/mclone-texture-lab/mclone-default-overlay.pbp cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-texture-overlay-pack.png --width 1280 --height 720 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 ```

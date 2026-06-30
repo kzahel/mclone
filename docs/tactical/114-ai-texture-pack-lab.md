@@ -247,14 +247,14 @@ creates visible artifacts before runtime support is attempted.
 
 ### Slice 6 - Pack Shape And Future Runtime Bridge
 
-- [ ] Export a local original resource-pack tree under `/tmp`.
-- [ ] Record a manifest of generated texture resource locations and source
-  fingerprints.
+- [x] Export a local original resource-pack tree under
+  `/tmp/mclone-texture-lab/runtime-pack`.
+- [x] Record generated texture resource locations and source fingerprints in
+  `/tmp/mclone-texture-lab/mclone-default-overlay.pbp.json`.
 - [x] Decide checked-in original source location:
   `tools/texture-lab/packs/mclone-default/` is the accepted overlay source tree;
   `tools/texture-lab/examples/` remains for small wrapper entrypoints.
-- [ ] Only after the lab proves useful, add a tactical for shared runtime pack
-  loading and variant selection.
+- [x] Add tactical 115 for shared runtime overlay-pack loading.
 
 ## Open Questions
 
