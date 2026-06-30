@@ -8,6 +8,7 @@ use mclone_app_runtime::startup_args::{
 };
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render_session::{ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, EngineCameraViewMode};
+use mclone_server::SimulationCadenceConfig;
 
 use crate::camera::{SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED};
 use crate::{
@@ -28,6 +29,7 @@ const DEFAULT_ACTOR_WALK_REVIEW_CYCLES: f32 = 2.0;
 const MAX_ACTOR_WALK_REVIEW_CYCLES: f32 = 16.0;
 const DEFAULT_XR_CLEAR_SMOKE_FRAMES: u32 = 120;
 const MAX_XR_SMOKE_FRAMES: u32 = 4096;
+const MAX_SIMULATION_CADENCE_RATE_HZ: u32 = 240;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SceneOptions {
@@ -43,6 +45,7 @@ pub(crate) struct SceneOptions {
     /// forced (or initial) `dayTime` stays put for inspection.
     pub(crate) freeze_time: bool,
     pub(crate) movement_speed_multiplier: f32,
+    pub(crate) simulation_cadence: SimulationCadenceConfig,
     pub(crate) first_person_player_visible: bool,
     /// Debug/perf switch: bypass native `ChunkStatus::Light` promotion and let
     /// generated `Features` snapshots stream directly to the client.
@@ -290,6 +293,7 @@ impl Default for SceneOptions {
             day_time_override: None,
             freeze_time: false,
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
+            simulation_cadence: SimulationCadenceConfig::default(),
             first_person_player_visible: false,
             lighting_enabled: true,
         }
@@ -323,6 +327,7 @@ impl SceneOptions {
             day_time_override: scene.day_time_override,
             freeze_time: scene.freeze_time,
             movement_speed_multiplier: scene.movement_speed_multiplier,
+            simulation_cadence: SimulationCadenceConfig::default(),
             first_person_player_visible: false,
             lighting_enabled: scene.lighting_enabled,
         })
@@ -410,6 +415,8 @@ impl Cli {
         let mut actor_walk_review_fps = DEFAULT_ACTOR_WALK_REVIEW_FPS;
         let mut actor_walk_review_cycles = DEFAULT_ACTOR_WALK_REVIEW_CYCLES;
         let mut first_person_player_visible = false;
+        let mut simulation_cadence = SimulationCadenceConfig::default();
+        let mut simulation_cadence_explicit = false;
         let mut window_start_intent = WindowStartIntent::InWorld;
         let mut startup_wait = None;
         let mut movement_perf = false;
@@ -629,6 +636,10 @@ impl Cli {
                     first_person_player_visible =
                         parse_bool_arg("--first-person-player", args.next())?;
                 }
+                "--simulation-cadence" | "--cadence" => {
+                    simulation_cadence_explicit = true;
+                    simulation_cadence = parse_simulation_cadence_arg(&arg, args.next())?;
+                }
                 "--menu" => {
                     window_start_intent = WindowStartIntent::Menu;
                 }
@@ -779,6 +790,10 @@ impl Cli {
         let startup_options = startup_args.finish();
         let mut scene = SceneOptions::from_startup_scene(startup_options.scene)?;
         scene.first_person_player_visible = first_person_player_visible;
+        scene.simulation_cadence = simulation_cadence;
+        if simulation_cadence_explicit && scene.remote_addr.is_some() {
+            bail!("--simulation-cadence applies only to local integrated worlds");
+        }
         let render_options = startup_options.render_options;
         match mode {
             Some(HeadlessMode::Clear(path)) => Ok(Self::HeadlessClear {
@@ -1081,6 +1096,41 @@ fn parse_path_radius_arg(flag: &str, value: Option<String>) -> Result<i32> {
     Ok(parsed)
 }
 
+fn parse_simulation_cadence_arg(
+    flag: &str,
+    value: Option<String>,
+) -> Result<SimulationCadenceConfig> {
+    let value = value.with_context(|| format!("{flag} requires HOST/GAMEPLAY/PHYSICS"))?;
+    let parts = value
+        .split('/')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() != 3 {
+        bail!("{flag} must be HOST/GAMEPLAY/PHYSICS, got `{value}`");
+    }
+    let host_rate_hz = parse_simulation_cadence_rate(flag, "host", parts[0])?;
+    let gameplay_rate_hz = parse_simulation_cadence_rate(flag, "gameplay", parts[1])?;
+    let physics_rate_hz = parse_simulation_cadence_rate(flag, "physics", parts[2])?;
+    let cadence = SimulationCadenceConfig::new(host_rate_hz, gameplay_rate_hz, physics_rate_hz);
+    if !cadence.is_valid() {
+        bail!(
+            "{flag} rates must use clean integer relationships: lower-rate lanes divide host rate and higher-rate lanes are integer substeps of host rate"
+        );
+    }
+    Ok(cadence)
+}
+
+fn parse_simulation_cadence_rate(flag: &str, label: &str, value: &str) -> Result<u32> {
+    let rate = value
+        .parse::<u32>()
+        .with_context(|| format!("{flag} {label} rate must be an unsigned integer"))?;
+    if !(1..=MAX_SIMULATION_CADENCE_RATE_HZ).contains(&rate) {
+        bail!("{flag} {label} rate must be between 1 and {MAX_SIMULATION_CADENCE_RATE_HZ}");
+    }
+    Ok(rate)
+}
+
 fn parse_screenshot_remote_settle_ms_arg(flag: &str, value: Option<String>) -> Result<u64> {
     let parsed = parse_u64_arg(flag, value)?;
     if parsed > MAX_SCREENSHOT_REMOTE_SETTLE_MS {
@@ -1180,11 +1230,11 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client [--menu|--start-in-world true|false] [--startup-wait none|playable|idle|frames:N] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\
            mclone-native-client --remote-player-visual-smoke /tmp/mclone-remote-player-visual-smoke.png [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--day-time 6000] [--freeze-time] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\
@@ -1194,6 +1244,6 @@ fn print_help() {
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
            mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-         Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
+         Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }

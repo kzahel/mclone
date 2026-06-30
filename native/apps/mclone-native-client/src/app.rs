@@ -56,7 +56,7 @@ pub(crate) fn run_window(
 ) -> Result<()> {
     let assets = WindowSceneAssets::load()?;
     log::info!(
-        "native window startup seed={} initial_center=({}, {}) render_distance={} lighting={} color_profile={} remote={:?} atlas={}x{} start={:?} startup_wait={:?}",
+        "native window startup seed={} initial_center=({}, {}) render_distance={} lighting={} cadence={}/{}/{} color_profile={} remote={:?} atlas={}x{} start={:?} startup_wait={:?}",
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
@@ -66,6 +66,9 @@ pub(crate) fn run_window(
         } else {
             "disabled"
         },
+        scene.simulation_cadence.host_rate_hz,
+        scene.simulation_cadence.gameplay_rate_hz,
+        scene.simulation_cadence.physics_rate_hz,
         render_options.color_profile.as_str(),
         scene.remote_addr,
         assets.mesh_assets.atlas.width,

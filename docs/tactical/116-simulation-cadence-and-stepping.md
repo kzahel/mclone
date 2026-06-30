@@ -4,7 +4,9 @@ Status: active; initial architecture note recorded, 60 Hz physics substeps lande
 inside the existing 20 Hz server tick, the first shared server cadence primitive
 landed, cadence configs now reject uneven fractional lane pacing by default, and
 the native server runner now consumes separate gameplay and physics lane work
-while preserving default 20 Hz gameplay behavior.
+while preserving default 20 Hz gameplay behavior. Native local play now exposes
+a developer cadence profile option that derives the runner host interval from
+the selected host rate.
 
 ## Purpose
 
@@ -149,10 +151,9 @@ cargo check --manifest-path native/Cargo.toml -p mclone-server
 - Runner diagnostics merge physics diagnostics back into the gameplay tick when
   both lanes run on the same host frame. Physics-only frames refresh runner
   diagnostics without pretending a gameplay tick occurred.
-- The native runner still has an explicit wall-clock `tick_interval`; the next
-  host-rate slice should configure or derive that interval together with the
-  cadence profile so `60/20/60` means both 60 scheduled host frames and 60 Hz
-  physics work.
+- At this point the native runner still had an explicit wall-clock
+  `tick_interval`; this was superseded by the later native CLI cadence slice
+  below.
 
 Validation:
 
@@ -166,6 +167,32 @@ cargo check --manifest-path native/Cargo.toml -p mclone-server --features physic
 cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
 ```
 
+- Added a native client developer CLI option for local integrated worlds:
+  `--simulation-cadence HOST/GAMEPLAY/PHYSICS`, with `--cadence` as a short
+  alias. The parser rejects invalid clean-ratio profiles and rejects the option
+  for remote dedicated sessions, where the local client cannot control the
+  server cadence.
+- Threaded cadence through `SceneOptions` and `LocalSingleViewSceneOptions` into
+  `NativeIntegratedServerRunnerConfig`.
+- The local native runner now derives its wall-clock `tick_interval` from the
+  selected cadence host rate. For example, `--simulation-cadence 60/20/60`
+  schedules a 60 Hz host pump, 20 Hz gameplay lane, and 60 Hz physics lane.
+- Startup logging includes the selected cadence so manual runs can confirm the
+  active profile.
+
+Validation:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-native-client -p mclone-app-runtime -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime native_runner_config_derives_tick_interval_from_cadence_host_rate -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime --quiet
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client cli_parses_simulation_cadence -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client cli_rejects_invalid_simulation_cadence -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client --quiet
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features physics-rapier
+```
+
 ## Follow-Up Work
 
 - Add explicit diagnostics for physics substep count and physics lane timing.
@@ -174,7 +201,4 @@ cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features
 - Evaluate active-physics presentation options: higher-rate snapshots for local
   integrated play, velocity/angular-velocity extrapolation, or a shared
   prediction path.
-- Add a dev-only configurable cadence profile / host pump rate and make the
-  native runner derive or validate wall-clock `tick_interval` from the selected
-  host rate.
 - Decide which entity classes can opt into higher-rate network snapshots.

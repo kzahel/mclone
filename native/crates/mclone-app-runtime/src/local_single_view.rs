@@ -11,7 +11,7 @@ use mclone_protocol::{ClientCommand, ServerUpdate};
 use mclone_render_session::RenderSectionCacheUpdate;
 use mclone_server::{
     IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
-    ServerRunnerDiagnostics, initial_spawn_center_for_seed,
+    ServerRunnerDiagnostics, SimulationCadenceConfig, initial_spawn_center_for_seed,
 };
 use mclone_ui::LoadingProgressOverlay;
 
@@ -39,6 +39,7 @@ pub struct LocalSingleViewSceneOptions {
     pub seed: i64,
     pub center: ChunkPos,
     pub render_distance: u32,
+    pub cadence: SimulationCadenceConfig,
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
     pub lighting_enabled: bool,
@@ -50,10 +51,16 @@ impl LocalSingleViewSceneOptions {
             seed,
             center,
             render_distance,
+            cadence: SimulationCadenceConfig::new(20, 20, 60),
             day_time_override: None,
             freeze_time: false,
             lighting_enabled: true,
         }
+    }
+
+    pub const fn with_cadence(mut self, cadence: SimulationCadenceConfig) -> Self {
+        self.cadence = cadence;
+        self
     }
 
     pub const fn with_day_time(mut self, day_time: Option<u64>) -> Self {
@@ -1030,6 +1037,16 @@ fn native_runner_config(
         .with_lighting_enabled(options.lighting_enabled)
         .with_day_time(options.day_time_override)
         .with_day_time_frozen(options.freeze_time)
+        .with_cadence(options.cadence)
+        .with_tick_interval(tick_interval_for_host_rate_hz(options.cadence.host_rate_hz))
+}
+
+fn tick_interval_for_host_rate_hz(host_rate_hz: u32) -> Duration {
+    if host_rate_hz == 0 {
+        return Duration::ZERO;
+    }
+    let host_rate_hz = u64::from(host_rate_hz);
+    Duration::from_nanos((1_000_000_000 + host_rate_hz / 2) / host_rate_hz)
 }
 
 fn runner_idle(diagnostics: &ServerRunnerDiagnostics) -> bool {
@@ -1071,6 +1088,18 @@ mod tests {
             .with_initial_spawn_center();
 
         assert_eq!(options.center, initial_spawn_center_for_seed(12345));
+    }
+
+    #[test]
+    fn native_runner_config_derives_tick_interval_from_cadence_host_rate() {
+        let cadence = SimulationCadenceConfig::new(60, 20, 60);
+        let options =
+            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), 2).with_cadence(cadence);
+
+        let config = native_runner_config(&options);
+
+        assert_eq!(config.cadence, cadence);
+        assert_eq!(config.tick_interval, Duration::from_nanos(16_666_667));
     }
 
     #[test]

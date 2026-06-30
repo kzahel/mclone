@@ -1030,6 +1030,7 @@ mod tests {
                     day_time_override: None,
                     freeze_time: false,
                     movement_speed_multiplier: 1.0,
+                    simulation_cadence: mclone_server::SimulationCadenceConfig::default(),
                     first_person_player_visible: false,
                     lighting_enabled: true,
                 },
@@ -1082,6 +1083,61 @@ mod tests {
                 TexturedSectionRenderOptions::default(),
             )
         );
+    }
+
+    #[test]
+    fn cli_parses_simulation_cadence() {
+        let cli = Cli::parse([
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
+            "--simulation-cadence".to_owned(),
+            "60/20/60".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            screenshot_cli(
+                "/tmp/mclone-frame.png",
+                SceneOptions {
+                    simulation_cadence: mclone_server::SimulationCadenceConfig::new(60, 20, 60),
+                    ..SceneOptions::default()
+                },
+                TexturedSectionRenderOptions::default(),
+            )
+        );
+
+        let cli = Cli::parse(["--cadence".to_owned(), "60/60/120".to_owned()]).unwrap();
+        let Cli::Window { scene, .. } = cli else {
+            panic!("expected window cli");
+        };
+        assert_eq!(
+            scene.simulation_cadence,
+            mclone_server::SimulationCadenceConfig::new(60, 60, 120)
+        );
+    }
+
+    #[test]
+    fn cli_rejects_invalid_simulation_cadence() {
+        let err = Cli::parse(["--simulation-cadence".to_owned(), "30/20/60".to_owned()])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("clean integer relationships"));
+
+        let err = Cli::parse(["--simulation-cadence".to_owned(), "60/20".to_owned()])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("HOST/GAMEPLAY/PHYSICS"));
+
+        let err = Cli::parse([
+            "--remote-addr".to_owned(),
+            "127.0.0.1:25565".to_owned(),
+            "--simulation-cadence".to_owned(),
+            "60/20/60".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("local integrated worlds"));
     }
 
     #[test]

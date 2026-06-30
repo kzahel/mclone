@@ -102,6 +102,7 @@ fn local_single_view_options(scene: &SceneOptions) -> Result<LocalSingleViewScen
     )
     .with_day_time(scene.day_time_override)
     .with_freeze_time(scene.freeze_time)
+    .with_cadence(scene.simulation_cadence)
     .with_lighting_enabled(scene.lighting_enabled))
 }
 
@@ -1064,12 +1065,7 @@ mod tests {
             chunk_x: -2,
             chunk_z: 3,
             render_distance: 1,
-            remote_addr: None,
-            day_time_override: None,
-            freeze_time: false,
-            movement_speed_multiplier: 1.0,
-            first_person_player_visible: false,
-            lighting_enabled: true,
+            ..SceneOptions::default()
         }
         .chunk_positions()
         .collect::<Vec<_>>();
