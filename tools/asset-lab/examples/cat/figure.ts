@@ -1,6 +1,6 @@
 import { figure } from "../../src/dsl";
 
-export default figure("cat", ({ mat, asciiTexture, part, box, capsule, sphere, cylinder, quadrupedWalk }) => {
+export default figure("cat", ({ mat, asciiTexture, part, box, capsule, sphere, cylinder, quadrupedWalk, followThrough }) => {
   mat("fur", "#5f6570");
   mat("fur_dark", "#303743");
   mat("fur_light", "#b9bec5");
@@ -74,7 +74,7 @@ export default figure("cat", ({ mat, asciiTexture, part, box, capsule, sphere, c
     cycleDistance: 0.78,
     gait: "walk",
     loop: true,
-    samples: 11,
+    samples: 13,
     contactParts: {
       frontLeft: "paw_fl",
       frontRight: "paw_fr",
@@ -96,5 +96,12 @@ export default figure("cat", ({ mat, asciiTexture, part, box, capsule, sphere, c
     swingDegrees: 18,
     tail: "tail",
     tailSwingDegrees: 10,
+    tracks: [
+      // Ears flop a beat behind the body bob, with a little overshoot.
+      followThrough("ear_l", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 15, overshoot: 0.6, lag: 0.12 }),
+      followThrough("ear_r", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 15, overshoot: 0.6, lag: 0.12 }),
+      // Tail trails the body vertically on top of its own side-to-side swing.
+      followThrough("tail", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 11, overshoot: 0.75, lag: 0.18 }),
+    ],
   });
 });

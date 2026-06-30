@@ -1,6 +1,6 @@
 import { figure } from "../../src/dsl";
 
-export default figure("piglet", ({ mat, asciiTexture, part, box, capsule, sphere, quadrupedWalk }) => {
+export default figure("piglet", ({ mat, asciiTexture, part, box, capsule, sphere, quadrupedWalk, followThrough }) => {
   mat("skin", "#d88a92");
   mat("skin_dark", "#bd6f7b");
   mat("hoof", "#4a3033");
@@ -80,7 +80,7 @@ export default figure("piglet", ({ mat, asciiTexture, part, box, capsule, sphere
     cycleDistance: 0.72,
     gait: "trot",
     loop: true,
-    samples: 9,
+    samples: 13,
     contactParts: {
       frontLeft: "hoof_fl",
       frontRight: "hoof_fr",
@@ -102,5 +102,10 @@ export default figure("piglet", ({ mat, asciiTexture, part, box, capsule, sphere
     swingDegrees: 20,
     tail: "tail",
     tailSwingDegrees: 15,
+    tracks: [
+      // Ears flop a beat behind the body bob, with a little overshoot.
+      followThrough("ear_l", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 17, overshoot: 0.6, lag: 0.12 }),
+      followThrough("ear_r", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 17, overshoot: 0.6, lag: 0.12 }),
+    ],
   });
 });

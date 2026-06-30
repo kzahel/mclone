@@ -149,10 +149,22 @@ export interface ContactSwingOptions extends SwingOptions {
   stanceRatio: number;
 }
 
+export interface FollowThroughOptions {
+  source: string;
+  sourceChannel?: "rot" | "pos";
+  sourceAxis?: AxisName;
+  axis?: AxisName;
+  degrees: number;
+  lag?: number;
+  overshoot?: number;
+  center?: number;
+}
+
 export type CycleTrack =
   | ({ kind: "swing"; part: string } & SwingOptions)
   | ({ kind: "contactSwing"; part: string } & ContactSwingOptions)
-  | ({ kind: "bob"; part: string } & BobOptions);
+  | ({ kind: "bob"; part: string } & BobOptions)
+  | ({ kind: "followThrough"; part: string } & FollowThroughOptions);
 
 export interface WalkCycleSpec {
   duration?: number;
@@ -252,6 +264,7 @@ export interface FigureApi {
   swing(part: string, options: SwingOptions): CycleTrack;
   contactSwing(part: string, options: ContactSwingOptions): CycleTrack;
   bob(part: string, options: BobOptions): CycleTrack;
+  followThrough(part: string, options: FollowThroughOptions): CycleTrack;
   box(options: BoxOptions): PartDraft;
   sphere(options: SphereOptions): PartDraft;
   capsule(options: CapsuleOptions): PartDraft;
@@ -350,6 +363,7 @@ class FigureBuilder {
       swing,
       contactSwing,
       bob,
+      followThrough,
       box,
       sphere,
       capsule,
@@ -436,7 +450,7 @@ function cylinder(options: CylinderOptions): PartDraft {
 }
 
 function swing(part: string, options: SwingOptions): CycleTrack {
-  const track: CycleTrack = { kind: "swing", part, degrees: options.degrees };
+  const track: Extract<CycleTrack, { kind: "swing" }> = { kind: "swing", part, degrees: options.degrees };
   if (options.axis !== undefined) {
     track.axis = options.axis;
   }
@@ -453,7 +467,7 @@ function swing(part: string, options: SwingOptions): CycleTrack {
 }
 
 function bob(part: string, options: BobOptions): CycleTrack {
-  const track: CycleTrack = { kind: "bob", part, amount: options.amount };
+  const track: Extract<CycleTrack, { kind: "bob" }> = { kind: "bob", part, amount: options.amount };
   if (options.axis !== undefined) {
     track.axis = options.axis;
   }
@@ -470,7 +484,7 @@ function bob(part: string, options: BobOptions): CycleTrack {
 }
 
 function contactSwing(part: string, options: ContactSwingOptions): CycleTrack {
-  const track: CycleTrack = {
+  const track: Extract<CycleTrack, { kind: "contactSwing" }> = {
     kind: "contactSwing",
     part,
     degrees: options.degrees,
@@ -487,6 +501,34 @@ function contactSwing(part: string, options: ContactSwingOptions): CycleTrack {
   }
   if (options.phase !== undefined) {
     track.phase = options.phase;
+  }
+  return track;
+}
+
+function followThrough(part: string, options: FollowThroughOptions): CycleTrack {
+  const track: Extract<CycleTrack, { kind: "followThrough" }> = {
+    kind: "followThrough",
+    part,
+    source: options.source,
+    degrees: options.degrees,
+  };
+  if (options.sourceChannel !== undefined) {
+    track.sourceChannel = options.sourceChannel;
+  }
+  if (options.sourceAxis !== undefined) {
+    track.sourceAxis = options.sourceAxis;
+  }
+  if (options.axis !== undefined) {
+    track.axis = options.axis;
+  }
+  if (options.lag !== undefined) {
+    track.lag = options.lag;
+  }
+  if (options.overshoot !== undefined) {
+    track.overshoot = options.overshoot;
+  }
+  if (options.center !== undefined) {
+    track.center = options.center;
   }
   return track;
 }
@@ -745,9 +787,15 @@ function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
     throw new Error("walkCycle requires at least one track");
   }
 
-  const frameParts = Array.from({ length: samples }, () => new Map<string, TransformKey>());
   for (const track of spec.tracks) {
     validateCycleTrack(track);
+  }
+
+  const frameParts = Array.from({ length: samples }, () => new Map<string, TransformKey>());
+  for (const track of spec.tracks) {
+    if (track.kind === "followThrough") {
+      continue;
+    }
     for (let index = 0; index < samples; index += 1) {
       const progress = index / (samples - 1);
       const value = track.kind === "contactSwing"
@@ -779,6 +827,8 @@ function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
     }
   }
 
+  applyFollowThroughTracks(frameParts, spec.tracks, samples);
+
   const keys: ClipKey[] = [];
   for (const [index, parts] of frameParts.entries()) {
     const time = (duration * index) / (samples - 1);
@@ -806,6 +856,27 @@ function validateCycleTrack(track: CycleTrack): void {
   }
   if (track.axis !== undefined && !["x", "y", "z"].includes(track.axis)) {
     throw new Error(`walkCycle track '${track.part}' has invalid axis '${track.axis}'`);
+  }
+  if (track.kind === "followThrough") {
+    if (!track.source.trim()) {
+      throw new Error(`walkCycle track '${track.part}' followThrough source is required`);
+    }
+    if (track.sourceAxis !== undefined && !["x", "y", "z"].includes(track.sourceAxis)) {
+      throw new Error(`walkCycle track '${track.part}' has invalid sourceAxis '${track.sourceAxis}'`);
+    }
+    if (!Number.isFinite(track.degrees)) {
+      throw new Error(`walkCycle track '${track.part}' degrees must be finite`);
+    }
+    if (track.lag !== undefined && (!Number.isFinite(track.lag) || track.lag < 0 || track.lag >= 1)) {
+      throw new Error(`walkCycle track '${track.part}' lag must be in [0, 1)`);
+    }
+    if (track.overshoot !== undefined && !Number.isFinite(track.overshoot)) {
+      throw new Error(`walkCycle track '${track.part}' overshoot must be finite`);
+    }
+    if (track.center !== undefined && !Number.isFinite(track.center)) {
+      throw new Error(`walkCycle track '${track.part}' center must be finite`);
+    }
+    return;
   }
   const amount = track.kind === "bob" ? track.amount : track.degrees;
   if (!Number.isFinite(amount)) {
@@ -906,6 +977,104 @@ function contactCycleValue(
   }
   const recoveryProgress = (cycleProgress - stanceRatio) / (1 - stanceRatio);
   return center + lerp(-amount, amount, smoothStep(recoveryProgress));
+}
+
+function applyFollowThroughTracks(
+  frames: Map<string, TransformKey>[],
+  tracks: CycleTrack[],
+  samples: number,
+): void {
+  const outputs: { part: string; axis: AxisName; values: number[] }[] = [];
+  for (const track of tracks) {
+    if (track.kind !== "followThrough") {
+      continue;
+    }
+    outputs.push({
+      part: track.part,
+      axis: track.axis ?? "x",
+      values: computeFollowThroughValues(frames, track, samples),
+    });
+  }
+  for (const output of outputs) {
+    const axisIndex = output.axis === "x" ? 0 : output.axis === "y" ? 1 : 2;
+    for (let index = 0; index < frames.length; index += 1) {
+      const transform = ensureFrameTransform(frames[index], output.part);
+      const rot = mutableVec(transform.rot);
+      rot[axisIndex] += output.values[index] ?? 0;
+      transform.rot = rot;
+    }
+  }
+}
+
+// A follow-through track makes a child part lag and overshoot a parent's motion
+// instead of running on its own clock: it reads the driver part's already-baked
+// curve, normalizes it, delays it by `lag`, and adds a velocity term for whip.
+// The result is sampled into ordinary keyframes like every other cycle helper.
+function computeFollowThroughValues(
+  frames: Map<string, TransformKey>[],
+  track: Extract<CycleTrack, { kind: "followThrough" }>,
+  samples: number,
+): number[] {
+  const period = Math.max(1, samples - 1);
+  const channel = track.sourceChannel ?? "pos";
+  const sourceAxis = track.sourceAxis ?? "y";
+  const lag = track.lag ?? 0.12;
+  const overshoot = track.overshoot ?? 0.45;
+  const center = track.center ?? 0;
+
+  const raw: number[] = [];
+  for (let index = 0; index < period; index += 1) {
+    const transform = frames[index]?.get(track.source);
+    const vec = channel === "rot" ? transform?.rot : transform?.at;
+    raw.push(vec ? axisValue(vec, sourceAxis) : 0);
+  }
+
+  let mean = 0;
+  for (const value of raw) {
+    mean += value;
+  }
+  mean /= period;
+  const centered = raw.map((value) => value - mean);
+
+  let amplitude = 0;
+  for (const value of centered) {
+    amplitude = Math.max(amplitude, Math.abs(value));
+  }
+
+  const velocity: number[] = [];
+  for (let index = 0; index < period; index += 1) {
+    const next = centered[(index + 1) % period] ?? 0;
+    const prev = centered[(index - 1 + period) % period] ?? 0;
+    velocity.push((next - prev) / 2);
+  }
+  let velocityAmplitude = 0;
+  for (const value of velocity) {
+    velocityAmplitude = Math.max(velocityAmplitude, Math.abs(value));
+  }
+
+  const lagSamples = (((Math.round(lag * period) % period) + period) % period);
+  const values: number[] = [];
+  for (let index = 0; index <= period; index += 1) {
+    if (amplitude <= 1e-6) {
+      values.push(center);
+      continue;
+    }
+    const wrapped = (((index % period) - lagSamples) % period + period) % period;
+    const normalized = (centered[wrapped] ?? 0) / amplitude;
+    const normalizedVelocity = velocityAmplitude > 1e-6 ? (velocity[wrapped] ?? 0) / velocityAmplitude : 0;
+    values.push(center + track.degrees * (normalized + overshoot * normalizedVelocity));
+  }
+  return values;
+}
+
+function axisValue(vec: Vec3, axis: AxisName): number {
+  if (axis === "x") {
+    return vec[0];
+  }
+  if (axis === "y") {
+    return vec[1];
+  }
+  return vec[2];
 }
 
 function completeLocomotion(locomotion: ClipLocomotionSpec, duration: number): ClipLocomotionSpec {
