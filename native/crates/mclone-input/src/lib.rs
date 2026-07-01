@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const FLAT_HOTBAR_SLOT_COUNT: u8 = 9;
+/// Mouse-delta units per second for held keyboard turning; intentionally slower than mouselook.
+pub const KEYBOARD_TURN_MOUSE_DELTA_PER_SECOND: f64 = 270.0;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -281,6 +283,29 @@ impl MovementDirection {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+pub enum KeyboardTurnDirection {
+    Left,
+    Right,
+}
+
+impl KeyboardTurnDirection {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Left => "Turn Left",
+            Self::Right => "Turn Right",
+        }
+    }
+
+    const fn impulse(self) -> f32 {
+        match self {
+            Self::Left => 1.0,
+            Self::Right => -1.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum FlatInputAction {
     Jump,
     Sprint,
@@ -299,6 +324,10 @@ pub enum FlatInputAction {
 pub enum FlatInputIntent {
     MoveDirection {
         direction: MovementDirection,
+        pressed: bool,
+    },
+    Turn {
+        direction: KeyboardTurnDirection,
         pressed: bool,
     },
     MoveAnalog {
@@ -340,6 +369,8 @@ pub struct FlatInputFrame {
     pub right: bool,
     pub movement: MovementImpulse,
     pub analog_movement: Option<MovementImpulse>,
+    #[serde(default)]
+    pub keyboard_turn: f32,
     pub look_delta: LookDelta,
     pub jump: bool,
     pub sprint: bool,
@@ -367,6 +398,11 @@ impl FlatInputFrame {
             FlatInputIntent::MoveDirection { direction, pressed } => {
                 if pressed {
                     self.add_movement_direction(direction);
+                }
+            }
+            FlatInputIntent::Turn { direction, pressed } => {
+                if pressed {
+                    self.add_keyboard_turn_direction(direction);
                 }
             }
             FlatInputIntent::MoveAnalog { left, forward } => {
@@ -405,6 +441,14 @@ impl FlatInputFrame {
             }
         };
         self.add_movement_impulse(left, forward);
+    }
+
+    pub fn add_keyboard_turn_direction(&mut self, direction: KeyboardTurnDirection) {
+        self.add_keyboard_turn_impulse(direction.impulse());
+    }
+
+    pub fn add_keyboard_turn_impulse(&mut self, turn: f32) {
+        self.keyboard_turn = clamp_axis(self.keyboard_turn + finite_axis(turn));
     }
 
     pub fn set_analog_movement_impulse(&mut self, left: f32, forward: f32) {
@@ -463,6 +507,7 @@ impl FlatInputFrame {
         }
         match action {
             InputBindingAction::Move(direction) => self.add_movement_direction(direction),
+            InputBindingAction::Turn(direction) => self.add_keyboard_turn_direction(direction),
             InputBindingAction::MoveAnalog | InputBindingAction::Look => {}
             InputBindingAction::Jump => self.press_action(FlatInputAction::Jump),
             InputBindingAction::Sprint => self.press_action(FlatInputAction::Sprint),
@@ -495,6 +540,16 @@ fn finite_axis(value: f32) -> f32 {
 
 fn clamp_axis(value: f32) -> f32 {
     value.clamp(-1.0, 1.0)
+}
+
+pub fn keyboard_turn_mouse_delta(turn: f32, dt_seconds: f64) -> f64 {
+    let turn = f64::from(clamp_axis(finite_axis(turn)));
+    let dt_seconds = if dt_seconds.is_finite() {
+        dt_seconds.clamp(0.0, 0.1)
+    } else {
+        0.0
+    };
+    -turn * KEYBOARD_TURN_MOUSE_DELTA_PER_SECOND * dt_seconds
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -539,6 +594,22 @@ impl Default for KeyboardMouseBindings {
             KeyboardMouseBinding::key(
                 KeyboardKey::KeyD,
                 InputBindingAction::Move(MovementDirection::Right),
+            ),
+            KeyboardMouseBinding::key(
+                KeyboardKey::ArrowUp,
+                InputBindingAction::Move(MovementDirection::Forward),
+            ),
+            KeyboardMouseBinding::key(
+                KeyboardKey::ArrowDown,
+                InputBindingAction::Move(MovementDirection::Backward),
+            ),
+            KeyboardMouseBinding::key(
+                KeyboardKey::ArrowLeft,
+                InputBindingAction::Turn(KeyboardTurnDirection::Left),
+            ),
+            KeyboardMouseBinding::key(
+                KeyboardKey::ArrowRight,
+                InputBindingAction::Turn(KeyboardTurnDirection::Right),
             ),
             KeyboardMouseBinding::key(KeyboardKey::Space, InputBindingAction::Jump),
             KeyboardMouseBinding::key(KeyboardKey::KeyX, InputBindingAction::Descend),
@@ -772,6 +843,10 @@ pub enum KeyboardKey {
     KeyA,
     KeyS,
     KeyD,
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
     KeyE,
     KeyB,
     KeyL,
@@ -823,6 +898,10 @@ impl KeyboardKey {
             Self::KeyA => "A",
             Self::KeyS => "S",
             Self::KeyD => "D",
+            Self::ArrowUp => "Arrow Up",
+            Self::ArrowDown => "Arrow Down",
+            Self::ArrowLeft => "Arrow Left",
+            Self::ArrowRight => "Arrow Right",
             Self::KeyE => "E",
             Self::KeyB => "B",
             Self::KeyL => "L",
@@ -981,6 +1060,12 @@ impl KeyboardMouseInputAdapter {
                     pressed: true,
                 });
             }
+            for direction in self.held.turn_directions() {
+                frame.apply_intent(FlatInputIntent::Turn {
+                    direction,
+                    pressed: true,
+                });
+            }
             for action in self.held.actions() {
                 frame.apply_intent(FlatInputIntent::Action {
                     action,
@@ -1057,6 +1142,8 @@ struct KeyboardMouseHeldState {
     backward: bool,
     left: bool,
     right: bool,
+    turn_left: bool,
+    turn_right: bool,
     jump: bool,
     descend: bool,
     sneak: bool,
@@ -1069,6 +1156,8 @@ impl KeyboardMouseHeldState {
             || self.backward
             || self.left
             || self.right
+            || self.turn_left
+            || self.turn_right
             || self.jump
             || self.descend
             || self.sneak
@@ -1079,6 +1168,10 @@ impl KeyboardMouseHeldState {
         match action {
             InputBindingAction::Move(direction) => {
                 self.set_direction(direction, pressed);
+                true
+            }
+            InputBindingAction::Turn(direction) => {
+                self.set_turn_direction(direction, pressed);
                 true
             }
             InputBindingAction::Jump => {
@@ -1120,12 +1213,28 @@ impl KeyboardMouseHeldState {
         }
     }
 
+    fn set_turn_direction(&mut self, direction: KeyboardTurnDirection, pressed: bool) {
+        match direction {
+            KeyboardTurnDirection::Left => self.turn_left = pressed,
+            KeyboardTurnDirection::Right => self.turn_right = pressed,
+        }
+    }
+
     fn directions(self) -> impl Iterator<Item = MovementDirection> {
         [
             (self.forward, MovementDirection::Forward),
             (self.backward, MovementDirection::Backward),
             (self.left, MovementDirection::Left),
             (self.right, MovementDirection::Right),
+        ]
+        .into_iter()
+        .filter_map(|(pressed, direction)| pressed.then_some(direction))
+    }
+
+    fn turn_directions(self) -> impl Iterator<Item = KeyboardTurnDirection> {
+        [
+            (self.turn_left, KeyboardTurnDirection::Left),
+            (self.turn_right, KeyboardTurnDirection::Right),
         ]
         .into_iter()
         .filter_map(|(pressed, direction)| pressed.then_some(direction))
@@ -1273,6 +1382,7 @@ pub enum GamepadControl {
 #[serde(rename_all = "camelCase")]
 pub enum InputBindingAction {
     Move(MovementDirection),
+    Turn(KeyboardTurnDirection),
     MoveAnalog,
     Look,
     Jump,
@@ -1294,6 +1404,7 @@ impl InputBindingAction {
     pub fn label(self) -> String {
         match self {
             Self::Move(direction) => direction.label().to_owned(),
+            Self::Turn(direction) => direction.label().to_owned(),
             Self::MoveAnalog => "Move".to_owned(),
             Self::Look => "Look".to_owned(),
             Self::Jump => "Jump".to_owned(),
@@ -1493,6 +1604,7 @@ impl GamepadInputAdapter {
     fn binary_action_frame(action: InputBindingAction) -> Option<FlatInputFrame> {
         match action {
             InputBindingAction::Move(_)
+            | InputBindingAction::Turn(_)
             | InputBindingAction::MoveAnalog
             | InputBindingAction::Look
             | InputBindingAction::Jump
@@ -1604,6 +1716,7 @@ fn is_continuous_binary_action(action: InputBindingAction) -> bool {
     matches!(
         action,
         InputBindingAction::Move(_)
+            | InputBindingAction::Turn(_)
             | InputBindingAction::Jump
             | InputBindingAction::Sprint
             | InputBindingAction::Sneak
@@ -1791,6 +1904,10 @@ mod tests {
             direction: MovementDirection::Left,
             pressed: true,
         });
+        frame.apply_intent(FlatInputIntent::Turn {
+            direction: KeyboardTurnDirection::Left,
+            pressed: true,
+        });
         frame.apply_intent(FlatInputIntent::MoveAnalog {
             left: -0.25,
             forward: f32::INFINITY,
@@ -1825,6 +1942,7 @@ mod tests {
                 forward: 0.0
             })
         );
+        assert_eq!(frame.keyboard_turn, 1.0);
         assert_eq!(frame.look_delta, LookDelta { x: 3.5, y: -2.0 });
         assert!(frame.attack);
         assert!(!frame.use_item);
@@ -1863,6 +1981,22 @@ mod tests {
         assert!(bindings.bindings.contains(&KeyboardMouseBinding::key(
             KeyboardKey::KeyD,
             InputBindingAction::Move(MovementDirection::Right)
+        )));
+        assert!(bindings.bindings.contains(&KeyboardMouseBinding::key(
+            KeyboardKey::ArrowUp,
+            InputBindingAction::Move(MovementDirection::Forward)
+        )));
+        assert!(bindings.bindings.contains(&KeyboardMouseBinding::key(
+            KeyboardKey::ArrowDown,
+            InputBindingAction::Move(MovementDirection::Backward)
+        )));
+        assert!(bindings.bindings.contains(&KeyboardMouseBinding::key(
+            KeyboardKey::ArrowLeft,
+            InputBindingAction::Turn(KeyboardTurnDirection::Left)
+        )));
+        assert!(bindings.bindings.contains(&KeyboardMouseBinding::key(
+            KeyboardKey::ArrowRight,
+            InputBindingAction::Turn(KeyboardTurnDirection::Right)
         )));
         assert!(bindings.bindings.contains(&KeyboardMouseBinding::key(
             KeyboardKey::KeyE,
@@ -1945,6 +2079,7 @@ mod tests {
         assert!(w.handled);
         assert!(w.frame.is_none());
         adapter.handle_key(KeyboardKey::KeyA, true, false);
+        adapter.handle_key(KeyboardKey::ArrowLeft, true, false);
         adapter.handle_key(KeyboardKey::Space, true, false);
         adapter.handle_key(KeyboardKey::ShiftLeft, true, false);
 
@@ -1953,6 +2088,7 @@ mod tests {
             .expect("held keys should produce frame");
         assert!(held.forward);
         assert!(held.left);
+        assert_eq!(held.keyboard_turn, 1.0);
         assert!(held.jump);
         assert!(held.sneak);
         assert_eq!(
@@ -1967,6 +2103,7 @@ mod tests {
         let held = adapter.held_frame().expect("left key should remain held");
         assert!(!held.forward);
         assert!(held.left);
+        assert_eq!(held.keyboard_turn, 1.0);
 
         adapter.clear_held();
         assert!(adapter.held_frame().is_none());

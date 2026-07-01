@@ -514,6 +514,7 @@ class WebChunkApp {
     this.mouseDeltaY = 0;
     this.syncCanvasSize();
     const keys = uiActive ? (defaultInputKeys() as InputKeys) : this.currentInputKeys();
+    const keyboardTurn = (keys.turnLeft ? 1 : 0) - (keys.turnRight ? 1 : 0);
     const movementImpulse = uiActive ? defaultMovementImpulse() : this.currentMovementImpulse();
 
     runtime.state.frameCount += 1;
@@ -522,6 +523,7 @@ class WebChunkApp {
       dtSeconds,
       mouseDeltaX,
       mouseDeltaY,
+      keyboardTurn,
       keys.forward,
       keys.backward,
       keys.left,
@@ -575,7 +577,7 @@ class WebChunkApp {
     let iterations = 0;
     while (performance.now() < deadline) {
       const camera = await this.withSessionAsync(() => session.advanceCameraFrame(
-        1e-4, 0, 0, false, false, false, false, false, false, false, false, false, 0, 0,
+        1e-4, 0, 0, 0, false, false, false, false, false, false, false, false, false, 0, 0,
       ));
       this.applyCameraState(camera);
       const idle = await this.streamFrameOnce({ awaitWorker: true });

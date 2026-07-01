@@ -31,6 +31,7 @@ use mclone_core::{
 };
 use mclone_input::{
     InputCapabilities, InputCapabilityState, InputDeviceKind, InputPreferences, TouchControlsMode,
+    keyboard_turn_mouse_delta,
 };
 use mclone_mesh::{
     RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
@@ -2719,6 +2720,7 @@ impl WebChunkRenderSession {
         dt_seconds: f64,
         mouse_delta_x: f64,
         mouse_delta_y: f64,
+        keyboard_turn: f64,
         forward: bool,
         backward: bool,
         left: bool,
@@ -2741,7 +2743,8 @@ impl WebChunkRenderSession {
         };
         let input = EngineCameraInput {
             dt_seconds,
-            mouse_delta_x,
+            mouse_delta_x: mouse_delta_x
+                + keyboard_turn_mouse_delta(keyboard_turn as f32, dt_seconds),
             mouse_delta_y,
             forward,
             backward,

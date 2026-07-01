@@ -18,7 +18,10 @@ use mclone_client::{
     ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
 use mclone_core::{BlockStateId, Vec3d};
-use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, TouchControlsMode};
+use mclone_input::{
+    FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, TouchControlsMode,
+    keyboard_turn_mouse_delta,
+};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_protocol::ClientCommand;
 use mclone_render::chunk::{
@@ -2147,7 +2150,8 @@ pub(crate) fn engine_camera_input_from_flat_frame(
 ) -> EngineCameraInput {
     EngineCameraInput {
         dt_seconds,
-        mouse_delta_x: f64::from(frame.look_delta.x),
+        mouse_delta_x: f64::from(frame.look_delta.x)
+            + keyboard_turn_mouse_delta(frame.keyboard_turn, dt_seconds),
         mouse_delta_y: f64::from(frame.look_delta.y),
         forward: frame.forward,
         backward: frame.backward,

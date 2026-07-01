@@ -1295,6 +1295,10 @@ fn desktop_keyboard_key_from_key_code(key_code: KeyCode) -> Option<KeyboardKey> 
         KeyCode::KeyA => Some(KeyboardKey::KeyA),
         KeyCode::KeyS => Some(KeyboardKey::KeyS),
         KeyCode::KeyD => Some(KeyboardKey::KeyD),
+        KeyCode::ArrowUp => Some(KeyboardKey::ArrowUp),
+        KeyCode::ArrowDown => Some(KeyboardKey::ArrowDown),
+        KeyCode::ArrowLeft => Some(KeyboardKey::ArrowLeft),
+        KeyCode::ArrowRight => Some(KeyboardKey::ArrowRight),
         KeyCode::KeyE => Some(KeyboardKey::KeyE),
         KeyCode::KeyB => Some(KeyboardKey::KeyB),
         KeyCode::KeyX => Some(KeyboardKey::KeyX),
@@ -1734,6 +1738,22 @@ mod tests {
             Some(KeyboardKey::KeyD)
         );
         assert_eq!(
+            desktop_keyboard_key_from_key_code(KeyCode::ArrowUp),
+            Some(KeyboardKey::ArrowUp)
+        );
+        assert_eq!(
+            desktop_keyboard_key_from_key_code(KeyCode::ArrowDown),
+            Some(KeyboardKey::ArrowDown)
+        );
+        assert_eq!(
+            desktop_keyboard_key_from_key_code(KeyCode::ArrowLeft),
+            Some(KeyboardKey::ArrowLeft)
+        );
+        assert_eq!(
+            desktop_keyboard_key_from_key_code(KeyCode::ArrowRight),
+            Some(KeyboardKey::ArrowRight)
+        );
+        assert_eq!(
             desktop_keyboard_key_from_key_code(KeyCode::KeyE),
             Some(KeyboardKey::KeyE)
         );
@@ -1813,12 +1833,17 @@ mod tests {
             input.handle_keyboard_input(KeyCode::ShiftLeft, ElementState::Pressed, false),
             None
         );
+        assert_eq!(
+            input.handle_keyboard_input(KeyCode::ArrowLeft, ElementState::Pressed, false),
+            None
+        );
 
         let frame = input.held_frame();
         assert!(frame.forward);
         assert!(frame.backward);
         assert!(!frame.left);
         assert!(!frame.right);
+        assert_eq!(frame.keyboard_turn, 1.0);
         assert_eq!(frame.movement.forward, 0.0);
         assert!(frame.jump);
         assert!(frame.sneak);
@@ -1828,6 +1853,7 @@ mod tests {
         assert_eq!(camera_input.dt_seconds, 0.016);
         assert!(camera_input.forward);
         assert!(camera_input.backward);
+        assert!(camera_input.mouse_delta_x < 0.0);
         assert!(camera_input.jump);
         assert!(camera_input.shift);
 

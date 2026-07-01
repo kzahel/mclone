@@ -5,7 +5,18 @@
 
 import type { TouchControls, TouchMovementImpulse } from "./mclone-web-touch.js";
 
-export const INPUT_KEY_NAMES = ["forward", "backward", "left", "right", "jump", "descend", "shift", "sprint"];
+export const INPUT_KEY_NAMES = [
+  "forward",
+  "backward",
+  "left",
+  "right",
+  "turnLeft",
+  "turnRight",
+  "jump",
+  "descend",
+  "shift",
+  "sprint",
+];
 
 type InputKeyName = typeof INPUT_KEY_NAMES[number];
 type InputKeys = Record<InputKeyName, boolean>;
@@ -240,9 +251,11 @@ function inputNameForEvent(event: KeyboardEvent): string | null {
     case "KeyS":
       return "backward";
     case "ArrowLeft":
+      return "turnLeft";
     case "KeyA":
       return "left";
     case "ArrowRight":
+      return "turnRight";
     case "KeyD":
       return "right";
     case "Space":
@@ -272,10 +285,12 @@ function inputNameForLegacyKey(key: string): string | null {
     case "S":
       return "backward";
     case "ArrowLeft":
+      return "turnLeft";
     case "a":
     case "A":
       return "left";
     case "ArrowRight":
+      return "turnRight";
     case "d":
     case "D":
       return "right";
