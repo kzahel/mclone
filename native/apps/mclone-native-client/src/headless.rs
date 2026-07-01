@@ -1198,6 +1198,7 @@ fn render_renderer_rebuild_smoke_frame(
         movement_speed_multiplier: 1.0,
         player_collision_box_visible: false,
         first_person_player_visible: false,
+        crosshair_visible: true,
         player_model: Default::default(),
         server_cadence,
     });

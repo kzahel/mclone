@@ -112,6 +112,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) interaction: ClientInteractionController,
     pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) player_collision_box_visible: bool,
+    pub(crate) crosshair_visible: bool,
     pub(crate) player_model: GamePlayerModel,
     pub(crate) render_resources: Option<FlatRenderResources>,
     pub(crate) render_stats: RenderStreamStats,
@@ -206,6 +207,7 @@ pub(crate) struct FlatClientUiRenderOptions {
     pub(crate) movement_speed_multiplier: f32,
     pub(crate) player_collision_box_visible: bool,
     pub(crate) first_person_player_visible: bool,
+    pub(crate) crosshair_visible: bool,
     pub(crate) player_model: GamePlayerModel,
     pub(crate) server_cadence: Option<GameSimulationCadence>,
 }
@@ -278,6 +280,7 @@ impl FlatClientDriver {
             interaction: ClientInteractionController::new(),
             render_options,
             player_collision_box_visible: false,
+            crosshair_visible: true,
             player_model: GamePlayerModel::default(),
             render_resources: None,
             render_stats: RenderStreamStats::default(),
@@ -673,6 +676,17 @@ impl FlatClientDriver {
                 log::info!(
                     "player collision box debug {}",
                     if self.player_collision_box_visible {
+                        "visible"
+                    } else {
+                        "hidden"
+                    }
+                );
+            }
+            GameUiAction::ToggleCrosshair => {
+                self.crosshair_visible = !self.crosshair_visible;
+                log::info!(
+                    "crosshair {}",
+                    if self.crosshair_visible {
                         "visible"
                     } else {
                         "hidden"
@@ -1807,6 +1821,7 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         force_fullbright: options.render_options.force_fullbright,
         player_collision_box_visible: options.player_collision_box_visible,
         first_person_player_visible: options.first_person_player_visible,
+        crosshair_visible: Some(options.crosshair_visible),
         player_model: options.player_model,
         movement_mode: options.movement_mode,
         fly_speed_multiplier: options.fly_speed_multiplier,
@@ -2026,6 +2041,18 @@ mod tests {
 
         assert!(result.host_action.is_none());
         assert!(driver.player_collision_box_visible);
+    }
+
+    #[test]
+    fn ui_action_toggles_crosshair_visibility() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        assert!(driver.crosshair_visible);
+        let result = driver.apply_ui_action(GameUiAction::ToggleCrosshair, ui_action_context());
+
+        assert!(result.host_action.is_none());
+        assert!(!driver.crosshair_visible);
     }
 
     #[test]

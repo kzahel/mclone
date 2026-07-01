@@ -412,6 +412,7 @@ impl ChunkApp {
             movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
             player_collision_box_visible: self.driver.player_collision_box_visible,
             first_person_player_visible: self.driver.camera.first_person_player_visible(),
+            crosshair_visible: self.driver.crosshair_visible,
             player_model: self.driver.player_model,
             server_cadence: self.driver.server_simulation_cadence(),
         });
@@ -431,7 +432,8 @@ impl ChunkApp {
         );
         let palette_active = self.driver.ui_screen() == Some(GameScreen::BlockPalette);
         hud.world_hud_visible = (!ui_active || palette_active) && self.driver.runtime.is_some();
-        hud.crosshair_visible = !ui_active && self.driver.runtime.is_some();
+        hud.crosshair_visible =
+            self.driver.crosshair_visible && !ui_active && self.driver.runtime.is_some();
         hud.hotbar = FlatHotbarOverlay::selected_with_icons(
             self.driver.interaction.selected_hotbar_slot(),
             debug_hotbar_icons(
@@ -1205,6 +1207,7 @@ impl ApplicationHandler for ChunkApp {
                         as f32,
                     player_collision_box_visible: self.driver.player_collision_box_visible,
                     first_person_player_visible: self.driver.camera.first_person_player_visible(),
+                    crosshair_visible: self.driver.crosshair_visible,
                     player_model: self.driver.player_model,
                     server_cadence: self.driver.server_simulation_cadence(),
                 };

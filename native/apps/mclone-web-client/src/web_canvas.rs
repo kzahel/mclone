@@ -2389,6 +2389,7 @@ pub struct WebChunkRenderSession {
     section_occlusion_culling: bool,
     force_fullbright: bool,
     player_collision_box_visible: bool,
+    crosshair_visible: bool,
     player_model: GamePlayerModel,
     render_color_profile: RenderColorProfile,
     input_preferences: InputPreferences,
@@ -2857,6 +2858,7 @@ impl WebChunkRenderSession {
             self.section_occlusion_culling,
         )?;
         set_bool(object, "forceFullbright", self.force_fullbright)?;
+        set_bool(object, "crosshairVisible", self.crosshair_visible)?;
         set_string(object, "playerModel", self.player_model.label())?;
         set_string(
             object,
@@ -2930,6 +2932,9 @@ impl WebChunkRenderSession {
             }
             GameUiAction::TogglePlayerCollisionBox => {
                 self.player_collision_box_visible = !self.player_collision_box_visible;
+            }
+            GameUiAction::ToggleCrosshair => {
+                self.crosshair_visible = !self.crosshair_visible;
             }
             GameUiAction::ToggleFirstPersonPlayer => {
                 let visible = !self.camera.first_person_player_visible();
@@ -3069,6 +3074,7 @@ impl WebChunkRenderSession {
                 | GameUiAction::ToggleSectionOcclusion
                 | GameUiAction::ToggleFullbright
                 | GameUiAction::TogglePlayerCollisionBox
+                | GameUiAction::ToggleCrosshair
                 | GameUiAction::ToggleFirstPersonPlayer
                 | GameUiAction::SetPlayerModel(_)
                 | GameUiAction::SetMovementMode(_)
@@ -3091,6 +3097,7 @@ impl WebChunkRenderSession {
             force_fullbright: self.force_fullbright,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
+            crosshair_visible: Some(self.crosshair_visible),
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
@@ -3286,6 +3293,7 @@ impl WebChunkRenderSession {
             section_occlusion_culling: render_options.section_occlusion_culling,
             force_fullbright: render_options.force_fullbright,
             player_collision_box_visible: false,
+            crosshair_visible: true,
             player_model: GamePlayerModel::default(),
             render_color_profile,
             input_preferences: InputPreferences::AUTO,
@@ -4298,7 +4306,7 @@ impl WebChunkRenderSession {
         }
         let mut hud = FlatHud::new(self.resolved_flat_input_for_hud());
         hud.world_hud_visible = !ui_active;
-        hud.crosshair_visible = !ui_active;
+        hud.crosshair_visible = self.crosshair_visible && !ui_active;
         let hotbar_icons =
             debug_hotbar_icons(self.interaction.hotbar_items(), &self.mesh_assets.catalog);
         hud.hotbar = FlatHotbarOverlay::selected_with_icons(
@@ -4756,6 +4764,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
         GameUiAction::ToggleFullbright => "toggleFullbright",
         GameUiAction::TogglePlayerCollisionBox => "togglePlayerCollisionBox",
+        GameUiAction::ToggleCrosshair => "toggleCrosshair",
         GameUiAction::ToggleFirstPersonPlayer => "toggleFirstPersonPlayer",
         GameUiAction::SetPlayerModel(_) => "setPlayerModel",
         GameUiAction::SetMovementMode(_) => "setMovementMode",

@@ -2985,6 +2985,7 @@ where
             force_fullbright: self.render_options.force_fullbright,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
+            crosshair_visible: None,
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
@@ -3710,6 +3711,7 @@ where
                     }
                 );
             }
+            GameUiAction::ToggleCrosshair => {}
             GameUiAction::ToggleFirstPersonPlayer => {
                 let visible = !self.camera.first_person_player_visible();
                 self.camera.set_first_person_player_visible(visible);

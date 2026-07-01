@@ -192,6 +192,7 @@ mod android {
         keyboard_mouse: KeyboardMouseInputAdapter,
         render_options: TexturedSectionRenderOptions,
         player_collision_box_visible: bool,
+        crosshair_visible: bool,
         player_model: GamePlayerModel,
         ui: GameUi,
         session_status: StatusOverlay,
@@ -591,6 +592,7 @@ mod android {
                 keyboard_mouse: KeyboardMouseInputAdapter::new(),
                 render_options,
                 player_collision_box_visible: false,
+                crosshair_visible: true,
                 player_model: GamePlayerModel::default(),
                 ui: android_game_ui_for_scene(&scene_options),
                 session_status: StatusOverlay::hidden(),
@@ -1210,6 +1212,17 @@ mod android {
                         }
                     );
                 }
+                GameUiAction::ToggleCrosshair => {
+                    self.crosshair_visible = !self.crosshair_visible;
+                    log::info!(
+                        "Mclone Android crosshair {}",
+                        if self.crosshair_visible {
+                            "visible"
+                        } else {
+                            "hidden"
+                        }
+                    );
+                }
                 GameUiAction::ToggleFirstPersonPlayer => {
                     let visible = !self.camera.first_person_player_visible();
                     self.camera.set_first_person_player_visible(visible);
@@ -1363,6 +1376,7 @@ mod android {
                 force_fullbright: self.render_options.force_fullbright,
                 player_collision_box_visible: self.player_collision_box_visible,
                 first_person_player_visible: self.camera.first_person_player_visible(),
+                crosshair_visible: Some(self.crosshair_visible),
                 player_model: self.player_model,
                 movement_mode: game_movement_mode(self.camera.movement_mode()),
                 fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
@@ -1406,6 +1420,7 @@ mod android {
             );
             touch.hotbar_icons = hotbar_icons;
             let mut hud = FlatHud::new(self.input_capabilities.resolve(self.input_preferences));
+            hud.crosshair_visible = self.crosshair_visible;
             hud.hotbar = FlatHotbarOverlay::selected_with_icons(
                 self.interaction.selected_hotbar_slot(),
                 hotbar_icons,

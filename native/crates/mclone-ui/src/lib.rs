@@ -958,6 +958,7 @@ pub enum GameUiAction {
     ToggleFullbright,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
+    ToggleCrosshair,
     SetPlayerModel(GamePlayerModel),
     SetMovementMode(GameMovementMode),
     CycleFramePacing,
@@ -1046,6 +1047,7 @@ pub struct GameUiRenderState {
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
+    pub crosshair_visible: Option<bool>,
     pub player_model: GamePlayerModel,
     pub movement_mode: GameMovementMode,
     pub fly_speed_multiplier: f32,
@@ -1072,6 +1074,7 @@ impl Default for GameUiRenderState {
             force_fullbright: false,
             player_collision_box_visible: false,
             first_person_player_visible: false,
+            crosshair_visible: Some(true),
             player_model: GamePlayerModel::Player,
             movement_mode: GameMovementMode::Walk,
             fly_speed_multiplier: 1.0,
@@ -1986,10 +1989,10 @@ pub fn render_crosshair(scale: GuiScale, draw: &mut GuiDrawList) {
     let center_y = (scale.height * 0.5).floor();
     let shadow = Color::rgba(0, 0, 0, 115);
     let color = Color::rgba(238, 244, 250, 220);
-    draw.fill(Rect::new(center_x - 1.0, center_y - 8.0, 2.0, 16.0), shadow);
-    draw.fill(Rect::new(center_x - 8.0, center_y - 1.0, 16.0, 2.0), shadow);
-    draw.fill(Rect::new(center_x, center_y - 7.0, 1.0, 14.0), color);
-    draw.fill(Rect::new(center_x - 7.0, center_y, 14.0, 1.0), color);
+    draw.fill(Rect::new(center_x - 1.0, center_y - 7.0, 3.0, 15.0), shadow);
+    draw.fill(Rect::new(center_x - 7.0, center_y - 1.0, 15.0, 3.0), shadow);
+    draw.fill(Rect::new(center_x, center_y - 6.0, 1.0, 13.0), color);
+    draw.fill(Rect::new(center_x - 6.0, center_y, 13.0, 1.0), color);
 }
 
 pub fn render_touch_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &TouchOverlay) {
@@ -2058,6 +2061,7 @@ const ID_SERVER_SETTINGS_HOST_RATE: WidgetId = WidgetId(30);
 const ID_SERVER_SETTINGS_GAMEPLAY_RATE: WidgetId = WidgetId(31);
 const ID_SERVER_SETTINGS_PHYSICS_RATE: WidgetId = WidgetId(32);
 const ID_SERVER_SETTINGS_BACK: WidgetId = WidgetId(33);
+const ID_OPTIONS_CROSSHAIR: WidgetId = WidgetId(34);
 const ID_BLOCK_PALETTE_BASE: u64 = 1000;
 
 const BLOCK_PALETTE_COLUMNS: usize = 10;
@@ -2299,6 +2303,7 @@ impl GameUi {
             | GameUiAction::ToggleFullbright
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
+            | GameUiAction::ToggleCrosshair
             | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
             | GameUiAction::CycleFramePacing
@@ -2369,6 +2374,8 @@ impl GameUi {
                     Some(ID_OPTIONS_PLAYER_BOX)
                 } else if rects.first_person_player.contains(point) {
                     Some(ID_OPTIONS_FIRST_PERSON_PLAYER)
+                } else if rects.crosshair.is_some_and(|rect| rect.contains(point)) {
+                    Some(ID_OPTIONS_CROSSHAIR)
                 } else if rects.player_model.contains(point) {
                     Some(ID_OPTIONS_PLAYER_MODEL)
                 } else if rects.movement_mode.contains(point) {
@@ -2454,6 +2461,7 @@ impl GameUi {
             ID_OPTIONS_FULLBRIGHT => Some(GameUiAction::ToggleFullbright),
             ID_OPTIONS_PLAYER_BOX => Some(GameUiAction::TogglePlayerCollisionBox),
             ID_OPTIONS_FIRST_PERSON_PLAYER => Some(GameUiAction::ToggleFirstPersonPlayer),
+            ID_OPTIONS_CROSSHAIR => Some(GameUiAction::ToggleCrosshair),
             ID_OPTIONS_PLAYER_MODEL => {
                 Some(GameUiAction::SetPlayerModel(state.player_model.next()))
             }
@@ -2815,6 +2823,13 @@ impl GameUi {
             state.first_person_player_visible,
         )
         .render(draw, &self.font, self.interaction());
+        if let (Some(visible), Some(rect)) = (state.crosshair_visible, widgets.crosshair) {
+            Checkbox::new(ID_OPTIONS_CROSSHAIR, rect, "Crosshair", visible).render(
+                draw,
+                &self.font,
+                self.interaction(),
+            );
+        }
         CycleButton::new(
             ID_OPTIONS_PLAYER_MODEL,
             widgets.player_model,
@@ -2985,6 +3000,7 @@ struct OptionWidgetRects {
     fullbright: Rect,
     player_box: Rect,
     first_person_player: Rect,
+    crosshair: Option<Rect>,
     player_model: Rect,
     movement_mode: Rect,
     frame_pacing: Rect,
@@ -3307,65 +3323,76 @@ fn render_block_palette_tooltip(
 
 fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRects {
     let panel = options_panel(scale, state);
+    let show_crosshair = state.crosshair_visible.is_some();
     let show_touch_controls = state.touch_controls_mode.is_some();
     let show_touch_look = state.touch_settings.is_some();
-    let check_x = panel.x + 26.0;
-    let row_x = panel.x + 25.0;
-    let mut y = panel.y + 34.0;
+    let column_gap = 10.0;
+    let column_width = ((panel.width - 42.0 - column_gap) * 0.5).max(110.0);
+    let left_x = panel.x + 18.0;
+    let right_x = left_x + column_width + column_gap;
+    let mut left_y = panel.y + 34.0;
+    let mut right_y = panel.y + 34.0;
 
-    let occlusion = Rect::new(check_x, y, 190.0, 18.0);
-    y += 20.0;
-    let fullbright = Rect::new(check_x, y, 190.0, 18.0);
-    y += 20.0;
-    let player_box = Rect::new(check_x, y, 190.0, 18.0);
-    y += 20.0;
-    let first_person_player = Rect::new(check_x, y, 190.0, 18.0);
-    y += 20.0;
-    let player_model = Rect::new(row_x, y, 192.0, 20.0);
-    y += 22.0;
-    let movement_mode = Rect::new(row_x, y, 192.0, 20.0);
-    y += 22.0;
-    let frame_pacing = Rect::new(row_x, y, 192.0, 20.0);
-    y += 22.0;
-    let fps_cap = Rect::new(row_x, y, 192.0, 20.0);
-    y += 22.0;
-    let radius = Rect::new(row_x, y, 192.0, 20.0);
-    y += 22.0;
-    let fly_speed = Rect::new(row_x, y, 192.0, 20.0);
-    y += 22.0;
-    let movement_speed = Rect::new(row_x, y, 192.0, 20.0);
-    y += 22.0;
+    let occlusion = Rect::new(left_x, left_y, column_width, 18.0);
+    left_y += 20.0;
+    let fullbright = Rect::new(left_x, left_y, column_width, 18.0);
+    left_y += 20.0;
+    let player_box = Rect::new(left_x, left_y, column_width, 18.0);
+    left_y += 20.0;
+    let first_person_player = Rect::new(left_x, left_y, column_width, 18.0);
+    left_y += 20.0;
+    let crosshair = if show_crosshair {
+        let rect = Rect::new(left_x, left_y, column_width, 18.0);
+        left_y += 20.0;
+        Some(rect)
+    } else {
+        None
+    };
+    let player_model = Rect::new(right_x, right_y, column_width, 20.0);
+    right_y += 22.0;
+    let movement_mode = Rect::new(right_x, right_y, column_width, 20.0);
+    right_y += 22.0;
+    let frame_pacing = Rect::new(right_x, right_y, column_width, 20.0);
+    right_y += 22.0;
+    let fps_cap = Rect::new(right_x, right_y, column_width, 20.0);
+    right_y += 22.0;
+    let radius = Rect::new(right_x, right_y, column_width, 20.0);
+    right_y += 22.0;
+    let fly_speed = Rect::new(right_x, right_y, column_width, 20.0);
+    right_y += 22.0;
+    let movement_speed = Rect::new(right_x, right_y, column_width, 20.0);
+    right_y += 22.0;
     let touch_controls = if show_touch_controls {
-        let rect = Rect::new(row_x, y, 192.0, 20.0);
-        y += 22.0;
+        let rect = Rect::new(left_x, left_y, column_width, 20.0);
+        left_y += 22.0;
         Some(rect)
     } else {
         None
     };
     let touch_look = if show_touch_look {
-        let rect = Rect::new(row_x, y, 192.0, 20.0);
-        y += 22.0;
+        let rect = Rect::new(right_x, right_y, column_width, 20.0);
         Some(rect)
     } else {
         None
     };
     let server_settings = if state.server_cadence.is_some() {
-        let rect = Rect::new(row_x, y, 192.0, 20.0);
-        y += 22.0;
+        let rect = Rect::new(left_x, left_y, column_width, 20.0);
+        left_y += 22.0;
         Some(rect)
     } else {
         None
     };
-    y += 6.0;
-    let controls = Rect::new(panel.center_x() - 55.0, y, 110.0, 20.0);
-    y += 22.0;
-    let back = Rect::new(panel.center_x() - 55.0, y, 110.0, 20.0);
+    left_y += 6.0;
+    let controls = Rect::new(left_x, left_y, column_width, 20.0);
+    left_y += 22.0;
+    let back = Rect::new(left_x, left_y, column_width, 20.0);
 
     OptionWidgetRects {
         occlusion,
         fullbright,
         player_box,
         first_person_player,
+        crosshair,
         player_model,
         movement_mode,
         frame_pacing,
@@ -3382,10 +3409,18 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
 }
 
 fn options_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
-    let extra_rows =
-        u8::from(state.touch_controls_mode.is_some()) + u8::from(state.touch_settings.is_some());
-    let extra_rows = extra_rows + u8::from(state.server_cadence.is_some());
-    centered_panel(scale, 242.0, 328.0 + f32::from(extra_rows) * 22.0)
+    let left_rows_height = 80.0
+        + f32::from(u8::from(state.crosshair_visible.is_some())) * 20.0
+        + f32::from(
+            u8::from(state.touch_controls_mode.is_some())
+                + u8::from(state.server_cadence.is_some()),
+        ) * 22.0
+        + 48.0;
+    let right_rows_height = (7 + usize::from(state.touch_settings.is_some())) as f32 * 22.0;
+    let panel_width = (scale.width - 18.0).clamp(242.0, 420.0);
+    let panel_height =
+        (44.0 + left_rows_height.max(right_rows_height)).min((scale.height - 4.0).max(1.0));
+    centered_panel(scale, panel_width, panel_height)
 }
 
 fn server_setting_widgets(scale: GuiScale, state: GameUiRenderState) -> ServerSettingWidgetRects {
@@ -4455,6 +4490,38 @@ mod tests {
         render_crosshair(GuiScale::from_pixels(960, 540), &mut draw);
 
         assert_eq!(draw.commands().len(), 4);
+        assert_eq!(
+            draw.commands()[0],
+            GuiDrawCommand::SolidRect {
+                rect: Rect::new(239.0, 128.0, 3.0, 15.0),
+                color: Color::rgba(0, 0, 0, 115),
+                clip: None,
+            }
+        );
+        assert_eq!(
+            draw.commands()[1],
+            GuiDrawCommand::SolidRect {
+                rect: Rect::new(233.0, 134.0, 15.0, 3.0),
+                color: Color::rgba(0, 0, 0, 115),
+                clip: None,
+            }
+        );
+        assert_eq!(
+            draw.commands()[2],
+            GuiDrawCommand::SolidRect {
+                rect: Rect::new(240.0, 129.0, 1.0, 13.0),
+                color: Color::rgba(238, 244, 250, 220),
+                clip: None,
+            }
+        );
+        assert_eq!(
+            draw.commands()[3],
+            GuiDrawCommand::SolidRect {
+                rect: Rect::new(234.0, 135.0, 13.0, 1.0),
+                color: Color::rgba(238, 244, 250, 220),
+                clip: None,
+            }
+        );
     }
 
     #[test]
@@ -4503,6 +4570,18 @@ mod tests {
         render_flat_hud(GuiScale::from_pixels(960, 540), &mut draw, &hud);
 
         assert!(draw.commands().len() > 4);
+    }
+
+    #[test]
+    fn flat_hud_hides_crosshair_when_disabled() {
+        let mut draw = GuiDrawList::new();
+        let mut hud = FlatHud::new(resolved_flat_input(false));
+        hud.crosshair_visible = false;
+
+        assert!(!hud.has_visible_commands());
+        render_flat_hud(GuiScale::from_pixels(960, 540), &mut draw, &hud);
+
+        assert!(draw.commands().is_empty());
     }
 
     #[test]
@@ -4865,6 +4944,36 @@ mod tests {
         assert!(ui.pointer_down(point, state));
         let (_handled, action) = ui.pointer_up(point, state);
         assert_eq!(action, Some(GameUiAction::ToggleFirstPersonPlayer));
+    }
+
+    #[test]
+    fn game_ui_options_crosshair_emits_toggle_action() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            crosshair_visible: Some(false),
+            ..GameUiRenderState::default()
+        };
+
+        let crosshair = option_widgets(ui.scale(), state)
+            .crosshair
+            .expect("crosshair option should expose a checkbox");
+        let point = Point {
+            x: crosshair.x + crosshair.width * 0.5,
+            y: crosshair.y + crosshair.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(action, Some(GameUiAction::ToggleCrosshair));
+
+        let state = GameUiRenderState {
+            crosshair_visible: None,
+            ..GameUiRenderState::default()
+        };
+        assert!(option_widgets(ui.scale(), state).crosshair.is_none());
     }
 
     #[test]
