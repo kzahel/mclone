@@ -56,6 +56,7 @@ XR_FRAME_OVERLAP="${MCLONE_ANDROID_XR_FRAME_OVERLAP:-0}"
 XR_OVERLAP_EYE_SUBMITS="${MCLONE_ANDROID_XR_OVERLAP_EYE_SUBMITS:-0}"
 XR_OVERLAP_RUNTIME_PREFETCH="${MCLONE_ANDROID_XR_OVERLAP_RUNTIME_PREFETCH:-0}"
 XR_RENDER_SECTION_UPLOAD_BUDGET="${MCLONE_ANDROID_XR_RENDER_SECTION_UPLOAD_BUDGET:-}"
+XR_RENDER_SECTION_ACCEPT_BUDGET="${MCLONE_ANDROID_XR_RENDER_SECTION_ACCEPT_BUDGET:-}"
 XR_FOVEATION="${MCLONE_ANDROID_XR_FOVEATION:-off}"
 XR_RENDER_SCALE="${MCLONE_ANDROID_XR_RENDER_SCALE:-}"
 XR_DISPLAY_REFRESH_RATE="${MCLONE_ANDROID_XR_DISPLAY_REFRESH_RATE:-}"
@@ -201,6 +202,10 @@ Options:
                      Upload at most N rebuilt render sections per live XR frame.
                      Removals still apply immediately. This is an opt-in probe
                      for smoothing runtime/render-section upload bursts.
+  --xr-render-section-accept-budget N
+                     Accept at most N rebuilt or removed render sections into
+                     XR draw resources per live frame. This is opt-in and
+                     leaves the default unbounded behavior unchanged.
   --xr-foveation off|low|medium|high
                      Apply XR_FB_foveation to submitted eye swapchains. Default:
                      off. Use high for the RD10 fixed-foveated-rendering probe.
@@ -579,6 +584,11 @@ while [[ $# -gt 0 ]]; do
             XR_RENDER_SECTION_UPLOAD_BUDGET="$2"
             shift 2
             ;;
+        --xr-render-section-accept-budget)
+            require_arg "$1" "${2:-}"
+            XR_RENDER_SECTION_ACCEPT_BUDGET="$2"
+            shift 2
+            ;;
         --xr-foveation)
             require_arg "$1" "${2:-}"
             XR_FOVEATION="$2"
@@ -739,6 +749,9 @@ if [[ "$XR_OVERLAP_RUNTIME_PREFETCH" == "1" ]]; then
 fi
 if [[ -n "$XR_RENDER_SECTION_UPLOAD_BUDGET" ]]; then
     validate_positive_integer "--xr-render-section-upload-budget" "$XR_RENDER_SECTION_UPLOAD_BUDGET"
+fi
+if [[ -n "$XR_RENDER_SECTION_ACCEPT_BUDGET" ]]; then
+    validate_positive_integer "--xr-render-section-accept-budget" "$XR_RENDER_SECTION_ACCEPT_BUDGET"
 fi
 case "$XR_FOVEATION" in
     off|none|false|0|disabled|low|medium|med|high)
@@ -909,6 +922,9 @@ if [[ "$XR_OVERLAP_RUNTIME_PREFETCH" == "1" ]]; then
 fi
 if [[ -n "$XR_RENDER_SECTION_UPLOAD_BUDGET" ]]; then
     STARTUP_ARGV+=(--xr-render-section-upload-budget "$XR_RENDER_SECTION_UPLOAD_BUDGET")
+fi
+if [[ -n "$XR_RENDER_SECTION_ACCEPT_BUDGET" ]]; then
+    STARTUP_ARGV+=(--xr-render-section-accept-budget "$XR_RENDER_SECTION_ACCEPT_BUDGET")
 fi
 if [[ "$XR_FOVEATION" != "off" ]]; then
     STARTUP_ARGV+=(--xr-foveation "$XR_FOVEATION")
@@ -1116,6 +1132,14 @@ if [[ -n "$PERF_SECONDS" ]]; then
         fi
         if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*render_section_upload_budget=${XR_RENDER_SECTION_UPLOAD_BUDGET}" "$LOG_PATH" >/dev/null 2>&1; then
             mclone_die "Android XR render-section upload budget perf summary marker was not seen; see $LOG_PATH"
+        fi
+    fi
+    if [[ -n "$XR_RENDER_SECTION_ACCEPT_BUDGET" ]]; then
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_START .*render_section_accept_budget=${XR_RENDER_SECTION_ACCEPT_BUDGET}" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR render-section accept budget perf-start marker was not seen; see $LOG_PATH"
+        fi
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*render_section_accept_budget=${XR_RENDER_SECTION_ACCEPT_BUDGET}" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR render-section accept budget perf summary marker was not seen; see $LOG_PATH"
         fi
     fi
     for marker in \

@@ -56,6 +56,8 @@ Settled orbit at walking-like speed:
 ```bash
 pnpm native:android-xr:perf:orbit:rd7:metrics
 pnpm native:android-xr:perf:orbit:rd7:frame-overlap
+pnpm native:android-xr:perf:orbit:rd7:accept4:metrics
+pnpm native:android-xr:perf:orbit:rd7:accept4:frame-overlap
 ```
 
 Settled stationary render isolation:
@@ -100,6 +102,49 @@ draw counts during the measured window. Current frozen scripts use
 force-stops the app and sleeps the headset during cleanup.
 
 ## Records
+
+### 2026-07-01 - Standalone Quest 3 RD7 Settled Orbit Section Accept Budget 4
+
+Benchmarked code: section-accept budget worktree, committed with this record.
+This adds opt-in `--xr-render-section-accept-budget N`, which caps how many
+rebuilt or removed sections the Android XR draw resources accept per live
+frame. Default behavior remains unbounded.
+
+Commands:
+
+```bash
+pnpm native:android-xr:perf:orbit:rd7:accept4:metrics
+pnpm native:android-xr:perf:orbit:rd7:accept4:frame-overlap
+```
+
+Summary:
+
+| Lane | Path | FPS | Missed 72 Hz slots | App avg | App p50 | App p95 | App p99 | Max | Headroom avg | Over period | MTP | Meta dropped | Drawn sections | Drawn indices |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| settled orbit accept4 | default per-eye | `63.65` | `~376 / 3241` (`11.6%`) | `15.440ms` | `14.736ms` | `21.676ms` | `30.272ms` | `70.603ms` | `-1.551ms` | `68.9%` | `35.144ms` | 87 | 146 | 1,245,252 |
+| settled orbit accept4 | frame overlap | `69.89` | `~95 / 3241` (`2.9%`) | `12.136ms` | `11.834ms` | `15.028ms` | `26.242ms` | `63.753ms` | `1.753ms` | `8.0%` | `30.047ms` | 58 | 147 | 1,253,166 |
+
+Key max buckets:
+
+| Lane | Runtime upload | Runtime sync | Runtime prefetch sync | GPU upload | Ready sections | Shared records | Record rebuilds | Rebuild avg / max | Queued uploads / removals |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| default per-eye | `50.179ms` | `46.131ms` | `0.000ms` | `17.195ms` | `22.946ms` | `21.933ms` | 797 | `1.039 / 21.849ms` | `96 / 224` |
+| frame overlap | `0.000ms` | `0.000ms` | `30.703ms` | `6.807ms` | `12.964ms` | `13.088ms` | 773 | `1.121 / 13.030ms` | `28 / 220` |
+
+Interpretation:
+
+- Budget 4 is not a win as a fixed policy. Compared with the prepared-record
+  dirty-diff baseline, default worsened from `65.01 FPS` / `58.6%` over-period
+  to `63.65 FPS` / `68.9%`, and frame-overlap worsened from `70.36 FPS` /
+  `5.7%` over-period to `69.89 FPS` / `8.0%`.
+- The cap did what it said: per-frame accepted uploads/removals are limited to
+  `4`, and the queued backlog is visible. But each small accepted batch can
+  dirty prepared records, so rebuild frames jumped from `174-175` to
+  `773-797`. Spreading the work without incremental record maintenance created
+  more total frames with record work.
+- Keep the flag as an opt-in diagnostic/probe, not a default. The next
+  implementation target should be prepared-record coalescing or incremental
+  maintenance for small section changes, then re-test accept/upload budgets.
 
 ### 2026-07-01 - Standalone Quest 3 RD7 Settled Orbit Prepared-Record Dirty Diff
 

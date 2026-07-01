@@ -30,9 +30,12 @@ Current priority read as of the RD7 settled-orbit runs:
    the stress lane.
 2. Prepared-record dirty churn from unchanged ready-set reassertions is fixed;
    remaining rebuilds track real section/update work.
-3. Budget completed-section acceptance and re-test upload budgets with the
-   current frame-overlap path next.
-4. Defer greedy meshing, draw arenas, and other geometry-policy changes until
+3. Naive fixed section-accept budgeting is measurable but not a win yet; it
+   spreads small section changes across many more prepared-record rebuild
+   frames.
+4. Coalesce or incrementally maintain prepared records for small accepted
+   section changes, then re-test accept/upload budgets with frame overlap.
+5. Defer greedy meshing, draw arenas, and other geometry-policy changes until
    counters show the remaining tail is dominated by geometry, draw submission,
    or upload bytes rather than ready-set/record maintenance.
 
@@ -201,6 +204,20 @@ remaining record rebuilds line up with real section/update work
 should budget completed-section acceptance/upload application and then consider
 incremental prepared-record maintenance if tails remain.
 
+Section accept budget 4 first pass:
+
+| Lane | app work avg / p95 / p99 / max | FPS | missed 72 Hz slots | over period | Record-cache notes |
+|---|---:|---:|---:|---:|---|
+| Settled orbit default accept4 | `15.440 / 21.676 / 30.272 / 70.603ms` | `63.65` | `~376 / 3241` (`11.6%`) | `68.9%` | `prepared_rebuilds=797`, `queued_upload_sections=96`, `queued_upload_removed_sections=224` |
+| Settled orbit overlap accept4 | `12.136 / 15.028 / 26.242 / 63.753ms` | `69.89` | `~95 / 3241` (`2.9%`) | `8.0%` | `prepared_rebuilds=773`, `queued_upload_sections=28`, `queued_upload_removed_sections=220` |
+
+Interpretation: the opt-in budget successfully caps accepted uploads/removals
+to `4` per frame, but it worsens RD7 settled orbit as a fixed policy. It turns
+section changes into many small record-dirty frames, increasing prepared-record
+rebuilds from `174-175` to `773-797`. Keep the flag as a diagnostic/probe; the
+next implementation slice should make prepared-record maintenance cheaper or
+coalesced before relying on section acceptance budgets.
+
 ### Frame Overlap Live RD10
 
 From the live RD10 A/B recorded in
@@ -317,7 +334,8 @@ Validation:
 
 ### C. Budget Completed Section Acceptance
 
-Status: open.
+Status: first opt-in XR draw-resource probe landed; fixed budget `4` measured
+as worse for RD7 settled orbit.
 
 Do not only budget GPU upload. Stage completed section meshes and admit them to
 the live render cache by section count or byte count per frame. Keep old visible
@@ -331,15 +349,22 @@ sky/background through an occluded neighbor boundary.
 Expected win: a single compile result cannot force all vertical section CPU
 apply work into one headset frame.
 
+Result so far: `--xr-render-section-accept-budget 4` limits XR draw-resource
+acceptance to four rebuilt/removed sections per frame, but without incremental
+prepared-record maintenance it spreads the same section churn across hundreds of
+record rebuild frames and worsens average/p95/p99 in RD7 settled orbit.
+
 Open design questions:
 
 - Budget by section count, vertex/index bytes, or measured apply time?
 - Prioritize nearest/visible sections first or preserve compile-result order?
 - How do we expose stale-but-visible sections in diagnostics?
+- How do we coalesce or incrementally update prepared records so accepting a few
+  section changes does not trigger a full prepared-record rebuild each time?
 
 ### D. Re-run Upload Budgets With Current Metrics
 
-Status: open.
+Status: still open after the accept4 result.
 
 Re-test `--xr-render-section-upload-budget` with the current headroom markers and
 frame-overlap path.
@@ -391,7 +416,7 @@ remain shared-first and not fork Android XR meshing.
 
 ### G. Co-design Uploads And Record Maintenance
 
-Status: open.
+Status: next priority after accept4.
 
 If B and C show record rebuild is still a major tail source, move toward:
 
@@ -440,6 +465,10 @@ spike is actually prepared-record rebuild or CPU apply work.
   dirty records, empty section-update applies are no-ops, and the RD7
   settled-orbit overlap lane improved to `11.791ms` avg / `14.142ms` p95 with
   `5.7%` over-period frames. It still is not locked.
+- `--xr-render-section-accept-budget` landed as an opt-in Android XR probe.
+  Budget `4` caps accepted uploads/removals but worsens RD7 settled orbit by
+  increasing prepared-record rebuild frames to `773-797`; do not make fixed low
+  accept budgets default without record-maintenance work.
 - Solid render-layer split landed for vanilla-shaped render-layer correctness,
   but it was not a measured RD10 performance win.
 - Full-frame multiview was correctness-valid but performance-flat or tail-worse
@@ -448,7 +477,8 @@ spike is actually prepared-record rebuild or CPU apply work.
 ### Not Yet Tried
 
 - Runtime sync sub-bucket instrumentation.
-- Section or byte budget for completed-result acceptance.
+- Section or byte budget for completed-result acceptance in the shared render
+  session, with prepared-record coalescing/incremental updates.
 - Current-metric upload-budget A/B combined with frame overlap.
 - Headroom-aware adaptive accept/upload controller.
 - Section-level render compile result splitting.
@@ -457,19 +487,20 @@ spike is actually prepared-record rebuild or CPU apply work.
 
 ## Next Recommended Slice
 
-Do C next: budget completed-section acceptance/apply by section count or byte
-count, then re-run RD7 settled orbit default and frame-overlap.
+Do G next: make prepared-record maintenance cheaper for small section changes,
+then re-run accept/upload budgets.
 
-1. Stage completed section meshes instead of applying a whole compile result in
-   one headset frame.
-2. Admit a bounded number of rebuilt/removed sections per frame, nearest/visible
-   first if practical.
-3. Keep old visible section resources until replacements are accepted so visual
-   coherence does not regress.
-4. Re-test upload budgets with frame overlap after acceptance is bounded.
-5. Only then revisit incremental prepared records or a section GPU arena if the
-   `MCLONE_ANDROID_XR_PERF_RECORD_CACHE` outliers remain.
+1. Inspect `TexturedSectionDrawResources` record invalidation and prepared
+   record build ownership for section add/remove/update.
+2. Prototype coalescing or incremental maintenance so a few accepted sections do
+   not force a full prepared-record rebuild every frame.
+3. Keep the existing accept-budget flag as the probe harness, but do not treat
+   budget `4` as a product policy.
+4. Re-test RD7 settled orbit default and frame-overlap, first unbounded and then
+   accept/upload budget variants.
+5. Only then move to adaptive budgets or section-level render compile result
+   splitting if the record-maintenance tail is under control.
 
-This is now lower risk and better targeted than greedy meshing: the current
-counter evidence says the remaining live tail follows section/update work, not
-unchanged ready-set churn or raw geometry count alone.
+This is now better targeted than greedy meshing: the latest counter evidence
+says low fixed acceptance budgets expose prepared-record rebuild amplification,
+not a raw geometry-count limit.

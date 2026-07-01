@@ -560,6 +560,7 @@ where
     overlap_runtime_prefetch_enabled: bool,
     prefetched_live_upload: Option<XrTerrainUploadSummary>,
     render_section_upload_budget: Option<usize>,
+    render_section_accept_budget: Option<usize>,
     per_view_uniform_frame: u32,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
@@ -709,6 +710,7 @@ where
             overlap_runtime_prefetch_enabled: false,
             prefetched_live_upload: None,
             render_section_upload_budget: None,
+            render_section_accept_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
             menu_toggle_down: false,
@@ -806,6 +808,7 @@ where
             overlap_runtime_prefetch_enabled: false,
             prefetched_live_upload: None,
             render_section_upload_budget: None,
+            render_section_accept_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
             menu_toggle_down: false,
@@ -2050,6 +2053,14 @@ where
         self.render_section_upload_budget
     }
 
+    pub fn set_render_section_accept_budget(&mut self, budget: Option<usize>) {
+        self.render_section_accept_budget = budget.filter(|budget| *budget > 0);
+    }
+
+    pub fn render_section_accept_budget(&self) -> Option<usize> {
+        self.render_section_accept_budget
+    }
+
     pub fn camera_snapshot(&self) -> EngineCameraSnapshot {
         self.camera.snapshot()
     }
@@ -2537,7 +2548,10 @@ where
         device: &wgpu::Device,
         section_update: mclone_render_session::RenderSectionCacheUpdate,
     ) -> Result<TexturedSectionUploadReport> {
-        if self.render_section_upload_budget.is_none() && !self.has_pending_section_upload_work() {
+        if self.render_section_upload_budget.is_none()
+            && self.render_section_accept_budget.is_none()
+            && !self.has_pending_section_upload_work()
+        {
             return self
                 .draw
                 .apply_section_updates(
@@ -2549,21 +2563,48 @@ where
         }
 
         self.enqueue_section_update_uploads(section_update);
+        let accept_budget = self.render_section_accept_budget.unwrap_or(usize::MAX);
         let upload_budget = self.render_section_upload_budget.unwrap_or(usize::MAX);
-        let upload_count = upload_budget.min(self.pending_section_uploads.len());
+        let upload_count = upload_budget
+            .min(accept_budget)
+            .min(self.pending_section_uploads.len());
         let mut sections = Vec::with_capacity(upload_count);
         for _ in 0..upload_count {
             if let Some(section) = self.pending_section_uploads.pop_front() {
                 sections.push(section);
             }
         }
-        let removed = std::mem::take(&mut self.pending_section_removals);
+        let removed = if self.render_section_accept_budget.is_some() {
+            let remaining_accept_budget = accept_budget.saturating_sub(sections.len());
+            self.take_budgeted_section_removals(remaining_accept_budget)
+        } else {
+            std::mem::take(&mut self.pending_section_removals)
+        };
         if sections.is_empty() && removed.is_empty() {
             return Ok(TexturedSectionUploadReport::default());
         }
         self.draw
             .apply_section_updates(device, &sections, &removed)
-            .context("upload budgeted XR terrain render section updates")
+            .context("accept budgeted XR terrain render section updates")
+    }
+
+    fn take_budgeted_section_removals(&mut self, budget: usize) -> BTreeSet<RenderSectionKey> {
+        if budget == 0 || self.pending_section_removals.is_empty() {
+            return BTreeSet::new();
+        }
+        if budget >= self.pending_section_removals.len() {
+            return std::mem::take(&mut self.pending_section_removals);
+        }
+        let keys: Vec<_> = self
+            .pending_section_removals
+            .iter()
+            .copied()
+            .take(budget)
+            .collect();
+        for key in &keys {
+            self.pending_section_removals.remove(key);
+        }
+        keys.into_iter().collect()
     }
 
     fn frozen_runtime_upload_summary(&self) -> XrTerrainUploadSummary {
