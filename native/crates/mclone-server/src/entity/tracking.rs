@@ -19,6 +19,18 @@ pub(crate) struct EntityTracking {
 }
 
 impl EntityTracking {
+    #[allow(dead_code)]
+    pub(crate) fn diagnostics(&self) -> EntityTrackingDiagnostics {
+        EntityTrackingDiagnostics {
+            tracked_entities: self
+                .seen_by_entity
+                .values()
+                .filter(|observers| !observers.is_empty())
+                .count(),
+            tracked_observer_pairs: self.seen_by_entity.values().map(BTreeSet::len).sum(),
+        }
+    }
+
     pub(crate) fn remove_observer(&mut self, player_id: ServerPlayerId) {
         for observers in self.seen_by_entity.values_mut() {
             observers.remove(&player_id);
@@ -89,6 +101,13 @@ impl EntityTracking {
     }
 }
 
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct EntityTrackingDiagnostics {
+    pub(crate) tracked_entities: usize,
+    pub(crate) tracked_observer_pairs: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +149,13 @@ mod tests {
                 update: ServerUpdate::EntitySnapshot(subject.snapshot()),
             }]
         );
+        assert_eq!(
+            tracking.diagnostics(),
+            EntityTrackingDiagnostics {
+                tracked_entities: 1,
+                tracked_observer_pairs: 1
+            }
+        );
 
         let routes = tracking.reconcile_observer(observer, &[subject], |_, _| false);
 
@@ -139,6 +165,13 @@ mod tests {
                 recipient: observer,
                 update: ServerUpdate::EntityRemove { id: subject.id },
             }]
+        );
+        assert_eq!(
+            tracking.diagnostics(),
+            EntityTrackingDiagnostics {
+                tracked_entities: 0,
+                tracked_observer_pairs: 0
+            }
         );
     }
 

@@ -12,8 +12,9 @@ entity/mob/goal skeleton is in place.
 
 Workstream: native Rust shared server/runtime, desktop validation first.
 
-Status: Slice 0 landed. The starter passive entity path is now split under
-`native/crates/mclone-server/src/entity/` with no intended behavior change.
+Status: Slices 0-1 landed. The starter passive entity path is split under
+`native/crates/mclone-server/src/entity/`, and entity visibility/tick-list
+boundaries now exist before real mob AI work.
 
 ## Non-Negotiable Constraints
 
@@ -113,7 +114,7 @@ Landed notes:
 - Preserved the existing starter cow and entity tracking behavior.
 - Verified with `cargo test --manifest-path native/Cargo.toml -p mclone-server`.
 
-## Slice 1 - Visibility And Tick-List Foundation
+## Slice 1 - Visibility And Tick-List Foundation (Landed)
 
 Purpose: make chunk-status-driven entity activity explicit before adding real
 AI.
@@ -136,6 +137,18 @@ Done when:
 
 - No entity tick path performs its own duplicate player-distance chunk check.
 - The runtime exposes diagnostics for stored/tracked/ticking entity counts.
+
+Landed notes:
+
+- Added `entity/visibility.rs` with a Java-shaped `FullChunkStatus` to
+  `Hidden` / `Tracked` / `Ticking` mapping.
+- Added `entity/tick_list.rs` as the explicit ordinary entity ticking set.
+- `ServerEntityStore::tick_stationary(...)` now reconciles the tick list from
+  scheduler-provided `entity_ticking_chunks` before advancing entity age.
+- Added store/tracking diagnostics for stored, tracked, observer-pair, and
+  ticking entity counts.
+- Added tests for visibility mapping, tick-list reconciliation, chunk demotion,
+  and diagnostics.
 
 ## Slice 2 - Metadata And Passive Mob Runtime State
 

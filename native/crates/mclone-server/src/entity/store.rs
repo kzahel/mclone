@@ -6,10 +6,12 @@ use mclone_protocol::EntityRotation;
 use mclone_protocol::{EntityId, EntityKind};
 
 use super::ServerEntityState;
+use super::tick_list::ServerEntityTickList;
 
 #[derive(Debug, Default)]
 pub(crate) struct ServerEntityStore {
     entities: BTreeMap<EntityId, ServerEntityState>,
+    tick_list: ServerEntityTickList,
     next_entity_id: u64,
     starter_passive_id: Option<EntityId>,
     #[cfg(feature = "physics-rapier")]
@@ -128,6 +130,14 @@ impl ServerEntityStore {
         self.entities.values().copied().collect()
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn diagnostics(&self) -> ServerEntityStoreDiagnostics {
+        ServerEntityStoreDiagnostics {
+            stored_entities: self.entities.len(),
+            ticking_entities: self.tick_list.len(),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn state(&self, id: EntityId) -> Option<ServerEntityState> {
         self.entities.get(&id).copied()
@@ -141,13 +151,17 @@ impl ServerEntityStore {
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
+        let debug_physics_cube_id = self.debug_physics_cube_id();
+        self.tick_list.reconcile(
+            self.entities
+                .values()
+                .copied()
+                .filter(|entity| Some(entity.id) != debug_physics_cube_id),
+            &entity_ticking_chunks,
+        );
         let mut updated = Vec::new();
-        for entity in self.entities.values_mut() {
-            #[cfg(feature = "physics-rapier")]
-            if Some(entity.id) == self.debug_physics_cube_id {
-                continue;
-            }
-            if entity.alive && entity_ticking_chunks.contains(&entity.chunk_pos()) {
+        for id in self.tick_list.iteration_ids() {
+            if let Some(entity) = self.entities.get_mut(&id) {
                 entity.age_ticks = entity.age_ticks.saturating_add(1);
                 updated.push(*entity);
             }
@@ -159,6 +173,24 @@ impl ServerEntityStore {
         self.next_entity_id = self.next_entity_id.saturating_add(1);
         EntityId(self.next_entity_id)
     }
+
+    fn debug_physics_cube_id(&self) -> Option<EntityId> {
+        #[cfg(feature = "physics-rapier")]
+        {
+            self.debug_physics_cube_id
+        }
+        #[cfg(not(feature = "physics-rapier"))]
+        {
+            None
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ServerEntityStoreDiagnostics {
+    pub(crate) stored_entities: usize,
+    pub(crate) ticking_entities: usize,
 }
 
 #[cfg(feature = "physics-rapier")]
@@ -224,11 +256,44 @@ mod tests {
 
         assert!(store.tick_stationary(&[ChunkPos::new(1, 0)]).is_empty());
         assert_eq!(store.state(id).unwrap().age_ticks, 0);
+        assert_eq!(
+            store.diagnostics(),
+            ServerEntityStoreDiagnostics {
+                stored_entities: 1,
+                ticking_entities: 0
+            }
+        );
 
         let updated = store.tick_stationary(&[ChunkPos::new(0, 0)]);
 
         assert_eq!(updated.len(), 1);
         assert_eq!(updated[0].id, id);
         assert_eq!(updated[0].age_ticks, 1);
+        assert_eq!(
+            store.diagnostics(),
+            ServerEntityStoreDiagnostics {
+                stored_entities: 1,
+                ticking_entities: 1
+            }
+        );
+    }
+
+    #[test]
+    fn entity_tick_list_demotes_without_removing_stored_entity() {
+        let mut store = ServerEntityStore::default();
+        let id = store.ensure_starter_passive_near_spawn(Vec3d::new(8.0, 64.0, 8.0));
+        store.tick_stationary(&[ChunkPos::new(0, 0)]);
+
+        let updated = store.tick_stationary(&[]);
+
+        assert!(updated.is_empty());
+        assert_eq!(store.state(id).unwrap().age_ticks, 1);
+        assert_eq!(
+            store.diagnostics(),
+            ServerEntityStoreDiagnostics {
+                stored_entities: 1,
+                ticking_entities: 0
+            }
+        );
     }
 }

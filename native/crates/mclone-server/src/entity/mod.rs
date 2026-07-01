@@ -6,7 +6,9 @@
 
 mod state;
 mod store;
+mod tick_list;
 mod tracking;
+mod visibility;
 
 pub(crate) use state::ServerEntityState;
 #[cfg(feature = "physics-rapier")]
