@@ -21,7 +21,7 @@ use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
     ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
-use mclone_core::{BlockStateId, Vec3d};
+use mclone_core::{BlockStateId, ChunkPos, Vec3d};
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, TouchControlsMode,
     keyboard_turn_mouse_delta,
@@ -1847,6 +1847,7 @@ impl FlatClientDriver {
             EngineDebugVisualOptions::new(self.player_collision_box_visible),
         );
         let render_distance = self.current_render_distance(fallback_render_distance);
+        let normal_terrain_chunks = traversal_ready_chunks(&frame_inputs.traversal_ready_sections);
         let far_lod_materials = self
             .runtime
             .as_ref()
@@ -1856,6 +1857,7 @@ impl FlatClientDriver {
             self.scene.seed,
             frame_inputs.camera_view.snapshot.chunk_pos,
             render_distance,
+            Some(&normal_terrain_chunks),
             far_lod_materials,
         );
         let Some(render_resources) = &mut self.render_resources else {
@@ -1973,6 +1975,13 @@ impl FlatClientDriver {
         self.underwater_effect.reset();
         self.far_lod_cache.clear();
     }
+}
+
+fn traversal_ready_chunks(sections: &BTreeSet<RenderSectionKey>) -> BTreeSet<ChunkPos> {
+    sections
+        .iter()
+        .map(|key| ChunkPos::new(key.chunk_x, key.chunk_z))
+        .collect()
 }
 
 pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUiRenderState {
