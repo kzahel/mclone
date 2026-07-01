@@ -162,6 +162,20 @@ materially, while live flight still exposes the same runtime-sync /
 prepared-record burst class and stationary RD7 still shows a near-budget steady
 render cost.
 
+The settled-orbit lane (`abe9d6d`) is the better product-style movement proxy
+because it waits for the populated RD7 scene, then moves around the local chunk
+cluster:
+
+| Lane | app work avg / p95 / p99 / max | FPS | missed 72 Hz slots | over period | Notes |
+|---|---:|---:|---:|---:|---|
+| Settled orbit default | `15.674 / 20.856 / 30.028 / 60.227ms` | `62.88` | `~410 / 3240` (`12.7%`) | `71.3%` | `max_runtime_sync_ms=33.504`, `max_terrain_shared_records_ms=27.010` |
+| Settled orbit overlap | `12.493 / 14.692 / 22.826 / 58.398ms` | `70.25` | `~79 / 3241` (`2.4%`) | `9.5%` | `max_runtime_prefetch_sync_ms=44.080`, `max_terrain_shared_records_ms=18.175` |
+
+Interpretation: frame overlap is a real product-lane win, but RD7 at scale `1.0`
+still is not locked. The remaining work should target prepared-record/runtime
+burst spikes and likely add a quality/headroom lever before making overlap a
+default.
+
 ### Frame Overlap Live RD10
 
 From the live RD10 A/B recorded in

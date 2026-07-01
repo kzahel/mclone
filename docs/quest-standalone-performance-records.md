@@ -101,6 +101,51 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-01 - Standalone Quest 3 RD7 Settled Orbit
+
+Benchmarked code commit: `abe9d6d` (`Add Android XR settled orbit perf lane`).
+This lane waits for the RD7 settled gate, then moves in a local no-clip orbit at
+`4.3` blocks/s for `45` seconds. Captured on Quest 3 with fixed startup pose
+`0,120,-96,180`, `--perf-metrics`, render scale `1.0`, foveation off, render
+distance `7`, and the same staged asset pack.
+
+Commands:
+
+```bash
+pnpm native:android-xr:perf:orbit:rd7:metrics
+pnpm native:android-xr:perf:orbit:rd7:frame-overlap
+```
+
+Summary:
+
+| Lane | Path | FPS | Missed 72 Hz slots | App avg | App p50 | App p95 | App p99 | Max | Headroom avg | Over period | MTP | Meta dropped | Drawn sections | Drawn indices |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| settled orbit | default per-eye | `62.88` | `~410 / 3240` (`12.7%`) | `15.674ms` | `15.173ms` | `20.856ms` | `30.028ms` | `60.227ms` | `-1.785ms` | `71.3%` | `31.094ms` | 72 | 157 | 1,252,116 |
+| settled orbit | frame overlap | `70.25` | `~79 / 3241` (`2.4%`) | `12.493ms` | `12.359ms` | `14.692ms` | `22.826ms` | `58.398ms` | `1.396ms` | `9.5%` | `39.214ms` | 54 | 157 | 1,252,116 |
+
+Key max buckets:
+
+| Lane | Runtime upload | Runtime sync | Runtime prefetch sync | Shared records | Stereo poll wait |
+|---|---:|---:|---:|---:|---:|
+| default per-eye | `35.719ms` | `33.504ms` | `0.000ms` | `27.010ms` | `41.404ms` |
+| frame overlap | `0.000ms` | `0.000ms` | `44.080ms` | `18.175ms` | `37.273ms` |
+
+Interpretation:
+
+- This is the better product-style movement lane. Unlike the earlier straight
+  flight sample, it starts from a populated settled RD7 scene and keeps drawing
+  `157` sections / `1.252M` indices while moving around the local chunk cluster.
+- Frame overlap is a large improvement here: submitted FPS rises from `62.88`
+  to `70.25`, missed 72 Hz slots fall from about `12.7%` to `2.4%`, and
+  over-period app-work frames fall from `71.3%` to `9.5%`.
+- It still is not perfectly locked. Frame overlap leaves p95 just over budget
+  (`14.692ms` against `13.889ms`) and p99/max spikes remain. The runtime spike
+  moves into the overlap prefetch path (`44.080ms` max prefetch sync), and
+  prepared-record/shared-record work remains visible (`18.175ms` max).
+- Motion-to-photon worsened in the overlap sample (`31.094ms -> 39.214ms`), so
+  overlap still needs a headset comfort check and probably a quality/headroom
+  lever before becoming a default.
+
 ### 2026-07-01 - Standalone Quest 3 Live RD7 Stable-Lane Baseline
 
 Benchmarked code commit: `c87ae7a` (`Add Android XR RD7 perf lanes`). Captured
