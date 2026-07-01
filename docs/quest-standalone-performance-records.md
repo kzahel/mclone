@@ -101,6 +101,52 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-01 - Standalone Quest 3 RD7 Settled Orbit Prepared-Record Dirty Diff
+
+Benchmarked code: prepared-record dirty diff worktree, committed with this
+record. The change avoids dirtying prepared terrain records when the
+traversal-ready set is reasserted unchanged, skips empty section-update apply
+calls, and adds `MCLONE_ANDROID_XR_PERF_RECORD_CACHE` counters.
+
+Commands:
+
+```bash
+pnpm native:android-xr:perf:orbit:rd7:metrics
+pnpm native:android-xr:perf:orbit:rd7:frame-overlap
+```
+
+Summary:
+
+| Lane | Path | FPS | Missed 72 Hz slots | App avg | App p50 | App p95 | App p99 | Max | Headroom avg | Over period | MTP | Meta dropped | Drawn sections | Drawn indices |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| settled orbit | default per-eye | `65.01` | `~315 / 3241` (`9.7%`) | `15.041ms` | `14.238ms` | `21.149ms` | `30.707ms` | `59.273ms` | `-1.152ms` | `58.6%` | `37.149ms` | 83 | 157 | 1,252,116 |
+| settled orbit | frame overlap | `70.36` | `~74 / 3241` (`2.3%`) | `11.791ms` | `11.670ms` | `14.142ms` | `22.437ms` | `49.540ms` | `2.098ms` | `5.7%` | `24.763ms` | 53 | 157 | 1,252,116 |
+
+Key max buckets:
+
+| Lane | Runtime upload | Runtime sync | Runtime prefetch sync | Shared records | Stereo poll wait | Record rebuilds | Rebuild avg / max | Ready set changed |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| default per-eye | `25.305ms` | `22.886ms` | `0.000ms` | `7.352ms` | `49.225ms` | 174 | `0.941 / 4.159ms` | `15 / 2926` |
+| frame overlap | `0.000ms` | `0.000ms` | `34.027ms` | `26.982ms` | `27.693ms` | 175 | `1.135 / 26.887ms` | `15 / 3167` |
+
+Interpretation:
+
+- The dirty-diff guard did what it was supposed to do: almost every
+  ready-set call is now unchanged (`2911/2926` default, `3152/3167` overlap),
+  and those calls no longer force prepared-record rebuilds.
+- The default lane improved average throughput versus the prior settled-orbit
+  record (`62.88 -> 65.01 FPS`, missed slots `12.7% -> 9.7%`, over-period
+  `71.3% -> 58.6%`), but it is still not close to locked.
+- The frame-overlap lane is the useful product signal: app avg improved
+  `12.493ms -> 11.791ms`, p95 `14.692ms -> 14.142ms`, p99
+  `22.826ms -> 22.437ms`, max `58.398ms -> 49.540ms`, and over-period
+  `9.5% -> 5.7%`. It still misses about `2.3%` of 72 Hz slots.
+- The remaining prepared-record rebuilds now line up with real section/update
+  work rather than ready-set reassertions (`174-175` rebuilds for
+  `182-203` upload-work frames). That points the next slice at section
+  acceptance/upload budgeting or incremental prepared records, not greedy
+  meshing yet.
+
 ### 2026-07-01 - Standalone Quest 3 RD7 Settled Orbit
 
 Benchmarked code commit: `abe9d6d` (`Add Android XR settled orbit perf lane`).

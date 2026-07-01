@@ -28,10 +28,10 @@ Current priority read as of the RD7 settled-orbit runs:
 
 1. Use RD7 settled orbit as the primary product-style movement lane; use RD10 as
    the stress lane.
-2. Fix or disprove prepared-record dirty churn first, with enough instrumentation
-   to explain runtime-sync and shared-record spikes.
-3. Then budget completed-section acceptance and re-test upload budgets with the
-   current frame-overlap path.
+2. Prepared-record dirty churn from unchanged ready-set reassertions is fixed;
+   remaining rebuilds track real section/update work.
+3. Budget completed-section acceptance and re-test upload budgets with the
+   current frame-overlap path next.
 4. Defer greedy meshing, draw arenas, and other geometry-policy changes until
    counters show the remaining tail is dominated by geometry, draw submission,
    or upload bytes rather than ready-set/record maintenance.
@@ -188,6 +188,19 @@ still is not locked. The remaining work should target prepared-record/runtime
 burst spikes and likely add a quality/headroom lever before making overlap a
 default.
 
+Prepared-record dirty diff first pass:
+
+| Lane | app work avg / p95 / p99 / max | FPS | missed 72 Hz slots | over period | Record-cache notes |
+|---|---:|---:|---:|---:|---|
+| Settled orbit default | `15.041 / 21.149 / 30.707 / 59.273ms` | `65.01` | `~315 / 3241` (`9.7%`) | `58.6%` | `ready_set_changed=15/2926`, `prepared_rebuilds=174`, `max_shared_records_ms=7.352` |
+| Settled orbit overlap | `11.791 / 14.142 / 22.437 / 49.540ms` | `70.36` | `~74 / 3241` (`2.3%`) | `5.7%` | `ready_set_changed=15/3167`, `prepared_rebuilds=175`, one `26.887ms` record rebuild outlier |
+
+Interpretation: the unchanged-ready-set rebuild class is mostly gone. The
+remaining record rebuilds line up with real section/update work
+(`174-175` rebuilds for `182-203` upload-work frames), so the next pacing slice
+should budget completed-section acceptance/upload application and then consider
+incremental prepared-record maintenance if tails remain.
+
 ### Frame Overlap Live RD10
 
 From the live RD10 A/B recorded in
@@ -245,7 +258,10 @@ incrementally.
 
 ### A. Instrument The Burst
 
-Status: open, highest priority.
+Status: partially landed. `MCLONE_ANDROID_XR_PERF_RECORD_CACHE` now reports
+ready-set diff calls and prepared-record rebuild count/avg/max. Runtime sync
+sub-buckets for completed-result receive/apply/cache insertion/removal are still
+open.
 
 Add Android XR perf markers for:
 
@@ -266,13 +282,21 @@ Success condition: a live RD7 settled-orbit or RD10 stress run can explain each
 
 ### B. Dirty Prepared Records Only On Real Ready-Set Change
 
-Status: open, likely first implementation slice.
+Status: first pass landed.
 
 Teach `set_traversal_ready_sections(...)` to compare or hash the incoming ready
 set against the current one before setting `records_dirty`.
 
+The landed pass also skips empty section-update apply calls so they do not dirty
+records. RD7 settled-orbit counters show the ready set only changes about `15`
+times in a 45-second run, while thousands of unchanged ready-set calls no longer
+force rebuilds.
+
 Expected win: remove full prepared-record rebuilds from frames where the live
 path merely reasserts the same ready set.
+
+Result: confirmed for the unchanged-ready-set case. The remaining rebuilds are
+mostly tied to real section/upload work, so this item now feeds Slice C.
 
 Risks:
 
@@ -412,6 +436,10 @@ spike is actually prepared-record rebuild or CPU apply work.
   keeps a populated scene visible while moving around nearby chunks; frame
   overlap cuts missed 72 Hz slots from about `12.7%` to `2.4%`, but p95 remains
   slightly over budget.
+- Prepared-record dirty diff landed: unchanged ready-set reassertions no longer
+  dirty records, empty section-update applies are no-ops, and the RD7
+  settled-orbit overlap lane improved to `11.791ms` avg / `14.142ms` p95 with
+  `5.7%` over-period frames. It still is not locked.
 - Solid render-layer split landed for vanilla-shaped render-layer correctness,
   but it was not a measured RD10 performance win.
 - Full-frame multiview was correctness-valid but performance-flat or tail-worse
@@ -419,7 +447,6 @@ spike is actually prepared-record rebuild or CPU apply work.
 
 ### Not Yet Tried
 
-- Prepared-record dirty diff before rebuild.
 - Runtime sync sub-bucket instrumentation.
 - Section or byte budget for completed-result acceptance.
 - Current-metric upload-budget A/B combined with frame overlap.
@@ -430,16 +457,19 @@ spike is actually prepared-record rebuild or CPU apply work.
 
 ## Next Recommended Slice
 
-Do B first, with enough of A to prove or disprove the prepared-record
-hypothesis. The primary A/B is RD7 settled orbit, default and frame-overlap:
+Do C next: budget completed-section acceptance/apply by section count or byte
+count, then re-run RD7 settled orbit default and frame-overlap.
 
-1. Add a cheap ready-set change marker/counter.
-2. Avoid setting `records_dirty` when the ready set is unchanged.
-3. Record whether `shared_records_ms` and `runtime_sync_ms` spikes disappear or
-   shrink in RD7 settled orbit.
-4. Re-run RD10 as the stress lane only after the RD7 product lane moves.
-5. Then re-run upload-budget experiments, because their old results were
-   confounded by record-maintenance cost.
+1. Stage completed section meshes instead of applying a whole compile result in
+   one headset frame.
+2. Admit a bounded number of rebuilt/removed sections per frame, nearest/visible
+   first if practical.
+3. Keep old visible section resources until replacements are accepted so visual
+   coherence does not regress.
+4. Re-test upload budgets with frame overlap after acceptance is bounded.
+5. Only then revisit incremental prepared records or a section GPU arena if the
+   `MCLONE_ANDROID_XR_PERF_RECORD_CACHE` outliers remain.
 
-This is lower risk than changing meshing or compile topology, and it directly
-targets a measured live movement spike source.
+This is now lower risk and better targeted than greedy meshing: the current
+counter evidence says the remaining live tail follows section/update work, not
+unchanged ready-set churn or raw geometry count alone.

@@ -33,7 +33,8 @@ mod android {
     use mclone_net::NativeClientSession;
     use mclone_protocol::{ClientCommand, ServerUpdate};
     use mclone_render::chunk::{
-        ChunkDepthTarget, ChunkMultiviewDepthTarget, TexturedSectionRenderOptions,
+        ChunkDepthTarget, ChunkMultiviewDepthTarget, TexturedSectionRecordCacheStats,
+        TexturedSectionRecordPrepareStats, TexturedSectionRenderOptions,
     };
     use mclone_render_session::EngineCameraSnapshot;
     use mclone_xr_host::{
@@ -3082,12 +3083,16 @@ mod android {
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     enum AndroidXrPerfAutomation {
-        Flight { speed_blocks_per_second: f64 },
+        Flight {
+            speed_blocks_per_second: f64,
+        },
         Orbit {
             speed_blocks_per_second: f64,
             elapsed_seconds: f64,
         },
-        Stationary { frozen_render: bool },
+        Stationary {
+            frozen_render: bool,
+        },
     }
 
     #[derive(Clone, Copy, Debug, Default)]
@@ -3105,6 +3110,7 @@ mod android {
         terrain_runtime_gpu_upload_ms: f64,
         terrain_runtime_ready_sections_ms: f64,
         terrain_shared_records_ms: f64,
+        terrain_record_cache_prepare: TexturedSectionRecordPrepareStats,
         terrain_left_eye_ms: f64,
         terrain_right_eye_ms: f64,
         terrain_left_eye_prepare_ms: f64,
@@ -3345,6 +3351,11 @@ mod android {
                 settle_quiet_frames: self.settle_quiet_frames,
                 start_camera: rendered.camera,
                 latest_camera: rendered.camera,
+                start_record_cache: rendered.summary.timing.record_cache_prepare.cache,
+                latest_record_cache: rendered.summary.timing.record_cache_prepare.cache,
+                record_rebuild_frames: 0,
+                record_rebuild_total_ms: 0.0,
+                record_rebuild_max_ms: 0.0,
                 latest_summary: rendered.summary,
             });
             true
@@ -3452,6 +3463,11 @@ mod android {
         settle_quiet_frames: u64,
         start_camera: EngineCameraSnapshot,
         latest_camera: EngineCameraSnapshot,
+        start_record_cache: TexturedSectionRecordCacheStats,
+        latest_record_cache: TexturedSectionRecordCacheStats,
+        record_rebuild_frames: u64,
+        record_rebuild_total_ms: f64,
+        record_rebuild_max_ms: f64,
         latest_summary: mclone_xr_scene::XrTerrainFrameSummary,
     }
 
@@ -3488,6 +3504,14 @@ mod android {
                 .max(timing.render_mclone_frame_ms);
             self.max_render = max_render_timing(self.max_render, timing.render);
             if let Some(rendered) = rendered {
+                let record_prepare = rendered.summary.timing.record_cache_prepare;
+                if record_prepare.rebuilt {
+                    self.record_rebuild_frames += 1;
+                    self.record_rebuild_total_ms += record_prepare.rebuild_ms;
+                    self.record_rebuild_max_ms =
+                        self.record_rebuild_max_ms.max(record_prepare.rebuild_ms);
+                }
+                self.latest_record_cache = record_prepare.cache;
                 if terrain_upload_summary_has_work(rendered.summary.upload) {
                     self.upload_work_frames += 1;
                 }
@@ -3542,6 +3566,14 @@ mod android {
             let flight_distance_blocks =
                 camera_distance_blocks(self.start_camera, self.latest_camera);
             let latest_upload = self.latest_summary.upload;
+            let record_cache_delta = self
+                .latest_record_cache
+                .sample_delta(self.start_record_cache);
+            let record_rebuild_avg_ms = if self.record_rebuild_frames == 0 {
+                0.0
+            } else {
+                self.record_rebuild_total_ms / self.record_rebuild_frames as f64
+            };
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
                 sample_seconds,
@@ -3704,6 +3736,18 @@ mod android {
                 self.max_upload.traversal_ready_section_count
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_RECORD_CACHE ready_set_calls={} ready_set_changed={} ready_set_unchanged={} prepared_rebuilds={} prepared_rebuild_frames={} prepared_rebuild_total_ms={:.3} prepared_rebuild_avg_ms={:.3} prepared_rebuild_max_ms={:.3} cumulative_rebuild_max_ms={:.3}",
+                record_cache_delta.ready_set_calls,
+                record_cache_delta.ready_set_changed_calls,
+                record_cache_delta.ready_set_unchanged_calls,
+                record_cache_delta.prepared_record_rebuilds,
+                self.record_rebuild_frames,
+                self.record_rebuild_total_ms,
+                record_rebuild_avg_ms,
+                self.record_rebuild_max_ms,
+                self.latest_record_cache.prepared_record_rebuild_max_ms
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_RUNTIME_MAX poll_total_ms={:.3} drain_updates_ms={:.3} apply_updates_ms={:.3} dirty_mark_ms={:.3} client_apply_ms={:.3} poll_diagnostics_ms={:.3} diagnostics_refresh_frames={} diagnostics_refreshed={} diagnostics_cache_age_ms={:.3} server_detail_refreshes={} server_detail_age_ms={:.3} server_tick_ms={:.3} scheduler_tick_ms={:.3} updates={} snapshot_updates={} section_updates={} unload_updates={}",
                 self.max_upload.poll_total_ms,
                 self.max_upload.poll_drain_updates_ms,
@@ -3806,6 +3850,35 @@ mod android {
             .join(",")
     }
 
+    fn max_record_prepare_stats(
+        a: TexturedSectionRecordPrepareStats,
+        b: TexturedSectionRecordPrepareStats,
+    ) -> TexturedSectionRecordPrepareStats {
+        TexturedSectionRecordPrepareStats {
+            rebuilt: a.rebuilt || b.rebuilt,
+            rebuild_ms: a.rebuild_ms.max(b.rebuild_ms),
+            cache: max_record_cache_stats(a.cache, b.cache),
+        }
+    }
+
+    fn max_record_cache_stats(
+        a: TexturedSectionRecordCacheStats,
+        b: TexturedSectionRecordCacheStats,
+    ) -> TexturedSectionRecordCacheStats {
+        TexturedSectionRecordCacheStats {
+            ready_set_calls: a.ready_set_calls.max(b.ready_set_calls),
+            ready_set_changed_calls: a.ready_set_changed_calls.max(b.ready_set_changed_calls),
+            ready_set_unchanged_calls: a.ready_set_unchanged_calls.max(b.ready_set_unchanged_calls),
+            prepared_record_rebuilds: a.prepared_record_rebuilds.max(b.prepared_record_rebuilds),
+            prepared_record_rebuild_total_ms: a
+                .prepared_record_rebuild_total_ms
+                .max(b.prepared_record_rebuild_total_ms),
+            prepared_record_rebuild_max_ms: a
+                .prepared_record_rebuild_max_ms
+                .max(b.prepared_record_rebuild_max_ms),
+        }
+    }
+
     fn max_render_timing(
         a: AndroidXrRenderFrameTiming,
         b: AndroidXrRenderFrameTiming,
@@ -3828,6 +3901,10 @@ mod android {
                 .terrain_runtime_ready_sections_ms
                 .max(b.terrain_runtime_ready_sections_ms),
             terrain_shared_records_ms: a.terrain_shared_records_ms.max(b.terrain_shared_records_ms),
+            terrain_record_cache_prepare: max_record_prepare_stats(
+                a.terrain_record_cache_prepare,
+                b.terrain_record_cache_prepare,
+            ),
             terrain_left_eye_ms: a.terrain_left_eye_ms.max(b.terrain_left_eye_ms),
             terrain_right_eye_ms: a.terrain_right_eye_ms.max(b.terrain_right_eye_ms),
             terrain_left_eye_prepare_ms: a
@@ -4057,6 +4134,7 @@ mod android {
                 .max(b.visibility_graph_build_count),
             visibility_graph_total_ms: a.visibility_graph_total_ms.max(b.visibility_graph_total_ms),
             visibility_graph_worst_ms: a.visibility_graph_worst_ms.max(b.visibility_graph_worst_ms),
+            record_cache: max_record_cache_stats(a.record_cache, b.record_cache),
         }
     }
 
@@ -4372,6 +4450,7 @@ mod android {
         timing.terrain_runtime_gpu_upload_ms = scene_timing.runtime_gpu_upload_ms;
         timing.terrain_runtime_ready_sections_ms = scene_timing.runtime_ready_sections_ms;
         timing.terrain_shared_records_ms = scene_timing.shared_records_ms;
+        timing.terrain_record_cache_prepare = scene_timing.record_cache_prepare;
         timing.terrain_left_eye_ms = scene_timing.left_eye_ms;
         timing.terrain_right_eye_ms = scene_timing.right_eye_ms;
         timing.terrain_left_eye_prepare_ms = scene_timing.left_eye_render.prepare_ms;

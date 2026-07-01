@@ -499,6 +499,56 @@ pub struct PreparedTexturedSectionRecords {
     loaded_index_count: u32,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TexturedSectionRecordCacheStats {
+    pub ready_set_calls: u64,
+    pub ready_set_changed_calls: u64,
+    pub ready_set_unchanged_calls: u64,
+    pub prepared_record_rebuilds: u64,
+    pub prepared_record_rebuild_total_ms: f64,
+    pub prepared_record_rebuild_max_ms: f64,
+}
+
+impl TexturedSectionRecordCacheStats {
+    pub fn prepared_record_rebuild_avg_ms(self) -> f64 {
+        if self.prepared_record_rebuilds == 0 {
+            0.0
+        } else {
+            self.prepared_record_rebuild_total_ms / self.prepared_record_rebuilds as f64
+        }
+    }
+
+    pub fn sample_delta(self, baseline: Self) -> Self {
+        Self {
+            ready_set_calls: self
+                .ready_set_calls
+                .saturating_sub(baseline.ready_set_calls),
+            ready_set_changed_calls: self
+                .ready_set_changed_calls
+                .saturating_sub(baseline.ready_set_changed_calls),
+            ready_set_unchanged_calls: self
+                .ready_set_unchanged_calls
+                .saturating_sub(baseline.ready_set_unchanged_calls),
+            prepared_record_rebuilds: self
+                .prepared_record_rebuilds
+                .saturating_sub(baseline.prepared_record_rebuilds),
+            prepared_record_rebuild_total_ms: (self.prepared_record_rebuild_total_ms
+                - baseline.prepared_record_rebuild_total_ms)
+                .max(0.0),
+            // A max cannot be derived from cumulative counters; callers that
+            // need sample-local max should track per-prepare samples.
+            prepared_record_rebuild_max_ms: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TexturedSectionRecordPrepareStats {
+    pub rebuilt: bool,
+    pub rebuild_ms: f64,
+    pub cache: TexturedSectionRecordCacheStats,
+}
+
 #[derive(Clone, Debug)]
 struct TexturedSectionCullingResult {
     stats: TexturedSectionRenderStats,
@@ -2136,6 +2186,7 @@ pub struct TexturedSectionDrawResources {
     // XR) that culls through this draw-state store reuses the same cache.
     cached_records: RefCell<Option<Arc<PreparedTexturedSectionRecords>>>,
     records_dirty: Cell<bool>,
+    record_cache_stats: Cell<TexturedSectionRecordCacheStats>,
     // Slice G: reusable per-eye cull scratch (cleared each call). `RefCell`
     // because the render path borrows `&self`; the scratch is only ever touched
     // synchronously inside one cull call, never aliased.
@@ -2162,6 +2213,7 @@ impl TexturedSectionDrawResources {
             atlas,
             cached_records: RefCell::new(None),
             records_dirty: Cell::new(true),
+            record_cache_stats: Cell::new(TexturedSectionRecordCacheStats::default()),
             cull_scratch: RefCell::new(CullScratch::default()),
         };
         let _ = resources.update_sections(device, sections)?;
@@ -2192,6 +2244,9 @@ impl TexturedSectionDrawResources {
         sections: &[TexturedRenderSectionMesh],
         removed: &BTreeSet<RenderSectionKey>,
     ) -> Result<TexturedSectionUploadReport> {
+        if sections.is_empty() && removed.is_empty() {
+            return Ok(TexturedSectionUploadReport::default());
+        }
         // Slice F: the section set / meshes change here, so the cached culling
         // records must be rebuilt on the next prepare.
         self.records_dirty.set(true);
@@ -2230,18 +2285,33 @@ impl TexturedSectionDrawResources {
     }
 
     pub fn set_traversal_ready_sections(&mut self, ready_sections: &BTreeSet<RenderSectionKey>) {
-        // Slice F: readiness flips change the cached records' `traversal_ready`.
-        self.records_dirty.set(true);
-        self.traversal_ready_sections = self
+        let filtered_ready_sections = self
             .visibility_sections
             .keys()
             .copied()
             .filter(|key| ready_sections.contains(key))
             .collect();
+        let mut stats = self.record_cache_stats.get();
+        stats.ready_set_calls += 1;
+        if filtered_ready_sections == self.traversal_ready_sections {
+            stats.ready_set_unchanged_calls += 1;
+            self.record_cache_stats.set(stats);
+            return;
+        }
+        stats.ready_set_changed_calls += 1;
+        self.record_cache_stats.set(stats);
+        // Slice F follow-up: readiness flips change cached `traversal_ready`.
+        // Reasserting the same ready set should not rebuild prepared records.
+        self.records_dirty.set(true);
+        self.traversal_ready_sections = filtered_ready_sections;
     }
 
     pub fn traversal_ready_section_count(&self) -> usize {
         self.traversal_ready_sections.len()
+    }
+
+    pub fn record_cache_stats(&self) -> TexturedSectionRecordCacheStats {
+        self.record_cache_stats.get()
     }
 
     pub fn section_count(&self) -> usize {
@@ -2399,16 +2469,40 @@ impl TexturedSectionDrawResources {
     /// both the XR stereo path and the single-view `render_with_options_inner`
     /// path reuse one cache.
     pub fn prepare_render_records(&self) -> Arc<PreparedTexturedSectionRecords> {
+        self.prepare_render_records_with_stats().0
+    }
+
+    pub fn prepare_render_records_with_stats(
+        &self,
+    ) -> (
+        Arc<PreparedTexturedSectionRecords>,
+        TexturedSectionRecordPrepareStats,
+    ) {
+        let mut prepare_stats = TexturedSectionRecordPrepareStats::default();
         if self.records_dirty.get() || self.cached_records.borrow().is_none() {
+            let rebuild_start = Instant::now();
             let rebuilt = Arc::new(self.build_prepared_records());
+            let rebuild_ms = elapsed_ms(rebuild_start.elapsed());
             *self.cached_records.borrow_mut() = Some(rebuilt);
             self.records_dirty.set(false);
+            let mut cache_stats = self.record_cache_stats.get();
+            cache_stats.prepared_record_rebuilds += 1;
+            cache_stats.prepared_record_rebuild_total_ms += rebuild_ms;
+            cache_stats.prepared_record_rebuild_max_ms =
+                cache_stats.prepared_record_rebuild_max_ms.max(rebuild_ms);
+            self.record_cache_stats.set(cache_stats);
+            prepare_stats.rebuilt = true;
+            prepare_stats.rebuild_ms = rebuild_ms;
         }
-        Arc::clone(
-            self.cached_records
-                .borrow()
-                .as_ref()
-                .expect("records cached above"),
+        prepare_stats.cache = self.record_cache_stats.get();
+        (
+            Arc::clone(
+                self.cached_records
+                    .borrow()
+                    .as_ref()
+                    .expect("records cached above"),
+            ),
+            prepare_stats,
         )
     }
 

@@ -36,7 +36,8 @@ use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
     ChunkDepthTarget, ChunkMultiviewDepthTarget, ChunkMultiviewRenderTarget, ChunkProjectionKind,
     ChunkRenderTarget, ChunkRenderView, PreparedTexturedSectionStereoDraw,
-    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderPhase,
+    TexturedSectionDrawResources, TexturedSectionRecordCacheStats,
+    TexturedSectionRecordPrepareStats, TexturedSectionRenderOptions, TexturedSectionRenderPhase,
     TexturedSectionRenderStats, TexturedSectionUploadReport,
 };
 use mclone_render::entity::{ActorDrawResources, ActorFigureSet, ActorInstance, ActorRenderStats};
@@ -341,6 +342,7 @@ pub struct XrTerrainFrameTiming {
     pub runtime_gpu_upload_ms: f64,
     pub runtime_ready_sections_ms: f64,
     pub shared_records_ms: f64,
+    pub record_cache_prepare: TexturedSectionRecordPrepareStats,
     pub left_eye_ms: f64,
     pub right_eye_ms: f64,
     pub left_eye_render: XrTerrainEyeRenderTiming,
@@ -428,6 +430,7 @@ pub struct XrTerrainUploadSummary {
     pub queued_upload_section_count: usize,
     pub queued_upload_removed_section_count: usize,
     pub traversal_ready_section_count: usize,
+    pub record_cache: TexturedSectionRecordCacheStats,
     pub visibility_graph_build_count: usize,
     pub visibility_graph_total_ms: f64,
     pub visibility_graph_worst_ms: f64,
@@ -1314,7 +1317,9 @@ where
         let actor_instances = self.current_actor_instances();
         let collect_split_timing = self.render_split_timing_enabled;
         let records_start = collect_split_timing.then(Instant::now);
-        let prepared_records = self.draw.prepare_render_records();
+        let (prepared_records, record_cache_prepare) =
+            self.draw.prepare_render_records_with_stats();
+        timing.record_cache_prepare = record_cache_prepare;
         timing.shared_records_ms = records_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         let (terrain_views, terrain_options, _) =
             self.terrain_render_views_and_options(render_views);
@@ -1759,9 +1764,11 @@ where
             Vec::new()
         };
         let records_start = Instant::now();
-        let prepared_records = self.draw.prepare_render_records();
+        let (prepared_records, record_cache_prepare) =
+            self.draw.prepare_render_records_with_stats();
         if let Some(timing) = timing.as_deref_mut() {
             timing.shared_records_ms = elapsed_ms(records_start.elapsed());
+            timing.record_cache_prepare = record_cache_prepare;
         }
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("mclone_xr_terrain_multiview_encoder"),
@@ -2383,6 +2390,7 @@ where
             } else {
                 return Ok(XrTerrainUploadSummary {
                     traversal_ready_section_count: self.draw.traversal_ready_section_count(),
+                    record_cache: self.draw.record_cache_stats(),
                     ..XrTerrainUploadSummary::default()
                 });
             };
@@ -2410,6 +2418,7 @@ where
                 queued_upload_section_count: self.pending_section_uploads.len(),
                 queued_upload_removed_section_count: self.pending_section_removals.len(),
                 traversal_ready_section_count,
+                record_cache: self.draw.record_cache_stats(),
                 ..poll_summary
             });
         }
@@ -2494,6 +2503,7 @@ where
             queued_upload_section_count: self.pending_section_uploads.len(),
             queued_upload_removed_section_count: self.pending_section_removals.len(),
             traversal_ready_section_count,
+            record_cache: self.draw.record_cache_stats(),
             visibility_graph_build_count,
             visibility_graph_total_ms,
             visibility_graph_worst_ms,
@@ -2573,6 +2583,7 @@ where
             queued_upload_section_count: self.pending_section_uploads.len(),
             queued_upload_removed_section_count: self.pending_section_removals.len(),
             traversal_ready_section_count: self.draw.traversal_ready_section_count(),
+            record_cache: self.draw.record_cache_stats(),
             ..XrTerrainUploadSummary::default()
         }
     }
