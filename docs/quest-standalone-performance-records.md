@@ -19,15 +19,22 @@ If a benchmark is captured from an uncommitted worktree, record that explicitly
 and name the later commit that contains the same runtime code.
 
 Current summaries are saved as a compact marker block:
-`MCLONE_ANDROID_XR_PERF_SUMMARY`, `STAGES`, `TERRAIN`, `TERRAIN_PREP`,
-`UPLOAD_MAX`, `RUNTIME_MAX`, `QUEUE_MAX`, `COMPILE_MAX`, `UPLOAD_LAST`, and
-`DRAW`. They
-include refresh fields (`refresh_supported`, `current_hz`, `supported_hz`,
-`target_hz`, `budget_ms`), max stage timings, terrain runtime
-poll/sync/GPU-upload timings, runtime poll sub-buckets, diagnostics
-refresh/cache-age fields, server/scheduler queue state, compile/upload workload
-counters, and draw counts. Add extra columns or a secondary detail table when
-those fields are relevant to the change being tracked.
+`MCLONE_ANDROID_XR_PERF_SUMMARY`, `HEADROOM`, `STAGES`, `TERRAIN`,
+`TERRAIN_PREP`, `UPLOAD_MAX`, `RUNTIME_MAX`, `QUEUE_MAX`, `COMPILE_MAX`,
+`UPLOAD_LAST`, and `DRAW`. Use `app_work_*`, `headroom_*`, and
+`app_over_period_*` as the primary performance comparison fields. `frame_avg_ms`
+and legacy `over_budget` include OpenXR compositor pacing and can stay near
+`13.889ms` at 72 Hz even when real app work changes.
+
+The marker block also includes refresh fields (`refresh_supported`,
+`current_hz`, `supported_hz`, `target_hz`, `budget_ms`), max stage timings,
+terrain runtime poll/sync/GPU-upload timings, runtime poll sub-buckets,
+diagnostics refresh/cache-age fields, server/scheduler queue state,
+compile/upload workload counters, and draw counts. Add extra columns or a
+secondary detail table when those fields are relevant to the change being
+tracked. Treat records captured before the `MCLONE_ANDROID_XR_PERF_HEADROOM`
+marker landed as historical pacing records unless they have a separate
+busy/free measurement.
 
 ## Current Standalone Quest Lanes
 

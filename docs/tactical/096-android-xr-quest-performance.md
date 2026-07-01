@@ -163,10 +163,13 @@ Recorded first-pass implementation:
   ready frame itself.
 - The budget uses the runtime's current OpenXR display refresh when
   `XR_FB_display_refresh_rate` is available, falling back to `72 Hz` otherwise.
-- The validator waits for `MCLONE_ANDROID_XR_PERF_SUMMARY`, writes the compact
-  nine-line marker block to `/tmp/mclone-quest-openxr-perf-summary.txt`, and
-  still runs the existing cleanup trap that force-stops the app, restores
-  headset power settings, re-enables proximity, and sends `KEYCODE_SLEEP`.
+- The validator waits for `MCLONE_ANDROID_XR_PERF_SUMMARY` and
+  `MCLONE_ANDROID_XR_PERF_HEADROOM`, writes the compact marker block to
+  `/tmp/mclone-quest-openxr-perf-summary.txt`, and still runs the existing
+  cleanup trap that force-stops the app, restores headset power settings,
+  re-enables proximity, and sends `KEYCODE_SLEEP`. Use `app_work_*`,
+  `headroom_*`, and `app_over_period_*` for optimization comparisons;
+  `frame_avg_ms` is compositor-paced cadence and does not measure headroom.
 - `package.json` includes `native:android-xr:perf` with a fixed seed, center
   chunk, render distance 2, noon, frozen time, and startup view pose.
 - `package.json` includes `native:android-xr:perf:flight:rd1`,

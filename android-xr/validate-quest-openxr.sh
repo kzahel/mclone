@@ -121,7 +121,9 @@ Options:
                      MODE is new-world.
   --perf-seconds N  After the first submitted terrain frame, sample N seconds
                      of headset frame timing and wait for the
-                     MCLONE_ANDROID_XR_PERF_SUMMARY marker block.
+                     MCLONE_ANDROID_XR_PERF_SUMMARY/HEADROOM marker block.
+                     Compare app_work_* / headroom_* fields for real headroom;
+                     frame_avg_ms is compositor-paced cadence, not work cost.
   --perf-flight      During --perf-seconds, fly forward in no-clip at about
                      walking speed instead of sampling a passive headset view.
   --perf-flight-speed N
