@@ -30,6 +30,10 @@ impl GroundPath {
         self.next_node_index = self.next_node_index.saturating_add(1);
     }
 
+    pub(super) fn next_node_index(&self) -> usize {
+        self.next_node_index
+    }
+
     pub(super) fn target(&self) -> BlockPos {
         self.target
     }
@@ -44,6 +48,18 @@ impl GroundPath {
 
     pub(super) fn nodes(&self) -> &[BlockPos] {
         &self.nodes
+    }
+
+    pub(super) fn node_pos(&self, index: usize) -> Option<BlockPos> {
+        self.nodes.get(index).copied()
+    }
+
+    pub(super) fn end_node_pos(&self) -> Option<BlockPos> {
+        self.nodes.last().copied()
+    }
+
+    pub(super) fn remaining_node_count(&self) -> usize {
+        self.nodes.len().saturating_sub(self.next_node_index)
     }
 
     pub(super) fn next_node_pos(&self) -> Option<BlockPos> {
@@ -87,6 +103,10 @@ mod tests {
 
         assert_eq!(path.node_count(), 2);
         assert!(!path.can_reach());
+        assert_eq!(path.next_node_index(), 0);
+        assert_eq!(path.node_pos(1), Some(BlockPos::new(1, 64, 0)));
+        assert_eq!(path.end_node_pos(), Some(BlockPos::new(1, 64, 0)));
+        assert_eq!(path.remaining_node_count(), 2);
         assert_eq!(
             path.nodes(),
             &[BlockPos::new(0, 64, 0), BlockPos::new(1, 64, 0)]

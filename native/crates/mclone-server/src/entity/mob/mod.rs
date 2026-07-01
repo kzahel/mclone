@@ -375,8 +375,13 @@ impl<'a> MobGoalContext<'a> {
         if let Some(target) = self.navigation.tick(
             self.position,
             entity.width,
+            entity.height,
             self.on_ground,
+            self.attributes.follow_range,
+            self.attributes.max_up_step,
+            self.attributes.movement_speed,
             self.block_state_at,
+            |path_type| self.pathfinding_malus.get(path_type),
         ) {
             self.move_control
                 .set_wanted_position(target.position, target.speed_modifier);

@@ -20,7 +20,8 @@ Slice 5B landed server-owned `GroundPathNavigation`, a terrain-MVP
 `DefaultRandomPos` target selection. Slice 5C landed the immediate path service
 boundary and heap-backed A* core. Slice 5D landed one-block step-up path
 expansion and the first `JumpControl` scaffold. Slice 5E landed mob movement
-attribute facts for navigation and jumping. The starter passive path is now an
+attribute facts for navigation and jumping. Slice 5F landed Minecraft-shaped
+navigation recompute and timeout state. The starter passive path is now an
 explicit debug passive showcase, enabled by default, while natural spawning
 remains future work.
 
@@ -616,6 +617,54 @@ Landed notes:
   mclone-server entity::mob`, `cargo test --manifest-path native/Cargo.toml
   -p mclone-server`, and the full `cargo test --manifest-path
   native/Cargo.toml` workspace gate.
+
+## Slice 5F - Navigation Recompute And Timeout State (Landed)
+
+Purpose: add the Minecraft-shaped `PathNavigation` bookkeeping that keeps path
+following bounded and gives future budgeted/deferred pathfinding a stable
+state-machine boundary.
+
+Implementation sketch:
+
+- Read Java `PathNavigation` and `GroundPathNavigation` for target/reach
+  storage, delayed recomputation, stuck detection, cached-node timeout, and
+  airborne waypoint advancement.
+- Keep path execution immediate and host-thread local for this slice.
+- Store `targetPos`, `reachRange`, delayed recompute state, and timeout state
+  inside `GroundPathNavigation`.
+- Let navigation tick rebuild delayed paths through the existing path service
+  boundary using mob attributes and pathfinding malus from `MobGoalContext`.
+- Count timeout elapsed time from deterministic navigation ticks instead of
+  wall-clock time; this intentionally preserves scheduling predictability while
+  keeping the Java timeout state shape.
+
+Done when:
+
+- `recomputePath()` requests inside the 20-tick Java gate are delayed and
+  consumed by later navigation ticks.
+- Stalled mobs can stop a path through cached-node timeout before the older
+  100-tick distance stuck check is the only escape.
+- Falling mobs can advance past a waypoint when vertically above it in the
+  same block column, matching the Java `PathNavigation.tick()` edge case.
+
+Landed notes:
+
+- Added target/reach, delayed recompute, timeout cached-node, timeout timer,
+  and timeout limit fields to `GroundPathNavigation`.
+- Added deterministic tick-time timeout accounting using 50 ms navigation
+  ticks rather than wall clock `Util.getMillis()`.
+- Routed mob height, follow range, `maxUpStep`, movement speed, and malus into
+  `GroundPathNavigation::tick(...)` so delayed recompute can rebuild paths
+  without storing world state in the navigation object.
+- Added the Java falling-past-waypoint advancement path for non-ground ticks.
+- Added a direction-based next-node shortcut for the current walkable path
+  subset.
+- Added focused tests for delayed recomputation, cached-node timeout, airborne
+  waypoint advancement, and path node introspection.
+- Verified with `cargo test --manifest-path native/Cargo.toml -p
+  mclone-server entity::mob::navigation`, `cargo test --manifest-path
+  native/Cargo.toml -p mclone-server`, and the full `cargo test
+  --manifest-path native/Cargo.toml` workspace gate.
 
 ## Slice 6 - Spawning Skeleton, Not Full Natural Spawning
 
