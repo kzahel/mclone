@@ -2952,6 +2952,7 @@ impl WebChunkRenderSession {
                 self.camera
                     .set_movement_mode(engine_movement_mode(movement_mode));
             }
+            GameUiAction::SetXrTurnMode(_) => {}
             GameUiAction::SetFlySpeed(multiplier) => {
                 self.camera.set_fly_speed_multiplier(f64::from(multiplier));
             }
@@ -3082,6 +3083,7 @@ impl WebChunkRenderSession {
                 | GameUiAction::ToggleFirstPersonPlayer
                 | GameUiAction::SetPlayerModel(_)
                 | GameUiAction::SetMovementMode(_)
+                | GameUiAction::SetXrTurnMode(_)
                 | GameUiAction::SetFlySpeed(_)
                 | GameUiAction::CycleFramePacing
                 | GameUiAction::CycleFpsCap => {}
@@ -3111,6 +3113,7 @@ impl WebChunkRenderSession {
             crosshair_visible: Some(self.crosshair_visible),
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
+            xr_turn_mode: None,
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
             max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
@@ -4781,6 +4784,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::ToggleFirstPersonPlayer => "toggleFirstPersonPlayer",
         GameUiAction::SetPlayerModel(_) => "setPlayerModel",
         GameUiAction::SetMovementMode(_) => "setMovementMode",
+        GameUiAction::SetXrTurnMode(_) => "setXrTurnMode",
         GameUiAction::CycleFramePacing => "cycleFramePacing",
         GameUiAction::CycleFpsCap => "cycleFpsCap",
         GameUiAction::SetRenderDistance(_) => "setRenderDistance",

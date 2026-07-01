@@ -799,6 +799,32 @@ impl GameMovementMode {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameXrTurnMode {
+    #[default]
+    Snap15,
+    Snap30,
+    Smooth,
+}
+
+impl GameXrTurnMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Snap15 => "Snap 15",
+            Self::Snap30 => "Snap 30",
+            Self::Smooth => "Smooth",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Snap15 => Self::Snap30,
+            Self::Snap30 => Self::Smooth,
+            Self::Smooth => Self::Snap15,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum GamePlayerModel {
     #[default]
     Player,
@@ -974,6 +1000,7 @@ pub enum GameUiAction {
     ToggleCrosshair,
     SetPlayerModel(GamePlayerModel),
     SetMovementMode(GameMovementMode),
+    SetXrTurnMode(GameXrTurnMode),
     CycleFramePacing,
     CycleFpsCap,
     SetRenderDistance(i32),
@@ -1067,6 +1094,7 @@ pub struct GameUiRenderState {
     pub crosshair_visible: Option<bool>,
     pub player_model: GamePlayerModel,
     pub movement_mode: GameMovementMode,
+    pub xr_turn_mode: Option<GameXrTurnMode>,
     pub fly_speed_multiplier: f32,
     pub min_fly_speed_multiplier: f32,
     pub max_fly_speed_multiplier: f32,
@@ -1098,6 +1126,7 @@ impl Default for GameUiRenderState {
             crosshair_visible: Some(true),
             player_model: GamePlayerModel::Player,
             movement_mode: GameMovementMode::Walk,
+            xr_turn_mode: None,
             fly_speed_multiplier: 1.0,
             min_fly_speed_multiplier: 0.5,
             max_fly_speed_multiplier: 8.0,
@@ -2099,6 +2128,7 @@ const ID_SERVER_SETTINGS_BACK: WidgetId = WidgetId(33);
 const ID_OPTIONS_CROSSHAIR: WidgetId = WidgetId(34);
 const ID_OPTIONS_FAR_LOD: WidgetId = WidgetId(35);
 const ID_OPTIONS_FAR_LOD_RANGE: WidgetId = WidgetId(36);
+const ID_OPTIONS_XR_TURN_MODE: WidgetId = WidgetId(37);
 const ID_BLOCK_PALETTE_BASE: u64 = 1000;
 
 const BLOCK_PALETTE_COLUMNS: usize = 10;
@@ -2348,6 +2378,7 @@ impl GameUi {
             | GameUiAction::ToggleCrosshair
             | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
+            | GameUiAction::SetXrTurnMode(_)
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetRenderDistance(_)
@@ -2427,6 +2458,8 @@ impl GameUi {
                     Some(ID_OPTIONS_PLAYER_MODEL)
                 } else if rects.movement_mode.contains(point) {
                     Some(ID_OPTIONS_MOVEMENT_MODE)
+                } else if rects.xr_turn_mode.is_some_and(|rect| rect.contains(point)) {
+                    Some(ID_OPTIONS_XR_TURN_MODE)
                 } else if rects.frame_pacing.contains(point) {
                     Some(ID_OPTIONS_FRAME_PACING)
                 } else if rects.fps_cap.contains(point) {
@@ -2516,6 +2549,10 @@ impl GameUi {
             ID_OPTIONS_MOVEMENT_MODE => {
                 Some(GameUiAction::SetMovementMode(state.movement_mode.next()))
             }
+            ID_OPTIONS_XR_TURN_MODE => state
+                .xr_turn_mode
+                .map(GameXrTurnMode::next)
+                .map(GameUiAction::SetXrTurnMode),
             ID_OPTIONS_FRAME_PACING => Some(GameUiAction::CycleFramePacing),
             ID_OPTIONS_FPS_CAP => Some(GameUiAction::CycleFpsCap),
             ID_OPTIONS_TOUCH_CONTROLS => state
@@ -2920,6 +2957,13 @@ impl GameUi {
             state.movement_mode.label(),
         )
         .render(draw, &self.font, self.interaction());
+        if let (Some(turn_mode), Some(rect)) = (state.xr_turn_mode, widgets.xr_turn_mode) {
+            CycleButton::new(ID_OPTIONS_XR_TURN_MODE, rect, "XR Turn", turn_mode.label()).render(
+                draw,
+                &self.font,
+                self.interaction(),
+            );
+        }
         CycleButton::new(
             ID_OPTIONS_FRAME_PACING,
             widgets.frame_pacing,
@@ -3081,6 +3125,7 @@ struct OptionWidgetRects {
     crosshair: Option<Rect>,
     player_model: Rect,
     movement_mode: Rect,
+    xr_turn_mode: Option<Rect>,
     frame_pacing: Rect,
     fps_cap: Rect,
     radius: Rect,
@@ -3402,6 +3447,7 @@ fn render_block_palette_tooltip(
 fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRects {
     let panel = options_panel(scale, state);
     let show_crosshair = state.crosshair_visible.is_some();
+    let show_xr_turn_mode = state.xr_turn_mode.is_some();
     let show_touch_controls = state.touch_controls_mode.is_some();
     let show_touch_look = state.touch_settings.is_some();
     let column_gap = 10.0;
@@ -3434,6 +3480,13 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
     right_y += 22.0;
     let movement_mode = Rect::new(right_x, right_y, column_width, 20.0);
     right_y += 22.0;
+    let xr_turn_mode = if show_xr_turn_mode {
+        let rect = Rect::new(right_x, right_y, column_width, 20.0);
+        right_y += 22.0;
+        Some(rect)
+    } else {
+        None
+    };
     let frame_pacing = Rect::new(right_x, right_y, column_width, 20.0);
     right_y += 22.0;
     let fps_cap = Rect::new(right_x, right_y, column_width, 20.0);
@@ -3479,6 +3532,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
         crosshair,
         player_model,
         movement_mode,
+        xr_turn_mode,
         frame_pacing,
         fps_cap,
         radius,
@@ -3501,6 +3555,8 @@ fn options_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
         ) * 22.0
         + 48.0;
     let right_rows_height = (7 + usize::from(state.touch_settings.is_some())) as f32 * 22.0;
+    let right_rows_height =
+        right_rows_height + f32::from(u8::from(state.xr_turn_mode.is_some())) * 22.0;
     let panel_width = (scale.width - 18.0).clamp(242.0, 420.0);
     let panel_height =
         (44.0 + left_rows_height.max(right_rows_height)).min((scale.height - 4.0).max(1.0));
@@ -5007,6 +5063,38 @@ mod tests {
         assert_eq!(
             action,
             Some(GameUiAction::SetMovementMode(GameMovementMode::Fly))
+        );
+    }
+
+    #[test]
+    fn game_ui_options_xr_turn_mode_is_optional_and_emits_next_mode_action() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        assert!(
+            option_widgets(ui.scale(), GameUiRenderState::default())
+                .xr_turn_mode
+                .is_none()
+        );
+        let state = GameUiRenderState {
+            xr_turn_mode: Some(GameXrTurnMode::Snap15),
+            ..GameUiRenderState::default()
+        };
+
+        let turn_mode = option_widgets(ui.scale(), state)
+            .xr_turn_mode
+            .expect("XR turn mode should expose a cycle button");
+        let point = Point {
+            x: turn_mode.x + turn_mode.width * 0.5,
+            y: turn_mode.y + turn_mode.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(
+            action,
+            Some(GameUiAction::SetXrTurnMode(GameXrTurnMode::Snap30))
         );
     }
 

@@ -749,6 +749,7 @@ const UI_V2_OPTIONS_TOUCH_LOOK: UiWidgetId = UiWidgetId(116);
 const UI_V2_OPTIONS_CONTROLS: UiWidgetId = UiWidgetId(117);
 const UI_V2_OPTIONS_SERVER_SETTINGS: UiWidgetId = UiWidgetId(118);
 const UI_V2_OPTIONS_BACK: UiWidgetId = UiWidgetId(119);
+const UI_V2_OPTIONS_XR_TURN_MODE: UiWidgetId = UiWidgetId(120);
 const UI_V2_HELP_BACK: UiWidgetId = UiWidgetId(201);
 
 fn pause_layout(scale: GuiScale, revision: u64) -> UiLayout {
@@ -983,6 +984,17 @@ fn options_layout(
         GameUiAction::SetMovementMode(state.movement_mode.next()),
     );
     right_y += 22.0;
+    if let Some(turn_mode) = state.xr_turn_mode {
+        push_cycle(
+            &mut layout,
+            UI_V2_OPTIONS_XR_TURN_MODE,
+            Rect::new(right_x, right_y, column_width, 20.0),
+            "XR Turn",
+            turn_mode.label(),
+            GameUiAction::SetXrTurnMode(turn_mode.next()),
+        );
+        right_y += 22.0;
+    }
     push_cycle(
         &mut layout,
         UI_V2_OPTIONS_FRAME_PACING,
@@ -1123,7 +1135,10 @@ fn options_panel_rect(scale: GuiScale, state: GameUiRenderState) -> Rect {
                 + u8::from(state.server_cadence.is_some()),
         ) * 22.0
         + 48.0;
-    let right_rows_height = (7 + usize::from(state.touch_settings.is_some())) as f32 * 22.0;
+    let right_rows_height = (7
+        + usize::from(state.xr_turn_mode.is_some())
+        + usize::from(state.touch_settings.is_some())) as f32
+        * 22.0;
     let panel_width = (scale.width - 18.0).clamp(242.0, 420.0);
     let panel_height =
         (44.0 + left_rows_height.max(right_rows_height)).min((scale.height - 4.0).max(1.0));
@@ -1140,7 +1155,7 @@ const fn help_parent_for_options(parent: GameOptionsParent) -> GameHelpParent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GameSimulationCadence, GameTouchSettings, GameUi};
+    use crate::{GameSimulationCadence, GameTouchSettings, GameUi, GameXrTurnMode};
     use mclone_input::TouchControlsMode;
 
     fn point_in(rect: Rect) -> Point {
@@ -1243,6 +1258,7 @@ mod tests {
         surface.set_scale(GuiScale::from_pixels(960, 540));
         surface.set_render_state(GameUiRenderState {
             crosshair_visible: None,
+            xr_turn_mode: Some(GameXrTurnMode::Snap15),
             touch_controls_mode: Some(TouchControlsMode::Auto),
             touch_settings: Some(GameTouchSettings::new(2.0, 1.0, 5.0)),
             server_cadence: Some(GameSimulationCadence::default()),
@@ -1252,6 +1268,7 @@ mod tests {
         let layout = surface.layout();
 
         assert!(layout.widget(UI_V2_OPTIONS_CROSSHAIR).is_none());
+        assert!(layout.widget(UI_V2_OPTIONS_XR_TURN_MODE).is_some());
         assert!(layout.widget(UI_V2_OPTIONS_TOUCH_CONTROLS).is_some());
         assert!(layout.widget(UI_V2_OPTIONS_TOUCH_LOOK).is_some());
         assert!(layout.widget(UI_V2_OPTIONS_SERVER_SETTINGS).is_some());
@@ -1265,6 +1282,7 @@ mod tests {
         }));
         surface.set_scale(GuiScale::from_pixels(960, 540));
         surface.set_render_state(GameUiRenderState {
+            xr_turn_mode: Some(GameXrTurnMode::Snap15),
             server_cadence: Some(GameSimulationCadence::default()),
             ..GameUiRenderState::default()
         });
@@ -1283,6 +1301,11 @@ mod tests {
             .widget(UI_V2_OPTIONS_SERVER_SETTINGS)
             .expect("server settings row")
             .rect;
+        let xr_turn = surface
+            .layout()
+            .widget(UI_V2_OPTIONS_XR_TURN_MODE)
+            .expect("XR turn row")
+            .rect;
         let controls = surface
             .layout()
             .widget(UI_V2_OPTIONS_CONTROLS)
@@ -1296,6 +1319,7 @@ mod tests {
                 server_settings,
                 GameUiAction::OpenServerSettings(GameOptionsParent::Pause),
             ),
+            (xr_turn, GameUiAction::SetXrTurnMode(GameXrTurnMode::Snap30)),
             (
                 controls,
                 GameUiAction::OpenHelp(GameHelpParent::OptionsPause),

@@ -747,6 +747,7 @@ impl FlatClientDriver {
                 GameUiAction::SetRenderDistance(_)
                     | GameUiAction::SetFlySpeed(_)
                     | GameUiAction::SetMovementSpeed(_)
+                    | GameUiAction::SetXrTurnMode(_)
                     | GameUiAction::SetTouchLookSensitivity(_)
                     | GameUiAction::SetTouchControlsMode(_)
                     | GameUiAction::SetServerSimulationCadence(_)
@@ -860,6 +861,7 @@ impl FlatClientDriver {
                 let movement_mode = self.camera.movement_mode();
                 log::info!("player movement mode {}", movement_mode.label());
             }
+            GameUiAction::SetXrTurnMode(_) => {}
             GameUiAction::SetFlySpeed(multiplier) => {
                 self.camera.set_fly_speed_multiplier(f64::from(multiplier));
                 log::info!(
@@ -1989,6 +1991,7 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         crosshair_visible: Some(options.crosshair_visible),
         player_model: options.player_model,
         movement_mode: options.movement_mode,
+        xr_turn_mode: None,
         fly_speed_multiplier: options.fly_speed_multiplier,
         min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
         max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,

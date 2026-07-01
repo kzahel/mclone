@@ -1545,6 +1545,14 @@ impl EngineCameraController {
         Self::turn_player_mouse_delta(&mut self.player, mouse_delta_x, mouse_delta_y);
     }
 
+    pub fn turn_yaw_delta(&mut self, yaw_delta_radians: f64) {
+        if !yaw_delta_radians.is_finite() {
+            return;
+        }
+        self.player.turn_native_radians(yaw_delta_radians, 0.0);
+        self.last_room_scale_reconciliation = None;
+    }
+
     pub fn turn_player_mouse_delta(
         player: &mut LocalPlayerController,
         mouse_delta_x: f64,
@@ -1634,7 +1642,9 @@ impl EngineCameraController {
             return result;
         }
 
-        let collision = self.player.move_colliding(client, requested_body_movement);
+        let collision = self
+            .player
+            .move_colliding_horizontal_preserving_vertical_contact(client, requested_body_movement);
         let body_eye_after = self.player.pose().eye_position();
         let consumed_body_movement = Vec3d::new(collision.traveled.x, 0.0, collision.traveled.z);
         let residual_head_offset = Vec3d::new(
@@ -4155,6 +4165,41 @@ mod tests {
     }
 
     #[test]
+    fn room_scale_reconciliation_preserves_grounded_jump_input() {
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(test_snapshot_with_block(
+            ChunkPos::new(0, 0),
+            BlockPos::new(0, 0, 0),
+            BlockStateId(7),
+        )));
+        let mut camera = EngineCameraController::from_eye_pose(
+            Vec3d::new(0.5, 2.62, 0.5),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+        camera.probe_ground(&client, 0.02);
+        assert!(camera.on_ground());
+
+        let reconciliation =
+            camera.reconcile_room_scale_headset(&client, Vec3d::new(0.55, 2.62, 0.5));
+        assert!(reconciliation.collision.on_ground);
+        assert!(camera.on_ground());
+        let before_jump = camera.snapshot();
+
+        let after_jump = camera.apply_movement_input(
+            &client,
+            EngineCameraInput {
+                dt_seconds: 1.0 / LOCAL_PLAYER_TICKS_PER_SECOND,
+                jump: true,
+                ..EngineCameraInput::default()
+            },
+        );
+
+        assert!(after_jump.eye.y > before_jump.eye.y);
+    }
+
+    #[test]
     fn hand_push_emulation_direction_uses_camera_yaw() {
         let forward = hand_push_emulation_direction(
             EngineCameraInput {
@@ -4223,6 +4268,23 @@ mod tests {
         assert_eq!(snapshot.chunk_pos, ChunkPos::new(1, -1));
         assert!((snapshot.yaw_radians - 0.25).abs() < 1.0e-12);
         assert!((snapshot.pitch_radians + 0.125).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn engine_camera_controller_applies_explicit_yaw_delta() {
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), 0.25, -0.1, 32.0);
+        let before = camera.snapshot();
+
+        camera.turn_yaw_delta(std::f64::consts::FRAC_PI_4);
+        let after = camera.snapshot();
+
+        assert_eq!(after.eye, before.eye);
+        assert!(
+            (after.yaw_radians - (before.yaw_radians + std::f64::consts::FRAC_PI_4)).abs()
+                < 1.0e-12
+        );
+        assert!((after.pitch_radians - before.pitch_radians).abs() < 1.0e-12);
     }
 
     #[test]

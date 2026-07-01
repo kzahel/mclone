@@ -1264,6 +1264,7 @@ mod android {
                         movement_mode.label()
                     );
                 }
+                GameUiAction::SetXrTurnMode(_) => {}
                 GameUiAction::SetFlySpeed(multiplier) => {
                     self.camera.set_fly_speed_multiplier(f64::from(multiplier));
                     log::info!(
@@ -1392,6 +1393,7 @@ mod android {
                 crosshair_visible: Some(self.crosshair_visible),
                 player_model: self.player_model,
                 movement_mode: game_movement_mode(self.camera.movement_mode()),
+                xr_turn_mode: None,
                 fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
                 min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
                 max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,

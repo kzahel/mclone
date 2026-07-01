@@ -63,8 +63,8 @@ use mclone_render_session::{
 };
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameMovementMode, GamePlayerModel,
-    GameScreen, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiScale, Point, Rect,
-    StatusOverlay, render_loading_progress_overlay, render_status_overlay,
+    GameScreen, GameUi, GameUiAction, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiScale,
+    Point, Rect, StatusOverlay, render_loading_progress_overlay, render_status_overlay,
 };
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
 use openxr as xr;
@@ -78,9 +78,9 @@ pub const XR_NEAR: f32 = 0.05;
 pub const XR_FAR: f32 = 700.0;
 pub const XR_JOYPAD_DEAD_ZONE: f32 = 0.18;
 pub const XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND: f64 = 1.6;
-/// Minimum right-stick vertical deflection required to ascend/descend. Keeps the
-/// radial dead-zone cross-talk from nudging the player up/down while turning.
-pub const XR_JOYPAD_VERTICAL_THRESHOLD: f32 = 0.5;
+pub const XR_DEFAULT_SNAP_TURN_DEGREES: f32 = 15.0;
+pub const XR_SNAP_TURN_ENGAGE_THRESHOLD: f32 = 0.65;
+pub const XR_SNAP_TURN_RECENTER_THRESHOLD: f32 = 0.25;
 pub const XR_LOCOMOTION_MAX_FRAME_SECONDS: f64 = 0.1;
 pub const XR_AUTOMATED_ORBIT_RADIUS_BLOCKS: f64 = 16.0;
 pub const XR_MENU_TOGGLE_HAND: XrHand = XrHand::Left;
@@ -121,6 +121,82 @@ impl XrLocomotionMode {
             Self::HeadsetYaw => "headset-yaw",
             Self::PlayerYaw => "player-yaw",
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum XrTurnPolicy {
+    Snap { degrees: f32 },
+    Smooth,
+}
+
+impl Default for XrTurnPolicy {
+    fn default() -> Self {
+        Self::Snap {
+            degrees: XR_DEFAULT_SNAP_TURN_DEGREES,
+        }
+    }
+}
+
+impl XrTurnPolicy {
+    pub const fn snap(degrees: f32) -> Self {
+        Self::Snap { degrees }
+    }
+
+    pub fn game_mode(self) -> GameXrTurnMode {
+        match self {
+            Self::Snap { degrees } if (degrees - 30.0).abs() < f32::EPSILON => {
+                GameXrTurnMode::Snap30
+            }
+            Self::Snap { .. } => GameXrTurnMode::Snap15,
+            Self::Smooth => GameXrTurnMode::Smooth,
+        }
+    }
+
+    pub fn from_game_mode(mode: GameXrTurnMode) -> Self {
+        match mode {
+            GameXrTurnMode::Snap15 => Self::Snap { degrees: 15.0 },
+            GameXrTurnMode::Snap30 => Self::Snap { degrees: 30.0 },
+            GameXrTurnMode::Smooth => Self::Smooth,
+        }
+    }
+
+    fn snap_radians(self) -> Option<f64> {
+        match self {
+            Self::Snap { degrees } if degrees.is_finite() && degrees > 0.0 => {
+                Some(f64::from(degrees).to_radians())
+            }
+            Self::Snap { .. } => Some(f64::from(XR_DEFAULT_SNAP_TURN_DEGREES).to_radians()),
+            Self::Smooth => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct XrSnapTurnState {
+    waiting_for_recenter: bool,
+}
+
+impl XrSnapTurnState {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn update(&mut self, axis_x: f32, policy: XrTurnPolicy) -> Option<f64> {
+        let axis_x = if axis_x.is_finite() { axis_x } else { 0.0 };
+        let magnitude = axis_x.abs();
+        if self.waiting_for_recenter {
+            if magnitude <= XR_SNAP_TURN_RECENTER_THRESHOLD {
+                self.waiting_for_recenter = false;
+            }
+            return None;
+        }
+        if magnitude < XR_SNAP_TURN_ENGAGE_THRESHOLD {
+            return None;
+        }
+        let snap_radians = policy.snap_radians()?;
+        self.waiting_for_recenter = true;
+        Some(-f64::from(axis_x.signum()) * snap_radians)
     }
 }
 
@@ -576,6 +652,8 @@ where
     render_stats: RenderStreamStats,
     tracking_origin: Option<XrTrackingOrigin>,
     locomotion_mode: XrLocomotionMode,
+    turn_policy: XrTurnPolicy,
+    snap_turn_state: XrSnapTurnState,
     display_refresh_hz: Option<f32>,
     render_split_timing_enabled: bool,
     defer_eye_waits_enabled: bool,
@@ -727,6 +805,8 @@ where
             render_stats: RenderStreamStats::default(),
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),
+            turn_policy: XrTurnPolicy::default(),
+            snap_turn_state: XrSnapTurnState::default(),
             display_refresh_hz: None,
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
@@ -826,6 +906,8 @@ where
             render_stats: started.render_stats,
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),
+            turn_policy: XrTurnPolicy::default(),
+            snap_turn_state: XrSnapTurnState::default(),
             display_refresh_hz: None,
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
@@ -2078,6 +2160,15 @@ where
         self.locomotion_mode
     }
 
+    pub fn set_turn_policy(&mut self, turn_policy: XrTurnPolicy) {
+        self.turn_policy = turn_policy;
+        self.snap_turn_state.reset();
+    }
+
+    pub fn turn_policy(&self) -> XrTurnPolicy {
+        self.turn_policy
+    }
+
     pub fn set_display_refresh_hz(&mut self, display_refresh_hz: Option<f32>) {
         self.display_refresh_hz = display_refresh_hz.filter(|hz| hz.is_finite() && *hz > 0.0);
     }
@@ -2146,23 +2237,34 @@ where
         let suppress_gameplay_interaction = ui_was_active != ui_active;
         if self.runtime.is_none() {
             self.head_comfort.reset();
+            self.snap_turn_state.reset();
             return Ok(());
         }
-        let transform = self
+        let mut transform = self
             .reconcile_room_scale_body_to_headset(&views)
             .context("reconcile XR room-scale body pose")?;
         self.update_head_comfort_state(transform, &views, dt_seconds)
             .context("update XR head comfort fade state")?;
         if self.ui.is_active() {
+            self.snap_turn_state.reset();
             self.commit_engine_camera_player_pose()
                 .context("sync XR room-scale player pose")?;
             return Ok(());
         }
+        if let Some(yaw_delta_radians) = self.snap_turn_delta_from_controllers(controllers) {
+            transform = self
+                .apply_snap_turn_preserving_headset(&views, transform, yaw_delta_radians)
+                .context("apply XR snap turn")?;
+        }
         let movement_yaw_radians = self
             .locomotion_movement_yaw_radians_with_transform(&views, transform)
             .context("resolve XR locomotion frame")?;
-        let mut input =
-            xr_locomotion_input_from_controllers(controllers, dt_seconds, movement_yaw_radians);
+        let mut input = xr_locomotion_input_from_controllers_with_turn_policy(
+            controllers,
+            dt_seconds,
+            movement_yaw_radians,
+            self.turn_policy,
+        );
         input.hand_push = xr_hand_push_input_from_controllers(controllers, &views, transform)
             .context("resolve XR hand-push input")?;
         let runtime = self.runtime.as_ref().expect("runtime presence checked");
@@ -2193,6 +2295,7 @@ where
         self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = false;
         self.head_comfort.reset();
+        self.snap_turn_state.reset();
         let now = Instant::now();
         let dt_seconds = self
             .last_locomotion_update
@@ -2231,6 +2334,7 @@ where
         self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = false;
         self.head_comfort.reset();
+        self.snap_turn_state.reset();
         let now = Instant::now();
         let dt_seconds = self
             .last_locomotion_update
@@ -2261,6 +2365,7 @@ where
         self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = false;
         self.head_comfort.reset();
+        self.snap_turn_state.reset();
         self.last_locomotion_update = Some(Instant::now());
     }
 
@@ -2403,6 +2508,38 @@ where
         let origin = origin.consume_world_movement(consumed_world, transform);
         self.tracking_origin = Some(origin);
         XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())
+    }
+
+    fn snap_turn_delta_from_controllers(
+        &mut self,
+        controllers: &[XrControllerSnapshot],
+    ) -> Option<f64> {
+        let right_axis = xr_right_stick_axis(controllers);
+        self.snap_turn_state.update(right_axis.x, self.turn_policy)
+    }
+
+    fn apply_snap_turn_preserving_headset(
+        &mut self,
+        views: &[xr::View],
+        before_transform: XrStageToWorld,
+        yaw_delta_radians: f64,
+    ) -> Result<XrStageToWorld> {
+        if !yaw_delta_radians.is_finite() || yaw_delta_radians.abs() <= f64::EPSILON {
+            return Ok(before_transform);
+        }
+        let Some(origin_before) = self.tracking_origin else {
+            return Ok(before_transform);
+        };
+        let headset_stage_position = xr_headset_stage_position_from_views(views)?;
+        let headset_world_before = before_transform.transform_position(headset_stage_position);
+        self.camera.turn_yaw_delta(yaw_delta_radians);
+        let origin_after = origin_before.rebase_for_stage_position_world_position(
+            headset_stage_position,
+            headset_world_before,
+            self.camera.snapshot(),
+        )?;
+        self.tracking_origin = Some(origin_after);
+        XrStageToWorld::from_tracking_origin(origin_after, self.camera.snapshot())
     }
 
     fn update_head_comfort_state(
@@ -3175,6 +3312,7 @@ where
             crosshair_visible: None,
             player_model: self.player_model,
             movement_mode: game_movement_mode(self.camera.movement_mode()),
+            xr_turn_mode: Some(self.turn_policy.game_mode()),
             fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
             max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
@@ -3934,6 +4072,10 @@ where
                 let movement_mode = self.camera.movement_mode();
                 log::info!("XR player movement mode {}", movement_mode.label());
             }
+            GameUiAction::SetXrTurnMode(turn_mode) => {
+                self.set_turn_policy(XrTurnPolicy::from_game_mode(turn_mode));
+                log::info!("XR turn mode {}", turn_mode.label());
+            }
             GameUiAction::SetFlySpeed(multiplier) => {
                 self.camera.set_fly_speed_multiplier(f64::from(multiplier));
                 log::info!(
@@ -4415,6 +4557,27 @@ impl XrTrackingOrigin {
             ..self
         }
     }
+
+    pub fn rebase_for_stage_position_world_position(
+        self,
+        stage_position: Vec3,
+        world_position: Vec3,
+        snapshot: EngineCameraSnapshot,
+    ) -> Result<Self> {
+        if !stage_position.is_finite() || !world_position.is_finite() {
+            bail!("invalid XR tracking-origin rebase position");
+        }
+        let transform = XrStageToWorld::from_tracking_origin(self, snapshot)?;
+        let origin_world = glam_vec3_from_vec3d(snapshot.eye);
+        let stage_offset = transform.stage_direction_from_world(world_position - origin_world);
+        if !stage_offset.is_finite() {
+            bail!("invalid XR tracking-origin rebase offset");
+        }
+        Ok(Self {
+            origin_stage: stage_position - stage_offset,
+            ..self
+        })
+    }
 }
 
 impl XrStageToWorld {
@@ -4604,43 +4767,69 @@ pub fn xr_locomotion_input_from_controllers(
     dt_seconds: f64,
     movement_yaw_radians: Option<f64>,
 ) -> EngineCameraInput {
+    xr_locomotion_input_from_controllers_with_turn_policy(
+        controllers,
+        dt_seconds,
+        movement_yaw_radians,
+        XrTurnPolicy::default(),
+    )
+}
+
+pub fn xr_locomotion_input_from_controllers_with_turn_policy(
+    controllers: &[XrControllerSnapshot],
+    dt_seconds: f64,
+    movement_yaw_radians: Option<f64>,
+    turn_policy: XrTurnPolicy,
+) -> EngineCameraInput {
     let dt_seconds = if dt_seconds.is_finite() {
         dt_seconds.clamp(0.0, XR_LOCOMOTION_MAX_FRAME_SECONDS)
     } else {
         0.0
     };
-    let left_axis = controllers
-        .iter()
-        .find(|controller| controller.hand == XrHand::Left)
-        .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
-        .unwrap_or(Vec2::ZERO);
-    let right_axis = controllers
-        .iter()
-        .find(|controller| controller.hand == XrHand::Right)
-        .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
-        .unwrap_or(Vec2::ZERO);
-    // Right stick: X turns (look left/right), Y flies up/down. Push up to ascend,
-    // pull down to descend.
-    let jump = right_axis.y > XR_JOYPAD_VERTICAL_THRESHOLD;
-    let descend = right_axis.y < -XR_JOYPAD_VERTICAL_THRESHOLD;
+    let left_axis = xr_left_stick_axis(controllers);
+    let right_axis = xr_right_stick_axis(controllers);
+    let jump = xr_right_a_pressed(controllers);
     let movement_impulse = (left_axis.length_squared() > f32::EPSILON)
         .then(|| xr_left_stick_movement_impulse(left_axis));
-    let yaw_delta = f64::from(right_axis.x) * XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * dt_seconds;
-    let mouse_delta_x = if ENGINE_CAMERA_MOUSE_SENSITIVITY > 0.0 {
-        yaw_delta / ENGINE_CAMERA_MOUSE_SENSITIVITY
-    } else {
-        0.0
-    };
+    let mouse_delta_x =
+        if matches!(turn_policy, XrTurnPolicy::Smooth) && ENGINE_CAMERA_MOUSE_SENSITIVITY > 0.0 {
+            let yaw_delta =
+                -f64::from(right_axis.x) * XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * dt_seconds;
+            -yaw_delta / ENGINE_CAMERA_MOUSE_SENSITIVITY
+        } else {
+            0.0
+        };
 
     EngineCameraInput {
         dt_seconds,
         mouse_delta_x,
         jump,
-        descend,
         movement_impulse,
         movement_yaw_radians,
         ..EngineCameraInput::default()
     }
+}
+
+fn xr_left_stick_axis(controllers: &[XrControllerSnapshot]) -> Vec2 {
+    controllers
+        .iter()
+        .find(|controller| controller.hand == XrHand::Left)
+        .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
+        .unwrap_or(Vec2::ZERO)
+}
+
+fn xr_right_stick_axis(controllers: &[XrControllerSnapshot]) -> Vec2 {
+    controllers
+        .iter()
+        .find(|controller| controller.hand == XrHand::Right)
+        .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
+        .unwrap_or(Vec2::ZERO)
+}
+
+fn xr_right_a_pressed(controllers: &[XrControllerSnapshot]) -> bool {
+    controllers
+        .iter()
+        .any(|controller| controller.hand == XrHand::Right && controller.a_pressed)
 }
 
 pub fn xr_hand_push_input_from_controllers(
@@ -5390,11 +5579,11 @@ mod tests {
     }
 
     #[test]
-    fn xr_locomotion_maps_left_stick_and_right_stick_ascend_to_engine_input() {
+    fn xr_locomotion_maps_left_stick_and_right_a_to_engine_input() {
         let input = xr_locomotion_input_from_controllers(
             &[
                 test_controller(XrHand::Left, Vec2::new(0.0, 1.0), false),
-                test_controller(XrHand::Right, Vec2::new(0.0, 1.0), false),
+                test_controller(XrHand::Right, Vec2::ZERO, true),
             ],
             1.0 / 72.0,
             Some(0.25),
@@ -5445,11 +5634,25 @@ mod tests {
     }
 
     #[test]
-    fn xr_locomotion_maps_right_stick_to_desktop_mouse_turn_path() {
+    fn xr_locomotion_default_snap_turn_does_not_emit_mouse_delta() {
         let input = xr_locomotion_input_from_controllers(
             &[test_controller(XrHand::Right, Vec2::new(1.0, 0.0), false)],
             0.05,
             None,
+        );
+
+        assert_eq!(input.mouse_delta_x, 0.0);
+        assert_eq!(input.movement_impulse, None);
+        assert!(!input.jump);
+    }
+
+    #[test]
+    fn xr_locomotion_smooth_turn_policy_uses_mouse_turn_path() {
+        let input = xr_locomotion_input_from_controllers_with_turn_policy(
+            &[test_controller(XrHand::Right, Vec2::new(1.0, 0.0), false)],
+            0.05,
+            None,
+            XrTurnPolicy::Smooth,
         );
         let expected_mouse_delta =
             XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * 0.05 / ENGINE_CAMERA_MOUSE_SENSITIVITY;
@@ -5460,8 +5663,8 @@ mod tests {
     }
 
     #[test]
-    fn xr_locomotion_maps_right_stick_up_to_jump() {
-        let right = test_controller(XrHand::Right, Vec2::new(0.0, 1.0), false);
+    fn xr_locomotion_maps_right_a_to_jump() {
+        let right = test_controller(XrHand::Right, Vec2::ZERO, true);
         let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
 
         assert!(input.jump);
@@ -5469,11 +5672,20 @@ mod tests {
     }
 
     #[test]
-    fn xr_locomotion_maps_right_stick_down_to_descend() {
+    fn xr_locomotion_right_stick_up_no_longer_maps_to_jump() {
+        let right = test_controller(XrHand::Right, Vec2::new(0.0, 1.0), false);
+        let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
+
+        assert!(!input.jump);
+        assert!(!input.descend);
+    }
+
+    #[test]
+    fn xr_locomotion_right_stick_down_no_longer_maps_to_descend() {
         let right = test_controller(XrHand::Right, Vec2::new(0.0, -1.0), false);
         let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
 
-        assert!(input.descend);
+        assert!(!input.descend);
         assert!(!input.jump);
     }
 
@@ -5484,6 +5696,58 @@ mod tests {
 
         assert!(!input.jump);
         assert!(!input.descend);
+    }
+
+    #[test]
+    fn default_xr_turn_policy_is_snap_15() {
+        assert_eq!(
+            XrTurnPolicy::default(),
+            XrTurnPolicy::Snap {
+                degrees: XR_DEFAULT_SNAP_TURN_DEGREES
+            }
+        );
+        assert_eq!(XrTurnPolicy::default().game_mode(), GameXrTurnMode::Snap15);
+        assert_eq!(
+            XrTurnPolicy::from_game_mode(GameXrTurnMode::Snap30),
+            XrTurnPolicy::Snap { degrees: 30.0 }
+        );
+        assert_eq!(
+            XrTurnPolicy::from_game_mode(GameXrTurnMode::Smooth),
+            XrTurnPolicy::Smooth
+        );
+    }
+
+    #[test]
+    fn xr_snap_turn_state_emits_one_snap_per_deflection() {
+        let mut state = XrSnapTurnState::default();
+        let policy = XrTurnPolicy::Snap { degrees: 15.0 };
+
+        let first = state.update(XR_SNAP_TURN_ENGAGE_THRESHOLD, policy);
+        let held = state.update(1.0, policy);
+
+        assert!((first.expect("snap") + 15.0_f64.to_radians()).abs() < 1.0e-12);
+        assert_eq!(held, None);
+    }
+
+    #[test]
+    fn xr_snap_turn_state_requires_recenter_before_next_snap() {
+        let mut state = XrSnapTurnState::default();
+        let policy = XrTurnPolicy::Snap { degrees: 30.0 };
+
+        assert!(state.update(1.0, policy).is_some());
+        assert_eq!(state.update(0.4, policy), None);
+        assert_eq!(state.update(1.0, policy), None);
+        assert_eq!(state.update(0.0, policy), None);
+        let next = state.update(-1.0, policy).expect("snap after recenter");
+
+        assert!((next - 30.0_f64.to_radians()).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn xr_snap_turn_state_ignores_smooth_policy() {
+        let mut state = XrSnapTurnState::default();
+
+        assert_eq!(state.update(1.0, XrTurnPolicy::Smooth), None);
     }
 
     #[test]
@@ -5929,6 +6193,45 @@ mod tests {
 
         assert!((head_world_after - head_world_before).length() < 1.0e-5);
         assert!((head_world_after - body_eye_after - Vec3::new(0.0, 0.2, -0.2)).length() < 1.0e-5);
+    }
+
+    #[test]
+    fn tracking_origin_rebase_preserves_headset_world_position_across_snap_turn() {
+        let origin = XrTrackingOrigin::from_stage_view(
+            Vec3::new(1.0, 1.6, -0.25),
+            Quat::IDENTITY,
+            XrViewAlignmentMode::ViewPose,
+        )
+        .unwrap();
+        let before_snapshot = EngineCameraSnapshot::from_eye_pose(
+            Vec3d::new(8.0, 72.0, -12.0),
+            0.0,
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+        let before_transform =
+            XrStageToWorld::from_tracking_origin(origin, before_snapshot).unwrap();
+        let current_head_stage = origin.origin_stage + Vec3::new(0.35, 0.15, -0.3);
+        let head_world_before = before_transform.transform_position(current_head_stage);
+
+        let after_snapshot = EngineCameraSnapshot::from_eye_pose(
+            before_snapshot.eye,
+            15.0_f64.to_radians(),
+            0.0,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        );
+        let origin_after = origin
+            .rebase_for_stage_position_world_position(
+                current_head_stage,
+                head_world_before,
+                after_snapshot,
+            )
+            .unwrap();
+        let after_transform =
+            XrStageToWorld::from_tracking_origin(origin_after, after_snapshot).unwrap();
+        let head_world_after = after_transform.transform_position(current_head_stage);
+
+        assert!((head_world_after - head_world_before).length() < 1.0e-5);
     }
 
     #[test]

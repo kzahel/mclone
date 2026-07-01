@@ -1210,6 +1210,22 @@ impl LocalPlayerController {
             on_ground: self.on_ground,
         }
     }
+
+    pub fn move_colliding_horizontal_preserving_vertical_contact(
+        &mut self,
+        client: &ClientRuntime,
+        requested: Vec3d,
+    ) -> CollisionMovementResult {
+        let requested = Vec3d::new(requested.x, 0.0, requested.z);
+        let previous_vertical_collision = self.vertical_collision;
+        let previous_on_ground = self.on_ground;
+        let mut result = self.move_colliding(client, requested);
+        self.vertical_collision = previous_vertical_collision;
+        self.on_ground = previous_on_ground;
+        result.vertical_collision = previous_vertical_collision;
+        result.on_ground = previous_on_ground;
+        result
+    }
 }
 
 fn can_auto_jump_over(client: &ClientRuntime, bounding_box: Aabb, movement: Vec3d) -> bool {
