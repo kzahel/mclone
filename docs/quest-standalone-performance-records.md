@@ -81,6 +81,56 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-01 - Standalone Quest 3 Frozen RD10 Solid Terrain Layer Split (Slice O)
+
+Benchmarked code commit: `0f5ecaa` (`Split solid terrain render layer`). The
+worktree had unrelated `tools/asset-lab` changes, but the Android XR APK was
+built from the committed native/render code. Captured with the fixed frozen RD10
+pose `0,80,-96,180`, `--perf-metrics`, render scale `1.0`, foveation off, and
+the same staged asset pack. This is the Slice O implementation from
+[`117`](tactical/117-android-xr-rd10-gpu-floor-and-frame-overlap.md):
+solid terrain now renders through a no-`discard` pipeline, while cutout and
+translucent terrain keep the alpha-discard shader path.
+
+Validation before the Quest run:
+`cargo test --manifest-path native/Cargo.toml`,
+`cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`,
+`pnpm native:web:build`, and visual inspection of
+`/tmp/mclone-solid-layer-debug.png`.
+
+Summary:
+
+| Path | Sample | FPS | Frames | App work avg | App work p50 | App work p95 | App work p99 | Headroom avg | Over period | Drawn sections | Drawn indices | Key marker |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| per-eye solid layer split | `20.013s` | `71.55` | 1,432 | `13.720ms` | `13.729ms` | `14.653ms` | `15.011ms` | `0.168ms` | `37.8%` | 179 | 1,356,102 | stereo poll `10.408ms`; Meta app GPU `2.537ms` |
+
+Raw marker block:
+
+```text
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.013 mode=stationary-frozen-render render_path=per-eye render_section_upload_budget=unbounded xr_foveation=off xr_render_scale=1.000 xr_eye_size=1680x1760 render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=35.273 settle_min_seconds=5.000 settle_frames=2398 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1432 submitted_delta=1432 runtime_delta=1432 skipped_delta=0 frame_avg_ms=13.925 frame_min_ms=11.324 frame_p50_ms=13.814 frame_p95_ms=14.873 frame_p99_ms=17.374 frame_max_ms=26.232 over_budget=636 over_2x_budget=0 over_4x_budget=0 app_work_avg_ms=13.720 app_work_p50_ms=13.729 app_work_p95_ms=14.653 headroom_avg_ms=0.168 app_over_period_frames=541 app_over_period_pct=37.8
+MCLONE_ANDROID_XR_PERF_HEADROOM sample_seconds=20.013 mode=stationary-frozen-render render_path=per-eye xr_render_scale=1.000 target_hz=72.0 budget_ms=13.889 frames=1432 submitted_delta=1432 runtime_delta=1432 skipped_delta=0 submitted_fps=71.55 runtime_fps=71.55 wait_frame_avg_ms=0.205 wait_frame_p50_ms=0.033 wait_frame_p95_ms=1.014 wait_frame_max_ms=11.802 app_work_avg_ms=13.720 app_work_min_ms=11.299 app_work_p50_ms=13.729 app_work_p95_ms=14.653 app_work_p99_ms=15.011 app_work_max_ms=15.311 headroom_avg_ms=0.168 headroom_p50_ms=0.160 headroom_p05_ms=-0.765 headroom_p01_ms=-1.122 headroom_min_ms=-1.422 app_over_period_frames=541 app_over_period_pct=37.8
+MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_render_frame_ms=14.769 max_terrain_render_views_ms=0.056 max_terrain_menu_pointer_ms=0.000 max_terrain_runtime_upload_ms=0.000 max_runtime_poll_ms=0.000 max_runtime_sync_ms=0.000 max_runtime_gpu_upload_ms=0.000 max_runtime_ready_sections_ms=0.000 max_terrain_shared_records_ms=0.008 max_terrain_left_eye_ms=7.849 max_terrain_right_eye_ms=6.857 max_terrain_left_eye_prepare_ms=2.007 max_terrain_left_eye_encode_ms=2.554 max_terrain_left_eye_section_encode_ms=1.746 max_terrain_left_eye_submit_ms=0.804 max_terrain_left_eye_poll_wait_ms=6.442 max_terrain_right_eye_prepare_ms=0.155 max_terrain_right_eye_encode_ms=2.067 max_terrain_right_eye_section_encode_ms=1.510 max_terrain_right_eye_submit_ms=0.405 max_terrain_right_eye_poll_wait_ms=5.611 max_terrain_stereo_finish_ms=0.000 max_terrain_stereo_submit_ms=0.992 max_terrain_stereo_poll_wait_ms=10.408
+MCLONE_ANDROID_XR_PERF_TERRAIN_PREP max_terrain_left_eye_cull_ms=1.865 max_terrain_left_eye_uniform_write_ms=0.216 max_terrain_left_eye_translucent_collect_ms=0.416 max_terrain_left_eye_translucent_sort_ms=0.038 max_terrain_right_eye_cull_ms=0.000 max_terrain_right_eye_uniform_write_ms=0.155 max_terrain_right_eye_translucent_collect_ms=0.000 max_terrain_right_eye_translucent_sort_ms=0.000
+MCLONE_ANDROID_XR_PERF_DRAW sections=1133 drawn_sections=179 indices=5396112 drawn_indices=1356102 actors=1 drawn_actors=1
+MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms=2.537 app_cpu_ms=n/a compositor_gpu_ms=1.152 compositor_cpu_ms=n/a gpu_util_pct=25.587 cpu_util_avg_pct=98.316 cpu_util_worst_pct=99.020 motion_to_photon_ms=36.239 dropped_frames=119.000 stale_frames=n/a counters=17 any_valid=true attempt=1/8 per_query_us=0.37
+```
+
+Interpretation:
+
+- The code path is validated, but this is **not a measured RD10 win**. Against
+  the current 117 baseline target of about `13.2-13.3ms` app work avg and
+  `~14.1ms` p95, this run is worse (`13.720ms` avg, `14.653ms` p95).
+- Drawn work stayed at the masked per-eye baseline shape (`179` sections /
+  `1.356M` drawn indices), so the change did not reduce geometry. It only
+  changed shader/pipeline selection for solid terrain.
+- The likely conclusion is that unconditional terrain `discard` was not the
+  practical RD10 bottleneck on this path, or any early-Z benefit is smaller than
+  thermal/run variance and the extra solid/cutout pipeline split overhead.
+- Keep the solid/cutout split for parity and future render-layer correctness,
+  but do not count it as an RD10 performance lever. The next measured lever
+  should be CPU/GPU frame overlap (Slice K/E4) or draw batching/arena work, with
+  render scale as the known quality tradeoff.
+
 ### 2026-06-30 - Standalone Quest 3 Frozen RD10 Per-Eye Submit-Overlap Probe
 
 Benchmarked code: current worktree for the per-eye submit-overlap slice, later
