@@ -1202,6 +1202,7 @@ pub struct GpuTexturedChunkMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+    solid_index_count: u32,
     opaque_index_count: u32,
     visibility: VisibilitySet,
 }
@@ -1233,6 +1234,7 @@ impl GpuTexturedChunkMesh {
             vertex_buffer,
             index_buffer,
             index_count: mesh.indices.len() as u32,
+            solid_index_count: mesh.solid_index_count().min(mesh.indices.len() as u32),
             opaque_index_count: mesh.opaque_index_count().min(mesh.indices.len() as u32),
             visibility,
         })
@@ -1244,6 +1246,14 @@ impl GpuTexturedChunkMesh {
 
     pub fn opaque_index_range(&self) -> Range<u32> {
         0..self.opaque_index_count.min(self.index_count)
+    }
+
+    pub fn solid_index_range(&self) -> Range<u32> {
+        0..self.solid_index_count.min(self.index_count)
+    }
+
+    pub fn cutout_index_range(&self) -> Range<u32> {
+        self.solid_index_count.min(self.index_count)..self.opaque_index_count.min(self.index_count)
     }
 
     pub fn translucent_index_range(&self) -> Range<u32> {
@@ -1551,7 +1561,8 @@ impl ChunkRenderer {
 }
 
 pub struct TexturedChunkRenderer {
-    opaque_pipeline: wgpu::RenderPipeline,
+    solid_pipeline: wgpu::RenderPipeline,
+    cutout_pipeline: wgpu::RenderPipeline,
     translucent_pipeline: wgpu::RenderPipeline,
     uniforms: PerViewUniformBuffer,
     bind_group: wgpu::BindGroup,
@@ -1609,12 +1620,24 @@ impl TexturedChunkRenderer {
             bind_group_layouts: &[&uniform_bind_group_layout, &texture_bind_group_layout],
             push_constant_ranges: &[],
         });
-        let opaque_pipeline = create_textured_chunk_pipeline(
+        let solid_pipeline = create_textured_chunk_pipeline(
             device,
             &pipeline_layout,
             &shader,
             color_format,
-            "mclone_textured_chunk_opaque_pipeline",
+            "mclone_textured_chunk_solid_pipeline",
+            "fs_main_solid",
+            None,
+            true,
+            None,
+        );
+        let cutout_pipeline = create_textured_chunk_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_textured_chunk_cutout_pipeline",
+            "fs_main_cutout",
             None,
             true,
             None,
@@ -1625,12 +1648,14 @@ impl TexturedChunkRenderer {
             &shader,
             color_format,
             "mclone_textured_chunk_translucent_pipeline",
+            "fs_main_cutout",
             Some(translucent_blend_state()),
             false,
             None,
         );
         Self {
-            opaque_pipeline,
+            solid_pipeline,
+            cutout_pipeline,
             translucent_pipeline,
             uniforms,
             bind_group,
@@ -1664,7 +1689,8 @@ impl TexturedChunkRenderer {
 }
 
 struct TexturedChunkMultiviewRenderer {
-    opaque_pipeline: wgpu::RenderPipeline,
+    solid_pipeline: wgpu::RenderPipeline,
+    cutout_pipeline: wgpu::RenderPipeline,
     translucent_pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -1715,12 +1741,24 @@ impl TexturedChunkMultiviewRenderer {
             bind_group_layouts: &[&uniform_bind_group_layout, texture_bind_group_layout],
             push_constant_ranges: &[],
         });
-        let opaque_pipeline = create_textured_chunk_pipeline(
+        let solid_pipeline = create_textured_chunk_pipeline(
             device,
             &pipeline_layout,
             &shader,
             color_format,
-            "mclone_textured_chunk_multiview_opaque_pipeline",
+            "mclone_textured_chunk_multiview_solid_pipeline",
+            "fs_main_solid",
+            None,
+            true,
+            NonZeroU32::new(2),
+        );
+        let cutout_pipeline = create_textured_chunk_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_textured_chunk_multiview_cutout_pipeline",
+            "fs_main_cutout",
             None,
             true,
             NonZeroU32::new(2),
@@ -1731,12 +1769,14 @@ impl TexturedChunkMultiviewRenderer {
             &shader,
             color_format,
             "mclone_textured_chunk_multiview_translucent_pipeline",
+            "fs_main_cutout",
             Some(translucent_blend_state()),
             false,
             NonZeroU32::new(2),
         );
         Self {
-            opaque_pipeline,
+            solid_pipeline,
+            cutout_pipeline,
             translucent_pipeline,
             uniform_buffer,
             bind_group,
@@ -1761,6 +1801,7 @@ fn create_textured_chunk_pipeline(
     shader: &wgpu::ShaderModule,
     color_format: wgpu::TextureFormat,
     label: &'static str,
+    fragment_entry_point: &'static str,
     blend: Option<wgpu::BlendState>,
     depth_write_enabled: bool,
     multiview: Option<NonZeroU32>,
@@ -1801,7 +1842,7 @@ fn create_textured_chunk_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
-            entry_point: Some("fs_main"),
+            entry_point: Some(fragment_entry_point),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: color_format,
@@ -2010,8 +2051,10 @@ impl TexturedChunkDrawResources {
         });
         pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
         pass.set_bind_group(1, &self.atlas.bind_group, &[]);
-        pass.set_pipeline(&self.renderer.opaque_pipeline);
-        draw_textured_mesh_range(&mut pass, &self.mesh, self.mesh.opaque_index_range());
+        pass.set_pipeline(&self.renderer.solid_pipeline);
+        draw_textured_mesh_range(&mut pass, &self.mesh, self.mesh.solid_index_range());
+        pass.set_pipeline(&self.renderer.cutout_pipeline);
+        draw_textured_mesh_range(&mut pass, &self.mesh, self.mesh.cutout_index_range());
         pass.set_pipeline(&self.renderer.translucent_pipeline);
         draw_textured_mesh_range(&mut pass, &self.mesh, self.mesh.translucent_index_range());
         Ok(())
@@ -2702,12 +2745,19 @@ impl TexturedSectionDrawResources {
             pass.set_bind_group(0, &renderer.bind_group, &[]);
             pass.set_bind_group(1, &self.atlas.bind_group, &[]);
             if phase.draws_opaque() {
-                pass.set_pipeline(&renderer.opaque_pipeline);
+                pass.set_pipeline(&renderer.solid_pipeline);
                 for (key, mesh) in &self.sections {
                     if !prepared_draw.drawn_keys.contains(key) {
                         continue;
                     }
-                    draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.solid_index_range());
+                }
+                pass.set_pipeline(&renderer.cutout_pipeline);
+                for (key, mesh) in &self.sections {
+                    if !prepared_draw.drawn_keys.contains(key) {
+                        continue;
+                    }
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
                 }
             }
             if phase.draws_translucent() {
@@ -2820,12 +2870,19 @@ impl TexturedSectionDrawResources {
             pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
             pass.set_bind_group(1, &self.atlas.bind_group, &[]);
             if phase.draws_opaque() {
-                pass.set_pipeline(&self.renderer.opaque_pipeline);
+                pass.set_pipeline(&self.renderer.solid_pipeline);
                 for (key, mesh) in &self.sections {
                     if !culling.drawn_keys.contains(key) {
                         continue;
                     }
-                    draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.solid_index_range());
+                }
+                pass.set_pipeline(&self.renderer.cutout_pipeline);
+                for (key, mesh) in &self.sections {
+                    if !culling.drawn_keys.contains(key) {
+                        continue;
+                    }
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
                 }
             }
             if phase.draws_translucent() {
@@ -2943,12 +3000,19 @@ impl TexturedSectionDrawResources {
             pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
             pass.set_bind_group(1, &self.atlas.bind_group, &[]);
             if phase.draws_opaque() {
-                pass.set_pipeline(&self.renderer.opaque_pipeline);
+                pass.set_pipeline(&self.renderer.solid_pipeline);
                 for (key, mesh) in &self.sections {
                     if !prepared_draw.draws_in_slot(*key, view_slot) {
                         continue;
                     }
-                    draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.solid_index_range());
+                }
+                pass.set_pipeline(&self.renderer.cutout_pipeline);
+                for (key, mesh) in &self.sections {
+                    if !prepared_draw.draws_in_slot(*key, view_slot) {
+                        continue;
+                    }
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
                 }
             }
             if phase.draws_translucent() {
@@ -3475,6 +3539,7 @@ mod tests {
             mesh: TexturedVisibleChunkMesh {
                 vertices: Vec::new(),
                 indices: vec![0; index_count],
+                solid_index_count: index_count as u32,
                 opaque_index_count: index_count as u32,
             },
             visibility,
@@ -3830,6 +3895,7 @@ mod tests {
                 packed_light: 15_728_880,
             }],
             indices: vec![0],
+            solid_index_count: 1,
             opaque_index_count: 1,
         };
 

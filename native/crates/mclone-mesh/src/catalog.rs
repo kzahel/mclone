@@ -154,6 +154,7 @@ impl BlockStateModelRotation {
 pub struct TexturedBlockModel {
     pub faces: Vec<TexturedBlockFace>,
     pub fluid: Option<TexturedFluidModel>,
+    pub render_layer: TexturedTerrainRenderLayer,
     pub occludes: bool,
     pub ambient_occlusion: bool,
     pub light_emission: u8,
@@ -162,6 +163,14 @@ pub struct TexturedBlockModel {
     pub solid_render: bool,
     pub collision_shape_full_block: bool,
     pub shade_brightness: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TexturedTerrainRenderLayer {
+    #[default]
+    Solid,
+    Cutout,
+    Translucent,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -234,11 +243,14 @@ impl TexturedMeshCatalog {
             let fluid = textured_fluid_model(record, atlas)?;
             let full_cube_occluder = full_cube_occluder(&faces);
             let facts = block_render_facts(record, full_cube_occluder);
+            let render_layer =
+                textured_terrain_render_layer(record.block.path(), facts.solid_render);
             blocks.insert(
                 record.id,
                 TexturedBlockModel {
                     faces,
                     fluid,
+                    render_layer,
                     occludes: facts.occludes,
                     ambient_occlusion: baked.ambient_occlusion,
                     light_emission: facts.light_emission,
@@ -309,6 +321,213 @@ impl TexturedMeshCatalog {
     pub(crate) fn fluid(&self, state_id: BlockStateId) -> Option<TexturedFluidModel> {
         self.blocks.get(&state_id).and_then(|model| model.fluid)
     }
+}
+
+fn textured_terrain_render_layer(path: &str, solid_render: bool) -> TexturedTerrainRenderLayer {
+    if java_translucent_block(path) {
+        TexturedTerrainRenderLayer::Translucent
+    } else if java_cutout_mipped_block(path) || java_cutout_block(path) {
+        TexturedTerrainRenderLayer::Cutout
+    } else if solid_render {
+        TexturedTerrainRenderLayer::Solid
+    } else {
+        TexturedTerrainRenderLayer::Cutout
+    }
+}
+
+// Mirrors Java 1.17.1 `ItemBlockRenderTypes.getChunkRenderType` for the
+// block-render-layer distinction that decides whether alpha discard is needed.
+fn java_cutout_mipped_block(path: &str) -> bool {
+    path.ends_with("_leaves")
+        || matches!(
+            path,
+            "grass_block" | "iron_bars" | "glass_pane" | "tripwire_hook" | "hopper" | "chain"
+        )
+}
+
+fn java_cutout_block(path: &str) -> bool {
+    matches!(
+        path,
+        "oak_sapling"
+            | "spruce_sapling"
+            | "birch_sapling"
+            | "jungle_sapling"
+            | "acacia_sapling"
+            | "dark_oak_sapling"
+            | "glass"
+            | "powered_rail"
+            | "detector_rail"
+            | "cobweb"
+            | "grass"
+            | "fern"
+            | "dead_bush"
+            | "seagrass"
+            | "tall_seagrass"
+            | "dandelion"
+            | "poppy"
+            | "blue_orchid"
+            | "allium"
+            | "azure_bluet"
+            | "red_tulip"
+            | "orange_tulip"
+            | "white_tulip"
+            | "pink_tulip"
+            | "oxeye_daisy"
+            | "cornflower"
+            | "wither_rose"
+            | "lily_of_the_valley"
+            | "brown_mushroom"
+            | "red_mushroom"
+            | "torch"
+            | "wall_torch"
+            | "soul_torch"
+            | "soul_wall_torch"
+            | "fire"
+            | "soul_fire"
+            | "spawner"
+            | "redstone_wire"
+            | "wheat"
+            | "oak_door"
+            | "ladder"
+            | "rail"
+            | "iron_door"
+            | "redstone_torch"
+            | "redstone_wall_torch"
+            | "cactus"
+            | "sugar_cane"
+            | "repeater"
+            | "oak_trapdoor"
+            | "spruce_trapdoor"
+            | "birch_trapdoor"
+            | "jungle_trapdoor"
+            | "acacia_trapdoor"
+            | "dark_oak_trapdoor"
+            | "crimson_trapdoor"
+            | "warped_trapdoor"
+            | "attached_pumpkin_stem"
+            | "attached_melon_stem"
+            | "pumpkin_stem"
+            | "melon_stem"
+            | "vine"
+            | "glow_lichen"
+            | "lily_pad"
+            | "nether_wart"
+            | "brewing_stand"
+            | "cocoa"
+            | "beacon"
+            | "flower_pot"
+            | "potted_oak_sapling"
+            | "potted_spruce_sapling"
+            | "potted_birch_sapling"
+            | "potted_jungle_sapling"
+            | "potted_acacia_sapling"
+            | "potted_dark_oak_sapling"
+            | "potted_fern"
+            | "potted_dandelion"
+            | "potted_poppy"
+            | "potted_blue_orchid"
+            | "potted_allium"
+            | "potted_azure_bluet"
+            | "potted_red_tulip"
+            | "potted_orange_tulip"
+            | "potted_white_tulip"
+            | "potted_pink_tulip"
+            | "potted_oxeye_daisy"
+            | "potted_cornflower"
+            | "potted_lily_of_the_valley"
+            | "potted_wither_rose"
+            | "potted_red_mushroom"
+            | "potted_brown_mushroom"
+            | "potted_dead_bush"
+            | "potted_cactus"
+            | "potted_azalea"
+            | "potted_flowering_azalea"
+            | "carrots"
+            | "potatoes"
+            | "comparator"
+            | "activator_rail"
+            | "iron_trapdoor"
+            | "sunflower"
+            | "lilac"
+            | "rose_bush"
+            | "peony"
+            | "tall_grass"
+            | "large_fern"
+            | "spruce_door"
+            | "birch_door"
+            | "jungle_door"
+            | "acacia_door"
+            | "dark_oak_door"
+            | "end_rod"
+            | "chorus_plant"
+            | "chorus_flower"
+            | "beetroots"
+            | "kelp"
+            | "kelp_plant"
+            | "turtle_egg"
+            | "sea_pickle"
+            | "conduit"
+            | "bamboo_sapling"
+            | "bamboo"
+            | "potted_bamboo"
+            | "scaffolding"
+            | "stonecutter"
+            | "lantern"
+            | "soul_lantern"
+            | "campfire"
+            | "soul_campfire"
+            | "sweet_berry_bush"
+            | "weeping_vines"
+            | "weeping_vines_plant"
+            | "twisting_vines"
+            | "twisting_vines_plant"
+            | "nether_sprouts"
+            | "crimson_fungus"
+            | "warped_fungus"
+            | "crimson_roots"
+            | "warped_roots"
+            | "potted_crimson_fungus"
+            | "potted_warped_fungus"
+            | "potted_crimson_roots"
+            | "potted_warped_roots"
+            | "crimson_door"
+            | "warped_door"
+            | "pointed_dripstone"
+            | "small_amethyst_bud"
+            | "medium_amethyst_bud"
+            | "large_amethyst_bud"
+            | "amethyst_cluster"
+            | "lightning_rod"
+            | "cave_vines"
+            | "cave_vines_plant"
+            | "spore_blossom"
+            | "flowering_azalea"
+            | "azalea"
+            | "moss_carpet"
+            | "big_dripleaf"
+            | "big_dripleaf_stem"
+            | "small_dripleaf"
+            | "hanging_roots"
+            | "sculk_sensor"
+    ) || path.ends_with("_bed")
+        || path.ends_with("_coral")
+        || path.ends_with("_coral_fan")
+        || path.ends_with("_coral_wall_fan")
+}
+
+fn java_translucent_block(path: &str) -> bool {
+    path.ends_with("_stained_glass")
+        || path.ends_with("_stained_glass_pane")
+        || matches!(
+            path,
+            "ice"
+                | "nether_portal"
+                | "slime_block"
+                | "honey_block"
+                | "frosted_ice"
+                | "bubble_column"
+                | "tinted_glass"
+        )
 }
 
 #[derive(Debug)]
@@ -469,5 +688,30 @@ fn face_is_full_cube_side(face: &TexturedBlockFace) -> bool {
         ModelFaceDirection::South => (face.to[2] - 16.0).abs() <= EPSILON,
         ModelFaceDirection::West => (face.from[0] - 0.0).abs() <= EPSILON,
         ModelFaceDirection::East => (face.to[0] - 16.0).abs() <= EPSILON,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terrain_render_layer_keeps_alpha_test_full_cube_exceptions_out_of_solid() {
+        assert_eq!(
+            textured_terrain_render_layer("stone", true),
+            TexturedTerrainRenderLayer::Solid
+        );
+        assert_eq!(
+            textured_terrain_render_layer("grass_block", true),
+            TexturedTerrainRenderLayer::Cutout
+        );
+        assert_eq!(
+            textured_terrain_render_layer("oak_leaves", false),
+            TexturedTerrainRenderLayer::Cutout
+        );
+        assert_eq!(
+            textured_terrain_render_layer("tinted_glass", false),
+            TexturedTerrainRenderLayer::Translucent
+        );
     }
 }

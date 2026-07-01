@@ -20,7 +20,7 @@ pub use builder::{
 };
 pub use catalog::{
     AtlasSpriteUv, TexturedBlockFace, TexturedBlockModel, TexturedFluidKind, TexturedFluidModel,
-    TexturedMeshCatalog, TexturedMeshError,
+    TexturedMeshCatalog, TexturedMeshError, TexturedTerrainRenderLayer,
 };
 pub use data::{
     ChunkVertex, RenderSectionKey, SectionMeshStats, TexturedChunkVertex,
@@ -866,6 +866,8 @@ mod tests {
 
         assert_eq!(mesh.stats().vertex_count, 24);
         assert_eq!(mesh.stats().index_count, 36);
+        assert_eq!(mesh.solid_index_count(), mesh.stats().index_count);
+        assert_eq!(mesh.cutout_index_count(), 0);
         assert_eq!(mesh.opaque_index_count(), mesh.stats().index_count);
         assert_eq!(mesh.translucent_index_count(), 0);
         assert!(catalog.occludes(BlockStateId(1)));
@@ -921,12 +923,14 @@ mod tests {
         assert_eq!(stone.light_block, 15);
         assert!(stone.view_blocking);
         assert!(stone.solid_render);
+        assert_eq!(stone.render_layer, TexturedTerrainRenderLayer::Solid);
 
         assert!(!leaves.occludes);
         assert_eq!(leaves.light_block, 1);
         assert!(!leaves.view_blocking);
         assert!(!leaves.solid_render);
         assert!(leaves.collision_shape_full_block);
+        assert_eq!(leaves.render_layer, TexturedTerrainRenderLayer::Cutout);
     }
 
     #[test]
@@ -956,6 +960,8 @@ mod tests {
 
         assert_eq!(mesh.stats().face_count(), 7);
         assert_eq!(mesh.opaque_index_count(), 0);
+        assert_eq!(mesh.solid_index_count(), 0);
+        assert_eq!(mesh.cutout_index_count(), 0);
         assert_eq!(mesh.translucent_index_count(), mesh.stats().index_count);
         assert!(mesh.vertices.iter().any(|vertex| vertex.color[3] < 1.0));
         assert!(mesh.vertices.iter().all(
@@ -1024,6 +1030,8 @@ mod tests {
 
         assert_eq!(mesh.stats().face_count(), 12);
         assert_eq!(mesh.opaque_index_count(), 0);
+        assert_eq!(mesh.solid_index_count(), 0);
+        assert_eq!(mesh.cutout_index_count(), 0);
         assert_eq!(mesh.translucent_index_count(), mesh.stats().index_count);
     }
 

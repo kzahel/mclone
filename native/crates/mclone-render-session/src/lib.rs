@@ -31,7 +31,7 @@ use mclone_protocol::{
 use mclone_render::entity::ActorInstance;
 use mclone_render::gui::WorldGuiLine;
 
-const PACKED_BUILD_REPORT_MAGIC: &[u8; 8] = b"MCRSBR1\0";
+const PACKED_BUILD_REPORT_MAGIC: &[u8; 8] = b"MCRSBR2\0";
 pub const LANDING_MIN_IMPACT_SPEED: f64 = 0.5;
 const THIRD_PERSON_CAMERA_DISTANCE: f64 = 4.0;
 
@@ -3250,6 +3250,7 @@ pub fn encode_textured_render_section_build_report(
         write_u64(&mut out, section.visibility.bits());
         write_u32(&mut out, section.mesh.vertices.len() as u32);
         write_u32(&mut out, section.mesh.indices.len() as u32);
+        write_u32(&mut out, section.mesh.solid_index_count());
         write_u32(&mut out, section.mesh.opaque_index_count());
         for vertex in &section.mesh.vertices {
             for value in vertex.position {
@@ -3285,6 +3286,7 @@ pub fn decode_textured_render_section_build_report(
         let visibility = VisibilitySet::from_bits(reader.read_u64()?);
         let vertex_count = reader.read_u32()? as usize;
         let index_count = reader.read_u32()? as usize;
+        let solid_index_count = reader.read_u32()?;
         let opaque_index_count = reader.read_u32()?;
         let mut vertices = Vec::with_capacity(vertex_count);
         for _ in 0..vertex_count {
@@ -3313,6 +3315,7 @@ pub fn decode_textured_render_section_build_report(
             mesh: TexturedVisibleChunkMesh {
                 vertices,
                 indices,
+                solid_index_count,
                 opaque_index_count,
             },
             visibility,
@@ -5255,6 +5258,7 @@ mod tests {
                                     packed_light: 0,
                                 }],
                                 indices: vec![0],
+                                solid_index_count: 1,
                                 opaque_index_count: 1,
                             },
                             visibility: VisibilitySet::all_visible(),
@@ -5595,6 +5599,7 @@ mod tests {
                         },
                     ],
                     indices: vec![0, 1, 0],
+                    solid_index_count: 1,
                     opaque_index_count: 1,
                 },
                 visibility,

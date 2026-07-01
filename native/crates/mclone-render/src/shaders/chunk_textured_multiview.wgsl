@@ -134,13 +134,24 @@ fn apply_fog(color: vec4<f32>, world_position: vec3<f32>, uniforms: ViewUniforms
     return vec4<f32>(lerp_vec3(color.rgb, uniforms.fog_color.rgb, fog_factor), color.a);
 }
 
+fn shade_texel(input: VertexOutput, texel: vec4<f32>, uniforms: ViewUniforms) -> vec4<f32> {
+    let color = vec4<f32>(texel.rgb * input.color.rgb * input.light, texel.a * input.color.a);
+    return apply_color_profile(apply_fog(color, input.world_position, uniforms), uniforms);
+}
+
 @fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_main_solid(input: VertexOutput) -> @location(0) vec4<f32> {
+    let uniforms = stereo_uniforms.views[u32(input.view_index)];
+    let texel = textureSample(atlas_texture, atlas_sampler, input.uv);
+    return shade_texel(input, texel, uniforms);
+}
+
+@fragment
+fn fs_main_cutout(input: VertexOutput) -> @location(0) vec4<f32> {
     let uniforms = stereo_uniforms.views[u32(input.view_index)];
     let texel = textureSample(atlas_texture, atlas_sampler, input.uv);
     if (texel.a < 0.1) {
         discard;
     }
-    let color = vec4<f32>(texel.rgb * input.color.rgb * input.light, texel.a * input.color.a);
-    return apply_color_profile(apply_fog(color, input.world_position, uniforms), uniforms);
+    return shade_texel(input, texel, uniforms);
 }

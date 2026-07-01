@@ -17,7 +17,7 @@ use crate::ambient_occlusion::{
 };
 use crate::catalog::{
     TexturedBlockFace, TexturedFluidKind, TexturedFluidModel, TexturedMeshCatalog,
-    TexturedMeshError,
+    TexturedMeshError, TexturedTerrainRenderLayer,
 };
 use crate::data::{
     ChunkVertex, RenderSectionKey, TexturedChunkVertex, TexturedRenderSectionBuildReport,
@@ -331,6 +331,7 @@ fn add_textured_chunk_range_to_mesh(
     let world_origin_x = chunk_min_block_coord(input.chunk_x);
     let world_origin_z = chunk_min_block_coord(input.chunk_z);
     let ao_sampler = TexturedAmbientOcclusionSampler { area, catalog };
+    let mut cutout_mesh = TexturedVisibleChunkMesh::default();
     let mut translucent_mesh = TexturedVisibleChunkMesh::default();
 
     for local_y in local_y_start..local_y_end {
@@ -398,13 +399,45 @@ fn add_textured_chunk_range_to_mesh(
                             );
                             AmbientOcclusionFace::flat(face.direction, face.shade, packed_light)
                         };
-                    add_textured_face(mesh, world_x, world_y, world_z, face, corners, lighting);
+                    match block_model.render_layer {
+                        TexturedTerrainRenderLayer::Solid => {
+                            add_textured_face(
+                                mesh, world_x, world_y, world_z, face, corners, lighting,
+                            );
+                        }
+                        TexturedTerrainRenderLayer::Cutout => {
+                            add_textured_face(
+                                &mut cutout_mesh,
+                                world_x,
+                                world_y,
+                                world_z,
+                                face,
+                                corners,
+                                lighting,
+                            );
+                        }
+                        TexturedTerrainRenderLayer::Translucent => {
+                            add_textured_face(
+                                &mut translucent_mesh,
+                                world_x,
+                                world_y,
+                                world_z,
+                                face,
+                                corners,
+                                lighting,
+                            );
+                        }
+                    }
                 }
             }
         }
     }
 
-    mesh.mark_all_indices_opaque();
+    mesh.mark_all_indices_solid();
+    cutout_mesh.mark_all_indices_cutout();
+    translucent_mesh.opaque_index_count = 0;
+    translucent_mesh.solid_index_count = 0;
+    append_textured_mesh(mesh, &cutout_mesh);
     append_textured_mesh(mesh, &translucent_mesh);
 
     Ok(())
@@ -412,21 +445,34 @@ fn add_textured_chunk_range_to_mesh(
 
 fn append_textured_mesh(mesh: &mut TexturedVisibleChunkMesh, source: &TexturedVisibleChunkMesh) {
     let base_index = mesh.vertices.len() as u32;
-    let target_opaque_end = mesh.opaque_index_range().end as usize;
-    let source_opaque_end = source.opaque_index_range().end as usize;
     mesh.vertices.extend_from_slice(&source.vertices);
-    mesh.indices.splice(
-        target_opaque_end..target_opaque_end,
-        source.indices[..source_opaque_end]
-            .iter()
-            .map(|index| base_index + *index),
-    );
-    mesh.opaque_index_count = (target_opaque_end + source_opaque_end) as u32;
-    mesh.indices.extend(
-        source.indices[source_opaque_end..]
-            .iter()
-            .map(|index| base_index + *index),
-    );
+    let target_solid_end = mesh.solid_index_range().end as usize;
+    let target_opaque_end = mesh.opaque_index_range().end as usize;
+    let source_solid_end = source.solid_index_range().end as usize;
+    let source_opaque_end = source.opaque_index_range().end as usize;
+
+    let target_indices = std::mem::take(&mut mesh.indices);
+    let adjusted_source = source
+        .indices
+        .iter()
+        .map(|index| base_index + *index)
+        .collect::<Vec<_>>();
+    mesh.indices
+        .reserve(target_indices.len() + adjusted_source.len());
+    mesh.indices
+        .extend_from_slice(&target_indices[..target_solid_end]);
+    mesh.indices
+        .extend_from_slice(&adjusted_source[..source_solid_end]);
+    mesh.solid_index_count = mesh.indices.len() as u32;
+    mesh.indices
+        .extend_from_slice(&target_indices[target_solid_end..target_opaque_end]);
+    mesh.indices
+        .extend_from_slice(&adjusted_source[source_solid_end..source_opaque_end]);
+    mesh.opaque_index_count = mesh.indices.len() as u32;
+    mesh.indices
+        .extend_from_slice(&target_indices[target_opaque_end..]);
+    mesh.indices
+        .extend_from_slice(&adjusted_source[source_opaque_end..]);
 }
 
 #[derive(Clone, Copy, Debug)]

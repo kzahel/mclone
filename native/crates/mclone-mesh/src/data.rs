@@ -63,6 +63,7 @@ pub struct TexturedChunkVertex {
 pub struct TexturedVisibleChunkMesh {
     pub vertices: Vec<TexturedChunkVertex>,
     pub indices: Vec<u32>,
+    pub solid_index_count: u32,
     pub opaque_index_count: u32,
 }
 
@@ -78,8 +79,24 @@ impl TexturedVisibleChunkMesh {
         }
     }
 
-    pub fn mark_all_indices_opaque(&mut self) {
+    pub fn mark_all_indices_solid(&mut self) {
+        let index_count = self.indices.len() as u32;
+        self.solid_index_count = index_count;
+        self.opaque_index_count = index_count;
+    }
+
+    pub fn mark_all_indices_cutout(&mut self) {
+        self.solid_index_count = 0;
         self.opaque_index_count = self.indices.len() as u32;
+    }
+
+    pub fn solid_index_range(&self) -> Range<u32> {
+        0..self.solid_index_count.min(self.indices.len() as u32)
+    }
+
+    pub fn cutout_index_range(&self) -> Range<u32> {
+        self.solid_index_count.min(self.indices.len() as u32)
+            ..self.opaque_index_count.min(self.indices.len() as u32)
     }
 
     pub fn opaque_index_range(&self) -> Range<u32> {
@@ -92,6 +109,14 @@ impl TexturedVisibleChunkMesh {
 
     pub fn opaque_index_count(&self) -> u32 {
         self.opaque_index_range().len() as u32
+    }
+
+    pub fn solid_index_count(&self) -> u32 {
+        self.solid_index_range().len() as u32
+    }
+
+    pub fn cutout_index_count(&self) -> u32 {
+        self.cutout_index_range().len() as u32
     }
 
     pub fn translucent_index_count(&self) -> u32 {
@@ -175,11 +200,16 @@ mod tests {
         let mesh = TexturedVisibleChunkMesh {
             vertices: Vec::new(),
             indices: vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7],
+            solid_index_count: 6,
             opaque_index_count: 6,
         };
 
+        assert_eq!(mesh.solid_index_range(), 0..6);
+        assert_eq!(mesh.cutout_index_range(), 6..6);
         assert_eq!(mesh.opaque_index_range(), 0..6);
         assert_eq!(mesh.translucent_index_range(), 6..12);
+        assert_eq!(mesh.solid_index_count(), 6);
+        assert_eq!(mesh.cutout_index_count(), 0);
         assert_eq!(mesh.opaque_index_count(), 6);
         assert_eq!(mesh.translucent_index_count(), 6);
     }
@@ -189,10 +219,32 @@ mod tests {
         let mesh = TexturedVisibleChunkMesh {
             vertices: Vec::new(),
             indices: vec![0, 1, 2],
+            solid_index_count: 99,
             opaque_index_count: 99,
         };
 
+        assert_eq!(mesh.solid_index_range(), 0..3);
+        assert_eq!(mesh.cutout_index_range(), 3..3);
         assert_eq!(mesh.opaque_index_range(), 0..3);
         assert_eq!(mesh.translucent_index_range(), 3..3);
+    }
+
+    #[test]
+    fn textured_mesh_layer_ranges_split_solid_cutout_and_translucent_indices() {
+        let mesh = TexturedVisibleChunkMesh {
+            vertices: Vec::new(),
+            indices: vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11],
+            solid_index_count: 6,
+            opaque_index_count: 12,
+        };
+
+        assert_eq!(mesh.solid_index_range(), 0..6);
+        assert_eq!(mesh.cutout_index_range(), 6..12);
+        assert_eq!(mesh.opaque_index_range(), 0..12);
+        assert_eq!(mesh.translucent_index_range(), 12..18);
+        assert_eq!(mesh.solid_index_count(), 6);
+        assert_eq!(mesh.cutout_index_count(), 6);
+        assert_eq!(mesh.opaque_index_count(), 12);
+        assert_eq!(mesh.translucent_index_count(), 6);
     }
 }
