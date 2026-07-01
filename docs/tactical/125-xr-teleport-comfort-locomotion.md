@@ -144,20 +144,21 @@ query window or collision snapshot for the bounded search area, plus a client
 world revision/generation and request sequence. Drop stale results whose
 sequence or revision no longer matches.
 
-This is an intentional platform topology difference for now:
+Platform notes, without allowing a divergent runtime topology:
 
 - Desktop OpenXR and Android XR use native OS worker threads or a native worker
   pool behind the shared `mclone-xr-scene` / `mclone-client` request path.
 - Desktop flat debug/offscreen tests should use the same shared evaluator and
   may reuse the native mailbox when they need interactive preview. Deterministic
   tests can call the evaluator directly with bounded fixtures.
-- Web/WASM has no supported XR target today, so it should not grow a browser
-  XR-specific teleport worker lane yet. A future flat web debug surface can add
-  a Web Worker or explicit synchronous smoke fallback behind the same shared
-  evaluator contract.
+- Web/WASM has no supported XR target today, so this slice does not need a
+  browser XR presentation surface. That is not permission for a reduced or
+  synchronous web runtime topology: a future flat web debug surface should use
+  the same latest-only client-side mailbox shape with a Web Worker backend for
+  interactive preview.
 - Keep `mclone-path` and the player teleport evaluator wasm-compatible where
-  practical, so a future web/non-XR caller can add a Web Worker backend without
-  changing the algorithm or target-validity contract.
+  practical, so future web/non-XR callers can share the same algorithm,
+  target-validity contract, and worker-backed request lifecycle.
 
 The first mailbox should be latest-only and bounded: one in-flight request per
 XR scene, pending requests replaced as aim/stick input changes, hard node/time
