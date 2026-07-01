@@ -57,6 +57,30 @@ serves them through `worker/index.js` with COOP/COEP/CORP headers. Wrangler
 must be authenticated for the Cloudflare account before deploy. `pnpm deploy`
 is an alias for `pnpm native:web:deploy`.
 
+For this local checkout,
+`scripts/local-deploy/deploy-after-main-push.sh` can be installed as a
+`pre-push` hook:
+
+```bash
+./scripts/local-deploy/install-hook.sh
+```
+
+The hook returns immediately, then a background worker waits until the pushed
+`main` commit is visible on the remote before running `pnpm deploy`. Quick
+successive pushes replace the pending SHA before deployment starts. The worker
+deploys from a reusable sibling worktree, by default `../mclone-deploy-worktree`,
+which it resets to the pushed commit before running `pnpm deploy`; your active
+checkout can be edited immediately after pushing. Local ignored inputs/caches
+such as `reference/minecraft-1.17.1` and `node_modules` are linked into that
+deploy worktree when present.
+
+Status is available with
+`./scripts/local-deploy/deploy-after-main-push.sh --status`; the latest summary,
+completed deploy, and failed deploy are stored under
+`.git/mclone-deploy-after-main-push/`, with the full log in `deploy.log`.
+Completed records include total seconds from hook scheduling to deploy success,
+deploy command seconds, and the deploy worktree path.
+
 ## Worldgen strategy
 
 **Directly translate** 1.17.1's full worldgen pipeline from the decomp into Rust: PRNG → noise → biome source → `NoiseSampler` → `NoiseBasedChunkGenerator` → carvers (`CaveWorldCarver`, `CanyonWorldCarver`) → surface rules → features → structures. Oracle-test each layer against real MC output (see strategy doc). Preserve the vanilla status scheduling and finality gates in [`docs/worldgen-deterministic-order.md`](docs/worldgen-deterministic-order.md). 1.17 specifically because it's pre-Caves-and-Cliffs — no density functions or splines to port.
