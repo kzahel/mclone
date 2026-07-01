@@ -18,4 +18,5 @@ mclone-render.workspace = true
 mclone-render-session.workspace = true
 mclone-server.workspace = true
 mclone-ui.workspace = true
+mclone-worldgen.workspace = true
 wgpu.workspace = true

@@ -45,6 +45,7 @@ use mclone_ui::{
 };
 
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
+pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
 pub const JAVA_MIN_TRACKING_RENDER_DISTANCE: u32 = 2;
 
 pub fn square_count(radius: i32) -> Result<usize> {

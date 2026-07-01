@@ -1,11 +1,24 @@
+use std::collections::{BTreeMap, VecDeque};
+
 use mclone_core::{CHUNK_WIDTH, ChunkPos, chunk_min_block_coord};
 use mclone_render::far_lod::FarTerrainLodMesh;
+use mclone_worldgen::block::{
+    ANDESITE, BEDROCK, BLACK_TERRACOTTA, BLUE_TERRACOTTA, BROWN_TERRACOTTA, CLAY, COARSE_DIRT,
+    CYAN_TERRACOTTA, DIORITE, DIRT, GRANITE, GRASS_BLOCK, GRAVEL, GRAY_TERRACOTTA,
+    GREEN_TERRACOTTA, GeneratedBlockId, ICE, LIGHT_BLUE_TERRACOTTA, LIGHT_GRAY_TERRACOTTA,
+    LIME_TERRACOTTA, MAGENTA_TERRACOTTA, MYCELIUM, ORANGE_TERRACOTTA, PACKED_ICE, PINK_TERRACOTTA,
+    PODZOL, PURPLE_TERRACOTTA, RED_SAND, RED_SANDSTONE, RED_TERRACOTTA, SAND, SANDSTONE, SNOW,
+    SNOW_BLOCK, STONE, TERRACOTTA, WHITE_TERRACOTTA, YELLOW_TERRACOTTA, base_block_id, has_fluid,
+    is_air_like, is_lava, is_water,
+};
+use mclone_worldgen::levelgen::{GeneratedChunk, generate_overworld_surface_chunk};
 
 pub const DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS: u32 = 0;
 pub const MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 1;
 pub const DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 12;
 pub const MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 64;
 pub const DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS: u32 = 8;
+pub const DEFAULT_FAR_TERRAIN_LOD_CHUNK_BUILD_BUDGET: usize = 4;
 pub const SEA_LEVEL: f32 = 63.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -100,6 +113,11 @@ impl FarTerrainLodBuildKey {
 #[derive(Debug, Default)]
 pub struct FarTerrainLodCache {
     key: Option<FarTerrainLodBuildKey>,
+    pending_chunks: VecDeque<ChunkPos>,
+    surface_chunks: BTreeMap<ChunkPos, GeneratedChunk>,
+    vertices: Vec<f32>,
+    indices: Vec<u32>,
+    mesh_revision: u64,
     mesh: Option<FarTerrainLodMesh>,
 }
 
@@ -110,6 +128,11 @@ impl FarTerrainLodCache {
 
     pub fn clear(&mut self) {
         self.key = None;
+        self.pending_chunks.clear();
+        self.surface_chunks.clear();
+        self.vertices.clear();
+        self.indices.clear();
+        self.mesh_revision = 0;
         self.mesh = None;
     }
 
@@ -126,77 +149,200 @@ impl FarTerrainLodCache {
         }
         let key = FarTerrainLodBuildKey::new(seed, center, render_distance, config);
         if self.key != Some(key) {
-            self.mesh = Some(build_far_terrain_lod_mesh(key));
-            self.key = Some(key);
+            self.begin_build(key);
         }
+        self.advance_build(DEFAULT_FAR_TERRAIN_LOD_CHUNK_BUILD_BUDGET);
         self.mesh.as_ref()
+    }
+
+    fn begin_build(&mut self, key: FarTerrainLodBuildKey) {
+        self.key = Some(key);
+        self.pending_chunks = far_lod_chunk_positions(key);
+        self.surface_chunks.clear();
+        self.vertices.clear();
+        self.indices.clear();
+        self.mesh_revision = key.revision();
+        self.mesh = Some(FarTerrainLodMesh::empty(self.mesh_revision));
+    }
+
+    fn advance_build(&mut self, chunk_budget: usize) {
+        let Some(key) = self.key else {
+            return;
+        };
+        let mut generated_chunks = 0;
+        for _ in 0..chunk_budget {
+            let Some(pos) = self.pending_chunks.pop_front() else {
+                break;
+            };
+            append_far_terrain_lod_chunk_patch(
+                &mut self.vertices,
+                &mut self.indices,
+                &mut self.surface_chunks,
+                key.seed,
+                pos,
+                key,
+            );
+            generated_chunks += 1;
+        }
+        if generated_chunks > 0 {
+            self.mesh_revision = self.mesh_revision.wrapping_add(generated_chunks as u64);
+            self.mesh = Some(FarTerrainLodMesh::new(
+                self.vertices.clone(),
+                self.indices.clone(),
+                self.mesh_revision,
+            ));
+        }
     }
 }
 
-fn build_far_terrain_lod_mesh(key: FarTerrainLodBuildKey) -> FarTerrainLodMesh {
+fn far_lod_chunk_radii(key: FarTerrainLodBuildKey) -> (u32, u32) {
     let inner_chunk_radius = key.render_distance.saturating_add(key.start_margin_chunks);
     let outer_chunk_radius = key
         .render_distance
         .saturating_add(key.extra_radius_chunks)
         .max(inner_chunk_radius.saturating_add(1));
-    let spacing = key.sample_spacing_blocks.max(1);
-    let side_chunks = outer_chunk_radius.saturating_mul(2).saturating_add(1);
-    let side_blocks = side_chunks.saturating_mul(CHUNK_WIDTH as u32);
-    let sample_count = ceil_div(side_blocks, spacing).saturating_add(1);
-    if sample_count < 2 {
-        return FarTerrainLodMesh::empty(key.revision());
-    }
+    (inner_chunk_radius, outer_chunk_radius)
+}
 
-    let mut vertices = Vec::with_capacity(sample_count as usize * sample_count as usize * 7);
-    let min_x = chunk_min_block_coord(key.center.x - outer_chunk_radius as i32);
-    let min_z = chunk_min_block_coord(key.center.z - outer_chunk_radius as i32);
-    for z_index in 0..sample_count {
-        let z = grid_coord(min_z, z_index, spacing, side_blocks);
-        for x_index in 0..sample_count {
-            let x = grid_coord(min_x, x_index, spacing, side_blocks);
-            let y = approximate_surface_y(key.seed, x, z);
-            let color = approximate_surface_color(y);
-            vertices.extend_from_slice(&[x as f32, y.max(SEA_LEVEL), z as f32]);
-            vertices.extend_from_slice(&color);
-        }
-    }
-
-    let mut indices = Vec::new();
-    let cells_per_side = sample_count - 1;
-    for z_cell in 0..cells_per_side {
-        for x_cell in 0..cells_per_side {
-            let x0 = grid_coord(min_x, x_cell, spacing, side_blocks);
-            let x1 = grid_coord(min_x, x_cell + 1, spacing, side_blocks);
-            let z0 = grid_coord(min_z, z_cell, spacing, side_blocks);
-            let z1 = grid_coord(min_z, z_cell + 1, spacing, side_blocks);
-            let cell_center_x = x0 + (x1 - x0) / 2;
-            let cell_center_z = z0 + (z1 - z0) / 2;
-            let chunk_distance =
-                chunk_distance_from_center(key.center, cell_center_x, cell_center_z);
-            if chunk_distance <= inner_chunk_radius || chunk_distance > outer_chunk_radius {
-                continue;
+fn far_lod_chunk_positions(key: FarTerrainLodBuildKey) -> VecDeque<ChunkPos> {
+    let (inner_chunk_radius, outer_chunk_radius) = far_lod_chunk_radii(key);
+    let outer = outer_chunk_radius as i32;
+    let mut positions = Vec::new();
+    for dz in -outer..=outer {
+        for dx in -outer..=outer {
+            let distance = dx.unsigned_abs().max(dz.unsigned_abs());
+            if distance > inner_chunk_radius && distance <= outer_chunk_radius {
+                positions.push(ChunkPos::new(key.center.x + dx, key.center.z + dz));
             }
-
-            let row = z_cell * sample_count;
-            let a = row + x_cell;
-            let b = a + 1;
-            let c = a + sample_count;
-            let d = c + 1;
-            indices.extend_from_slice(&[a, c, b, b, c, d]);
         }
     }
+    positions.sort_by_key(|pos| {
+        let distance = (pos.x - key.center.x)
+            .unsigned_abs()
+            .max((pos.z - key.center.z).unsigned_abs());
+        (distance, pos.z, pos.x)
+    });
+    positions.into()
+}
 
+#[cfg(test)]
+fn build_far_terrain_lod_mesh(key: FarTerrainLodBuildKey) -> FarTerrainLodMesh {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let mut surface_chunks = BTreeMap::new();
+    for pos in far_lod_chunk_positions(key) {
+        append_far_terrain_lod_chunk_patch(
+            &mut vertices,
+            &mut indices,
+            &mut surface_chunks,
+            key.seed,
+            pos,
+            key,
+        );
+    }
     FarTerrainLodMesh::new(vertices, indices, key.revision())
 }
 
-fn ceil_div(value: u32, divisor: u32) -> u32 {
-    value.saturating_add(divisor.saturating_sub(1)) / divisor.max(1)
+fn append_far_terrain_lod_chunk_patch(
+    vertices: &mut Vec<f32>,
+    indices: &mut Vec<u32>,
+    surface_chunks: &mut BTreeMap<ChunkPos, GeneratedChunk>,
+    seed: i64,
+    pos: ChunkPos,
+    key: FarTerrainLodBuildKey,
+) {
+    let spacing = key.sample_spacing_blocks.max(1);
+    let offsets = chunk_sample_offsets(spacing);
+    debug_assert!(offsets.len() >= 2);
+
+    let mut grid = Vec::with_capacity(offsets.len() * offsets.len());
+    let min_x = chunk_min_block_coord(pos.x);
+    let min_z = chunk_min_block_coord(pos.z);
+    for z_offset in &offsets {
+        for x_offset in &offsets {
+            let world_x = min_x + *x_offset;
+            let world_z = min_z + *z_offset;
+            if let Some(sample) = surface_sample_world(surface_chunks, seed, world_x, world_z) {
+                let index = u32::try_from(vertices.len() / 7)
+                    .expect("far terrain LOD vertex count fits u32");
+                vertices.extend_from_slice(&[world_x as f32, sample.y, world_z as f32]);
+                vertices.extend_from_slice(&sample.color);
+                grid.push(Some(index));
+            } else {
+                grid.push(None);
+            }
+        }
+    }
+
+    let side = offsets.len();
+    for z_cell in 0..side - 1 {
+        for x_cell in 0..side - 1 {
+            let a = grid[z_cell * side + x_cell];
+            let b = grid[z_cell * side + x_cell + 1];
+            let c = grid[(z_cell + 1) * side + x_cell];
+            let d = grid[(z_cell + 1) * side + x_cell + 1];
+            if let (Some(a), Some(b), Some(c), Some(d)) = (a, b, c, d) {
+                indices.extend_from_slice(&[a, c, b, b, c, d]);
+            }
+        }
+    }
 }
 
-fn grid_coord(min: i32, index: u32, spacing: u32, side_blocks: u32) -> i32 {
-    min + index.saturating_mul(spacing).min(side_blocks) as i32
+fn chunk_sample_offsets(spacing: u32) -> Vec<i32> {
+    let spacing = spacing.max(1).min(CHUNK_WIDTH as u32);
+    let mut offsets = Vec::new();
+    let mut offset = 0;
+    while offset < CHUNK_WIDTH as u32 {
+        offsets.push(offset as i32);
+        offset = offset.saturating_add(spacing);
+    }
+    if offsets.last().copied() != Some(CHUNK_WIDTH) {
+        offsets.push(CHUNK_WIDTH);
+    }
+    offsets
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FarTerrainSurfaceSample {
+    y: f32,
+    color: [f32; 4],
+}
+
+fn surface_sample(
+    chunk: &GeneratedChunk,
+    local_x: i32,
+    local_z: i32,
+) -> Option<FarTerrainSurfaceSample> {
+    for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
+        let block = chunk.block_at_y(local_x, y, local_z);
+        if is_air_like(block.raw()) {
+            continue;
+        }
+        let surface_y = y + 1;
+        return Some(FarTerrainSurfaceSample {
+            y: surface_y as f32,
+            color: surface_color(block, surface_y),
+        });
+    }
+    None
+}
+
+fn surface_sample_world(
+    chunks: &mut BTreeMap<ChunkPos, GeneratedChunk>,
+    seed: i64,
+    world_x: i32,
+    world_z: i32,
+) -> Option<FarTerrainSurfaceSample> {
+    let pos = ChunkPos::from_block_coords(world_x, world_z);
+    let chunk = chunks
+        .entry(pos)
+        .or_insert_with(|| generate_overworld_surface_chunk(seed, pos.x, pos.z));
+    let local_x = world_x - chunk_min_block_coord(pos.x);
+    let local_z = world_z - chunk_min_block_coord(pos.z);
+    surface_sample(chunk, local_x, local_z)
+}
+
+#[cfg(test)]
 fn chunk_distance_from_center(center: ChunkPos, world_x: i32, world_z: i32) -> u32 {
     let chunk = ChunkPos::from_block_coords(world_x, world_z);
     (chunk.x - center.x)
@@ -204,38 +350,63 @@ fn chunk_distance_from_center(center: ChunkPos, world_x: i32, world_z: i32) -> u
         .max((chunk.z - center.z).unsigned_abs())
 }
 
-fn approximate_surface_y(seed: i64, x: i32, z: i32) -> f32 {
-    let seed_phase = (seed as f32 * 0.000_031).sin() * 400.0;
-    let xf = x as f32 + seed_phase;
-    let zf = z as f32 - seed_phase * 0.37;
-    let continent = (xf * 0.0075).sin() * 18.0 + (zf * 0.0065).cos() * 14.0;
-    let ridge = ((xf + zf) * 0.018).sin().abs() * 10.0;
-    let local = seeded_noise(seed, x.div_euclid(24), z.div_euclid(24)) * 5.0;
-    (SEA_LEVEL + continent + ridge + local).clamp(44.0, 124.0)
-}
-
-fn approximate_surface_color(y: f32) -> [f32; 4] {
-    if y <= SEA_LEVEL + 0.5 {
-        [0.16, 0.30, 0.62, 1.0]
-    } else if y < SEA_LEVEL + 4.0 {
-        [0.70, 0.64, 0.42, 1.0]
-    } else if y > 102.0 {
-        [0.84, 0.86, 0.84, 1.0]
-    } else if y > 86.0 {
-        [0.44, 0.44, 0.40, 1.0]
-    } else {
-        [0.30, 0.52, 0.24, 1.0]
+fn surface_color(block: GeneratedBlockId, surface_y: i32) -> [f32; 4] {
+    let block_id = base_block_id(block.raw());
+    if is_water(block_id) {
+        return [0.14, 0.28, 0.58, 1.0];
     }
-}
+    if is_lava(block_id) {
+        return [0.88, 0.30, 0.08, 1.0];
+    }
+    if has_fluid(block_id) {
+        return [0.16, 0.30, 0.62, 1.0];
+    }
 
-fn seeded_noise(seed: i64, x: i32, z: i32) -> f32 {
-    let mut hash = seed as u64;
-    hash ^= (x as u32 as u64).wrapping_mul(0x9e37_79b1);
-    hash = mix_hash(hash);
-    hash ^= (z as u32 as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    hash = mix_hash(hash);
-    let normalized = ((hash >> 40) as u32) as f32 / 16_777_215.0;
-    normalized * 2.0 - 1.0
+    match block_id {
+        GRASS_BLOCK => [0.30, 0.50, 0.22, 1.0],
+        DIRT => [0.36, 0.25, 0.15, 1.0],
+        COARSE_DIRT | PODZOL => [0.28, 0.20, 0.13, 1.0],
+        MYCELIUM => [0.42, 0.36, 0.42, 1.0],
+        SAND | SANDSTONE => [0.72, 0.66, 0.42, 1.0],
+        RED_SAND | RED_SANDSTONE => [0.64, 0.32, 0.16, 1.0],
+        GRAVEL => [0.42, 0.42, 0.40, 1.0],
+        STONE | BEDROCK | ANDESITE | DIORITE | GRANITE => {
+            if surface_y > 104 {
+                [0.58, 0.58, 0.54, 1.0]
+            } else {
+                [0.44, 0.44, 0.40, 1.0]
+            }
+        }
+        SNOW | SNOW_BLOCK => [0.88, 0.90, 0.86, 1.0],
+        ICE | PACKED_ICE => [0.58, 0.74, 0.86, 1.0],
+        CLAY => [0.48, 0.50, 0.54, 1.0],
+        TERRACOTTA => [0.55, 0.30, 0.20, 1.0],
+        WHITE_TERRACOTTA => [0.72, 0.62, 0.52, 1.0],
+        ORANGE_TERRACOTTA => [0.64, 0.32, 0.16, 1.0],
+        MAGENTA_TERRACOTTA => [0.58, 0.32, 0.44, 1.0],
+        LIGHT_BLUE_TERRACOTTA => [0.44, 0.46, 0.58, 1.0],
+        YELLOW_TERRACOTTA => [0.70, 0.54, 0.24, 1.0],
+        LIME_TERRACOTTA => [0.48, 0.54, 0.28, 1.0],
+        PINK_TERRACOTTA => [0.62, 0.38, 0.36, 1.0],
+        GRAY_TERRACOTTA => [0.36, 0.30, 0.28, 1.0],
+        LIGHT_GRAY_TERRACOTTA => [0.52, 0.46, 0.42, 1.0],
+        CYAN_TERRACOTTA => [0.34, 0.38, 0.38, 1.0],
+        PURPLE_TERRACOTTA => [0.46, 0.30, 0.42, 1.0],
+        BLUE_TERRACOTTA => [0.32, 0.30, 0.44, 1.0],
+        BROWN_TERRACOTTA => [0.38, 0.24, 0.16, 1.0],
+        GREEN_TERRACOTTA => [0.34, 0.36, 0.20, 1.0],
+        RED_TERRACOTTA => [0.56, 0.24, 0.18, 1.0],
+        BLACK_TERRACOTTA => [0.18, 0.15, 0.14, 1.0],
+        _ => {
+            if surface_y <= SEA_LEVEL as i32 + 1 {
+                [0.32, 0.44, 0.24, 1.0]
+            } else if surface_y > 102 {
+                [0.58, 0.58, 0.54, 1.0]
+            } else {
+                [0.30, 0.50, 0.22, 1.0]
+            }
+        }
+    }
 }
 
 fn mix_hash(mut value: u64) -> u64 {
@@ -277,12 +448,8 @@ mod tests {
 
     #[test]
     fn far_terrain_lod_mesh_has_surface_ring_geometry() {
-        let key = FarTerrainLodBuildKey::new(
-            12345,
-            ChunkPos::new(0, 0),
-            5,
-            FarTerrainLodConfig::enabled(),
-        );
+        let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
+        let key = FarTerrainLodBuildKey::new(12345, ChunkPos::new(0, 0), 0, config);
 
         let mesh = build_far_terrain_lod_mesh(key);
 
@@ -321,27 +488,56 @@ mod tests {
     }
 
     #[test]
-    fn far_terrain_lod_cache_reuses_same_mesh_for_same_key() {
+    fn far_terrain_lod_mesh_uses_real_surface_chunk_height() {
+        let chunk = generate_overworld_surface_chunk(12345, 1, 0);
+        let sample = surface_sample(&chunk, 0, 0).expect("surface chunk has terrain");
+        let mut expected = None;
+        for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
+            let block = chunk.block_at_y(0, y, 0);
+            if !is_air_like(block.raw()) {
+                expected = Some(y + 1);
+                break;
+            }
+        }
+
+        assert_eq!(
+            sample.y,
+            expected.expect("manual scan found terrain") as f32
+        );
+    }
+
+    #[test]
+    fn far_terrain_lod_world_boundary_sample_uses_owning_chunk() {
+        let mut chunks = BTreeMap::new();
+        let world_x = chunk_min_block_coord(1);
+
+        let _sample =
+            surface_sample_world(&mut chunks, 12345, world_x, 0).expect("surface sample exists");
+
+        assert!(chunks.contains_key(&ChunkPos::new(1, 0)));
+        assert!(!chunks.contains_key(&ChunkPos::new(0, 0)));
+    }
+
+    #[test]
+    fn far_terrain_lod_cache_advances_incrementally_then_stabilizes() {
         let mut cache = FarTerrainLodCache::new();
+        let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
         let first = cache
-            .mesh_for_camera(
-                FarTerrainLodConfig::enabled(),
-                12345,
-                ChunkPos::new(0, 0),
-                5,
-            )
+            .mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0)
             .expect("enabled LOD returns mesh")
             .revision();
+        assert_eq!(cache.pending_chunks.len(), 4);
         let second = cache
-            .mesh_for_camera(
-                FarTerrainLodConfig::enabled(),
-                12345,
-                ChunkPos::new(0, 0),
-                5,
-            )
+            .mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0)
+            .expect("enabled LOD returns mesh")
+            .revision();
+        assert!(second > first);
+        assert!(cache.pending_chunks.is_empty());
+        let third = cache
+            .mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0)
             .expect("enabled LOD returns mesh")
             .revision();
 
-        assert_eq!(first, second);
+        assert_eq!(second, third);
     }
 }

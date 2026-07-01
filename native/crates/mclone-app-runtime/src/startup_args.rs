@@ -6,7 +6,7 @@ use mclone_render_session::{
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
 };
 
-use crate::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS;
+use crate::DEFAULT_RENDER_SECTION_COMPILE_WORKERS;
 
 pub const ARG_SEED: &str = "--seed";
 pub const ARG_CHUNK_X: &str = "--chunk-x";

@@ -1384,6 +1384,7 @@ dependencies = [
  "mclone-render-session",
  "mclone-server",
  "mclone-ui",
+ "mclone-worldgen",
  "wgpu",
 ]
 

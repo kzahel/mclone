@@ -29,8 +29,9 @@ final terrain algorithm:
 
 - Add an explicit `--far-lod true|false` switch, defaulting to `false`.
 - Generate one in-memory coarse surface ring outside the normal render distance.
-- Use a deterministic placeholder height/color model keyed by seed and world
-  position.
+- Start with a deterministic placeholder height/color model keyed by seed and
+  world position, then replace it with real surface chunk sampling once the
+  renderer path is proven.
 - Leave a square hole for real chunk geometry so near chunks remain authoritative.
 - Render the LOD shell before normal terrain, with normal chunks depth-overwriting
   it where they overlap.
@@ -52,13 +53,13 @@ final terrain algorithm:
 
 ## Slice A: Opt-In Prototype
 
-Status: landed first prototype.
+Status: Slice A and B landed.
 
 Implementation targets:
 
 - `mclone-render`: vertex-colored far surface mesh renderer.
-- `mclone-app-runtime`: shared config, deterministic surface mesh builder, and
-  cache.
+- `mclone-app-runtime`: shared config, real surface mesh builder, and
+  incrementally filled session-local cache.
 - `mclone-native-client`: CLI flag and desktop/headless wiring for validation.
 
 Validation targets:
@@ -73,12 +74,15 @@ Validation targets:
   `/tmp/mclone-far-lod-visible.png`
 - Inspected: the visible capture shows the coarse far surface shell and the
   deliberate empty near hole.
+- Passed: `cargo test -p mclone-app-runtime --manifest-path native/Cargo.toml
+  far_terrain_lod`
 
 Landed scope:
 
 - `mclone-render` now has a vertex-colored far surface LOD renderer.
-- `mclone-app-runtime` now has the opt-in config, deterministic placeholder
-  surface mesh builder, and session-local cache.
+- `mclone-app-runtime` now has the opt-in config, a terrain-surface mesh
+  builder backed by `mclone-worldgen::levelgen::generate_overworld_surface_chunk`,
+  and a session-local cache that builds a few far chunks per frame.
 - `mclone-native-client` now parses `--far-lod true|false`, keeps it disabled by
   default, and feeds the mesh through the shared flat render path.
 - The shared Options UI now exposes a `Far LOD` checkbox for toggling the
@@ -86,9 +90,10 @@ Landed scope:
   rings rendered beyond the normal render distance.
 - The current pass is single-view flat only; XR/multiview remains intentionally
   out of scope until this prototype has measured value.
-- The current height/color source is still a deterministic placeholder. It uses
-  world X/Z coordinates, but it does not yet sample the real overworld terrain,
-  so it will not line up with mountains, shorelines, trees, or terrain colors.
+- The current height source samples real 1.17.1-style overworld surface chunks,
+  but intentionally skips feature decoration, structures, persistence, caves,
+  interiors, and full material fidelity. Water surfaces are represented; terrain
+  under water is not separately drawn.
 
 Current hard-coded prototype distances:
 
@@ -96,6 +101,9 @@ Current hard-coded prototype distances:
 - LOD ends at `render_distance + far_lod_range` chunks.
 - The default `far_lod_range` is 12 chunks, adjustable in the Options UI.
 - Surface samples are spaced every 8 blocks.
+- Far terrain chunks are generated incrementally with a small per-frame budget,
+  so the LOD mesh fills in over multiple frames instead of blocking startup or a
+  camera move on a full-ring rebuild.
 
 This intentionally exposes a single range control rather than separate start/end
 sliders. The start boundary should remain tied to the normal render distance
@@ -105,14 +113,15 @@ unless pop-in testing proves we need a hidden overlap/blend margin.
 
 ### B. Replace Placeholder Surface Source
 
-Use a budgeted, shortcut worldgen sampler that waits for nearby real chunks and
-skips nonessential features. Keep underwater/underground omission explicit. This
-is the next implementation slice.
+Status: landed first real-surface version. Remaining work is to avoid rebuilding
+from scratch on every center/range key change, improve color/material selection,
+and decide whether feature whitelists such as trees are worth adding.
 
 ### C. Runtime Scheduling And Diagnostics
 
-Expose mesh vertex/index counts, update cadence, and build time in diagnostics.
-Add frame-budgeted rebuilds instead of one synchronous mesh build per cache miss.
+Expose mesh vertex/index counts, pending chunk count, update cadence, and build
+time in diagnostics. The cache now has a per-frame generation budget, but this
+still needs user-facing/profiling visibility.
 
 ### D. XR And Quest Measurement
 

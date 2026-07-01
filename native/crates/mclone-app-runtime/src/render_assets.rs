@@ -24,7 +24,7 @@ pub const DEFAULT_NAMED_PACK_FILE: &str = "mclone-game-1.17.1.pbp";
 pub const DEFAULT_OVERLAY_PACK_FILE: &str = "mclone-default-overlay.pbp";
 pub const DEFAULT_ANDROID_APP_ID: &str = "com.kzahel.mclone";
 pub const DEFAULT_FIRST_PARTY_ASSET_DIR: &str = "assets";
-pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
+pub use crate::DEFAULT_RENDER_SECTION_COMPILE_WORKERS;
 
 #[derive(Clone, Debug)]
 pub struct SceneTexturedSections {

@@ -29,8 +29,7 @@ impl SingleViewHostOptions {
             center,
             render_distance,
             chunk_tracking_radius: chunk_tracking_radius_for_render_distance(render_distance),
-            render_compile_worker_count:
-                crate::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
+            render_compile_worker_count: crate::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
         }
     }
 
