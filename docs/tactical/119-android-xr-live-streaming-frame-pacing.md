@@ -24,6 +24,18 @@ This file is the durable checklist for:
 - what has already been tried on Quest,
 - what remains worth trying next.
 
+Current priority read as of the RD7 settled-orbit runs:
+
+1. Use RD7 settled orbit as the primary product-style movement lane; use RD10 as
+   the stress lane.
+2. Fix or disprove prepared-record dirty churn first, with enough instrumentation
+   to explain runtime-sync and shared-record spikes.
+3. Then budget completed-section acceptance and re-test upload budgets with the
+   current frame-overlap path.
+4. Defer greedy meshing, draw arenas, and other geometry-policy changes until
+   counters show the remaining tail is dominated by geometry, draw submission,
+   or upload bytes rather than ready-set/record maintenance.
+
 ## Pipeline Model
 
 Think of the live path as five queues feeding the headset frame:
@@ -249,7 +261,7 @@ Add Android XR perf markers for:
 - prepared-record rebuild,
 - snapshot clone/staging.
 
-Success condition: a live RD7 or RD10 flight run can explain each
+Success condition: a live RD7 settled-orbit or RD10 stress run can explain each
 `runtime_sync_ms` or `shared_records_ms` spike with a named sub-phase.
 
 ### B. Dirty Prepared Records Only On Real Ready-Set Change
@@ -272,6 +284,8 @@ Validation:
 
 - `cargo test --manifest-path native/Cargo.toml`
 - desktop timedemo/smoke lane if render records changed materially,
+- Quest settled-orbit RD7 metrics and frame-overlap as the primary product-lane
+  comparison,
 - Quest stationary RD7 metrics and frame-overlap,
 - Quest flight RD7 metrics and frame-overlap,
 - Quest stationary RD10 metrics and frame-overlap as the stress comparison,
@@ -308,6 +322,8 @@ frame-overlap path.
 
 Suggested lanes:
 
+- `native:android-xr:perf:orbit:rd7:metrics`,
+- `native:android-xr:perf:orbit:rd7:frame-overlap`,
 - `native:android-xr:perf:flight:rd7:metrics`,
 - `native:android-xr:perf:flight:rd7:frame-overlap`,
 - `native:android-xr:perf:stationary:rd7:metrics`,
@@ -392,6 +408,10 @@ spike is actually prepared-record rebuild or CPU apply work.
   MTP but left visible pacing problems and queued uploads.
 - `117` landed `--xr-frame-overlap`. It is a useful opt-in and a frozen RD10
   win, but live RD10 flight remains below the target.
+- RD7 settled-orbit landed as the preferred product-style movement lane. It
+  keeps a populated scene visible while moving around nearby chunks; frame
+  overlap cuts missed 72 Hz slots from about `12.7%` to `2.4%`, but p95 remains
+  slightly over budget.
 - Solid render-layer split landed for vanilla-shaped render-layer correctness,
   but it was not a measured RD10 performance win.
 - Full-frame multiview was correctness-valid but performance-flat or tail-worse
@@ -410,14 +430,16 @@ spike is actually prepared-record rebuild or CPU apply work.
 
 ## Next Recommended Slice
 
-Do B first, with enough of A to prove or disprove the prepared-record hypothesis:
+Do B first, with enough of A to prove or disprove the prepared-record
+hypothesis. The primary A/B is RD7 settled orbit, default and frame-overlap:
 
 1. Add a cheap ready-set change marker/counter.
 2. Avoid setting `records_dirty` when the ready set is unchanged.
-3. Record whether `shared_records_ms` spikes disappear or shrink in live RD7 and
-   RD10.
-4. Then re-run upload-budget experiments, because their old results were
+3. Record whether `shared_records_ms` and `runtime_sync_ms` spikes disappear or
+   shrink in RD7 settled orbit.
+4. Re-run RD10 as the stress lane only after the RD7 product lane moves.
+5. Then re-run upload-budget experiments, because their old results were
    confounded by record-maintenance cost.
 
 This is lower risk than changing meshing or compile topology, and it directly
-targets a measured live-flight spike source.
+targets a measured live movement spike source.

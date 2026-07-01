@@ -6,7 +6,10 @@ in [`096`](096-android-xr-quest-performance.md),
 [`099`](099-android-xr-rd10-render-cost-attribution.md),
 [`106`](106-android-xr-static-render-cpu-reduction.md), and
 [`107`](107-xr-stereo-uniform-ownership-and-multiview.md) (all now closed as
-references). We will step through the slices below in priority order.
+references). This remains the RD10 GPU-floor / geometry / quality-lever parent.
+Live streaming burst priority now lives in
+[`119`](119-android-xr-live-streaming-frame-pacing.md); do not let this RD10
+ordering override the current RD7 settled-orbit pacing priority there.
 
 ## Why this doc exists (the pivot)
 
@@ -61,6 +64,14 @@ Initial probes corrected the measurement path and split the cheap GPU levers:
   improved app work from `8.081ms` to `6.619ms` avg but still submitted only
   about `69 FPS`. Keep it opt-in pending comfort signoff and RD/scale policy
   work.
+- **RD7 settled orbit is now the product-style live lane.** Commit `abe9d6d`
+  added a lane that waits for a populated RD7 scene, then orbits nearby chunks.
+  On Quest 3, frame overlap improved this lane from `62.88 FPS` and about
+  `12.7%` missed 72 Hz slots to `70.25 FPS` and about `2.4%` missed slots, while
+  keeping `157` sections / `1.252M` indices visible. The remaining tails point
+  back to live runtime/prepared-record bursts, so those are tracked in
+  [`119`](119-android-xr-live-streaming-frame-pacing.md) before larger geometry
+  policy changes like greedy meshing.
 
 ## Baseline to beat
 
@@ -110,6 +121,12 @@ RD5 already hold solid 72 Hz; RD10 is the stress lane.
   reference-porting policy.
 
 ## Priority order
+
+This table is the RD10 GPU-floor sequence. For the immediate live movement
+pacing work, follow [`119`](119-android-xr-live-streaming-frame-pacing.md):
+prepared-record dirty diff plus burst instrumentation first, then section
+acceptance/upload budgeting, then geometry/draw reductions if counters justify
+them.
 
 | # | Slice | Idea | Cost | Risk |
 |---|---|---|---|---|
@@ -320,11 +337,13 @@ Quality risk is real in VR — treat as last resort, behind a toggle.
 
 ## Slice R — Ship-distance decision and dynamic render distance
 
-**Idea.** RD8 likely holds solid 72 Hz with what already landed, but RD7/RD8 are
-not yet benchmarked. Add frozen `rd7`/`rd8` lanes to find the real solid-72 Hz
-distance, then ship a **dynamic render distance** (e.g. default ~RD8, RD10 opt-in
-"experimental") plus dynamic foveation/resolution that ramps with measured GPU
-load.
+**Idea.** RD7 is now benchmarked and should stay the current comfort/product
+lane, but scale-1.0 RD7 is still not a perfect 72 Hz lock under settled movement:
+the settled-orbit overlap run missed about `2.4%` of 72 Hz slots and had p95 app
+work just over budget. Add any missing frozen/live `rd8` lanes only when making
+the product ship-distance decision, then ship a **dynamic render distance** plus
+dynamic foveation/resolution that ramps with measured GPU and app-work load. Keep
+RD10 as the fixed stress lane.
 
 **Tips.** This is the pragmatic shipping answer regardless of how far L-Q get,
 and it can proceed in parallel with them. The 099 open question "what render
