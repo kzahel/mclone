@@ -9,6 +9,7 @@ pub mod actor_assets;
 pub mod chunk;
 pub mod color_profile;
 pub mod entity;
+pub mod far_lod;
 pub mod fog;
 pub mod gui;
 pub mod light_texture;

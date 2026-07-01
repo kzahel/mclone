@@ -1220,6 +1220,7 @@ fn render_renderer_rebuild_smoke_frame(
         state.render_options,
         None,
         &[],
+        None,
         gui_state,
         |_| ui_draw,
         &mut state.render_stats,

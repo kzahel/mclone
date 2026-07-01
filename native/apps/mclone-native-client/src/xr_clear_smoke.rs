@@ -796,6 +796,7 @@ fn desktop_scene_options_for_xr_request(
         freeze_time: scene.freeze_time,
         first_person_player_visible: false,
         lighting_enabled: scene.lighting_enabled,
+        ..SceneOptions::default()
     }
 }
 

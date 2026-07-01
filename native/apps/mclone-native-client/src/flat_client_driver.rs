@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use anyhow::Context;
+use mclone_app_runtime::far_lod::FarTerrainLodCache;
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats,
@@ -115,6 +116,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) crosshair_visible: bool,
     pub(crate) player_model: GamePlayerModel,
     pub(crate) render_resources: Option<FlatRenderResources>,
+    pub(crate) far_lod_cache: FarTerrainLodCache,
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
     underwater_effect: UnderwaterEffectState,
@@ -283,6 +285,7 @@ impl FlatClientDriver {
             crosshair_visible: true,
             player_model: GamePlayerModel::default(),
             render_resources: None,
+            far_lod_cache: FarTerrainLodCache::new(),
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
             underwater_effect: UnderwaterEffectState::new(),
@@ -1702,6 +1705,13 @@ impl FlatClientDriver {
             &self.camera,
             EngineDebugVisualOptions::new(self.player_collision_box_visible),
         );
+        let render_distance = self.current_render_distance(fallback_render_distance);
+        let far_lod_mesh = self.far_lod_cache.mesh_for_camera(
+            self.scene.far_lod,
+            self.scene.seed,
+            frame_inputs.camera_view.snapshot.chunk_pos,
+            render_distance,
+        );
         let Some(render_resources) = &mut self.render_resources else {
             anyhow::bail!("flat client render resources are not initialized");
         };
@@ -1720,6 +1730,7 @@ impl FlatClientDriver {
             frame_inputs.render_options,
             frame_inputs.selection_outline.as_ref(),
             &world_debug_lines,
+            far_lod_mesh,
             gui_state,
             build_gui_draw,
             &mut render_stats,
@@ -1809,6 +1820,7 @@ impl FlatClientDriver {
         self.render_stats = RenderStreamStats::default();
         self.frame_timing = FrameTimingStats::default();
         self.underwater_effect.reset();
+        self.far_lod_cache.clear();
     }
 }
 

@@ -15,6 +15,7 @@ This document exists to answer a different question than [`strategy.md`](./strat
 - `authoritative-host-scheduling.md`: how player/session authority stays responsive while chunk jobs run
 - `entity-architecture.md`: required entity, mob, spawning, persistence, tracking, and presentation boundaries for native runtime work
 - `multiplayer-hosting.md`: local, dedicated, future P2P, transport, asset-hosting, and server-config shape
+- `lod-architecture.md`: non-authoritative far-terrain LOD, Distant Horizons reference points, and the minimal surface-only first slice
 - `minecraft-client-replica-research.md`: vanilla integrated-server, client-world, lighting, fluid, entity-interpolation, and networking source review
 - `gui.md`: WebGPU-only, vanilla-shaped 2D GUI architecture for menus, loading status, HUD, options, debug settings, and touch UI
 - `player-movement-netcode.md`: paused high-rate player movement and netcode constraint notes

@@ -10,6 +10,7 @@ use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::entity::{
     ActorDrawResources, ActorFigureSet, ActorInstance, ActorRenderStats, ActorTextureAtlas,
 };
+use mclone_render::far_lod::{FarTerrainLodMesh, FarTerrainLodRenderer};
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiRenderer};
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
@@ -142,6 +143,7 @@ pub struct FlatRenderResources {
     scaled_color: Option<FlatScaledColorTarget>,
     scale_presenter: Option<FlatScalePresenter>,
     sky: SkyRenderer,
+    far_lod: FarTerrainLodRenderer,
     draw: TexturedSectionDrawResources,
     actors: ActorDrawResources,
     screen_effects: ScreenEffectsRenderer,
@@ -194,6 +196,7 @@ impl FlatRenderResources {
         )
         .context("failed to initialize chunk draw resources")?;
         let sky = SkyRenderer::new_with_config(device, render_config);
+        let far_lod = FarTerrainLodRenderer::new(device, render_config.color_format);
         let actors = ActorDrawResources::new(
             device,
             queue,
@@ -216,6 +219,7 @@ impl FlatRenderResources {
             scaled_color,
             scale_presenter,
             sky,
+            far_lod,
             draw,
             actors,
             screen_effects,
@@ -313,6 +317,7 @@ impl FlatRenderResources {
         render_options: TexturedSectionRenderOptions,
         selection_outline: Option<&SelectionOutline>,
         world_debug_lines: &[WorldGuiLine],
+        far_lod_mesh: Option<&FarTerrainLodMesh>,
         gui: FullFrameGui,
         build_gui_draw: BuildGuiDraw,
         render_stats: &mut RenderStreamStats,
@@ -335,7 +340,8 @@ impl FlatRenderResources {
             render_view_with_underwater_effect(render_view, underwater_overlay);
         let render_frame = RenderFrameContext::new(device, queue, encoder, render_target);
         let world_pass_gui = FullFrameGui::new(false, gui.covers_world, gui.scale);
-        let summary = render_full_frame_for_view(
+        let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+        let summary = render_full_frame_for_view_inner(
             render_frame,
             &self.depth,
             &self.sky,
@@ -352,6 +358,12 @@ impl FlatRenderResources {
             render_options,
             world_pass_gui,
             |_| GuiDrawList::new(),
+            SINGLE_VIEW_SLOT,
+            Some(&mut self.far_lod),
+            far_lod_mesh,
+            None,
+            None,
+            None,
             render_stats,
         )?;
         if !gui.covers_world {
@@ -852,6 +864,8 @@ where
         None,
         None,
         None,
+        None,
+        None,
         render_stats,
     )
 }
@@ -945,6 +959,8 @@ where
         gui,
         build_gui_draw,
         view_slot,
+        None,
+        None,
         None,
         None,
         Some(&mut timing),
@@ -1044,6 +1060,8 @@ where
         gui,
         build_gui_draw,
         view_slot,
+        None,
+        None,
         Some(prepared_records),
         None,
         None,
@@ -1095,6 +1113,8 @@ where
         gui,
         build_gui_draw,
         view_slot,
+        None,
+        None,
         None,
         Some(prepared_draw),
         None,
@@ -1194,6 +1214,8 @@ where
         gui,
         build_gui_draw,
         view_slot,
+        None,
+        None,
         Some(prepared_records),
         None,
         Some(&mut timing),
@@ -1248,6 +1270,8 @@ where
         build_gui_draw,
         view_slot,
         None,
+        None,
+        None,
         Some(prepared_draw),
         Some(&mut timing),
         render_stats,
@@ -1274,6 +1298,8 @@ fn render_full_frame_for_view_inner<BuildGuiDraw>(
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
     view_slot: PerViewSlot,
+    far_lod: Option<&mut FarTerrainLodRenderer>,
+    far_lod_mesh: Option<&FarTerrainLodMesh>,
     prepared_records: Option<&PreparedTexturedSectionRecords>,
     prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
     mut timing: Option<&mut FullFrameRenderTiming>,
@@ -1307,12 +1333,30 @@ where
             );
             sky_clear_color
         };
+        let far_lod_depth_ready =
+            far_lod.is_some() && far_lod_mesh.is_some_and(|mesh| !mesh.is_empty());
+        if let Some(far_lod) = far_lod {
+            let _ = far_lod.render_in_slot(
+                frame.device,
+                frame.queue,
+                frame.encoder,
+                frame.target,
+                depth,
+                render_view,
+                far_lod_mesh,
+                view_slot,
+            );
+        }
         // The sky/clear pass prepared the background; the chunk pass loads it.
-        let render_target = ChunkRenderTarget::from_frame_target(
+        // When far LOD rendered first, it also prepared depth for real chunks.
+        let mut render_target = ChunkRenderTarget::from_frame_target(
             frame.target.with_depth(&depth.view),
             background_clear_color,
         )?
         .with_loaded_color();
+        if far_lod_depth_ready {
+            render_target = render_target.with_loaded_depth();
+        }
         let split_translucent_terrain = !actor_instances.is_empty();
         let terrain_phase = if split_translucent_terrain {
             TexturedSectionRenderPhase::Opaque

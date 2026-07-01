@@ -1039,6 +1039,7 @@ mod tests {
                     first_person_player_visible: false,
                     debug_passive_showcase: true,
                     lighting_enabled: true,
+                    far_lod: Default::default(),
                 },
                 TexturedSectionRenderOptions::default(),
             )
@@ -1061,6 +1062,29 @@ mod tests {
                 "/tmp/mclone-frame.png",
                 SceneOptions {
                     render_distance: 32,
+                    ..SceneOptions::default()
+                },
+                TexturedSectionRenderOptions::default(),
+            )
+        );
+    }
+
+    #[test]
+    fn cli_parses_far_lod_opt_in() {
+        let cli = Cli::parse([
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
+            "--far-lod".to_owned(),
+            "true".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            screenshot_cli(
+                "/tmp/mclone-frame.png",
+                SceneOptions {
+                    far_lod: mclone_app_runtime::far_lod::FarTerrainLodConfig::enabled(),
                     ..SceneOptions::default()
                 },
                 TexturedSectionRenderOptions::default(),

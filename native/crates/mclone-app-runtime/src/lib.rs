@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod far_lod;
 pub mod frame_render;
 pub mod host_mode;
 #[cfg(not(target_arch = "wasm32"))]
