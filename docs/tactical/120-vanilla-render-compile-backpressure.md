@@ -51,7 +51,8 @@ still coarser than Java:
   Slice C added the first native runtime version, but it does not yet use a
   cross-frame cost estimate before the first request.
 - Upload/result acceptance and prepared-record maintenance still have separate
-  burst paths tracked in `119`.
+  burst paths tracked in `119`. Slice D added an opt-in completed-result
+  acceptance budget, but it is not a default policy yet.
 
 ## Slice Plan
 
@@ -175,14 +176,57 @@ Interpretation:
   compile requests.
 - Do not change the default worker count yet.
 
-### D. Upload Publication Baseline
+### D. Completed Result Acceptance / Upload Publication
 
-Status: planned after B/C.
+Status: first opt-in result-acceptance pass landed and measured.
 
 Re-evaluate the upload path against Java's `uploadAllPendingUploads()` baseline.
 Do not assume upload throttling is correct. First measure the vanilla-shaped
 compile admission path; only keep upload/accept throttles when they beat the
 baseline in headset and desktop lanes.
+
+First pass result:
+
+- `EngineRenderSession` now owns a FIFO queue of completed compiler results.
+- The default remains unbounded, preserving the previous baseline and the
+  Java-shaped "drain completed work" behavior unless a caller opts in.
+- `SingleViewRuntime` and `NativeSingleViewSessionRuntime` expose
+  `completed_result_accept_budget`.
+- Android XR exposes the probe as
+  `--xr-render-completed-result-accept-budget N` and
+  `MCLONE_ANDROID_XR_RENDER_COMPLETED_RESULT_ACCEPT_BUDGET`.
+- Perf markers now distinguish completed-result acceptance from section upload:
+  `accepted_results`, `queued_completed_results`, completed sections, uploaded
+  sections, and queued upload sections.
+- If completed results remain queued after the frame's result-acceptance budget,
+  the shared sync loop does not submit more compile work in that call. This is
+  intentional backpressure: the renderer should not create more completed
+  results while the main/render side is already behind accepting them.
+
+Measurement after Slice D, Quest Android XR per-eye settled orbit, render
+distance 7, 2 render compile workers, 30-second sample:
+
+| Result accept budget | Frame avg / p95 / p99 / max | Over-budget frames | Dropped frames | App over-period | Max runtime sync | Max GPU upload | Result/upload read |
+|---:|---|---:|---:|---:|---:|---:|---|
+| unbounded | 15.142 / 24.720 / 36.125 / 84.695 ms | 977 / 1978, 49.4% | 94 | 31.9% | 39.969 ms | 14.001 ms | max 2 accepted results, 32 completed sections, 13 uploaded |
+| 1 | 15.073 / 24.514 / 34.695 / 75.843 ms | 974 / 1985, 49.1% | 88 | 28.4% | 56.490 ms | 5.431 ms | max 1 accepted result, 1 queued result, 16 completed sections, 8 uploaded |
+| 2 | 15.075 / 24.218 / 34.110 / 100.366 ms | 995 / 1982, 50.2% | 85 | 30.2% | 81.842 ms | 10.092 ms | max 2 accepted results, 0 queued results, 32 completed sections, 11 uploaded |
+
+Interpretation:
+
+- The control point works and should stay as an opt-in diagnostic/policy hook.
+  The budget-1 run capped result acceptance exactly as intended and cut the max
+  GPU-upload burst from 14.001 ms to 5.431 ms in the current-code control.
+- It is not a default performance win yet. Budget 1 improved current-control
+  p99, max frame, app-over-period, and dropped-frame count slightly, but max
+  runtime sync rose from 39.969 ms to 56.490 ms. Budget 2 was worse on max frame
+  and max runtime sync.
+- The remaining burst is not just raw GPU upload. After upload is smoothed, the
+  high tail moves into runtime sync / ready-section maintenance, so the next
+  measurement must split result acceptance, ready-set recomputation, and record
+  cache/update publication more finely.
+- Do not enable a result-acceptance budget by default. Keep default unbounded
+  until an adaptive policy or follow-up split beats the baseline consistently.
 
 ### E. Local Edit Coherence
 
@@ -206,9 +250,15 @@ a compiler exposes spare capacity and waits when capacity is full.
 
 ## Next Step
 
-Move to Slice D, but keep it baseline-first: measure and shape result
-acceptance/upload publication against Java's `uploadAllPendingUploads()` path.
-The immediate candidate is not another worker cap; it is separating "compile
-request admission" from "how many completed sections we accept/upload into this
-frame" so Quest can avoid 40-50 ms runtime-sync/upload spikes without throwing
-away the vanilla queue/buffer-pack structure.
+Investigate the new tail after upload smoothing: split Android XR terrain timing
+inside `poll_runtime_and_upload` / `apply_section_update_uploads` so result
+acceptance, ready-section traversal-set recomputation, draw-resource publication,
+and prepared-record cache maintenance are separately visible. Then use that
+evidence to choose between:
+
+- an adaptive completed-result acceptance budget based on measured frame
+  headroom,
+- a smaller section-upload publication budget layered after batched result
+  acceptance, or
+- optimizing ready-set / record-cache publication directly if that is the real
+  long pole.

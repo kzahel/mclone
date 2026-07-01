@@ -29,8 +29,9 @@ use crate::session::{
     SessionFailure, SessionStartRequest, SessionStartResult, SessionStatus, StartedGameSession,
 };
 use crate::{
-    RuntimePollDiagnostics, RuntimePollTiming, RuntimeUpdateApplyReport, SingleViewRuntime,
-    SingleViewRuntimeStats, chunk_tracking_radius_for_render_distance, elapsed_ms,
+    DEFAULT_RENDER_CHUNK_MESH_BUDGET, RuntimePollDiagnostics, RuntimePollTiming,
+    RuntimeUpdateApplyReport, SingleViewRuntime, SingleViewRuntimeStats,
+    chunk_tracking_radius_for_render_distance, elapsed_ms,
     loading_progress_overlay_from_diagnostics, view_readiness_overlay_from_diagnostics,
 };
 
@@ -438,6 +439,22 @@ impl LocalSingleViewSceneRuntime {
         )
     }
 
+    pub fn sync_render_sections_with_completed_result_acceptance(
+        &mut self,
+        camera_position: Vec3,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<RenderSectionCacheUpdate> {
+        let render_compile_worker = &mut self.render_compile_worker;
+        self.core
+            .sync_render_sections_with_budget_and_completed_result_acceptance(
+                render_compile_worker,
+                camera_position,
+                DEFAULT_RENDER_CHUNK_MESH_BUDGET,
+                completed_result_accept_budget,
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
+    }
+
     pub fn sync_render_sections_until_deadline(
         &mut self,
         camera_position: Vec3,
@@ -450,6 +467,23 @@ impl LocalSingleViewSceneRuntime {
             deadline,
             |client, _compiler| client.chunk_snapshots().cloned().collect(),
         )
+    }
+
+    pub fn sync_render_sections_until_deadline_with_completed_result_acceptance(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<RenderSectionCacheUpdate> {
+        let render_compile_worker = &mut self.render_compile_worker;
+        self.core
+            .sync_render_sections_until_deadline_with_completed_result_acceptance(
+                render_compile_worker,
+                camera_position,
+                deadline,
+                completed_result_accept_budget,
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
     }
 
     pub fn sync_all_render_sections(
@@ -688,6 +722,24 @@ where
         }
     }
 
+    pub fn sync_render_sections_with_completed_result_acceptance(
+        &mut self,
+        camera_position: Vec3,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<RenderSectionCacheUpdate> {
+        match self {
+            Self::Local(scene) => scene.sync_render_sections_with_completed_result_acceptance(
+                camera_position,
+                completed_result_accept_budget,
+            ),
+            Self::RemoteDedicated(scene) => scene
+                .sync_render_sections_with_completed_result_acceptance(
+                    camera_position,
+                    completed_result_accept_budget,
+                ),
+        }
+    }
+
     pub fn sync_render_sections_until_deadline(
         &mut self,
         camera_position: Vec3,
@@ -700,6 +752,28 @@ where
             Self::RemoteDedicated(scene) => {
                 scene.sync_render_sections_until_deadline(camera_position, deadline)
             }
+        }
+    }
+
+    pub fn sync_render_sections_until_deadline_with_completed_result_acceptance(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<RenderSectionCacheUpdate> {
+        match self {
+            Self::Local(scene) => scene
+                .sync_render_sections_until_deadline_with_completed_result_acceptance(
+                    camera_position,
+                    deadline,
+                    completed_result_accept_budget,
+                ),
+            Self::RemoteDedicated(scene) => scene
+                .sync_render_sections_until_deadline_with_completed_result_acceptance(
+                    camera_position,
+                    deadline,
+                    completed_result_accept_budget,
+                ),
         }
     }
 
@@ -767,6 +841,10 @@ where
             Self::Local(scene) => scene.render_compile_worker.pending_job_count(),
             Self::RemoteDedicated(scene) => scene.render_compile_worker.pending_job_count(),
         }
+    }
+
+    pub fn pending_completed_compile_result_count(&self) -> usize {
+        self.core().pending_completed_compile_result_count()
     }
 
     pub fn render_compile_max_pending_job_count(&self) -> usize {
@@ -1044,6 +1122,21 @@ where
         )
     }
 
+    pub fn sync_render_sections_with_completed_result_acceptance(
+        &mut self,
+        camera_position: Vec3,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<RenderSectionCacheUpdate> {
+        self.core
+            .sync_render_sections_with_budget_and_completed_result_acceptance(
+                &mut self.render_compile_worker,
+                camera_position,
+                DEFAULT_RENDER_CHUNK_MESH_BUDGET,
+                completed_result_accept_budget,
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
+    }
+
     pub fn sync_render_sections_until_deadline(
         &mut self,
         camera_position: Vec3,
@@ -1055,6 +1148,22 @@ where
             deadline,
             |client, _compiler| client.chunk_snapshots().cloned().collect(),
         )
+    }
+
+    pub fn sync_render_sections_until_deadline_with_completed_result_acceptance(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<RenderSectionCacheUpdate> {
+        self.core
+            .sync_render_sections_until_deadline_with_completed_result_acceptance(
+                &mut self.render_compile_worker,
+                camera_position,
+                deadline,
+                completed_result_accept_budget,
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
     }
 
     pub fn sync_all_render_sections(

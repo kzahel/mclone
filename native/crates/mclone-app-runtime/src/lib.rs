@@ -717,25 +717,48 @@ impl SingleViewRuntime {
         C: RenderSectionCompiler,
         Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
-        self.engine.sync_render_sections_with_budget(
+        self.sync_render_sections_with_budget_and_completed_result_acceptance(
             compiler,
+            camera_position,
             chunk_budget,
-            |dirty_work| {
-                sort_chunk_positions_by_distance(
-                    dirty_work.loaded_dirty_chunks.iter().copied(),
-                    camera_position,
-                )
-            },
-            |dirty_work| {
-                sort_dirty_section_chunks_by_distance(
-                    &dirty_work.loaded_dirty_sections_by_chunk,
-                    camera_position,
-                )
-            },
-            |client, key| render_section_neighbor_readiness(client, key, camera_position),
-            RenderSectionRemovalMode::ApplyImmediately,
+            None,
             snapshots_for_submit,
         )
+    }
+
+    pub fn sync_render_sections_with_budget_and_completed_result_acceptance<C, Snapshots>(
+        &mut self,
+        compiler: &mut C,
+        camera_position: Vec3,
+        chunk_budget: usize,
+        completed_result_accept_budget: Option<usize>,
+        snapshots_for_submit: Snapshots,
+    ) -> Result<RenderSectionCacheUpdate>
+    where
+        C: RenderSectionCompiler,
+        Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
+    {
+        self.engine
+            .sync_render_sections_with_budget_and_completed_result_acceptance(
+                compiler,
+                chunk_budget,
+                |dirty_work| {
+                    sort_chunk_positions_by_distance(
+                        dirty_work.loaded_dirty_chunks.iter().copied(),
+                        camera_position,
+                    )
+                },
+                |dirty_work| {
+                    sort_dirty_section_chunks_by_distance(
+                        &dirty_work.loaded_dirty_sections_by_chunk,
+                        camera_position,
+                    )
+                },
+                |client, key| render_section_neighbor_readiness(client, key, camera_position),
+                RenderSectionRemovalMode::ApplyImmediately,
+                completed_result_accept_budget,
+                snapshots_for_submit,
+            )
     }
 
     pub fn sync_render_sections<C, Snapshots>(
@@ -762,6 +785,28 @@ impl SingleViewRuntime {
         compiler: &mut C,
         camera_position: Vec3,
         deadline: Instant,
+        snapshots_for_submit: Snapshots,
+    ) -> Result<RenderSectionCacheUpdate>
+    where
+        C: RenderSectionCompiler,
+        Snapshots: FnMut(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
+    {
+        self.sync_render_sections_until_deadline_with_completed_result_acceptance(
+            compiler,
+            camera_position,
+            deadline,
+            None,
+            snapshots_for_submit,
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn sync_render_sections_until_deadline_with_completed_result_acceptance<C, Snapshots>(
+        &mut self,
+        compiler: &mut C,
+        camera_position: Vec3,
+        deadline: Instant,
+        completed_result_accept_budget: Option<usize>,
         mut snapshots_for_submit: Snapshots,
     ) -> Result<RenderSectionCacheUpdate>
     where
@@ -771,6 +816,7 @@ impl SingleViewRuntime {
         let mut combined = RenderSectionCacheUpdate::default();
         let mut submitted_request_count = 0_usize;
         let mut admission_total = Duration::ZERO;
+        let mut remaining_result_accept_budget = completed_result_accept_budget;
 
         loop {
             if submitted_request_count > 0 {
@@ -789,16 +835,21 @@ impl SingleViewRuntime {
             }
 
             let admission_start = Instant::now();
-            let update = self.sync_render_sections_with_budget(
+            let update = self.sync_render_sections_with_budget_and_completed_result_acceptance(
                 compiler,
                 camera_position,
                 DEFAULT_RENDER_CHUNK_MESH_BUDGET,
+                remaining_result_accept_budget,
                 |client, compiler| snapshots_for_submit(client, compiler),
             )?;
+            if let Some(remaining) = remaining_result_accept_budget.as_mut() {
+                *remaining = remaining.saturating_sub(update.accepted_compile_result_count);
+            }
             let submitted = update.submitted_compile_section_count > 0;
             let progressed = update.rebuilt_section_count() > 0
                 || update.removed_section_count() > 0
                 || submitted
+                || update.accepted_compile_result_count > 0
                 || update.completed_compile_section_count > 0
                 || update.stale_compile_section_count > 0;
             if submitted {
@@ -850,6 +901,7 @@ impl SingleViewRuntime {
             let progressed = update.rebuilt_section_count() > 0
                 || update.removed_section_count() > 0
                 || update.submitted_compile_section_count > 0
+                || update.accepted_compile_result_count > 0
                 || update.completed_compile_section_count > 0
                 || update.stale_compile_section_count > 0;
             combined.merge(update);
@@ -909,6 +961,10 @@ impl SingleViewRuntime {
         self.engine.has_pending_render_work(0, |client, key| {
             render_section_neighbor_readiness(client, key, camera_position)
         })
+    }
+
+    pub fn pending_completed_compile_result_count(&self) -> usize {
+        self.engine.pending_completed_compile_result_count()
     }
 
     pub fn pending_render_chunk_count(&self) -> usize {

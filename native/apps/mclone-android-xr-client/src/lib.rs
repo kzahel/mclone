@@ -249,6 +249,7 @@ mod android {
         overlap_runtime_prefetch: bool,
         render_section_upload_budget: Option<usize>,
         render_section_accept_budget: Option<usize>,
+        render_completed_result_accept_budget: Option<usize>,
         xr_foveation: AndroidXrFoveation,
         xr_render_scale: f32,
         xr_display_refresh_rate: Option<f32>,
@@ -278,6 +279,7 @@ mod android {
                 overlap_runtime_prefetch: false,
                 render_section_upload_budget: None,
                 render_section_accept_budget: None,
+                render_completed_result_accept_budget: None,
                 xr_foveation: AndroidXrFoveation::Off,
                 xr_render_scale: ANDROID_XR_DEFAULT_RENDER_SCALE,
                 xr_display_refresh_rate: None,
@@ -518,6 +520,18 @@ mod android {
                         bail!("--xr-render-section-accept-budget must be greater than zero");
                     }
                     options.render_section_accept_budget = Some(budget);
+                }
+                "--xr-render-completed-result-accept-budget" => {
+                    let budget = parse_next::<usize>(
+                        &mut argv,
+                        "--xr-render-completed-result-accept-budget",
+                    )?;
+                    if budget == 0 {
+                        bail!(
+                            "--xr-render-completed-result-accept-budget must be greater than zero"
+                        );
+                    }
+                    options.render_completed_result_accept_budget = Some(budget);
                 }
                 "--xr-foveation" => {
                     options.xr_foveation = AndroidXrFoveation::parse_label(
@@ -1002,6 +1016,10 @@ mod android {
             format_optional_usize(startup_options.render_section_accept_budget)
         );
         log::info!(
+            "Android XR render completed-result accept budget: {}",
+            format_optional_usize(startup_options.render_completed_result_accept_budget)
+        );
+        log::info!(
             "Android XR fixed foveation: {}",
             startup_options.xr_foveation.label()
         );
@@ -1061,6 +1079,7 @@ mod android {
             startup_options.overlap_runtime_prefetch,
             startup_options.render_section_upload_budget,
             startup_options.render_section_accept_budget,
+            startup_options.render_completed_result_accept_budget,
             startup_options.xr_foveation,
             startup_options.xr_render_scale,
             startup_options.xr_display_refresh_rate,
@@ -1095,6 +1114,7 @@ mod android {
         overlap_runtime_prefetch: bool,
         render_section_upload_budget: Option<usize>,
         render_section_accept_budget: Option<usize>,
+        render_completed_result_accept_budget: Option<usize>,
         xr_foveation: AndroidXrFoveation,
         xr_render_scale: f32,
         xr_display_refresh_rate: Option<f32>,
@@ -1485,6 +1505,8 @@ mod android {
             terrain.set_render_split_timing_enabled(perf_seconds.is_some());
             terrain.set_render_section_upload_budget(render_section_upload_budget);
             terrain.set_render_section_accept_budget(render_section_accept_budget);
+            terrain
+                .set_render_completed_result_accept_budget(render_completed_result_accept_budget);
             log::info!(
                 "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={} actors={}",
                 terrain_summary.section_count,
@@ -1516,6 +1538,7 @@ mod android {
                 display_refresh,
                 render_section_upload_budget,
                 render_section_accept_budget,
+                render_completed_result_accept_budget,
                 xr_foveation,
                 xr_render_scale,
             );
@@ -1583,6 +1606,7 @@ mod android {
         terrain.set_overlap_runtime_prefetch_enabled(frame_overlap || overlap_runtime_prefetch);
         terrain.set_render_section_upload_budget(render_section_upload_budget);
         terrain.set_render_section_accept_budget(render_section_accept_budget);
+        terrain.set_render_completed_result_accept_budget(render_completed_result_accept_budget);
         log::info!("Android XR frame overlap active: {}", frame_overlap);
         log::info!(
             "Android XR per-eye submit overlap active: {}",
@@ -1626,6 +1650,7 @@ mod android {
             display_refresh,
             render_section_upload_budget,
             render_section_accept_budget,
+            render_completed_result_accept_budget,
             xr_foveation,
             xr_render_scale,
         )
@@ -2778,6 +2803,7 @@ mod android {
         display_refresh: XrDisplayRefreshSnapshot,
         render_section_upload_budget: Option<usize>,
         render_section_accept_budget: Option<usize>,
+        render_completed_result_accept_budget: Option<usize>,
         xr_foveation: AndroidXrFoveation,
         xr_render_scale: f32,
     ) -> Result<()> {
@@ -2798,6 +2824,7 @@ mod android {
             render_path,
             render_section_upload_budget,
             render_section_accept_budget,
+            render_completed_result_accept_budget,
             xr_foveation,
             xr_render_scale,
             xr_eye_size,
@@ -3230,6 +3257,7 @@ mod android {
         render_path: AndroidXrRenderPath,
         render_section_upload_budget: Option<usize>,
         render_section_accept_budget: Option<usize>,
+        render_completed_result_accept_budget: Option<usize>,
         xr_foveation: AndroidXrFoveation,
         xr_render_scale: f32,
         xr_eye_size: [u32; 2],
@@ -3254,6 +3282,7 @@ mod android {
             render_path: AndroidXrRenderPath,
             render_section_upload_budget: Option<usize>,
             render_section_accept_budget: Option<usize>,
+            render_completed_result_accept_budget: Option<usize>,
             xr_foveation: AndroidXrFoveation,
             xr_render_scale: f32,
             xr_eye_size: [u32; 2],
@@ -3275,6 +3304,7 @@ mod android {
                 render_path,
                 render_section_upload_budget,
                 render_section_accept_budget,
+                render_completed_result_accept_budget,
                 xr_foveation,
                 xr_render_scale,
                 xr_eye_size,
@@ -3357,12 +3387,13 @@ mod android {
                 );
             }
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
                 seconds,
                 mode,
                 self.render_path.label(),
                 format_optional_usize(self.render_section_upload_budget),
                 format_optional_usize(self.render_section_accept_budget),
+                format_optional_usize(self.render_completed_result_accept_budget),
                 self.render_distance,
                 self.render_compile_worker_count,
                 flight_speed,
@@ -3413,6 +3444,7 @@ mod android {
                 render_path: self.render_path,
                 render_section_upload_budget: self.render_section_upload_budget,
                 render_section_accept_budget: self.render_section_accept_budget,
+                render_completed_result_accept_budget: self.render_completed_result_accept_budget,
                 xr_foveation: self.xr_foveation,
                 xr_render_scale: self.xr_render_scale,
                 xr_eye_size: self.xr_eye_size,
@@ -3534,6 +3566,7 @@ mod android {
         render_path: AndroidXrRenderPath,
         render_section_upload_budget: Option<usize>,
         render_section_accept_budget: Option<usize>,
+        render_completed_result_accept_budget: Option<usize>,
         xr_foveation: AndroidXrFoveation,
         xr_render_scale: f32,
         xr_eye_size: [u32; 2],
@@ -3656,12 +3689,13 @@ mod android {
                 self.record_rebuild_total_ms / self.record_rebuild_frames as f64
             };
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
                 sample_seconds,
                 self.mode_label,
                 self.render_path.label(),
                 format_optional_usize(self.render_section_upload_budget),
                 format_optional_usize(self.render_section_accept_budget),
+                format_optional_usize(self.render_completed_result_accept_budget),
                 self.xr_foveation.label(),
                 self.xr_render_scale,
                 self.xr_eye_size[0],
@@ -3804,12 +3838,14 @@ mod android {
                 self.max_render.terrain_multiview_poll_wait_ms
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_UPLOAD_MAX work_frames={} rebuilt_sections={} removed_sections={} rebuilt_vertices={} rebuilt_indices={} uploaded_sections={} upload_removed_sections={} uploaded_vertices={} uploaded_indices={} queued_upload_sections={} queued_upload_removed_sections={} ready_sections={}",
+                "MCLONE_ANDROID_XR_PERF_UPLOAD_MAX work_frames={} rebuilt_sections={} removed_sections={} rebuilt_vertices={} rebuilt_indices={} accepted_results={} queued_completed_results={} uploaded_sections={} upload_removed_sections={} uploaded_vertices={} uploaded_indices={} queued_upload_sections={} queued_upload_removed_sections={} ready_sections={}",
                 self.upload_work_frames,
                 self.max_upload.rebuilt_section_count,
                 self.max_upload.removed_section_count,
                 self.max_upload.rebuilt_vertex_count,
                 self.max_upload.rebuilt_index_count,
+                self.max_upload.accepted_compile_result_count,
+                self.max_upload.queued_completed_compile_result_count,
                 self.max_upload.uploaded_section_count,
                 self.max_upload.upload_removed_section_count,
                 self.max_upload.uploaded_vertex_count,
@@ -3866,7 +3902,7 @@ mod android {
                 self.max_upload.player_outbound_queue_depth
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_COMPILE_MAX pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} neighbor_ready_sections={} near_exception_sections={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} completed_sections={} stale_sections={} visibility_graph_builds={} visibility_graph_total_ms={:.3} visibility_graph_worst_ms={:.3}",
+                "MCLONE_ANDROID_XR_PERF_COMPILE_MAX pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} neighbor_ready_sections={} near_exception_sections={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} accepted_results={} queued_completed_results={} completed_sections={} stale_sections={} visibility_graph_builds={} visibility_graph_total_ms={:.3} visibility_graph_worst_ms={:.3}",
                 self.max_upload.pending_render_chunks_before,
                 self.max_upload.pending_render_chunks_after,
                 self.max_upload.pending_compile_jobs_before,
@@ -3879,6 +3915,8 @@ mod android {
                 self.max_upload.deferred_section_count,
                 self.max_upload.submitted_compile_section_count,
                 self.max_upload.deadline_skipped_compile_request_count,
+                self.max_upload.accepted_compile_result_count,
+                self.max_upload.queued_completed_compile_result_count,
                 self.max_upload.completed_compile_section_count,
                 self.max_upload.stale_compile_section_count,
                 self.max_upload.visibility_graph_build_count,
@@ -3886,7 +3924,7 @@ mod android {
                 self.max_upload.visibility_graph_worst_ms
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_UPLOAD_LAST poll_changed={} pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} deadline_skipped_requests={} rebuilt_sections={} removed_sections={} uploaded_sections={} upload_removed_sections={} uploaded_indices={} ready_sections={}",
+                "MCLONE_ANDROID_XR_PERF_UPLOAD_LAST poll_changed={} pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} deadline_skipped_requests={} accepted_results={} queued_completed_results={} rebuilt_sections={} removed_sections={} uploaded_sections={} upload_removed_sections={} uploaded_indices={} ready_sections={}",
                 latest_upload.poll_changed,
                 latest_upload.pending_render_chunks_before,
                 latest_upload.pending_render_chunks_after,
@@ -3896,6 +3934,8 @@ mod android {
                 latest_upload.available_compile_slots_before,
                 latest_upload.available_compile_slots_after,
                 latest_upload.deadline_skipped_compile_request_count,
+                latest_upload.accepted_compile_result_count,
+                latest_upload.queued_completed_compile_result_count,
                 latest_upload.rebuilt_section_count,
                 latest_upload.removed_section_count,
                 latest_upload.uploaded_section_count,
@@ -4097,6 +4137,8 @@ mod android {
             || summary.rebuilt_section_count > 0
             || summary.removed_section_count > 0
             || summary.submitted_compile_section_count > 0
+            || summary.accepted_compile_result_count > 0
+            || summary.queued_completed_compile_result_count > 0
             || summary.completed_compile_section_count > 0
             || summary.stale_compile_section_count > 0
             || summary.uploaded_section_count > 0
@@ -4209,6 +4251,12 @@ mod android {
             deadline_skipped_compile_request_count: a
                 .deadline_skipped_compile_request_count
                 .max(b.deadline_skipped_compile_request_count),
+            accepted_compile_result_count: a
+                .accepted_compile_result_count
+                .max(b.accepted_compile_result_count),
+            queued_completed_compile_result_count: a
+                .queued_completed_compile_result_count
+                .max(b.queued_completed_compile_result_count),
             completed_compile_section_count: a
                 .completed_compile_section_count
                 .max(b.completed_compile_section_count),

@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
@@ -282,6 +282,8 @@ pub struct RenderSectionCacheUpdate {
     pub deferred_section_count: usize,
     pub submitted_compile_section_count: usize,
     pub deadline_skipped_compile_request_count: usize,
+    pub accepted_compile_result_count: usize,
+    pub queued_completed_compile_result_count: usize,
     pub completed_compile_section_count: usize,
     pub stale_compile_section_count: usize,
     pub pending_compile_jobs: usize,
@@ -311,6 +313,8 @@ impl RenderSectionCacheUpdate {
         self.deferred_section_count += other.deferred_section_count;
         self.submitted_compile_section_count += other.submitted_compile_section_count;
         self.deadline_skipped_compile_request_count += other.deadline_skipped_compile_request_count;
+        self.accepted_compile_result_count += other.accepted_compile_result_count;
+        self.queued_completed_compile_result_count = other.queued_completed_compile_result_count;
         self.completed_compile_section_count += other.completed_compile_section_count;
         self.stale_compile_section_count += other.stale_compile_section_count;
         self.pending_compile_jobs = other.pending_compile_jobs;
@@ -2195,6 +2199,7 @@ pub struct RenderSectionSession {
 pub struct EngineRenderSession {
     client: ClientRuntime,
     render_session: RenderSectionSession,
+    pending_completed_compile_results: VecDeque<RenderSectionCompileResult>,
 }
 
 impl EngineRenderSession {
@@ -2202,6 +2207,7 @@ impl EngineRenderSession {
         Self {
             client,
             render_session: RenderSectionSession::default(),
+            pending_completed_compile_results: VecDeque::new(),
         }
     }
 
@@ -2219,6 +2225,10 @@ impl EngineRenderSession {
 
     pub const fn render_session_mut(&mut self) -> &mut RenderSectionSession {
         &mut self.render_session
+    }
+
+    pub fn pending_completed_compile_result_count(&self) -> usize {
+        self.pending_completed_compile_results.len()
     }
 
     pub fn mark_chunk_neighborhood_dirty(&mut self, pos: ChunkPos) -> usize {
@@ -2375,18 +2385,51 @@ impl EngineRenderSession {
         request_id_for_result: impl FnMut(&RenderSectionCompileResult) -> u32,
         pending_compile_jobs: usize,
     ) -> Result<RenderSectionCacheUpdate> {
-        let client = &self.client;
-        self.render_session.drain_completed_compile_updates(
+        self.drain_completed_compile_updates_with_acceptance_budget(
             completed_results,
             request_id_for_result,
             pending_compile_jobs,
-            |key| {
-                let pos = render_section_chunk_pos(key);
-                client
-                    .chunk_snapshot(pos)
-                    .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
-            },
+            None,
         )
+    }
+
+    pub fn drain_completed_compile_updates_with_acceptance_budget(
+        &mut self,
+        completed_results: impl IntoIterator<Item = RenderSectionCompileResult>,
+        mut request_id_for_result: impl FnMut(&RenderSectionCompileResult) -> u32,
+        pending_compile_jobs: usize,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<RenderSectionCacheUpdate> {
+        self.pending_completed_compile_results
+            .extend(completed_results);
+        let accept_count = completed_result_accept_budget
+            .unwrap_or(usize::MAX)
+            .min(self.pending_completed_compile_results.len());
+        let client = &self.client;
+        let mut update = RenderSectionCacheUpdate::default();
+        for _ in 0..accept_count {
+            let Some(completed) = self.pending_completed_compile_results.pop_front() else {
+                break;
+            };
+            let request_id = request_id_for_result(&completed);
+            let finished = self.render_session.finish_compile_update(
+                completed,
+                request_id,
+                &BTreeSet::new(),
+                &BTreeSet::new(),
+                |key| {
+                    let pos = render_section_chunk_pos(key);
+                    client
+                        .chunk_snapshot(pos)
+                        .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
+                },
+            )?;
+            update.accepted_compile_result_count += 1;
+            update.merge(finished.cache_update);
+        }
+        update.pending_compile_jobs = pending_compile_jobs;
+        update.queued_completed_compile_result_count = self.pending_completed_compile_results.len();
+        Ok(update)
     }
 
     pub fn prepare_sync_update(
@@ -2501,10 +2544,55 @@ impl EngineRenderSession {
         // owned `Vec` is moved over `mpsc` to the worker thread, so the clone is load-bearing).
         Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
+        self.sync_render_sections_with_budget_and_completed_result_acceptance(
+            compiler,
+            chunk_budget,
+            order_loaded_dirty_chunks,
+            order_dirty_section_chunks,
+            section_readiness,
+            removal_mode,
+            None,
+            snapshots_for_submit,
+        )
+    }
+
+    pub fn sync_render_sections_with_budget_and_completed_result_acceptance<
+        C,
+        OrderChunks,
+        OrderSections,
+        Ready,
+        Snapshots,
+    >(
+        &mut self,
+        compiler: &mut C,
+        chunk_budget: usize,
+        order_loaded_dirty_chunks: OrderChunks,
+        order_dirty_section_chunks: OrderSections,
+        section_readiness: Ready,
+        removal_mode: RenderSectionRemovalMode,
+        completed_result_accept_budget: Option<usize>,
+        snapshots_for_submit: Snapshots,
+    ) -> Result<RenderSectionCacheUpdate>
+    where
+        C: RenderSectionCompiler,
+        OrderChunks: FnOnce(&RenderSectionDirtyWork) -> Vec<ChunkPos>,
+        OrderSections: FnOnce(&RenderSectionDirtyWork) -> Vec<ChunkPos>,
+        Ready: FnMut(&ClientRuntime, RenderSectionKey) -> RenderSectionNeighborReadiness,
+        Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
+    {
         let completed_results = compiler.try_recv_completed()?;
         let pending_compile_jobs = compiler.pending_job_count();
-        let mut report =
-            self.drain_completed_compile_updates(completed_results, |_| 0, pending_compile_jobs)?;
+        let mut report = self.drain_completed_compile_updates_with_acceptance_budget(
+            completed_results,
+            |_| 0,
+            pending_compile_jobs,
+            completed_result_accept_budget,
+        )?;
+
+        if report.queued_completed_compile_result_count > 0 {
+            report.pending_compile_jobs = compiler.pending_job_count();
+            return Ok(report);
+        }
 
         self.mark_loaded_chunks_dirty_when_cache_empty();
 
@@ -2551,6 +2639,9 @@ impl EngineRenderSession {
         ) -> RenderSectionNeighborReadiness,
     ) -> bool {
         if compiler_pending_job_count > 0 {
+            return true;
+        }
+        if !self.pending_completed_compile_results.is_empty() {
             return true;
         }
         let client = &self.client;
@@ -3716,6 +3807,7 @@ mod tests {
     struct CapacityTestCompiler {
         pending_jobs: usize,
         max_pending_jobs: usize,
+        completed_results: Vec<RenderSectionCompileResult>,
         submitted_requests: Vec<RenderSectionCompileRequest>,
     }
 
@@ -3724,6 +3816,16 @@ mod tests {
             Self {
                 pending_jobs,
                 max_pending_jobs,
+                completed_results: Vec::new(),
+                submitted_requests: Vec::new(),
+            }
+        }
+
+        fn with_completed_results(completed_results: Vec<RenderSectionCompileResult>) -> Self {
+            Self {
+                pending_jobs: 0,
+                max_pending_jobs: 1,
+                completed_results,
                 submitted_requests: Vec::new(),
             }
         }
@@ -3737,7 +3839,7 @@ mod tests {
         }
 
         fn try_recv_completed(&mut self) -> Result<Vec<RenderSectionCompileResult>> {
-            Ok(Vec::new())
+            Ok(std::mem::take(&mut self.completed_results))
         }
 
         fn pending_job_count(&self) -> usize {
@@ -4648,6 +4750,88 @@ mod tests {
         assert_eq!(compiler.pending_job_count(), 1);
         assert!(compiler.submitted_requests.is_empty());
         assert!(!engine.render_session().dirty_is_empty());
+    }
+
+    #[test]
+    fn engine_render_session_can_budget_completed_compile_result_acceptance() {
+        let chunk = ChunkPos::new(0, 0);
+        let first = RenderSectionKey::new(0, 0, 0);
+        let second = RenderSectionKey::new(0, 1, 0);
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(empty_test_snapshot(
+            chunk,
+            0,
+            SECTION_HEIGHT * 2,
+        )));
+        let mut engine = EngineRenderSession::new(client);
+        let mut compiler = CapacityTestCompiler::with_completed_results(vec![
+            RenderSectionCompileResult {
+                target_sections: BTreeSet::from([first]),
+                section_revisions: BTreeMap::from([(first, 0)]),
+                result: Ok(test_build_report([first])),
+            },
+            RenderSectionCompileResult {
+                target_sections: BTreeSet::from([second]),
+                section_revisions: BTreeMap::from([(second, 0)]),
+                result: Ok(test_build_report([second])),
+            },
+        ]);
+
+        let first_update = engine
+            .sync_render_sections_with_budget_and_completed_result_acceptance(
+                &mut compiler,
+                1,
+                |dirty_work| dirty_work.loaded_dirty_chunks.iter().copied().collect(),
+                |dirty_work| {
+                    dirty_work
+                        .loaded_dirty_sections_by_chunk
+                        .keys()
+                        .copied()
+                        .collect()
+                },
+                |_client, _key| RenderSectionNeighborReadiness::ReadyWithNeighbors,
+                RenderSectionRemovalMode::Defer,
+                Some(1),
+                |_, _| panic!("queued completed results should backpressure new submissions"),
+            )
+            .expect("first sync should accept one completed result");
+
+        assert_eq!(first_update.accepted_compile_result_count, 1);
+        assert_eq!(first_update.queued_completed_compile_result_count, 1);
+        assert_eq!(first_update.rebuilt_section_count(), 1);
+        assert_eq!(first_update.completed_compile_section_count, 1);
+        assert_eq!(engine.pending_completed_compile_result_count(), 1);
+        assert!(engine.has_pending_render_work(0, |_client, _key| {
+            RenderSectionNeighborReadiness::ReadyWithNeighbors
+        }));
+
+        let second_update = engine
+            .sync_render_sections_with_budget_and_completed_result_acceptance(
+                &mut compiler,
+                1,
+                |dirty_work| dirty_work.loaded_dirty_chunks.iter().copied().collect(),
+                |dirty_work| {
+                    dirty_work
+                        .loaded_dirty_sections_by_chunk
+                        .keys()
+                        .copied()
+                        .collect()
+                },
+                |_client, _key| RenderSectionNeighborReadiness::ReadyWithNeighbors,
+                RenderSectionRemovalMode::Defer,
+                Some(1),
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
+            .expect("second sync should accept the queued completed result");
+
+        assert_eq!(second_update.accepted_compile_result_count, 1);
+        assert_eq!(second_update.queued_completed_compile_result_count, 0);
+        assert_eq!(second_update.rebuilt_section_count(), 1);
+        assert_eq!(second_update.completed_compile_section_count, 1);
+        assert_eq!(engine.pending_completed_compile_result_count(), 0);
+        assert!(!engine.has_pending_render_work(0, |_client, _key| {
+            RenderSectionNeighborReadiness::ReadyWithNeighbors
+        }));
     }
 
     #[test]

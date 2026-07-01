@@ -433,6 +433,8 @@ pub struct XrTerrainUploadSummary {
     pub deferred_section_count: usize,
     pub submitted_compile_section_count: usize,
     pub deadline_skipped_compile_request_count: usize,
+    pub accepted_compile_result_count: usize,
+    pub queued_completed_compile_result_count: usize,
     pub completed_compile_section_count: usize,
     pub stale_compile_section_count: usize,
     pub uploaded_section_count: usize,
@@ -573,6 +575,7 @@ where
     prefetched_live_upload: Option<XrTerrainUploadSummary>,
     render_section_upload_budget: Option<usize>,
     render_section_accept_budget: Option<usize>,
+    render_completed_result_accept_budget: Option<usize>,
     per_view_uniform_frame: u32,
     last_locomotion_update: Option<Instant>,
     menu_toggle_down: bool,
@@ -723,6 +726,7 @@ where
             prefetched_live_upload: None,
             render_section_upload_budget: None,
             render_section_accept_budget: None,
+            render_completed_result_accept_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
             menu_toggle_down: false,
@@ -821,6 +825,7 @@ where
             prefetched_live_upload: None,
             render_section_upload_budget: None,
             render_section_accept_budget: None,
+            render_completed_result_accept_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
             menu_toggle_down: false,
@@ -2100,6 +2105,14 @@ where
         self.render_section_accept_budget
     }
 
+    pub fn set_render_completed_result_accept_budget(&mut self, budget: Option<usize>) {
+        self.render_completed_result_accept_budget = budget.filter(|budget| *budget > 0);
+    }
+
+    pub fn render_completed_result_accept_budget(&self) -> Option<usize> {
+        self.render_completed_result_accept_budget
+    }
+
     pub fn camera_snapshot(&self) -> EngineCameraSnapshot {
         self.camera.snapshot()
     }
@@ -2475,6 +2488,8 @@ where
                 max_pending_compile_jobs,
                 available_compile_slots_before,
                 available_compile_slots_after: runtime.render_compile_available_pending_job_slots(),
+                queued_completed_compile_result_count: runtime
+                    .pending_completed_compile_result_count(),
                 queued_upload_section_count: self.pending_section_uploads.len(),
                 queued_upload_removed_section_count: self.pending_section_removals.len(),
                 traversal_ready_section_count,
@@ -2505,6 +2520,9 @@ where
         let submitted_compile_section_count = section_update.submitted_compile_section_count;
         let deadline_skipped_compile_request_count =
             section_update.deadline_skipped_compile_request_count;
+        let accepted_compile_result_count = section_update.accepted_compile_result_count;
+        let queued_completed_compile_result_count =
+            section_update.queued_completed_compile_result_count;
         let completed_compile_section_count = section_update.completed_compile_section_count;
         let stale_compile_section_count = section_update.stale_compile_section_count;
         let pending_compile_jobs_after_sync = section_update.pending_compile_jobs;
@@ -2565,6 +2583,8 @@ where
             deferred_section_count,
             submitted_compile_section_count,
             deadline_skipped_compile_request_count,
+            accepted_compile_result_count,
+            queued_completed_compile_result_count,
             completed_compile_section_count,
             stale_compile_section_count,
             uploaded_section_count: upload_report.uploaded_section_count,
@@ -2995,10 +3015,14 @@ where
         &mut self,
         camera_position: Vec3,
     ) -> Result<mclone_render_session::RenderSectionCacheUpdate> {
+        let completed_result_accept_budget = self.render_completed_result_accept_budget;
         self.runtime
             .as_mut()
             .context("XR terrain runtime is not active")?
-            .sync_render_sections(camera_position)
+            .sync_render_sections_with_completed_result_acceptance(
+                camera_position,
+                completed_result_accept_budget,
+            )
     }
 
     fn sync_render_sections_until_deadline(
@@ -3006,10 +3030,15 @@ where
         camera_position: Vec3,
         deadline: Instant,
     ) -> Result<mclone_render_session::RenderSectionCacheUpdate> {
+        let completed_result_accept_budget = self.render_completed_result_accept_budget;
         self.runtime
             .as_mut()
             .context("XR terrain runtime is not active")?
-            .sync_render_sections_until_deadline(camera_position, deadline)
+            .sync_render_sections_until_deadline_with_completed_result_acceptance(
+                camera_position,
+                deadline,
+                completed_result_accept_budget,
+            )
     }
 
     fn poll(&mut self) -> Result<bool> {
