@@ -17,9 +17,18 @@ chicken-specific ticking still pending. Slice 5A landed shared block collision,
 the debug passive showcase toggle, and first server mob gravity/collision.
 Slice 5B landed server-owned `GroundPathNavigation`, a terrain-MVP
 `WalkNodeEvaluator` subset, and collision-aware `LandRandomPos` /
-`DefaultRandomPos` target selection. The starter passive path is now an
-explicit debug passive showcase, enabled by default, while natural spawning
-remains future work.
+`DefaultRandomPos` target selection. Slice 5C landed the immediate path service
+boundary and heap-backed A* core. The starter passive path is now an explicit
+debug passive showcase, enabled by default, while natural spawning remains
+future work.
+
+Pathfinding direction: preserve the Minecraft layering (`Goal` ->
+`PathNavigation` -> path service -> `PathFinder` / `NodeEvaluator` ->
+`MoveControl`) while keeping execution policy replaceable. The immediate
+native path service should start synchronous and host-thread local with
+Minecraft-shaped bounds. Later performance slices can add fixed node budgets,
+wall-time budgets, priorities, deferred results, or worker execution behind the
+same path request/result boundary.
 
 ## Non-Negotiable Constraints
 
@@ -464,6 +473,55 @@ Still pending:
 - `LivingEntity.travel(...)` parity for friction, fluids, ladders, and jump
   movement.
 - Visible desktop capture of showcase animals on uneven terrain.
+
+## Slice 5C - Immediate Path Service And A* Core (Landed)
+
+Purpose: add the Minecraft-shaped path service and A* core without committing
+to synchronous unbounded pathfinding as the permanent execution policy.
+
+Implementation sketch:
+
+- Add `PathService` request/result structs under `entity/mob/navigation/`.
+- Add `PathFinder` with A* search, open-set heap, per-search visited-node cap,
+  reach range, and best-partial-path fallback.
+- Expand `WalkNodeEvaluator` from classification-only into the first
+  terrain-MVP neighbor generator.
+- Route `GroundPathNavigation::createPath` through the path service instead of
+  constructing a one-node path directly.
+- Keep path execution immediate for this slice; do not add worker threads or
+  deferred results yet.
+
+Done when:
+
+- Navigation can receive a multi-node path through the same boundary future
+  budgeted pathfinding will use.
+- Passive goals remain unaware of pathfinding execution policy.
+- Tests cover bounded search, obstacle routing, target fallback, and unchanged
+  lower-floor descent behavior.
+
+Landed notes:
+
+- Added `path_service.rs` with an immediate host-thread path service and
+  `PathRequest` boundary. This is intentionally synchronous today, but goals
+  and navigation now depend on request/result shape rather than a direct
+  pathfinder call.
+- Added `path_finder.rs` with heap-backed A* search, Java-shaped heuristic
+  fudge, follow-range-derived visited-node cap, reach range, and best partial
+  path fallback.
+- Expanded `GroundPath` to track reachability and node lists.
+- Expanded `WalkNodeEvaluator` from classification-only into the first
+  terrain-MVP neighbor generator with start-node selection, body clearance,
+  cardinal/diagonal neighbors, one-block drops, stable-floor checks, and malus
+  filtering.
+- Routed `GroundPathNavigation::create_path` through the path service using
+  authoritative mob width/height and pathfinding malus from `MobGoalContext`.
+- Updated the lower-floor descent regression for Java-shaped reach range: the
+  cow may stop adjacent to the requested block, but must still descend through
+  server collision once support is gone.
+- Verified with `cargo test --manifest-path native/Cargo.toml -p mclone-server
+  entity::mob::navigation` and `cargo test --manifest-path native/Cargo.toml
+  -p mclone-server entity::mob`, plus the full `cargo test --manifest-path
+  native/Cargo.toml` workspace gate.
 
 ## Slice 6 - Spawning Skeleton, Not Full Natural Spawning
 

@@ -80,11 +80,25 @@ The first shared ground/collision scaffold is also in place:
 - The native `WalkNodeEvaluator` subset classifies terrain-MVP blocks as
   open, walkable, blocked, water, or lava using shared block facts and
   collision shapes.
+- `GroundPathNavigation` now routes through an immediate host-thread path
+  service and heap-backed A* `PathFinder`. The first `WalkNodeEvaluator`
+  neighbor generator supports body clearance, cardinal/diagonal ground
+  neighbors, one-block drops, malus filtering, per-search node bounds, reach
+  range, and best-partial-path fallback.
 
-This does not complete full A* `PathFinder` neighbor expansion, one-block
-step-up / jump control, timeout-based stuck detection, or full
-`LivingEntity.travel(...)`. Those remain required foundations before natural
-passive movement can be considered complete.
+This does not complete full Java `WalkNodeEvaluator` parity, one-block
+step-up / jump control, timeout-based stuck detection, path recomputation
+timing, or full `LivingEntity.travel(...)`. Those remain required foundations
+before natural passive movement can be considered complete.
+
+Pathfinding should keep the Minecraft module shape even where native runtime
+execution diverges for performance. Goals should ask navigation to move;
+navigation should ask a path service for a path; `PathFinder` and
+`NodeEvaluator` should own the search and terrain graph. The first native path
+service may execute synchronously on the host thread with Minecraft-shaped
+limits, but the boundary must remain explicit so later slices can add fixed
+node budgets, wall-clock budgets, priorities, deferred results, or worker
+execution without rewriting goals.
 
 ## Target Module Shape
 
@@ -199,6 +213,11 @@ The AI stack should mirror vanilla layering:
 - Controls (`MoveControl`, `LookControl`, `JumpControl`) turn intent into
   per-tick body/look/jump changes.
 - Navigation owns paths and waypoints, not the goals themselves.
+- A path service owns path request execution. Today this can be immediate and
+  host-thread local; future budgeted/deferred execution should fit behind the
+  same request/result contract.
+- `PathFinder` owns A* search and per-search bounds.
+- `NodeEvaluator` owns start/goal/neighbor generation and terrain path types.
 - World queries, pathfinding, collision, and lighting are shared services
   consumed by goals/navigation/spawning.
 

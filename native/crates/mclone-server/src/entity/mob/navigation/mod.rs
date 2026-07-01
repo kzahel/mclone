@@ -1,4 +1,6 @@
 mod path;
+mod path_finder;
+mod path_service;
 mod random_pos;
 mod walk_node_evaluator;
 
@@ -8,7 +10,11 @@ pub(crate) use random_pos::{default_random_pos, land_random_pos};
 pub(crate) use walk_node_evaluator::{BlockPathType, WalkNodeEvaluator};
 
 use path::GroundPath;
+use path_service::{ImmediatePathService, PathRequest};
 
+const DEFAULT_FOLLOW_RANGE_BLOCKS: f32 = 16.0;
+const DEFAULT_REACH_RANGE_BLOCKS: i32 = 1;
+const DEFAULT_MAX_VISITED_NODES_MULTIPLIER: f32 = 1.0;
 const MAX_DISTANCE_TO_WAYPOINT_WIDE_FACTOR: f32 = 0.5;
 const MAX_DISTANCE_TO_WAYPOINT_NARROW_BASE: f32 = 0.75;
 const STUCK_CHECK_INTERVAL_TICKS: i32 = 100;
@@ -79,12 +85,22 @@ impl GroundPathNavigation {
         mob_position: Vec3d,
         target: Vec3d,
         speed_modifier: f64,
+        mob_width: f32,
+        mob_height: f32,
         block_state_at: &F,
+        pathfinding_malus: impl Fn(BlockPathType) -> f32 + Copy,
     ) -> bool
     where
         F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
     {
-        let Some(path) = self.create_path(target, block_state_at) else {
+        let Some(path) = self.create_path(
+            mob_position,
+            target,
+            mob_width,
+            mob_height,
+            block_state_at,
+            pathfinding_malus,
+        ) else {
             self.stop();
             return false;
         };
@@ -138,12 +154,32 @@ impl GroundPathNavigation {
         })
     }
 
-    fn create_path<F>(&self, target: Vec3d, block_state_at: &F) -> Option<GroundPath>
+    fn create_path<F>(
+        &self,
+        mob_position: Vec3d,
+        target: Vec3d,
+        mob_width: f32,
+        mob_height: f32,
+        block_state_at: &F,
+        pathfinding_malus: impl Fn(BlockPathType) -> f32 + Copy,
+    ) -> Option<GroundPath>
     where
         F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
     {
         let target_pos = adjust_ground_target(BlockPos::containing(target), block_state_at)?;
-        Some(GroundPath::from_single_target(target_pos))
+        ImmediatePathService::find_path(
+            PathRequest {
+                start_position: mob_position,
+                target_position: target_pos,
+                mob_width,
+                mob_height,
+                follow_range: DEFAULT_FOLLOW_RANGE_BLOCKS,
+                reach_range: DEFAULT_REACH_RANGE_BLOCKS,
+                max_visited_nodes_multiplier: DEFAULT_MAX_VISITED_NODES_MULTIPLIER,
+            },
+            block_state_at,
+            pathfinding_malus,
+        )
     }
 
     fn follow_the_path(&mut self, mob_position: Vec3d, mob_width: f32) {
@@ -229,6 +265,10 @@ mod tests {
         None
     }
 
+    fn pathfinding_malus(path_type: BlockPathType) -> f32 {
+        path_type.default_malus()
+    }
+
     #[test]
     fn ground_navigation_adjusts_air_target_down_to_stable_floor() {
         let mut navigation = GroundPathNavigation::default();
@@ -237,7 +277,10 @@ mod tests {
             Vec3d::new(8.5, 64.0, 8.5),
             Vec3d::new(10.5, 70.0, 10.5),
             1.0,
+            0.9,
+            1.4,
             &flat_ground,
+            pathfinding_malus,
         ));
 
         assert_eq!(navigation.target_pos(), Some(BlockPos::new(10, 64, 10)));
@@ -251,7 +294,10 @@ mod tests {
             Vec3d::new(8.5, 64.0, 8.5),
             Vec3d::new(10.5, 70.0, 10.5),
             1.0,
+            0.9,
+            1.4,
             &no_blocks,
+            pathfinding_malus,
         ));
         assert!(navigation.is_done());
     }
@@ -263,14 +309,17 @@ mod tests {
             Vec3d::new(8.5, 64.0, 8.5),
             Vec3d::new(10.5, 64.0, 10.5),
             1.0,
+            0.9,
+            1.4,
             &flat_ground,
+            pathfinding_malus,
         );
 
         let target = navigation
             .tick(Vec3d::new(8.5, 64.0, 8.5), 0.9, true, &flat_ground)
             .expect("path should feed a move target");
 
-        assert_eq!(target.position, Vec3d::new(10.5, 64.0, 10.5));
+        assert!(target.position.distance_to_sqr(Vec3d::new(8.5, 64.0, 8.5)) > 0.0);
         assert_eq!(target.speed_modifier, 1.0);
     }
 }

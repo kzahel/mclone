@@ -1,5 +1,5 @@
 use mclone_blocks::{BlockFluidKind, block_collision_aabb, block_fluid_kind, terrain_id};
-use mclone_core::{BlockPos, BlockStateId};
+use mclone_core::{BlockPos, BlockStateId, Vec3d};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) enum BlockPathType {
@@ -20,9 +20,98 @@ impl BlockPathType {
     }
 }
 
-pub(crate) struct WalkNodeEvaluator;
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct PathNeighbor {
+    pub(super) pos: BlockPos,
+    pub(super) path_type: BlockPathType,
+    pub(super) cost_malus: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WalkNodeEvaluator {
+    entity_width_blocks: i32,
+    entity_height_blocks: i32,
+    entity_depth_blocks: i32,
+}
 
 impl WalkNodeEvaluator {
+    pub(super) fn new(entity_width: f32, entity_height: f32) -> Self {
+        Self {
+            entity_width_blocks: (entity_width + 1.0).floor().max(1.0) as i32,
+            entity_height_blocks: (entity_height + 1.0).floor().max(1.0) as i32,
+            entity_depth_blocks: (entity_width + 1.0).floor().max(1.0) as i32,
+        }
+    }
+
+    pub(super) fn get_start<F, M>(
+        &self,
+        position: Vec3d,
+        block_state_at: &F,
+        pathfinding_malus: M,
+    ) -> Option<BlockPos>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
+        M: Fn(BlockPathType) -> f32 + Copy,
+    {
+        let mut pos = BlockPos::new(
+            position.x.floor() as i32,
+            (position.y + 0.5).floor() as i32,
+            position.z.floor() as i32,
+        );
+
+        for _ in 0..16 {
+            if self
+                .accepted_at(block_state_at, pathfinding_malus, pos)
+                .is_some()
+            {
+                return Some(pos);
+            }
+            pos = pos.below();
+        }
+        None
+    }
+
+    pub(super) fn get_neighbors<F, M>(
+        &self,
+        pos: BlockPos,
+        block_state_at: &F,
+        pathfinding_malus: M,
+    ) -> Vec<PathNeighbor>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
+        M: Fn(BlockPathType) -> f32 + Copy,
+    {
+        let south = self.find_accepted_node(block_state_at, pathfinding_malus, pos, 0, 1);
+        let west = self.find_accepted_node(block_state_at, pathfinding_malus, pos, -1, 0);
+        let east = self.find_accepted_node(block_state_at, pathfinding_malus, pos, 1, 0);
+        let north = self.find_accepted_node(block_state_at, pathfinding_malus, pos, 0, -1);
+
+        let mut neighbors = Vec::with_capacity(8);
+        push_neighbor(&mut neighbors, south);
+        push_neighbor(&mut neighbors, west);
+        push_neighbor(&mut neighbors, east);
+        push_neighbor(&mut neighbors, north);
+
+        let northwest = self.find_accepted_node(block_state_at, pathfinding_malus, pos, -1, -1);
+        if is_diagonal_valid(west, north, northwest) {
+            push_neighbor(&mut neighbors, northwest);
+        }
+        let northeast = self.find_accepted_node(block_state_at, pathfinding_malus, pos, 1, -1);
+        if is_diagonal_valid(east, north, northeast) {
+            push_neighbor(&mut neighbors, northeast);
+        }
+        let southwest = self.find_accepted_node(block_state_at, pathfinding_malus, pos, -1, 1);
+        if is_diagonal_valid(west, south, southwest) {
+            push_neighbor(&mut neighbors, southwest);
+        }
+        let southeast = self.find_accepted_node(block_state_at, pathfinding_malus, pos, 1, 1);
+        if is_diagonal_valid(east, south, southeast) {
+            push_neighbor(&mut neighbors, southeast);
+        }
+
+        neighbors
+    }
+
     pub(crate) fn get_block_path_type_static<F>(block_state_at: &F, pos: BlockPos) -> BlockPathType
     where
         F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
@@ -117,6 +206,73 @@ impl WalkNodeEvaluator {
             },
         }
     }
+
+    fn find_accepted_node<F, M>(
+        &self,
+        block_state_at: &F,
+        pathfinding_malus: M,
+        from: BlockPos,
+        dx: i32,
+        dz: i32,
+    ) -> Option<PathNeighbor>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
+        M: Fn(BlockPathType) -> f32 + Copy,
+    {
+        let same_y = from.offset(dx, 0, dz);
+        self.accepted_at(block_state_at, pathfinding_malus, same_y)
+            .or_else(|| self.accepted_at(block_state_at, pathfinding_malus, same_y.below()))
+    }
+
+    fn accepted_at<F, M>(
+        &self,
+        block_state_at: &F,
+        pathfinding_malus: M,
+        pos: BlockPos,
+    ) -> Option<PathNeighbor>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
+        M: Fn(BlockPathType) -> f32 + Copy,
+    {
+        let path_type = Self::get_block_path_type_static(block_state_at, pos);
+        let cost_malus = pathfinding_malus(path_type);
+        if path_type != BlockPathType::Walkable || !(0.0..8.0).contains(&cost_malus) {
+            return None;
+        }
+
+        for dx in 0..self.entity_width_blocks {
+            for dz in 0..self.entity_depth_blocks {
+                for dy in 0..self.entity_height_blocks {
+                    if !Self::is_open(block_state_at, pos.offset(dx, dy, dz)) {
+                        return None;
+                    }
+                }
+                if !Self::is_stable_destination(block_state_at, pos.offset(dx, 0, dz)) {
+                    return None;
+                }
+            }
+        }
+
+        Some(PathNeighbor {
+            pos,
+            path_type,
+            cost_malus,
+        })
+    }
+}
+
+fn push_neighbor(neighbors: &mut Vec<PathNeighbor>, neighbor: Option<PathNeighbor>) {
+    if let Some(neighbor) = neighbor {
+        neighbors.push(neighbor);
+    }
+}
+
+fn is_diagonal_valid(
+    first_cardinal: Option<PathNeighbor>,
+    second_cardinal: Option<PathNeighbor>,
+    diagonal: Option<PathNeighbor>,
+) -> bool {
+    diagonal.is_some() && first_cardinal.is_some() && second_cardinal.is_some()
 }
 
 #[cfg(test)]
@@ -169,6 +325,50 @@ mod tests {
         assert_eq!(
             WalkNodeEvaluator::get_block_path_type_static(&terrain, BlockPos::new(2, 64, 0)),
             BlockPathType::Open
+        );
+    }
+
+    #[test]
+    fn start_uses_on_ground_y_and_entity_clearance() {
+        let evaluator = WalkNodeEvaluator::new(0.9, 1.4);
+
+        assert_eq!(
+            evaluator.get_start(
+                Vec3d::new(0.5, 64.0, 0.5),
+                &terrain,
+                BlockPathType::default_malus
+            ),
+            Some(BlockPos::new(0, 64, 0))
+        );
+    }
+
+    #[test]
+    fn neighbors_include_one_block_drop_but_not_unsupported_air() {
+        fn stepped_ground(pos: BlockPos) -> Option<BlockStateId> {
+            let floor_y = if pos.x <= 0 { 63 } else { 62 };
+            Some(if pos.y == floor_y {
+                state(1)
+            } else {
+                state(terrain_id::AIR)
+            })
+        }
+
+        let evaluator = WalkNodeEvaluator::new(0.9, 1.4);
+        let neighbors = evaluator.get_neighbors(
+            BlockPos::new(0, 64, 0),
+            &stepped_ground,
+            BlockPathType::default_malus,
+        );
+
+        assert!(
+            neighbors
+                .iter()
+                .any(|node| node.pos == BlockPos::new(1, 63, 0))
+        );
+        assert!(
+            !neighbors
+                .iter()
+                .any(|node| node.pos == BlockPos::new(1, 64, 0))
         );
     }
 }

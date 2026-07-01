@@ -5,14 +5,20 @@ pub(super) struct GroundPath {
     nodes: Vec<BlockPos>,
     next_node_index: usize,
     target: BlockPos,
+    reached: bool,
 }
 
 impl GroundPath {
     pub(super) fn from_single_target(target: BlockPos) -> Self {
+        Self::from_nodes(vec![target], target, true)
+    }
+
+    pub(super) fn from_nodes(nodes: Vec<BlockPos>, target: BlockPos, reached: bool) -> Self {
         Self {
-            nodes: vec![target],
+            nodes,
             next_node_index: 0,
             target,
+            reached,
         }
     }
 
@@ -26,6 +32,18 @@ impl GroundPath {
 
     pub(super) fn target(&self) -> BlockPos {
         self.target
+    }
+
+    pub(super) fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub(super) fn can_reach(&self) -> bool {
+        self.reached
+    }
+
+    pub(super) fn nodes(&self) -> &[BlockPos] {
+        &self.nodes
     }
 
     pub(super) fn next_node_pos(&self) -> Option<BlockPos> {
@@ -56,6 +74,22 @@ mod tests {
         assert_eq!(
             chicken_path.next_entity_pos(0.4),
             Vec3d::new(1.5, 64.0, 2.5)
+        );
+    }
+
+    #[test]
+    fn path_tracks_reachability_and_nodes() {
+        let path = GroundPath::from_nodes(
+            vec![BlockPos::new(0, 64, 0), BlockPos::new(1, 64, 0)],
+            BlockPos::new(1, 64, 0),
+            false,
+        );
+
+        assert_eq!(path.node_count(), 2);
+        assert!(!path.can_reach());
+        assert_eq!(
+            path.nodes(),
+            &[BlockPos::new(0, 64, 0), BlockPos::new(1, 64, 0)]
         );
     }
 }

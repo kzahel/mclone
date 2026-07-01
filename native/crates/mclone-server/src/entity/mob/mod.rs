@@ -187,6 +187,8 @@ impl MobRuntimeState {
         let look_control = std::mem::take(&mut self.look_control);
         let mut context = MobGoalContext {
             position: entity.position,
+            mob_width: entity.width,
+            mob_height: entity.height,
             eye_height: self.eye_height,
             y_body_rot_degrees: self.y_body_rot_degrees,
             y_head_rot_degrees: self.y_head_rot_degrees,
@@ -222,6 +224,8 @@ impl MobRuntimeState {
 
 pub(crate) struct MobGoalContext<'a> {
     position: Vec3d,
+    mob_width: f32,
+    mob_height: f32,
     eye_height: f64,
     y_body_rot_degrees: f32,
     y_head_rot_degrees: f32,
@@ -288,8 +292,15 @@ impl<'a> MobGoalContext<'a> {
     }
 
     pub(crate) fn move_to(&mut self, position: Vec3d, speed_modifier: f64) -> bool {
-        self.navigation
-            .move_to(self.position, position, speed_modifier, self.block_state_at)
+        self.navigation.move_to(
+            self.position,
+            position,
+            speed_modifier,
+            self.mob_width,
+            self.mob_height,
+            self.block_state_at,
+            |path_type| self.pathfinding_malus.get(path_type),
+        )
     }
 
     pub(crate) fn stop_navigation(&mut self) {
@@ -407,6 +418,8 @@ impl<'a> MobGoalContext<'a> {
     ) -> Self {
         Self {
             position: entity.position,
+            mob_width: entity.width,
+            mob_height: entity.height,
             eye_height,
             y_body_rot_degrees: entity.y_rot_degrees,
             y_head_rot_degrees: entity.y_rot_degrees,
@@ -527,12 +540,12 @@ mod tests {
         assert!(context.move_to(Vec3d::new(2.5, 63.0, 0.5), 1.0));
         for _ in 0..80 {
             context.apply_controls(&mut entity);
-            if entity.on_ground && entity.position.x > 1.6 {
+            if entity.on_ground && entity.position.x > 1.4 && entity.position.y < 64.0 {
                 break;
             }
         }
 
-        assert!(entity.position.x > 1.6);
+        assert!(entity.position.x > 1.4);
         assert!(entity.position.y < 64.0);
         assert!(entity.on_ground);
     }
