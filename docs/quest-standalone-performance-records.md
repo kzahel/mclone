@@ -43,6 +43,8 @@ Automated no-clip flight at walking-like speed:
 ```bash
 pnpm native:android-xr:perf:flight:rd1
 pnpm native:android-xr:perf:flight:rd5
+pnpm native:android-xr:perf:flight:rd7:metrics
+pnpm native:android-xr:perf:flight:rd7:frame-overlap
 pnpm native:android-xr:perf:flight:rd10
 pnpm native:android-xr:perf:flight:rd10:metrics
 pnpm native:android-xr:perf:flight:rd10:frame-overlap
@@ -54,6 +56,8 @@ Settled stationary render isolation:
 ```bash
 pnpm native:android-xr:perf:stationary:rd1
 pnpm native:android-xr:perf:stationary:rd5
+pnpm native:android-xr:perf:stationary:rd7:metrics
+pnpm native:android-xr:perf:stationary:rd7:frame-overlap
 pnpm native:android-xr:perf:stationary:rd10
 pnpm native:android-xr:perf:stationary:rd10:metrics
 pnpm native:android-xr:perf:stationary:rd10:frame-overlap
@@ -76,6 +80,10 @@ disable locomotion, wait for no server queues, no compile jobs, no rebuilds, no
 uploads, and no poll changes after a minimum 5 second settle window, then record
 a 20 second steady-state render sample. Persistent deferred render sections are
 recorded as a steady-state condition rather than blocking the sample forever.
+RD7 is the current "hopefully stable" live lane for comfort and product-style
+interpretation. RD10 remains the stress lane for exposing bursty work and tail
+regressions; it should not be the only pass/fail signal for a pacing change.
+
 Frozen samples use the same settle gate, then skip runtime polling, section
 sync, traversal-ready refresh, and GPU section uploads during the measured
 window. They render from the configured startup `--view-pose`, not the live
@@ -173,7 +181,7 @@ Interpretation:
   `max_terrain_runtime_upload_ms` bucket dropped to `0.000ms` in both overlap
   runs.
 - The next practical performance step is to combine frame overlap with the
-  shipping-policy levers: benchmark RD7/RD8 and/or a moderate render scale, then
+  shipping-policy levers: benchmark RD7 and/or a moderate render scale, then
   make dynamic render distance/render scale the default policy while keeping
   fixed RD10 as the stress lane.
 
