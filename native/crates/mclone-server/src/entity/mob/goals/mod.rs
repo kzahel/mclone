@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub(crate) mod passive;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum GoalFlag {
     Move,
@@ -71,22 +73,22 @@ impl GoalFlags {
     }
 }
 
-pub(crate) trait Goal {
-    fn can_use(&mut self) -> bool;
+pub(crate) trait Goal<C> {
+    fn can_use(&mut self, context: &mut C) -> bool;
 
-    fn can_continue_to_use(&mut self) -> bool {
-        self.can_use()
+    fn can_continue_to_use(&mut self, context: &mut C) -> bool {
+        self.can_use(context)
     }
 
     fn is_interruptable(&self) -> bool {
         true
     }
 
-    fn start(&mut self) {}
+    fn start(&mut self, _context: &mut C) {}
 
-    fn stop(&mut self) {}
+    fn stop(&mut self, _context: &mut C) {}
 
-    fn tick(&mut self) {}
+    fn tick(&mut self, _context: &mut C) {}
 
     fn flags(&self) -> GoalFlags {
         GoalFlags::NONE
@@ -95,14 +97,14 @@ pub(crate) trait Goal {
     fn set_flags(&mut self, _flags: GoalFlags) {}
 }
 
-struct WrappedGoal {
+struct WrappedGoal<C> {
     priority: i32,
-    goal: Box<dyn Goal>,
+    goal: Box<dyn Goal<C>>,
     is_running: bool,
 }
 
-impl WrappedGoal {
-    fn new(priority: i32, goal: Box<dyn Goal>) -> Self {
+impl<C> WrappedGoal<C> {
+    fn new(priority: i32, goal: Box<dyn Goal<C>>) -> Self {
         Self {
             priority,
             goal,
@@ -114,30 +116,30 @@ impl WrappedGoal {
         self.goal.is_interruptable() && candidate_priority < self.priority
     }
 
-    fn can_use(&mut self) -> bool {
-        self.goal.can_use()
+    fn can_use(&mut self, context: &mut C) -> bool {
+        self.goal.can_use(context)
     }
 
-    fn can_continue_to_use(&mut self) -> bool {
-        self.goal.can_continue_to_use()
+    fn can_continue_to_use(&mut self, context: &mut C) -> bool {
+        self.goal.can_continue_to_use(context)
     }
 
-    fn start(&mut self) {
+    fn start(&mut self, context: &mut C) {
         if !self.is_running {
             self.is_running = true;
-            self.goal.start();
+            self.goal.start(context);
         }
     }
 
-    fn stop(&mut self) {
+    fn stop(&mut self, context: &mut C) {
         if self.is_running {
             self.is_running = false;
-            self.goal.stop();
+            self.goal.stop(context);
         }
     }
 
-    fn tick(&mut self) {
-        self.goal.tick();
+    fn tick(&mut self, context: &mut C) {
+        self.goal.tick(context);
     }
 
     fn is_running(&self) -> bool {
@@ -153,15 +155,15 @@ impl WrappedGoal {
     }
 }
 
-pub(crate) struct GoalSelector {
+pub(crate) struct GoalSelector<C> {
     locked_flags: [Option<usize>; 4],
-    available_goals: Vec<WrappedGoal>,
+    available_goals: Vec<WrappedGoal<C>>,
     disabled_flags: GoalFlags,
     tick_count: i32,
     new_goal_rate: i32,
 }
 
-impl Default for GoalSelector {
+impl<C> Default for GoalSelector<C> {
     fn default() -> Self {
         Self {
             locked_flags: [None; 4],
@@ -173,8 +175,20 @@ impl Default for GoalSelector {
     }
 }
 
-impl GoalSelector {
-    pub(crate) fn add_goal(&mut self, priority: i32, goal: impl Goal + 'static) {
+impl<C> std::fmt::Debug for GoalSelector<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GoalSelector")
+            .field("available_goals", &self.available_goals.len())
+            .field("running_goals", &self.running_goal_count())
+            .field("disabled_flags", &self.disabled_flags)
+            .field("tick_count", &self.tick_count)
+            .field("new_goal_rate", &self.new_goal_rate)
+            .finish()
+    }
+}
+
+impl<C> GoalSelector<C> {
+    pub(crate) fn add_goal(&mut self, priority: i32, goal: impl Goal<C> + 'static) {
         self.available_goals
             .push(WrappedGoal::new(priority, Box::new(goal)));
     }
@@ -184,11 +198,11 @@ impl GoalSelector {
         self.locked_flags = [None; 4];
     }
 
-    pub(crate) fn tick(&mut self) {
-        self.cleanup_running_goals();
+    pub(crate) fn tick(&mut self, context: &mut C) {
+        self.cleanup_running_goals(context);
         self.clear_stopped_locked_flags();
-        self.update_available_goals();
-        self.tick_running_goals();
+        self.update_available_goals(context);
+        self.tick_running_goals(context);
     }
 
     pub(crate) fn set_new_goal_rate(&mut self, new_goal_rate: i32) {
@@ -222,13 +236,13 @@ impl GoalSelector {
         self.available_goals.len()
     }
 
-    fn cleanup_running_goals(&mut self) {
+    fn cleanup_running_goals(&mut self, context: &mut C) {
         for goal in &mut self.available_goals {
             if !goal.is_running() {
                 continue;
             }
-            if goal.flags().intersects(self.disabled_flags) || !goal.can_continue_to_use() {
-                goal.stop();
+            if goal.flags().intersects(self.disabled_flags) || !goal.can_continue_to_use(context) {
+                goal.stop(context);
             }
         }
     }
@@ -241,7 +255,7 @@ impl GoalSelector {
         }
     }
 
-    fn update_available_goals(&mut self) {
+    fn update_available_goals(&mut self, context: &mut C) {
         for candidate_index in 0..self.available_goals.len() {
             if self.available_goals[candidate_index].is_running() {
                 continue;
@@ -253,17 +267,17 @@ impl GoalSelector {
             if !self.can_use_locked_flags(candidate_index, candidate_flags) {
                 continue;
             }
-            if !self.available_goals[candidate_index].can_use() {
+            if !self.available_goals[candidate_index].can_use(context) {
                 continue;
             }
 
             for flag in candidate_flags.iter() {
                 if let Some(locked_index) = self.locked_flags[flag.index()] {
-                    self.available_goals[locked_index].stop();
+                    self.available_goals[locked_index].stop(context);
                 }
                 self.locked_flags[flag.index()] = Some(candidate_index);
             }
-            self.available_goals[candidate_index].start();
+            self.available_goals[candidate_index].start(context);
         }
     }
 
@@ -276,10 +290,10 @@ impl GoalSelector {
         })
     }
 
-    fn tick_running_goals(&mut self) {
+    fn tick_running_goals(&mut self, context: &mut C) {
         for goal in &mut self.available_goals {
             if goal.is_running() {
-                goal.tick();
+                goal.tick(context);
             }
         }
     }
@@ -340,6 +354,14 @@ mod tests {
         handle: ProbeHandle,
     }
 
+    #[derive(Default)]
+    struct TestGoalContext;
+
+    fn tick(selector: &mut GoalSelector<TestGoalContext>) {
+        let mut context = TestGoalContext;
+        selector.tick(&mut context);
+    }
+
     impl ProbeGoal {
         fn new(name: &'static str, flags: GoalFlags, events: EventLog) -> (Self, ProbeHandle) {
             Self::with_interruptable(name, flags, true, events)
@@ -368,13 +390,13 @@ mod tests {
         }
     }
 
-    impl Goal for ProbeGoal {
-        fn can_use(&mut self) -> bool {
+    impl Goal<TestGoalContext> for ProbeGoal {
+        fn can_use(&mut self, _context: &mut TestGoalContext) -> bool {
             self.events.push(Event::CanUse(self.name));
             self.handle.can_use.get()
         }
 
-        fn can_continue_to_use(&mut self) -> bool {
+        fn can_continue_to_use(&mut self, _context: &mut TestGoalContext) -> bool {
             self.events.push(Event::CanContinue(self.name));
             self.handle.can_continue.get()
         }
@@ -383,15 +405,15 @@ mod tests {
             self.interruptable
         }
 
-        fn start(&mut self) {
+        fn start(&mut self, _context: &mut TestGoalContext) {
             self.events.push(Event::Start(self.name));
         }
 
-        fn stop(&mut self) {
+        fn stop(&mut self, _context: &mut TestGoalContext) {
             self.events.push(Event::Stop(self.name));
         }
 
-        fn tick(&mut self) {
+        fn tick(&mut self, _context: &mut TestGoalContext) {
             self.events.push(Event::Tick(self.name));
         }
 
@@ -413,11 +435,11 @@ mod tests {
         new_handle.set_can_use(false);
         selector.add_goal(5, old);
         selector.add_goal(1, new);
-        selector.tick();
+        tick(&mut selector);
         events.take();
         new_handle.set_can_use(true);
 
-        selector.tick();
+        tick(&mut selector);
 
         assert_eq!(selector.running_goal_count(), 1);
         assert_eq!(
@@ -442,11 +464,11 @@ mod tests {
         new_handle.set_can_use(false);
         selector.add_goal(5, old);
         selector.add_goal(1, new);
-        selector.tick();
+        tick(&mut selector);
         events.take();
         new_handle.set_can_use(true);
 
-        selector.tick();
+        tick(&mut selector);
 
         assert_eq!(selector.running_goal_count(), 1);
         assert_eq!(
@@ -464,11 +486,11 @@ mod tests {
         new_handle.set_can_use(false);
         selector.add_goal(5, old);
         selector.add_goal(5, new);
-        selector.tick();
+        tick(&mut selector);
         events.take();
         new_handle.set_can_use(true);
 
-        selector.tick();
+        tick(&mut selector);
 
         assert_eq!(
             events.take(),
@@ -485,13 +507,13 @@ mod tests {
         new_handle.set_can_use(false);
         selector.add_goal(5, old);
         selector.add_goal(1, new);
-        selector.tick();
+        tick(&mut selector);
         events.take();
         old_handle.set_can_continue(false);
         old_handle.set_can_use(false);
         new_handle.set_can_use(true);
 
-        selector.tick();
+        tick(&mut selector);
 
         assert_eq!(
             events.take(),
@@ -512,11 +534,11 @@ mod tests {
         let events = EventLog::default();
         let (goal, _goal_handle) = ProbeGoal::new("move", GoalFlags::MOVE, events.clone());
         selector.add_goal(0, goal);
-        selector.tick();
+        tick(&mut selector);
         events.take();
 
         selector.disable_control_flag(GoalFlag::Move);
-        selector.tick();
+        tick(&mut selector);
 
         assert_eq!(selector.running_goal_count(), 0);
         assert_eq!(events.take(), vec![Event::Stop("move")]);
@@ -531,7 +553,7 @@ mod tests {
         selector.add_goal(0, move_goal);
         selector.add_goal(0, look_goal);
 
-        selector.tick();
+        tick(&mut selector);
 
         assert_eq!(selector.running_goal_count(), 2);
         assert_eq!(

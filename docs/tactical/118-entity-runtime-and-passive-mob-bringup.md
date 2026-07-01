@@ -12,10 +12,10 @@ entity/mob/goal skeleton is in place.
 
 Workstream: native Rust shared server/runtime, desktop validation first.
 
-Status: Slices 0-3 landed. The starter passive entity path is split under
+Status: Slices 0-4 landed. The starter passive entity path is split under
 `native/crates/mclone-server/src/entity/`, and entity visibility/tick-list
-boundaries, passive cow/chicken metadata, and a standalone goal selector now
-exist before real mob AI work.
+boundaries, passive cow/chicken metadata, a standalone goal selector, and a
+first cow passive AI/control path now exist before chicken-specific work.
 
 ## Non-Negotiable Constraints
 
@@ -53,6 +53,8 @@ Read before implementation:
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/ai/goal/WaterAvoidingRandomStrollGoal.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/ai/goal/LookAtPlayerGoal.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/ai/goal/RandomLookAroundGoal.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/entity/ai/control/MoveControl.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/entity/ai/control/LookControl.java`
 
 Existing native modules to consume rather than duplicate:
 
@@ -237,7 +239,7 @@ Landed notes:
   replacement, non-interruptible locks, same-priority blocking, phase order,
   disabled flags, and independent flag coexistence.
 
-## Slice 4 - Cow Baseline Behavior
+## Slice 4 - Cow Baseline Behavior (Landed)
 
 Purpose: prove the reusable mob stack on the existing starter cow before adding
 species-specific chicken state.
@@ -272,6 +274,26 @@ Done when:
 - Client interpolation sees authoritative cow updates.
 - A desktop headless screenshot or small movement smoke captures the cow after
   behavior is active.
+
+Landed notes:
+
+- Converted `GoalSelector` to a typed-context selector so real goals can read
+  mob/player/control context without embedding animal logic in the selector.
+- Added `entity/mob/control.rs` with narrow `MoveControl` and `LookControl`
+  scaffolding based on Java `MoveControl` / `LookControl` rotation semantics.
+- Added `entity/mob/goals/passive.rs` with cow's first passive goal subset:
+  water-avoiding random stroll, look at nearest player, and random look around
+  at the Java cow priorities 5/6/7.
+- Threaded nearby player positions into entity ticking from `IntegratedServer`
+  while keeping ticking gated by scheduler-provided `ENTITY_TICKING` chunks.
+- Kept full `PathNavigation`, collision-aware `LandRandomPos`, and
+  `LivingEntity.travel(...)` out of this slice; the temporary stroll target is
+  local and deterministic but still flows through the shared move-control
+  boundary.
+- Added tests for selector context use, move/look controls, look-at-player
+  target application, cow goal registration, visibility-gated ticking, and a
+  small server-side cow movement smoke.
+- Verified with `cargo test --manifest-path native/Cargo.toml -p mclone-server`.
 
 ## Slice 5 - Chicken Asset And Species State
 

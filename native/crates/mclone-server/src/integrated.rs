@@ -20,7 +20,9 @@ use mclone_worldgen::block::{AIR, RawBlockId, generated_block_state_id};
 
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
-use crate::entity::{EntityTracking, RoutedEntityUpdate, ServerEntityState, ServerEntityStore};
+use crate::entity::{
+    EntityTracking, MobPlayerTarget, RoutedEntityUpdate, ServerEntityState, ServerEntityStore,
+};
 use crate::falling_block::{
     BlockTickList, BlockTickPhaseReport, basic_falling_block_move,
     block_tick_requests_after_block_change,
@@ -246,6 +248,17 @@ impl IntegratedServer {
         self.dedicated_players.position(player_id)
     }
 
+    fn mob_player_targets(&self) -> Vec<MobPlayerTarget> {
+        let mut targets = Vec::with_capacity(self.dedicated_players.len() + 1);
+        targets.push(MobPlayerTarget::from_position(self.player.position()));
+        targets.extend(
+            self.dedicated_players
+                .iter()
+                .map(|(_, entry)| MobPlayerTarget::from_position(entry.state.position())),
+        );
+        targets
+    }
+
     pub fn handle_command(&mut self, command: ClientCommand) -> Vec<ServerUpdate> {
         self.try_handle_command(command)
             .expect("integrated server command failed")
@@ -469,9 +482,10 @@ impl IntegratedServer {
 
         let entity_tick_start = simulation_timing_start();
         let entity_tick_chunks = run_noop_simulation_phase(&tick_report.entity_ticking_chunks);
+        let mob_player_targets = self.mob_player_targets();
         let entity_updates = self
             .entities
-            .tick_stationary(&tick_report.entity_ticking_chunks);
+            .tick_stationary(&tick_report.entity_ticking_chunks, &mob_player_targets);
         #[cfg(feature = "physics-rapier")]
         let mut entity_updates = entity_updates;
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
@@ -2111,7 +2125,7 @@ mod tests {
         let update = first_entity_update(&report.updates, snapshot.id).expect("entity age update");
 
         assert_eq!(update.id, snapshot.id);
-        assert_eq!(update.position, snapshot.position);
+        assert!(update.position.is_finite());
         assert!(update.age_ticks > snapshot.age_ticks);
     }
 

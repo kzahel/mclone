@@ -12,6 +12,7 @@ mod tick_list;
 mod tracking;
 mod visibility;
 
+pub(crate) use mob::MobPlayerTarget;
 pub(crate) use state::ServerEntityState;
 #[cfg(feature = "physics-rapier")]
 pub(crate) use store::DebugPhysicsCubeEntitySpawn;

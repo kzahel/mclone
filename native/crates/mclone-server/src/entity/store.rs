@@ -7,7 +7,7 @@ use mclone_protocol::{EntityId, EntityKind};
 
 use super::ServerEntityState;
 use super::metadata::EntityMetadata;
-use super::mob::MobRuntimeState;
+use super::mob::{MobPlayerTarget, MobRuntimeState};
 use super::tick_list::ServerEntityTickList;
 
 #[derive(Debug, Default)]
@@ -151,6 +151,7 @@ impl ServerEntityStore {
     pub(crate) fn tick_stationary(
         &mut self,
         entity_ticking_chunks: &[ChunkPos],
+        nearby_players: &[MobPlayerTarget],
     ) -> Vec<ServerEntityState> {
         let entity_ticking_chunks = entity_ticking_chunks
             .iter()
@@ -168,7 +169,7 @@ impl ServerEntityStore {
         for id in self.tick_list.iteration_ids() {
             if let Some(entity) = self.entities.get_mut(&id) {
                 if let Some(mob) = self.mobs.get_mut(&id) {
-                    mob.sync_from_entity(*entity);
+                    mob.tick_entity(entity, nearby_players);
                 }
                 entity.age_ticks = entity.age_ticks.saturating_add(1);
                 updated.push(*entity);
@@ -286,7 +287,9 @@ mod tests {
         assert_eq!(entity.position, Vec3d::new(14.5, 64.0, 14.5));
         let mob = store.mob_state(first).expect("starter cow mob state");
         assert_eq!(mob.movement_speed(), metadata.movement_speed);
+        assert_eq!(mob.eye_height(), metadata.standing_eye_height() as f64);
         assert_eq!(mob.pathfinding_malus(BlockPathType::Water), 8.0);
+        assert_eq!(mob.available_goal_count(), 3);
     }
 
     #[test]
@@ -306,6 +309,7 @@ mod tests {
         let mob = store.mob_state(id).expect("chicken mob state");
         assert_eq!(mob.movement_speed(), metadata.movement_speed);
         assert_eq!(mob.pathfinding_malus(BlockPathType::Water), 0.0);
+        assert_eq!(mob.available_goal_count(), 0);
     }
 
     #[test]
@@ -313,7 +317,11 @@ mod tests {
         let mut store = ServerEntityStore::default();
         let id = store.ensure_starter_passive_near_spawn(Vec3d::new(8.0, 64.0, 8.0));
 
-        assert!(store.tick_stationary(&[ChunkPos::new(1, 0)]).is_empty());
+        assert!(
+            store
+                .tick_stationary(&[ChunkPos::new(1, 0)], &[])
+                .is_empty()
+        );
         assert_eq!(store.state(id).unwrap().age_ticks, 0);
         assert_eq!(
             store.diagnostics(),
@@ -323,7 +331,7 @@ mod tests {
             }
         );
 
-        let updated = store.tick_stationary(&[ChunkPos::new(0, 0)]);
+        let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[]);
 
         assert_eq!(updated.len(), 1);
         assert_eq!(updated[0].id, id);
@@ -341,9 +349,9 @@ mod tests {
     fn entity_tick_list_demotes_without_removing_stored_entity() {
         let mut store = ServerEntityStore::default();
         let id = store.ensure_starter_passive_near_spawn(Vec3d::new(8.0, 64.0, 8.0));
-        store.tick_stationary(&[ChunkPos::new(0, 0)]);
+        store.tick_stationary(&[ChunkPos::new(0, 0)], &[]);
 
-        let updated = store.tick_stationary(&[]);
+        let updated = store.tick_stationary(&[], &[]);
 
         assert!(updated.is_empty());
         assert_eq!(store.state(id).unwrap().age_ticks, 1);
@@ -354,5 +362,31 @@ mod tests {
                 ticking_entities: 0
             }
         );
+    }
+
+    #[test]
+    fn ticking_starter_cow_eventually_applies_passive_movement() {
+        let mut store = ServerEntityStore::default();
+        let id = store.ensure_starter_passive_near_spawn(Vec3d::new(8.0, 64.0, 8.0));
+        let start = store.state(id).unwrap();
+
+        let mut moved = None;
+        for _ in 0..2_000 {
+            let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[]);
+            let entity = updated
+                .into_iter()
+                .find(|entity| entity.id == id)
+                .expect("starter cow should tick while chunk is entity ticking");
+            if entity.position != start.position {
+                moved = Some(entity);
+                break;
+            }
+        }
+
+        let moved = moved.expect("cow passive AI should choose a stroll target");
+        assert!(moved.age_ticks > start.age_ticks);
+        assert!(moved.position.distance_to_sqr(start.position) > 0.0);
+        let mob = store.mob_state(id).expect("starter cow mob state");
+        assert!(mob.running_goal_count() > 0);
     }
 }
