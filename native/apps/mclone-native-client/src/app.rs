@@ -1555,6 +1555,7 @@ mod tests {
             mclone_protocol::EntitySnapshot {
                 id: mclone_protocol::EntityId(1),
                 kind: mclone_protocol::EntityKind::Cow,
+                item_stack: None,
                 position: Vec3d::new(3.0, 64.0, 4.0),
                 y_rot_degrees: 45.0,
                 x_rot_degrees: 0.0,

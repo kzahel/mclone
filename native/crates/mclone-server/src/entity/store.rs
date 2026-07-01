@@ -3,9 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use mclone_core::{BlockPos, BlockStateId, ChunkPos, Vec3d};
 #[cfg(feature = "physics-rapier")]
 use mclone_protocol::EntityRotation;
-use mclone_protocol::{EntityId, EntityKind};
+use mclone_protocol::{EntityId, EntityKind, ItemKind, ItemStackSnapshot};
 
 use super::ServerEntityState;
+use super::item::{ITEM_ENTITY_LIFETIME_TICKS, ItemEntityRuntimeState};
 use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
 use super::mob::{MobPlayerTarget, MobRuntimeState};
 use super::tick_list::ServerEntityTickList;
@@ -14,6 +15,7 @@ use super::tick_list::ServerEntityTickList;
 pub(crate) struct ServerEntityStore {
     entities: BTreeMap<EntityId, ServerEntityState>,
     mobs: BTreeMap<EntityId, MobRuntimeState>,
+    items: BTreeMap<EntityId, ItemEntityRuntimeState>,
     tick_list: ServerEntityTickList,
     next_entity_id: u64,
     debug_passive_showcase_ids: Vec<(EntityKind, EntityId)>,
@@ -188,6 +190,11 @@ impl ServerEntityStore {
         self.mobs.get(&id)
     }
 
+    #[cfg(test)]
+    pub(crate) fn item_state(&self, id: EntityId) -> Option<&ItemEntityRuntimeState> {
+        self.items.get(&id)
+    }
+
     pub(crate) fn tick_stationary<F>(
         &mut self,
         entity_ticking_chunks: &[ChunkPos],
@@ -210,14 +217,40 @@ impl ServerEntityStore {
             &entity_ticking_chunks,
         );
         let mut updated = Vec::new();
+        let mut egg_spawns = Vec::new();
+        let mut removed_ids = Vec::new();
         for id in self.tick_list.iteration_ids() {
             if let Some(entity) = self.entities.get_mut(&id) {
                 if let Some(mob) = self.mobs.get_mut(&id) {
                     mob.tick_entity(entity, nearby_players, &block_state_at);
+                    let egg_count = mob.take_chicken_pending_egg_lays();
+                    egg_spawns
+                        .extend((0..egg_count).map(|_| (entity.position, entity.y_rot_degrees)));
+                }
+                if let Some(item) = self.items.get_mut(&id) {
+                    item.tick_entity(entity, &block_state_at);
+                    if entity.age_ticks.saturating_add(1) >= ITEM_ENTITY_LIFETIME_TICKS {
+                        entity.alive = false;
+                        removed_ids.push(id);
+                    }
                 }
                 entity.age_ticks = entity.age_ticks.saturating_add(1);
                 updated.push(*entity);
             }
+        }
+        for id in removed_ids {
+            self.entities.remove(&id);
+            self.items.remove(&id);
+        }
+        for (position, y_rot_degrees) in egg_spawns {
+            updated.push(self.insert_item_entity(
+                ItemStackSnapshot {
+                    kind: ItemKind::Egg,
+                    count: 1,
+                },
+                position,
+                y_rot_degrees,
+            ));
         }
         updated
     }
@@ -253,6 +286,40 @@ impl ServerEntityStore {
         state
     }
 
+    fn insert_item_entity(
+        &mut self,
+        stack: ItemStackSnapshot,
+        position: Vec3d,
+        y_rot_degrees: f32,
+    ) -> ServerEntityState {
+        let id = self.allocate_entity_id();
+        let metadata = EntityMetadata::for_kind(EntityKind::Item).expect("item metadata");
+        let mut state = ServerEntityState::from_metadata(
+            id,
+            metadata,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            false,
+        );
+        state.item_stack = Some(stack);
+        let item = ItemEntityRuntimeState::from_spawn(id, stack);
+        debug_assert_eq!(item.stack(), stack);
+        self.items.insert(id, item);
+        self.entities.insert(id, state);
+        state
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_item_entity_for_test(
+        &mut self,
+        stack: ItemStackSnapshot,
+        position: Vec3d,
+    ) -> EntityId {
+        self.insert_item_entity(stack, position, 0.0).id
+    }
+
     fn debug_physics_cube_id(&self) -> Option<EntityId> {
         #[cfg(feature = "physics-rapier")]
         {
@@ -284,6 +351,7 @@ fn debug_physics_cube_state(
     ServerEntityState {
         id,
         kind: EntityKind::DebugCube,
+        item_stack: None,
         position,
         y_rot_degrees,
         x_rot_degrees,
@@ -405,6 +473,116 @@ mod tests {
         assert_eq!(mob.movement_speed(), metadata.movement_speed);
         assert_eq!(mob.pathfinding_malus(BlockPathType::Water), 0.0);
         assert_eq!(mob.available_goal_count(), 3);
+    }
+
+    #[test]
+    fn item_entity_can_snapshot_stack_metadata() {
+        let mut store = ServerEntityStore::default();
+        let metadata = EntityMetadata::for_kind(EntityKind::Item).unwrap();
+        let stack = ItemStackSnapshot {
+            kind: ItemKind::Egg,
+            count: 1,
+        };
+
+        let id = store.insert_item_entity_for_test(stack, Vec3d::new(4.0, 64.0, 4.0));
+        let snapshot = store.state(id).unwrap().snapshot();
+
+        assert_eq!(snapshot.kind, EntityKind::Item);
+        assert_eq!(snapshot.item_stack, Some(stack));
+        assert_eq!(snapshot.width, metadata.dimensions.width);
+        assert_eq!(snapshot.height, metadata.dimensions.height);
+        assert!(store.item_state(id).is_some());
+        assert!(store.mob_state(id).is_none());
+    }
+
+    #[test]
+    fn item_entity_ticks_only_in_entity_ticking_chunks() {
+        let mut store = ServerEntityStore::default();
+        let id = store.insert_item_entity_for_test(
+            ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            },
+            Vec3d::new(4.0, 64.0, 4.0),
+        );
+        let start = store.state(id).unwrap();
+
+        assert!(
+            store
+                .tick_stationary(&[ChunkPos::new(1, 0)], &[], no_blocks)
+                .is_empty()
+        );
+        assert_eq!(store.state(id).unwrap(), start);
+
+        let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], no_blocks);
+        let item = updated
+            .iter()
+            .find(|entity| entity.id == id)
+            .expect("item should tick in entity ticking chunk");
+
+        assert_ne!(item.position, start.position);
+        assert_eq!(item.age_ticks, 1);
+        assert_eq!(store.item_state(id).unwrap().pickup_delay(), 9);
+    }
+
+    #[test]
+    fn item_entity_expires_after_java_lifetime() {
+        let mut store = ServerEntityStore::default();
+        let id = store.insert_item_entity_for_test(
+            ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            },
+            Vec3d::new(4.0, 64.0, 4.0),
+        );
+        store.entities.get_mut(&id).unwrap().age_ticks = ITEM_ENTITY_LIFETIME_TICKS - 1;
+
+        let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], no_blocks);
+        let removed = updated
+            .iter()
+            .find(|entity| entity.id == id)
+            .expect("expired item should emit final update");
+
+        assert!(!removed.alive);
+        assert_eq!(store.state(id), None);
+        assert_eq!(store.item_state(id), None);
+    }
+
+    #[test]
+    fn chicken_egg_timer_spawns_egg_item_entity() {
+        let mut store = ServerEntityStore::default();
+        let chicken_id =
+            store.insert_passive_mob_for_test(EntityKind::Chicken, Vec3d::new(4.0, 64.0, 4.0), 0.0);
+        store
+            .mobs
+            .get_mut(&chicken_id)
+            .unwrap()
+            .set_chicken_egg_time_for_test(1);
+
+        let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_ground);
+        let egg = updated
+            .iter()
+            .find(|entity| entity.kind == EntityKind::Item)
+            .expect("chicken should spawn egg item");
+
+        assert_eq!(
+            egg.item_stack,
+            Some(ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            })
+        );
+        assert_eq!(egg.width, 0.25);
+        assert_eq!(egg.height, 0.25);
+        assert_eq!(egg.position.x, store.state(chicken_id).unwrap().position.x);
+        assert_eq!(egg.position.z, store.state(chicken_id).unwrap().position.z);
+        assert_eq!(
+            store
+                .mob_state(chicken_id)
+                .unwrap()
+                .chicken_pending_egg_lays_for_test(),
+            Some(0)
+        );
     }
 
     #[test]

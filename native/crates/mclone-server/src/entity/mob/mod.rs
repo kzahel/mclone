@@ -103,7 +103,7 @@ impl MobRuntimeState {
         match metadata.kind {
             EntityKind::Cow => passive::register_cow_goals(&mut goal_selector),
             EntityKind::Chicken => passive::register_chicken_goals(&mut goal_selector),
-            EntityKind::DebugCube => {}
+            EntityKind::DebugCube | EntityKind::Item => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
 
@@ -308,6 +308,13 @@ impl MobRuntimeState {
     #[cfg(test)]
     pub(crate) fn chicken_flap_speed_for_test(&self) -> Option<f32> {
         self.species.chicken().map(|chicken| chicken.flap_speed())
+    }
+
+    pub(crate) fn take_chicken_pending_egg_lays(&mut self) -> u32 {
+        self.species
+            .chicken_mut()
+            .map(|chicken| chicken.take_pending_egg_lays())
+            .unwrap_or(0)
     }
 }
 
@@ -554,6 +561,7 @@ fn mob_random_seed(id: EntityId, kind: EntityKind) -> i64 {
     let kind_id = match kind {
         EntityKind::Cow => 0x00c0_0001_u64,
         EntityKind::Chicken => 0x00c0_0002_u64,
+        EntityKind::Item => 0x00c0_0003_u64,
         EntityKind::DebugCube => 0x00c0_00ff_u64,
     };
     let mixed = id.0.wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(17) ^ kind_id;

@@ -42,7 +42,7 @@ can report missing collision facts.
 
 ## Protocol Version And Handshake
 
-`PROTOCOL_VERSION` (currently `11`) is exchanged in the transport handshake
+`PROTOCOL_VERSION` (currently `15`) is exchanged in the transport handshake
 before any messages — `MCLONE_NATIVE_TCP` for native TCP, `MCLONE_WS` for
 WebSocket. The server replies accept or reject; a mismatch fails the connection
 with `ProtocolVersionMismatch`.
@@ -87,7 +87,7 @@ commands are intents, not client-owned state mutations.
 | `TimeUpdate` | authoritative world day-time (ticks) for the day/night cycle |
 | `PlayerPosition` | authoritative local-player position/rotation correction with relative flags and a teleport id |
 | `RemotePlayerAdd` / `RemotePlayerUpdate` / `RemotePlayerRemove` | other players entering / moving in / leaving the client's tracked view |
-| `EntitySnapshot` | passive-entity (cow/chicken) baseline for a visible chunk |
+| `EntitySnapshot` | entity baseline for a visible chunk; passive mobs are stackless, item entities carry an `ItemStackSnapshot` |
 | `EntityUpdate` | partial entity position/rotation/age update after a baseline |
 | `EntityRemove` | explicit entity untrack/remove for the replica |
 
@@ -97,6 +97,21 @@ yet an in-band error update.
 The loop is **request/response**: the host emits queued updates as the reply to
 a client command. A server-push lane — so a player who stops sending commands
 still sees others move — is still to come.
+
+### Entity Snapshots
+
+`EntitySnapshot` covers tracked world entities. Current runtime kinds are:
+
+| Kind | Extra snapshot data |
+|---|---|
+| `Cow` | none |
+| `Chicken` | none; visible wing pose is client-derived presentation state |
+| `Item` | `ItemStackSnapshot` with `ItemKind` and count; currently `Egg` is the only item kind |
+| `DebugCube` | optional debug rotation |
+
+`EntityUpdate` intentionally carries transform/age data only in the current
+slice. If an item stack mutates later, add that through a general tracked entity
+data path rather than a chicken-specific or item-specific update side channel.
 
 ### Likely future messages (design intent; not implemented)
 

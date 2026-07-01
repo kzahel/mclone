@@ -59,6 +59,7 @@ mod tests {
         ServerEntityState {
             id: EntityId(id),
             kind: EntityKind::Cow,
+            item_stack: None,
             position: Vec3d::new(x, 64.0, z),
             y_rot_degrees: 45.0,
             x_rot_degrees: 0.0,

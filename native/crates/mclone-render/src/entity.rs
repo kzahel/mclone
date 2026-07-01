@@ -56,6 +56,7 @@ pub enum ActorInstanceShape {
     QuadrupedPlaceholder,
     CowModel,
     DebugCube,
+    ItemEgg,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -214,6 +215,25 @@ impl ActorInstance {
             height,
             body_color: [0.13, 0.48, 0.72, 1.0],
             accent_color: [0.95, 0.78, 0.22, 1.0],
+            packed_light: FULL_BRIGHT,
+            animation: None,
+            chicken_wing_flap_radians: None,
+        }
+    }
+
+    pub fn item_egg(feet_position: Vec3, y_rot_degrees: f32, width: f32, height: f32) -> Self {
+        Self {
+            feet_position,
+            yaw_radians: -y_rot_degrees.to_radians(),
+            pitch_radians: 0.0,
+            rotation_pivot: Vec3::ZERO,
+            orientation: None,
+            shape: ActorInstanceShape::ItemEgg,
+            first_person_body_only: false,
+            width,
+            height,
+            body_color: [0.92, 0.89, 0.78, 1.0],
+            accent_color: [0.74, 0.58, 0.24, 1.0],
             packed_light: FULL_BRIGHT,
             animation: None,
             chicken_wing_flap_radians: None,
@@ -886,6 +906,7 @@ fn append_actor(
         }
         ActorInstanceShape::CowModel => append_cow_model(mesh, actor, texture_layout, atlas_size),
         ActorInstanceShape::DebugCube => append_debug_cube(mesh, actor, texture_layout, atlas_size),
+        ActorInstanceShape::ItemEgg => append_item_egg(mesh, actor, texture_layout, atlas_size),
     }
 }
 
@@ -1407,6 +1428,70 @@ fn append_debug_cube(
             scale_color(actor.accent_color, 0.82),
             actor.body_color,
             actor.accent_color,
+        ],
+    );
+}
+
+fn append_item_egg(
+    mesh: &mut ActorMesh,
+    actor: ActorInstance,
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
+) {
+    let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
+    let width = actor.width.max(0.1);
+    let height = actor.height.max(0.1);
+    let half = width * 0.5;
+    let lower_half = half * 0.72;
+    let upper_half = half * 0.62;
+    let shell_dark = scale_color(actor.body_color, 0.70);
+    let shell_side = scale_color(actor.body_color, 0.88);
+    let shell_light = scale_color(actor.body_color, 1.12);
+    let spot = scale_color(actor.accent_color, 0.90);
+
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(-lower_half, 0.0, -lower_half),
+        Vec3::new(lower_half, height * 0.28, lower_half),
+        white_uv,
+        [
+            shell_dark,
+            shell_side,
+            shell_side,
+            shell_side,
+            shell_side,
+            shell_light,
+        ],
+    );
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(-half, height * 0.20, -half),
+        Vec3::new(half, height * 0.78, half),
+        white_uv,
+        [
+            shell_dark,
+            shell_side,
+            shell_side,
+            scale_color(actor.body_color, 0.96),
+            shell_side,
+            shell_light,
+        ],
+    );
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(-upper_half, height * 0.66, -upper_half),
+        Vec3::new(upper_half, height, upper_half),
+        white_uv,
+        [
+            shell_dark,
+            shell_side,
+            shell_side,
+            shell_side,
+            spot,
+            shell_light,
         ],
     );
 }
@@ -2119,6 +2204,24 @@ mod tests {
 
         assert_eq!(mesh.vertices.len(), 6 * 4);
         assert_eq!(mesh.indices.len(), 6 * 6);
+    }
+
+    #[test]
+    fn actor_mesh_emits_item_egg() {
+        let mesh = actor_mesh(
+            &[ActorInstance::item_egg(Vec3::ZERO, 0.0, 0.25, 0.25)],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+            &ActorFigureSet::default(),
+        );
+
+        assert_eq!(mesh.vertices.len(), 3 * 6 * 4);
+        assert_eq!(mesh.indices.len(), 3 * 6 * 6);
+        assert!(
+            mesh.vertices
+                .iter()
+                .any(|vertex| vertex.color != mesh.vertices[0].color)
+        );
     }
 
     #[test]

@@ -26,7 +26,7 @@ use mclone_mesh::{
     build_textured_render_sections_with_stats, quad_face_count_from_indices,
 };
 use mclone_protocol::{
-    ClientCommand, EntityKind, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate,
+    ClientCommand, EntityKind, ItemKind, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate,
 };
 use mclone_render::entity::ActorInstance;
 use mclone_render::gui::WorldGuiLine;
@@ -144,6 +144,17 @@ pub fn actor_instances_from_presentations(
                     actor.height,
                 )
                 .with_packed_light(packed_light),
+                ActorPresentationKind::Entity(EntityKind::Item) => {
+                    match actor.item_stack.map(|stack| stack.kind) {
+                        Some(ItemKind::Egg) | None => ActorInstance::item_egg(
+                            glam_vec3_from_vec3d(actor.feet_position),
+                            actor.y_rot_degrees,
+                            actor.width,
+                            actor.height,
+                        )
+                        .with_packed_light(packed_light),
+                    }
+                }
             }
         })
         .collect()
@@ -197,6 +208,7 @@ pub fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
         ActorPresentationKind::Entity(EntityKind::Cow) => 1.3,
         ActorPresentationKind::Entity(EntityKind::Chicken) => f64::from(actor.height) * 0.92,
         ActorPresentationKind::Entity(EntityKind::DebugCube) => f64::from(actor.height) * 0.5,
+        ActorPresentationKind::Entity(EntityKind::Item) => f64::from(actor.height) * 0.5,
     }
 }
 
@@ -4587,6 +4599,7 @@ mod tests {
             id: ActorPresentationId::Entity(mclone_protocol::EntityId(7)),
             kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Chicken),
             appearance: ActorAppearance::NONE,
+            item_stack: None,
             feet_position: Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 45.0,
             x_rot_degrees: 0.0,
@@ -4609,6 +4622,39 @@ mod tests {
         assert_eq!(actors[0].height, 0.7);
         assert!(actors[0].animation.is_some());
         assert_eq!(actors[0].chicken_wing_flap_radians, Some(0.4));
+    }
+
+    #[test]
+    fn item_entity_actor_uses_egg_item_shape() {
+        let client = ClientRuntime::local_integrated();
+        let presentation = ActorPresentation {
+            id: ActorPresentationId::Entity(mclone_protocol::EntityId(8)),
+            kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Item),
+            appearance: ActorAppearance::NONE,
+            item_stack: Some(mclone_protocol::ItemStackSnapshot {
+                kind: mclone_protocol::ItemKind::Egg,
+                count: 1,
+            }),
+            feet_position: Vec3d::new(1.0, 64.0, 2.0),
+            y_rot_degrees: 45.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: false,
+            width: 0.25,
+            height: 0.25,
+            walk_animation_distance: 0.0,
+            chicken_wing_flap_radians: None,
+        };
+
+        let actors = actor_instances_from_presentations(&[presentation], &client);
+
+        assert_eq!(actors.len(), 1);
+        assert_eq!(
+            actors[0].shape,
+            mclone_render::entity::ActorInstanceShape::ItemEgg
+        );
+        assert_eq!(actors[0].width, 0.25);
+        assert_eq!(actors[0].height, 0.25);
     }
 
     #[test]

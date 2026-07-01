@@ -16,8 +16,8 @@ impl MobSpeciesState {
         match kind {
             EntityKind::Cow => Self::Cow,
             EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::new(random)),
-            EntityKind::DebugCube => {
-                debug_assert!(false, "debug cubes do not use mob species state");
+            EntityKind::DebugCube | EntityKind::Item => {
+                debug_assert!(false, "non-mob entities do not use mob species state");
                 Self::Cow
             }
         }
@@ -43,7 +43,6 @@ impl MobSpeciesState {
         }
     }
 
-    #[cfg(test)]
     pub(super) fn chicken_mut(&mut self) -> Option<&mut ChickenRuntimeState> {
         match self {
             Self::Cow => None,
@@ -128,6 +127,12 @@ impl ChickenRuntimeState {
     #[cfg(test)]
     pub(super) fn set_egg_time_for_test(&mut self, egg_time: i32) {
         self.egg_time = egg_time;
+    }
+
+    pub(super) fn take_pending_egg_lays(&mut self) -> u32 {
+        let pending = self.pending_egg_lays;
+        self.pending_egg_lays = 0;
+        pending
     }
 }
 

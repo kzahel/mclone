@@ -520,19 +520,26 @@ fn actor_walk_review_actors(
 }
 
 fn actor_review_actors(view_name: &str) -> Vec<ActorInstance> {
-    let count = mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS.len();
+    let figure_count = mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS.len();
+    let count = figure_count + 1;
     let spacing = 0.75;
     let center = (count.saturating_sub(1)) as f32 * spacing * 0.5;
-    mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS
-        .iter()
-        .enumerate()
-        .map(|(index, figure)| {
+    (0..count)
+        .map(|index| {
             let offset = index as f32 * spacing - center;
             let position = match view_name {
                 "side" => Vec3::new(0.0, 0.0, offset),
                 _ => Vec3::new(offset, 0.0, 0.0),
             };
-            ActorInstance::local_player_with_figure(position, 0.0, *figure)
+            if index < figure_count {
+                ActorInstance::local_player_with_figure(
+                    position,
+                    0.0,
+                    mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS[index],
+                )
+            } else {
+                ActorInstance::item_egg(position, 0.0, 0.25, 0.25)
+            }
         })
         .collect()
 }
@@ -1302,7 +1309,7 @@ mod tests {
 
         assert_eq!(
             actors.len(),
-            mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS.len()
+            mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS.len() + 1
         );
         assert_eq!(
             actors[0].shape,
@@ -1320,8 +1327,13 @@ mod tests {
             actors[2].shape,
             mclone_render::entity::ActorInstanceShape::Figure(mclone_assets::chicken_figure_id())
         );
+        assert_eq!(
+            actors[3].shape,
+            mclone_render::entity::ActorInstanceShape::ItemEgg
+        );
         assert!(actors[0].feet_position.x < actors[1].feet_position.x);
         assert!(actors[1].feet_position.x < actors[2].feet_position.x);
+        assert!(actors[2].feet_position.x < actors[3].feet_position.x);
     }
 
     #[test]

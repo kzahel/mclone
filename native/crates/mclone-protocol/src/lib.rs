@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 15;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
@@ -237,6 +237,18 @@ pub enum EntityKind {
     Cow,
     Chicken,
     DebugCube,
+    Item,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ItemKind {
+    Egg,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ItemStackSnapshot {
+    pub kind: ItemKind,
+    pub count: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -260,6 +272,7 @@ impl EntityRotation {
 pub struct EntitySnapshot {
     pub id: EntityId,
     pub kind: EntityKind,
+    pub item_stack: Option<ItemStackSnapshot>,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
@@ -358,6 +371,7 @@ pub enum ProtocolCodecError {
     UnknownChunkStatus(u8),
     UnknownDirection(u8),
     UnknownEntityKind(u8),
+    UnknownItemKind(u8),
     UnknownInteractionHand(u8),
     UnknownPlayerModelKind(u8),
     UnknownPlayerActionKind(u8),
@@ -389,6 +403,9 @@ impl fmt::Display for ProtocolCodecError {
             }
             Self::UnknownEntityKind(kind) => {
                 write!(f, "unknown entity kind tag {kind}")
+            }
+            Self::UnknownItemKind(kind) => {
+                write!(f, "unknown item kind tag {kind}")
             }
             Self::UnknownInteractionHand(hand) => {
                 write!(f, "unknown interaction hand tag {hand}")
@@ -669,6 +686,29 @@ fn validate_entity_snapshot(snapshot: &EntitySnapshot) -> ProtocolCodecResult<()
             "entity snapshot contains invalid dimensions",
         ));
     }
+    match (snapshot.kind, snapshot.item_stack) {
+        (EntityKind::Item, Some(stack)) => validate_item_stack_snapshot(stack)?,
+        (EntityKind::Item, None) => {
+            return Err(ProtocolCodecError::InvalidData(
+                "item entity snapshot missing item stack",
+            ));
+        }
+        (_, Some(_)) => {
+            return Err(ProtocolCodecError::InvalidData(
+                "non-item entity snapshot contains item stack",
+            ));
+        }
+        (_, None) => {}
+    }
+    Ok(())
+}
+
+fn validate_item_stack_snapshot(stack: ItemStackSnapshot) -> ProtocolCodecResult<()> {
+    if stack.count == 0 {
+        return Err(ProtocolCodecError::InvalidData(
+            "item stack snapshot has zero count",
+        ));
+    }
     Ok(())
 }
 
@@ -778,6 +818,13 @@ impl ByteWriter {
             EntityKind::Cow => 0,
             EntityKind::Chicken => 1,
             EntityKind::DebugCube => 2,
+            EntityKind::Item => 3,
+        });
+    }
+
+    fn write_item_kind(&mut self, kind: ItemKind) {
+        self.write_u8(match kind {
+            ItemKind::Egg => 0,
         });
     }
 
@@ -973,6 +1020,7 @@ impl ByteWriter {
     fn write_entity_snapshot(&mut self, snapshot: &EntitySnapshot) {
         self.write_entity_id(snapshot.id);
         self.write_entity_kind(snapshot.kind);
+        self.write_optional_item_stack_snapshot(snapshot.item_stack);
         self.write_vec3d(snapshot.position);
         self.write_f32(snapshot.y_rot_degrees);
         self.write_f32(snapshot.x_rot_degrees);
@@ -981,6 +1029,16 @@ impl ByteWriter {
         self.write_f32(snapshot.width);
         self.write_f32(snapshot.height);
         self.write_u64(snapshot.age_ticks);
+    }
+
+    fn write_optional_item_stack_snapshot(&mut self, stack: Option<ItemStackSnapshot>) {
+        let Some(stack) = stack else {
+            self.write_bool(false);
+            return;
+        };
+        self.write_bool(true);
+        self.write_item_kind(stack.kind);
+        self.write_u8(stack.count);
     }
 
     fn write_entity_update(&mut self, update: &EntityUpdate) {
@@ -1118,7 +1176,16 @@ impl<'a> ByteReader<'a> {
             0 => Ok(EntityKind::Cow),
             1 => Ok(EntityKind::Chicken),
             2 => Ok(EntityKind::DebugCube),
+            3 => Ok(EntityKind::Item),
             kind => Err(ProtocolCodecError::UnknownEntityKind(kind)),
+        }
+    }
+
+    fn read_item_kind(&mut self) -> ProtocolCodecResult<ItemKind> {
+        let kind = self.read_u8()?;
+        match kind {
+            0 => Ok(ItemKind::Egg),
+            kind => Err(ProtocolCodecError::UnknownItemKind(kind)),
         }
     }
 
@@ -1395,6 +1462,7 @@ impl<'a> ByteReader<'a> {
         let snapshot = EntitySnapshot {
             id: self.read_entity_id()?,
             kind: self.read_entity_kind()?,
+            item_stack: self.read_optional_item_stack_snapshot()?,
             position: self.read_vec3d()?,
             y_rot_degrees: self.read_f32()?,
             x_rot_degrees: self.read_f32()?,
@@ -1406,6 +1474,20 @@ impl<'a> ByteReader<'a> {
         };
         validate_entity_snapshot(&snapshot)?;
         Ok(snapshot)
+    }
+
+    fn read_optional_item_stack_snapshot(
+        &mut self,
+    ) -> ProtocolCodecResult<Option<ItemStackSnapshot>> {
+        if !self.read_bool()? {
+            return Ok(None);
+        }
+        let stack = ItemStackSnapshot {
+            kind: self.read_item_kind()?,
+            count: self.read_u8()?,
+        };
+        validate_item_stack_snapshot(stack)?;
+        Ok(Some(stack))
     }
 
     fn read_entity_update(&mut self) -> ProtocolCodecResult<EntityUpdate> {
@@ -1731,6 +1813,7 @@ mod tests {
         let snapshot = EntitySnapshot {
             id: EntityId(7),
             kind: EntityKind::DebugCube,
+            item_stack: None,
             position: Vec3d::new(12.5, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -1769,6 +1852,30 @@ mod tests {
 
             assert_eq!(decode_server_update(&bytes).unwrap(), server_update);
         }
+    }
+
+    #[test]
+    fn server_update_codec_round_trips_item_entity_snapshot() {
+        let snapshot = EntitySnapshot {
+            id: EntityId(8),
+            kind: EntityKind::Item,
+            item_stack: Some(ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            }),
+            position: Vec3d::new(12.5, 64.0, -3.25),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: false,
+            width: 0.25,
+            height: 0.25,
+            age_ticks: 0,
+        };
+        let update = ServerUpdate::EntitySnapshot(snapshot);
+        let bytes = encode_server_update(&update).unwrap();
+
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
     }
 
     #[test]
@@ -1811,6 +1918,7 @@ mod tests {
         let invalid_dimensions = ServerUpdate::EntitySnapshot(EntitySnapshot {
             id: EntityId(42),
             kind: EntityKind::Chicken,
+            item_stack: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -1824,6 +1932,49 @@ mod tests {
             encode_server_update(&invalid_dimensions),
             Err(ProtocolCodecError::InvalidData(
                 "entity snapshot contains invalid dimensions"
+            ))
+        );
+
+        let missing_item_stack = ServerUpdate::EntitySnapshot(EntitySnapshot {
+            id: EntityId(42),
+            kind: EntityKind::Item,
+            item_stack: None,
+            position: Vec3d::new(1.0, 70.0, -3.25),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: -15.0,
+            rotation: None,
+            on_ground: true,
+            width: 0.25,
+            height: 0.25,
+            age_ticks: 1,
+        });
+        assert_eq!(
+            encode_server_update(&missing_item_stack),
+            Err(ProtocolCodecError::InvalidData(
+                "item entity snapshot missing item stack"
+            ))
+        );
+
+        let misplaced_item_stack = ServerUpdate::EntitySnapshot(EntitySnapshot {
+            id: EntityId(42),
+            kind: EntityKind::Chicken,
+            item_stack: Some(ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            }),
+            position: Vec3d::new(1.0, 70.0, -3.25),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: -15.0,
+            rotation: None,
+            on_ground: true,
+            width: 0.4,
+            height: 0.7,
+            age_ticks: 1,
+        });
+        assert_eq!(
+            encode_server_update(&misplaced_item_stack),
+            Err(ProtocolCodecError::InvalidData(
+                "non-item entity snapshot contains item stack"
             ))
         );
 

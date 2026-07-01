@@ -5,6 +5,7 @@ use mclone_protocol::EntityKind;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum EntityCategory {
     Creature,
+    Misc,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -65,10 +66,20 @@ impl EntityMetadata {
         client_tracking_range: 10,
     };
 
+    pub(crate) const ITEM: Self = Self {
+        kind: EntityKind::Item,
+        category: EntityCategory::Misc,
+        dimensions: EntityDimensions::scalable(0.25, 0.25),
+        standing_eye_height: StandingEyeHeight::HeightScale(0.5),
+        movement_speed: 0.0,
+        client_tracking_range: 6,
+    };
+
     pub(crate) const fn for_kind(kind: EntityKind) -> Option<Self> {
         match kind {
             EntityKind::Cow => Some(Self::COW),
             EntityKind::Chicken => Some(Self::CHICKEN),
+            EntityKind::Item => Some(Self::ITEM),
             EntityKind::DebugCube => None,
         }
     }
@@ -78,7 +89,7 @@ impl EntityMetadata {
     }
 
     pub(crate) const fn is_passive_mob(self) -> bool {
-        matches!(self.category, EntityCategory::Creature)
+        matches!(self.kind, EntityKind::Cow | EntityKind::Chicken)
     }
 }
 
@@ -113,5 +124,16 @@ mod tests {
     #[test]
     fn non_vanilla_debug_cube_has_no_passive_mob_metadata() {
         assert_eq!(EntityMetadata::for_kind(EntityKind::DebugCube), None);
+    }
+
+    #[test]
+    fn item_metadata_matches_java_1_17_1_type() {
+        let metadata = EntityMetadata::for_kind(EntityKind::Item).expect("item metadata");
+
+        assert_eq!(metadata.kind, EntityKind::Item);
+        assert_eq!(metadata.category, EntityCategory::Misc);
+        assert_eq!(metadata.dimensions, EntityDimensions::scalable(0.25, 0.25));
+        assert_eq!(metadata.client_tracking_range, 6);
+        assert!(!metadata.is_passive_mob());
     }
 }

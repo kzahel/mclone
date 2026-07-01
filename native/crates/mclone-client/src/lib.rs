@@ -467,6 +467,7 @@ mod tests {
         runtime.apply_update(ServerUpdate::EntitySnapshot(EntitySnapshot {
             id: EntityId(7),
             kind: mclone_protocol::EntityKind::Cow,
+            item_stack: None,
             position: mclone_core::Vec3d::new(4.0, 64.0, 5.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -598,6 +599,7 @@ mod tests {
         let initial = EntitySnapshot {
             id,
             kind: mclone_protocol::EntityKind::Cow,
+            item_stack: None,
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
             y_rot_degrees: 45.0,
             x_rot_degrees: 5.0,
@@ -636,6 +638,7 @@ mod tests {
         assert_eq!(updated.on_ground, moved.on_ground);
         assert_eq!(updated.age_ticks, moved.age_ticks);
         assert_eq!(updated.kind, initial.kind);
+        assert_eq!(updated.item_stack, initial.item_stack);
         assert_eq!(updated.width, initial.width);
         assert_eq!(updated.height, initial.height);
 
@@ -673,6 +676,7 @@ mod tests {
                 id: ActorPresentationId::RemotePlayer(update.id),
                 kind: ActorPresentationKind::RemotePlayer,
                 appearance: ActorAppearance::figure(mclone_assets::upright_bear_figure_id()),
+                item_stack: None,
                 feet_position: update.position,
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
@@ -696,6 +700,7 @@ mod tests {
         let snapshot = EntitySnapshot {
             id: EntityId(11),
             kind: mclone_protocol::EntityKind::Cow,
+            item_stack: None,
             position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
             y_rot_degrees: -90.0,
             x_rot_degrees: 0.0,
@@ -714,6 +719,7 @@ mod tests {
                 id: ActorPresentationId::Entity(snapshot.id),
                 kind: ActorPresentationKind::Entity(snapshot.kind),
                 appearance: ActorAppearance::NONE,
+                item_stack: snapshot.item_stack,
                 feet_position: snapshot.position,
                 y_rot_degrees: snapshot.y_rot_degrees,
                 x_rot_degrees: snapshot.x_rot_degrees,
@@ -725,6 +731,39 @@ mod tests {
                 chicken_wing_flap_radians: None,
             }]
         );
+    }
+
+    #[test]
+    fn actor_presentations_include_item_stack_snapshots() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let stack = mclone_protocol::ItemStackSnapshot {
+            kind: mclone_protocol::ItemKind::Egg,
+            count: 1,
+        };
+        let snapshot = EntitySnapshot {
+            id: EntityId(12),
+            kind: mclone_protocol::EntityKind::Item,
+            item_stack: Some(stack),
+            position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: false,
+            width: 0.25,
+            height: 0.25,
+            age_ticks: 0,
+        };
+
+        runtime.apply_update(ServerUpdate::EntitySnapshot(snapshot));
+
+        let presentation = runtime.actor_presentations().remove(0);
+        assert_eq!(
+            presentation.kind,
+            ActorPresentationKind::Entity(snapshot.kind)
+        );
+        assert_eq!(presentation.item_stack, Some(stack));
+        assert_eq!(presentation.width, 0.25);
+        assert_eq!(presentation.height, 0.25);
     }
 
     #[test]

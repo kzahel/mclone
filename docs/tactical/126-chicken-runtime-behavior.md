@@ -20,11 +20,13 @@ first.
 - Chicken has Java-shaped dimensions, eye height, movement speed, and water
   pathfinding malus.
 - Chunk A landed supported passive goals, species flap/egg state, and
-  Java-shaped airborne glide damping. Egg item entities and sounds remain
-  deferred behind the future item/sound boundaries.
+  Java-shaped airborne glide damping. Sound events remain deferred behind the
+  future sound boundary.
 - Chunk B landed the first visible chicken wing pose through client-derived
   presentation data and the shared actor render path. No chicken protocol
   metadata is needed for the current behavior slice.
+- Chunk C landed a first shared item-entity/drop boundary. Mature chickens now
+  drain egg-lay events into visible `egg x1` item entities.
 
 ## Reference Shape
 
@@ -37,6 +39,10 @@ Read before implementation:
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/ai/goal/RandomLookAroundGoal.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/client/renderer/entity/ChickenRenderer.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/client/model/ChickenModel.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/entity/item/ItemEntity.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/entity/EntityType.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/entity/Entity.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/item/Items.java`
 
 The Java chicken behavior that matters for this phase:
 
@@ -52,6 +58,10 @@ The Java chicken behavior that matters for this phase:
 - derives visible wing rotation from interpolated `flap` / `flapSpeed` in
   `ChickenRenderer.getBob()` and applies opposite Z rotations to `rightWing`
   and `leftWing` in `ChickenModel.setupAnim()`
+- `spawnAtLocation(Items.EGG)` creates an `EntityType.ITEM` at the chicken
+  position; Java item entities are `0.25 x 0.25`, client tracking range 6,
+  spawn with small random horizontal velocity and `0.2` upward velocity, apply
+  gravity/drag, and expire at 6000 item-age ticks.
 
 ## Chunk A - Supported Goals And Species Tick
 
@@ -165,7 +175,37 @@ Done when:
 - A mature chicken can visibly produce an egg item without embedding item-drop
   policy in chicken ticking.
 
-Status: blocked on item entities / sound event boundaries.
+Status: landed for the current item-entity/drop scope.
+
+Landed notes:
+
+- Added protocol `EntityKind::Item`, `ItemKind`, and `ItemStackSnapshot`, with
+  validation that item entities carry stack data and stackless entities do not.
+- Added server item-entity runtime alongside the mob runtime, gated by the
+  existing entity-ticking chunk list.
+- Implemented Java-shaped item spawn velocity, gravity/drag, ground bounce,
+  default pickup-delay countdown, and 6000-tick lifetime.
+- Drained chicken pending egg-lay events in `ServerEntityStore` and spawned
+  `egg x1` item entities without embedding entity creation inside chicken
+  species ticking.
+- Mapped item snapshots through client actor presentation and render-session
+  into a shared `ItemEgg` actor shape.
+- Added the egg item actor to the native actor review sheet for screenshot
+  validation.
+- Bumped `PROTOCOL_VERSION` to 15 for the entity snapshot payload change.
+- Verified with focused protocol/server/client/render/render-session/native
+  tests and the affected crate gate:
+  ```bash
+  cargo test --manifest-path native/Cargo.toml -p mclone-protocol -p mclone-server -p mclone-client -p mclone-render-session -p mclone-render -p mclone-native-client -p mclone-net -p mclone-dedicated-server
+  ```
+
+Remaining item follow-ups:
+
+- Item pickup, stack merging, owner/thrower metadata, damage, persistence, and
+  full item model/texture rendering.
+- Route `SoundEvents.CHICKEN_EGG` through the future shared sound-event path.
+- Consider item-stack mutation updates through a general tracked entity data
+  path if/when item entities can merge or otherwise change count after spawn.
 
 ## Chunk D - Persistence, Jockey, And Despawn
 
