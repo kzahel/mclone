@@ -62,6 +62,7 @@ Frozen-mesh stationary render isolation:
 pnpm native:android-xr:perf:frozen:rd1
 pnpm native:android-xr:perf:frozen:rd5
 pnpm native:android-xr:perf:frozen:rd10
+pnpm native:android-xr:perf:frozen:rd10:frame-overlap
 pnpm native:android-xr:perf:frozen:sweep
 ```
 
@@ -80,6 +81,69 @@ draw counts during the measured window. Current frozen scripts use
 force-stops the app and sleeps the headset during cleanup.
 
 ## Records
+
+### 2026-07-01 - Standalone Quest 3 Frozen RD10 Opt-In Frame Overlap
+
+Benchmarked code commit: `1977a67` (`Add opt-in XR frame overlap path`). This
+adds `--xr-frame-overlap` for the per-eye Android XR path, leaves the default
+path unchanged, defers the eye GPU waits to one stereo wait, and caches any live
+runtime/render-section prefetch so the next frame consumes it instead of
+polling twice. The frozen RD10 lane has no live runtime/upload work during the
+timed sample, so this record primarily validates the deferred stereo wait /
+frame-pacing part; `MCLONE_ANDROID_XR_PERF_OVERLAP` stayed `0.000ms`.
+
+Validation before/on device:
+`bash -n android-xr/validate-quest-openxr.sh android-xr/install-quest-openxr.sh`,
+`cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-android-xr-client --target aarch64-linux-android`,
+`cargo test --manifest-path native/Cargo.toml`, visual inspection of
+`/tmp/mclone-frame-overlap-debug.png`, and three Quest runs:
+overlap, matched default baseline, overlap confirmation. Captured with fixed
+frozen RD10 pose `0,80,-96,180`, `--perf-metrics`, render scale `1.0`,
+foveation off, and the same staged asset pack.
+
+Summary:
+
+| Path | Sample | FPS | App work avg | App work p50 | App work p95 | App work p99 | Headroom avg | Headroom p05 | Over period | Drawn sections | Drawn indices | MTP |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| matched default per-eye | `20.014s` | `72.00` | `12.685ms` | `12.673ms` | `13.554ms` | `13.953ms` | `1.204ms` | `0.335ms` | `1.5%` | 179 | 1,356,102 | `35.487ms` |
+| frame overlap, first run | `20.013s` | `72.00` | `10.967ms` | `10.926ms` | `11.734ms` | `12.019ms` | `2.922ms` | `2.155ms` | `0.0%` | 179 | 1,356,102 | `28.814ms` |
+| frame overlap, confirmation | `20.015s` | `72.00` | `10.959ms` | `10.956ms` | `11.686ms` | `11.964ms` | `2.930ms` | `2.203ms` | `0.0%` | 179 | 1,356,102 | `23.011ms` |
+
+Matched delta from the default run to the confirmation overlap run:
+`app_work_avg_ms -1.726ms`, p95 `-1.868ms`, average headroom `+1.726ms`,
+`app_over_period_pct 1.5% -> 0.0%`.
+
+Raw marker block, matched default baseline:
+
+```text
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.014 mode=stationary-frozen-render render_path=per-eye render_section_upload_budget=unbounded xr_foveation=off xr_render_scale=1.000 xr_eye_size=1680x1760 render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=34.995 settle_min_seconds=5.000 settle_frames=2394 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1441 submitted_delta=1441 runtime_delta=1441 skipped_delta=0 frame_avg_ms=13.843 frame_min_ms=11.366 frame_p50_ms=13.789 frame_p95_ms=15.240 frame_p99_ms=15.826 frame_max_ms=16.631 over_budget=674 over_2x_budget=0 over_4x_budget=0 app_work_avg_ms=12.685 app_work_p50_ms=12.673 app_work_p95_ms=13.554 headroom_avg_ms=1.204 app_over_period_frames=22 app_over_period_pct=1.5
+MCLONE_ANDROID_XR_PERF_HEADROOM sample_seconds=20.014 mode=stationary-frozen-render render_path=per-eye xr_render_scale=1.000 target_hz=72.0 budget_ms=13.889 frames=1441 submitted_delta=1441 runtime_delta=1441 skipped_delta=0 submitted_fps=72.00 runtime_fps=72.00 wait_frame_avg_ms=1.159 wait_frame_p50_ms=1.176 wait_frame_p95_ms=2.214 wait_frame_max_ms=3.703 app_work_avg_ms=12.685 app_work_min_ms=10.490 app_work_p50_ms=12.673 app_work_p95_ms=13.554 app_work_p99_ms=13.953 app_work_max_ms=14.323 headroom_avg_ms=1.204 headroom_p50_ms=1.216 headroom_p05_ms=0.335 headroom_p01_ms=-0.064 headroom_min_ms=-0.434 app_over_period_frames=22 app_over_period_pct=1.5
+MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_render_frame_ms=13.874 max_terrain_render_views_ms=0.034 max_terrain_menu_pointer_ms=0.000 max_terrain_runtime_upload_ms=0.000 max_runtime_poll_ms=0.000 max_runtime_sync_ms=0.000 max_runtime_gpu_upload_ms=0.000 max_runtime_ready_sections_ms=0.000 max_terrain_shared_records_ms=0.005 max_terrain_left_eye_ms=7.258 max_terrain_right_eye_ms=5.294 max_terrain_left_eye_prepare_ms=2.175 max_terrain_left_eye_encode_ms=2.294 max_terrain_left_eye_section_encode_ms=1.632 max_terrain_left_eye_submit_ms=0.629 max_terrain_left_eye_poll_wait_ms=5.664 max_terrain_right_eye_prepare_ms=0.193 max_terrain_right_eye_encode_ms=1.847 max_terrain_right_eye_section_encode_ms=1.388 max_terrain_right_eye_submit_ms=0.470 max_terrain_right_eye_poll_wait_ms=3.664 max_terrain_stereo_finish_ms=0.000 max_terrain_stereo_submit_ms=0.941 max_terrain_stereo_poll_wait_ms=8.826
+MCLONE_ANDROID_XR_PERF_DRAW sections=1133 drawn_sections=179 indices=5396316 drawn_indices=1356102 actors=1 drawn_actors=1
+MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms=2.555 app_cpu_ms=n/a compositor_gpu_ms=1.296 compositor_cpu_ms=n/a gpu_util_pct=28.361 cpu_util_avg_pct=81.243 cpu_util_worst_pct=88.119 motion_to_photon_ms=35.487 dropped_frames=102.000 stale_frames=n/a counters=17 any_valid=true attempt=1/8 per_query_us=1.27
+```
+
+Raw marker block, frame-overlap confirmation:
+
+```text
+MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds=20.015 mode=stationary-frozen-render render_path=per-eye-frame-overlap render_section_upload_budget=unbounded xr_foveation=off xr_render_scale=1.000 xr_eye_size=1680x1760 render_distance=10 flight_speed_blocks_per_second=0.000 flight_distance_blocks=0.000 settle_seconds=34.858 settle_min_seconds=5.000 settle_frames=2471 settle_quiet_frames=45 refresh_supported=true current_hz=72.0 supported_hz=72.0,80.0,90.0,120.0 target_hz=72.0 budget_ms=13.889 frames=1441 submitted_delta=1441 runtime_delta=1441 skipped_delta=0 frame_avg_ms=13.839 frame_min_ms=11.115 frame_p50_ms=13.814 frame_p95_ms=14.829 frame_p99_ms=15.269 frame_max_ms=18.269 over_budget=658 over_2x_budget=0 over_4x_budget=0 app_work_avg_ms=10.959 app_work_p50_ms=10.956 app_work_p95_ms=11.686 headroom_avg_ms=2.930 app_over_period_frames=0 app_over_period_pct=0.0
+MCLONE_ANDROID_XR_PERF_HEADROOM sample_seconds=20.015 mode=stationary-frozen-render render_path=per-eye-frame-overlap xr_render_scale=1.000 target_hz=72.0 budget_ms=13.889 frames=1441 submitted_delta=1441 runtime_delta=1441 skipped_delta=0 submitted_fps=72.00 runtime_fps=72.00 wait_frame_avg_ms=2.881 wait_frame_p50_ms=2.886 wait_frame_p95_ms=3.762 wait_frame_max_ms=5.574 app_work_avg_ms=10.959 app_work_min_ms=9.394 app_work_p50_ms=10.956 app_work_p95_ms=11.686 app_work_p99_ms=11.964 app_work_max_ms=12.737 headroom_avg_ms=2.930 headroom_p50_ms=2.933 headroom_p05_ms=2.203 headroom_p01_ms=1.925 headroom_min_ms=1.152 app_over_period_frames=0 app_over_period_pct=0.0
+MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_render_frame_ms=12.190 max_terrain_render_views_ms=0.044 max_terrain_menu_pointer_ms=0.000 max_terrain_runtime_upload_ms=0.000 max_runtime_poll_ms=0.000 max_runtime_sync_ms=0.000 max_runtime_gpu_upload_ms=0.000 max_runtime_ready_sections_ms=0.000 max_terrain_shared_records_ms=1.422 max_terrain_left_eye_ms=2.657 max_terrain_right_eye_ms=2.114 max_terrain_left_eye_prepare_ms=2.111 max_terrain_left_eye_encode_ms=2.424 max_terrain_left_eye_section_encode_ms=1.829 max_terrain_left_eye_submit_ms=0.778 max_terrain_left_eye_poll_wait_ms=0.000 max_terrain_right_eye_prepare_ms=0.132 max_terrain_right_eye_encode_ms=1.810 max_terrain_right_eye_section_encode_ms=1.478 max_terrain_right_eye_submit_ms=0.435 max_terrain_right_eye_poll_wait_ms=0.000 max_terrain_stereo_finish_ms=0.000 max_terrain_stereo_submit_ms=1.134 max_terrain_stereo_poll_wait_ms=7.215
+MCLONE_ANDROID_XR_PERF_OVERLAP max_runtime_prefetch_ms=0.000 max_runtime_prefetch_poll_ms=0.000 max_runtime_prefetch_sync_ms=0.000 max_runtime_prefetch_gpu_upload_ms=0.000 max_runtime_prefetch_ready_sections_ms=0.000
+MCLONE_ANDROID_XR_PERF_DRAW sections=1133 drawn_sections=179 indices=5396736 drawn_indices=1356102 actors=1 drawn_actors=1
+MCLONE_ANDROID_XR_PERF_METRICS app_gpu_ms=2.214 app_cpu_ms=n/a compositor_gpu_ms=1.143 compositor_cpu_ms=n/a gpu_util_pct=25.035 cpu_util_avg_pct=84.439 cpu_util_worst_pct=87.129 motion_to_photon_ms=23.011 dropped_frames=48.000 stale_frames=n/a counters=17 any_valid=true attempt=1/8 per_query_us=0.40
+```
+
+Interpretation:
+
+- This is a real opt-in frozen-RD10 app-work win. Two overlap runs were stable
+  (`10.967/11.734ms` and `10.959/11.686ms` avg/p95) around a matched default
+  run at `12.685/13.554ms`.
+- The measured win is mostly frame pacing / deferred stereo wait, not live
+  N+1 runtime work: frozen render disables runtime polling and upload, so the
+  prefetch fields are all zero.
+- Keep `--xr-frame-overlap` opt-in for now. It needs live stationary/flight RD10
+  validation and a headset comfort/latency check before becoming the default.
 
 ### 2026-07-01 - Standalone Quest 3 Frozen RD10 Solid Terrain Layer Split (Slice O)
 
