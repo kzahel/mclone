@@ -2,6 +2,8 @@
 
 pub(crate) mod passive;
 
+use super::MobGoalContext;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum GoalFlag {
     Move,
@@ -73,10 +75,10 @@ impl GoalFlags {
     }
 }
 
-pub(crate) trait Goal<C> {
-    fn can_use(&mut self, context: &mut C) -> bool;
+pub(crate) trait Goal {
+    fn can_use(&mut self, context: &mut MobGoalContext<'_>) -> bool;
 
-    fn can_continue_to_use(&mut self, context: &mut C) -> bool {
+    fn can_continue_to_use(&mut self, context: &mut MobGoalContext<'_>) -> bool {
         self.can_use(context)
     }
 
@@ -84,11 +86,11 @@ pub(crate) trait Goal<C> {
         true
     }
 
-    fn start(&mut self, _context: &mut C) {}
+    fn start(&mut self, _context: &mut MobGoalContext<'_>) {}
 
-    fn stop(&mut self, _context: &mut C) {}
+    fn stop(&mut self, _context: &mut MobGoalContext<'_>) {}
 
-    fn tick(&mut self, _context: &mut C) {}
+    fn tick(&mut self, _context: &mut MobGoalContext<'_>) {}
 
     fn flags(&self) -> GoalFlags {
         GoalFlags::NONE
@@ -97,14 +99,14 @@ pub(crate) trait Goal<C> {
     fn set_flags(&mut self, _flags: GoalFlags) {}
 }
 
-struct WrappedGoal<C> {
+struct WrappedGoal {
     priority: i32,
-    goal: Box<dyn Goal<C>>,
+    goal: Box<dyn Goal>,
     is_running: bool,
 }
 
-impl<C> WrappedGoal<C> {
-    fn new(priority: i32, goal: Box<dyn Goal<C>>) -> Self {
+impl WrappedGoal {
+    fn new(priority: i32, goal: Box<dyn Goal>) -> Self {
         Self {
             priority,
             goal,
@@ -116,29 +118,29 @@ impl<C> WrappedGoal<C> {
         self.goal.is_interruptable() && candidate_priority < self.priority
     }
 
-    fn can_use(&mut self, context: &mut C) -> bool {
+    fn can_use(&mut self, context: &mut MobGoalContext<'_>) -> bool {
         self.goal.can_use(context)
     }
 
-    fn can_continue_to_use(&mut self, context: &mut C) -> bool {
+    fn can_continue_to_use(&mut self, context: &mut MobGoalContext<'_>) -> bool {
         self.goal.can_continue_to_use(context)
     }
 
-    fn start(&mut self, context: &mut C) {
+    fn start(&mut self, context: &mut MobGoalContext<'_>) {
         if !self.is_running {
             self.is_running = true;
             self.goal.start(context);
         }
     }
 
-    fn stop(&mut self, context: &mut C) {
+    fn stop(&mut self, context: &mut MobGoalContext<'_>) {
         if self.is_running {
             self.is_running = false;
             self.goal.stop(context);
         }
     }
 
-    fn tick(&mut self, context: &mut C) {
+    fn tick(&mut self, context: &mut MobGoalContext<'_>) {
         self.goal.tick(context);
     }
 
@@ -155,15 +157,15 @@ impl<C> WrappedGoal<C> {
     }
 }
 
-pub(crate) struct GoalSelector<C> {
+pub(crate) struct GoalSelector {
     locked_flags: [Option<usize>; 4],
-    available_goals: Vec<WrappedGoal<C>>,
+    available_goals: Vec<WrappedGoal>,
     disabled_flags: GoalFlags,
     tick_count: i32,
     new_goal_rate: i32,
 }
 
-impl<C> Default for GoalSelector<C> {
+impl Default for GoalSelector {
     fn default() -> Self {
         Self {
             locked_flags: [None; 4],
@@ -175,7 +177,7 @@ impl<C> Default for GoalSelector<C> {
     }
 }
 
-impl<C> std::fmt::Debug for GoalSelector<C> {
+impl std::fmt::Debug for GoalSelector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GoalSelector")
             .field("available_goals", &self.available_goals.len())
@@ -187,8 +189,8 @@ impl<C> std::fmt::Debug for GoalSelector<C> {
     }
 }
 
-impl<C> GoalSelector<C> {
-    pub(crate) fn add_goal(&mut self, priority: i32, goal: impl Goal<C> + 'static) {
+impl GoalSelector {
+    pub(crate) fn add_goal(&mut self, priority: i32, goal: impl Goal + 'static) {
         self.available_goals
             .push(WrappedGoal::new(priority, Box::new(goal)));
     }
@@ -198,7 +200,7 @@ impl<C> GoalSelector<C> {
         self.locked_flags = [None; 4];
     }
 
-    pub(crate) fn tick(&mut self, context: &mut C) {
+    pub(crate) fn tick(&mut self, context: &mut MobGoalContext<'_>) {
         self.cleanup_running_goals(context);
         self.clear_stopped_locked_flags();
         self.update_available_goals(context);
@@ -236,7 +238,7 @@ impl<C> GoalSelector<C> {
         self.available_goals.len()
     }
 
-    fn cleanup_running_goals(&mut self, context: &mut C) {
+    fn cleanup_running_goals(&mut self, context: &mut MobGoalContext<'_>) {
         for goal in &mut self.available_goals {
             if !goal.is_running() {
                 continue;
@@ -255,7 +257,7 @@ impl<C> GoalSelector<C> {
         }
     }
 
-    fn update_available_goals(&mut self, context: &mut C) {
+    fn update_available_goals(&mut self, context: &mut MobGoalContext<'_>) {
         for candidate_index in 0..self.available_goals.len() {
             if self.available_goals[candidate_index].is_running() {
                 continue;
@@ -290,7 +292,7 @@ impl<C> GoalSelector<C> {
         })
     }
 
-    fn tick_running_goals(&mut self, context: &mut C) {
+    fn tick_running_goals(&mut self, context: &mut MobGoalContext<'_>) {
         for goal in &mut self.available_goals {
             if goal.is_running() {
                 goal.tick(context);
@@ -305,6 +307,11 @@ mod tests {
     use std::rc::Rc;
 
     use super::*;
+    use crate::entity::metadata::EntityMetadata;
+    use crate::entity::state::ServerEntityState;
+    use mclone_core::{BlockPos, BlockStateId, Vec3d};
+    use mclone_protocol::{EntityId, EntityKind};
+    use mclone_worldgen::prng::SimpleRandomSource;
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum Event {
@@ -354,11 +361,28 @@ mod tests {
         handle: ProbeHandle,
     }
 
-    #[derive(Default)]
-    struct TestGoalContext;
+    fn no_blocks(_pos: BlockPos) -> Option<BlockStateId> {
+        None
+    }
 
-    fn tick(selector: &mut GoalSelector<TestGoalContext>) {
-        let mut context = TestGoalContext;
+    fn tick(selector: &mut GoalSelector) {
+        let metadata = EntityMetadata::for_kind(EntityKind::Cow).unwrap();
+        let entity = ServerEntityState::from_metadata(
+            EntityId(1),
+            metadata,
+            Vec3d::new(0.0, 64.0, 0.0),
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+        let mut context = MobGoalContext::from_parts_for_test(
+            entity,
+            metadata.standing_eye_height() as f64,
+            Vec::new(),
+            SimpleRandomSource::new(1),
+            &no_blocks,
+        );
         selector.tick(&mut context);
     }
 
@@ -390,13 +414,13 @@ mod tests {
         }
     }
 
-    impl Goal<TestGoalContext> for ProbeGoal {
-        fn can_use(&mut self, _context: &mut TestGoalContext) -> bool {
+    impl Goal for ProbeGoal {
+        fn can_use(&mut self, _context: &mut MobGoalContext<'_>) -> bool {
             self.events.push(Event::CanUse(self.name));
             self.handle.can_use.get()
         }
 
-        fn can_continue_to_use(&mut self, _context: &mut TestGoalContext) -> bool {
+        fn can_continue_to_use(&mut self, _context: &mut MobGoalContext<'_>) -> bool {
             self.events.push(Event::CanContinue(self.name));
             self.handle.can_continue.get()
         }
@@ -405,15 +429,15 @@ mod tests {
             self.interruptable
         }
 
-        fn start(&mut self, _context: &mut TestGoalContext) {
+        fn start(&mut self, _context: &mut MobGoalContext<'_>) {
             self.events.push(Event::Start(self.name));
         }
 
-        fn stop(&mut self, _context: &mut TestGoalContext) {
+        fn stop(&mut self, _context: &mut MobGoalContext<'_>) {
             self.events.push(Event::Stop(self.name));
         }
 
-        fn tick(&mut self, _context: &mut TestGoalContext) {
+        fn tick(&mut self, _context: &mut MobGoalContext<'_>) {
             self.events.push(Event::Tick(self.name));
         }
 

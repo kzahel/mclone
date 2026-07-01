@@ -13,11 +13,13 @@ entity/mob/goal skeleton is in place.
 Workstream: native Rust shared server/runtime, desktop validation first.
 
 Status: Slices 0-4 landed. Slice 5 asset promotion is landed, with
-chicken-specific ticking still pending. Slice 5A landed the shared block
-collision owner, debug passive showcase toggle, and first server mob
-gravity/collision scaffold. The starter passive path is now an explicit
-debug passive showcase, enabled by default, while natural spawning remains
-future work.
+chicken-specific ticking still pending. Slice 5A landed shared block collision,
+the debug passive showcase toggle, and first server mob gravity/collision.
+Slice 5B landed server-owned `GroundPathNavigation`, a terrain-MVP
+`WalkNodeEvaluator` subset, and collision-aware `LandRandomPos` /
+`DefaultRandomPos` target selection. The starter passive path is now an
+explicit debug passive showcase, enabled by default, while natural spawning
+remains future work.
 
 ## Non-Negotiable Constraints
 
@@ -406,12 +408,62 @@ Landed notes:
 
 Still pending:
 
-- `GroundPathNavigation`, `WalkNodeEvaluator`, and real path waypoint ownership.
-- Collision-aware `LandRandomPos` target selection.
-- One-block step-up / `maxUpStep`, jump control, stuck detection, and
-  `LivingEntity.travel(...)` parity.
+- Full A* `PathFinder` and `WalkNodeEvaluator` neighbor expansion over loaded
+  world collision.
+- One-block step-up / `maxUpStep`, jump control, timeout-based stuck
+  detection, and `LivingEntity.travel(...)` parity.
 - A visible desktop capture of cow/chicken walking over uneven terrain after
   path navigation lands.
+
+## Slice 5B - Ground Navigation And Land Random Targets (Landed)
+
+Purpose: move passive stroll behavior through a shared navigation owner and
+terrain-aware random target selection instead of direct raw `MoveControl`
+targets.
+
+Implementation sketch:
+
+- Add `entity/mob/navigation/` with path ownership, ground navigation, a
+  terrain-MVP `WalkNodeEvaluator` subset, and random land target helpers.
+- Give `MobGoalContext` a short-lived world block lookup so goals can perform
+  Java-shaped terrain checks during `canUse`.
+- Port the `RandomStrollGoal` / `WaterAvoidingRandomStrollGoal` path boundary:
+  goals choose a target, navigation owns progress, and `MoveControl` receives
+  per-tick waypoints.
+- Reject unsupported random land targets so passive mobs do not intentionally
+  stroll toward floating air.
+- Keep full A* pathfinding and step-up out of this slice, but preserve their
+  module boundary.
+
+Landed notes:
+
+- Added `navigation/mod.rs`, `path.rs`, `walk_node_evaluator.rs`, and
+  `random_pos.rs` under `entity/mob/`.
+- Converted the mob goal selector to use `MobGoalContext<'_>` directly so
+  goal `canUse` checks can query the active server terrain lookup without
+  storing platform or scheduler state in goals.
+- Added `GroundPathNavigation` path state, waypoint advancement, Java-shaped
+  passive waypoint centering, stable-destination checks, and 100-tick
+  distance-based stuck detection.
+- Added a terrain-MVP `WalkNodeEvaluator` subset for open, walkable, blocked,
+  water, and lava path types backed by `mclone-blocks`.
+- Added collision-aware `LandRandomPos` / `DefaultRandomPos` helpers that use
+  Java random-direction attempts, stable floor checks, water rejection, and
+  pathfinding malus checks.
+- Updated cow random stroll to call those helpers and continue while
+  navigation is in progress.
+- Added a lower-floor regression proving navigation plus server collision lets
+  a cow descend to a lower supported block instead of preserving its old Y.
+- Verified with `cargo test --manifest-path native/Cargo.toml -p mclone-server`.
+
+Still pending:
+
+- Full Java `PathFinder` / `WalkNodeEvaluator.getNeighbors(...)` port.
+- One-block step-up, `JumpControl`, and `maxUpStep` handling.
+- Timeout-cached-node stuck detection and path recomputation timing.
+- `LivingEntity.travel(...)` parity for friction, fluids, ladders, and jump
+  movement.
+- Visible desktop capture of showcase animals on uneven terrain.
 
 ## Slice 6 - Spawning Skeleton, Not Full Natural Spawning
 

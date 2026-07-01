@@ -73,11 +73,18 @@ The first shared ground/collision scaffold is also in place:
 - Passive mobs carry vertical delta movement, resolve movement against server
   world blocks, derive `on_ground` from vertical collision, and fall when they
   leave support.
+- Server mobs now carry a `GroundPathNavigation` owner. Passive stroll goals
+  choose targets through collision-aware `LandRandomPos` / `DefaultRandomPos`
+  helpers, reject unsupported and water/malus targets, and let navigation feed
+  `MoveControl` waypoints.
+- The native `WalkNodeEvaluator` subset classifies terrain-MVP blocks as
+  open, walkable, blocked, water, or lava using shared block facts and
+  collision shapes.
 
-This does not complete `GroundPathNavigation`, `WalkNodeEvaluator`, one-block
-step-up, stuck detection, or full `LivingEntity.travel(...)`. Those remain
-required foundations before natural passive movement can be considered
-correct.
+This does not complete full A* `PathFinder` neighbor expansion, one-block
+step-up / jump control, timeout-based stuck detection, or full
+`LivingEntity.travel(...)`. Those remain required foundations before natural
+passive movement can be considered complete.
 
 ## Target Module Shape
 

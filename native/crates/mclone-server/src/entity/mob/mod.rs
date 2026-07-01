@@ -12,27 +12,17 @@ use super::state::ServerEntityState;
 
 mod control;
 pub(crate) mod goals;
+mod navigation;
 
 use control::{LookControl, MoveControl};
 use goals::{GoalSelector, passive};
+pub(crate) use navigation::BlockPathType;
+use navigation::GroundPathNavigation;
 
 const PLAYER_EYE_HEIGHT: f64 = 1.62;
 const MOB_GRAVITY: f64 = 0.08;
 const MOB_VERTICAL_DRAG: f64 = 0.98;
 const MOB_COLLISION_EPSILON: f64 = 1.0e-7;
-
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub(crate) enum BlockPathType {
-    Water,
-}
-
-impl BlockPathType {
-    pub(crate) const fn default_malus(self) -> f32 {
-        match self {
-            Self::Water => 8.0,
-        }
-    }
-}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PathfindingMalusTable {
@@ -78,7 +68,8 @@ pub(crate) struct MobRuntimeState {
     delta_movement: Vec3d,
     pathfinding_malus: PathfindingMalusTable,
     random: SimpleRandomSource,
-    goal_selector: GoalSelector<MobGoalContext>,
+    goal_selector: GoalSelector,
+    navigation: GroundPathNavigation,
     move_control: MoveControl,
     look_control: LookControl,
 }
@@ -115,6 +106,7 @@ impl MobRuntimeState {
             pathfinding_malus,
             random: SimpleRandomSource::new(mob_random_seed(id, metadata.kind)),
             goal_selector,
+            navigation: GroundPathNavigation::default(),
             move_control: MoveControl::default(),
             look_control: LookControl::default(),
         }
@@ -162,6 +154,14 @@ impl MobRuntimeState {
         self.goal_selector.running_goal_count()
     }
 
+    pub(crate) fn navigation_in_progress(&self) -> bool {
+        self.navigation.is_in_progress()
+    }
+
+    pub(crate) fn navigation_is_stuck(&self) -> bool {
+        self.navigation.is_stuck()
+    }
+
     pub(crate) fn pathfinding_malus(&self, path_type: BlockPathType) -> f32 {
         self.pathfinding_malus.get(path_type)
     }
@@ -182,6 +182,7 @@ impl MobRuntimeState {
         self.y_body_rot_degrees = entity.y_rot_degrees;
 
         let random = std::mem::replace(&mut self.random, SimpleRandomSource::new(0));
+        let navigation = std::mem::take(&mut self.navigation);
         let move_control = std::mem::take(&mut self.move_control);
         let look_control = std::mem::take(&mut self.look_control);
         let mut context = MobGoalContext {
@@ -194,14 +195,17 @@ impl MobRuntimeState {
             no_action_time: self.no_action_time,
             on_ground: self.on_ground,
             nearby_players: nearby_players.to_vec(),
+            pathfinding_malus: self.pathfinding_malus.clone(),
             random,
+            navigation,
             move_control,
             look_control,
+            block_state_at,
         };
 
         let mut goal_selector = std::mem::take(&mut self.goal_selector);
         goal_selector.tick(&mut context);
-        context.apply_controls(entity, block_state_at);
+        context.apply_controls(entity);
         self.goal_selector = goal_selector;
 
         self.no_action_time = context.no_action_time;
@@ -210,13 +214,13 @@ impl MobRuntimeState {
         self.y_head_rot_degrees = context.y_head_rot_degrees;
         self.delta_movement = context.delta_movement;
         self.random = context.random;
+        self.navigation = context.navigation;
         self.move_control = context.move_control;
         self.look_control = context.look_control;
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct MobGoalContext {
+pub(crate) struct MobGoalContext<'a> {
     position: Vec3d,
     eye_height: f64,
     y_body_rot_degrees: f32,
@@ -226,12 +230,15 @@ pub(crate) struct MobGoalContext {
     no_action_time: u32,
     on_ground: bool,
     nearby_players: Vec<MobPlayerTarget>,
+    pathfinding_malus: PathfindingMalusTable,
     random: SimpleRandomSource,
+    navigation: GroundPathNavigation,
     move_control: MoveControl,
     look_control: LookControl,
+    block_state_at: &'a dyn Fn(BlockPos) -> Option<BlockStateId>,
 }
 
-impl MobGoalContext {
+impl<'a> MobGoalContext<'a> {
     pub(crate) fn position(&self) -> Vec3d {
         self.position
     }
@@ -276,34 +283,70 @@ impl MobGoalContext {
         self.position.distance_to_sqr(position)
     }
 
-    pub(crate) fn has_move_target(&self) -> bool {
-        self.move_control.has_wanted()
+    pub(crate) fn is_navigation_in_progress(&self) -> bool {
+        self.navigation.is_in_progress()
     }
 
-    pub(crate) fn set_move_target(&mut self, position: Vec3d, speed_modifier: f64) {
-        self.move_control
-            .set_wanted_position(position, speed_modifier);
+    pub(crate) fn move_to(&mut self, position: Vec3d, speed_modifier: f64) -> bool {
+        self.navigation
+            .move_to(self.position, position, speed_modifier, self.block_state_at)
     }
 
     pub(crate) fn stop_navigation(&mut self) {
+        self.navigation.stop();
         self.move_control.stop();
+    }
+
+    pub(crate) fn land_random_pos(
+        &mut self,
+        horizontal_range: i32,
+        vertical_range: i32,
+    ) -> Option<Vec3d> {
+        navigation::land_random_pos(
+            self.position,
+            horizontal_range,
+            vertical_range,
+            &mut self.random,
+            &self.navigation,
+            self.block_state_at,
+            |path_type| self.pathfinding_malus.get(path_type),
+        )
+    }
+
+    pub(crate) fn default_random_pos(
+        &mut self,
+        horizontal_range: i32,
+        vertical_range: i32,
+    ) -> Option<Vec3d> {
+        navigation::default_random_pos(
+            self.position,
+            horizontal_range,
+            vertical_range,
+            &mut self.random,
+            &self.navigation,
+            self.block_state_at,
+            |path_type| self.pathfinding_malus.get(path_type),
+        )
     }
 
     pub(crate) fn set_look_at(&mut self, position: Vec3d) {
         self.look_control.set_look_at(position);
     }
 
-    pub(crate) fn apply_controls<F>(
-        &mut self,
-        entity: &mut ServerEntityState,
-        block_state_at: &F,
-    ) -> bool
-    where
-        F: Fn(BlockPos) -> Option<BlockStateId>,
-    {
+    pub(crate) fn apply_controls(&mut self, entity: &mut ServerEntityState) -> bool {
         let previous_position = entity.position;
         let previous_y_rot = entity.y_rot_degrees;
         let previous_on_ground = entity.on_ground;
+
+        if let Some(target) = self.navigation.tick(
+            self.position,
+            entity.width,
+            self.on_ground,
+            self.block_state_at,
+        ) {
+            self.move_control
+                .set_wanted_position(target.position, target.speed_modifier);
+        }
 
         let previous_control_position = self.position;
         let moved = self.move_control.tick(
@@ -329,7 +372,7 @@ impl MobGoalContext {
             f64::from(entity.width),
             f64::from(entity.height),
         );
-        let traveled = collide_movement(block_state_at, bounding_box, requested);
+        let traveled = collide_movement(self.block_state_at, bounding_box, requested);
         if traveled.length_sqr() > MOB_COLLISION_EPSILON * MOB_COLLISION_EPSILON {
             self.position = self.position.add(traveled);
         }
@@ -360,6 +403,7 @@ impl MobGoalContext {
         eye_height: f64,
         nearby_players: Vec<MobPlayerTarget>,
         random: SimpleRandomSource,
+        block_state_at: &'static dyn Fn(BlockPos) -> Option<BlockStateId>,
     ) -> Self {
         Self {
             position: entity.position,
@@ -371,9 +415,12 @@ impl MobGoalContext {
             no_action_time: 0,
             on_ground: entity.on_ground,
             nearby_players,
+            pathfinding_malus: PathfindingMalusTable::default(),
             random,
+            navigation: GroundPathNavigation::default(),
             move_control: MoveControl::default(),
             look_control: LookControl::default(),
+            block_state_at,
         }
     }
 }
@@ -392,6 +439,15 @@ fn mob_random_seed(id: EntityId, kind: EntityKind) -> i64 {
 mod tests {
     use super::*;
     use crate::entity::metadata::EntityMetadata;
+
+    fn stepped_ground(pos: BlockPos) -> Option<BlockStateId> {
+        let floor_y = if pos.x <= 0 { 63 } else { 62 };
+        Some(if pos.y == floor_y {
+            BlockStateId(1)
+        } else {
+            BlockStateId(mclone_blocks::terrain_id::AIR)
+        })
+    }
 
     #[test]
     fn cow_runtime_uses_default_water_malus_and_metadata_speed() {
@@ -446,5 +502,38 @@ mod tests {
         assert!(!mob.on_ground());
         assert_eq!(mob.y_body_rot_degrees(), 90.0);
         assert_eq!(mob.y_head_rot_degrees(), 90.0);
+    }
+
+    #[test]
+    fn navigation_move_to_lower_floor_descends_with_collision() {
+        let metadata = EntityMetadata::for_kind(EntityKind::Cow).unwrap();
+        let mut entity = ServerEntityState::from_metadata(
+            EntityId(1),
+            metadata,
+            Vec3d::new(0.5, 64.0, 0.5),
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+        let mut context = MobGoalContext::from_parts_for_test(
+            entity,
+            metadata.standing_eye_height() as f64,
+            Vec::new(),
+            SimpleRandomSource::new(1),
+            &stepped_ground,
+        );
+
+        assert!(context.move_to(Vec3d::new(2.5, 63.0, 0.5), 1.0));
+        for _ in 0..80 {
+            context.apply_controls(&mut entity);
+            if entity.on_ground && entity.position.x > 1.6 {
+                break;
+            }
+        }
+
+        assert!(entity.position.x > 1.6);
+        assert!(entity.position.y < 64.0);
+        assert!(entity.on_ground);
     }
 }

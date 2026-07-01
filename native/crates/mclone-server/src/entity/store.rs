@@ -318,7 +318,11 @@ mod tests {
     }
 
     fn flat_ground(pos: BlockPos) -> Option<BlockStateId> {
-        (pos.y == 63).then_some(BlockStateId(1))
+        Some(if pos.y == 63 {
+            BlockStateId(1)
+        } else {
+            BlockStateId(mclone_blocks::terrain_id::AIR)
+        })
     }
 
     #[test]
