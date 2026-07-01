@@ -125,12 +125,13 @@ pub fn actor_instances_from_presentations(
                 )
                 .with_packed_light(packed_light),
                 ActorPresentationKind::Entity(EntityKind::Chicken) => {
-                    ActorInstance::chicken_placeholder(
+                    ActorInstance::remote_player_with_figure(
                         glam_vec3_from_vec3d(actor.feet_position),
                         actor.y_rot_degrees,
-                        actor.width,
-                        actor.height,
+                        mclone_assets::chicken_figure_id(),
                     )
+                    .with_dimensions(actor.width, actor.height)
+                    .with_walk_animation_distance(actor.walk_animation_distance)
                     .with_packed_light(packed_light)
                 }
                 ActorPresentationKind::Entity(EntityKind::DebugCube) => ActorInstance::debug_cube(
@@ -3643,6 +3644,7 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use mclone_assets::default_player_figure_id;
+    use mclone_client::{ActorAppearance, ActorPresentationId};
     use mclone_core::{
         AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision,
         ChunkStatus, HitResultType, chunk_section_index,
@@ -4356,6 +4358,35 @@ mod tests {
                 mclone_assets::upright_bear_figure_id()
             )
         );
+    }
+
+    #[test]
+    fn chicken_entity_actor_uses_chicken_figure() {
+        let client = ClientRuntime::local_integrated();
+        let presentation = ActorPresentation {
+            id: ActorPresentationId::Entity(mclone_protocol::EntityId(7)),
+            kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Chicken),
+            appearance: ActorAppearance::NONE,
+            feet_position: Vec3d::new(1.0, 64.0, 2.0),
+            y_rot_degrees: 45.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: true,
+            width: 0.4,
+            height: 0.7,
+            walk_animation_distance: 0.25,
+        };
+
+        let actors = actor_instances_from_presentations(&[presentation], &client);
+
+        assert_eq!(actors.len(), 1);
+        assert_eq!(
+            actors[0].shape,
+            mclone_render::entity::ActorInstanceShape::Figure(mclone_assets::chicken_figure_id())
+        );
+        assert_eq!(actors[0].width, 0.4);
+        assert_eq!(actors[0].height, 0.7);
+        assert!(actors[0].animation.is_some());
     }
 
     #[test]

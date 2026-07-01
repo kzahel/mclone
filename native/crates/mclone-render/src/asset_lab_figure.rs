@@ -4,8 +4,7 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_assets::{
     ActorFigureId, FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAsciiTexture, FigureAsset, FigureClip,
-    FigureClipLocomotion, FigureClipTransform, FigurePart, FigurePrimitive, actor_figure_path,
-    load_figure_asset,
+    FigureClipLocomotion, FigureClipTransform, FigurePart, actor_figure_path, load_figure_asset,
 };
 
 const TEXTURE_OVERLAY_DEPTH: f32 = 0.004;
@@ -169,29 +168,7 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
     let mut compiled_parts = Vec::with_capacity(asset.parts.len());
 
     for (part_index, part) in asset.parts.iter().enumerate() {
-        let FigurePrimitive { kind, size, faces } = &part.primitive;
-        if kind != "box" {
-            bail!(
-                "asset-lab figure '{}' part '{}' uses unsupported primitive kind '{}'",
-                asset.name,
-                part.name,
-                kind
-            );
-        }
-        let size = Vec3::from_array(size.with_context(|| {
-            format!(
-                "asset-lab figure '{}' box part '{}' is missing size",
-                asset.name, part.name
-            )
-        })?);
-        if size.x <= 0.0 || size.y <= 0.0 || size.z <= 0.0 {
-            bail!(
-                "asset-lab figure '{}' box part '{}' has non-positive size {:?}",
-                asset.name,
-                part.name,
-                size
-            );
-        }
+        let (size, face_overrides) = primitive_cuboid_size(asset, part)?;
 
         let origin = part_origin(
             part_index,
@@ -231,7 +208,6 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
             .transpose()?
             .unwrap_or([0.84, 0.87, 0.89, 1.0]);
         let mut face_colors = shaded_faces(base_color);
-        let face_overrides = faces.as_ref();
         if let Some(face_overrides) = face_overrides {
             for (face_name, face) in face_overrides {
                 let box_face = parse_box_face(face_name)?;
@@ -332,6 +308,106 @@ pub(crate) fn compile_figure_asset(asset: &FigureAsset) -> Result<CompiledFigure
     }
     let clips = compile_clips(asset, &part_names)?;
     normalize_figure(raw_cuboids, raw_overlay_cuboids, compiled_parts, clips)
+}
+
+fn primitive_cuboid_size<'a>(
+    asset: &FigureAsset,
+    part: &'a FigurePart,
+) -> Result<(Vec3, Option<&'a HashMap<String, mclone_assets::FigureFace>>)> {
+    let primitive = &part.primitive;
+    let size = match primitive.kind.as_str() {
+        "box" => {
+            let size = Vec3::from_array(primitive.size.with_context(|| {
+                format!(
+                    "asset-lab figure '{}' box part '{}' is missing size",
+                    asset.name, part.name
+                )
+            })?);
+            require_positive_size(asset, part, size)?;
+            return Ok((size, primitive.faces.as_ref()));
+        }
+        "sphere" => {
+            let radius =
+                required_positive_primitive_field(asset, part, "radius", primitive.radius)?;
+            Vec3::splat(radius * 2.0)
+        }
+        "capsule" => {
+            let radius =
+                required_positive_primitive_field(asset, part, "radius", primitive.radius)?;
+            let length =
+                required_positive_primitive_field(asset, part, "length", primitive.length)?;
+            Vec3::new(radius * 2.0, length + radius * 2.0, radius * 2.0)
+        }
+        "cylinder" => {
+            let radius_top =
+                required_positive_primitive_field(asset, part, "radiusTop", primitive.radius_top)?;
+            let radius_bottom = required_positive_primitive_field(
+                asset,
+                part,
+                "radiusBottom",
+                primitive.radius_bottom,
+            )?;
+            let length =
+                required_positive_primitive_field(asset, part, "length", primitive.length)?;
+            let radius = radius_top.max(radius_bottom);
+            Vec3::new(radius * 2.0, length, radius * 2.0)
+        }
+        _ => {
+            bail!(
+                "asset-lab figure '{}' part '{}' uses unsupported primitive kind '{}'",
+                asset.name,
+                part.name,
+                primitive.kind
+            );
+        }
+    };
+
+    if primitive.faces.is_some() {
+        bail!(
+            "asset-lab figure '{}' part '{}' uses face overrides on non-box primitive '{}'",
+            asset.name,
+            part.name,
+            primitive.kind
+        );
+    }
+    Ok((size, None))
+}
+
+fn require_positive_size(asset: &FigureAsset, part: &FigurePart, size: Vec3) -> Result<()> {
+    if size.x <= 0.0 || size.y <= 0.0 || size.z <= 0.0 {
+        bail!(
+            "asset-lab figure '{}' box part '{}' has non-positive size {:?}",
+            asset.name,
+            part.name,
+            size
+        );
+    }
+    Ok(())
+}
+
+fn required_positive_primitive_field(
+    asset: &FigureAsset,
+    part: &FigurePart,
+    field: &str,
+    value: Option<f32>,
+) -> Result<f32> {
+    let value = value.with_context(|| {
+        format!(
+            "asset-lab figure '{}' {} part '{}' is missing {}",
+            asset.name, part.primitive.kind, part.name, field
+        )
+    })?;
+    if value <= 0.0 {
+        bail!(
+            "asset-lab figure '{}' {} part '{}' has non-positive {} {}",
+            asset.name,
+            part.primitive.kind,
+            part.name,
+            field,
+            value
+        );
+    }
+    Ok(value)
 }
 
 fn compile_materials(asset: &FigureAsset) -> Result<HashMap<String, [f32; 4]>> {
@@ -946,6 +1022,8 @@ mod tests {
 
     const PLAYER_FIGURE_JSON: &str =
         include_str!("../../../../assets/mclone/figures/player.figure.json");
+    const CHICKEN_FIGURE_JSON: &str =
+        include_str!("../../../../assets/mclone/figures/chicken.figure.json");
 
     #[test]
     fn compiles_player_figure_asset() {
@@ -968,11 +1046,29 @@ mod tests {
     }
 
     #[test]
+    fn compiles_chicken_figure_asset_with_non_box_primitives() {
+        let asset: FigureAsset = serde_json::from_str(CHICKEN_FIGURE_JSON).unwrap();
+        let figure = compile_figure_asset(&asset).unwrap();
+
+        assert!(figure.cuboids.len() > 20);
+        assert_eq!(figure.overlay_cuboids.len(), 0);
+        assert_eq!(figure.parts.len(), asset.parts.len());
+        assert!(figure.clips.contains_key("walk"));
+        assert!(figure.inv_height > 0.0);
+
+        let bounds = compiled_bounds(&figure);
+        assert!((bounds.min.y - 0.0).abs() < 1.0e-6);
+        assert!((bounds.max.y - 1.0).abs() < 1.0e-6);
+        assert!(bounds.max.x > 0.2);
+        assert!(bounds.max.z > 0.2);
+    }
+
+    #[test]
     fn first_party_actor_figure_set_loads_default_player() {
         let source = mclone_assets::FilesystemAssetSource::new("../../..");
         let figures = load_first_party_actor_figures(&source).unwrap();
 
-        assert_eq!(figures.len(), 2);
+        assert_eq!(figures.len(), 3);
         assert!(
             figures
                 .get(mclone_assets::default_player_figure_id())
@@ -983,6 +1079,7 @@ mod tests {
                 .get(mclone_assets::upright_bear_figure_id())
                 .is_some()
         );
+        assert!(figures.get(mclone_assets::chicken_figure_id()).is_some());
     }
 
     #[test]
@@ -1071,7 +1168,7 @@ mod tests {
           "materials": { "skin": { "color": "#ffffff" } },
           "textures": {},
           "parts": [
-            { "name": "body", "material": "skin", "primitive": { "kind": "sphere", "radius": 1 } }
+            { "name": "body", "material": "skin", "primitive": { "kind": "torus", "radius": 1 } }
           ],
           "clips": {}
         }
@@ -1079,7 +1176,7 @@ mod tests {
 
         let asset: FigureAsset = serde_json::from_str(json).unwrap();
         let error = compile_figure_asset(&asset).unwrap_err().to_string();
-        assert!(error.contains("unsupported primitive kind 'sphere'"));
+        assert!(error.contains("unsupported primitive kind 'torus'"));
     }
 
     fn compile_test_player_figure() -> CompiledFigure {

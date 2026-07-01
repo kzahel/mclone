@@ -203,8 +203,8 @@ struct RgbaTexture {
 mod tests {
     use super::*;
     use mclone_assets::{
-        default_player_figure_id, default_player_figure_path, upright_bear_figure_id,
-        upright_bear_figure_path,
+        chicken_figure_id, chicken_figure_path, default_player_figure_id,
+        default_player_figure_path, upright_bear_figure_id, upright_bear_figure_path,
     };
     use std::io::Cursor;
 
@@ -218,6 +218,10 @@ mod tests {
         source.insert_text(
             upright_bear_figure_path(),
             include_str!("../../../../assets/mclone/figures/upright_bear.figure.json"),
+        );
+        source.insert_text(
+            chicken_figure_path(),
+            include_str!("../../../../assets/mclone/figures/chicken.figure.json"),
         );
         source
     }
@@ -257,6 +261,7 @@ mod tests {
 
         assert!(assets.figures.get(default_player_figure_id()).is_some());
         assert!(assets.figures.get(upright_bear_figure_id()).is_some());
-        assert_eq!(assets.figures.len(), 2);
+        assert!(assets.figures.get(chicken_figure_id()).is_some());
+        assert_eq!(assets.figures.len(), 3);
     }
 }

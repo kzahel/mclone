@@ -223,6 +223,12 @@ impl ActorInstance {
         self
     }
 
+    pub fn with_dimensions(mut self, width: f32, height: f32) -> Self {
+        self.width = width;
+        self.height = height;
+        self
+    }
+
     pub fn with_walk_animation_distance(mut self, distance: f32) -> Self {
         if distance.is_finite() {
             self.animation = Some(ActorAnimation {

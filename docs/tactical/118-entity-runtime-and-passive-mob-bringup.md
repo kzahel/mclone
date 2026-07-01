@@ -12,10 +12,12 @@ entity/mob/goal skeleton is in place.
 
 Workstream: native Rust shared server/runtime, desktop validation first.
 
-Status: Slices 0-4 landed. The starter passive entity path is split under
-`native/crates/mclone-server/src/entity/`, and entity visibility/tick-list
-boundaries, passive cow/chicken metadata, a standalone goal selector, and a
-first cow passive AI/control path now exist before chicken-specific work.
+Status: Slices 0-4 landed. Slice 5 asset promotion is landed, with
+chicken-specific ticking still pending. The starter passive entity path is
+split under `native/crates/mclone-server/src/entity/`, and entity
+visibility/tick-list boundaries, passive cow/chicken metadata, a standalone
+goal selector, and a first cow passive AI/control path now exist before
+chicken-specific work.
 
 ## Non-Negotiable Constraints
 
@@ -334,6 +336,32 @@ Done when:
 - Entity protocol can carry any chicken presentation data required by the
   renderer, or the deferred data gap is documented explicitly.
 - Desktop screenshot validation shows the chicken figure in-world.
+
+Partial landed notes:
+
+- Exported `tools/asset-lab/examples/chicken/figure.ts` to
+  `assets/mclone/figures/chicken.figure.json`.
+- Added `mclone:chicken` figure id/path registration in `mclone-assets`.
+- Extended the Rust asset-lab figure compiler to accept exported
+  `sphere` / `capsule` / `cylinder` primitives as cuboid bounds for the current
+  actor renderer. True non-box primitive mesh rendering remains follow-up work.
+- Added chicken to the first-party actor figure set loaded by `mclone-render`.
+- Mapped authoritative `EntityKind::Chicken` presentations to the chicken
+  figure in `mclone-render-session`, with entity dimensions preserved.
+- Added actor review coverage so the first-party review sheet includes chicken.
+- Verified with
+  `cargo test --manifest-path native/Cargo.toml -p mclone-assets -p mclone-render -p mclone-render-session`.
+- Verified with `cargo test --manifest-path native/Cargo.toml`.
+- Rendered and inspected `/tmp/mclone-chicken-actor-review.png` with 3 views,
+  9 actors, and 9 drawn actors.
+
+Still pending:
+
+- Chicken-specific flap/egg/jockey runtime state.
+- Java `Chicken.aiStep()` ticking for state that does not require item entities
+  or sounds.
+- Protocol/client presentation review for any chicken-specific animation data
+  that cannot be derived from ordinary entity movement.
 
 ## Slice 6 - Spawning Skeleton, Not Full Natural Spawning
 

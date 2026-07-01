@@ -1304,7 +1304,12 @@ mod tests {
                 mclone_assets::upright_bear_figure_id()
             )
         );
+        assert_eq!(
+            actors[2].shape,
+            mclone_render::entity::ActorInstanceShape::Figure(mclone_assets::chicken_figure_id())
+        );
         assert!(actors[0].feet_position.x < actors[1].feet_position.x);
+        assert!(actors[1].feet_position.x < actors[2].feet_position.x);
     }
 
     #[test]

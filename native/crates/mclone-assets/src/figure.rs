@@ -6,10 +6,15 @@ use crate::{AssetError, AssetPath, AssetResult, AssetSource};
 
 pub const DEFAULT_PLAYER_FIGURE_PATH: &str = "assets/mclone/figures/player.figure.json";
 pub const UPRIGHT_BEAR_FIGURE_PATH: &str = "assets/mclone/figures/upright_bear.figure.json";
+pub const CHICKEN_FIGURE_PATH: &str = "assets/mclone/figures/chicken.figure.json";
 pub const DEFAULT_PLAYER_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:player");
 pub const UPRIGHT_BEAR_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:upright_bear");
-pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 2] =
-    [DEFAULT_PLAYER_FIGURE_ID, UPRIGHT_BEAR_FIGURE_ID];
+pub const CHICKEN_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:chicken");
+pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 3] = [
+    DEFAULT_PLAYER_FIGURE_ID,
+    UPRIGHT_BEAR_FIGURE_ID,
+    CHICKEN_FIGURE_ID,
+];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ActorFigureId(&'static str);
@@ -72,6 +77,20 @@ pub struct FigureJoint {
 pub struct FigurePrimitive {
     pub kind: String,
     pub size: Option<[f32; 3]>,
+    pub radius: Option<f32>,
+    #[serde(rename = "radiusTop")]
+    pub radius_top: Option<f32>,
+    #[serde(rename = "radiusBottom")]
+    pub radius_bottom: Option<f32>,
+    pub length: Option<f32>,
+    #[serde(rename = "widthSegments")]
+    pub width_segments: Option<u32>,
+    #[serde(rename = "heightSegments")]
+    pub height_segments: Option<u32>,
+    #[serde(rename = "capSegments")]
+    pub cap_segments: Option<u32>,
+    #[serde(rename = "radialSegments")]
+    pub radial_segments: Option<u32>,
     pub faces: Option<HashMap<String, FigureFace>>,
 }
 
@@ -133,6 +152,10 @@ pub fn upright_bear_figure_path() -> AssetPath {
     AssetPath::new(UPRIGHT_BEAR_FIGURE_PATH)
 }
 
+pub fn chicken_figure_path() -> AssetPath {
+    AssetPath::new(CHICKEN_FIGURE_PATH)
+}
+
 pub const fn default_player_figure_id() -> ActorFigureId {
     DEFAULT_PLAYER_FIGURE_ID
 }
@@ -141,10 +164,15 @@ pub const fn upright_bear_figure_id() -> ActorFigureId {
     UPRIGHT_BEAR_FIGURE_ID
 }
 
+pub const fn chicken_figure_id() -> ActorFigureId {
+    CHICKEN_FIGURE_ID
+}
+
 pub fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
     match id.as_str() {
         "mclone:player" => Some(default_player_figure_path()),
         "mclone:upright_bear" => Some(upright_bear_figure_path()),
+        "mclone:chicken" => Some(chicken_figure_path()),
         _ => None,
     }
 }
@@ -227,6 +255,11 @@ mod tests {
         assert_eq!(
             actor_figure_path(upright_bear_figure_id()).unwrap(),
             upright_bear_figure_path()
+        );
+        assert_eq!(chicken_figure_id().as_str(), "mclone:chicken");
+        assert_eq!(
+            actor_figure_path(chicken_figure_id()).unwrap(),
+            chicken_figure_path()
         );
         assert!(actor_figure_path(ActorFigureId::from_static("mclone:missing")).is_none());
     }
