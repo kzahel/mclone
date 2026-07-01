@@ -407,7 +407,7 @@ impl FlatClientDriver {
 
     pub(crate) fn ui_pointer_down(&mut self, point: Point, state: GameUiRenderState) -> bool {
         if self.sync_ui_v2_screen() {
-            return self.ui_v2.pointer_down(point);
+            return self.ui_v2.pointer_down(point, state);
         }
         self.ui.pointer_down(point, state)
     }
@@ -418,7 +418,7 @@ impl FlatClientDriver {
         state: GameUiRenderState,
     ) -> (bool, Option<GameUiAction>) {
         if self.sync_ui_v2_screen() {
-            return self.ui_v2.pointer_up(point);
+            return self.ui_v2.pointer_up(point, state);
         }
         self.ui.pointer_up(point, state)
     }
@@ -429,7 +429,7 @@ impl FlatClientDriver {
         state: GameUiRenderState,
     ) -> (bool, Option<GameUiAction>) {
         if self.sync_ui_v2_screen() {
-            return self.ui_v2.pointer_move(point);
+            return self.ui_v2.pointer_move(point, state);
         }
         self.ui.pointer_move(point, state)
     }
@@ -1835,7 +1835,7 @@ impl FlatClientDriver {
         ui_render_state.block_palette = ui_frame.block_palette;
         self.sync_ui_v2_screen();
         let base_ui_draw = if self.ui_v2.is_active() {
-            self.ui_v2.render_draw_list()
+            self.ui_v2.render_draw_list(ui_render_state)
         } else {
             self.ui.render_draw_list(ui_render_state)
         };

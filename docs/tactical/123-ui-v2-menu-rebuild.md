@@ -1,6 +1,6 @@
 # 123: UI V2 Menu Rebuild
 
-Status: active; first chunk landed 2026-07-01.
+Status: active; Options v2 first pass landed 2026-07-01.
 
 ## Decision
 
@@ -219,7 +219,7 @@ Validation:
 
 ### Slice C: Desktop App Routing For V2
 
-Status: first pass landed for Pause only 2026-07-01.
+Status: first pass landed for Pause and Options 2026-07-01.
 
 Wire desktop flat input to UI v2 when the active screen has migrated. Legacy
 screens continue to route through legacy `GameUi`.
@@ -243,7 +243,7 @@ Validation:
 
 ### Slice D: Options Screen In V2
 
-Status: pending.
+Status: first pass landed 2026-07-01.
 
 Rebuild Options on top of retained row models.
 
@@ -497,10 +497,58 @@ Known limits:
 
 - XR still uses the existing shared UI panel path; this slice proves compile/test
   compatibility, not v2 XR routing
-- Options, Controls, HUD, hotbar, and block picker remain legacy
+- Controls, Server Settings, HUD, hotbar, and block picker remain legacy
 - v2 text still adapts to the existing rectangle-command font path until the
   atlas text slice lands
-- macOS manual click signoff should happen on Pause before migrating Options
+- macOS manual click signoff remains pending for migrated Pause/Options screens
+
+## Landed Options Chunk
+
+Date: 2026-07-01.
+
+Scope:
+
+- expanded `UiScreenId` and desktop routing so `GameScreen::Options` uses v2
+- added v2 widget kinds for buttons, checkboxes, cycle rows, and sliders
+- added a v2-owned retained Options row layout instead of using legacy
+  `option_widgets()` for v2 hit testing
+- included conditional Crosshair, Touch Controls, Touch Look, and Server
+  Settings rows during layout from one `GameUiRenderState` snapshot
+- implemented slider capture/drag actions for Render Distance, Far LOD Range,
+  Fly Speed, Movement Speed, and Touch Look
+- kept rendering on the temporary `GuiDrawList` backend and existing visual
+  widget primitives
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+```
+
+Rendered checks:
+
+- native Options screenshot inspected:
+  `/tmp/mclone-ui-v2-options.png`
+- browser canvas smoke regenerated:
+  `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- macOS manual click signoff for Pause/Options is still pending; this chunk
+  proceeded on the assumption that committed v2 rects are sufficient until the
+  user can test desktop clicks
+- Controls still uses the legacy help/controls screen
+- Server Settings still uses the legacy screen after Options opens it
+- v2 text still uses the old rectangle-command font path; Options produced 7190
+  GUI commands in the inspected screenshot, so atlas text remains important
 
 ## Non-Goals
 
@@ -516,19 +564,18 @@ Known limits:
 
 ## Next Recommended Chunk
 
-Move Options into v2 as Slice D, but keep the slice narrow:
+Move Controls/Help into v2 as Slice E:
 
-- build a retained row model for the current Options rows
-- include/exclude conditional rows during layout only once
-- implement button, toggle, cycle, and slider widgets using committed rects
-- route Options through v2 only after Pause click behavior has been manually
-  confirmed on macOS
-- capture native screenshots for row combinations that include Crosshair,
-  Controls, Server Settings, First Person Body, and sliders
-- compare legacy and v2 command counts for Options before moving to Controls
+- build retained shortcut rows once when the screen/state changes
+- route `GameScreen::Help { parent: OptionsTitle | OptionsPause | Pause }`
+  through v2 for the migrated menu paths
+- keep Back as a committed v2 button rect
+- add a command-count comparison against legacy Controls, because this is the
+  text-heavy screen that originally exposed the worst menu frame cost
+- decide whether basic scrolling/pagination is needed before atlas text lands
 
-This is the first chunk that directly attacks the macOS mis-click reports,
-because the bug reports are concentrated in Options rows and sliders.
+This should be done before XR panel caching because Controls is the most
+text-heavy migrated menu and gives the atlas/caching work a concrete target.
 
 ## Completed First Recommended Chunk
 
