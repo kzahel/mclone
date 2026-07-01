@@ -956,6 +956,7 @@ pub enum GameUiAction {
     QuitToTitle,
     ToggleSectionOcclusion,
     ToggleFullbright,
+    ToggleFarLod,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
     ToggleCrosshair,
@@ -1045,6 +1046,7 @@ pub struct GameUiRenderState {
     pub max_render_distance: i32,
     pub section_occlusion_culling: bool,
     pub force_fullbright: bool,
+    pub far_lod_enabled: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
     pub crosshair_visible: Option<bool>,
@@ -1072,6 +1074,7 @@ impl Default for GameUiRenderState {
             max_render_distance: 16,
             section_occlusion_culling: true,
             force_fullbright: false,
+            far_lod_enabled: false,
             player_collision_box_visible: false,
             first_person_player_visible: false,
             crosshair_visible: Some(true),
@@ -2062,6 +2065,7 @@ const ID_SERVER_SETTINGS_GAMEPLAY_RATE: WidgetId = WidgetId(31);
 const ID_SERVER_SETTINGS_PHYSICS_RATE: WidgetId = WidgetId(32);
 const ID_SERVER_SETTINGS_BACK: WidgetId = WidgetId(33);
 const ID_OPTIONS_CROSSHAIR: WidgetId = WidgetId(34);
+const ID_OPTIONS_FAR_LOD: WidgetId = WidgetId(35);
 const ID_BLOCK_PALETTE_BASE: u64 = 1000;
 
 const BLOCK_PALETTE_COLUMNS: usize = 10;
@@ -2301,6 +2305,7 @@ impl GameUi {
             GameUiAction::RerollSeed => {}
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::ToggleFullbright
+            | GameUiAction::ToggleFarLod
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
             | GameUiAction::ToggleCrosshair
@@ -2370,6 +2375,8 @@ impl GameUi {
                     Some(ID_OPTIONS_OCCLUSION)
                 } else if rects.fullbright.contains(point) {
                     Some(ID_OPTIONS_FULLBRIGHT)
+                } else if rects.far_lod.contains(point) {
+                    Some(ID_OPTIONS_FAR_LOD)
                 } else if rects.player_box.contains(point) {
                     Some(ID_OPTIONS_PLAYER_BOX)
                 } else if rects.first_person_player.contains(point) {
@@ -2459,6 +2466,7 @@ impl GameUi {
             }
             ID_OPTIONS_OCCLUSION => Some(GameUiAction::ToggleSectionOcclusion),
             ID_OPTIONS_FULLBRIGHT => Some(GameUiAction::ToggleFullbright),
+            ID_OPTIONS_FAR_LOD => Some(GameUiAction::ToggleFarLod),
             ID_OPTIONS_PLAYER_BOX => Some(GameUiAction::TogglePlayerCollisionBox),
             ID_OPTIONS_FIRST_PERSON_PLAYER => Some(GameUiAction::ToggleFirstPersonPlayer),
             ID_OPTIONS_CROSSHAIR => Some(GameUiAction::ToggleCrosshair),
@@ -2810,6 +2818,13 @@ impl GameUi {
         )
         .render(draw, &self.font, self.interaction());
         Checkbox::new(
+            ID_OPTIONS_FAR_LOD,
+            widgets.far_lod,
+            "Far LOD",
+            state.far_lod_enabled,
+        )
+        .render(draw, &self.font, self.interaction());
+        Checkbox::new(
             ID_OPTIONS_PLAYER_BOX,
             widgets.player_box,
             "Player Box",
@@ -2998,6 +3013,7 @@ impl GameUi {
 struct OptionWidgetRects {
     occlusion: Rect,
     fullbright: Rect,
+    far_lod: Rect,
     player_box: Rect,
     first_person_player: Rect,
     crosshair: Option<Rect>,
@@ -3337,6 +3353,8 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
     left_y += 20.0;
     let fullbright = Rect::new(left_x, left_y, column_width, 18.0);
     left_y += 20.0;
+    let far_lod = Rect::new(left_x, left_y, column_width, 18.0);
+    left_y += 20.0;
     let player_box = Rect::new(left_x, left_y, column_width, 18.0);
     left_y += 20.0;
     let first_person_player = Rect::new(left_x, left_y, column_width, 18.0);
@@ -3390,6 +3408,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
     OptionWidgetRects {
         occlusion,
         fullbright,
+        far_lod,
         player_box,
         first_person_player,
         crosshair,
@@ -3409,7 +3428,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
 }
 
 fn options_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
-    let left_rows_height = 80.0
+    let left_rows_height = 100.0
         + f32::from(u8::from(state.crosshair_visible.is_some())) * 20.0
         + f32::from(
             u8::from(state.touch_controls_mode.is_some())
@@ -4922,6 +4941,28 @@ mod tests {
         assert!(ui.pointer_down(point, state));
         let (_handled, action) = ui.pointer_up(point, state);
         assert_eq!(action, Some(GameUiAction::TogglePlayerCollisionBox));
+    }
+
+    #[test]
+    fn game_ui_options_far_lod_emits_toggle_action() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            far_lod_enabled: true,
+            ..GameUiRenderState::default()
+        };
+
+        let far_lod = option_widgets(ui.scale(), state).far_lod;
+        let point = Point {
+            x: far_lod.x + far_lod.width * 0.5,
+            y: far_lod.y + far_lod.height * 0.5,
+        };
+        assert!(ui.pointer_down(point, state));
+        let (_handled, action) = ui.pointer_up(point, state);
+        assert_eq!(action, Some(GameUiAction::ToggleFarLod));
     }
 
     #[test]

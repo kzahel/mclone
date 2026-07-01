@@ -81,8 +81,22 @@ Landed scope:
   surface mesh builder, and session-local cache.
 - `mclone-native-client` now parses `--far-lod true|false`, keeps it disabled by
   default, and feeds the mesh through the shared flat render path.
+- The shared Options UI now exposes a `Far LOD` checkbox for toggling the
+  prototype at runtime.
 - The current pass is single-view flat only; XR/multiview remains intentionally
   out of scope until this prototype has measured value.
+
+Current hard-coded prototype distances:
+
+- LOD starts at `render_distance + 2` chunks.
+- LOD ends at `render_distance + 12` chunks.
+- Effective LOD band width is therefore 10 chunks.
+- Surface samples are spaced every 8 blocks.
+
+This is intentionally not exposed as a slider yet. Once the source data is real
+enough to evaluate, prefer a single `Far LOD Distance` control over separate
+start/end sliders; keep the start margin/blend region hidden unless pop-in
+testing proves it must be user-tunable.
 
 ## Follow-Up Slices
 

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use anyhow::Context;
-use mclone_app_runtime::far_lod::FarTerrainLodCache;
+use mclone_app_runtime::far_lod::{FarTerrainLodCache, FarTerrainLodConfig};
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats,
@@ -203,6 +203,7 @@ pub(crate) struct FlatClientFrameInputs {
 pub(crate) struct FlatClientUiRenderOptions {
     pub(crate) render_distance: i32,
     pub(crate) render_options: TexturedSectionRenderOptions,
+    pub(crate) far_lod_enabled: bool,
     pub(crate) frame_pacing: FramePacingUiState,
     pub(crate) movement_mode: GameMovementMode,
     pub(crate) fly_speed_multiplier: f32,
@@ -668,6 +669,23 @@ impl FlatClientDriver {
                 log::info!(
                     "fullbright {}",
                     if self.render_options.force_fullbright {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+            }
+            GameUiAction::ToggleFarLod => {
+                let enabled = !self.scene.far_lod.enabled;
+                self.scene.far_lod = if enabled {
+                    FarTerrainLodConfig::enabled()
+                } else {
+                    FarTerrainLodConfig::default()
+                };
+                self.far_lod_cache.clear();
+                log::info!(
+                    "far LOD {}",
+                    if self.scene.far_lod.enabled {
                         "enabled"
                     } else {
                         "disabled"
@@ -1831,6 +1849,7 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         max_render_distance: MAX_RENDER_DISTANCE,
         section_occlusion_culling: options.render_options.section_occlusion_culling,
         force_fullbright: options.render_options.force_fullbright,
+        far_lod_enabled: options.far_lod_enabled,
         player_collision_box_visible: options.player_collision_box_visible,
         first_person_player_visible: options.first_person_player_visible,
         crosshair_visible: Some(options.crosshair_visible),
@@ -2080,6 +2099,23 @@ mod tests {
         assert!(result.host_action.is_none());
         assert!(driver.scene.first_person_player_visible);
         assert!(driver.camera.first_person_player_visible());
+    }
+
+    #[test]
+    fn ui_action_toggles_far_lod() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        assert!(!driver.scene.far_lod.enabled);
+        let result = driver.apply_ui_action(GameUiAction::ToggleFarLod, ui_action_context());
+
+        assert!(result.host_action.is_none());
+        assert!(driver.scene.far_lod.enabled);
+
+        let result = driver.apply_ui_action(GameUiAction::ToggleFarLod, ui_action_context());
+
+        assert!(result.host_action.is_none());
+        assert!(!driver.scene.far_lod.enabled);
     }
 
     #[test]

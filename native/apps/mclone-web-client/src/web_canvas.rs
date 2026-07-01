@@ -2930,6 +2930,7 @@ impl WebChunkRenderSession {
             GameUiAction::ToggleFullbright => {
                 self.force_fullbright = !self.force_fullbright;
             }
+            GameUiAction::ToggleFarLod => {}
             GameUiAction::TogglePlayerCollisionBox => {
                 self.player_collision_box_visible = !self.player_collision_box_visible;
             }
@@ -3073,6 +3074,7 @@ impl WebChunkRenderSession {
                 | GameUiAction::QuitToTitle
                 | GameUiAction::ToggleSectionOcclusion
                 | GameUiAction::ToggleFullbright
+                | GameUiAction::ToggleFarLod
                 | GameUiAction::TogglePlayerCollisionBox
                 | GameUiAction::ToggleCrosshair
                 | GameUiAction::ToggleFirstPersonPlayer
@@ -3095,6 +3097,7 @@ impl WebChunkRenderSession {
             max_render_distance: WEB_MAX_RENDER_DISTANCE,
             section_occlusion_culling: self.section_occlusion_culling,
             force_fullbright: self.force_fullbright,
+            far_lod_enabled: false,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: Some(self.crosshair_visible),
@@ -4763,6 +4766,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::QuitToTitle => "quitToTitle",
         GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
         GameUiAction::ToggleFullbright => "toggleFullbright",
+        GameUiAction::ToggleFarLod => "toggleFarLod",
         GameUiAction::TogglePlayerCollisionBox => "togglePlayerCollisionBox",
         GameUiAction::ToggleCrosshair => "toggleCrosshair",
         GameUiAction::ToggleFirstPersonPlayer => "toggleFirstPersonPlayer",

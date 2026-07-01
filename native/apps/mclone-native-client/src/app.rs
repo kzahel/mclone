@@ -406,6 +406,7 @@ impl ChunkApp {
             render_distance: i32::try_from(self.current_render_distance())
                 .unwrap_or(MAX_RENDER_DISTANCE),
             render_options: self.driver.render_options,
+            far_lod_enabled: self.driver.scene.far_lod.enabled,
             frame_pacing: self.frame_pacing.ui_state(),
             movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
             fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
@@ -1200,6 +1201,7 @@ impl ApplicationHandler for ChunkApp {
                     render_distance: i32::try_from(self.current_render_distance())
                         .unwrap_or(MAX_RENDER_DISTANCE),
                     render_options: self.driver.render_options,
+                    far_lod_enabled: self.driver.scene.far_lod.enabled,
                     frame_pacing: self.frame_pacing.ui_state(),
                     movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
                     fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,

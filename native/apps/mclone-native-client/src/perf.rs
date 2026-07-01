@@ -1410,6 +1410,7 @@ pub(crate) fn run_frame_budget_probe(
             let ui_render_state = game_ui_render_state(FlatClientUiRenderOptions {
                 render_distance: state.runtime.render_distance() as i32,
                 render_options,
+                far_lod_enabled: false,
                 frame_pacing: FramePacingUiState::default(),
                 movement_mode: GameMovementMode::Walk,
                 fly_speed_multiplier: 1.0,
