@@ -8,11 +8,16 @@ use crate::{
     render_distance_label, render_distance_slider_value, touch_controls_mode_label,
     touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
 };
+use mclone_input::{
+    ShortcutHelpGroup, ShortcutHelpRow, default_keyboard_mouse_shortcut_rows,
+    flat_runtime_shortcut_rows,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiScreenId {
     Pause,
     Options { parent: GameOptionsParent },
+    Help { parent: GameHelpParent },
 }
 
 impl UiScreenId {
@@ -20,6 +25,7 @@ impl UiScreenId {
         match screen {
             Some(GameScreen::Pause) => Some(Self::Pause),
             Some(GameScreen::Options { parent }) => Some(Self::Options { parent }),
+            Some(GameScreen::Help { parent }) => Some(Self::Help { parent }),
             _ => None,
         }
     }
@@ -173,6 +179,7 @@ pub struct UiLayout {
     pub screen: Option<UiScreenId>,
     pub revision: u64,
     widgets: Vec<UiWidget>,
+    help_rows: Vec<UiHelpRow>,
 }
 
 impl UiLayout {
@@ -181,6 +188,7 @@ impl UiLayout {
             screen,
             revision,
             widgets: Vec::new(),
+            help_rows: Vec::new(),
         }
     }
 
@@ -203,6 +211,28 @@ impl UiLayout {
             .find(|widget| widget.contains(point))
             .map(|widget| widget.id)
     }
+
+    fn set_help_rows(&mut self, rows: Vec<UiHelpRow>) {
+        self.help_rows = rows;
+    }
+
+    fn help_rows(&self) -> &[UiHelpRow] {
+        &self.help_rows
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct UiHelpRow {
+    x: f32,
+    y: f32,
+    control_width: f32,
+    kind: UiHelpRowKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum UiHelpRowKind {
+    Group(ShortcutHelpGroup),
+    Shortcut(ShortcutHelpRow),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -427,6 +457,9 @@ impl UiSurface {
                 true,
                 Some(GameUiAction::OpenHelp(help_parent_for_options(parent))),
             ),
+            (Some(UiScreenId::Help { parent }), GuiKey::Escape | GuiKey::F1) => {
+                (true, Some(GameUiAction::CloseHelp(parent)))
+            }
             (None, _) => (false, None),
         }
     }
@@ -438,6 +471,7 @@ impl UiSurface {
         match self.screen {
             Some(UiScreenId::Pause) => self.render_pause(&mut draw),
             Some(UiScreenId::Options { parent }) => self.render_options(&mut draw, parent),
+            Some(UiScreenId::Help { parent }) => self.render_help(&mut draw, parent),
             None => {}
         }
         if self.debug_overlay {
@@ -455,6 +489,9 @@ impl UiSurface {
             Some(UiScreenId::Pause) => pause_layout(self.scale, self.layout_revision),
             Some(UiScreenId::Options { parent }) => {
                 options_layout(self.scale, self.layout_revision, parent, self.render_state)
+            }
+            Some(UiScreenId::Help { parent }) => {
+                help_layout(self.scale, self.layout_revision, parent)
             }
             None => UiLayout::new(None, self.layout_revision),
         };
@@ -518,6 +555,84 @@ impl UiSurface {
             self.render_widget(draw, widget, interaction);
         }
         let _ = parent;
+    }
+
+    fn render_help(&self, draw: &mut GuiDrawList, parent: GameHelpParent) {
+        if help_parent_covers_world(parent) {
+            draw.fill_gradient(
+                Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+                Color::rgba(24, 44, 51, 255),
+                Color::rgba(7, 10, 12, 255),
+            );
+            draw.fill(
+                Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+                Color::rgba(0, 0, 0, 55),
+            );
+        } else {
+            draw.fill(
+                Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+                Color::rgba(0, 0, 0, 150),
+            );
+        }
+
+        let panel = help_panel_rect(self.scale);
+        draw.fill_gradient(
+            panel,
+            Color::rgba(33, 45, 47, 245),
+            Color::rgba(15, 20, 22, 245),
+        );
+        draw.outline(panel, Color::rgba(130, 166, 154, 255));
+        self.font.draw_centered(
+            draw,
+            "CONTROLS",
+            panel.center_x(),
+            panel.y + 8.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        self.font.draw_centered(
+            draw,
+            "F1 / ESC BACK",
+            panel.center_x(),
+            panel.y + 20.0,
+            Color::rgba(185, 212, 198, 255),
+        );
+        for row in self.layout.help_rows() {
+            self.render_help_row(draw, row);
+        }
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
+        }
+    }
+
+    fn render_help_row(&self, draw: &mut GuiDrawList, row: &UiHelpRow) {
+        match &row.kind {
+            UiHelpRowKind::Group(group) => {
+                self.font.draw_shadow(
+                    draw,
+                    group.label(),
+                    row.x,
+                    row.y,
+                    Color::rgba(220, 238, 220, 255),
+                );
+            }
+            UiHelpRowKind::Shortcut(shortcut) => {
+                self.font.draw_shadow(
+                    draw,
+                    &shortcut.control,
+                    row.x,
+                    row.y,
+                    Color::rgba(185, 212, 198, 255),
+                );
+                self.font.draw_shadow(
+                    draw,
+                    &shortcut.action,
+                    row.x + row.control_width,
+                    row.y,
+                    Color::rgba(214, 226, 218, 255),
+                );
+            }
+        }
     }
 
     fn render_widget(&self, draw: &mut GuiDrawList, widget: &UiWidget, interaction: Interaction) {
@@ -634,6 +749,7 @@ const UI_V2_OPTIONS_TOUCH_LOOK: UiWidgetId = UiWidgetId(116);
 const UI_V2_OPTIONS_CONTROLS: UiWidgetId = UiWidgetId(117);
 const UI_V2_OPTIONS_SERVER_SETTINGS: UiWidgetId = UiWidgetId(118);
 const UI_V2_OPTIONS_BACK: UiWidgetId = UiWidgetId(119);
+const UI_V2_HELP_BACK: UiWidgetId = UiWidgetId(201);
 
 fn pause_layout(scale: GuiScale, revision: u64) -> UiLayout {
     let mut layout = UiLayout::new(Some(UiScreenId::Pause), revision);
@@ -667,6 +783,103 @@ fn pause_layout(scale: GuiScale, revision: u64) -> UiLayout {
 
 fn menu_button_rect(scale: GuiScale, y: f32) -> Rect {
     Rect::new(scale.width * 0.5 - 90.0, y, 180.0, 20.0)
+}
+
+fn help_layout(scale: GuiScale, revision: u64, parent: GameHelpParent) -> UiLayout {
+    let mut layout = UiLayout::new(Some(UiScreenId::Help { parent }), revision);
+    let panel = help_panel_rect(scale);
+    let font = Font::default();
+    layout.set_help_rows(help_text_rows(panel, font.line_height()));
+    layout.push(
+        UiWidget::button(UI_V2_HELP_BACK, help_back_rect(scale), "Back")
+            .action(GameUiAction::CloseHelp(parent)),
+    );
+    layout
+}
+
+fn help_panel_rect(scale: GuiScale) -> Rect {
+    centered_panel(scale, 432.0, 264.0)
+}
+
+fn help_back_rect(scale: GuiScale) -> Rect {
+    let panel = help_panel_rect(scale);
+    Rect::new(panel.center_x() - 45.0, panel.bottom() - 25.0, 90.0, 20.0)
+}
+
+fn help_text_rows(panel: Rect, line_height: f32) -> Vec<UiHelpRow> {
+    let rows = controls_help_rows();
+    let split = (rows.len() + 1) / 2;
+    let column_gap = 10.0;
+    let column_width = (panel.width - 24.0 - column_gap) * 0.5;
+    let left_x = panel.x + 12.0;
+    let right_x = left_x + column_width + column_gap;
+    let y = panel.y + 34.0;
+    let mut output = Vec::with_capacity(rows.len());
+    push_help_column_rows(
+        &mut output,
+        left_x,
+        y,
+        column_width,
+        line_height,
+        &rows[..split],
+    );
+    push_help_column_rows(
+        &mut output,
+        right_x,
+        y,
+        column_width,
+        line_height,
+        &rows[split..],
+    );
+    output
+}
+
+fn push_help_column_rows(
+    output: &mut Vec<UiHelpRow>,
+    x: f32,
+    y: f32,
+    width: f32,
+    line_height: f32,
+    rows: &[UiHelpRowKind],
+) {
+    let control_width = 72.0_f32.min(width * 0.45);
+    let mut row_y = y;
+    for row in rows {
+        output.push(UiHelpRow {
+            x,
+            y: row_y,
+            control_width,
+            kind: row.clone(),
+        });
+        row_y += match row {
+            UiHelpRowKind::Group(_) => line_height + 2.0,
+            UiHelpRowKind::Shortcut(_) => line_height,
+        };
+    }
+}
+
+fn controls_help_rows() -> Vec<UiHelpRowKind> {
+    let mut rows = Vec::new();
+    rows.push(UiHelpRowKind::Group(ShortcutHelpGroup::KeyboardMouse));
+    rows.extend(
+        default_keyboard_mouse_shortcut_rows()
+            .into_iter()
+            .map(UiHelpRowKind::Shortcut),
+    );
+    rows.push(UiHelpRowKind::Group(ShortcutHelpGroup::RuntimeDebug));
+    rows.extend(
+        flat_runtime_shortcut_rows()
+            .into_iter()
+            .map(UiHelpRowKind::Shortcut),
+    );
+    rows
+}
+
+const fn help_parent_covers_world(parent: GameHelpParent) -> bool {
+    matches!(
+        parent,
+        GameHelpParent::Title | GameHelpParent::NewWorld | GameHelpParent::JoinRemote
+    )
 }
 
 fn options_layout(
@@ -927,7 +1140,7 @@ const fn help_parent_for_options(parent: GameOptionsParent) -> GameHelpParent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GameSimulationCadence, GameTouchSettings};
+    use crate::{GameSimulationCadence, GameTouchSettings, GameUi};
     use mclone_input::TouchControlsMode;
 
     fn point_in(rect: Rect) -> Point {
@@ -1160,5 +1373,86 @@ mod tests {
         assert!(surface.pointer_down(point_in(movement_speed), surface.render_state));
         let (_handled, action) = surface.pointer_move(max_speed, surface.render_state);
         assert_eq!(action, Some(GameUiAction::SetMovementSpeed(8.0)));
+    }
+
+    #[test]
+    fn help_layout_retains_shortcut_rows_and_back_button() {
+        let mut surface = UiSurface::new();
+        surface.set_screen(Some(UiScreenId::Help {
+            parent: GameHelpParent::OptionsPause,
+        }));
+        surface.set_scale(GuiScale::from_pixels(960, 540));
+
+        let layout = surface.layout();
+
+        assert!(layout.help_rows().len() > 8);
+        assert!(layout.help_rows().iter().any(|row| matches!(
+            row.kind,
+            UiHelpRowKind::Group(ShortcutHelpGroup::KeyboardMouse)
+        )));
+        assert!(layout.help_rows().iter().any(|row| matches!(
+            row.kind,
+            UiHelpRowKind::Group(ShortcutHelpGroup::RuntimeDebug)
+        )));
+        assert!(layout.widget(UI_V2_HELP_BACK).is_some());
+    }
+
+    #[test]
+    fn help_back_and_keys_close_to_parent() {
+        let mut surface = UiSurface::new();
+        surface.set_screen(Some(UiScreenId::Help {
+            parent: GameHelpParent::OptionsPause,
+        }));
+        surface.set_scale(GuiScale::from_pixels(960, 540));
+        let back = surface
+            .layout()
+            .widget(UI_V2_HELP_BACK)
+            .expect("help back button")
+            .rect;
+
+        assert!(surface.pointer_down(point_in(back), GameUiRenderState::default()));
+        let (_handled, action) = surface.pointer_up(point_in(back), GameUiRenderState::default());
+        assert_eq!(
+            action,
+            Some(GameUiAction::CloseHelp(GameHelpParent::OptionsPause))
+        );
+        assert_eq!(
+            surface.key_pressed(GuiKey::Escape),
+            (
+                true,
+                Some(GameUiAction::CloseHelp(GameHelpParent::OptionsPause))
+            )
+        );
+        assert_eq!(
+            surface.key_pressed(GuiKey::F1),
+            (
+                true,
+                Some(GameUiAction::CloseHelp(GameHelpParent::OptionsPause))
+            )
+        );
+    }
+
+    #[test]
+    fn help_render_uses_committed_rows_and_matches_legacy_command_scale() {
+        let mut surface = UiSurface::new();
+        surface.set_screen(Some(UiScreenId::Help {
+            parent: GameHelpParent::Game,
+        }));
+        surface.set_scale(GuiScale::from_pixels(960, 540));
+        let row_count = surface.layout().help_rows().len();
+
+        let v2_draw = surface.render_draw_list(GameUiRenderState::default());
+
+        assert_eq!(surface.layout().help_rows().len(), row_count);
+        assert!(!v2_draw.commands().is_empty());
+
+        let mut legacy = GameUi::new();
+        legacy.set_screen(Some(GameScreen::Help {
+            parent: GameHelpParent::Game,
+        }));
+        legacy.set_scale(GuiScale::from_pixels(960, 540));
+        let legacy_draw = legacy.render_draw_list(GameUiRenderState::default());
+
+        assert_eq!(v2_draw.commands().len(), legacy_draw.commands().len());
     }
 }

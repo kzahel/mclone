@@ -1,6 +1,6 @@
 # 123: UI V2 Menu Rebuild
 
-Status: active; Options v2 first pass landed 2026-07-01.
+Status: active; Controls/Help v2 first pass landed 2026-07-01.
 
 ## Decision
 
@@ -219,7 +219,7 @@ Validation:
 
 ### Slice C: Desktop App Routing For V2
 
-Status: first pass landed for Pause and Options 2026-07-01.
+Status: first pass landed for Pause, Options, and Help 2026-07-01.
 
 Wire desktop flat input to UI v2 when the active screen has migrated. Legacy
 screens continue to route through legacy `GameUi`.
@@ -287,7 +287,7 @@ Validation:
 
 ### Slice E: Help/Controls Screen In V2
 
-Status: pending.
+Status: first pass landed 2026-07-01.
 
 Rebuild the controls/help screen as retained content.
 
@@ -545,10 +545,54 @@ Known limits:
 - macOS manual click signoff for Pause/Options is still pending; this chunk
   proceeded on the assumption that committed v2 rects are sufficient until the
   user can test desktop clicks
-- Controls still uses the legacy help/controls screen
 - Server Settings still uses the legacy screen after Options opens it
 - v2 text still uses the old rectangle-command font path; Options produced 7190
   GUI commands in the inspected screenshot, so atlas text remains important
+
+## Landed Controls/Help Chunk
+
+Date: 2026-07-01.
+
+Scope:
+
+- routed all `GameScreen::Help { parent }` screens through v2
+- added retained Help shortcut rows to `UiLayout`
+- computed Controls shortcut rows once during v2 layout instead of rebuilding
+  the table during render
+- kept Back as a committed v2 button rect that emits `CloseHelp(parent)`
+- added v2 Help key handling for `Esc` and `F1`
+- added a unit command-count comparison against the legacy Controls renderer
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+```
+
+Rendered checks:
+
+- native Controls screenshot inspected:
+  `/tmp/mclone-ui-v2-controls.png`
+- browser canvas smoke regenerated:
+  `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- v2 Controls still uses the old rectangle-command font path and produced 21061
+  GUI commands in the inspected screenshot
+- no scrolling/pagination was added because current rows fit the 960x540
+  screenshot and existing Minecraft-style GUI scale target
+- Server Settings, HUD, hotbar, and block picker remain legacy
+- macOS manual click signoff remains pending for migrated Pause/Options/Controls
+  screens
 
 ## Non-Goals
 
@@ -564,18 +608,20 @@ Known limits:
 
 ## Next Recommended Chunk
 
-Move Controls/Help into v2 as Slice E:
+Implement Slice F: atlas-backed text for v2.
 
-- build retained shortcut rows once when the screen/state changes
-- route `GameScreen::Help { parent: OptionsTitle | OptionsPause | Pause }`
-  through v2 for the migrated menu paths
-- keep Back as a committed v2 button rect
-- add a command-count comparison against legacy Controls, because this is the
-  text-heavy screen that originally exposed the worst menu frame cost
-- decide whether basic scrolling/pagination is needed before atlas text lands
+Start with the smallest production-shaped text path:
 
-This should be done before XR panel caching because Controls is the most
-text-heavy migrated menu and gives the atlas/caching work a concrete target.
+- keep `mclone-ui` responsible for text runs, labels, and measurement requests
+- add a `mclone-render` glyph atlas/batch path for v2 text drawing
+- adapt v2 Pause, Options, and Controls text to glyph quads
+- preserve legacy rectangle-font rendering for non-migrated screens during the
+  transition
+- compare command/vertex counts for Controls before and after atlas text
+
+Controls should be the headline benchmark because it currently emits 21061 GUI
+commands at 960x540, which is the clearest evidence that the old font path is
+the next bottleneck.
 
 ## Completed First Recommended Chunk
 
