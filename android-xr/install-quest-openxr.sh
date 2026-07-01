@@ -61,6 +61,8 @@ Options:
                   Add --section-occlusion VALUE to startup argv.
   --fullbright true|false
                   Add --fullbright VALUE to startup argv.
+  --xr-frame-overlap
+                  Add --xr-frame-overlap to startup argv.
   -h, --help       Show this help.
 USAGE
 }
@@ -141,6 +143,10 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --freeze-time)
+            STARTUP_ARGV+=("$1")
+            shift
+            ;;
+        --xr-frame-overlap)
             STARTUP_ARGV+=("$1")
             shift
             ;;

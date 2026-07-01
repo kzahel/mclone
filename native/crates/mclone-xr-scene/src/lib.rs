@@ -554,6 +554,7 @@ where
     render_split_timing_enabled: bool,
     defer_eye_waits_enabled: bool,
     overlap_runtime_prefetch_enabled: bool,
+    prefetched_live_upload: Option<XrTerrainUploadSummary>,
     render_section_upload_budget: Option<usize>,
     per_view_uniform_frame: u32,
     last_locomotion_update: Option<Instant>,
@@ -702,6 +703,7 @@ where
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
             overlap_runtime_prefetch_enabled: false,
+            prefetched_live_upload: None,
             render_section_upload_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
@@ -798,6 +800,7 @@ where
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
             overlap_runtime_prefetch_enabled: false,
+            prefetched_live_upload: None,
             render_section_upload_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
@@ -1270,19 +1273,8 @@ where
     ) -> Result<XrTerrainFrameSummary> {
         let center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
-        let upload = match runtime_mode {
-            XrTerrainRuntimeUpdateMode::Live
-                if self.local_startup.is_none() && self.runtime.is_some() =>
-            {
-                let runtime_upload_start = Instant::now();
-                let upload = self.poll_runtime_and_upload(device, center_position, &mut timing)?;
-                timing.runtime_upload_ms = elapsed_ms(runtime_upload_start.elapsed());
-                upload
-            }
-            XrTerrainRuntimeUpdateMode::Live | XrTerrainRuntimeUpdateMode::Frozen => {
-                self.frozen_runtime_upload_summary()
-            }
-        };
+        let upload =
+            self.live_upload_for_frame(device, center_position, runtime_mode, &mut timing)?;
         let multiview = self
             .render_prepared_terrain_multiview_frame_with_upload_inner(
                 device,
@@ -1311,19 +1303,8 @@ where
     ) -> Result<XrTerrainFrameSummary> {
         let center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
-        let upload = match runtime_mode {
-            XrTerrainRuntimeUpdateMode::Live
-                if self.local_startup.is_none() && self.runtime.is_some() =>
-            {
-                let runtime_upload_start = Instant::now();
-                let upload = self.poll_runtime_and_upload(device, center_position, &mut timing)?;
-                timing.runtime_upload_ms = elapsed_ms(runtime_upload_start.elapsed());
-                upload
-            }
-            XrTerrainRuntimeUpdateMode::Live | XrTerrainRuntimeUpdateMode::Frozen => {
-                self.frozen_runtime_upload_summary()
-            }
-        };
+        let upload =
+            self.live_upload_for_frame(device, center_position, runtime_mode, &mut timing)?;
         let render_options = self.effective_render_options(center_position);
         let sky_clear_color = self.sky_clear_color();
         let time_of_day = self.time_of_day();
@@ -1402,8 +1383,10 @@ where
             {
                 let prefetch_start = Instant::now();
                 let mut prefetch_timing = XrTerrainFrameTiming::default();
-                self.poll_runtime_and_upload(device, center_position, &mut prefetch_timing)
+                let upload = self
+                    .poll_runtime_and_upload(device, center_position, &mut prefetch_timing)
                     .context("prefetch XR runtime upload before deferred stereo wait")?;
+                self.prefetched_live_upload = Some(upload);
                 timing.overlap_runtime_prefetch_ms = elapsed_ms(prefetch_start.elapsed());
                 timing.overlap_runtime_prefetch_poll_ms = prefetch_timing.runtime_poll_ms;
                 timing.overlap_runtime_prefetch_sync_ms = prefetch_timing.runtime_sync_ms;
@@ -1426,6 +1409,30 @@ where
         }
         self.record_eye0_summary(left_eye.summary);
         Ok(self.frame_summary_with_timing(timing, upload))
+    }
+
+    fn live_upload_for_frame(
+        &mut self,
+        device: &wgpu::Device,
+        center_position: Vec3,
+        runtime_mode: XrTerrainRuntimeUpdateMode,
+        timing: &mut XrTerrainFrameTiming,
+    ) -> Result<XrTerrainUploadSummary> {
+        if !matches!(runtime_mode, XrTerrainRuntimeUpdateMode::Live) {
+            self.prefetched_live_upload = None;
+            return Ok(self.frozen_runtime_upload_summary());
+        }
+        if self.local_startup.is_some() || self.runtime.is_none() {
+            self.prefetched_live_upload = None;
+            return Ok(self.frozen_runtime_upload_summary());
+        }
+        if let Some(upload) = self.prefetched_live_upload.take() {
+            return Ok(upload);
+        }
+        let runtime_upload_start = Instant::now();
+        let upload = self.poll_runtime_and_upload(device, center_position, timing)?;
+        timing.runtime_upload_ms = elapsed_ms(runtime_upload_start.elapsed());
+        Ok(upload)
     }
 
     fn next_per_view_uniform_frame(&mut self) -> u32 {
@@ -2022,6 +2029,9 @@ where
 
     pub fn set_overlap_runtime_prefetch_enabled(&mut self, enabled: bool) {
         self.overlap_runtime_prefetch_enabled = enabled;
+        if !enabled {
+            self.prefetched_live_upload = None;
+        }
     }
 
     pub fn set_render_section_upload_budget(&mut self, budget: Option<usize>) {
@@ -3533,6 +3543,7 @@ where
         self.latest_controllers.clear();
         self.first_eye_summary = None;
         self.rendered_frames = 0;
+        self.prefetched_live_upload = None;
     }
 
     fn start_replacement_session(

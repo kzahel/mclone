@@ -242,6 +242,7 @@ mod android {
         sky_terrain_multiview_perf: bool,
         sky_terrain_actors_multiview_perf: bool,
         full_frame_multiview: bool,
+        frame_overlap: bool,
         overlap_eye_submits: bool,
         overlap_runtime_prefetch: bool,
         render_section_upload_budget: Option<usize>,
@@ -268,6 +269,7 @@ mod android {
                 sky_terrain_multiview_perf: false,
                 sky_terrain_actors_multiview_perf: false,
                 full_frame_multiview: false,
+                frame_overlap: false,
                 overlap_eye_submits: false,
                 overlap_runtime_prefetch: false,
                 render_section_upload_budget: None,
@@ -462,6 +464,9 @@ mod android {
                 "--xr-full-frame-multiview" => {
                     options.full_frame_multiview = true;
                 }
+                "--xr-frame-overlap" => {
+                    options.frame_overlap = true;
+                }
                 "--xr-overlap-eye-submits" => {
                     options.overlap_eye_submits = true;
                 }
@@ -549,6 +554,21 @@ mod android {
             bail!(
                 "--xr-full-frame-multiview cannot be combined with multiview proof or microbenchmark modes"
             );
+        }
+        if options.frame_overlap
+            && (options.full_frame_multiview
+                || options.multiview_proof
+                || options.terrain_multiview_proof
+                || options.terrain_multiview_perf
+                || options.sky_terrain_multiview_perf
+                || options.sky_terrain_actors_multiview_perf)
+        {
+            bail!("--xr-frame-overlap only applies to the per-eye full-frame path");
+        }
+        if options.frame_overlap
+            && (options.overlap_eye_submits || options.overlap_runtime_prefetch)
+        {
+            bail!("--xr-frame-overlap cannot be combined with older overlap probe flags");
         }
         if options.overlap_eye_submits
             && (options.full_frame_multiview
@@ -868,6 +888,10 @@ mod android {
             startup_options.full_frame_multiview
         );
         log::info!(
+            "Android XR frame overlap: {}",
+            startup_options.frame_overlap
+        );
+        log::info!(
             "Android XR overlap eye submits: {}",
             startup_options.overlap_eye_submits
         );
@@ -932,6 +956,7 @@ mod android {
             startup_options.sky_terrain_multiview_perf,
             startup_options.sky_terrain_actors_multiview_perf,
             startup_options.full_frame_multiview,
+            startup_options.frame_overlap,
             startup_options.overlap_eye_submits,
             startup_options.overlap_runtime_prefetch,
             startup_options.render_section_upload_budget,
@@ -963,6 +988,7 @@ mod android {
         sky_terrain_multiview_perf: bool,
         sky_terrain_actors_multiview_perf: bool,
         full_frame_multiview: bool,
+        frame_overlap: bool,
         overlap_eye_submits: bool,
         overlap_runtime_prefetch: bool,
         render_section_upload_budget: Option<usize>,
@@ -1444,9 +1470,12 @@ mod android {
         let terrain_summary = terrain.frame_summary();
         terrain.set_display_refresh_hz(display_refresh.current_rate);
         terrain.set_render_split_timing_enabled(perf_seconds.is_some());
-        terrain.set_defer_eye_waits_enabled(overlap_eye_submits || overlap_runtime_prefetch);
-        terrain.set_overlap_runtime_prefetch_enabled(overlap_runtime_prefetch);
+        terrain.set_defer_eye_waits_enabled(
+            frame_overlap || overlap_eye_submits || overlap_runtime_prefetch,
+        );
+        terrain.set_overlap_runtime_prefetch_enabled(frame_overlap || overlap_runtime_prefetch);
         terrain.set_render_section_upload_budget(render_section_upload_budget);
+        log::info!("Android XR frame overlap active: {}", frame_overlap);
         log::info!(
             "Android XR per-eye submit overlap active: {}",
             overlap_eye_submits
@@ -1470,6 +1499,7 @@ mod android {
             AndroidXrFrameTargets::PerEye {
                 left_eye: &mut left_eye,
                 right_eye: &mut right_eye,
+                frame_overlap,
                 overlap_eye_submits,
                 overlap_runtime_prefetch,
             },
@@ -2934,6 +2964,7 @@ mod android {
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum AndroidXrRenderPath {
         PerEye,
+        PerEyeFrameOverlap,
         PerEyeOverlap,
         PerEyePrefetch,
         Multiview,
@@ -2943,6 +2974,7 @@ mod android {
         const fn label(self) -> &'static str {
             match self {
                 Self::PerEye => "per-eye",
+                Self::PerEyeFrameOverlap => "per-eye-frame-overlap",
                 Self::PerEyeOverlap => "per-eye-overlap",
                 Self::PerEyePrefetch => "per-eye-prefetch",
                 Self::Multiview => "multiview",
@@ -2954,6 +2986,7 @@ mod android {
         PerEye {
             left_eye: &'a mut graphics_vulkan::OpenXrEyeState,
             right_eye: &'a mut graphics_vulkan::OpenXrEyeState,
+            frame_overlap: bool,
             overlap_eye_submits: bool,
             overlap_runtime_prefetch: bool,
         },
@@ -2967,11 +3000,14 @@ mod android {
         fn render_path(&self) -> AndroidXrRenderPath {
             match self {
                 Self::PerEye {
+                    frame_overlap,
                     overlap_eye_submits,
                     overlap_runtime_prefetch,
                     ..
                 } => {
-                    if *overlap_runtime_prefetch {
+                    if *frame_overlap {
+                        AndroidXrRenderPath::PerEyeFrameOverlap
+                    } else if *overlap_runtime_prefetch {
                         AndroidXrRenderPath::PerEyePrefetch
                     } else if *overlap_eye_submits {
                         AndroidXrRenderPath::PerEyeOverlap

@@ -50,6 +50,7 @@ TERRAIN_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PERF:-0}"
 SKY_TERRAIN_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_SKY_TERRAIN_MULTIVIEW_PERF:-0}"
 SKY_TERRAIN_ACTORS_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF:-0}"
 XR_FULL_FRAME_MULTIVIEW="${MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW:-0}"
+XR_FRAME_OVERLAP="${MCLONE_ANDROID_XR_FRAME_OVERLAP:-0}"
 XR_OVERLAP_EYE_SUBMITS="${MCLONE_ANDROID_XR_OVERLAP_EYE_SUBMITS:-0}"
 XR_OVERLAP_RUNTIME_PREFETCH="${MCLONE_ANDROID_XR_OVERLAP_RUNTIME_PREFETCH:-0}"
 XR_RENDER_SECTION_UPLOAD_BUDGET="${MCLONE_ANDROID_XR_RENDER_SECTION_UPLOAD_BUDGET:-}"
@@ -173,6 +174,11 @@ Options:
                      full-frame multiview stack and require
                      MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW_READY. Can be
                      combined with ordinary --perf-* probes.
+  --xr-frame-overlap
+                     Per-eye path only: submit both eyes with a deferred GPU
+                     wait, prefetch live runtime/render-section work while
+                     that submission is in flight, consume it on the next
+                     frame, and report render_path=per-eye-frame-overlap.
   --xr-overlap-eye-submits
                      Per-eye path only: submit each eye as soon as encoded,
                      defer the GPU wait until both eyes are submitted, and
@@ -537,6 +543,10 @@ while [[ $# -gt 0 ]]; do
             XR_FULL_FRAME_MULTIVIEW=1
             shift
             ;;
+        --xr-frame-overlap)
+            XR_FRAME_OVERLAP=1
+            shift
+            ;;
         --xr-overlap-eye-submits)
             XR_OVERLAP_EYE_SUBMITS=1
             shift
@@ -685,6 +695,14 @@ fi
 if [[ "$XR_FULL_FRAME_MULTIVIEW" == "1" ]]; then
     if [[ "$MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
         mclone_die "--xr-full-frame-multiview cannot be combined with multiview proof or microbenchmark modes"
+    fi
+fi
+if [[ "$XR_FRAME_OVERLAP" == "1" ]]; then
+    if [[ "$XR_FULL_FRAME_MULTIVIEW" == "1" || "$MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PROOF" == "1" || "$TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" || "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
+        mclone_die "--xr-frame-overlap only applies to the per-eye full-frame path"
+    fi
+    if [[ "$XR_OVERLAP_EYE_SUBMITS" == "1" || "$XR_OVERLAP_RUNTIME_PREFETCH" == "1" ]]; then
+        mclone_die "--xr-frame-overlap cannot be combined with older overlap probe flags"
     fi
 fi
 if [[ "$XR_OVERLAP_EYE_SUBMITS" == "1" ]]; then
@@ -842,6 +860,9 @@ if [[ "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
 fi
 if [[ "$XR_FULL_FRAME_MULTIVIEW" == "1" ]]; then
     STARTUP_ARGV+=(--xr-full-frame-multiview)
+fi
+if [[ "$XR_FRAME_OVERLAP" == "1" ]]; then
+    STARTUP_ARGV+=(--xr-frame-overlap)
 fi
 if [[ "$XR_OVERLAP_EYE_SUBMITS" == "1" ]]; then
     STARTUP_ARGV+=(--xr-overlap-eye-submits)
