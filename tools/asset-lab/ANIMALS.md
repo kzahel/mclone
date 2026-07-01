@@ -95,8 +95,8 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Wolf | P0 | ☐ | Q | gray, black, arctic (white), pup | reuses dog rig heavily |
-| Fox | P1 | ☐ | Q | red, arctic (white), fennec (huge ears), kit | bushy tail signature |
+| Wolf | P0 | ✅ | Q | gray, black, arctic (white), pup | `examples/wolf` — gray wolf; lean dog-class rig, pale chest, long muzzle, bushy tail; `quadrupedWalk` |
+| Fox | P1 | ✅ | Q | red, arctic (white), fennec (huge ears), kit | `examples/fox` — red fox; white chest/muzzle/tail tip, black stockings, large ears, bushy tail; `quadrupedWalk` |
 | Coyote | P3 | ☐ | Q | — | between wolf and fox |
 | Hyena | P3 | ☐ | Q | spotted, striped | not a canid, but a dog-like rig fits |
 
@@ -104,8 +104,8 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Lion | P1 | ✅* | Q | male (mane), lioness, cub | *only the anthro `lionfolk` exists — a true quadruped lion is still TODO |
-| Tiger | P1 | ☐ | Q | orange, white, cub | stripe texture |
+| Lion | P1 | ✅ | Q | male (mane), lioness, cub | `examples/lion` — male quadruped; tawny body, dark mane, broad muzzle, strong paws/claws, tufted tail; `quadrupedWalk` |
+| Tiger | P1 | ✅ | Q | orange, white, cub | `examples/tiger` — orange tiger; black body/head/leg/tail stripes, white muzzle/chest/belly, whiskers, strong paws/claws; `quadrupedWalk` |
 | Leopard / Jaguar | P2 | ☐ | Q | spotted, melanistic (black panther) | spot rosette texture |
 | Cheetah | P2 | ☐ | Q | — | slender; tear-mark face |
 | Lynx / Bobcat | P3 | ☐ | Q | ear tufts | scaled-up cat rig |
@@ -114,7 +114,7 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Bear | P1 | ✅* | Q | brown/grizzly, black, polar (Arctic), cub | *only anthro `bearfolk` exists — a true quadruped bear is TODO |
+| Bear | P1 | ✅ | Q | brown/grizzly, black, polar (Arctic), cub | `examples/bear` — brown/grizzly quadruped; bulky body, shoulder hump, short rounded ears, large paws/claws; `quadrupedWalk` |
 | Panda | P2 | ☐ | Q | adult, cub | bear rig + iconic black/white texture |
 | Polar bear | P2 | ☐ | Q | adult, cub | also lives in Polar/Arctic set |
 
