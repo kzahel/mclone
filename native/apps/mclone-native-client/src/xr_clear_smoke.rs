@@ -750,6 +750,7 @@ fn xr_scene_options_from_desktop_scene(
         movement_speed_multiplier: scene.movement_speed_multiplier,
         day_time_override: scene.day_time_override,
         freeze_time: scene.freeze_time,
+        debug_passive_showcase: scene.debug_passive_showcase,
         lighting_enabled: scene.lighting_enabled,
         underwater_detection_mode: xr_underwater_mode_from_desktop(underwater_mode),
     }

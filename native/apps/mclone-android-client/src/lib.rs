@@ -1201,6 +1201,9 @@ mod android {
                         }
                     );
                 }
+                GameUiAction::ToggleFarLod => {
+                    log::info!("Mclone Android far LOD toggle ignored; far LOD is not available");
+                }
                 GameUiAction::TogglePlayerCollisionBox => {
                     self.player_collision_box_visible = !self.player_collision_box_visible;
                     log::info!(
@@ -1374,6 +1377,7 @@ mod android {
                 max_render_distance: ANDROID_MAX_RENDER_DISTANCE,
                 section_occlusion_culling: self.render_options.section_occlusion_culling,
                 force_fullbright: self.render_options.force_fullbright,
+                far_lod_enabled: false,
                 player_collision_box_visible: self.player_collision_box_visible,
                 first_person_player_visible: self.camera.first_person_player_visible(),
                 crosshair_visible: Some(self.crosshair_visible),
@@ -1812,6 +1816,7 @@ mod android {
         movement_speed_multiplier: f32,
         day_time_override: Option<u64>,
         freeze_time: bool,
+        debug_passive_showcase: bool,
         lighting_enabled: bool,
         remote_addr: Option<String>,
     }
@@ -1822,6 +1827,7 @@ mod android {
                 .with_initial_spawn_center()
                 .with_day_time(self.day_time_override)
                 .with_freeze_time(self.freeze_time)
+                .with_debug_passive_showcase(self.debug_passive_showcase)
                 .with_lighting_enabled(self.lighting_enabled)
         }
 
@@ -1902,6 +1908,7 @@ mod android {
             remote_addr: None,
             day_time_override: Some(6000),
             freeze_time: true,
+            debug_passive_showcase: true,
             lighting_enabled: true,
         }
     }
@@ -1914,6 +1921,7 @@ mod android {
             movement_speed_multiplier: scene.movement_speed_multiplier,
             day_time_override: scene.day_time_override,
             freeze_time: scene.freeze_time,
+            debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
             remote_addr: scene.remote_addr,
         }

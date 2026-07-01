@@ -197,6 +197,7 @@ pub struct XrSceneOptions {
     pub movement_speed_multiplier: f32,
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
+    pub debug_passive_showcase: bool,
     pub lighting_enabled: bool,
     pub underwater_detection_mode: XrUnderwaterDetectionMode,
 }
@@ -211,6 +212,7 @@ impl Default for XrSceneOptions {
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             day_time_override: None,
             freeze_time: false,
+            debug_passive_showcase: true,
             lighting_enabled: true,
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
         }
@@ -3024,6 +3026,7 @@ where
             max_render_distance: MAX_XR_RENDER_DISTANCE as i32,
             section_occlusion_culling: self.render_options.section_occlusion_culling,
             force_fullbright: self.render_options.force_fullbright,
+            far_lod_enabled: false,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: None,
@@ -3741,6 +3744,9 @@ where
                     }
                 );
             }
+            GameUiAction::ToggleFarLod => {
+                log::info!("XR far LOD toggle ignored; far LOD is not available");
+            }
             GameUiAction::TogglePlayerCollisionBox => {
                 self.player_collision_box_visible = !self.player_collision_box_visible;
                 log::info!(
@@ -4188,6 +4194,7 @@ fn local_single_view_options(scene: XrSceneOptions) -> LocalSingleViewSceneOptio
         .with_initial_spawn_center()
         .with_day_time(scene.day_time_override)
         .with_freeze_time(scene.freeze_time)
+        .with_debug_passive_showcase(scene.debug_passive_showcase)
         .with_lighting_enabled(scene.lighting_enabled)
 }
 

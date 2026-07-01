@@ -673,6 +673,7 @@ mod android {
             remote_addr: None,
             day_time_override: scene.day_time_override,
             freeze_time: scene.freeze_time,
+            debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
         }
     }
@@ -686,6 +687,7 @@ mod android {
             movement_speed_multiplier: scene.movement_speed_multiplier,
             day_time_override: scene.day_time_override,
             freeze_time: scene.freeze_time,
+            debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
         }
@@ -1696,6 +1698,7 @@ mod android {
             .with_initial_spawn_center()
             .with_day_time(scene.day_time_override)
             .with_freeze_time(scene.freeze_time)
+            .with_debug_passive_showcase(scene.debug_passive_showcase)
             .with_lighting_enabled(scene.lighting_enabled)
     }
 
