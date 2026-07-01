@@ -887,9 +887,9 @@ impl IntegratedServer {
         let Some(clicked_block) = self.scheduler.block_at_world(command.hit.block_pos) else {
             return Ok(None);
         };
-        let relative_pos = command.hit.block_pos.relative(command.hit.direction);
-        let relative_block = self.scheduler.block_at_world(relative_pos);
-        let Some(placement) = block_item.use_on(command.hit, clicked_block, relative_block) else {
+        let Some(placement) = block_item.use_on(command.hit, clicked_block, |pos| {
+            self.scheduler.block_at_world(pos)
+        }) else {
             return Ok(None);
         };
         Ok(context
@@ -1496,8 +1496,8 @@ mod tests {
         PlayerPositionRelativeFlags, RemotePlayerId, RemotePlayerUpdate, ServerUpdate,
     };
     use mclone_worldgen::block::{
-        AIR, BRICKS, DIRT, GRASS, OAK_LOG_X, OAK_LOG_Z, SAND, SNOW, STONE, WATER,
-        generated_block_state_id, has_fluid, material_blocks_motion,
+        AIR, BRICKS, DIRT, GRASS, OAK_LOG_X, OAK_LOG_Z, SAND, SNOW, STONE, TORCH, WALL_TORCH_EAST,
+        WATER, generated_block_state_id, has_fluid, material_blocks_motion,
     };
 
     fn last_time_update(report: &ServerSimulationTickReport) -> u64 {
@@ -1806,6 +1806,15 @@ mod tests {
         updates
             .iter()
             .any(|update| matches!(update, ServerUpdate::SectionBlockUpdates { .. }))
+    }
+
+    fn has_section_block_update_with_state(updates: &[ServerUpdate], state: BlockStateId) -> bool {
+        updates.iter().any(|update| match update {
+            ServerUpdate::SectionBlockUpdates { updates, .. } => {
+                updates.iter().any(|update| update.block_state == state)
+            }
+            _ => false,
+        })
     }
 
     fn remote_player_add(
@@ -3243,6 +3252,94 @@ mod tests {
                 _ => false,
             }
         }));
+    }
+
+    #[test]
+    fn debug_place_command_places_floor_torch_from_torch_item() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
+        sync_carried_slot(&mut server, 0);
+        assign_debug_hotbar_slot(&mut server, 0, generated_block_state_id(TORCH));
+        let clicked = BlockPos::new(8, 80, 8);
+        let target = clicked.relative(Direction::Up);
+        assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
+        server.scheduler_mut().set_block_at_world(target, AIR);
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let updates = server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.5, 81.0, 8.5),
+                Direction::Up,
+                clicked,
+                false,
+            )))
+            .expect("place floor torch");
+
+        assert_eq!(server.scheduler().block_at_world(target), Some(TORCH));
+        assert!(has_section_block_update_with_state(
+            &updates,
+            generated_block_state_id(TORCH)
+        ));
+    }
+
+    #[test]
+    fn debug_place_command_places_wall_torch_matching_clicked_side() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
+        sync_carried_slot(&mut server, 0);
+        assign_debug_hotbar_slot(&mut server, 0, generated_block_state_id(TORCH));
+        let clicked = BlockPos::new(8, 80, 8);
+        let target = clicked.relative(Direction::East);
+        assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
+        server.scheduler_mut().set_block_at_world(target, AIR);
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let updates = server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(9.0, 80.5, 8.5),
+                Direction::East,
+                clicked,
+                false,
+            )))
+            .expect("place wall torch");
+
+        assert_eq!(
+            server.scheduler().block_at_world(target),
+            Some(WALL_TORCH_EAST)
+        );
+        assert!(has_section_block_update_with_state(
+            &updates,
+            generated_block_state_id(WALL_TORCH_EAST)
+        ));
+    }
+
+    #[test]
+    fn debug_place_command_rejects_bottom_face_torch_placement() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
+        sync_carried_slot(&mut server, 0);
+        assign_debug_hotbar_slot(&mut server, 0, generated_block_state_id(TORCH));
+        let clicked = BlockPos::new(8, 80, 8);
+        let target = clicked.relative(Direction::Down);
+        assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
+        server.scheduler_mut().set_block_at_world(target, AIR);
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let updates = server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.5, 80.0, 8.5),
+                Direction::Down,
+                clicked,
+                false,
+            )))
+            .expect("reject bottom-face torch placement");
+
+        assert_eq!(server.scheduler().block_at_world(clicked), Some(STONE));
+        assert_eq!(server.scheduler().block_at_world(target), Some(AIR));
+        assert!(updates.is_empty());
     }
 
     #[test]

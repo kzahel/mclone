@@ -1,6 +1,6 @@
 # 122: Torch Placement Lighting Demo
 
-Status: active; Slice A landed.
+Status: active; Slice B landed.
 
 ## Purpose
 
@@ -74,13 +74,21 @@ Validation:
 
 ### Slice B: Standing/Wall Placement Semantics
 
-Status: pending.
+Status: landed 2026-07-01.
 
 Extend debug `BlockItem` placement to support torch-specific placement-state
 selection. Preserve the current generic block-item path for normal cube blocks
 and rotated pillars. Add server tests for top-face floor torch placement, side
 face wall torch placement by facing, unsupported placement rejection, and block
 delta publication.
+
+Validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server
+  placement::tests::`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server
+  debug_place_command`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server`
 
 ### Slice C: Palette/Hotbar Exposure And Visual Validation
 

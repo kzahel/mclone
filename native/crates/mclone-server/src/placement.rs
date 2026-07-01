@@ -3,7 +3,8 @@ use mclone_worldgen::block::{
     AIR, BIRCH_LOG, BIRCH_LOG_X, BIRCH_LOG_Z, CAVE_AIR, DANDELION, DEAD_BUSH, DEEPSLATE,
     DEEPSLATE_X, DEEPSLATE_Z, FERN, GLOW_LICHEN, GRASS, LARGE_FERN_LOWER, LARGE_FERN_UPPER,
     OAK_LOG, OAK_LOG_X, OAK_LOG_Z, POPPY, RawBlockId, SNOW, SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z,
-    base_block_id, has_fluid,
+    TORCH, WALL_TORCH_EAST, WALL_TORCH_NORTH, WALL_TORCH_SOUTH, WALL_TORCH_WEST, base_block_id,
+    has_fluid, material_blocks_motion,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -67,10 +68,6 @@ impl BlockPlaceContext {
                 )
             })
     }
-
-    pub(crate) const fn replacing_clicked_on_block(self) -> bool {
-        self.replace_clicked
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -95,32 +92,46 @@ impl DebugBlockItem {
         self,
         hit: BlockHitResult,
         clicked_block: RawBlockId,
-        relative_block: Option<RawBlockId>,
+        block_at: impl Fn(BlockPos) -> Option<RawBlockId>,
     ) -> Option<BlockPlacement> {
         self.place(
             BlockPlaceContext::new(UseOnContext::new(hit, self), clicked_block),
-            relative_block,
+            block_at,
         )
     }
 
     fn place(
         self,
         context: BlockPlaceContext,
-        relative_block: Option<RawBlockId>,
+        block_at: impl Fn(BlockPos) -> Option<RawBlockId>,
     ) -> Option<BlockPlacement> {
-        let target_block = if context.replacing_clicked_on_block() {
-            Some(self.block)
-        } else {
-            relative_block
-        };
-        context.can_place(target_block).then_some(BlockPlacement {
-            pos: context.clicked_pos(),
-            block: self.placement_block(context),
+        let pos = context.clicked_pos();
+        if !context.can_place(block_at(pos)) {
+            return None;
+        }
+        Some(BlockPlacement {
+            pos,
+            block: self.placement_block(context, &block_at)?,
         })
     }
 
-    fn placement_block(self, context: BlockPlaceContext) -> RawBlockId {
-        rotated_pillar_block_for_axis(self.block, context.use_on.clicked_face())
+    fn placement_block(
+        self,
+        context: BlockPlaceContext,
+        block_at: &impl Fn(BlockPos) -> Option<RawBlockId>,
+    ) -> Option<RawBlockId> {
+        if self.is_torch_item() {
+            torch_placement_block(context, block_at)
+        } else {
+            Some(rotated_pillar_block_for_axis(
+                self.block,
+                context.use_on.clicked_face(),
+            ))
+        }
+    }
+
+    const fn is_torch_item(self) -> bool {
+        base_block_id(self.block) == TORCH
     }
 }
 
@@ -165,6 +176,41 @@ fn rotated_pillar_block_for_axis(block: RawBlockId, clicked_face: Direction) -> 
     }
 }
 
+fn torch_placement_block(
+    context: BlockPlaceContext,
+    block_at: &impl Fn(BlockPos) -> Option<RawBlockId>,
+) -> Option<RawBlockId> {
+    let pos = context.clicked_pos();
+    match context.use_on.clicked_face() {
+        Direction::Up => can_support_torch(block_at(pos.below())).then_some(TORCH),
+        Direction::North => {
+            wall_torch_block(Direction::North, pos, block_at).then_some(WALL_TORCH_NORTH)
+        }
+        Direction::South => {
+            wall_torch_block(Direction::South, pos, block_at).then_some(WALL_TORCH_SOUTH)
+        }
+        Direction::West => {
+            wall_torch_block(Direction::West, pos, block_at).then_some(WALL_TORCH_WEST)
+        }
+        Direction::East => {
+            wall_torch_block(Direction::East, pos, block_at).then_some(WALL_TORCH_EAST)
+        }
+        Direction::Down => None,
+    }
+}
+
+fn wall_torch_block(
+    facing: Direction,
+    pos: BlockPos,
+    block_at: &impl Fn(BlockPos) -> Option<RawBlockId>,
+) -> bool {
+    can_support_torch(block_at(pos.relative(facing.opposite())))
+}
+
+fn can_support_torch(block: Option<RawBlockId>) -> bool {
+    block.is_some_and(material_blocks_motion)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PlacementAxis {
     X,
@@ -184,7 +230,9 @@ fn clicked_face_axis(direction: Direction) -> PlacementAxis {
 mod tests {
     use super::*;
     use mclone_core::Vec3d;
-    use mclone_worldgen::block::{DIRT, OAK_LOG, OAK_LOG_X, OAK_LOG_Z, STONE, WATER};
+    use mclone_worldgen::block::{
+        DIRT, OAK_LOG, OAK_LOG_X, OAK_LOG_Z, STONE, TORCH, WALL_TORCH_EAST, WALL_TORCH_NORTH, WATER,
+    };
 
     fn block_hit(pos: BlockPos, direction: Direction) -> BlockHitResult {
         BlockHitResult::new(
@@ -199,26 +247,61 @@ mod tests {
         DebugBlockItem::new(block).expect("debug block item")
     }
 
+    fn place_item(
+        block: RawBlockId,
+        hit: BlockHitResult,
+        clicked_block: RawBlockId,
+        relative_block: Option<RawBlockId>,
+    ) -> Option<BlockPlacement> {
+        let clicked_pos = hit.block_pos;
+        let relative_pos = clicked_pos.relative(hit.direction);
+        item(block).use_on(hit, clicked_block, |pos| {
+            if pos == clicked_pos {
+                Some(clicked_block)
+            } else if pos == relative_pos {
+                relative_block
+            } else {
+                Some(AIR)
+            }
+        })
+    }
+
+    fn place_item_with_blocks(
+        block: RawBlockId,
+        hit: BlockHitResult,
+        blocks: &[(BlockPos, RawBlockId)],
+    ) -> Option<BlockPlacement> {
+        let clicked_block = blocks
+            .iter()
+            .find_map(|(pos, block)| (*pos == hit.block_pos).then_some(*block))
+            .expect("clicked block must be present");
+        item(block).use_on(hit, clicked_block, |pos| {
+            blocks
+                .iter()
+                .find_map(|(block_pos, block)| (*block_pos == pos).then_some(*block))
+        })
+    }
+
     #[test]
     fn block_place_context_replaces_replaceable_clicked_blocks() {
         let clicked = BlockPos::new(0, 80, 0);
 
         assert_eq!(
-            item(DIRT).use_on(block_hit(clicked, Direction::Up), GRASS, Some(AIR)),
+            place_item(DIRT, block_hit(clicked, Direction::Up), GRASS, Some(AIR)),
             Some(BlockPlacement {
                 pos: clicked,
                 block: DIRT,
             })
         );
         assert_eq!(
-            item(DIRT).use_on(block_hit(clicked, Direction::Up), WATER, Some(AIR)),
+            place_item(DIRT, block_hit(clicked, Direction::Up), WATER, Some(AIR)),
             Some(BlockPlacement {
                 pos: clicked,
                 block: DIRT,
             })
         );
         assert_eq!(
-            item(DIRT).use_on(block_hit(clicked, Direction::North), SNOW, Some(AIR)),
+            place_item(DIRT, block_hit(clicked, Direction::North), SNOW, Some(AIR)),
             Some(BlockPlacement {
                 pos: clicked,
                 block: DIRT,
@@ -231,14 +314,14 @@ mod tests {
         let clicked = BlockPos::new(0, 80, 0);
 
         assert_eq!(
-            item(SNOW).use_on(block_hit(clicked, Direction::Up), SNOW, Some(AIR)),
+            place_item(SNOW, block_hit(clicked, Direction::Up), SNOW, Some(AIR)),
             Some(BlockPlacement {
                 pos: clicked,
                 block: SNOW,
             })
         );
         assert_eq!(
-            item(SNOW).use_on(block_hit(clicked, Direction::North), SNOW, Some(AIR)),
+            place_item(SNOW, block_hit(clicked, Direction::North), SNOW, Some(AIR)),
             Some(BlockPlacement {
                 pos: BlockPos::new(0, 80, -1),
                 block: SNOW,
@@ -251,14 +334,14 @@ mod tests {
         let clicked = BlockPos::new(0, 80, 0);
 
         assert_eq!(
-            item(DIRT).use_on(block_hit(clicked, Direction::Up), STONE, Some(AIR)),
+            place_item(DIRT, block_hit(clicked, Direction::Up), STONE, Some(AIR)),
             Some(BlockPlacement {
                 pos: BlockPos::new(0, 81, 0),
                 block: DIRT,
             })
         );
         assert_eq!(
-            item(DIRT).use_on(block_hit(clicked, Direction::Up), STONE, Some(STONE)),
+            place_item(DIRT, block_hit(clicked, Direction::Up), STONE, Some(STONE)),
             None
         );
     }
@@ -268,21 +351,31 @@ mod tests {
         let clicked = BlockPos::new(0, 80, 0);
 
         assert_eq!(
-            item(OAK_LOG).use_on(block_hit(clicked, Direction::Up), STONE, Some(AIR)),
+            place_item(OAK_LOG, block_hit(clicked, Direction::Up), STONE, Some(AIR)),
             Some(BlockPlacement {
                 pos: BlockPos::new(0, 81, 0),
                 block: OAK_LOG,
             })
         );
         assert_eq!(
-            item(OAK_LOG).use_on(block_hit(clicked, Direction::East), STONE, Some(AIR)),
+            place_item(
+                OAK_LOG,
+                block_hit(clicked, Direction::East),
+                STONE,
+                Some(AIR)
+            ),
             Some(BlockPlacement {
                 pos: BlockPos::new(1, 80, 0),
                 block: OAK_LOG_X,
             })
         );
         assert_eq!(
-            item(OAK_LOG).use_on(block_hit(clicked, Direction::North), STONE, Some(AIR)),
+            place_item(
+                OAK_LOG,
+                block_hit(clicked, Direction::North),
+                STONE,
+                Some(AIR)
+            ),
             Some(BlockPlacement {
                 pos: BlockPos::new(0, 80, -1),
                 block: OAK_LOG_Z,
@@ -295,11 +388,17 @@ mod tests {
         let clicked = BlockPos::new(0, 80, 0);
 
         assert_eq!(
-            item(OAK_LOG).use_on(block_hit(clicked, Direction::Up), STONE, Some(OAK_LOG_X)),
+            place_item(
+                OAK_LOG,
+                block_hit(clicked, Direction::Up),
+                STONE,
+                Some(OAK_LOG_X)
+            ),
             None
         );
         assert_eq!(
-            item(OAK_LOG).use_on(
+            place_item(
+                OAK_LOG,
                 block_hit(clicked, Direction::East),
                 OAK_LOG_Z,
                 Some(OAK_LOG_X)
@@ -312,5 +411,61 @@ mod tests {
     fn debug_block_item_rejects_air_items() {
         assert_eq!(DebugBlockItem::new(AIR), None);
         assert_eq!(DebugBlockItem::new(CAVE_AIR), None);
+    }
+
+    #[test]
+    fn torch_item_uses_standing_state_on_supported_top_face() {
+        let clicked = BlockPos::new(0, 80, 0);
+
+        assert_eq!(
+            place_item(TORCH, block_hit(clicked, Direction::Up), STONE, Some(AIR)),
+            Some(BlockPlacement {
+                pos: BlockPos::new(0, 81, 0),
+                block: TORCH,
+            })
+        );
+    }
+
+    #[test]
+    fn torch_item_uses_wall_state_matching_clicked_side_face() {
+        let clicked = BlockPos::new(0, 80, 0);
+
+        assert_eq!(
+            place_item(TORCH, block_hit(clicked, Direction::East), STONE, Some(AIR)),
+            Some(BlockPlacement {
+                pos: BlockPos::new(1, 80, 0),
+                block: WALL_TORCH_EAST,
+            })
+        );
+        assert_eq!(
+            place_item(
+                TORCH,
+                block_hit(clicked, Direction::North),
+                STONE,
+                Some(AIR)
+            ),
+            Some(BlockPlacement {
+                pos: BlockPos::new(0, 80, -1),
+                block: WALL_TORCH_NORTH,
+            })
+        );
+    }
+
+    #[test]
+    fn torch_item_rejects_unsupported_faces_and_missing_support() {
+        let clicked = BlockPos::new(0, 80, 0);
+
+        assert_eq!(
+            place_item(TORCH, block_hit(clicked, Direction::Down), STONE, Some(AIR)),
+            None
+        );
+        assert_eq!(
+            place_item_with_blocks(
+                TORCH,
+                block_hit(clicked, Direction::Up),
+                &[(clicked, GRASS), (clicked.below(), AIR)],
+            ),
+            None
+        );
     }
 }
