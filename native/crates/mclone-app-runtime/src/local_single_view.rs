@@ -726,6 +726,22 @@ where
         }
     }
 
+    pub fn render_compile_max_pending_job_count(&self) -> usize {
+        match self {
+            Self::Local(scene) => scene.render_compile_worker.max_pending_job_count(),
+            Self::RemoteDedicated(scene) => scene.render_compile_worker.max_pending_job_count(),
+        }
+    }
+
+    pub fn render_compile_available_pending_job_slots(&self) -> usize {
+        match self {
+            Self::Local(scene) => scene.render_compile_worker.available_pending_job_slots(),
+            Self::RemoteDedicated(scene) => {
+                scene.render_compile_worker.available_pending_job_slots()
+            }
+        }
+    }
+
     pub fn pending_render_chunk_count(&self) -> usize {
         self.core().pending_render_chunk_count()
     }

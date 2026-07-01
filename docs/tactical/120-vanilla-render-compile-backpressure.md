@@ -69,7 +69,7 @@ Validation:
 
 ### B. Native Buffer-Pack Pool
 
-Status: next.
+Status: landed first conservative pass.
 
 Replace the single native render compile worker slot with a bounded pool. This
 does not need Java's exact `BufferBuilder` objects, but it should model the same
@@ -82,6 +82,23 @@ Initial target:
 - keep default conservative until measured,
 - expose pending jobs, max slots, and available slots in diagnostics,
 - prove no unbounded request queue can grow behind the renderer.
+
+First pass result:
+
+- `RenderSectionCompileWorker` now owns a bounded native worker pool instead of a
+  single hard-coded thread shape.
+- The default remains one compile slot, so runtime behavior is intentionally
+  unchanged until measurements justify a larger pool.
+- `submit` now rejects work when all compile slots are occupied, which prevents
+  a hidden unbounded request queue behind the renderer.
+- Shared runtime accessors expose pending compile jobs, max compile slots, and
+  available compile slots.
+
+Remaining for this slice:
+
+- add a runtime setting/launch option for the native slot count,
+- surface slot counts in Android XR and desktop perf markers,
+- benchmark one slot against larger slot counts before changing the default.
 
 ### C. Deadline-Driven Admission
 
@@ -128,7 +145,7 @@ a compiler exposes spare capacity and waits when capacity is full.
 
 ## Next Step
 
-Implement Slice B: a native render compile worker pool / buffer-pack pool with a
-bounded slot count and diagnostics. Keep the default conservative for the first
-measurement, then compare RD7 settled orbit and desktop streaming probes before
-raising capacity.
+Finish Slice B instrumentation: add a runtime setting for native compile slots
+and include max/available slot counts in the perf capture. Then compare one
+slot against two or more slots on the RD7 settled orbit and desktop streaming
+probes before changing the default.

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::env;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
 use anyhow::{Context, Result, bail};
@@ -24,6 +24,7 @@ pub const DEFAULT_NAMED_PACK_FILE: &str = "mclone-game-1.17.1.pbp";
 pub const DEFAULT_OVERLAY_PACK_FILE: &str = "mclone-default-overlay.pbp";
 pub const DEFAULT_ANDROID_APP_ID: &str = "com.kzahel.mclone";
 pub const DEFAULT_FIRST_PARTY_ASSET_DIR: &str = "assets";
+pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
 
 #[derive(Clone, Debug)]
 pub struct SceneTexturedSections {
@@ -81,57 +82,90 @@ enum RenderSectionCompileCommand {
 pub struct RenderSectionCompileWorker {
     sender: mpsc::Sender<RenderSectionCompileCommand>,
     receiver: mpsc::Receiver<RenderSectionCompileResult>,
-    handle: Option<thread::JoinHandle<()>>,
+    handles: Vec<thread::JoinHandle<()>>,
     pending_jobs: usize,
+    max_pending_jobs: usize,
 }
 
 impl RenderSectionCompileWorker {
     pub fn new(catalog: TexturedMeshCatalog) -> Result<Self> {
+        Self::with_worker_count(catalog, DEFAULT_RENDER_SECTION_COMPILE_WORKERS)
+    }
+
+    pub fn with_worker_count(catalog: TexturedMeshCatalog, worker_count: usize) -> Result<Self> {
+        if worker_count == 0 {
+            bail!("render section compile worker count must be greater than zero");
+        }
+
         let (sender, command_receiver) = mpsc::channel::<RenderSectionCompileCommand>();
         let (result_sender, receiver) = mpsc::channel::<RenderSectionCompileResult>();
-        let handle = thread::Builder::new()
-            .name("mclone-render-compile".to_string())
-            .spawn(move || {
-                while let Ok(command) = command_receiver.recv() {
-                    match command {
-                        RenderSectionCompileCommand::Build(request) => {
-                            let result = build_render_sections_from_snapshots(
-                                &request.snapshots,
-                                &catalog,
-                                &request.target_sections,
-                            )
-                            .map_err(|error| format!("{error:#}"));
-                            if result_sender
-                                .send(RenderSectionCompileResult {
-                                    target_sections: request.target_sections,
-                                    section_revisions: request.section_revisions,
-                                    result,
-                                })
-                                .is_err()
-                            {
-                                break;
+        let command_receiver = Arc::new(Mutex::new(command_receiver));
+        let mut handles = Vec::with_capacity(worker_count);
+
+        for worker_index in 0..worker_count {
+            let catalog = catalog.clone();
+            let command_receiver = Arc::clone(&command_receiver);
+            let result_sender = result_sender.clone();
+            let thread_name = if worker_count == 1 {
+                "mclone-render-compile".to_string()
+            } else {
+                format!("mclone-render-compile-{worker_index}")
+            };
+            let handle = thread::Builder::new()
+                .name(thread_name)
+                .spawn(move || {
+                    loop {
+                        let command = match command_receiver.lock() {
+                            Ok(receiver) => receiver.recv(),
+                            Err(_) => break,
+                        };
+                        match command {
+                            Ok(RenderSectionCompileCommand::Build(request)) => {
+                                let result = compile_render_section_request(&catalog, request);
+                                if result_sender.send(result).is_err() {
+                                    break;
+                                }
                             }
+                            Ok(RenderSectionCompileCommand::Shutdown) | Err(_) => break,
                         }
-                        RenderSectionCompileCommand::Shutdown => break,
                     }
-                }
-            })
-            .context("failed to spawn render section compile worker")?;
+                })
+                .context("failed to spawn render section compile worker")?;
+            handles.push(handle);
+        }
+
         Ok(Self {
             sender,
             receiver,
-            handle: Some(handle),
+            handles,
             pending_jobs: 0,
+            max_pending_jobs: worker_count,
         })
     }
 
     pub fn pending_job_count(&self) -> usize {
         self.pending_jobs
     }
+
+    pub fn max_pending_job_count(&self) -> usize {
+        self.max_pending_jobs
+    }
+
+    pub fn available_pending_job_slots(&self) -> usize {
+        self.max_pending_jobs.saturating_sub(self.pending_jobs)
+    }
 }
 
 impl RenderSectionCompiler for RenderSectionCompileWorker {
     fn submit(&mut self, request: RenderSectionCompileRequest) -> Result<()> {
+        if self.pending_jobs >= self.max_pending_jobs {
+            bail!(
+                "render section compile worker has no free compile slots \
+                 (pending_jobs={}, max_pending_jobs={})",
+                self.pending_jobs,
+                self.max_pending_jobs
+            );
+        }
         self.sender
             .send(RenderSectionCompileCommand::Build(request))
             .context("failed to submit render section compile task")?;
@@ -158,14 +192,34 @@ impl RenderSectionCompiler for RenderSectionCompileWorker {
     fn pending_job_count(&self) -> usize {
         self.pending_jobs
     }
+
+    fn max_pending_job_count(&self) -> usize {
+        self.max_pending_jobs
+    }
 }
 
 impl Drop for RenderSectionCompileWorker {
     fn drop(&mut self) {
-        let _ = self.sender.send(RenderSectionCompileCommand::Shutdown);
-        if let Some(handle) = self.handle.take() {
+        for _ in 0..self.handles.len() {
+            let _ = self.sender.send(RenderSectionCompileCommand::Shutdown);
+        }
+        for handle in self.handles.drain(..) {
             let _ = handle.join();
         }
+    }
+}
+
+fn compile_render_section_request(
+    catalog: &TexturedMeshCatalog,
+    request: RenderSectionCompileRequest,
+) -> RenderSectionCompileResult {
+    let result =
+        build_render_sections_from_snapshots(&request.snapshots, catalog, &request.target_sections)
+            .map_err(|error| format!("{error:#}"));
+    RenderSectionCompileResult {
+        target_sections: request.target_sections,
+        section_revisions: request.section_revisions,
+        result,
     }
 }
 
@@ -569,4 +623,49 @@ fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use super::*;
+
+    fn empty_compile_request() -> RenderSectionCompileRequest {
+        RenderSectionCompileRequest {
+            target_sections: BTreeSet::new(),
+            section_revisions: BTreeMap::new(),
+            snapshots: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn render_compile_worker_rejects_zero_slots() {
+        let error =
+            RenderSectionCompileWorker::with_worker_count(TexturedMeshCatalog::default(), 0)
+                .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("worker count must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn render_compile_worker_exposes_bounded_capacity() -> Result<()> {
+        let mut worker =
+            RenderSectionCompileWorker::with_worker_count(TexturedMeshCatalog::default(), 2)?;
+        assert_eq!(worker.pending_job_count(), 0);
+        assert_eq!(worker.max_pending_job_count(), 2);
+        assert_eq!(worker.available_pending_job_slots(), 2);
+
+        worker.submit(empty_compile_request())?;
+        worker.submit(empty_compile_request())?;
+        assert_eq!(worker.pending_job_count(), 2);
+        assert_eq!(worker.available_pending_job_slots(), 0);
+
+        let error = worker.submit(empty_compile_request()).unwrap_err();
+        assert!(error.to_string().contains("no free compile slots"));
+        Ok(())
+    }
 }
