@@ -95,12 +95,31 @@ produce render-thread bursts for our current path: broad pending-upload drains,
 synchronous near/player-dirty rebuilds, and any downstream prepared-record
 maintenance that turns small accepted section changes into repeated broad work.
 
-### Reference Divergence: Local Edit Coherence Versus XR Frame Budget
+### Baseline Policy
+
+For render-section pacing, assume the Minecraft Java behavior is the correct
+baseline unless profiling proves otherwise. Implement the reference queue,
+buffer-pack backpressure, deadline-driven compile admission, upload publication,
+and local edit coherence shape first when practical. Diverge only when the
+source cannot map cleanly to the native/WebGPU/OpenXR runtime or when
+benchmarks/profiling show a specific vanilla policy causing missed frames,
+memory pressure, or visible correctness problems in our target lanes.
+
+Any non-vanilla pacing policy should be:
+
+- named as a divergence from the Java baseline,
+- covered by a benchmark or profiler result,
+- opt-in until it beats the baseline in the relevant lane, and
+- recorded here with the exact evidence that justified it.
+
+### Potential XR Divergence: Local Edit Coherence Versus Frame Budget
 
 Java's synchronous near/player-dirty rebuild path is evidence for why local
-edits can look visually immediate, but it is not a policy we should inherit for
-Quest. On Android XR, the headset frame deadline is harder than immediate
-terrain repair: a missed frame is worse than a few frames of stale terrain.
+edits can look visually immediate. Keep that as the baseline behavior to
+understand and reproduce first. If Android XR profiling shows that synchronous
+near rebuilds miss headset frames, then a Quest-specific or shared adaptive
+policy may be justified, but it should be measured against the Java-shaped
+baseline rather than assumed better.
 
 For local block edits, gameplay/client state should update immediately, while
 render repair should be bounded and coherent. Prefer high-priority async section
@@ -108,11 +127,12 @@ compiles plus atomic/grouped publication: old visible section meshes may remain
 until the replacement dirty group is ready, but we should avoid publishing a
 partial group that exposes sky/background where an adjacent face should be.
 
-Synchronous rebuilds may stay useful for desktop diagnostics or opportunistic
-desktop work when measured headroom exists, but they should not be the default
-shared or Quest policy. This matches
-[`113`](113-block-edit-render-coherence.md): the production target is coherent
-eventual render publication, not Java-style render-thread immediacy.
+Synchronous rebuilds may stay useful for desktop diagnostics and may still be
+the right baseline for nearby local edits. A bounded async alternative should
+only replace them when the relevant lane demonstrates that preserving the Java
+policy costs more comfort than it saves in edit immediacy. This connects to
+[`113`](113-block-edit-render-coherence.md): any eventual-publication path must
+preserve coherent visual publication instead of introducing partial holes.
 
 ## Current Native/XR Shape
 
