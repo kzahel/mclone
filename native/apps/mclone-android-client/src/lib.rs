@@ -1882,7 +1882,7 @@ mod android {
             seed: 12345,
             chunk_x: 0,
             chunk_z: 0,
-            render_distance: 2,
+            render_distance: 5,
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             remote_addr: None,
             day_time_override: Some(6000),

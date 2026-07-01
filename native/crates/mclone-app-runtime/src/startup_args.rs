@@ -50,7 +50,7 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
 pub const DEFAULT_STARTUP_SEED: i64 = 12_345;
 pub const DEFAULT_STARTUP_CHUNK_X: i32 = 0;
 pub const DEFAULT_STARTUP_CHUNK_Z: i32 = 0;
-pub const DEFAULT_STARTUP_RENDER_DISTANCE: u32 = 2;
+pub const DEFAULT_STARTUP_RENDER_DISTANCE: u32 = 5;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RenderDistanceLimits {
@@ -382,7 +382,7 @@ mod tests {
                 seed: 12_345,
                 chunk_x: 0,
                 chunk_z: 0,
-                render_distance: 2,
+                render_distance: 5,
                 remote_addr: None,
                 day_time_override: None,
                 freeze_time: false,

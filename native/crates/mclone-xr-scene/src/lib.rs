@@ -72,7 +72,7 @@ use openxr as xr;
 pub const DEFAULT_XR_SEED: i64 = 12_345;
 pub const DEFAULT_XR_CHUNK_X: i32 = 0;
 pub const DEFAULT_XR_CHUNK_Z: i32 = 0;
-pub const DEFAULT_XR_RENDER_DISTANCE: u32 = 2;
+pub const DEFAULT_XR_RENDER_DISTANCE: u32 = 5;
 pub const MAX_XR_RENDER_DISTANCE: u32 = 16;
 pub const XR_NEAR: f32 = 0.05;
 pub const XR_FAR: f32 = 700.0;
@@ -5027,7 +5027,7 @@ mod tests {
         let options = XrSceneOptions::default();
         assert_eq!(options.seed, 12_345);
         assert_eq!(options.center(), ChunkPos::new(0, 0));
-        assert_eq!(options.render_distance, 2);
+        assert_eq!(options.render_distance, 5);
         assert_eq!(
             options.underwater_detection_mode,
             XrUnderwaterDetectionMode::Midpoint
