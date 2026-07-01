@@ -1,6 +1,7 @@
 # 121: Surface LOD First Slice
 
-Status: active; Slice A landed. Shared native Rust renderer/runtime workstream.
+Status: active; Slices A and B landed. Shared native Rust renderer/runtime
+workstream.
 
 ## Purpose
 
@@ -100,7 +101,12 @@ Current hard-coded prototype distances:
 - LOD starts at the first chunk ring outside the normal render distance.
 - LOD ends at `render_distance + far_lod_range` chunks.
 - The default `far_lod_range` is 12 chunks, adjustable in the Options UI.
-- Surface samples are spaced every 8 blocks.
+- Surface samples are spaced every 4 blocks, producing 4x4-block coarse LOD
+  cells.
+- The LOD mesh is a blocky heightfield: each coarse cell has a flat top face,
+  with vertical side faces where adjacent coarse cell heights differ. This
+  intentionally looks more Minecraft-like than the first sloped-triangle pass,
+  while staying much cheaper than one-to-one block terrain.
 - Far terrain chunks are generated incrementally with a small per-frame budget,
   so the LOD mesh fills in over multiple frames instead of blocking startup or a
   camera move on a full-ring rebuild.
@@ -113,9 +119,11 @@ unless pop-in testing proves we need a hidden overlap/blend margin.
 
 ### B. Replace Placeholder Surface Source
 
-Status: landed first real-surface version. Remaining work is to avoid rebuilding
-from scratch on every center/range key change, improve color/material selection,
-and decide whether feature whitelists such as trees are worth adding.
+Status: landed first real-surface version and the blocky heightfield revision.
+Remaining work is to avoid rebuilding from scratch on every center/range key
+change, add texture-atlas material mapping instead of vertex-only colors,
+improve color/material selection, and decide whether feature whitelists such as
+trees are worth adding.
 
 ### C. Runtime Scheduling And Diagnostics
 

@@ -17,7 +17,7 @@ pub const DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS: u32 = 0;
 pub const MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 1;
 pub const DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 12;
 pub const MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 64;
-pub const DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS: u32 = 8;
+pub const DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS: u32 = 4;
 pub const DEFAULT_FAR_TERRAIN_LOD_CHUNK_BUILD_BUDGET: usize = 4;
 pub const SEA_LEVEL: f32 = 63.0;
 
@@ -255,37 +255,322 @@ fn append_far_terrain_lod_chunk_patch(
     let offsets = chunk_sample_offsets(spacing);
     debug_assert!(offsets.len() >= 2);
 
-    let mut grid = Vec::with_capacity(offsets.len() * offsets.len());
+    let mut cells = Vec::with_capacity((offsets.len() - 1) * (offsets.len() - 1));
     let min_x = chunk_min_block_coord(pos.x);
     let min_z = chunk_min_block_coord(pos.z);
-    for z_offset in &offsets {
-        for x_offset in &offsets {
-            let world_x = min_x + *x_offset;
-            let world_z = min_z + *z_offset;
-            if let Some(sample) = surface_sample_world(surface_chunks, seed, world_x, world_z) {
-                let index = u32::try_from(vertices.len() / 7)
-                    .expect("far terrain LOD vertex count fits u32");
-                vertices.extend_from_slice(&[world_x as f32, sample.y, world_z as f32]);
-                vertices.extend_from_slice(&sample.color);
-                grid.push(Some(index));
-            } else {
-                grid.push(None);
-            }
+    for z_cell in 0..offsets.len() - 1 {
+        for x_cell in 0..offsets.len() - 1 {
+            let x0 = min_x + offsets[x_cell];
+            let x1 = min_x + offsets[x_cell + 1];
+            let z0 = min_z + offsets[z_cell];
+            let z1 = min_z + offsets[z_cell + 1];
+            cells.push(sample_lod_cell(surface_chunks, seed, x0, x1, z0, z1));
         }
     }
 
-    let side = offsets.len();
-    for z_cell in 0..side - 1 {
-        for x_cell in 0..side - 1 {
-            let a = grid[z_cell * side + x_cell];
-            let b = grid[z_cell * side + x_cell + 1];
-            let c = grid[(z_cell + 1) * side + x_cell];
-            let d = grid[(z_cell + 1) * side + x_cell + 1];
-            if let (Some(a), Some(b), Some(c), Some(d)) = (a, b, c, d) {
-                indices.extend_from_slice(&[a, c, b, b, c, d]);
+    for cell in cells.iter().flatten() {
+        append_top_face(vertices, indices, cell);
+    }
+
+    let cells_per_axis = offsets.len() - 1;
+    for z_cell in 0..cells_per_axis {
+        for x_cell in 0..cells_per_axis {
+            let Some(cell) = cells[z_cell * cells_per_axis + x_cell] else {
+                continue;
+            };
+            for direction in [
+                LodCellDirection::West,
+                LodCellDirection::East,
+                LodCellDirection::North,
+                LodCellDirection::South,
+            ] {
+                let neighbor = neighbor_lod_cell(
+                    &cells,
+                    cells_per_axis,
+                    x_cell,
+                    z_cell,
+                    direction,
+                    surface_chunks,
+                    seed,
+                    key,
+                    cell,
+                );
+                let Some(neighbor) = neighbor else {
+                    continue;
+                };
+                if neighbor.region == LodNeighborRegion::Outer {
+                    continue;
+                }
+                if cell.sample.y > neighbor.cell.sample.y {
+                    append_drop_face(
+                        vertices,
+                        indices,
+                        cell,
+                        neighbor.cell.sample.y,
+                        direction,
+                        0.74,
+                    );
+                } else if neighbor.region == LodNeighborRegion::Inner
+                    && neighbor.cell.sample.y > cell.sample.y
+                {
+                    append_neighbor_inner_drop_face(
+                        vertices,
+                        indices,
+                        cell,
+                        neighbor.cell,
+                        direction,
+                        0.68,
+                    );
+                }
             }
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FarTerrainLodCell {
+    x0: i32,
+    x1: i32,
+    z0: i32,
+    z1: i32,
+    sample: FarTerrainSurfaceSample,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LodCellDirection {
+    West,
+    East,
+    North,
+    South,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LodNeighborRegion {
+    Inner,
+    Lod,
+    Outer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LodNeighborCell {
+    cell: FarTerrainLodCell,
+    region: LodNeighborRegion,
+}
+
+fn sample_lod_cell(
+    chunks: &mut BTreeMap<ChunkPos, GeneratedChunk>,
+    seed: i64,
+    x0: i32,
+    x1: i32,
+    z0: i32,
+    z1: i32,
+) -> Option<FarTerrainLodCell> {
+    let sample_x = x0 + (x1 - x0) / 2;
+    let sample_z = z0 + (z1 - z0) / 2;
+    surface_sample_world(chunks, seed, sample_x, sample_z).map(|sample| FarTerrainLodCell {
+        x0,
+        x1,
+        z0,
+        z1,
+        sample,
+    })
+}
+
+fn neighbor_lod_cell(
+    cells: &[Option<FarTerrainLodCell>],
+    cells_per_axis: usize,
+    x_cell: usize,
+    z_cell: usize,
+    direction: LodCellDirection,
+    surface_chunks: &mut BTreeMap<ChunkPos, GeneratedChunk>,
+    seed: i64,
+    key: FarTerrainLodBuildKey,
+    cell: FarTerrainLodCell,
+) -> Option<LodNeighborCell> {
+    match direction {
+        LodCellDirection::West if x_cell > 0 => {
+            let cell = cells[z_cell * cells_per_axis + x_cell - 1]?;
+            Some(LodNeighborCell {
+                cell,
+                region: LodNeighborRegion::Lod,
+            })
+        }
+        LodCellDirection::East if x_cell + 1 < cells_per_axis => {
+            let cell = cells[z_cell * cells_per_axis + x_cell + 1]?;
+            Some(LodNeighborCell {
+                cell,
+                region: LodNeighborRegion::Lod,
+            })
+        }
+        LodCellDirection::North if z_cell > 0 => {
+            let cell = cells[(z_cell - 1) * cells_per_axis + x_cell]?;
+            Some(LodNeighborCell {
+                cell,
+                region: LodNeighborRegion::Lod,
+            })
+        }
+        LodCellDirection::South if z_cell + 1 < cells_per_axis => {
+            let cell = cells[(z_cell + 1) * cells_per_axis + x_cell]?;
+            Some(LodNeighborCell {
+                cell,
+                region: LodNeighborRegion::Lod,
+            })
+        }
+        _ => {
+            let (x0, x1, z0, z1) = neighbor_cell_bounds(cell, direction);
+            let neighbor = sample_lod_cell(surface_chunks, seed, x0, x1, z0, z1)?;
+            Some(LodNeighborCell {
+                cell: neighbor,
+                region: neighbor_region(key, neighbor),
+            })
+        }
+    }
+}
+
+fn neighbor_cell_bounds(
+    cell: FarTerrainLodCell,
+    direction: LodCellDirection,
+) -> (i32, i32, i32, i32) {
+    let width = cell.x1 - cell.x0;
+    let depth = cell.z1 - cell.z0;
+    match direction {
+        LodCellDirection::West => (cell.x0 - width, cell.x0, cell.z0, cell.z1),
+        LodCellDirection::East => (cell.x1, cell.x1 + width, cell.z0, cell.z1),
+        LodCellDirection::North => (cell.x0, cell.x1, cell.z0 - depth, cell.z0),
+        LodCellDirection::South => (cell.x0, cell.x1, cell.z1, cell.z1 + depth),
+    }
+}
+
+fn neighbor_region(key: FarTerrainLodBuildKey, cell: FarTerrainLodCell) -> LodNeighborRegion {
+    let (inner_chunk_radius, outer_chunk_radius) = far_lod_chunk_radii(key);
+    let center_x = cell.x0 + (cell.x1 - cell.x0) / 2;
+    let center_z = cell.z0 + (cell.z1 - cell.z0) / 2;
+    let distance = chunk_distance_from_center(key.center, center_x, center_z);
+    if distance <= inner_chunk_radius {
+        LodNeighborRegion::Inner
+    } else if distance > outer_chunk_radius {
+        LodNeighborRegion::Outer
+    } else {
+        LodNeighborRegion::Lod
+    }
+}
+
+fn append_top_face(vertices: &mut Vec<f32>, indices: &mut Vec<u32>, cell: &FarTerrainLodCell) {
+    append_quad(
+        vertices,
+        indices,
+        [
+            [cell.x0 as f32, cell.sample.y, cell.z0 as f32],
+            [cell.x1 as f32, cell.sample.y, cell.z0 as f32],
+            [cell.x0 as f32, cell.sample.y, cell.z1 as f32],
+            [cell.x1 as f32, cell.sample.y, cell.z1 as f32],
+        ],
+        cell.sample.color,
+    );
+}
+
+fn append_drop_face(
+    vertices: &mut Vec<f32>,
+    indices: &mut Vec<u32>,
+    cell: FarTerrainLodCell,
+    low_y: f32,
+    direction: LodCellDirection,
+    shade: f32,
+) {
+    append_vertical_face(
+        vertices,
+        indices,
+        cell,
+        cell.sample.y,
+        low_y,
+        direction,
+        shade_color(cell.sample.color, shade),
+    );
+}
+
+fn append_neighbor_inner_drop_face(
+    vertices: &mut Vec<f32>,
+    indices: &mut Vec<u32>,
+    cell: FarTerrainLodCell,
+    neighbor: FarTerrainLodCell,
+    direction: LodCellDirection,
+    shade: f32,
+) {
+    append_vertical_face(
+        vertices,
+        indices,
+        cell,
+        neighbor.sample.y,
+        cell.sample.y,
+        direction,
+        shade_color(neighbor.sample.color, shade),
+    );
+}
+
+fn append_vertical_face(
+    vertices: &mut Vec<f32>,
+    indices: &mut Vec<u32>,
+    cell: FarTerrainLodCell,
+    high_y: f32,
+    low_y: f32,
+    direction: LodCellDirection,
+    color: [f32; 4],
+) {
+    if high_y <= low_y {
+        return;
+    }
+    let x0 = cell.x0 as f32;
+    let x1 = cell.x1 as f32;
+    let z0 = cell.z0 as f32;
+    let z1 = cell.z1 as f32;
+    let positions = match direction {
+        LodCellDirection::West => [
+            [x0, high_y, z0],
+            [x0, low_y, z0],
+            [x0, high_y, z1],
+            [x0, low_y, z1],
+        ],
+        LodCellDirection::East => [
+            [x1, high_y, z1],
+            [x1, low_y, z1],
+            [x1, high_y, z0],
+            [x1, low_y, z0],
+        ],
+        LodCellDirection::North => [
+            [x1, high_y, z0],
+            [x1, low_y, z0],
+            [x0, high_y, z0],
+            [x0, low_y, z0],
+        ],
+        LodCellDirection::South => [
+            [x0, high_y, z1],
+            [x0, low_y, z1],
+            [x1, high_y, z1],
+            [x1, low_y, z1],
+        ],
+    };
+    append_quad(vertices, indices, positions, color);
+}
+
+fn append_quad(
+    vertices: &mut Vec<f32>,
+    indices: &mut Vec<u32>,
+    positions: [[f32; 3]; 4],
+    color: [f32; 4],
+) {
+    let base = u32::try_from(vertices.len() / 7).expect("far terrain LOD vertex count fits u32");
+    for position in positions {
+        vertices.extend_from_slice(&position);
+        vertices.extend_from_slice(&color);
+    }
+    indices.extend_from_slice(&[base, base + 2, base + 1, base + 1, base + 2, base + 3]);
+}
+
+fn shade_color(mut color: [f32; 4], shade: f32) -> [f32; 4] {
+    color[0] *= shade;
+    color[1] *= shade;
+    color[2] *= shade;
+    color
 }
 
 fn chunk_sample_offsets(spacing: u32) -> Vec<i32> {
@@ -342,7 +627,6 @@ fn surface_sample_world(
     surface_sample(chunk, local_x, local_z)
 }
 
-#[cfg(test)]
 fn chunk_distance_from_center(center: ChunkPos, world_x: i32, world_z: i32) -> u32 {
     let chunk = ChunkPos::from_block_coords(world_x, world_z);
     (chunk.x - center.x)
@@ -430,6 +714,7 @@ mod tests {
             DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS
         );
         assert_eq!(DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS, 0);
+        assert_eq!(DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS, 4);
     }
 
     #[test]
@@ -457,6 +742,84 @@ mod tests {
         assert!(mesh.index_count() > 0);
         assert_eq!(mesh.index_count() % 3, 0);
         assert_eq!(mesh.revision(), key.revision());
+    }
+
+    #[test]
+    fn far_terrain_lod_chunk_patch_emits_flat_blocky_cell_caps() {
+        let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
+        let key = FarTerrainLodBuildKey::new(12345, ChunkPos::new(0, 0), 0, config);
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        let mut chunks = BTreeMap::new();
+
+        append_far_terrain_lod_chunk_patch(
+            &mut vertices,
+            &mut indices,
+            &mut chunks,
+            12345,
+            ChunkPos::new(1, 0),
+            key,
+        );
+
+        assert!(vertices.len() >= 28);
+        let y0 = vertices[1];
+        let y1 = vertices[8];
+        let y2 = vertices[15];
+        let y3 = vertices[22];
+        assert_eq!(y0, y1);
+        assert_eq!(y0, y2);
+        assert_eq!(y0, y3);
+
+        let xs = [vertices[0], vertices[7], vertices[14], vertices[21]];
+        let zs = [vertices[2], vertices[9], vertices[16], vertices[23]];
+        let min_x = xs.iter().fold(f32::INFINITY, |min, x| min.min(*x));
+        let max_x = xs.iter().fold(f32::NEG_INFINITY, |max, x| max.max(*x));
+        let min_z = zs.iter().fold(f32::INFINITY, |min, z| min.min(*z));
+        let max_z = zs.iter().fold(f32::NEG_INFINITY, |max, z| max.max(*z));
+        assert_eq!(
+            max_x - min_x,
+            DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS as f32
+        );
+        assert_eq!(
+            max_z - min_z,
+            DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS as f32
+        );
+        assert_eq!(&indices[0..6], &[0, 2, 1, 1, 2, 3]);
+    }
+
+    #[test]
+    fn far_terrain_lod_drop_face_is_vertical() {
+        let cell = FarTerrainLodCell {
+            x0: 16,
+            x1: 20,
+            z0: 32,
+            z1: 36,
+            sample: FarTerrainSurfaceSample {
+                y: 72.0,
+                color: [0.30, 0.50, 0.22, 1.0],
+            },
+        };
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_drop_face(
+            &mut vertices,
+            &mut indices,
+            cell,
+            64.0,
+            LodCellDirection::West,
+            0.74,
+        );
+
+        assert_eq!(vertices.len(), 28);
+        assert_eq!(indices.len(), 6);
+        for vertex in 0..4 {
+            assert_eq!(vertices[vertex * 7], cell.x0 as f32);
+        }
+        assert_eq!(vertices[1], 72.0);
+        assert_eq!(vertices[8], 64.0);
+        assert_eq!(vertices[15], 72.0);
+        assert_eq!(vertices[22], 64.0);
     }
 
     #[test]
