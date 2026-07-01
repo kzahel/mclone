@@ -1,81 +1,9 @@
-use std::{
-    cmp::Ordering,
-    collections::{BinaryHeap, HashMap},
-};
-
 use mclone_core::{BlockPos, BlockStateId};
+use mclone_path::{PathNeighbor, PathSearch, PathSearchQuery, manhattan_distance};
 
 use super::{BlockPathType, WalkNodeEvaluator, path::GroundPath, path_service::PathRequest};
 
-const PATH_HEURISTIC_FUDGE: f32 = 1.5;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct PathSearchLimits {
-    pub(super) max_visited_nodes: usize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct NodeRecord {
-    pos: BlockPos,
-    came_from: Option<BlockPos>,
-    g: f32,
-    f: f32,
-    walked_distance: f32,
-    closed: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct TargetRecord {
-    pos: BlockPos,
-    best_heuristic: f32,
-    best_node: Option<BlockPos>,
-    reached: bool,
-}
-
-impl TargetRecord {
-    fn new(pos: BlockPos) -> Self {
-        Self {
-            pos,
-            best_heuristic: f32::INFINITY,
-            best_node: None,
-            reached: false,
-        }
-    }
-
-    fn update_best(&mut self, heuristic: f32, node: BlockPos) {
-        if heuristic < self.best_heuristic {
-            self.best_heuristic = heuristic;
-            self.best_node = Some(node);
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct OpenEntry {
-    pos: BlockPos,
-    f: f32,
-    h: f32,
-    sequence: usize,
-}
-
-impl Eq for OpenEntry {}
-
-impl Ord for OpenEntry {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other
-            .f
-            .total_cmp(&self.f)
-            .then_with(|| other.h.total_cmp(&self.h))
-            .then_with(|| other.sequence.cmp(&self.sequence))
-            .then_with(|| other.pos.cmp(&self.pos))
-    }
-}
-
-impl PartialOrd for OpenEntry {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
+pub(super) use mclone_path::PathSearchLimits;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct PathFinder {
@@ -105,156 +33,29 @@ impl PathFinder {
         );
         let start =
             evaluator.get_start(request.start_position, block_state_at, pathfinding_malus)?;
-        let mut target = TargetRecord::new(request.target_position);
-        let start_h = distance(start, target.pos);
-        target.update_best(start_h, start);
-        if manhattan_distance(start, target.pos) <= request.reach_range {
-            return Some(GroundPath::from_nodes(
-                vec![start],
-                request.target_position,
-                true,
-            ));
-        }
-
-        let mut open_set = BinaryHeap::new();
-        let mut records = HashMap::new();
-        let mut sequence = 0_usize;
-        records.insert(
-            start,
-            NodeRecord {
-                pos: start,
-                came_from: None,
-                g: 0.0,
-                f: start_h,
-                walked_distance: 0.0,
-                closed: false,
-            },
-        );
-        open_set.push(OpenEntry {
-            pos: start,
-            f: start_h,
-            h: start_h,
-            sequence,
-        });
-
         let max_visited_nodes = ((self.limits.max_visited_nodes as f32
             * request.max_visited_nodes_multiplier)
             .floor()
             .max(1.0)) as usize;
-        let mut visited_nodes = 0_usize;
-
-        loop {
-            if visited_nodes + 1 >= max_visited_nodes {
-                break;
-            }
-            let Some(entry) = open_set.pop() else {
-                break;
-            };
-            let Some(open_record) = records.get(&entry.pos) else {
-                continue;
-            };
-            if open_record.closed || entry.f > open_record.f {
-                continue;
-            }
-
-            let current = *open_record;
-            if let Some(record) = records.get_mut(&entry.pos) {
-                record.closed = true;
-            }
-            visited_nodes += 1;
-
-            let current_h = distance(current.pos, target.pos);
-            target.update_best(current_h, current.pos);
-            if manhattan_distance(current.pos, target.pos) <= request.reach_range {
-                target.reached = true;
-                target.best_node = Some(current.pos);
-                break;
-            }
-
-            if distance(start, current.pos) >= request.follow_range {
-                continue;
-            }
-
-            for neighbor in evaluator.get_neighbors(current.pos, block_state_at, pathfinding_malus)
-            {
-                if records
-                    .get(&neighbor.pos)
-                    .is_some_and(|record| record.closed)
-                {
-                    continue;
-                }
-
-                let step_distance = distance(current.pos, neighbor.pos);
-                let walked_distance = current.walked_distance + step_distance;
-                if walked_distance >= request.follow_range {
-                    continue;
-                }
-
-                let tentative_g = current.g + step_distance + neighbor.cost_malus;
-                let should_update = records
-                    .get(&neighbor.pos)
-                    .is_none_or(|record| tentative_g < record.g);
-                if !should_update {
-                    continue;
-                }
-
-                let heuristic = distance(neighbor.pos, target.pos);
-                target.update_best(heuristic, neighbor.pos);
-                let weighted_heuristic = heuristic * PATH_HEURISTIC_FUDGE;
-                let f = tentative_g + weighted_heuristic;
-                records.insert(
-                    neighbor.pos,
-                    NodeRecord {
-                        pos: neighbor.pos,
-                        came_from: Some(current.pos),
-                        g: tentative_g,
-                        f,
-                        walked_distance,
-                        closed: false,
-                    },
-                );
-                sequence = sequence.wrapping_add(1);
-                open_set.push(OpenEntry {
-                    pos: neighbor.pos,
-                    f,
-                    h: weighted_heuristic,
-                    sequence,
-                });
-            }
-        }
-
-        let best_node = target.best_node?;
-        let nodes = reconstruct_path(best_node, &records)?;
+        let result = PathSearch::new(PathSearchLimits { max_visited_nodes }).find_path(
+            PathSearchQuery::new(start, request.target_position)
+                .with_follow_range(request.follow_range),
+            |pos| {
+                evaluator
+                    .get_neighbors(pos, block_state_at, pathfinding_malus)
+                    .into_iter()
+                    .map(|neighbor| PathNeighbor::new(neighbor.pos, neighbor.cost_malus))
+                    .collect()
+            },
+            |pos, target| manhattan_distance(pos, target) <= request.reach_range,
+        );
+        let reached = result.can_reach();
         Some(GroundPath::from_nodes(
-            nodes,
+            result.into_nodes(),
             request.target_position,
-            target.reached,
+            reached,
         ))
     }
-}
-
-fn reconstruct_path(
-    mut pos: BlockPos,
-    records: &HashMap<BlockPos, NodeRecord>,
-) -> Option<Vec<BlockPos>> {
-    let mut nodes = vec![pos];
-    while let Some(previous) = records.get(&pos)?.came_from {
-        pos = previous;
-        nodes.push(pos);
-    }
-    nodes.reverse();
-    Some(nodes)
-}
-
-fn distance(first: BlockPos, second: BlockPos) -> f32 {
-    let dx = (first.x - second.x) as f32;
-    let dy = (first.y - second.y) as f32;
-    let dz = (first.z - second.z) as f32;
-    (dx * dx + dy * dy + dz * dz).sqrt()
-}
-
-fn manhattan_distance(first: BlockPos, second: BlockPos) -> i32 {
-    (first.x - second.x).abs() + (first.y - second.y).abs() + (first.z - second.z).abs()
 }
 
 #[cfg(test)]

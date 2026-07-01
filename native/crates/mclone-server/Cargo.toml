@@ -9,6 +9,7 @@ publish.workspace = true
 mclone-core.workspace = true
 mclone-blocks.workspace = true
 mclone-light.workspace = true
+mclone-path.workspace = true
 mclone-physics = { workspace = true, optional = true }
 mclone-protocol.workspace = true
 mclone-worldgen.workspace = true

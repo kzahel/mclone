@@ -10,6 +10,7 @@ members = [
   "crates/mclone-light",
   "crates/mclone-mesh",
   "crates/mclone-net",
+  "crates/mclone-path",
   "crates/mclone-physics",
   "crates/mclone-protocol",
   "crates/mclone-render",
@@ -58,6 +59,7 @@ mclone-input = { path = "crates/mclone-input" }
 mclone-light = { path = "crates/mclone-light" }
 mclone-mesh = { path = "crates/mclone-mesh" }
 mclone-net = { path = "crates/mclone-net" }
+mclone-path = { path = "crates/mclone-path" }
 mclone-physics = { path = "crates/mclone-physics" }
 mclone-protocol = { path = "crates/mclone-protocol" }
 mclone-render = { path = "crates/mclone-render" }

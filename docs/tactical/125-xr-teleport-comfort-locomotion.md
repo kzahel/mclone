@@ -1,0 +1,290 @@
+# 125: XR Teleport Comfort Locomotion
+
+Status: active; the input/snap-turn prerequisite in
+[`124`](124-xr-input-snap-turn.md) is implemented and headset-validated.
+Slice 1 code landed on July 1, 2026.
+
+## Purpose
+
+Add comfort locomotion options modeled after Half-Life: Alyx's Blink and Shift
+movement. Continuous left-stick locomotion is useful but can feel nauseating
+when headset frame pacing is imperfect. Blink/Shift should give the player a
+room-scale-friendly way to relocate the authoritative body, including moving to
+valid nearby higher surfaces, without desynchronizing the headset, collision
+box, hands, or server pose.
+
+## References
+
+- Half-Life: Alyx movement modes: Blink is teleport with a brief fade, Shift is
+  teleport with a fast linear movement, and Continuous remains available for
+  players who prefer stick movement.
+- Public summaries:
+  - `https://www.uploadvr.com/valve-deep-dive-locomotion/`
+  - `https://www.gamespot.com/articles/half-life-alyx-accessibility-options-full-guide/1100-6475045/`
+  - `https://www.newsweek.com/half-life-alyx-vr-gameplay-pc-specs-vive-oculus-movement-1490121`
+- Local pathfinding reference:
+  `native/crates/mclone-server/src/entity/mob/navigation/`.
+
+## Current Problem
+
+The current XR locomotion stack has three ingredients but no comfort teleport
+mode:
+
+- continuous left-stick movement through shared player collision,
+- room-scale head/body reconciliation,
+- head-comfort fade when the head is obstructed or residual offset is blocked.
+
+That is enough for walking and hand-push experiments, but it still relies on
+continuous artificial movement. Quest testing showed that continuous movement
+plus imperfect frame pacing can become uncomfortable.
+
+We also have a pathfinding implementation, but it is nested under server mob
+AI. That makes it awkward to reuse for player teleport preview/validation,
+where the shared algorithm should be core and the mob-specific evaluator should
+remain mob-specific.
+
+## Target Shape
+
+- XR comfort locomotion is a shared `mclone-xr-scene` feature used by desktop
+  OpenXR and Android XR.
+- Teleport moves the authoritative body/player pose through shared
+  engine/client contracts. It must not be app-local stage-origin glue.
+- The current headset world position remains understandable across teleport:
+  after relocation, the stage-to-world transform is rebuilt from the new body
+  pose so render views, hands, rays, debug overlays, and server pose agree.
+- Blink and Shift share target acquisition, path validation, and preview. Both
+  modes require the same validated reachable path to the target; Blink must not
+  allow destinations that Shift would reject. They differ only in execution
+  comfort:
+  - **Blink**: fade out/in and relocate immediately while faded.
+  - **Shift/Warp**: move quickly along the same validated path with a comfort
+    transition.
+- Preview uses existing multiview-aware world overlay paths such as
+  `WorldGuiLine` and world GUI panels where possible. Any new renderer must
+  include both per-eye and full-frame multiview paths.
+- Pathfinding core moves out of `mclone-server::entity::mob::navigation` into
+  a shared module/crate before XR depends on it.
+
+## Input Model
+
+The exact input should be validated in headset, but the first design target is:
+
+- A movement-mode option selects Continuous, Blink, Shift, or Hand Push.
+- In Blink/Shift, left-stick deflection starts or updates a target preview.
+- The preview shows where the player's feet/body would land.
+- Stick direction can influence landing yaw, so the player can choose the
+  facing direction before committing.
+- Releasing or pressing a chosen confirm input commits the teleport. The first
+  implementation should pick one simple rule and document it in the UI/options
+  code; avoid hidden multi-button choreography.
+
+The target preview should not conflict with the right-stick snap-turn work from
+`124`. Snap turn remains right-stick based. Blink/Shift target selection should
+stay left-stick or controller-aim based.
+
+## Pathfinding Refactor Policy
+
+The pathfinding algorithm itself does not belong under passive mob AI. The
+refactor should separate:
+
+- **Shared path core**: A* frontier/open-set logic, search limits, generic
+  path result, nearest-reachable target behavior, and deterministic tests.
+- **Mob navigation evaluator**: Java-shaped passive mob walkability,
+  block-path types, malus, width/height rules, and follow-range behavior.
+- **XR teleport evaluator**: player-body/feet target validation, headroom,
+  step-up policy, unloaded-chunk rejection, and preview path facts.
+
+Implementation shape:
+
+- Prefer a small shared crate such as `mclone-path` or a clearly named core
+  navigation module over putting reusable A* in `mclone-server`.
+- Keep `mclone-server` mob AI depending on the shared path core.
+- Let `mclone-client` or another shared client/engine crate own player teleport
+  target validation against the client world snapshot and collision facts.
+- Do not make `mclone-xr-scene` depend on server mob AI to compute a player
+  teleport target.
+
+## Runtime And Worker Topology
+
+Teleport preview must be responsive and must not run expensive path search on
+the XR render/frame thread. The first implementation should use a client-side
+latest-only worker mailbox:
+
+```text
+XR frame thread
+  read controllers/views
+  submit or refresh the latest target/path request
+  render the latest completed preview result
+  commit only a still-valid completed result
+
+teleport path worker
+  receives compact client-world collision facts and request parameters
+  runs bounded target/path search
+  returns target feet pose, yaw, validity reason, and path facts
+
+host/server thread
+  remains out of the preview loop
+  may later reuse the same shared path core for validation/budget policy
+```
+
+The worker should not borrow `ClientRuntime` live. Give it a compact immutable
+query window or collision snapshot for the bounded search area, plus a client
+world revision/generation and request sequence. Drop stale results whose
+sequence or revision no longer matches.
+
+This is an intentional platform topology difference for now:
+
+- Desktop OpenXR and Android XR use native OS worker threads or a native worker
+  pool behind the shared `mclone-xr-scene` / `mclone-client` request path.
+- Web/WASM has no supported XR target today, so it should not grow a browser XR
+  teleport worker lane yet.
+- Keep `mclone-path` and the player teleport evaluator wasm-compatible where
+  practical, so a future web/non-XR caller can add a Web Worker backend without
+  changing the algorithm or target-validity contract.
+
+The first mailbox should be latest-only and bounded: one in-flight request per
+XR scene, pending requests replaced as aim/stick input changes, hard node/time
+limits, and final cheap endpoint revalidation on commit.
+
+## Slice 1 - Extract Shared Path Core
+
+- [x] Add a shared pathfinding core with generic neighbor expansion and target
+  acceptance callbacks.
+- [x] Preserve current mob path behavior by adapting
+  `mclone-server/src/entity/mob/navigation/path_finder.rs` to the shared core.
+- [x] Keep `WalkNodeEvaluator`, `BlockPathType`, and mob malus policy in the
+  server mob module.
+- [x] Add behavior-equivalence tests around existing mob navigation fixtures.
+- [x] Add standalone shared path tests for nearest-reachable target, search
+  limit behavior, deterministic tie breaking, and empty/no-path cases.
+
+Landed:
+
+- Added `mclone-path`, a small shared block-grid pathfinding crate with bounded
+  A* search, generic neighbor expansion, target acceptance callback,
+  nearest-reachable fallback, deterministic open-set tie breaking, path
+  reconstruction, and diagnostics.
+- Rewired `mclone-server` mob navigation so
+  `entity/mob/navigation/path_finder.rs` computes the Java-shaped mob start and
+  walk neighbors through `WalkNodeEvaluator`, then delegates the A* search to
+  `mclone-path`.
+- Kept `WalkNodeEvaluator`, `BlockPathType`, mob malus policy, width/height,
+  follow-range shaping, and `GroundPathNavigation` server-local.
+- Added focused `mclone-path` tests for direct paths, obstacle routing,
+  exhausted search budgets, empty frontier/no-path fallback, deterministic tie
+  breaking, and target acceptance callbacks. Existing server mob navigation
+  tests now exercise the shared path core through the server adapter.
+
+## Slice 2 - Player Teleport Target Query And Worker
+
+- [ ] Add a shared target query that consumes:
+  - current body/player pose,
+  - controller/headset world pose or intended aim/stick direction,
+  - loaded client world block/collision facts,
+  - max distance and step-up/drop limits.
+- [ ] Return a target feet pose, target yaw, validity reason, and optional
+  preview path.
+- [ ] Require a reachable path result for both Blink and Shift; no direct-only
+  Blink exception.
+- [ ] Allow valid one-block-up landing when there is foot support and headroom.
+- [ ] Reject unloaded chunks, solid body overlap, insufficient headroom, and
+  targets that would place the head/body into obstruction.
+- [ ] Keep vertical room-scale HMD motion out of target validity. Teleport can
+  intentionally change body height; leaning forward into a block cannot.
+- [ ] Add a native latest-only worker mailbox for desktop OpenXR and Android XR
+  so path search stays off the XR render/frame thread.
+- [ ] Keep web/WASM worker support documented as intentionally absent while web
+  has no XR target.
+
+## Slice 3 - Preview Overlay
+
+- [ ] Render a world-space target feet marker.
+- [ ] Render a facing arrow or short body-forward line.
+- [ ] Render the candidate path/arc/line, with invalid previews visibly
+  different from valid previews.
+- [ ] Route through existing multiview-aware world GUI/overlay paths where
+  practical.
+- [ ] Add headless or synthetic render coverage for the overlay renderer path.
+
+## Slice 4 - Blink Execution
+
+- [ ] Add Blink locomotion mode.
+- [ ] Commit the path-validated target by moving the authoritative body/player
+  pose, not only the XR stage transform.
+- [ ] Use `ScreenEffectsRenderer` or the existing comfort fade primitive for a
+  brief same-alpha stereo fade.
+- [ ] Rebuild tracking origin after the relocation so the current headset pose,
+  hands, rays, collision box, and debug overlays agree.
+- [ ] Add tests for relocation, server pose sync command generation, and
+  rejected target no-op behavior.
+
+## Slice 5 - Shift/Warp Execution
+
+- [ ] Add Shift/Warp locomotion mode using the same target query, path, and
+  preview as Blink.
+- [ ] Move the body quickly along the validated path with a short comfort
+  transition.
+- [ ] Keep collision authoritative during the transition. If the path becomes
+  invalid due to world changes, cancel or finish safely rather than clipping.
+- [ ] Decide whether Shift uses full fade, edge vignette, or the existing head
+  comfort darkening; validate in headset.
+
+## Slice 6 - Options, Diagnostics, And Quest Validation
+
+- [ ] Add shared UI/options for Continuous, Blink, Shift, and Hand Push.
+- [ ] Add debug status for target validity reason and selected locomotion mode.
+- [ ] Validate on Quest standalone:
+  - preview appears in both eyes,
+  - body/collision box lands at the preview,
+  - headset pose stays coherent after relocation,
+  - one-block-up targets feel intentional,
+  - invalid targets are obvious,
+  - Blink is comfortable under imperfect frame pacing,
+  - Shift is not more nauseating than continuous movement.
+
+## Open Design Questions
+
+- Should Blink/Shift target selection be controller-aim based, left-stick based,
+  or support both?
+- Should the landing yaw come from stick direction, current headset yaw, or a
+  separate twist/turn input?
+- What maximum distance is comfortable in Minecraft-scale terrain?
+- Should one-block-up teleport be always allowed, or only when the preview path
+  visibly shows the climb?
+- Should the execution use an instantaneous server correction-like pose set, or
+  a short sequence of normal movement commands? The first implementation should
+  prefer correctness and pose coherence over multiplayer anti-cheat concerns.
+
+## Validation Plan
+
+Passed on July 1, 2026:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-path
+cargo test --manifest-path native/Cargo.toml -p mclone-server
+cargo test --manifest-path native/Cargo.toml -p mclone-path -p mclone-client -p mclone-server -p mclone-xr-scene
+```
+
+Required automated gates once implementation starts:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-path -p mclone-client -p mclone-server -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-web-client
+git diff --check
+```
+
+If the shared path core is a module rather than a new crate, replace
+`-p mclone-path` with the owning crate's focused test command.
+
+## Out Of Scope
+
+- Multiplayer anti-cheat or hostile-server validation for teleport.
+- Full navmesh generation.
+- Entity AI behavior changes beyond preserving existing mob path behavior
+  during the path-core extraction.
+- Replacing continuous movement or hand-push. Blink/Shift are comfort options,
+  not a removal of the existing modes.
