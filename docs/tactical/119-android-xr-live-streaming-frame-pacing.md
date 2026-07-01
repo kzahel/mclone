@@ -3,7 +3,9 @@
 Status: active checklist. Companion to
 [`030`](030-native-streaming-publish-and-render-budget.md) for the shared/native
 streaming architecture and [`117`](117-android-xr-rd10-gpu-floor-and-frame-overlap.md)
-for RD10 GPU-floor and CPU/GPU overlap work.
+for RD10 GPU-floor and CPU/GPU overlap work. The shared vanilla-baseline render
+compile backpressure implementation now lives in
+[`120`](120-vanilla-render-compile-backpressure.md).
 
 ## Purpose
 

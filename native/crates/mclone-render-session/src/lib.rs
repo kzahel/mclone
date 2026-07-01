@@ -2466,14 +2466,17 @@ impl EngineRenderSession {
     /// 2. seed dirty work when the cache is empty (first frame after a view loads),
     /// 3. plan a `chunk_budget`-bounded ready increment using the caller's ordering,
     ///    readiness, and removal-mode policy, then
-    /// 4. submit that increment through `compiler` — but only when no job is already in
-    ///    flight, so exactly one compile runs at a time.
+    /// 4. submit that increment through `compiler` — but only when the compiler reports
+    ///    free capacity, matching Java's buffer-pack backpressure shape.
     ///
-    /// Desktop drives it at budget 1 over an OS-thread `mpsc` worker; web drives it at
-    /// budget 1 over the resident `SharedArrayBuffer` ring. With budget 1 each job is
-    /// tiny, so the current cache stays visible and movement fills progressively instead
-    /// of stalling on a whole-view mega-job. The transport (move vs. arena) lives behind
-    /// the [`RenderSectionCompiler`] trait; this loop is identical on both platforms.
+    /// Desktop currently exposes one compile slot over an OS-thread `mpsc` worker; web
+    /// exposes one slot over the resident `SharedArrayBuffer` ring. The capacity check is
+    /// deliberately part of the shared [`RenderSectionCompiler`] trait so native workers can
+    /// grow toward a Java-style bounded buffer-pack pool without making callers guess at
+    /// pending-job policy. With budget 1 each submitted job is tiny, so the current cache
+    /// stays visible and movement fills progressively instead of stalling on a whole-view
+    /// mega-job. The transport (move vs. arena) lives behind the compiler trait; this loop is
+    /// identical on both platforms.
     pub fn sync_render_sections_with_budget<C, OrderChunks, OrderSections, Ready, Snapshots>(
         &mut self,
         compiler: &mut C,
@@ -2517,7 +2520,7 @@ impl EngineRenderSession {
         );
         report.merge(sync_update.cache_update);
 
-        if chunk_budget == 0 || compiler.pending_job_count() > 0 {
+        if chunk_budget == 0 || !compiler.has_pending_job_capacity() {
             report.pending_compile_jobs = compiler.pending_job_count();
             return Ok(report);
         }
@@ -3340,6 +3343,19 @@ pub trait RenderSectionCompiler {
     fn try_recv_completed(&mut self) -> Result<Vec<RenderSectionCompileResult>>;
 
     fn pending_job_count(&self) -> usize;
+
+    fn max_pending_job_count(&self) -> usize {
+        1
+    }
+
+    fn available_pending_job_slots(&self) -> usize {
+        self.max_pending_job_count()
+            .saturating_sub(self.pending_job_count())
+    }
+
+    fn has_pending_job_capacity(&self) -> bool {
+        self.available_pending_job_slots() > 0
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -3692,6 +3708,43 @@ mod tests {
             height,
             &block_state_ids,
         )
+    }
+
+    #[derive(Debug)]
+    struct CapacityTestCompiler {
+        pending_jobs: usize,
+        max_pending_jobs: usize,
+        submitted_requests: Vec<RenderSectionCompileRequest>,
+    }
+
+    impl CapacityTestCompiler {
+        fn new(pending_jobs: usize, max_pending_jobs: usize) -> Self {
+            Self {
+                pending_jobs,
+                max_pending_jobs,
+                submitted_requests: Vec::new(),
+            }
+        }
+    }
+
+    impl RenderSectionCompiler for CapacityTestCompiler {
+        fn submit(&mut self, request: RenderSectionCompileRequest) -> Result<()> {
+            self.pending_jobs += 1;
+            self.submitted_requests.push(request);
+            Ok(())
+        }
+
+        fn try_recv_completed(&mut self) -> Result<Vec<RenderSectionCompileResult>> {
+            Ok(Vec::new())
+        }
+
+        fn pending_job_count(&self) -> usize {
+            self.pending_jobs
+        }
+
+        fn max_pending_job_count(&self) -> usize {
+            self.max_pending_jobs
+        }
     }
 
     fn test_snapshot_with_block(
@@ -4515,6 +4568,84 @@ mod tests {
             BTreeSet::from([key])
         );
         assert!(engine.render_session().dirty().dirty_chunks.is_empty());
+    }
+
+    #[test]
+    fn engine_render_session_submits_when_compiler_capacity_is_available() {
+        let chunk = ChunkPos::new(2, -1);
+        let key = RenderSectionKey::new(2, 0, -1);
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(empty_test_snapshot(
+            chunk,
+            0,
+            SECTION_HEIGHT,
+        )));
+        let mut engine = EngineRenderSession::new(client);
+        let mut compiler = CapacityTestCompiler::new(1, 2);
+
+        let update = engine
+            .sync_render_sections_with_budget(
+                &mut compiler,
+                1,
+                |dirty_work| dirty_work.loaded_dirty_chunks.iter().copied().collect(),
+                |dirty_work| {
+                    dirty_work
+                        .loaded_dirty_sections_by_chunk
+                        .keys()
+                        .copied()
+                        .collect()
+                },
+                |_client, _key| RenderSectionNeighborReadiness::ReadyWithNeighbors,
+                RenderSectionRemovalMode::Defer,
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
+            .expect("sync should submit when compiler has capacity");
+
+        assert_eq!(update.submitted_compile_section_count, 1);
+        assert_eq!(update.pending_compile_jobs, 2);
+        assert_eq!(compiler.pending_job_count(), 2);
+        assert_eq!(compiler.submitted_requests.len(), 1);
+        assert_eq!(
+            compiler.submitted_requests[0].target_sections,
+            BTreeSet::from([key])
+        );
+    }
+
+    #[test]
+    fn engine_render_session_waits_when_compiler_capacity_is_full() {
+        let chunk = ChunkPos::new(2, -1);
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(empty_test_snapshot(
+            chunk,
+            0,
+            SECTION_HEIGHT,
+        )));
+        let mut engine = EngineRenderSession::new(client);
+        let mut compiler = CapacityTestCompiler::new(1, 1);
+
+        let update = engine
+            .sync_render_sections_with_budget(
+                &mut compiler,
+                1,
+                |dirty_work| dirty_work.loaded_dirty_chunks.iter().copied().collect(),
+                |dirty_work| {
+                    dirty_work
+                        .loaded_dirty_sections_by_chunk
+                        .keys()
+                        .copied()
+                        .collect()
+                },
+                |_client, _key| RenderSectionNeighborReadiness::ReadyWithNeighbors,
+                RenderSectionRemovalMode::Defer,
+                |_, _| panic!("full compiler capacity must not collect submit snapshots"),
+            )
+            .expect("sync should wait when compiler capacity is full");
+
+        assert_eq!(update.submitted_compile_section_count, 0);
+        assert_eq!(update.pending_compile_jobs, 1);
+        assert_eq!(compiler.pending_job_count(), 1);
+        assert!(compiler.submitted_requests.is_empty());
+        assert!(!engine.render_session().dirty_is_empty());
     }
 
     #[test]
