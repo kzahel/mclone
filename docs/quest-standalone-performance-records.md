@@ -94,6 +94,60 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-01 - Standalone Quest 3 Live RD7 Stable-Lane Baseline
+
+Benchmarked code commit: `c87ae7a` (`Add Android XR RD7 perf lanes`). Captured
+on Quest 3 with fixed startup pose `0,120,-96,180`, `--perf-metrics`, render
+scale `1.0`, foveation off, render distance `7`, flight speed `4.3`, and the
+same staged asset pack.
+
+Commands:
+
+```bash
+pnpm native:android-xr:perf:flight:rd7:metrics
+pnpm native:android-xr:perf:flight:rd7:frame-overlap
+pnpm native:android-xr:perf:stationary:rd7:metrics
+pnpm native:android-xr:perf:stationary:rd7:frame-overlap
+```
+
+Summary:
+
+| Lane | Path | FPS | App work avg | App work p50 | App work p95 | App work p99 | Max | Headroom avg | Over period | Drawn sections | Drawn indices |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| flight | default per-eye | `69.61` | `8.360ms` | `6.913ms` | `18.850ms` | `29.565ms` | `64.889ms` | `5.529ms` | `9.8%` | 81 | 556,938 |
+| flight | frame overlap | `69.85` | `6.685ms` | `5.553ms` | `14.122ms` | `28.115ms` | `48.444ms` | `7.204ms` | `5.3%` | 81 | 556,938 |
+| stationary settled | default per-eye | `60.94` | `16.319ms` | `16.057ms` | `18.289ms` | `25.364ms` | `35.139ms` | `-2.430ms` | `99.1%` | 172 | 1,369,332 |
+| stationary settled | frame overlap | `71.01` | `13.494ms` | `13.370ms` | `14.600ms` | `18.275ms` | `26.322ms` | `0.394ms` | `21.1%` | 180 | 1,387,980 |
+
+Key max buckets:
+
+| Lane | Runtime upload | Runtime sync | Runtime prefetch sync | Shared records | Stereo poll wait |
+|---|---:|---:|---:|---:|---:|
+| flight default | `45.239ms` | `44.386ms` | `0.000ms` | `24.230ms` | `23.310ms` |
+| flight frame overlap | `0.000ms` | `0.000ms` | `42.745ms` | `10.769ms` | `22.796ms` |
+| stationary default | `18.581ms` | `14.730ms` | `0.000ms` | `2.074ms` | `10.453ms` |
+| stationary frame overlap | `0.000ms` | `0.000ms` | `16.763ms` | `2.528ms` | `7.014ms` |
+
+Interpretation:
+
+- RD7 is better than RD10, but it is **not yet a clean product lane at scale
+  1.0** from this view. Stationary default is steady-render bound at only
+  `60.94 FPS`, and even stationary frame-overlap still has `21.1%`
+  app-over-period frames.
+- Frame overlap is still valuable. It improves flight average app work by
+  `1.675ms`, flight p95 by `4.728ms`, stationary average by `2.825ms`, and
+  stationary p95 by `3.689ms`. It also moves normal runtime upload/sync work out
+  of the measured render bucket.
+- Flight remains burst-sensitive at RD7: default flight hit
+  `max_runtime_sync_ms=44.386` and `max_terrain_shared_records_ms=24.230`;
+  frame-overlap moved the runtime spike into prefetch but still had
+  `app_work_p99=28.115ms`.
+- This keeps the next implementation target unchanged: instrument and reduce
+  prepared-record / ready-section churn first, then revisit upload/acceptance
+  budgeting. Separately, product stability likely needs frame overlap plus a
+  quality lever such as moderate render scale, dynamic render distance, or a
+  lower stable lane.
+
 ### 2026-07-01 - Standalone Quest 3 Live RD10 Opt-In Frame Overlap
 
 Benchmarked code: current worktree for the live validation follow-up to

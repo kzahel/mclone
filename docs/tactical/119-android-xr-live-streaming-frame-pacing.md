@@ -143,6 +143,25 @@ Current gaps versus the reference or versus what mobile XR needs:
 
 ## Current Evidence
 
+### RD7 Stable-Lane Baseline
+
+The first committed RD7 live baseline (`c87ae7a`) shows RD7 is better than RD10
+but still not a clean 72 Hz product lane at scale `1.0` from the current
+`0,120,-96,180` view:
+
+| Lane | app work avg / p95 / p99 / max | FPS | over period | Notes |
+|---|---:|---:|---:|---|
+| Flight default | `8.360 / 18.850 / 29.565 / 64.889ms` | `69.61` | `9.8%` | `max_runtime_sync_ms=44.386`, `max_terrain_shared_records_ms=24.230` |
+| Flight overlap | `6.685 / 14.122 / 28.115 / 48.444ms` | `69.85` | `5.3%` | runtime spike moved to `max_runtime_prefetch_sync_ms=42.745` |
+| Stationary default | `16.319 / 18.289 / 25.364 / 35.139ms` | `60.94` | `99.1%` | steady view draws `172` sections / `1.369M` indices |
+| Stationary overlap | `13.494 / 14.600 / 18.275 / 26.322ms` | `71.01` | `21.1%` | much better, but still borderline |
+
+Interpretation: RD7 should stay as the comfort/product lane, but passing RD7 now
+requires more than just lowering distance from RD10. Frame overlap helps
+materially, while live flight still exposes the same runtime-sync /
+prepared-record burst class and stationary RD7 still shows a near-budget steady
+render cost.
+
 ### Frame Overlap Live RD10
 
 From the live RD10 A/B recorded in
