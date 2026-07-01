@@ -30,7 +30,7 @@ use crate::cli::{SceneOptions, StartupWaitPolicy, WindowStartIntent};
 use crate::flat_client_driver::{
     FlatClientCameraView, FlatClientDebugFrame, FlatClientDriver, FlatClientHostAction,
     FlatClientUiActionContext, FlatClientUiFrame, FlatClientUiRenderOptions,
-    FlatClientWorldActionStatus, game_movement_mode, game_ui_render_state,
+    FlatClientWorldActionStatus, game_movement_mode,
 };
 use crate::frame_pacing::{
     FramePacing, FramePacingMode, FrameTimingStats, RedrawSchedule, elapsed_ms,
@@ -474,28 +474,13 @@ impl ChunkApp {
     }
 
     fn current_ui_render_state(&self) -> GameUiRenderState {
-        let mut state = game_ui_render_state(FlatClientUiRenderOptions {
-            render_distance: i32::try_from(self.current_render_distance())
-                .unwrap_or(MAX_RENDER_DISTANCE),
-            render_options: self.driver.render_options,
-            far_lod_enabled: self.driver.scene.far_lod.enabled,
-            far_lod_range_chunks: self.driver.scene.far_lod.extra_radius_chunks as i32,
-            frame_pacing: self.frame_pacing.ui_state(),
-            movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
-            fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,
-            movement_speed_multiplier: self.driver.camera.movement_speed_multiplier() as f32,
-            player_collision_box_visible: self.driver.player_collision_box_visible,
-            first_person_player_visible: self.driver.camera.first_person_player_visible(),
-            crosshair_visible: self.driver.crosshair_visible,
-            player_model: self.driver.player_model,
-            server_cadence: self.driver.server_simulation_cadence(),
-        });
-        state.touch_controls_mode = Some(self.input_preferences.touch_controls);
-        state.block_palette = debug_block_palette_overlay(
-            &self.assets.mesh_assets.catalog,
-            self.driver.interaction.selected_hotbar_slot(),
-        );
-        state
+        self.driver.current_ui_render_state(
+            self.frame_pacing.ui_state(),
+            debug_block_palette_overlay(
+                &self.assets.mesh_assets.catalog,
+                self.driver.interaction.selected_hotbar_slot(),
+            ),
+        )
     }
 
     fn current_flat_hud(&self, status: StatusOverlay, ui_active: bool) -> FlatHud {
