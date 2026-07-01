@@ -44,11 +44,13 @@ Initial probes corrected the measurement path and split the cheap GPU levers:
   HIGH foveation (`VrApi Fov=3`), but corrected headroom runs showed no win:
   scale-1.0 app work was `13.198ms` off vs `13.273ms` high, within noise and
   slightly worse.
-- **One terrain pipeline with an unconditional `discard`**
-  (`chunk_textured.wgsl:130`) is used for *all* opaque terrain. The mesh splits
-  opaque/translucent but not solid/cutout, so solid stone (the bulk of RD10)
-  runs a shader with `discard`, which disables early-Z / hidden-surface removal
-  on the Adreno tile GPU.
+- **Solid render layer landed, but it is not an RD10 performance lever.** Commit
+  `0f5ecaa` split terrain into solid/cutout/translucent mesh ranges and renders
+  solid terrain through a no-`discard` shader by default. The headset run on
+  commit `0f5ecaa` measured `13.720ms` app-work avg / `14.653ms` p95, worse than
+  the `~13.2-13.3ms` / `~14.1ms` baseline target. Keep the split for
+  vanilla-shaped render-layer correctness, but do not count it as a Quest RD10
+  perf win unless a later within-run A/B proves otherwise.
 
 ## Baseline to beat
 
@@ -104,7 +106,7 @@ RD5 already hold solid 72 Hz; RD10 is the stress lane.
 | 1 | **L** — fill-vs-geometry probe | Confirm whether the `~10.7ms` is fragment-fill-bound or vertex/draw-bound | ~hrs | none |
 | 2 | **M** — render-scale | Render eyes below native resolution; landed as a probe and showed real headroom | ~hrs | low |
 | 3 | **N** — fixed-foveated rendering | Applied successfully, but measured no app-work win; keep only as a possible dynamic/quality lever | ~hrs | low |
-| 4 | **O** — solid render layer | Drop `discard` for opaque-solid terrain; restore early-Z; audit fragment cost | ~day | low/parity |
+| 4 | **O** — solid render layer | Landed for parity; measured no RD10 app-work win at scale 1.0 | done | keep/default |
 | 5 | **K (E4)** — CPU/GPU frame overlap | Overlap N+1 pose-independent prep with N's GPU poll (carried from 106) | ~days | latency/comfort |
 | 6 | **J** — draw batching / indirect arena | Shared vertex/index arena + `multi_draw_indexed_indirect` (carried from 106) | ~days | medium |
 | 7 | **P** — greedy meshing | Merge coplanar same-light/same-texture faces to cut index count | ~days | parity |
@@ -171,6 +173,15 @@ future property in 083) for level control.
 
 ## Slice O — Solid render layer (drop `discard`) + fragment-cost audit
 
+**Status.** Landed in `0f5ecaa`; measured on Quest 3 and recorded in
+[`../quest-standalone-performance-records.md`](../quest-standalone-performance-records.md).
+This should stay as the default render path for vanilla-shaped render-layer
+correctness, but it should be treated as **not a measured RD10 performance win**:
+`native:android-xr:perf:frozen:rd10:metrics` reported `13.720ms` app-work avg,
+`14.653ms` p95, and `37.8%` app-over-period at RD10. Drawn work stayed at the
+masked per-eye baseline (`179` sections / `1.356M` indices), so the change only
+altered shader/pipeline selection.
+
 **Idea.** Split opaque terrain into vanilla-shaped `solid` (no alpha test) and
 `cutout`/`cutout_mipped` (alpha test/`discard`) layers, and give `solid` a
 pipeline **without `discard`** so the bulk of terrain regains early-Z /
@@ -181,16 +192,15 @@ that could be precomputed into the atlas or approximated.
 
 **Tips.** `reference/minecraft-1.17.1` `RenderType` + `ItemBlockRenderTypes` is
 the authority: most blocks = `solid`, leaves = `cutout_mipped`, glass = `cutout`,
-water/ice = `translucent`. The mesh builder already splits opaque/translucent
-(`mclone-mesh/src/builder.rs`, `data.rs` `translucent_index_range`); add the
-solid/cutout split *within* opaque and a second pipeline. Per-block layer
-assignment lives next to the existing model/`solid_render` facts.
+water/ice = `translucent`. The mesh now carries solid/cutout/translucent ranges,
+and per-block layer assignment lives next to the existing model/`solid_render`
+facts.
 
 **Watch out.** Only route fully-opaque textures through the no-`discard` solid
 pipeline (alpha is ignored there). `cutout_mipped` (leaves) needs mipmaps on vs
 `cutout` (no mip) — different sampler/UV-shrink behavior; match vanilla. This is
-a render-layer parity change, so keep appearance identical to the current single
-pipeline.
+a render-layer parity path now, not a reason to keep spending RD10 optimization
+time here unless a future run exposes a visual or layer-classification bug.
 
 ## Slice K (E4) — CPU/GPU frame overlap (carried from 106)
 
