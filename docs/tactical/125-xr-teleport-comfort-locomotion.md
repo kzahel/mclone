@@ -45,10 +45,18 @@ remain mob-specific.
 
 ## Target Shape
 
-- XR comfort locomotion is a shared `mclone-xr-scene` feature used by desktop
-  OpenXR and Android XR.
+- Comfort teleport is a shared engine/client feature, with XR as the first
+  product-facing input and presentation surface. The path query, target
+  validation, and body relocation code must not be compiled only for XR.
+- Desktop flat and offscreen/headless may expose Blink as a debug/test
+  locomotion path so the shared evaluator, server pose sync, and render
+  invalidation can be validated without a headset.
+- `mclone-xr-scene` owns XR-specific controller mapping, stereo preview
+  presentation, comfort fade, and tracking-origin rebasing. It should consume
+  the shared teleport evaluator rather than own it.
 - Teleport moves the authoritative body/player pose through shared
-  engine/client contracts. It must not be app-local stage-origin glue.
+  engine/client contracts. It must not be app-local stage-origin glue or
+  XR-only camera math.
 - The current headset world position remains understandable across teleport:
   after relocation, the stage-to-world transform is rebuilt from the new body
   pose so render views, hands, rays, debug overlays, and server pose agree.
@@ -91,8 +99,9 @@ refactor should separate:
   path result, nearest-reachable target behavior, and deterministic tests.
 - **Mob navigation evaluator**: Java-shaped passive mob walkability,
   block-path types, malus, width/height rules, and follow-range behavior.
-- **XR teleport evaluator**: player-body/feet target validation, headroom,
-  step-up policy, unloaded-chunk rejection, and preview path facts.
+- **Player teleport evaluator**: player-body/feet target validation, headroom,
+  step-up policy, unloaded-chunk rejection, and preview path facts usable by XR,
+  desktop flat debug, and offscreen/headless tests.
 
 Implementation shape:
 
@@ -103,16 +112,19 @@ Implementation shape:
   target validation against the client world snapshot and collision facts.
 - Do not make `mclone-xr-scene` depend on server mob AI to compute a player
   teleport target.
+- Do not hide Blink/Shift target validation or body relocation behind an XR-only
+  feature flag. Platform-specific input, preview, and comfort presentation may
+  be gated; the evaluator and commit contract should stay shared.
 
 ## Runtime And Worker Topology
 
-Teleport preview must be responsive and must not run expensive path search on
-the XR render/frame thread. The first implementation should use a client-side
-latest-only worker mailbox:
+Teleport preview must be responsive and must not run expensive path search on a
+render/frame thread. The first implementation should use a client-side
+latest-only worker mailbox for interactive preview surfaces:
 
 ```text
-XR frame thread
-  read controllers/views
+XR or flat frame thread
+  read controllers/views or flat debug input
   submit or refresh the latest target/path request
   render the latest completed preview result
   commit only a still-valid completed result
@@ -136,8 +148,13 @@ This is an intentional platform topology difference for now:
 
 - Desktop OpenXR and Android XR use native OS worker threads or a native worker
   pool behind the shared `mclone-xr-scene` / `mclone-client` request path.
-- Web/WASM has no supported XR target today, so it should not grow a browser XR
-  teleport worker lane yet.
+- Desktop flat debug/offscreen tests should use the same shared evaluator and
+  may reuse the native mailbox when they need interactive preview. Deterministic
+  tests can call the evaluator directly with bounded fixtures.
+- Web/WASM has no supported XR target today, so it should not grow a browser
+  XR-specific teleport worker lane yet. A future flat web debug surface can add
+  a Web Worker or explicit synchronous smoke fallback behind the same shared
+  evaluator contract.
 - Keep `mclone-path` and the player teleport evaluator wasm-compatible where
   practical, so a future web/non-XR caller can add a Web Worker backend without
   changing the algorithm or target-validity contract.
@@ -179,7 +196,8 @@ Landed:
 
 - [ ] Add a shared target query that consumes:
   - current body/player pose,
-  - controller/headset world pose or intended aim/stick direction,
+  - controller/headset world pose, flat debug ray, or intended aim/stick
+    direction,
   - loaded client world block/collision facts,
   - max distance and step-up/drop limits.
 - [ ] Return a target feet pose, target yaw, validity reason, and optional
@@ -193,8 +211,10 @@ Landed:
   intentionally change body height; leaning forward into a block cannot.
 - [ ] Add a native latest-only worker mailbox for desktop OpenXR and Android XR
   so path search stays off the XR render/frame thread.
-- [ ] Keep web/WASM worker support documented as intentionally absent while web
-  has no XR target.
+- [ ] Add a flat/offscreen test entry point that exercises the same query and
+  target validation without requiring XR.
+- [ ] Keep web/WASM XR-worker support documented as intentionally absent while
+  web has no XR target, without making the shared evaluator non-wasm or XR-only.
 
 ## Slice 3 - Preview Overlay
 
