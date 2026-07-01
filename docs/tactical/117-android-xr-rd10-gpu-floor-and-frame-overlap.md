@@ -55,10 +55,12 @@ Initial probes corrected the measurement path and split the cheap GPU levers:
   added `--xr-frame-overlap` for the per-eye Android XR path. In a matched
   frozen RD10 A/B it moved app work from `12.685ms` avg / `13.554ms` p95 to
   `10.959ms` avg / `11.686ms` p95, with `0.0%` app-over-period and about
-  `2.93ms` average headroom. Frozen render has no live runtime/upload work, so
-  this proves the deferred-stereo-wait/pacing part first; live stationary/flight
-  validation and comfort/latency signoff are still needed before making it
-  default.
+  `2.93ms` average headroom. Live validation kept the flag useful but not
+  default-ready: stationary RD10 improved from `19.251ms` avg / `23.594ms` p95
+  / `51.72 FPS` to `15.206ms` avg / `16.932ms` p95 / `65.11 FPS`, while flight
+  improved app work from `8.081ms` to `6.619ms` avg but still submitted only
+  about `69 FPS`. Keep it opt-in pending comfort signoff and RD/scale policy
+  work.
 
 ## Baseline to beat
 
@@ -115,7 +117,7 @@ RD5 already hold solid 72 Hz; RD10 is the stress lane.
 | 2 | **M** — render-scale | Render eyes below native resolution; landed as a probe and showed real headroom | ~hrs | low |
 | 3 | **N** — fixed-foveated rendering | Applied successfully, but measured no app-work win; keep only as a possible dynamic/quality lever | ~hrs | low |
 | 4 | **O** — solid render layer | Landed for parity; measured no RD10 app-work win at scale 1.0 | done | keep/default |
-| 5 | **K (E4)** — CPU/GPU frame overlap | Opt-in per-eye path landed; frozen RD10 app work improved, live/comfort validation pending | done+validate | latency/comfort |
+| 5 | **K (E4)** — CPU/GPU frame overlap | Opt-in per-eye path landed; frozen and live RD10 app work improved, but not default-ready | done+keep opt-in | latency/comfort |
 | 6 | **J** — draw batching / indirect arena | Shared vertex/index arena + `multi_draw_indexed_indirect` (carried from 106) | ~days | medium |
 | 7 | **P** — greedy meshing | Merge coplanar same-light/same-texture faces to cut index count | ~days | parity |
 | 8 | **Q** — application spacewarp | Render at 36, compositor reprojects to 72 | ~days | quality |
@@ -226,7 +228,24 @@ shows a matched A/B on `1977a67`: default per-eye `12.685ms` avg /
 `11.686ms` p95 / `0.0%` app-over-period. A first overlap run was consistent at
 `10.967ms` avg / `11.734ms` p95. This is enough to keep the flag and continue,
 but frozen render disables runtime polling/upload, so `MCLONE_ANDROID_XR_PERF_OVERLAP`
-was `0.000ms`; it has not yet proven the live N+1 runtime-prefetch half.
+was `0.000ms`; that run only proved the deferred-stereo-wait/pacing half.
+
+Live RD10 result:
+the follow-up record shows the live half is active and useful, but not enough to
+make RD10 the default. In stationary-settled RD10, frame overlap moved app work
+from `19.251ms` avg / `23.594ms` p95 / `100.0%` app-over-period at `51.72 FPS`
+to `15.206ms` avg / `16.932ms` p95 / `87.3%` app-over-period at `65.11 FPS`.
+`MCLONE_ANDROID_XR_PERF_OVERLAP` reported up to `22.927ms` runtime-prefetch work,
+and the normal `max_terrain_runtime_upload_ms` bucket fell from `20.496ms` to
+`0.000ms`.
+
+In live flight RD10, app work improved from `8.081ms` avg / `15.623ms` p95 /
+`6.6%` app-over-period to `6.619ms` avg / `15.156ms` p95 / `6.0%`
+app-over-period, with max app work dropping `73.828ms -> 56.720ms` and dropped
+frames halving (`92 -> 46`). Submitted FPS stayed effectively flat
+(`69.31 -> 69.26`), and sampled motion-to-photon worsened (`24.521ms ->
+25.815ms`), so this is still an experimental/perf flag rather than a default
+runtime policy.
 
 **Idea.** Submit frame N's GPU work, then **during the `~10.7ms` poll** do frame
 N+1's *pose-independent* work (runtime poll, completed-section upload
@@ -241,12 +260,14 @@ Overlap only cheap, pose-independent work. Cull/encode are pose-dependent (need
 the final head pose), so they stay *after* the wait — but they are now small
 (`~4ms`).
 
-**Watch out.** Keep it default off until live stationary/flight RD10 and a
-headset comfort check are done. Motion-to-photon in the frozen A/B improved on
-the sampled Meta counter (`35.487ms` default vs `23.011ms` confirmation), but the
-Meta counter is noisy enough that this should be treated as a comfort-screening
-prompt, not proof. The `+1.9ms` GPU contention from concurrent CPU on the
-unified-memory SoC (E2) is real but bounded; validate it in live lanes. **E5**
+**Watch out.** Keep it default off until a headset comfort check and the
+ship-distance policy are done. Motion-to-photon in the frozen A/B improved on
+the sampled Meta counter (`35.487ms` default vs `23.011ms` confirmation), and
+stationary live also improved (`26.954ms -> 25.482ms`), but flight worsened
+(`24.521ms -> 25.815ms`). The Meta counter is noisy enough that this should be
+treated as a comfort-screening prompt, not proof. The `+1.9ms` GPU contention
+from concurrent CPU on the unified-memory SoC (E2) is real but bounded; live
+flight still needs a lower steady load from RD/scale or streaming policy. **E5**
 (GPU-side semaphore / no CPU block) is the cleaner architecture but needs raw
 Vulkan/OpenXR sync that wgpu does not expose ergonomically — defer it unless
 E4's latency proves unacceptable.
