@@ -3,12 +3,20 @@
 use std::collections::{BTreeMap, VecDeque};
 
 mod actor;
-mod block_clip;
-pub mod block_facts;
-mod block_shapes;
 mod interaction;
 mod inventory;
 mod player;
+
+pub mod block_facts {
+    pub use mclone_blocks::{
+        BlockFluidKind, LAVA_BLOCK_STATE_ID, WATER_BLOCK_STATE_ID, block_fluid_height,
+        block_fluid_kind, is_fluid, terrain_id,
+    };
+}
+
+mod block_shapes {
+    pub(crate) use mclone_blocks::{block_outline_aabbs, clip_block_outline};
+}
 
 use mclone_core::{
     BlockPos, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT, local_block_coord,

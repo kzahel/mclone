@@ -14,6 +14,7 @@ pub const ARG_REMOTE_ADDR: &str = "--remote-addr";
 pub const ARG_DAY_TIME: &str = "--day-time";
 pub const ARG_FREEZE_TIME: &str = "--freeze-time";
 pub const ARG_MOVEMENT_SPEED_MULTIPLIER: &str = "--movement-speed-multiplier";
+pub const ARG_DEBUG_PASSIVE_SHOWCASE: &str = "--debug-passive-showcase";
 pub const ARG_LIGHTING: &str = "--lighting";
 pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
 pub const ARG_FULLBRIGHT: &str = "--fullbright";
@@ -27,6 +28,7 @@ pub const QUERY_REMOTE_WS_URL: &str = "remoteWsUrl";
 pub const QUERY_DAY_TIME: &str = "dayTime";
 pub const QUERY_FREEZE_TIME: &str = "freezeTime";
 pub const QUERY_MOVEMENT_SPEED_MULTIPLIER: &str = "movementSpeedMultiplier";
+pub const QUERY_DEBUG_PASSIVE_SHOWCASE: &str = "debugPassiveShowcase";
 pub const QUERY_LIGHTING: &str = "lighting";
 pub const QUERY_SECTION_OCCLUSION: &str = "sectionOcclusion";
 pub const QUERY_FULLBRIGHT: &str = "fullbright";
@@ -41,6 +43,7 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_DAY_TIME,
     QUERY_FREEZE_TIME,
     QUERY_MOVEMENT_SPEED_MULTIPLIER,
+    QUERY_DEBUG_PASSIVE_SHOWCASE,
     QUERY_LIGHTING,
     QUERY_SECTION_OCCLUSION,
     QUERY_FULLBRIGHT,
@@ -74,6 +77,7 @@ pub struct StartupSceneOptions {
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
     pub movement_speed_multiplier: f32,
+    pub debug_passive_showcase: bool,
     pub lighting_enabled: bool,
 }
 
@@ -88,6 +92,7 @@ impl Default for StartupSceneOptions {
             day_time_override: None,
             freeze_time: false,
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
+            debug_passive_showcase: true,
             lighting_enabled: true,
         }
     }
@@ -153,6 +158,10 @@ impl StartupArgState {
                     args.next(),
                 )?;
             }
+            ARG_DEBUG_PASSIVE_SHOWCASE => {
+                self.scene.debug_passive_showcase =
+                    parse_bool_arg(ARG_DEBUG_PASSIVE_SHOWCASE, args.next())?;
+            }
             ARG_LIGHTING => {
                 self.scene.lighting_enabled = parse_bool_arg(ARG_LIGHTING, args.next())?;
             }
@@ -208,6 +217,10 @@ impl StartupArgState {
             QUERY_MOVEMENT_SPEED_MULTIPLIER => {
                 self.scene.movement_speed_multiplier =
                     parse_movement_speed_multiplier_arg(QUERY_MOVEMENT_SPEED_MULTIPLIER, value)?;
+            }
+            QUERY_DEBUG_PASSIVE_SHOWCASE => {
+                self.scene.debug_passive_showcase =
+                    parse_bool_arg(QUERY_DEBUG_PASSIVE_SHOWCASE, value)?;
             }
             QUERY_LIGHTING => {
                 self.scene.lighting_enabled = parse_bool_arg(QUERY_LIGHTING, value)?;
@@ -387,6 +400,7 @@ mod tests {
                 day_time_override: None,
                 freeze_time: false,
                 movement_speed_multiplier: 1.0,
+                debug_passive_showcase: true,
                 lighting_enabled: true,
             }
         );
@@ -412,6 +426,8 @@ mod tests {
             ARG_FREEZE_TIME,
             ARG_MOVEMENT_SPEED_MULTIPLIER,
             "2.5",
+            ARG_DEBUG_PASSIVE_SHOWCASE,
+            "false",
             ARG_REMOTE_ADDR,
             "127.0.0.1:25565",
         ]);
@@ -426,6 +442,7 @@ mod tests {
                 day_time_override: Some(6000),
                 freeze_time: true,
                 movement_speed_multiplier: 2.5,
+                debug_passive_showcase: false,
                 lighting_enabled: true,
             }
         );
@@ -470,6 +487,7 @@ mod tests {
             (QUERY_DAY_TIME, "6000"),
             (QUERY_FREEZE_TIME, ""),
             (QUERY_MOVEMENT_SPEED_MULTIPLIER, "0.5"),
+            (QUERY_DEBUG_PASSIVE_SHOWCASE, "false"),
             (QUERY_LIGHTING, "false"),
             (QUERY_SECTION_OCCLUSION, "false"),
             (QUERY_FULLBRIGHT, "true"),
@@ -499,6 +517,7 @@ mod tests {
                 day_time_override: Some(6000),
                 freeze_time: true,
                 movement_speed_multiplier: 0.5,
+                debug_passive_showcase: false,
                 lighting_enabled: false,
             }
         );

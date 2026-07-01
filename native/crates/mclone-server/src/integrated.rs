@@ -66,6 +66,7 @@ pub struct IntegratedServer {
     simulation_tick: u64,
     day_time: u64,
     day_time_frozen: bool,
+    debug_passive_showcase_enabled: bool,
     initial_spawn_center: Option<ChunkPos>,
     player: ServerPlayerState,
     inventory: ServerInventory,
@@ -123,6 +124,7 @@ impl IntegratedServer {
             simulation_tick: 0,
             day_time: INITIAL_DAY_TIME,
             day_time_frozen: false,
+            debug_passive_showcase_enabled: true,
             initial_spawn_center: None,
             player: ServerPlayerState::default(),
             inventory: ServerInventory::default(),
@@ -161,6 +163,10 @@ impl IntegratedServer {
     /// `day_time` unchanged (debug hook for inspecting a fixed time of day).
     pub fn set_day_time_frozen(&mut self, frozen: bool) {
         self.day_time_frozen = frozen;
+    }
+
+    pub fn set_debug_passive_showcase_enabled(&mut self, enabled: bool) {
+        self.debug_passive_showcase_enabled = enabled;
     }
 
     pub fn schedule_fluid_tick(&mut self, pos: WorldBlockPos, fluid: FluidKind, delay: i32) {
@@ -483,9 +489,16 @@ impl IntegratedServer {
         let entity_tick_start = simulation_timing_start();
         let entity_tick_chunks = run_noop_simulation_phase(&tick_report.entity_ticking_chunks);
         let mob_player_targets = self.mob_player_targets();
-        let entity_updates = self
-            .entities
-            .tick_stationary(&tick_report.entity_ticking_chunks, &mob_player_targets);
+        let scheduler = &self.scheduler;
+        let entity_updates = self.entities.tick_stationary(
+            &tick_report.entity_ticking_chunks,
+            &mob_player_targets,
+            |pos| {
+                scheduler
+                    .block_at_world(pos)
+                    .map(|block| BlockStateId(u32::from(block)))
+            },
+        );
         #[cfg(feature = "physics-rapier")]
         let mut entity_updates = entity_updates;
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
@@ -1196,7 +1209,10 @@ impl IntegratedServer {
         ) else {
             return Ok(None);
         };
-        self.entities.ensure_starter_passive_near_spawn(position);
+        self.entities.ensure_debug_passive_showcase_near_spawn(
+            position,
+            self.debug_passive_showcase_enabled,
+        );
         let simulation_tick = self.simulation_tick;
         Ok(Some(
             self.player_mut_for_target(target)?.initial_position_update(
@@ -2092,7 +2108,7 @@ mod tests {
     }
 
     #[test]
-    fn dedicated_player_receives_starter_passive_entity_when_visible() {
+    fn dedicated_player_receives_debug_passive_showcase_when_visible() {
         let mut server = IntegratedServer::new(12_345);
         server.set_lighting_enabled(false);
         let player = server.add_dedicated_player();
@@ -2111,7 +2127,20 @@ mod tests {
     }
 
     #[test]
-    fn starter_passive_entity_updates_age_on_simulation_tick() {
+    fn debug_passive_showcase_can_be_disabled() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        server.set_debug_passive_showcase_enabled(false);
+        let player = server.add_dedicated_player();
+
+        let updates =
+            set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 2);
+
+        assert!(first_entity_snapshot(&updates).is_none());
+    }
+
+    #[test]
+    fn debug_passive_showcase_entity_updates_age_on_simulation_tick() {
         let mut server = IntegratedServer::new(12_345);
         server.set_lighting_enabled(false);
         let player = server.add_dedicated_player();
@@ -2130,7 +2159,7 @@ mod tests {
     }
 
     #[test]
-    fn starter_passive_entity_is_removed_when_observer_view_stops_tracking_it() {
+    fn debug_passive_showcase_entity_is_removed_when_observer_view_stops_tracking_it() {
         let mut server = IntegratedServer::new(12_345);
         server.set_lighting_enabled(false);
         let player = server.add_dedicated_player();

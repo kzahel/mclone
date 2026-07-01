@@ -1,29 +1,29 @@
 use mclone_core::BlockStateId;
 
 /// Current generated terrain ids are identity-mapped to `BlockStateId`.
-/// Keep this table narrow until client gameplay consumes the full block-state
-/// registry instead of the terrain-MVP raw id lane.
-pub(crate) mod terrain_id {
-    pub(crate) const AIR: u32 = 0;
-    pub(crate) const WATER: u32 = 2;
-    pub(crate) const SNOW: u32 = 8;
-    pub(crate) const LAVA: u32 = 9;
-    pub(crate) const GRASS: u32 = 43;
-    pub(crate) const DANDELION: u32 = 44;
-    pub(crate) const POPPY: u32 = 45;
-    pub(crate) const FERN: u32 = 50;
-    pub(crate) const DEAD_BUSH: u32 = 51;
-    pub(crate) const LARGE_FERN_LOWER: u32 = 68;
-    pub(crate) const LARGE_FERN_UPPER: u32 = 69;
-    pub(crate) const GLOW_LICHEN: u32 = 70;
-    pub(crate) const CAVE_AIR: u32 = 71;
-    pub(crate) const WATER_LEVEL_1: u32 = 72;
-    pub(crate) const WATER_LEVEL_8: u32 = 79;
-    pub(crate) const LAVA_LEVEL_1: u32 = 80;
-    pub(crate) const LAVA_LEVEL_8: u32 = 87;
+/// Keep this table narrow until client/server gameplay consumes the full
+/// block-state registry instead of the terrain-MVP raw id lane.
+pub mod terrain_id {
+    pub const AIR: u32 = 0;
+    pub const WATER: u32 = 2;
+    pub const SNOW: u32 = 8;
+    pub const LAVA: u32 = 9;
+    pub const GRASS: u32 = 43;
+    pub const DANDELION: u32 = 44;
+    pub const POPPY: u32 = 45;
+    pub const FERN: u32 = 50;
+    pub const DEAD_BUSH: u32 = 51;
+    pub const LARGE_FERN_LOWER: u32 = 68;
+    pub const LARGE_FERN_UPPER: u32 = 69;
+    pub const GLOW_LICHEN: u32 = 70;
+    pub const CAVE_AIR: u32 = 71;
+    pub const WATER_LEVEL_1: u32 = 72;
+    pub const WATER_LEVEL_8: u32 = 79;
+    pub const LAVA_LEVEL_1: u32 = 80;
+    pub const LAVA_LEVEL_8: u32 = 87;
     #[cfg(test)]
-    pub(crate) const DRIPSTONE_BLOCK: u32 = 89;
-    pub(crate) const POINTED_DRIPSTONE: u32 = 90;
+    pub const DRIPSTONE_BLOCK: u32 = 89;
+    pub const POINTED_DRIPSTONE: u32 = 90;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

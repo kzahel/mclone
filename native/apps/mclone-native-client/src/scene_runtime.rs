@@ -104,6 +104,7 @@ fn local_single_view_options(scene: &SceneOptions) -> Result<LocalSingleViewScen
     .with_day_time(scene.day_time_override)
     .with_freeze_time(scene.freeze_time)
     .with_cadence(scene.simulation_cadence)
+    .with_debug_passive_showcase(scene.debug_passive_showcase)
     .with_lighting_enabled(scene.lighting_enabled))
 }
 

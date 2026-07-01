@@ -13,11 +13,11 @@ entity/mob/goal skeleton is in place.
 Workstream: native Rust shared server/runtime, desktop validation first.
 
 Status: Slices 0-4 landed. Slice 5 asset promotion is landed, with
-chicken-specific ticking still pending. The starter passive entity path is
-split under `native/crates/mclone-server/src/entity/`, and entity
-visibility/tick-list boundaries, passive cow/chicken metadata, a standalone
-goal selector, and a first cow passive AI/control path now exist before
-chicken-specific work.
+chicken-specific ticking still pending. Slice 5A landed the shared block
+collision owner, debug passive showcase toggle, and first server mob
+gravity/collision scaffold. The starter passive path is now an explicit
+debug passive showcase, enabled by default, while natural spawning remains
+future work.
 
 ## Non-Negotiable Constraints
 
@@ -65,6 +65,7 @@ Existing native modules to consume rather than duplicate:
 - `native/crates/mclone-server/src/scheduler.rs`
 - `native/crates/mclone-server/src/integrated.rs`
 - `native/crates/mclone-server/src/entity/mod.rs`
+- `native/crates/mclone-blocks/src/lib.rs`
 - `native/crates/mclone-protocol/src/lib.rs`
 - `native/crates/mclone-client/src/actor.rs`
 - `native/crates/mclone-render-session/src/lib.rs`
@@ -76,10 +77,12 @@ Existing native modules to consume rather than duplicate:
 The current native code has a narrow server-owned passive entity path:
 
 - `EntityKind` includes cow and chicken in protocol.
-- The server has a starter passive cow path.
+- The server has an explicit debug passive showcase path, enabled by default,
+  that spawns registered passive mobs near the first safe spawn.
 - Entity snapshots/updates/removes already flow to clients.
 - Entity ticks currently advance age only in `entity_ticking_chunks`.
-- Cow has a real render model path; chicken currently maps to a placeholder.
+- Cow has the vanilla-shaped model path; chicken now maps to the promoted
+  asset-lab figure.
 - Asset-lab animal examples exist under `tools/asset-lab/examples/`, but only
   player/upright-bear figure JSON is registered as runtime first-party figure
   assets today.
@@ -363,6 +366,53 @@ Still pending:
 - Protocol/client presentation review for any chicken-specific animation data
   that cannot be derived from ordinary entity movement.
 
+## Slice 5A - Shared Ground Collision And Debug Passive Showcase (Landed)
+
+Purpose: make the always-nearby animal behavior explicit and remove the first
+floating-mob shortcut without pretending full path navigation is done.
+
+Implementation sketch:
+
+- Introduce a shared block/collision owner below both client and server.
+- Route local player AABB movement and server mob AABB movement through the
+  same collision clipping primitive.
+- Replace the implicit single starter cow with a named debug passive showcase
+  setting that defaults on and can be disabled for spawn-parity testing.
+- Spawn every registered passive mob kind in the showcase path so future
+  animals have one metadata registration point.
+- Add server mob vertical delta movement and gravity/drag so mobs fall when
+  unsupported and derive `on_ground` from collision.
+
+Landed notes:
+
+- Added `native/crates/mclone-blocks/` for terrain-MVP block facts,
+  outline/collision shapes, and Java-shaped AABB movement clipping.
+- Replaced the client-local block facts/shapes implementation with
+  `mclone-blocks` re-exports and routed local player movement through the
+  shared collision primitive.
+- Added `--debug-passive-showcase true|false` and
+  `debugPassiveShowcase=true|false` to shared startup options, defaulting to
+  `true`.
+- Replaced the implicit starter cow with `PASSIVE_MOB_KINDS`-driven debug
+  passive showcase spawning. Cow and chicken now spawn near the initial safe
+  spawn when enabled.
+- Passed scheduler-backed block lookups into entity ticks and added server mob
+  gravity/collision movement using entity dimensions and shared AABB clipping.
+- Added tests for enabled/disabled showcase behavior and unsupported passive
+  mobs falling instead of preserving their original spawn Y.
+- Verified with `cargo test --manifest-path native/Cargo.toml -p mclone-server debug_passive_showcase`.
+- Verified full native workspace compile with
+  `cargo test --manifest-path native/Cargo.toml --workspace --no-run`.
+
+Still pending:
+
+- `GroundPathNavigation`, `WalkNodeEvaluator`, and real path waypoint ownership.
+- Collision-aware `LandRandomPos` target selection.
+- One-block step-up / `maxUpStep`, jump control, stuck detection, and
+  `LivingEntity.travel(...)` parity.
+- A visible desktop capture of cow/chicken walking over uneven terrain after
+  path navigation lands.
+
 ## Slice 6 - Spawning Skeleton, Not Full Natural Spawning
 
 Purpose: prepare the non-optional spawning boundary without pretending live
@@ -405,8 +455,8 @@ do not write screenshots into the repo.
 
 Suggested visible checks:
 
-- starter cow in an entity-ticking chunk
-- same cow no longer ticking after chunk demotion
+- debug passive showcase cow/chicken in an entity-ticking chunk
+- same showcase entities no longer ticking after chunk demotion
 - cow stroll/look update path visible in a short smoke
 - chicken figure review sheet or in-world screenshot after registration
 

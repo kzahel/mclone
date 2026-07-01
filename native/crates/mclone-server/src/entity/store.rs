@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use mclone_core::{BlockPos, ChunkPos, Vec3d};
+use mclone_core::{BlockPos, BlockStateId, ChunkPos, Vec3d};
 #[cfg(feature = "physics-rapier")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{EntityId, EntityKind};
 
 use super::ServerEntityState;
-use super::metadata::EntityMetadata;
+use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
 use super::mob::{MobPlayerTarget, MobRuntimeState};
 use super::tick_list::ServerEntityTickList;
 
@@ -16,7 +16,7 @@ pub(crate) struct ServerEntityStore {
     mobs: BTreeMap<EntityId, MobRuntimeState>,
     tick_list: ServerEntityTickList,
     next_entity_id: u64,
-    starter_passive_id: Option<EntityId>,
+    debug_passive_showcase_ids: Vec<(EntityKind, EntityId)>,
     #[cfg(feature = "physics-rapier")]
     debug_physics_cube_id: Option<EntityId>,
 }
@@ -29,15 +29,34 @@ pub(crate) struct DebugPhysicsCubeEntitySpawn {
 }
 
 impl ServerEntityStore {
-    pub(crate) fn ensure_starter_passive_near_spawn(&mut self, spawn_position: Vec3d) -> EntityId {
-        if let Some(id) = self.starter_passive_id {
-            return id;
+    pub(crate) fn ensure_debug_passive_showcase_near_spawn(
+        &mut self,
+        spawn_position: Vec3d,
+        enabled: bool,
+    ) -> Vec<EntityId> {
+        if !enabled {
+            return Vec::new();
         }
-        let id = self.allocate_entity_id();
-        let position = starter_passive_position(spawn_position);
-        self.insert_passive_mob(id, EntityKind::Cow, position, 135.0);
-        self.starter_passive_id = Some(id);
-        id
+
+        let mut ids = Vec::with_capacity(PASSIVE_MOB_KINDS.len());
+        for (index, kind) in PASSIVE_MOB_KINDS.iter().copied().enumerate() {
+            if let Some(id) = self
+                .debug_passive_showcase_ids
+                .iter()
+                .find_map(|(stored_kind, id)| (*stored_kind == kind).then_some(*id))
+            {
+                ids.push(id);
+                continue;
+            }
+
+            let id = self.allocate_entity_id();
+            let position = debug_passive_showcase_position(spawn_position, index);
+            let y_rot_degrees = debug_passive_showcase_y_rot(index);
+            self.insert_passive_mob(id, kind, position, y_rot_degrees);
+            self.debug_passive_showcase_ids.push((kind, id));
+            ids.push(id);
+        }
+        ids
     }
 
     #[cfg(test)]
@@ -148,11 +167,15 @@ impl ServerEntityStore {
         self.mobs.get(&id)
     }
 
-    pub(crate) fn tick_stationary(
+    pub(crate) fn tick_stationary<F>(
         &mut self,
         entity_ticking_chunks: &[ChunkPos],
         nearby_players: &[MobPlayerTarget],
-    ) -> Vec<ServerEntityState> {
+        block_state_at: F,
+    ) -> Vec<ServerEntityState>
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
         let entity_ticking_chunks = entity_ticking_chunks
             .iter()
             .copied()
@@ -169,7 +192,7 @@ impl ServerEntityStore {
         for id in self.tick_list.iteration_ids() {
             if let Some(entity) = self.entities.get_mut(&id) {
                 if let Some(mob) = self.mobs.get_mut(&id) {
-                    mob.tick_entity(entity, nearby_players);
+                    mob.tick_entity(entity, nearby_players, &block_state_at);
                 }
                 entity.age_ticks = entity.age_ticks.saturating_add(1);
                 updated.push(*entity);
@@ -252,13 +275,32 @@ fn debug_physics_cube_state(
     }
 }
 
-fn starter_passive_position(spawn_position: Vec3d) -> Vec3d {
+fn debug_passive_showcase_position(spawn_position: Vec3d, index: usize) -> Vec3d {
     let chunk = BlockPos::containing(spawn_position).chunk_pos();
+    let offset = debug_passive_showcase_offset(index);
     Vec3d::new(
-        offset_within_chunk(spawn_position.x, chunk.min_block_x()),
+        offset_within_chunk(spawn_position.x + offset.x, chunk.min_block_x()),
         spawn_position.y,
-        offset_within_chunk(spawn_position.z, chunk.min_block_z()),
+        offset_within_chunk(spawn_position.z + offset.z, chunk.min_block_z()),
     )
+}
+
+fn debug_passive_showcase_offset(index: usize) -> Vec3d {
+    const OFFSETS: [Vec3d; 8] = [
+        Vec3d::new(2.5, 0.0, 2.5),
+        Vec3d::new(-2.5, 0.0, 2.5),
+        Vec3d::new(2.5, 0.0, -2.5),
+        Vec3d::new(-2.5, 0.0, -2.5),
+        Vec3d::new(4.5, 0.0, 0.0),
+        Vec3d::new(-4.5, 0.0, 0.0),
+        Vec3d::new(0.0, 0.0, 4.5),
+        Vec3d::new(0.0, 0.0, -4.5),
+    ];
+    OFFSETS[index % OFFSETS.len()]
+}
+
+fn debug_passive_showcase_y_rot(index: usize) -> f32 {
+    45.0 + (index % 8) as f32 * 45.0
 }
 
 fn offset_within_chunk(value: f64, chunk_min: i32) -> f64 {
@@ -268,28 +310,52 @@ fn offset_within_chunk(value: f64, chunk_min: i32) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity::metadata::{EntityDimensions, EntityMetadata};
+    use crate::entity::metadata::{EntityDimensions, EntityMetadata, PASSIVE_MOB_KINDS};
     use crate::entity::mob::BlockPathType;
 
+    fn no_blocks(_pos: BlockPos) -> Option<BlockStateId> {
+        None
+    }
+
+    fn flat_ground(pos: BlockPos) -> Option<BlockStateId> {
+        (pos.y == 63).then_some(BlockStateId(1))
+    }
+
     #[test]
-    fn starter_passive_spawns_once_near_initial_spawn() {
+    fn debug_passive_showcase_spawns_once_near_initial_spawn() {
         let mut store = ServerEntityStore::default();
         let metadata = EntityMetadata::for_kind(EntityKind::Cow).unwrap();
 
-        let first = store.ensure_starter_passive_near_spawn(Vec3d::new(15.0, 64.0, 15.0));
-        let second = store.ensure_starter_passive_near_spawn(Vec3d::new(1.0, 64.0, 1.0));
+        let first =
+            store.ensure_debug_passive_showcase_near_spawn(Vec3d::new(15.0, 64.0, 15.0), true);
+        let second =
+            store.ensure_debug_passive_showcase_near_spawn(Vec3d::new(1.0, 64.0, 1.0), true);
 
         assert_eq!(first, second);
-        let entity = store.state(first).unwrap();
+        assert_eq!(first.len(), PASSIVE_MOB_KINDS.len());
+        let entity = store.state(first[0]).unwrap();
         assert_eq!(entity.kind, EntityKind::Cow);
         assert_eq!(entity.width, metadata.dimensions.width);
         assert_eq!(entity.height, metadata.dimensions.height);
         assert_eq!(entity.position, Vec3d::new(14.5, 64.0, 14.5));
-        let mob = store.mob_state(first).expect("starter cow mob state");
+        let mob = store.mob_state(first[0]).expect("starter cow mob state");
         assert_eq!(mob.movement_speed(), metadata.movement_speed);
         assert_eq!(mob.eye_height(), metadata.standing_eye_height() as f64);
         assert_eq!(mob.pathfinding_malus(BlockPathType::Water), 8.0);
         assert_eq!(mob.available_goal_count(), 3);
+
+        let chicken = store.state(first[1]).unwrap();
+        assert_eq!(chicken.kind, EntityKind::Chicken);
+    }
+
+    #[test]
+    fn debug_passive_showcase_can_be_disabled() {
+        let mut store = ServerEntityStore::default();
+
+        let ids = store.ensure_debug_passive_showcase_near_spawn(Vec3d::new(8.0, 64.0, 8.0), false);
+
+        assert!(ids.is_empty());
+        assert_eq!(store.diagnostics().stored_entities, 0);
     }
 
     #[test]
@@ -315,32 +381,36 @@ mod tests {
     #[test]
     fn entity_tick_advances_age_in_entity_ticking_chunks() {
         let mut store = ServerEntityStore::default();
-        let id = store.ensure_starter_passive_near_spawn(Vec3d::new(8.0, 64.0, 8.0));
+        let id =
+            store.ensure_debug_passive_showcase_near_spawn(Vec3d::new(8.0, 64.0, 8.0), true)[0];
 
         assert!(
             store
-                .tick_stationary(&[ChunkPos::new(1, 0)], &[])
+                .tick_stationary(&[ChunkPos::new(1, 0)], &[], flat_ground)
                 .is_empty()
         );
         assert_eq!(store.state(id).unwrap().age_ticks, 0);
         assert_eq!(
             store.diagnostics(),
             ServerEntityStoreDiagnostics {
-                stored_entities: 1,
+                stored_entities: PASSIVE_MOB_KINDS.len(),
                 ticking_entities: 0
             }
         );
 
-        let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[]);
+        let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_ground);
 
-        assert_eq!(updated.len(), 1);
-        assert_eq!(updated[0].id, id);
-        assert_eq!(updated[0].age_ticks, 1);
+        assert_eq!(updated.len(), PASSIVE_MOB_KINDS.len());
+        let updated = updated
+            .iter()
+            .find(|entity| entity.id == id)
+            .expect("showcase cow should update");
+        assert_eq!(updated.age_ticks, 1);
         assert_eq!(
             store.diagnostics(),
             ServerEntityStoreDiagnostics {
-                stored_entities: 1,
-                ticking_entities: 1
+                stored_entities: PASSIVE_MOB_KINDS.len(),
+                ticking_entities: PASSIVE_MOB_KINDS.len()
             }
         );
     }
@@ -348,17 +418,18 @@ mod tests {
     #[test]
     fn entity_tick_list_demotes_without_removing_stored_entity() {
         let mut store = ServerEntityStore::default();
-        let id = store.ensure_starter_passive_near_spawn(Vec3d::new(8.0, 64.0, 8.0));
-        store.tick_stationary(&[ChunkPos::new(0, 0)], &[]);
+        let id =
+            store.ensure_debug_passive_showcase_near_spawn(Vec3d::new(8.0, 64.0, 8.0), true)[0];
+        store.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_ground);
 
-        let updated = store.tick_stationary(&[], &[]);
+        let updated = store.tick_stationary(&[], &[], flat_ground);
 
         assert!(updated.is_empty());
         assert_eq!(store.state(id).unwrap().age_ticks, 1);
         assert_eq!(
             store.diagnostics(),
             ServerEntityStoreDiagnostics {
-                stored_entities: 1,
+                stored_entities: PASSIVE_MOB_KINDS.len(),
                 ticking_entities: 0
             }
         );
@@ -367,12 +438,13 @@ mod tests {
     #[test]
     fn ticking_starter_cow_eventually_applies_passive_movement() {
         let mut store = ServerEntityStore::default();
-        let id = store.ensure_starter_passive_near_spawn(Vec3d::new(8.0, 64.0, 8.0));
+        let id =
+            store.ensure_debug_passive_showcase_near_spawn(Vec3d::new(8.0, 64.0, 8.0), true)[0];
         let start = store.state(id).unwrap();
 
         let mut moved = None;
         for _ in 0..2_000 {
-            let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[]);
+            let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_ground);
             let entity = updated
                 .into_iter()
                 .find(|entity| entity.id == id)
@@ -388,5 +460,24 @@ mod tests {
         assert!(moved.position.distance_to_sqr(start.position) > 0.0);
         let mob = store.mob_state(id).expect("starter cow mob state");
         assert!(mob.running_goal_count() > 0);
+    }
+
+    #[test]
+    fn ticking_passive_without_support_falls_and_clears_ground_state() {
+        let mut store = ServerEntityStore::default();
+        let id =
+            store.ensure_debug_passive_showcase_near_spawn(Vec3d::new(8.0, 64.0, 8.0), true)[0];
+        let start = store.state(id).unwrap();
+
+        let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], no_blocks);
+
+        let entity = updated
+            .into_iter()
+            .find(|entity| entity.id == id)
+            .expect("starter cow should tick while chunk is entity ticking");
+        assert!(entity.position.y < start.position.y);
+        assert!(!entity.on_ground);
+        let mob = store.mob_state(id).expect("starter cow mob state");
+        assert!(mob.delta_movement().y < 0.0);
     }
 }

@@ -1410,10 +1410,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-blocks"
+version = "0.0.0"
+dependencies = [
+ "mclone-core",
+]
+
+[[package]]
 name = "mclone-client"
 version = "0.0.0"
 dependencies = [
  "mclone-assets",
+ "mclone-blocks",
  "mclone-core",
  "mclone-light",
  "mclone-protocol",
@@ -1558,6 +1566,7 @@ name = "mclone-server"
 version = "0.0.0"
 dependencies = [
  "js-sys",
+ "mclone-blocks",
  "mclone-core",
  "mclone-light",
  "mclone-physics",

@@ -240,7 +240,9 @@ mod tests {
         goal.start(&mut context);
         goal.tick(&mut context);
         let mut entity = entity;
-        assert!(context.apply_controls(&mut entity));
+        assert!(context.apply_controls(&mut entity, &|pos| {
+            (pos.y == 63).then_some(mclone_core::BlockStateId(1))
+        }));
 
         assert_eq!(entity.y_rot_degrees, 10.0);
     }

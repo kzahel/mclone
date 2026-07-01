@@ -4853,6 +4853,11 @@ fn startup_options_to_js_value(options: &StartupOptions) -> Result<JsValue, Stri
         set_number(&object, "dayTime", day_time as f64)?;
     }
     set_bool(&object, "freezeTime", options.scene.freeze_time)?;
+    set_bool(
+        &object,
+        "debugPassiveShowcase",
+        options.scene.debug_passive_showcase,
+    )?;
     set_bool(&object, "lightingEnabled", options.scene.lighting_enabled)?;
     set_bool(
         &object,

@@ -3,6 +3,7 @@ members = [
   "crates/mclone-audio",
   "crates/mclone-assets",
   "crates/mclone-app-runtime",
+  "crates/mclone-blocks",
   "crates/mclone-client",
   "crates/mclone-core",
   "crates/mclone-input",
@@ -50,6 +51,7 @@ log = "0.4"
 mclone-audio = { path = "crates/mclone-audio" }
 mclone-assets = { path = "crates/mclone-assets" }
 mclone-app-runtime = { path = "crates/mclone-app-runtime" }
+mclone-blocks = { path = "crates/mclone-blocks" }
 mclone-client = { path = "crates/mclone-client" }
 mclone-core = { path = "crates/mclone-core" }
 mclone-input = { path = "crates/mclone-input" }

@@ -55,6 +55,30 @@ Do not model creatures as decorative render assets. A cow or chicken placed in
 the world is an entity with authoritative identity, chunk/section ownership,
 tracking, tick eligibility, and eventual persistence.
 
+## Current Native Status
+
+As of 2026-07-01, the native runtime has an explicit debug passive showcase
+path, enabled by default through shared startup/server options
+(`--debug-passive-showcase true|false`, `debugPassiveShowcase=true|false`).
+This is not natural spawning. It deliberately places registered passive mobs
+near the initial safe spawn so new animal assets are visible while the entity
+stack is being built.
+
+The first shared ground/collision scaffold is also in place:
+
+- `mclone-blocks` owns terrain-MVP block facts, outline/collision shapes, and
+  Java-shaped AABB movement clipping below both client and server.
+- Local player collision and server passive-mob movement consume that shared
+  block collision path.
+- Passive mobs carry vertical delta movement, resolve movement against server
+  world blocks, derive `on_ground` from vertical collision, and fall when they
+  leave support.
+
+This does not complete `GroundPathNavigation`, `WalkNodeEvaluator`, one-block
+step-up, stuck detection, or full `LivingEntity.travel(...)`. Those remain
+required foundations before natural passive movement can be considered
+correct.
+
 ## Target Module Shape
 
 The exact file names can evolve, but the boundaries should stay recognizable.
@@ -97,6 +121,10 @@ actor presentation remain in `mclone-client` / `mclone-render-session`.
 Renderer geometry, figure compilation, texture atlases, and animation sampling
 remain in `mclone-render` / `mclone-assets`. Those crates consume entity facts;
 they do not decide entity lifecycle.
+
+Shared terrain block facts and AABB collision semantics live below both client
+and server in `mclone-blocks`. Do not duplicate block collision shape or
+movement clipping logic in a client-only or server-only module.
 
 ## Runtime Ownership
 

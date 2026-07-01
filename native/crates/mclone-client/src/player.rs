@@ -1,15 +1,12 @@
 use std::collections::VecDeque;
 
+use mclone_blocks::{BlockFluidKind, block_fluid_height, block_fluid_kind};
 use mclone_core::{Aabb, BlockPos, ChunkPos, Vec3d};
 use mclone_protocol::{
     AcceptTeleportCommand, ClientCommand, MovePlayerCommand, PlayerPositionUpdate,
 };
 
-use crate::{
-    ClientRuntime,
-    block_facts::{BlockFluidKind, block_fluid_height, block_fluid_kind},
-    block_shapes::block_collision_aabb,
-};
+use crate::ClientRuntime;
 
 pub const NO_CLIP_BOOST_MULTIPLIER: f64 = 3.0;
 pub const MOVING_SLOW_FACTOR: f32 = 0.3;
@@ -1573,12 +1570,11 @@ pub struct CollisionMovementResult {
 }
 
 pub fn collide_movement(client: &ClientRuntime, bounding_box: Aabb, movement: Vec3d) -> Vec3d {
-    if !bounding_box.is_finite() || !movement.is_finite() || movement.length_sqr() == 0.0 {
-        return Vec3d::ZERO;
-    }
-
-    let solid_blocks = solid_block_aabbs_in(client, bounding_box.expand_towards(movement));
-    collide_with_aabbs(bounding_box, movement, &solid_blocks)
+    mclone_blocks::collide_movement(
+        |pos| client.block_state_at_block_pos(pos),
+        bounding_box,
+        movement,
+    )
 }
 
 pub fn sphere_intersects_solid_blocks(client: &ClientRuntime, center: Vec3d, radius: f64) -> bool {
@@ -1589,40 +1585,6 @@ pub fn sphere_intersects_solid_blocks(client: &ClientRuntime, center: Vec3d, rad
     solid_block_aabbs_in(client, hand_probe_aabb(center, radius))
         .into_iter()
         .any(|solid| point_aabb_distance_sqr(center, solid) <= radius_sqr)
-}
-
-fn collide_with_aabbs(mut bounding_box: Aabb, movement: Vec3d, solids: &[Aabb]) -> Vec3d {
-    let mut x = movement.x;
-    let mut y = movement.y;
-    let mut z = movement.z;
-
-    if y != 0.0 {
-        y = clip_axis(Axis::Y, bounding_box, solids, y);
-        if y != 0.0 {
-            bounding_box = bounding_box.move_by(Vec3d::new(0.0, y, 0.0));
-        }
-    }
-
-    let z_first = x.abs() < z.abs();
-    if z_first && z != 0.0 {
-        z = clip_axis(Axis::Z, bounding_box, solids, z);
-        if z != 0.0 {
-            bounding_box = bounding_box.move_by(Vec3d::new(0.0, 0.0, z));
-        }
-    }
-
-    if x != 0.0 {
-        x = clip_axis(Axis::X, bounding_box, solids, x);
-        if !z_first && x != 0.0 {
-            bounding_box = bounding_box.move_by(Vec3d::new(x, 0.0, 0.0));
-        }
-    }
-
-    if !z_first && z != 0.0 {
-        z = clip_axis(Axis::Z, bounding_box, solids, z);
-    }
-
-    Vec3d::new(x, y, z)
 }
 
 fn point_aabb_distance_sqr(point: Vec3d, aabb: Aabb) -> f64 {
@@ -1651,105 +1613,11 @@ fn point_aabb_distance_sqr(point: Vec3d, aabb: Aabb) -> f64 {
 }
 
 fn solid_block_aabbs_in(client: &ClientRuntime, area: Aabb) -> Vec<Aabb> {
-    if !area.is_finite() {
-        return Vec::new();
-    }
-
-    let min_x = area.min_x.floor() as i32;
-    let min_y = area.min_y.floor() as i32;
-    let min_z = area.min_z.floor() as i32;
-    let max_x = area.max_x.floor() as i32;
-    let max_y = area.max_y.floor() as i32;
-    let max_z = area.max_z.floor() as i32;
-    let mut solids = Vec::new();
-    for y in min_y..=max_y {
-        for z in min_z..=max_z {
-            for x in min_x..=max_x {
-                let pos = BlockPos::new(x, y, z);
-                let Some(block_state) = client.block_state_at_block_pos(pos) else {
-                    continue;
-                };
-                if let Some(block_box) = block_collision_aabb(block_state, pos) {
-                    if block_box.intersects(area) {
-                        solids.push(block_box);
-                    }
-                }
-            }
-        }
-    }
-    solids
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Axis {
-    X,
-    Y,
-    Z,
-}
-
-fn clip_axis(axis: Axis, bounding_box: Aabb, solids: &[Aabb], mut delta: f64) -> f64 {
-    if delta.abs() < COLLISION_EPSILON {
-        return 0.0;
-    }
-
-    for solid in solids {
-        if !overlaps_other_axes(axis, bounding_box, *solid) {
-            continue;
-        }
-        if delta > 0.0 {
-            let distance = min_axis(axis, *solid) - max_axis(axis, bounding_box);
-            if distance >= -COLLISION_EPSILON && distance < delta {
-                delta = distance.max(0.0);
-            }
-        } else {
-            let distance = max_axis(axis, *solid) - min_axis(axis, bounding_box);
-            if distance <= COLLISION_EPSILON && distance > delta {
-                delta = distance.min(0.0);
-            }
-        }
-    }
-    delta
-}
-
-fn overlaps_other_axes(axis: Axis, a: Aabb, b: Aabb) -> bool {
-    match axis {
-        Axis::X => {
-            ranges_overlap(a.min_y, a.max_y, b.min_y, b.max_y)
-                && ranges_overlap(a.min_z, a.max_z, b.min_z, b.max_z)
-        }
-        Axis::Y => {
-            ranges_overlap(a.min_x, a.max_x, b.min_x, b.max_x)
-                && ranges_overlap(a.min_z, a.max_z, b.min_z, b.max_z)
-        }
-        Axis::Z => {
-            ranges_overlap(a.min_x, a.max_x, b.min_x, b.max_x)
-                && ranges_overlap(a.min_y, a.max_y, b.min_y, b.max_y)
-        }
-    }
-}
-
-fn ranges_overlap(a_min: f64, a_max: f64, b_min: f64, b_max: f64) -> bool {
-    a_min < b_max && a_max > b_min
+    mclone_blocks::solid_block_aabbs_in(|pos| client.block_state_at_block_pos(pos), area)
 }
 
 fn nearly_equal(a: f64, b: f64) -> bool {
     (a - b).abs() < COLLISION_EPSILON
-}
-
-fn min_axis(axis: Axis, aabb: Aabb) -> f64 {
-    match axis {
-        Axis::X => aabb.min_x,
-        Axis::Y => aabb.min_y,
-        Axis::Z => aabb.min_z,
-    }
-}
-
-fn max_axis(axis: Axis, aabb: Aabb) -> f64 {
-    match axis {
-        Axis::X => aabb.max_x,
-        Axis::Y => aabb.max_y,
-        Axis::Z => aabb.max_z,
-    }
 }
 
 fn walking_input_speed(on_ground: bool, sprinting: bool) -> f64 {
@@ -1908,7 +1776,7 @@ fn normalize_or_zero(value: Vec3d) -> Vec3d {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block_facts::WATER_BLOCK_STATE_ID;
+    use mclone_blocks::WATER_BLOCK_STATE_ID;
     use mclone_core::{
         AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkSnapshot,
         ChunkStatus, SECTION_HEIGHT, chunk_section_index,

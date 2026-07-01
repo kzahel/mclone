@@ -1037,6 +1037,7 @@ mod tests {
                     movement_speed_multiplier: 1.0,
                     simulation_cadence: mclone_server::SimulationCadenceConfig::default(),
                     first_person_player_visible: false,
+                    debug_passive_showcase: true,
                     lighting_enabled: true,
                 },
                 TexturedSectionRenderOptions::default(),

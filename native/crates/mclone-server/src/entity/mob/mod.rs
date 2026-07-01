@@ -2,7 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use mclone_core::Vec3d;
+use mclone_blocks::{collide_movement, collide_movement_result, collision_aabb_for_feet_position};
+use mclone_core::{BlockPos, BlockStateId, Vec3d};
 use mclone_protocol::{EntityId, EntityKind};
 use mclone_worldgen::prng::SimpleRandomSource;
 
@@ -16,6 +17,9 @@ use control::{LookControl, MoveControl};
 use goals::{GoalSelector, passive};
 
 const PLAYER_EYE_HEIGHT: f64 = 1.62;
+const MOB_GRAVITY: f64 = 0.08;
+const MOB_VERTICAL_DRAG: f64 = 0.98;
+const MOB_COLLISION_EPSILON: f64 = 1.0e-7;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) enum BlockPathType {
@@ -71,6 +75,7 @@ pub(crate) struct MobRuntimeState {
     y_head_rot_degrees: f32,
     movement_speed: f64,
     eye_height: f64,
+    delta_movement: Vec3d,
     pathfinding_malus: PathfindingMalusTable,
     random: SimpleRandomSource,
     goal_selector: GoalSelector<MobGoalContext>,
@@ -106,6 +111,7 @@ impl MobRuntimeState {
             y_head_rot_degrees: y_rot_degrees,
             movement_speed: metadata.movement_speed,
             eye_height: metadata.standing_eye_height() as f64,
+            delta_movement: Vec3d::new(0.0, -MOB_GRAVITY * MOB_VERTICAL_DRAG, 0.0),
             pathfinding_malus,
             random: SimpleRandomSource::new(mob_random_seed(id, metadata.kind)),
             goal_selector,
@@ -144,6 +150,10 @@ impl MobRuntimeState {
         self.eye_height
     }
 
+    pub(crate) const fn delta_movement(&self) -> Vec3d {
+        self.delta_movement
+    }
+
     pub(crate) fn available_goal_count(&self) -> usize {
         self.goal_selector.available_goal_count()
     }
@@ -160,11 +170,14 @@ impl MobRuntimeState {
         self.random.next_int_bound(bound)
     }
 
-    pub(crate) fn tick_entity(
+    pub(crate) fn tick_entity<F>(
         &mut self,
         entity: &mut ServerEntityState,
         nearby_players: &[MobPlayerTarget],
-    ) {
+        block_state_at: &F,
+    ) where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
         self.on_ground = entity.on_ground;
         self.y_body_rot_degrees = entity.y_rot_degrees;
 
@@ -177,6 +190,7 @@ impl MobRuntimeState {
             y_body_rot_degrees: self.y_body_rot_degrees,
             y_head_rot_degrees: self.y_head_rot_degrees,
             movement_speed: self.movement_speed,
+            delta_movement: self.delta_movement,
             no_action_time: self.no_action_time,
             on_ground: self.on_ground,
             nearby_players: nearby_players.to_vec(),
@@ -187,13 +201,14 @@ impl MobRuntimeState {
 
         let mut goal_selector = std::mem::take(&mut self.goal_selector);
         goal_selector.tick(&mut context);
-        context.apply_controls(entity);
+        context.apply_controls(entity, block_state_at);
         self.goal_selector = goal_selector;
 
         self.no_action_time = context.no_action_time;
         self.on_ground = entity.on_ground;
         self.y_body_rot_degrees = entity.y_rot_degrees;
         self.y_head_rot_degrees = context.y_head_rot_degrees;
+        self.delta_movement = context.delta_movement;
         self.random = context.random;
         self.move_control = context.move_control;
         self.look_control = context.look_control;
@@ -207,6 +222,7 @@ pub(crate) struct MobGoalContext {
     y_body_rot_degrees: f32,
     y_head_rot_degrees: f32,
     movement_speed: f64,
+    delta_movement: Vec3d,
     no_action_time: u32,
     on_ground: bool,
     nearby_players: Vec<MobPlayerTarget>,
@@ -277,10 +293,19 @@ impl MobGoalContext {
         self.look_control.set_look_at(position);
     }
 
-    pub(crate) fn apply_controls(&mut self, entity: &mut ServerEntityState) -> bool {
+    pub(crate) fn apply_controls<F>(
+        &mut self,
+        entity: &mut ServerEntityState,
+        block_state_at: &F,
+    ) -> bool
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId>,
+    {
         let previous_position = entity.position;
         let previous_y_rot = entity.y_rot_degrees;
+        let previous_on_ground = entity.on_ground;
 
+        let previous_control_position = self.position;
         let moved = self.move_control.tick(
             &mut self.position,
             &mut self.y_body_rot_degrees,
@@ -291,6 +316,26 @@ impl MobGoalContext {
             &mut self.y_head_rot_degrees,
             self.y_body_rot_degrees,
         );
+        let controlled_position = self.position;
+        self.position = previous_control_position;
+
+        let requested = Vec3d::new(
+            controlled_position.x - previous_control_position.x,
+            self.delta_movement.y,
+            controlled_position.z - previous_control_position.z,
+        );
+        let bounding_box = collision_aabb_for_feet_position(
+            previous_control_position,
+            f64::from(entity.width),
+            f64::from(entity.height),
+        );
+        let traveled = collide_movement(block_state_at, bounding_box, requested);
+        if traveled.length_sqr() > MOB_COLLISION_EPSILON * MOB_COLLISION_EPSILON {
+            self.position = self.position.add(traveled);
+        }
+        let collision = collide_movement_result(requested, traveled);
+        self.on_ground = collision.on_ground;
+        self.delta_movement = Vec3d::new(0.0, (traveled.y - MOB_GRAVITY) * MOB_VERTICAL_DRAG, 0.0);
 
         if !moved && looked {
             // The current entity protocol has one yaw field. Until head/body yaw
@@ -302,9 +347,11 @@ impl MobGoalContext {
         entity.position = self.position;
         entity.y_rot_degrees = self.y_body_rot_degrees;
         entity.x_rot_degrees = 0.0;
-        self.on_ground = entity.on_ground;
+        entity.on_ground = self.on_ground;
 
-        entity.position != previous_position || entity.y_rot_degrees != previous_y_rot
+        entity.position != previous_position
+            || entity.y_rot_degrees != previous_y_rot
+            || entity.on_ground != previous_on_ground
     }
 
     #[cfg(test)]
@@ -320,6 +367,7 @@ impl MobGoalContext {
             y_body_rot_degrees: entity.y_rot_degrees,
             y_head_rot_degrees: entity.y_rot_degrees,
             movement_speed: 0.2,
+            delta_movement: Vec3d::new(0.0, -MOB_GRAVITY * MOB_VERTICAL_DRAG, 0.0),
             no_action_time: 0,
             on_ground: entity.on_ground,
             nearby_players,

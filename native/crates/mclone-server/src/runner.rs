@@ -485,6 +485,7 @@ mod native {
         pub lighting_enabled: bool,
         pub day_time: Option<u64>,
         pub day_time_frozen: bool,
+        pub debug_passive_showcase: bool,
         pub tick_interval: Duration,
         pub cadence: SimulationCadenceConfig,
     }
@@ -496,6 +497,7 @@ mod native {
                 lighting_enabled: true,
                 day_time: None,
                 day_time_frozen: false,
+                debug_passive_showcase: true,
                 tick_interval: Duration::from_millis(50),
                 cadence: SimulationCadenceConfig::new(20, 20, 60),
             }
@@ -513,6 +515,11 @@ mod native {
 
         pub const fn with_day_time_frozen(mut self, frozen: bool) -> Self {
             self.day_time_frozen = frozen;
+            self
+        }
+
+        pub const fn with_debug_passive_showcase(mut self, enabled: bool) -> Self {
+            self.debug_passive_showcase = enabled;
             self
         }
 
@@ -791,6 +798,7 @@ mod native {
         let mut server = IntegratedServer::new(config.seed);
         server.set_lighting_enabled(config.lighting_enabled);
         server.set_day_time_frozen(config.day_time_frozen);
+        server.set_debug_passive_showcase_enabled(config.debug_passive_showcase);
         if let Some(day_time) = config.day_time {
             server.set_day_time(day_time);
         }

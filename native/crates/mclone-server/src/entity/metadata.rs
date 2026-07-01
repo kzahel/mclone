@@ -44,6 +44,8 @@ pub(crate) struct EntityMetadata {
     pub(crate) client_tracking_range: u8,
 }
 
+pub(crate) const PASSIVE_MOB_KINDS: &[EntityKind] = &[EntityKind::Cow, EntityKind::Chicken];
+
 impl EntityMetadata {
     pub(crate) const COW: Self = Self {
         kind: EntityKind::Cow,

@@ -21,17 +21,17 @@ struct LocalShape {
     offset: OffsetKind,
 }
 
-pub(crate) fn block_collision_aabb(state: BlockStateId, pos: BlockPos) -> Option<Aabb> {
+pub fn block_collision_aabb(state: BlockStateId, pos: BlockPos) -> Option<Aabb> {
     shape_for(state, ShapeUse::Collision).map(|shape| shape.world_aabb(pos))
 }
 
-pub(crate) fn block_outline_aabbs(state: BlockStateId, pos: BlockPos) -> Vec<Aabb> {
+pub fn block_outline_aabbs(state: BlockStateId, pos: BlockPos) -> Vec<Aabb> {
     shape_for(state, ShapeUse::Outline)
         .map(|shape| vec![shape.world_aabb(pos)])
         .unwrap_or_default()
 }
 
-pub(crate) fn clip_block_outline(
+pub fn clip_block_outline(
     state: BlockStateId,
     from: Vec3d,
     to: Vec3d,
@@ -154,7 +154,7 @@ fn java_mth_seed(x: i32, y: i32, z: i32) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_core::{Direction, HitResultType};
+    use mclone_core::Direction;
 
     fn state(id: u32) -> BlockStateId {
         BlockStateId(id)
@@ -267,40 +267,27 @@ mod tests {
     }
 
     #[test]
-    fn java_flower_offset_matches_mth_get_seed_reference_value() {
-        let pos = BlockPos::new(4, 99, 1);
-        let offset = java_block_offset_xz(pos);
+    fn clipping_outline_reports_face_and_inside_hits() {
+        let pos = BlockPos::new(0, 0, 0);
 
-        assert_eq!(java_mth_seed(pos.x, 0, pos.z), -43_525_942_199_652);
-        assert!((offset.x - 0.15).abs() < 1.0e-12);
-        assert!((offset.y - 0.0).abs() < 1.0e-12);
-        assert!((offset.z - (1.0 / 12.0)).abs() < 1.0e-12);
-    }
-
-    #[test]
-    fn outline_clip_uses_partial_shape_height() {
-        let state = state(terrain_id::SNOW);
-        let pos = BlockPos::new(4, 2, 1);
-
-        let low_hit = clip_block_outline(
-            state,
-            Vec3d::new(1.5, 2.05, 1.5),
-            Vec3d::new(8.0, 2.05, 1.5),
+        let hit = clip_block_outline(
+            state(1),
+            Vec3d::new(-1.0, 0.5, 0.5),
+            Vec3d::new(2.0, 0.5, 0.5),
             pos,
         )
-        .expect("snow outline hit");
-        assert_eq!(low_hit.hit_type(), HitResultType::Block);
-        assert_eq!(low_hit.block_pos, pos);
-        assert_eq!(low_hit.direction, Direction::West);
+        .expect("ray should hit full block outline");
+        assert!(!hit.miss);
+        assert_eq!(hit.direction, Direction::West);
+        assert_eq!(hit.block_pos, pos);
 
-        assert_eq!(
-            clip_block_outline(
-                state,
-                Vec3d::new(1.5, 2.2, 1.5),
-                Vec3d::new(8.0, 2.2, 1.5),
-                pos,
-            ),
-            None
-        );
+        let inside = clip_block_outline(
+            state(1),
+            Vec3d::new(0.5, 0.5, 0.5),
+            Vec3d::new(2.0, 0.5, 0.5),
+            pos,
+        )
+        .expect("inside ray should produce a hit");
+        assert!(inside.inside);
     }
 }

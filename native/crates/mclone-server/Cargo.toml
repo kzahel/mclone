@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 mclone-core.workspace = true
+mclone-blocks.workspace = true
 mclone-light.workspace = true
 mclone-physics = { workspace = true, optional = true }
 mclone-protocol.workspace = true

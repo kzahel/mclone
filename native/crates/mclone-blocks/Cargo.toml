@@ -1,17 +1,13 @@
 [package]
-name = "mclone-client"
+name = "mclone-blocks"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-mclone-assets.workspace = true
-mclone-blocks.workspace = true
 mclone-core.workspace = true
-mclone-light.workspace = true
-mclone-protocol.workspace = true
 
 [lib]
-name = "mclone_client"
+name = "mclone_blocks"
 path = "src/lib.rs"

@@ -1772,7 +1772,7 @@ mod tests {
                 .iter()
                 .filter(|update| matches!(update, ServerUpdate::EntitySnapshot(_)))
                 .count(),
-            1
+            2
         );
         assert_eq!(server.loaded_chunk_count(), 25);
         assert_eq!(server.scheduler().client_visible_chunk_count(), 9);
@@ -3384,7 +3384,7 @@ mod tests {
                 .iter()
                 .filter(|update| matches!(update, ServerUpdate::EntitySnapshot(_)))
                 .count(),
-            1
+            2
         );
         assert_eq!(reloaded.scheduler().job_count(), 0);
         let holder = reloaded.scheduler().holder(ChunkPos::new(0, 0)).unwrap();
