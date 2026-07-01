@@ -228,6 +228,41 @@ Interpretation:
 - Do not enable a result-acceptance budget by default. Keep default unbounded
   until an adaptive policy or follow-up split beats the baseline consistently.
 
+Follow-up attribution pass:
+
+- Added `MCLONE_ANDROID_XR_PERF_TERRAIN_RUNTIME` to split terrain runtime work
+  into poll, completed-result acceptance, dirty-cache seed, ready/dirty prepare,
+  compile submit/snapshot handoff, GPU upload apply, ready-section query, and
+  ready-section publish.
+- `runtime_sync_ms` remains the high-level wall-clock sync measure, so the new
+  fields are attribution for the same event rather than a separate policy.
+- Upload timing now also separates queue/enqueue/select from draw-resource
+  `apply_section_updates`.
+
+Measurement after the split, Quest Android XR per-eye settled orbit, render
+distance 7, 2 render compile workers, 30-second sample:
+
+| Result accept budget | Frame avg / p95 / p99 / max | Max runtime sync split | Max upload / ready / records | Read |
+|---:|---|---|---|---|
+| unbounded | 15.908 / 26.562 / 42.082 / 70.163 ms | sync 42.712 ms; accept 1.381; prepare 14.181; submit 42.364 | upload apply 10.552; ready query 2.492; ready publish 7.386; records 13.590 | max 2 accepted results, 32 completed sections, 13 uploaded |
+| 1 | 15.860 / 25.783 / 37.986 / 105.877 ms | sync 62.588 ms; accept 6.205; prepare 2.258; submit 61.234 | upload apply 13.388; ready query 11.819; ready publish 15.094; records 24.264 | max 1 accepted result, 1 queued result, 16 completed sections, 8 uploaded |
+
+Interpretation:
+
+- The new marker supports the control-point conclusion: completed-result
+  acceptance itself is not the primary tail. It topped out at 1.381 ms
+  unbounded and 6.205 ms with budget 1 in this run.
+- The largest runtime-sync tail is compile submit/snapshot handoff
+  (`max_runtime_submit_ms` 42-61 ms). In the native path, each submit currently
+  clones the live client chunk snapshots into an owned `Vec` for the worker
+  request, even when the compile target is a small ready-section set.
+- Ready-section publish and prepared-record maintenance are also meaningful
+  second-order costs: budget 1 saw 15.094 ms ready publish and 24.264 ms shared
+  record work in the max frame.
+- The split run had worse overall frame averages than the previous control
+  runs, so use it for attribution rather than as a clean before/after
+  performance comparison.
+
 ### E. Local Edit Coherence
 
 Status: planned.
@@ -250,15 +285,12 @@ a compiler exposes spare capacity and waits when capacity is full.
 
 ## Next Step
 
-Investigate the new tail after upload smoothing: split Android XR terrain timing
-inside `poll_runtime_and_upload` / `apply_section_update_uploads` so result
-acceptance, ready-section traversal-set recomputation, draw-resource publication,
-and prepared-record cache maintenance are separately visible. Then use that
-evidence to choose between:
+Reduce native compile submit/snapshot handoff cost. The immediate target is the
+`snapshots_for_submit` path that clones all loaded client chunk snapshots for a
+small render-section compile request. Move toward a Java-shaped resident
+render-chunk/snapshot view for compile workers, or at least pass only the chunk
+snapshots needed by the submitted target sections plus their mesh neighbors.
 
-- an adaptive completed-result acceptance budget based on measured frame
-  headroom,
-- a smaller section-upload publication budget layered after batched result
-  acceptance, or
-- optimizing ready-set / record-cache publication directly if that is the real
-  long pole.
+After that, re-run the same `MCLONE_ANDROID_XR_PERF_TERRAIN_RUNTIME` probe. If
+submit falls below the ready/publish/record path, the next candidates are
+ready-section publish invalidation and prepared-record rebuild reduction.

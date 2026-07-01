@@ -347,8 +347,16 @@ pub struct XrTerrainFrameTiming {
     pub runtime_upload_ms: f64,
     pub runtime_poll_ms: f64,
     pub runtime_sync_ms: f64,
+    pub runtime_result_accept_ms: f64,
+    pub runtime_dirty_seed_ms: f64,
+    pub runtime_prepare_ms: f64,
+    pub runtime_submit_ms: f64,
     pub runtime_gpu_upload_ms: f64,
+    pub runtime_upload_enqueue_ms: f64,
+    pub runtime_upload_select_ms: f64,
+    pub runtime_upload_apply_ms: f64,
     pub runtime_ready_sections_ms: f64,
+    pub runtime_ready_publish_ms: f64,
     pub shared_records_ms: f64,
     pub record_cache_prepare: TexturedSectionRecordPrepareStats,
     pub left_eye_ms: f64,
@@ -2478,7 +2486,9 @@ where
             let ready_sections = runtime.traversal_ready_render_section_keys(camera_position);
             timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
             let traversal_ready_section_count = ready_sections.len();
+            let ready_publish_start = Instant::now();
             self.draw.set_traversal_ready_sections(&ready_sections);
+            timing.runtime_ready_publish_ms = elapsed_ms(ready_publish_start.elapsed());
             return Ok(XrTerrainUploadSummary {
                 poll_changed,
                 pending_render_chunks_before,
@@ -2498,18 +2508,23 @@ where
             });
         }
         let sync_start = Instant::now();
-        let section_update = if poll_changed || has_runtime_render_work {
+        let timed_section_update = if poll_changed || has_runtime_render_work {
             if let Some(deadline) = frame_deadline {
-                self.sync_render_sections_until_deadline(camera_position, deadline)
+                self.sync_render_sections_until_deadline_timed(camera_position, deadline)
                     .context("sync XR terrain render sections until deadline")?
             } else {
-                self.sync_render_sections(camera_position)
+                self.sync_render_sections_timed(camera_position)
                     .context("sync XR terrain render sections")?
             }
         } else {
-            mclone_render_session::RenderSectionCacheUpdate::default()
+            mclone_app_runtime::TimedRenderSectionCacheUpdate::default()
         };
         timing.runtime_sync_ms = elapsed_ms(sync_start.elapsed());
+        timing.runtime_result_accept_ms = timed_section_update.timing.completed_result_accept_ms;
+        timing.runtime_dirty_seed_ms = timed_section_update.timing.dirty_seed_ms;
+        timing.runtime_prepare_ms = timed_section_update.timing.prepare_ms;
+        timing.runtime_submit_ms = timed_section_update.timing.submit_ms;
+        let section_update = timed_section_update.cache_update;
         let rebuilt_section_count = section_update.rebuilt_section_count();
         let removed_section_count = section_update.removed_section_count();
         let rebuilt_vertex_count = section_update.rebuilt_vertex_count;
@@ -2530,7 +2545,7 @@ where
         let visibility_graph_total_ms = section_update.visibility_graph_stats.total_ms;
         let visibility_graph_worst_ms = section_update.visibility_graph_stats.worst_ms;
         let upload_start = Instant::now();
-        let upload_report = self.apply_section_update_uploads(device, section_update)?;
+        let upload_report = self.apply_section_update_uploads(device, section_update, timing)?;
         timing.runtime_gpu_upload_ms = elapsed_ms(upload_start.elapsed());
         let ready_start = Instant::now();
         let runtime = self
@@ -2540,7 +2555,9 @@ where
         let ready_sections = runtime.traversal_ready_render_section_keys(camera_position);
         timing.runtime_ready_sections_ms = elapsed_ms(ready_start.elapsed());
         let traversal_ready_section_count = ready_sections.len();
+        let ready_publish_start = Instant::now();
         self.draw.set_traversal_ready_sections(&ready_sections);
+        timing.runtime_ready_publish_ms = elapsed_ms(ready_publish_start.elapsed());
         self.render_stats.section_count = self.draw.section_count();
         self.render_stats.index_count = self.draw.index_count();
         self.render_stats.face_count = quad_face_count_from_indices(self.render_stats.index_count);
@@ -2627,12 +2644,14 @@ where
         &mut self,
         device: &wgpu::Device,
         section_update: mclone_render_session::RenderSectionCacheUpdate,
+        timing: &mut XrTerrainFrameTiming,
     ) -> Result<TexturedSectionUploadReport> {
         if self.render_section_upload_budget.is_none()
             && self.render_section_accept_budget.is_none()
             && !self.has_pending_section_upload_work()
         {
-            return self
+            let apply_start = Instant::now();
+            let report = self
                 .draw
                 .apply_section_updates(
                     device,
@@ -2640,9 +2659,14 @@ where
                     &section_update.removed_section_keys,
                 )
                 .context("upload XR terrain render section updates");
+            timing.runtime_upload_apply_ms += elapsed_ms(apply_start.elapsed());
+            return report;
         }
 
+        let enqueue_start = Instant::now();
         self.enqueue_section_update_uploads(section_update);
+        timing.runtime_upload_enqueue_ms += elapsed_ms(enqueue_start.elapsed());
+        let select_start = Instant::now();
         let accept_budget = self.render_section_accept_budget.unwrap_or(usize::MAX);
         let upload_budget = self.render_section_upload_budget.unwrap_or(usize::MAX);
         let upload_count = upload_budget
@@ -2660,12 +2684,17 @@ where
         } else {
             std::mem::take(&mut self.pending_section_removals)
         };
+        timing.runtime_upload_select_ms += elapsed_ms(select_start.elapsed());
         if sections.is_empty() && removed.is_empty() {
             return Ok(TexturedSectionUploadReport::default());
         }
-        self.draw
+        let apply_start = Instant::now();
+        let report = self
+            .draw
             .apply_section_updates(device, &sections, &removed)
-            .context("accept budgeted XR terrain render section updates")
+            .context("accept budgeted XR terrain render section updates");
+        timing.runtime_upload_apply_ms += elapsed_ms(apply_start.elapsed());
+        report
     }
 
     fn take_budgeted_section_removals(&mut self, budget: usize) -> BTreeSet<RenderSectionKey> {
@@ -3011,30 +3040,30 @@ where
         Ok(())
     }
 
-    fn sync_render_sections(
+    fn sync_render_sections_timed(
         &mut self,
         camera_position: Vec3,
-    ) -> Result<mclone_render_session::RenderSectionCacheUpdate> {
+    ) -> Result<mclone_app_runtime::TimedRenderSectionCacheUpdate> {
         let completed_result_accept_budget = self.render_completed_result_accept_budget;
         self.runtime
             .as_mut()
             .context("XR terrain runtime is not active")?
-            .sync_render_sections_with_completed_result_acceptance(
+            .sync_render_sections_with_completed_result_acceptance_timed(
                 camera_position,
                 completed_result_accept_budget,
             )
     }
 
-    fn sync_render_sections_until_deadline(
+    fn sync_render_sections_until_deadline_timed(
         &mut self,
         camera_position: Vec3,
         deadline: Instant,
-    ) -> Result<mclone_render_session::RenderSectionCacheUpdate> {
+    ) -> Result<mclone_app_runtime::TimedRenderSectionCacheUpdate> {
         let completed_result_accept_budget = self.render_completed_result_accept_budget;
         self.runtime
             .as_mut()
             .context("XR terrain runtime is not active")?
-            .sync_render_sections_until_deadline_with_completed_result_acceptance(
+            .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
                 camera_position,
                 deadline,
                 completed_result_accept_budget,

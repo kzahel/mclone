@@ -48,6 +48,36 @@ pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
 pub const JAVA_MIN_TRACKING_RENDER_DISTANCE: u32 = 2;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RenderSectionSyncTiming {
+    pub completed_result_accept_ms: f64,
+    pub dirty_seed_ms: f64,
+    pub prepare_ms: f64,
+    pub submit_ms: f64,
+}
+
+impl RenderSectionSyncTiming {
+    pub fn merge(&mut self, other: Self) {
+        self.completed_result_accept_ms += other.completed_result_accept_ms;
+        self.dirty_seed_ms += other.dirty_seed_ms;
+        self.prepare_ms += other.prepare_ms;
+        self.submit_ms += other.submit_ms;
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TimedRenderSectionCacheUpdate {
+    pub cache_update: RenderSectionCacheUpdate,
+    pub timing: RenderSectionSyncTiming,
+}
+
+impl TimedRenderSectionCacheUpdate {
+    pub fn merge(&mut self, other: Self) {
+        self.cache_update.merge(other.cache_update);
+        self.timing.merge(other.timing);
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn average_duration(total: Duration, count: usize) -> Duration {
     if count == 0 {
@@ -780,6 +810,101 @@ impl SingleViewRuntime {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    pub fn sync_render_sections_with_budget_and_completed_result_acceptance_timed<C, Snapshots>(
+        &mut self,
+        compiler: &mut C,
+        camera_position: Vec3,
+        chunk_budget: usize,
+        completed_result_accept_budget: Option<usize>,
+        snapshots_for_submit: Snapshots,
+    ) -> Result<TimedRenderSectionCacheUpdate>
+    where
+        C: RenderSectionCompiler,
+        Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
+    {
+        let mut timing = RenderSectionSyncTiming::default();
+
+        let accept_start = Instant::now();
+        let completed_results = compiler.try_recv_completed()?;
+        let pending_compile_jobs = compiler.pending_job_count();
+        let mut cache_update = self
+            .engine
+            .drain_completed_compile_updates_with_acceptance_budget(
+                completed_results,
+                |_| 0,
+                pending_compile_jobs,
+                completed_result_accept_budget,
+            )?;
+        timing.completed_result_accept_ms = elapsed_ms(accept_start.elapsed());
+
+        if cache_update.queued_completed_compile_result_count > 0 {
+            cache_update.pending_compile_jobs = compiler.pending_job_count();
+            return Ok(TimedRenderSectionCacheUpdate {
+                cache_update,
+                timing,
+            });
+        }
+
+        let seed_start = Instant::now();
+        self.engine.mark_loaded_chunks_dirty_when_cache_empty();
+        timing.dirty_seed_ms = elapsed_ms(seed_start.elapsed());
+
+        if self.engine.render_session().dirty_work_is_empty() {
+            cache_update.pending_compile_jobs = compiler.pending_job_count();
+            return Ok(TimedRenderSectionCacheUpdate {
+                cache_update,
+                timing,
+            });
+        }
+
+        let prepare_start = Instant::now();
+        let sync_update = self.engine.prepare_sync_update(
+            |dirty_work| {
+                sort_chunk_positions_by_distance(
+                    dirty_work.loaded_dirty_chunks.iter().copied(),
+                    camera_position,
+                )
+            },
+            |dirty_work| {
+                sort_dirty_section_chunks_by_distance(
+                    &dirty_work.loaded_dirty_sections_by_chunk,
+                    camera_position,
+                )
+            },
+            chunk_budget,
+            |client, key| render_section_neighbor_readiness(client, key, camera_position),
+            RenderSectionRemovalMode::ApplyImmediately,
+        );
+        timing.prepare_ms = elapsed_ms(prepare_start.elapsed());
+        cache_update.merge(sync_update.cache_update);
+
+        if chunk_budget == 0 || !compiler.has_pending_job_capacity() {
+            cache_update.pending_compile_jobs = compiler.pending_job_count();
+            return Ok(TimedRenderSectionCacheUpdate {
+                cache_update,
+                timing,
+            });
+        }
+
+        let submit_start = Instant::now();
+        let sync_plan = sync_update.sync_plan;
+        let snapshots = snapshots_for_submit(self.client(), compiler);
+        let submission_update = self.engine.submit_prepared_sync_plan(
+            &sync_plan,
+            snapshots,
+            |_sync_plan, request| compiler.submit(request),
+        )?;
+        cache_update.merge(submission_update.cache_update);
+        cache_update.pending_compile_jobs = compiler.pending_job_count();
+        timing.submit_ms = elapsed_ms(submit_start.elapsed());
+
+        Ok(TimedRenderSectionCacheUpdate {
+            cache_update,
+            timing,
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn sync_render_sections_until_deadline<C, Snapshots>(
         &mut self,
         compiler: &mut C,
@@ -791,13 +916,14 @@ impl SingleViewRuntime {
         C: RenderSectionCompiler,
         Snapshots: FnMut(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
-        self.sync_render_sections_until_deadline_with_completed_result_acceptance(
+        self.sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
             compiler,
             camera_position,
             deadline,
             None,
             snapshots_for_submit,
         )
+        .map(|timed| timed.cache_update)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -807,13 +933,40 @@ impl SingleViewRuntime {
         camera_position: Vec3,
         deadline: Instant,
         completed_result_accept_budget: Option<usize>,
-        mut snapshots_for_submit: Snapshots,
+        snapshots_for_submit: Snapshots,
     ) -> Result<RenderSectionCacheUpdate>
     where
         C: RenderSectionCompiler,
         Snapshots: FnMut(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
+        self.sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+            compiler,
+            camera_position,
+            deadline,
+            completed_result_accept_budget,
+            snapshots_for_submit,
+        )
+        .map(|timed| timed.cache_update)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn sync_render_sections_until_deadline_with_completed_result_acceptance_timed<
+        C,
+        Snapshots,
+    >(
+        &mut self,
+        compiler: &mut C,
+        camera_position: Vec3,
+        deadline: Instant,
+        completed_result_accept_budget: Option<usize>,
+        mut snapshots_for_submit: Snapshots,
+    ) -> Result<TimedRenderSectionCacheUpdate>
+    where
+        C: RenderSectionCompiler,
+        Snapshots: FnMut(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
+    {
         let mut combined = RenderSectionCacheUpdate::default();
+        let mut combined_timing = RenderSectionSyncTiming::default();
         let mut submitted_request_count = 0_usize;
         let mut admission_total = Duration::ZERO;
         let mut remaining_result_accept_budget = completed_result_accept_budget;
@@ -830,18 +983,24 @@ impl SingleViewRuntime {
                         combined.deadline_skipped_compile_request_count += 1;
                     }
                     combined.pending_compile_jobs = compiler.pending_job_count();
-                    return Ok(combined);
+                    return Ok(TimedRenderSectionCacheUpdate {
+                        cache_update: combined,
+                        timing: combined_timing,
+                    });
                 }
             }
 
             let admission_start = Instant::now();
-            let update = self.sync_render_sections_with_budget_and_completed_result_acceptance(
-                compiler,
-                camera_position,
-                DEFAULT_RENDER_CHUNK_MESH_BUDGET,
-                remaining_result_accept_budget,
-                |client, compiler| snapshots_for_submit(client, compiler),
-            )?;
+            let timed_update = self
+                .sync_render_sections_with_budget_and_completed_result_acceptance_timed(
+                    compiler,
+                    camera_position,
+                    DEFAULT_RENDER_CHUNK_MESH_BUDGET,
+                    remaining_result_accept_budget,
+                    |client, compiler| snapshots_for_submit(client, compiler),
+                )?;
+            let update = timed_update.cache_update;
+            combined_timing.merge(timed_update.timing);
             if let Some(remaining) = remaining_result_accept_budget.as_mut() {
                 *remaining = remaining.saturating_sub(update.accepted_compile_result_count);
             }
@@ -862,18 +1021,27 @@ impl SingleViewRuntime {
                 && !self.has_ready_pending_render_work(camera_position)
             {
                 combined.pending_compile_jobs = 0;
-                return Ok(combined);
+                return Ok(TimedRenderSectionCacheUpdate {
+                    cache_update: combined,
+                    timing: combined_timing,
+                });
             }
             if !compiler.has_pending_job_capacity() || !progressed {
                 combined.pending_compile_jobs = compiler.pending_job_count();
-                return Ok(combined);
+                return Ok(TimedRenderSectionCacheUpdate {
+                    cache_update: combined,
+                    timing: combined_timing,
+                });
             }
             if submitted_request_count > 0 && Instant::now() >= deadline {
                 if self.has_ready_pending_render_work(camera_position) {
                     combined.deadline_skipped_compile_request_count += 1;
                 }
                 combined.pending_compile_jobs = compiler.pending_job_count();
-                return Ok(combined);
+                return Ok(TimedRenderSectionCacheUpdate {
+                    cache_update: combined,
+                    timing: combined_timing,
+                });
             }
         }
     }

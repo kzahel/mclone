@@ -3202,8 +3202,16 @@ mod android {
         terrain_runtime_upload_ms: f64,
         terrain_runtime_poll_ms: f64,
         terrain_runtime_sync_ms: f64,
+        terrain_runtime_result_accept_ms: f64,
+        terrain_runtime_dirty_seed_ms: f64,
+        terrain_runtime_prepare_ms: f64,
+        terrain_runtime_submit_ms: f64,
         terrain_runtime_gpu_upload_ms: f64,
+        terrain_runtime_upload_enqueue_ms: f64,
+        terrain_runtime_upload_select_ms: f64,
+        terrain_runtime_upload_apply_ms: f64,
         terrain_runtime_ready_sections_ms: f64,
+        terrain_runtime_ready_publish_ms: f64,
         terrain_shared_records_ms: f64,
         terrain_record_cache_prepare: TexturedSectionRecordPrepareStats,
         terrain_left_eye_ms: f64,
@@ -3807,6 +3815,21 @@ mod android {
                 self.max_render.terrain_stereo_poll_wait_ms
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_TERRAIN_RUNTIME max_runtime_poll_ms={:.3} max_runtime_sync_ms={:.3} max_runtime_result_accept_ms={:.3} max_runtime_dirty_seed_ms={:.3} max_runtime_prepare_ms={:.3} max_runtime_submit_ms={:.3} max_runtime_gpu_upload_ms={:.3} max_runtime_upload_enqueue_ms={:.3} max_runtime_upload_select_ms={:.3} max_runtime_upload_apply_ms={:.3} max_runtime_ready_sections_ms={:.3} max_runtime_ready_publish_ms={:.3}",
+                self.max_render.terrain_runtime_poll_ms,
+                self.max_render.terrain_runtime_sync_ms,
+                self.max_render.terrain_runtime_result_accept_ms,
+                self.max_render.terrain_runtime_dirty_seed_ms,
+                self.max_render.terrain_runtime_prepare_ms,
+                self.max_render.terrain_runtime_submit_ms,
+                self.max_render.terrain_runtime_gpu_upload_ms,
+                self.max_render.terrain_runtime_upload_enqueue_ms,
+                self.max_render.terrain_runtime_upload_select_ms,
+                self.max_render.terrain_runtime_upload_apply_ms,
+                self.max_render.terrain_runtime_ready_sections_ms,
+                self.max_render.terrain_runtime_ready_publish_ms
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_TERRAIN_PREP max_terrain_left_eye_cull_ms={:.3} max_terrain_left_eye_uniform_write_ms={:.3} max_terrain_left_eye_translucent_collect_ms={:.3} max_terrain_left_eye_translucent_sort_ms={:.3} max_terrain_right_eye_cull_ms={:.3} max_terrain_right_eye_uniform_write_ms={:.3} max_terrain_right_eye_translucent_collect_ms={:.3} max_terrain_right_eye_translucent_sort_ms={:.3}",
                 self.max_render.terrain_left_eye_cull_ms,
                 self.max_render.terrain_left_eye_uniform_write_ms,
@@ -4025,12 +4048,34 @@ mod android {
             terrain_runtime_upload_ms: a.terrain_runtime_upload_ms.max(b.terrain_runtime_upload_ms),
             terrain_runtime_poll_ms: a.terrain_runtime_poll_ms.max(b.terrain_runtime_poll_ms),
             terrain_runtime_sync_ms: a.terrain_runtime_sync_ms.max(b.terrain_runtime_sync_ms),
+            terrain_runtime_result_accept_ms: a
+                .terrain_runtime_result_accept_ms
+                .max(b.terrain_runtime_result_accept_ms),
+            terrain_runtime_dirty_seed_ms: a
+                .terrain_runtime_dirty_seed_ms
+                .max(b.terrain_runtime_dirty_seed_ms),
+            terrain_runtime_prepare_ms: a
+                .terrain_runtime_prepare_ms
+                .max(b.terrain_runtime_prepare_ms),
+            terrain_runtime_submit_ms: a.terrain_runtime_submit_ms.max(b.terrain_runtime_submit_ms),
             terrain_runtime_gpu_upload_ms: a
                 .terrain_runtime_gpu_upload_ms
                 .max(b.terrain_runtime_gpu_upload_ms),
+            terrain_runtime_upload_enqueue_ms: a
+                .terrain_runtime_upload_enqueue_ms
+                .max(b.terrain_runtime_upload_enqueue_ms),
+            terrain_runtime_upload_select_ms: a
+                .terrain_runtime_upload_select_ms
+                .max(b.terrain_runtime_upload_select_ms),
+            terrain_runtime_upload_apply_ms: a
+                .terrain_runtime_upload_apply_ms
+                .max(b.terrain_runtime_upload_apply_ms),
             terrain_runtime_ready_sections_ms: a
                 .terrain_runtime_ready_sections_ms
                 .max(b.terrain_runtime_ready_sections_ms),
+            terrain_runtime_ready_publish_ms: a
+                .terrain_runtime_ready_publish_ms
+                .max(b.terrain_runtime_ready_publish_ms),
             terrain_shared_records_ms: a.terrain_shared_records_ms.max(b.terrain_shared_records_ms),
             terrain_record_cache_prepare: max_record_prepare_stats(
                 a.terrain_record_cache_prepare,
@@ -4596,8 +4641,16 @@ mod android {
         timing.terrain_runtime_upload_ms = scene_timing.runtime_upload_ms;
         timing.terrain_runtime_poll_ms = scene_timing.runtime_poll_ms;
         timing.terrain_runtime_sync_ms = scene_timing.runtime_sync_ms;
+        timing.terrain_runtime_result_accept_ms = scene_timing.runtime_result_accept_ms;
+        timing.terrain_runtime_dirty_seed_ms = scene_timing.runtime_dirty_seed_ms;
+        timing.terrain_runtime_prepare_ms = scene_timing.runtime_prepare_ms;
+        timing.terrain_runtime_submit_ms = scene_timing.runtime_submit_ms;
         timing.terrain_runtime_gpu_upload_ms = scene_timing.runtime_gpu_upload_ms;
+        timing.terrain_runtime_upload_enqueue_ms = scene_timing.runtime_upload_enqueue_ms;
+        timing.terrain_runtime_upload_select_ms = scene_timing.runtime_upload_select_ms;
+        timing.terrain_runtime_upload_apply_ms = scene_timing.runtime_upload_apply_ms;
         timing.terrain_runtime_ready_sections_ms = scene_timing.runtime_ready_sections_ms;
+        timing.terrain_runtime_ready_publish_ms = scene_timing.runtime_ready_publish_ms;
         timing.terrain_shared_records_ms = scene_timing.shared_records_ms;
         timing.terrain_record_cache_prepare = scene_timing.record_cache_prepare;
         timing.terrain_left_eye_ms = scene_timing.left_eye_ms;

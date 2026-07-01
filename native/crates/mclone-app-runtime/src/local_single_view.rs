@@ -31,7 +31,7 @@ use crate::session::{
 use crate::{
     DEFAULT_RENDER_CHUNK_MESH_BUDGET, RuntimePollDiagnostics, RuntimePollTiming,
     RuntimeUpdateApplyReport, SingleViewRuntime, SingleViewRuntimeStats,
-    chunk_tracking_radius_for_render_distance, elapsed_ms,
+    TimedRenderSectionCacheUpdate, chunk_tracking_radius_for_render_distance, elapsed_ms,
     loading_progress_overlay_from_diagnostics, view_readiness_overlay_from_diagnostics,
 };
 
@@ -455,6 +455,22 @@ impl LocalSingleViewSceneRuntime {
             )
     }
 
+    pub fn sync_render_sections_with_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        let render_compile_worker = &mut self.render_compile_worker;
+        self.core
+            .sync_render_sections_with_budget_and_completed_result_acceptance_timed(
+                render_compile_worker,
+                camera_position,
+                DEFAULT_RENDER_CHUNK_MESH_BUDGET,
+                completed_result_accept_budget,
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
+    }
+
     pub fn sync_render_sections_until_deadline(
         &mut self,
         camera_position: Vec3,
@@ -478,6 +494,23 @@ impl LocalSingleViewSceneRuntime {
         let render_compile_worker = &mut self.render_compile_worker;
         self.core
             .sync_render_sections_until_deadline_with_completed_result_acceptance(
+                render_compile_worker,
+                camera_position,
+                deadline,
+                completed_result_accept_budget,
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
+    }
+
+    pub fn sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        let render_compile_worker = &mut self.render_compile_worker;
+        self.core
+            .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
                 render_compile_worker,
                 camera_position,
                 deadline,
@@ -589,6 +622,25 @@ where
         match self {
             Self::Local(_) => SingleViewHostMode::LocalIntegrated,
             Self::RemoteDedicated(_) => SingleViewHostMode::RemoteDedicated,
+        }
+    }
+
+    pub fn sync_render_sections_with_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        match self {
+            Self::Local(scene) => scene
+                .sync_render_sections_with_completed_result_acceptance_timed(
+                    camera_position,
+                    completed_result_accept_budget,
+                ),
+            Self::RemoteDedicated(scene) => scene
+                .sync_render_sections_with_completed_result_acceptance_timed(
+                    camera_position,
+                    completed_result_accept_budget,
+                ),
         }
     }
 
@@ -770,6 +822,28 @@ where
                 ),
             Self::RemoteDedicated(scene) => scene
                 .sync_render_sections_until_deadline_with_completed_result_acceptance(
+                    camera_position,
+                    deadline,
+                    completed_result_accept_budget,
+                ),
+        }
+    }
+
+    pub fn sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        match self {
+            Self::Local(scene) => scene
+                .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+                    camera_position,
+                    deadline,
+                    completed_result_accept_budget,
+                ),
+            Self::RemoteDedicated(scene) => scene
+                .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
                     camera_position,
                     deadline,
                     completed_result_accept_budget,
@@ -1137,6 +1211,21 @@ where
             )
     }
 
+    pub fn sync_render_sections_with_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        self.core
+            .sync_render_sections_with_budget_and_completed_result_acceptance_timed(
+                &mut self.render_compile_worker,
+                camera_position,
+                DEFAULT_RENDER_CHUNK_MESH_BUDGET,
+                completed_result_accept_budget,
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
+    }
+
     pub fn sync_render_sections_until_deadline(
         &mut self,
         camera_position: Vec3,
@@ -1158,6 +1247,22 @@ where
     ) -> Result<RenderSectionCacheUpdate> {
         self.core
             .sync_render_sections_until_deadline_with_completed_result_acceptance(
+                &mut self.render_compile_worker,
+                camera_position,
+                deadline,
+                completed_result_accept_budget,
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
+    }
+
+    pub fn sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+        completed_result_accept_budget: Option<usize>,
+    ) -> Result<TimedRenderSectionCacheUpdate> {
+        self.core
+            .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
                 &mut self.render_compile_worker,
                 camera_position,
                 deadline,
