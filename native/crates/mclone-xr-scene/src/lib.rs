@@ -81,6 +81,7 @@ pub const XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND: f64 = 1.6;
 /// radial dead-zone cross-talk from nudging the player up/down while turning.
 pub const XR_JOYPAD_VERTICAL_THRESHOLD: f32 = 0.5;
 pub const XR_LOCOMOTION_MAX_FRAME_SECONDS: f64 = 0.1;
+pub const XR_AUTOMATED_ORBIT_RADIUS_BLOCKS: f64 = 16.0;
 pub const XR_MENU_TOGGLE_HAND: XrHand = XrHand::Left;
 pub const XR_UI_FPS_CAP: u32 = 90;
 pub const XR_MENU_PANEL_PIXELS: [u32; 2] = [1024, 576];
@@ -2132,6 +2133,41 @@ where
         self.camera.apply_movement_input(runtime.client(), input);
         self.commit_engine_camera_player_pose()
             .context("sync XR automated flight player pose")?;
+        Ok(())
+    }
+
+    pub fn apply_automated_orbit_input(
+        &mut self,
+        speed_blocks_per_second: f64,
+        elapsed_seconds: f64,
+    ) -> Result<()> {
+        self.latest_controllers.clear();
+        if self.local_startup.is_some() || self.runtime.is_none() {
+            return Ok(());
+        }
+        self.ui.close();
+        self.ui.clear_input();
+        self.menu_pointer_down = false;
+        self.gameplay_interaction_buttons = XrGameplayInteractionButtons::default();
+        self.menu_panel_pose = None;
+        self.menu_panel_anchor = XrUiPanelAnchor::Head;
+        self.menu_panel_recenter_pending = false;
+        self.head_comfort.reset();
+        let now = Instant::now();
+        let dt_seconds = self
+            .last_locomotion_update
+            .replace(now)
+            .map(|last| now.duration_since(last).as_secs_f64())
+            .unwrap_or(0.0);
+        self.camera
+            .set_movement_mode(EngineCameraMovementMode::NoClip);
+        self.camera
+            .set_speed_blocks_per_second(speed_blocks_per_second);
+        let input = xr_automated_orbit_input(dt_seconds, speed_blocks_per_second, elapsed_seconds);
+        let runtime = self.runtime.as_ref().expect("runtime presence checked");
+        self.camera.apply_movement_input(runtime.client(), input);
+        self.commit_engine_camera_player_pose()
+            .context("sync XR automated orbit player pose")?;
         Ok(())
     }
 
@@ -4450,6 +4486,27 @@ pub fn xr_automated_flight_input(
     }
 }
 
+pub fn xr_automated_orbit_input(
+    dt_seconds: f64,
+    speed_blocks_per_second: f64,
+    elapsed_seconds: f64,
+) -> EngineCameraInput {
+    let angular_speed = if speed_blocks_per_second.is_finite()
+        && speed_blocks_per_second > 0.0
+        && XR_AUTOMATED_ORBIT_RADIUS_BLOCKS > 0.0
+    {
+        speed_blocks_per_second / XR_AUTOMATED_ORBIT_RADIUS_BLOCKS
+    } else {
+        0.0
+    };
+    let yaw = if elapsed_seconds.is_finite() {
+        (elapsed_seconds.max(0.0) * angular_speed).rem_euclid(std::f64::consts::TAU)
+    } else {
+        0.0
+    };
+    xr_automated_flight_input(dt_seconds, Some(yaw))
+}
+
 fn game_movement_mode(mode: EngineCameraMovementMode) -> GameMovementMode {
     match mode {
         EngineCameraMovementMode::Walking => GameMovementMode::Walk,
@@ -5233,6 +5290,22 @@ mod tests {
             Some(EngineCameraMovementImpulse::new(0.0, 1.0))
         );
         assert_eq!(input.movement_yaw_radians, Some(0.25));
+        assert!(!input.jump);
+        assert!(!input.descend);
+    }
+
+    #[test]
+    fn xr_automated_orbit_advances_heading_by_speed_and_radius() {
+        let elapsed = std::f64::consts::PI * XR_AUTOMATED_ORBIT_RADIUS_BLOCKS / 4.0;
+        let input = xr_automated_orbit_input(1.0 / 72.0, 4.0, elapsed);
+
+        assert_eq!(input.dt_seconds, 1.0 / 72.0);
+        assert_eq!(
+            input.movement_impulse,
+            Some(EngineCameraMovementImpulse::new(0.0, 1.0))
+        );
+        let yaw = input.movement_yaw_radians.expect("orbit yaw");
+        assert!((yaw - std::f64::consts::PI).abs() < 1.0e-9);
         assert!(!input.jump);
         assert!(!input.descend);
     }

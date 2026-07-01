@@ -41,6 +41,8 @@ SESSION_SMOKE="${MCLONE_ANDROID_XR_SESSION_SMOKE:-}"
 PERF_SECONDS="${MCLONE_ANDROID_XR_PERF_SECONDS:-}"
 PERF_FLIGHT="${MCLONE_ANDROID_XR_PERF_FLIGHT:-0}"
 PERF_FLIGHT_SPEED="${MCLONE_ANDROID_XR_PERF_FLIGHT_SPEED:-}"
+PERF_SETTLED_ORBIT="${MCLONE_ANDROID_XR_PERF_SETTLED_ORBIT:-0}"
+PERF_ORBIT_SPEED="${MCLONE_ANDROID_XR_PERF_ORBIT_SPEED:-}"
 PERF_SETTLED_STATIONARY="${MCLONE_ANDROID_XR_PERF_SETTLED_STATIONARY:-0}"
 PERF_FROZEN_RENDER="${MCLONE_ANDROID_XR_PERF_FROZEN_RENDER:-0}"
 PERF_METRICS="${MCLONE_ANDROID_XR_PERF_METRICS:-0}"
@@ -130,6 +132,13 @@ Options:
   --perf-flight-speed N
                      Flight speed in blocks/second. Implies --perf-flight.
                      Default: 4.3.
+  --perf-settled-orbit
+                     Start the timed sample only after the settled gate, then
+                     move in a local no-clip orbit around the settled chunk
+                     cluster to exercise streaming with a populated scene.
+  --perf-orbit-speed N
+                     Orbit speed in blocks/second. Implies
+                     --perf-settled-orbit. Default: 4.3.
   --perf-settled-stationary
                      During --perf-seconds, disable locomotion and start the
                      timed sample only after terrain generation, render
@@ -501,6 +510,16 @@ while [[ $# -gt 0 ]]; do
             PERF_FLIGHT_SPEED="$2"
             shift 2
             ;;
+        --perf-settled-orbit)
+            PERF_SETTLED_ORBIT=1
+            shift
+            ;;
+        --perf-orbit-speed)
+            require_arg "$1" "${2:-}"
+            PERF_SETTLED_ORBIT=1
+            PERF_ORBIT_SPEED="$2"
+            shift 2
+            ;;
         --perf-settled-stationary)
             PERF_SETTLED_STATIONARY=1
             shift
@@ -626,7 +645,7 @@ if [[ "$MULTIVIEW_PROOF" == "1" ]]; then
     if [[ -n "$SESSION_SMOKE" ]]; then
         mclone_die "--multiview-proof cannot be combined with --session-smoke"
     fi
-    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
+    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
         mclone_die "--multiview-proof cannot be combined with performance probes"
     fi
 fi
@@ -640,7 +659,7 @@ if [[ "$TERRAIN_MULTIVIEW_PROOF" == "1" ]]; then
     if [[ -n "$SESSION_SMOKE" ]]; then
         mclone_die "--terrain-multiview-proof cannot be combined with --session-smoke"
     fi
-    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
+    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
         mclone_die "--terrain-multiview-proof cannot be combined with performance probes"
     fi
 fi
@@ -657,7 +676,7 @@ if [[ "$TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
     if [[ -n "$SESSION_SMOKE" ]]; then
         mclone_die "--terrain-multiview-perf cannot be combined with --session-smoke"
     fi
-    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
+    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
         mclone_die "--terrain-multiview-perf cannot be combined with frame performance probes"
     fi
 fi
@@ -674,7 +693,7 @@ if [[ "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
     if [[ -n "$SESSION_SMOKE" ]]; then
         mclone_die "--sky-terrain-multiview-perf cannot be combined with --session-smoke"
     fi
-    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
+    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
         mclone_die "--sky-terrain-multiview-perf cannot be combined with frame performance probes"
     fi
 fi
@@ -688,7 +707,7 @@ if [[ "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
     if [[ -n "$SESSION_SMOKE" ]]; then
         mclone_die "--sky-terrain-actors-multiview-perf cannot be combined with --session-smoke"
     fi
-    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
+    if [[ -n "$PERF_SECONDS" || "$PERF_FLIGHT" == "1" || "$PERF_SETTLED_ORBIT" == "1" || "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_FROZEN_RENDER" == "1" || "$PERF_METRICS" == "1" ]]; then
         mclone_die "--sky-terrain-actors-multiview-perf cannot be combined with frame performance probes"
     fi
 fi
@@ -743,7 +762,7 @@ if [[ -n "$PERF_SECONDS" ]]; then
         mclone_die "--perf-seconds cannot be combined with --session-smoke in the first perf probe"
     fi
     if [[ -z "$WAIT_SECONDS_EXPLICIT" ]]; then
-        if [[ "$PERF_SETTLED_STATIONARY" == "1" ]]; then
+        if [[ "$PERF_SETTLED_STATIONARY" == "1" || "$PERF_SETTLED_ORBIT" == "1" ]]; then
             WAIT_SECONDS=$((10#$PERF_SECONDS + 180))
         else
             WAIT_SECONDS=$((10#$PERF_SECONDS + 30))
@@ -753,11 +772,20 @@ fi
 if [[ "$PERF_FLIGHT" == "1" && -z "$PERF_SECONDS" ]]; then
     mclone_die "--perf-flight requires --perf-seconds"
 fi
+if [[ "$PERF_SETTLED_ORBIT" == "1" && -z "$PERF_SECONDS" ]]; then
+    mclone_die "--perf-settled-orbit requires --perf-seconds"
+fi
 if [[ "$PERF_SETTLED_STATIONARY" == "1" && -z "$PERF_SECONDS" ]]; then
     mclone_die "--perf-settled-stationary requires --perf-seconds"
 fi
 if [[ "$PERF_SETTLED_STATIONARY" == "1" && "$PERF_FLIGHT" == "1" ]]; then
     mclone_die "--perf-settled-stationary cannot be combined with --perf-flight"
+fi
+if [[ "$PERF_SETTLED_ORBIT" == "1" && "$PERF_FLIGHT" == "1" ]]; then
+    mclone_die "--perf-settled-orbit cannot be combined with --perf-flight"
+fi
+if [[ "$PERF_SETTLED_ORBIT" == "1" && "$PERF_SETTLED_STATIONARY" == "1" ]]; then
+    mclone_die "--perf-settled-orbit cannot be combined with --perf-settled-stationary"
 fi
 if [[ "$PERF_FROZEN_RENDER" == "1" && -z "$PERF_SECONDS" ]]; then
     mclone_die "--perf-frozen-render requires --perf-seconds"
@@ -770,6 +798,9 @@ if [[ "$PERF_FROZEN_RENDER" == "1" && "$START_VIEW_POSE" == "0" ]]; then
 fi
 if [[ -n "$PERF_FLIGHT_SPEED" ]]; then
     validate_positive_number "--perf-flight-speed" "$PERF_FLIGHT_SPEED"
+fi
+if [[ -n "$PERF_ORBIT_SPEED" ]]; then
+    validate_positive_number "--perf-orbit-speed" "$PERF_ORBIT_SPEED"
 fi
 
 cd "$REPO_ROOT"
@@ -832,6 +863,12 @@ if [[ "$PERF_FLIGHT" == "1" ]]; then
     STARTUP_ARGV+=(--perf-flight)
     if [[ -n "$PERF_FLIGHT_SPEED" ]]; then
         STARTUP_ARGV+=(--perf-flight-speed "$PERF_FLIGHT_SPEED")
+    fi
+fi
+if [[ "$PERF_SETTLED_ORBIT" == "1" ]]; then
+    STARTUP_ARGV+=(--perf-settled-orbit)
+    if [[ -n "$PERF_ORBIT_SPEED" ]]; then
+        STARTUP_ARGV+=(--perf-orbit-speed "$PERF_ORBIT_SPEED")
     fi
 fi
 if [[ "$PERF_SETTLED_STATIONARY" == "1" ]]; then
@@ -1106,6 +1143,17 @@ if [[ -n "$PERF_SECONDS" ]]; then
         fi
         if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*mode=flight .*flight_distance_blocks=" "$LOG_PATH" >/dev/null 2>&1; then
             mclone_die "Android XR perf flight summary marker was not seen; see $LOG_PATH"
+        fi
+    fi
+    if [[ "$PERF_SETTLED_ORBIT" == "1" ]]; then
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_SETTLED .*mode=settled-orbit" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR perf settled orbit marker was not seen; see $LOG_PATH"
+        fi
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_START .*mode=settled-orbit .*settle_seconds=" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR perf settled orbit start marker was not seen; see $LOG_PATH"
+        fi
+        if ! grep -E "MCLONE_ANDROID_XR_PERF_SUMMARY .*mode=settled-orbit .*settle_seconds=" "$LOG_PATH" >/dev/null 2>&1; then
+            mclone_die "Android XR perf settled orbit summary marker was not seen; see $LOG_PATH"
         fi
     fi
     if [[ "$PERF_SETTLED_STATIONARY" == "1" ]]; then

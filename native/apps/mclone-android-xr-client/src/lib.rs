@@ -233,6 +233,7 @@ mod android {
         session_smoke: Option<AndroidXrSessionSmoke>,
         perf_seconds: Option<u64>,
         perf_flight: Option<AndroidXrPerfFlight>,
+        perf_settled_orbit: Option<AndroidXrPerfOrbit>,
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
@@ -260,6 +261,7 @@ mod android {
                 session_smoke: None,
                 perf_seconds: None,
                 perf_flight: None,
+                perf_settled_orbit: None,
                 perf_settled_stationary: false,
                 perf_frozen_render: false,
                 perf_metrics: false,
@@ -366,6 +368,11 @@ mod android {
         speed_blocks_per_second: f64,
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct AndroidXrPerfOrbit {
+        speed_blocks_per_second: f64,
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum AndroidXrSessionSmoke {
         NewWorld,
@@ -433,7 +440,27 @@ mod android {
                 "--perf-flight-speed" => {
                     let speed = parse_next::<f64>(&mut argv, "--perf-flight-speed")?;
                     options.perf_flight = Some(AndroidXrPerfFlight {
-                        speed_blocks_per_second: validate_perf_flight_speed(speed)?,
+                        speed_blocks_per_second: validate_perf_motion_speed(
+                            "--perf-flight-speed",
+                            speed,
+                        )?,
+                    });
+                }
+                "--perf-settled-orbit" => {
+                    if options.perf_settled_orbit.is_none() {
+                        options.perf_settled_orbit = Some(AndroidXrPerfOrbit {
+                            speed_blocks_per_second:
+                                ANDROID_XR_PERF_DEFAULT_FLIGHT_SPEED_BLOCKS_PER_SECOND,
+                        });
+                    }
+                }
+                "--perf-orbit-speed" => {
+                    let speed = parse_next::<f64>(&mut argv, "--perf-orbit-speed")?;
+                    options.perf_settled_orbit = Some(AndroidXrPerfOrbit {
+                        speed_blocks_per_second: validate_perf_motion_speed(
+                            "--perf-orbit-speed",
+                            speed,
+                        )?,
                     });
                 }
                 "--perf-settled-stationary" => {
@@ -510,11 +537,20 @@ mod android {
         if options.perf_flight.is_some() && options.perf_seconds.is_none() {
             bail!("--perf-flight requires --perf-seconds");
         }
+        if options.perf_settled_orbit.is_some() && options.perf_seconds.is_none() {
+            bail!("--perf-settled-orbit requires --perf-seconds");
+        }
         if options.perf_settled_stationary && options.perf_seconds.is_none() {
             bail!("--perf-settled-stationary requires --perf-seconds");
         }
         if options.perf_settled_stationary && options.perf_flight.is_some() {
             bail!("--perf-settled-stationary cannot be combined with --perf-flight");
+        }
+        if options.perf_settled_orbit.is_some() && options.perf_flight.is_some() {
+            bail!("--perf-settled-orbit cannot be combined with --perf-flight");
+        }
+        if options.perf_settled_orbit.is_some() && options.perf_settled_stationary {
+            bail!("--perf-settled-orbit cannot be combined with --perf-settled-stationary");
         }
         if options.perf_frozen_render && options.perf_seconds.is_none() {
             bail!("--perf-frozen-render requires --perf-seconds");
@@ -604,6 +640,7 @@ mod android {
             }
             if options.perf_seconds.is_some()
                 || options.perf_flight.is_some()
+                || options.perf_settled_orbit.is_some()
                 || options.perf_settled_stationary
                 || options.perf_frozen_render
                 || options.perf_metrics
@@ -643,9 +680,9 @@ mod android {
         }
     }
 
-    fn validate_perf_flight_speed(speed_blocks_per_second: f64) -> Result<f64> {
+    fn validate_perf_motion_speed(flag: &str, speed_blocks_per_second: f64) -> Result<f64> {
         if !speed_blocks_per_second.is_finite() || speed_blocks_per_second <= 0.0 {
-            bail!("--perf-flight-speed must be a finite positive number");
+            bail!("{flag} must be a finite positive number");
         }
         Ok(speed_blocks_per_second)
     }
@@ -851,6 +888,14 @@ mod android {
         } else {
             log::info!("Android XR performance flight: <none>");
         }
+        if let Some(orbit) = startup_options.perf_settled_orbit {
+            log::info!(
+                "Android XR performance settled orbit: speed={:.3} blocks/s",
+                orbit.speed_blocks_per_second
+            );
+        } else {
+            log::info!("Android XR performance settled orbit: <none>");
+        }
         log::info!(
             "Android XR performance settled stationary: {}",
             startup_options.perf_settled_stationary
@@ -947,6 +992,7 @@ mod android {
             startup_options.session_smoke,
             startup_options.perf_seconds,
             startup_options.perf_flight,
+            startup_options.perf_settled_orbit,
             startup_options.perf_settled_stationary,
             startup_options.perf_frozen_render,
             startup_options.perf_metrics,
@@ -979,6 +1025,7 @@ mod android {
         session_smoke: Option<AndroidXrSessionSmoke>,
         perf_seconds: Option<u64>,
         perf_flight: Option<AndroidXrPerfFlight>,
+        perf_settled_orbit: Option<AndroidXrPerfOrbit>,
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
@@ -1402,6 +1449,7 @@ mod android {
                 session_smoke,
                 perf_seconds,
                 perf_flight,
+                perf_settled_orbit,
                 perf_settled_stationary,
                 perf_frozen_render,
                 perf_metrics,
@@ -1508,6 +1556,7 @@ mod android {
             session_smoke,
             perf_seconds,
             perf_flight,
+            perf_settled_orbit,
             perf_settled_stationary,
             perf_frozen_render,
             perf_metrics,
@@ -2654,6 +2703,7 @@ mod android {
         session_smoke: Option<AndroidXrSessionSmoke>,
         perf_seconds: Option<u64>,
         perf_flight: Option<AndroidXrPerfFlight>,
+        perf_settled_orbit: Option<AndroidXrPerfOrbit>,
         perf_settled_stationary: bool,
         perf_frozen_render: bool,
         perf_metrics: bool,
@@ -2672,6 +2722,7 @@ mod android {
         let mut perf_probe = AndroidXrPerfProbe::new(
             perf_seconds,
             perf_flight,
+            perf_settled_orbit,
             perf_settled_stationary,
             perf_frozen_render,
             render_distance,
@@ -3032,6 +3083,10 @@ mod android {
     #[derive(Clone, Copy, Debug, PartialEq)]
     enum AndroidXrPerfAutomation {
         Flight { speed_blocks_per_second: f64 },
+        Orbit {
+            speed_blocks_per_second: f64,
+            elapsed_seconds: f64,
+        },
         Stationary { frozen_render: bool },
     }
 
@@ -3092,6 +3147,7 @@ mod android {
     struct AndroidXrPerfProbe {
         requested_seconds: Option<u64>,
         flight: Option<AndroidXrPerfFlight>,
+        settled_orbit: Option<AndroidXrPerfOrbit>,
         settled_stationary: bool,
         frozen_render: bool,
         render_distance: u32,
@@ -3113,6 +3169,7 @@ mod android {
         fn new(
             requested_seconds: Option<u64>,
             flight: Option<AndroidXrPerfFlight>,
+            settled_orbit: Option<AndroidXrPerfOrbit>,
             settled_stationary: bool,
             frozen_render: bool,
             render_distance: u32,
@@ -3131,6 +3188,7 @@ mod android {
             Self {
                 requested_seconds,
                 flight,
+                settled_orbit,
                 settled_stationary,
                 frozen_render,
                 render_distance,
@@ -3150,7 +3208,14 @@ mod android {
         }
 
         fn automation(&self) -> Option<AndroidXrPerfAutomation> {
-            if self.settled_stationary && self.requested_seconds.is_some() && !self.completed {
+            let needs_settle = self.settled_stationary || self.settled_orbit.is_some();
+            if needs_settle && self.requested_seconds.is_some() && !self.completed {
+                if let (Some(active), Some(orbit)) = (self.active.as_ref(), self.settled_orbit) {
+                    return Some(AndroidXrPerfAutomation::Orbit {
+                        speed_blocks_per_second: orbit.speed_blocks_per_second,
+                        elapsed_seconds: active.started.elapsed().as_secs_f64(),
+                    });
+                }
                 return Some(AndroidXrPerfAutomation::Stationary {
                     frozen_render: self.frozen_render && self.active.is_some(),
                 });
@@ -3175,22 +3240,28 @@ mod android {
             if self.completed || self.active.is_some() {
                 return false;
             }
-            if self.settled_stationary && !self.record_settle_frame(rendered.summary) {
-                return false;
-            }
+            let needs_settle = self.settled_stationary || self.settled_orbit.is_some();
             let mode = android_xr_perf_mode_label(
                 self.flight,
+                self.settled_orbit,
                 self.settled_stationary,
                 self.frozen_render,
             );
+            if needs_settle && !self.record_settle_frame(rendered.summary, mode) {
+                return false;
+            }
             let flight_speed = self
                 .flight
                 .map(|flight| flight.speed_blocks_per_second)
+                .or_else(|| {
+                    self.settled_orbit
+                        .map(|orbit| orbit.speed_blocks_per_second)
+                })
                 .unwrap_or(0.0);
             let settle_seconds = self
                 .settle_started
                 .map_or(0.0, |started| started.elapsed().as_secs_f64());
-            if self.settled_stationary {
+            if needs_settle {
                 log::info!(
                     "MCLONE_ANDROID_XR_PERF_SETTLED mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={}",
                     mode,
@@ -3264,7 +3335,11 @@ mod android {
                 mode_label: mode,
                 flight_speed_blocks_per_second: self
                     .flight
-                    .map(|flight| flight.speed_blocks_per_second),
+                    .map(|flight| flight.speed_blocks_per_second)
+                    .or_else(|| {
+                        self.settled_orbit
+                            .map(|orbit| orbit.speed_blocks_per_second)
+                    }),
                 settle_seconds,
                 settle_frames: self.settle_frames,
                 settle_quiet_frames: self.settle_quiet_frames,
@@ -3275,7 +3350,11 @@ mod android {
             true
         }
 
-        fn record_settle_frame(&mut self, summary: mclone_xr_scene::XrTerrainFrameSummary) -> bool {
+        fn record_settle_frame(
+            &mut self,
+            summary: mclone_xr_scene::XrTerrainFrameSummary,
+            mode: &'static str,
+        ) -> bool {
             let _ = self.settle_started.get_or_insert_with(Instant::now);
             self.settle_frames += 1;
             let quiet = android_xr_perf_settle_frame_is_quiet(summary);
@@ -3292,7 +3371,8 @@ mod android {
             {
                 let upload = summary.upload;
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode=stationary-settled settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} sections={} drawn_sections={} drawn_indices={}",
+                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} sections={} drawn_sections={} drawn_indices={}",
+                    mode,
                     settle_seconds,
                     ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
                     self.settle_frames,
@@ -3982,11 +4062,14 @@ mod android {
 
     fn android_xr_perf_mode_label(
         flight: Option<AndroidXrPerfFlight>,
+        settled_orbit: Option<AndroidXrPerfOrbit>,
         settled_stationary: bool,
         frozen_render: bool,
     ) -> &'static str {
         if frozen_render {
             "stationary-frozen-render"
+        } else if settled_orbit.is_some() {
+            "settled-orbit"
         } else if settled_stationary {
             "stationary-settled"
         } else if flight.is_some() {
@@ -4068,6 +4151,14 @@ mod android {
                         speed_blocks_per_second,
                     )
                     .context("apply Android XR automated flight locomotion")?;
+            }
+            Some(AndroidXrPerfAutomation::Orbit {
+                speed_blocks_per_second,
+                elapsed_seconds,
+            }) => {
+                terrain
+                    .apply_automated_orbit_input(speed_blocks_per_second, elapsed_seconds)
+                    .context("apply Android XR automated orbit locomotion")?;
             }
             Some(AndroidXrPerfAutomation::Stationary {
                 frozen_render: freeze_runtime,
@@ -4187,6 +4278,14 @@ mod android {
                         speed_blocks_per_second,
                     )
                     .context("apply Android XR automated flight locomotion")?;
+            }
+            Some(AndroidXrPerfAutomation::Orbit {
+                speed_blocks_per_second,
+                elapsed_seconds,
+            }) => {
+                terrain
+                    .apply_automated_orbit_input(speed_blocks_per_second, elapsed_seconds)
+                    .context("apply Android XR automated orbit locomotion")?;
             }
             Some(AndroidXrPerfAutomation::Stationary {
                 frozen_render: freeze_runtime,

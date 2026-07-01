@@ -51,6 +51,13 @@ pnpm native:android-xr:perf:flight:rd10:frame-overlap
 pnpm native:android-xr:perf:flight:sweep
 ```
 
+Settled orbit at walking-like speed:
+
+```bash
+pnpm native:android-xr:perf:orbit:rd7:metrics
+pnpm native:android-xr:perf:orbit:rd7:frame-overlap
+```
+
 Settled stationary render isolation:
 
 ```bash
