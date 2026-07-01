@@ -681,6 +681,7 @@ mod tests {
                 width: 0.6,
                 height: 1.8,
                 walk_animation_distance: 0.0,
+                chicken_wing_flap_radians: None,
             }]
         );
 
@@ -721,6 +722,7 @@ mod tests {
                 width: snapshot.width,
                 height: snapshot.height,
                 walk_animation_distance: 0.0,
+                chicken_wing_flap_radians: None,
             }]
         );
     }

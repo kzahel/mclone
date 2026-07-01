@@ -61,6 +61,7 @@ pub struct ActorPresentation {
     pub width: f32,
     pub height: f32,
     pub walk_animation_distance: f32,
+    pub chicken_wing_flap_radians: Option<f32>,
 }
 
 impl ActorPresentation {
@@ -77,6 +78,7 @@ impl ActorPresentation {
             width: 0.6,
             height: 1.8,
             walk_animation_distance,
+            chicken_wing_flap_radians: None,
         }
     }
 
@@ -93,9 +95,17 @@ impl ActorPresentation {
             width: snapshot.width,
             height: snapshot.height,
             walk_animation_distance: 0.0,
+            chicken_wing_flap_radians: None,
         }
     }
 }
+
+const CHICKEN_WING_FLAP_MAX_RADIANS: f32 = 0.65;
+const CHICKEN_WING_FLAP_TICKS_PER_SECOND: f32 = 20.0;
+const CHICKEN_WING_FLAP_AIRBORNE_SPEED_DELTA_PER_TICK: f32 = 1.2;
+const CHICKEN_WING_FLAP_GROUND_SPEED_DELTA_PER_TICK: f32 = -0.3;
+const CHICKEN_WING_FLAP_PHASE_DELTA_PER_TICK: f32 = 2.0;
+const CHICKEN_WING_VERTICAL_MOVE_EPSILON: f64 = 0.01;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ActorInterpolationConfig {
@@ -141,7 +151,7 @@ impl ActorInterpolationState {
     pub fn step(&mut self, dt_seconds: f32, config: ActorInterpolationConfig) {
         let factor = interpolation_factor(dt_seconds, config.half_life_seconds);
         for track in self.tracks.values_mut() {
-            track.step(factor);
+            track.step(factor, dt_seconds);
         }
     }
 
@@ -161,6 +171,7 @@ impl ActorInterpolationState {
 struct ActorTrack {
     rendered: ActorPresentation,
     target: ActorPresentation,
+    derived: ActorDerivedAnimationState,
 }
 
 impl ActorTrack {
@@ -168,6 +179,7 @@ impl ActorTrack {
         Self {
             rendered: actor,
             target: actor,
+            derived: ActorDerivedAnimationState::default(),
         }
     }
 
@@ -180,9 +192,17 @@ impl ActorTrack {
         self.rendered.width = actor.width;
         self.rendered.height = actor.height;
         self.rendered.walk_animation_distance = actor.walk_animation_distance;
+        if !matches!(
+            self.rendered.kind,
+            ActorPresentationKind::Entity(EntityKind::Chicken)
+        ) {
+            self.derived = ActorDerivedAnimationState::default();
+            self.rendered.chicken_wing_flap_radians = None;
+        }
     }
 
-    fn step(&mut self, factor: f32) {
+    fn step(&mut self, factor: f32, dt_seconds: f32) {
+        let previous_y = self.rendered.feet_position.y;
         self.rendered.feet_position = lerp_vec3d(
             self.rendered.feet_position,
             self.target.feet_position,
@@ -201,6 +221,73 @@ impl ActorTrack {
         self.rendered.rotation =
             lerp_optional_entity_rotation(self.rendered.rotation, self.target.rotation, factor);
         self.rendered.on_ground = self.target.on_ground;
+        self.derived.step(
+            self.rendered.kind,
+            previous_y,
+            self.rendered.feet_position.y,
+            self.rendered.on_ground,
+            dt_seconds,
+        );
+        self.rendered.chicken_wing_flap_radians =
+            self.derived.chicken_wing_flap_radians(self.rendered.kind);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct ActorDerivedAnimationState {
+    chicken: ChickenWingAnimationState,
+}
+
+impl ActorDerivedAnimationState {
+    fn step(
+        &mut self,
+        kind: ActorPresentationKind,
+        previous_y: f64,
+        current_y: f64,
+        on_ground: bool,
+        dt_seconds: f32,
+    ) {
+        if !matches!(kind, ActorPresentationKind::Entity(EntityKind::Chicken)) {
+            self.chicken = ChickenWingAnimationState::default();
+            return;
+        }
+        self.chicken
+            .step(previous_y, current_y, on_ground, dt_seconds);
+    }
+
+    fn chicken_wing_flap_radians(self, kind: ActorPresentationKind) -> Option<f32> {
+        matches!(kind, ActorPresentationKind::Entity(EntityKind::Chicken))
+            .then_some(self.chicken.wing_flap_radians())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct ChickenWingAnimationState {
+    phase: f32,
+    speed: f32,
+}
+
+impl ChickenWingAnimationState {
+    fn step(&mut self, previous_y: f64, current_y: f64, on_ground: bool, dt_seconds: f32) {
+        if !dt_seconds.is_finite() || dt_seconds <= 0.0 {
+            return;
+        }
+        let tick_delta = dt_seconds * CHICKEN_WING_FLAP_TICKS_PER_SECOND;
+        let moved_vertically = (current_y - previous_y).abs() > CHICKEN_WING_VERTICAL_MOVE_EPSILON;
+        let airborne = !on_ground || moved_vertically;
+        let speed_delta = if airborne {
+            CHICKEN_WING_FLAP_AIRBORNE_SPEED_DELTA_PER_TICK
+        } else {
+            CHICKEN_WING_FLAP_GROUND_SPEED_DELTA_PER_TICK
+        };
+        self.speed = (self.speed + speed_delta * tick_delta).clamp(0.0, 1.0);
+        if self.speed > 0.0 {
+            self.phase += CHICKEN_WING_FLAP_PHASE_DELTA_PER_TICK * tick_delta;
+        }
+    }
+
+    fn wing_flap_radians(self) -> f32 {
+        (self.phase.sin() + 1.0) * 0.5 * self.speed * CHICKEN_WING_FLAP_MAX_RADIANS
     }
 }
 
@@ -301,6 +388,24 @@ mod tests {
             width: 0.6,
             height: 1.8,
             walk_animation_distance: 0.0,
+            chicken_wing_flap_radians: None,
+        }
+    }
+
+    fn chicken_actor(id: u64, y: f64, on_ground: bool) -> ActorPresentation {
+        ActorPresentation {
+            id: ActorPresentationId::Entity(EntityId(id)),
+            kind: ActorPresentationKind::Entity(EntityKind::Chicken),
+            appearance: ActorAppearance::NONE,
+            feet_position: Vec3d::new(0.0, y, 0.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground,
+            width: 0.4,
+            height: 0.7,
+            walk_animation_distance: 0.0,
+            chicken_wing_flap_radians: None,
         }
     }
 
@@ -329,6 +434,7 @@ mod tests {
                 width: 0.6,
                 height: 1.8,
                 walk_animation_distance: 1.25,
+                chicken_wing_flap_radians: None,
             }
         );
     }
@@ -362,6 +468,7 @@ mod tests {
                 width: snapshot.width,
                 height: snapshot.height,
                 walk_animation_distance: 0.0,
+                chicken_wing_flap_radians: None,
             }
         );
     }
@@ -454,5 +561,35 @@ mod tests {
 
         assert_eq!(presentation.feet_position.x, 12.0);
         assert_eq!(presentation.y_rot_degrees, 90.0);
+    }
+
+    #[test]
+    fn actor_interpolation_derives_chicken_wing_flap_locally() {
+        let mut state = ActorInterpolationState::from_authoritative([chicken_actor(1, 64.0, true)]);
+        state.reconcile_authoritative([chicken_actor(1, 63.8, false)]);
+        state.step(
+            1.0 / CHICKEN_WING_FLAP_TICKS_PER_SECOND,
+            ActorInterpolationConfig {
+                half_life_seconds: 0.0,
+            },
+        );
+        let airborne_flap = state.presentations()[0]
+            .chicken_wing_flap_radians
+            .expect("airborne chicken wing flap");
+        assert!(airborne_flap > 0.0);
+
+        state.reconcile_authoritative([chicken_actor(1, 63.8, true)]);
+        for _ in 0..4 {
+            state.step(
+                1.0 / CHICKEN_WING_FLAP_TICKS_PER_SECOND,
+                ActorInterpolationConfig {
+                    half_life_seconds: 0.0,
+                },
+            );
+        }
+        let grounded_flap = state.presentations()[0]
+            .chicken_wing_flap_radians
+            .expect("grounded chicken keeps local animation field");
+        assert!(grounded_flap < airborne_flap);
     }
 }

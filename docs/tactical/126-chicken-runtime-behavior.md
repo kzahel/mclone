@@ -9,7 +9,8 @@ This tactical is not a general item, sound, breeding, or passenger system. It
 uses Java 1.17.1 `Chicken` as the reference for the behavior that belongs in
 the chicken runtime now, and leaves broader systems behind explicit hooks.
 
-Workstream: native Rust shared server/runtime, desktop validation first.
+Workstream: native Rust shared server/client/render runtime, desktop validation
+first.
 
 ## Current Baseline
 
@@ -21,6 +22,9 @@ Workstream: native Rust shared server/runtime, desktop validation first.
 - Chunk A landed supported passive goals, species flap/egg state, and
   Java-shaped airborne glide damping. Egg item entities and sounds remain
   deferred behind the future item/sound boundaries.
+- Chunk B landed the first visible chicken wing pose through client-derived
+  presentation data and the shared actor render path. No chicken protocol
+  metadata is needed for the current behavior slice.
 
 ## Reference Shape
 
@@ -31,6 +35,8 @@ Read before implementation:
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/ai/goal/WaterAvoidingRandomStrollGoal.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/ai/goal/LookAtPlayerGoal.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/ai/goal/RandomLookAroundGoal.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/client/renderer/entity/ChickenRenderer.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/client/model/ChickenModel.java`
 
 The Java chicken behavior that matters for this phase:
 
@@ -43,6 +49,9 @@ The Java chicken behavior that matters for this phase:
 - dampens downward velocity while airborne
 - decrements and resets the egg timer on the authoritative side
 - suppresses normal fall damage
+- derives visible wing rotation from interpolated `flap` / `flapSpeed` in
+  `ChickenRenderer.getBob()` and applies opposite Z rotations to `rightWing`
+  and `leftWing` in `ChickenModel.setupAnim()`
 
 ## Chunk A - Supported Goals And Species Tick
 
@@ -108,9 +117,38 @@ Done when:
 
 - The tactical records whether flap data stays server-local or becomes tracked
   data.
-- Any protocol addition has round-trip tests.
+- Any protocol addition has round-trip tests, or the tactical explicitly records
+  why no protocol addition is needed yet.
 
-Status: pending.
+Status: landed for the current presentation scope.
+
+Landed notes:
+
+- Audited the Java client render shape. The current native slice keeps the
+  authoritative flap and egg timer state server-local; the client derives the
+  visible wing pose from ordinary entity `on_ground` and vertical motion during
+  interpolation.
+- Added `ActorPresentation::chicken_wing_flap_radians` as local presentation
+  data, mapped through `mclone-render-session` into `ActorInstance`.
+- Applied the pose in `mclone-render` as additive opposite Z rotations on
+  Asset Lab figure parts named `wing_l` and `wing_r`, after walk-clip sampling.
+- Updated the native actor walk review capture path so chickens render with a
+  visible wing pose for screenshot validation.
+- Verified with focused client/session/render/native-client tests and the
+  affected crate gate:
+  ```bash
+  cargo test --manifest-path native/Cargo.toml -p mclone-client -p mclone-render-session -p mclone-render -p mclone-native-client
+  ```
+- Verified with the full `cargo test --manifest-path native/Cargo.toml`
+  workspace gate.
+
+Remaining presentation follow-ups:
+
+- If later parity needs exact server flap phase, expose species animation data
+  through a general entity metadata/update path rather than a chicken-specific
+  protocol message.
+- Higher-fidelity flap cadence, sound/game-event routing, and egg item side
+  effects remain separate chunks behind their shared systems.
 
 ## Chunk C - Egg Item Side Effects
 
@@ -149,6 +187,8 @@ Minimum gates for code slices:
 
 - focused `mclone-server` chicken/entity tests
 - `cargo test --manifest-path native/Cargo.toml -p mclone-server`
+- focused `mclone-client`, `mclone-render-session`, `mclone-render`, and
+  `mclone-native-client` tests for client/render presentation slices
 - full `cargo test --manifest-path native/Cargo.toml` for committed runtime
   changes
 

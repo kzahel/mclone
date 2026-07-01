@@ -46,6 +46,7 @@ pub struct ActorInstance {
     pub accent_color: [f32; 4],
     pub packed_light: u32,
     pub animation: Option<ActorAnimation>,
+    pub chicken_wing_flap_radians: Option<f32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -92,6 +93,7 @@ impl ActorInstance {
             accent_color: [0.92, 0.70, 0.54, 1.0],
             packed_light: FULL_BRIGHT,
             animation: None,
+            chicken_wing_flap_radians: None,
         }
     }
 
@@ -110,6 +112,7 @@ impl ActorInstance {
             accent_color: [0.95, 0.80, 0.24, 1.0],
             packed_light: FULL_BRIGHT,
             animation: None,
+            chicken_wing_flap_radians: None,
         }
     }
 
@@ -144,6 +147,7 @@ impl ActorInstance {
             accent_color: [0.92, 0.86, 0.74, 1.0],
             packed_light: FULL_BRIGHT,
             animation: None,
+            chicken_wing_flap_radians: None,
         }
     }
 
@@ -162,6 +166,7 @@ impl ActorInstance {
             accent_color: [0.90, 0.86, 0.72, 1.0],
             packed_light: FULL_BRIGHT,
             animation: None,
+            chicken_wing_flap_radians: None,
         }
     }
 
@@ -185,6 +190,7 @@ impl ActorInstance {
             accent_color: [0.92, 0.18, 0.12, 1.0],
             packed_light: FULL_BRIGHT,
             animation: None,
+            chicken_wing_flap_radians: None,
         }
     }
 
@@ -210,6 +216,7 @@ impl ActorInstance {
             accent_color: [0.95, 0.78, 0.22, 1.0],
             packed_light: FULL_BRIGHT,
             animation: None,
+            chicken_wing_flap_radians: None,
         }
     }
 
@@ -236,6 +243,11 @@ impl ActorInstance {
                 distance,
             });
         }
+        self
+    }
+
+    pub fn with_chicken_wing_flap_radians(mut self, radians: Option<f32>) -> Self {
+        self.chicken_wing_flap_radians = radians.filter(|radians| radians.is_finite());
         self
     }
 }
@@ -891,7 +903,8 @@ fn append_asset_lab_figure_model(
 
     let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
     let model_scale = actor.height.max(0.1);
-    let sampled_transforms = sampled_figure_part_transforms(figure, actor.animation);
+    let sampled_transforms =
+        sampled_figure_part_transforms(figure, actor.animation, actor.chicken_wing_flap_radians);
     let content_matrices = figure_content_matrices(figure, &sampled_transforms);
     for (part_index, part) in figure.parts.iter().enumerate() {
         let content_matrix = content_matrices[part_index];
@@ -933,24 +946,47 @@ fn append_asset_lab_figure_model(
 fn sampled_figure_part_transforms(
     figure: &ActorFigure,
     animation: Option<ActorAnimation>,
+    chicken_wing_flap_radians: Option<f32>,
 ) -> Vec<CompiledFigureTransform> {
     let mut transforms = vec![CompiledFigureTransform::default(); figure.parts.len()];
-    let Some(animation) = animation else {
-        return transforms;
-    };
-    let clip = match animation.clip {
-        ActorAnimationClip::Walk => figure.clips.get("walk"),
-    };
-    let Some(clip) = clip else {
-        return transforms;
-    };
-    let time_seconds = clip_time_for_animation_distance(clip, animation.distance);
-    for (part_index, keys) in &clip.tracks {
-        if *part_index < transforms.len() {
-            transforms[*part_index] = sample_clip_track(keys, time_seconds, clip);
+    if let Some(animation) = animation {
+        let clip = match animation.clip {
+            ActorAnimationClip::Walk => figure.clips.get("walk"),
+        };
+        if let Some(clip) = clip {
+            let time_seconds = clip_time_for_animation_distance(clip, animation.distance);
+            for (part_index, keys) in &clip.tracks {
+                if *part_index < transforms.len() {
+                    transforms[*part_index] = sample_clip_track(keys, time_seconds, clip);
+                }
+            }
         }
     }
+    if let Some(wing_flap) = chicken_wing_flap_radians {
+        apply_chicken_wing_flap(figure, &mut transforms, wing_flap);
+    }
     transforms
+}
+
+fn apply_chicken_wing_flap(
+    figure: &ActorFigure,
+    transforms: &mut [CompiledFigureTransform],
+    wing_flap_radians: f32,
+) {
+    if !wing_flap_radians.is_finite() || wing_flap_radians.abs() <= f32::EPSILON {
+        return;
+    }
+    for (part_index, part) in figure.parts.iter().enumerate() {
+        let z_delta = match part.name.as_str() {
+            "wing_l" => wing_flap_radians,
+            "wing_r" => -wing_flap_radians,
+            _ => continue,
+        };
+        if let Some(transform) = transforms.get_mut(part_index) {
+            let rot = transform.rot_radians.unwrap_or(Vec3::ZERO);
+            transform.rot_radians = Some(rot + Vec3::new(0.0, 0.0, z_delta));
+        }
+    }
 }
 
 fn clip_time_for_animation_distance(clip: &CompiledFigureClip, distance: f32) -> f32 {
@@ -1880,6 +1916,16 @@ mod tests {
         ActorFigureSet::new([(default_player_figure_id(), test_player_figure())])
     }
 
+    fn test_chicken_figure() -> ActorFigure {
+        let json = include_str!("../../../../assets/mclone/figures/chicken.figure.json");
+        let asset: mclone_assets::FigureAsset = serde_json::from_str(json).unwrap();
+        crate::asset_lab_figure::compile_figure_asset(&asset).unwrap()
+    }
+
+    fn test_chicken_figures() -> ActorFigureSet {
+        ActorFigureSet::new([(mclone_assets::chicken_figure_id(), test_chicken_figure())])
+    }
+
     #[test]
     fn actor_mesh_emits_asset_lab_player_model() {
         let figures = test_player_figures();
@@ -1950,6 +1996,33 @@ mod tests {
         assert_eq!(animated_mesh.vertices.len(), static_mesh.vertices.len());
         assert_eq!(animated_mesh.indices.len(), static_mesh.indices.len());
         assert_ne!(animated_mesh.vertices, static_mesh.vertices);
+    }
+
+    #[test]
+    fn asset_lab_chicken_wing_flap_changes_vertices() {
+        let figures = test_chicken_figures();
+        let static_actor = ActorInstance::remote_player_with_figure(
+            Vec3::ZERO,
+            0.0,
+            mclone_assets::chicken_figure_id(),
+        )
+        .with_dimensions(0.4, 0.7);
+        let static_mesh = actor_mesh(
+            &[static_actor],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+            &figures,
+        );
+        let flapping_mesh = actor_mesh(
+            &[static_actor.with_chicken_wing_flap_radians(Some(0.45))],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+            &figures,
+        );
+
+        assert_eq!(flapping_mesh.vertices.len(), static_mesh.vertices.len());
+        assert_eq!(flapping_mesh.indices.len(), static_mesh.indices.len());
+        assert_ne!(flapping_mesh.vertices, static_mesh.vertices);
     }
 
     #[test]

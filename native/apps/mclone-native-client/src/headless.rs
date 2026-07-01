@@ -505,8 +505,16 @@ fn actor_walk_review_actors(
         .enumerate()
         .map(|(index, spec)| {
             let offset = index as f32 * spacing - center;
-            ActorInstance::local_player_with_figure(Vec3::new(0.0, 0.0, offset), 0.0, spec.figure)
-                .with_walk_animation_distance(phase_cycles * spec.cycle_distance)
+            let mut actor = ActorInstance::local_player_with_figure(
+                Vec3::new(0.0, 0.0, offset),
+                0.0,
+                spec.figure,
+            )
+            .with_walk_animation_distance(phase_cycles * spec.cycle_distance);
+            if spec.figure == mclone_assets::chicken_figure_id() {
+                actor = actor.with_chicken_wing_flap_radians(Some(0.45));
+            }
+            actor
         })
         .collect()
 }
@@ -1327,11 +1335,15 @@ mod tests {
                 figure: mclone_assets::upright_bear_figure_id(),
                 cycle_distance: 1.25,
             },
+            ActorWalkReviewFigureSpec {
+                figure: mclone_assets::chicken_figure_id(),
+                cycle_distance: 0.75,
+            },
         ];
 
         let actors = actor_walk_review_actors(&specs, 1.5);
 
-        assert_eq!(actors.len(), 2);
+        assert_eq!(actors.len(), 3);
         assert_eq!(
             actors[0].shape,
             mclone_render::entity::ActorInstanceShape::Figure(
@@ -1340,7 +1352,10 @@ mod tests {
         );
         assert_eq!(actors[0].animation.unwrap().distance, 0.75);
         assert_eq!(actors[1].animation.unwrap().distance, 1.875);
+        assert_eq!(actors[2].animation.unwrap().distance, 1.125);
+        assert_eq!(actors[2].chicken_wing_flap_radians, Some(0.45));
         assert!(actors[0].feet_position.z < actors[1].feet_position.z);
+        assert!(actors[1].feet_position.z < actors[2].feet_position.z);
     }
 
     #[test]

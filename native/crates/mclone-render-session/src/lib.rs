@@ -132,6 +132,7 @@ pub fn actor_instances_from_presentations(
                     )
                     .with_dimensions(actor.width, actor.height)
                     .with_walk_animation_distance(actor.walk_animation_distance)
+                    .with_chicken_wing_flap_radians(actor.chicken_wing_flap_radians)
                     .with_packed_light(packed_light)
                 }
                 ActorPresentationKind::Entity(EntityKind::DebugCube) => ActorInstance::debug_cube(
@@ -4594,6 +4595,7 @@ mod tests {
             width: 0.4,
             height: 0.7,
             walk_animation_distance: 0.25,
+            chicken_wing_flap_radians: Some(0.4),
         };
 
         let actors = actor_instances_from_presentations(&[presentation], &client);
@@ -4606,6 +4608,7 @@ mod tests {
         assert_eq!(actors[0].width, 0.4);
         assert_eq!(actors[0].height, 0.7);
         assert!(actors[0].animation.is_some());
+        assert_eq!(actors[0].chicken_wing_flap_radians, Some(0.4));
     }
 
     #[test]
