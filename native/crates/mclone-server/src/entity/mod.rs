@@ -4,6 +4,8 @@
 //! stack. It gives native clients authoritative snapshots for simple passive
 //! actor rendering without adding natural spawning, AI, persistence, or combat.
 
+mod metadata;
+mod mob;
 mod state;
 mod store;
 mod tick_list;

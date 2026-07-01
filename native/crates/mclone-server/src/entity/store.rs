@@ -6,11 +6,14 @@ use mclone_protocol::EntityRotation;
 use mclone_protocol::{EntityId, EntityKind};
 
 use super::ServerEntityState;
+use super::metadata::EntityMetadata;
+use super::mob::MobRuntimeState;
 use super::tick_list::ServerEntityTickList;
 
 #[derive(Debug, Default)]
 pub(crate) struct ServerEntityStore {
     entities: BTreeMap<EntityId, ServerEntityState>,
+    mobs: BTreeMap<EntityId, MobRuntimeState>,
     tick_list: ServerEntityTickList,
     next_entity_id: u64,
     starter_passive_id: Option<EntityId>,
@@ -32,23 +35,20 @@ impl ServerEntityStore {
         }
         let id = self.allocate_entity_id();
         let position = starter_passive_position(spawn_position);
-        self.entities.insert(
-            id,
-            ServerEntityState {
-                id,
-                kind: EntityKind::Cow,
-                position,
-                y_rot_degrees: 135.0,
-                x_rot_degrees: 0.0,
-                rotation: None,
-                on_ground: true,
-                width: 0.9,
-                height: 1.4,
-                age_ticks: 0,
-                alive: true,
-            },
-        );
+        self.insert_passive_mob(id, EntityKind::Cow, position, 135.0);
         self.starter_passive_id = Some(id);
+        id
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_passive_mob_for_test(
+        &mut self,
+        kind: EntityKind,
+        position: Vec3d,
+        y_rot_degrees: f32,
+    ) -> EntityId {
+        let id = self.allocate_entity_id();
+        self.insert_passive_mob(id, kind, position, y_rot_degrees);
         id
     }
 
@@ -143,6 +143,11 @@ impl ServerEntityStore {
         self.entities.get(&id).copied()
     }
 
+    #[cfg(test)]
+    pub(crate) fn mob_state(&self, id: EntityId) -> Option<&MobRuntimeState> {
+        self.mobs.get(&id)
+    }
+
     pub(crate) fn tick_stationary(
         &mut self,
         entity_ticking_chunks: &[ChunkPos],
@@ -162,6 +167,9 @@ impl ServerEntityStore {
         let mut updated = Vec::new();
         for id in self.tick_list.iteration_ids() {
             if let Some(entity) = self.entities.get_mut(&id) {
+                if let Some(mob) = self.mobs.get_mut(&id) {
+                    mob.sync_from_entity(*entity);
+                }
                 entity.age_ticks = entity.age_ticks.saturating_add(1);
                 updated.push(*entity);
             }
@@ -172,6 +180,32 @@ impl ServerEntityStore {
     fn allocate_entity_id(&mut self) -> EntityId {
         self.next_entity_id = self.next_entity_id.saturating_add(1);
         EntityId(self.next_entity_id)
+    }
+
+    fn insert_passive_mob(
+        &mut self,
+        id: EntityId,
+        kind: EntityKind,
+        position: Vec3d,
+        y_rot_degrees: f32,
+    ) -> ServerEntityState {
+        let metadata = EntityMetadata::for_kind(kind).expect("passive mob metadata must exist");
+        debug_assert!(metadata.is_passive_mob());
+        let state = ServerEntityState::from_metadata(
+            id,
+            metadata,
+            position,
+            y_rot_degrees,
+            0.0,
+            None,
+            true,
+        );
+        self.mobs.insert(
+            id,
+            MobRuntimeState::from_spawn(id, metadata, state.on_ground, state.y_rot_degrees),
+        );
+        self.entities.insert(id, state);
+        state
     }
 
     fn debug_physics_cube_id(&self) -> Option<EntityId> {
@@ -233,10 +267,13 @@ fn offset_within_chunk(value: f64, chunk_min: i32) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entity::metadata::{EntityDimensions, EntityMetadata};
+    use crate::entity::mob::BlockPathType;
 
     #[test]
     fn starter_passive_spawns_once_near_initial_spawn() {
         let mut store = ServerEntityStore::default();
+        let metadata = EntityMetadata::for_kind(EntityKind::Cow).unwrap();
 
         let first = store.ensure_starter_passive_near_spawn(Vec3d::new(15.0, 64.0, 15.0));
         let second = store.ensure_starter_passive_near_spawn(Vec3d::new(1.0, 64.0, 1.0));
@@ -244,9 +281,31 @@ mod tests {
         assert_eq!(first, second);
         let entity = store.state(first).unwrap();
         assert_eq!(entity.kind, EntityKind::Cow);
-        assert_eq!(entity.width, 0.9);
-        assert_eq!(entity.height, 1.4);
+        assert_eq!(entity.width, metadata.dimensions.width);
+        assert_eq!(entity.height, metadata.dimensions.height);
         assert_eq!(entity.position, Vec3d::new(14.5, 64.0, 14.5));
+        let mob = store.mob_state(first).expect("starter cow mob state");
+        assert_eq!(mob.movement_speed(), metadata.movement_speed);
+        assert_eq!(mob.pathfinding_malus(BlockPathType::Water), 8.0);
+    }
+
+    #[test]
+    fn chicken_passive_mob_can_snapshot_metadata_dimensions() {
+        let mut store = ServerEntityStore::default();
+        let metadata = EntityMetadata::for_kind(EntityKind::Chicken).unwrap();
+
+        let id =
+            store.insert_passive_mob_for_test(EntityKind::Chicken, Vec3d::new(4.0, 64.0, 4.0), 0.0);
+        let snapshot = store.state(id).unwrap().snapshot();
+
+        assert_eq!(snapshot.kind, EntityKind::Chicken);
+        assert_eq!(snapshot.width, metadata.dimensions.width);
+        assert_eq!(snapshot.height, metadata.dimensions.height);
+        assert_eq!(metadata.dimensions, EntityDimensions::scalable(0.4, 0.7));
+        assert_eq!(metadata.standing_eye_height(), snapshot.height * 0.92);
+        let mob = store.mob_state(id).expect("chicken mob state");
+        assert_eq!(mob.movement_speed(), metadata.movement_speed);
+        assert_eq!(mob.pathfinding_malus(BlockPathType::Water), 0.0);
     }
 
     #[test]

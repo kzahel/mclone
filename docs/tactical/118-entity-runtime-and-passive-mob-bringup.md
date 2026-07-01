@@ -12,9 +12,9 @@ entity/mob/goal skeleton is in place.
 
 Workstream: native Rust shared server/runtime, desktop validation first.
 
-Status: Slices 0-1 landed. The starter passive entity path is split under
+Status: Slices 0-2 landed. The starter passive entity path is split under
 `native/crates/mclone-server/src/entity/`, and entity visibility/tick-list
-boundaries now exist before real mob AI work.
+boundaries plus passive cow/chicken metadata now exist before real mob AI work.
 
 ## Non-Negotiable Constraints
 
@@ -150,7 +150,7 @@ Landed notes:
 - Added tests for visibility mapping, tick-list reconciliation, chunk demotion,
   and diagnostics.
 
-## Slice 2 - Metadata And Passive Mob Runtime State
+## Slice 2 - Metadata And Passive Mob Runtime State (Landed)
 
 Purpose: give cow/chicken reusable type metadata instead of ad hoc dimensions
 and behavior branches.
@@ -179,6 +179,21 @@ Done when:
 - Starter cow dimensions come from metadata, not local constants.
 - Chicken dimensions can be snapshotted from metadata even if still spawned
   only in tests.
+
+Landed notes:
+
+- Added `entity/metadata.rs` with Java 1.17.1 cow/chicken category,
+  dimensions, standing eye height, movement speed, and client tracking range
+  facts.
+- Added `entity/mob/` runtime state for no-action time, ground state,
+  body/head yaw, pathfinding malus, movement speed, and deterministic
+  per-entity random source.
+- Starter cow construction now flows through metadata-driven passive mob
+  insertion instead of local width/height constants.
+- Chicken can be inserted in tests through the same passive mob path and
+  snapshotted with metadata dimensions.
+- Added tests for cow/chicken metadata, chicken water pathfinding malus,
+  deterministic mob random seeding, mob rotation sync, and passive snapshots.
 
 ## Slice 3 - Goal Selector Foundation
 

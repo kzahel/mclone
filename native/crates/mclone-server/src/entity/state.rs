@@ -1,6 +1,8 @@
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
 use mclone_protocol::{EntityId, EntityKind, EntityRotation, EntitySnapshot, EntityUpdate};
 
+use super::metadata::EntityMetadata;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ServerEntityState {
     pub(crate) id: EntityId,
@@ -17,6 +19,30 @@ pub(crate) struct ServerEntityState {
 }
 
 impl ServerEntityState {
+    pub(crate) fn from_metadata(
+        id: EntityId,
+        metadata: EntityMetadata,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        x_rot_degrees: f32,
+        rotation: Option<EntityRotation>,
+        on_ground: bool,
+    ) -> Self {
+        Self {
+            id,
+            kind: metadata.kind,
+            position,
+            y_rot_degrees,
+            x_rot_degrees,
+            rotation,
+            on_ground,
+            width: metadata.dimensions.width,
+            height: metadata.dimensions.height,
+            age_ticks: 0,
+            alive: true,
+        }
+    }
+
     pub(crate) fn chunk_pos(self) -> ChunkPos {
         BlockPos::containing(self.position).chunk_pos()
     }
