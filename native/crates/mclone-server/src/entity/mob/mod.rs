@@ -8,6 +8,8 @@ use mclone_worldgen::prng::SimpleRandomSource;
 use super::metadata::EntityMetadata;
 use super::state::ServerEntityState;
 
+pub(crate) mod goals;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) enum BlockPathType {
     Water,

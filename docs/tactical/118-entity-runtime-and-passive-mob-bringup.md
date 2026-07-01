@@ -12,9 +12,10 @@ entity/mob/goal skeleton is in place.
 
 Workstream: native Rust shared server/runtime, desktop validation first.
 
-Status: Slices 0-2 landed. The starter passive entity path is split under
+Status: Slices 0-3 landed. The starter passive entity path is split under
 `native/crates/mclone-server/src/entity/`, and entity visibility/tick-list
-boundaries plus passive cow/chicken metadata now exist before real mob AI work.
+boundaries, passive cow/chicken metadata, and a standalone goal selector now
+exist before real mob AI work.
 
 ## Non-Negotiable Constraints
 
@@ -195,7 +196,7 @@ Landed notes:
 - Added tests for cow/chicken metadata, chicken water pathfinding malus,
   deterministic mob random seeding, mob rotation sync, and passive snapshots.
 
-## Slice 3 - Goal Selector Foundation
+## Slice 3 - Goal Selector Foundation (Landed)
 
 Purpose: port the shared AI scheduling surface before adding more species.
 
@@ -222,6 +223,19 @@ Done when:
 
 - The selector is unit-tested independently of cow/chicken.
 - No animal-specific logic is embedded in the selector.
+
+Landed notes:
+
+- Added `entity/mob/goals/` with `Goal`, `WrappedGoal`, `GoalSelector`, and
+  `Move` / `Look` / `Jump` / `Target` control flags.
+- Preserved the Java cleanup, update, and tick phase ordering.
+- Preserved Java-style replacement semantics: lower numeric priority can
+  replace a running goal only when the current lock holder is interruptible.
+- Added disabled control flag handling that stops running goals and prevents
+  new starts.
+- Added synthetic selector tests independent of cow/chicken for priority
+  replacement, non-interruptible locks, same-priority blocking, phase order,
+  disabled flags, and independent flag coexistence.
 
 ## Slice 4 - Cow Baseline Behavior
 
