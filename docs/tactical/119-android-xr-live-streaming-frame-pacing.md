@@ -86,10 +86,14 @@ For pacing, the important shape is:
 - Uploads are still drained broadly through `uploadAllPendingUploads()`.
 - Some nearby dirty chunks may rebuild synchronously on the render thread.
 
-Interpretation for us: Java is more time-aware than a fixed "N chunks per
-frame" scheduler, but it is not a perfect mobile XR pacing model. Its unbounded
-upload drain and occasional synchronous rebuild are acceptable compromises for a
-desktop 60 Hz Java client, not policies to copy blindly on Quest.
+Interpretation for us: Java is deliberately frame-budget-aware. The
+`ChunkBufferBuilderPack` pool is real backpressure on worker count and memory,
+and `compileChunksUntil(...)` uses a frame-time deadline plus recent average
+compile cost instead of a fixed "N chunks per frame" rule. That shape should be
+our baseline. The parts to adapt for Quest XR are the policies that can still
+produce render-thread bursts for our current path: broad pending-upload drains,
+synchronous near/player-dirty rebuilds, and any downstream prepared-record
+maintenance that turns small accepted section changes into repeated broad work.
 
 ### Reference Divergence: Local Edit Coherence Versus XR Frame Budget
 
@@ -135,6 +139,10 @@ Current gaps versus the reference or versus what mobile XR needs:
 - The main render compile budget is by dirty chunk column. One accepted chunk can
   produce many vertical render sections, so the actual CPU/GPU work admitted in
   a frame is still lumpy.
+- We do not yet model Java's `ChunkBufferBuilderPack` pool as explicit
+  memory/backpressure for render compile work. Keeping one compile job in flight
+  is conservative, but it is not the same as a bounded pool plus
+  deadline-driven admission.
 - A completed render compile result can contain many section meshes. Accepting
   the result is not yet section-count or byte-count budgeted.
 - The XR upload budget limits GPU upload count, but it does not fully budget the
