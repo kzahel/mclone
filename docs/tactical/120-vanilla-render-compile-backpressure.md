@@ -263,6 +263,41 @@ Interpretation:
   runs, so use it for attribution rather than as a clean before/after
   performance comparison.
 
+Targeted native snapshot pass:
+
+- Native single-view runtimes now build compile requests from only the target
+  render-section chunks plus their four horizontal mesh neighbors. The old
+  generic `snapshots_for_submit` hook remains for web, where the worker-side
+  resident mirror already uses a delta stream.
+- This keeps the Java-shaped admission and backpressure policy unchanged. It
+  only reduces the owned snapshot payload sent to native compile workers.
+- A focused app-runtime test verifies that a target chunk compile request omits
+  unrelated loaded chunks while retaining the target chunk and cardinal
+  neighbors needed for cross-chunk face culling.
+
+Measurement after targeted native snapshots, Quest Android XR per-eye settled
+orbit, render distance 7, 2 render compile workers, 30-second sample:
+
+| Result accept budget | Frame avg / p95 / p99 / max | Max runtime sync split | Max upload / ready / records | Read |
+|---:|---|---|---|---|
+| unbounded | 14.217 / 16.075 / 24.536 / 38.511 ms | sync 13.430 ms; accept 1.352; prepare 1.947; submit 11.548 | upload apply 4.544; ready query 1.413; ready publish 8.616; records 1.858 | max 2 accepted results, 32 completed sections, 15 uploaded |
+| 1 | 14.319 / 16.232 / 24.815 / 44.506 ms | sync 17.094 ms; accept 1.162; prepare 2.102; submit 15.414 | upload apply 3.913; ready query 1.532; ready publish 1.568; records 1.783 | max 1 accepted result, 1 queued result, 16 completed sections, 8 uploaded |
+
+Interpretation:
+
+- This is a clear performance win for the previous long pole. Compared with the
+  split-attribution unbounded run, max runtime submit fell from 42.364 ms to
+  11.548 ms. Frame p95 fell from 26.562 ms to 16.075 ms, p99 from 42.082 ms to
+  24.536 ms, and max frame from 70.163 ms to 38.511 ms.
+- The default unbounded result-acceptance path remains stronger than budget 1.
+  Budget 1 slightly improved average app headroom in this sample, but worsened
+  p95/p99/max frame and dropped-frame count. Keep it diagnostic/opt-in.
+- `runtime_submit_ms` is still visible at 11-15 ms, even after shrinking the
+  payload to five chunk columns. The remaining cost is likely still owned
+  snapshot cloning / request handoff, not compile admission policy.
+- Ready publish, per-eye terrain cull/encode, and stereo submit/poll waits now
+  show up as comparable second-order tails depending on run variance.
+
 ### E. Local Edit Coherence
 
 Status: planned.
@@ -285,12 +320,10 @@ a compiler exposes spare capacity and waits when capacity is full.
 
 ## Next Step
 
-Reduce native compile submit/snapshot handoff cost. The immediate target is the
-`snapshots_for_submit` path that clones all loaded client chunk snapshots for a
-small render-section compile request. Move toward a Java-shaped resident
-render-chunk/snapshot view for compile workers, or at least pass only the chunk
-snapshots needed by the submitted target sections plus their mesh neighbors.
-
-After that, re-run the same `MCLONE_ANDROID_XR_PERF_TERRAIN_RUNTIME` probe. If
-submit falls below the ready/publish/record path, the next candidates are
-ready-section publish invalidation and prepared-record rebuild reduction.
+Split the remaining native submit cost into snapshot selection/clone time and
+compiler handoff time. If the clone remains dominant, the next implementation
+slice should move native workers toward a resident snapshot/render-chunk mirror
+or shared immutable snapshot ownership so live frames do not deep-clone even the
+five-column mesh neighborhood. If handoff is cheap and submit is mostly
+elsewhere, move to ready-section publish invalidation and per-eye terrain
+cull/encode tail analysis.

@@ -432,11 +432,13 @@ impl LocalSingleViewSceneRuntime {
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
         let render_compile_worker = &mut self.render_compile_worker;
-        self.core.sync_render_sections(
-            render_compile_worker,
-            camera_position,
-            |client, _compiler| client.chunk_snapshots().cloned().collect(),
-        )
+        self.core
+            .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots(
+                render_compile_worker,
+                camera_position,
+                DEFAULT_RENDER_CHUNK_MESH_BUDGET,
+                None,
+            )
     }
 
     pub fn sync_render_sections_with_completed_result_acceptance(
@@ -446,12 +448,11 @@ impl LocalSingleViewSceneRuntime {
     ) -> Result<RenderSectionCacheUpdate> {
         let render_compile_worker = &mut self.render_compile_worker;
         self.core
-            .sync_render_sections_with_budget_and_completed_result_acceptance(
+            .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots(
                 render_compile_worker,
                 camera_position,
                 DEFAULT_RENDER_CHUNK_MESH_BUDGET,
                 completed_result_accept_budget,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
             )
     }
 
@@ -462,12 +463,11 @@ impl LocalSingleViewSceneRuntime {
     ) -> Result<TimedRenderSectionCacheUpdate> {
         let render_compile_worker = &mut self.render_compile_worker;
         self.core
-            .sync_render_sections_with_budget_and_completed_result_acceptance_timed(
+            .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots_timed(
                 render_compile_worker,
                 camera_position,
                 DEFAULT_RENDER_CHUNK_MESH_BUDGET,
                 completed_result_accept_budget,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
             )
     }
 
@@ -477,12 +477,13 @@ impl LocalSingleViewSceneRuntime {
         deadline: Instant,
     ) -> Result<RenderSectionCacheUpdate> {
         let render_compile_worker = &mut self.render_compile_worker;
-        self.core.sync_render_sections_until_deadline(
-            render_compile_worker,
-            camera_position,
-            deadline,
-            |client, _compiler| client.chunk_snapshots().cloned().collect(),
-        )
+        self.core
+            .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots(
+                render_compile_worker,
+                camera_position,
+                deadline,
+                None,
+            )
     }
 
     pub fn sync_render_sections_until_deadline_with_completed_result_acceptance(
@@ -493,12 +494,11 @@ impl LocalSingleViewSceneRuntime {
     ) -> Result<RenderSectionCacheUpdate> {
         let render_compile_worker = &mut self.render_compile_worker;
         self.core
-            .sync_render_sections_until_deadline_with_completed_result_acceptance(
+            .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots(
                 render_compile_worker,
                 camera_position,
                 deadline,
                 completed_result_accept_budget,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
             )
     }
 
@@ -510,12 +510,11 @@ impl LocalSingleViewSceneRuntime {
     ) -> Result<TimedRenderSectionCacheUpdate> {
         let render_compile_worker = &mut self.render_compile_worker;
         self.core
-            .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+            .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots_timed(
                 render_compile_worker,
                 camera_position,
                 deadline,
                 completed_result_accept_budget,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
             )
     }
 
@@ -523,10 +522,9 @@ impl LocalSingleViewSceneRuntime {
         &mut self,
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
-        self.core.sync_all_render_sections(
+        self.core.sync_all_render_sections_targeted_snapshots(
             &mut self.render_compile_worker,
             camera_position,
-            |client, _compiler| client.chunk_snapshots().cloned().collect(),
         )
     }
 
@@ -1189,11 +1187,13 @@ where
         &mut self,
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
-        self.core.sync_render_sections(
-            &mut self.render_compile_worker,
-            camera_position,
-            |client, _compiler| client.chunk_snapshots().cloned().collect(),
-        )
+        self.core
+            .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots(
+                &mut self.render_compile_worker,
+                camera_position,
+                DEFAULT_RENDER_CHUNK_MESH_BUDGET,
+                None,
+            )
     }
 
     pub fn sync_render_sections_with_completed_result_acceptance(
@@ -1202,12 +1202,11 @@ where
         completed_result_accept_budget: Option<usize>,
     ) -> Result<RenderSectionCacheUpdate> {
         self.core
-            .sync_render_sections_with_budget_and_completed_result_acceptance(
+            .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots(
                 &mut self.render_compile_worker,
                 camera_position,
                 DEFAULT_RENDER_CHUNK_MESH_BUDGET,
                 completed_result_accept_budget,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
             )
     }
 
@@ -1217,12 +1216,11 @@ where
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate> {
         self.core
-            .sync_render_sections_with_budget_and_completed_result_acceptance_timed(
+            .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots_timed(
                 &mut self.render_compile_worker,
                 camera_position,
                 DEFAULT_RENDER_CHUNK_MESH_BUDGET,
                 completed_result_accept_budget,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
             )
     }
 
@@ -1231,12 +1229,13 @@ where
         camera_position: Vec3,
         deadline: Instant,
     ) -> Result<RenderSectionCacheUpdate> {
-        self.core.sync_render_sections_until_deadline(
-            &mut self.render_compile_worker,
-            camera_position,
-            deadline,
-            |client, _compiler| client.chunk_snapshots().cloned().collect(),
-        )
+        self.core
+            .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots(
+                &mut self.render_compile_worker,
+                camera_position,
+                deadline,
+                None,
+            )
     }
 
     pub fn sync_render_sections_until_deadline_with_completed_result_acceptance(
@@ -1246,12 +1245,11 @@ where
         completed_result_accept_budget: Option<usize>,
     ) -> Result<RenderSectionCacheUpdate> {
         self.core
-            .sync_render_sections_until_deadline_with_completed_result_acceptance(
+            .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots(
                 &mut self.render_compile_worker,
                 camera_position,
                 deadline,
                 completed_result_accept_budget,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
             )
     }
 
@@ -1262,12 +1260,11 @@ where
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate> {
         self.core
-            .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+            .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots_timed(
                 &mut self.render_compile_worker,
                 camera_position,
                 deadline,
                 completed_result_accept_budget,
-                |client, _compiler| client.chunk_snapshots().cloned().collect(),
             )
     }
 
@@ -1275,10 +1272,9 @@ where
         &mut self,
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
-        self.core.sync_all_render_sections(
+        self.core.sync_all_render_sections_targeted_snapshots(
             &mut self.render_compile_worker,
             camera_position,
-            |client, _compiler| client.chunk_snapshots().cloned().collect(),
         )
     }
 
