@@ -1193,6 +1193,8 @@ fn render_renderer_rebuild_smoke_frame(
         render_distance: state.runtime.render_distance() as i32,
         render_options: state.render_options,
         far_lod_enabled: false,
+        far_lod_range_chunks:
+            mclone_app_runtime::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
         frame_pacing: FramePacingUiState::default(),
         movement_mode: GameMovementMode::Walk,
         fly_speed_multiplier: 1.0,

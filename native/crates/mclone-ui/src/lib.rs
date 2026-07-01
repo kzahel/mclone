@@ -614,6 +614,11 @@ impl Slider {
         }
     }
 
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
     pub fn contains(&self, point: Point) -> bool {
         self.enabled && self.rect.contains(point)
     }
@@ -957,6 +962,7 @@ pub enum GameUiAction {
     ToggleSectionOcclusion,
     ToggleFullbright,
     ToggleFarLod,
+    SetFarLodRange(i32),
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
     ToggleCrosshair,
@@ -1047,6 +1053,9 @@ pub struct GameUiRenderState {
     pub section_occlusion_culling: bool,
     pub force_fullbright: bool,
     pub far_lod_enabled: bool,
+    pub far_lod_range_chunks: i32,
+    pub min_far_lod_range_chunks: i32,
+    pub max_far_lod_range_chunks: i32,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
     pub crosshair_visible: Option<bool>,
@@ -1075,6 +1084,9 @@ impl Default for GameUiRenderState {
             section_occlusion_culling: true,
             force_fullbright: false,
             far_lod_enabled: false,
+            far_lod_range_chunks: 12,
+            min_far_lod_range_chunks: 1,
+            max_far_lod_range_chunks: 64,
             player_collision_box_visible: false,
             first_person_player_visible: false,
             crosshair_visible: Some(true),
@@ -1107,6 +1119,20 @@ impl GameUiRenderState {
     pub fn clamped_render_distance(self) -> i32 {
         let (min, max) = self.render_distance_limits();
         self.render_distance.clamp(min, max)
+    }
+
+    pub fn far_lod_range_limits(self) -> (i32, i32) {
+        (
+            self.min_far_lod_range_chunks
+                .min(self.max_far_lod_range_chunks),
+            self.min_far_lod_range_chunks
+                .max(self.max_far_lod_range_chunks),
+        )
+    }
+
+    pub fn clamped_far_lod_range(self) -> i32 {
+        let (min, max) = self.far_lod_range_limits();
+        self.far_lod_range_chunks.clamp(min, max)
     }
 
     pub fn fly_speed_multiplier_limits(self) -> (f32, f32) {
@@ -2066,6 +2092,7 @@ const ID_SERVER_SETTINGS_PHYSICS_RATE: WidgetId = WidgetId(32);
 const ID_SERVER_SETTINGS_BACK: WidgetId = WidgetId(33);
 const ID_OPTIONS_CROSSHAIR: WidgetId = WidgetId(34);
 const ID_OPTIONS_FAR_LOD: WidgetId = WidgetId(35);
+const ID_OPTIONS_FAR_LOD_RANGE: WidgetId = WidgetId(36);
 const ID_BLOCK_PALETTE_BASE: u64 = 1000;
 
 const BLOCK_PALETTE_COLUMNS: usize = 10;
@@ -2182,6 +2209,7 @@ impl GameUi {
         self.pointer = Some(point);
         let action = match self.pressed {
             Some(ID_OPTIONS_RADIUS) => Some(self.render_distance_action_at(point, state)),
+            Some(ID_OPTIONS_FAR_LOD_RANGE) => Some(self.far_lod_range_action_at(point, state)),
             Some(ID_OPTIONS_FLY_SPEED) => Some(self.fly_speed_action_at(point, state)),
             Some(ID_OPTIONS_MOVEMENT_SPEED) => Some(self.movement_speed_action_at(point, state)),
             Some(ID_OPTIONS_TOUCH_LOOK) => self.touch_look_action_at(point, state),
@@ -2213,6 +2241,9 @@ impl GameUi {
         let action = match (pressed, released) {
             (Some(ID_OPTIONS_RADIUS), Some(ID_OPTIONS_RADIUS)) => {
                 Some(self.render_distance_action_at(point, state))
+            }
+            (Some(ID_OPTIONS_FAR_LOD_RANGE), Some(ID_OPTIONS_FAR_LOD_RANGE)) => {
+                Some(self.far_lod_range_action_at(point, state))
             }
             (Some(ID_OPTIONS_FLY_SPEED), Some(ID_OPTIONS_FLY_SPEED)) => {
                 Some(self.fly_speed_action_at(point, state))
@@ -2314,6 +2345,7 @@ impl GameUi {
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetRenderDistance(_)
+            | GameUiAction::SetFarLodRange(_)
             | GameUiAction::SetFlySpeed(_)
             | GameUiAction::SetMovementSpeed(_)
             | GameUiAction::SetTouchLookSensitivity(_)
@@ -2377,6 +2409,8 @@ impl GameUi {
                     Some(ID_OPTIONS_FULLBRIGHT)
                 } else if rects.far_lod.contains(point) {
                     Some(ID_OPTIONS_FAR_LOD)
+                } else if state.far_lod_enabled && rects.far_lod_range.contains(point) {
+                    Some(ID_OPTIONS_FAR_LOD_RANGE)
                 } else if rects.player_box.contains(point) {
                     Some(ID_OPTIONS_PLAYER_BOX)
                 } else if rects.first_person_player.contains(point) {
@@ -2530,6 +2564,19 @@ impl GameUi {
             render_distance_slider_value(state),
         );
         GameUiAction::SetRenderDistance(render_distance_from_slider_value(
+            slider.value_from_point(point),
+            state,
+        ))
+    }
+
+    fn far_lod_range_action_at(&self, point: Point, state: GameUiRenderState) -> GameUiAction {
+        let slider = Slider::new(
+            ID_OPTIONS_FAR_LOD_RANGE,
+            option_widgets(self.scale, state).far_lod_range,
+            "",
+            far_lod_range_slider_value(state),
+        );
+        GameUiAction::SetFarLodRange(far_lod_range_from_slider_value(
             slider.value_from_point(point),
             state,
         ))
@@ -2824,6 +2871,14 @@ impl GameUi {
             state.far_lod_enabled,
         )
         .render(draw, &self.font, self.interaction());
+        Slider::new(
+            ID_OPTIONS_FAR_LOD_RANGE,
+            widgets.far_lod_range,
+            far_lod_range_label(state),
+            far_lod_range_slider_value(state),
+        )
+        .enabled(state.far_lod_enabled)
+        .render(draw, &self.font, self.interaction());
         Checkbox::new(
             ID_OPTIONS_PLAYER_BOX,
             widgets.player_box,
@@ -3014,6 +3069,7 @@ struct OptionWidgetRects {
     occlusion: Rect,
     fullbright: Rect,
     far_lod: Rect,
+    far_lod_range: Rect,
     player_box: Rect,
     first_person_player: Rect,
     crosshair: Option<Rect>,
@@ -3355,6 +3411,8 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
     left_y += 20.0;
     let far_lod = Rect::new(left_x, left_y, column_width, 18.0);
     left_y += 20.0;
+    let far_lod_range = Rect::new(left_x, left_y, column_width, 20.0);
+    left_y += 22.0;
     let player_box = Rect::new(left_x, left_y, column_width, 18.0);
     left_y += 20.0;
     let first_person_player = Rect::new(left_x, left_y, column_width, 18.0);
@@ -3409,6 +3467,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
         occlusion,
         fullbright,
         far_lod,
+        far_lod_range,
         player_box,
         first_person_player,
         crosshair,
@@ -3428,7 +3487,7 @@ fn option_widgets(scale: GuiScale, state: GameUiRenderState) -> OptionWidgetRect
 }
 
 fn options_panel(scale: GuiScale, state: GameUiRenderState) -> Rect {
-    let left_rows_height = 100.0
+    let left_rows_height = 122.0
         + f32::from(u8::from(state.crosshair_visible.is_some())) * 20.0
         + f32::from(
             u8::from(state.touch_controls_mode.is_some())
@@ -3498,6 +3557,30 @@ fn render_distance_label(state: GameUiRenderState) -> String {
     let radius = state.clamped_render_distance();
     let suffix = if radius == 1 { "chunk" } else { "chunks" };
     format!("Render Distance: {radius} {suffix}")
+}
+
+fn far_lod_range_slider_value(state: GameUiRenderState) -> f32 {
+    let (min, max) = state.far_lod_range_limits();
+    if max <= min {
+        0.0
+    } else {
+        (state.clamped_far_lod_range() - min) as f32 / (max - min) as f32
+    }
+}
+
+fn far_lod_range_from_slider_value(value: f32, state: GameUiRenderState) -> i32 {
+    let (min, max) = state.far_lod_range_limits();
+    if max <= min {
+        min
+    } else {
+        min + (value.clamp(0.0, 1.0) * (max - min) as f32).round() as i32
+    }
+}
+
+fn far_lod_range_label(state: GameUiRenderState) -> String {
+    let range = state.clamped_far_lod_range();
+    let suffix = if range == 1 { "chunk" } else { "chunks" };
+    format!("Far LOD Range: {range} {suffix}")
 }
 
 fn fly_speed_slider_value(state: GameUiRenderState) -> f32 {
@@ -4963,6 +5046,39 @@ mod tests {
         assert!(ui.pointer_down(point, state));
         let (_handled, action) = ui.pointer_up(point, state);
         assert_eq!(action, Some(GameUiAction::ToggleFarLod));
+    }
+
+    #[test]
+    fn game_ui_options_far_lod_range_slider_emits_set_action() {
+        let mut ui = GameUi::new();
+        ui.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            far_lod_enabled: true,
+            far_lod_range_chunks: 12,
+            min_far_lod_range_chunks: 1,
+            max_far_lod_range_chunks: 64,
+            ..GameUiRenderState::default()
+        };
+
+        let far_lod_range = option_widgets(ui.scale(), state).far_lod_range;
+        let max_point = Point {
+            x: far_lod_range.right() - 0.1,
+            y: far_lod_range.y + far_lod_range.height * 0.5,
+        };
+        assert!(ui.pointer_down(max_point, state));
+        let (_handled, action) = ui.pointer_up(max_point, state);
+        assert_eq!(action, Some(GameUiAction::SetFarLodRange(64)));
+
+        let min_point = Point {
+            x: far_lod_range.x,
+            y: far_lod_range.y + far_lod_range.height * 0.5,
+        };
+        assert!(ui.pointer_down(min_point, state));
+        let (_handled, action) = ui.pointer_up(min_point, state);
+        assert_eq!(action, Some(GameUiAction::SetFarLodRange(1)));
     }
 
     #[test]

@@ -280,6 +280,7 @@ impl OffscreenFlatClientHost {
                     as i32,
                 render_options: self.driver.render_options,
                 far_lod_enabled: self.driver.scene.far_lod.enabled,
+                far_lod_range_chunks: self.driver.scene.far_lod.extra_radius_chunks as i32,
                 frame_pacing: FramePacingUiState::default(),
                 movement_mode: game_movement_mode(self.driver.camera.movement_mode()),
                 fly_speed_multiplier: self.driver.camera.fly_speed_multiplier() as f32,

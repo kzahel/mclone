@@ -1,8 +1,10 @@
-use mclone_core::{CHUNK_WIDTH, ChunkPos};
+use mclone_core::{CHUNK_WIDTH, ChunkPos, chunk_min_block_coord};
 use mclone_render::far_lod::FarTerrainLodMesh;
 
-pub const DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS: u32 = 2;
+pub const DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS: u32 = 0;
+pub const MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 1;
 pub const DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 12;
+pub const MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 64;
 pub const DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS: u32 = 8;
 pub const SEA_LEVEL: f32 = 63.0;
 
@@ -33,11 +35,22 @@ impl FarTerrainLodConfig {
         }
     }
 
+    pub fn with_extra_radius_chunks(mut self, extra_radius_chunks: u32) -> Self {
+        self.extra_radius_chunks = extra_radius_chunks.clamp(
+            MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+            MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+        );
+        self
+    }
+
     fn normalized(self) -> Self {
         Self {
             enabled: self.enabled,
-            start_margin_chunks: self.start_margin_chunks.max(1),
-            extra_radius_chunks: self.extra_radius_chunks.max(1),
+            start_margin_chunks: self.start_margin_chunks,
+            extra_radius_chunks: self.extra_radius_chunks.clamp(
+                MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+                MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+            ),
             sample_spacing_blocks: self.sample_spacing_blocks.max(1),
         }
     }
@@ -121,30 +134,26 @@ impl FarTerrainLodCache {
 }
 
 fn build_far_terrain_lod_mesh(key: FarTerrainLodBuildKey) -> FarTerrainLodMesh {
-    let start_blocks =
-        (key.render_distance + key.start_margin_chunks).saturating_mul(CHUNK_WIDTH as u32);
-    let end_blocks = (key.render_distance + key.extra_radius_chunks)
-        .max(key.render_distance + key.start_margin_chunks + 1)
-        .saturating_mul(CHUNK_WIDTH as u32);
+    let inner_chunk_radius = key.render_distance.saturating_add(key.start_margin_chunks);
+    let outer_chunk_radius = key
+        .render_distance
+        .saturating_add(key.extra_radius_chunks)
+        .max(inner_chunk_radius.saturating_add(1));
     let spacing = key.sample_spacing_blocks.max(1);
-    if end_blocks <= start_blocks {
-        return FarTerrainLodMesh::empty(key.revision());
-    }
-
-    let center_x = key.center.middle_block_x();
-    let center_z = key.center.middle_block_z();
-    let sample_count = (end_blocks.saturating_mul(2) / spacing).saturating_add(1);
+    let side_chunks = outer_chunk_radius.saturating_mul(2).saturating_add(1);
+    let side_blocks = side_chunks.saturating_mul(CHUNK_WIDTH as u32);
+    let sample_count = ceil_div(side_blocks, spacing).saturating_add(1);
     if sample_count < 2 {
         return FarTerrainLodMesh::empty(key.revision());
     }
 
     let mut vertices = Vec::with_capacity(sample_count as usize * sample_count as usize * 7);
-    let min_x = center_x - end_blocks as i32;
-    let min_z = center_z - end_blocks as i32;
+    let min_x = chunk_min_block_coord(key.center.x - outer_chunk_radius as i32);
+    let min_z = chunk_min_block_coord(key.center.z - outer_chunk_radius as i32);
     for z_index in 0..sample_count {
-        let z = min_z + (z_index * spacing) as i32;
+        let z = grid_coord(min_z, z_index, spacing, side_blocks);
         for x_index in 0..sample_count {
-            let x = min_x + (x_index * spacing) as i32;
+            let x = grid_coord(min_x, x_index, spacing, side_blocks);
             let y = approximate_surface_y(key.seed, x, z);
             let color = approximate_surface_color(y);
             vertices.extend_from_slice(&[x as f32, y.max(SEA_LEVEL), z as f32]);
@@ -156,12 +165,15 @@ fn build_far_terrain_lod_mesh(key: FarTerrainLodBuildKey) -> FarTerrainLodMesh {
     let cells_per_side = sample_count - 1;
     for z_cell in 0..cells_per_side {
         for x_cell in 0..cells_per_side {
-            let cell_center_x = min_x + (x_cell * spacing + spacing / 2) as i32;
-            let cell_center_z = min_z + (z_cell * spacing + spacing / 2) as i32;
-            let dx = (cell_center_x - center_x).unsigned_abs();
-            let dz = (cell_center_z - center_z).unsigned_abs();
-            let distance = dx.max(dz);
-            if distance < start_blocks || distance > end_blocks {
+            let x0 = grid_coord(min_x, x_cell, spacing, side_blocks);
+            let x1 = grid_coord(min_x, x_cell + 1, spacing, side_blocks);
+            let z0 = grid_coord(min_z, z_cell, spacing, side_blocks);
+            let z1 = grid_coord(min_z, z_cell + 1, spacing, side_blocks);
+            let cell_center_x = x0 + (x1 - x0) / 2;
+            let cell_center_z = z0 + (z1 - z0) / 2;
+            let chunk_distance =
+                chunk_distance_from_center(key.center, cell_center_x, cell_center_z);
+            if chunk_distance <= inner_chunk_radius || chunk_distance > outer_chunk_radius {
                 continue;
             }
 
@@ -175,6 +187,21 @@ fn build_far_terrain_lod_mesh(key: FarTerrainLodBuildKey) -> FarTerrainLodMesh {
     }
 
     FarTerrainLodMesh::new(vertices, indices, key.revision())
+}
+
+fn ceil_div(value: u32, divisor: u32) -> u32 {
+    value.saturating_add(divisor.saturating_sub(1)) / divisor.max(1)
+}
+
+fn grid_coord(min: i32, index: u32, spacing: u32, side_blocks: u32) -> i32 {
+    min + index.saturating_mul(spacing).min(side_blocks) as i32
+}
+
+fn chunk_distance_from_center(center: ChunkPos, world_x: i32, world_z: i32) -> u32 {
+    let chunk = ChunkPos::from_block_coords(world_x, world_z);
+    (chunk.x - center.x)
+        .unsigned_abs()
+        .max((chunk.z - center.z).unsigned_abs())
 }
 
 fn approximate_surface_y(seed: i64, x: i32, z: i32) -> f32 {
@@ -227,6 +254,11 @@ mod tests {
     fn far_terrain_lod_config_defaults_disabled() {
         assert!(!FarTerrainLodConfig::default().enabled);
         assert!(FarTerrainLodConfig::enabled().enabled);
+        assert_eq!(
+            FarTerrainLodConfig::enabled().start_margin_chunks,
+            DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS
+        );
+        assert_eq!(DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS, 0);
     }
 
     #[test]
@@ -258,6 +290,34 @@ mod tests {
         assert!(mesh.index_count() > 0);
         assert_eq!(mesh.index_count() % 3, 0);
         assert_eq!(mesh.revision(), key.revision());
+    }
+
+    #[test]
+    fn far_terrain_lod_chunk_distance_matches_render_distance_boundary() {
+        let center = ChunkPos::new(0, 0);
+        let last_normal_x = chunk_min_block_coord(5) + CHUNK_WIDTH - 1;
+        let first_lod_x = chunk_min_block_coord(6);
+
+        assert_eq!(chunk_distance_from_center(center, last_normal_x, 0), 5);
+        assert_eq!(chunk_distance_from_center(center, first_lod_x, 0), 6);
+    }
+
+    #[test]
+    fn far_terrain_lod_range_is_clamped() {
+        assert_eq!(
+            FarTerrainLodConfig::enabled()
+                .with_extra_radius_chunks(0)
+                .normalized()
+                .extra_radius_chunks,
+            MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS
+        );
+        assert_eq!(
+            FarTerrainLodConfig::enabled()
+                .with_extra_radius_chunks(MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS + 1)
+                .normalized()
+                .extra_radius_chunks,
+            MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS
+        );
     }
 
     #[test]

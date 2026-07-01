@@ -82,21 +82,24 @@ Landed scope:
 - `mclone-native-client` now parses `--far-lod true|false`, keeps it disabled by
   default, and feeds the mesh through the shared flat render path.
 - The shared Options UI now exposes a `Far LOD` checkbox for toggling the
-  prototype at runtime.
+  prototype at runtime, plus a `Far LOD Range` slider for the number of chunk
+  rings rendered beyond the normal render distance.
 - The current pass is single-view flat only; XR/multiview remains intentionally
   out of scope until this prototype has measured value.
+- The current height/color source is still a deterministic placeholder. It uses
+  world X/Z coordinates, but it does not yet sample the real overworld terrain,
+  so it will not line up with mountains, shorelines, trees, or terrain colors.
 
 Current hard-coded prototype distances:
 
-- LOD starts at `render_distance + 2` chunks.
-- LOD ends at `render_distance + 12` chunks.
-- Effective LOD band width is therefore 10 chunks.
+- LOD starts at the first chunk ring outside the normal render distance.
+- LOD ends at `render_distance + far_lod_range` chunks.
+- The default `far_lod_range` is 12 chunks, adjustable in the Options UI.
 - Surface samples are spaced every 8 blocks.
 
-This is intentionally not exposed as a slider yet. Once the source data is real
-enough to evaluate, prefer a single `Far LOD Distance` control over separate
-start/end sliders; keep the start margin/blend region hidden unless pop-in
-testing proves it must be user-tunable.
+This intentionally exposes a single range control rather than separate start/end
+sliders. The start boundary should remain tied to the normal render distance
+unless pop-in testing proves we need a hidden overlap/blend margin.
 
 ## Follow-Up Slices
 

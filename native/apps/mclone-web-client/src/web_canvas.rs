@@ -2931,6 +2931,7 @@ impl WebChunkRenderSession {
                 self.force_fullbright = !self.force_fullbright;
             }
             GameUiAction::ToggleFarLod => {}
+            GameUiAction::SetFarLodRange(_) => {}
             GameUiAction::TogglePlayerCollisionBox => {
                 self.player_collision_box_visible = !self.player_collision_box_visible;
             }
@@ -3075,6 +3076,7 @@ impl WebChunkRenderSession {
                 | GameUiAction::ToggleSectionOcclusion
                 | GameUiAction::ToggleFullbright
                 | GameUiAction::ToggleFarLod
+                | GameUiAction::SetFarLodRange(_)
                 | GameUiAction::TogglePlayerCollisionBox
                 | GameUiAction::ToggleCrosshair
                 | GameUiAction::ToggleFirstPersonPlayer
@@ -3098,6 +3100,12 @@ impl WebChunkRenderSession {
             section_occlusion_culling: self.section_occlusion_culling,
             force_fullbright: self.force_fullbright,
             far_lod_enabled: false,
+            far_lod_range_chunks:
+                mclone_app_runtime::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
+            min_far_lod_range_chunks:
+                mclone_app_runtime::far_lod::MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
+            max_far_lod_range_chunks:
+                mclone_app_runtime::far_lod::MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: Some(self.crosshair_visible),
@@ -4767,6 +4775,7 @@ fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
         GameUiAction::ToggleFullbright => "toggleFullbright",
         GameUiAction::ToggleFarLod => "toggleFarLod",
+        GameUiAction::SetFarLodRange(_) => "setFarLodRange",
         GameUiAction::TogglePlayerCollisionBox => "togglePlayerCollisionBox",
         GameUiAction::ToggleCrosshair => "toggleCrosshair",
         GameUiAction::ToggleFirstPersonPlayer => "toggleFirstPersonPlayer",

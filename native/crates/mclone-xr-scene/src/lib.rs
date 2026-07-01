@@ -3027,6 +3027,12 @@ where
             section_occlusion_culling: self.render_options.section_occlusion_culling,
             force_fullbright: self.render_options.force_fullbright,
             far_lod_enabled: false,
+            far_lod_range_chunks:
+                mclone_app_runtime::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
+            min_far_lod_range_chunks:
+                mclone_app_runtime::far_lod::MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
+            max_far_lod_range_chunks:
+                mclone_app_runtime::far_lod::MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: None,
@@ -3747,6 +3753,7 @@ where
             GameUiAction::ToggleFarLod => {
                 log::info!("XR far LOD toggle ignored; far LOD is not available");
             }
+            GameUiAction::SetFarLodRange(_) => {}
             GameUiAction::TogglePlayerCollisionBox => {
                 self.player_collision_box_visible = !self.player_collision_box_visible;
                 log::info!(

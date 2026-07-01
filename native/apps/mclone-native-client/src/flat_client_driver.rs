@@ -1,7 +1,10 @@
 use std::collections::BTreeSet;
 
 use anyhow::Context;
-use mclone_app_runtime::far_lod::{FarTerrainLodCache, FarTerrainLodConfig};
+use mclone_app_runtime::far_lod::{
+    FarTerrainLodCache, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+    MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+};
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats,
@@ -204,6 +207,7 @@ pub(crate) struct FlatClientUiRenderOptions {
     pub(crate) render_distance: i32,
     pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) far_lod_enabled: bool,
+    pub(crate) far_lod_range_chunks: i32,
     pub(crate) frame_pacing: FramePacingUiState,
     pub(crate) movement_mode: GameMovementMode,
     pub(crate) fly_speed_multiplier: f32,
@@ -676,12 +680,7 @@ impl FlatClientDriver {
                 );
             }
             GameUiAction::ToggleFarLod => {
-                let enabled = !self.scene.far_lod.enabled;
-                self.scene.far_lod = if enabled {
-                    FarTerrainLodConfig::enabled()
-                } else {
-                    FarTerrainLodConfig::default()
-                };
+                self.scene.far_lod.enabled = !self.scene.far_lod.enabled;
                 self.far_lod_cache.clear();
                 log::info!(
                     "far LOD {}",
@@ -690,6 +689,20 @@ impl FlatClientDriver {
                     } else {
                         "disabled"
                     }
+                );
+            }
+            GameUiAction::SetFarLodRange(range_chunks) => {
+                let range_chunks = u32::try_from(range_chunks)
+                    .unwrap_or(MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS)
+                    .clamp(
+                        MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+                        MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+                    );
+                self.scene.far_lod = self.scene.far_lod.with_extra_radius_chunks(range_chunks);
+                self.far_lod_cache.clear();
+                log::info!(
+                    "far LOD range set to {} chunks beyond render distance",
+                    self.scene.far_lod.extra_radius_chunks
                 );
             }
             GameUiAction::TogglePlayerCollisionBox => {
@@ -1850,6 +1863,9 @@ pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUi
         section_occlusion_culling: options.render_options.section_occlusion_culling,
         force_fullbright: options.render_options.force_fullbright,
         far_lod_enabled: options.far_lod_enabled,
+        far_lod_range_chunks: options.far_lod_range_chunks,
+        min_far_lod_range_chunks: MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
+        max_far_lod_range_chunks: MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
         player_collision_box_visible: options.player_collision_box_visible,
         first_person_player_visible: options.first_person_player_visible,
         crosshair_visible: Some(options.crosshair_visible),
@@ -2116,6 +2132,17 @@ mod tests {
 
         assert!(result.host_action.is_none());
         assert!(!driver.scene.far_lod.enabled);
+    }
+
+    #[test]
+    fn ui_action_sets_far_lod_range() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+
+        let result = driver.apply_ui_action(GameUiAction::SetFarLodRange(24), ui_action_context());
+
+        assert!(result.host_action.is_none());
+        assert_eq!(driver.scene.far_lod.extra_radius_chunks, 24);
     }
 
     #[test]
