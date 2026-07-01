@@ -371,6 +371,10 @@ mod tests {
 
         let chicken = store.state(first[1]).unwrap();
         assert_eq!(chicken.kind, EntityKind::Chicken);
+        let chicken_mob = store
+            .mob_state(first[1])
+            .expect("starter chicken mob state");
+        assert_eq!(chicken_mob.available_goal_count(), 3);
     }
 
     #[test]
@@ -400,7 +404,7 @@ mod tests {
         let mob = store.mob_state(id).expect("chicken mob state");
         assert_eq!(mob.movement_speed(), metadata.movement_speed);
         assert_eq!(mob.pathfinding_malus(BlockPathType::Water), 0.0);
-        assert_eq!(mob.available_goal_count(), 0);
+        assert_eq!(mob.available_goal_count(), 3);
     }
 
     #[test]
@@ -484,6 +488,33 @@ mod tests {
         assert!(moved.age_ticks > start.age_ticks);
         assert!(moved.position.distance_to_sqr(start.position) > 0.0);
         let mob = store.mob_state(id).expect("starter cow mob state");
+        assert!(mob.running_goal_count() > 0);
+    }
+
+    #[test]
+    fn ticking_starter_chicken_eventually_applies_passive_movement() {
+        let mut store = ServerEntityStore::default();
+        let id =
+            store.ensure_debug_passive_showcase_near_spawn(Vec3d::new(8.0, 64.0, 8.0), true)[1];
+        let start = store.state(id).unwrap();
+
+        let mut moved = None;
+        for _ in 0..2_000 {
+            let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], flat_ground);
+            let entity = updated
+                .into_iter()
+                .find(|entity| entity.id == id)
+                .expect("starter chicken should tick while chunk is entity ticking");
+            if entity.position != start.position {
+                moved = Some(entity);
+                break;
+            }
+        }
+
+        let moved = moved.expect("chicken passive AI should choose a stroll target");
+        assert!(moved.age_ticks > start.age_ticks);
+        assert!(moved.position.distance_to_sqr(start.position) > 0.0);
+        let mob = store.mob_state(id).expect("starter chicken mob state");
         assert!(mob.running_goal_count() > 0);
     }
 

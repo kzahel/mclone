@@ -12,6 +12,14 @@ const LOOK_AT_PLAYER_PROBABILITY: f32 = 0.02;
 const RANDOM_LOOK_AROUND_PROBABILITY: f32 = 0.02;
 
 pub(crate) fn register_cow_goals(selector: &mut GoalSelector) {
+    register_supported_passive_animal_goals(selector);
+}
+
+pub(crate) fn register_chicken_goals(selector: &mut GoalSelector) {
+    register_supported_passive_animal_goals(selector);
+}
+
+fn register_supported_passive_animal_goals(selector: &mut GoalSelector) {
     selector.add_goal(5, WaterAvoidingRandomStrollGoal::new(1.0));
     selector.add_goal(6, LookAtPlayerGoal::new(6.0));
     selector.add_goal(7, RandomLookAroundGoal::default());

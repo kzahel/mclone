@@ -105,6 +105,11 @@ The first shared ground/collision scaffold is also in place:
   path, and the actual rebuild still flows through navigation and the path
   service. Java `trimPath()` scaffolding is also present, with cauldron
   behavior waiting on cauldron block facts.
+- Chicken now has compact server species state behind the shared mob runtime:
+  the supported passive goal tail is registered, flap/egg timer state ticks only
+  in entity-ticking chunks, and airborne downward velocity is damped like Java
+  `Chicken.aiStep()`. Egg item entities, sounds, persistence, and jockey
+  passenger behavior remain separate system follow-ups.
 
 This does not complete full Java `WalkNodeEvaluator` parity, cauldron/sun path
 trim behavior, the full Java `AttributeMap` / modifier/effect stack, or full

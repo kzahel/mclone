@@ -12,19 +12,20 @@ entity/mob/goal skeleton is in place.
 
 Workstream: native Rust shared server/runtime, desktop validation first.
 
-Status: Slices 0-4 landed. Slice 5 asset promotion is landed, with
-chicken-specific ticking still pending. Slice 5A landed shared block collision,
-the debug passive showcase toggle, and first server mob gravity/collision.
-Slice 5B landed server-owned `GroundPathNavigation`, a terrain-MVP
-`WalkNodeEvaluator` subset, and collision-aware `LandRandomPos` /
-`DefaultRandomPos` target selection. Slice 5C landed the immediate path service
-boundary and heap-backed A* core. Slice 5D landed one-block step-up path
-expansion and the first `JumpControl` scaffold. Slice 5E landed mob movement
-attribute facts for navigation and jumping. Slice 5F landed Minecraft-shaped
-navigation recompute and timeout state. Slice 5G landed block-change path
-recompute triggers and path-trim hooks. The starter passive path is now an
-explicit debug passive showcase, enabled by default, while natural spawning
-remains future work.
+Status: Slices 0-4 landed. Slice 5 asset promotion is landed, and tactical
+[`126`](126-chicken-runtime-behavior.md) landed the first chicken runtime chunk:
+supported passive goals, species flap/egg state, and airborne glide damping.
+Slice 5A landed shared block collision, the debug passive showcase toggle, and
+first server mob gravity/collision. Slice 5B landed server-owned
+`GroundPathNavigation`, a terrain-MVP `WalkNodeEvaluator` subset, and
+collision-aware `LandRandomPos` / `DefaultRandomPos` target selection. Slice 5C
+landed the immediate path service boundary and heap-backed A* core. Slice 5D
+landed one-block step-up path expansion and the first `JumpControl` scaffold.
+Slice 5E landed mob movement attribute facts for navigation and jumping. Slice
+5F landed Minecraft-shaped navigation recompute and timeout state. Slice 5G
+landed block-change path recompute triggers and path-trim hooks. The starter
+passive path is now an explicit debug passive showcase, enabled by default,
+while natural spawning remains future work.
 
 Pathfinding direction: preserve the Minecraft layering (`Goal` ->
 `PathNavigation` -> path service -> `PathFinder` / `NodeEvaluator` ->
@@ -372,14 +373,16 @@ Partial landed notes:
 - Verified with `cargo test --manifest-path native/Cargo.toml`.
 - Rendered and inspected `/tmp/mclone-chicken-actor-review.png` with 3 views,
   9 actors, and 9 drawn actors.
+- Tactical [`126`](126-chicken-runtime-behavior.md) added chicken species state,
+  supported passive goals, Java-shaped airborne glide damping, and an egg timer
+  hook without item-entity side effects.
 
 Still pending:
 
-- Chicken-specific flap/egg/jockey runtime state.
-- Java `Chicken.aiStep()` ticking for state that does not require item entities
-  or sounds.
 - Protocol/client presentation review for any chicken-specific animation data
   that cannot be derived from ordinary entity movement.
+- Egg item entities, egg sound, persisted `EggLayTime`, and
+  chicken-jockey/passenger behavior.
 
 ## Slice 5A - Shared Ground Collision And Debug Passive Showcase (Landed)
 

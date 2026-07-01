@@ -14,12 +14,14 @@ mod attributes;
 mod control;
 pub(crate) mod goals;
 mod navigation;
+mod species;
 
 use attributes::MobAttributes;
 use control::{JumpControl, LookControl, MoveControl};
 use goals::{GoalSelector, passive};
 pub(crate) use navigation::BlockPathType;
 use navigation::GroundPathNavigation;
+use species::MobSpeciesState;
 
 const PLAYER_EYE_HEIGHT: f64 = 1.62;
 const MOB_GRAVITY: f64 = 0.08;
@@ -70,6 +72,7 @@ pub(crate) struct MobRuntimeState {
     delta_movement: Vec3d,
     pathfinding_malus: PathfindingMalusTable,
     random: SimpleRandomSource,
+    species: MobSpeciesState,
     goal_selector: GoalSelector,
     navigation: GroundPathNavigation,
     move_control: MoveControl,
@@ -93,9 +96,14 @@ impl MobRuntimeState {
             pathfinding_malus.set(BlockPathType::Water, 0.0);
         }
 
+        let mut random = SimpleRandomSource::new(mob_random_seed(id, metadata.kind));
+        let species = MobSpeciesState::from_spawn(metadata.kind, &mut random);
+
         let mut goal_selector = GoalSelector::default();
-        if metadata.kind == EntityKind::Cow {
-            passive::register_cow_goals(&mut goal_selector);
+        match metadata.kind {
+            EntityKind::Cow => passive::register_cow_goals(&mut goal_selector),
+            EntityKind::Chicken => passive::register_chicken_goals(&mut goal_selector),
+            EntityKind::DebugCube => {}
         }
         let attributes = MobAttributes::from_metadata(metadata);
 
@@ -108,7 +116,8 @@ impl MobRuntimeState {
             eye_height: metadata.standing_eye_height() as f64,
             delta_movement: Vec3d::new(0.0, -MOB_GRAVITY * MOB_VERTICAL_DRAG, 0.0),
             pathfinding_malus,
-            random: SimpleRandomSource::new(mob_random_seed(id, metadata.kind)),
+            random,
+            species,
             goal_selector,
             navigation: GroundPathNavigation::default(),
             move_control: MoveControl::default(),
@@ -239,6 +248,8 @@ impl MobRuntimeState {
         self.y_head_rot_degrees = context.y_head_rot_degrees;
         self.delta_movement = context.delta_movement;
         self.random = context.random;
+        self.species
+            .ai_step(self.on_ground, &mut self.delta_movement, &mut self.random);
         self.navigation = context.navigation;
         self.move_control = context.move_control;
         self.jump_control = context.jump_control;
@@ -272,6 +283,31 @@ impl MobRuntimeState {
     #[cfg(test)]
     pub(crate) fn navigation_has_delayed_recomputation(&self) -> bool {
         self.navigation.has_delayed_recomputation()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn chicken_egg_time_for_test(&self) -> Option<i32> {
+        self.species.chicken().map(|chicken| chicken.egg_time())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_chicken_egg_time_for_test(&mut self, egg_time: i32) {
+        let Some(chicken) = self.species.chicken_mut() else {
+            panic!("test expected chicken species state");
+        };
+        chicken.set_egg_time_for_test(egg_time);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn chicken_pending_egg_lays_for_test(&self) -> Option<u32> {
+        self.species
+            .chicken()
+            .map(|chicken| chicken.pending_egg_lays())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn chicken_flap_speed_for_test(&self) -> Option<f32> {
+        self.species.chicken().map(|chicken| chicken.flap_speed())
     }
 }
 
@@ -538,6 +574,18 @@ mod tests {
         })
     }
 
+    fn flat_ground(pos: BlockPos) -> Option<BlockStateId> {
+        Some(if pos.y == 63 {
+            BlockStateId(1)
+        } else {
+            BlockStateId(mclone_blocks::terrain_id::AIR)
+        })
+    }
+
+    fn no_blocks(_pos: BlockPos) -> Option<BlockStateId> {
+        None
+    }
+
     fn one_block_ledge(pos: BlockPos) -> Option<BlockStateId> {
         let floor_y = if pos.x <= 0 { 63 } else { 64 };
         Some(if pos.y == floor_y {
@@ -570,6 +618,58 @@ mod tests {
 
         assert_eq!(mob.movement_speed(), 0.25);
         assert_eq!(mob.pathfinding_malus(BlockPathType::Water), 0.0);
+        assert_eq!(mob.available_goal_count(), 3);
+        let egg_time = mob.chicken_egg_time_for_test().expect("chicken egg time");
+        assert!((6_000..12_000).contains(&egg_time));
+        assert_eq!(mob.chicken_pending_egg_lays_for_test(), Some(0));
+        assert_eq!(mob.chicken_flap_speed_for_test(), Some(0.0));
+    }
+
+    #[test]
+    fn chicken_runtime_dampens_airborne_falling_delta() {
+        let metadata = EntityMetadata::for_kind(EntityKind::Chicken).unwrap();
+        let mut mob = MobRuntimeState::from_spawn(EntityId(1), metadata, true, 0.0);
+        let mut entity = ServerEntityState::from_metadata(
+            EntityId(1),
+            metadata,
+            Vec3d::new(0.5, 64.0, 0.5),
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+
+        mob.tick_entity(&mut entity, &[], &no_blocks);
+
+        let expected = ((-MOB_GRAVITY * MOB_VERTICAL_DRAG - MOB_GRAVITY) * MOB_VERTICAL_DRAG) * 0.6;
+        assert!(!entity.on_ground);
+        assert!(entity.position.y < 64.0);
+        assert!((mob.delta_movement().y - expected).abs() < 1.0e-12);
+        assert_eq!(mob.chicken_flap_speed_for_test(), Some(1.0));
+    }
+
+    #[test]
+    fn chicken_runtime_counts_and_resets_egg_timer_without_item_spawn() {
+        let metadata = EntityMetadata::for_kind(EntityKind::Chicken).unwrap();
+        let mut mob = MobRuntimeState::from_spawn(EntityId(1), metadata, true, 0.0);
+        let mut entity = ServerEntityState::from_metadata(
+            EntityId(1),
+            metadata,
+            Vec3d::new(0.5, 64.0, 0.5),
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+        mob.set_chicken_egg_time_for_test(1);
+
+        mob.tick_entity(&mut entity, &[], &flat_ground);
+
+        let egg_time = mob
+            .chicken_egg_time_for_test()
+            .expect("chicken should reset egg time");
+        assert!((6_000..12_000).contains(&egg_time));
+        assert_eq!(mob.chicken_pending_egg_lays_for_test(), Some(1));
     }
 
     #[test]
