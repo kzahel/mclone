@@ -1,65 +1,11 @@
-//! Server-owned entity replicas and visibility routing.
-//!
-//! This is intentionally narrower than Java's full `ChunkMap.TrackedEntity`
-//! stack. It gives native clients authoritative snapshots for simple passive
-//! actor rendering without adding natural spawning, AI, persistence, or combat.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
-use mclone_protocol::{
-    EntityId, EntityKind, EntityRotation, EntitySnapshot, EntityUpdate, ServerUpdate,
-};
+#[cfg(feature = "physics-rapier")]
+use mclone_protocol::EntityRotation;
+use mclone_protocol::{EntityId, EntityKind};
 
-use crate::players::ServerPlayerId;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ServerEntityState {
-    pub(crate) id: EntityId,
-    pub(crate) kind: EntityKind,
-    pub(crate) position: Vec3d,
-    pub(crate) y_rot_degrees: f32,
-    pub(crate) x_rot_degrees: f32,
-    pub(crate) rotation: Option<EntityRotation>,
-    pub(crate) on_ground: bool,
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-    pub(crate) age_ticks: u64,
-    pub(crate) alive: bool,
-}
-
-impl ServerEntityState {
-    fn chunk_pos(self) -> ChunkPos {
-        BlockPos::containing(self.position).chunk_pos()
-    }
-
-    fn snapshot(self) -> EntitySnapshot {
-        EntitySnapshot {
-            id: self.id,
-            kind: self.kind,
-            position: self.position,
-            y_rot_degrees: self.y_rot_degrees,
-            x_rot_degrees: self.x_rot_degrees,
-            rotation: self.rotation,
-            on_ground: self.on_ground,
-            width: self.width,
-            height: self.height,
-            age_ticks: self.age_ticks,
-        }
-    }
-
-    fn update(self) -> EntityUpdate {
-        EntityUpdate {
-            id: self.id,
-            position: self.position,
-            y_rot_degrees: self.y_rot_degrees,
-            x_rot_degrees: self.x_rot_degrees,
-            rotation: self.rotation,
-            on_ground: self.on_ground,
-            age_ticks: self.age_ticks,
-        }
-    }
-}
+use super::ServerEntityState;
 
 #[derive(Debug, Default)]
 pub(crate) struct ServerEntityStore {
@@ -239,88 +185,6 @@ fn debug_physics_cube_state(
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RoutedEntityUpdate {
-    pub(crate) recipient: ServerPlayerId,
-    pub(crate) update: ServerUpdate,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct EntityTracking {
-    seen_by_entity: BTreeMap<EntityId, BTreeSet<ServerPlayerId>>,
-}
-
-impl EntityTracking {
-    pub(crate) fn remove_observer(&mut self, player_id: ServerPlayerId) {
-        for observers in self.seen_by_entity.values_mut() {
-            observers.remove(&player_id);
-        }
-    }
-
-    pub(crate) fn reconcile_observer(
-        &mut self,
-        observer: ServerPlayerId,
-        subjects: &[ServerEntityState],
-        mut tracks_chunk: impl FnMut(ServerPlayerId, ChunkPos) -> bool,
-    ) -> Vec<RoutedEntityUpdate> {
-        let mut routes = Vec::new();
-        for subject in subjects {
-            self.reconcile_pair(observer, *subject, &mut tracks_chunk, false, &mut routes);
-        }
-        routes
-    }
-
-    pub(crate) fn reconcile_subject(
-        &mut self,
-        subject: ServerEntityState,
-        observers: impl IntoIterator<Item = ServerPlayerId>,
-        mut tracks_chunk: impl FnMut(ServerPlayerId, ChunkPos) -> bool,
-        emit_existing_updates: bool,
-    ) -> Vec<RoutedEntityUpdate> {
-        let mut routes = Vec::new();
-        for observer in observers {
-            self.reconcile_pair(
-                observer,
-                subject,
-                &mut tracks_chunk,
-                emit_existing_updates,
-                &mut routes,
-            );
-        }
-        routes
-    }
-
-    fn reconcile_pair(
-        &mut self,
-        observer: ServerPlayerId,
-        subject: ServerEntityState,
-        tracks_chunk: &mut impl FnMut(ServerPlayerId, ChunkPos) -> bool,
-        emit_existing_update: bool,
-        routes: &mut Vec<RoutedEntityUpdate>,
-    ) {
-        let observers = self.seen_by_entity.entry(subject.id).or_default();
-        let should_see = subject.alive && tracks_chunk(observer, subject.chunk_pos());
-        if should_see {
-            if observers.insert(observer) {
-                routes.push(RoutedEntityUpdate {
-                    recipient: observer,
-                    update: ServerUpdate::EntitySnapshot(subject.snapshot()),
-                });
-            } else if emit_existing_update {
-                routes.push(RoutedEntityUpdate {
-                    recipient: observer,
-                    update: ServerUpdate::EntityUpdate(subject.update()),
-                });
-            }
-        } else if observers.remove(&observer) {
-            routes.push(RoutedEntityUpdate {
-                recipient: observer,
-                update: ServerUpdate::EntityRemove { id: subject.id },
-            });
-        }
-    }
-}
-
 fn starter_passive_position(spawn_position: Vec3d) -> Vec3d {
     let chunk = BlockPos::containing(spawn_position).chunk_pos();
     Vec3d::new(
@@ -337,26 +201,6 @@ fn offset_within_chunk(value: f64, chunk_min: i32) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn player(raw: u64) -> ServerPlayerId {
-        ServerPlayerId::from_raw_for_tests(raw)
-    }
-
-    fn state(id: u64, x: f64, z: f64) -> ServerEntityState {
-        ServerEntityState {
-            id: EntityId(id),
-            kind: EntityKind::Cow,
-            position: Vec3d::new(x, 64.0, z),
-            y_rot_degrees: 45.0,
-            x_rot_degrees: 0.0,
-            rotation: None,
-            on_ground: true,
-            width: 0.9,
-            height: 1.4,
-            age_ticks: 0,
-            alive: true,
-        }
-    }
 
     #[test]
     fn starter_passive_spawns_once_near_initial_spawn() {
@@ -386,55 +230,5 @@ mod tests {
         assert_eq!(updated.len(), 1);
         assert_eq!(updated[0].id, id);
         assert_eq!(updated[0].age_ticks, 1);
-    }
-
-    #[test]
-    fn observer_reconcile_adds_and_removes_visible_entities() {
-        let observer = player(1);
-        let subject = state(7, 8.0, 8.0);
-        let mut tracking = EntityTracking::default();
-
-        let routes = tracking.reconcile_observer(observer, &[subject], |_, _| true);
-
-        assert_eq!(
-            routes,
-            vec![RoutedEntityUpdate {
-                recipient: observer,
-                update: ServerUpdate::EntitySnapshot(subject.snapshot()),
-            }]
-        );
-
-        let routes = tracking.reconcile_observer(observer, &[subject], |_, _| false);
-
-        assert_eq!(
-            routes,
-            vec![RoutedEntityUpdate {
-                recipient: observer,
-                update: ServerUpdate::EntityRemove { id: subject.id },
-            }]
-        );
-    }
-
-    #[test]
-    fn subject_reconcile_updates_existing_observers() {
-        let observer = player(1);
-        let mut tracking = EntityTracking::default();
-        let initial = state(7, 8.0, 8.0);
-        tracking.reconcile_subject(initial, [observer], |_, _| true, false);
-        let moved = ServerEntityState {
-            position: Vec3d::new(9.0, 64.0, 8.0),
-            age_ticks: 2,
-            ..initial
-        };
-
-        let routes = tracking.reconcile_subject(moved, [observer], |_, _| true, true);
-
-        assert_eq!(
-            routes,
-            vec![RoutedEntityUpdate {
-                recipient: observer,
-                update: ServerUpdate::EntityUpdate(moved.update()),
-            }]
-        );
     }
 }

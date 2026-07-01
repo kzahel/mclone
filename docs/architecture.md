@@ -13,6 +13,7 @@ This document exists to answer a different question than [`strategy.md`](./strat
 - `protocol.md`: the logical host/client message model and transport-codec boundaries
 - `loading-persistence.md`: world creation/open/join flow, chunk lifecycle, and save/eviction policy
 - `authoritative-host-scheduling.md`: how player/session authority stays responsive while chunk jobs run
+- `entity-architecture.md`: required entity, mob, spawning, persistence, tracking, and presentation boundaries for native runtime work
 - `multiplayer-hosting.md`: local, dedicated, future P2P, transport, asset-hosting, and server-config shape
 - `minecraft-client-replica-research.md`: vanilla integrated-server, client-world, lighting, fluid, entity-interpolation, and networking source review
 - `gui.md`: WebGPU-only, vanilla-shaped 2D GUI architecture for menus, loading status, HUD, options, debug settings, and touch UI

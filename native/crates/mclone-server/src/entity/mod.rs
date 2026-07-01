@@ -1,0 +1,15 @@
+//! Server-owned entity replicas and visibility routing.
+//!
+//! This is intentionally narrower than Java's full `ChunkMap.TrackedEntity`
+//! stack. It gives native clients authoritative snapshots for simple passive
+//! actor rendering without adding natural spawning, AI, persistence, or combat.
+
+mod state;
+mod store;
+mod tracking;
+
+pub(crate) use state::ServerEntityState;
+#[cfg(feature = "physics-rapier")]
+pub(crate) use store::DebugPhysicsCubeEntitySpawn;
+pub(crate) use store::ServerEntityStore;
+pub(crate) use tracking::{EntityTracking, RoutedEntityUpdate};

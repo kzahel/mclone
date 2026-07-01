@@ -4,7 +4,7 @@
 mod block_light_bridge;
 mod cadence;
 mod distance_manager;
-mod entities;
+mod entity;
 mod falling_block;
 mod fluid;
 mod game_mode;

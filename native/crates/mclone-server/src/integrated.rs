@@ -20,7 +20,7 @@ use mclone_worldgen::block::{AIR, RawBlockId, generated_block_state_id};
 
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
-use crate::entities::{EntityTracking, RoutedEntityUpdate, ServerEntityState, ServerEntityStore};
+use crate::entity::{EntityTracking, RoutedEntityUpdate, ServerEntityState, ServerEntityStore};
 use crate::falling_block::{
     BlockTickList, BlockTickPhaseReport, basic_falling_block_move,
     block_tick_requests_after_block_change,
@@ -1098,7 +1098,7 @@ impl IntegratedServer {
         &mut self,
         age_ticks: u64,
         physics: ServerPhysicsTickDiagnostics,
-    ) -> Option<crate::entities::DebugPhysicsCubeEntitySpawn> {
+    ) -> Option<crate::entity::DebugPhysicsCubeEntitySpawn> {
         let pose = self.physics.debug_cube_pose()?;
         let (position, y_rot_degrees, x_rot_degrees, rotation) =
             debug_physics_cube_entity_pose(pose);
