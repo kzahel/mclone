@@ -194,6 +194,7 @@ pub struct XrSceneOptions {
     pub chunk_x: i32,
     pub chunk_z: i32,
     pub render_distance: u32,
+    pub render_compile_worker_count: usize,
     pub movement_speed_multiplier: f32,
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
@@ -209,6 +210,8 @@ impl Default for XrSceneOptions {
             chunk_x: DEFAULT_XR_CHUNK_X,
             chunk_z: DEFAULT_XR_CHUNK_Z,
             render_distance: DEFAULT_XR_RENDER_DISTANCE,
+            render_compile_worker_count:
+                mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             day_time_override: None,
             freeze_time: false,
@@ -230,6 +233,9 @@ impl XrSceneOptions {
                 "XR render distance must be between 1 and {MAX_XR_RENDER_DISTANCE}, got {}",
                 self.render_distance
             );
+        }
+        if self.render_compile_worker_count == 0 {
+            bail!("XR render compile worker count must be greater than zero");
         }
         let min = ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32;
         let max = ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32;
@@ -415,6 +421,9 @@ pub struct XrTerrainUploadSummary {
     pub pending_render_chunks_after: usize,
     pub pending_compile_jobs_before: usize,
     pub pending_compile_jobs_after: usize,
+    pub max_pending_compile_jobs: usize,
+    pub available_compile_slots_before: usize,
+    pub available_compile_slots_after: usize,
     pub rebuilt_section_count: usize,
     pub removed_section_count: usize,
     pub rebuilt_vertex_count: u32,
@@ -2394,19 +2403,25 @@ where
         camera_position: Vec3,
         timing: &mut XrTerrainFrameTiming,
     ) -> Result<XrTerrainUploadSummary> {
-        let (pending_render_chunks_before, pending_compile_jobs_before) =
-            if let Some(runtime) = self.runtime.as_ref() {
-                (
-                    runtime.pending_render_chunk_count(),
-                    runtime.render_compile_pending_job_count(),
-                )
-            } else {
-                return Ok(XrTerrainUploadSummary {
-                    traversal_ready_section_count: self.draw.traversal_ready_section_count(),
-                    record_cache: self.draw.record_cache_stats(),
-                    ..XrTerrainUploadSummary::default()
-                });
-            };
+        let (
+            pending_render_chunks_before,
+            pending_compile_jobs_before,
+            max_pending_compile_jobs,
+            available_compile_slots_before,
+        ) = if let Some(runtime) = self.runtime.as_ref() {
+            (
+                runtime.pending_render_chunk_count(),
+                runtime.render_compile_pending_job_count(),
+                runtime.render_compile_max_pending_job_count(),
+                runtime.render_compile_available_pending_job_slots(),
+            )
+        } else {
+            return Ok(XrTerrainUploadSummary {
+                traversal_ready_section_count: self.draw.traversal_ready_section_count(),
+                record_cache: self.draw.record_cache_stats(),
+                ..XrTerrainUploadSummary::default()
+            });
+        };
         let poll_start = Instant::now();
         let poll_changed = self.poll().context("poll XR terrain runtime")?;
         timing.runtime_poll_ms = elapsed_ms(poll_start.elapsed());
@@ -2428,6 +2443,9 @@ where
                 pending_render_chunks_after: runtime.pending_render_chunk_count(),
                 pending_compile_jobs_before,
                 pending_compile_jobs_after: runtime.render_compile_pending_job_count(),
+                max_pending_compile_jobs,
+                available_compile_slots_before,
+                available_compile_slots_after: runtime.render_compile_available_pending_job_slots(),
                 queued_upload_section_count: self.pending_section_uploads.len(),
                 queued_upload_removed_section_count: self.pending_section_removals.len(),
                 traversal_ready_section_count,
@@ -2499,6 +2517,9 @@ where
             pending_render_chunks_after: runtime.pending_render_chunk_count(),
             pending_compile_jobs_before,
             pending_compile_jobs_after: pending_compile_jobs_after_sync,
+            max_pending_compile_jobs,
+            available_compile_slots_before,
+            available_compile_slots_after: runtime.render_compile_available_pending_job_slots(),
             rebuilt_section_count,
             removed_section_count,
             rebuilt_vertex_count,
@@ -2618,11 +2639,21 @@ where
             .runtime
             .as_ref()
             .map_or(0, |runtime| runtime.render_compile_pending_job_count());
+        let max_pending_compile_jobs = self
+            .runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.render_compile_max_pending_job_count());
+        let available_compile_slots = self.runtime.as_ref().map_or(0, |runtime| {
+            runtime.render_compile_available_pending_job_slots()
+        });
         XrTerrainUploadSummary {
             pending_render_chunks_before: pending_render_chunks,
             pending_render_chunks_after: pending_render_chunks,
             pending_compile_jobs_before: pending_compile_jobs,
             pending_compile_jobs_after: pending_compile_jobs,
+            max_pending_compile_jobs,
+            available_compile_slots_before: available_compile_slots,
+            available_compile_slots_after: available_compile_slots,
             queued_upload_section_count: self.pending_section_uploads.len(),
             queued_upload_removed_section_count: self.pending_section_removals.len(),
             traversal_ready_section_count: self.draw.traversal_ready_section_count(),
@@ -4203,6 +4234,7 @@ fn local_single_view_options(scene: XrSceneOptions) -> LocalSingleViewSceneOptio
         .with_freeze_time(scene.freeze_time)
         .with_debug_passive_showcase(scene.debug_passive_showcase)
         .with_lighting_enabled(scene.lighting_enabled)
+        .with_render_compile_worker_count(scene.render_compile_worker_count)
 }
 
 fn active_session_label(session: Option<&ActiveSessionDescriptor>) -> String {

@@ -747,6 +747,7 @@ fn xr_scene_options_from_desktop_scene(
         chunk_z: scene.chunk_z,
         render_distance: u32::try_from(scene.render_distance)
             .context("desktop XR render distance must fit u32")?,
+        render_compile_worker_count: scene.render_compile_worker_count,
         movement_speed_multiplier: scene.movement_speed_multiplier,
         day_time_override: scene.day_time_override,
         freeze_time: scene.freeze_time,
@@ -790,6 +791,7 @@ fn desktop_scene_options_for_xr_request(
         chunk_x: scene.chunk_x,
         chunk_z: scene.chunk_z,
         render_distance: scene.render_distance as i32,
+        render_compile_worker_count: scene.render_compile_worker_count,
         movement_speed_multiplier: scene.movement_speed_multiplier,
         simulation_cadence: Default::default(),
         remote_addr,

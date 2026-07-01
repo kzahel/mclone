@@ -90,7 +90,8 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
 
     let mut session = RemoteServerSession::connect(remote_addr.as_str())?;
     build_remote_dedicated_client_runtime(
-        SingleViewHostOptions::new(center, render_distance),
+        SingleViewHostOptions::new(center, render_distance)
+            .with_render_compile_worker_count(scene.render_compile_worker_count),
         &mut session,
     )
 }
@@ -105,7 +106,8 @@ fn local_single_view_options(scene: &SceneOptions) -> Result<LocalSingleViewScen
     .with_freeze_time(scene.freeze_time)
     .with_cadence(scene.simulation_cadence)
     .with_debug_passive_showcase(scene.debug_passive_showcase)
-    .with_lighting_enabled(scene.lighting_enabled))
+    .with_lighting_enabled(scene.lighting_enabled)
+    .with_render_compile_worker_count(scene.render_compile_worker_count))
 }
 
 #[cfg_attr(not(feature = "xr"), allow(dead_code))]
@@ -130,7 +132,8 @@ pub(crate) fn native_window_scene_runtime_with_mesh_assets(
 
     let session = RemoteServerSession::connect(remote_addr.as_str())?;
     NativeWindowSceneRuntime::remote_dedicated_with_mesh_assets(
-        SingleViewHostOptions::new(center, render_distance),
+        SingleViewHostOptions::new(center, render_distance)
+            .with_render_compile_worker_count(scene.render_compile_worker_count),
         session,
         mesh_assets,
     )
@@ -218,6 +221,18 @@ impl WindowSceneRuntime {
 
     pub(crate) fn render_distance(&self) -> u32 {
         self.scene.render_distance()
+    }
+
+    pub(crate) fn render_compile_pending_job_count(&self) -> usize {
+        self.scene.render_compile_pending_job_count()
+    }
+
+    pub(crate) fn render_compile_max_pending_job_count(&self) -> usize {
+        self.scene.render_compile_max_pending_job_count()
+    }
+
+    pub(crate) fn render_compile_available_pending_job_slots(&self) -> usize {
+        self.scene.render_compile_available_pending_job_slots()
     }
 
     pub(crate) fn simulation_cadence(&self) -> Option<SimulationCadenceConfig> {

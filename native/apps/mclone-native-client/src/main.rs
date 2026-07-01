@@ -1031,6 +1031,8 @@ mod tests {
                     chunk_x: 2,
                     chunk_z: -3,
                     render_distance: DEFAULT_RENDER_DISTANCE,
+                    render_compile_worker_count:
+                        mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
                     remote_addr: None,
                     day_time_override: None,
                     freeze_time: false,
@@ -1066,6 +1068,29 @@ mod tests {
                 },
                 TexturedSectionRenderOptions::default(),
             )
+        );
+    }
+
+    #[test]
+    fn cli_parses_render_compile_workers() {
+        let cli = Cli::parse([
+            "--movement-perf".to_owned(),
+            "--render-compile-workers".to_owned(),
+            "2".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::MovementPerf {
+                options: MovementPerfOptions {
+                    scene: SceneOptions {
+                        render_compile_worker_count: 2,
+                        ..SceneOptions::default()
+                    },
+                    ..MovementPerfOptions::default()
+                },
+            }
         );
     }
 

@@ -63,6 +63,9 @@ struct MovementPerfStepReport {
     player_visible_chunks: usize,
     aggregate_player_ticket_chunks: usize,
     player_outbound_queue_depth: usize,
+    pending_render_compile_jobs: usize,
+    max_pending_render_compile_jobs: usize,
+    available_render_compile_slots: usize,
     pending_unload_chunks: usize,
     block_ticking_chunks: usize,
     entity_ticking_chunks: usize,
@@ -177,6 +180,10 @@ impl MovementPerfReport {
             self.options.scene.render_distance
         );
         println!(
+            "  \"render_compile_workers\": {},",
+            self.options.scene.render_compile_worker_count
+        );
+        println!(
             "  \"section_occlusion_culling\": {},",
             self.options.render_options.section_occlusion_culling
         );
@@ -235,6 +242,18 @@ impl MovementPerfReport {
             println!(
                 "      \"player_outbound_queue_depth\": {},",
                 step.player_outbound_queue_depth
+            );
+            println!(
+                "      \"pending_render_compile_jobs\": {},",
+                step.pending_render_compile_jobs
+            );
+            println!(
+                "      \"max_pending_render_compile_jobs\": {},",
+                step.max_pending_render_compile_jobs
+            );
+            println!(
+                "      \"available_render_compile_slots\": {},",
+                step.available_render_compile_slots
             );
             println!(
                 "      \"pending_unload_chunks\": {},",
@@ -415,6 +434,8 @@ struct FrameBudgetProbeFrameReport {
     pending_publications: usize,
     pending_render_chunks: usize,
     pending_render_compile_jobs: usize,
+    max_pending_render_compile_jobs: usize,
+    available_render_compile_slots: usize,
     inflight_render_sections: usize,
     drawn_sections: usize,
     drawn_indices: u32,
@@ -481,6 +502,8 @@ impl Default for FrameBudgetProbeFrameReport {
             pending_publications: 0,
             pending_render_chunks: 0,
             pending_render_compile_jobs: 0,
+            max_pending_render_compile_jobs: 0,
+            available_render_compile_slots: 0,
             inflight_render_sections: 0,
             drawn_sections: 0,
             drawn_indices: 0,
@@ -725,6 +748,10 @@ impl FrameBudgetProbeReport {
         println!(
             "  \"render_distance\": {},",
             self.options.scene.render_distance
+        );
+        println!(
+            "  \"render_compile_workers\": {},",
+            self.options.scene.render_compile_worker_count
         );
         println!(
             "  \"section_occlusion_culling\": {},",
@@ -989,6 +1016,14 @@ impl FrameBudgetProbeReport {
                 frame.pending_render_compile_jobs
             );
             println!(
+                "      \"max_pending_render_compile_jobs\": {},",
+                frame.max_pending_render_compile_jobs
+            );
+            println!(
+                "      \"available_render_compile_slots\": {},",
+                frame.available_render_compile_slots
+            );
+            println!(
                 "      \"inflight_render_sections\": {},",
                 frame.inflight_render_sections
             );
@@ -1086,6 +1121,9 @@ pub(crate) fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<M
             player_visible_chunks: stats.player_visible_chunks,
             aggregate_player_ticket_chunks: stats.aggregate_player_ticket_chunks,
             player_outbound_queue_depth: stats.player_outbound_queue_depth,
+            pending_render_compile_jobs: runtime.render_compile_pending_job_count(),
+            max_pending_render_compile_jobs: runtime.render_compile_max_pending_job_count(),
+            available_render_compile_slots: runtime.render_compile_available_pending_job_slots(),
             pending_unload_chunks: stats.pending_unload_chunks,
             block_ticking_chunks: stats.block_ticking_chunks,
             entity_ticking_chunks: stats.entity_ticking_chunks,
@@ -1459,6 +1497,10 @@ pub(crate) fn run_frame_budget_probe(
             report.pending_publications = stats.pending_publications;
             report.pending_render_chunks = stats.pending_render_chunks;
             report.pending_render_compile_jobs = stats.pending_render_compile_jobs;
+            report.max_pending_render_compile_jobs =
+                state.runtime.render_compile_max_pending_job_count();
+            report.available_render_compile_slots =
+                state.runtime.render_compile_available_pending_job_slots();
             report.inflight_render_sections = stats.inflight_render_sections;
             report.drawn_sections = state.render_stats.drawn_section_count;
             report.drawn_indices = state.render_stats.drawn_index_count;

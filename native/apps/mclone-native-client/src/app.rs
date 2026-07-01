@@ -56,11 +56,12 @@ pub(crate) fn run_window(
 ) -> Result<()> {
     let assets = WindowSceneAssets::load()?;
     log::info!(
-        "native window startup seed={} initial_center=({}, {}) render_distance={} lighting={} cadence={}/{}/{} color_profile={} remote={:?} atlas={}x{} start={:?} startup_wait={:?}",
+        "native window startup seed={} initial_center=({}, {}) render_distance={} render_compile_workers={} lighting={} cadence={}/{}/{} color_profile={} remote={:?} atlas={}x{} start={:?} startup_wait={:?}",
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
         scene.render_distance,
+        scene.render_compile_worker_count,
         if scene.lighting_enabled {
             "enabled"
         } else {

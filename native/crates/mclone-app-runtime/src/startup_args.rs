@@ -6,10 +6,13 @@ use mclone_render_session::{
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
 };
 
+use crate::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS;
+
 pub const ARG_SEED: &str = "--seed";
 pub const ARG_CHUNK_X: &str = "--chunk-x";
 pub const ARG_CHUNK_Z: &str = "--chunk-z";
 pub const ARG_RENDER_DISTANCE: &str = "--render-distance";
+pub const ARG_RENDER_COMPILE_WORKERS: &str = "--render-compile-workers";
 pub const ARG_REMOTE_ADDR: &str = "--remote-addr";
 pub const ARG_DAY_TIME: &str = "--day-time";
 pub const ARG_FREEZE_TIME: &str = "--freeze-time";
@@ -24,6 +27,7 @@ pub const QUERY_SEED: &str = "seed";
 pub const QUERY_CHUNK_X: &str = "chunkX";
 pub const QUERY_CHUNK_Z: &str = "chunkZ";
 pub const QUERY_RENDER_DISTANCE: &str = "renderDistance";
+pub const QUERY_RENDER_COMPILE_WORKERS: &str = "renderCompileWorkers";
 pub const QUERY_REMOTE_WS_URL: &str = "remoteWsUrl";
 pub const QUERY_DAY_TIME: &str = "dayTime";
 pub const QUERY_FREEZE_TIME: &str = "freezeTime";
@@ -39,6 +43,7 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_CHUNK_X,
     QUERY_CHUNK_Z,
     QUERY_RENDER_DISTANCE,
+    QUERY_RENDER_COMPILE_WORKERS,
     QUERY_REMOTE_WS_URL,
     QUERY_DAY_TIME,
     QUERY_FREEZE_TIME,
@@ -73,6 +78,7 @@ pub struct StartupSceneOptions {
     pub chunk_x: i32,
     pub chunk_z: i32,
     pub render_distance: u32,
+    pub render_compile_worker_count: usize,
     pub remote_addr: Option<String>,
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
@@ -88,6 +94,7 @@ impl Default for StartupSceneOptions {
             chunk_x: DEFAULT_STARTUP_CHUNK_X,
             chunk_z: DEFAULT_STARTUP_CHUNK_Z,
             render_distance: DEFAULT_STARTUP_RENDER_DISTANCE,
+            render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             remote_addr: None,
             day_time_override: None,
             freeze_time: false,
@@ -142,6 +149,10 @@ impl StartupArgState {
                     args.next(),
                     render_distance_limits,
                 )?;
+            }
+            ARG_RENDER_COMPILE_WORKERS => {
+                self.scene.render_compile_worker_count =
+                    parse_render_compile_worker_count_arg(ARG_RENDER_COMPILE_WORKERS, args.next())?;
             }
             ARG_REMOTE_ADDR => {
                 self.scene.remote_addr = parse_remote_addr_arg(args.next())?;
@@ -204,6 +215,10 @@ impl StartupArgState {
                     value,
                     render_distance_limits,
                 )?;
+            }
+            QUERY_RENDER_COMPILE_WORKERS => {
+                self.scene.render_compile_worker_count =
+                    parse_render_compile_worker_count_arg(QUERY_RENDER_COMPILE_WORKERS, value)?;
             }
             QUERY_REMOTE_WS_URL => {
                 self.scene.remote_addr = parse_remote_addr_value(QUERY_REMOTE_WS_URL, value)?;
@@ -336,6 +351,11 @@ pub fn parse_render_distance_arg(
     Ok(parsed)
 }
 
+pub fn parse_render_compile_worker_count_arg(flag: &str, value: Option<String>) -> Result<usize> {
+    let parsed = parse_u32_arg(flag, value)?;
+    usize::try_from(parsed).with_context(|| format!("{flag} value does not fit usize"))
+}
+
 pub fn parse_movement_speed_multiplier_arg(flag: &str, value: Option<String>) -> Result<f32> {
     let parsed = parse_f32_arg(flag, value)?;
     let min = ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32;
@@ -396,6 +416,7 @@ mod tests {
                 chunk_x: 0,
                 chunk_z: 0,
                 render_distance: 5,
+                render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
                 remote_addr: None,
                 day_time_override: None,
                 freeze_time: false,
@@ -421,6 +442,8 @@ mod tests {
             "-3",
             ARG_RENDER_DISTANCE,
             "5",
+            ARG_RENDER_COMPILE_WORKERS,
+            "2",
             ARG_DAY_TIME,
             "6000",
             ARG_FREEZE_TIME,
@@ -438,6 +461,7 @@ mod tests {
                 chunk_x: 4,
                 chunk_z: -3,
                 render_distance: 5,
+                render_compile_worker_count: 2,
                 remote_addr: Some("127.0.0.1:25565".to_owned()),
                 day_time_override: Some(6000),
                 freeze_time: true,
@@ -483,6 +507,7 @@ mod tests {
             (QUERY_CHUNK_X, "4"),
             (QUERY_CHUNK_Z, "-3"),
             (QUERY_RENDER_DISTANCE, "6"),
+            (QUERY_RENDER_COMPILE_WORKERS, "3"),
             (QUERY_REMOTE_WS_URL, "ws://127.0.0.1:25565"),
             (QUERY_DAY_TIME, "6000"),
             (QUERY_FREEZE_TIME, ""),
@@ -513,6 +538,7 @@ mod tests {
                 chunk_x: 4,
                 chunk_z: -3,
                 render_distance: 6,
+                render_compile_worker_count: 3,
                 remote_addr: Some("ws://127.0.0.1:25565".to_owned()),
                 day_time_override: Some(6000),
                 freeze_time: true,
@@ -540,6 +566,23 @@ mod tests {
             )
             .unwrap();
         assert!(!state.finish().scene.freeze_time);
+    }
+
+    #[test]
+    fn rejects_zero_render_compile_workers() {
+        let mut state = StartupArgState::default();
+        let mut args = ["0".to_owned()].into_iter();
+        let err = state
+            .parse_next_arg(
+                ARG_RENDER_COMPILE_WORKERS,
+                &mut args,
+                RenderDistanceLimits::new(1, 16),
+            )
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("must be greater than zero"),
+            "unexpected error: {err:#}"
+        );
     }
 
     #[test]

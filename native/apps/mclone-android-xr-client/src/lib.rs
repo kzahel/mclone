@@ -669,6 +669,7 @@ mod android {
             chunk_x: scene.chunk_x,
             chunk_z: scene.chunk_z,
             render_distance: scene.render_distance,
+            render_compile_worker_count: scene.render_compile_worker_count,
             movement_speed_multiplier: scene.movement_speed_multiplier,
             remote_addr: None,
             day_time_override: scene.day_time_override,
@@ -684,6 +685,7 @@ mod android {
             chunk_x: scene.chunk_x,
             chunk_z: scene.chunk_z,
             render_distance: scene.render_distance,
+            render_compile_worker_count: scene.render_compile_worker_count,
             movement_speed_multiplier: scene.movement_speed_multiplier,
             day_time_override: scene.day_time_override,
             freeze_time: scene.freeze_time,
@@ -1008,11 +1010,12 @@ mod android {
             startup_options.xr_render_scale
         );
         log::info!(
-            "Android XR scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} lighting={}",
+            "Android XR scene options: seed={} center=({}, {}) render_distance={} render_compile_workers={} day_time={:?} freeze_time={} lighting={}",
             scene_options.seed,
             scene_options.chunk_x,
             scene_options.chunk_z,
             scene_options.render_distance,
+            scene_options.render_compile_worker_count,
             scene_options.day_time_override,
             scene_options.freeze_time,
             scene_options.lighting_enabled
@@ -1509,6 +1512,7 @@ mod android {
                 perf_metrics,
                 startup_view_pose,
                 scene_options.render_distance,
+                scene_options.render_compile_worker_count,
                 display_refresh,
                 render_section_upload_budget,
                 render_section_accept_budget,
@@ -1618,6 +1622,7 @@ mod android {
             perf_metrics,
             startup_view_pose,
             scene_options.render_distance,
+            scene_options.render_compile_worker_count,
             display_refresh,
             render_section_upload_budget,
             render_section_accept_budget,
@@ -1734,10 +1739,12 @@ mod android {
             .with_freeze_time(scene.freeze_time)
             .with_debug_passive_showcase(scene.debug_passive_showcase)
             .with_lighting_enabled(scene.lighting_enabled)
+            .with_render_compile_worker_count(scene.render_compile_worker_count)
     }
 
     fn android_xr_host_options(scene: XrSceneOptions) -> SingleViewHostOptions {
         SingleViewHostOptions::new(scene.center(), scene.render_distance)
+            .with_render_compile_worker_count(scene.render_compile_worker_count)
     }
 
     fn request_display_refresh_rate(
@@ -2767,6 +2774,7 @@ mod android {
         perf_metrics: bool,
         fixed_render_view_pose: Option<XrStartupViewPose>,
         render_distance: u32,
+        render_compile_worker_count: usize,
         display_refresh: XrDisplayRefreshSnapshot,
         render_section_upload_budget: Option<usize>,
         render_section_accept_budget: Option<usize>,
@@ -2785,6 +2793,7 @@ mod android {
             perf_settled_stationary,
             perf_frozen_render,
             render_distance,
+            render_compile_worker_count,
             display_refresh,
             render_path,
             render_section_upload_budget,
@@ -3216,6 +3225,7 @@ mod android {
         settled_stationary: bool,
         frozen_render: bool,
         render_distance: u32,
+        render_compile_worker_count: usize,
         display_refresh: XrDisplayRefreshSnapshot,
         render_path: AndroidXrRenderPath,
         render_section_upload_budget: Option<usize>,
@@ -3239,6 +3249,7 @@ mod android {
             settled_stationary: bool,
             frozen_render: bool,
             render_distance: u32,
+            render_compile_worker_count: usize,
             display_refresh: XrDisplayRefreshSnapshot,
             render_path: AndroidXrRenderPath,
             render_section_upload_budget: Option<usize>,
@@ -3259,6 +3270,7 @@ mod android {
                 settled_stationary,
                 frozen_render,
                 render_distance,
+                render_compile_worker_count,
                 display_refresh,
                 render_path,
                 render_section_upload_budget,
@@ -3345,13 +3357,14 @@ mod android {
                 );
             }
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_distance={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
                 seconds,
                 mode,
                 self.render_path.label(),
                 format_optional_usize(self.render_section_upload_budget),
                 format_optional_usize(self.render_section_accept_budget),
                 self.render_distance,
+                self.render_compile_worker_count,
                 flight_speed,
                 settle_seconds,
                 ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
@@ -3394,6 +3407,7 @@ mod android {
                 over_2x_budget_frames: 0,
                 over_4x_budget_frames: 0,
                 render_distance: self.render_distance,
+                render_compile_worker_count: self.render_compile_worker_count,
                 display_refresh: self.display_refresh.clone(),
                 target_hz: self.target_hz,
                 render_path: self.render_path,
@@ -3513,6 +3527,7 @@ mod android {
         over_2x_budget_frames: u64,
         over_4x_budget_frames: u64,
         render_distance: u32,
+        render_compile_worker_count: usize,
         display_refresh: XrDisplayRefreshSnapshot,
         target_hz: f64,
         render_path: AndroidXrRenderPath,
@@ -3640,7 +3655,7 @@ mod android {
                 self.record_rebuild_total_ms / self.record_rebuild_frames as f64
             };
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
                 sample_seconds,
                 self.mode_label,
                 self.render_path.label(),
@@ -3651,6 +3666,7 @@ mod android {
                 self.xr_eye_size[0],
                 self.xr_eye_size[1],
                 self.render_distance,
+                self.render_compile_worker_count,
                 flight_speed,
                 flight_distance_blocks,
                 self.settle_seconds,
@@ -3849,11 +3865,14 @@ mod android {
                 self.max_upload.player_outbound_queue_depth
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_COMPILE_MAX pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} neighbor_ready_sections={} near_exception_sections={} deferred_sections={} submitted_sections={} completed_sections={} stale_sections={} visibility_graph_builds={} visibility_graph_total_ms={:.3} visibility_graph_worst_ms={:.3}",
+                "MCLONE_ANDROID_XR_PERF_COMPILE_MAX pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} neighbor_ready_sections={} near_exception_sections={} deferred_sections={} submitted_sections={} completed_sections={} stale_sections={} visibility_graph_builds={} visibility_graph_total_ms={:.3} visibility_graph_worst_ms={:.3}",
                 self.max_upload.pending_render_chunks_before,
                 self.max_upload.pending_render_chunks_after,
                 self.max_upload.pending_compile_jobs_before,
                 self.max_upload.pending_compile_jobs_after,
+                self.max_upload.max_pending_compile_jobs,
+                self.max_upload.available_compile_slots_before,
+                self.max_upload.available_compile_slots_after,
                 self.max_upload.neighbor_ready_section_count,
                 self.max_upload.near_exception_section_count,
                 self.max_upload.deferred_section_count,
@@ -3865,12 +3884,15 @@ mod android {
                 self.max_upload.visibility_graph_worst_ms
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_UPLOAD_LAST poll_changed={} pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} rebuilt_sections={} removed_sections={} uploaded_sections={} upload_removed_sections={} uploaded_indices={} ready_sections={}",
+                "MCLONE_ANDROID_XR_PERF_UPLOAD_LAST poll_changed={} pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} rebuilt_sections={} removed_sections={} uploaded_sections={} upload_removed_sections={} uploaded_indices={} ready_sections={}",
                 latest_upload.poll_changed,
                 latest_upload.pending_render_chunks_before,
                 latest_upload.pending_render_chunks_after,
                 latest_upload.pending_compile_jobs_before,
                 latest_upload.pending_compile_jobs_after,
+                latest_upload.max_pending_compile_jobs,
+                latest_upload.available_compile_slots_before,
+                latest_upload.available_compile_slots_after,
                 latest_upload.rebuilt_section_count,
                 latest_upload.removed_section_count,
                 latest_upload.uploaded_section_count,
@@ -4160,6 +4182,13 @@ mod android {
             pending_compile_jobs_after: a
                 .pending_compile_jobs_after
                 .max(b.pending_compile_jobs_after),
+            max_pending_compile_jobs: a.max_pending_compile_jobs.max(b.max_pending_compile_jobs),
+            available_compile_slots_before: a
+                .available_compile_slots_before
+                .max(b.available_compile_slots_before),
+            available_compile_slots_after: a
+                .available_compile_slots_after
+                .max(b.available_compile_slots_after),
             rebuilt_section_count: a.rebuilt_section_count.max(b.rebuilt_section_count),
             removed_section_count: a.removed_section_count.max(b.removed_section_count),
             rebuilt_vertex_count: a.rebuilt_vertex_count.max(b.rebuilt_vertex_count),

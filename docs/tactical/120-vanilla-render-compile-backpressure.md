@@ -69,7 +69,7 @@ Validation:
 
 ### B. Native Buffer-Pack Pool
 
-Status: landed first conservative pass.
+Status: landed with runtime toggle and initial measurement.
 
 Replace the single native render compile worker slot with a bounded pool. This
 does not need Java's exact `BufferBuilder` objects, but it should model the same
@@ -94,11 +94,35 @@ First pass result:
 - Shared runtime accessors expose pending compile jobs, max compile slots, and
   available compile slots.
 
-Remaining for this slice:
+Runtime setting and diagnostics:
 
-- add a runtime setting/launch option for the native slot count,
-- surface slot counts in Android XR and desktop perf markers,
-- benchmark one slot against larger slot counts before changing the default.
+- `--render-compile-workers N` / `renderCompileWorkers=N` selects the native
+  compile slot count for desktop, flat Android, Android XR, and shared
+  single-view runtime startup paths.
+- The default remains one slot.
+- Startup rejects zero workers.
+- Desktop frame-budget/movement captures and Android XR perf markers now record
+  the selected worker count plus pending/max/available compile slot state.
+
+Initial measurement, render distance 7:
+
+| Lane | Workers | Frame/app result | Compile/upload result | Read |
+|---|---:|---|---|---|
+| Desktop release frame-budget, 240-frame settled orbit | 1 | avg 2.798 ms, p95 4.519 ms, p99 5.582 ms, 1 over-budget frame | 772 submitted, 756 completed, 259 uploaded; slot saturated 240/240 frames | baseline |
+| Desktop release frame-budget, 240-frame settled orbit | 2 | avg 3.109 ms, p95 4.918 ms, p99 6.374 ms, 1 over-budget frame | 1384 submitted, 1334 completed, 451 uploaded; slot saturated 231/240 frames | nearly doubles throughput but costs frame time |
+| Quest Android XR per-eye, 30-second settled orbit | 1 | frame avg 15.381 ms, p95 24.181 ms, app-work avg 14.994 ms, app-over-period 53.9%, metrics dropped_frames 201 | max 16 submitted, 16 completed, 8 uploaded; max runtime upload 30.413 ms | compile limited and over budget |
+| Quest Android XR per-eye, 30-second settled orbit | 2 | frame avg 14.954 ms, p95 23.025 ms, app-work avg 14.035 ms, app-over-period 27.0%, metrics dropped_frames 110 | max 16 submitted, 32 completed, 14 uploaded; max runtime upload 53.398 ms | better average/headroom, worse upload/sync tail |
+
+Interpretation:
+
+- The bounded pool is useful and should stay: it gives us a vanilla-shaped
+  buffer-pack control point and exposes the throughput/latency tradeoff.
+- Two workers are not a default yet. Desktop gets more terrain throughput but
+  slightly worse frame metrics, and Quest improves average/headroom while
+  producing larger tail bursts in runtime sync/GPU upload.
+- The next policy decision should be deadline-driven admission, not a fixed
+  global default increase. Worker count is now an opt-in variable for measured
+  lanes.
 
 ### C. Deadline-Driven Admission
 
@@ -145,7 +169,8 @@ a compiler exposes spare capacity and waits when capacity is full.
 
 ## Next Step
 
-Finish Slice B instrumentation: add a runtime setting for native compile slots
-and include max/available slot counts in the perf capture. Then compare one
-slot against two or more slots on the RD7 settled orbit and desktop streaming
-probes before changing the default.
+Implement Slice C deadline-driven admission. The measurements show that extra
+compile capacity can help throughput, but accepting/applying the resulting work
+can still burst past the frame budget. The next chunk should estimate the live
+frame deadline and admit only the compile work that is likely to fit, while
+leaving deterministic pump-to-idle paths able to override the live-frame limit.

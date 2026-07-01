@@ -52,6 +52,8 @@ Options:
   --chunk-z Z      Add --chunk-z Z to startup argv.
   --render-distance N
                   Add --render-distance N to startup argv.
+  --render-compile-workers N
+                  Add --render-compile-workers N to startup argv.
   --movement-speed-multiplier N
                   Add --movement-speed-multiplier N to startup argv.
   --day-time T     Add --day-time T to startup argv.
@@ -179,7 +181,7 @@ while [[ $# -gt 0 ]]; do
             REMOTE_ADDR="$2"
             shift 2
             ;;
-        --seed|--chunk-x|--chunk-z|--render-distance|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright)
+        --seed|--chunk-x|--chunk-z|--render-distance|--render-compile-workers|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright)
             require_arg "$1" "${2:-}"
             STARTUP_ARGV+=("$1" "$2")
             shift 2

@@ -33,6 +33,8 @@ Common delegated install options:
                  Set the startup XR view pose.
   --remote-addr ADDR
                  Connect to a remote dedicated server.
+  --render-compile-workers N
+                 Set native render compile worker count for terrain meshing.
 
 All other options are forwarded to android-xr/install-quest-openxr.sh.
 

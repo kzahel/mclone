@@ -20,6 +20,7 @@ pub struct SingleViewHostOptions {
     pub center: ChunkPos,
     pub render_distance: u32,
     pub chunk_tracking_radius: u32,
+    pub render_compile_worker_count: usize,
 }
 
 impl SingleViewHostOptions {
@@ -28,11 +29,21 @@ impl SingleViewHostOptions {
             center,
             render_distance,
             chunk_tracking_radius: chunk_tracking_radius_for_render_distance(render_distance),
+            render_compile_worker_count:
+                crate::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
         }
     }
 
     pub const fn with_chunk_tracking_radius(mut self, chunk_tracking_radius: u32) -> Self {
         self.chunk_tracking_radius = chunk_tracking_radius;
+        self
+    }
+
+    pub const fn with_render_compile_worker_count(
+        mut self,
+        render_compile_worker_count: usize,
+    ) -> Self {
+        self.render_compile_worker_count = render_compile_worker_count;
         self
     }
 

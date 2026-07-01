@@ -20,7 +20,9 @@ mod android {
     use mclone_app_runtime::local_single_view::{
         LocalSingleViewSceneOptions, NativeSingleViewSessionRuntime,
     };
-    use mclone_app_runtime::render_assets::load_asset_source;
+    use mclone_app_runtime::render_assets::{
+        DEFAULT_RENDER_SECTION_COMPILE_WORKERS, load_asset_source,
+    };
     use mclone_app_runtime::session::{
         ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
     };
@@ -1820,6 +1822,7 @@ mod android {
         seed: i64,
         center: ChunkPos,
         render_distance: u32,
+        render_compile_worker_count: usize,
         movement_speed_multiplier: f32,
         day_time_override: Option<u64>,
         freeze_time: bool,
@@ -1836,10 +1839,12 @@ mod android {
                 .with_freeze_time(self.freeze_time)
                 .with_debug_passive_showcase(self.debug_passive_showcase)
                 .with_lighting_enabled(self.lighting_enabled)
+                .with_render_compile_worker_count(self.render_compile_worker_count)
         }
 
         fn host_options(&self) -> SingleViewHostOptions {
             SingleViewHostOptions::new(self.center, self.render_distance)
+                .with_render_compile_worker_count(self.render_compile_worker_count)
         }
 
         fn validated(self) -> Result<Self> {
@@ -1911,6 +1916,7 @@ mod android {
             chunk_x: 0,
             chunk_z: 0,
             render_distance: 5,
+            render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             remote_addr: None,
             day_time_override: Some(6000),
@@ -1925,6 +1931,7 @@ mod android {
             seed: scene.seed,
             center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
             render_distance: scene.render_distance,
+            render_compile_worker_count: scene.render_compile_worker_count,
             movement_speed_multiplier: scene.movement_speed_multiplier,
             day_time_override: scene.day_time_override,
             freeze_time: scene.freeze_time,
@@ -2425,11 +2432,12 @@ mod android {
             log::info!("Mclone Android remote dedicated address: <none>");
         }
         log::info!(
-            "Mclone Android scene options: seed={} center=({}, {}) render_distance={} day_time={:?} freeze_time={} movement_speed={:.2}x lighting={}",
+            "Mclone Android scene options: seed={} center=({}, {}) render_distance={} render_compile_workers={} day_time={:?} freeze_time={} movement_speed={:.2}x lighting={}",
             startup_options.scene.seed,
             startup_options.scene.center.x,
             startup_options.scene.center.z,
             startup_options.scene.render_distance,
+            startup_options.scene.render_compile_worker_count,
             startup_options.scene.day_time_override,
             startup_options.scene.freeze_time,
             startup_options.scene.movement_speed_multiplier,

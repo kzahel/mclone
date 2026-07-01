@@ -21,7 +21,8 @@ use crate::host_mode::{
     dispatch_remote_dedicated_command,
 };
 use crate::render_assets::{
-    RenderSectionCompileWorker, TexturedMeshAssets, load_textured_mesh_assets,
+    DEFAULT_RENDER_SECTION_COMPILE_WORKERS, RenderSectionCompileWorker, TexturedMeshAssets,
+    load_textured_mesh_assets,
 };
 use crate::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
@@ -45,6 +46,7 @@ pub struct LocalSingleViewSceneOptions {
     pub freeze_time: bool,
     pub debug_passive_showcase: bool,
     pub lighting_enabled: bool,
+    pub render_compile_worker_count: usize,
 }
 
 impl LocalSingleViewSceneOptions {
@@ -58,6 +60,7 @@ impl LocalSingleViewSceneOptions {
             freeze_time: false,
             debug_passive_showcase: true,
             lighting_enabled: true,
+            render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
         }
     }
 
@@ -88,6 +91,14 @@ impl LocalSingleViewSceneOptions {
 
     pub const fn with_lighting_enabled(mut self, lighting_enabled: bool) -> Self {
         self.lighting_enabled = lighting_enabled;
+        self
+    }
+
+    pub const fn with_render_compile_worker_count(
+        mut self,
+        render_compile_worker_count: usize,
+    ) -> Self {
+        self.render_compile_worker_count = render_compile_worker_count;
         self
     }
 
@@ -224,7 +235,10 @@ impl LocalSingleViewSceneRuntime {
         options: LocalSingleViewSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
-        let render_compile_worker = RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
+        let render_compile_worker = RenderSectionCompileWorker::with_worker_count(
+            mesh_assets.catalog.clone(),
+            options.render_compile_worker_count,
+        )?;
         let server_runner = NativeIntegratedServerRunner::new(native_runner_config(&options))
             .context("failed to start local single-view integrated server runner")?;
         let mut scene = Self {
@@ -929,7 +943,10 @@ where
         mut session: S,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
-        let render_compile_worker = RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
+        let render_compile_worker = RenderSectionCompileWorker::with_worker_count(
+            mesh_assets.catalog.clone(),
+            options.render_compile_worker_count,
+        )?;
         let mut core = SingleViewRuntime::remote_dedicated(
             options.center,
             options.render_distance,
