@@ -11,15 +11,16 @@ use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
 use mclone_render::target::RenderFrameContext;
 use mclone_server::initial_spawn_center_for_seed;
-use mclone_ui::GuiScale;
+use mclone_ui::{GuiScale, Point};
 
 use crate::camera::SpectatorCamera;
 use crate::cli::{
     HeadlessScreenshotOptions, HeadlessScreenshotUi, SceneOptions, StartupWaitPolicy,
 };
 use crate::flat_client_driver::{
-    FlatClientDebugFrame, FlatClientDriver, FlatClientUiFrame, FlatClientUiRenderOptions,
-    FlatClientWorldActionStatus, game_movement_mode,
+    FlatClientDebugFrame, FlatClientDriver, FlatClientUiActionContext, FlatClientUiFrame,
+    FlatClientUiPointerClickReport, FlatClientUiRenderOptions, FlatClientWorldActionStatus,
+    game_movement_mode,
 };
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState};
 use crate::render_cache::load_asset_source;
@@ -96,12 +97,19 @@ pub(crate) enum OffscreenScriptStep {
         frame: FlatInputFrame,
         require_changed_action: Option<FlatInputAction>,
     },
+    #[allow(dead_code)]
+    UiPointerClick {
+        point: Point,
+        require_action: Option<mclone_ui::GameUiAction>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct OffscreenScriptReport {
     pub(crate) input_frame_count: usize,
     pub(crate) world_action_count: usize,
+    pub(crate) ui_pointer_click_count: usize,
+    pub(crate) ui_action_count: usize,
 }
 
 pub(crate) struct OffscreenFlatClientHost {
@@ -358,6 +366,29 @@ impl OffscreenFlatClientHost {
         Ok(statuses)
     }
 
+    pub(crate) fn apply_ui_pointer_click(
+        &mut self,
+        point: Point,
+    ) -> FlatClientUiPointerClickReport {
+        let fallback_remote_addr = self.driver.scene.remote_addr.clone();
+        let state = self.driver.current_ui_render_state(
+            FramePacingUiState::default(),
+            debug_block_palette_overlay(
+                &self.assets.mesh_assets.catalog,
+                self.driver.interaction.selected_hotbar_slot(),
+            ),
+        );
+        self.driver.apply_ui_pointer_click(
+            point,
+            state,
+            FlatClientUiActionContext {
+                session_starting: self.driver.session.is_starting(),
+                from_pointer_click: true,
+                fallback_remote_addr: fallback_remote_addr.as_deref(),
+            },
+        )
+    }
+
     pub(crate) fn run_script(&mut self, script: &OffscreenScript) -> Result<OffscreenScriptReport> {
         let mut report = OffscreenScriptReport::default();
         for step in &script.steps {
@@ -385,6 +416,27 @@ impl OffscreenFlatClientHost {
                             action,
                             "offscreen script input frame",
                         )?;
+                    }
+                }
+                OffscreenScriptStep::UiPointerClick {
+                    point,
+                    require_action,
+                } => {
+                    report.ui_pointer_click_count += 1;
+                    let click = self.apply_ui_pointer_click(point);
+                    if click.action.is_some() {
+                        report.ui_action_count += 1;
+                    }
+                    if let Some(action) = require_action
+                        && click.action != Some(action)
+                    {
+                        bail!(
+                            "offscreen script UI pointer click at ({:.1}, {:.1}) emitted {:?}, expected {:?}",
+                            point.x,
+                            point.y,
+                            click.action,
+                            action
+                        );
                     }
                 }
             }
@@ -811,6 +863,24 @@ mod tests {
         assert!(matches!(
             script.steps()[4],
             OffscreenScriptStep::SetCameraPose { .. }
+        ));
+    }
+
+    #[test]
+    fn offscreen_script_can_store_ui_pointer_click_steps() {
+        let point = Point { x: 12.0, y: 34.0 };
+        let script = OffscreenScript::from_steps([OffscreenScriptStep::UiPointerClick {
+            point,
+            require_action: Some(mclone_ui::GameUiAction::ToggleCrosshair),
+        }]);
+
+        assert_eq!(script.steps().len(), 1);
+        assert!(matches!(
+            script.steps()[0],
+            OffscreenScriptStep::UiPointerClick {
+                point: stored_point,
+                require_action: Some(mclone_ui::GameUiAction::ToggleCrosshair),
+            } if stored_point == point
         ));
     }
 }

@@ -1,6 +1,6 @@
 # 123: UI V2 Menu Rebuild
 
-Status: active; Controls/Help v2 first pass landed 2026-07-01.
+Status: active; UI v2 headless interaction harness landed 2026-07-01.
 
 ## Decision
 
@@ -593,6 +593,56 @@ Known limits:
 - Server Settings, HUD, hotbar, and block picker remain legacy
 - macOS manual click signoff remains pending for migrated Pause/Options/Controls
   screens
+
+## Landed Headless Interaction Harness Chunk
+
+Date: 2026-07-01.
+
+Scope:
+
+- added a driver-level headless UI pointer-click harness that records v2 debug
+  snapshots before/down/up, emitted action, and action-application result
+- added a state builder for driver-owned UI render state so headless UI clicks
+  use the same Options facts as rendering
+- exposed UI pointer clicks as an offscreen script step for future GPU/headless
+  interaction captures
+- added regression tests that click Options checkbox rows at multiple in-row
+  points, including label area, right edge, and bottom-right edge
+- verified that headless v2 clicks toggle Crosshair and First Person Body
+  through `FlatClientDriver`, not only through pure `UiSurface`
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client headless_ui_click -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client offscreen_script -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-options-headless.png --width 960 --height 540 --screenshot-ui options-pause --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true
+```
+
+Rendered checks:
+
+- native Options screenshot inspected:
+  `/tmp/mclone-ui-v2-options-headless.png`
+- browser canvas smoke regenerated:
+  `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- this does not exercise macOS `winit` cursor delivery, Retina/window/surface
+  conversion, or focus/titlebar behavior
+- server-backed Options rows still need a GPU/offscreen script that starts a
+  runtime, opens Options, clicks Server Settings, and renders the next frame
+- sliders and cycles still need the same edge-point harness coverage
+- atlas text remains the next performance chunk
 
 ## Non-Goals
 

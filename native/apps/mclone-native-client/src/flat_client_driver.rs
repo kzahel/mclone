@@ -260,6 +260,17 @@ pub(crate) struct FlatClientUiActionResult {
     pub(crate) clear_gameplay_input: bool,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FlatClientUiPointerClickReport {
+    pub(crate) before: Option<UiDebugSnapshot>,
+    pub(crate) down_handled: bool,
+    pub(crate) after_down: Option<UiDebugSnapshot>,
+    pub(crate) up_handled: bool,
+    pub(crate) after_up: Option<UiDebugSnapshot>,
+    pub(crate) action: Option<GameUiAction>,
+    pub(crate) action_result: Option<FlatClientUiActionResult>,
+}
+
 impl FlatClientDriver {
     pub(crate) fn new(scene: &SceneOptions, render_options: TexturedSectionRenderOptions) -> Self {
         Self::new_with_ui(scene, render_options, GameUi::new())
@@ -445,6 +456,65 @@ impl FlatClientDriver {
     pub(crate) fn ui_v2_debug_snapshot(&mut self) -> Option<UiDebugSnapshot> {
         self.sync_ui_v2_screen();
         self.ui_v2.debug_snapshot()
+    }
+
+    pub(crate) fn ui_v2_debug_snapshot_for_state(
+        &mut self,
+        state: GameUiRenderState,
+    ) -> Option<UiDebugSnapshot> {
+        if !self.sync_ui_v2_screen() {
+            return None;
+        }
+        self.ui_v2.set_render_state(state);
+        self.ui_v2.debug_snapshot()
+    }
+
+    pub(crate) fn current_ui_render_state(
+        &self,
+        frame_pacing: FramePacingUiState,
+        block_palette: BlockPaletteOverlay,
+    ) -> GameUiRenderState {
+        let mut state = game_ui_render_state(FlatClientUiRenderOptions {
+            render_distance: self.current_render_distance(self.scene.render_distance) as i32,
+            render_options: self.render_options,
+            far_lod_enabled: self.scene.far_lod.enabled,
+            far_lod_range_chunks: self.scene.far_lod.extra_radius_chunks as i32,
+            frame_pacing,
+            movement_mode: game_movement_mode(self.camera.movement_mode()),
+            fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
+            movement_speed_multiplier: self.camera.movement_speed_multiplier() as f32,
+            player_collision_box_visible: self.player_collision_box_visible,
+            first_person_player_visible: self.camera.first_person_player_visible(),
+            crosshair_visible: self.crosshair_visible,
+            player_model: self.player_model,
+            server_cadence: self.server_simulation_cadence(),
+        });
+        state.block_palette = block_palette;
+        state
+    }
+
+    pub(crate) fn apply_ui_pointer_click(
+        &mut self,
+        point: Point,
+        state: GameUiRenderState,
+        context: FlatClientUiActionContext<'_>,
+    ) -> FlatClientUiPointerClickReport {
+        let before = self.ui_v2_debug_snapshot_for_state(state);
+        let down_handled = self.ui_pointer_down(point, state);
+        let after_down = self.ui_v2_debug_snapshot();
+        let (up_handled, action) = self.ui_pointer_up(point, state);
+        let after_up = self.ui_v2_debug_snapshot();
+        let action_result = action.map(|action| self.apply_ui_action(action, context));
+
+        FlatClientUiPointerClickReport {
+            before,
+            down_handled,
+            after_down,
+            up_handled,
+            after_up,
+            action,
+            action_result,
+        }
     }
 
     fn sync_ui_v2_screen(&mut self) -> bool {
@@ -2047,6 +2117,44 @@ mod tests {
         }
     }
 
+    fn headless_ui_state(driver: &FlatClientDriver) -> GameUiRenderState {
+        driver.current_ui_render_state(FramePacingUiState::default(), BlockPaletteOverlay::hidden())
+    }
+
+    fn debug_widget_rect(snapshot: &UiDebugSnapshot, label: &str) -> mclone_ui::Rect {
+        snapshot
+            .widgets
+            .iter()
+            .find(|widget| widget.label == label)
+            .unwrap_or_else(|| panic!("missing debug widget {label:?}"))
+            .rect
+    }
+
+    fn row_probe_points(rect: mclone_ui::Rect) -> [Point; 5] {
+        [
+            Point {
+                x: rect.x + 1.0,
+                y: rect.y + 1.0,
+            },
+            Point {
+                x: rect.x + 12.0,
+                y: rect.y + rect.height * 0.5,
+            },
+            Point {
+                x: rect.x + 64.0,
+                y: rect.y + rect.height * 0.5,
+            },
+            Point {
+                x: rect.right() - 1.0,
+                y: rect.y + rect.height * 0.5,
+            },
+            Point {
+                x: rect.right() - 1.0,
+                y: rect.bottom() - 1.0,
+            },
+        ]
+    }
+
     #[test]
     fn flat_camera_view_exposes_third_person_render_eye() {
         let mut camera =
@@ -2163,6 +2271,74 @@ mod tests {
         assert!(result.host_action.is_none());
         assert!(driver.scene.first_person_player_visible);
         assert!(driver.camera.first_person_player_visible());
+    }
+
+    #[test]
+    fn headless_ui_click_toggles_options_crosshair_from_full_row() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+        driver.set_ui_screen(Some(GameScreen::Options {
+            parent: mclone_ui::GameOptionsParent::Pause,
+        }));
+        driver.set_ui_scale(GuiScale::from_pixels(960, 540));
+        let state = headless_ui_state(&driver);
+        let snapshot = driver
+            .ui_v2_debug_snapshot_for_state(state)
+            .expect("Options is a v2 screen");
+        let crosshair = debug_widget_rect(&snapshot, "Crosshair");
+
+        for point in row_probe_points(crosshair) {
+            let before = driver.crosshair_visible;
+            let state = headless_ui_state(&driver);
+            let report = driver.apply_ui_pointer_click(point, state, ui_action_context());
+
+            assert!(report.down_handled, "down missed at {point:?}");
+            assert!(report.up_handled, "up missed at {point:?}");
+            assert_eq!(report.action, Some(GameUiAction::ToggleCrosshair));
+            assert!(
+                report
+                    .action_result
+                    .is_some_and(|result| result.host_action.is_none())
+            );
+            assert_eq!(driver.crosshair_visible, !before);
+            assert_eq!(
+                report.after_down.and_then(|snapshot| snapshot.captured),
+                report.after_up.and_then(|snapshot| snapshot.hovered),
+                "captured widget should still be hovered on release at {point:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn headless_ui_click_toggles_options_first_person_body_from_full_row() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+        driver.set_ui_screen(Some(GameScreen::Options {
+            parent: mclone_ui::GameOptionsParent::Pause,
+        }));
+        driver.set_ui_scale(GuiScale::from_pixels(960, 540));
+        let state = headless_ui_state(&driver);
+        let snapshot = driver
+            .ui_v2_debug_snapshot_for_state(state)
+            .expect("Options is a v2 screen");
+        let first_person = debug_widget_rect(&snapshot, "First Person Body");
+
+        for point in row_probe_points(first_person) {
+            let before = driver.camera.first_person_player_visible();
+            let state = headless_ui_state(&driver);
+            let report = driver.apply_ui_pointer_click(point, state, ui_action_context());
+
+            assert!(report.down_handled, "down missed at {point:?}");
+            assert!(report.up_handled, "up missed at {point:?}");
+            assert_eq!(report.action, Some(GameUiAction::ToggleFirstPersonPlayer));
+            assert!(
+                report
+                    .action_result
+                    .is_some_and(|result| result.host_action.is_none())
+            );
+            assert_eq!(driver.camera.first_person_player_visible(), !before);
+            assert_eq!(driver.scene.first_person_player_visible, !before);
+        }
     }
 
     #[test]
