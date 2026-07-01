@@ -13,6 +13,7 @@ APK_PATH="${MCLONE_ANDROID_XR_APK:-}"
 BUILD_TYPE="${MCLONE_ANDROID_XR_BUILD_TYPE:-release}"
 BOOT_TIMEOUT_SECONDS="${MCLONE_ANDROID_BOOT_TIMEOUT:-60}"
 STAGE_ASSETS="${MCLONE_ANDROID_XR_STAGE_ASSETS:-1}"
+LAUNCH_CHECK_SECONDS="${MCLONE_ANDROID_XR_LAUNCH_CHECK_SECONDS:-8}"
 SERIAL=""
 SKIP_BUILD=0
 LAUNCH_APP=0
@@ -80,6 +81,47 @@ wake_headset_for_interactive_launch() {
     "$ADB" -s "$serial" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
     "$ADB" -s "$serial" shell am broadcast -a com.oculus.vrpowermanager.prox_close --ei timeout 0 >/dev/null 2>&1 || true
     mclone_dismiss_vr_system_dialogs "$serial"
+}
+
+check_interactive_launch_result() {
+    local serial="$1"
+    local deadline
+    local log_output
+    local failure_lines
+    local pid
+    local saw_process=0
+
+    [[ "$LAUNCH_CHECK_SECONDS" =~ ^[0-9]+$ ]] || {
+        mclone_die "MCLONE_ANDROID_XR_LAUNCH_CHECK_SECONDS must be a non-negative integer"
+    }
+    [[ "$LAUNCH_CHECK_SECONDS" != "0" ]] || return 0
+    deadline=$((SECONDS + LAUNCH_CHECK_SECONDS))
+    mclone_note "Checking Android XR startup logs for ${LAUNCH_CHECK_SECONDS}s"
+    while (( SECONDS < deadline )); do
+        log_output="$("$ADB" -s "$serial" logcat -d -t 2000 2>/dev/null | tr -d '\r' || true)"
+        if failure_lines="$(printf '%s\n' "$log_output" | grep -E "MCLONE_ANDROID_XR_FAILURE|FATAL EXCEPTION|Fatal signal|SIGSEGV|thread .* panicked|panicked at" || true)" \
+            && [[ -n "$failure_lines" ]]; then
+            printf '%s\n' "$failure_lines" >&2
+            mclone_die "Android XR startup failure detected"
+        fi
+        if printf '%s\n' "$log_output" | grep -F "MCLONE_ANDROID_XR_READY" >/dev/null; then
+            mclone_note "Android XR ready marker observed"
+            return 0
+        fi
+        pid="$("$ADB" -s "$serial" shell pidof "$MCLONE_ANDROID_XR_APP_ID" 2>/dev/null | tr -d '\r' || true)"
+        if [[ -n "$pid" ]]; then
+            saw_process=1
+        fi
+        sleep 1
+    done
+    pid="$("$ADB" -s "$serial" shell pidof "$MCLONE_ANDROID_XR_APP_ID" 2>/dev/null | tr -d '\r' || true)"
+    if [[ -z "$pid" ]]; then
+        printf '%s\n' "$log_output" | grep -E "MCLONE_ANDROID_XR|FATAL EXCEPTION|Fatal signal|SIGSEGV|thread .* panicked|panicked at" >&2 || true
+        if [[ "$saw_process" == "1" ]]; then
+            mclone_die "Android XR process exited during startup"
+        fi
+        mclone_die "Android XR process did not start within ${LAUNCH_CHECK_SECONDS}s"
+    fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -247,6 +289,7 @@ launch_command=("$ADB" -s "$SERIAL" shell "$remote_launch_command")
 if [[ "$LAUNCH_APP" == "1" ]]; then
     mclone_note "Force-stopping any running $MCLONE_ANDROID_XR_APP_ID before launch"
     "$ADB" -s "$SERIAL" shell am force-stop "$MCLONE_ANDROID_XR_APP_ID" >/dev/null 2>&1 || true
+    "$ADB" -s "$SERIAL" logcat -c || true
     if [[ "$WAKE_HEADSET" == "1" ]]; then
         wake_headset_for_interactive_launch "$SERIAL"
     fi
@@ -256,6 +299,7 @@ if [[ "$LAUNCH_APP" == "1" ]]; then
     if ! printf '%s\n' "$launch_output" | grep -E "Starting: Intent|Warning: Activity not started" >/dev/null; then
         mclone_die "activity launch command did not start an intent"
     fi
+    check_interactive_launch_result "$SERIAL"
 else
     mclone_note "Launch from the headset as Mclone XR, or run:"
     printf '%q ' "${launch_command[@]}"

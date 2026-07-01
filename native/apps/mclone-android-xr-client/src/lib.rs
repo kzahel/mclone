@@ -819,6 +819,40 @@ mod android {
         })
     }
 
+    fn report_android_xr_failure(app: &AndroidApp, error: &anyhow::Error) {
+        let message = format!("{error:#}");
+        log::error!("MCLONE_ANDROID_XR_FAILURE: {message}");
+        if let Err(report_error) = report_android_xr_failure_to_activity(app, &message) {
+            log::warn!(
+                "failed to surface Android XR startup failure in activity: {report_error:#}"
+            );
+        }
+    }
+
+    #[allow(unsafe_code)]
+    fn report_android_xr_failure_to_activity(app: &AndroidApp, message: &str) -> Result<()> {
+        let vm = app.vm_as_ptr() as *mut jni::sys::JavaVM;
+        let activity = app.activity_as_ptr() as jni::sys::jobject;
+        if vm.is_null() || activity.is_null() {
+            bail!("null JVM or Activity");
+        }
+
+        let vm = unsafe { jni::JavaVM::from_raw(vm) };
+        vm.attach_current_thread(|env| {
+            let activity = unsafe { jni::objects::JObject::from_raw(env, activity) };
+            let message = env.new_string(message)?;
+            let message = jni::objects::JObject::from(message);
+            env.call_method(
+                &activity,
+                jni::jni_str!("reportMcloneNativeFailure"),
+                jni::jni_sig!("(Ljava/lang/String;)V"),
+                &[jni::objects::JValue::Object(&message)],
+            )?;
+            Ok::<(), jni::errors::Error>(())
+        })
+        .context("call McloneXrActivity.reportMcloneNativeFailure")
+    }
+
     #[allow(unsafe_code)]
     #[unsafe(no_mangle)]
     fn android_main(app: AndroidApp) {
@@ -829,7 +863,7 @@ mod android {
         let startup_argv = match android_startup_argv_json(&app) {
             Ok(value) => value,
             Err(error) => {
-                log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
+                report_android_xr_failure(&app, &error);
                 return;
             }
         };
@@ -854,7 +888,7 @@ mod android {
         let startup_options = match parse_android_xr_startup_options(startup_argv.as_deref()) {
             Ok(options) => options,
             Err(error) => {
-                log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
+                report_android_xr_failure(&app, &error);
                 return;
             }
         };
@@ -863,7 +897,7 @@ mod android {
             match parse_android_xr_startup_view_pose(startup_view_pose_property.as_deref()) {
                 Ok(value) => value,
                 Err(error) => {
-                    log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
+                    report_android_xr_failure(&app, &error);
                     return;
                 }
             };
@@ -993,7 +1027,7 @@ mod android {
         let runtime_assets = match load_android_xr_runtime_assets() {
             Ok(assets) => assets,
             Err(error) => {
-                log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
+                report_android_xr_failure(&app, &error);
                 return;
             }
         };
@@ -1028,7 +1062,7 @@ mod android {
             startup_options.xr_render_scale,
             startup_options.xr_display_refresh_rate,
         ) {
-            log::error!("MCLONE_ANDROID_XR_FAILURE: {error:#}");
+            report_android_xr_failure(&app, &error);
         }
     }
 

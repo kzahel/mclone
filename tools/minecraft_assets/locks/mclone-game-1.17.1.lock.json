@@ -1,24 +1,24 @@
 {
   "asset_set": "mclone-game-1.17.1",
   "format_version": 1,
-  "generated_at": "2026-06-30T13:52:35.932664Z",
+  "generated_at": "2026-07-01T14:33:17.985678Z",
   "minecraft_version": "1.17.1",
   "pack": {
     "asset_set": "mclone-game-1.17.1",
-    "content_manifest_sha256": "0922f709ae47349f202ff49a31c5fe755d4cc6e704061f3ab1d457d3736dd76c",
-    "file_count": 6984,
+    "content_manifest_sha256": "c7feae12da25757c9e4554a3603238d6e565ecf8fb9703cafe65e9ef6231f81f",
+    "file_count": 6985,
     "fingerprints": {
       "payload_raw_v1": {
         "algorithm": "sha256",
-        "bytes": 6137157,
-        "file_count": 6984,
-        "sha256": "62f7f77649c2c3fa097a47e6002c0432910d9e0e58c4635f238c570eb9e971c6"
+        "bytes": 6161454,
+        "file_count": 6985,
+        "sha256": "dac24b443b0ba8803f6b58e4982b0b627820dc7072aeeb5c22afd22ec6880cf0"
       },
       "portable_json_text_v1": {
         "algorithm": "sha256",
         "excluded_file_count": 3073,
-        "fingerprinted_file_count": 3911,
-        "sha256": "0922f709ae47349f202ff49a31c5fe755d4cc6e704061f3ab1d457d3736dd76c"
+        "fingerprinted_file_count": 3912,
+        "sha256": "c7feae12da25757c9e4554a3603238d6e565ecf8fb9703cafe65e9ef6231f81f"
       }
     },
     "manifest_path": "reference/minecraft-1.17.1/extracted.zip.json",
@@ -26,6 +26,11 @@
     "payload_raw_manifest": {
       "algorithm": "sha256",
       "files": [
+        {
+          "bytes": 24297,
+          "path": "assets/mclone/figures/chicken.figure.json",
+          "sha256": "fb5ba1b83c81d4e83c32066eb55bdaf57852f596b1205c84161bca83a7649c5b"
+        },
         {
           "bytes": 17365,
           "path": "assets/mclone/figures/player.figure.json",
@@ -34951,19 +34956,19 @@
     }
   },
   "source": {
-    "file_count": 6984,
+    "file_count": 6985,
     "fingerprints": {
       "payload_raw_v1": {
         "algorithm": "sha256",
-        "bytes": 6137157,
-        "file_count": 6984,
-        "sha256": "62f7f77649c2c3fa097a47e6002c0432910d9e0e58c4635f238c570eb9e971c6"
+        "bytes": 6161454,
+        "file_count": 6985,
+        "sha256": "dac24b443b0ba8803f6b58e4982b0b627820dc7072aeeb5c22afd22ec6880cf0"
       },
       "portable_json_text_v1": {
         "algorithm": "sha256",
         "excluded_file_count": 3073,
-        "fingerprinted_file_count": 3911,
-        "sha256": "0922f709ae47349f202ff49a31c5fe755d4cc6e704061f3ab1d457d3736dd76c"
+        "fingerprinted_file_count": 3912,
+        "sha256": "c7feae12da25757c9e4554a3603238d6e565ecf8fb9703cafe65e9ef6231f81f"
       }
     },
     "root": "reference/minecraft-1.17.1/extracted",

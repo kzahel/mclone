@@ -325,6 +325,34 @@ mclone_capture_screenshot() {
     [[ -s "$screenshot_path" ]] || mclone_die "screenshot capture failed: $screenshot_path"
 }
 
+mclone_abs_path() {
+    local path="$1"
+    local dir
+    local base
+
+    dir="$(cd "$(dirname "$path")" && pwd -P)" || return 1
+    base="$(basename "$path")"
+    printf '%s/%s' "$dir" "$base"
+}
+
+mclone_check_default_asset_pack_lock() {
+    local asset_pack_path="$1"
+    local default_asset_pack_path="$REPO_ROOT/reference/minecraft-1.17.1/extracted.zip"
+    local asset_pack_abs
+    local default_asset_pack_abs
+
+    [[ "${MCLONE_ANDROID_ASSET_LOCK_CHECK:-1}" == "1" ]] || return 0
+    asset_pack_abs="$(mclone_abs_path "$asset_pack_path")" || return 0
+    default_asset_pack_abs="$(mclone_abs_path "$default_asset_pack_path")" || return 0
+    [[ "$asset_pack_abs" == "$default_asset_pack_abs" ]] || return 0
+
+    command -v pnpm >/dev/null 2>&1 || {
+        mclone_die "pnpm is required to check the default asset pack lock; install pnpm or set MCLONE_ANDROID_ASSET_LOCK_CHECK=0"
+    }
+    mclone_note "Checking default asset pack lock"
+    (cd "$REPO_ROOT" && pnpm --silent assets:pack:check)
+}
+
 mclone_stage_asset_pack() {
     local serial="$1"
     local asset_pack_path="${MCLONE_ANDROID_ASSET_PACK:-$REPO_ROOT/reference/minecraft-1.17.1/extracted.zip}"
@@ -335,6 +363,7 @@ mclone_stage_asset_pack() {
         mclone_die "asset pack not found at $asset_pack_path; run pnpm assets:pack"
     }
 
+    mclone_check_default_asset_pack_lock "$asset_pack_path"
     mclone_note "Staging asset pack $asset_pack_path to $remote_path"
     "$ADB" -s "$serial" shell mkdir -p "$remote_dir" >/dev/null
     "$ADB" -s "$serial" push "$asset_pack_path" "$remote_path" >/dev/null
