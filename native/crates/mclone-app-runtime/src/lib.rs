@@ -54,6 +54,8 @@ pub struct RenderSectionSyncTiming {
     pub dirty_seed_ms: f64,
     pub prepare_ms: f64,
     pub submit_ms: f64,
+    pub submit_snapshot_ms: f64,
+    pub submit_handoff_ms: f64,
 }
 
 impl RenderSectionSyncTiming {
@@ -62,6 +64,8 @@ impl RenderSectionSyncTiming {
         self.dirty_seed_ms += other.dirty_seed_ms;
         self.prepare_ms += other.prepare_ms;
         self.submit_ms += other.submit_ms;
+        self.submit_snapshot_ms += other.submit_snapshot_ms;
+        self.submit_handoff_ms += other.submit_handoff_ms;
     }
 }
 
@@ -905,12 +909,16 @@ impl SingleViewRuntime {
 
         let submit_start = Instant::now();
         let sync_plan = sync_update.sync_plan;
+        let snapshot_start = Instant::now();
         let snapshots = snapshots_for_submit(self.client(), compiler);
+        timing.submit_snapshot_ms = elapsed_ms(snapshot_start.elapsed());
+        let handoff_start = Instant::now();
         let submission_update = self.engine.submit_prepared_sync_plan(
             &sync_plan,
             snapshots,
             |_sync_plan, request| compiler.submit(request),
         )?;
+        timing.submit_handoff_ms = elapsed_ms(handoff_start.elapsed());
         cache_update.merge(submission_update.cache_update);
         cache_update.pending_compile_jobs = compiler.pending_job_count();
         timing.submit_ms = elapsed_ms(submit_start.elapsed());
@@ -1020,15 +1028,19 @@ impl SingleViewRuntime {
 
         let submit_start = Instant::now();
         let sync_plan = sync_update.sync_plan;
+        let snapshot_start = Instant::now();
         let snapshots = compile_snapshots_for_target_sections(
             self.client(),
             &sync_plan.ready_plan.ready_section_keys,
         );
+        timing.submit_snapshot_ms = elapsed_ms(snapshot_start.elapsed());
+        let handoff_start = Instant::now();
         let submission_update = self.engine.submit_prepared_sync_plan(
             &sync_plan,
             snapshots,
             |_sync_plan, request| compiler.submit(request),
         )?;
+        timing.submit_handoff_ms = elapsed_ms(handoff_start.elapsed());
         cache_update.merge(submission_update.cache_update);
         cache_update.pending_compile_jobs = compiler.pending_job_count();
         timing.submit_ms = elapsed_ms(submit_start.elapsed());

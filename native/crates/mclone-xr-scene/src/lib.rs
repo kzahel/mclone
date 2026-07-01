@@ -427,6 +427,8 @@ pub struct XrTerrainFrameTiming {
     pub runtime_dirty_seed_ms: f64,
     pub runtime_prepare_ms: f64,
     pub runtime_submit_ms: f64,
+    pub runtime_submit_snapshot_ms: f64,
+    pub runtime_submit_handoff_ms: f64,
     pub runtime_gpu_upload_ms: f64,
     pub runtime_upload_enqueue_ms: f64,
     pub runtime_upload_select_ms: f64,
@@ -2661,6 +2663,8 @@ where
         timing.runtime_dirty_seed_ms = timed_section_update.timing.dirty_seed_ms;
         timing.runtime_prepare_ms = timed_section_update.timing.prepare_ms;
         timing.runtime_submit_ms = timed_section_update.timing.submit_ms;
+        timing.runtime_submit_snapshot_ms = timed_section_update.timing.submit_snapshot_ms;
+        timing.runtime_submit_handoff_ms = timed_section_update.timing.submit_handoff_ms;
         let section_update = timed_section_update.cache_update;
         let rebuilt_section_count = section_update.rebuilt_section_count();
         let removed_section_count = section_update.removed_section_count();

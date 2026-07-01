@@ -298,6 +298,37 @@ Interpretation:
 - Ready publish, per-eye terrain cull/encode, and stereo submit/poll waits now
   show up as comparable second-order tails depending on run variance.
 
+Submit split pass:
+
+- Added `max_runtime_submit_snapshot_ms` and
+  `max_runtime_submit_handoff_ms` to
+  `MCLONE_ANDROID_XR_PERF_TERRAIN_RUNTIME`.
+- `submit_snapshot_ms` covers target-section neighbor selection plus
+  `ChunkSnapshot` cloning for the request payload.
+- `submit_handoff_ms` covers `submit_prepared_sync_plan(...)`: request
+  construction, compiler submission, inflight marking, ready-plan application,
+  and cache-update bookkeeping.
+
+Measurement, Quest Android XR per-eye settled orbit, render distance 7, 2
+render compile workers, unbounded completed-result acceptance, 30-second sample:
+
+| Frame avg / p95 / p99 / max | Max runtime sync split | Max upload / render tails | Read |
+|---|---|---|---|
+| 14.240 / 16.332 / 24.325 / 37.713 ms | sync 16.256 ms; submit 14.130; submit snapshot 0.979; submit handoff 13.873 | upload apply 10.743; ready query 2.509; ready publish 1.463; left-eye encode 19.994 | max 2 accepted results, 32 completed sections, 15 uploaded |
+
+Interpretation:
+
+- Snapshot selection/clone is not the remaining submit long pole. It is below
+  1 ms in the max submit frame.
+- The remaining tail sits inside the handoff bucket. That does not prove the
+  raw `mpsc` compiler send is expensive: the bucket also includes request
+  construction and ready-plan/dirty-state mutation. In particular, the max
+  compile frame still reports thousands of deferred sections, so BTreeSet
+  churn around applying the ready plan is a plausible culprit.
+- Do not jump straight to native resident snapshot mirrors from this result.
+  They may still be desirable for parity and memory ownership, but they are not
+  the next measured performance lever.
+
 ### E. Local Edit Coherence
 
 Status: planned.
@@ -320,10 +351,10 @@ a compiler exposes spare capacity and waits when capacity is full.
 
 ## Next Step
 
-Split the remaining native submit cost into snapshot selection/clone time and
-compiler handoff time. If the clone remains dominant, the next implementation
-slice should move native workers toward a resident snapshot/render-chunk mirror
-or shared immutable snapshot ownership so live frames do not deep-clone even the
-five-column mesh neighborhood. If handoff is cheap and submit is mostly
-elsewhere, move to ready-section publish invalidation and per-eye terrain
-cull/encode tail analysis.
+Split the `submit_handoff_ms` bucket inside
+`submit_prepared_sync_plan(...)`: request construction, compiler `submit`, and
+ready-plan/dirty-state mutation should be separately visible. If raw compiler
+send is cheap, optimize the ready-plan/deferred-section bookkeeping before
+returning to resident snapshot ownership. In parallel, continue tracking
+upload-apply and per-eye terrain encode tails because they are now comparable to
+runtime submit in the worst frames.
