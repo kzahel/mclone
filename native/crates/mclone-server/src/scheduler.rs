@@ -220,7 +220,11 @@ impl FluidTickList {
         game_time: u64,
         entity_ticking_chunks: &[ChunkPos],
         scheduler: &mut ChunkScheduler,
-    ) -> (FluidTickPhaseReport, Vec<ChunkSchedulerEvent>) {
+    ) -> (
+        FluidTickPhaseReport,
+        Vec<ChunkSchedulerEvent>,
+        Vec<WorldBlockPos>,
+    ) {
         let due_scan_start = simulation_timing_start();
         let ticking_chunks = entity_ticking_chunks
             .iter()
@@ -247,6 +251,7 @@ impl FluidTickList {
         let mut events = Vec::new();
         let mut executed_ticks: usize = 0;
         let mut mutated_blocks: usize = 0;
+        let mut mutated_positions = Vec::new();
         let mut snapshot_events: usize = 0;
         let mut tick_fluid_us = 0;
         let mut set_block_us = 0;
@@ -264,6 +269,7 @@ impl FluidTickList {
             let mutation = scheduler.tick_fluid(entry.key.pos, entry.key.fluid);
             tick_fluid_us += simulation_timing_elapsed_us(tick_fluid_start);
             mutated_blocks += mutation.mutated_positions.len();
+            mutated_positions.extend(mutation.mutated_positions.iter().copied());
             snapshot_events += mutation.snapshot_events;
             set_block_us += mutation.set_block_us;
             for scheduled in mutation.scheduled_ticks {
@@ -272,6 +278,8 @@ impl FluidTickList {
             events.extend(mutation.events);
         }
         let event_count = events.len();
+        mutated_positions.sort();
+        mutated_positions.dedup();
 
         (
             FluidTickPhaseReport {
@@ -288,6 +296,7 @@ impl FluidTickList {
                 set_block_us,
             },
             events,
+            mutated_positions,
         )
     }
 }

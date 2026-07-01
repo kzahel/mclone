@@ -149,6 +149,27 @@ impl ServerEntityStore {
         self.entities.values().copied().collect()
     }
 
+    pub(crate) fn on_block_changed(&mut self, pos: BlockPos) -> usize {
+        let mut affected_mobs = 0;
+        for (id, mob) in &mut self.mobs {
+            let Some(entity) = self.entities.get(id).copied() else {
+                continue;
+            };
+            if mob.on_block_changed(entity, pos) {
+                affected_mobs += 1;
+            }
+        }
+        affected_mobs
+    }
+
+    pub(crate) fn on_blocks_changed(&mut self, positions: &[BlockPos]) -> usize {
+        positions
+            .iter()
+            .copied()
+            .map(|pos| self.on_block_changed(pos))
+            .sum()
+    }
+
     #[allow(dead_code)]
     pub(crate) fn diagnostics(&self) -> ServerEntityStoreDiagnostics {
         ServerEntityStoreDiagnostics {
@@ -483,5 +504,32 @@ mod tests {
         assert!(!entity.on_ground);
         let mob = store.mob_state(id).expect("starter cow mob state");
         assert!(mob.delta_movement().y < 0.0);
+    }
+
+    #[test]
+    fn block_change_near_mob_path_marks_navigation_for_recompute() {
+        let mut store = ServerEntityStore::default();
+        let id =
+            store.insert_passive_mob_for_test(EntityKind::Cow, Vec3d::new(0.5, 64.0, 0.5), 0.0);
+        let entity = store.state(id).unwrap();
+        let mob = store.mobs.get_mut(&id).expect("cow should have mob state");
+        assert!(mob.move_to_for_test(entity, Vec3d::new(4.5, 64.0, 0.5), &flat_ground));
+        assert!(!mob.navigation_has_delayed_recomputation());
+
+        assert_eq!(store.on_block_changed(BlockPos::new(40, 64, 40)), 0);
+        assert!(
+            !store
+                .mob_state(id)
+                .unwrap()
+                .navigation_has_delayed_recomputation()
+        );
+
+        assert_eq!(store.on_block_changed(BlockPos::new(2, 64, 0)), 1);
+        assert!(
+            store
+                .mob_state(id)
+                .unwrap()
+                .navigation_has_delayed_recomputation()
+        );
     }
 }

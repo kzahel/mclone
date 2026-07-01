@@ -30,6 +30,19 @@ impl GroundPath {
         self.next_node_index = self.next_node_index.saturating_add(1);
     }
 
+    pub(super) fn replace_node(&mut self, index: usize, pos: BlockPos) -> bool {
+        let Some(node) = self.nodes.get_mut(index) else {
+            return false;
+        };
+        *node = pos;
+        true
+    }
+
+    pub(super) fn truncate_nodes(&mut self, len: usize) {
+        self.nodes.truncate(len);
+        self.next_node_index = self.next_node_index.min(self.nodes.len());
+    }
+
     pub(super) fn next_node_index(&self) -> usize {
         self.next_node_index
     }
@@ -111,5 +124,26 @@ mod tests {
             path.nodes(),
             &[BlockPos::new(0, 64, 0), BlockPos::new(1, 64, 0)]
         );
+    }
+
+    #[test]
+    fn path_can_replace_and_truncate_nodes_for_navigation_trimming() {
+        let mut path = GroundPath::from_nodes(
+            vec![
+                BlockPos::new(0, 64, 0),
+                BlockPos::new(1, 64, 0),
+                BlockPos::new(2, 64, 0),
+            ],
+            BlockPos::new(2, 64, 0),
+            true,
+        );
+
+        assert!(path.replace_node(1, BlockPos::new(1, 65, 0)));
+        assert!(!path.replace_node(5, BlockPos::new(5, 65, 0)));
+        path.advance();
+        path.truncate_nodes(1);
+
+        assert_eq!(path.nodes(), &[BlockPos::new(0, 64, 0)]);
+        assert!(path.is_done());
     }
 }

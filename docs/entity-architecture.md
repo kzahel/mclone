@@ -99,12 +99,17 @@ The first shared ground/collision scaffold is also in place:
   deterministic navigation ticks rather than wall clock time so host-thread
   execution remains reproducible and later scheduling budgets can degrade
   behavior without depending on frame duration.
+- Server block mutations now notify mob navigation before entity ticks. The
+  notification uses Java's `PathNavigation.recomputePath(BlockPos)` shape:
+  changed blocks only mark paths for recompute when they are near the remaining
+  path, and the actual rebuild still flows through navigation and the path
+  service. Java `trimPath()` scaffolding is also present, with cauldron
+  behavior waiting on cauldron block facts.
 
-This does not complete full Java `WalkNodeEvaluator` parity, block-change
-recompute triggers, path trimming, the full Java `AttributeMap` /
-modifier/effect stack, or full `LivingEntity.travel(...)`. Those remain
-required foundations before natural passive movement can be considered
-complete.
+This does not complete full Java `WalkNodeEvaluator` parity, cauldron/sun path
+trim behavior, the full Java `AttributeMap` / modifier/effect stack, or full
+`LivingEntity.travel(...)`. Those remain required foundations before natural
+passive movement can be considered complete.
 
 Pathfinding should keep the Minecraft module shape even where native runtime
 execution diverges for performance. Goals should ask navigation to move;

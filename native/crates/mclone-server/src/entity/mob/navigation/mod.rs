@@ -102,6 +102,35 @@ impl GroundPathNavigation {
         self.path = None;
     }
 
+    pub(crate) fn recompute_path_around(
+        &mut self,
+        changed_pos: BlockPos,
+        mob_position: Vec3d,
+    ) -> bool {
+        let Some(path) = &self.path else {
+            return false;
+        };
+        if path.is_done() || path.node_count() == 0 {
+            return false;
+        }
+        let Some(end_node) = path.end_node_pos() else {
+            return false;
+        };
+
+        let midpoint = Vec3d::new(
+            (end_node.x as f64 + mob_position.x) * 0.5,
+            (end_node.y as f64 + mob_position.y) * 0.5,
+            (end_node.z as f64 + mob_position.z) * 0.5,
+        );
+        let remaining_nodes = path.remaining_node_count() as f64;
+        if !block_pos_closer_than(changed_pos, midpoint, remaining_nodes) {
+            return false;
+        }
+
+        self.has_delayed_recomputation = true;
+        true
+    }
+
     pub(crate) fn recompute_path<F>(
         &mut self,
         mob_position: Vec3d,
@@ -155,7 +184,7 @@ impl GroundPathNavigation {
     where
         F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
     {
-        let Some(path) = self.create_path(
+        let Some(mut path) = self.create_path(
             mob_position,
             target,
             mob_width,
@@ -170,6 +199,7 @@ impl GroundPathNavigation {
             return false;
         };
 
+        self.trim_path(&mut path, block_state_at);
         if path.is_done() {
             return false;
         }
@@ -267,6 +297,13 @@ impl GroundPathNavigation {
             block_state_at,
             pathfinding_malus,
         )
+    }
+
+    fn trim_path<F>(&self, path: &mut GroundPath, block_state_at: &F)
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
+    {
+        trim_path_with(path, |pos| is_cauldron_path_trim_block(block_state_at, pos));
     }
 
     fn create_path_to_block<F>(
@@ -435,6 +472,39 @@ where
     None
 }
 
+fn trim_path_with(path: &mut GroundPath, mut is_cauldron: impl FnMut(BlockPos) -> bool) {
+    for index in 0..path.node_count() {
+        let Some(node) = path.node_pos(index) else {
+            continue;
+        };
+        let next = path.node_pos(index + 1);
+        if !is_cauldron(node) {
+            continue;
+        }
+
+        path.replace_node(index, node.offset(0, 1, 0));
+        if let Some(next) = next {
+            if node.y >= next.y {
+                path.replace_node(index + 1, next.offset(0, 1, 0));
+            }
+        }
+    }
+}
+
+fn is_cauldron_path_trim_block<F>(block_state_at: &F, pos: BlockPos) -> bool
+where
+    F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
+{
+    let _ = block_state_at(pos);
+    // Terrain MVP does not register cauldron block states yet. Keep the Java
+    // trim hook in place so adding cauldron facts later is a data extension.
+    false
+}
+
+fn block_pos_closer_than(pos: BlockPos, target: Vec3d, distance: f64) -> bool {
+    block_pos_center(pos).distance_to_sqr(target) < distance * distance
+}
+
 fn should_target_next_node_in_direction(path: &GroundPath, mob_position: Vec3d) -> bool {
     let next_index = path.next_node_index();
     if next_index + 1 >= path.node_count() {
@@ -460,6 +530,10 @@ fn should_target_next_node_in_direction(path: &GroundPath, mob_position: Vec3d) 
 
 fn bottom_center(pos: BlockPos) -> Vec3d {
     Vec3d::new(pos.x as f64 + 0.5, pos.y as f64, pos.z as f64 + 0.5)
+}
+
+fn block_pos_center(pos: BlockPos) -> Vec3d {
+    Vec3d::new(pos.x as f64 + 0.5, pos.y as f64 + 0.5, pos.z as f64 + 0.5)
 }
 
 fn dot(first: Vec3d, second: Vec3d) -> f64 {
@@ -677,5 +751,82 @@ mod tests {
             Some(BlockPos::new(8, 64, 9))
         );
         assert_eq!(target.position, Vec3d::new(8.5, 64.0, 9.5));
+    }
+
+    #[test]
+    fn ground_navigation_block_change_marks_near_remaining_path_for_recompute() {
+        let mut navigation = GroundPathNavigation::default();
+        navigation.path = Some(GroundPath::from_nodes(
+            vec![
+                BlockPos::new(0, 64, 0),
+                BlockPos::new(1, 64, 0),
+                BlockPos::new(2, 64, 0),
+                BlockPos::new(3, 64, 0),
+                BlockPos::new(4, 64, 0),
+            ],
+            BlockPos::new(4, 64, 0),
+            true,
+        ));
+
+        assert!(
+            !navigation
+                .recompute_path_around(BlockPos::new(40, 64, 40), Vec3d::new(0.5, 64.0, 0.5),)
+        );
+        assert!(!navigation.has_delayed_recomputation());
+
+        assert!(
+            navigation.recompute_path_around(BlockPos::new(2, 64, 0), Vec3d::new(0.5, 64.0, 0.5),)
+        );
+        assert!(navigation.has_delayed_recomputation());
+    }
+
+    #[test]
+    fn ground_navigation_block_change_uses_remaining_path_distance() {
+        let mut navigation = GroundPathNavigation::default();
+        let mut path = GroundPath::from_nodes(
+            vec![
+                BlockPos::new(0, 64, 0),
+                BlockPos::new(1, 64, 0),
+                BlockPos::new(2, 64, 0),
+                BlockPos::new(3, 64, 0),
+                BlockPos::new(4, 64, 0),
+            ],
+            BlockPos::new(4, 64, 0),
+            true,
+        );
+        path.advance();
+        path.advance();
+        path.advance();
+        path.advance();
+        navigation.path = Some(path);
+
+        assert!(
+            !navigation.recompute_path_around(BlockPos::new(0, 64, 0), Vec3d::new(0.5, 64.0, 0.5),)
+        );
+        assert!(!navigation.has_delayed_recomputation());
+    }
+
+    #[test]
+    fn ground_navigation_trim_path_hook_raises_cauldron_nodes() {
+        let mut path = GroundPath::from_nodes(
+            vec![
+                BlockPos::new(0, 64, 0),
+                BlockPos::new(1, 64, 0),
+                BlockPos::new(2, 63, 0),
+            ],
+            BlockPos::new(2, 63, 0),
+            true,
+        );
+
+        trim_path_with(&mut path, |pos| pos == BlockPos::new(1, 64, 0));
+
+        assert_eq!(
+            path.nodes(),
+            &[
+                BlockPos::new(0, 64, 0),
+                BlockPos::new(1, 65, 0),
+                BlockPos::new(2, 64, 0),
+            ]
+        );
     }
 }

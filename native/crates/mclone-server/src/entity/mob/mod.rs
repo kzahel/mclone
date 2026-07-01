@@ -187,6 +187,10 @@ impl MobRuntimeState {
         self.random.next_int_bound(bound)
     }
 
+    pub(crate) fn on_block_changed(&mut self, entity: ServerEntityState, pos: BlockPos) -> bool {
+        self.navigation.recompute_path_around(pos, entity.position)
+    }
+
     pub(crate) fn tick_entity<F>(
         &mut self,
         entity: &mut ServerEntityState,
@@ -239,6 +243,35 @@ impl MobRuntimeState {
         self.move_control = context.move_control;
         self.jump_control = context.jump_control;
         self.look_control = context.look_control;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn move_to_for_test<F>(
+        &mut self,
+        entity: ServerEntityState,
+        target: Vec3d,
+        block_state_at: &F,
+    ) -> bool
+    where
+        F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
+    {
+        let pathfinding_malus = self.pathfinding_malus.clone();
+        self.navigation.move_to(
+            entity.position,
+            target,
+            1.0,
+            entity.width,
+            entity.height,
+            self.attributes.follow_range,
+            self.attributes.max_up_step,
+            block_state_at,
+            |path_type| pathfinding_malus.get(path_type),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn navigation_has_delayed_recomputation(&self) -> bool {
+        self.navigation.has_delayed_recomputation()
     }
 }
 

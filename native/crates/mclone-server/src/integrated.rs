@@ -477,12 +477,13 @@ impl IntegratedServer {
         let block_tick_us = simulation_timing_elapsed_us(block_tick_start);
 
         let fluid_tick_start = simulation_timing_start();
-        let (fluid_report, mut fluid_events) = self.liquid_ticks.tick(
+        let (fluid_report, mut fluid_events, fluid_mutated_positions) = self.liquid_ticks.tick(
             simulation_tick,
             &tick_report.entity_ticking_chunks,
             &mut self.scheduler,
         );
         let fluid_tick_us = simulation_timing_elapsed_us(fluid_tick_start);
+        self.entities.on_blocks_changed(&fluid_mutated_positions);
         fluid_events.extend(self.scheduler.drain_pending_block_delta_events());
         let fluid_event_count = fluid_events.len();
 
@@ -907,6 +908,7 @@ impl IntegratedServer {
         let before = self.scheduler.block_at_world(pos);
         let changed = self.scheduler.set_block_at_world(pos, block_id);
         if changed {
+            self.entities.on_block_changed(pos);
             if let Some(before) = before {
                 self.scheduler
                     .refresh_runtime_lighting_after_block_change(pos, before, block_id);

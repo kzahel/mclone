@@ -21,7 +21,8 @@ Slice 5B landed server-owned `GroundPathNavigation`, a terrain-MVP
 boundary and heap-backed A* core. Slice 5D landed one-block step-up path
 expansion and the first `JumpControl` scaffold. Slice 5E landed mob movement
 attribute facts for navigation and jumping. Slice 5F landed Minecraft-shaped
-navigation recompute and timeout state. The starter passive path is now an
+navigation recompute and timeout state. Slice 5G landed block-change path
+recompute triggers and path-trim hooks. The starter passive path is now an
 explicit debug passive showcase, enabled by default, while natural spawning
 remains future work.
 
@@ -663,6 +664,49 @@ Landed notes:
   waypoint advancement, and path node introspection.
 - Verified with `cargo test --manifest-path native/Cargo.toml -p
   mclone-server entity::mob::navigation`, `cargo test --manifest-path
+  native/Cargo.toml -p mclone-server`, and the full `cargo test
+  --manifest-path native/Cargo.toml` workspace gate.
+
+## Slice 5G - Block-Change Recompute And Path Trim Hooks (Landed)
+
+Purpose: connect server block mutations to mob path invalidation without
+letting block or scheduler code own AI policy.
+
+Implementation sketch:
+
+- Read Java `PathNavigation.recomputePath(BlockPos)` and `trimPath()`.
+- Add a navigation method that checks whether a changed block is close enough
+  to the remaining path before marking delayed recompute.
+- Route direct simulation block changes, falling-block moves, and fluid-tick
+  block mutations into `ServerEntityStore` before entity ticks.
+- Keep actual path rebuilding inside `GroundPathNavigation::tick(...)` through
+  the existing path service boundary.
+- Add `GroundPath` node replacement/truncation primitives and a Java-shaped
+  `trimPath()` hook. Terrain MVP has no cauldron facts yet, so cauldron trim
+  behavior remains a data follow-up.
+
+Done when:
+
+- A far block change does not mark a mob path for recompute.
+- A near block change along the remaining path marks the path for delayed
+  recompute.
+- Fluid-tick mutations expose changed positions to entity navigation.
+- Path trim tests cover the cauldron node-raise rule independent of missing
+  cauldron block ids.
+
+Landed notes:
+
+- Added `GroundPathNavigation::recompute_path_around(...)` using Java's
+  midpoint/radius shape from `PathNavigation.recomputePath(BlockPos)`.
+- Added entity-store block-change fan-out and integrated-server notifications
+  for direct block changes and fluid-tick mutated positions.
+- Extended fluid ticking to return deduplicated mutated block positions
+  alongside existing metrics/events.
+- Added `GroundPath` node replacement and truncation helpers plus the
+  Java-shaped `trim_path` hook.
+- Added focused tests for affected-path recompute, remaining-path distance,
+  store-level block-change notification, and trim node raising.
+- Verified with focused navigation/store tests, `cargo test --manifest-path
   native/Cargo.toml -p mclone-server`, and the full `cargo test
   --manifest-path native/Cargo.toml` workspace gate.
 
