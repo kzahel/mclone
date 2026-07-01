@@ -23,6 +23,51 @@ Method:
 Exact color counts are not perceptual palette counts. They are still useful for
 understanding the typical size of vanilla texture palettes.
 
+## Related Tools
+
+For a specific authored texture, use the texture analyzer instead of updating
+this note by hand. It renders the mclone pack, loads the local vanilla
+counterpart when available, downscales both to a shared comparison grid, and
+reports color, luminance, blob, seam, and structure features:
+
+```sh
+pnpm texture-lab:analyze --texture stone
+pnpm texture-lab:analyze --texture stone --json
+```
+
+The analyzer is implemented in:
+
+```text
+tools/texture-lab/src/analyze.ts
+tools/texture-lab/src/analysis.ts
+```
+
+Use compare mode when judging two generated PNG candidates against each other:
+
+```sh
+pnpm texture-lab:analyze --compare /tmp/a.png /tmp/b.png --reference-name stone
+```
+
+For atlas-wide authoring constraints, use the texture catalog. It answers
+questions about vanilla texture usage, alpha/cutout behavior, tint indexes,
+render layers, model families, tiling, rotation, and authored overlay coverage:
+
+```sh
+pnpm texture-lab:catalog
+```
+
+The catalog writes:
+
+```text
+/tmp/mclone-texture-lab/mclone-default-texture-catalog.md
+/tmp/mclone-texture-lab/mclone-default-texture-catalog.json
+```
+
+The catalog does not currently emit this document's color-count distribution.
+If this table needs regular refreshes, add a generated vanilla-summary mode to
+`texture-lab:analyze` or a small companion script that reuses
+`tools/texture-lab/src/png.ts`.
+
 ## Common Textures
 
 | Texture | Size | Exact non-transparent colors |
