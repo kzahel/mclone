@@ -48,6 +48,15 @@ pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
 pub const JAVA_MIN_TRACKING_RENDER_DISTANCE: u32 = 2;
 
+#[cfg(not(target_arch = "wasm32"))]
+fn average_duration(total: Duration, count: usize) -> Duration {
+    if count == 0 {
+        Duration::ZERO
+    } else {
+        Duration::from_secs_f64(total.as_secs_f64() / count as f64)
+    }
+}
+
 pub fn square_count(radius: i32) -> Result<usize> {
     anyhow::ensure!(radius >= 0, "radius must be non-negative");
     let side = usize::try_from(radius)?.saturating_mul(2).saturating_add(1);
@@ -748,6 +757,77 @@ impl SingleViewRuntime {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    pub fn sync_render_sections_until_deadline<C, Snapshots>(
+        &mut self,
+        compiler: &mut C,
+        camera_position: Vec3,
+        deadline: Instant,
+        mut snapshots_for_submit: Snapshots,
+    ) -> Result<RenderSectionCacheUpdate>
+    where
+        C: RenderSectionCompiler,
+        Snapshots: FnMut(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
+    {
+        let mut combined = RenderSectionCacheUpdate::default();
+        let mut submitted_request_count = 0_usize;
+        let mut admission_total = Duration::ZERO;
+
+        loop {
+            if submitted_request_count > 0 {
+                let average_admission = average_duration(admission_total, submitted_request_count);
+                if average_admission > Duration::ZERO
+                    && deadline.saturating_duration_since(Instant::now()) < average_admission
+                {
+                    if compiler.has_pending_job_capacity()
+                        && self.has_ready_pending_render_work(camera_position)
+                    {
+                        combined.deadline_skipped_compile_request_count += 1;
+                    }
+                    combined.pending_compile_jobs = compiler.pending_job_count();
+                    return Ok(combined);
+                }
+            }
+
+            let admission_start = Instant::now();
+            let update = self.sync_render_sections_with_budget(
+                compiler,
+                camera_position,
+                DEFAULT_RENDER_CHUNK_MESH_BUDGET,
+                |client, compiler| snapshots_for_submit(client, compiler),
+            )?;
+            let submitted = update.submitted_compile_section_count > 0;
+            let progressed = update.rebuilt_section_count() > 0
+                || update.removed_section_count() > 0
+                || submitted
+                || update.completed_compile_section_count > 0
+                || update.stale_compile_section_count > 0;
+            if submitted {
+                submitted_request_count += 1;
+                admission_total += admission_start.elapsed();
+            }
+            combined.merge(update);
+
+            if compiler.pending_job_count() == 0
+                && !self.has_ready_pending_render_work(camera_position)
+            {
+                combined.pending_compile_jobs = 0;
+                return Ok(combined);
+            }
+            if !compiler.has_pending_job_capacity() || !progressed {
+                combined.pending_compile_jobs = compiler.pending_job_count();
+                return Ok(combined);
+            }
+            if submitted_request_count > 0 && Instant::now() >= deadline {
+                if self.has_ready_pending_render_work(camera_position) {
+                    combined.deadline_skipped_compile_request_count += 1;
+                }
+                combined.pending_compile_jobs = compiler.pending_job_count();
+                return Ok(combined);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn sync_all_render_sections<C, Snapshots>(
         &mut self,
         compiler: &mut C,
@@ -1160,7 +1240,56 @@ fn timing_elapsed_ms(_start: Option<RuntimeTimingSample>) -> f64 {
 mod tests {
     use super::*;
     use mclone_core::{CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
+    use mclone_render_session::{RenderSectionCompileRequest, RenderSectionCompileResult};
     use mclone_server::{ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot};
+
+    #[derive(Default)]
+    struct DeadlineTestCompiler {
+        pending_jobs: usize,
+        max_pending_jobs: usize,
+        submitted_requests: Vec<RenderSectionCompileRequest>,
+    }
+
+    impl DeadlineTestCompiler {
+        fn new(max_pending_jobs: usize) -> Self {
+            Self {
+                max_pending_jobs,
+                ..Self::default()
+            }
+        }
+    }
+
+    impl RenderSectionCompiler for DeadlineTestCompiler {
+        fn submit(&mut self, request: RenderSectionCompileRequest) -> Result<()> {
+            self.pending_jobs += 1;
+            self.submitted_requests.push(request);
+            Ok(())
+        }
+
+        fn try_recv_completed(&mut self) -> Result<Vec<RenderSectionCompileResult>> {
+            Ok(Vec::new())
+        }
+
+        fn pending_job_count(&self) -> usize {
+            self.pending_jobs
+        }
+
+        fn max_pending_job_count(&self) -> usize {
+            self.max_pending_jobs
+        }
+    }
+
+    fn empty_runtime_test_snapshot(pos: ChunkPos) -> ChunkSnapshot {
+        let block_state_ids = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        ChunkSnapshot::from_block_state_ids(
+            pos,
+            ChunkStatus::Full,
+            ChunkRevision(1),
+            0,
+            16,
+            &block_state_ids,
+        )
+    }
 
     #[test]
     fn chunk_tracking_radius_derives_java_shaped_minimum() {
@@ -1323,5 +1452,39 @@ mod tests {
         assert_eq!(runtime.snapshot_update_count(), 1);
         assert_eq!(runtime.section_block_update_count(), 1);
         assert_eq!(runtime.unload_update_count(), 1);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn render_section_deadline_loop_reports_skipped_ready_admission() {
+        let chunks = [ChunkPos::new(0, 0), ChunkPos::new(1, 0)];
+        let mut runtime = SingleViewRuntime::local_integrated(ChunkPos::new(0, 0), 2, 2);
+        runtime.apply_server_updates(
+            chunks
+                .iter()
+                .copied()
+                .map(empty_runtime_test_snapshot)
+                .map(ServerUpdate::ChunkSnapshot)
+                .collect(),
+        );
+        let mut compiler = DeadlineTestCompiler::new(2);
+
+        let update = runtime
+            .sync_render_sections_until_deadline(
+                &mut compiler,
+                Vec3::new(8.0, 8.0, 8.0),
+                Instant::now(),
+                |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            )
+            .expect("deadline render sync should succeed");
+
+        assert_eq!(compiler.submitted_requests.len(), 1);
+        assert_eq!(update.submitted_compile_section_count, 1);
+        assert_eq!(update.deadline_skipped_compile_request_count, 1);
+        assert_eq!(update.pending_compile_jobs, 1);
+        assert!(
+            runtime
+                .has_pending_render_work(compiler.pending_job_count(), Vec3::new(8.0, 8.0, 8.0),)
+        );
     }
 }

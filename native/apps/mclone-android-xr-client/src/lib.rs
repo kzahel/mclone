@@ -3460,7 +3460,7 @@ mod android {
             {
                 let upload = summary.upload;
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} sections={} drawn_sections={} drawn_indices={}",
+                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} sections={} drawn_sections={} drawn_indices={}",
                     mode,
                     settle_seconds,
                     ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
@@ -3474,6 +3474,7 @@ mod android {
                     upload.pending_render_chunks_after,
                     upload.deferred_section_count,
                     upload.submitted_compile_section_count,
+                    upload.deadline_skipped_compile_request_count,
                     upload.completed_compile_section_count,
                     upload.stale_compile_section_count,
                     upload.uploaded_section_count,
@@ -3865,7 +3866,7 @@ mod android {
                 self.max_upload.player_outbound_queue_depth
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_COMPILE_MAX pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} neighbor_ready_sections={} near_exception_sections={} deferred_sections={} submitted_sections={} completed_sections={} stale_sections={} visibility_graph_builds={} visibility_graph_total_ms={:.3} visibility_graph_worst_ms={:.3}",
+                "MCLONE_ANDROID_XR_PERF_COMPILE_MAX pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} neighbor_ready_sections={} near_exception_sections={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} completed_sections={} stale_sections={} visibility_graph_builds={} visibility_graph_total_ms={:.3} visibility_graph_worst_ms={:.3}",
                 self.max_upload.pending_render_chunks_before,
                 self.max_upload.pending_render_chunks_after,
                 self.max_upload.pending_compile_jobs_before,
@@ -3877,6 +3878,7 @@ mod android {
                 self.max_upload.near_exception_section_count,
                 self.max_upload.deferred_section_count,
                 self.max_upload.submitted_compile_section_count,
+                self.max_upload.deadline_skipped_compile_request_count,
                 self.max_upload.completed_compile_section_count,
                 self.max_upload.stale_compile_section_count,
                 self.max_upload.visibility_graph_build_count,
@@ -3884,7 +3886,7 @@ mod android {
                 self.max_upload.visibility_graph_worst_ms
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_UPLOAD_LAST poll_changed={} pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} rebuilt_sections={} removed_sections={} uploaded_sections={} upload_removed_sections={} uploaded_indices={} ready_sections={}",
+                "MCLONE_ANDROID_XR_PERF_UPLOAD_LAST poll_changed={} pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} deadline_skipped_requests={} rebuilt_sections={} removed_sections={} uploaded_sections={} upload_removed_sections={} uploaded_indices={} ready_sections={}",
                 latest_upload.poll_changed,
                 latest_upload.pending_render_chunks_before,
                 latest_upload.pending_render_chunks_after,
@@ -3893,6 +3895,7 @@ mod android {
                 latest_upload.max_pending_compile_jobs,
                 latest_upload.available_compile_slots_before,
                 latest_upload.available_compile_slots_after,
+                latest_upload.deadline_skipped_compile_request_count,
                 latest_upload.rebuilt_section_count,
                 latest_upload.removed_section_count,
                 latest_upload.uploaded_section_count,
@@ -4203,6 +4206,9 @@ mod android {
             submitted_compile_section_count: a
                 .submitted_compile_section_count
                 .max(b.submitted_compile_section_count),
+            deadline_skipped_compile_request_count: a
+                .deadline_skipped_compile_request_count
+                .max(b.deadline_skipped_compile_request_count),
             completed_compile_section_count: a
                 .completed_compile_section_count
                 .max(b.completed_compile_section_count),

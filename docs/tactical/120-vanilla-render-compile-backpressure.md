@@ -40,11 +40,16 @@ tracking, stale-result handling, and old-mesh retention. The admission policy is
 still coarser than Java:
 
 - `RenderSectionCompiler` only exposed pending job count, so callers inferred
-  "no job in flight" as the only safe submission state.
-- `mclone-app-runtime` uses a fixed dirty chunk budget of `1`.
-- There is no explicit compile buffer-pack pool/capacity in the compiler
-  contract.
-- There is no frame-deadline admission equivalent to `compileChunksUntil(...)`.
+  "no job in flight" as the only safe submission state. Slice A fixed this
+  contract gap.
+- `mclone-app-runtime` used a fixed dirty chunk budget of `1`. Slice C added a
+  first Java-shaped deadline loop for measured native lanes, but the default
+  live window path still needs a clear target-budget signal.
+- There was no explicit compile buffer-pack pool/capacity in the compiler
+  contract. Slice B added this for native workers with a conservative default.
+- There was no frame-deadline admission equivalent to `compileChunksUntil(...)`.
+  Slice C added the first native runtime version, but it does not yet use a
+  cross-frame cost estimate before the first request.
 - Upload/result acceptance and prepared-record maintenance still have separate
   burst paths tracked in `119`.
 
@@ -126,17 +131,49 @@ Interpretation:
 
 ### C. Deadline-Driven Admission
 
-Status: planned.
+Status: first native pass landed and measured.
 
 Add a Java-shaped admission controller:
 
-- track recent submit/finish/apply cost,
+- track submit/admission cost,
 - compare estimated next compile admission cost against remaining frame budget,
 - stop scheduling when the next task likely exceeds the deadline,
 - keep deterministic pump-to-idle paths able to override the live-frame
   deadline.
 
-This should replace fixed "N chunks per frame" as the live policy once measured.
+First pass result:
+
+- `SingleViewRuntime::sync_render_sections_until_deadline(...)` repeatedly runs
+  the existing one-chunk shared sync/admission step while compiler capacity is
+  available and the per-frame average admission cost still fits the remaining
+  frame budget.
+- This deliberately keeps deterministic `sync_all_render_sections(...)`
+  unchanged for startup, captures, smoke tests, and pump-to-idle paths.
+- Desktop frame-budget probes use the probe `--target-hz` as the deadline.
+- Android XR uses the terrain state's display refresh as the terrain-runtime
+  deadline for per-eye, full-frame multiview, and overlap-prefetch runtime sync.
+- Perf markers now record `deadline_skipped_compile_requests`.
+
+Measurement after Slice C, render distance 7:
+
+| Lane | Workers | Frame/app result | Compile/admission result | Read |
+|---|---:|---|---|---|
+| Desktop release frame-budget, 240-frame settled orbit | 1 | avg 2.487 ms, p95 3.960 ms, p99 4.958 ms, 1 over-budget frame | 724 submitted, 708 completed, 242 uploaded, 0 deadline skips | desktop has enough headroom; gate does not fire |
+| Desktop release frame-budget, 240-frame settled orbit | 2 | avg 2.798 ms, p95 4.708 ms, p99 5.296 ms, 1 over-budget frame | 1300 submitted, 1250 completed, 420 uploaded, 0 deadline skips | still throughput-heavy but within desktop budget |
+| Quest Android XR per-eye, 30-second settled orbit | 2 | frame avg 15.130 ms, p95 25.104 ms, p99 39.982 ms, app-over-period 35.5%, metrics dropped_frames 75 | max 32 submitted, 32 completed, 1 deadline skip; max runtime sync 41.167 ms, max GPU upload 20.285 ms | gate is observable, but tails remain completion/upload dominated |
+
+Interpretation:
+
+- This is useful scaffolding, not a complete pacing fix. It moves native runtime
+  admission toward the Java `compileChunksUntil(...)` shape and proves the
+  deadline can gate extra worker admission.
+- The first-pass rule is still Java-like within a frame: it needs at least one
+  admission before it has a per-frame average. That means it cannot prevent a
+  too-expensive first live request.
+- Quest still shows large runtime sync/GPU-upload tails, so the remaining burst
+  is mostly result acceptance/upload work rather than simply scheduling too many
+  compile requests.
+- Do not change the default worker count yet.
 
 ### D. Upload Publication Baseline
 
@@ -169,8 +206,9 @@ a compiler exposes spare capacity and waits when capacity is full.
 
 ## Next Step
 
-Implement Slice C deadline-driven admission. The measurements show that extra
-compile capacity can help throughput, but accepting/applying the resulting work
-can still burst past the frame budget. The next chunk should estimate the live
-frame deadline and admit only the compile work that is likely to fit, while
-leaving deterministic pump-to-idle paths able to override the live-frame limit.
+Move to Slice D, but keep it baseline-first: measure and shape result
+acceptance/upload publication against Java's `uploadAllPendingUploads()` path.
+The immediate candidate is not another worker cap; it is separating "compile
+request admission" from "how many completed sections we accept/upload into this
+frame" so Quest can avoid 40-50 ms runtime-sync/upload spikes without throwing
+away the vanilla queue/buffer-pack structure.

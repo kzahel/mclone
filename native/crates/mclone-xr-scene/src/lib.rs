@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeSet, VecDeque};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
@@ -432,6 +432,7 @@ pub struct XrTerrainUploadSummary {
     pub near_exception_section_count: usize,
     pub deferred_section_count: usize,
     pub submitted_compile_section_count: usize,
+    pub deadline_skipped_compile_request_count: usize,
     pub completed_compile_section_count: usize,
     pub stale_compile_section_count: usize,
     pub uploaded_section_count: usize,
@@ -1291,8 +1292,14 @@ where
     ) -> Result<XrTerrainFrameSummary> {
         let center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
-        let upload =
-            self.live_upload_for_frame(device, center_position, runtime_mode, &mut timing)?;
+        let frame_deadline = self.render_compile_frame_deadline();
+        let upload = self.live_upload_for_frame(
+            device,
+            center_position,
+            runtime_mode,
+            frame_deadline,
+            &mut timing,
+        )?;
         let multiview = self
             .render_prepared_terrain_multiview_frame_with_upload_inner(
                 device,
@@ -1321,8 +1328,14 @@ where
     ) -> Result<XrTerrainFrameSummary> {
         let center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
-        let upload =
-            self.live_upload_for_frame(device, center_position, runtime_mode, &mut timing)?;
+        let frame_deadline = self.render_compile_frame_deadline();
+        let upload = self.live_upload_for_frame(
+            device,
+            center_position,
+            runtime_mode,
+            frame_deadline,
+            &mut timing,
+        )?;
         let render_options = self.effective_render_options(center_position);
         let sky_clear_color = self.sky_clear_color();
         let time_of_day = self.time_of_day();
@@ -1403,8 +1416,14 @@ where
             {
                 let prefetch_start = Instant::now();
                 let mut prefetch_timing = XrTerrainFrameTiming::default();
+                let prefetch_deadline = self.render_compile_frame_deadline();
                 let upload = self
-                    .poll_runtime_and_upload(device, center_position, &mut prefetch_timing)
+                    .poll_runtime_and_upload(
+                        device,
+                        center_position,
+                        prefetch_deadline,
+                        &mut prefetch_timing,
+                    )
                     .context("prefetch XR runtime upload before deferred stereo wait")?;
                 self.prefetched_live_upload = Some(upload);
                 timing.overlap_runtime_prefetch_ms = elapsed_ms(prefetch_start.elapsed());
@@ -1436,6 +1455,7 @@ where
         device: &wgpu::Device,
         center_position: Vec3,
         runtime_mode: XrTerrainRuntimeUpdateMode,
+        frame_deadline: Option<Instant>,
         timing: &mut XrTerrainFrameTiming,
     ) -> Result<XrTerrainUploadSummary> {
         if !matches!(runtime_mode, XrTerrainRuntimeUpdateMode::Live) {
@@ -1450,9 +1470,16 @@ where
             return Ok(upload);
         }
         let runtime_upload_start = Instant::now();
-        let upload = self.poll_runtime_and_upload(device, center_position, timing)?;
+        let upload =
+            self.poll_runtime_and_upload(device, center_position, frame_deadline, timing)?;
         timing.runtime_upload_ms = elapsed_ms(runtime_upload_start.elapsed());
         Ok(upload)
+    }
+
+    fn render_compile_frame_deadline(&self) -> Option<Instant> {
+        self.display_refresh_hz
+            .filter(|hz| hz.is_finite() && *hz > 0.0)
+            .map(|hz| Instant::now() + Duration::from_secs_f64(1.0 / f64::from(hz)))
     }
 
     fn next_per_view_uniform_frame(&mut self) -> u32 {
@@ -1682,7 +1709,8 @@ where
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         let mut timing = XrTerrainFrameTiming::default();
         let upload = if self.local_startup.is_none() && self.runtime.is_some() {
-            self.poll_runtime_and_upload(device, center_position, &mut timing)?
+            let frame_deadline = self.render_compile_frame_deadline();
+            self.poll_runtime_and_upload(device, center_position, frame_deadline, &mut timing)?
         } else {
             self.frozen_runtime_upload_summary()
         };
@@ -2401,6 +2429,7 @@ where
         &mut self,
         device: &wgpu::Device,
         camera_position: Vec3,
+        frame_deadline: Option<Instant>,
         timing: &mut XrTerrainFrameTiming,
     ) -> Result<XrTerrainUploadSummary> {
         let (
@@ -2455,8 +2484,13 @@ where
         }
         let sync_start = Instant::now();
         let section_update = if poll_changed || has_runtime_render_work {
-            self.sync_render_sections(camera_position)
-                .context("sync XR terrain render sections")?
+            if let Some(deadline) = frame_deadline {
+                self.sync_render_sections_until_deadline(camera_position, deadline)
+                    .context("sync XR terrain render sections until deadline")?
+            } else {
+                self.sync_render_sections(camera_position)
+                    .context("sync XR terrain render sections")?
+            }
         } else {
             mclone_render_session::RenderSectionCacheUpdate::default()
         };
@@ -2469,6 +2503,8 @@ where
         let near_exception_section_count = section_update.near_exception_section_count;
         let deferred_section_count = section_update.deferred_section_count;
         let submitted_compile_section_count = section_update.submitted_compile_section_count;
+        let deadline_skipped_compile_request_count =
+            section_update.deadline_skipped_compile_request_count;
         let completed_compile_section_count = section_update.completed_compile_section_count;
         let stale_compile_section_count = section_update.stale_compile_section_count;
         let pending_compile_jobs_after_sync = section_update.pending_compile_jobs;
@@ -2528,6 +2564,7 @@ where
             near_exception_section_count,
             deferred_section_count,
             submitted_compile_section_count,
+            deadline_skipped_compile_request_count,
             completed_compile_section_count,
             stale_compile_section_count,
             uploaded_section_count: upload_report.uploaded_section_count,
@@ -2962,6 +2999,17 @@ where
             .as_mut()
             .context("XR terrain runtime is not active")?
             .sync_render_sections(camera_position)
+    }
+
+    fn sync_render_sections_until_deadline(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+    ) -> Result<mclone_render_session::RenderSectionCacheUpdate> {
+        self.runtime
+            .as_mut()
+            .context("XR terrain runtime is not active")?
+            .sync_render_sections_until_deadline(camera_position, deadline)
     }
 
     fn poll(&mut self) -> Result<bool> {

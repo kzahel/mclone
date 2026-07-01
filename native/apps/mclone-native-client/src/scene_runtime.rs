@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 #[cfg(test)]
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
@@ -353,6 +354,15 @@ impl WindowSceneRuntime {
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
         self.scene.sync_render_sections(camera_position)
+    }
+
+    pub(crate) fn sync_render_sections_until_deadline(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+    ) -> Result<RenderSectionCacheUpdate> {
+        self.scene
+            .sync_render_sections_until_deadline(camera_position, deadline)
     }
 
     pub(crate) fn sync_all_render_sections(

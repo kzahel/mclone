@@ -281,6 +281,7 @@ pub struct RenderSectionCacheUpdate {
     pub near_exception_section_count: usize,
     pub deferred_section_count: usize,
     pub submitted_compile_section_count: usize,
+    pub deadline_skipped_compile_request_count: usize,
     pub completed_compile_section_count: usize,
     pub stale_compile_section_count: usize,
     pub pending_compile_jobs: usize,
@@ -309,6 +310,7 @@ impl RenderSectionCacheUpdate {
         self.near_exception_section_count += other.near_exception_section_count;
         self.deferred_section_count += other.deferred_section_count;
         self.submitted_compile_section_count += other.submitted_compile_section_count;
+        self.deadline_skipped_compile_request_count += other.deadline_skipped_compile_request_count;
         self.completed_compile_section_count += other.completed_compile_section_count;
         self.stale_compile_section_count += other.stale_compile_section_count;
         self.pending_compile_jobs = other.pending_compile_jobs;

@@ -438,6 +438,20 @@ impl LocalSingleViewSceneRuntime {
         )
     }
 
+    pub fn sync_render_sections_until_deadline(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+    ) -> Result<RenderSectionCacheUpdate> {
+        let render_compile_worker = &mut self.render_compile_worker;
+        self.core.sync_render_sections_until_deadline(
+            render_compile_worker,
+            camera_position,
+            deadline,
+            |client, _compiler| client.chunk_snapshots().cloned().collect(),
+        )
+    }
+
     pub fn sync_all_render_sections(
         &mut self,
         camera_position: Vec3,
@@ -671,6 +685,21 @@ where
         match self {
             Self::Local(scene) => scene.sync_render_sections(camera_position),
             Self::RemoteDedicated(scene) => scene.sync_render_sections(camera_position),
+        }
+    }
+
+    pub fn sync_render_sections_until_deadline(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+    ) -> Result<RenderSectionCacheUpdate> {
+        match self {
+            Self::Local(scene) => {
+                scene.sync_render_sections_until_deadline(camera_position, deadline)
+            }
+            Self::RemoteDedicated(scene) => {
+                scene.sync_render_sections_until_deadline(camera_position, deadline)
+            }
         }
     }
 
@@ -1011,6 +1040,19 @@ where
         self.core.sync_render_sections(
             &mut self.render_compile_worker,
             camera_position,
+            |client, _compiler| client.chunk_snapshots().cloned().collect(),
+        )
+    }
+
+    pub fn sync_render_sections_until_deadline(
+        &mut self,
+        camera_position: Vec3,
+        deadline: Instant,
+    ) -> Result<RenderSectionCacheUpdate> {
+        self.core.sync_render_sections_until_deadline(
+            &mut self.render_compile_worker,
+            camera_position,
+            deadline,
             |client, _compiler| client.chunk_snapshots().cloned().collect(),
         )
     }

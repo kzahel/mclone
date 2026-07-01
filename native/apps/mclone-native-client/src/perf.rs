@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
@@ -423,6 +423,7 @@ struct FrameBudgetProbeFrameReport {
     rebuilt_sections: usize,
     removed_sections: usize,
     submitted_compile_sections: usize,
+    deadline_skipped_compile_requests: usize,
     completed_compile_sections: usize,
     stale_compile_sections: usize,
     uploaded_sections: usize,
@@ -491,6 +492,7 @@ impl Default for FrameBudgetProbeFrameReport {
             rebuilt_sections: 0,
             removed_sections: 0,
             submitted_compile_sections: 0,
+            deadline_skipped_compile_requests: 0,
             completed_compile_sections: 0,
             stale_compile_sections: 0,
             uploaded_sections: 0,
@@ -518,6 +520,7 @@ impl FrameBudgetProbeFrameReport {
         self.rebuilt_sections += timing.rebuilt_sections;
         self.removed_sections += timing.removed_sections;
         self.submitted_compile_sections += timing.submitted_compile_sections;
+        self.deadline_skipped_compile_requests += timing.deadline_skipped_compile_requests;
         self.completed_compile_sections += timing.completed_compile_sections;
         self.stale_compile_sections += timing.stale_compile_sections;
         self.uploaded_sections += timing.uploaded_sections;
@@ -547,6 +550,7 @@ struct FrameBudgetProbeSectionTiming {
     rebuilt_sections: usize,
     removed_sections: usize,
     submitted_compile_sections: usize,
+    deadline_skipped_compile_requests: usize,
     completed_compile_sections: usize,
     stale_compile_sections: usize,
     uploaded_sections: usize,
@@ -987,6 +991,10 @@ impl FrameBudgetProbeReport {
                 frame.submitted_compile_sections
             );
             println!(
+                "      \"deadline_skipped_compile_requests\": {},",
+                frame.deadline_skipped_compile_requests
+            );
+            println!(
                 "      \"completed_compile_sections\": {},",
                 frame.completed_compile_sections
             );
@@ -1216,9 +1224,12 @@ fn probe_sync_upload_sections(
     frame: &RenderFrameContext<'_>,
     state: &mut FrameBudgetProbeState,
     camera_position: Vec3,
+    deadline: Instant,
 ) -> Result<FrameBudgetProbeSectionTiming> {
     let remesh_start = Instant::now();
-    let section_update = state.runtime.sync_render_sections(camera_position)?;
+    let section_update = state
+        .runtime
+        .sync_render_sections_until_deadline(camera_position, deadline)?;
     let remesh_ms = elapsed_ms(remesh_start.elapsed());
     let upload_start = Instant::now();
     let upload_report = state
@@ -1247,6 +1258,7 @@ fn probe_sync_upload_sections(
         rebuilt_sections: section_update.rebuilt_section_count(),
         removed_sections: section_update.removed_section_count(),
         submitted_compile_sections: section_update.submitted_compile_section_count,
+        deadline_skipped_compile_requests: section_update.deadline_skipped_compile_request_count,
         completed_compile_sections: section_update.completed_compile_section_count,
         stale_compile_sections: section_update.stale_compile_section_count,
         uploaded_sections: upload_report.uploaded_section_count,
@@ -1357,6 +1369,9 @@ pub(crate) fn run_frame_budget_probe(
             })
         },
         |index, frame, state| {
+            let frame_start = Instant::now();
+            let frame_deadline =
+                frame_start + Duration::from_secs_f64(1.0 / probe_options.target_hz.max(1.0));
             let spectator = frame_budget_probe_spectator(&probe_options, index);
             let center = spectator.chunk_pos();
             let mut report = FrameBudgetProbeFrameReport {
@@ -1411,7 +1426,8 @@ pub(crate) fn run_frame_budget_probe(
             report.poll_fluid_event_count = poll_diagnostics.fluid_event_count;
             report.poll_scheduled_fluid_ticks = poll_diagnostics.scheduled_fluid_ticks;
             if state.runtime.has_pending_render_work(spectator.position) {
-                let update = probe_sync_upload_sections(&frame, state, spectator.position)?;
+                let update =
+                    probe_sync_upload_sections(&frame, state, spectator.position, frame_deadline)?;
                 report.add_section_timing(update);
             }
 
