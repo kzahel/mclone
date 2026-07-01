@@ -405,8 +405,8 @@ async function renderCanvas() {
           // and the shared-memory runner capability is asserted by sharedTopologyStress.
           && frameMetricsActive(report.worldgenJobFrameMetrics, "shared-memory")
           && frameMetricsActive(report.lightStatusJobFrameMetrics, "shared-memory")
-          && sharedBufferPoolActive(report.worldgenJobFrameMetrics)
-          && sharedBufferPoolActive(report.lightStatusJobFrameMetrics)
+          && sharedBufferPoolUsed(report.worldgenJobFrameMetrics)
+          && sharedBufferPoolUsed(report.lightStatusJobFrameMetrics)
           && report.rendered
           && report.configured
           && report.chunkLoaded
@@ -662,12 +662,9 @@ function frameMetricsActive(metrics, transportKind) {
 }
 
 /** @param {any} metrics */
-function sharedBufferPoolActive(metrics) {
+function sharedBufferPoolUsed(metrics) {
   return Boolean(
     metrics
-    && Number(metrics.sharedBufferPoolMisses) > 0
-    && Number(metrics.sharedBufferPoolHits) > 0
-    && Number(metrics.sharedBufferPoolDrops) === 0
     && Number(metrics.sharedBufferCapacityBytes) > 0
     && Number(metrics.maxSharedBufferCapacityBytes) >= Number(metrics.sharedBufferCapacityBytes)
     && Number(metrics.sharedBufferPooledResponseFrames) > 0

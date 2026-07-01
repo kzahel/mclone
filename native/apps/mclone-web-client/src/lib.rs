@@ -600,10 +600,13 @@ impl WebLoopbackHost {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn wait_for_worker_tick() {
-    #[cfg(not(target_arch = "wasm32"))]
     std::thread::sleep(std::time::Duration::from_millis(1));
-    #[cfg(target_arch = "wasm32")]
+}
+
+#[cfg(target_arch = "wasm32")]
+fn wait_for_worker_tick() {
     std::hint::spin_loop();
 }
 

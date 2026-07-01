@@ -23,6 +23,9 @@ log.workspace = true
 pollster.workspace = true
 winit.workspace = true
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
+
 [lib]
 name = "mclone_render"
 path = "src/lib.rs"

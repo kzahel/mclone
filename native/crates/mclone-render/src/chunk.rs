@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::{NonZeroU32, NonZeroU64};
 use std::ops::Range;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
@@ -2480,9 +2481,9 @@ impl TexturedSectionDrawResources {
     ) {
         let mut prepare_stats = TexturedSectionRecordPrepareStats::default();
         if self.records_dirty.get() || self.cached_records.borrow().is_none() {
-            let rebuild_start = Instant::now();
+            let rebuild_start = timing_now();
             let rebuilt = Arc::new(self.build_prepared_records());
-            let rebuild_ms = elapsed_ms(rebuild_start.elapsed());
+            let rebuild_ms = timing_elapsed_ms(rebuild_start);
             *self.cached_records.borrow_mut() = Some(rebuilt);
             self.records_dirty.set(false);
             let mut cache_stats = self.record_cache_stats.get();
@@ -2878,41 +2879,41 @@ impl TexturedSectionDrawResources {
         mut timing: Option<&mut TexturedSectionRenderTiming>,
         phase: TexturedSectionRenderPhase,
     ) -> Result<TexturedSectionRenderStats> {
-        let prepare_start = timing.as_ref().map(|_| Instant::now());
+        let prepare_start = timing.as_ref().map(|_| timing_now());
         let records_storage;
         let records: &PreparedTexturedSectionRecords = match prepared_records {
             Some(records) => records,
             None => {
                 // Slice F shared with all single-view clients: go through the
                 // cross-frame cache instead of rebuilding the records every frame.
-                let records_start = timing.as_ref().map(|_| Instant::now());
+                let records_start = timing.as_ref().map(|_| timing_now());
                 records_storage = self.prepare_render_records();
                 if let (Some(timing), Some(records_start)) = (&mut timing, records_start) {
-                    timing.records_ms = elapsed_ms(records_start.elapsed());
+                    timing.records_ms = timing_elapsed_ms(records_start);
                 }
                 &records_storage
             }
         };
-        let cull_start = timing.as_ref().map(|_| Instant::now());
+        let cull_start = timing.as_ref().map(|_| timing_now());
         let culling = {
             let mut scratch = self.cull_scratch.borrow_mut();
             cull_textured_sections(records, render_view, options, &mut scratch)
         };
         if let (Some(timing), Some(cull_start)) = (&mut timing, cull_start) {
-            timing.cull_ms = elapsed_ms(cull_start.elapsed());
+            timing.cull_ms = timing_elapsed_ms(cull_start);
         }
-        let uniform_start = timing.as_ref().map(|_| Instant::now());
+        let uniform_start = timing.as_ref().map(|_| timing_now());
         let uniform_offset = self.renderer.uniforms.write_slot(
             queue,
             view_slot,
             &uniform_bytes(render_view, options, self.renderer.color_format),
         );
         if let (Some(timing), Some(uniform_start)) = (&mut timing, uniform_start) {
-            timing.uniform_write_ms = elapsed_ms(uniform_start.elapsed());
+            timing.uniform_write_ms = timing_elapsed_ms(uniform_start);
         }
         let mut translucent_sections = Vec::new();
         if phase.draws_translucent() {
-            let translucent_collect_start = timing.as_ref().map(|_| Instant::now());
+            let translucent_collect_start = timing.as_ref().map(|_| timing_now());
             translucent_sections = self
                 .sections
                 .iter()
@@ -2923,23 +2924,23 @@ impl TexturedSectionDrawResources {
             if let (Some(timing), Some(translucent_collect_start)) =
                 (&mut timing, translucent_collect_start)
             {
-                timing.translucent_collect_ms = elapsed_ms(translucent_collect_start.elapsed());
+                timing.translucent_collect_ms = timing_elapsed_ms(translucent_collect_start);
             }
-            let translucent_sort_start = timing.as_ref().map(|_| Instant::now());
+            let translucent_sort_start = timing.as_ref().map(|_| timing_now());
             translucent_sections.sort_by(|(left_key, _), (right_key, _)| {
                 compare_translucent_sections(**left_key, **right_key, render_view)
             });
             if let (Some(timing), Some(translucent_sort_start)) =
                 (&mut timing, translucent_sort_start)
             {
-                timing.translucent_sort_ms = elapsed_ms(translucent_sort_start.elapsed());
+                timing.translucent_sort_ms = timing_elapsed_ms(translucent_sort_start);
             }
         }
         if let (Some(timing), Some(prepare_start)) = (&mut timing, prepare_start) {
-            timing.prepare_ms = elapsed_ms(prepare_start.elapsed());
+            timing.prepare_ms = timing_elapsed_ms(prepare_start);
         }
 
-        let encode_start = timing.as_ref().map(|_| Instant::now());
+        let encode_start = timing.as_ref().map(|_| timing_now());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_textured_section_render_pass"),
@@ -2987,7 +2988,7 @@ impl TexturedSectionDrawResources {
             }
         }
         if let (Some(timing), Some(encode_start)) = (&mut timing, encode_start) {
-            timing.encode_ms = elapsed_ms(encode_start.elapsed());
+            timing.encode_ms = timing_elapsed_ms(encode_start);
         }
         Ok(culling.stats)
     }
@@ -2999,16 +3000,16 @@ impl TexturedSectionDrawResources {
         options: [TexturedSectionRenderOptions; 2],
         mut timing: Option<&mut TexturedSectionRenderTiming>,
     ) -> PreparedTexturedSectionStereoDraw {
-        let prepare_start = timing.as_ref().map(|_| Instant::now());
-        let cull_start = timing.as_ref().map(|_| Instant::now());
+        let prepare_start = timing.as_ref().map(|_| timing_now());
+        let cull_start = timing.as_ref().map(|_| timing_now());
         let culling = {
             let mut scratch = self.cull_scratch.borrow_mut();
             cull_textured_sections_stereo_union(records, render_views, options, &mut scratch)
         };
         if let (Some(timing), Some(cull_start)) = (&mut timing, cull_start) {
-            timing.cull_ms = elapsed_ms(cull_start.elapsed());
+            timing.cull_ms = timing_elapsed_ms(cull_start);
         }
-        let translucent_collect_start = timing.as_ref().map(|_| Instant::now());
+        let translucent_collect_start = timing.as_ref().map(|_| timing_now());
         let mut translucent_keys = self
             .sections
             .iter()
@@ -3020,18 +3021,18 @@ impl TexturedSectionDrawResources {
         if let (Some(timing), Some(translucent_collect_start)) =
             (&mut timing, translucent_collect_start)
         {
-            timing.translucent_collect_ms = elapsed_ms(translucent_collect_start.elapsed());
+            timing.translucent_collect_ms = timing_elapsed_ms(translucent_collect_start);
         }
-        let translucent_sort_start = timing.as_ref().map(|_| Instant::now());
+        let translucent_sort_start = timing.as_ref().map(|_| timing_now());
         let sort_view = stereo_translucent_sort_view(render_views);
         translucent_keys
             .sort_by(|left, right| compare_translucent_sections(*left, *right, sort_view));
         if let (Some(timing), Some(translucent_sort_start)) = (&mut timing, translucent_sort_start)
         {
-            timing.translucent_sort_ms = elapsed_ms(translucent_sort_start.elapsed());
+            timing.translucent_sort_ms = timing_elapsed_ms(translucent_sort_start);
         }
         if let (Some(timing), Some(prepare_start)) = (&mut timing, prepare_start) {
-            timing.prepare_ms = elapsed_ms(prepare_start.elapsed());
+            timing.prepare_ms = timing_elapsed_ms(prepare_start);
         }
         let union_stats = stereo_union_stats_for_options(culling.stats, options);
         PreparedTexturedSectionStereoDraw {
@@ -3055,21 +3056,21 @@ impl TexturedSectionDrawResources {
         mut timing: Option<&mut TexturedSectionRenderTiming>,
         phase: TexturedSectionRenderPhase,
     ) -> Result<TexturedSectionRenderStats> {
-        let prepare_start = timing.as_ref().map(|_| Instant::now());
-        let uniform_start = timing.as_ref().map(|_| Instant::now());
+        let prepare_start = timing.as_ref().map(|_| timing_now());
+        let uniform_start = timing.as_ref().map(|_| timing_now());
         let uniform_offset = self.renderer.uniforms.write_slot(
             queue,
             view_slot,
             &uniform_bytes(render_view, options, self.renderer.color_format),
         );
         if let (Some(timing), Some(uniform_start)) = (&mut timing, uniform_start) {
-            timing.uniform_write_ms = elapsed_ms(uniform_start.elapsed());
+            timing.uniform_write_ms = timing_elapsed_ms(uniform_start);
         }
         if let (Some(timing), Some(prepare_start)) = (&mut timing, prepare_start) {
-            timing.prepare_ms = elapsed_ms(prepare_start.elapsed());
+            timing.prepare_ms = timing_elapsed_ms(prepare_start);
         }
 
-        let encode_start = timing.as_ref().map(|_| Instant::now());
+        let encode_start = timing.as_ref().map(|_| timing_now());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_textured_section_stereo_prepared_render_pass"),
@@ -3122,7 +3123,7 @@ impl TexturedSectionDrawResources {
             }
         }
         if let (Some(timing), Some(encode_start)) = (&mut timing, encode_start) {
-            timing.encode_ms = elapsed_ms(encode_start.elapsed());
+            timing.encode_ms = timing_elapsed_ms(encode_start);
         }
         Ok(prepared_draw.stats_for_slot(view_slot))
     }
@@ -3157,8 +3158,30 @@ impl TexturedSectionDrawResources {
     }
 }
 
-fn elapsed_ms(duration: std::time::Duration) -> f64 {
-    duration.as_secs_f64() * 1000.0
+#[cfg(not(target_arch = "wasm32"))]
+type RenderTimingSample = Instant;
+
+#[cfg(target_arch = "wasm32")]
+type RenderTimingSample = f64;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn timing_now() -> RenderTimingSample {
+    Instant::now()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn timing_now() -> RenderTimingSample {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn timing_elapsed_ms(start: RenderTimingSample) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
+}
+
+#[cfg(target_arch = "wasm32")]
+fn timing_elapsed_ms(start: RenderTimingSample) -> f64 {
+    (js_sys::Date::now() - start).max(0.0)
 }
 
 fn stereo_union_stats_for_options(

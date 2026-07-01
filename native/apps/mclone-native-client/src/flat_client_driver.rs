@@ -47,8 +47,8 @@ use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameHelpParent,
     GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameUi, GameUiAction,
     GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, StatusOverlay,
-    render_flat_hud, render_loading_progress_overlay, render_loading_progress_panel_at,
-    touch_controls_mode_label,
+    UiDebugSnapshot, UiScreenId, UiSurface, render_flat_hud, render_loading_progress_overlay,
+    render_loading_progress_panel_at, touch_controls_mode_label,
 };
 
 use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
@@ -110,6 +110,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) startup: Option<FlatClientPendingStartup>,
     pub(crate) session: GameSessionCoordinator<FlatClientPendingSessionStart>,
     pub(crate) ui: GameUi,
+    ui_v2: UiSurface,
     pub(crate) spectator: SpectatorCamera,
     pub(crate) camera: EngineCameraController,
     pub(crate) actor_interpolation: ActorInterpolationState,
@@ -281,6 +282,7 @@ impl FlatClientDriver {
             startup: None,
             session: GameSessionCoordinator::new(),
             ui,
+            ui_v2: UiSurface::new(),
             spectator,
             camera,
             actor_interpolation: ActorInterpolationState::new(),
@@ -361,6 +363,7 @@ impl FlatClientDriver {
 
     pub(crate) fn set_ui_screen(&mut self, screen: Option<GameScreen>) {
         self.ui.set_screen(screen);
+        self.sync_ui_v2_screen();
     }
 
     pub(crate) fn set_new_world_seed(&mut self, seed: i64) {
@@ -378,14 +381,17 @@ impl FlatClientDriver {
 
     pub(crate) fn set_ui_scale(&mut self, scale: GuiScale) {
         self.ui.set_scale(scale);
+        self.ui_v2.set_scale(scale);
     }
 
     pub(crate) fn clear_ui_input(&mut self) {
         self.ui.clear_input();
+        self.ui_v2.clear_input();
     }
 
     pub(crate) fn open_pause_menu(&mut self) {
         self.ui.open_pause();
+        self.sync_ui_v2_screen();
     }
 
     pub(crate) fn open_help(&mut self, parent: GameHelpParent) {
@@ -393,10 +399,16 @@ impl FlatClientDriver {
     }
 
     pub(crate) fn ui_key_pressed(&mut self, key: GuiKey) -> (bool, Option<GameUiAction>) {
+        if self.sync_ui_v2_screen() {
+            return self.ui_v2.key_pressed(key);
+        }
         self.ui.key_pressed(key)
     }
 
     pub(crate) fn ui_pointer_down(&mut self, point: Point, state: GameUiRenderState) -> bool {
+        if self.sync_ui_v2_screen() {
+            return self.ui_v2.pointer_down(point);
+        }
         self.ui.pointer_down(point, state)
     }
 
@@ -405,6 +417,9 @@ impl FlatClientDriver {
         point: Point,
         state: GameUiRenderState,
     ) -> (bool, Option<GameUiAction>) {
+        if self.sync_ui_v2_screen() {
+            return self.ui_v2.pointer_up(point);
+        }
         self.ui.pointer_up(point, state)
     }
 
@@ -413,7 +428,29 @@ impl FlatClientDriver {
         point: Point,
         state: GameUiRenderState,
     ) -> (bool, Option<GameUiAction>) {
+        if self.sync_ui_v2_screen() {
+            return self.ui_v2.pointer_move(point);
+        }
         self.ui.pointer_move(point, state)
+    }
+
+    pub(crate) fn set_ui_v2_debug_overlay(&mut self, enabled: bool) {
+        self.ui_v2.set_debug_overlay(enabled);
+    }
+
+    pub(crate) fn ui_v2_is_active(&self) -> bool {
+        UiScreenId::from_game_screen(self.ui.screen()).is_some()
+    }
+
+    pub(crate) fn ui_v2_debug_snapshot(&mut self) -> Option<UiDebugSnapshot> {
+        self.sync_ui_v2_screen();
+        self.ui_v2.debug_snapshot()
+    }
+
+    fn sync_ui_v2_screen(&mut self) -> bool {
+        let screen = UiScreenId::from_game_screen(self.ui.screen());
+        self.ui_v2.set_screen(screen);
+        screen.is_some()
     }
 
     pub(crate) fn apply_started_session_ui(&mut self, descriptor: &ActiveSessionDescriptor) {
@@ -897,6 +934,7 @@ impl FlatClientDriver {
         if apply_ui_action {
             self.ui.apply_action(action);
         }
+        self.sync_ui_v2_screen();
         result
     }
 
@@ -1795,7 +1833,12 @@ impl FlatClientDriver {
             || debug_view_readiness_overlay.is_some();
         let mut ui_render_state = game_ui_render_state(ui_frame.render_options);
         ui_render_state.block_palette = ui_frame.block_palette;
-        let base_ui_draw = self.ui.render_draw_list(ui_render_state);
+        self.sync_ui_v2_screen();
+        let base_ui_draw = if self.ui_v2.is_active() {
+            self.ui_v2.render_draw_list()
+        } else {
+            self.ui.render_draw_list(ui_render_state)
+        };
         let gui_state = FullFrameGui::new(
             gui_active,
             ui_covers_world || loading_progress_overlay.is_some(),

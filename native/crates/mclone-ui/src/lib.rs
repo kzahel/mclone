@@ -5,6 +5,12 @@ use mclone_input::{
     TouchControlsMode, default_keyboard_mouse_shortcut_rows, flat_runtime_shortcut_rows,
 };
 
+mod v2;
+pub use v2::{
+    UiDebugSnapshot, UiDebugWidget, UiFrameState, UiLayout, UiScreenId, UiSurface, UiWidget,
+    UiWidgetId, UiWidgetKind,
+};
+
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = FLAT_HOTBAR_SLOT_COUNT as usize;
 pub const EMPTY_HOTBAR_ICONS: [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE] =
     [None; HOTBAR_SLOT_COUNT_USIZE];

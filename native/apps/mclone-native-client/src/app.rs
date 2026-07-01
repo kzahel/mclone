@@ -47,6 +47,7 @@ const RENDER_RESOURCE_REBUILD_KEY: KeyCode = KeyCode::F8;
 const RENDER_SCALE_REBUILD_KEY: KeyCode = KeyCode::F9;
 const DESKTOP_RENDER_SCALE_PRESETS: [f32; 4] = [DEFAULT_RENDER_SCALE, 0.5, 0.75, 1.5];
 const RENDER_SCALE_PRESET_EPSILON: f32 = 0.000_1;
+const UI_V2_HIT_DEBUG_ENV: &str = "MCLONE_UI_V2_HIT_DEBUG";
 
 pub(crate) fn run_window(
     scene: SceneOptions,
@@ -188,6 +189,7 @@ struct ChunkApp {
     mouse_lock_requested: bool,
     last_cursor: Option<(f64, f64)>,
     debug_visible: bool,
+    ui_v2_hit_debug: bool,
     last_frame: Instant,
     next_redraw_at: Option<Instant>,
     start_intent: WindowStartIntent,
@@ -212,8 +214,14 @@ impl ChunkApp {
                 .clone()
                 .unwrap_or_else(|| DEFAULT_JOIN_REMOTE_ADDR.to_owned()),
         );
+        let ui_v2_hit_debug = std::env::var_os(UI_V2_HIT_DEBUG_ENV).is_some();
+        let mut driver = FlatClientDriver::new_with_ui(&scene, render_options, ui);
+        driver.set_ui_v2_debug_overlay(ui_v2_hit_debug);
+        if ui_v2_hit_debug {
+            log::info!("{UI_V2_HIT_DEBUG_ENV}=1; UI v2 hit debug overlay/logging enabled");
+        }
         Self {
-            driver: FlatClientDriver::new_with_ui(&scene, render_options, ui),
+            driver,
             assets,
             flat_input: DesktopFlatInputAdapter::new(),
             input_preferences: InputPreferences::AUTO,
@@ -225,6 +233,7 @@ impl ChunkApp {
             mouse_lock_requested: false,
             last_cursor: None,
             debug_visible: false,
+            ui_v2_hit_debug,
             last_frame: Instant::now(),
             next_redraw_at: None,
             start_intent,
@@ -400,6 +409,68 @@ impl ChunkApp {
             window_size,
             [surface.config.width, surface.config.height],
         ))
+    }
+
+    fn log_ui_v2_pointer_debug(
+        &mut self,
+        phase: &str,
+        raw_cursor: (f64, f64),
+        gui_point: Point,
+        action: Option<GameUiAction>,
+    ) {
+        if !self.ui_v2_hit_debug || !self.driver.ui_v2_is_active() {
+            return;
+        }
+        let window_size = self
+            .window
+            .as_ref()
+            .map(|window| window.inner_size())
+            .map(|size| [size.width, size.height])
+            .unwrap_or([0, 0]);
+        let surface_size = self
+            .surface
+            .as_ref()
+            .map(|surface| [surface.config.width, surface.config.height])
+            .unwrap_or([0, 0]);
+        let Some(snapshot) = self.driver.ui_v2_debug_snapshot() else {
+            return;
+        };
+        let widgets = snapshot
+            .widgets
+            .iter()
+            .map(|widget| {
+                format!(
+                    "{:?} '{}' enabled={} rect=({:.1},{:.1},{:.1},{:.1})",
+                    widget.id,
+                    widget.label,
+                    widget.enabled,
+                    widget.rect.x,
+                    widget.rect.y,
+                    widget.rect.width,
+                    widget.rect.height
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        log::info!(
+            "ui_v2_hit {phase} raw=({:.1},{:.1}) window={}x{} surface={}x{} gui_scale={} gui=({:.1},{:.1}) screen={:?} frame_rev={} layout_rev={} hovered={:?} captured={:?} action={:?} widgets=[{}]",
+            raw_cursor.0,
+            raw_cursor.1,
+            window_size[0],
+            window_size[1],
+            surface_size[0],
+            surface_size[1],
+            snapshot.scale.scale,
+            gui_point.x,
+            gui_point.y,
+            snapshot.screen,
+            snapshot.frame_revision,
+            snapshot.layout_revision,
+            snapshot.hovered,
+            snapshot.captured,
+            action,
+            widgets
+        );
     }
 
     fn current_ui_render_state(&self) -> GameUiRenderState {
@@ -1068,11 +1139,13 @@ impl ApplicationHandler for ChunkApp {
                                 ElementState::Pressed => {
                                     let ui_state = self.current_ui_render_state();
                                     self.driver.ui_pointer_down(point, ui_state);
+                                    self.log_ui_v2_pointer_debug("down", (x, y), point, None);
                                 }
                                 ElementState::Released => {
                                     let ui_state = self.current_ui_render_state();
                                     let (_handled, action) =
                                         self.driver.ui_pointer_up(point, ui_state);
+                                    self.log_ui_v2_pointer_debug("up", (x, y), point, action);
                                     if let Some(action) = action {
                                         self.apply_ui_action(action, event_loop, true);
                                         return;
@@ -1115,6 +1188,7 @@ impl ApplicationHandler for ChunkApp {
                     if let Some(point) = self.gui_point(cursor.0, cursor.1) {
                         let ui_state = self.current_ui_render_state();
                         let (_handled, action) = self.driver.ui_pointer_move(point, ui_state);
+                        self.log_ui_v2_pointer_debug("move", cursor, point, action);
                         if let Some(action) = action {
                             self.apply_ui_action(action, event_loop, true);
                             return;
