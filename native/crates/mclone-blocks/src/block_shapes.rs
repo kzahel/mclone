@@ -73,6 +73,11 @@ fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
             .with_offset(OffsetKind::Xz),
         ),
         terrain_id::POINTED_DRIPSTONE => Some(pointed_dripstone_shape()),
+        terrain_id::TORCH => Some(torch_shape()),
+        terrain_id::WALL_TORCH_NORTH => Some(wall_torch_north_shape()),
+        terrain_id::WALL_TORCH_EAST => Some(wall_torch_east_shape()),
+        terrain_id::WALL_TORCH_SOUTH => Some(wall_torch_south_shape()),
+        terrain_id::WALL_TORCH_WEST => Some(wall_torch_west_shape()),
         terrain_id::GLOW_LICHEN => None,
         _ => Some(full_block()),
     }
@@ -90,7 +95,12 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::DEAD_BUSH
         | terrain_id::LARGE_FERN_LOWER
         | terrain_id::LARGE_FERN_UPPER
-        | terrain_id::GLOW_LICHEN => None,
+        | terrain_id::GLOW_LICHEN
+        | terrain_id::TORCH
+        | terrain_id::WALL_TORCH_NORTH
+        | terrain_id::WALL_TORCH_EAST
+        | terrain_id::WALL_TORCH_SOUTH
+        | terrain_id::WALL_TORCH_WEST => None,
         terrain_id::POINTED_DRIPSTONE => Some(pointed_dripstone_shape()),
         id if is_fluid(BlockStateId(id)) => None,
         _ => Some(full_block()),
@@ -110,6 +120,61 @@ fn full_block() -> LocalShape {
 
 fn pointed_dripstone_shape() -> LocalShape {
     local_box(5.0 / 16.0, 0.0, 5.0 / 16.0, 11.0 / 16.0, 1.0, 11.0 / 16.0)
+}
+
+fn torch_shape() -> LocalShape {
+    local_box(
+        6.0 / 16.0,
+        0.0,
+        6.0 / 16.0,
+        10.0 / 16.0,
+        10.0 / 16.0,
+        10.0 / 16.0,
+    )
+}
+
+fn wall_torch_north_shape() -> LocalShape {
+    local_box(
+        5.5 / 16.0,
+        3.0 / 16.0,
+        11.0 / 16.0,
+        10.5 / 16.0,
+        13.0 / 16.0,
+        1.0,
+    )
+}
+
+fn wall_torch_south_shape() -> LocalShape {
+    local_box(
+        5.5 / 16.0,
+        3.0 / 16.0,
+        0.0,
+        10.5 / 16.0,
+        13.0 / 16.0,
+        5.0 / 16.0,
+    )
+}
+
+fn wall_torch_west_shape() -> LocalShape {
+    local_box(
+        11.0 / 16.0,
+        3.0 / 16.0,
+        5.5 / 16.0,
+        1.0,
+        13.0 / 16.0,
+        10.5 / 16.0,
+    )
+}
+
+fn wall_torch_east_shape() -> LocalShape {
+    local_box(
+        0.0,
+        3.0 / 16.0,
+        5.5 / 16.0,
+        5.0 / 16.0,
+        13.0 / 16.0,
+        10.5 / 16.0,
+    )
 }
 
 impl LocalShape {
@@ -190,6 +255,11 @@ mod tests {
             terrain_id::LARGE_FERN_LOWER,
             terrain_id::LARGE_FERN_UPPER,
             terrain_id::GLOW_LICHEN,
+            terrain_id::TORCH,
+            terrain_id::WALL_TORCH_NORTH,
+            terrain_id::WALL_TORCH_EAST,
+            terrain_id::WALL_TORCH_SOUTH,
+            terrain_id::WALL_TORCH_WEST,
         ] {
             assert_eq!(
                 block_collision_aabb(state(id), BlockPos::ZERO),
@@ -263,6 +333,42 @@ mod tests {
         assert_eq!(
             block_collision_aabb(state(terrain_id::POINTED_DRIPSTONE), pos),
             Some(expected)
+        );
+    }
+
+    #[test]
+    fn torch_shapes_match_java_block_classes() {
+        let pos = BlockPos::new(1, 2, 3);
+
+        assert_eq!(
+            shape_for(state(terrain_id::TORCH), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(1.375, 2.0, 3.375, 1.625, 2.625, 3.625))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::WALL_TORCH_NORTH), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(1.34375, 2.1875, 3.6875, 1.65625, 2.8125, 4.0))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::WALL_TORCH_SOUTH), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(1.34375, 2.1875, 3.0, 1.65625, 2.8125, 3.3125))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::WALL_TORCH_EAST), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(1.0, 2.1875, 3.34375, 1.3125, 2.8125, 3.65625))
+        );
+        assert_eq!(
+            shape_for(state(terrain_id::WALL_TORCH_WEST), ShapeUse::Outline)
+                .map(|shape| shape.world_aabb(pos)),
+            Some(Aabb::new(1.6875, 2.1875, 3.34375, 2.0, 2.8125, 3.65625))
+        );
+        assert_eq!(block_collision_aabb(state(terrain_id::TORCH), pos), None);
+        assert_eq!(
+            block_collision_aabb(state(terrain_id::WALL_TORCH_NORTH), pos),
+            None
         );
     }
 

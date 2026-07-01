@@ -102,6 +102,11 @@ pub const SPRUCE_LOG_X: RawBlockId = 96;
 pub const SPRUCE_LOG_Z: RawBlockId = 97;
 pub const DEEPSLATE_X: RawBlockId = 98;
 pub const DEEPSLATE_Z: RawBlockId = 99;
+pub const TORCH: RawBlockId = 100;
+pub const WALL_TORCH_NORTH: RawBlockId = 101;
+pub const WALL_TORCH_EAST: RawBlockId = 102;
+pub const WALL_TORCH_SOUTH: RawBlockId = 103;
+pub const WALL_TORCH_WEST: RawBlockId = 104;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -135,6 +140,7 @@ impl GeneratedBlockId {
     pub const DRIPSTONE_BLOCK: Self = Self(DRIPSTONE_BLOCK);
     pub const POINTED_DRIPSTONE: Self = Self(POINTED_DRIPSTONE);
     pub const BRICKS: Self = Self(BRICKS);
+    pub const TORCH: Self = Self(TORCH);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -179,6 +185,11 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | LARGE_FERN_UPPER
             | GLOW_LICHEN
             | POINTED_DRIPSTONE
+            | TORCH
+            | WALL_TORCH_NORTH
+            | WALL_TORCH_EAST
+            | WALL_TORCH_SOUTH
+            | WALL_TORCH_WEST
     )
 }
 
@@ -201,6 +212,7 @@ pub const fn block_light_emission(block_id: RawBlockId) -> u8 {
         match block_id {
             MAGMA_BLOCK => 3,
             GLOW_LICHEN => 7,
+            TORCH | WALL_TORCH_NORTH | WALL_TORCH_EAST | WALL_TORCH_SOUTH | WALL_TORCH_WEST => 14,
             _ => 0,
         }
     }
@@ -212,6 +224,7 @@ pub const fn base_block_id(block_id: RawBlockId) -> RawBlockId {
         BIRCH_LOG_X | BIRCH_LOG_Z => BIRCH_LOG,
         SPRUCE_LOG_X | SPRUCE_LOG_Z => SPRUCE_LOG,
         DEEPSLATE_X | DEEPSLATE_Z => DEEPSLATE,
+        WALL_TORCH_NORTH | WALL_TORCH_EAST | WALL_TORCH_SOUTH | WALL_TORCH_WEST => TORCH,
         _ => block_id,
     }
 }
@@ -363,6 +376,10 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         DRIPSTONE_BLOCK => "minecraft:dripstone_block",
         POINTED_DRIPSTONE => "minecraft:pointed_dripstone",
         BRICKS => "minecraft:bricks",
+        TORCH => "minecraft:torch",
+        WALL_TORCH_NORTH | WALL_TORCH_EAST | WALL_TORCH_SOUTH | WALL_TORCH_WEST => {
+            "minecraft:wall_torch"
+        }
         _ => "minecraft:unknown",
     }
 }
@@ -377,6 +394,8 @@ mod tests {
         assert_eq!(block_light_emission(LAVA_LEVEL_8), 15);
         assert_eq!(block_light_emission(MAGMA_BLOCK), 3);
         assert_eq!(block_light_emission(GLOW_LICHEN), 7);
+        assert_eq!(block_light_emission(TORCH), 14);
+        assert_eq!(block_light_emission(WALL_TORCH_NORTH), 14);
         assert_eq!(block_light_emission(STONE), 0);
     }
 
@@ -393,5 +412,18 @@ mod tests {
         assert_eq!(block_light_opacity(GLOW_LICHEN), 0);
         assert_eq!(block_light_opacity(DRIPSTONE_BLOCK), 15);
         assert_eq!(block_light_opacity(POINTED_DRIPSTONE), 0);
+        assert_eq!(block_light_opacity(TORCH), 0);
+        assert_eq!(block_light_opacity(WALL_TORCH_EAST), 0);
+    }
+
+    #[test]
+    fn torch_wall_variants_share_torch_base_block() {
+        assert_eq!(base_block_id(TORCH), TORCH);
+        assert_eq!(base_block_id(WALL_TORCH_NORTH), TORCH);
+        assert_eq!(base_block_id(WALL_TORCH_EAST), TORCH);
+        assert_eq!(base_block_id(WALL_TORCH_SOUTH), TORCH);
+        assert_eq!(base_block_id(WALL_TORCH_WEST), TORCH);
+        assert_eq!(block_name(TORCH), "minecraft:torch");
+        assert_eq!(block_name(WALL_TORCH_WEST), "minecraft:wall_torch");
     }
 }

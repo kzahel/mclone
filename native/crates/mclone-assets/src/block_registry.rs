@@ -371,6 +371,10 @@ const HALF_LOWER: &[(&str, &str)] = &[("half", "lower")];
 const HALF_UPPER: &[(&str, &str)] = &[("half", "upper")];
 const POINTED_DRIPSTONE_UP_TIP: &[(&str, &str)] =
     &[("thickness", "tip"), ("vertical_direction", "up")];
+const FACING_NORTH: &[(&str, &str)] = &[("facing", "north")];
+const FACING_EAST: &[(&str, &str)] = &[("facing", "east")];
+const FACING_SOUTH: &[(&str, &str)] = &[("facing", "south")];
+const FACING_WEST: &[(&str, &str)] = &[("facing", "west")];
 const LEVEL_0: &[(&str, &str)] = &[("level", "0")];
 const LEVEL_1: &[(&str, &str)] = &[("level", "1")];
 const LEVEL_2: &[(&str, &str)] = &[("level", "2")];
@@ -484,6 +488,11 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (97, "minecraft:spruce_log", AXIS_Z),
     (98, "minecraft:deepslate", AXIS_X),
     (99, "minecraft:deepslate", AXIS_Z),
+    (100, "minecraft:torch", EMPTY_PROPS),
+    (101, "minecraft:wall_torch", FACING_NORTH),
+    (102, "minecraft:wall_torch", FACING_EAST),
+    (103, "minecraft:wall_torch", FACING_SOUTH),
+    (104, "minecraft:wall_torch", FACING_WEST),
 ];
 
 #[cfg(test)]
@@ -495,7 +504,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 100);
+        assert_eq!(registry.len(), 105);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -623,6 +632,26 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:magma_block"),
             Some(BlockStateId(37))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:torch"),
+            Some(BlockStateId(100))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:wall_torch[facing=north]"),
+            Some(BlockStateId(101))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:wall_torch[facing=east]"),
+            Some(BlockStateId(102))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:wall_torch[facing=south]"),
+            Some(BlockStateId(103))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(104)).unwrap().canonical_key(),
+            "minecraft:wall_torch[facing=west]"
         );
     }
 

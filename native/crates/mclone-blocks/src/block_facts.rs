@@ -24,6 +24,11 @@ pub mod terrain_id {
     #[cfg(test)]
     pub const DRIPSTONE_BLOCK: u32 = 89;
     pub const POINTED_DRIPSTONE: u32 = 90;
+    pub const TORCH: u32 = 100;
+    pub const WALL_TORCH_NORTH: u32 = 101;
+    pub const WALL_TORCH_EAST: u32 = 102;
+    pub const WALL_TORCH_SOUTH: u32 = 103;
+    pub const WALL_TORCH_WEST: u32 = 104;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

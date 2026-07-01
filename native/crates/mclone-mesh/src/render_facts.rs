@@ -61,6 +61,8 @@ fn java_no_collision(block: &ResourceLocation) -> bool {
             | "poppy"
             | "dead_bush"
             | "glow_lichen"
+            | "torch"
+            | "wall_torch"
     )
 }
 
@@ -138,6 +140,9 @@ fn java_light_emission(record: &BlockStateRecord) -> u8 {
     if matches!(path, "glow_lichen") {
         return 7;
     }
+    if matches!(path, "torch" | "wall_torch") {
+        return 14;
+    }
     if matches!(path, "redstone_ore" | "deepslate_redstone_ore")
         && record
             .properties
@@ -172,6 +177,8 @@ fn java_material_blocks_motion(block: &ResourceLocation) -> bool {
             | "poppy"
             | "dead_bush"
             | "glow_lichen"
+            | "torch"
+            | "wall_torch"
     )
 }
 
@@ -360,5 +367,18 @@ mod tests {
 
         assert_eq!(dark.light_emission, 0);
         assert_eq!(lit.light_emission, 9);
+    }
+
+    #[test]
+    fn torches_are_non_colliding_emitters() {
+        for block in ["minecraft:torch", "minecraft:wall_torch"] {
+            let facts = block_render_facts(&record(block), false);
+            assert!(!facts.occludes, "{block}");
+            assert_eq!(facts.light_block, 0, "{block}");
+            assert_eq!(facts.light_emission, 14, "{block}");
+            assert!(!facts.view_blocking, "{block}");
+            assert!(!facts.collision_shape_full_block, "{block}");
+            assert_eq!(facts.shade_brightness, 1.0, "{block}");
+        }
     }
 }
