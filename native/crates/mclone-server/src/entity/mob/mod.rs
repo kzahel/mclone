@@ -10,10 +10,12 @@ use mclone_worldgen::prng::SimpleRandomSource;
 use super::metadata::EntityMetadata;
 use super::state::ServerEntityState;
 
+mod attributes;
 mod control;
 pub(crate) mod goals;
 mod navigation;
 
+use attributes::MobAttributes;
 use control::{JumpControl, LookControl, MoveControl};
 use goals::{GoalSelector, passive};
 pub(crate) use navigation::BlockPathType;
@@ -23,8 +25,6 @@ const PLAYER_EYE_HEIGHT: f64 = 1.62;
 const MOB_GRAVITY: f64 = 0.08;
 const MOB_VERTICAL_DRAG: f64 = 0.98;
 const MOB_COLLISION_EPSILON: f64 = 1.0e-7;
-const MOB_MAX_UP_STEP: f64 = 0.6;
-const MOB_JUMP_POWER: f64 = 0.42;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PathfindingMalusTable {
@@ -65,7 +65,7 @@ pub(crate) struct MobRuntimeState {
     on_ground: bool,
     y_body_rot_degrees: f32,
     y_head_rot_degrees: f32,
-    movement_speed: f64,
+    attributes: MobAttributes,
     eye_height: f64,
     delta_movement: Vec3d,
     pathfinding_malus: PathfindingMalusTable,
@@ -97,13 +97,14 @@ impl MobRuntimeState {
         if metadata.kind == EntityKind::Cow {
             passive::register_cow_goals(&mut goal_selector);
         }
+        let attributes = MobAttributes::from_metadata(metadata);
 
         Self {
             no_action_time: 0,
             on_ground,
             y_body_rot_degrees: y_rot_degrees,
             y_head_rot_degrees: y_rot_degrees,
-            movement_speed: metadata.movement_speed,
+            attributes,
             eye_height: metadata.standing_eye_height() as f64,
             delta_movement: Vec3d::new(0.0, -MOB_GRAVITY * MOB_VERTICAL_DRAG, 0.0),
             pathfinding_malus,
@@ -139,7 +140,19 @@ impl MobRuntimeState {
     }
 
     pub(crate) const fn movement_speed(&self) -> f64 {
-        self.movement_speed
+        self.attributes.movement_speed
+    }
+
+    pub(crate) const fn follow_range(&self) -> f32 {
+        self.attributes.follow_range
+    }
+
+    pub(crate) const fn max_up_step(&self) -> f64 {
+        self.attributes.max_up_step
+    }
+
+    pub(crate) const fn jump_power(&self) -> f64 {
+        self.attributes.jump_power
     }
 
     pub(crate) const fn eye_height(&self) -> f64 {
@@ -197,7 +210,7 @@ impl MobRuntimeState {
             eye_height: self.eye_height,
             y_body_rot_degrees: self.y_body_rot_degrees,
             y_head_rot_degrees: self.y_head_rot_degrees,
-            movement_speed: self.movement_speed,
+            attributes: self.attributes,
             delta_movement: self.delta_movement,
             no_action_time: self.no_action_time,
             on_ground: self.on_ground,
@@ -236,7 +249,7 @@ pub(crate) struct MobGoalContext<'a> {
     eye_height: f64,
     y_body_rot_degrees: f32,
     y_head_rot_degrees: f32,
-    movement_speed: f64,
+    attributes: MobAttributes,
     delta_movement: Vec3d,
     no_action_time: u32,
     on_ground: bool,
@@ -306,6 +319,8 @@ impl<'a> MobGoalContext<'a> {
             speed_modifier,
             self.mob_width,
             self.mob_height,
+            self.attributes.follow_range,
+            self.attributes.max_up_step,
             self.block_state_at,
             |path_type| self.pathfinding_malus.get(path_type),
         )
@@ -371,9 +386,9 @@ impl<'a> MobGoalContext<'a> {
         let move_tick = self.move_control.tick(
             &mut self.position,
             &mut self.y_body_rot_degrees,
-            self.movement_speed,
+            self.attributes.movement_speed,
             self.on_ground,
-            MOB_MAX_UP_STEP,
+            self.attributes.max_up_step,
             self.mob_width,
         );
         if move_tick.jump_requested {
@@ -389,7 +404,7 @@ impl<'a> MobGoalContext<'a> {
         self.position = previous_control_position;
 
         let requested_y = if jumping && self.on_ground {
-            MOB_JUMP_POWER
+            self.attributes.jump_power
         } else {
             self.delta_movement.y
         };
@@ -436,6 +451,8 @@ impl<'a> MobGoalContext<'a> {
         random: SimpleRandomSource,
         block_state_at: &'static dyn Fn(BlockPos) -> Option<BlockStateId>,
     ) -> Self {
+        let metadata =
+            EntityMetadata::for_kind(entity.kind).expect("test mob context requires mob metadata");
         Self {
             position: entity.position,
             mob_width: entity.width,
@@ -443,7 +460,7 @@ impl<'a> MobGoalContext<'a> {
             eye_height,
             y_body_rot_degrees: entity.y_rot_degrees,
             y_head_rot_degrees: entity.y_rot_degrees,
-            movement_speed: 0.2,
+            attributes: MobAttributes::from_metadata(metadata),
             delta_movement: Vec3d::new(0.0, -MOB_GRAVITY * MOB_VERTICAL_DRAG, 0.0),
             no_action_time: 0,
             on_ground: entity.on_ground,
@@ -502,6 +519,9 @@ mod tests {
         assert_eq!(mob.y_body_rot_degrees(), 135.0);
         assert_eq!(mob.y_head_rot_degrees(), 135.0);
         assert_eq!(mob.movement_speed(), 0.2);
+        assert_eq!(mob.follow_range(), 16.0);
+        assert_eq!(mob.max_up_step(), 0.6);
+        assert_eq!(mob.jump_power(), 0.42);
         assert_eq!(mob.pathfinding_malus(BlockPathType::Water), 8.0);
     }
 

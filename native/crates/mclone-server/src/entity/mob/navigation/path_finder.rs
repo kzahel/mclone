@@ -97,7 +97,12 @@ impl PathFinder {
         F: Fn(BlockPos) -> Option<BlockStateId> + ?Sized,
         M: Fn(BlockPathType) -> f32 + Copy,
     {
-        let evaluator = WalkNodeEvaluator::new(request.mob_width, request.mob_height);
+        let max_up_step_blocks = request.max_up_step.max(1.0).floor() as i32;
+        let evaluator = WalkNodeEvaluator::new_with_max_up_step(
+            request.mob_width,
+            request.mob_height,
+            max_up_step_blocks,
+        );
         let start =
             evaluator.get_start(request.start_position, block_state_at, pathfinding_malus)?;
         let mut target = TargetRecord::new(request.target_position);
@@ -289,6 +294,7 @@ mod tests {
             mob_width: 0.9,
             mob_height: 1.4,
             follow_range: 16.0,
+            max_up_step: 0.6,
             reach_range: 0,
             max_visited_nodes_multiplier,
         }

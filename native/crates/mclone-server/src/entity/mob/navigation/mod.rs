@@ -12,7 +12,6 @@ pub(crate) use walk_node_evaluator::{BlockPathType, WalkNodeEvaluator};
 use path::GroundPath;
 use path_service::{ImmediatePathService, PathRequest};
 
-const DEFAULT_FOLLOW_RANGE_BLOCKS: f32 = 16.0;
 const DEFAULT_REACH_RANGE_BLOCKS: i32 = 1;
 const DEFAULT_MAX_VISITED_NODES_MULTIPLIER: f32 = 1.0;
 const MAX_DISTANCE_TO_WAYPOINT_WIDE_FACTOR: f32 = 0.5;
@@ -87,6 +86,8 @@ impl GroundPathNavigation {
         speed_modifier: f64,
         mob_width: f32,
         mob_height: f32,
+        follow_range: f32,
+        max_up_step: f64,
         block_state_at: &F,
         pathfinding_malus: impl Fn(BlockPathType) -> f32 + Copy,
     ) -> bool
@@ -98,6 +99,8 @@ impl GroundPathNavigation {
             target,
             mob_width,
             mob_height,
+            follow_range,
+            max_up_step,
             block_state_at,
             pathfinding_malus,
         ) else {
@@ -160,6 +163,8 @@ impl GroundPathNavigation {
         target: Vec3d,
         mob_width: f32,
         mob_height: f32,
+        follow_range: f32,
+        max_up_step: f64,
         block_state_at: &F,
         pathfinding_malus: impl Fn(BlockPathType) -> f32 + Copy,
     ) -> Option<GroundPath>
@@ -173,7 +178,8 @@ impl GroundPathNavigation {
                 target_position: target_pos,
                 mob_width,
                 mob_height,
-                follow_range: DEFAULT_FOLLOW_RANGE_BLOCKS,
+                follow_range,
+                max_up_step,
                 reach_range: DEFAULT_REACH_RANGE_BLOCKS,
                 max_visited_nodes_multiplier: DEFAULT_MAX_VISITED_NODES_MULTIPLIER,
             },
@@ -269,6 +275,14 @@ mod tests {
         path_type.default_malus()
     }
 
+    fn follow_range() -> f32 {
+        16.0
+    }
+
+    fn max_up_step() -> f64 {
+        0.6
+    }
+
     #[test]
     fn ground_navigation_adjusts_air_target_down_to_stable_floor() {
         let mut navigation = GroundPathNavigation::default();
@@ -279,6 +293,8 @@ mod tests {
             1.0,
             0.9,
             1.4,
+            follow_range(),
+            max_up_step(),
             &flat_ground,
             pathfinding_malus,
         ));
@@ -296,6 +312,8 @@ mod tests {
             1.0,
             0.9,
             1.4,
+            follow_range(),
+            max_up_step(),
             &no_blocks,
             pathfinding_malus,
         ));
@@ -311,6 +329,8 @@ mod tests {
             1.0,
             0.9,
             1.4,
+            follow_range(),
+            max_up_step(),
             &flat_ground,
             pathfinding_malus,
         );

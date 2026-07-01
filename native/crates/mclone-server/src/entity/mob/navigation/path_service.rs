@@ -13,6 +13,7 @@ pub(super) struct PathRequest {
     pub(super) mob_width: f32,
     pub(super) mob_height: f32,
     pub(super) follow_range: f32,
+    pub(super) max_up_step: f64,
     pub(super) reach_range: i32,
     pub(super) max_visited_nodes_multiplier: f32,
 }

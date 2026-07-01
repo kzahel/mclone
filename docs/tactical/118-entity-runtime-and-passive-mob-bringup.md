@@ -19,8 +19,9 @@ Slice 5B landed server-owned `GroundPathNavigation`, a terrain-MVP
 `WalkNodeEvaluator` subset, and collision-aware `LandRandomPos` /
 `DefaultRandomPos` target selection. Slice 5C landed the immediate path service
 boundary and heap-backed A* core. Slice 5D landed one-block step-up path
-expansion and the first `JumpControl` scaffold. The starter passive path is now
-an explicit debug passive showcase, enabled by default, while natural spawning
+expansion and the first `JumpControl` scaffold. Slice 5E landed mob movement
+attribute facts for navigation and jumping. The starter passive path is now an
+explicit debug passive showcase, enabled by default, while natural spawning
 remains future work.
 
 Pathfinding direction: preserve the Minecraft layering (`Goal` ->
@@ -470,8 +471,8 @@ Still pending:
 
 - Full Java `WalkNodeEvaluator.getNeighbors(...)` parity for doors, fences,
   rails, trapdoors, water, fall-depth limits, and collision-cache checks.
-- Attribute/metadata ownership for `maxUpStep` and jump modifiers instead of
-  local mob constants.
+- Full Java `AttributeMap` / modifier / effect ownership for mutable movement,
+  follow range, step, and jump values.
 - Timeout-cached-node stuck detection and path recomputation timing.
 - `LivingEntity.travel(...)` parity for friction, fluids, ladders, and jump
   movement.
@@ -570,6 +571,51 @@ Landed notes:
   entity::mob`, `cargo test --manifest-path native/Cargo.toml -p
   mclone-server`, and the full `cargo test --manifest-path native/Cargo.toml`
   workspace gate.
+
+## Slice 5E - Mob Attribute Facts For Navigation And Jumping (Landed)
+
+Purpose: move the movement facts used by pathfinding and jump movement into a
+shared mob attribute owner before adding more animals or path scheduling
+policy.
+
+Implementation sketch:
+
+- Read Java `LivingEntity`, `Mob`, `Cow`, and `Chicken` for the default
+  `maxUpStep`, jump impulse, follow range, and species movement speeds.
+- Add `entity/mob/attributes.rs` as the narrow current owner for movement
+  speed, follow range, `maxUpStep`, and jump power.
+- Keep this intentionally smaller than Java's full `AttributeMap` while
+  preserving the future route for mutable modifiers and effects.
+- Pass follow range and step height through `GroundPathNavigation` and
+  `PathRequest` instead of keeping navigation-local defaults.
+- Pass movement speed, step height, and jump power from mob attributes into
+  `MoveControl` / `JumpControl` application.
+
+Done when:
+
+- Cow and chicken derive movement speeds from metadata and share Java default
+  follow range, `maxUpStep`, and jump impulse values.
+- Path search bounds continue to derive from follow range.
+- Step-up expansion uses the mob's step-height fact.
+- Jump impulse application uses the mob's jump-power fact.
+
+Landed notes:
+
+- Added `entity/mob/attributes.rs` with cow/chicken movement speeds plus Java
+  defaults for follow range `16.0`, `maxUpStep` `0.6`, and jump power `0.42`.
+- Replaced local mob movement constants in `MobRuntimeState` /
+  `MobGoalContext` with `MobAttributes`.
+- Routed follow range and `maxUpStep` through `GroundPathNavigation` and
+  `PathRequest`, keeping the path service boundary ready for future budgeted
+  scheduling.
+- Routed movement speed, `maxUpStep`, and jump power into `MoveControl` and
+  `JumpControl` application.
+- Added tests for cow/chicken attribute facts and cow runtime attribute
+  accessors.
+- Verified with `cargo test --manifest-path native/Cargo.toml -p
+  mclone-server entity::mob`, `cargo test --manifest-path native/Cargo.toml
+  -p mclone-server`, and the full `cargo test --manifest-path
+  native/Cargo.toml` workspace gate.
 
 ## Slice 6 - Spawning Skeleton, Not Full Natural Spawning
 

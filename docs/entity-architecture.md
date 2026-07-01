@@ -89,11 +89,16 @@ The first shared ground/collision scaffold is also in place:
   scaffold: the evaluator can emit elevated ground nodes with headroom, and
   server mob movement can request and apply the default Java jump impulse to
   follow those waypoints.
+- Simple Java movement attribute facts now live in `mob::attributes`.
+  Movement speed, follow range, `maxUpStep`, and jump power flow from mob
+  runtime state into navigation, path requests, `MoveControl`, and
+  `JumpControl` instead of being local pathfinding constants.
 
 This does not complete full Java `WalkNodeEvaluator` parity, path timeout
-caching, path recomputation timing, attribute-owned step heights, or full
-`LivingEntity.travel(...)`. Those remain required foundations before natural
-passive movement can be considered complete.
+caching, path recomputation timing, the full Java `AttributeMap` /
+modifier/effect stack, or full `LivingEntity.travel(...)`. Those remain
+required foundations before natural passive movement can be considered
+complete.
 
 Pathfinding should keep the Minecraft module shape even where native runtime
 execution diverges for performance. Goals should ask navigation to move;
@@ -120,7 +125,7 @@ native/crates/mclone-server/src/entity/
   persistence.rs         logical entity chunk records, dirty/unload/save rules
   mob/
     mod.rs               Mob/LivingEntity-shaped runtime fields and tick hooks
-    attributes.rs        health, movement speed, pathfinding malus, follow range
+    attributes.rs        movement speed, follow range, maxUpStep, jump power
     controls.rs          MoveControl, LookControl, JumpControl
     navigation.rs        GroundPathNavigation and path ownership
     goals/
