@@ -19,4 +19,6 @@ mclone-render-session.workspace = true
 mclone-server.workspace = true
 mclone-ui.workspace = true
 mclone-worldgen.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 wgpu.workspace = true

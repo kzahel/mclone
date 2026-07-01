@@ -18,6 +18,7 @@ use mclone_render_session::{
     build_render_sections_from_snapshots,
 };
 
+use crate::far_lod::FarTerrainLodMaterialPalette;
 pub const DEFAULT_REFERENCE_ASSET_VERSION: &str = "1.17.1";
 pub const DEFAULT_REFERENCE_PACK_FILE: &str = "extracted.zip";
 pub const DEFAULT_NAMED_PACK_FILE: &str = "mclone-game-1.17.1.pbp";
@@ -227,6 +228,7 @@ fn compile_render_section_request(
 pub struct TexturedMeshAssets {
     pub catalog: TexturedMeshCatalog,
     pub atlas: TextureAtlasImage,
+    pub far_lod_materials: Option<FarTerrainLodMaterialPalette>,
 }
 
 pub fn load_textured_mesh_assets() -> Result<TexturedMeshAssets> {
@@ -239,10 +241,13 @@ pub fn load_textured_mesh_assets_from_source(
 ) -> Result<TexturedMeshAssets> {
     let assets =
         load_textured_terrain_assets(source).context("failed to load textured terrain assets")?;
+    let far_lod_materials = FarTerrainLodMaterialPalette::load_from_asset_source(source)
+        .context("failed to load Far LOD material metadata")?;
 
     Ok(TexturedMeshAssets {
         catalog: assets.catalog,
         atlas: assets.atlas.into(),
+        far_lod_materials,
     })
 }
 

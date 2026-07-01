@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 
+use anyhow::{Context, Result, bail};
+use mclone_assets::{AssetPath, AssetSource};
 use mclone_core::{CHUNK_WIDTH, ChunkPos, chunk_min_block_coord};
 use mclone_render::far_lod::FarTerrainLodMesh;
 use mclone_worldgen::block::{
@@ -12,6 +14,7 @@ use mclone_worldgen::block::{
     is_air_like, is_lava, is_water,
 };
 use mclone_worldgen::levelgen::{GeneratedChunk, generate_overworld_surface_chunk};
+use serde::Deserialize;
 
 pub const DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS: u32 = 0;
 pub const MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 1;
@@ -20,6 +23,7 @@ pub const MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 64;
 pub const DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS: u32 = 4;
 pub const DEFAULT_FAR_TERRAIN_LOD_CHUNK_BUILD_BUDGET: usize = 4;
 pub const SEA_LEVEL: f32 = 63.0;
+pub const FAR_TERRAIN_LOD_MATERIALS_PATH: &str = "assets/mclone/lod/materials.v1.json";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FarTerrainLodConfig {
@@ -73,6 +77,162 @@ impl Default for FarTerrainLodConfig {
     fn default() -> Self {
         Self::disabled()
     }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct FarTerrainLodMaterialPalette {
+    block_colors: BTreeMap<String, FarTerrainLodSurfaceColors>,
+    texture_colors: BTreeMap<String, FarTerrainLodSurfaceColors>,
+}
+
+impl FarTerrainLodMaterialPalette {
+    pub fn load_from_asset_source(source: &impl AssetSource) -> Result<Option<Self>> {
+        let path = AssetPath::new(FAR_TERRAIN_LOD_MATERIALS_PATH);
+        let Some(bytes) = source
+            .read(&path)
+            .with_context(|| format!("failed to read {FAR_TERRAIN_LOD_MATERIALS_PATH}"))?
+        else {
+            return Ok(None);
+        };
+        Self::from_json_bytes(&bytes).map(Some)
+    }
+
+    pub fn color_count(&self) -> usize {
+        self.block_colors.len() + self.texture_colors.len()
+    }
+
+    fn from_json_bytes(bytes: &[u8]) -> Result<Self> {
+        let raw: RawLodMaterials = serde_json::from_slice(bytes)
+            .with_context(|| format!("failed to parse {FAR_TERRAIN_LOD_MATERIALS_PATH}"))?;
+        if raw.schema_version != 1 {
+            bail!(
+                "unsupported Far LOD material schema version {}; expected 1",
+                raw.schema_version
+            );
+        }
+        Ok(Self::from_raw(raw))
+    }
+
+    fn from_raw(raw: RawLodMaterials) -> Self {
+        let texture_colors = raw
+            .textures
+            .into_iter()
+            .map(|(name, texture)| {
+                (
+                    name,
+                    FarTerrainLodSurfaceColors::same(srgb_color(texture.average_srgb)),
+                )
+            })
+            .collect();
+
+        let mut block_colors = BTreeMap::new();
+        for (name, block) in raw.blocks {
+            let top = face_color(
+                &block.faces,
+                &["top", "all", "side", "north", "south", "east", "west"],
+            );
+            let side = face_color(
+                &block.faces,
+                &["side", "north", "south", "east", "west", "top", "all"],
+            );
+            let Some(top) = top else {
+                continue;
+            };
+            block_colors.insert(
+                name,
+                FarTerrainLodSurfaceColors {
+                    top,
+                    side: side.unwrap_or(top),
+                },
+            );
+        }
+
+        Self {
+            block_colors,
+            texture_colors,
+        }
+    }
+
+    fn colors_for_block(
+        &self,
+        block: GeneratedBlockId,
+        surface_y: i32,
+    ) -> Option<FarTerrainLodSurfaceColors> {
+        let block_id = base_block_id(block.raw());
+        let block_name = GeneratedBlockId(block_id).name();
+        if let Some(colors) = self.block_colors.get(block_name) {
+            return Some(*colors);
+        }
+        let texture_name = block_name.strip_prefix("minecraft:").unwrap_or(block_name);
+        if let Some(colors) = self.texture_colors.get(texture_name) {
+            return Some(*colors);
+        }
+        if block_id == GRASS_BLOCK && surface_y > SEA_LEVEL as i32 + 1 {
+            return self.texture_colors.get("grass_block_top").copied();
+        }
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FarTerrainLodSurfaceColors {
+    top: [f32; 4],
+    side: [f32; 4],
+}
+
+impl FarTerrainLodSurfaceColors {
+    const fn same(color: [f32; 4]) -> Self {
+        Self {
+            top: color,
+            side: color,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawLodMaterials {
+    schema_version: u32,
+    #[serde(default)]
+    textures: BTreeMap<String, RawLodTexture>,
+    #[serde(default)]
+    blocks: BTreeMap<String, RawLodBlock>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawLodTexture {
+    average_srgb: [u8; 4],
+}
+
+#[derive(Debug, Deserialize)]
+struct RawLodBlock {
+    #[serde(default)]
+    faces: BTreeMap<String, RawLodFace>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawLodFace {
+    average_srgb: [u8; 4],
+}
+
+fn face_color(faces: &BTreeMap<String, RawLodFace>, names: &[&str]) -> Option<[f32; 4]> {
+    for name in names {
+        if let Some(face) = faces.get(*name) {
+            return Some(srgb_color(face.average_srgb));
+        }
+    }
+    None
+}
+
+fn srgb_color(color: [u8; 4]) -> [f32; 4] {
+    [
+        color[0] as f32 / 255.0,
+        color[1] as f32 / 255.0,
+        color[2] as f32 / 255.0,
+        color[3] as f32 / 255.0,
+    ]
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -142,6 +302,7 @@ impl FarTerrainLodCache {
         seed: i64,
         center: ChunkPos,
         render_distance: u32,
+        materials: Option<&FarTerrainLodMaterialPalette>,
     ) -> Option<&FarTerrainLodMesh> {
         if !config.enabled {
             self.clear();
@@ -151,7 +312,7 @@ impl FarTerrainLodCache {
         if self.key != Some(key) {
             self.begin_build(key);
         }
-        self.advance_build(DEFAULT_FAR_TERRAIN_LOD_CHUNK_BUILD_BUDGET);
+        self.advance_build(DEFAULT_FAR_TERRAIN_LOD_CHUNK_BUILD_BUDGET, materials);
         self.mesh.as_ref()
     }
 
@@ -165,7 +326,11 @@ impl FarTerrainLodCache {
         self.mesh = Some(FarTerrainLodMesh::empty(self.mesh_revision));
     }
 
-    fn advance_build(&mut self, chunk_budget: usize) {
+    fn advance_build(
+        &mut self,
+        chunk_budget: usize,
+        materials: Option<&FarTerrainLodMaterialPalette>,
+    ) {
         let Some(key) = self.key else {
             return;
         };
@@ -181,6 +346,7 @@ impl FarTerrainLodCache {
                 key.seed,
                 pos,
                 key,
+                materials,
             );
             generated_chunks += 1;
         }
@@ -238,6 +404,7 @@ fn build_far_terrain_lod_mesh(key: FarTerrainLodBuildKey) -> FarTerrainLodMesh {
             key.seed,
             pos,
             key,
+            None,
         );
     }
     FarTerrainLodMesh::new(vertices, indices, key.revision())
@@ -250,6 +417,7 @@ fn append_far_terrain_lod_chunk_patch(
     seed: i64,
     pos: ChunkPos,
     key: FarTerrainLodBuildKey,
+    materials: Option<&FarTerrainLodMaterialPalette>,
 ) {
     let spacing = key.sample_spacing_blocks.max(1);
     let offsets = chunk_sample_offsets(spacing);
@@ -264,7 +432,15 @@ fn append_far_terrain_lod_chunk_patch(
             let x1 = min_x + offsets[x_cell + 1];
             let z0 = min_z + offsets[z_cell];
             let z1 = min_z + offsets[z_cell + 1];
-            cells.push(sample_lod_cell(surface_chunks, seed, x0, x1, z0, z1));
+            cells.push(sample_lod_cell(
+                surface_chunks,
+                seed,
+                x0,
+                x1,
+                z0,
+                z1,
+                materials,
+            ));
         }
     }
 
@@ -294,6 +470,7 @@ fn append_far_terrain_lod_chunk_patch(
                     seed,
                     key,
                     cell,
+                    materials,
                 );
                 let Some(neighbor) = neighbor else {
                     continue;
@@ -364,15 +541,18 @@ fn sample_lod_cell(
     x1: i32,
     z0: i32,
     z1: i32,
+    materials: Option<&FarTerrainLodMaterialPalette>,
 ) -> Option<FarTerrainLodCell> {
     let sample_x = x0 + (x1 - x0) / 2;
     let sample_z = z0 + (z1 - z0) / 2;
-    surface_sample_world(chunks, seed, sample_x, sample_z).map(|sample| FarTerrainLodCell {
-        x0,
-        x1,
-        z0,
-        z1,
-        sample,
+    surface_sample_world(chunks, seed, sample_x, sample_z, materials).map(|sample| {
+        FarTerrainLodCell {
+            x0,
+            x1,
+            z0,
+            z1,
+            sample,
+        }
     })
 }
 
@@ -386,6 +566,7 @@ fn neighbor_lod_cell(
     seed: i64,
     key: FarTerrainLodBuildKey,
     cell: FarTerrainLodCell,
+    materials: Option<&FarTerrainLodMaterialPalette>,
 ) -> Option<LodNeighborCell> {
     match direction {
         LodCellDirection::West if x_cell > 0 => {
@@ -418,7 +599,7 @@ fn neighbor_lod_cell(
         }
         _ => {
             let (x0, x1, z0, z1) = neighbor_cell_bounds(cell, direction);
-            let neighbor = sample_lod_cell(surface_chunks, seed, x0, x1, z0, z1)?;
+            let neighbor = sample_lod_cell(surface_chunks, seed, x0, x1, z0, z1, materials)?;
             Some(LodNeighborCell {
                 cell: neighbor,
                 region: neighbor_region(key, neighbor),
@@ -465,7 +646,7 @@ fn append_top_face(vertices: &mut Vec<f32>, indices: &mut Vec<u32>, cell: &FarTe
             [cell.x0 as f32, cell.sample.y, cell.z1 as f32],
             [cell.x1 as f32, cell.sample.y, cell.z1 as f32],
         ],
-        cell.sample.color,
+        cell.sample.top_color,
     );
 }
 
@@ -484,7 +665,7 @@ fn append_drop_face(
         cell.sample.y,
         low_y,
         direction,
-        shade_color(cell.sample.color, shade),
+        shade_color(cell.sample.side_color, shade),
     );
 }
 
@@ -503,7 +684,7 @@ fn append_neighbor_inner_drop_face(
         neighbor.sample.y,
         cell.sample.y,
         direction,
-        shade_color(neighbor.sample.color, shade),
+        shade_color(neighbor.sample.side_color, shade),
     );
 }
 
@@ -590,13 +771,15 @@ fn chunk_sample_offsets(spacing: u32) -> Vec<i32> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct FarTerrainSurfaceSample {
     y: f32,
-    color: [f32; 4],
+    top_color: [f32; 4],
+    side_color: [f32; 4],
 }
 
 fn surface_sample(
     chunk: &GeneratedChunk,
     local_x: i32,
     local_z: i32,
+    materials: Option<&FarTerrainLodMaterialPalette>,
 ) -> Option<FarTerrainSurfaceSample> {
     for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
         let block = chunk.block_at_y(local_x, y, local_z);
@@ -604,9 +787,11 @@ fn surface_sample(
             continue;
         }
         let surface_y = y + 1;
+        let colors = surface_colors(block, surface_y, materials);
         return Some(FarTerrainSurfaceSample {
             y: surface_y as f32,
-            color: surface_color(block, surface_y),
+            top_color: colors.top,
+            side_color: colors.side,
         });
     }
     None
@@ -617,6 +802,7 @@ fn surface_sample_world(
     seed: i64,
     world_x: i32,
     world_z: i32,
+    materials: Option<&FarTerrainLodMaterialPalette>,
 ) -> Option<FarTerrainSurfaceSample> {
     let pos = ChunkPos::from_block_coords(world_x, world_z);
     let chunk = chunks
@@ -624,7 +810,7 @@ fn surface_sample_world(
         .or_insert_with(|| generate_overworld_surface_chunk(seed, pos.x, pos.z));
     let local_x = world_x - chunk_min_block_coord(pos.x);
     let local_z = world_z - chunk_min_block_coord(pos.z);
-    surface_sample(chunk, local_x, local_z)
+    surface_sample(chunk, local_x, local_z, materials)
 }
 
 fn chunk_distance_from_center(center: ChunkPos, world_x: i32, world_z: i32) -> u32 {
@@ -632,6 +818,17 @@ fn chunk_distance_from_center(center: ChunkPos, world_x: i32, world_z: i32) -> u
     (chunk.x - center.x)
         .unsigned_abs()
         .max((chunk.z - center.z).unsigned_abs())
+}
+
+fn surface_colors(
+    block: GeneratedBlockId,
+    surface_y: i32,
+    materials: Option<&FarTerrainLodMaterialPalette>,
+) -> FarTerrainLodSurfaceColors {
+    if let Some(colors) = materials.and_then(|palette| palette.colors_for_block(block, surface_y)) {
+        return colors;
+    }
+    FarTerrainLodSurfaceColors::same(surface_color(block, surface_y))
 }
 
 fn surface_color(block: GeneratedBlockId, surface_y: i32) -> [f32; 4] {
@@ -726,6 +923,7 @@ mod tests {
             12345,
             ChunkPos::new(0, 0),
             5,
+            None,
         );
 
         assert!(mesh.is_none());
@@ -759,6 +957,7 @@ mod tests {
             12345,
             ChunkPos::new(1, 0),
             key,
+            None,
         );
 
         assert!(vertices.len() >= 28);
@@ -796,7 +995,8 @@ mod tests {
             z1: 36,
             sample: FarTerrainSurfaceSample {
                 y: 72.0,
-                color: [0.30, 0.50, 0.22, 1.0],
+                top_color: [0.30, 0.50, 0.22, 1.0],
+                side_color: [0.36, 0.25, 0.15, 1.0],
             },
         };
         let mut vertices = Vec::new();
@@ -851,9 +1051,48 @@ mod tests {
     }
 
     #[test]
+    fn far_terrain_lod_material_palette_uses_block_faces_and_texture_fallback() {
+        let palette = FarTerrainLodMaterialPalette::from_json_bytes(
+            br#"{
+                "schemaVersion": 1,
+                "textures": {
+                    "dirt": {
+                        "averageSrgb": [64, 48, 32, 255]
+                    }
+                },
+                "blocks": {
+                    "minecraft:grass_block": {
+                        "faces": {
+                            "top": {
+                                "averageSrgb": [32, 128, 16, 255]
+                            },
+                            "side": {
+                                "averageSrgb": [96, 64, 32, 255]
+                            }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .expect("valid Far LOD material metadata parses");
+
+        let grass = palette
+            .colors_for_block(GeneratedBlockId(GRASS_BLOCK), 64)
+            .expect("grass block material exists");
+        assert_eq!(grass.top, srgb_color([32, 128, 16, 255]));
+        assert_eq!(grass.side, srgb_color([96, 64, 32, 255]));
+
+        let dirt = palette
+            .colors_for_block(GeneratedBlockId(DIRT), 64)
+            .expect("dirt texture fallback exists");
+        assert_eq!(dirt.top, srgb_color([64, 48, 32, 255]));
+        assert_eq!(dirt.side, srgb_color([64, 48, 32, 255]));
+    }
+
+    #[test]
     fn far_terrain_lod_mesh_uses_real_surface_chunk_height() {
         let chunk = generate_overworld_surface_chunk(12345, 1, 0);
-        let sample = surface_sample(&chunk, 0, 0).expect("surface chunk has terrain");
+        let sample = surface_sample(&chunk, 0, 0, None).expect("surface chunk has terrain");
         let mut expected = None;
         for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
             let block = chunk.block_at_y(0, y, 0);
@@ -874,8 +1113,8 @@ mod tests {
         let mut chunks = BTreeMap::new();
         let world_x = chunk_min_block_coord(1);
 
-        let _sample =
-            surface_sample_world(&mut chunks, 12345, world_x, 0).expect("surface sample exists");
+        let _sample = surface_sample_world(&mut chunks, 12345, world_x, 0, None)
+            .expect("surface sample exists");
 
         assert!(chunks.contains_key(&ChunkPos::new(1, 0)));
         assert!(!chunks.contains_key(&ChunkPos::new(0, 0)));
@@ -886,18 +1125,18 @@ mod tests {
         let mut cache = FarTerrainLodCache::new();
         let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
         let first = cache
-            .mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0)
+            .mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0, None)
             .expect("enabled LOD returns mesh")
             .revision();
         assert_eq!(cache.pending_chunks.len(), 4);
         let second = cache
-            .mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0)
+            .mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0, None)
             .expect("enabled LOD returns mesh")
             .revision();
         assert!(second > first);
         assert!(cache.pending_chunks.is_empty());
         let third = cache
-            .mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0)
+            .mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0, None)
             .expect("enabled LOD returns mesh")
             .revision();
 

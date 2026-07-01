@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadTexturePack } from "./load";
+import { makeLodMaterialsJson } from "./lod-materials";
 import { encodePng } from "./png";
 import { loadReferenceTexture, runtimeCompatTexturePath } from "./reference";
 import { makeMetadataReportJson, makeMetadataReportMarkdown } from "./report";
@@ -71,6 +72,18 @@ console.log(`Wrote ${reportMarkdownPath}`);
 const reportJsonPath = path.join(args.outDir, `${pack.name}-metadata.json`);
 await fs.writeFile(reportJsonPath, makeMetadataReportJson(pack));
 console.log(`Wrote ${reportJsonPath}`);
+
+const lodMaterialsJson = makeLodMaterialsJson(pack, textures);
+const lodMaterialsReportPath = path.join(args.outDir, `${pack.name}-lod-materials.v1.json`);
+await fs.writeFile(lodMaterialsReportPath, lodMaterialsJson);
+console.log(`Wrote ${lodMaterialsReportPath}`);
+
+if (!args.sheetOnly && args.runtimeCompat) {
+  const lodMaterialsPackPath = path.join(args.outDir, "runtime-pack", "assets/mclone/lod/materials.v1.json");
+  await fs.mkdir(path.dirname(lodMaterialsPackPath), { recursive: true });
+  await fs.writeFile(lodMaterialsPackPath, lodMaterialsJson);
+  console.log(`Wrote ${lodMaterialsPackPath}`);
+}
 
 function parseArgs(argv: string[]): ExportArgs {
   const input = argv[0];

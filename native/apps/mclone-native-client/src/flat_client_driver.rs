@@ -1775,11 +1775,16 @@ impl FlatClientDriver {
             EngineDebugVisualOptions::new(self.player_collision_box_visible),
         );
         let render_distance = self.current_render_distance(fallback_render_distance);
+        let far_lod_materials = self
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.mesh_assets().far_lod_materials.as_ref());
         let far_lod_mesh = self.far_lod_cache.mesh_for_camera(
             self.scene.far_lod,
             self.scene.seed,
             frame_inputs.camera_view.snapshot.chunk_pos,
             render_distance,
+            far_lod_materials,
         );
         let Some(render_resources) = &mut self.render_resources else {
             anyhow::bail!("flat client render resources are not initialized");
