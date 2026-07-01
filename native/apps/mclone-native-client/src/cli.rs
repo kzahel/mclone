@@ -128,6 +128,7 @@ pub(crate) struct HeadlessScreenshotOptions {
     pub(crate) scripted_interaction: bool,
     pub(crate) remote_settle_ms: u64,
     pub(crate) eye: Option<[f32; 3]>,
+    pub(crate) target: Option<[f32; 3]>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -423,6 +424,7 @@ impl Cli {
         let mut screenshot_scripted_interaction = false;
         let mut screenshot_remote_settle_ms = 0;
         let mut screenshot_eye = None;
+        let mut screenshot_target = None;
         let mut screenshot_camera_view = EngineCameraViewMode::FirstPerson;
         let mut actor_walk_review_video = None;
         let mut actor_walk_review_options_explicit = false;
@@ -644,6 +646,10 @@ impl Cli {
                 }
                 "--screenshot-eye" => {
                     screenshot_eye = Some(parse_f32_vec3_arg("--screenshot-eye", args.next())?);
+                }
+                "--screenshot-target" => {
+                    screenshot_target =
+                        Some(parse_f32_vec3_arg("--screenshot-target", args.next())?);
                 }
                 "--screenshot-camera-view" => {
                     screenshot_camera_view = parse_camera_view_arg(&arg, args.next())?;
@@ -870,6 +876,7 @@ impl Cli {
                     scripted_interaction: screenshot_scripted_interaction,
                     remote_settle_ms: screenshot_remote_settle_ms,
                     eye: screenshot_eye,
+                    target: screenshot_target,
                 },
             }),
             Some(HeadlessMode::RendererRebuildSmoke(directory)) => Ok(Self::RendererRebuildSmoke {
@@ -1261,7 +1268,7 @@ fn print_help() {
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\
            mclone-native-client --remote-player-visual-smoke /tmp/mclone-remote-player-visual-smoke.png [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--day-time 6000] [--freeze-time] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\

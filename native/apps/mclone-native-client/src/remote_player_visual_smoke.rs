@@ -81,6 +81,7 @@ pub(crate) fn run_remote_player_visual_smoke(
         scripted_interaction: false,
         remote_settle_ms: REMOTE_SETTLE_MS,
         eye: None,
+        target: None,
     });
 
     let remote_actor_stop_result = remote_actor.stop();

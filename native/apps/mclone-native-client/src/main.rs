@@ -334,6 +334,7 @@ mod tests {
                 scripted_interaction: false,
                 remote_settle_ms: 0,
                 eye: None,
+                target: None,
             },
         }
     }
@@ -925,6 +926,8 @@ mod tests {
             "750".to_owned(),
             "--screenshot-eye".to_owned(),
             "1.5,62.25,-3".to_owned(),
+            "--screenshot-target".to_owned(),
+            "8,64,8".to_owned(),
             "--screenshot-camera-view".to_owned(),
             "third-person".to_owned(),
             "--fullbright".to_owned(),
@@ -957,6 +960,7 @@ mod tests {
                     scripted_interaction: true,
                     remote_settle_ms: 750,
                     eye: Some([1.5, 62.25, -3.0]),
+                    target: Some([8.0, 64.0, 8.0]),
                 },
             }
         );

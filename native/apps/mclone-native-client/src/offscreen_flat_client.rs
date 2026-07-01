@@ -702,6 +702,10 @@ fn configure_screenshot_scene(
     if let Some(eye) = options.eye {
         host.set_eye_override(eye);
     }
+    if let Some(target) = options.target {
+        let eye = host.driver.spectator.position;
+        host.set_camera_look_at(eye, Vec3::from_array(target));
+    }
     host.driver.player_collision_box_visible = options.player_collision_box;
     host.driver.camera.set_view_mode(options.camera_view);
     Ok(())
