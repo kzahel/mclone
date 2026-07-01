@@ -14,7 +14,7 @@ mod control;
 pub(crate) mod goals;
 mod navigation;
 
-use control::{LookControl, MoveControl};
+use control::{JumpControl, LookControl, MoveControl};
 use goals::{GoalSelector, passive};
 pub(crate) use navigation::BlockPathType;
 use navigation::GroundPathNavigation;
@@ -23,6 +23,8 @@ const PLAYER_EYE_HEIGHT: f64 = 1.62;
 const MOB_GRAVITY: f64 = 0.08;
 const MOB_VERTICAL_DRAG: f64 = 0.98;
 const MOB_COLLISION_EPSILON: f64 = 1.0e-7;
+const MOB_MAX_UP_STEP: f64 = 0.6;
+const MOB_JUMP_POWER: f64 = 0.42;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PathfindingMalusTable {
@@ -71,6 +73,7 @@ pub(crate) struct MobRuntimeState {
     goal_selector: GoalSelector,
     navigation: GroundPathNavigation,
     move_control: MoveControl,
+    jump_control: JumpControl,
     look_control: LookControl,
 }
 
@@ -108,6 +111,7 @@ impl MobRuntimeState {
             goal_selector,
             navigation: GroundPathNavigation::default(),
             move_control: MoveControl::default(),
+            jump_control: JumpControl::default(),
             look_control: LookControl::default(),
         }
     }
@@ -184,6 +188,7 @@ impl MobRuntimeState {
         let random = std::mem::replace(&mut self.random, SimpleRandomSource::new(0));
         let navigation = std::mem::take(&mut self.navigation);
         let move_control = std::mem::take(&mut self.move_control);
+        let jump_control = std::mem::take(&mut self.jump_control);
         let look_control = std::mem::take(&mut self.look_control);
         let mut context = MobGoalContext {
             position: entity.position,
@@ -201,6 +206,7 @@ impl MobRuntimeState {
             random,
             navigation,
             move_control,
+            jump_control,
             look_control,
             block_state_at,
         };
@@ -218,6 +224,7 @@ impl MobRuntimeState {
         self.random = context.random;
         self.navigation = context.navigation;
         self.move_control = context.move_control;
+        self.jump_control = context.jump_control;
         self.look_control = context.look_control;
     }
 }
@@ -238,6 +245,7 @@ pub(crate) struct MobGoalContext<'a> {
     random: SimpleRandomSource,
     navigation: GroundPathNavigation,
     move_control: MoveControl,
+    jump_control: JumpControl,
     look_control: LookControl,
     block_state_at: &'a dyn Fn(BlockPos) -> Option<BlockStateId>,
 }
@@ -360,11 +368,18 @@ impl<'a> MobGoalContext<'a> {
         }
 
         let previous_control_position = self.position;
-        let moved = self.move_control.tick(
+        let move_tick = self.move_control.tick(
             &mut self.position,
             &mut self.y_body_rot_degrees,
             self.movement_speed,
+            self.on_ground,
+            MOB_MAX_UP_STEP,
+            self.mob_width,
         );
+        if move_tick.jump_requested {
+            self.jump_control.jump();
+        }
+        let jumping = self.jump_control.tick();
         let looked = self.look_control.tick(
             self.position,
             &mut self.y_head_rot_degrees,
@@ -373,9 +388,14 @@ impl<'a> MobGoalContext<'a> {
         let controlled_position = self.position;
         self.position = previous_control_position;
 
+        let requested_y = if jumping && self.on_ground {
+            MOB_JUMP_POWER
+        } else {
+            self.delta_movement.y
+        };
         let requested = Vec3d::new(
             controlled_position.x - previous_control_position.x,
-            self.delta_movement.y,
+            requested_y,
             controlled_position.z - previous_control_position.z,
         );
         let bounding_box = collision_aabb_for_feet_position(
@@ -391,7 +411,7 @@ impl<'a> MobGoalContext<'a> {
         self.on_ground = collision.on_ground;
         self.delta_movement = Vec3d::new(0.0, (traveled.y - MOB_GRAVITY) * MOB_VERTICAL_DRAG, 0.0);
 
-        if !moved && looked {
+        if !move_tick.moved && looked {
             // The current entity protocol has one yaw field. Until head/body yaw
             // are split, publish head turns as body yaw so passive looks are
             // visible to clients.
@@ -432,6 +452,7 @@ impl<'a> MobGoalContext<'a> {
             random,
             navigation: GroundPathNavigation::default(),
             move_control: MoveControl::default(),
+            jump_control: JumpControl::default(),
             look_control: LookControl::default(),
             block_state_at,
         }
@@ -455,6 +476,15 @@ mod tests {
 
     fn stepped_ground(pos: BlockPos) -> Option<BlockStateId> {
         let floor_y = if pos.x <= 0 { 63 } else { 62 };
+        Some(if pos.y == floor_y {
+            BlockStateId(1)
+        } else {
+            BlockStateId(mclone_blocks::terrain_id::AIR)
+        })
+    }
+
+    fn one_block_ledge(pos: BlockPos) -> Option<BlockStateId> {
+        let floor_y = if pos.x <= 0 { 63 } else { 64 };
         Some(if pos.y == floor_y {
             BlockStateId(1)
         } else {
@@ -547,6 +577,39 @@ mod tests {
 
         assert!(entity.position.x > 1.4);
         assert!(entity.position.y < 64.0);
+        assert!(entity.on_ground);
+    }
+
+    #[test]
+    fn navigation_move_to_one_block_ledge_uses_jump_control() {
+        let metadata = EntityMetadata::for_kind(EntityKind::Cow).unwrap();
+        let mut entity = ServerEntityState::from_metadata(
+            EntityId(1),
+            metadata,
+            Vec3d::new(0.5, 64.0, 0.5),
+            0.0,
+            0.0,
+            None,
+            true,
+        );
+        let mut context = MobGoalContext::from_parts_for_test(
+            entity,
+            metadata.standing_eye_height() as f64,
+            Vec::new(),
+            SimpleRandomSource::new(1),
+            &one_block_ledge,
+        );
+
+        assert!(context.move_to(Vec3d::new(2.5, 65.0, 0.5), 1.0));
+        for _ in 0..120 {
+            context.apply_controls(&mut entity);
+            if entity.on_ground && entity.position.x > 1.4 && entity.position.y >= 65.0 {
+                break;
+            }
+        }
+
+        assert!(entity.position.x > 1.4);
+        assert!(entity.position.y >= 65.0);
         assert!(entity.on_ground);
     }
 }

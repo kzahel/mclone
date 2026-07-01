@@ -266,11 +266,20 @@ mod tests {
     }
 
     fn obstacle_ground(pos: BlockPos) -> Option<BlockStateId> {
-        if pos.y == 63 || pos == BlockPos::new(1, 64, 0) {
+        if pos.y == 63 || pos == BlockPos::new(1, 64, 0) || pos == BlockPos::new(1, 65, 0) {
             Some(BlockStateId(1))
         } else {
             Some(BlockStateId(mclone_blocks::terrain_id::AIR))
         }
+    }
+
+    fn one_block_ledge(pos: BlockPos) -> Option<BlockStateId> {
+        let floor_y = if pos.x <= 0 { 63 } else { 64 };
+        Some(if pos.y == floor_y {
+            BlockStateId(1)
+        } else {
+            BlockStateId(mclone_blocks::terrain_id::AIR)
+        })
     }
 
     fn request_to(target_position: BlockPos, max_visited_nodes_multiplier: f32) -> PathRequest {
@@ -313,13 +322,30 @@ mod tests {
             &obstacle_ground,
             BlockPathType::default_malus,
         )
-        .expect("flat ground with one obstacle should produce a path");
+        .expect("flat ground with one two-block obstacle should produce a path");
 
         assert!(path.can_reach());
         assert_eq!(path.nodes().first(), Some(&BlockPos::new(0, 64, 0)));
         assert_eq!(path.nodes().last(), Some(&BlockPos::new(2, 64, 0)));
         assert!(!path.nodes().contains(&BlockPos::new(1, 64, 0)));
         assert!(path.node_count() > 3);
+    }
+
+    #[test]
+    fn path_finder_can_route_up_one_block_ledge() {
+        let path = PathFinder::new(PathSearchLimits {
+            max_visited_nodes: 128,
+        })
+        .find_path(
+            request_to(BlockPos::new(2, 65, 0), 1.0),
+            &one_block_ledge,
+            BlockPathType::default_malus,
+        )
+        .expect("one-block ledge should produce a path");
+
+        assert!(path.can_reach());
+        assert!(path.nodes().contains(&BlockPos::new(1, 65, 0)));
+        assert_eq!(path.nodes().last(), Some(&BlockPos::new(2, 65, 0)));
     }
 
     #[test]

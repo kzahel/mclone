@@ -7,26 +7,37 @@ const DEFAULT_HEAD_TURN_DEGREES: f32 = 10.0;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct MoveControl {
     operation: MoveOperation,
+    wanted_position: Vec3d,
+    speed_modifier: f64,
 }
 
 impl Default for MoveControl {
     fn default() -> Self {
         Self {
             operation: MoveOperation::Wait,
+            wanted_position: Vec3d::ZERO,
+            speed_modifier: 0.0,
         }
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct MoveControlTick {
+    pub(crate) moved: bool,
+    pub(crate) jump_requested: bool,
+}
+
 impl MoveControl {
     pub(crate) fn has_wanted(&self) -> bool {
-        matches!(self.operation, MoveOperation::MoveTo { .. })
+        matches!(self.operation, MoveOperation::MoveTo)
     }
 
     pub(crate) fn set_wanted_position(&mut self, position: Vec3d, speed_modifier: f64) {
-        self.operation = MoveOperation::MoveTo {
-            position,
-            speed_modifier,
-        };
+        self.wanted_position = position;
+        self.speed_modifier = speed_modifier;
+        if self.operation != MoveOperation::Jumping {
+            self.operation = MoveOperation::MoveTo;
+        }
     }
 
     pub(crate) fn stop(&mut self) {
@@ -38,24 +49,84 @@ impl MoveControl {
         position: &mut Vec3d,
         y_body_rot_degrees: &mut f32,
         movement_speed: f64,
-    ) -> bool {
-        let MoveOperation::MoveTo {
-            position: wanted,
-            speed_modifier,
-        } = self.operation
-        else {
-            return false;
-        };
+        on_ground: bool,
+        max_up_step: f64,
+        entity_width: f32,
+    ) -> MoveControlTick {
+        match self.operation {
+            MoveOperation::Wait => MoveControlTick::default(),
+            MoveOperation::Jumping => {
+                if on_ground {
+                    self.stop();
+                    MoveControlTick::default()
+                } else {
+                    MoveControlTick {
+                        moved: self.step_toward_wanted(
+                            position,
+                            y_body_rot_degrees,
+                            movement_speed,
+                        ),
+                        jump_requested: false,
+                    }
+                }
+            }
+            MoveOperation::MoveTo => {
+                self.operation = MoveOperation::Wait;
+                self.tick_move_to(
+                    position,
+                    y_body_rot_degrees,
+                    movement_speed,
+                    max_up_step,
+                    entity_width,
+                )
+            }
+        }
+    }
 
-        let dx = wanted.x - position.x;
-        let dy = wanted.y - position.y;
-        let dz = wanted.z - position.z;
+    fn tick_move_to(
+        &mut self,
+        position: &mut Vec3d,
+        y_body_rot_degrees: &mut f32,
+        movement_speed: f64,
+        max_up_step: f64,
+        entity_width: f32,
+    ) -> MoveControlTick {
+        let dx = self.wanted_position.x - position.x;
+        let dy = self.wanted_position.y - position.y;
+        let dz = self.wanted_position.z - position.z;
         let distance_sqr = dx * dx + dy * dy + dz * dz;
         if distance_sqr < MIN_SPEED_SQR {
             self.stop();
-            return false;
+            return MoveControlTick::default();
         }
 
+        let horizontal_distance_sqr = dx * dx + dz * dz;
+        let jump_requested =
+            dy > max_up_step && horizontal_distance_sqr < f64::from(entity_width).max(1.0);
+        if jump_requested {
+            self.operation = MoveOperation::Jumping;
+        }
+
+        let moved = if horizontal_distance_sqr < f64::EPSILON {
+            false
+        } else {
+            self.step_toward_wanted(position, y_body_rot_degrees, movement_speed)
+        };
+
+        MoveControlTick {
+            moved,
+            jump_requested,
+        }
+    }
+
+    fn step_toward_wanted(
+        &mut self,
+        position: &mut Vec3d,
+        y_body_rot_degrees: &mut f32,
+        movement_speed: f64,
+    ) -> bool {
+        let dx = self.wanted_position.x - position.x;
+        let dz = self.wanted_position.z - position.z;
         let wanted_y_rot = yaw_to_target(dx, dz);
         *y_body_rot_degrees = rotlerp(*y_body_rot_degrees, wanted_y_rot, MAX_MOVE_TURN_DEGREES);
 
@@ -65,9 +136,9 @@ impl MoveControl {
             return false;
         }
 
-        let step = movement_speed * speed_modifier;
+        let step = movement_speed * self.speed_modifier;
         if step >= horizontal_distance {
-            *position = Vec3d::new(wanted.x, position.y, wanted.z);
+            *position = Vec3d::new(self.wanted_position.x, position.y, self.wanted_position.z);
             self.stop();
             return true;
         }
@@ -82,10 +153,25 @@ impl MoveControl {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum MoveOperation {
     Wait,
-    MoveTo {
-        position: Vec3d,
-        speed_modifier: f64,
-    },
+    MoveTo,
+    Jumping,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct JumpControl {
+    jump: bool,
+}
+
+impl JumpControl {
+    pub(crate) fn jump(&mut self) {
+        self.jump = true;
+    }
+
+    pub(crate) fn tick(&mut self) -> bool {
+        let jump = self.jump;
+        self.jump = false;
+        jump
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -178,11 +264,35 @@ mod tests {
         let mut y_rot = 0.0;
         control.set_wanted_position(Vec3d::new(0.0, 64.0, 4.0), 1.0);
 
-        assert!(control.tick(&mut position, &mut y_rot, 0.2));
+        let tick = control.tick(&mut position, &mut y_rot, 0.2, true, 0.6, 0.9);
 
+        assert!(tick.moved);
+        assert!(!tick.jump_requested);
         assert_eq!(y_rot, 0.0);
         assert_eq!(position, Vec3d::new(0.0, 64.0, 0.2));
-        assert!(control.has_wanted());
+        assert!(!control.has_wanted());
+    }
+
+    #[test]
+    fn move_control_requests_jump_for_close_high_target() {
+        let mut control = MoveControl::default();
+        let mut position = Vec3d::new(0.5, 64.0, 0.5);
+        let mut y_rot = 0.0;
+        control.set_wanted_position(Vec3d::new(0.5, 65.0, 0.5), 1.0);
+
+        let tick = control.tick(&mut position, &mut y_rot, 0.2, true, 0.6, 0.9);
+
+        assert!(!tick.moved);
+        assert!(tick.jump_requested);
+    }
+
+    #[test]
+    fn jump_control_pulses_once_per_request() {
+        let mut control = JumpControl::default();
+        control.jump();
+
+        assert!(control.tick());
+        assert!(!control.tick());
     }
 
     #[test]

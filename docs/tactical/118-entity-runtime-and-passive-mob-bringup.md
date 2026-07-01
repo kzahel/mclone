@@ -18,9 +18,10 @@ the debug passive showcase toggle, and first server mob gravity/collision.
 Slice 5B landed server-owned `GroundPathNavigation`, a terrain-MVP
 `WalkNodeEvaluator` subset, and collision-aware `LandRandomPos` /
 `DefaultRandomPos` target selection. Slice 5C landed the immediate path service
-boundary and heap-backed A* core. The starter passive path is now an explicit
-debug passive showcase, enabled by default, while natural spawning remains
-future work.
+boundary and heap-backed A* core. Slice 5D landed one-block step-up path
+expansion and the first `JumpControl` scaffold. The starter passive path is now
+an explicit debug passive showcase, enabled by default, while natural spawning
+remains future work.
 
 Pathfinding direction: preserve the Minecraft layering (`Goal` ->
 `PathNavigation` -> path service -> `PathFinder` / `NodeEvaluator` ->
@@ -467,8 +468,10 @@ Landed notes:
 
 Still pending:
 
-- Full Java `PathFinder` / `WalkNodeEvaluator.getNeighbors(...)` port.
-- One-block step-up, `JumpControl`, and `maxUpStep` handling.
+- Full Java `WalkNodeEvaluator.getNeighbors(...)` parity for doors, fences,
+  rails, trapdoors, water, fall-depth limits, and collision-cache checks.
+- Attribute/metadata ownership for `maxUpStep` and jump modifiers instead of
+  local mob constants.
 - Timeout-cached-node stuck detection and path recomputation timing.
 - `LivingEntity.travel(...)` parity for friction, fluids, ladders, and jump
   movement.
@@ -522,6 +525,51 @@ Landed notes:
   entity::mob::navigation` and `cargo test --manifest-path native/Cargo.toml
   -p mclone-server entity::mob`, plus the full `cargo test --manifest-path
   native/Cargo.toml` workspace gate.
+
+## Slice 5D - One-Block Step-Up And Jump Control (Landed)
+
+Purpose: let ground navigation intentionally plan and physically follow a
+simple one-block ledge without bypassing the Minecraft-shaped
+`NodeEvaluator` / `MoveControl` / `JumpControl` layering.
+
+Implementation sketch:
+
+- Extend the terrain-MVP `WalkNodeEvaluator` neighbor generator to try one
+  accepted node above the horizontal candidate before falling back to a drop.
+- Preserve Java's floor-height guard for step-up candidates: reject elevated
+  nodes whose floor is more than 1.125 blocks above the current floor.
+- Keep body-clearance and stable-floor checks on elevated nodes.
+- Add `JumpControl` as a one-tick pulse control and let `MoveControl` request
+  a jump when the wanted waypoint is above `maxUpStep` and close horizontally.
+- Apply the default Java `LivingEntity` jump impulse in server mob movement
+  before collision clipping.
+
+Done when:
+
+- `PathFinder` can return a path containing an elevated one-block waypoint.
+- A passive cow can navigate onto a one-block ledge through navigation,
+  move-control jump request, jump-control pulse, gravity, and server collision.
+- Two-block columns still route around rather than becoming invalid step-up
+  shortcuts.
+
+Landed notes:
+
+- Added `WalkNodeEvaluator` step-up expansion with headroom and floor-height
+  checks, plus diagonal validation that rejects diagonals relying on stepped-up
+  cardinal neighbors.
+- Refactored `MoveControl` toward the Java shape by separating wanted
+  position/speed from operation state and adding a `Jumping` operation.
+- Added `JumpControl` and wired it through `MobRuntimeState` /
+  `MobGoalContext`.
+- Applied the default `0.42` jump impulse when jump control pulses while the
+  mob is on ground.
+- Added tests for elevated neighbor generation, low-ceiling rejection,
+  one-block ledge pathfinding, two-block obstacle routing, one-shot jump
+  pulses, move-control jump requests, and cow movement onto a ledge.
+- Verified with `cargo test --manifest-path native/Cargo.toml -p mclone-server
+  entity::mob`, `cargo test --manifest-path native/Cargo.toml -p
+  mclone-server`, and the full `cargo test --manifest-path native/Cargo.toml`
+  workspace gate.
 
 ## Slice 6 - Spawning Skeleton, Not Full Natural Spawning
 

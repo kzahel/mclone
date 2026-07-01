@@ -1,6 +1,9 @@
 use mclone_blocks::{BlockFluidKind, block_collision_aabb, block_fluid_kind, terrain_id};
 use mclone_core::{BlockPos, BlockStateId, Vec3d};
 
+const DEFAULT_MAX_UP_STEP_BLOCKS: i32 = 1;
+const MAX_FLOOR_STEP_HEIGHT: f64 = 1.125;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) enum BlockPathType {
     Blocked,
@@ -32,14 +35,24 @@ pub(crate) struct WalkNodeEvaluator {
     entity_width_blocks: i32,
     entity_height_blocks: i32,
     entity_depth_blocks: i32,
+    max_up_step_blocks: i32,
 }
 
 impl WalkNodeEvaluator {
     pub(super) fn new(entity_width: f32, entity_height: f32) -> Self {
+        Self::new_with_max_up_step(entity_width, entity_height, DEFAULT_MAX_UP_STEP_BLOCKS)
+    }
+
+    pub(super) fn new_with_max_up_step(
+        entity_width: f32,
+        entity_height: f32,
+        max_up_step_blocks: i32,
+    ) -> Self {
         Self {
             entity_width_blocks: (entity_width + 1.0).floor().max(1.0) as i32,
             entity_height_blocks: (entity_height + 1.0).floor().max(1.0) as i32,
             entity_depth_blocks: (entity_width + 1.0).floor().max(1.0) as i32,
+            max_up_step_blocks: max_up_step_blocks.max(0),
         }
     }
 
@@ -93,19 +106,19 @@ impl WalkNodeEvaluator {
         push_neighbor(&mut neighbors, north);
 
         let northwest = self.find_accepted_node(block_state_at, pathfinding_malus, pos, -1, -1);
-        if is_diagonal_valid(west, north, northwest) {
+        if is_diagonal_valid(pos, west, north, northwest) {
             push_neighbor(&mut neighbors, northwest);
         }
         let northeast = self.find_accepted_node(block_state_at, pathfinding_malus, pos, 1, -1);
-        if is_diagonal_valid(east, north, northeast) {
+        if is_diagonal_valid(pos, east, north, northeast) {
             push_neighbor(&mut neighbors, northeast);
         }
         let southwest = self.find_accepted_node(block_state_at, pathfinding_malus, pos, -1, 1);
-        if is_diagonal_valid(west, south, southwest) {
+        if is_diagonal_valid(pos, west, south, southwest) {
             push_neighbor(&mut neighbors, southwest);
         }
         let southeast = self.find_accepted_node(block_state_at, pathfinding_malus, pos, 1, 1);
-        if is_diagonal_valid(east, south, southeast) {
+        if is_diagonal_valid(pos, east, south, southeast) {
             push_neighbor(&mut neighbors, southeast);
         }
 
@@ -220,8 +233,22 @@ impl WalkNodeEvaluator {
         M: Fn(BlockPathType) -> f32 + Copy,
     {
         let same_y = from.offset(dx, 0, dz);
-        self.accepted_at(block_state_at, pathfinding_malus, same_y)
-            .or_else(|| self.accepted_at(block_state_at, pathfinding_malus, same_y.below()))
+        if let Some(neighbor) = self.accepted_at(block_state_at, pathfinding_malus, same_y) {
+            return Some(neighbor);
+        }
+
+        let current_floor = Self::floor_level(block_state_at, from);
+        for step in 1..=self.max_up_step_blocks {
+            let stepped = same_y.offset(0, step, 0);
+            if let Some(neighbor) = self.accepted_at(block_state_at, pathfinding_malus, stepped) {
+                let next_floor = Self::floor_level(block_state_at, stepped);
+                if next_floor - current_floor <= MAX_FLOOR_STEP_HEIGHT {
+                    return Some(neighbor);
+                }
+            }
+        }
+
+        self.accepted_at(block_state_at, pathfinding_malus, same_y.below())
     }
 
     fn accepted_at<F, M>(
@@ -268,11 +295,19 @@ fn push_neighbor(neighbors: &mut Vec<PathNeighbor>, neighbor: Option<PathNeighbo
 }
 
 fn is_diagonal_valid(
+    current: BlockPos,
     first_cardinal: Option<PathNeighbor>,
     second_cardinal: Option<PathNeighbor>,
     diagonal: Option<PathNeighbor>,
 ) -> bool {
-    diagonal.is_some() && first_cardinal.is_some() && second_cardinal.is_some()
+    let (Some(first_cardinal), Some(second_cardinal), Some(diagonal)) =
+        (first_cardinal, second_cardinal, diagonal)
+    else {
+        return false;
+    };
+    diagonal.cost_malus >= 0.0
+        && first_cardinal.pos.y <= current.y
+        && second_cardinal.pos.y <= current.y
 }
 
 #[cfg(test)]
@@ -369,6 +404,56 @@ mod tests {
             !neighbors
                 .iter()
                 .any(|node| node.pos == BlockPos::new(1, 64, 0))
+        );
+    }
+
+    #[test]
+    fn neighbors_include_one_block_step_up_with_headroom() {
+        fn ledge_ground(pos: BlockPos) -> Option<BlockStateId> {
+            let floor_y = if pos.x <= 0 { 63 } else { 64 };
+            Some(if pos.y == floor_y {
+                state(1)
+            } else {
+                state(terrain_id::AIR)
+            })
+        }
+
+        let evaluator = WalkNodeEvaluator::new(0.9, 1.4);
+        let neighbors = evaluator.get_neighbors(
+            BlockPos::new(0, 64, 0),
+            &ledge_ground,
+            BlockPathType::default_malus,
+        );
+
+        assert!(
+            neighbors
+                .iter()
+                .any(|node| node.pos == BlockPos::new(1, 65, 0))
+        );
+    }
+
+    #[test]
+    fn neighbors_reject_step_up_without_headroom() {
+        fn low_ceiling_ledge(pos: BlockPos) -> Option<BlockStateId> {
+            let floor_y = if pos.x <= 0 { 63 } else { 64 };
+            Some(if pos.y == floor_y || pos == BlockPos::new(1, 66, 0) {
+                state(1)
+            } else {
+                state(terrain_id::AIR)
+            })
+        }
+
+        let evaluator = WalkNodeEvaluator::new(0.9, 1.4);
+        let neighbors = evaluator.get_neighbors(
+            BlockPos::new(0, 64, 0),
+            &low_ceiling_ledge,
+            BlockPathType::default_malus,
+        );
+
+        assert!(
+            !neighbors
+                .iter()
+                .any(|node| node.pos == BlockPos::new(1, 65, 0))
         );
     }
 }

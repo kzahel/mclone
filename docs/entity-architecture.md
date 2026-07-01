@@ -85,11 +85,15 @@ The first shared ground/collision scaffold is also in place:
   neighbor generator supports body clearance, cardinal/diagonal ground
   neighbors, one-block drops, malus filtering, per-search node bounds, reach
   range, and best-partial-path fallback.
+- Ground navigation also has a first one-block step-up and `JumpControl`
+  scaffold: the evaluator can emit elevated ground nodes with headroom, and
+  server mob movement can request and apply the default Java jump impulse to
+  follow those waypoints.
 
-This does not complete full Java `WalkNodeEvaluator` parity, one-block
-step-up / jump control, timeout-based stuck detection, path recomputation
-timing, or full `LivingEntity.travel(...)`. Those remain required foundations
-before natural passive movement can be considered complete.
+This does not complete full Java `WalkNodeEvaluator` parity, path timeout
+caching, path recomputation timing, attribute-owned step heights, or full
+`LivingEntity.travel(...)`. Those remain required foundations before natural
+passive movement can be considered complete.
 
 Pathfinding should keep the Minecraft module shape even where native runtime
 execution diverges for performance. Goals should ask navigation to move;
