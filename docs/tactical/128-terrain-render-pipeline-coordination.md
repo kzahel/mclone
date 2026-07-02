@@ -99,6 +99,44 @@ state and dirty/deferred ownership. If compiler submit dominates, the first
 target is dispatcher/request transport. If upload dominates next, the first
 target is an explicit upload queue/budget owner.
 
+## North Star And Anti-Drift Rules
+
+North star: converge on a Java-shaped dirty-to-drawable terrain pipeline,
+adapted to native Rust, `wgpu`, XR, and web workers:
+
+1. resident render-section/render-column slots hold lifecycle state,
+2. frame admission chooses bounded work before the deadline,
+3. a dispatcher owns priority, worker capacity, request slots, and completed
+   results,
+4. compile workers consume a small compile-region contract,
+5. upload/publication has its own queue, counters, and frame policy,
+6. old drawable output remains visible until replacement output is complete.
+
+The current confirmed problem is narrower than the whole pipeline: on Quest
+Android XR render-distance-7 settled orbit, the render-thread spike is in the
+compiler handoff, specifically `std::sync::mpsc` command send of an owned
+compile request. A plain bounded `sync_channel` swap was measured worse. That
+means the next implementation work should change the ownership shape, not keep
+trying generic channel variants.
+
+To avoid getting lost in local trees, every implementation slice under this
+parent must answer these questions before it lands:
+
+- Which Java-like owner does this slice clarify: resident slot, admission,
+  dispatcher, compile-region input, upload/publication, or drawable records?
+- Which measured metric should improve or become easier to attribute?
+- Which stable lane proves it: currently Quest Android XR per-eye
+  render-distance-7 settled orbit, 2 render compile workers, 45 seconds.
+- What is the rollback rule if the metric is flat or worse?
+- Does the slice preserve the shared native/web contract, or does it document a
+  temporary platform-local exception?
+
+Defer tempting side quests unless the metrics point there. Greedy meshing,
+multiview, render scale, and draw-record maintenance are still relevant, but
+they should not displace the confirmed dispatcher/request-transport work unless
+the RD7 lane stops showing submit/command-send pressure and starts showing a
+different dominant tail.
+
 ## Related tacticals
 
 | Doc | Angle | How it feeds this parent |
@@ -572,7 +610,7 @@ one set of counters.
 
 ### Slice A: split `submit_handoff_ms` as the refactor probe
 
-Status: landed, pending Quest measurement.
+Status: landed and measured.
 
 Add timing and count instrumentation inside shared submit, keeping the current
 behavior unchanged:
@@ -647,21 +685,57 @@ This should tell us whether the next implementation is data structure work,
 transport work, or request-shape work. It also tells us which owner boundary to
 extract first.
 
-### Slice B: extract the first confirmed owner boundary
+### Slice B: introduce the dispatcher boundary
 
-Choose based on Slice A:
+The confirmed first owner boundary is a terrain compile dispatcher. This slice
+should make the ownership visible before it tries to remove every request clone.
+The first version may keep the current snapshot-backed request payload, but the
+render frame should no longer talk directly to a flat worker channel.
 
-- If `apply_ready_plan` dominates: extract resident lifecycle state and reduce
-  dirty/deferred set churn instead of merely hiding it behind another cap.
-- If request construction dominates: extract a narrower coordinator-owned
-  request builder, avoid cloning `BTreeSet`s, and collect revisions from compact
-  section state.
-- If compiler submit dominates: extract dispatcher/request transport ownership
-  and inspect channel send/move cost, worker locking, and request payload shape.
-- If ready-update/report dominates: move diagnostics behind the coordinator as
-  count-first telemetry and avoid large intermediate structures.
+Target shape:
 
-### Slice C: restore Java-region parity at the input boundary
+- a shared dispatcher/coordinator API owns compile queue counters, pending job
+  count, capacity, request admission, completed-result drain, and queue health,
+- runtime frame code asks the dispatcher to admit ready section work before the
+  deadline,
+- native implementation wraps today's compile worker internally so behavior is
+  preserved for the first extraction,
+- Android XR logs the same `MCLONE_ANDROID_XR_PERF_TERRAIN_SUBMIT_MAX` fields
+  plus dispatcher queue-health counters,
+- web keeps the same high-level dispatcher contract even if its implementation
+  remains a temporary inline or worker-backed path.
+
+Success condition: the code now has an obvious owner corresponding to Java's
+`ChunkRenderDispatcher`, and the RD7 lane is no worse. A flat result is
+acceptable for this slice if it removes the direct render-frame-to-worker
+channel dependency and prepares the request-slot change.
+
+Rollback rule: if the extraction adds new frame spikes or obscures existing
+submit metrics, revert or shrink the API before continuing.
+
+### Slice C: replace owned-request transport with dispatcher-owned slots
+
+Once Slice B owns the dispatcher boundary, replace the generic owned-request
+handoff with explicit dispatcher-owned request slots or a preallocated request
+ring.
+
+Target shape:
+
+- frame admission reserves a request slot from the dispatcher,
+- request construction fills dispatcher-owned storage,
+- worker wakeup carries a compact slot id or descriptor, not the full request,
+- queue capacity is explicit and visible in counters,
+- failed admission leaves dirty/ready state intact for a later frame.
+
+Success condition: `command_send_single_ms` and `compiler_submit_single_ms`
+drop materially in the RD7 settled-orbit lane without increasing upload or
+encode tails enough to lose the gain.
+
+Rollback rule: if slot ownership becomes complex without reducing command-send
+or submit tails, stop and move to resident compile inputs instead of adding
+another queue layer.
+
+### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
 
@@ -674,14 +748,14 @@ Once handoff cost is understood, introduce a shared compile-region contract:
 
 This should make `127` an implementation plan rather than a loose idea.
 
-### Slice D: define upload baseline and divergence rule
+### Slice E: define upload baseline and divergence rule
 
 Measure a Java-like "drain all pending uploads" policy against an upload-budgeted
 policy on Quest. Keep the Java baseline as the default mental model unless data
 proves it is too bursty for XR. If we diverge, record the exact reason and the
 phase budget that forced it.
 
-### Slice E: attach draw-record maintenance to the same bus
+### Slice F: attach draw-record maintenance to the same bus
 
 If encode/prepared-record churn remains a tail after handoff and upload are
 bounded, move prepared-record invalidation into the same section lifecycle so a
@@ -690,12 +764,12 @@ record maintenance.
 
 ## Open Questions
 
-1. Does `submit_handoff_ms` primarily come from `apply_ready_plan` and
-   `BTreeSet` churn?
+1. How much of the command-send tail remains after dispatcher-owned request
+   slots remove the full owned request from the wakeup path?
 2. How often do deferred sections exceed thousands on stable render-distance-7
    movement, and how many are reprocessed per frame?
-3. Does the worker submit cost scale with snapshot payload size, target-section
-   count, or revision count?
+3. Does slot-backed submit cost scale with snapshot payload size, target-section
+   count, revision count, or worker wakeup contention?
 4. Is upload apply dominated by section count, vertex/index bytes, GPU resource
    creation, or queue submission?
 5. Does local edit coherence require a true synchronous path, or can a
@@ -725,18 +799,22 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Extract or replace the native terrain compile dispatcher/request transport
-boundary. The measured next target is no longer `apply_ready_plan`; it is the
-compiler handoff itself. The first follow-up should keep behavior the same while
-making `RenderSectionCompileWorker::submit` more Java-dispatcher-like and less
-dependent on moving an owned request through `std::sync::mpsc` on the render
-frame. Good candidate slices:
+Implement Slice B: introduce the terrain compile dispatcher boundary, keeping
+behavior as close as possible to the current measured path. The point of this
+slice is ownership clarity, not yet a heroic performance win.
 
-- do not repeat a plain `std::sync::mpsc::sync_channel` swap; it was measured
-  worse than the current unbounded channel in this lane,
-- introduce a custom/preallocated dispatcher queue or request-slot ring with
-  explicit render-thread ownership, queue-health counters, and nonblocking
-  admission,
-- move toward resident worker-owned snapshot/request storage if the custom
-  dispatcher still pays too much to move owned request payloads from the render
-  frame.
+The next commit should:
+
+- define the shared dispatcher/coordinator surface,
+- move native compile queue capacity, pending count, completed-result drain, and
+  submit timing behind that surface,
+- keep the existing snapshot-backed request payload and current worker
+  internally for the first extraction,
+- expose queue-health counters on Android XR,
+- rerun the RD7 settled-orbit lane and compare against the current baseline.
+
+Do not repeat a plain `std::sync::mpsc::sync_channel` swap; it was measured
+worse than the current unbounded channel. After Slice B lands, Slice C is the
+performance-changing step: dispatcher-owned request slots or a preallocated
+request ring so the render frame wakes workers with a compact descriptor instead
+of moving an owned compile request through `std::sync::mpsc`.

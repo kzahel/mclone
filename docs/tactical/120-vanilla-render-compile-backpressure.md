@@ -351,6 +351,13 @@ a compiler exposes spare capacity and waits when capacity is full.
 
 ## Next Step
 
+This tactical is now subordinate to
+[`128-terrain-render-pipeline-coordination.md`](128-terrain-render-pipeline-coordination.md)
+for implementation direction. The backpressure lesson is retained here, but the
+next code slice should be driven from `128`: introduce a Java-shaped terrain
+compile dispatcher boundary first, then replace owned-request transport with
+dispatcher-owned slots if the RD7 lane confirms the submit tail remains.
+
 The `submit_handoff_ms` bucket is now split in the timed native path and exposed
 on Android XR as `MCLONE_ANDROID_XR_PERF_TERRAIN_SUBMIT_MAX`: request build,
 compiler submit, compiler capacity check, compiler command send, compiler
