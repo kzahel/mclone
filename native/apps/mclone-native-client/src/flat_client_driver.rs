@@ -46,9 +46,9 @@ use mclone_render_session::{
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameHelpParent,
-    GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameUi, GameUiAction,
-    GameUiHost, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point,
-    StatusOverlay, UiDebugSnapshot, UiDrawCacheStats, render_loading_progress_overlay,
+    GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameUiAction, GameUiHost,
+    GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, StatusOverlay,
+    UiDebugSnapshot, UiDrawCacheStats, render_loading_progress_overlay,
     render_loading_progress_panel_at, touch_controls_mode_label,
 };
 
@@ -299,13 +299,13 @@ pub(crate) struct FlatClientUiPointerClickReport {
 
 impl FlatClientDriver {
     pub(crate) fn new(scene: &SceneOptions, render_options: TexturedSectionRenderOptions) -> Self {
-        Self::new_with_ui(scene, render_options, GameUi::new())
+        Self::new_with_ui(scene, render_options, GameUiHost::new())
     }
 
     pub(crate) fn new_with_ui(
         scene: &SceneOptions,
         render_options: TexturedSectionRenderOptions,
-        ui: GameUi,
+        ui: GameUiHost,
     ) -> Self {
         let spectator = SpectatorCamera::spawn_for_scene(scene);
         let camera = engine_camera_controller_from_spectator(
@@ -318,7 +318,7 @@ impl FlatClientDriver {
             runtime: None,
             startup: None,
             session: GameSessionCoordinator::new(),
-            ui: GameUiHost::from_game_ui(ui),
+            ui,
             spectator,
             camera,
             actor_interpolation: ActorInterpolationState::new(),

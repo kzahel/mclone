@@ -1,16 +1,15 @@
 # 123: UI V2 Menu Rebuild
 
-Status: active; player-facing menu render/input routes are now v2-only as of
-2026-07-02. The remaining cleanup is collapsing the lightweight legacy
-`GameUi` screen/action state wrapper and continuing HUD transient-layer work.
+Status: active; menu render/input routes and the old `GameUi` state wrapper have
+been removed as of 2026-07-02. Remaining work is HUD transient-layer retention.
 
 ## Decision
 
 Do not refactor the current menu system into shape.
 
-Build a new retained UI path beside the legacy `GameUi`, migrate screens into it
-one at a time, then delete the legacy menu implementation once the player-facing
-surfaces have moved.
+Build a new retained UI path beside the legacy menu state, migrate screens into
+it one at a time, then delete the legacy menu implementation once the
+player-facing surfaces have moved.
 
 The old path can stay as a fallback during migration, but new work should not
 add menu features to it unless the feature is an urgent unblocker. Coordinate
@@ -379,9 +378,8 @@ Validation:
 
 ### Slice I: Legacy UI Deletion
 
-Status: landed 2026-07-02 for player-facing menu render/input routes. A small
-`GameUi` screen/action state wrapper remains under `GameUiHost` until a later
-state-model cleanup.
+Status: landed 2026-07-02 for player-facing menu render/input routes and the
+old `GameUi` screen/action state wrapper.
 
 Delete the legacy screen helpers once migrated screens have equivalent v2
 coverage.
@@ -1405,22 +1403,58 @@ Rendered checks:
 
 Known limits:
 
-- `GameUiHost` still wraps `GameUi` for screen/action state, seed, remote
-  address, scale, and startup construction compatibility
+- `GameUiHost` still wrapped `GameUi` for screen/action state, seed, remote
+  address, scale, and startup construction compatibility before the next
+  cleanup chunk
+- HUD touch/gamepad prompts, debug overlays, and selected item name fade remained
+  transient immediate layers
+
+## Landed GameUi State Wrapper Removal Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- removed the old `GameUi` type
+- made `GameUiHost` own screen/action state, New World seed, Join Remote
+  address, and GUI scale directly
+- changed desktop app startup and flat-client driver construction to pass
+  `GameUiHost` directly
+- removed `GameUiHost::from_game_ui` and the `legacy` field
+- kept v2 retained surface, panel cache, and HUD retained-layer ownership in the
+  same shared host
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+pnpm native:web:build
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml --workspace
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-title-host-state.png --width 960 --height 540 --startup-wait frames:1 --screenshot-ui title --screenshot-hud false --render-distance 2 --lighting false --fullbright true
+```
+
+Rendered checks:
+
+- native Title screenshot generated and inspected:
+  `/tmp/mclone-ui-v2-title-host-state.png`
+
+Known limits:
+
 - HUD touch/gamepad prompts, debug overlays, and selected item name fade remain
   transient immediate layers
 
 ## Next Recommended Chunk
 
-Collapse the leftover `GameUi` state wrapper or return to the remaining HUD
-transient-layer work.
+Return to the remaining HUD transient-layer work.
 
 Next scope:
 
-- decide whether to remove `GameUiHost::legacy: GameUi` now by making
-  `GameUiHost` own screen/action state directly
-- after that, continue Slice H retained layers for selected item name fade,
-  touch/gamepad prompts, and debug overlays
+- continue Slice H retained layers for selected item name fade, touch/gamepad
+  prompts, and debug overlays
 
 ## Completed First Recommended Chunk
 

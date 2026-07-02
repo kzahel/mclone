@@ -1,17 +1,17 @@
 use crate::{
     BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
     Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsParent,
-    GameScreen, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale,
-    GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction, Point, Rect, Slider, WidgetId,
-    block_palette_panel_rect, block_palette_slot_rect, centered_panel,
-    far_lod_range_from_slider_value, far_lod_range_label, far_lod_range_slider_value,
-    fly_speed_from_slider_value, fly_speed_label, fly_speed_slider_value,
-    movement_speed_from_slider_value, movement_speed_label, movement_speed_slider_value,
-    next_touch_controls_mode, render_block_palette_tooltip, render_distance_from_slider_value,
-    render_distance_label, render_distance_slider_value, render_flat_hud_hotbar_layer,
-    render_flat_hud_retained_layer, render_flat_hud_status_layer, render_flat_hud_transient_layers,
-    render_palette_slot_contents, render_touch_panel, touch_controls_mode_label,
-    touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
+    GameScreen, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, GuiTextureUv,
+    HOTBAR_SLOT_COUNT_USIZE, Interaction, Point, Rect, Slider, WidgetId, block_palette_panel_rect,
+    block_palette_slot_rect, centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
+    far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
+    fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
+    movement_speed_slider_value, next_touch_controls_mode, render_block_palette_tooltip,
+    render_distance_from_slider_value, render_distance_label, render_distance_slider_value,
+    render_flat_hud_hotbar_layer, render_flat_hud_retained_layer, render_flat_hud_status_layer,
+    render_flat_hud_transient_layers, render_palette_slot_contents, render_touch_panel,
+    touch_controls_mode_label, touch_look_from_slider_value, touch_look_label,
+    touch_look_slider_value,
 };
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, ShortcutHelpGroup, ShortcutHelpRow,
@@ -1314,7 +1314,10 @@ impl FlatHudSurface {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameUiHost {
-    legacy: GameUi,
+    screen: Option<GameScreen>,
+    new_world_seed: i64,
+    join_remote_addr: String,
+    scale: GuiScale,
     surface: UiSurface,
     committed_render_state: GameUiRenderState,
     cached_v2_draw: Option<CachedV2DrawList>,
@@ -1329,87 +1332,94 @@ impl Default for GameUiHost {
 
 impl GameUiHost {
     pub fn new() -> Self {
-        Self::from_game_ui(GameUi::new())
+        Self::with_screen(Some(GameScreen::Title))
     }
 
     pub fn new_ingame() -> Self {
-        Self::from_game_ui(GameUi::new_ingame())
+        Self::with_screen(None)
     }
 
-    pub fn from_game_ui(legacy: GameUi) -> Self {
-        let new_world_seed = legacy.new_world_seed();
-        let join_remote_addr = legacy.join_remote_addr().to_owned();
+    fn with_screen(screen: Option<GameScreen>) -> Self {
         let mut host = Self {
-            legacy,
+            screen,
+            new_world_seed: 0,
+            join_remote_addr: crate::DEFAULT_JOIN_REMOTE_ADDR.to_owned(),
+            scale: GuiScale::from_pixels(1280, 900),
             surface: UiSurface::new(),
             committed_render_state: GameUiRenderState::default(),
             cached_v2_draw: None,
             hud_surface: FlatHudSurface::default(),
         };
-        host.surface.set_new_world_seed(new_world_seed);
-        host.surface.set_join_remote_addr(join_remote_addr);
+        host.surface.set_new_world_seed(host.new_world_seed);
+        host.surface
+            .set_join_remote_addr(host.join_remote_addr.clone());
         host.sync_surface_screen();
-        host.surface.set_scale(host.legacy.scale());
+        host.surface.set_scale(host.scale);
         host
     }
 
     pub fn screen(&self) -> Option<GameScreen> {
-        self.legacy.screen()
+        self.screen
     }
 
     pub fn new_world_seed(&self) -> i64 {
-        self.legacy.new_world_seed()
+        self.new_world_seed
     }
 
     pub fn set_new_world_seed(&mut self, seed: i64) {
-        self.legacy.set_new_world_seed(seed);
+        self.new_world_seed = seed;
         self.surface.set_new_world_seed(seed);
     }
 
     pub fn join_remote_addr(&self) -> &str {
-        self.legacy.join_remote_addr()
+        &self.join_remote_addr
     }
 
     pub fn set_join_remote_addr(&mut self, addr: impl Into<String>) {
         let addr = addr.into();
-        self.legacy.set_join_remote_addr(addr.clone());
+        self.join_remote_addr = addr.clone();
         self.surface.set_join_remote_addr(addr);
     }
 
     pub fn scale(&self) -> GuiScale {
-        self.legacy.scale()
+        self.scale
     }
 
     pub fn set_scale(&mut self, scale: GuiScale) {
-        self.legacy.set_scale(scale);
+        self.scale = scale;
         self.surface.set_scale(scale);
     }
 
     pub fn is_active(&self) -> bool {
-        self.legacy.is_active()
+        self.screen.is_some()
     }
 
     pub fn covers_world(&self) -> bool {
-        self.legacy.covers_world()
+        matches!(
+            self.screen,
+            Some(GameScreen::Title | GameScreen::NewWorld | GameScreen::JoinRemote)
+        ) || matches!(
+            self.screen,
+            Some(GameScreen::Help { parent }) if help_parent_covers_world(parent)
+        )
     }
 
     pub fn open_pause(&mut self) {
-        self.legacy.open_pause();
+        self.screen = Some(GameScreen::Pause);
         self.sync_surface_screen();
     }
 
     pub fn close(&mut self) {
-        self.legacy.close();
+        self.screen = None;
         self.sync_surface_screen();
     }
 
     pub fn set_screen(&mut self, screen: Option<GameScreen>) {
-        self.legacy.set_screen(screen);
+        self.screen = screen;
         self.sync_surface_screen();
     }
 
     pub fn clear_input(&mut self) {
-        self.legacy.clear_input();
         self.surface.clear_input();
     }
 
@@ -1445,7 +1455,47 @@ impl GameUiHost {
     }
 
     pub fn apply_action(&mut self, action: GameUiAction) {
-        self.legacy.apply_action(action);
+        match action {
+            GameUiAction::StartWorld
+            | GameUiAction::Resume
+            | GameUiAction::AssignHotbarBlock { .. } => self.screen = None,
+            GameUiAction::OpenNewWorld => self.screen = Some(GameScreen::NewWorld),
+            GameUiAction::OpenBlockPalette => self.screen = Some(GameScreen::BlockPalette),
+            GameUiAction::OpenHelp(parent) => self.screen = Some(GameScreen::Help { parent }),
+            GameUiAction::CloseHelp(parent) => self.screen = parent.screen(),
+            GameUiAction::OpenJoinRemote => self.screen = Some(GameScreen::JoinRemote),
+            GameUiAction::OpenOptions(parent) => {
+                self.screen = Some(GameScreen::Options { parent });
+            }
+            GameUiAction::OpenServerSettings(parent) => {
+                self.screen = Some(GameScreen::ServerSettings { parent });
+            }
+            GameUiAction::BackToTitle | GameUiAction::QuitToTitle => {
+                self.screen = Some(GameScreen::Title);
+            }
+            GameUiAction::BackToPause => self.screen = Some(GameScreen::Pause),
+            GameUiAction::CreateWorld(_) | GameUiAction::JoinRemote => self.screen = None,
+            GameUiAction::RerollSeed => {}
+            GameUiAction::ToggleSectionOcclusion
+            | GameUiAction::ToggleFullbright
+            | GameUiAction::ToggleFarLod
+            | GameUiAction::TogglePlayerCollisionBox
+            | GameUiAction::ToggleFirstPersonPlayer
+            | GameUiAction::ToggleCrosshair
+            | GameUiAction::SetPlayerModel(_)
+            | GameUiAction::SetMovementMode(_)
+            | GameUiAction::SetXrTurnMode(_)
+            | GameUiAction::CycleFramePacing
+            | GameUiAction::CycleFpsCap
+            | GameUiAction::SetRenderDistance(_)
+            | GameUiAction::SetFarLodRange(_)
+            | GameUiAction::SetFlySpeed(_)
+            | GameUiAction::SetMovementSpeed(_)
+            | GameUiAction::SetTouchLookSensitivity(_)
+            | GameUiAction::SetTouchControlsMode(_)
+            | GameUiAction::SetServerSimulationCadence(_)
+            | GameUiAction::Quit => {}
+        }
         self.sync_surface_screen();
     }
 
@@ -1539,7 +1589,7 @@ impl GameUiHost {
     }
 
     pub fn v2_is_active(&self) -> bool {
-        UiScreenId::from_game_screen(self.legacy.screen()).is_some()
+        UiScreenId::from_game_screen(self.screen).is_some()
     }
 
     pub fn v2_debug_snapshot(&mut self) -> Option<UiDebugSnapshot> {
@@ -1548,7 +1598,7 @@ impl GameUiHost {
     }
 
     fn sync_surface_screen(&mut self) -> bool {
-        let screen = UiScreenId::from_game_screen(self.legacy.screen());
+        let screen = UiScreenId::from_game_screen(self.screen);
         self.surface.set_screen(screen);
         screen.is_some()
     }
@@ -2725,6 +2775,19 @@ mod tests {
         render_flat_hud(scale, &mut standalone, &hud);
 
         assert_eq!(retained.draw, standalone);
+    }
+
+    #[test]
+    fn game_ui_host_has_title_and_ingame_start_modes() {
+        let title_ui = GameUiHost::new();
+        assert!(title_ui.is_active());
+        assert!(title_ui.covers_world());
+        assert_eq!(title_ui.screen(), Some(GameScreen::Title));
+
+        let ingame_ui = GameUiHost::new_ingame();
+        assert!(!ingame_ui.is_active());
+        assert!(!ingame_ui.covers_world());
+        assert_eq!(ingame_ui.screen(), None);
     }
 
     #[test]

@@ -876,10 +876,6 @@ impl GameHelpParent {
             }),
         }
     }
-
-    const fn covers_world(self) -> bool {
-        matches!(self, Self::Title | Self::NewWorld | Self::JoinRemote)
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -2226,14 +2222,6 @@ pub fn render_touch_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &T
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct GameUi {
-    screen: Option<GameScreen>,
-    new_world_seed: i64,
-    join_remote_addr: String,
-    scale: GuiScale,
-}
-
 const BLOCK_PALETTE_COLUMNS: usize = 10;
 const BLOCK_PALETTE_SLOT_SIZE: f32 = 22.0;
 const BLOCK_PALETTE_GAP: f32 = 3.0;
@@ -2241,144 +2229,6 @@ const BLOCK_PALETTE_PADDING: f32 = 7.0;
 const BLOCK_PALETTE_HEADER_HEIGHT: f32 = 14.0;
 
 pub const DEFAULT_JOIN_REMOTE_ADDR: &str = "127.0.0.1:25565";
-
-impl Default for GameUi {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl GameUi {
-    pub fn new() -> Self {
-        Self {
-            screen: Some(GameScreen::Title),
-            new_world_seed: 0,
-            join_remote_addr: DEFAULT_JOIN_REMOTE_ADDR.to_owned(),
-            scale: GuiScale::from_pixels(1280, 900),
-        }
-    }
-
-    pub fn new_ingame() -> Self {
-        let mut ui = Self::new();
-        ui.set_screen(None);
-        ui
-    }
-
-    pub fn screen(&self) -> Option<GameScreen> {
-        self.screen
-    }
-
-    pub fn new_world_seed(&self) -> i64 {
-        self.new_world_seed
-    }
-
-    pub fn set_new_world_seed(&mut self, seed: i64) {
-        self.new_world_seed = seed;
-    }
-
-    pub fn join_remote_addr(&self) -> &str {
-        &self.join_remote_addr
-    }
-
-    pub fn set_join_remote_addr(&mut self, addr: impl Into<String>) {
-        self.join_remote_addr = addr.into();
-    }
-
-    pub fn scale(&self) -> GuiScale {
-        self.scale
-    }
-
-    pub fn set_scale(&mut self, scale: GuiScale) {
-        self.scale = scale;
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.screen.is_some()
-    }
-
-    pub fn covers_world(&self) -> bool {
-        matches!(
-            self.screen,
-            Some(GameScreen::Title | GameScreen::NewWorld | GameScreen::JoinRemote)
-        ) || matches!(
-            self.screen,
-            Some(GameScreen::Help { parent }) if parent.covers_world()
-        )
-    }
-
-    pub fn open_pause(&mut self) {
-        self.screen = Some(GameScreen::Pause);
-    }
-
-    pub fn close(&mut self) {
-        self.screen = None;
-    }
-
-    pub fn set_screen(&mut self, screen: Option<GameScreen>) {
-        self.screen = screen;
-    }
-
-    pub fn clear_input(&mut self) {}
-
-    pub fn apply_action(&mut self, action: GameUiAction) {
-        match action {
-            GameUiAction::StartWorld
-            | GameUiAction::Resume
-            | GameUiAction::AssignHotbarBlock { .. } => self.close(),
-            GameUiAction::OpenNewWorld => {
-                self.screen = Some(GameScreen::NewWorld);
-            }
-            GameUiAction::OpenBlockPalette => {
-                self.screen = Some(GameScreen::BlockPalette);
-            }
-            GameUiAction::OpenHelp(parent) => {
-                self.screen = Some(GameScreen::Help { parent });
-            }
-            GameUiAction::CloseHelp(parent) => {
-                self.screen = parent.screen();
-            }
-            GameUiAction::OpenJoinRemote => {
-                self.screen = Some(GameScreen::JoinRemote);
-            }
-            GameUiAction::OpenOptions(parent) => {
-                self.screen = Some(GameScreen::Options { parent });
-            }
-            GameUiAction::OpenServerSettings(parent) => {
-                self.screen = Some(GameScreen::ServerSettings { parent });
-            }
-            GameUiAction::BackToTitle => {
-                self.screen = Some(GameScreen::Title);
-            }
-            GameUiAction::QuitToTitle => {
-                self.screen = Some(GameScreen::Title);
-            }
-            GameUiAction::BackToPause => {
-                self.screen = Some(GameScreen::Pause);
-            }
-            GameUiAction::CreateWorld(_) | GameUiAction::JoinRemote => self.close(),
-            GameUiAction::RerollSeed => {}
-            GameUiAction::ToggleSectionOcclusion
-            | GameUiAction::ToggleFullbright
-            | GameUiAction::ToggleFarLod
-            | GameUiAction::TogglePlayerCollisionBox
-            | GameUiAction::ToggleFirstPersonPlayer
-            | GameUiAction::ToggleCrosshair
-            | GameUiAction::SetPlayerModel(_)
-            | GameUiAction::SetMovementMode(_)
-            | GameUiAction::SetXrTurnMode(_)
-            | GameUiAction::CycleFramePacing
-            | GameUiAction::CycleFpsCap
-            | GameUiAction::SetRenderDistance(_)
-            | GameUiAction::SetFarLodRange(_)
-            | GameUiAction::SetFlySpeed(_)
-            | GameUiAction::SetMovementSpeed(_)
-            | GameUiAction::SetTouchLookSensitivity(_)
-            | GameUiAction::SetTouchControlsMode(_)
-            | GameUiAction::SetServerSimulationCadence(_)
-            | GameUiAction::Quit => {}
-        }
-    }
-}
 
 fn block_palette_occupied_span(overlay: BlockPaletteOverlay) -> usize {
     overlay
@@ -3307,19 +3157,6 @@ mod tests {
             })
             .count();
         assert_eq!(cell_rects, 9);
-    }
-
-    #[test]
-    fn game_ui_has_title_and_ingame_start_modes() {
-        let title_ui = GameUi::new();
-        assert!(title_ui.is_active());
-        assert!(title_ui.covers_world());
-        assert_eq!(title_ui.screen(), Some(GameScreen::Title));
-
-        let ingame_ui = GameUi::new_ingame();
-        assert!(!ingame_ui.is_active());
-        assert!(!ingame_ui.covers_world());
-        assert_eq!(ingame_ui.screen(), None);
     }
 
     #[test]

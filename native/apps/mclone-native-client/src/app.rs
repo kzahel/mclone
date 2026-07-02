@@ -14,8 +14,8 @@ use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameHelpParent, GameScreen, GameUi,
-    GameUiAction, GuiKey, GuiScale, Point, StatusOverlay,
+    DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameHelpParent, GameScreen, GameUiAction,
+    GameUiHost, GuiKey, GuiScale, Point, StatusOverlay,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -206,8 +206,8 @@ impl ChunkApp {
         startup_wait: StartupWaitPolicy,
     ) -> Self {
         let mut ui = match start_intent {
-            WindowStartIntent::InWorld => GameUi::new_ingame(),
-            WindowStartIntent::Menu => GameUi::new(),
+            WindowStartIntent::InWorld => GameUiHost::new_ingame(),
+            WindowStartIntent::Menu => GameUiHost::new(),
         };
         ui.set_join_remote_addr(
             scene
