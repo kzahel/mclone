@@ -1013,10 +1013,96 @@ Next implementation implication:
 - When the headset is visible again, measure a less aggressive budget point:
   completed-result accept budget `2`, upload budget `16`, section accept budget
   `64`.
-- In parallel, the next code slice should target ready-set publication and
-  prepared-record churn: avoid rebuilding/publishing the full traversal-ready
-  set or broad prepared draw records when only a bounded subset of sections was
-  accepted/uploaded.
+- The strict budget run also exposed an architectural mismatch: XR budgeted
+  uploads queue on the render side, but runtime sync could still accept completed
+  compile results and submit more section compiles before that queue caught up.
+  Java's dispatcher shape is more coordinated: pending uploads/free buffer packs
+  backpressure worker admission.
+
+Coordinated upload-backpressure implementation:
+
+- Implemented July 2, 2026 in `mclone-xr-scene` as the first bridge toward the
+  Java shape.
+- In opt-in budgeted upload mode only
+  (`--xr-render-section-upload-budget` and/or
+  `--xr-render-section-accept-budget`), `poll_runtime_and_upload` now drains one
+  budgeted slice of already queued section uploads/removals before runtime
+  section sync.
+- If that upload queue still has work after the drain, the frame skips runtime
+  section sync. That means it does not accept more completed compile results or
+  submit more compile requests while the render-side upload queue is already
+  behind.
+- The default unbudgeted path is unchanged and still applies section updates in
+  the drain-all style unless measured XR evidence justifies a different default.
+- Perf counters now preserve real pending compile job and queued completed-result
+  counts on upload-backpressured frames instead of reporting the default empty
+  cache-update values.
+
+Validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all`
+- `git diff --check -- native/crates/mclone-xr-scene/src/lib.rs`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene` (`53`
+  tests)
+
+Quest measurement:
+
+- Measured July 2, 2026 on Quest 3 using the render-distance-7 settled orbit
+  lane, 2 render compile workers, 45 second sample, per-eye path, render scale
+  `1.000`.
+- Commands:
+  - strict: `--xr-render-completed-result-accept-budget 1`,
+    `--xr-render-section-upload-budget 8`,
+    `--xr-render-section-accept-budget 16`
+  - less aggressive: `--xr-render-completed-result-accept-budget 2`,
+    `--xr-render-section-upload-budget 16`,
+    `--xr-render-section-accept-budget 64`
+
+| Policy | Meta dropped frames | Frame avg / p95 / p99 / max | App over period | Upload backlog max | Key tail |
+|---|---:|---|---:|---|---|
+| `1 / 8 / 16` coordinated bridge | 72 | 15.626 / 18.172 / 23.855 / 50.325 ms | 77.2% | queued uploads 8; queued removals 208; queued completed results 1 | upload apply 20.588 ms; ready sections 21.980 ms; left/right eye 28.396/31.635 ms |
+| `2 / 16 / 64` coordinated bridge | 68 | 15.830 / 18.475 / 25.732 / 55.895 ms | 84.6% | queued uploads 16; queued removals 160; queued completed results 0 | upload select 22.347 ms; upload apply 15.560 ms; ready publish 32.058 ms |
+
+Comparison against the earlier strict budget run before the bridge:
+
+- The bridge did what it was designed to do mechanically: max queued upload
+  sections dropped from `288` to `8` on the strict point. Queued removals also
+  improved from `320` to `208`.
+- It did not improve frame pacing. Meta dropped frames were worse than the prior
+  strict run (`61` before, `72` after), and the less aggressive point remained
+  worse on p99/max and app-over-period frames.
+- The likely reason is that the bridge prevents unlimited render-side backlog,
+  but it still performs large lifecycle maintenance on the render frame. The
+  tail moved into budgeted upload selection/apply, ready-set recomputation or
+  publication, and eye encode/wait.
+
+Interpretation:
+
+- Keep this as an opt-in diagnostic bridge for now. Do not make these budgeted
+  policies default.
+- The result strengthens the Java-shape conclusion: a frame-local upload queue
+  bridge is not enough. The capacity/backpressure owner needs to move upstream
+  into the shared dispatcher/coordinator so the system reserves capacity before
+  compile starts and releases it after upload/publication, instead of producing
+  completed work first and asking the render frame to absorb it later.
+- The `2 / 16 / 64` run also suggests the current budgeted removal-selection path
+  needs scrutiny before more budget tuning. `runtime_upload_select_ms=22.347`
+  is far too high for a pacing mechanism.
+
+Next implementation implication:
+
+- Move the capacity token upstream: make the shared dispatcher own the
+  drawable/upload capacity and hold compile slots until results are
+  uploaded/published, closer to Java's buffer-pack lifetime.
+- In that design, avoid the current frame-side backlog queue becoming the
+  pacing owner. The render frame should consume a bounded number of already
+  admitted upload/publication transitions, not decide after the fact whether too
+  much work was produced.
+- Also inspect the current budgeted upload/removal selection path. Even if the
+  dispatcher shape is corrected, a pacing mechanism that can spend 22 ms just
+  selecting budgeted removals is not viable.
 
 ### Slice D: restore Java-region parity at the input boundary
 
@@ -1082,12 +1168,18 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Finish the ready/upload pacing comparison, then target ready-set publication.
-The strict budget point improved p99 and upload/apply spikes but accumulated a
-large queued upload/removal backlog. The next measurement should use the less
-aggressive `2 / 16 / 64` budget point once ADB sees the headset again.
+Do not continue tuning independent frame-side budgets as the main strategy. The
+coordinated bridge reduced upload backlog but did not improve dropped frames or
+p99/max frame time, and it exposed an expensive upload-removal selection tail.
 
-The next code slice should avoid broad ready-set publication and prepared-record
-churn when only a bounded subset of sections changed. Keep Java's drain-all
-behavior as the default until a budgeted policy improves frame pacing without
-falling behind chunk movement.
+The next architectural step is to move capacity ownership upstream into the
+shared dispatcher/coordinator: compile admission should reserve a drawable/upload
+capacity token, and that token should be released only after the result crosses
+the upload/publication boundary. That is closer to Java's buffer-pack lifetime
+than the current path, where completed work can exist before the render frame
+knows whether it can absorb it.
+
+Before or during that dispatcher slice, inspect the current budgeted
+upload/removal selection path. The `2 / 16 / 64` run hit
+`runtime_upload_select_ms=22.347`, which is too high for any pacing policy and
+may hide a straightforward data-structure or accounting bug.

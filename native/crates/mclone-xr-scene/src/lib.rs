@@ -2804,8 +2804,26 @@ where
                 ..poll_summary
             });
         }
+        let budgeted_section_uploads = self.uses_budgeted_section_uploads();
+        let mut upload_report = TexturedSectionUploadReport::default();
+        let drained_pending_uploads_before_sync =
+            budgeted_section_uploads && self.has_pending_section_upload_work();
+        if drained_pending_uploads_before_sync {
+            let upload_start = Instant::now();
+            let drained_report = self.apply_section_update_uploads(
+                device,
+                mclone_render_session::RenderSectionCacheUpdate::default(),
+                timing,
+            )?;
+            timing.runtime_gpu_upload_ms += elapsed_ms(upload_start.elapsed());
+            accumulate_upload_report(&mut upload_report, drained_report);
+        }
+        let upload_backpressure_active =
+            budgeted_section_uploads && self.has_pending_section_upload_work();
+        let should_sync_render_sections =
+            (poll_changed || has_runtime_render_work) && !upload_backpressure_active;
         let sync_start = Instant::now();
-        let timed_section_update = if poll_changed || has_runtime_render_work {
+        let timed_section_update = if should_sync_render_sections {
             if let Some(deadline) = frame_deadline {
                 self.sync_render_sections_until_deadline_timed(camera_position, deadline)
                     .context("sync XR terrain render sections until deadline")?
@@ -2955,17 +2973,32 @@ where
         let deadline_skipped_compile_request_count =
             section_update.deadline_skipped_compile_request_count;
         let accepted_compile_result_count = section_update.accepted_compile_result_count;
-        let queued_completed_compile_result_count =
-            section_update.queued_completed_compile_result_count;
+        let queued_completed_compile_result_count = if should_sync_render_sections {
+            section_update.queued_completed_compile_result_count
+        } else {
+            self.runtime.as_ref().map_or(0, |runtime| {
+                runtime.pending_completed_compile_result_count()
+            })
+        };
         let completed_compile_section_count = section_update.completed_compile_section_count;
         let stale_compile_section_count = section_update.stale_compile_section_count;
-        let pending_compile_jobs_after_sync = section_update.pending_compile_jobs;
+        let pending_compile_jobs_after_sync = if should_sync_render_sections {
+            section_update.pending_compile_jobs
+        } else {
+            self.runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.render_compile_pending_job_count())
+        };
         let visibility_graph_build_count = section_update.visibility_graph_stats.build_count;
         let visibility_graph_total_ms = section_update.visibility_graph_stats.total_ms;
         let visibility_graph_worst_ms = section_update.visibility_graph_stats.worst_ms;
-        let upload_start = Instant::now();
-        let upload_report = self.apply_section_update_uploads(device, section_update, timing)?;
-        timing.runtime_gpu_upload_ms = elapsed_ms(upload_start.elapsed());
+        if should_sync_render_sections || !drained_pending_uploads_before_sync {
+            let upload_start = Instant::now();
+            let section_update_report =
+                self.apply_section_update_uploads(device, section_update, timing)?;
+            timing.runtime_gpu_upload_ms += elapsed_ms(upload_start.elapsed());
+            accumulate_upload_report(&mut upload_report, section_update_report);
+        }
         let ready_start = Instant::now();
         let runtime = self
             .runtime
@@ -3040,6 +3073,10 @@ where
 
     fn has_pending_section_upload_work(&self) -> bool {
         !self.pending_section_uploads.is_empty() || !self.pending_section_removals.is_empty()
+    }
+
+    fn uses_budgeted_section_uploads(&self) -> bool {
+        self.render_section_upload_budget.is_some() || self.render_section_accept_budget.is_some()
     }
 
     fn enqueue_section_update_uploads(
@@ -4592,6 +4629,16 @@ fn xr_poll_diagnostics_upload_summary(
         player_outbound_queue_depth: diagnostics.player_outbound_queue_depth,
         ..XrTerrainUploadSummary::default()
     }
+}
+
+fn accumulate_upload_report(
+    total: &mut TexturedSectionUploadReport,
+    report: TexturedSectionUploadReport,
+) {
+    total.uploaded_section_count += report.uploaded_section_count;
+    total.removed_section_count += report.removed_section_count;
+    total.uploaded_vertex_count += report.uploaded_vertex_count;
+    total.uploaded_index_count += report.uploaded_index_count;
 }
 
 fn start_xr_terrain_runtime<S>(
