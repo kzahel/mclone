@@ -1,6 +1,6 @@
 # 132: HUD Overlay Polish
 
-Status: proposed.
+Status: active; Slice A landed.
 
 Workstream: native Rust, shared `mclone-ui` overlay behavior with desktop
 validation first; web/WASM, flat Android, and XR must keep compatible paths.
@@ -80,6 +80,19 @@ Validation:
 
 - `cargo test --manifest-path native/Cargo.toml -p mclone-ui loading_progress`
 - `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime loading_progress`
+
+Implementation note, 2026-07-02:
+
+- `LoadingProgressOverlay::new` now keeps the incoming cell list for existing
+  callers while building a dense row-major status grid keyed by
+  `display_radius`.
+- `status_at(relative_x, relative_z)` indexes the dense grid and returns
+  `None` outside the normalized display radius.
+- `playable_cell()` returns the latest playable cell captured during
+  construction instead of scanning cells during rendering.
+- Focused tests cover duplicate/latest-cell behavior, sparse startup-style
+  snapshots, dense view-readiness-style snapshots, panel rendering, and
+  app-runtime snapshot mapping.
 
 ## Slice B: Retained Loading Layers For Flat Paths
 

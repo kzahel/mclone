@@ -1719,6 +1719,8 @@ pub struct LoadingProgressOverlay {
     pub target_chunk_count: usize,
     pub playable_ready: bool,
     pub cells: Vec<LoadingProgressCell>,
+    status_grid: Vec<LoadingProgressCellStatus>,
+    playable_cell: Option<LoadingProgressCell>,
 }
 
 impl LoadingProgressOverlay {
@@ -1729,17 +1731,37 @@ impl LoadingProgressOverlay {
         playable_ready: bool,
         cells: impl IntoIterator<Item = LoadingProgressCell>,
     ) -> Self {
+        let cells = cells.into_iter().collect::<Vec<_>>();
+        let mut status_grid = vec![
+            LoadingProgressCellStatus::None;
+            loading_progress_grid_len(display_radius).unwrap_or(0)
+        ];
+        let mut playable_cell = None;
+        for cell in &cells {
+            if let Some(status) =
+                loading_progress_grid_index(display_radius, cell.relative_x, cell.relative_z)
+                    .and_then(|index| status_grid.get_mut(index))
+            {
+                *status = cell.status;
+            }
+            if cell.playable {
+                playable_cell = Some(*cell);
+            }
+        }
+
         Self {
             display_radius,
             target_ready_chunks,
             target_chunk_count,
             playable_ready,
-            cells: cells.into_iter().collect(),
+            cells,
+            status_grid,
+            playable_cell,
         }
     }
 
     pub fn grid_side(&self) -> usize {
-        self.display_radius as usize * 2 + 1
+        loading_progress_grid_side(self.display_radius).unwrap_or(0)
     }
 
     pub fn percent(&self) -> u8 {
@@ -1751,16 +1773,42 @@ impl LoadingProgressOverlay {
     }
 
     pub fn status_at(&self, relative_x: i32, relative_z: i32) -> LoadingProgressCellStatus {
-        self.cells
-            .iter()
-            .rev()
-            .find(|cell| cell.relative_x == relative_x && cell.relative_z == relative_z)
-            .map_or(LoadingProgressCellStatus::None, |cell| cell.status)
+        loading_progress_grid_index(self.display_radius, relative_x, relative_z)
+            .and_then(|index| self.status_grid.get(index))
+            .copied()
+            .unwrap_or(LoadingProgressCellStatus::None)
     }
 
     pub fn playable_cell(&self) -> Option<LoadingProgressCell> {
-        self.cells.iter().rev().find(|cell| cell.playable).copied()
+        self.playable_cell
     }
+}
+
+fn loading_progress_grid_len(display_radius: u32) -> Option<usize> {
+    let side = loading_progress_grid_side(display_radius)?;
+    side.checked_mul(side)
+}
+
+fn loading_progress_grid_side(display_radius: u32) -> Option<usize> {
+    let radius = usize::try_from(display_radius).ok()?;
+    radius.checked_mul(2)?.checked_add(1)
+}
+
+fn loading_progress_grid_index(
+    display_radius: u32,
+    relative_x: i32,
+    relative_z: i32,
+) -> Option<usize> {
+    let radius = i32::try_from(display_radius).ok()?;
+    if relative_x < -radius || relative_x > radius || relative_z < -radius || relative_z > radius {
+        return None;
+    }
+
+    let radius = i64::from(radius);
+    let col = usize::try_from(i64::from(relative_x) + radius).ok()?;
+    let row = usize::try_from(i64::from(relative_z) + radius).ok()?;
+    let side = loading_progress_grid_side(display_radius)?;
+    row.checked_mul(side)?.checked_add(col)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -3098,6 +3146,7 @@ mod tests {
             ],
         );
 
+        assert_eq!(progress.status_grid.len(), 9);
         assert_eq!(
             progress.status_at(0, 0),
             LoadingProgressCellStatus::Features
@@ -3105,6 +3154,72 @@ mod tests {
         assert_eq!(progress.status_at(1, 1), LoadingProgressCellStatus::None);
         assert_eq!(progress.playable_cell().unwrap().relative_x, 0);
         assert!(!progress.playable_ready);
+    }
+
+    #[test]
+    fn loading_progress_sparse_snapshot_defaults_missing_cells() {
+        let progress = LoadingProgressOverlay::new(
+            2,
+            1,
+            25,
+            false,
+            [
+                LoadingProgressCell::new(-2, -2, LoadingProgressCellStatus::Terrain),
+                LoadingProgressCell::new(2, 2, LoadingProgressCellStatus::TargetReady)
+                    .playable(true),
+            ],
+        );
+
+        assert_eq!(progress.status_grid.len(), 25);
+        assert_eq!(
+            progress.status_at(-2, -2),
+            LoadingProgressCellStatus::Terrain
+        );
+        assert_eq!(
+            progress.status_at(2, 2),
+            LoadingProgressCellStatus::TargetReady
+        );
+        assert_eq!(progress.status_at(0, 0), LoadingProgressCellStatus::None);
+        assert_eq!(progress.status_at(3, 0), LoadingProgressCellStatus::None);
+        assert_eq!(progress.playable_cell().unwrap().relative_z, 2);
+    }
+
+    #[test]
+    fn loading_progress_dense_snapshot_lookup_uses_normalized_grid() {
+        let radius = 3;
+        let mut cells = Vec::new();
+        for relative_z in -radius..=radius {
+            for relative_x in -radius..=radius {
+                cells.push(LoadingProgressCell::new(
+                    relative_x,
+                    relative_z,
+                    LoadingProgressCellStatus::Terrain,
+                ));
+            }
+        }
+        cells.push(LoadingProgressCell::new(
+            1,
+            -2,
+            LoadingProgressCellStatus::Features,
+        ));
+        cells.push(LoadingProgressCell::new(
+            -4,
+            0,
+            LoadingProgressCellStatus::Light,
+        ));
+
+        let progress = LoadingProgressOverlay::new(3, 0, 49, false, cells);
+
+        assert_eq!(progress.status_grid.len(), 49);
+        assert_eq!(
+            progress.status_at(1, -2),
+            LoadingProgressCellStatus::Features
+        );
+        assert_eq!(
+            progress.status_at(-3, 3),
+            LoadingProgressCellStatus::Terrain
+        );
+        assert_eq!(progress.status_at(-4, 0), LoadingProgressCellStatus::None);
     }
 
     #[test]
