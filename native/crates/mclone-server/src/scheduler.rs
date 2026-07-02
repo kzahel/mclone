@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use mclone_core::{
     BlockStateId, CHUNK_SECTION_VOLUME, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus,
-    PackedLightSection, block_to_section_coord, chunk_section_index, local_block_coord,
-    local_section_block_coord,
+    LIGHT_DATA_LAYER_BYTE_COUNT, PackedLightSection, block_to_section_coord, chunk_section_index,
+    local_block_coord, local_section_block_coord,
 };
 use mclone_protocol::{ChunkView, SectionBlockUpdate};
 use mclone_worldgen::block::{
@@ -908,6 +908,31 @@ impl ChunkScheduler {
                 } else {
                     Some(buffer.get_block_at_y(local_x, pos.y, local_z))
                 }
+            })
+    }
+
+    pub(crate) fn raw_brightness_at_world(&self, pos: WorldBlockPos, sky_darken: u8) -> Option<u8> {
+        let chunk_pos = pos.chunk_pos();
+        let local_x = local_block_coord(pos.x);
+        let local_z = local_block_coord(pos.z);
+        self.holders
+            .get(&chunk_pos)
+            .and_then(|holder| holder.published_snapshot.as_ref())
+            .and_then(|snapshot| {
+                if snapshot.status < ChunkStatus::Light
+                    || !snapshot.light_correct
+                    || snapshot.light_sections.is_empty()
+                    || pos.y < snapshot.min_y
+                    || pos.y >= snapshot.min_y + snapshot.height
+                {
+                    return None;
+                }
+
+                let index = chunk_section_index(local_x, local_section_block_coord(pos.y), local_z);
+                let section_y = block_to_section_coord(pos.y);
+                let block = block_light_at_strict(&snapshot.light_sections, section_y, index);
+                let sky = sky_light_at_strict(&snapshot.light_sections, section_y, index);
+                Some(block.max(sky.saturating_sub(sky_darken)))
             })
     }
 
@@ -2362,6 +2387,23 @@ fn sorted_chunk_positions_z_major(positions: BTreeSet<ChunkPos>) -> Vec<ChunkPos
 mod tests {
     use super::*;
 
+    fn light_layer_with_value(index: usize, value: u8) -> Vec<u8> {
+        debug_assert!(value <= 15);
+        let mut layer = vec![0; LIGHT_DATA_LAYER_BYTE_COUNT];
+        layer[index >> 1] |= value << (4 * (index & 1));
+        layer
+    }
+
+    fn scheduler_with_snapshot(snapshot: ChunkSnapshot) -> ChunkScheduler {
+        let pos = snapshot.pos;
+        let mut holder = ChunkHolder::new(pos);
+        holder.publish_snapshot(snapshot, ChunkResidency::Generated, false);
+
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler.holders.insert(pos, holder);
+        scheduler
+    }
+
     fn square(center: ChunkPos, radius: i32) -> BTreeSet<ChunkPos> {
         (-radius..=radius)
             .flat_map(|z| {
@@ -2414,6 +2456,172 @@ mod tests {
         assert_eq!(target_chunks.first(), Some(&ChunkPos::new(5, -3)));
         assert_eq!(feature_centers.first(), Some(&ChunkPos::new(5, -3)));
         assert_eq!(dependency_chunks.first(), Some(&ChunkPos::new(5, -3)));
+    }
+
+    #[test]
+    fn raw_brightness_at_world_uses_light_correct_snapshot_layers() {
+        let pos = WorldBlockPos::new(2, 4, 3);
+        let index = chunk_section_index(2, 4, 3);
+        let blocks = vec![BlockStateId(0); CHUNK_SECTION_VOLUME];
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Light,
+            ChunkRevision(1),
+            0,
+            16,
+            &blocks,
+        )
+        .with_light_sections(
+            true,
+            vec![PackedLightSection::new(
+                0,
+                Some(light_layer_with_value(index, 12)),
+                Some(light_layer_with_value(index, 5)),
+            )],
+        );
+        let scheduler = scheduler_with_snapshot(snapshot);
+
+        assert_eq!(scheduler.raw_brightness_at_world(pos, 0), Some(12));
+        assert_eq!(scheduler.raw_brightness_at_world(pos, 8), Some(5));
+    }
+
+    #[test]
+    fn raw_brightness_at_world_has_no_fullbright_fallback_for_missing_light_payload() {
+        let blocks = vec![BlockStateId(0); CHUNK_SECTION_VOLUME];
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Light,
+            ChunkRevision(1),
+            0,
+            16,
+            &blocks,
+        )
+        .with_light_sections(true, Vec::new());
+        let scheduler = scheduler_with_snapshot(snapshot);
+
+        assert_eq!(
+            scheduler.raw_brightness_at_world(WorldBlockPos::new(2, 4, 3), 0),
+            None
+        );
+    }
+
+    #[test]
+    fn raw_brightness_at_world_requires_light_status_and_light_correct_data() {
+        let pos = WorldBlockPos::new(2, 4, 3);
+        let index = chunk_section_index(2, 4, 3);
+        let blocks = vec![BlockStateId(0); CHUNK_SECTION_VOLUME];
+        let light_sections = vec![PackedLightSection::new(
+            0,
+            Some(light_layer_with_value(index, 15)),
+            None,
+        )];
+        let features_snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Features,
+            ChunkRevision(1),
+            0,
+            16,
+            &blocks,
+        )
+        .with_light_sections(true, light_sections.clone());
+        let untrusted_light_snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Light,
+            ChunkRevision(2),
+            0,
+            16,
+            &blocks,
+        )
+        .with_light_sections(false, light_sections.clone());
+        let light_snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Light,
+            ChunkRevision(3),
+            0,
+            16,
+            &blocks,
+        )
+        .with_light_sections(true, light_sections);
+
+        assert_eq!(
+            scheduler_with_snapshot(features_snapshot).raw_brightness_at_world(pos, 0),
+            None
+        );
+        assert_eq!(
+            scheduler_with_snapshot(untrusted_light_snapshot).raw_brightness_at_world(pos, 0),
+            None
+        );
+        let scheduler = scheduler_with_snapshot(light_snapshot);
+        assert_eq!(scheduler.raw_brightness_at_world(pos, 0), Some(15));
+        assert_eq!(
+            scheduler.raw_brightness_at_world(WorldBlockPos::new(2, 16, 3), 0),
+            None
+        );
+    }
+
+    #[test]
+    fn raw_brightness_at_world_uses_next_sky_section() {
+        let bottom_pos = WorldBlockPos::new(2, 4, 3);
+        let top_pos = WorldBlockPos::new(2, 20, 3);
+        let index = chunk_section_index(2, 4, 3);
+        let blocks = vec![BlockStateId(0); CHUNK_SECTION_VOLUME * 2];
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Light,
+            ChunkRevision(1),
+            0,
+            32,
+            &blocks,
+        )
+        .with_light_sections(
+            true,
+            vec![PackedLightSection::new(
+                1,
+                Some(light_layer_with_value(index, 11)),
+                None,
+            )],
+        );
+        let scheduler = scheduler_with_snapshot(snapshot);
+
+        assert_eq!(scheduler.raw_brightness_at_world(bottom_pos, 0), Some(11));
+        assert_eq!(scheduler.raw_brightness_at_world(top_pos, 0), Some(11));
+    }
+
+    #[test]
+    fn raw_brightness_at_world_uses_top_sky_fallback_without_fullbright_snapshot_fallback() {
+        let bottom_pos = WorldBlockPos::new(2, 4, 3);
+        let top_pos = WorldBlockPos::new(2, 20, 3);
+        let index = chunk_section_index(2, 4, 3);
+        let blocks = vec![BlockStateId(0); CHUNK_SECTION_VOLUME * 2];
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Light,
+            ChunkRevision(1),
+            0,
+            32,
+            &blocks,
+        )
+        .with_light_sections(
+            true,
+            vec![PackedLightSection::new(
+                0,
+                Some(light_layer_with_value(index, 11)),
+                None,
+            )],
+        );
+        let scheduler = scheduler_with_snapshot(snapshot);
+
+        assert_eq!(scheduler.raw_brightness_at_world(bottom_pos, 0), Some(11));
+        assert_eq!(scheduler.raw_brightness_at_world(top_pos, 0), Some(15));
+        assert_eq!(scheduler.raw_brightness_at_world(top_pos, 6), Some(9));
+        assert_eq!(
+            scheduler.raw_brightness_at_world(WorldBlockPos::new(2, -1, 3), 0),
+            None
+        );
+        assert_eq!(
+            scheduler.raw_brightness_at_world(WorldBlockPos::new(2, 32, 3), 0),
+            None
+        );
     }
 
     #[cfg(feature = "physics")]
@@ -2474,6 +2682,52 @@ fn snapshot_is_client_ready_for_lighting_mode(
     } else {
         snapshot.status >= ChunkStatus::Features
     }
+}
+
+fn block_light_at_strict(
+    light_sections: &[PackedLightSection],
+    section_y: i32,
+    index: usize,
+) -> u8 {
+    light_sections
+        .iter()
+        .find(|section| section.section_y == section_y)
+        .and_then(|section| section.block.as_deref())
+        .map_or(0, |layer| light_data_layer_value(layer, index))
+}
+
+fn sky_light_at_strict(light_sections: &[PackedLightSection], section_y: i32, index: usize) -> u8 {
+    let any_sky_layer = light_sections.iter().any(|section| section.sky.is_some());
+    let mut next_sky_layer = None;
+    for section in light_sections {
+        if section.section_y < section_y {
+            continue;
+        }
+        let Some(layer) = section.sky.as_deref() else {
+            continue;
+        };
+        if section.section_y == section_y {
+            return light_data_layer_value(layer, index);
+        }
+        if next_sky_layer.is_none_or(|(next_section_y, _)| section.section_y < next_section_y) {
+            next_sky_layer = Some((section.section_y, layer));
+        }
+    }
+
+    if any_sky_layer {
+        next_sky_layer
+            .map(|(_, layer)| light_data_layer_value(layer, index))
+            .unwrap_or(15)
+    } else {
+        0
+    }
+}
+
+fn light_data_layer_value(layer: &[u8], index: usize) -> u8 {
+    debug_assert_eq!(layer.len(), LIGHT_DATA_LAYER_BYTE_COUNT);
+    let byte = layer[index >> 1];
+    let shift = 4 * (index & 1);
+    (byte >> shift) & 15
 }
 
 fn section_block_update_from_index(

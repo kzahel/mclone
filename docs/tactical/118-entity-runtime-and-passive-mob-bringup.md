@@ -28,8 +28,9 @@ passive path is now an explicit debug passive showcase, enabled by default,
 while natural spawning remains live-disabled. Slice 8 landed a bounded
 farm-animal biome/placement dry run so biome tables, on-ground animal
 predicates, and cow/chicken AABB collision are no longer missing subsystems;
-brightness, gamerules, despawn, persistence, and the live executor remain
-required before natural spawning creates mobs.
+Slice 9 landed strict raw-brightness sampling for the dry-run. Gamerules/server
+flags, despawn, persistence, and the live executor remain required before
+natural spawning creates mobs.
 
 Pathfinding direction: preserve the Minecraft layering (`Goal` ->
 `PathNavigation` -> path service -> `PathFinder` / `NodeEvaluator` ->
@@ -858,6 +859,51 @@ Landed notes:
 - The integrated diagnostics now clear biome/placement/collision blockers and
   keep brightness/gamerules/despawn/persistence as the remaining blockers.
 
+## Slice 9 - Raw Brightness Sampling For Spawn Dry Run
+
+Purpose: make animal placement brightness use the real server light data path
+instead of treating lighting as a missing subsystem forever.
+
+Status: landed; live natural spawn attempts remain disabled.
+
+Implementation sketch:
+
+- Mirror Java 1.17.1 `LevelLightEngine.getRawBrightness(pos, skyDarken)` for
+  spawn placement: `max(blockLight, skyLight - skyDarken)`.
+- Read brightness from `ChunkScheduler` published snapshots only when the
+  chunk is at least `Light`, `light_correct` is true, and light payload exists.
+- Keep the sampler strict for gameplay: do not use the renderer's fullbright
+  fallback when light payload is missing.
+- Preserve packed sky-light section fallback semantics for valid light payloads:
+  exact section, next section above, or open-sky value when no higher sky
+  layer exists.
+- Wire the natural-spawn dry-run to query scheduler raw brightness with
+  `skyDarken = 0`, matching `Animal.checkAnimalSpawnRules`.
+
+Done when:
+
+- Lighting-enabled integrated-server diagnostics can clear the brightness
+  subsystem blocker.
+- Lighting-disabled/debug fallback modes still report brightness as not ready
+  rather than creating mobs under guessed light.
+- Focused scheduler tests cover exact block/sky light, sky darkening, missing
+  payload, untrusted light status, next sky section fallback, and open-sky
+  fallback.
+- Live spawning is still blocked by gamerules/server flags, despawn,
+  persistence, and the live executor, and no entities are created by this
+  dry-run.
+
+Landed notes:
+
+- Added `ChunkScheduler::raw_brightness_at_world(...)` over light-correct
+  published snapshots.
+- Added strict block/sky light helpers for gameplay sampling, intentionally
+  separate from rendering fullbright fallback.
+- The integrated dry-run now passes scheduler raw brightness into
+  `check_farm_animal_natural_spawn(...)`.
+- `NaturalSpawnContext::brightness_checks_ready` now follows scheduler lighting
+  mode, so disabled lighting remains an explicit blocker.
+
 ## Validation
 
 Minimum gates for code slices:
@@ -883,8 +929,8 @@ Suggested visible checks:
 - Full `Entity.move(...)` / `LivingEntity.travel(...)` parity.
 - Real pathfinding over loaded world collision.
 - Live natural spawning for `CREATURE` through the `entity::spawning` planner
-  once raw brightness checks, gamerules/server flags, despawn, persistence, and
-  the live spawn executor are wired.
+  once gamerules/server flags, despawn, persistence, and the live spawn
+  executor are wired.
 - Despawn rules for passive animals and later hostile mobs.
 - Sounds for passive mobs.
 - Data watcher / tracked data equivalent for richer entity presentation.

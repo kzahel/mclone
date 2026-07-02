@@ -799,7 +799,7 @@ impl IntegratedServer {
             &chunk_inputs.eligible_entity_ticking_chunks,
             |pos| self.scheduler.block_at_world(pos),
             |x, z| self.biome_source.block_position_biome_definition(x, z),
-            |_pos| None,
+            |pos| self.scheduler.raw_brightness_at_world(pos, 0),
         );
 
         let mut context = NaturalSpawnContext::with_live_chunk_and_count_inputs(
@@ -809,6 +809,7 @@ impl IntegratedServer {
         );
         context.biome_spawn_tables_ready = true;
         context.placement_predicates_ready = true;
+        context.brightness_checks_ready = self.scheduler.lighting_enabled();
         context.collision_checks_ready = true;
         let plan = plan_natural_spawns(NaturalSpawnConfig::enabled_all_categories(), context);
         let creature_state = SpawnState::new(spawnable_chunk_count, category_counts)
