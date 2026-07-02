@@ -106,7 +106,7 @@ pub struct FarTerrainLodRenderer {
     vertex_buffer_slot_size: wgpu::BufferAddress,
     index_buffer: Option<wgpu::Buffer>,
     index_buffer_size: wgpu::BufferAddress,
-    uploaded_revision: Option<u64>,
+    uploaded_revisions: [Option<u64>; PER_VIEW_UNIFORM_SLOT_COUNT as usize],
     uploaded_index_count: u32,
     uploaded_stats: FarTerrainLodRenderStats,
 }
@@ -195,7 +195,7 @@ impl FarTerrainLodRenderer {
             vertex_buffer_slot_size: 0,
             index_buffer: None,
             index_buffer_size: 0,
-            uploaded_revision: None,
+            uploaded_revisions: [None; PER_VIEW_UNIFORM_SLOT_COUNT as usize],
             uploaded_index_count: 0,
             uploaded_stats: FarTerrainLodRenderStats::default(),
         }
@@ -290,19 +290,25 @@ impl FarTerrainLodRenderer {
         view_slot: PerViewSlot,
         mesh: Option<&FarTerrainLodMesh>,
     ) {
+        let slot_index = view_slot.index() as usize;
+        assert!(
+            slot_index < self.uploaded_revisions.len(),
+            "far terrain LOD view slot {slot_index} is outside slot count {}",
+            self.uploaded_revisions.len()
+        );
         let Some(mesh) = mesh else {
-            self.uploaded_revision = None;
+            self.uploaded_revisions = [None; PER_VIEW_UNIFORM_SLOT_COUNT as usize];
             self.uploaded_index_count = 0;
             self.uploaded_stats = FarTerrainLodRenderStats::default();
             return;
         };
         if mesh.is_empty() {
-            self.uploaded_revision = Some(mesh.revision());
+            self.uploaded_revisions[slot_index] = Some(mesh.revision());
             self.uploaded_index_count = 0;
             self.uploaded_stats = FarTerrainLodRenderStats::default();
             return;
         }
-        if self.uploaded_revision == Some(mesh.revision()) {
+        if self.uploaded_revisions[slot_index] == Some(mesh.revision()) {
             return;
         }
 
@@ -314,6 +320,7 @@ impl FarTerrainLodRenderer {
             .is_none_or(|_| self.vertex_buffer_slot_size < vertex_slot_size)
         {
             self.vertex_buffer_slot_size = vertex_slot_size;
+            self.uploaded_revisions = [None; PER_VIEW_UNIFORM_SLOT_COUNT as usize];
             self.vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("mclone_far_terrain_lod_vertices"),
                 size: self.vertex_buffer_slot_size
@@ -335,6 +342,7 @@ impl FarTerrainLodRenderer {
             .is_none_or(|_| self.index_buffer_size < index_size)
         {
             self.index_buffer_size = index_size;
+            self.uploaded_revisions = [None; PER_VIEW_UNIFORM_SLOT_COUNT as usize];
             self.index_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("mclone_far_terrain_lod_indices"),
                 size: self.index_buffer_size,
@@ -346,7 +354,7 @@ impl FarTerrainLodRenderer {
             queue.write_buffer(buffer, 0, &index_bytes);
         }
 
-        self.uploaded_revision = Some(mesh.revision());
+        self.uploaded_revisions[slot_index] = Some(mesh.revision());
         self.uploaded_index_count =
             u32::try_from(mesh.index_count()).expect("far terrain LOD index count fits u32");
         self.uploaded_stats = FarTerrainLodRenderStats {

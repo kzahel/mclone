@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
+use mclone_app_runtime::far_lod::FarTerrainLodConfig;
 use mclone_app_runtime::host_mode::{SingleViewHostOptions, build_remote_dedicated_client_runtime};
 use mclone_app_runtime::local_single_view::{
     LocalSingleViewSceneOptions, LocalSingleViewSceneRuntime, LocalSingleViewStartupPump,
@@ -25,6 +26,7 @@ use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 #[cfg(test)]
 use mclone_protocol::ServerUpdate;
 use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
+use mclone_render::far_lod::FarTerrainLodMesh;
 use mclone_server::SimulationCadenceConfig;
 #[cfg(test)]
 use mclone_server::{IntegratedServer, ServerRunnerKind};
@@ -208,6 +210,21 @@ impl WindowSceneRuntime {
 
     pub(crate) fn mesh_assets(&self) -> &TexturedMeshAssets {
         self.scene.mesh_assets()
+    }
+
+    pub(crate) fn clear_far_lod(&mut self) {
+        self.scene.clear_far_lod();
+    }
+
+    pub(crate) fn prepare_far_lod_mesh(
+        &mut self,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        center: ChunkPos,
+        camera_position: Vec3,
+    ) -> Option<&FarTerrainLodMesh> {
+        self.scene
+            .prepare_far_lod_mesh(config, seed, center, camera_position)
     }
 
     #[cfg(test)]

@@ -2,8 +2,7 @@ use std::collections::BTreeSet;
 
 use anyhow::Context;
 use mclone_app_runtime::far_lod::{
-    FarTerrainLodCache, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-    MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+    MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS, MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
@@ -21,7 +20,7 @@ use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
     ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
-use mclone_core::{BlockStateId, ChunkPos, Vec3d};
+use mclone_core::{BlockStateId, Vec3d};
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, TouchControlsMode,
     keyboard_turn_mouse_delta,
@@ -119,7 +118,6 @@ pub(crate) struct FlatClientDriver {
     pub(crate) crosshair_visible: bool,
     pub(crate) player_model: GamePlayerModel,
     pub(crate) render_resources: Option<FlatRenderResources>,
-    pub(crate) far_lod_cache: FarTerrainLodCache,
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
     underwater_effect: UnderwaterEffectState,
@@ -301,7 +299,6 @@ impl FlatClientDriver {
             crosshair_visible: true,
             player_model: GamePlayerModel::default(),
             render_resources: None,
-            far_lod_cache: FarTerrainLodCache::new(),
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
             underwater_effect: UnderwaterEffectState::new(),
@@ -757,7 +754,9 @@ impl FlatClientDriver {
             }
             GameUiAction::ToggleFarLod => {
                 self.scene.far_lod.enabled = !self.scene.far_lod.enabled;
-                self.far_lod_cache.clear();
+                if let Some(runtime) = &mut self.runtime {
+                    runtime.clear_far_lod();
+                }
                 log::info!(
                     "far LOD {}",
                     if self.scene.far_lod.enabled {
@@ -775,7 +774,9 @@ impl FlatClientDriver {
                         MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
                     );
                 self.scene.far_lod = self.scene.far_lod.with_extra_radius_chunks(range_chunks);
-                self.far_lod_cache.clear();
+                if let Some(runtime) = &mut self.runtime {
+                    runtime.clear_far_lod();
+                }
                 log::info!(
                     "far LOD range set to {} chunks beyond render distance",
                     self.scene.far_lod.extra_radius_chunks
@@ -1813,20 +1814,14 @@ impl FlatClientDriver {
             &self.camera,
             EngineDebugVisualOptions::new(self.player_collision_box_visible),
         );
-        let render_distance = self.current_render_distance(fallback_render_distance);
-        let normal_terrain_chunks = traversal_ready_chunks(&frame_inputs.traversal_ready_sections);
-        let far_lod_materials = self
-            .runtime
-            .as_ref()
-            .and_then(|runtime| runtime.mesh_assets().far_lod_materials.as_ref());
-        let far_lod_mesh = self.far_lod_cache.mesh_for_camera(
-            self.scene.far_lod,
-            self.scene.seed,
-            frame_inputs.camera_view.snapshot.chunk_pos,
-            render_distance,
-            Some(&normal_terrain_chunks),
-            far_lod_materials,
-        );
+        let far_lod_mesh = self.runtime.as_mut().and_then(|runtime| {
+            runtime.prepare_far_lod_mesh(
+                self.scene.far_lod,
+                self.scene.seed,
+                frame_inputs.camera_view.snapshot.chunk_pos,
+                frame_inputs.camera_view.render_eye,
+            )
+        });
         let Some(render_resources) = &mut self.render_resources else {
             anyhow::bail!("flat client render resources are not initialized");
         };
@@ -1935,15 +1930,10 @@ impl FlatClientDriver {
         self.render_stats = RenderStreamStats::default();
         self.frame_timing = FrameTimingStats::default();
         self.underwater_effect.reset();
-        self.far_lod_cache.clear();
+        if let Some(runtime) = &mut self.runtime {
+            runtime.clear_far_lod();
+        }
     }
-}
-
-fn traversal_ready_chunks(sections: &BTreeSet<RenderSectionKey>) -> BTreeSet<ChunkPos> {
-    sections
-        .iter()
-        .map(|key| ChunkPos::new(key.chunk_x, key.chunk_z))
-        .collect()
 }
 
 pub(crate) fn game_ui_render_state(options: FlatClientUiRenderOptions) -> GameUiRenderState {

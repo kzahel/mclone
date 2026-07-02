@@ -753,6 +753,7 @@ fn xr_scene_options_from_desktop_scene(
         freeze_time: scene.freeze_time,
         debug_passive_showcase: scene.debug_passive_showcase,
         lighting_enabled: scene.lighting_enabled,
+        far_lod: scene.far_lod,
         underwater_detection_mode: xr_underwater_mode_from_desktop(underwater_mode),
     }
     .validated()
@@ -799,6 +800,7 @@ fn desktop_scene_options_for_xr_request(
         freeze_time: scene.freeze_time,
         first_person_player_visible: false,
         lighting_enabled: scene.lighting_enabled,
+        far_lod: scene.far_lod,
         ..SceneOptions::default()
     }
 }

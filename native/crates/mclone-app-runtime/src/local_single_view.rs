@@ -8,6 +8,7 @@ use mclone_client::ClientRuntime;
 use mclone_core::{BlockStateId, ChunkPos};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 use mclone_protocol::{ClientCommand, ServerUpdate};
+use mclone_render::far_lod::FarTerrainLodMesh;
 use mclone_render_session::RenderSectionCacheUpdate;
 use mclone_server::{
     IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
@@ -16,6 +17,7 @@ use mclone_server::{
 };
 use mclone_ui::LoadingProgressOverlay;
 
+use crate::far_lod::{FarTerrainLodCache, FarTerrainLodConfig};
 use crate::host_mode::{
     RemoteDedicatedServerSession, SingleViewHostMode, SingleViewHostOptions,
     dispatch_remote_dedicated_command,
@@ -114,6 +116,7 @@ pub struct LocalSingleViewSceneRuntime {
     server_runner: NativeIntegratedServerRunner,
     mesh_assets: TexturedMeshAssets,
     render_compile_worker: RenderSectionCompileWorker,
+    far_lod_cache: FarTerrainLodCache,
     simulation_cadence: SimulationCadenceConfig,
     last_runner_diagnostics: Option<ServerRunnerDiagnostics>,
     last_runner_diagnostics_poll_at: Option<Instant>,
@@ -251,6 +254,7 @@ impl LocalSingleViewSceneRuntime {
             server_runner,
             mesh_assets,
             render_compile_worker,
+            far_lod_cache: FarTerrainLodCache::new(),
             simulation_cadence: options.cadence,
             last_runner_diagnostics: None,
             last_runner_diagnostics_poll_at: None,
@@ -280,6 +284,32 @@ impl LocalSingleViewSceneRuntime {
 
     pub const fn mesh_assets(&self) -> &TexturedMeshAssets {
         &self.mesh_assets
+    }
+
+    pub fn clear_far_lod(&mut self) {
+        self.far_lod_cache.clear();
+    }
+
+    pub fn prepare_far_lod_mesh(
+        &mut self,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        center: ChunkPos,
+        camera_position: Vec3,
+    ) -> Option<&FarTerrainLodMesh> {
+        let normal_terrain_chunks = traversal_ready_chunks(
+            &self
+                .core
+                .traversal_ready_render_section_keys(camera_position),
+        );
+        self.far_lod_cache.mesh_for_camera(
+            config,
+            seed,
+            center,
+            self.core.render_distance(),
+            Some(&normal_terrain_chunks),
+            self.mesh_assets.far_lod_materials.as_ref(),
+        )
     }
 
     pub fn render_distance(&self) -> u32 {
@@ -674,6 +704,28 @@ where
         match self {
             Self::Local(scene) => scene.mesh_assets(),
             Self::RemoteDedicated(scene) => scene.mesh_assets(),
+        }
+    }
+
+    pub fn clear_far_lod(&mut self) {
+        match self {
+            Self::Local(scene) => scene.clear_far_lod(),
+            Self::RemoteDedicated(scene) => scene.clear_far_lod(),
+        }
+    }
+
+    pub fn prepare_far_lod_mesh(
+        &mut self,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        center: ChunkPos,
+        camera_position: Vec3,
+    ) -> Option<&FarTerrainLodMesh> {
+        match self {
+            Self::Local(scene) => scene.prepare_far_lod_mesh(config, seed, center, camera_position),
+            Self::RemoteDedicated(scene) => {
+                scene.prepare_far_lod_mesh(config, seed, center, camera_position)
+            }
         }
     }
 
@@ -1106,6 +1158,7 @@ pub struct RemoteDedicatedSingleViewSceneRuntime<S> {
     session: S,
     mesh_assets: TexturedMeshAssets,
     render_compile_worker: RenderSectionCompileWorker,
+    far_lod_cache: FarTerrainLodCache,
 }
 
 impl<S> RemoteDedicatedSingleViewSceneRuntime<S>
@@ -1144,6 +1197,7 @@ where
             session,
             mesh_assets,
             render_compile_worker,
+            far_lod_cache: FarTerrainLodCache::new(),
         })
     }
 
@@ -1161,6 +1215,32 @@ where
 
     pub const fn mesh_assets(&self) -> &TexturedMeshAssets {
         &self.mesh_assets
+    }
+
+    pub fn clear_far_lod(&mut self) {
+        self.far_lod_cache.clear();
+    }
+
+    pub fn prepare_far_lod_mesh(
+        &mut self,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        center: ChunkPos,
+        camera_position: Vec3,
+    ) -> Option<&FarTerrainLodMesh> {
+        let normal_terrain_chunks = traversal_ready_chunks(
+            &self
+                .core
+                .traversal_ready_render_section_keys(camera_position),
+        );
+        self.far_lod_cache.mesh_for_camera(
+            config,
+            seed,
+            center,
+            self.core.render_distance(),
+            Some(&normal_terrain_chunks),
+            self.mesh_assets.far_lod_materials.as_ref(),
+        )
     }
 
     pub fn render_distance(&self) -> u32 {
@@ -1376,6 +1456,13 @@ fn runner_idle(diagnostics: &ServerRunnerDiagnostics) -> bool {
         && !diagnostics.awaiting_tick
         && diagnostics.pending_jobs == 0
         && diagnostics.pending_publications == 0
+}
+
+fn traversal_ready_chunks(sections: &BTreeSet<RenderSectionKey>) -> BTreeSet<ChunkPos> {
+    sections
+        .iter()
+        .map(|key| ChunkPos::new(key.chunk_x, key.chunk_z))
+        .collect()
 }
 
 #[cfg(test)]

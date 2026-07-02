@@ -705,6 +705,7 @@ mod android {
             freeze_time: scene.freeze_time,
             debug_passive_showcase: scene.debug_passive_showcase,
             lighting_enabled: scene.lighting_enabled,
+            far_lod: Default::default(),
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
         }
     }

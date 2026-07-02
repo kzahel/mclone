@@ -5,6 +5,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use glam::{Quat, Vec2, Vec3};
+use mclone_app_runtime::far_lod::{
+    FarTerrainLodConfig, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+    MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+};
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats, record_render_section_update_stats,
     render_full_frame_for_view_with_prepared_stereo_draw_in_slot,
@@ -41,6 +45,7 @@ use mclone_render::chunk::{
     TexturedSectionRenderStats, TexturedSectionUploadReport,
 };
 use mclone_render::entity::{ActorDrawResources, ActorFigureSet, ActorInstance, ActorRenderStats};
+use mclone_render::far_lod::FarTerrainLodRenderer;
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiRenderer};
 use mclone_render::screen_effect::{
@@ -276,6 +281,7 @@ pub struct XrSceneOptions {
     pub freeze_time: bool,
     pub debug_passive_showcase: bool,
     pub lighting_enabled: bool,
+    pub far_lod: FarTerrainLodConfig,
     pub underwater_detection_mode: XrUnderwaterDetectionMode,
 }
 
@@ -293,6 +299,7 @@ impl Default for XrSceneOptions {
             freeze_time: false,
             debug_passive_showcase: true,
             lighting_enabled: true,
+            far_lod: FarTerrainLodConfig::default(),
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
         }
     }
@@ -674,6 +681,7 @@ where
     pending_section_uploads: VecDeque<TexturedRenderSectionMesh>,
     pending_section_removals: BTreeSet<RenderSectionKey>,
     actors: ActorDrawResources,
+    far_lod: FarTerrainLodRenderer,
     selection_outline: SelectionOutlineRenderer,
     world_gui_renderer: WorldGuiRenderer,
     ui: GameUiHost,
@@ -822,6 +830,7 @@ where
                 Some(&actor_figures),
             )
             .context("initialize XR terrain actor draw resources")?,
+            far_lod: FarTerrainLodRenderer::new(device, color_format),
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
             ui,
@@ -923,6 +932,7 @@ where
                 Some(&actor_figures),
             )
             .context("initialize XR terrain actor draw resources")?,
+            far_lod: FarTerrainLodRenderer::new(device, color_format),
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
             ui,
@@ -3121,7 +3131,19 @@ where
         let summary_ui_draw = ui_draw.clone();
         let selection_outline = self.current_xr_selection_outline();
         let mut render_stats = self.render_stats;
+        let far_lod_config = self.scene.far_lod;
+        let far_lod_seed = self.scene.seed;
+        let far_lod_center = self.camera.snapshot().chunk_pos;
+        let far_lod_mesh = self.runtime.as_mut().and_then(|runtime| {
+            runtime.prepare_far_lod_mesh(
+                far_lod_config,
+                far_lod_seed,
+                far_lod_center,
+                render_view.camera_position,
+            )
+        });
         let (summary, frame_timing) = if collect_split_timing {
+            let far_lod = far_lod_mesh.map(|_| &mut self.far_lod);
             render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot(
                 frame,
                 target.depth,
@@ -3140,10 +3162,13 @@ where
                 render_options,
                 FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                 |_| summary_ui_draw,
+                far_lod,
+                far_lod_mesh,
                 &mut render_stats,
                 view_slot,
             )
         } else {
+            let far_lod = far_lod_mesh.map(|_| &mut self.far_lod);
             render_full_frame_for_view_with_prepared_stereo_draw_in_slot(
                 frame,
                 target.depth,
@@ -3162,6 +3187,8 @@ where
                 render_options,
                 FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                 |_| summary_ui_draw,
+                far_lod,
+                far_lod_mesh,
                 &mut render_stats,
                 view_slot,
             )
@@ -3412,13 +3439,10 @@ where
             max_render_distance: MAX_XR_RENDER_DISTANCE as i32,
             section_occlusion_culling: self.render_options.section_occlusion_culling,
             force_fullbright: self.render_options.force_fullbright,
-            far_lod_enabled: false,
-            far_lod_range_chunks:
-                mclone_app_runtime::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
-            min_far_lod_range_chunks:
-                mclone_app_runtime::far_lod::MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
-            max_far_lod_range_chunks:
-                mclone_app_runtime::far_lod::MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
+            far_lod_enabled: self.scene.far_lod.enabled,
+            far_lod_range_chunks: self.scene.far_lod.extra_radius_chunks as i32,
+            min_far_lod_range_chunks: MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
+            max_far_lod_range_chunks: MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.camera.first_person_player_visible(),
             crosshair_visible: None,
@@ -4137,9 +4161,35 @@ where
                 );
             }
             GameUiAction::ToggleFarLod => {
-                log::info!("XR far LOD toggle ignored; far LOD is not available");
+                self.scene.far_lod.enabled = !self.scene.far_lod.enabled;
+                if let Some(runtime) = &mut self.runtime {
+                    runtime.clear_far_lod();
+                }
+                log::info!(
+                    "XR far LOD {}",
+                    if self.scene.far_lod.enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
             }
-            GameUiAction::SetFarLodRange(_) => {}
+            GameUiAction::SetFarLodRange(range_chunks) => {
+                let range_chunks = u32::try_from(range_chunks)
+                    .unwrap_or(MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS)
+                    .clamp(
+                        MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+                        MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+                    );
+                self.scene.far_lod = self.scene.far_lod.with_extra_radius_chunks(range_chunks);
+                if let Some(runtime) = &mut self.runtime {
+                    runtime.clear_far_lod();
+                }
+                log::info!(
+                    "XR far LOD range set to {} chunks beyond render distance",
+                    self.scene.far_lod.extra_radius_chunks
+                );
+            }
             GameUiAction::TogglePlayerCollisionBox => {
                 self.player_collision_box_visible = !self.player_collision_box_visible;
                 log::info!(
