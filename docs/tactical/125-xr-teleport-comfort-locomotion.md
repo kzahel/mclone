@@ -75,20 +75,26 @@ remain mob-specific.
 
 ## Input Model
 
-The exact input should be validated in headset, but the first design target is:
+The first XR Blink control target is concrete:
 
 - A movement-mode option selects Continuous, Blink, Shift, or Hand Push.
-- In Blink/Shift, left-stick deflection starts or updates a target preview.
+- In Blink, the left analog joystick is the arm/commit control.
+- Pushing the left analog joystick more than `0.5` magnitude in any direction
+  starts the Blink intent preview.
+- While the stick remains past the threshold, the preview refreshes from the
+  latest controller/camera aim.
 - The preview shows where the player's feet/body would land.
-- Stick direction can influence landing yaw, so the player can choose the
-  facing direction before committing.
-- Releasing or pressing a chosen confirm input commits the teleport. The first
-  implementation should pick one simple rule and document it in the UI/options
-  code; avoid hidden multi-button choreography.
+- Returning the stick below the threshold commits the latest still-valid
+  preview result.
+- Blink has no cancel gesture. Once armed, release commits; if no valid
+  completed result exists, commit is a no-op.
+- Stick direction may influence landing yaw, so the player can choose the
+  facing direction before committing, but any direction over threshold arms
+  Blink.
 
 The target preview should not conflict with the right-stick snap-turn work from
 `124`. Snap turn remains right-stick based. Blink/Shift target selection should
-stay left-stick or controller-aim based.
+not bind to the right stick.
 
 ## Desktop Flat Debug Input
 
@@ -336,8 +342,8 @@ Landed:
 
 ## Open Design Questions
 
-- Should Blink/Shift target selection be controller-aim based, left-stick based,
-  or support both?
+- After the left analog joystick arms Blink, should the resolved arc aim use
+  controller pose, headset/camera forward, or a blend?
 - Should the landing yaw come from stick direction, current headset yaw, or a
   separate twist/turn input?
 - What maximum distance is comfortable in Minecraft-scale terrain?
