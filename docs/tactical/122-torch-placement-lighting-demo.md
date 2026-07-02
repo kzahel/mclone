@@ -1,6 +1,6 @@
 # 122: Torch Placement Lighting Demo
 
-Status: active; Slice C landed.
+Status: active; Slice C2 dark-room probe landed.
 
 ## Purpose
 
@@ -117,6 +117,36 @@ Validation:
   --lighting true --fullbright false --debug-passive-showcase false`
 - inspected `/tmp/mclone-torch-lighting-demo.png`: placed torch geometry and
   local block-light contribution are visible with fullbright disabled
+
+### Slice C2: Dark-Room Render Probe
+
+Status: landed 2026-07-02.
+
+Add a deterministic native headless dark-room probe for the torch lighting
+artifact investigation. The probe bypasses runtime placement and generated
+terrain, builds a small stone room with one normal torch and a Java-oracle-shaped
+block-light field, then captures both lit and fullbright frames from the same
+camera. This keeps the visual comparison focused on render sampling/AO/lightmap
+behavior after the Java/native block-light oracle proved source and decay values
+match. Coarse live-light publication remains owned by tactical 113.
+
+Validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+  torch_light_probe`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+  cli_rejects_startup_wait_for_non_host_modes`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client` passed
+  outside the sandbox; the sandboxed run hit local TCP `Operation not permitted`
+  in existing remote-session tests.
+- `cargo run --manifest-path native/Cargo.toml -p mclone-native-client --
+  --torch-light-probe /tmp/mclone-torch-light-probe --width 1280 --height 720`
+  passed outside the sandbox after the sandboxed run could not see a headless
+  `wgpu` adapter.
+- inspected `/tmp/mclone-torch-light-probe/lit.png` and
+  `/tmp/mclone-torch-light-probe/fullbright.png`: same synthetic room/torch
+  geometry, with the lit frame showing the expected dark-room block-light
+  falloff and samples `14, 13, 13, 12, 0`.
 
 ### Slice D: Web/XR Follow-Up
 

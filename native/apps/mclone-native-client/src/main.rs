@@ -16,6 +16,7 @@ mod remote_player_visual_smoke;
 mod remote_session;
 mod render_cache;
 mod scene_runtime;
+mod torch_light_probe;
 mod ui;
 #[cfg(feature = "xr")]
 mod xr_clear_smoke;
@@ -29,8 +30,8 @@ use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, HeadlessActorReviewSheetOptions,
     HeadlessActorWalkReviewOptions, HeadlessDualViewOptions, HeadlessScreenshotOptions,
     HeadlessScreenshotUi, MovementPerfOptions, RemotePlayerVisualSmokeOptions,
-    RendererRebuildSmokeOptions, SceneOptions, TimedemoOptions, WindowStartIntent,
-    XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
+    RendererRebuildSmokeOptions, SceneOptions, TimedemoOptions, TorchLightProbeOptions,
+    WindowStartIntent, XrClearSmokeOptions, XrMcloneSmokeOptions, XrUnderwaterMode, XrViewPose,
     parse_screenshot_ui_arg,
 };
 use crate::headless::{
@@ -39,6 +40,7 @@ use crate::headless::{
 };
 use crate::perf::{run_frame_budget_probe, run_movement_perf_smoke, run_timedemo};
 use crate::remote_player_visual_smoke::run_remote_player_visual_smoke;
+use crate::torch_light_probe::run_torch_light_probe;
 use anyhow::Result;
 #[cfg(test)]
 use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, ChunkPos, ChunkSnapshot};
@@ -187,6 +189,37 @@ fn main() -> Result<()> {
                 report.config_changed,
                 report.before_render_size,
                 report.after_render_size
+            );
+            Ok(())
+        }
+        Cli::TorchLightProbe { options } => {
+            let report = run_torch_light_probe(&options)?;
+            let samples = report
+                .samples
+                .iter()
+                .map(|sample| {
+                    format!(
+                        "{}@{},{},{}={}",
+                        sample.label,
+                        sample.position[0],
+                        sample.position[1],
+                        sample.position[2],
+                        sample.block_light
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!(
+                "torch light probe saved lit={} fullbright={} ({}x{}, {} bytes, sections={}, vertices={}, indices={}, samples=[{}])",
+                report.lit_path.display(),
+                report.fullbright_path.display(),
+                report.width,
+                report.height,
+                report.byte_len,
+                report.section_count,
+                report.vertex_count,
+                report.index_count,
+                samples
             );
             Ok(())
         }
@@ -412,6 +445,16 @@ mod tests {
         .to_string();
         assert!(err.contains("applies to window mode and --screenshot"));
 
+        let err = Cli::parse([
+            "--torch-light-probe".to_owned(),
+            "/tmp/mclone-torch-light-probe".to_owned(),
+            "--startup-wait".to_owned(),
+            "idle".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("applies to window mode and --screenshot"));
+
         let err = Cli::parse(["--startup-wait".to_owned(), "frames:4097".to_owned()])
             .unwrap_err()
             .to_string();
@@ -489,6 +532,36 @@ mod tests {
                         ..TexturedSectionRenderOptions::default()
                     },
                     rebuild_render_scale: Some(0.5),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_torch_light_probe_options() {
+        let cli = Cli::parse([
+            "--torch-light-probe".to_owned(),
+            "/tmp/mclone-torch-light-probe".to_owned(),
+            "--width".to_owned(),
+            "640".to_owned(),
+            "--height".to_owned(),
+            "360".to_owned(),
+            "--fullbright".to_owned(),
+            "false".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::TorchLightProbe {
+                options: TorchLightProbeOptions {
+                    directory: PathBuf::from("/tmp/mclone-torch-light-probe"),
+                    width: 640,
+                    height: 360,
+                    render_options: TexturedSectionRenderOptions {
+                        force_fullbright: false,
+                        ..TexturedSectionRenderOptions::default()
+                    },
                 },
             }
         );

@@ -171,6 +171,14 @@ pub(crate) struct RendererRebuildSmokeOptions {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TorchLightProbeOptions {
+    pub(crate) directory: PathBuf,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) render_options: TexturedSectionRenderOptions,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RemotePlayerVisualSmokeOptions {
     pub(crate) path: PathBuf,
     pub(crate) width: u32,
@@ -378,6 +386,9 @@ pub(crate) enum Cli {
     RendererRebuildSmoke {
         options: RendererRebuildSmokeOptions,
     },
+    TorchLightProbe {
+        options: TorchLightProbeOptions,
+    },
     RemotePlayerVisualSmoke {
         options: RemotePlayerVisualSmokeOptions,
     },
@@ -406,6 +417,7 @@ enum HeadlessMode {
     DualView(PathBuf),
     Screenshot(PathBuf),
     RendererRebuildSmoke(PathBuf),
+    TorchLightProbe(PathBuf),
     RemotePlayerVisualSmoke(PathBuf),
 }
 
@@ -613,6 +625,16 @@ impl Cli {
                     }
                     set_headless_mode(&mut mode, HeadlessMode::RendererRebuildSmoke(path))?;
                 }
+                "--torch-light-probe" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--torch-light-probe requires an output directory")?;
+                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
+                        bail!("headless output modes cannot be combined with perf modes");
+                    }
+                    set_headless_mode(&mut mode, HeadlessMode::TorchLightProbe(path))?;
+                }
                 "--remote-player-visual-smoke" => {
                     let path = args
                         .next()
@@ -810,6 +832,7 @@ impl Cli {
                             | HeadlessMode::ActorWalkReview(_)
                             | HeadlessMode::DualView(_)
                             | HeadlessMode::RendererRebuildSmoke(_)
+                            | HeadlessMode::TorchLightProbe(_)
                             | HeadlessMode::RemotePlayerVisualSmoke(_)
                     )
                 ))
@@ -887,6 +910,14 @@ impl Cli {
                     scene,
                     render_options,
                     rebuild_render_scale,
+                },
+            }),
+            Some(HeadlessMode::TorchLightProbe(directory)) => Ok(Self::TorchLightProbe {
+                options: TorchLightProbeOptions {
+                    directory,
+                    width: width.unwrap_or(1280),
+                    height: height.unwrap_or(720),
+                    render_options,
                 },
             }),
             Some(HeadlessMode::RemotePlayerVisualSmoke(path)) => {
@@ -1269,6 +1300,7 @@ fn print_help() {
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|playable|idle|frames:N] [--screenshot-ui none|title|new-world|join-remote|pause|help|controls|block-palette|options-title|options-pause|server-settings-pause] [--screenshot-debug-pane true|false] [--screenshot-player-box true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+           mclone-native-client --torch-light-probe /tmp/mclone-torch-light-probe [--width 1280] [--height 720] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\
            mclone-native-client --remote-player-visual-smoke /tmp/mclone-remote-player-visual-smoke.png [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--day-time 6000] [--freeze-time] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\
