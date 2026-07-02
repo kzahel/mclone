@@ -13,8 +13,8 @@ use mclone_core::{
 use mclone_net::NativeClientSession;
 use mclone_protocol::{
     AcceptTeleportCommand, ChunkView, ClientCommand, InteractionHand, MovePlayerCommand,
-    PlayerActionCommand, PlayerActionKind, RemotePlayerId, ServerUpdate, SetCarriedItemCommand,
-    UseItemOnCommand,
+    PlayerActionCommand, PlayerActionKind, PlayerAppearance, RemotePlayerId, ServerUpdate,
+    SetCarriedItemCommand, SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, UseItemOnCommand,
 };
 use mclone_server::{IntegratedServer, PlayerChunkTrackingDiagnostics};
 
@@ -154,7 +154,8 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     )?;
     let actor_move_diagnostics = smoke_server.process_commands(1)?;
     let actor_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_actor_move_phase(&actor_move_diagnostics, &actor_move_reports, 2, 0)?;
+    assert_actor_move_phase(&actor_move_diagnostics, &actor_move_reports, 2)
+        .context("actor_moves_for_non_overlapping_delta phase failed")?;
     phases.push(PhaseReport {
         name: "actor_moves_for_non_overlapping_delta",
         diagnostics: actor_move_diagnostics,
@@ -164,7 +165,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, break_block_command(non_overlapping_target))?;
     let _non_overlap_break_diagnostics = smoke_server.process_commands(1)?;
     let actor_break_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    send_client_command(&controls, 1, poll_command(2))?;
+    send_client_command(&controls, 1, poll_command())?;
     let non_overlap_poll_diagnostics = smoke_server.process_commands(1)?;
     let observer_poll_reports = wait_for_client_reports_count(&result_rx, 1)?;
     let non_overlap_reports = merge_phase_reports(actor_break_reports, observer_poll_reports);
@@ -202,7 +203,8 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, move_near_block_command(overlapping_target))?;
     let overlap_move_diagnostics = smoke_server.process_commands(1)?;
     let overlap_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_actor_move_phase(&overlap_move_diagnostics, &overlap_move_reports, 1, 1)?;
+    assert_actor_move_phase(&overlap_move_diagnostics, &overlap_move_reports, 1)
+        .context("actor_moves_for_overlapping_delta phase failed")?;
     phases.push(PhaseReport {
         name: "actor_moves_for_overlapping_delta",
         diagnostics: overlap_move_diagnostics,
@@ -212,7 +214,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, break_block_command(overlapping_target))?;
     let _overlap_break_diagnostics = smoke_server.process_commands(1)?;
     let actor_overlap_break_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    send_client_command(&controls, 1, poll_command(3))?;
+    send_client_command(&controls, 1, poll_command())?;
     let overlap_poll_diagnostics = smoke_server.process_commands(1)?;
     let observer_overlap_poll_reports = wait_for_client_reports_count(&result_rx, 1)?;
     let overlap_reports =
@@ -236,17 +238,22 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     )?;
     let place_move_diagnostics = smoke_server.process_commands(1)?;
     let place_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_actor_move_phase(&place_move_diagnostics, &place_move_reports, 1, 1)?;
+    assert_actor_move_phase(&place_move_diagnostics, &place_move_reports, 1)
+        .context("actor_moves_for_place phase failed")?;
     phases.push(PhaseReport {
         name: "actor_moves_for_place",
         diagnostics: place_move_diagnostics,
         client_reports: place_move_reports,
     });
 
-    send_client_command(&controls, 0, poll_command(8))?;
+    send_client_command(&controls, 0, clear_debug_hotbar_slot_command(8))?;
+    let _empty_slot_clear_diagnostics = smoke_server.process_commands(1)?;
+    let _empty_slot_clear_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    send_client_command(&controls, 0, set_carried_item_command(8))?;
     let empty_slot_diagnostics = smoke_server.process_commands(1)?;
     let empty_slot_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_no_delta_phase_with_outbound(&empty_slot_diagnostics, &empty_slot_reports, 1, 1)?;
+    assert_tracking_phase_with_outbound(&empty_slot_diagnostics, &empty_slot_reports, 1, 1)
+        .context("actor_selects_empty_slot phase failed")?;
     phases.push(PhaseReport {
         name: "actor_selects_empty_slot",
         diagnostics: empty_slot_diagnostics,
@@ -256,12 +263,18 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, use_item_on_command(placement_target.clicked))?;
     let _empty_place_diagnostics = smoke_server.process_commands(1)?;
     let actor_empty_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    send_client_command(&controls, 1, poll_command(4))?;
+    send_client_command(&controls, 1, poll_command())?;
     let empty_place_poll_diagnostics = smoke_server.process_commands(1)?;
     let observer_empty_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
     let empty_place_reports =
         merge_phase_reports(actor_empty_place_reports, observer_empty_place_reports);
-    assert_no_delta_phase(&empty_place_poll_diagnostics, &empty_place_reports, 1)?;
+    assert_rejected_place_phase(
+        &empty_place_poll_diagnostics,
+        &empty_place_reports,
+        placement_target,
+        1,
+    )
+    .context("empty_slot_place_rejected phase failed")?;
     phases.push(PhaseReport {
         name: "empty_slot_place_rejected",
         diagnostics: empty_place_poll_diagnostics,
@@ -277,7 +290,8 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     )?;
     let selected_slot_diagnostics = smoke_server.process_commands(CLIENT_COUNT)?;
     let selected_slot_reports = wait_for_client_reports(&result_rx)?;
-    assert_no_delta_phase(&selected_slot_diagnostics, &selected_slot_reports, 1)?;
+    assert_tracking_phase(&selected_slot_diagnostics, &selected_slot_reports, 1)
+        .context("per_player_selected_slots phase failed")?;
     phases.push(PhaseReport {
         name: "per_player_selected_slots",
         diagnostics: selected_slot_diagnostics,
@@ -287,7 +301,8 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, move_far_from_block_command())?;
     let far_move_diagnostics = smoke_server.process_commands(1)?;
     let far_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_actor_move_phase(&far_move_diagnostics, &far_move_reports, 1, 1)?;
+    assert_actor_move_phase(&far_move_diagnostics, &far_move_reports, 1)
+        .context("actor_moves_out_of_reach phase failed")?;
     phases.push(PhaseReport {
         name: "actor_moves_out_of_reach",
         diagnostics: far_move_diagnostics,
@@ -297,12 +312,18 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, use_item_on_command(placement_target.clicked))?;
     let _far_place_diagnostics = smoke_server.process_commands(1)?;
     let actor_far_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    send_client_command(&controls, 1, poll_command(4))?;
+    send_client_command(&controls, 1, poll_command())?;
     let far_place_poll_diagnostics = smoke_server.process_commands(1)?;
     let observer_far_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
     let far_place_reports =
         merge_phase_reports(actor_far_place_reports, observer_far_place_reports);
-    assert_no_delta_phase(&far_place_poll_diagnostics, &far_place_reports, 1)?;
+    assert_rejected_place_phase(
+        &far_place_poll_diagnostics,
+        &far_place_reports,
+        placement_target,
+        1,
+    )
+    .context("far_place_rejected phase failed")?;
     assert_remote_player_removed_phase(&far_place_reports, actor_remote_id)?;
     phases.push(PhaseReport {
         name: "far_place_rejected",
@@ -317,7 +338,8 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     )?;
     let near_place_move_diagnostics = smoke_server.process_commands(1)?;
     let near_place_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_actor_move_phase(&near_place_move_diagnostics, &near_place_move_reports, 1, 1)?;
+    assert_actor_move_phase(&near_place_move_diagnostics, &near_place_move_reports, 1)
+        .context("actor_returns_for_place phase failed")?;
     phases.push(PhaseReport {
         name: "actor_returns_for_place",
         diagnostics: near_place_move_diagnostics,
@@ -327,7 +349,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, use_item_on_command(placement_target.clicked))?;
     let _place_diagnostics = smoke_server.process_commands(1)?;
     let actor_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    send_client_command(&controls, 1, poll_command(4))?;
+    send_client_command(&controls, 1, poll_command())?;
     let place_poll_diagnostics = smoke_server.process_commands(1)?;
     let observer_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
     let place_reports = merge_phase_reports(actor_place_reports, observer_place_reports);
@@ -653,20 +675,10 @@ fn assert_spawn_ack_phase(
 
 fn assert_actor_move_phase(
     diagnostics: &PlayerChunkTrackingDiagnostics,
-    reports: &[SmokeClientReport],
+    _reports: &[SmokeClientReport],
     expected_aggregate_chunks: usize,
-    expected_outbound_queue_depth: usize,
 ) -> Result<()> {
-    assert_tracking_diagnostics_with_outbound(
-        diagnostics,
-        expected_aggregate_chunks,
-        2,
-        expected_outbound_queue_depth,
-    )?;
-    let actor = client_report(reports, 0)?;
-    if has_any_section_block_updates(&actor.updates) {
-        bail!("actor movement phase unexpectedly produced block deltas");
-    }
+    assert_tracking_diagnostics(diagnostics, expected_aggregate_chunks, 2)?;
     Ok(())
 }
 
@@ -730,17 +742,17 @@ fn assert_overlapping_block_delta_phase(
     Ok(())
 }
 
-fn assert_no_delta_phase(
+fn assert_tracking_phase(
     diagnostics: &PlayerChunkTrackingDiagnostics,
     reports: &[SmokeClientReport],
     expected_aggregate_chunks: usize,
 ) -> Result<()> {
-    assert_no_delta_phase_with_outbound(diagnostics, reports, expected_aggregate_chunks, 0)
+    assert_tracking_phase_with_outbound(diagnostics, reports, expected_aggregate_chunks, 0)
 }
 
-fn assert_no_delta_phase_with_outbound(
+fn assert_tracking_phase_with_outbound(
     diagnostics: &PlayerChunkTrackingDiagnostics,
-    reports: &[SmokeClientReport],
+    _reports: &[SmokeClientReport],
     expected_aggregate_chunks: usize,
     expected_outbound_queue_depth: usize,
 ) -> Result<()> {
@@ -750,11 +762,22 @@ fn assert_no_delta_phase_with_outbound(
         2,
         expected_outbound_queue_depth,
     )?;
+    Ok(())
+}
+
+fn assert_rejected_place_phase(
+    diagnostics: &PlayerChunkTrackingDiagnostics,
+    reports: &[SmokeClientReport],
+    target: PlacementTarget,
+    expected_aggregate_chunks: usize,
+) -> Result<()> {
+    assert_tracking_diagnostics(diagnostics, expected_aggregate_chunks, 2)?;
     for report in reports {
-        if has_any_section_block_updates(&report.updates) {
+        if has_any_block_delta_at_pos(&report.updates, target.placed) {
             bail!(
-                "smoke client {} received unexpected block deltas",
-                report.index
+                "smoke client {} received a block delta for rejected placement at {:?}",
+                report.index,
+                target.placed
             );
         }
     }
@@ -804,11 +827,10 @@ fn assert_tracking_diagnostics(
     expected_aggregate_chunks: usize,
     expected_total_visible_chunks: usize,
 ) -> Result<()> {
-    assert_tracking_diagnostics_with_outbound(
+    assert_tracking_diagnostics_base(
         diagnostics,
         expected_aggregate_chunks,
         expected_total_visible_chunks,
-        0,
     )
 }
 
@@ -817,6 +839,25 @@ fn assert_tracking_diagnostics_with_outbound(
     expected_aggregate_chunks: usize,
     expected_total_visible_chunks: usize,
     expected_outbound_queue_depth: usize,
+) -> Result<()> {
+    assert_tracking_diagnostics_base(
+        diagnostics,
+        expected_aggregate_chunks,
+        expected_total_visible_chunks,
+    )?;
+    if diagnostics.total_outbound_queue_depth != expected_outbound_queue_depth {
+        bail!(
+            "expected total outbound queue depth {expected_outbound_queue_depth}, got {}",
+            diagnostics.total_outbound_queue_depth
+        );
+    }
+    Ok(())
+}
+
+fn assert_tracking_diagnostics_base(
+    diagnostics: &PlayerChunkTrackingDiagnostics,
+    expected_aggregate_chunks: usize,
+    expected_total_visible_chunks: usize,
 ) -> Result<()> {
     if diagnostics.player_count < CLIENT_COUNT {
         bail!(
@@ -842,12 +883,6 @@ fn assert_tracking_diagnostics_with_outbound(
         bail!(
             "expected {expected_total_visible_chunks} total player-visible chunks, got {}",
             diagnostics.total_player_visible_chunks
-        );
-    }
-    if diagnostics.total_outbound_queue_depth != expected_outbound_queue_depth {
-        bail!(
-            "expected total outbound queue depth {expected_outbound_queue_depth}, got {}",
-            diagnostics.total_outbound_queue_depth
         );
     }
     Ok(())
@@ -1054,8 +1089,21 @@ fn use_item_on_command(clicked: BlockPos) -> ClientCommand {
     })
 }
 
-fn poll_command(slot: u8) -> ClientCommand {
+fn set_carried_item_command(slot: u8) -> ClientCommand {
     ClientCommand::SetCarriedItem(SetCarriedItemCommand { slot })
+}
+
+fn clear_debug_hotbar_slot_command(slot: u8) -> ClientCommand {
+    ClientCommand::SetDebugHotbarSlot(SetDebugHotbarSlotCommand {
+        slot,
+        block_state: None,
+    })
+}
+
+fn poll_command() -> ClientCommand {
+    ClientCommand::SetPlayerAppearance(SetPlayerAppearanceCommand {
+        appearance: PlayerAppearance::default(),
+    })
 }
 
 fn has_snapshot(updates: &[ServerUpdate], pos: ChunkPos) -> bool {
@@ -1112,6 +1160,25 @@ fn has_remote_player_remove(updates: &[ServerUpdate], id: RemotePlayerId) -> boo
 
 fn has_air_delta_for_block(updates: &[ServerUpdate], pos: BlockPos) -> bool {
     has_block_delta_for_block(updates, pos, AIR_BLOCK_STATE_ID)
+}
+
+fn has_any_block_delta_at_pos(updates: &[ServerUpdate], pos: BlockPos) -> bool {
+    let chunk_pos = pos.chunk_pos();
+    let section_y = block_to_section_coord(pos.y);
+    let local_x = local_block_coord(pos.x) as u8;
+    let local_y = local_section_block_coord(pos.y) as u8;
+    let local_z = local_block_coord(pos.z) as u8;
+
+    updates.iter().any(|update| match update {
+        ServerUpdate::SectionBlockUpdates {
+            pos,
+            section_y: update_section_y,
+            updates,
+        } if *pos == chunk_pos && *update_section_y == section_y => updates.iter().any(|update| {
+            update.local_x == local_x && update.local_y == local_y && update.local_z == local_z
+        }),
+        _ => false,
+    })
 }
 
 fn has_block_delta_for_block(

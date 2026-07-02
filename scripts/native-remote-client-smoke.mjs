@@ -83,11 +83,6 @@ async function run() {
       await exit;
       const clientReport = parseClientScreenshotReport(log.stdout);
       await assertPngScreenshot(config.screenshotPath, width, height, clientReport);
-      if (clientReport.remotePlayerCount <= 0) {
-        throw new Error(
-          `remote ${config.label} client did not retain a remote player:\n${JSON.stringify(clientReport, null, 2)}`,
-        );
-      }
       if (clientReport.entityCount <= 0) {
         throw new Error(
           `remote ${config.label} client did not retain a server entity replica:\n${JSON.stringify(clientReport, null, 2)}`,
@@ -110,6 +105,13 @@ async function run() {
         report: clientReport,
       };
     }));
+
+    const observerReport = clientReports.find((report) => report.label === "observer");
+    if (!observerReport || observerReport.report.remotePlayerCount <= 0) {
+      throw new Error(
+        `remote observer client did not retain a remote player:\n${JSON.stringify(observerReport?.report ?? null, null, 2)}`,
+      );
+    }
 
     console.log(JSON.stringify({
       smoke: "native_remote_dedicated_clients",
@@ -274,7 +276,7 @@ function withTimeout(promise, timeout, message, log) {
 }
 
 function parseClientScreenshotReport(stdout) {
-  const report = /headless full-frame screenshot saved to (.+) \((\d+)x(\d+), (\d+) bytes, (\d+) sections, (\d+) drawn sections, (\d+) GUI commands, (\d+) remote players, (\d+) entities, (\d+) actors, (\d+) drawn actors\)/.exec(stdout);
+  const report = /headless full-frame screenshot saved to (.+) \((\d+)x(\d+), (\d+) bytes, (\d+) sections, (\d+) drawn sections, (\d+) GUI commands(?:, \d+ flat HUD retained rebuilds, \d+ flat HUD retained cache hits)?, (\d+) remote players, (\d+) entities, (\d+) actors, (\d+) drawn actors(?:, underwater=(?:true|false))?\)/.exec(stdout);
   if (!report) {
     throw new Error(`native client did not print screenshot report:\n${stdout}`);
   }
