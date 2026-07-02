@@ -962,6 +962,62 @@ Next implementation implication:
   completed results, uploaded sections/removals, and prepared-record rebuilds per
   frame.
 
+Opt-in ready/upload pacing experiment result:
+
+- Measured July 2, 2026 using the existing Android XR runtime flags:
+  `--xr-render-completed-result-accept-budget 1`,
+  `--xr-render-section-upload-budget 8`, and
+  `--xr-render-section-accept-budget 16`.
+- No code change was needed for this experiment. These flags already exercise
+  the opt-in budgeted path while leaving the default Java-like drain-all behavior
+  unchanged.
+- Validation:
+  - Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+    workers, 45 seconds.
+  - The APK built and `validate-quest-openxr.sh` passed.
+- Measurement:
+
+| Frame avg / p95 / p99 / max | Runtime / upload split | Work accepted this frame | Backlog |
+|---|---|---|---|
+| 15.640 / 18.084 / 23.280 / 48.932 ms | sync 5.750 ms; submit 3.935; snapshot 3.738; handoff 0.570; upload apply 4.813; ready sections 21.583; ready publish 16.609 | accepted results 1; completed sections 16; uploaded sections 8; removed sections 14 | queued completed results 1; queued upload sections 288; queued upload removals 320 |
+
+Other comparison points:
+
+- Meta perf dropped frames improved from `68` in the unbounded dispatcher-pump
+  run to `61`.
+- The p99 improved from `26.912 ms` to `23.280 ms`, and `over_2x_budget`
+  improved from `25` to `9`.
+- Upload/apply burst improved sharply (`runtime_upload_apply_ms` from `20.418`
+  to `4.813`), and submit/apply stayed low (`max_apply_ready_plan_ms=0.445`).
+- The strict budgets created substantial backlog and shifted the visible tail to
+  ready-set computation/publication and eye encode (`ready_publish_ms=16.609`,
+  left-eye encode `28.259`, right-eye encode `12.683`).
+
+Interpretation:
+
+- The existing budget knobs are useful as diagnostics and should remain opt-in.
+  They reduce the worst upload/apply spikes and improve p99, but the tested
+  values are too strict to treat as a default because they accumulate hundreds of
+  queued section uploads/removals in a 45 second render-distance-7 orbit.
+- The bottleneck is now more clearly split: upload apply can be bounded, but
+  ready-set recompute/publish and prepared draw-record churn still produce large
+  frame tails when work is spread across many more frames.
+- A second, less aggressive budget point was attempted
+  (`completed-result=2`, `upload=16`, `accept=64`), but ADB lost the headset
+  before launch. Restarting the ADB server did not rediscover the device during
+  this session.
+
+Next implementation implication:
+
+- Do not make the strict `1 / 8 / 16` policy the default.
+- When the headset is visible again, measure a less aggressive budget point:
+  completed-result accept budget `2`, upload budget `16`, section accept budget
+  `64`.
+- In parallel, the next code slice should target ready-set publication and
+  prepared-record churn: avoid rebuilding/publishing the full traversal-ready
+  set or broad prepared draw records when only a bounded subset of sections was
+  accepted/uploaded.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -1026,14 +1082,12 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Pace completed-result acceptance and ready-section publication/upload. The
-dispatcher pump removed render-frame worker wakeup from compile submit
-(`command_send_single_ms=0.003`), so the next visible burst is downstream:
-ready-plan application, GPU upload, ready-section publication, and prepared draw
-record/encode work.
+Finish the ready/upload pacing comparison, then target ready-set publication.
+The strict budget point improved p99 and upload/apply spikes but accumulated a
+large queued upload/removal backlog. The next measurement should use the less
+aggressive `2 / 16 / 64` budget point once ADB sees the headset again.
 
-Keep Java's drain-all behavior as the baseline measurement, but compare it
-against a bounded policy that limits accepted completed results, uploaded
-sections/removals, and prepared-record rebuilds per frame. Record both frame
-pacing and backlog growth so we can tell whether a smoother frame simply falls
-behind chunk movement.
+The next code slice should avoid broad ready-set publication and prepared-record
+churn when only a bounded subset of sections changed. Keep Java's drain-all
+behavior as the default until a budgeted policy improves frame pacing without
+falling behind chunk movement.
