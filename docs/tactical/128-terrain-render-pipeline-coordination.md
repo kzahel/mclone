@@ -1233,6 +1233,69 @@ Next implementation implication:
   released jobs this frame, upload-limited frames, capacity-limited frames, and
   compile admissions after release.
 
+Shared upload-phase diagnostics:
+
+- Implemented July 2, 2026 without changing upload, release, or admission
+  policy.
+- `RenderSectionUploadCoordinator` now reports a shared
+  `RenderSectionUploadPhaseReport` for enqueue, drain, and release work:
+  accepted compile jobs, queued lifecycle items, superseded lifecycle items,
+  drained lifecycle items, released compile jobs, queue backlog before/after,
+  held release lifecycle items, held compile jobs, and whether upload or accept
+  budgets limited the drain.
+- XR terrain carries that phase report through `XrTerrainUploadSummary`.
+- Android XR logs the maxima as
+  `MCLONE_ANDROID_XR_PERF_UPLOAD_PHASE_MAX`.
+- `android-xr/validate-quest-openxr.sh` now validates and includes that marker
+  in perf summaries.
+
+Validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render-session upload_coordinator`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client -p mclone-web-client`
+- `pnpm native:web:build`
+- `bash -n android-xr/validate-quest-openxr.sh`
+- `git diff --check -- android-xr/validate-quest-openxr.sh native/apps/mclone-android-xr-client/src/lib.rs native/crates/mclone-render-session/src/lib.rs native/crates/mclone-xr-scene/src/lib.rs`
+- Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+  workers, `2 / 16 / 64`, 45 seconds.
+
+Measurement:
+
+| Policy | Meta dropped frames | Frame avg / p95 / p99 / max | App over period | Upload phase max | Key tail |
+|---|---:|---|---:|---|---|
+| `2 / 16 / 64` shared upload coordinator | 64 | 15.813 / 18.174 / 21.490 / 52.185 ms | 81.7% | not yet logged | submit snapshot 12.748 ms; upload apply 11.853 ms; ready publish 10.410 ms |
+| `2 / 16 / 64` upload phase diagnostics | 75 | 15.623 / 17.960 / 22.534 / 52.100 ms | 79.0% | phase events 4; enqueued lifecycle 224; drained lifecycle 80; queued lifecycle 160; held lifecycle 128; held jobs 2; upload limited true; accept limited true; backpressured true | submit snapshot 11.037 ms; upload apply 3.728 ms; ready sections 24.015 ms; right-eye encode 29.623 ms |
+
+Interpretation:
+
+- The code change is diagnostic and should not be read as a performance win.
+  Dropped frames worsened in this single run (`64` to `75`), while average,
+  p95, app-over-period, and max frame time were similar or slightly better.
+  Treat this as within current run-to-run variability unless repeated.
+- The new phase line confirms the less aggressive budget lane still hits both
+  upload and accept limits. The max aggregator is per-field, not a consistent
+  single-frame snapshot, but it shows the important pressure shape: pending
+  upload lifecycle peaked at `160`, held release lifecycle at `128`, and held
+  compile jobs at `2`.
+- The run also shows upload apply can be low (`3.728 ms`) while ready-section
+  computation/publication and eye encode still produce large tails. That means
+  the next policy work should coordinate upload/release/admission with ready
+  publication, not only throttle GPU upload.
+
+Next implementation implication:
+
+- Use the new phase counters as the guardrail for the next policy change.
+- The next slice should make the shared coordinator return a frame decision:
+  drained/released work, backlog/held capacity after the drain, and whether
+  compile admission should be skipped because upload/publication is still
+  backlogged.
+- Keep `2 / 16 / 64` as the measurement lane. Do not tune the numbers again
+  until the shared phase can explain whether the frame was upload-limited,
+  accept-limited, capacity-limited, or ready/encode-limited.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -1297,14 +1360,13 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Expand the shared upload coordinator into the first real shared terrain
-frame-phase API. The current slice moved XR's queued upload/removal/release
-lifecycle into `mclone-render-session` without materially changing performance.
-The next slice should make that coordinator own the frame ordering around
-upload/publication and compile admission: drain pending upload work, release
-capacity from applied/superseded lifecycle items, report why the frame was
-limited, then admit new compile work only when the coordinated phase has
-headroom.
+Use the new upload-phase counters to implement the first shared terrain
+frame-decision API. The current slice reports queue/release/backlog state
+clearly, but XR still makes the "skip runtime sync while upload is backlogged"
+decision locally. The next slice should move that decision into the shared
+coordinator: drain pending upload work, release capacity from applied or
+superseded lifecycle items, report the limiting phase, then return whether new
+compile-result acceptance/submission may run on this frame.
 
 Use `2 / 16 / 64` as the current measurement lane, not a default policy. It was
 the best held-capacity result, but it is still over the 72 Hz app budget most of

@@ -4031,6 +4031,22 @@ mod android {
                 self.max_upload.traversal_ready_section_count
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_UPLOAD_PHASE_MAX phase_events={} enqueued_lifecycle={} superseded_lifecycle={} drained_lifecycle={} released_jobs={} released_on_enqueue={} released_on_apply={} queued_lifecycle={} held_lifecycle={} held_jobs={} upload_limited={} accept_limited={} backpressured={}",
+                self.max_upload.upload_phase_event_count,
+                self.max_upload.upload_enqueued_lifecycle_item_count,
+                self.max_upload.upload_superseded_lifecycle_item_count,
+                self.max_upload.upload_drained_lifecycle_item_count,
+                self.max_upload.upload_released_compile_job_count,
+                self.max_upload.upload_released_compile_jobs_on_enqueue,
+                self.max_upload.upload_released_compile_jobs_on_apply,
+                self.max_upload.queued_upload_lifecycle_item_count,
+                self.max_upload.upload_held_lifecycle_item_count,
+                self.max_upload.upload_held_compile_job_count,
+                self.max_upload.upload_limited,
+                self.max_upload.upload_accept_limited,
+                self.max_upload.upload_backpressured
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_RECORD_CACHE ready_set_calls={} ready_set_changed={} ready_set_unchanged={} prepared_rebuilds={} prepared_rebuild_frames={} prepared_rebuild_total_ms={:.3} prepared_rebuild_avg_ms={:.3} prepared_rebuild_max_ms={:.3} cumulative_rebuild_max_ms={:.3}",
                 record_cache_delta.ready_set_calls,
                 record_cache_delta.ready_set_changed_calls,
@@ -4626,6 +4642,37 @@ mod android {
             queued_upload_removed_section_count: a
                 .queued_upload_removed_section_count
                 .max(b.queued_upload_removed_section_count),
+            queued_upload_lifecycle_item_count: a
+                .queued_upload_lifecycle_item_count
+                .max(b.queued_upload_lifecycle_item_count),
+            upload_phase_event_count: a.upload_phase_event_count.max(b.upload_phase_event_count),
+            upload_enqueued_lifecycle_item_count: a
+                .upload_enqueued_lifecycle_item_count
+                .max(b.upload_enqueued_lifecycle_item_count),
+            upload_superseded_lifecycle_item_count: a
+                .upload_superseded_lifecycle_item_count
+                .max(b.upload_superseded_lifecycle_item_count),
+            upload_drained_lifecycle_item_count: a
+                .upload_drained_lifecycle_item_count
+                .max(b.upload_drained_lifecycle_item_count),
+            upload_released_compile_job_count: a
+                .upload_released_compile_job_count
+                .max(b.upload_released_compile_job_count),
+            upload_released_compile_jobs_on_enqueue: a
+                .upload_released_compile_jobs_on_enqueue
+                .max(b.upload_released_compile_jobs_on_enqueue),
+            upload_released_compile_jobs_on_apply: a
+                .upload_released_compile_jobs_on_apply
+                .max(b.upload_released_compile_jobs_on_apply),
+            upload_held_lifecycle_item_count: a
+                .upload_held_lifecycle_item_count
+                .max(b.upload_held_lifecycle_item_count),
+            upload_held_compile_job_count: a
+                .upload_held_compile_job_count
+                .max(b.upload_held_compile_job_count),
+            upload_limited: a.upload_limited || b.upload_limited,
+            upload_accept_limited: a.upload_accept_limited || b.upload_accept_limited,
+            upload_backpressured: a.upload_backpressured || b.upload_backpressured,
             traversal_ready_section_count: a
                 .traversal_ready_section_count
                 .max(b.traversal_ready_section_count),
