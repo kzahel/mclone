@@ -6,6 +6,7 @@ mod catalog;
 mod data;
 mod render_facts;
 mod terrain_assets;
+mod tint;
 mod visibility;
 
 use mclone_core::BlockStateId;
