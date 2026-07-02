@@ -173,7 +173,7 @@ pub(crate) fn full_chunk_status_for_ticket_level(ticket_level: i32) -> FullChunk
 mod tests {
     use super::*;
     use mclone_worldgen::block::{
-        AIR, LAVA_LEVEL_2, LAVA_LEVEL_8, OBSIDIAN, STONE, WATER_LEVEL_1, WATER_LEVEL_2,
+        AIR, LAVA_LEVEL_2, LAVA_LEVEL_8, OBSIDIAN, STONE, TORCH, WATER_LEVEL_1, WATER_LEVEL_2,
         WATER_LEVEL_8, lava_block_for_level, water_block_for_level,
     };
     use serde_json::Value;
@@ -365,7 +365,7 @@ mod tests {
         let min_y = fixture_i32(&fixture["level"], "minY");
         let height = fixture_i32(&fixture["level"], "height");
 
-        for case_name in ["lavaOpen", "lavaBlockedByStone"] {
+        for case_name in ["lavaOpen", "lavaBlockedByStone", "torchInStoneRoom"] {
             let case = synthetic_block_light_case(&fixture, case_name);
             let chunks = native_chunk_blocks_from_synthetic_light_case(case, min_y, height);
             let target_pos = ChunkPos::new(0, 0);
@@ -754,6 +754,25 @@ mod tests {
                 assert!((min_y..min_y + height).contains(&y));
                 blocks[chunk_block_index(local_block_coord(x), y - min_y, local_block_coord(z))] =
                     LAVA;
+            }
+        }
+        if let Some(torch_cells) = case.get("torch").and_then(Value::as_array) {
+            for cell in torch_cells {
+                let coords = cell
+                    .as_array()
+                    .expect("synthetic light torch cell must be an array");
+                assert_eq!(coords.len(), 3);
+                let x = coords[0].as_i64().unwrap() as i32;
+                let y = coords[1].as_i64().unwrap() as i32;
+                let z = coords[2].as_i64().unwrap() as i32;
+                let pos = WorldBlockPos::new(x, y, z);
+                let chunk_pos = pos.chunk_pos();
+                let blocks = chunks
+                    .get_mut(&chunk_pos)
+                    .unwrap_or_else(|| panic!("torch cell ({x}, {y}, {z}) had no loaded chunk"));
+                assert!((min_y..min_y + height).contains(&y));
+                blocks[chunk_block_index(local_block_coord(x), y - min_y, local_block_coord(z))] =
+                    TORCH;
             }
         }
         chunks

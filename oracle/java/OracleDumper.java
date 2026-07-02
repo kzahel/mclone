@@ -465,6 +465,7 @@ public final class OracleDumper {
       blockPalette.put("air", "minecraft:air");
       blockPalette.put("stone", "minecraft:stone");
       blockPalette.put("lava", "minecraft:lava");
+      blockPalette.put("torch", "minecraft:torch");
       root.put("blockPalette", blockPalette);
 
       List<Map<String, Object>> cases = new ArrayList<>();
@@ -528,6 +529,20 @@ public final class OracleDumper {
          sampleList(new int[]{15, 1, 1}),
          sampleList(new int[]{15, 1, 1}, new int[]{16, 1, 1}, new int[]{17, 1, 1}, new int[]{14, 1, 1})
       ));
+      blockCases.add(dumpSyntheticBlockCase(
+         "torchInStoneRoom",
+         chunkList(new int[]{0, 0}),
+         enclosedStoneRoomCells(5, 11, 0, 7, 5, 11),
+         new ArrayList<>(),
+         sampleList(new int[]{8, 1, 8}),
+         sampleList(
+            new int[]{8, 1, 8},
+            new int[]{8, 1, 9},
+            new int[]{8, 2, 8},
+            new int[]{10, 1, 8},
+            new int[]{4, 1, 8}
+         )
+      ));
       root.put("blockCases", blockCases);
 
       return GSON.toJson(root) + "\n";
@@ -587,6 +602,24 @@ public final class OracleDumper {
       List<int[]> lavaCells,
       List<int[]> samplePositions
    ) {
+      return dumpSyntheticBlockCase(
+         name,
+         chunks,
+         opaqueCells,
+         lavaCells,
+         new ArrayList<>(),
+         samplePositions
+      );
+   }
+
+   private static Map<String, Object> dumpSyntheticBlockCase(
+      String name,
+      List<int[]> chunks,
+      List<int[]> opaqueCells,
+      List<int[]> lavaCells,
+      List<int[]> torchCells,
+      List<int[]> samplePositions
+   ) {
       SyntheticLightLevel level = new SyntheticLightLevel(SYNTHETIC_LIGHT_MIN_Y, SYNTHETIC_LIGHT_HEIGHT);
       LevelLightEngine engine = new LevelLightEngine(level, true, false);
 
@@ -607,6 +640,12 @@ public final class OracleDumper {
          level.setBlock(cell[0], cell[1], cell[2], lava);
          engine.onBlockEmissionIncrease(pos, lava.getLightEmission());
       }
+      BlockState torch = Blocks.TORCH.defaultBlockState();
+      for (int[] cell : torchCells) {
+         BlockPos pos = new BlockPos(cell[0], cell[1], cell[2]);
+         level.setBlock(cell[0], cell[1], cell[2], torch);
+         engine.onBlockEmissionIncrease(pos, torch.getLightEmission());
+      }
       runLightUntilIdle(engine);
 
       Map<String, Object> result = new LinkedHashMap<>();
@@ -615,6 +654,7 @@ public final class OracleDumper {
       result.put("opaqueCount", opaqueCells.size());
       result.put("opaque", opaqueCells);
       result.put("lava", lavaCells);
+      result.put("torch", torchCells);
 
       List<Map<String, Object>> samples = new ArrayList<>();
       for (int[] position : samplePositions) {
@@ -700,6 +740,33 @@ public final class OracleDumper {
             for (int x = minX; x <= maxX; x++) {
                boolean wall = x == minX || x == maxX || z == minZ || z == maxZ || y == maxY;
                if (wall) {
+                  cells.add(new int[]{x, y, z});
+               }
+            }
+         }
+      }
+      return cells;
+   }
+
+   private static List<int[]> enclosedStoneRoomCells(
+      int minX,
+      int maxX,
+      int minY,
+      int maxY,
+      int minZ,
+      int maxZ
+   ) {
+      List<int[]> cells = new ArrayList<>();
+      for (int y = minY; y <= maxY; y++) {
+         for (int z = minZ; z <= maxZ; z++) {
+            for (int x = minX; x <= maxX; x++) {
+               boolean shell = x == minX
+                  || x == maxX
+                  || z == minZ
+                  || z == maxZ
+                  || y == minY
+                  || y == maxY;
+               if (shell) {
                   cells.add(new int[]{x, y, z});
                }
             }
