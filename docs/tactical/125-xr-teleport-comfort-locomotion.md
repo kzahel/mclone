@@ -90,6 +90,28 @@ The target preview should not conflict with the right-stick snap-turn work from
 `124`. Snap turn remains right-stick based. Blink/Shift target selection should
 stay left-stick or controller-aim based.
 
+## Desktop Flat Debug Input
+
+Desktop flat should have an interactive Blink debug path for testing the shared
+resolver without a headset. This is not a separate locomotion algorithm; it is
+an input/presentation adapter over the same target query, preview result, and
+body relocation contract used by XR.
+
+First debug input shape:
+
+- Holding a debug binding starts or refreshes the Blink intent preview.
+- Moving the mouse/camera while held updates the aim direction.
+- Releasing the binding commits the latest still-valid preview result.
+- If there is no completed valid result on release, commit is a no-op.
+- A cancel binding may clear the preview without committing.
+
+The flat debug aim should use a synthetic left-hand pose rather than the exact
+camera center ray. Start the intent arc from a camera/body-local offset that is
+slightly left of player center and visible from the normal view. Aim should be
+based on camera forward with a small upward pitch bias from the screen center or
+crosshair so the arc begins just above the vertical centerline and is visible
+while the user steers it with mouse look.
+
 ## Pathfinding Refactor Policy
 
 The pathfinding algorithm itself does not belong under passive mob AI. The
@@ -257,15 +279,21 @@ Landed:
   so path search stays off the XR render/frame thread.
 - [ ] Add a flat/offscreen test entry point that exercises the same query and
   target validation without requiring XR.
+- [ ] Add the desktop flat debug input adapter: hold-to-preview, mouse-look aim
+  updates, release-to-commit, and synthetic left-hand origin/upward-biased aim
+  feeding the shared query.
 - [ ] Keep web/WASM XR-worker support documented as intentionally absent while
   web has no XR target, without making the shared evaluator non-wasm or XR-only.
 
 ## Slice 3 - Preview Overlay
 
 - [ ] Render a world-space target feet marker.
+- [ ] Render the dot directly above the resolved feet marker.
 - [ ] Render a facing arrow or short body-forward line.
 - [ ] Render the candidate path/arc/line, with invalid previews visibly
   different from valid previews.
+- [ ] Keep the desktop flat debug arc visible from the normal camera by using
+  the synthetic off-center origin and upward-biased aim.
 - [ ] Route through existing multiview-aware world GUI/overlay paths where
   practical.
 - [ ] Add headless or synthetic render coverage for the overlay renderer path.
