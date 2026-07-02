@@ -1,6 +1,6 @@
 # 122: Torch Placement Lighting Demo
 
-Status: active; Slice B landed.
+Status: active; Slice C landed.
 
 ## Purpose
 
@@ -92,13 +92,31 @@ Validation:
 
 ### Slice C: Palette/Hotbar Exposure And Visual Validation
 
-Status: pending.
+Status: landed 2026-07-02.
 
 Add "Torch" to the debug palette and default hotbar slot 9. Capture and inspect
 a native screenshot showing placed torch geometry and visible light contribution
 with lighting enabled and fullbright disabled. Run the focused server/runtime
 tests plus the normal native smoke lane that is practical for the touched
 surface.
+
+Validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-protocol -p
+  mclone-client -p mclone-server -p mclone-app-runtime -p mclone-native-client`
+  passed outside the sandbox; the same command hit local TCP `Operation not
+  permitted` in native-client remote-session tests inside the sandbox.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-protocol -p
+  mclone-net` passed outside the sandbox after the protocol version bump; the
+  same command hit local TCP `Operation not permitted` in native TCP tests
+  inside the sandbox.
+- `cargo run --manifest-path native/Cargo.toml -p mclone-native-client --
+  --screenshot /tmp/mclone-torch-lighting-demo.png --width 1280 --height 720
+  --startup-wait frames:20 --screenshot-scripted-interaction true --seed 12345
+  --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 18000 --freeze-time
+  --lighting true --fullbright false --debug-passive-showcase false`
+- inspected `/tmp/mclone-torch-lighting-demo.png`: placed torch geometry and
+  local block-light contribution are visible with fullbright disabled
 
 ### Slice D: Web/XR Follow-Up
 

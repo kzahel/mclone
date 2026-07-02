@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 16;
+pub const PROTOCOL_VERSION: u32 = 17;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
@@ -21,7 +21,7 @@ pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] 
     Some(BlockStateId(42)),
     Some(BlockStateId(8)),
     Some(BlockStateId(91)),
-    None,
+    Some(BlockStateId(100)),
 ];
 
 const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
@@ -1558,6 +1558,11 @@ mod tests {
         };
         assert_eq!(view.render_distance, 8);
         assert_eq!(view.chunk_tracking_radius, 9);
+    }
+
+    #[test]
+    fn default_debug_hotbar_exposes_torch_in_final_slot() {
+        assert_eq!(DEFAULT_DEBUG_HOTBAR[8], Some(BlockStateId(100)));
     }
 
     #[test]

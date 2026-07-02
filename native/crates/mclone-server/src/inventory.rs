@@ -169,7 +169,7 @@ impl ServerInventory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_worldgen::block::{BRICKS, DIRT, SAND, STONE, generated_block_state_id};
+    use mclone_worldgen::block::{BRICKS, DIRT, SAND, STONE, TORCH, generated_block_state_id};
 
     #[test]
     fn carried_item_packet_updates_only_valid_hotbar_slots() {
@@ -197,7 +197,10 @@ mod tests {
             Some(generated_block_state_id(DIRT))
         );
         assert!(inventory.apply_set_carried_item(SetCarriedItemCommand { slot: 8 }));
-        assert_eq!(inventory.selected_block_state(), None);
+        assert_eq!(
+            inventory.selected_block_state(),
+            Some(generated_block_state_id(TORCH))
+        );
     }
 
     #[test]

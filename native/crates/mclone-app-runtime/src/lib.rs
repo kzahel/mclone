@@ -206,6 +206,7 @@ const DEBUG_BLOCK_PALETTE: &[(BlockStateId, &str)] = &[
     (BlockStateId(62), "Redstone Ore"),
     (BlockStateId(89), "Dripstone Block"),
     (BlockStateId(90), "Pointed Dripstone"),
+    (BlockStateId(100), "Torch"),
     (BlockStateId(43), "Grass"),
     (BlockStateId(44), "Dandelion"),
     (BlockStateId(45), "Poppy"),
@@ -1825,6 +1826,15 @@ mod tests {
         assert_eq!(chunk_tracking_radius_for_render_distance(2), 3);
         assert_eq!(chunk_tracking_radius_for_render_distance(3), 3);
         assert_eq!(chunk_tracking_radius_for_render_distance(4), 4);
+    }
+
+    #[test]
+    fn debug_block_palette_exposes_torch() {
+        assert!(
+            DEBUG_BLOCK_PALETTE
+                .iter()
+                .any(|&(state, label)| state == BlockStateId(100) && label == "Torch")
+        );
     }
 
     #[test]

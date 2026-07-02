@@ -101,6 +101,7 @@ mod tests {
         let mut inventory = ClientInventory::new();
 
         assert_eq!(inventory.hotbar_items()[0], Some(BlockStateId(1)));
+        assert_eq!(inventory.hotbar_items()[8], Some(BlockStateId(100)));
         assert_eq!(
             inventory.set_debug_hotbar_slot(0, Some(BlockStateId(91))),
             Some(ClientCommand::SetDebugHotbarSlot(

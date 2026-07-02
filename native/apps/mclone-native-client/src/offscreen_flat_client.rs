@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_app_runtime::{debug_block_palette_overlay, frame_render::FullFrameRenderSummary};
 use mclone_client::{ActorPresentationId, ClientHost};
+use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId};
 use mclone_input::{FlatInputAction, FlatInputFrame, FlatInputIntent};
 use mclone_protocol::{ClientCommand, MovePlayerCommand};
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
@@ -87,11 +88,6 @@ pub(crate) enum OffscreenScriptStep {
     SetCameraLookAt {
         eye: Vec3,
         target: Vec3,
-    },
-    SetCameraPose {
-        position: Vec3,
-        yaw: f32,
-        pitch: f32,
     },
     InputFrame {
         frame: FlatInputFrame,
@@ -396,13 +392,6 @@ impl OffscreenFlatClientHost {
                 OffscreenScriptStep::SetCameraLookAt { eye, target } => {
                     self.set_camera_look_at(eye, target);
                 }
-                OffscreenScriptStep::SetCameraPose {
-                    position,
-                    yaw,
-                    pitch,
-                } => {
-                    self.set_camera_pose(position, yaw, pitch);
-                }
                 OffscreenScriptStep::InputFrame {
                     frame,
                     require_changed_action,
@@ -507,9 +496,9 @@ impl OffscreenFlatClientHost {
     fn apply_scripted_interaction(&mut self) -> Result<()> {
         let target = self.scripted_interaction_target()?;
         let report = self.run_script(&scripted_interaction_script(target))?;
-        if report.input_frame_count != 3 || report.world_action_count != 2 {
+        if report.input_frame_count != 2 || report.world_action_count != 1 {
             bail!(
-                "scripted interaction expected 3 input frames and 2 world actions, got {} input frames and {} world actions",
+                "scripted interaction expected 2 input frames and 1 world action, got {} input frames and {} world actions",
                 report.input_frame_count,
                 report.world_action_count
             );
@@ -524,17 +513,23 @@ impl OffscreenFlatClientHost {
             .as_ref()
             .context("offscreen scripted interaction requires an active runtime")?;
         let (base_x, base_z) = self.driver.spectator.block_column();
-        let target_x = base_x;
-        let target_z = base_z + 4;
+        if let Some(target) = clear_scripted_interaction_target(runtime, base_x, base_z) {
+            return Ok(target);
+        }
+
+        let fallback_x = base_x;
+        let fallback_z = base_z + 4;
         let surface_y = runtime
-            .highest_non_air_block_y_at_world(target_x, target_z)
+            .highest_non_air_block_y_at_world(fallback_x, fallback_z)
             .with_context(|| {
-                format!("no loaded surface for scripted interaction at ({target_x}, {target_z})")
+                format!(
+                    "no loaded surface for scripted interaction at ({fallback_x}, {fallback_z})"
+                )
             })?;
         Ok(ScriptedInteractionTarget {
-            x: target_x,
+            x: fallback_x,
             y: surface_y,
-            z: target_z,
+            z: fallback_z,
         })
     }
 
@@ -564,18 +559,6 @@ impl OffscreenFlatClientHost {
         );
     }
 
-    fn set_camera_pose(&mut self, position: Vec3, yaw: f32, pitch: f32) {
-        let mut spectator = self.driver.spectator.clone();
-        spectator.position = position;
-        spectator.yaw = yaw;
-        spectator.pitch = pitch;
-        self.driver.set_spectator_camera(
-            spectator,
-            self.driver.scene.movement_speed_multiplier,
-            self.driver.scene.first_person_player_visible,
-        );
-    }
-
     fn set_camera_look_at(&mut self, eye: Vec3, target: Vec3) {
         let mut spectator = self.driver.spectator.clone();
         aim_spectator_at(&mut spectator, eye, target);
@@ -585,6 +568,46 @@ impl OffscreenFlatClientHost {
             self.driver.scene.first_person_player_visible,
         );
     }
+}
+
+fn clear_scripted_interaction_target(
+    runtime: &WindowSceneRuntime,
+    base_x: i32,
+    base_z: i32,
+) -> Option<ScriptedInteractionTarget> {
+    const X_OFFSETS: [i32; 7] = [0, -1, 1, -2, 2, -3, 3];
+    for dz in 3..=10 {
+        for dx in X_OFFSETS {
+            let x = base_x + dx;
+            let z = base_z + dz;
+            let Some(y) = runtime.highest_non_air_block_y_at_world(x, z) else {
+                continue;
+            };
+            if is_clear_torch_surface(runtime, x, y, z) {
+                return Some(ScriptedInteractionTarget { x, y, z });
+            }
+        }
+    }
+    None
+}
+
+fn is_clear_torch_surface(runtime: &WindowSceneRuntime, x: i32, y: i32, z: i32) -> bool {
+    let pos = BlockPos::new(x, y, z);
+    let above = pos.relative(mclone_core::Direction::Up);
+    let headroom = above.relative(mclone_core::Direction::Up);
+    let Some(surface) = runtime.client().block_state_at_block_pos(pos) else {
+        return false;
+    };
+    is_screenshot_surface_support(surface)
+        && runtime.client().block_state_at_block_pos(above) == Some(AIR_BLOCK_STATE_ID)
+        && runtime.client().block_state_at_block_pos(headroom) == Some(AIR_BLOCK_STATE_ID)
+}
+
+fn is_screenshot_surface_support(state: BlockStateId) -> bool {
+    matches!(
+        state.0,
+        1 | 4 | 5 | 6 | 7 | 13 | 14 | 15 | 33 | 34 | 38 | 40 | 52 | 53 | 88
+    )
 }
 
 pub(crate) fn run_offscreen_flat_client_screenshot(
@@ -777,8 +800,13 @@ fn scripted_interaction_script(target: ScriptedInteractionTarget) -> OffscreenSc
     );
     let final_position = Vec3::new(
         target.x as f32 + 0.5,
-        target.y as f32 + 5.0,
-        target.z as f32 - 6.0,
+        target.y as f32 + 6.0,
+        target.z as f32 - 2.0,
+    );
+    let final_target = Vec3::new(
+        target.x as f32 + 0.5,
+        target.y as f32 + 1.2,
+        target.z as f32 + 0.5,
     );
     OffscreenScript::from_steps([
         OffscreenScriptStep::SetCameraLookAt {
@@ -786,21 +814,16 @@ fn scripted_interaction_script(target: ScriptedInteractionTarget) -> OffscreenSc
             target: interaction_target,
         },
         OffscreenScriptStep::InputFrame {
-            frame: hotbar_input_frame(7),
+            frame: hotbar_input_frame(8),
             require_changed_action: None,
-        },
-        OffscreenScriptStep::InputFrame {
-            frame: action_input_frame(FlatInputAction::Attack),
-            require_changed_action: Some(FlatInputAction::Attack),
         },
         OffscreenScriptStep::InputFrame {
             frame: action_input_frame(FlatInputAction::Use),
             require_changed_action: Some(FlatInputAction::Use),
         },
-        OffscreenScriptStep::SetCameraPose {
-            position: final_position,
-            yaw: 0.0,
-            pitch: -0.7,
+        OffscreenScriptStep::SetCameraLookAt {
+            eye: final_position,
+            target: final_target,
         },
     ])
 }
@@ -832,10 +855,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scripted_interaction_script_has_camera_input_and_final_pose_steps() {
+    fn scripted_interaction_script_has_camera_input_and_final_framing_steps() {
         let script = scripted_interaction_script(ScriptedInteractionTarget { x: 1, y: 64, z: 2 });
 
-        assert_eq!(script.steps().len(), 5);
+        assert_eq!(script.steps().len(), 4);
         assert!(matches!(
             script.steps()[0],
             OffscreenScriptStep::SetCameraLookAt { .. }
@@ -844,7 +867,7 @@ mod tests {
             script.steps()[1],
             OffscreenScriptStep::InputFrame {
                 frame: FlatInputFrame {
-                    selected_hotbar_slot: Some(7),
+                    selected_hotbar_slot: Some(8),
                     ..
                 },
                 require_changed_action: None,
@@ -853,20 +876,13 @@ mod tests {
         assert!(matches!(
             script.steps()[2],
             OffscreenScriptStep::InputFrame {
-                require_changed_action: Some(FlatInputAction::Attack),
-                ..
-            }
-        ));
-        assert!(matches!(
-            script.steps()[3],
-            OffscreenScriptStep::InputFrame {
                 require_changed_action: Some(FlatInputAction::Use),
                 ..
             }
         ));
         assert!(matches!(
-            script.steps()[4],
-            OffscreenScriptStep::SetCameraPose { .. }
+            script.steps()[3],
+            OffscreenScriptStep::SetCameraLookAt { .. }
         ));
     }
 

@@ -2406,6 +2406,18 @@ mod tests {
         assert!(updates.is_empty());
     }
 
+    fn clear_debug_hotbar_slot(server: &mut IntegratedServer, slot: u8) {
+        let updates = server
+            .try_handle_command(ClientCommand::SetDebugHotbarSlot(
+                SetDebugHotbarSlotCommand {
+                    slot,
+                    block_state: None,
+                },
+            ))
+            .expect("clear debug hotbar slot");
+        assert!(updates.is_empty());
+    }
+
     fn use_held_item_on(hit: BlockHitResult) -> ClientCommand {
         ClientCommand::UseItemOn(UseItemOnCommand {
             hand: InteractionHand::MainHand,
@@ -3471,11 +3483,12 @@ mod tests {
     }
 
     #[test]
-    fn debug_place_command_rejects_empty_selected_hotbar_slot() {
+    fn debug_place_command_rejects_cleared_selected_hotbar_slot() {
         let mut server = IntegratedServer::new(0);
         load_center_chunk(&mut server);
         sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
         sync_carried_slot(&mut server, 8);
+        clear_debug_hotbar_slot(&mut server, 8);
         let clicked = BlockPos::new(8, 80, 8);
         assert!(server.scheduler_mut().set_block_at_world(clicked, GRASS));
         server.scheduler_mut().drain_pending_block_delta_events();
