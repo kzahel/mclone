@@ -687,8 +687,7 @@ extract first.
 
 ### Slice B: introduce the dispatcher boundary
 
-Status: implemented, host/web validated, Quest RD7 measurement pending because
-ADB reported no connected devices after an ADB server restart.
+Status: implemented, host/web validated, and Quest RD7 measured.
 
 The confirmed first owner boundary is a terrain compile dispatcher. This slice
 should make the ownership visible before it tries to remove every request clone.
@@ -730,21 +729,36 @@ Implementation result:
 - Behavior is intentionally preserved: snapshot-backed request construction and
   the current native worker/channel remain inside the native dispatcher for this
   extraction.
+- The first headset run showed the combined submit log line was too long for
+  logcat and truncated before the dispatcher counters. Android XR now emits a
+  separate `MCLONE_ANDROID_XR_PERF_TERRAIN_DISPATCHER_MAX` line.
 
 Validation:
 
 - `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
 - `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-android-xr-client`
 - `pnpm native:web:build`
+- Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+  workers, 45 seconds.
 
-Pending measurement:
+Measurement:
 
-- rerun the Quest Android XR per-eye render-distance-7 settled-orbit lane with
-  2 render compile workers once ADB sees the headset again,
-- compare frame avg/p95/p99/max and `command_send_single_ms` against the
-  current baseline,
-- confirm the new dispatcher counters appear on
-  `MCLONE_ANDROID_XR_PERF_TERRAIN_SUBMIT_MAX`.
+| Frame avg / p95 / p99 / max | Runtime submit split | Submit handoff split | Dispatcher health |
+|---|---|---|---|
+| 15.794 / 18.482 / 27.032 / 57.255 ms | submit 15.569 ms; snapshot 0.943; handoff 15.378 | request count 2; compiler submit total 15.349; compiler submit single 15.349; command send total 15.347; command send single 15.347; apply ready plan 0.283; ready update 0.002 | pending jobs 2; max pending jobs 2; available slots 2; queued compile tasks 2 |
+
+Interpretation:
+
+- Slice B succeeded as an ownership extraction: the runtime now has an explicit
+  dispatcher boundary and the new queue-health counters are visible.
+- It did not improve performance. The confirmed tail is still the same one:
+  command send of the owned compile request dominates compiler submit.
+- The frame lane was worse than the earlier pre-dispatcher reference
+  (`14.211 / 15.849 / 24.616 / 63.979 ms`), but this is not a clean isolated
+  A/B because the current tree/render state differs and this run drew 158
+  sections versus 128 in that earlier reference. Treat the result as "no
+  performance win, proceed to the actual transport change" rather than proof
+  that the boundary wrapper itself is the cause.
 
 ### Slice C: replace owned-request transport with dispatcher-owned slots
 
@@ -832,9 +846,9 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-First rerun the RD7 settled-orbit lane once the Quest is visible to ADB and
-record the dispatcher-boundary measurement. Slice B is code-complete but not yet
-headset-measured.
+Proceed to Slice C: replace owned-request transport with dispatcher-owned
+request slots or a preallocated request ring. Slice B gave us the owner boundary
+needed for that change but did not move the command-send tail.
 
 Do not repeat a plain `std::sync::mpsc::sync_channel` swap; it was measured
 worse than the current unbounded channel. After Slice B lands, Slice C is the
