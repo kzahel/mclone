@@ -1174,6 +1174,65 @@ Next implementation implication:
   counters still make it hard to tell whether a frame was upload-limited,
   capacity-limited, or submit-limited.
 
+Shared upload-coordinator extraction:
+
+- Implemented July 2, 2026 as the first promotion step out of XR-local
+  bookkeeping.
+- `mclone-render-session` now owns `RenderSectionUploadCoordinator`, a shared
+  pending upload/removal queue plus compile-release lifecycle tracker.
+- XR terrain no longer owns its own pending section uploads, pending removals,
+  or compile-release batches. It asks the shared coordinator to enqueue cache
+  updates, drain a budgeted slice, and release compile capacity after applied or
+  superseded lifecycle work.
+- Behavior is intentionally preserved. This slice changes ownership and test
+  coverage, not the budget policy or the default unbounded path.
+- The coordinator has focused unit coverage for budgeted removal drains,
+  batch-held release behavior, and superseded removal-to-rebuild release.
+
+Validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all`
+- `git diff --check -- native/crates/mclone-render-session/src/lib.rs native/crates/mclone-xr-scene/src/lib.rs`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render-session upload_coordinator`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client -p mclone-web-client`
+- `pnpm native:web:build`
+- Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+  workers, `2 / 16 / 64`, 45 seconds.
+
+Measurement:
+
+| Policy | Meta dropped frames | Frame avg / p95 / p99 / max | App over period | Upload backlog max | Key tail |
+|---|---:|---|---:|---|---|
+| `2 / 16 / 64` held capacity before shared coordinator | 62 | 15.767 / 18.296 / 24.512 / 51.107 ms | 82.7% | queued uploads 16; queued removals 160; queued completed results 0 | submit handoff 12.900 ms; upload apply 11.355 ms; ready publish 17.849 ms |
+| `2 / 16 / 64` shared upload coordinator | 64 | 15.813 / 18.174 / 21.490 / 52.185 ms | 81.7% | queued uploads 16; queued removals 160; queued completed results 0 | submit snapshot 12.748 ms; upload apply 11.853 ms; ready publish 10.410 ms |
+
+Interpretation:
+
+- This is effectively performance-neutral, which is the desired outcome for an
+  ownership extraction. Dropped frames moved from `62` to `64`, p99 improved
+  from `24.512 ms` to `21.490 ms`, max moved from `51.107 ms` to `52.185 ms`,
+  and app-over-period improved slightly from `82.7%` to `81.7%`.
+- The shared coordinator did not itself solve pacing. That is expected: it is
+  still only the upload/removal/release queue, not the full dirty-to-drawable
+  coordinator.
+- The useful result is architectural: the release-after-upload invariant is no
+  longer encoded in XR-only frame-loop fields. That makes the next step a shared
+  phase API instead of another XR-local cap.
+
+Next implementation implication:
+
+- Keep the shared upload coordinator.
+- Expand it into a real shared terrain frame phase: drain pending
+  upload/publication work first, release capacity from applied/superseded
+  lifecycle items, then admit new compile work under the same coordinator
+  counters.
+- Add explicit release/backlog diagnostics to the shared API before changing the
+  budget policy again: held completed jobs, pending upload lifecycle items,
+  released jobs this frame, upload-limited frames, capacity-limited frames, and
+  compile admissions after release.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -1238,15 +1297,17 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Promote the held-capacity bridge into a shared terrain coordinator. The current
-slice proves that capacity should stay occupied beyond CPU compile completion,
-but XR now owns too much lifecycle bookkeeping locally. The next slice should
-make the dispatcher/coordinator own section states through dirty, ready,
-compiling, completed, uploading, and drawable, then expose an explicit
-drain-then-admit frame API.
+Expand the shared upload coordinator into the first real shared terrain
+frame-phase API. The current slice moved XR's queued upload/removal/release
+lifecycle into `mclone-render-session` without materially changing performance.
+The next slice should make that coordinator own the frame ordering around
+upload/publication and compile admission: drain pending upload work, release
+capacity from applied/superseded lifecycle items, report why the frame was
+limited, then admit new compile work only when the coordinated phase has
+headroom.
 
 Use `2 / 16 / 64` as the current measurement lane, not a default policy. It was
 the best held-capacity result, but it is still over the 72 Hz app budget most of
 the time. The next run should tell us whether shared phase ownership reduces
-submit/ready/upload tails, not whether one more isolated budget number looks
-better.
+submit/ready/upload tails and clarifies the limiting phase, not whether one more
+isolated budget number looks better.
