@@ -1,14 +1,17 @@
 use crate::{
+    BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
     Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsParent,
     GameScreen, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale,
     GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction, Point, Rect, Slider, WidgetId,
-    centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
-    far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
-    fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
-    movement_speed_slider_value, next_touch_controls_mode, render_distance_from_slider_value,
+    block_palette_panel_rect, block_palette_slot_rect, centered_panel,
+    far_lod_range_from_slider_value, far_lod_range_label, far_lod_range_slider_value,
+    fly_speed_from_slider_value, fly_speed_label, fly_speed_slider_value,
+    movement_speed_from_slider_value, movement_speed_label, movement_speed_slider_value,
+    next_touch_controls_mode, render_block_palette_tooltip, render_distance_from_slider_value,
     render_distance_label, render_distance_slider_value, render_flat_hud_hotbar_layer,
-    render_flat_hud_retained_layer, render_flat_hud_transient_layers, touch_controls_mode_label,
-    touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
+    render_flat_hud_retained_layer, render_flat_hud_transient_layers, render_palette_slot_contents,
+    render_touch_panel, touch_controls_mode_label, touch_look_from_slider_value, touch_look_label,
+    touch_look_slider_value,
 };
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, ShortcutHelpGroup, ShortcutHelpRow,
@@ -18,6 +21,7 @@ use mclone_input::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiScreenId {
     Pause,
+    BlockPalette,
     Options { parent: GameOptionsParent },
     Help { parent: GameHelpParent },
 }
@@ -26,6 +30,7 @@ impl UiScreenId {
     pub fn from_game_screen(screen: Option<GameScreen>) -> Option<Self> {
         match screen {
             Some(GameScreen::Pause) => Some(Self::Pause),
+            Some(GameScreen::BlockPalette) => Some(Self::BlockPalette),
             Some(GameScreen::Options { parent }) => Some(Self::Options { parent }),
             Some(GameScreen::Help { parent }) => Some(Self::Help { parent }),
             _ => None,
@@ -86,6 +91,7 @@ pub enum UiWidgetKind {
     Button,
     Checkbox { checked: bool },
     Cycle,
+    PaletteSlot { icon: Option<GuiTextureUv> },
     Slider { value: f32 },
 }
 
@@ -153,6 +159,23 @@ impl UiWidget {
             enabled: true,
             value: None,
             action: None,
+        }
+    }
+
+    fn palette_slot(
+        id: UiWidgetId,
+        rect: Rect,
+        label: impl Into<String>,
+        icon: Option<GuiTextureUv>,
+    ) -> Self {
+        Self {
+            id,
+            kind: UiWidgetKind::PaletteSlot { icon },
+            rect,
+            label: label.into(),
+            enabled: true,
+            action: None,
+            value: None,
         }
     }
 
@@ -274,6 +297,29 @@ pub struct UiDebugSnapshot {
     pub widgets: Vec<UiDebugWidget>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BlockPaletteGridState {
+    scale: GuiScale,
+    selected_hotbar_slot: u8,
+    entries: [Option<BlockPaletteEntry>; BLOCK_PALETTE_ENTRY_CAPACITY],
+}
+
+impl BlockPaletteGridState {
+    fn from_overlay(scale: GuiScale, overlay: BlockPaletteOverlay) -> Option<Self> {
+        overlay.visible.then_some(Self {
+            scale,
+            selected_hotbar_slot: overlay.selected_hotbar_slot,
+            entries: overlay.entries,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CachedBlockPaletteGridLayer {
+    state: BlockPaletteGridState,
+    draw: GuiDrawList,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiSurface {
     screen: Option<UiScreenId>,
@@ -289,6 +335,8 @@ pub struct UiSurface {
     captured: Option<UiWidgetId>,
     font: Font,
     debug_overlay: bool,
+    block_palette_grid: Option<CachedBlockPaletteGridLayer>,
+    block_palette_grid_cache: UiDrawCacheStats,
 }
 
 impl Default for UiSurface {
@@ -314,6 +362,8 @@ impl UiSurface {
             captured: None,
             font: Font::default(),
             debug_overlay: false,
+            block_palette_grid: None,
+            block_palette_grid_cache: UiDrawCacheStats::default(),
         }
     }
 
@@ -473,6 +523,10 @@ impl UiSurface {
             (Some(UiScreenId::Pause), GuiKey::F1) => {
                 (true, Some(GameUiAction::OpenHelp(GameHelpParent::Pause)))
             }
+            (Some(UiScreenId::BlockPalette), GuiKey::Escape) => (true, Some(GameUiAction::Resume)),
+            (Some(UiScreenId::BlockPalette), GuiKey::F1) => {
+                (true, Some(GameUiAction::OpenHelp(GameHelpParent::Pause)))
+            }
             (Some(UiScreenId::Options { parent }), GuiKey::Escape) => match parent {
                 GameOptionsParent::Title => (true, Some(GameUiAction::BackToTitle)),
                 GameOptionsParent::Pause => (true, Some(GameUiAction::BackToPause)),
@@ -494,6 +548,7 @@ impl UiSurface {
         let mut draw = GuiDrawList::new();
         match self.screen {
             Some(UiScreenId::Pause) => self.render_pause(&mut draw),
+            Some(UiScreenId::BlockPalette) => self.render_block_palette(&mut draw),
             Some(UiScreenId::Options { parent }) => self.render_options(&mut draw, parent),
             Some(UiScreenId::Help { parent }) => self.render_help(&mut draw, parent),
             None => {}
@@ -511,6 +566,11 @@ impl UiSurface {
         self.layout_revision = self.layout_revision.wrapping_add(1);
         self.layout = match self.screen {
             Some(UiScreenId::Pause) => pause_layout(self.scale, self.layout_revision),
+            Some(UiScreenId::BlockPalette) => block_palette_layout(
+                self.scale,
+                self.layout_revision,
+                self.render_state.block_palette,
+            ),
             Some(UiScreenId::Options { parent }) => {
                 options_layout(self.scale, self.layout_revision, parent, self.render_state)
             }
@@ -684,6 +744,90 @@ impl UiSurface {
         }
     }
 
+    fn render_block_palette(&mut self, draw: &mut GuiDrawList) {
+        let overlay = self.render_state.block_palette;
+        if !overlay.visible {
+            self.block_palette_grid_cache = UiDrawCacheStats::default();
+            return;
+        }
+
+        let grid = self.render_block_palette_grid_layer(overlay);
+        draw.append(&grid);
+        self.render_block_palette_interaction_layer(draw);
+    }
+
+    fn render_block_palette_grid_layer(&mut self, overlay: BlockPaletteOverlay) -> GuiDrawList {
+        let Some(state) = BlockPaletteGridState::from_overlay(self.scale, overlay) else {
+            self.block_palette_grid_cache = UiDrawCacheStats::default();
+            return GuiDrawList::new();
+        };
+        if let Some(cached) = &self.block_palette_grid {
+            if cached.state == state {
+                self.block_palette_grid_cache = UiDrawCacheStats::cache_hit();
+                return cached.draw.clone();
+            }
+        }
+
+        let mut draw = GuiDrawList::new();
+        let panel = block_palette_panel_rect(self.scale, overlay);
+        draw.fill(panel, Color::rgba(5, 8, 9, 188));
+        draw.outline(panel, Color::rgba(132, 158, 148, 210));
+        self.font.draw_shadow_atlas(
+            &mut draw,
+            &format!("SLOT {}", u16::from(overlay.selected_hotbar_slot) + 1),
+            panel.x + BLOCK_PALETTE_PADDING,
+            panel.y + 5.0,
+            Color::rgba(218, 234, 226, 255),
+        );
+
+        for widget in self.layout.widgets() {
+            let UiWidgetKind::PaletteSlot { icon } = widget.kind else {
+                continue;
+            };
+            render_touch_panel(&mut draw, widget.rect, false);
+            render_palette_slot_contents(&mut draw, &self.font, widget.rect, icon);
+        }
+
+        self.block_palette_grid = Some(CachedBlockPaletteGridLayer {
+            state,
+            draw: draw.clone(),
+        });
+        self.block_palette_grid_cache = UiDrawCacheStats::rebuild();
+        draw
+    }
+
+    fn render_block_palette_interaction_layer(&self, draw: &mut GuiDrawList) {
+        for widget in self.layout.widgets() {
+            let UiWidgetKind::PaletteSlot { icon } = widget.kind else {
+                continue;
+            };
+            if self.captured == Some(widget.id) {
+                render_touch_panel(draw, widget.rect, true);
+                render_palette_slot_contents(draw, &self.font, widget.rect, icon);
+            }
+            if self.hovered == Some(widget.id) {
+                draw.outline(widget.rect.inset(-1.0), Color::rgba(245, 250, 255, 205));
+            }
+        }
+
+        let Some(hovered) = self.hovered.and_then(|id| self.layout.widget(id)) else {
+            return;
+        };
+        if matches!(hovered.kind, UiWidgetKind::PaletteSlot { .. }) {
+            let tooltip_anchor = Point {
+                x: hovered.rect.right(),
+                y: hovered.rect.y,
+            };
+            render_block_palette_tooltip(
+                draw,
+                &self.font,
+                self.scale,
+                tooltip_anchor,
+                hovered.label.as_str(),
+            );
+        }
+    }
+
     fn render_widget(&self, draw: &mut GuiDrawList, widget: &UiWidget, interaction: Interaction) {
         match &widget.kind {
             UiWidgetKind::Button => Button::new(
@@ -712,6 +856,14 @@ impl UiSurface {
                 );
                 cycle.enabled = widget.enabled;
                 cycle.render_atlas_text(draw, &self.font, interaction);
+            }
+            UiWidgetKind::PaletteSlot { icon } => {
+                render_touch_panel(
+                    draw,
+                    widget.rect,
+                    interaction.pressed == Some(widget.id.legacy_widget_id()),
+                );
+                render_palette_slot_contents(draw, &self.font, widget.rect, *icon);
             }
             UiWidgetKind::Slider { value } => Slider::new(
                 widget.id.legacy_widget_id(),
@@ -1195,6 +1347,7 @@ const UI_V2_OPTIONS_SERVER_SETTINGS: UiWidgetId = UiWidgetId(118);
 const UI_V2_OPTIONS_BACK: UiWidgetId = UiWidgetId(119);
 const UI_V2_OPTIONS_XR_TURN_MODE: UiWidgetId = UiWidgetId(120);
 const UI_V2_HELP_BACK: UiWidgetId = UiWidgetId(201);
+const UI_V2_BLOCK_PALETTE_BASE: u64 = 3000;
 
 fn pause_layout(scale: GuiScale, revision: u64) -> UiLayout {
     let mut layout = UiLayout::new(Some(UiScreenId::Pause), revision);
@@ -1228,6 +1381,34 @@ fn pause_layout(scale: GuiScale, revision: u64) -> UiLayout {
 
 fn menu_button_rect(scale: GuiScale, y: f32) -> Rect {
     Rect::new(scale.width * 0.5 - 90.0, y, 180.0, 20.0)
+}
+
+fn block_palette_slot_id(index: usize) -> UiWidgetId {
+    UiWidgetId(UI_V2_BLOCK_PALETTE_BASE + index as u64)
+}
+
+fn block_palette_layout(scale: GuiScale, revision: u64, overlay: BlockPaletteOverlay) -> UiLayout {
+    let mut layout = UiLayout::new(Some(UiScreenId::BlockPalette), revision);
+    if !overlay.visible {
+        return layout;
+    }
+
+    for (index, entry) in overlay.entries.into_iter().enumerate() {
+        let Some(entry) = entry else {
+            continue;
+        };
+        let Some(rect) = block_palette_slot_rect(scale, overlay, index) else {
+            continue;
+        };
+        layout.push(
+            UiWidget::palette_slot(block_palette_slot_id(index), rect, entry.label, entry.icon)
+                .action(GameUiAction::AssignHotbarBlock {
+                    slot: overlay.selected_hotbar_slot,
+                    block_state: entry.block_state,
+                }),
+        );
+    }
+    layout
 }
 
 fn help_layout(scale: GuiScale, revision: u64, parent: GameHelpParent) -> UiLayout {
@@ -1600,8 +1781,8 @@ const fn help_parent_for_options(parent: GameOptionsParent) -> GameHelpParent {
 mod tests {
     use super::*;
     use crate::{
-        EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, GameSimulationCadence, GameTouchSettings, GameUi,
-        GameXrTurnMode, GuiDrawCommand, GuiTextureUv, render_flat_hud,
+        EMPTY_BLOCK_PALETTE_ENTRIES, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, GameSimulationCadence,
+        GameTouchSettings, GameUi, GameXrTurnMode, GuiDrawCommand, GuiTextureUv, render_flat_hud,
     };
     use mclone_input::{InputPromptKind, ResolvedFlatInput, TouchControlsMode};
 
@@ -1629,6 +1810,18 @@ mod tests {
             accepts_touch: false,
             accepts_gamepad: false,
             accepts_xr_controller: false,
+        }
+    }
+
+    fn block_palette_state(selected_hotbar_slot: u8) -> GameUiRenderState {
+        let brick_icon = GuiTextureUv::new(0.1, 0.2, 0.3, 0.4);
+        let log_icon = GuiTextureUv::new(0.4, 0.3, 0.2, 0.1);
+        let mut entries = EMPTY_BLOCK_PALETTE_ENTRIES;
+        entries[0] = Some(BlockPaletteEntry::new(91, Some(brick_icon), "Bricks"));
+        entries[1] = Some(BlockPaletteEntry::new(41, Some(log_icon), "Oak Log"));
+        GameUiRenderState {
+            block_palette: BlockPaletteOverlay::visible(selected_hotbar_slot, entries),
+            ..GameUiRenderState::default()
         }
     }
 
@@ -1771,6 +1964,150 @@ mod tests {
             host.render_v2_panel_draw_list(GameUiRenderState::default())
                 .is_none()
         );
+    }
+
+    #[test]
+    fn block_palette_layout_uses_committed_slots_for_actions() {
+        let scale = GuiScale::from_pixels(960, 540);
+        let state = block_palette_state(4);
+        let mut surface = UiSurface::new();
+        surface.set_screen(Some(UiScreenId::BlockPalette));
+        surface.set_scale(scale);
+        surface.set_render_state(state);
+
+        let widgets = surface.layout().widgets().to_vec();
+        assert_eq!(widgets.len(), 2);
+        assert_eq!(widgets[0].id, block_palette_slot_id(0));
+        assert_eq!(widgets[0].label, "Bricks");
+        assert_eq!(
+            widgets[0].rect,
+            block_palette_slot_rect(scale, state.block_palette, 0)
+                .expect("first palette slot rect")
+        );
+
+        let point = point_in(widgets[0].rect);
+        assert!(surface.pointer_down(point, state));
+        let (_handled, action) = surface.pointer_up(point, state);
+        assert_eq!(
+            action,
+            Some(GameUiAction::AssignHotbarBlock {
+                slot: 4,
+                block_state: 91,
+            })
+        );
+    }
+
+    #[test]
+    fn block_palette_grid_cache_survives_hover_and_pointer_jitter() {
+        let state = block_palette_state(2);
+        let mut surface = UiSurface::new();
+        surface.set_screen(Some(UiScreenId::BlockPalette));
+        surface.set_scale(GuiScale::from_pixels(960, 540));
+
+        let first = surface.render_draw_list(state);
+        assert_eq!(
+            surface.block_palette_grid_cache,
+            UiDrawCacheStats::rebuild()
+        );
+        assert!(!first.commands().is_empty());
+
+        let second = surface.render_draw_list(state);
+        assert_eq!(
+            surface.block_palette_grid_cache,
+            UiDrawCacheStats::cache_hit()
+        );
+        assert_eq!(second, first);
+
+        let slots = surface.layout().widgets().to_vec();
+        let slot_zero = slots[0].rect;
+        surface.pointer_move(point_in(slot_zero), state);
+        let hovered_revision = surface.panel_revision().expect("active surface");
+        let hovered = surface.render_draw_list(state);
+        assert_eq!(
+            surface.block_palette_grid_cache,
+            UiDrawCacheStats::cache_hit()
+        );
+        assert_ne!(hovered, second);
+
+        surface.pointer_move(
+            Point {
+                x: slot_zero.x + 2.0,
+                y: slot_zero.y + 2.0,
+            },
+            state,
+        );
+        assert_eq!(surface.panel_revision(), Some(hovered_revision));
+        let jitter = surface.render_draw_list(state);
+        assert_eq!(
+            surface.block_palette_grid_cache,
+            UiDrawCacheStats::cache_hit()
+        );
+        assert_eq!(jitter, hovered);
+
+        let mut changed = state;
+        changed.block_palette.entries[1] = Some(BlockPaletteEntry::new(
+            41,
+            Some(GuiTextureUv::new(0.2, 0.3, 0.4, 0.5)),
+            "Oak Log",
+        ));
+        surface.render_draw_list(changed);
+        assert_eq!(
+            surface.block_palette_grid_cache,
+            UiDrawCacheStats::rebuild()
+        );
+    }
+
+    #[test]
+    fn game_ui_host_block_palette_uses_v2_panel_cache() {
+        let state = block_palette_state(4);
+        let mut host = GameUiHost::new_ingame();
+        host.set_screen(Some(GameScreen::BlockPalette));
+        host.set_scale(GuiScale::from_pixels(960, 540));
+
+        let first = host
+            .render_v2_panel_draw_list(state)
+            .expect("BlockPalette is a v2 panel");
+        assert_eq!(first.cache, UiDrawCacheStats::rebuild());
+        assert!(!first.draw.commands().is_empty());
+        assert!(first.draw.commands().iter().any(|command| matches!(
+            command,
+            GuiDrawCommand::TextureRect { uv, .. }
+                if *uv == GuiTextureUv::new(0.1, 0.2, 0.3, 0.4)
+        )));
+
+        let second = host
+            .render_v2_panel_draw_list(state)
+            .expect("BlockPalette is a v2 panel");
+        assert_eq!(second.cache, UiDrawCacheStats::cache_hit());
+        assert_eq!(second.revision, first.revision);
+        assert_eq!(second.draw, first.draw);
+
+        let snapshot = host
+            .v2_debug_snapshot()
+            .expect("BlockPalette has debug data");
+        let slot = snapshot
+            .widgets
+            .iter()
+            .find(|widget| widget.id == block_palette_slot_id(0))
+            .expect("first palette slot")
+            .rect;
+        host.pointer_move(point_in(slot));
+        let hovered = host
+            .render_v2_panel_draw_list(state)
+            .expect("BlockPalette is a v2 panel");
+        assert_eq!(hovered.cache, UiDrawCacheStats::rebuild());
+        assert_ne!(hovered.revision, first.revision);
+
+        host.pointer_move(Point {
+            x: slot.x + 2.0,
+            y: slot.y + 2.0,
+        });
+        let jitter = host
+            .render_v2_panel_draw_list(state)
+            .expect("BlockPalette is a v2 panel");
+        assert_eq!(jitter.cache, UiDrawCacheStats::cache_hit());
+        assert_eq!(jitter.revision, hovered.revision);
+        assert_eq!(jitter.draw, hovered.draw);
     }
 
     #[test]

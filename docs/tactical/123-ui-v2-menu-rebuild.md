@@ -348,9 +348,10 @@ Validation:
 
 ### Slice H: HUD, Hotbar, And Block Picker V2
 
-Status: flat crosshair/hotbar frame, hotbar selection/content retention, and
-runtime cache reporting landed 2026-07-02; selected item text, debug/status
-overlays, touch/gamepad prompts, and block picker still pending.
+Status: flat crosshair/hotbar frame, hotbar selection/content retention, block
+picker v2 retained grid, and runtime cache reporting landed 2026-07-02;
+selected item text, debug/status overlays, and touch/gamepad prompts still
+pending.
 
 Move in-game UI surfaces to v2 retained layers:
 
@@ -1073,7 +1074,66 @@ Known limits:
 - native desktop live-world HUD pixel capture still needs a dedicated diagnostic
   path because the current offscreen screenshot command does not attach HUD
   state
-- block picker and block-picker hit testing are still legacy
+
+## Landed Block Picker V2 Retained-Grid Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- moved `GameScreen::BlockPalette` into `UiScreenId`, so player-facing block
+  picker rendering and hit testing now route through `GameUiHost`'s v2 surface
+- added committed v2 slot widgets for occupied block-palette entries, with
+  `AssignHotbarBlock` actions derived from the committed render state
+- added a retained block-palette grid draw-list cache keyed by GUI scale,
+  selected hotbar slot, and palette entry contents
+- kept hover, press, and tooltip visuals in a transient layer so pointer
+  movement does not rebuild the grid
+- anchored the v2 tooltip to the committed slot rect instead of the raw pointer,
+  preserving cache stability for pointer jitter inside one slot
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui block_palette -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui game_ui_host_block_palette_uses_v2_panel_cache -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-xr-scene -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-block-palette.png --width 960 --height 540 --screenshot-ui block-palette --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true
+```
+
+Automated proof coverage:
+
+- `block_palette_layout_uses_committed_slots_for_actions` proves v2 slot hit
+  testing uses committed rects and emits the expected `AssignHotbarBlock`
+  action
+- `block_palette_grid_cache_survives_hover_and_pointer_jitter` proves the grid
+  cache rebuilds on first render, hits on unchanged frames, survives hover and
+  same-slot pointer jitter, and rebuilds when palette entry contents change
+- `game_ui_host_block_palette_uses_v2_panel_cache` proves `GameUiHost` now treats
+  BlockPalette as a v2 panel, including top-level cache hits for pointer jitter
+
+Rendered checks:
+
+- native block-palette screenshot generated and inspected:
+  `/tmp/mclone-ui-v2-block-palette.png`
+- browser live-world canvas smoke regenerated and inspected:
+  `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- legacy `GameUi` still contains direct BlockPalette render/hit code for
+  compatibility and tests; the player-facing host path now uses v2
+- block picker visual content is retained as GUI commands, not yet as a GPU-side
+  texture/atlas independent of the normal GUI renderer
+- touch-specific hotbar controls, gamepad prompts, status/debug overlays, and
+  selected item name fade are still transient immediate layers
 
 ## Non-Goals
 
@@ -1089,18 +1149,20 @@ Known limits:
 
 ## Next Recommended Chunk
 
-Continue Slice H with the block picker retained surface.
+Continue with cleanup for the migrated block picker, then resume remaining HUD
+transient layers.
 
 Next scope:
 
 - run a real headset/desktop XR idle Controls smoke and confirm
   `ui_draw_rebuilds=0`, `ui_panel_repaints=0`, and no texture recreates on quiet
   frames after the first cached frame
-- add a native live-world HUD screenshot diagnostic if we need desktop pixel
-  proof before or during block picker migration
-- move the creative block picker to a v2 retained slot-grid layer with committed
-  layout, draw-cache counters, and hit tests proving pointer movement inside the
-  same slot does not rebuild the grid
+- remove or quarantine the legacy `GameUi` BlockPalette render/hit path now that
+  `GameUiHost` routes the player-facing screen through v2
+- keep the geometry/render helpers that v2 still shares, but move tests off the
+  legacy `GameUi` path
+- after that cleanup, decide whether the next Slice H item is selected item name
+  fade, touch/gamepad prompt retention, or status/debug overlay retention
 
 ## Completed First Recommended Chunk
 
