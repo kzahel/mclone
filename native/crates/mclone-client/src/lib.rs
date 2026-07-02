@@ -62,6 +62,7 @@ pub enum ClientHost {
 #[derive(Clone, Debug)]
 pub struct ClientRuntime {
     host: ClientHost,
+    world_seed: Option<i64>,
     chunk_view: Option<ChunkView>,
     chunks: BTreeMap<ChunkPos, ChunkSnapshot>,
     day_time: u64,
@@ -75,6 +76,7 @@ impl ClientRuntime {
     pub fn new(host: ClientHost) -> Self {
         Self {
             host,
+            world_seed: None,
             chunk_view: None,
             chunks: BTreeMap::new(),
             day_time: 0,
@@ -89,8 +91,21 @@ impl ClientRuntime {
         Self::new(ClientHost::LocalIntegrated)
     }
 
+    pub fn local_integrated_with_seed(seed: i64) -> Self {
+        Self::new(ClientHost::LocalIntegrated).with_world_seed(seed)
+    }
+
+    pub fn with_world_seed(mut self, seed: i64) -> Self {
+        self.world_seed = Some(seed);
+        self
+    }
+
     pub const fn host(&self) -> ClientHost {
         self.host
+    }
+
+    pub const fn world_seed(&self) -> Option<i64> {
+        self.world_seed
     }
 
     pub fn set_chunk_view(&mut self, view: ChunkView) -> ClientCommand {

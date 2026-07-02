@@ -111,7 +111,7 @@ impl WebRuntime {
 
     pub fn local_integrated_at(seed: i64, initial_center: ChunkPos) -> Self {
         let host = WebLoopbackHost::new(seed);
-        let mut core = SingleViewRuntime::local_integrated(initial_center, 0, 0);
+        let mut core = SingleViewRuntime::local_integrated_with_seed(seed, initial_center, 0, 0);
         core.force_day_time(host.day_time());
         Self {
             core,
@@ -131,9 +131,10 @@ impl WebRuntime {
         config: WebIntegratedServerRunnerConfig,
         initial_center: ChunkPos,
     ) -> Result<Self, String> {
+        let seed = config.seed;
         let runner = WebIntegratedServerRunner::new(config).await?;
         let diagnostics = runner.diagnostics();
-        let mut core = SingleViewRuntime::local_integrated(initial_center, 0, 0);
+        let mut core = SingleViewRuntime::local_integrated_with_seed(seed, initial_center, 0, 0);
         core.force_day_time(diagnostics.day_time);
         Ok(Self {
             core,

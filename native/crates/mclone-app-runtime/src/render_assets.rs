@@ -16,7 +16,8 @@ use mclone_render::actor_assets::load_actor_texture_assets as load_actor_texture
 use mclone_render::chunk::ChunkTextureAtlas;
 use mclone_render_session::{
     RenderSectionCompileQueueHealth, RenderSectionCompileRequest, RenderSectionCompileResult,
-    RenderSectionCompileSubmitTiming, RenderSectionCompiler, build_render_sections_from_snapshots,
+    RenderSectionCompileSubmitTiming, RenderSectionCompiler,
+    build_render_sections_from_snapshots_with_world_seed,
 };
 
 use crate::elapsed_ms;
@@ -471,9 +472,13 @@ fn compile_render_section_request(
     catalog: &TexturedMeshCatalog,
     request: RenderSectionCompileRequest,
 ) -> RenderSectionCompileResult {
-    let result =
-        build_render_sections_from_snapshots(&request.snapshots, catalog, &request.target_sections)
-            .map_err(|error| format!("{error:#}"));
+    let result = build_render_sections_from_snapshots_with_world_seed(
+        &request.snapshots,
+        catalog,
+        &request.target_sections,
+        request.world_seed,
+    )
+    .map_err(|error| format!("{error:#}"));
     RenderSectionCompileResult {
         target_sections: request.target_sections,
         section_revisions: request.section_revisions,
@@ -898,6 +903,7 @@ mod tests {
             target_sections: BTreeSet::new(),
             section_revisions: BTreeMap::new(),
             snapshots: Vec::new(),
+            world_seed: None,
         }
     }
 

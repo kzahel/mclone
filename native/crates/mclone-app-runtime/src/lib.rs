@@ -793,6 +793,20 @@ impl SingleViewRuntime {
         )
     }
 
+    pub fn local_integrated_with_seed(
+        seed: i64,
+        interest_center: ChunkPos,
+        render_distance: u32,
+        chunk_tracking_radius: u32,
+    ) -> Self {
+        Self::new(
+            ClientRuntime::local_integrated_with_seed(seed),
+            interest_center,
+            render_distance,
+            chunk_tracking_radius,
+        )
+    }
+
     pub fn remote_dedicated(
         interest_center: ChunkPos,
         render_distance: u32,
@@ -1108,6 +1122,7 @@ impl SingleViewRuntime {
             .engine
             .render_session()
             .build_ready_plan_compile_request(&sync_plan.ready_plan, snapshots)
+            .map(|request| request.with_world_seed(self.client().world_seed()))
         else {
             timing.submit_request_build_ms += elapsed_ms(request_build_start.elapsed());
 

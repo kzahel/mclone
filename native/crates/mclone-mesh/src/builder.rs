@@ -10,6 +10,7 @@ use mclone_light::{
     FULL_BRIGHT, pack_light, packed_block_light, packed_light_at_local_block_or_fullbright,
     packed_sky_light,
 };
+use sha2::{Digest, Sha256};
 
 use crate::ambient_occlusion::{
     AmbientOcclusionFace, AmbientOcclusionSampler, AmbientOcclusionShape, BlockPos,
@@ -27,6 +28,9 @@ use crate::data::{
 use crate::tint::{blended_liquid_color, block_tint};
 use crate::visibility::{VisGraph, VisibilityGraphTimer, VisibilitySet};
 use crate::{AIR_BLOCK_ID, CAVE_AIR_BLOCK_ID, CAVE_AIR_BLOCK_STATE_ID};
+
+const LCG_MULTIPLIER: i64 = 6364136223846793005;
+const LCG_INCREMENT: i64 = 1442695040888963407;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ChunkMeshInput<'a> {
@@ -90,6 +94,7 @@ pub struct TexturedChunkMeshInput<'a> {
     pub blocks: &'a [BlockStateId],
     pub biomes: &'a [i32],
     pub light_sections: &'a [PackedLightSection],
+    pub biome_zoom_seed: Option<i64>,
 }
 
 impl<'a> TexturedChunkMeshInput<'a> {
@@ -118,11 +123,22 @@ impl<'a> TexturedChunkMeshInput<'a> {
             blocks,
             biomes: &[],
             light_sections: &[],
+            biome_zoom_seed: None,
         }
     }
 
     pub fn with_biomes(mut self, biomes: &'a [i32]) -> Self {
         self.biomes = biomes;
+        self
+    }
+
+    pub fn with_world_seed(mut self, seed: i64) -> Self {
+        self.biome_zoom_seed = Some(obfuscate_biome_zoom_seed(seed));
+        self
+    }
+
+    pub fn with_biome_zoom_seed(mut self, biome_zoom_seed: i64) -> Self {
+        self.biome_zoom_seed = Some(biome_zoom_seed);
         self
     }
 
@@ -153,6 +169,18 @@ impl<'a> TexturedChunkMeshInput<'a> {
     }
 
     fn biome_id_at_or_default(&self, local_x: i32, world_y: i32, local_z: i32) -> i32 {
+        let local_quart_x = local_x.div_euclid(4).clamp(0, 3);
+        let local_quart_z = local_z.div_euclid(4).clamp(0, 3);
+        let quart_y = world_y.div_euclid(4);
+        self.biome_id_at_quart_or_default(local_quart_x, quart_y, local_quart_z)
+    }
+
+    fn biome_id_at_quart_or_default(
+        &self,
+        local_quart_x: i32,
+        quart_y: i32,
+        local_quart_z: i32,
+    ) -> i32 {
         if self.biomes.is_empty() {
             return DEFAULT_BIOME_ID;
         }
@@ -162,10 +190,9 @@ impl<'a> TexturedChunkMeshInput<'a> {
             return DEFAULT_BIOME_ID;
         }
 
-        let local_quart_x = local_x.div_euclid(4).clamp(0, 3);
-        let local_quart_z = local_z.div_euclid(4).clamp(0, 3);
-        let local_quart_y =
-            (world_y.div_euclid(4) - self.min_y.div_euclid(4)).clamp(0, quart_height - 1);
+        let local_quart_x = local_quart_x.clamp(0, 3);
+        let local_quart_z = local_quart_z.clamp(0, 3);
+        let local_quart_y = (quart_y - self.min_y.div_euclid(4)).clamp(0, quart_height - 1);
         let index = ((local_quart_y << 4) | (local_quart_z << 2) | local_quart_x) as usize;
         self.biomes.get(index).copied().unwrap_or(DEFAULT_BIOME_ID)
     }
@@ -1338,6 +1365,12 @@ fn biome_id_at_world_or_default(
     y: i32,
     world_z: i32,
 ) -> i32 {
+    if let Some(zoom_seed) = inputs.iter().find_map(|input| input.biome_zoom_seed) {
+        return fuzzy_offset_constant_column_biome_id(zoom_seed, world_x, world_z, |x, y, z| {
+            biome_id_at_quart_or_default(inputs, x, y, z)
+        });
+    }
+
     let chunk_x = block_to_chunk_coord(world_x);
     let chunk_z = block_to_chunk_coord(world_z);
     let local_x = local_block_coord(world_x);
@@ -1347,6 +1380,152 @@ fn biome_id_at_world_or_default(
         .find(|input| input.chunk_x == chunk_x && input.chunk_z == chunk_z)
         .map(|input| input.biome_id_at_or_default(local_x, y, local_z))
         .unwrap_or(DEFAULT_BIOME_ID)
+}
+
+fn biome_id_at_quart_or_default(
+    inputs: &[TexturedChunkMeshInput<'_>],
+    quart_x: i32,
+    quart_y: i32,
+    quart_z: i32,
+) -> i32 {
+    let chunk_x = quart_x.div_euclid(4);
+    let chunk_z = quart_z.div_euclid(4);
+    let local_quart_x = quart_x.rem_euclid(4);
+    let local_quart_z = quart_z.rem_euclid(4);
+    inputs
+        .iter()
+        .find(|input| input.chunk_x == chunk_x && input.chunk_z == chunk_z)
+        .map(|input| input.biome_id_at_quart_or_default(local_quart_x, quart_y, local_quart_z))
+        .unwrap_or(DEFAULT_BIOME_ID)
+}
+
+fn obfuscate_biome_zoom_seed(seed: i64) -> i64 {
+    let digest = Sha256::digest(seed.to_le_bytes());
+    i64::from_le_bytes(
+        digest[..8]
+            .try_into()
+            .expect("sha256 digest has at least eight bytes"),
+    )
+}
+
+fn fuzzy_offset_constant_column_biome_id(
+    zoom_seed: i64,
+    block_x: i32,
+    block_z: i32,
+    noise_biome_source: impl Fn(i32, i32, i32) -> i32,
+) -> i32 {
+    let (quart_x, quart_y, quart_z) =
+        fuzzy_offset_constant_column_quart(zoom_seed, block_x, block_z);
+    noise_biome_source(quart_x, quart_y, quart_z)
+}
+
+fn fuzzy_offset_constant_column_quart(
+    zoom_seed: i64,
+    block_x: i32,
+    block_z: i32,
+) -> (i32, i32, i32) {
+    fuzzy_offset_quart(zoom_seed, block_x, 0, block_z)
+}
+
+fn fuzzy_offset_quart(zoom_seed: i64, block_x: i32, block_y: i32, block_z: i32) -> (i32, i32, i32) {
+    let shifted_x = block_x - 2;
+    let shifted_y = block_y - 2;
+    let shifted_z = block_z - 2;
+    let base_quart_x = shifted_x >> 2;
+    let base_quart_y = shifted_y >> 2;
+    let base_quart_z = shifted_z >> 2;
+    let offset_x = (shifted_x & 3) as f64 / 4.0;
+    let offset_y = (shifted_y & 3) as f64 / 4.0;
+    let offset_z = (shifted_z & 3) as f64 / 4.0;
+
+    let mut best_corner = 0;
+    let mut best_distance = f64::INFINITY;
+    for corner in 0..8 {
+        let use_base_x = (corner & 4) == 0;
+        let use_base_y = (corner & 2) == 0;
+        let use_base_z = (corner & 1) == 0;
+        let quart_x = if use_base_x {
+            base_quart_x
+        } else {
+            base_quart_x + 1
+        };
+        let quart_y = if use_base_y {
+            base_quart_y
+        } else {
+            base_quart_y + 1
+        };
+        let quart_z = if use_base_z {
+            base_quart_z
+        } else {
+            base_quart_z + 1
+        };
+        let scale_x = if use_base_x { offset_x } else { offset_x - 1.0 };
+        let scale_y = if use_base_y { offset_y } else { offset_y - 1.0 };
+        let scale_z = if use_base_z { offset_z } else { offset_z - 1.0 };
+        let distance = get_fiddled_distance(
+            zoom_seed, quart_x, quart_y, quart_z, scale_x, scale_y, scale_z,
+        );
+        if distance < best_distance {
+            best_corner = corner;
+            best_distance = distance;
+        }
+    }
+
+    let quart_x = if (best_corner & 4) == 0 {
+        base_quart_x
+    } else {
+        base_quart_x + 1
+    };
+    let quart_y = if (best_corner & 2) == 0 {
+        base_quart_y
+    } else {
+        base_quart_y + 1
+    };
+    let quart_z = if (best_corner & 1) == 0 {
+        base_quart_z
+    } else {
+        base_quart_z + 1
+    };
+    (quart_x, quart_y, quart_z)
+}
+
+fn get_fiddled_distance(
+    zoom_seed: i64,
+    quart_x: i32,
+    quart_y: i32,
+    quart_z: i32,
+    scale_x: f64,
+    scale_y: f64,
+    scale_z: f64,
+) -> f64 {
+    let mut seed = linear_congruential_generator_next(zoom_seed, quart_x as i64);
+    seed = linear_congruential_generator_next(seed, quart_y as i64);
+    seed = linear_congruential_generator_next(seed, quart_z as i64);
+    seed = linear_congruential_generator_next(seed, quart_x as i64);
+    seed = linear_congruential_generator_next(seed, quart_y as i64);
+    seed = linear_congruential_generator_next(seed, quart_z as i64);
+    let fiddle_x = get_fiddle(seed);
+    seed = linear_congruential_generator_next(seed, zoom_seed);
+    let fiddle_y = get_fiddle(seed);
+    seed = linear_congruential_generator_next(seed, zoom_seed);
+    let fiddle_z = get_fiddle(seed);
+    square(scale_z + fiddle_z) + square(scale_y + fiddle_y) + square(scale_x + fiddle_x)
+}
+
+fn get_fiddle(seed: i64) -> f64 {
+    let scaled = (seed >> 24).rem_euclid(1024) as f64;
+    (scaled / 1024.0 - 0.5) * 0.9
+}
+
+fn square(value: f64) -> f64 {
+    value * value
+}
+
+fn linear_congruential_generator_next(left: i64, right: i64) -> i64 {
+    let transformed = left
+        .wrapping_mul(LCG_MULTIPLIER)
+        .wrapping_add(LCG_INCREMENT);
+    left.wrapping_mul(transformed).wrapping_add(right)
 }
 
 fn packed_light_at_world_or_fullbright(
@@ -1444,6 +1623,97 @@ fn direction_offset(direction: ModelFaceDirection) -> [i32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn empty_textured_blocks(height: i32) -> Vec<BlockStateId> {
+        vec![AIR_BLOCK_STATE_ID; CHUNK_WIDTH as usize * CHUNK_WIDTH as usize * height as usize]
+    }
+
+    fn biome_id_for_world_quart(quart_x: i32, quart_z: i32) -> i32 {
+        10_000 + quart_x * 100 + quart_z
+    }
+
+    fn test_biomes_for_chunk(chunk_x: i32, chunk_z: i32, height: i32) -> Vec<i32> {
+        let quart_height = height / 4;
+        let mut biomes = Vec::with_capacity((quart_height * 4 * 4) as usize);
+        for _quart_y in 0..quart_height {
+            for local_quart_z in 0..4 {
+                for local_quart_x in 0..4 {
+                    biomes.push(biome_id_for_world_quart(
+                        chunk_x * 4 + local_quart_x,
+                        chunk_z * 4 + local_quart_z,
+                    ));
+                }
+            }
+        }
+        biomes
+    }
+
+    #[test]
+    fn obfuscates_biome_zoom_seed_like_biome_manager() {
+        assert_eq!(obfuscate_biome_zoom_seed(1124), 2_991_024_998_819_753_860);
+    }
+
+    #[test]
+    fn fuzzy_constant_column_quart_matches_reference_cases() {
+        let zoom_seed = obfuscate_biome_zoom_seed(1124);
+
+        assert_eq!(
+            fuzzy_offset_constant_column_quart(zoom_seed, 0, 0),
+            (-1, -1, 0)
+        );
+        assert_eq!(
+            fuzzy_offset_constant_column_quart(zoom_seed, 4, 0),
+            (1, 0, -1)
+        );
+        assert_eq!(
+            fuzzy_offset_constant_column_quart(zoom_seed, 15, 15),
+            (3, 0, 3)
+        );
+        assert_eq!(
+            fuzzy_offset_constant_column_quart(zoom_seed, 32, 0),
+            (8, 0, 0)
+        );
+    }
+
+    #[test]
+    fn unseeded_biome_lookup_uses_direct_quart_cell() {
+        let blocks = empty_textured_blocks(16);
+        let center_biomes = test_biomes_for_chunk(0, 0, 16);
+        let input = TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks).with_biomes(&center_biomes);
+
+        assert_eq!(
+            biome_id_at_world_or_default(&[input], 4, 64, 0),
+            biome_id_for_world_quart(1, 0)
+        );
+    }
+
+    #[test]
+    fn seeded_biome_lookup_uses_fuzzy_offset_constant_column() {
+        let blocks = empty_textured_blocks(16);
+        let center_biomes = test_biomes_for_chunk(0, 0, 16);
+        let north_biomes = test_biomes_for_chunk(0, -1, 16);
+        let west_biomes = test_biomes_for_chunk(-1, 0, 16);
+        let inputs = [
+            TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks)
+                .with_biomes(&center_biomes)
+                .with_world_seed(1124),
+            TexturedChunkMeshInput::new(0, -1, 0, 16, &blocks)
+                .with_biomes(&north_biomes)
+                .with_world_seed(1124),
+            TexturedChunkMeshInput::new(-1, 0, 0, 16, &blocks)
+                .with_biomes(&west_biomes)
+                .with_world_seed(1124),
+        ];
+
+        assert_eq!(
+            biome_id_at_world_or_default(&inputs, 4, 64, 0),
+            biome_id_for_world_quart(1, -1)
+        );
+        assert_eq!(
+            biome_id_at_world_or_default(&inputs, 0, 64, 0),
+            biome_id_for_world_quart(-1, 0)
+        );
+    }
 
     #[test]
     fn all_air_textured_sections_keep_visibility_without_mesh_work() {

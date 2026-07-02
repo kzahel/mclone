@@ -1472,6 +1472,7 @@ dependencies = [
  "mclone-core",
  "mclone-light",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

@@ -248,7 +248,8 @@ impl LocalSingleViewSceneRuntime {
         let server_runner = NativeIntegratedServerRunner::new(native_runner_config(&options))
             .context("failed to start local single-view integrated server runner")?;
         let mut scene = Self {
-            core: SingleViewRuntime::local_integrated(
+            core: SingleViewRuntime::local_integrated_with_seed(
+                options.seed,
                 options.center,
                 options.render_distance,
                 options.chunk_tracking_radius(),
@@ -1405,7 +1406,8 @@ where
 pub fn build_local_single_view_client_runtime(
     options: LocalSingleViewSceneOptions,
 ) -> Result<ClientRuntime> {
-    let mut runtime = SingleViewRuntime::local_integrated(
+    let mut runtime = SingleViewRuntime::local_integrated_with_seed(
+        options.seed,
         options.center,
         options.render_distance,
         options.chunk_tracking_radius(),

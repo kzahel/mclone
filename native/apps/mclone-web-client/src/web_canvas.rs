@@ -58,9 +58,9 @@ use mclone_render_session::{
     RenderSectionCompileResult, RenderSectionCompiler, RenderSectionNeighborReadiness,
     RenderSectionRemovalMode, RenderSectionSyncPlan, RenderSectionViewSync,
     actor_instances_from_presentations, build_client_textured_sections,
-    build_render_sections_from_snapshots, decode_textured_render_section_build_report,
-    encode_textured_render_section_build_report, render_section_chunk_pos,
-    render_section_neighbor_readiness, snapshot_contains_render_section,
+    build_render_sections_from_snapshots_with_world_seed,
+    decode_textured_render_section_build_report, encode_textured_render_section_build_report,
+    render_section_chunk_pos, render_section_neighbor_readiness, snapshot_contains_render_section,
     summarize_textured_render_section_build_report,
 };
 use mclone_server::ServerRunnerKind;
@@ -102,6 +102,7 @@ const WEB_OVERVIEW_CAMERA_EYE_Y: f32 = 256.0;
 // followed by that many `[i32 x][i32 z]` chunk positions to drop from the mirror.
 const WEB_RENDER_COMPILE_DELTA_MAGIC: &[u8; 8] = b"MCWRCD1\0";
 const WEB_RENDER_COMPILE_DELTA_FLAG_RESET: u32 = 1;
+const WEB_RENDER_COMPILE_DELTA_FLAG_WORLD_SEED: u32 = 2;
 
 // 067 Stage 2 ABI / Stage 5 lock: resident render-compiler shared ring constants.
 // The worker writes the result control word + payload and main wasm reads them back
@@ -373,6 +374,7 @@ pub struct WebRenderCompilerSession {
     // The mirror epoch this session currently holds. A non-reset delta whose generation does
     // not match is a desync (e.g. a worker that silently lost its mirror) and is rejected.
     mirror_generation: u32,
+    world_seed: Option<i64>,
     last_delta_upsert_count: usize,
     last_delta_eviction_count: usize,
 }
@@ -391,6 +393,7 @@ impl WebRenderCompilerSession {
             compile_count: 0,
             snapshot_mirror: BTreeMap::new(),
             mirror_generation: 0,
+            world_seed: None,
             last_delta_upsert_count: 0,
             last_delta_eviction_count: 0,
         })
@@ -486,6 +489,7 @@ impl WebRenderCompilerSession {
             &self.mesh_assets.catalog,
             &snapshots,
             &target_sections,
+            self.world_seed,
         )
         .map_err(JsValue::from)?;
         let packed = encode_textured_render_section_build_report(&report);
@@ -531,6 +535,7 @@ impl WebRenderCompilerSession {
         }
         self.last_delta_upsert_count = delta.upserts.len();
         self.last_delta_eviction_count = delta.evictions.len();
+        self.world_seed = delta.world_seed;
         for pos in &delta.evictions {
             self.snapshot_mirror.remove(pos);
         }
@@ -706,9 +711,13 @@ fn compile_generated_chunk_sections_with_catalog(
             .chunk_snapshots()
             .cloned()
             .collect::<Vec<_>>();
-        build_render_sections_from_snapshots(&snapshots, catalog, target_sections).map_err(
-            |error| format!("failed to compile targeted generated render sections: {error:#}"),
+        build_render_sections_from_snapshots_with_world_seed(
+            &snapshots,
+            catalog,
+            target_sections,
+            Some(SMOKE_SEED),
         )
+        .map_err(|error| format!("failed to compile targeted generated render sections: {error:#}"))
     } else {
         build_client_textured_sections(runtime.client(), catalog).map_err(|error| {
             format!("failed to compile generated textured render sections: {error:#}")
@@ -720,9 +729,15 @@ fn compile_snapshot_chunk_sections_with_catalog<S: std::borrow::Borrow<ChunkSnap
     catalog: &TexturedMeshCatalog,
     snapshots: &[S],
     target_sections: &BTreeSet<RenderSectionKey>,
+    world_seed: Option<i64>,
 ) -> Result<mclone_mesh::TexturedRenderSectionBuildReport, String> {
-    build_render_sections_from_snapshots(snapshots, catalog, target_sections)
-        .map_err(|error| format!("failed to compile snapshot render sections: {error:#}"))
+    build_render_sections_from_snapshots_with_world_seed(
+        snapshots,
+        catalog,
+        target_sections,
+        world_seed,
+    )
+    .map_err(|error| format!("failed to compile snapshot render sections: {error:#}"))
 }
 
 /// A per-frame render-compile input delta against the worker's resident snapshot mirror
@@ -732,6 +747,7 @@ fn compile_snapshot_chunk_sections_with_catalog<S: std::borrow::Borrow<ChunkSnap
 struct WebRenderCompileDelta {
     generation: u32,
     reset: bool,
+    world_seed: Option<i64>,
     upserts: Vec<ChunkSnapshot>,
     evictions: Vec<ChunkPos>,
 }
@@ -739,18 +755,25 @@ struct WebRenderCompileDelta {
 fn encode_web_render_compile_delta(
     generation: u32,
     reset: bool,
+    world_seed: Option<i64>,
     upserts: &[ChunkSnapshot],
     evictions: &[ChunkPos],
 ) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(WEB_RENDER_COMPILE_DELTA_MAGIC);
     bytes.extend_from_slice(&generation.to_le_bytes());
-    let flags = if reset {
+    let mut flags = if reset {
         WEB_RENDER_COMPILE_DELTA_FLAG_RESET
     } else {
         0
     };
+    if world_seed.is_some() {
+        flags |= WEB_RENDER_COMPILE_DELTA_FLAG_WORLD_SEED;
+    }
     bytes.extend_from_slice(&flags.to_le_bytes());
+    if let Some(seed) = world_seed {
+        bytes.extend_from_slice(&seed.to_le_bytes());
+    }
     write_web_compile_input_u32(&mut bytes, upserts.len(), "delta upsert count")?;
     for snapshot in upserts {
         let frame = encode_server_update(&ServerUpdate::ChunkSnapshot(snapshot.clone())).map_err(
@@ -781,6 +804,11 @@ fn decode_web_render_compile_delta(bytes: &[u8]) -> Result<WebRenderCompileDelta
     let generation = reader.read_u32("delta generation")?;
     let flags = reader.read_u32("delta flags")?;
     let reset = flags & WEB_RENDER_COMPILE_DELTA_FLAG_RESET != 0;
+    let world_seed = if flags & WEB_RENDER_COMPILE_DELTA_FLAG_WORLD_SEED != 0 {
+        Some(reader.read_i64("delta world seed")?)
+    } else {
+        None
+    };
     let upsert_count = reader.read_u32("delta upsert count")? as usize;
     let mut upserts = Vec::with_capacity(upsert_count);
     for index in 0..upsert_count {
@@ -808,6 +836,7 @@ fn decode_web_render_compile_delta(bytes: &[u8]) -> Result<WebRenderCompileDelta
     Ok(WebRenderCompileDelta {
         generation,
         reset,
+        world_seed,
         upserts,
         evictions,
     })
@@ -845,6 +874,13 @@ impl<'a> WebRenderCompileInputReader<'a> {
         let bytes = self.read_bytes(4, label)?;
         Ok(i32::from_le_bytes(bytes.try_into().map_err(|_| {
             format!("web render compile input {label} was not 4 bytes")
+        })?))
+    }
+
+    fn read_i64(&mut self, label: &str) -> Result<i64, String> {
+        let bytes = self.read_bytes(8, label)?;
+        Ok(i64::from_le_bytes(bytes.try_into().map_err(|_| {
+            format!("web render compile input {label} was not 8 bytes")
         })?))
     }
 
@@ -1990,6 +2026,7 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
             target_sections,
             section_revisions,
             snapshots: upserts,
+            world_seed,
         } = request;
 
         if staged_delta.reset {
@@ -2005,6 +2042,7 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
         let input_bytes = encode_web_render_compile_delta(
             staged_delta.generation,
             staged_delta.reset,
+            world_seed,
             &upserts,
             &staged_delta.evictions,
         )
@@ -5371,19 +5409,23 @@ mod tests {
         let evictions = vec![ChunkPos::new(-3, 4), ChunkPos::new(5, -6)];
 
         // Full-resync delta (reset = true) carrying upserts and evictions together.
-        let bytes = encode_web_render_compile_delta(7, true, &upserts, &evictions).unwrap();
+        let bytes =
+            encode_web_render_compile_delta(7, true, Some(1124), &upserts, &evictions).unwrap();
         assert!(bytes.len() > WEB_RENDER_COMPILE_DELTA_MAGIC.len());
         let decoded = decode_web_render_compile_delta(&bytes).unwrap();
         assert_eq!(decoded.generation, 7);
         assert!(decoded.reset);
+        assert_eq!(decoded.world_seed, Some(1124));
         assert_eq!(decoded.upserts, upserts);
         assert_eq!(decoded.evictions, evictions);
 
         // Incremental delta (reset = false) preserves the generation and the empty-set cases.
-        let incremental = encode_web_render_compile_delta(8, false, &upserts[..1], &[]).unwrap();
+        let incremental =
+            encode_web_render_compile_delta(8, false, None, &upserts[..1], &[]).unwrap();
         let decoded = decode_web_render_compile_delta(&incremental).unwrap();
         assert_eq!(decoded.generation, 8);
         assert!(!decoded.reset);
+        assert_eq!(decoded.world_seed, None);
         assert_eq!(decoded.upserts, upserts[..1]);
         assert!(decoded.evictions.is_empty());
 
