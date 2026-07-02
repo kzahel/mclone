@@ -266,30 +266,45 @@ Landed:
 
 ## Slice 2 - Player Teleport Target Query And Worker
 
-- [ ] Add a shared target query that consumes:
+- [x] Add a shared target query that consumes:
   - current body/player pose,
   - controller/headset world pose, flat debug ray, or intended aim/stick
     direction,
   - loaded client world block/collision facts,
   - max distance and step-up/drop limits.
-- [ ] Return a target feet pose, target yaw, validity reason, and optional
+- [x] Return a target feet pose, target yaw, validity reason, and optional
   preview path.
-- [ ] Require a reachable path result for both Blink and Shift; no direct-only
+- [x] Require a reachable path result for both Blink and Shift; no direct-only
   Blink exception.
-- [ ] Allow valid one-block-up landing when there is foot support and headroom.
-- [ ] Reject unloaded chunks, solid body overlap, insufficient headroom, and
+- [x] Allow valid one-block-up landing when there is foot support and headroom.
+- [x] Reject unloaded chunks, solid body overlap, insufficient headroom, and
   targets that would place the head/body into obstruction.
-- [ ] Keep vertical room-scale HMD motion out of target validity. Teleport can
+- [x] Keep vertical room-scale HMD motion out of target validity. Teleport can
   intentionally change body height; leaning forward into a block cannot.
 - [ ] Add a native latest-only worker mailbox for desktop OpenXR and Android XR
   so path search stays off the XR render/frame thread.
-- [ ] Add a flat/offscreen test entry point that exercises the same query and
+- [x] Add a flat/offscreen test entry point that exercises the same query and
   target validation without requiring XR.
 - [ ] Add the desktop flat debug input adapter: hold-to-preview, mouse-look aim
   updates, release-to-commit, and synthetic left-hand origin/upward-biased aim
   feeding the shared query.
 - [ ] Keep web/WASM XR-worker support documented as intentionally absent while
   web has no XR target, without making the shared evaluator non-wasm or XR-only.
+
+Landed:
+
+- Added `mclone-client::teleport` with shared `TeleportIntent`,
+  `TeleportConfig`, `TeleportPreview`, `TeleportValidityReason`, and
+  `TeleportCollisionWorld`.
+- Implemented a synchronous resolver that builds a bounded fixed-range intent
+  arc, searches body-valid standing candidates near the intent, uses
+  `mclone-path` for reachability and nearest reachable fallback, and refines
+  the final target to a continuous feet pose rather than a block center.
+- The resolved dot/marker contract is represented in the preview as
+  `marker_dot`, with `marker_dot.xz == target_feet.xz`.
+- Added deterministic flat/offscreen unit tests for wall stop, too-small
+  opening rejection, one-block-up landing, unloaded/no-candidate invalid
+  behavior, and off-block-center continuous placement.
 
 ## Slice 3 - Preview Overlay
 

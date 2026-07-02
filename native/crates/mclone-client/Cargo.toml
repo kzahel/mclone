@@ -10,6 +10,7 @@ mclone-assets.workspace = true
 mclone-blocks.workspace = true
 mclone-core.workspace = true
 mclone-light.workspace = true
+mclone-path.workspace = true
 mclone-protocol.workspace = true
 
 [lib]

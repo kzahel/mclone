@@ -6,6 +6,7 @@ mod actor;
 mod interaction;
 mod inventory;
 mod player;
+mod teleport;
 
 pub mod block_facts {
     pub use mclone_blocks::{
@@ -46,6 +47,10 @@ pub use player::{
     PlayerInputKey, PlayerInputKeys, WalkingMovementResult, WalkingMovementStep, collide_movement,
     no_clip_displacement, sphere_intersects_solid_blocks, view_vector,
     view_vector_from_rot_degrees,
+};
+pub use teleport::{
+    TeleportCollisionWorld, TeleportConfig, TeleportIntent, TeleportPreview,
+    TeleportResolverDiagnostics, TeleportValidityReason, resolve_teleport_preview,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
