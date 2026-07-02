@@ -164,6 +164,49 @@ The first mailbox should be latest-only and bounded: one in-flight request per
 XR scene, pending requests replaced as aim/stick input changes, hard node/time
 limits, and final cheap endpoint revalidation on commit.
 
+## Teleport Intent Resolver Sketch
+
+The player-facing behavior should be closer to Half-Life: Alyx Blink/Shift than
+to an exact raycast validator. The user should not have to inspect a valid/invalid
+state during combat. Aiming should almost always resolve to a usable reachable
+landing, even if that landing is short because the intended direction is blocked.
+
+Important preview contract:
+
+- The feet marker is the exact committed landing pose.
+- The dot is vertically aligned with the feet marker and communicates how far
+  the teleport will go even when the user is not attending to the feet marker.
+- Blink and Shift commit the same resolved `target_feet`; only the comfort
+  transition differs.
+- Commit may cheaply revalidate the same pose against the current world
+  revision, but it must not silently choose a different landing than the preview.
+
+First-pass algorithm shape:
+
+1. Build a fixed-range intent arc from controller/camera pose. This should be a
+   bounded parametric arc, not an unconstrained physics projectile; raising the
+   hand should not extend range without limit.
+2. Search reachable player-foot candidates in a bounded tube/cone around that
+   arc and intent direction. Use `mclone-path` for coarse reachability, but keep
+   the search intent-constrained rather than general NPC navigation.
+3. Treat obstructions as stopping/bounce-like constraints. If the aim points at
+   a wall or a body-too-small opening, prefer the best reachable body-valid
+   landing before the obstruction over routing around to a surprising far target.
+4. Score candidates by forward progress along the intent, proximity to the arc,
+   reachable path cost, stable support, headroom/body clearance, and modest
+   vertical change. Invalid should mean no reasonable reachable candidate exists
+   inside the loaded/searchable window.
+5. Refine the winning coarse foot cell into a continuous `Vec3d` feet pose.
+   The player body is narrower than one block, so final placement must validate
+   the actual standing AABB, headroom, and support footprint rather than snapping
+   to block centers.
+6. Derive the visual dot from the resolved landing pose. The invariant should be
+   `marker_dot.xz == target_feet.xz`; the arc can visually fade/truncate around
+   that marker.
+
+The path nodes are diagnostics and a Shift/Warp execution guide. The committed
+landing is the refined continuous feet pose, not a raw `BlockPos`.
+
 ## Slice 1 - Extract Shared Path Core
 
 - [x] Add a shared pathfinding core with generic neighbor expansion and target
