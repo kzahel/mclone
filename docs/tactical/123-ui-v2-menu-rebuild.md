@@ -1,7 +1,8 @@
 # 123: UI V2 Menu Rebuild
 
 Status: active; menu render/input routes and the old `GameUi` state wrapper have
-been removed as of 2026-07-02. Remaining work is HUD transient-layer retention.
+been removed as of 2026-07-02. Remaining work is HUD debug/notification-layer
+retention.
 
 ## Decision
 
@@ -349,9 +350,9 @@ Validation:
 ### Slice H: HUD, Hotbar, And Block Picker V2
 
 Status: flat crosshair/hotbar frame, hotbar selection/content retention, status
-overlay retention, block picker v2 retained grid, and runtime cache reporting
-landed 2026-07-02; selected item text, debug overlays, and touch/gamepad prompts
-still pending.
+overlay retention, touch/gamepad prompt retention, block picker v2 retained
+grid, and runtime cache reporting landed 2026-07-02; debug overlays and a
+future selected-item notification/fade model still need retained ownership.
 
 Move in-game UI surfaces to v2 retained layers:
 
@@ -1445,16 +1446,64 @@ Rendered checks:
 Known limits:
 
 - HUD touch/gamepad prompts, debug overlays, and selected item name fade remain
-  transient immediate layers
+  transient immediate layers before the next prompt-retention chunk
+
+## Landed HUD Prompt Retained-Layer Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- split touch controls and gamepad prompt chips out of the flat HUD transient
+  pass into a host-owned retained prompt layer
+- keyed the prompt layer by GUI scale, effective touch controls, effective
+  gamepad prompts, and whether the flat hotbar is visible for LB/RB placement
+- kept empty/no-op prompt overlays out of the retained cache count
+- kept standalone `render_flat_hud` visually aligned with
+  `GameUiHost::render_flat_hud_draw_list`
+- clarified that remaining debug overlays and selected-item notifications are
+  separate HUD overlay models, not current `FlatHud` transient prompt state
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui flat_hud -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml --workspace
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-hud-prompts-split.png --width 960 --height 540 --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true --screenshot-hud true
+```
+
+Rendered checks:
+
+- native HUD screenshot generated and inspected:
+  `/tmp/mclone-ui-v2-hud-prompts-split.png`
+- web/WASM smoke generated screenshots:
+  `/tmp/mclone-native-web-smoke.png` and `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- flat debug overlays are still composed by app-level overlay paths outside
+  `FlatHud`
+- selected item name fade is not currently modeled as a flat HUD retained layer;
+  add it only when we define the actual notification/state contract
 
 ## Next Recommended Chunk
 
-Return to the remaining HUD transient-layer work.
+Return to the remaining HUD overlay-model work.
 
 Next scope:
 
-- continue Slice H retained layers for selected item name fade, touch/gamepad
-  prompts, and debug overlays
+- define a retained debug/notification overlay contract shared by desktop, web,
+  and Android flat HUD composition
+- move flat debug overlays behind that contract
+- add selected-item notification/fade only if the gameplay/client side has a
+  real event/state source for it
 
 ## Completed First Recommended Chunk
 

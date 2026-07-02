@@ -8,9 +8,9 @@ use crate::{
     fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
     movement_speed_slider_value, next_touch_controls_mode, render_block_palette_tooltip,
     render_distance_from_slider_value, render_distance_label, render_distance_slider_value,
-    render_flat_hud_hotbar_layer, render_flat_hud_retained_layer, render_flat_hud_status_layer,
-    render_flat_hud_transient_layers, render_palette_slot_contents, render_touch_panel,
-    touch_controls_mode_label, touch_look_from_slider_value, touch_look_label,
+    render_flat_hud_hotbar_layer, render_flat_hud_prompt_layer, render_flat_hud_retained_layer,
+    render_flat_hud_status_layer, render_flat_hud_transient_layers, render_palette_slot_contents,
+    render_touch_panel, touch_controls_mode_label, touch_look_from_slider_value, touch_look_label,
     touch_look_slider_value,
 };
 use mclone_input::{
@@ -1205,6 +1205,35 @@ impl FlatHudStatusState {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FlatHudPromptState {
+    scale: GuiScale,
+    touch: crate::TouchOverlay,
+    gamepad: crate::GamepadHudOverlay,
+    flat_hotbar_visible: bool,
+}
+
+impl FlatHudPromptState {
+    fn from_hud(scale: GuiScale, hud: &FlatHud) -> Option<Self> {
+        let touch = hud.effective_touch_overlay();
+        let mut gamepad = hud.effective_gamepad_overlay();
+        let gamepad_draws =
+            gamepad.visible && (gamepad.hotbar_hints_visible || gamepad.action_hints_visible);
+        if !gamepad_draws {
+            gamepad = crate::GamepadHudOverlay::hidden();
+        }
+        if !touch.visible && !gamepad_draws {
+            return None;
+        }
+        Some(Self {
+            scale,
+            touch,
+            gamepad,
+            flat_hotbar_visible: hud.should_render_flat_hotbar(),
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct CachedFlatHudRetainedLayer {
     state: FlatHudRetainedState,
@@ -1223,11 +1252,18 @@ struct CachedFlatHudStatusLayer {
     draw: GuiDrawList,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct CachedFlatHudPromptLayer {
+    state: FlatHudPromptState,
+    draw: GuiDrawList,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 struct FlatHudSurface {
     retained: Option<CachedFlatHudRetainedLayer>,
     hotbar: Option<CachedFlatHudHotbarLayer>,
     status: Option<CachedFlatHudStatusLayer>,
+    prompt: Option<CachedFlatHudPromptLayer>,
 }
 
 impl FlatHudSurface {
@@ -1302,6 +1338,35 @@ impl FlatHudSurface {
         let mut draw = GuiDrawList::new();
         render_flat_hud_status_layer(scale, &mut draw, hud);
         self.status = Some(CachedFlatHudStatusLayer {
+            state,
+            draw: draw.clone(),
+        });
+        FlatHudDrawList {
+            draw,
+            retained_cache: UiDrawCacheStats::rebuild(),
+        }
+    }
+
+    fn render_prompt_layer(&mut self, scale: GuiScale, hud: &FlatHud) -> FlatHudDrawList {
+        let Some(state) = FlatHudPromptState::from_hud(scale, hud) else {
+            self.prompt = None;
+            return FlatHudDrawList {
+                draw: GuiDrawList::new(),
+                retained_cache: UiDrawCacheStats::default(),
+            };
+        };
+        if let Some(cached) = &self.prompt {
+            if cached.state == state {
+                return FlatHudDrawList {
+                    draw: cached.draw.clone(),
+                    retained_cache: UiDrawCacheStats::cache_hit(),
+                };
+            }
+        }
+
+        let mut draw = GuiDrawList::new();
+        render_flat_hud_prompt_layer(scale, &mut draw, hud);
+        self.prompt = Some(CachedFlatHudPromptLayer {
             state,
             draw: draw.clone(),
         });
@@ -1560,13 +1625,16 @@ impl GameUiHost {
         let retained = self.hud_surface.render_retained_layer(scale, hud);
         let hotbar = self.hud_surface.render_hotbar_layer(scale, hud);
         let status = self.hud_surface.render_status_layer(scale, hud);
+        let prompt = self.hud_surface.render_prompt_layer(scale, hud);
         let mut draw = retained.draw.clone();
         draw.append(&hotbar.draw);
         draw.append(&status.draw);
+        draw.append(&prompt.draw);
         render_flat_hud_transient_layers(scale, &mut draw, hud);
         let mut retained_cache = retained.retained_cache;
         retained_cache.add(hotbar.retained_cache);
         retained_cache.add(status.retained_cache);
+        retained_cache.add(prompt.retained_cache);
         FlatHudDrawList {
             draw,
             retained_cache,
@@ -2264,6 +2332,28 @@ mod tests {
         }
     }
 
+    fn touch_input() -> ResolvedFlatInput {
+        ResolvedFlatInput {
+            preferred_prompt: Some(InputPromptKind::Touch),
+            touch_controls_visible: true,
+            accepts_keyboard_mouse: true,
+            accepts_touch: true,
+            accepts_gamepad: false,
+            accepts_xr_controller: false,
+        }
+    }
+
+    fn gamepad_input() -> ResolvedFlatInput {
+        ResolvedFlatInput {
+            preferred_prompt: Some(InputPromptKind::Gamepad),
+            touch_controls_visible: false,
+            accepts_keyboard_mouse: true,
+            accepts_touch: true,
+            accepts_gamepad: true,
+            accepts_xr_controller: false,
+        }
+    }
+
     fn block_palette_state(selected_hotbar_slot: u8) -> GameUiRenderState {
         let brick_icon = GuiTextureUv::new(0.1, 0.2, 0.3, 0.4);
         let log_icon = GuiTextureUv::new(0.4, 0.3, 0.2, 0.1);
@@ -2758,6 +2848,100 @@ mod tests {
                 cache_hit_count: 2,
             }
         );
+    }
+
+    #[test]
+    fn game_ui_host_flat_hud_gamepad_prompt_cache_rebuilds_independently() {
+        let scale = GuiScale::from_pixels(960, 540);
+        let mut host = GameUiHost::new_ingame();
+        let mut hud = FlatHud::new(gamepad_input());
+        hud.hotbar = FlatHotbarOverlay::selected(2);
+
+        let first = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            first.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 3,
+                cache_hit_count: 0,
+            }
+        );
+
+        let second = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            second.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 0,
+                cache_hit_count: 3,
+            }
+        );
+        assert_eq!(second.draw, first.draw);
+
+        hud.gamepad.action_hints_visible = false;
+        let prompts_changed = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            prompts_changed.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 1,
+                cache_hit_count: 2,
+            }
+        );
+        assert_ne!(prompts_changed.draw, second.draw);
+
+        hud.gamepad.hotbar_hints_visible = false;
+        let prompts_hidden = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            prompts_hidden.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 0,
+                cache_hit_count: 2,
+            }
+        );
+        assert_ne!(prompts_hidden.draw, prompts_changed.draw);
+    }
+
+    #[test]
+    fn game_ui_host_flat_hud_touch_prompt_cache_rebuilds_independently() {
+        let scale = GuiScale::from_pixels(780, 1688);
+        let mut host = GameUiHost::new_ingame();
+        let mut hud = FlatHud::new(touch_input());
+        hud.hotbar = FlatHotbarOverlay::selected(2);
+        hud.touch = crate::TouchOverlay {
+            visible: true,
+            interaction_visible: true,
+            hotbar_visible: true,
+            selected_hotbar_slot: 2,
+            ..crate::TouchOverlay::hidden()
+        };
+
+        let first = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            first.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 2,
+                cache_hit_count: 0,
+            }
+        );
+
+        let second = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            second.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 0,
+                cache_hit_count: 2,
+            }
+        );
+        assert_eq!(second.draw, first.draw);
+
+        hud.touch.jump_pressed = true;
+        let touch_changed = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            touch_changed.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 1,
+                cache_hit_count: 1,
+            }
+        );
+        assert_ne!(touch_changed.draw, second.draw);
     }
 
     #[test]

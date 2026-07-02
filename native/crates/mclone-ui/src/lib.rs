@@ -1898,18 +1898,18 @@ impl FlatHud {
             || self.status.visible
     }
 
-    fn should_render_flat_hotbar(&self) -> bool {
+    pub(crate) fn should_render_flat_hotbar(&self) -> bool {
         let touch = self.effective_touch_overlay();
         self.hotbar.visible && !(touch.visible && touch.hotbar_visible)
     }
 
-    fn effective_touch_overlay(&self) -> TouchOverlay {
+    pub(crate) fn effective_touch_overlay(&self) -> TouchOverlay {
         let mut touch = self.touch;
         touch.visible &= self.world_hud_visible && self.input.touch_controls_visible;
         touch
     }
 
-    fn effective_gamepad_overlay(&self) -> GamepadHudOverlay {
+    pub(crate) fn effective_gamepad_overlay(&self) -> GamepadHudOverlay {
         let mut gamepad = self.gamepad;
         gamepad.visible &= self.world_hud_visible
             && self.input.accepts_gamepad
@@ -1922,6 +1922,7 @@ pub fn render_flat_hud(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
     render_flat_hud_retained_layer(scale, draw, hud);
     render_flat_hud_hotbar_layer(scale, draw, hud);
     render_flat_hud_status_layer(scale, draw, hud);
+    render_flat_hud_prompt_layer(scale, draw, hud);
     render_flat_hud_transient_layers(scale, draw, hud);
 }
 
@@ -1951,15 +1952,18 @@ pub(crate) fn render_flat_hud_status_layer(scale: GuiScale, draw: &mut GuiDrawLi
     render_status_overlay(scale, draw, &hud.status);
 }
 
-pub(crate) fn render_flat_hud_transient_layers(
-    scale: GuiScale,
-    draw: &mut GuiDrawList,
-    hud: &FlatHud,
-) {
+pub(crate) fn render_flat_hud_prompt_layer(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
     let touch = hud.effective_touch_overlay();
     let gamepad = hud.effective_gamepad_overlay();
     render_gamepad_hud(scale, draw, gamepad, hud.should_render_flat_hotbar());
     render_touch_overlay(scale, draw, &touch);
+}
+
+pub(crate) fn render_flat_hud_transient_layers(
+    _scale: GuiScale,
+    _draw: &mut GuiDrawList,
+    _hud: &FlatHud,
+) {
 }
 
 pub fn render_debug_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &DebugOverlay) {
