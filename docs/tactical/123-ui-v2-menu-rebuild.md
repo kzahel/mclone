@@ -1,7 +1,8 @@
 # 123: UI V2 Menu Rebuild
 
-Status: active; title flow now routes through v2, and Server Settings is the
-remaining player-facing legacy menu screen as of 2026-07-02.
+Status: active; player-facing menu render/input routes are now v2-only as of
+2026-07-02. The remaining cleanup is collapsing the lightweight legacy
+`GameUi` screen/action state wrapper and continuing HUD transient-layer work.
 
 ## Decision
 
@@ -378,8 +379,9 @@ Validation:
 
 ### Slice I: Legacy UI Deletion
 
-Status: pending; after the title-flow migration, Server Settings is the only
-remaining player-facing legacy menu screen route.
+Status: landed 2026-07-02 for player-facing menu render/input routes. A small
+`GameUi` screen/action state wrapper remains under `GameUiHost` until a later
+state-model cleanup.
 
 Delete the legacy screen helpers once migrated screens have equivalent v2
 coverage.
@@ -1362,21 +1364,63 @@ Rendered checks:
 
 Known limits:
 
-- Server Settings still uses legacy render and hit-test helpers
-- legacy Title/New World/Join Remote helpers still exist until the deletion
-  slice removes fallback code after Server Settings migrates
+- Server Settings still used legacy render and hit-test helpers before the next
+  deletion chunk
+- legacy Title/New World/Join Remote helpers still existed before the next
+  deletion chunk
+
+## Landed Server Settings And Legacy Menu Deletion Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- moved `GameScreen::ServerSettings` into `UiScreenId` and the retained v2
+  surface
+- added retained v2 cadence-cycle rows for Host Rate, World Tick Rate, Physics
+  Rate, and Back/Done
+- changed `GameUiHost` so active menu render, pointer, and key input no longer
+  fall back to legacy `GameUi`
+- converted native renderer-rebuild and frame-budget probe state from raw
+  `GameUi` to `GameUiHost`
+- deleted the old `GameUi` menu render/hit-test implementation, old menu
+  geometry helpers, old widget-id constants, and obsolete legacy menu tests
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+pnpm native:web:build
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-server-settings.png --width 960 --height 540 --startup-wait frames:1 --screenshot-ui server-settings-pause --screenshot-hud false --simulation-cadence 20/20/60 --render-distance 2 --lighting false --fullbright true
+```
+
+Rendered checks:
+
+- native Server Settings screenshot generated and inspected:
+  `/tmp/mclone-ui-v2-server-settings.png`
+
+Known limits:
+
+- `GameUiHost` still wraps `GameUi` for screen/action state, seed, remote
+  address, scale, and startup construction compatibility
+- HUD touch/gamepad prompts, debug overlays, and selected item name fade remain
+  transient immediate layers
 
 ## Next Recommended Chunk
 
-Finish menu migration instead of chasing HUD polish.
+Collapse the leftover `GameUi` state wrapper or return to the remaining HUD
+transient-layer work.
 
 Next scope:
 
-- migrate Server Settings to v2
-- remove the remaining legacy menu render/hit-test route once Server Settings is
-  covered
-- delete obsolete legacy title-flow and menu helper tests as part of the same
-  cleanup
+- decide whether to remove `GameUiHost::legacy: GameUi` now by making
+  `GameUiHost` own screen/action state directly
+- after that, continue Slice H retained layers for selected item name fade,
+  touch/gamepad prompts, and debug overlays
 
 ## Completed First Recommended Chunk
 

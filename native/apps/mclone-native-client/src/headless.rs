@@ -23,7 +23,7 @@ use mclone_render::headless::{
 use mclone_render::screen_effect::UnderwaterOverlay;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render_session::actor_instances_from_presentations;
-use mclone_ui::{GameMovementMode, GameUi, GuiDrawList, GuiScale};
+use mclone_ui::{GameMovementMode, GameUiHost, GuiDrawList, GuiScale};
 
 use crate::actor_assets::load_actor_texture_assets;
 use crate::camera::SpectatorCamera;
@@ -138,7 +138,7 @@ struct RendererRebuildSmokePreservedState {
 }
 
 impl RendererRebuildSmokePreservedState {
-    fn capture(runtime: &WindowSceneRuntime, camera: ChunkCamera, ui: &GameUi) -> Self {
+    fn capture(runtime: &WindowSceneRuntime, camera: ChunkCamera, ui: &GameUiHost) -> Self {
         let runtime = runtime.stats();
         let scale = ui.scale();
         Self {
@@ -163,7 +163,7 @@ struct RendererRebuildSmokeState {
     asset_source: mclone_assets::AssetSourceChain,
     sections: Vec<mclone_mesh::TexturedRenderSectionMesh>,
     camera: ChunkCamera,
-    ui: GameUi,
+    ui: GameUiHost,
     actor_interpolation: ActorInterpolationState,
     render_stats: RenderStreamStats,
     render_options: TexturedSectionRenderOptions,
@@ -1016,7 +1016,7 @@ pub(crate) fn run_renderer_rebuild_smoke(
             };
             record_render_section_update_stats(&mut render_stats, &section_update, initial_upload);
 
-            let mut ui = GameUi::new_ingame();
+            let mut ui = GameUiHost::new_ingame();
             ui.set_scale(GuiScale::from_pixels(size[0], size[1]));
             let before_render_size = resources.render_size();
 

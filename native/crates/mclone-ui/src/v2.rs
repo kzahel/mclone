@@ -26,6 +26,7 @@ pub enum UiScreenId {
     Pause,
     BlockPalette,
     Options { parent: GameOptionsParent },
+    ServerSettings { parent: GameOptionsParent },
     Help { parent: GameHelpParent },
 }
 
@@ -38,8 +39,9 @@ impl UiScreenId {
             Some(GameScreen::Pause) => Some(Self::Pause),
             Some(GameScreen::BlockPalette) => Some(Self::BlockPalette),
             Some(GameScreen::Options { parent }) => Some(Self::Options { parent }),
+            Some(GameScreen::ServerSettings { parent }) => Some(Self::ServerSettings { parent }),
             Some(GameScreen::Help { parent }) => Some(Self::Help { parent }),
-            _ => None,
+            None => None,
         }
     }
 }
@@ -577,6 +579,13 @@ impl UiSurface {
                 true,
                 Some(GameUiAction::OpenHelp(help_parent_for_options(parent))),
             ),
+            (Some(UiScreenId::ServerSettings { parent }), GuiKey::Escape) => {
+                (true, Some(GameUiAction::OpenOptions(parent)))
+            }
+            (Some(UiScreenId::ServerSettings { parent }), GuiKey::F1) => (
+                true,
+                Some(GameUiAction::OpenHelp(help_parent_for_options(parent))),
+            ),
             (Some(UiScreenId::Help { parent }), GuiKey::Escape | GuiKey::F1) => {
                 (true, Some(GameUiAction::CloseHelp(parent)))
             }
@@ -595,6 +604,9 @@ impl UiSurface {
             Some(UiScreenId::Pause) => self.render_pause(&mut draw),
             Some(UiScreenId::BlockPalette) => self.render_block_palette(&mut draw),
             Some(UiScreenId::Options { parent }) => self.render_options(&mut draw, parent),
+            Some(UiScreenId::ServerSettings { parent }) => {
+                self.render_server_settings(&mut draw, parent)
+            }
             Some(UiScreenId::Help { parent }) => self.render_help(&mut draw, parent),
             None => {}
         }
@@ -621,6 +633,9 @@ impl UiSurface {
             ),
             Some(UiScreenId::Options { parent }) => {
                 options_layout(self.scale, self.layout_revision, parent, self.render_state)
+            }
+            Some(UiScreenId::ServerSettings { parent }) => {
+                server_settings_layout(self.scale, self.layout_revision, parent, self.render_state)
             }
             Some(UiScreenId::Help { parent }) => {
                 help_layout(self.scale, self.layout_revision, parent)
@@ -780,6 +795,41 @@ impl UiSurface {
             panel.y + 12.0,
             Color::rgba(245, 252, 234, 255),
         );
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
+        }
+        let _ = parent;
+    }
+
+    fn render_server_settings(&self, draw: &mut GuiDrawList, parent: GameOptionsParent) {
+        draw.fill(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(0, 0, 0, 150),
+        );
+        let panel = server_settings_panel_rect(self.scale, self.render_state);
+        draw.fill_gradient(
+            panel,
+            Color::rgba(33, 45, 47, 245),
+            Color::rgba(15, 20, 22, 245),
+        );
+        draw.outline(panel, Color::rgba(130, 166, 154, 255));
+        self.font.draw_centered_atlas(
+            draw,
+            "SERVER SETTINGS",
+            panel.center_x(),
+            panel.y + 12.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        if self.render_state.server_cadence.is_none() {
+            self.font.draw_centered_atlas(
+                draw,
+                "LOCAL SERVER ONLY",
+                panel.center_x(),
+                panel.y + 42.0,
+                Color::rgba(185, 212, 198, 255),
+            );
+        }
         let interaction = self.interaction();
         for widget in self.layout.widgets() {
             self.render_widget(draw, widget, interaction);
@@ -1330,10 +1380,6 @@ impl GameUiHost {
         self.legacy.scale()
     }
 
-    pub fn font(&self) -> &Font {
-        self.legacy.font()
-    }
-
     pub fn set_scale(&mut self, scale: GuiScale) {
         self.legacy.set_scale(scale);
         self.surface.set_scale(scale);
@@ -1369,33 +1415,33 @@ impl GameUiHost {
 
     pub fn key_pressed(&mut self, key: GuiKey) -> (bool, Option<GameUiAction>) {
         if self.sync_surface_screen() {
-            return self.surface.key_pressed(key);
+            self.surface.key_pressed(key)
+        } else {
+            (false, None)
         }
-        self.legacy.key_pressed(key)
     }
 
     pub fn pointer_move(&mut self, point: Point) -> (bool, Option<GameUiAction>) {
         let state = self.committed_render_state;
         if self.sync_surface_screen() {
-            return self.surface.pointer_move(point, state);
+            self.surface.pointer_move(point, state)
+        } else {
+            (false, None)
         }
-        self.legacy.pointer_move(point, state)
     }
 
     pub fn pointer_down(&mut self, point: Point) -> bool {
         let state = self.committed_render_state;
-        if self.sync_surface_screen() {
-            return self.surface.pointer_down(point, state);
-        }
-        self.legacy.pointer_down(point, state)
+        self.sync_surface_screen() && self.surface.pointer_down(point, state)
     }
 
     pub fn pointer_up(&mut self, point: Point) -> (bool, Option<GameUiAction>) {
         let state = self.committed_render_state;
         if self.sync_surface_screen() {
-            return self.surface.pointer_up(point, state);
+            self.surface.pointer_up(point, state)
+        } else {
+            (false, None)
         }
-        self.legacy.pointer_up(point, state)
     }
 
     pub fn apply_action(&mut self, action: GameUiAction) {
@@ -1424,7 +1470,7 @@ impl GameUiHost {
         if self.surface.is_active() {
             self.surface.render_draw_list(self.committed_render_state)
         } else {
-            self.legacy.render_draw_list(self.committed_render_state)
+            GuiDrawList::new()
         }
     }
 
@@ -1540,6 +1586,10 @@ const UI_V2_OPTIONS_CONTROLS: UiWidgetId = UiWidgetId(117);
 const UI_V2_OPTIONS_SERVER_SETTINGS: UiWidgetId = UiWidgetId(118);
 const UI_V2_OPTIONS_BACK: UiWidgetId = UiWidgetId(119);
 const UI_V2_OPTIONS_XR_TURN_MODE: UiWidgetId = UiWidgetId(120);
+const UI_V2_SERVER_SETTINGS_HOST_RATE: UiWidgetId = UiWidgetId(701);
+const UI_V2_SERVER_SETTINGS_GAMEPLAY_RATE: UiWidgetId = UiWidgetId(702);
+const UI_V2_SERVER_SETTINGS_PHYSICS_RATE: UiWidgetId = UiWidgetId(703);
+const UI_V2_SERVER_SETTINGS_BACK: UiWidgetId = UiWidgetId(704);
 const UI_V2_HELP_BACK: UiWidgetId = UiWidgetId(201);
 const UI_V2_BLOCK_PALETTE_BASE: u64 = 3000;
 
@@ -2014,6 +2064,64 @@ fn options_layout(
     layout
 }
 
+fn server_settings_layout(
+    scale: GuiScale,
+    revision: u64,
+    parent: GameOptionsParent,
+    state: GameUiRenderState,
+) -> UiLayout {
+    let mut layout = UiLayout::new(Some(UiScreenId::ServerSettings { parent }), revision);
+    let panel = server_settings_panel_rect(scale, state);
+    let row_x = panel.x + 25.0;
+    let mut y = panel.y + 38.0;
+
+    if let Some(cadence) = state.server_cadence {
+        push_cycle(
+            &mut layout,
+            UI_V2_SERVER_SETTINGS_HOST_RATE,
+            Rect::new(row_x, y, 192.0, 20.0),
+            "Host Rate",
+            format!("{} Hz", cadence.host_rate_hz),
+            GameUiAction::SetServerSimulationCadence(cadence.next_host_rate()),
+        );
+        y += 22.0;
+        push_cycle(
+            &mut layout,
+            UI_V2_SERVER_SETTINGS_GAMEPLAY_RATE,
+            Rect::new(row_x, y, 192.0, 20.0),
+            "World Tick Rate",
+            format!("{} Hz", cadence.gameplay_rate_hz),
+            GameUiAction::SetServerSimulationCadence(cadence.next_gameplay_rate()),
+        );
+        y += 22.0;
+        push_cycle(
+            &mut layout,
+            UI_V2_SERVER_SETTINGS_PHYSICS_RATE,
+            Rect::new(row_x, y, 192.0, 20.0),
+            "Physics Rate",
+            format!("{} Hz", cadence.physics_rate_hz),
+            GameUiAction::SetServerSimulationCadence(cadence.next_physics_rate()),
+        );
+        y += 28.0;
+    } else {
+        y += 34.0;
+    }
+
+    layout.push(
+        UiWidget::button(
+            UI_V2_SERVER_SETTINGS_BACK,
+            Rect::new(panel.center_x() - 55.0, y, 110.0, 20.0),
+            match parent {
+                GameOptionsParent::Title => "Back",
+                GameOptionsParent::Pause => "Done",
+            },
+        )
+        .action(GameUiAction::OpenOptions(parent)),
+    );
+
+    layout
+}
+
 fn push_checkbox(
     layout: &mut UiLayout,
     id: UiWidgetId,
@@ -2054,6 +2162,15 @@ fn options_panel_rect(scale: GuiScale, state: GameUiRenderState) -> Rect {
     centered_panel(scale, panel_width, panel_height)
 }
 
+fn server_settings_panel_rect(scale: GuiScale, state: GameUiRenderState) -> Rect {
+    let height = if state.server_cadence.is_some() {
+        138.0
+    } else {
+        96.0
+    };
+    centered_panel(scale, 242.0, height)
+}
+
 const fn help_parent_for_options(parent: GameOptionsParent) -> GameHelpParent {
     match parent {
         GameOptionsParent::Title => GameHelpParent::OptionsTitle,
@@ -2066,7 +2183,7 @@ mod tests {
     use super::*;
     use crate::{
         EMPTY_BLOCK_PALETTE_ENTRIES, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, GameSimulationCadence,
-        GameTouchSettings, GameUi, GameXrTurnMode, GuiDrawCommand, GuiTextureUv, render_flat_hud,
+        GameTouchSettings, GameXrTurnMode, GuiDrawCommand, GuiTextureUv, render_flat_hud,
     };
     use mclone_input::{InputPromptKind, ResolvedFlatInput, TouchControlsMode};
 
@@ -2240,16 +2357,28 @@ mod tests {
     }
 
     #[test]
-    fn game_ui_host_v2_panel_draw_cache_ignores_unmigrated_server_settings() {
+    fn game_ui_host_v2_panel_draw_cache_covers_server_settings() {
         let mut host = GameUiHost::new();
         host.set_screen(Some(GameScreen::ServerSettings {
             parent: GameOptionsParent::Pause,
         }));
+        host.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            server_cadence: Some(GameSimulationCadence::new(20, 20, 60)),
+            ..GameUiRenderState::default()
+        };
 
-        assert!(
-            host.render_v2_panel_draw_list(GameUiRenderState::default())
-                .is_none()
-        );
+        let first = host
+            .render_v2_panel_draw_list(state)
+            .expect("ServerSettings is a v2 panel");
+        assert_eq!(first.cache, UiDrawCacheStats::rebuild());
+        assert!(!first.draw.commands().is_empty());
+
+        let second = host
+            .render_v2_panel_draw_list(state)
+            .expect("ServerSettings is a v2 panel");
+        assert_eq!(second.cache, UiDrawCacheStats::cache_hit());
+        assert_eq!(second.revision, first.revision);
     }
 
     #[test]
@@ -2756,6 +2885,102 @@ mod tests {
     }
 
     #[test]
+    fn server_settings_buttons_emit_expected_actions_from_committed_rects() {
+        let mut surface = UiSurface::new();
+        surface.set_screen(Some(UiScreenId::ServerSettings {
+            parent: GameOptionsParent::Pause,
+        }));
+        surface.set_scale(GuiScale::from_pixels(960, 540));
+        surface.set_render_state(GameUiRenderState {
+            server_cadence: Some(GameSimulationCadence::new(20, 20, 60)),
+            ..GameUiRenderState::default()
+        });
+
+        let host_rate = surface
+            .layout()
+            .widget(UI_V2_SERVER_SETTINGS_HOST_RATE)
+            .expect("host rate row")
+            .rect;
+        let gameplay_rate = surface
+            .layout()
+            .widget(UI_V2_SERVER_SETTINGS_GAMEPLAY_RATE)
+            .expect("gameplay rate row")
+            .rect;
+        let physics_rate = surface
+            .layout()
+            .widget(UI_V2_SERVER_SETTINGS_PHYSICS_RATE)
+            .expect("physics rate row")
+            .rect;
+        let back = surface
+            .layout()
+            .widget(UI_V2_SERVER_SETTINGS_BACK)
+            .expect("back button")
+            .rect;
+
+        for (rect, expected) in [
+            (
+                host_rate,
+                GameUiAction::SetServerSimulationCadence(GameSimulationCadence::new(30, 30, 60)),
+            ),
+            (
+                gameplay_rate,
+                GameUiAction::SetServerSimulationCadence(GameSimulationCadence::new(20, 60, 60)),
+            ),
+            (
+                physics_rate,
+                GameUiAction::SetServerSimulationCadence(GameSimulationCadence::new(20, 20, 120)),
+            ),
+            (back, GameUiAction::OpenOptions(GameOptionsParent::Pause)),
+        ] {
+            let point = point_in(rect);
+            assert!(surface.pointer_down(point, surface.render_state));
+            let (_handled, action) = surface.pointer_up(point, surface.render_state);
+            assert_eq!(action, Some(expected));
+        }
+    }
+
+    #[test]
+    fn server_settings_without_cadence_keeps_only_back_action() {
+        let mut surface = UiSurface::new();
+        surface.set_screen(Some(UiScreenId::ServerSettings {
+            parent: GameOptionsParent::Title,
+        }));
+        surface.set_scale(GuiScale::from_pixels(960, 540));
+        surface.set_render_state(GameUiRenderState::default());
+
+        assert!(
+            surface
+                .layout()
+                .widget(UI_V2_SERVER_SETTINGS_HOST_RATE)
+                .is_none()
+        );
+        assert!(
+            surface
+                .layout()
+                .widget(UI_V2_SERVER_SETTINGS_GAMEPLAY_RATE)
+                .is_none()
+        );
+        assert!(
+            surface
+                .layout()
+                .widget(UI_V2_SERVER_SETTINGS_PHYSICS_RATE)
+                .is_none()
+        );
+
+        let back = surface
+            .layout()
+            .widget(UI_V2_SERVER_SETTINGS_BACK)
+            .expect("back button")
+            .rect;
+        assert!(surface.pointer_down(point_in(back), surface.render_state));
+        let (_handled, action) = surface.pointer_up(point_in(back), surface.render_state);
+        assert_eq!(
+            action,
+            Some(GameUiAction::OpenOptions(GameOptionsParent::Title))
+        );
+    }
+
+    #[test]
     fn options_disabled_far_lod_range_is_not_hit() {
         let mut surface = UiSurface::new();
         surface.set_screen(Some(UiScreenId::Options {
@@ -2892,20 +3117,6 @@ mod tests {
 
         assert_eq!(surface.layout().help_rows().len(), row_count);
         assert!(!v2_draw.commands().is_empty());
-
-        let mut legacy = GameUi::new();
-        legacy.set_screen(Some(GameScreen::Help {
-            parent: GameHelpParent::Game,
-        }));
-        legacy.set_scale(GuiScale::from_pixels(960, 540));
-        let legacy_draw = legacy.render_draw_list(GameUiRenderState::default());
-
-        assert!(
-            v2_draw.commands().len() < legacy_draw.commands().len(),
-            "v2={} legacy={}",
-            v2_draw.commands().len(),
-            legacy_draw.commands().len()
-        );
         assert!(
             v2_draw
                 .commands()

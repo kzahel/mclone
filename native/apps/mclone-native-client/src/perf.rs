@@ -22,7 +22,7 @@ use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_render_session::actor_instances_from_presentations;
-use mclone_ui::{GameMovementMode, GameUi, GuiScale};
+use mclone_ui::{GameMovementMode, GameUiHost, GuiScale};
 
 use crate::camera::{
     SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED, SpectatorCamera,
@@ -539,7 +539,7 @@ struct FrameBudgetProbeState {
     actors: ActorDrawResources,
     screen_effects: ScreenEffectsRenderer,
     gui: GuiRenderer,
-    ui: GameUi,
+    ui: GameUiHost,
     render_stats: RenderStreamStats,
 }
 
@@ -1355,7 +1355,7 @@ pub(crate) fn run_frame_budget_probe(
                 ..RenderStreamStats::default()
             };
             record_render_section_update_stats(&mut render_stats, &initial_update, initial_upload);
-            let mut ui = GameUi::new();
+            let mut ui = GameUiHost::new();
             ui.set_screen(None);
             ui.set_scale(GuiScale::from_pixels(size[0], size[1]));
             Ok(FrameBudgetProbeState {
