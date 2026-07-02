@@ -70,7 +70,7 @@ use mclone_ui::{
     FlatDebugTarget, FlatDebugView, FlatHotbarOverlay, FlatHud, GameFramePacingMode,
     GameHelpParent, GameMovementMode, GameOptionsParent, GamePlayerModel, GameScreen,
     GameTouchSettings, GameUiAction, GameUiHost, GameUiRenderState, GuiKey, GuiScale, Point,
-    StatusOverlay, TouchJoystickOverlay, TouchOverlay, render_debug_overlay_at, render_flat_hud,
+    StatusOverlay, TouchJoystickOverlay, TouchOverlay, render_debug_overlay_at,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -4331,7 +4331,8 @@ impl WebChunkRenderSession {
         touch.hotbar_icons = hotbar_icons;
         hud.touch = touch;
         hud.status = self.effective_status_overlay();
-        render_flat_hud(self.ui.scale(), &mut ui_draw, &hud);
+        self.ui
+            .append_flat_hud_draw(self.ui.scale(), &mut ui_draw, &hud);
         let gui_command_count = ui_draw.commands().len();
         if gui_command_count > 0 {
             self.gui

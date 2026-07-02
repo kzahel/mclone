@@ -48,7 +48,7 @@ use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameHelpParent,
     GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameUi, GameUiAction,
     GameUiHost, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point,
-    StatusOverlay, UiDebugSnapshot, render_flat_hud, render_loading_progress_overlay,
+    StatusOverlay, UiDebugSnapshot, render_loading_progress_overlay,
     render_loading_progress_panel_at, touch_controls_mode_label,
 };
 
@@ -1978,7 +1978,14 @@ impl FlatClientDriver {
             || debug_view_readiness_overlay.is_some();
         let mut ui_render_state = game_ui_render_state(ui_frame.render_options);
         ui_render_state.block_palette = ui_frame.block_palette;
-        let base_ui_draw = self.ui.render_draw_list(ui_render_state);
+        let mut base_ui_draw = self.ui.render_draw_list(ui_render_state);
+        if let Some(progress) = loading_progress_overlay.as_ref() {
+            render_loading_progress_overlay(gui_scale, &mut base_ui_draw, progress);
+        }
+        if let Some(hud) = hud.as_ref() {
+            self.ui
+                .append_flat_hud_draw(gui_scale, &mut base_ui_draw, hud);
+        }
         let gui_state = FullFrameGui::new(
             gui_active,
             ui_covers_world || loading_progress_overlay.is_some(),
@@ -1993,8 +2000,6 @@ impl FlatClientDriver {
                 render_flat_client_gui_draw(
                     base_ui_draw,
                     gui_scale,
-                    hud.as_ref(),
-                    loading_progress_overlay.as_ref(),
                     debug_stats,
                     debug_view_readiness_overlay.as_ref(),
                     stats,
@@ -2246,18 +2251,10 @@ fn session_start_request_for_scene(scene: &SceneOptions) -> SessionStartRequest 
 fn render_flat_client_gui_draw(
     mut ui_draw: GuiDrawList,
     gui_scale: GuiScale,
-    hud: Option<&FlatHud>,
-    loading_progress_overlay: Option<&LoadingProgressOverlay>,
     debug_stats: Option<DebugPaneStats>,
     debug_view_readiness_overlay: Option<&LoadingProgressOverlay>,
     stats: &RenderStreamStats,
 ) -> GuiDrawList {
-    if let Some(progress) = loading_progress_overlay {
-        render_loading_progress_overlay(gui_scale, &mut ui_draw, progress);
-    }
-    if let Some(hud) = hud {
-        render_flat_hud(gui_scale, &mut ui_draw, hud);
-    }
     if let Some(mut debug_stats) = debug_stats {
         debug_stats.render = *stats;
         render_debug_pane(gui_scale, &mut ui_draw, &debug_stats);

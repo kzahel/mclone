@@ -7,8 +7,9 @@ use mclone_input::{
 
 mod v2;
 pub use v2::{
-    GameUiHost, UiDebugSnapshot, UiDebugWidget, UiDrawCacheStats, UiFrameState, UiLayout,
-    UiPanelDrawList, UiPanelRevision, UiScreenId, UiSurface, UiWidget, UiWidgetId, UiWidgetKind,
+    FlatHudDrawList, GameUiHost, UiDebugSnapshot, UiDebugWidget, UiDrawCacheStats, UiFrameState,
+    UiLayout, UiPanelDrawList, UiPanelRevision, UiScreenId, UiSurface, UiWidget, UiWidgetId,
+    UiWidgetKind,
 };
 
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = FLAT_HOTBAR_SLOT_COUNT as usize;
@@ -270,6 +271,10 @@ impl GuiDrawList {
     pub fn clear(&mut self) {
         self.commands.clear();
         self.clip_stack.clear();
+    }
+
+    pub fn append(&mut self, other: &GuiDrawList) {
+        self.commands.extend(other.commands.iter().cloned());
     }
 
     pub fn commands(&self) -> &[GuiDrawCommand] {
@@ -1944,15 +1949,34 @@ impl FlatHud {
 }
 
 pub fn render_flat_hud(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
-    let touch = hud.effective_touch_overlay();
-    let gamepad = hud.effective_gamepad_overlay();
+    render_flat_hud_retained_layer(scale, draw, hud);
+    render_flat_hud_dynamic_layers(scale, draw, hud);
+}
+
+pub(crate) fn render_flat_hud_retained_layer(
+    scale: GuiScale,
+    draw: &mut GuiDrawList,
+    hud: &FlatHud,
+) {
     if hud.world_hud_visible {
         if hud.crosshair_visible {
             render_crosshair(scale, draw);
         }
         if hud.should_render_flat_hotbar() {
-            render_flat_hotbar(draw, &Font::default(), scale, hud.hotbar);
+            render_flat_hotbar_frame(draw, scale, hud.hotbar.selected_slot);
         }
+    }
+}
+
+pub(crate) fn render_flat_hud_dynamic_layers(
+    scale: GuiScale,
+    draw: &mut GuiDrawList,
+    hud: &FlatHud,
+) {
+    let touch = hud.effective_touch_overlay();
+    let gamepad = hud.effective_gamepad_overlay();
+    if hud.world_hud_visible && hud.should_render_flat_hotbar() {
+        render_flat_hotbar_contents(draw, &Font::default(), scale, hud.hotbar);
     }
     render_gamepad_hud(scale, draw, gamepad, hud.should_render_flat_hotbar());
     render_touch_overlay(scale, draw, &touch);
@@ -3955,21 +3979,24 @@ fn render_touch_hotbar(
     }
 }
 
-fn render_flat_hotbar(
-    draw: &mut GuiDrawList,
-    font: &Font,
-    scale: GuiScale,
-    hotbar: FlatHotbarOverlay,
-) {
-    let selected_slot = hotbar
-        .selected_slot
-        .min(FLAT_HOTBAR_SLOT_COUNT.saturating_sub(1));
+fn render_flat_hotbar_frame(draw: &mut GuiDrawList, scale: GuiScale, selected_slot: u8) {
+    let selected_slot = selected_slot.min(FLAT_HOTBAR_SLOT_COUNT.saturating_sub(1));
     for (index, rect) in flat_hotbar_slot_rects(scale).into_iter().enumerate() {
         let slot = index as u8;
         render_touch_panel(draw, rect, false);
         if selected_slot == slot {
             draw.outline(rect.inset(-2.0), Color::rgba(245, 250, 255, 225));
         }
+    }
+}
+
+fn render_flat_hotbar_contents(
+    draw: &mut GuiDrawList,
+    font: &Font,
+    scale: GuiScale,
+    hotbar: FlatHotbarOverlay,
+) {
+    for (index, rect) in flat_hotbar_slot_rects(scale).into_iter().enumerate() {
         render_hotbar_slot_contents(draw, font, rect, hotbar.icons[index], index, 16.0);
     }
 }

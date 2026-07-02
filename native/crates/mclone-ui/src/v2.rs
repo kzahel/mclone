@@ -1,16 +1,17 @@
 use crate::{
-    Button, Checkbox, Color, CycleButton, Font, GameHelpParent, GameOptionsParent, GameScreen,
-    GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Interaction, Point,
-    Rect, Slider, WidgetId, centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
-    far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
+    Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsParent,
+    GameScreen, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale,
+    Interaction, Point, Rect, Slider, WidgetId, centered_panel, far_lod_range_from_slider_value,
+    far_lod_range_label, far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
     fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
     movement_speed_slider_value, next_touch_controls_mode, render_distance_from_slider_value,
-    render_distance_label, render_distance_slider_value, touch_controls_mode_label,
-    touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
+    render_distance_label, render_distance_slider_value, render_flat_hud_dynamic_layers,
+    render_flat_hud_retained_layer, touch_controls_mode_label, touch_look_from_slider_value,
+    touch_look_label, touch_look_slider_value,
 };
 use mclone_input::{
-    ShortcutHelpGroup, ShortcutHelpRow, default_keyboard_mouse_shortcut_rows,
-    flat_runtime_shortcut_rows,
+    FLAT_HOTBAR_SLOT_COUNT, ShortcutHelpGroup, ShortcutHelpRow,
+    default_keyboard_mouse_shortcut_rows, flat_runtime_shortcut_rows,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -809,9 +810,78 @@ pub struct UiPanelDrawList {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct FlatHudDrawList {
+    pub draw: GuiDrawList,
+    pub retained_cache: UiDrawCacheStats,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct CachedV2DrawList {
     revision: UiPanelRevision,
     draw: GuiDrawList,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FlatHudRetainedState {
+    scale: GuiScale,
+    crosshair_visible: bool,
+    hotbar_visible: bool,
+    selected_hotbar_slot: u8,
+}
+
+impl FlatHudRetainedState {
+    fn from_hud(scale: GuiScale, hud: &FlatHud) -> Self {
+        let crosshair_visible = hud.world_hud_visible && hud.crosshair_visible;
+        let hotbar_visible = hud.world_hud_visible && hud.should_render_flat_hotbar();
+        Self {
+            scale,
+            crosshair_visible,
+            hotbar_visible,
+            selected_hotbar_slot: hotbar_visible
+                .then(|| {
+                    hud.hotbar
+                        .selected_slot
+                        .min(FLAT_HOTBAR_SLOT_COUNT.saturating_sub(1))
+                })
+                .unwrap_or(0),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CachedFlatHudRetainedLayer {
+    state: FlatHudRetainedState,
+    draw: GuiDrawList,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct FlatHudSurface {
+    retained: Option<CachedFlatHudRetainedLayer>,
+}
+
+impl FlatHudSurface {
+    fn render_retained_layer(&mut self, scale: GuiScale, hud: &FlatHud) -> FlatHudDrawList {
+        let state = FlatHudRetainedState::from_hud(scale, hud);
+        if let Some(cached) = &self.retained {
+            if cached.state == state {
+                return FlatHudDrawList {
+                    draw: cached.draw.clone(),
+                    retained_cache: UiDrawCacheStats::cache_hit(),
+                };
+            }
+        }
+
+        let mut draw = GuiDrawList::new();
+        render_flat_hud_retained_layer(scale, &mut draw, hud);
+        self.retained = Some(CachedFlatHudRetainedLayer {
+            state,
+            draw: draw.clone(),
+        });
+        FlatHudDrawList {
+            draw,
+            retained_cache: UiDrawCacheStats::rebuild(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -820,6 +890,7 @@ pub struct GameUiHost {
     surface: UiSurface,
     committed_render_state: GameUiRenderState,
     cached_v2_draw: Option<CachedV2DrawList>,
+    hud_surface: FlatHudSurface,
 }
 
 impl Default for GameUiHost {
@@ -843,6 +914,7 @@ impl GameUiHost {
             surface: UiSurface::new(),
             committed_render_state: GameUiRenderState::default(),
             cached_v2_draw: None,
+            hud_surface: FlatHudSurface::default(),
         };
         host.sync_surface_screen();
         host.surface.set_scale(host.legacy.scale());
@@ -1001,6 +1073,27 @@ impl GameUiHost {
             revision,
             cache: UiDrawCacheStats::rebuild(),
         })
+    }
+
+    pub fn render_flat_hud_draw_list(&mut self, scale: GuiScale, hud: &FlatHud) -> FlatHudDrawList {
+        let retained = self.hud_surface.render_retained_layer(scale, hud);
+        let mut draw = retained.draw.clone();
+        render_flat_hud_dynamic_layers(scale, &mut draw, hud);
+        FlatHudDrawList {
+            draw,
+            retained_cache: retained.retained_cache,
+        }
+    }
+
+    pub fn append_flat_hud_draw(
+        &mut self,
+        scale: GuiScale,
+        draw: &mut GuiDrawList,
+        hud: &FlatHud,
+    ) -> UiDrawCacheStats {
+        let hud_draw = self.render_flat_hud_draw_list(scale, hud);
+        draw.append(&hud_draw.draw);
+        hud_draw.retained_cache
     }
 
     pub fn set_v2_debug_overlay(&mut self, enabled: bool) {
@@ -1451,8 +1544,11 @@ const fn help_parent_for_options(parent: GameOptionsParent) -> GameHelpParent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GameSimulationCadence, GameTouchSettings, GameUi, GameXrTurnMode, GuiDrawCommand};
-    use mclone_input::TouchControlsMode;
+    use crate::{
+        EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, GameSimulationCadence, GameTouchSettings, GameUi,
+        GameXrTurnMode, GuiDrawCommand, GuiTextureUv, render_flat_hud,
+    };
+    use mclone_input::{InputPromptKind, ResolvedFlatInput, TouchControlsMode};
 
     fn point_in(rect: Rect) -> Point {
         Point {
@@ -1468,6 +1564,17 @@ mod tests {
             .iter()
             .find(|widget| widget.id == hovered)
             .map(|widget| widget.label.as_str())
+    }
+
+    fn keyboard_mouse_input() -> ResolvedFlatInput {
+        ResolvedFlatInput {
+            preferred_prompt: Some(InputPromptKind::KeyboardMouse),
+            touch_controls_visible: false,
+            accepts_keyboard_mouse: true,
+            accepts_touch: false,
+            accepts_gamepad: false,
+            accepts_xr_controller: false,
+        }
     }
 
     #[test]
@@ -1609,6 +1716,50 @@ mod tests {
             host.render_v2_panel_draw_list(GameUiRenderState::default())
                 .is_none()
         );
+    }
+
+    #[test]
+    fn game_ui_host_flat_hud_retained_cache_tracks_static_geometry() {
+        let scale = GuiScale::from_pixels(960, 540);
+        let mut host = GameUiHost::new_ingame();
+        let mut hud = FlatHud::new(keyboard_mouse_input());
+        hud.hotbar = FlatHotbarOverlay::selected(2);
+
+        let first = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(first.retained_cache, UiDrawCacheStats::rebuild());
+        assert!(!first.draw.commands().is_empty());
+
+        let second = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(second.retained_cache, UiDrawCacheStats::cache_hit());
+        assert_eq!(second.draw, first.draw);
+
+        let mut icons = EMPTY_HOTBAR_ICONS;
+        icons[0] = Some(GuiTextureUv::new(0.1, 0.2, 0.3, 0.4));
+        hud.hotbar = FlatHotbarOverlay::selected_with_icons(2, icons);
+        let icon_changed = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(icon_changed.retained_cache, UiDrawCacheStats::cache_hit());
+        assert_ne!(icon_changed.draw, second.draw);
+
+        hud.hotbar = FlatHotbarOverlay::selected_with_icons(3, icons);
+        let selected_changed = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(selected_changed.retained_cache, UiDrawCacheStats::rebuild());
+    }
+
+    #[test]
+    fn game_ui_host_flat_hud_draw_matches_standalone_renderer() {
+        let scale = GuiScale::from_pixels(960, 540);
+        let mut host = GameUiHost::new_ingame();
+        let mut hud = FlatHud::new(keyboard_mouse_input());
+        let mut icons = EMPTY_HOTBAR_ICONS;
+        icons[0] = Some(GuiTextureUv::new(0.1, 0.2, 0.3, 0.4));
+        hud.hotbar = FlatHotbarOverlay::selected_with_icons(4, icons);
+        hud.status = crate::StatusOverlay::new("ready", true);
+
+        let retained = host.render_flat_hud_draw_list(scale, &hud);
+        let mut standalone = GuiDrawList::new();
+        render_flat_hud(scale, &mut standalone, &hud);
+
+        assert_eq!(retained.draw, standalone);
     }
 
     #[test]

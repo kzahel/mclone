@@ -61,8 +61,8 @@ mod android {
         DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, FlatHud,
         GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel, GameUiAction,
         GameUiHost, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay,
-        TouchJoystickOverlay, TouchOverlay, render_flat_hud, touch_action_button_rects,
-        touch_hotbar_slot_rects, touch_menu_button_rect, touch_movement_zone_rect,
+        TouchJoystickOverlay, TouchOverlay, touch_action_button_rects, touch_hotbar_slot_rects,
+        touch_menu_button_rect, touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -1422,7 +1422,7 @@ mod android {
                 hud.world_hud_visible = false;
                 hud.crosshair_visible = false;
                 hud.status = self.session_status.clone();
-                render_flat_hud(gui_scale, &mut draw, &hud);
+                self.ui.append_flat_hud_draw(gui_scale, &mut draw, &hud);
                 return draw;
             }
             let mut draw = GuiDrawList::new();
@@ -1443,7 +1443,7 @@ mod android {
             );
             hud.touch = touch;
             hud.status = self.session_status.clone();
-            render_flat_hud(gui_scale, &mut draw, &hud);
+            self.ui.append_flat_hud_draw(gui_scale, &mut draw, &hud);
             draw
         }
 

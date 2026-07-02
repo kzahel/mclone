@@ -348,7 +348,8 @@ Validation:
 
 ### Slice H: HUD, Hotbar, And Block Picker V2
 
-Status: pending.
+Status: first retained HUD layer landed 2026-07-02; icons, selected item text,
+debug/status overlays, touch/gamepad prompts, and block picker still pending.
 
 Move in-game UI surfaces to v2 retained layers:
 
@@ -922,6 +923,60 @@ Rendered checks:
 - browser canvas smoke regenerated and inspected:
   `/tmp/mclone-native-web-canvas.png`
 
+## Landed HUD Retained-Layer Foundation Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- added a host-owned retained HUD layer in `GameUiHost`
+- cached crosshair, flat hotbar slot panel geometry, and selected-slot outline
+  by a compact retained HUD state
+- kept hotbar icons/slot labels, touch/gamepad prompts, status overlays, debug
+  overlays, and the block picker on the existing immediate path
+- routed desktop flat, web/WASM, and flat Android HUD composition through the
+  shared host-owned HUD path
+- kept `render_flat_hud` as a compatibility wrapper for tests and non-host
+  callers
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui flat_hud -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-xr-scene -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+```
+
+Automated proof coverage:
+
+- `game_ui_host_flat_hud_retained_cache_tracks_static_geometry` proves the HUD
+  retained layer rebuilds on first render, hits on unchanged frames, remains a
+  hit when only hotbar icons change, and rebuilds when the selected slot changes
+- `game_ui_host_flat_hud_draw_matches_standalone_renderer` proves the host-owned
+  retained/dynamic split produces the same draw list as the standalone HUD
+  renderer
+
+Rendered checks:
+
+- browser live-world canvas smoke regenerated and inspected:
+  `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- this is not yet a retained icon/text layer; hotbar numbers/icons are still
+  rebuilt every frame
+- the native offscreen screenshot lane currently sets `hud: None`, so native
+  live-world HUD pixel capture needs a separate diagnostic option
+- runtime frame summaries do not yet surface flat HUD retained-cache counters
+- block picker and block-picker hit testing are still legacy
+
 ## Non-Goals
 
 - Spending more effort on legacy Options hit-test fixes than needed to keep the
@@ -936,17 +991,18 @@ Rendered checks:
 
 ## Next Recommended Chunk
 
-Finish Slice G validation, then start Slice H.
+Continue Slice H with runtime proof and the next retained HUD layer.
 
 Next scope:
 
 - run a real headset/desktop XR idle Controls smoke and confirm
   `ui_draw_rebuilds=0`, `ui_panel_repaints=0`, and no texture recreates on quiet
   frames after the first cached frame
-- start Slice H with the smallest always-visible in-game retained surface:
-  crosshair plus hotbar frame/selected-slot overlay
-- keep block/item icons and the full creative picker as follow-up Slice H steps
-  after the HUD surface ownership and cache behavior are proven
+- surface flat HUD retained-cache counters in the flat frame summaries/reports
+- move hotbar icon/slot-label draws onto retained dynamic sublayers keyed by
+  selected slot and item/icon revisions
+- keep the full creative picker as the next larger migration after the HUD
+  surface has runtime cache visibility
 
 ## Completed First Recommended Chunk
 
