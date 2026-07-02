@@ -603,25 +603,31 @@ Implementation notes:
 - Follow-up instrumentation adds request count, worst single handoff, and worst
   single compiler-submit time so accumulated deadline-loop work can be separated
   from one bad submit.
+- The second follow-up splits `RenderSectionCompileWorker::submit` itself into
+  capacity check, command send, and render-thread pending-count mark, while
+  logging request target/snapshot/light/revision counts and estimated owned
+  payload bytes.
 
 Measurement, Quest Android XR per-eye settled orbit, render distance 7, 2 render
 compile workers, unbounded completed-result acceptance, 45-second sample:
 
 | Frame avg / p95 / p99 / max | Runtime submit split | Submit handoff split | Read |
 |---|---|---|---|
-| 14.206 / 15.744 / 26.212 / 38.703 ms | submit 15.218 ms; snapshot 0.898; handoff 15.076 | single handoff 15.076; request count 2; request build 0.097; compiler submit total 15.041; compiler submit single 15.041; mark inflight 0.012; apply ready plan 0.310; ready update 0.018 | 32 ready sections, 3536 deferred sections, 10 request snapshots, 32 revisions |
+| 14.211 / 15.849 / 24.616 / 63.979 ms | submit 13.078 ms; snapshot 0.859; handoff 12.735 | single handoff 12.699; request count 2; request build 0.060; compiler submit total 12.653; compiler submit single 12.653; command send total 12.651; command send single 12.651; capacity check 0.000; pending mark 0.001; mark inflight 0.017; apply ready plan 0.670; ready update 0.009 | 32 ready sections, 3552 deferred sections, 10 request snapshots, 72 snapshot sections, 102 light sections, 32 revisions, 587300 estimated payload bytes total, 306164 single |
 
 Interpretation:
 
 - The handoff tail is not ready-plan application or request construction in
   this run. Those are sub-millisecond even with thousands of deferred sections.
 - The visible spike is inside native compiler submission. The request-count
-  follow-up shows this is not merely two medium submits added together:
-  `request_count=2`, but `compiler_submit_single=15.041 ms`, effectively the
+  follow-up still shows this is not merely two medium submits added together:
+  `request_count=2`, but `compiler_submit_single=12.653 ms`, effectively the
   whole compiler-submit total for the worst frame.
-- In the current native worker, that means the next cut is inside
-  `RenderSectionCompileWorker::submit`: capacity check, `std::sync::mpsc`
-  command send, request move/drop behavior, and worker wakeup interaction.
+- The inner-submit follow-up narrows the current native worker tail to
+  `std::sync::mpsc` command send: `command_send_single=12.651 ms`, while
+  capacity check and render-thread pending-count mutation round to zero. The
+  largest individual request in that max line targets 16 sections and carries
+  about 306 KB of estimated owned payload.
 - This result changes the first extraction target from dirty/deferred set
   ownership to compiler dispatcher/request transport ownership. The set-moving
   model is still a likely architectural cleanup, but it is not the measured
@@ -721,9 +727,10 @@ making `RenderSectionCompileWorker::submit` more Java-dispatcher-like and less
 dependent on moving an owned request through `std::sync::mpsc` on the render
 frame. Good candidate slices:
 
-- split `RenderSectionCompileWorker::submit` itself into capacity-check, channel
-  send, and pending-count mutation, while logging request payload counts/bytes,
-- replace the unbounded `mpsc` command channel with a bounded/preallocated
+- replace the unbounded `mpsc` command channel with a bounded nonblocking
   dispatcher queue or ring that has explicit capacity and queue-health counters,
-- move toward resident worker-owned snapshot/request storage so render-frame
-  submit can enqueue a compact descriptor instead of an owned request payload.
+- measure the same RD7 settled-orbit lane to see whether command-send single
+  spikes disappear or move into upload/encode tails,
+- move toward resident worker-owned snapshot/request storage if the bounded
+  transport still pays too much to move owned request payloads from the render
+  frame.

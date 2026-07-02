@@ -3,6 +3,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use mclone_assets::{AssetSource, AssetSourceChain, FilesystemAssetSource, PackedAssetSource};
@@ -14,10 +15,11 @@ pub use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::load_actor_texture_assets as load_actor_texture_assets_from_source;
 use mclone_render::chunk::ChunkTextureAtlas;
 use mclone_render_session::{
-    RenderSectionCompileRequest, RenderSectionCompileResult, RenderSectionCompiler,
-    build_render_sections_from_snapshots,
+    RenderSectionCompileRequest, RenderSectionCompileResult, RenderSectionCompileSubmitTiming,
+    RenderSectionCompiler, build_render_sections_from_snapshots,
 };
 
+use crate::elapsed_ms;
 use crate::far_lod::FarTerrainLodMaterialPalette;
 pub const DEFAULT_REFERENCE_ASSET_VERSION: &str = "1.17.1";
 pub const DEFAULT_REFERENCE_PACK_FILE: &str = "extracted.zip";
@@ -159,6 +161,14 @@ impl RenderSectionCompileWorker {
 
 impl RenderSectionCompiler for RenderSectionCompileWorker {
     fn submit(&mut self, request: RenderSectionCompileRequest) -> Result<()> {
+        self.submit_with_timing(request).map(|_| ())
+    }
+
+    fn submit_with_timing(
+        &mut self,
+        request: RenderSectionCompileRequest,
+    ) -> Result<RenderSectionCompileSubmitTiming> {
+        let capacity_start = Instant::now();
         if self.pending_jobs >= self.max_pending_jobs {
             bail!(
                 "render section compile worker has no free compile slots \
@@ -167,11 +177,23 @@ impl RenderSectionCompiler for RenderSectionCompileWorker {
                 self.max_pending_jobs
             );
         }
+        let capacity_check_ms = elapsed_ms(capacity_start.elapsed());
+
+        let send_start = Instant::now();
         self.sender
             .send(RenderSectionCompileCommand::Build(request))
             .context("failed to submit render section compile task")?;
+        let command_send_ms = elapsed_ms(send_start.elapsed());
+
+        let pending_start = Instant::now();
         self.pending_jobs += 1;
-        Ok(())
+        let pending_mark_ms = elapsed_ms(pending_start.elapsed());
+
+        Ok(RenderSectionCompileSubmitTiming {
+            capacity_check_ms,
+            command_send_ms,
+            pending_mark_ms,
+        })
     }
 
     fn try_recv_completed(&mut self) -> Result<Vec<RenderSectionCompileResult>> {

@@ -353,27 +353,34 @@ a compiler exposes spare capacity and waits when capacity is full.
 
 The `submit_handoff_ms` bucket is now split in the timed native path and exposed
 on Android XR as `MCLONE_ANDROID_XR_PERF_TERRAIN_SUBMIT_MAX`: request build,
-compiler submit, mark inflight, apply ready plan, ready-update generation, and
-the relevant dirty/inflight/request counts are visible.
+compiler submit, compiler capacity check, compiler command send, compiler
+pending-count mark, mark inflight, apply ready plan, ready-update generation,
+and the relevant dirty/inflight/request/payload counts are visible.
 
 Measurement, Quest Android XR per-eye settled orbit, render distance 7, 2 render
 compile workers, unbounded completed-result acceptance, 45-second sample:
 
 | Frame avg / p95 / p99 / max | Runtime submit split | Submit handoff split | Read |
 |---|---|---|---|
-| 14.206 / 15.744 / 26.212 / 38.703 ms | submit 15.218 ms; snapshot 0.898; handoff 15.076 | single handoff 15.076; request count 2; request build 0.097; compiler submit total 15.041; compiler submit single 15.041; mark inflight 0.012; apply ready plan 0.310; ready update 0.018 | 32 ready sections, 3536 deferred sections, 10 request snapshots, 32 revisions |
+| 14.211 / 15.849 / 24.616 / 63.979 ms | submit 13.078 ms; snapshot 0.859; handoff 12.735 | single handoff 12.699; request count 2; request build 0.060; compiler submit total 12.653; compiler submit single 12.653; command send total 12.651; command send single 12.651; capacity check 0.000; pending mark 0.001; mark inflight 0.017; apply ready plan 0.670; ready update 0.009 | 32 ready sections, 3552 deferred sections, 10 request snapshots, 72 snapshot sections, 102 light sections, 32 revisions, 587300 estimated payload bytes total, 306164 single |
 
 Interpretation:
 
 - Raw compiler handoff is not cheap in the worst frame. It dominates the old
   handoff bucket.
 - The request-count follow-up shows this is not just two admitted requests
-  accumulating: one compiler submit can take essentially the whole 15 ms spike.
+  accumulating: one compiler submit can take essentially the whole submit spike.
+- The inner-submit follow-up narrows that further: the spike is in
+  `std::sync::mpsc` command send (`12.651 ms` single submit here), while the
+  explicit capacity check and render-thread pending-count mutation are
+  effectively zero.
 - Ready-plan/deferred-section bookkeeping is not the measured submit spike in
-  this run: `apply_ready_plan` is under 0.5 ms even with 3536 deferred sections.
+  this run: `apply_ready_plan` is still sub-millisecond even with 3552 deferred
+  sections.
 - The next backpressure slice should focus on native compile dispatcher/request
-  transport: split `RenderSectionCompileWorker::submit` itself, then move toward
-  a bounded preallocated dispatcher queue or compact resident-worker descriptor.
+  transport: replace the unbounded `mpsc` command send with a bounded,
+  nonblocking/preallocated queue shape or enqueue a compact resident-worker
+  descriptor instead of an owned request payload.
 - In parallel, continue tracking upload-apply, ready publish, prepared-record
   rebuild, and per-eye terrain encode tails because they remain comparable to
   runtime submit in worst frames.

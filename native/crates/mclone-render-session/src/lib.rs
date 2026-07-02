@@ -14,9 +14,10 @@ use mclone_client::{
     WalkingMovementStep,
 };
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, Aabb, BlockHitResult, BlockPos, CHUNK_SECTION_VOLUME, CHUNK_WIDTH,
-    ChunkPos, ChunkSnapshot, PackedLightSection, SECTION_HEIGHT, Vec3d, block_to_chunk_coord,
-    block_to_section_coord, chunk_block_coord, chunk_middle_block_coord,
+    AIR_BLOCK_STATE_ID, Aabb, BlockHitResult, BlockPos, BlockStateId, CHUNK_SECTION_VOLUME,
+    CHUNK_WIDTH, ChunkPos, ChunkSnapshot, PackedChunkSection, PackedLightSection, SECTION_HEIGHT,
+    Vec3d, block_to_chunk_coord, block_to_section_coord, chunk_block_coord,
+    chunk_middle_block_coord,
 };
 use mclone_mesh::{
     RenderSectionKey, TexturedChunkMeshInput, TexturedChunkVertex, TexturedMeshCatalog,
@@ -345,6 +346,65 @@ pub struct RenderSectionCompileRequest {
     pub target_sections: BTreeSet<RenderSectionKey>,
     pub section_revisions: BTreeMap<RenderSectionKey, u64>,
     pub snapshots: Vec<ChunkSnapshot>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RenderSectionCompileRequestPayloadStats {
+    pub target_section_count: usize,
+    pub section_revision_count: usize,
+    pub snapshot_count: usize,
+    pub snapshot_section_count: usize,
+    pub snapshot_light_section_count: usize,
+    pub estimated_owned_bytes: usize,
+}
+
+impl RenderSectionCompileRequest {
+    pub fn payload_stats(&self) -> RenderSectionCompileRequestPayloadStats {
+        let snapshot_section_count = self
+            .snapshots
+            .iter()
+            .map(|snapshot| snapshot.sections.len())
+            .sum();
+        let snapshot_light_section_count = self
+            .snapshots
+            .iter()
+            .map(|snapshot| snapshot.light_sections.len())
+            .sum();
+        let mut estimated_owned_bytes = self.target_sections.len()
+            * std::mem::size_of::<RenderSectionKey>()
+            + self.section_revisions.len()
+                * (std::mem::size_of::<RenderSectionKey>() + std::mem::size_of::<u64>())
+            + self.snapshots.capacity() * std::mem::size_of::<ChunkSnapshot>();
+        for snapshot in &self.snapshots {
+            estimated_owned_bytes +=
+                snapshot.sections.capacity() * std::mem::size_of::<PackedChunkSection>();
+            estimated_owned_bytes +=
+                snapshot.light_sections.capacity() * std::mem::size_of::<PackedLightSection>();
+            for section in &snapshot.sections {
+                estimated_owned_bytes +=
+                    section.palette_state_ids.capacity() * std::mem::size_of::<BlockStateId>();
+                estimated_owned_bytes +=
+                    section.packed_block_indices.capacity() * std::mem::size_of::<u64>();
+            }
+            for light_section in &snapshot.light_sections {
+                if let Some(sky) = &light_section.sky {
+                    estimated_owned_bytes += sky.capacity();
+                }
+                if let Some(block) = &light_section.block {
+                    estimated_owned_bytes += block.capacity();
+                }
+            }
+        }
+
+        RenderSectionCompileRequestPayloadStats {
+            target_section_count: self.target_sections.len(),
+            section_revision_count: self.section_revisions.len(),
+            snapshot_count: self.snapshots.len(),
+            snapshot_section_count,
+            snapshot_light_section_count,
+            estimated_owned_bytes,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -3456,6 +3516,14 @@ pub fn decode_textured_render_section_build_report(
 pub trait RenderSectionCompiler {
     fn submit(&mut self, request: RenderSectionCompileRequest) -> Result<()>;
 
+    fn submit_with_timing(
+        &mut self,
+        request: RenderSectionCompileRequest,
+    ) -> Result<RenderSectionCompileSubmitTiming> {
+        self.submit(request)?;
+        Ok(RenderSectionCompileSubmitTiming::default())
+    }
+
     fn try_recv_completed(&mut self) -> Result<Vec<RenderSectionCompileResult>>;
 
     fn pending_job_count(&self) -> usize;
@@ -3472,6 +3540,13 @@ pub trait RenderSectionCompiler {
     fn has_pending_job_capacity(&self) -> bool {
         self.available_pending_job_slots() > 0
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RenderSectionCompileSubmitTiming {
+    pub capacity_check_ms: f64,
+    pub command_send_ms: f64,
+    pub pending_mark_ms: f64,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

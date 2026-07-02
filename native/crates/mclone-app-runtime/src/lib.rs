@@ -30,10 +30,11 @@ use mclone_protocol::{
     PlayerPositionUpdate, ServerUpdate, SetPlayerAppearanceCommand,
 };
 use mclone_render_session::{
-    EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompileSubmission,
-    RenderSectionCompiler, RenderSectionReadyWorkSubmission, RenderSectionRemovalMode,
-    RenderSectionSession, RenderSectionSyncPlan, build_client_textured_sections,
-    render_section_chunk_pos, render_section_neighbor_readiness, sort_chunk_positions_by_distance,
+    EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompileRequestPayloadStats,
+    RenderSectionCompileSubmission, RenderSectionCompileSubmitTiming, RenderSectionCompiler,
+    RenderSectionReadyWorkSubmission, RenderSectionRemovalMode, RenderSectionSession,
+    RenderSectionSyncPlan, build_client_textured_sections, render_section_chunk_pos,
+    render_section_neighbor_readiness, sort_chunk_positions_by_distance,
     sort_dirty_section_chunks_by_distance,
 };
 use mclone_server::{
@@ -62,6 +63,12 @@ pub struct RenderSectionSyncTiming {
     pub submit_request_build_ms: f64,
     pub submit_compiler_ms: f64,
     pub submit_compiler_worst_ms: f64,
+    pub submit_compiler_capacity_check_ms: f64,
+    pub submit_compiler_capacity_check_worst_ms: f64,
+    pub submit_compiler_command_send_ms: f64,
+    pub submit_compiler_command_send_worst_ms: f64,
+    pub submit_compiler_pending_mark_ms: f64,
+    pub submit_compiler_pending_mark_worst_ms: f64,
     pub submit_mark_inflight_ms: f64,
     pub submit_apply_ready_plan_ms: f64,
     pub submit_ready_update_ms: f64,
@@ -73,11 +80,54 @@ pub struct RenderSectionSyncTiming {
     pub submit_dirty_section_count_after: usize,
     pub submit_inflight_section_count_before: usize,
     pub submit_inflight_section_count_after: usize,
+    pub submit_request_target_section_count: usize,
+    pub submit_request_target_section_count_worst: usize,
     pub submit_request_snapshot_count: usize,
+    pub submit_request_snapshot_section_count: usize,
+    pub submit_request_snapshot_section_count_worst: usize,
+    pub submit_request_light_section_count: usize,
+    pub submit_request_light_section_count_worst: usize,
     pub submit_request_revision_count: usize,
+    pub submit_request_estimated_payload_bytes: usize,
+    pub submit_request_estimated_payload_bytes_worst: usize,
 }
 
 impl RenderSectionSyncTiming {
+    fn record_submit_timing(&mut self, timing: RenderSectionCompileSubmitTiming) {
+        self.submit_compiler_capacity_check_ms += timing.capacity_check_ms;
+        self.submit_compiler_capacity_check_worst_ms = self
+            .submit_compiler_capacity_check_worst_ms
+            .max(timing.capacity_check_ms);
+        self.submit_compiler_command_send_ms += timing.command_send_ms;
+        self.submit_compiler_command_send_worst_ms = self
+            .submit_compiler_command_send_worst_ms
+            .max(timing.command_send_ms);
+        self.submit_compiler_pending_mark_ms += timing.pending_mark_ms;
+        self.submit_compiler_pending_mark_worst_ms = self
+            .submit_compiler_pending_mark_worst_ms
+            .max(timing.pending_mark_ms);
+    }
+
+    fn record_request_payload_stats(&mut self, stats: RenderSectionCompileRequestPayloadStats) {
+        self.submit_request_target_section_count += stats.target_section_count;
+        self.submit_request_target_section_count_worst = self
+            .submit_request_target_section_count_worst
+            .max(stats.target_section_count);
+        self.submit_request_snapshot_section_count += stats.snapshot_section_count;
+        self.submit_request_snapshot_section_count_worst = self
+            .submit_request_snapshot_section_count_worst
+            .max(stats.snapshot_section_count);
+        self.submit_request_light_section_count += stats.snapshot_light_section_count;
+        self.submit_request_light_section_count_worst = self
+            .submit_request_light_section_count_worst
+            .max(stats.snapshot_light_section_count);
+        self.submit_request_revision_count += stats.section_revision_count;
+        self.submit_request_estimated_payload_bytes += stats.estimated_owned_bytes;
+        self.submit_request_estimated_payload_bytes_worst = self
+            .submit_request_estimated_payload_bytes_worst
+            .max(stats.estimated_owned_bytes);
+    }
+
     pub fn merge(&mut self, other: Self) {
         self.completed_result_accept_ms += other.completed_result_accept_ms;
         self.dirty_seed_ms += other.dirty_seed_ms;
@@ -94,6 +144,18 @@ impl RenderSectionSyncTiming {
         self.submit_compiler_worst_ms = self
             .submit_compiler_worst_ms
             .max(other.submit_compiler_worst_ms);
+        self.submit_compiler_capacity_check_ms += other.submit_compiler_capacity_check_ms;
+        self.submit_compiler_capacity_check_worst_ms = self
+            .submit_compiler_capacity_check_worst_ms
+            .max(other.submit_compiler_capacity_check_worst_ms);
+        self.submit_compiler_command_send_ms += other.submit_compiler_command_send_ms;
+        self.submit_compiler_command_send_worst_ms = self
+            .submit_compiler_command_send_worst_ms
+            .max(other.submit_compiler_command_send_worst_ms);
+        self.submit_compiler_pending_mark_ms += other.submit_compiler_pending_mark_ms;
+        self.submit_compiler_pending_mark_worst_ms = self
+            .submit_compiler_pending_mark_worst_ms
+            .max(other.submit_compiler_pending_mark_worst_ms);
         self.submit_mark_inflight_ms += other.submit_mark_inflight_ms;
         self.submit_apply_ready_plan_ms += other.submit_apply_ready_plan_ms;
         self.submit_ready_update_ms += other.submit_ready_update_ms;
@@ -117,8 +179,24 @@ impl RenderSectionSyncTiming {
         self.submit_inflight_section_count_after = self
             .submit_inflight_section_count_after
             .max(other.submit_inflight_section_count_after);
+        self.submit_request_target_section_count += other.submit_request_target_section_count;
+        self.submit_request_target_section_count_worst = self
+            .submit_request_target_section_count_worst
+            .max(other.submit_request_target_section_count_worst);
         self.submit_request_snapshot_count += other.submit_request_snapshot_count;
+        self.submit_request_snapshot_section_count += other.submit_request_snapshot_section_count;
+        self.submit_request_snapshot_section_count_worst = self
+            .submit_request_snapshot_section_count_worst
+            .max(other.submit_request_snapshot_section_count_worst);
+        self.submit_request_light_section_count += other.submit_request_light_section_count;
+        self.submit_request_light_section_count_worst = self
+            .submit_request_light_section_count_worst
+            .max(other.submit_request_light_section_count_worst);
         self.submit_request_revision_count += other.submit_request_revision_count;
+        self.submit_request_estimated_payload_bytes += other.submit_request_estimated_payload_bytes;
+        self.submit_request_estimated_payload_bytes_worst = self
+            .submit_request_estimated_payload_bytes_worst
+            .max(other.submit_request_estimated_payload_bytes_worst);
     }
 }
 
@@ -954,14 +1032,15 @@ impl SingleViewRuntime {
         };
         timing.submit_request_build_ms += elapsed_ms(request_build_start.elapsed());
         timing.submit_request_count += 1;
-        timing.submit_request_revision_count += request.section_revisions.len();
+        timing.record_request_payload_stats(request.payload_stats());
 
         let submitted_section_count = request.target_sections.len();
         let compiler_start = Instant::now();
-        compiler.submit(request)?;
+        let submit_timing = compiler.submit_with_timing(request)?;
         let compiler_ms = elapsed_ms(compiler_start.elapsed());
         timing.submit_compiler_ms += compiler_ms;
         timing.submit_compiler_worst_ms = timing.submit_compiler_worst_ms.max(compiler_ms);
+        timing.record_submit_timing(submit_timing);
 
         let mark_start = Instant::now();
         self.engine

@@ -434,6 +434,12 @@ pub struct XrTerrainFrameTiming {
     pub runtime_submit_request_build_ms: f64,
     pub runtime_submit_compiler_ms: f64,
     pub runtime_submit_compiler_worst_ms: f64,
+    pub runtime_submit_compiler_capacity_check_ms: f64,
+    pub runtime_submit_compiler_capacity_check_worst_ms: f64,
+    pub runtime_submit_compiler_command_send_ms: f64,
+    pub runtime_submit_compiler_command_send_worst_ms: f64,
+    pub runtime_submit_compiler_pending_mark_ms: f64,
+    pub runtime_submit_compiler_pending_mark_worst_ms: f64,
     pub runtime_submit_mark_inflight_ms: f64,
     pub runtime_submit_apply_ready_plan_ms: f64,
     pub runtime_submit_ready_update_ms: f64,
@@ -445,8 +451,16 @@ pub struct XrTerrainFrameTiming {
     pub runtime_submit_dirty_section_count_after: usize,
     pub runtime_submit_inflight_section_count_before: usize,
     pub runtime_submit_inflight_section_count_after: usize,
+    pub runtime_submit_request_target_section_count: usize,
+    pub runtime_submit_request_target_section_count_worst: usize,
     pub runtime_submit_request_snapshot_count: usize,
+    pub runtime_submit_request_snapshot_section_count: usize,
+    pub runtime_submit_request_snapshot_section_count_worst: usize,
+    pub runtime_submit_request_light_section_count: usize,
+    pub runtime_submit_request_light_section_count_worst: usize,
     pub runtime_submit_request_revision_count: usize,
+    pub runtime_submit_request_estimated_payload_bytes: usize,
+    pub runtime_submit_request_estimated_payload_bytes_worst: usize,
     pub runtime_gpu_upload_ms: f64,
     pub runtime_upload_enqueue_ms: f64,
     pub runtime_upload_select_ms: f64,
@@ -2691,6 +2705,22 @@ where
         timing.runtime_submit_compiler_ms = timed_section_update.timing.submit_compiler_ms;
         timing.runtime_submit_compiler_worst_ms =
             timed_section_update.timing.submit_compiler_worst_ms;
+        timing.runtime_submit_compiler_capacity_check_ms = timed_section_update
+            .timing
+            .submit_compiler_capacity_check_ms;
+        timing.runtime_submit_compiler_capacity_check_worst_ms = timed_section_update
+            .timing
+            .submit_compiler_capacity_check_worst_ms;
+        timing.runtime_submit_compiler_command_send_ms =
+            timed_section_update.timing.submit_compiler_command_send_ms;
+        timing.runtime_submit_compiler_command_send_worst_ms = timed_section_update
+            .timing
+            .submit_compiler_command_send_worst_ms;
+        timing.runtime_submit_compiler_pending_mark_ms =
+            timed_section_update.timing.submit_compiler_pending_mark_ms;
+        timing.runtime_submit_compiler_pending_mark_worst_ms = timed_section_update
+            .timing
+            .submit_compiler_pending_mark_worst_ms;
         timing.runtime_submit_mark_inflight_ms =
             timed_section_update.timing.submit_mark_inflight_ms;
         timing.runtime_submit_apply_ready_plan_ms =
@@ -2715,10 +2745,34 @@ where
         timing.runtime_submit_inflight_section_count_after = timed_section_update
             .timing
             .submit_inflight_section_count_after;
+        timing.runtime_submit_request_target_section_count = timed_section_update
+            .timing
+            .submit_request_target_section_count;
+        timing.runtime_submit_request_target_section_count_worst = timed_section_update
+            .timing
+            .submit_request_target_section_count_worst;
         timing.runtime_submit_request_snapshot_count =
             timed_section_update.timing.submit_request_snapshot_count;
+        timing.runtime_submit_request_snapshot_section_count = timed_section_update
+            .timing
+            .submit_request_snapshot_section_count;
+        timing.runtime_submit_request_snapshot_section_count_worst = timed_section_update
+            .timing
+            .submit_request_snapshot_section_count_worst;
+        timing.runtime_submit_request_light_section_count = timed_section_update
+            .timing
+            .submit_request_light_section_count;
+        timing.runtime_submit_request_light_section_count_worst = timed_section_update
+            .timing
+            .submit_request_light_section_count_worst;
         timing.runtime_submit_request_revision_count =
             timed_section_update.timing.submit_request_revision_count;
+        timing.runtime_submit_request_estimated_payload_bytes = timed_section_update
+            .timing
+            .submit_request_estimated_payload_bytes;
+        timing.runtime_submit_request_estimated_payload_bytes_worst = timed_section_update
+            .timing
+            .submit_request_estimated_payload_bytes_worst;
         let section_update = timed_section_update.cache_update;
         let rebuilt_section_count = section_update.rebuilt_section_count();
         let removed_section_count = section_update.removed_section_count();
