@@ -63,7 +63,7 @@ use mclone_render_session::{
 };
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameMovementMode, GamePlayerModel,
-    GameScreen, GameUi, GameUiAction, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiScale,
+    GameScreen, GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiScale,
     Point, Rect, StatusOverlay, render_loading_progress_overlay, render_status_overlay,
 };
 use mclone_xr_host::{XrControllerSnapshot, XrHand};
@@ -676,7 +676,7 @@ where
     actors: ActorDrawResources,
     selection_outline: SelectionOutlineRenderer,
     world_gui_renderer: WorldGuiRenderer,
-    ui: GameUi,
+    ui: GameUiHost,
     session_status: StatusOverlay,
     sky: SkyRenderer,
     screen_effects: ScreenEffectsRenderer,
@@ -3560,7 +3560,6 @@ where
         let transform = XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())?;
         let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
         self.ui.set_scale(gui_scale);
-        let ui_state = self.current_ui_render_state();
         let hit = xr_menu_pointer_hit_from_controllers(
             &self.latest_controllers,
             transform,
@@ -3574,13 +3573,13 @@ where
         };
         let trigger_down = xr_menu_pointer_trigger_down(hit.trigger, self.menu_pointer_down);
         let action = if trigger_down && !self.menu_pointer_down {
-            self.ui.pointer_down(hit.point, ui_state);
+            self.ui.pointer_down(hit.point);
             None
         } else if !trigger_down && self.menu_pointer_down {
-            let (_handled, action) = self.ui.pointer_up(hit.point, ui_state);
+            let (_handled, action) = self.ui.pointer_up(hit.point);
             action
         } else {
-            let (_handled, action) = self.ui.pointer_move(hit.point, ui_state);
+            let (_handled, action) = self.ui.pointer_move(hit.point);
             action
         };
         self.menu_pointer_down = trigger_down;
@@ -4556,8 +4555,8 @@ where
     Ok(false)
 }
 
-fn xr_game_ui_for_session(session: Option<&ActiveSessionDescriptor>, seed: i64) -> GameUi {
-    let mut ui = GameUi::new();
+fn xr_game_ui_for_session(session: Option<&ActiveSessionDescriptor>, seed: i64) -> GameUiHost {
+    let mut ui = GameUiHost::new();
     ui.set_new_world_seed(match session {
         Some(ActiveSessionDescriptor::LocalWorld { seed }) => *seed,
         Some(ActiveSessionDescriptor::Remote { .. }) | None => seed,

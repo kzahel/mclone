@@ -69,7 +69,7 @@ use mclone_ui::{
     FlatDebugMeshCounts, FlatDebugOverlay, FlatDebugRenderOptions, FlatDebugRunner,
     FlatDebugTarget, FlatDebugView, FlatHotbarOverlay, FlatHud, GameFramePacingMode,
     GameHelpParent, GameMovementMode, GameOptionsParent, GamePlayerModel, GameScreen,
-    GameTouchSettings, GameUi, GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point,
+    GameTouchSettings, GameUiAction, GameUiHost, GameUiRenderState, GuiKey, GuiScale, Point,
     StatusOverlay, TouchJoystickOverlay, TouchOverlay, render_debug_overlay_at, render_flat_hud,
 };
 
@@ -2383,7 +2383,7 @@ pub struct WebChunkRenderSession {
     draw: Option<TexturedSectionDrawResources>,
     actors: ActorDrawResources,
     gui: GuiRenderer,
-    ui: GameUi,
+    ui: GameUiHost,
     debug_overlay_visible: bool,
     status_overlay: StatusOverlay,
     section_occlusion_culling: bool,
@@ -2620,8 +2620,8 @@ impl WebChunkRenderSession {
         radius_chunks: u32,
     ) -> Result<JsValue, JsValue> {
         let point = self.ui_point_from_canvas_pixels(pixel_x, pixel_y);
-        let state = self.ui_render_state(radius_chunks);
-        let (handled, action) = self.ui.pointer_move(point, state);
+        let _ = radius_chunks;
+        let (handled, action) = self.ui.pointer_move(point);
         self.apply_ui_event_result(handled, action)
             .map_err(JsValue::from)
     }
@@ -2634,8 +2634,8 @@ impl WebChunkRenderSession {
         radius_chunks: u32,
     ) -> Result<JsValue, JsValue> {
         let point = self.ui_point_from_canvas_pixels(pixel_x, pixel_y);
-        let state = self.ui_render_state(radius_chunks);
-        let handled = self.ui.pointer_down(point, state);
+        let _ = radius_chunks;
+        let handled = self.ui.pointer_down(point);
         self.apply_ui_event_result(handled, None)
             .map_err(JsValue::from)
     }
@@ -2648,8 +2648,8 @@ impl WebChunkRenderSession {
         radius_chunks: u32,
     ) -> Result<JsValue, JsValue> {
         let point = self.ui_point_from_canvas_pixels(pixel_x, pixel_y);
-        let state = self.ui_render_state(radius_chunks);
-        let (handled, action) = self.ui.pointer_up(point, state);
+        let _ = radius_chunks;
+        let (handled, action) = self.ui.pointer_up(point);
         self.apply_ui_event_result(handled, action)
             .map_err(JsValue::from)
     }
@@ -3270,7 +3270,7 @@ impl WebChunkRenderSession {
             atlas_upload(&mesh_assets.atlas),
         )
         .map_err(|error| format!("failed to upload GUI atlas: {error:#}"))?;
-        let mut ui = GameUi::new_ingame();
+        let mut ui = GameUiHost::new_ingame();
         match &session_request {
             SessionStartRequest::NewLocalWorld { seed } => {
                 ui.set_new_world_seed(*seed);

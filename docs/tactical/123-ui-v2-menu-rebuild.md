@@ -1,6 +1,6 @@
 # 123: UI V2 Menu Rebuild
 
-Status: active; native flat committed UI frame state landed 2026-07-02.
+Status: active; shared committed UI host landed 2026-07-02.
 
 ## Decision
 
@@ -696,6 +696,59 @@ Known limits:
 - atlas text remains the next major performance chunk after the committed-state
   host is shared across web and XR
 
+## Landed Shared Committed UI Host Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- added `GameUiHost` in `mclone-ui` as the shared owner of legacy `GameUi`, v2
+  `UiSurface`, and the last committed `GameUiRenderState`
+- moved committed-state pointer/key/render routing out of the native flat driver
+  and into the shared host
+- routed desktop flat, web/WASM, flat Android, desktop XR, and Android XR through
+  the shared host for migrated v2 screens while preserving legacy fallback
+  screens
+- changed web, flat Android, and XR pointer input so app/platform crates pass
+  converted pointer points only, not freshly rebuilt layout/render state
+- added a shared-host regression test proving a divergent input-time state would
+  hit `Crosshair`, while committed host input still activates `First Person
+  Body`
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui game_ui_host_pointer -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client committed_ui_state -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-options-shared-host.png --width 960 --height 540 --screenshot-ui options-pause --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true
+```
+
+Rendered checks:
+
+- native Options screenshot inspected:
+  `/tmp/mclone-ui-v2-options-shared-host.png`
+- browser canvas smoke regenerated:
+  `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- legacy screens still render and hit-test through legacy `GameUi` inside
+  `GameUiHost`; this chunk removes app-local state divergence, not legacy screen
+  implementations
+- `UiSurface` still exposes state-taking render/pointer APIs for tests and
+  compatibility; app/platform crates should use `GameUiHost`
+- atlas text remains the next major performance chunk
+
 ## Non-Goals
 
 - Spending more effort on legacy Options hit-test fixes than needed to keep the
@@ -710,23 +763,7 @@ Known limits:
 
 ## Next Recommended Chunk
 
-Implement a shared committed-state UI host for native flat, web/WASM, and XR.
-
-Start by moving the driver-local committed-state pattern into a small shared
-owner around `UiSurface`:
-
-- one method commits frame/render state and returns the draw list
-- pointer/key methods consume the last committed state
-- app/platform crates pass converted input facts, not screen layout state
-- web/WASM and XR keep their existing presentation code but stop rebuilding
-  input-time UI state for migrated v2 screens
-- offscreen tests exercise the shared host, not native-driver-only glue
-
-Validation should include native flat tests, web build/smoke, XR compile/tests,
-and at least one Options click regression through the shared host. This is the
-foundation chunk that makes the UI invariant platform-wide.
-
-After that, implement Slice F: atlas-backed text for v2.
+Implement Slice F: atlas-backed text for v2.
 
 Start with the smallest production-shaped text path:
 

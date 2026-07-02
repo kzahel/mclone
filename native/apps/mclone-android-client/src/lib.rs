@@ -59,8 +59,8 @@ mod android {
     };
     use mclone_ui::{
         DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, FlatHud,
-        GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel, GameUi,
-        GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay,
+        GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel, GameUiAction,
+        GameUiHost, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay,
         TouchJoystickOverlay, TouchOverlay, render_flat_hud, touch_action_button_rects,
         touch_hotbar_slot_rects, touch_menu_button_rect, touch_movement_zone_rect,
     };
@@ -196,7 +196,7 @@ mod android {
         player_collision_box_visible: bool,
         crosshair_visible: bool,
         player_model: GamePlayerModel,
-        ui: GameUi,
+        ui: GameUiHost,
         session_status: StatusOverlay,
         touch_menu_touch_id: Option<u64>,
         touch_menu_pressed: bool,
@@ -718,8 +718,7 @@ mod android {
                 return Ok(AndroidUiTouchResult::default());
             }
             let point = gui_scale.client_to_gui(position.x, position.y);
-            let ui_state = self.current_ui_render_state();
-            let (handled, action) = self.ui.pointer_move(point, ui_state);
+            let (handled, action) = self.ui.pointer_move(point);
             if let Some(action) = action {
                 return self.apply_ui_action(action, device, queue, format);
             }
@@ -753,17 +752,16 @@ mod android {
                 let gui_scale = GuiScale::from_pixels(width.max(1), height.max(1));
                 self.ui.set_scale(gui_scale);
                 let point = gui_scale.client_to_gui(cursor.x, cursor.y);
-                let ui_state = self.current_ui_render_state();
                 match state {
                     ElementState::Pressed => {
-                        let handled = self.ui.pointer_down(point, ui_state);
+                        let handled = self.ui.pointer_down(point);
                         Ok(AndroidUiTouchResult {
                             handled,
                             quit: false,
                         })
                     }
                     ElementState::Released => {
-                        let (handled, action) = self.ui.pointer_up(point, ui_state);
+                        let (handled, action) = self.ui.pointer_up(point);
                         if let Some(action) = action {
                             return self.apply_ui_action(action, device, queue, format);
                         }
@@ -1024,12 +1022,11 @@ mod android {
             queue: &wgpu::Queue,
             format: wgpu::TextureFormat,
         ) -> Result<AndroidUiTouchResult> {
-            let ui_state = self.current_ui_render_state();
             match touch.phase {
                 TouchPhase::Started => {
                     if self.ui_touch_id.is_none() {
                         self.ui_touch_id = Some(touch.id);
-                        self.ui.pointer_down(point, ui_state);
+                        self.ui.pointer_down(point);
                     }
                     Ok(AndroidUiTouchResult {
                         handled: true,
@@ -1038,7 +1035,7 @@ mod android {
                 }
                 TouchPhase::Moved => {
                     if self.ui_touch_id == Some(touch.id) {
-                        let (_handled, action) = self.ui.pointer_move(point, ui_state);
+                        let (_handled, action) = self.ui.pointer_move(point);
                         if let Some(action) = action {
                             return self.apply_ui_action(action, device, queue, format);
                         }
@@ -1051,7 +1048,7 @@ mod android {
                 TouchPhase::Ended => {
                     if self.ui_touch_id == Some(touch.id) {
                         self.ui_touch_id = None;
-                        let (_handled, action) = self.ui.pointer_up(point, ui_state);
+                        let (_handled, action) = self.ui.pointer_up(point);
                         if let Some(action) = action {
                             return self.apply_ui_action(action, device, queue, format);
                         }
@@ -1414,7 +1411,11 @@ mod android {
             state
         }
 
-        fn gui_draw_list(&self, gui_scale: GuiScale, ui_state: GameUiRenderState) -> GuiDrawList {
+        fn gui_draw_list(
+            &mut self,
+            gui_scale: GuiScale,
+            ui_state: GameUiRenderState,
+        ) -> GuiDrawList {
             if self.ui.is_active() {
                 let mut draw = self.ui.render_draw_list(ui_state);
                 let mut hud = FlatHud::new(self.input_capabilities.resolve(self.input_preferences));
@@ -1943,8 +1944,8 @@ mod android {
         }
     }
 
-    fn android_game_ui_for_scene(options: &AndroidSceneOptions) -> GameUi {
-        let mut ui = GameUi::new_ingame();
+    fn android_game_ui_for_scene(options: &AndroidSceneOptions) -> GameUiHost {
+        let mut ui = GameUiHost::new_ingame();
         ui.set_new_world_seed(options.seed);
         ui.set_join_remote_addr(
             options

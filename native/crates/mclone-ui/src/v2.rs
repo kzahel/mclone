@@ -1,7 +1,7 @@
 use crate::{
     Button, Checkbox, Color, CycleButton, Font, GameHelpParent, GameOptionsParent, GameScreen,
-    GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Interaction, Point, Rect,
-    Slider, WidgetId, centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
+    GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Interaction, Point,
+    Rect, Slider, WidgetId, centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
     far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
     fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
     movement_speed_slider_value, next_touch_controls_mode, render_distance_from_slider_value,
@@ -727,6 +727,176 @@ impl UiSurface {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct GameUiHost {
+    legacy: GameUi,
+    surface: UiSurface,
+    committed_render_state: GameUiRenderState,
+}
+
+impl Default for GameUiHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GameUiHost {
+    pub fn new() -> Self {
+        Self::from_game_ui(GameUi::new())
+    }
+
+    pub fn new_ingame() -> Self {
+        Self::from_game_ui(GameUi::new_ingame())
+    }
+
+    pub fn from_game_ui(legacy: GameUi) -> Self {
+        let mut host = Self {
+            legacy,
+            surface: UiSurface::new(),
+            committed_render_state: GameUiRenderState::default(),
+        };
+        host.sync_surface_screen();
+        host.surface.set_scale(host.legacy.scale());
+        host
+    }
+
+    pub fn screen(&self) -> Option<GameScreen> {
+        self.legacy.screen()
+    }
+
+    pub fn new_world_seed(&self) -> i64 {
+        self.legacy.new_world_seed()
+    }
+
+    pub fn set_new_world_seed(&mut self, seed: i64) {
+        self.legacy.set_new_world_seed(seed);
+    }
+
+    pub fn join_remote_addr(&self) -> &str {
+        self.legacy.join_remote_addr()
+    }
+
+    pub fn set_join_remote_addr(&mut self, addr: impl Into<String>) {
+        self.legacy.set_join_remote_addr(addr);
+    }
+
+    pub fn scale(&self) -> GuiScale {
+        self.legacy.scale()
+    }
+
+    pub fn font(&self) -> &Font {
+        self.legacy.font()
+    }
+
+    pub fn set_scale(&mut self, scale: GuiScale) {
+        self.legacy.set_scale(scale);
+        self.surface.set_scale(scale);
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.legacy.is_active()
+    }
+
+    pub fn covers_world(&self) -> bool {
+        self.legacy.covers_world()
+    }
+
+    pub fn open_pause(&mut self) {
+        self.legacy.open_pause();
+        self.sync_surface_screen();
+    }
+
+    pub fn close(&mut self) {
+        self.legacy.close();
+        self.sync_surface_screen();
+    }
+
+    pub fn set_screen(&mut self, screen: Option<GameScreen>) {
+        self.legacy.set_screen(screen);
+        self.sync_surface_screen();
+    }
+
+    pub fn clear_input(&mut self) {
+        self.legacy.clear_input();
+        self.surface.clear_input();
+    }
+
+    pub fn key_pressed(&mut self, key: GuiKey) -> (bool, Option<GameUiAction>) {
+        if self.sync_surface_screen() {
+            return self.surface.key_pressed(key);
+        }
+        self.legacy.key_pressed(key)
+    }
+
+    pub fn pointer_move(&mut self, point: Point) -> (bool, Option<GameUiAction>) {
+        let state = self.committed_render_state;
+        if self.sync_surface_screen() {
+            return self.surface.pointer_move(point, state);
+        }
+        self.legacy.pointer_move(point, state)
+    }
+
+    pub fn pointer_down(&mut self, point: Point) -> bool {
+        let state = self.committed_render_state;
+        if self.sync_surface_screen() {
+            return self.surface.pointer_down(point, state);
+        }
+        self.legacy.pointer_down(point, state)
+    }
+
+    pub fn pointer_up(&mut self, point: Point) -> (bool, Option<GameUiAction>) {
+        let state = self.committed_render_state;
+        if self.sync_surface_screen() {
+            return self.surface.pointer_up(point, state);
+        }
+        self.legacy.pointer_up(point, state)
+    }
+
+    pub fn apply_action(&mut self, action: GameUiAction) {
+        self.legacy.apply_action(action);
+        self.sync_surface_screen();
+    }
+
+    pub fn commit_render_state(&mut self, state: GameUiRenderState) {
+        self.committed_render_state = state;
+        if self.sync_surface_screen() {
+            self.surface.set_render_state(state);
+        }
+    }
+
+    pub fn committed_render_state(&self) -> GameUiRenderState {
+        self.committed_render_state
+    }
+
+    pub fn render_draw_list(&mut self, state: GameUiRenderState) -> GuiDrawList {
+        self.commit_render_state(state);
+        if self.surface.is_active() {
+            self.surface.render_draw_list(self.committed_render_state)
+        } else {
+            self.legacy.render_draw_list(self.committed_render_state)
+        }
+    }
+
+    pub fn set_v2_debug_overlay(&mut self, enabled: bool) {
+        self.surface.set_debug_overlay(enabled);
+    }
+
+    pub fn v2_is_active(&self) -> bool {
+        UiScreenId::from_game_screen(self.legacy.screen()).is_some()
+    }
+
+    pub fn v2_debug_snapshot(&mut self) -> Option<UiDebugSnapshot> {
+        self.sync_surface_screen();
+        self.surface.debug_snapshot()
+    }
+
+    fn sync_surface_screen(&mut self) -> bool {
+        let screen = UiScreenId::from_game_screen(self.legacy.screen());
+        self.surface.set_screen(screen);
+        screen.is_some()
+    }
+}
+
 const UI_V2_PAUSE_RESUME: UiWidgetId = UiWidgetId(1);
 const UI_V2_PAUSE_OPTIONS: UiWidgetId = UiWidgetId(2);
 const UI_V2_PAUSE_QUIT_TO_TITLE: UiWidgetId = UiWidgetId(3);
@@ -1165,6 +1335,15 @@ mod tests {
         }
     }
 
+    fn hovered_label(snapshot: &UiDebugSnapshot) -> Option<&str> {
+        let hovered = snapshot.hovered?;
+        snapshot
+            .widgets
+            .iter()
+            .find(|widget| widget.id == hovered)
+            .map(|widget| widget.label.as_str())
+    }
+
     #[test]
     fn layout_hit_test_uses_topmost_enabled_widget() {
         let mut layout = UiLayout::new(Some(UiScreenId::Pause), 1);
@@ -1272,6 +1451,47 @@ mod tests {
         assert!(layout.widget(UI_V2_OPTIONS_TOUCH_CONTROLS).is_some());
         assert!(layout.widget(UI_V2_OPTIONS_TOUCH_LOOK).is_some());
         assert!(layout.widget(UI_V2_OPTIONS_SERVER_SETTINGS).is_some());
+    }
+
+    #[test]
+    fn game_ui_host_pointer_input_uses_committed_render_state() {
+        let mut host = GameUiHost::new_ingame();
+        host.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        host.set_scale(GuiScale::from_pixels(960, 540));
+
+        let committed_state = GameUiRenderState::default();
+        host.commit_render_state(committed_state);
+        let committed_snapshot = host.v2_debug_snapshot().expect("Options is a v2 screen");
+        let first_person = committed_snapshot
+            .widgets
+            .iter()
+            .find(|widget| widget.id == UI_V2_OPTIONS_FIRST_PERSON_PLAYER)
+            .expect("First Person Body row exists")
+            .rect;
+        let point = Point {
+            x: first_person.x + 16.0,
+            y: first_person.bottom() - 2.0,
+        };
+
+        let mut divergent_state = committed_state;
+        divergent_state.touch_controls_mode = Some(TouchControlsMode::Auto);
+        let mut divergent_surface = UiSurface::new();
+        divergent_surface.set_screen(Some(UiScreenId::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        divergent_surface.set_scale(GuiScale::from_pixels(960, 540));
+        let (_handled, _action) = divergent_surface.pointer_move(point, divergent_state);
+        let divergent_snapshot = divergent_surface
+            .debug_snapshot()
+            .expect("divergent Options surface is active");
+
+        assert_eq!(hovered_label(&divergent_snapshot), Some("Crosshair"));
+        assert!(host.pointer_down(point));
+        let (_handled, action) = host.pointer_up(point);
+
+        assert_eq!(action, Some(GameUiAction::ToggleFirstPersonPlayer));
     }
 
     #[test]
