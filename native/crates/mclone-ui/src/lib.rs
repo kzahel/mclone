@@ -1950,7 +1950,8 @@ impl FlatHud {
 
 pub fn render_flat_hud(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
     render_flat_hud_retained_layer(scale, draw, hud);
-    render_flat_hud_dynamic_layers(scale, draw, hud);
+    render_flat_hud_hotbar_layer(scale, draw, hud);
+    render_flat_hud_transient_layers(scale, draw, hud);
 }
 
 pub(crate) fn render_flat_hud_retained_layer(
@@ -1963,21 +1964,25 @@ pub(crate) fn render_flat_hud_retained_layer(
             render_crosshair(scale, draw);
         }
         if hud.should_render_flat_hotbar() {
-            render_flat_hotbar_frame(draw, scale, hud.hotbar.selected_slot);
+            render_flat_hotbar_frame(draw, scale);
         }
     }
 }
 
-pub(crate) fn render_flat_hud_dynamic_layers(
+pub(crate) fn render_flat_hud_hotbar_layer(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
+    if hud.world_hud_visible && hud.should_render_flat_hotbar() {
+        render_flat_hotbar_selection(draw, scale, hud.hotbar.selected_slot);
+        render_flat_hotbar_contents(draw, &Font::default(), scale, hud.hotbar);
+    }
+}
+
+pub(crate) fn render_flat_hud_transient_layers(
     scale: GuiScale,
     draw: &mut GuiDrawList,
     hud: &FlatHud,
 ) {
     let touch = hud.effective_touch_overlay();
     let gamepad = hud.effective_gamepad_overlay();
-    if hud.world_hud_visible && hud.should_render_flat_hotbar() {
-        render_flat_hotbar_contents(draw, &Font::default(), scale, hud.hotbar);
-    }
     render_gamepad_hud(scale, draw, gamepad, hud.should_render_flat_hotbar());
     render_touch_overlay(scale, draw, &touch);
     render_status_overlay(scale, draw, &hud.status);
@@ -3979,14 +3984,19 @@ fn render_touch_hotbar(
     }
 }
 
-fn render_flat_hotbar_frame(draw: &mut GuiDrawList, scale: GuiScale, selected_slot: u8) {
-    let selected_slot = selected_slot.min(FLAT_HOTBAR_SLOT_COUNT.saturating_sub(1));
-    for (index, rect) in flat_hotbar_slot_rects(scale).into_iter().enumerate() {
-        let slot = index as u8;
+fn render_flat_hotbar_frame(draw: &mut GuiDrawList, scale: GuiScale) {
+    for rect in flat_hotbar_slot_rects(scale) {
         render_touch_panel(draw, rect, false);
-        if selected_slot == slot {
-            draw.outline(rect.inset(-2.0), Color::rgba(245, 250, 255, 225));
-        }
+    }
+}
+
+fn render_flat_hotbar_selection(draw: &mut GuiDrawList, scale: GuiScale, selected_slot: u8) {
+    let selected_slot = selected_slot.min(FLAT_HOTBAR_SLOT_COUNT.saturating_sub(1));
+    if let Some(rect) = flat_hotbar_slot_rects(scale)
+        .into_iter()
+        .nth(usize::from(selected_slot))
+    {
+        draw.outline(rect.inset(-2.0), Color::rgba(245, 250, 255, 225));
     }
 }
 

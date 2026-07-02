@@ -1,13 +1,14 @@
 use crate::{
     Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsParent,
     GameScreen, GameUi, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale,
-    Interaction, Point, Rect, Slider, WidgetId, centered_panel, far_lod_range_from_slider_value,
-    far_lod_range_label, far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
+    GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction, Point, Rect, Slider, WidgetId,
+    centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
+    far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
     fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
     movement_speed_slider_value, next_touch_controls_mode, render_distance_from_slider_value,
-    render_distance_label, render_distance_slider_value, render_flat_hud_dynamic_layers,
-    render_flat_hud_retained_layer, touch_controls_mode_label, touch_look_from_slider_value,
-    touch_look_label, touch_look_slider_value,
+    render_distance_label, render_distance_slider_value, render_flat_hud_hotbar_layer,
+    render_flat_hud_retained_layer, render_flat_hud_transient_layers, touch_controls_mode_label,
+    touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
 };
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, ShortcutHelpGroup, ShortcutHelpRow,
@@ -826,7 +827,6 @@ struct FlatHudRetainedState {
     scale: GuiScale,
     crosshair_visible: bool,
     hotbar_visible: bool,
-    selected_hotbar_slot: u8,
 }
 
 impl FlatHudRetainedState {
@@ -837,14 +837,30 @@ impl FlatHudRetainedState {
             scale,
             crosshair_visible,
             hotbar_visible,
-            selected_hotbar_slot: hotbar_visible
-                .then(|| {
-                    hud.hotbar
-                        .selected_slot
-                        .min(FLAT_HOTBAR_SLOT_COUNT.saturating_sub(1))
-                })
-                .unwrap_or(0),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FlatHudHotbarState {
+    scale: GuiScale,
+    selected_hotbar_slot: u8,
+    icons: [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE],
+}
+
+impl FlatHudHotbarState {
+    fn from_hud(scale: GuiScale, hud: &FlatHud) -> Option<Self> {
+        if !(hud.world_hud_visible && hud.should_render_flat_hotbar()) {
+            return None;
+        }
+        Some(Self {
+            scale,
+            selected_hotbar_slot: hud
+                .hotbar
+                .selected_slot
+                .min(FLAT_HOTBAR_SLOT_COUNT.saturating_sub(1)),
+            icons: hud.hotbar.icons,
+        })
     }
 }
 
@@ -854,9 +870,16 @@ struct CachedFlatHudRetainedLayer {
     draw: GuiDrawList,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct CachedFlatHudHotbarLayer {
+    state: FlatHudHotbarState,
+    draw: GuiDrawList,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 struct FlatHudSurface {
     retained: Option<CachedFlatHudRetainedLayer>,
+    hotbar: Option<CachedFlatHudHotbarLayer>,
 }
 
 impl FlatHudSurface {
@@ -874,6 +897,34 @@ impl FlatHudSurface {
         let mut draw = GuiDrawList::new();
         render_flat_hud_retained_layer(scale, &mut draw, hud);
         self.retained = Some(CachedFlatHudRetainedLayer {
+            state,
+            draw: draw.clone(),
+        });
+        FlatHudDrawList {
+            draw,
+            retained_cache: UiDrawCacheStats::rebuild(),
+        }
+    }
+
+    fn render_hotbar_layer(&mut self, scale: GuiScale, hud: &FlatHud) -> FlatHudDrawList {
+        let Some(state) = FlatHudHotbarState::from_hud(scale, hud) else {
+            return FlatHudDrawList {
+                draw: GuiDrawList::new(),
+                retained_cache: UiDrawCacheStats::default(),
+            };
+        };
+        if let Some(cached) = &self.hotbar {
+            if cached.state == state {
+                return FlatHudDrawList {
+                    draw: cached.draw.clone(),
+                    retained_cache: UiDrawCacheStats::cache_hit(),
+                };
+            }
+        }
+
+        let mut draw = GuiDrawList::new();
+        render_flat_hud_hotbar_layer(scale, &mut draw, hud);
+        self.hotbar = Some(CachedFlatHudHotbarLayer {
             state,
             draw: draw.clone(),
         });
@@ -1077,11 +1128,15 @@ impl GameUiHost {
 
     pub fn render_flat_hud_draw_list(&mut self, scale: GuiScale, hud: &FlatHud) -> FlatHudDrawList {
         let retained = self.hud_surface.render_retained_layer(scale, hud);
+        let hotbar = self.hud_surface.render_hotbar_layer(scale, hud);
         let mut draw = retained.draw.clone();
-        render_flat_hud_dynamic_layers(scale, &mut draw, hud);
+        draw.append(&hotbar.draw);
+        render_flat_hud_transient_layers(scale, &mut draw, hud);
+        let mut retained_cache = retained.retained_cache;
+        retained_cache.add(hotbar.retained_cache);
         FlatHudDrawList {
             draw,
-            retained_cache: retained.retained_cache,
+            retained_cache,
         }
     }
 
@@ -1726,23 +1781,48 @@ mod tests {
         hud.hotbar = FlatHotbarOverlay::selected(2);
 
         let first = host.render_flat_hud_draw_list(scale, &hud);
-        assert_eq!(first.retained_cache, UiDrawCacheStats::rebuild());
+        assert_eq!(
+            first.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 2,
+                cache_hit_count: 0,
+            }
+        );
         assert!(!first.draw.commands().is_empty());
 
         let second = host.render_flat_hud_draw_list(scale, &hud);
-        assert_eq!(second.retained_cache, UiDrawCacheStats::cache_hit());
+        assert_eq!(
+            second.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 0,
+                cache_hit_count: 2,
+            }
+        );
         assert_eq!(second.draw, first.draw);
 
         let mut icons = EMPTY_HOTBAR_ICONS;
         icons[0] = Some(GuiTextureUv::new(0.1, 0.2, 0.3, 0.4));
         hud.hotbar = FlatHotbarOverlay::selected_with_icons(2, icons);
         let icon_changed = host.render_flat_hud_draw_list(scale, &hud);
-        assert_eq!(icon_changed.retained_cache, UiDrawCacheStats::cache_hit());
+        assert_eq!(
+            icon_changed.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 1,
+                cache_hit_count: 1,
+            }
+        );
         assert_ne!(icon_changed.draw, second.draw);
 
         hud.hotbar = FlatHotbarOverlay::selected_with_icons(3, icons);
         let selected_changed = host.render_flat_hud_draw_list(scale, &hud);
-        assert_eq!(selected_changed.retained_cache, UiDrawCacheStats::rebuild());
+        assert_eq!(
+            selected_changed.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 1,
+                cache_hit_count: 1,
+            }
+        );
+        assert_ne!(selected_changed.draw, icon_changed.draw);
     }
 
     #[test]
