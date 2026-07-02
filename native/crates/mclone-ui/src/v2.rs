@@ -2,14 +2,16 @@ use crate::{
     BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
     Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsParent,
     GameScreen, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, GuiTextureUv,
-    HOTBAR_SLOT_COUNT_USIZE, Interaction, Point, Rect, Slider, WidgetId, block_palette_panel_rect,
-    block_palette_slot_rect, centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
-    far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
-    fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
-    movement_speed_slider_value, next_touch_controls_mode, render_block_palette_tooltip,
-    render_distance_from_slider_value, render_distance_label, render_distance_slider_value,
-    render_flat_hud_debug_layer, render_flat_hud_hotbar_layer, render_flat_hud_prompt_layer,
-    render_flat_hud_retained_layer, render_flat_hud_status_layer, render_flat_hud_transient_layers,
+    HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay, Point, Rect, Slider, WidgetId,
+    block_palette_panel_rect, block_palette_slot_rect, centered_panel,
+    far_lod_range_from_slider_value, far_lod_range_label, far_lod_range_slider_value,
+    fly_speed_from_slider_value, fly_speed_label, fly_speed_slider_value,
+    movement_speed_from_slider_value, movement_speed_label, movement_speed_slider_value,
+    next_touch_controls_mode, render_block_palette_tooltip, render_distance_from_slider_value,
+    render_distance_label, render_distance_slider_value, render_flat_hud_debug_layer,
+    render_flat_hud_hotbar_layer, render_flat_hud_prompt_layer, render_flat_hud_retained_layer,
+    render_flat_hud_status_layer, render_flat_hud_transient_layers,
+    render_loading_progress_overlay, render_loading_progress_panel_at,
     render_palette_slot_contents, render_touch_panel, touch_controls_mode_label,
     touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
 };
@@ -1143,6 +1145,31 @@ pub struct FlatHudDrawList {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct LoadingProgressDrawList {
+    pub draw: GuiDrawList,
+    pub retained_cache: UiDrawCacheStats,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum LoadingProgressOverlayLayer {
+    Fullscreen,
+    Panel { origin: Point, label: String },
+}
+
+impl LoadingProgressOverlayLayer {
+    pub const fn fullscreen() -> Self {
+        Self::Fullscreen
+    }
+
+    pub fn panel(origin: Point, label: impl Into<String>) -> Self {
+        Self::Panel {
+            origin,
+            label: label.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct CachedV2DrawList {
     revision: UiPanelRevision,
     draw: GuiDrawList,
@@ -1430,6 +1457,70 @@ impl FlatHudSurface {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct LoadingProgressLayerState {
+    scale: GuiScale,
+    progress: LoadingProgressOverlay,
+    layer: LoadingProgressOverlayLayer,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CachedLoadingProgressLayer {
+    state: LoadingProgressLayerState,
+    draw: GuiDrawList,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct LoadingProgressSurface {
+    fullscreen: Option<CachedLoadingProgressLayer>,
+    panel: Option<CachedLoadingProgressLayer>,
+}
+
+impl LoadingProgressSurface {
+    fn render_layer(
+        &mut self,
+        scale: GuiScale,
+        progress: &LoadingProgressOverlay,
+        layer: LoadingProgressOverlayLayer,
+    ) -> LoadingProgressDrawList {
+        let state = LoadingProgressLayerState {
+            scale,
+            progress: progress.clone(),
+            layer,
+        };
+        let cached = match &state.layer {
+            LoadingProgressOverlayLayer::Fullscreen => &mut self.fullscreen,
+            LoadingProgressOverlayLayer::Panel { .. } => &mut self.panel,
+        };
+        if let Some(cached_layer) = cached {
+            if cached_layer.state == state {
+                return LoadingProgressDrawList {
+                    draw: cached_layer.draw.clone(),
+                    retained_cache: UiDrawCacheStats::cache_hit(),
+                };
+            }
+        }
+
+        let mut draw = GuiDrawList::new();
+        match &state.layer {
+            LoadingProgressOverlayLayer::Fullscreen => {
+                render_loading_progress_overlay(scale, &mut draw, progress);
+            }
+            LoadingProgressOverlayLayer::Panel { origin, label } => {
+                render_loading_progress_panel_at(scale, &mut draw, progress, *origin, label);
+            }
+        }
+        *cached = Some(CachedLoadingProgressLayer {
+            state,
+            draw: draw.clone(),
+        });
+        LoadingProgressDrawList {
+            draw,
+            retained_cache: UiDrawCacheStats::rebuild(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct GameUiHost {
     screen: Option<GameScreen>,
     new_world_seed: i64,
@@ -1439,6 +1530,7 @@ pub struct GameUiHost {
     committed_render_state: GameUiRenderState,
     cached_v2_draw: Option<CachedV2DrawList>,
     hud_surface: FlatHudSurface,
+    loading_progress_surface: LoadingProgressSurface,
 }
 
 impl Default for GameUiHost {
@@ -1466,6 +1558,7 @@ impl GameUiHost {
             committed_render_state: GameUiRenderState::default(),
             cached_v2_draw: None,
             hud_surface: FlatHudSurface::default(),
+            loading_progress_surface: LoadingProgressSurface::default(),
         };
         host.surface.set_new_world_seed(host.new_world_seed);
         host.surface
@@ -1705,6 +1798,28 @@ impl GameUiHost {
         let hud_draw = self.render_flat_hud_draw_list(scale, hud);
         draw.append(&hud_draw.draw);
         hud_draw.retained_cache
+    }
+
+    pub fn render_loading_progress_draw_list(
+        &mut self,
+        scale: GuiScale,
+        progress: &LoadingProgressOverlay,
+        layer: LoadingProgressOverlayLayer,
+    ) -> LoadingProgressDrawList {
+        self.loading_progress_surface
+            .render_layer(scale, progress, layer)
+    }
+
+    pub fn append_loading_progress_draw(
+        &mut self,
+        scale: GuiScale,
+        draw: &mut GuiDrawList,
+        progress: &LoadingProgressOverlay,
+        layer: LoadingProgressOverlayLayer,
+    ) -> UiDrawCacheStats {
+        let loading_draw = self.render_loading_progress_draw_list(scale, progress, layer);
+        draw.append(&loading_draw.draw);
+        loading_draw.retained_cache
     }
 
     pub fn set_v2_debug_overlay(&mut self, enabled: bool) {
@@ -2356,7 +2471,9 @@ mod tests {
     use super::*;
     use crate::{
         EMPTY_BLOCK_PALETTE_ENTRIES, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, GameSimulationCadence,
-        GameTouchSettings, GameXrTurnMode, GuiDrawCommand, GuiTextureUv, render_flat_hud,
+        GameTouchSettings, GameXrTurnMode, GuiDrawCommand, GuiTextureUv, LoadingProgressCell,
+        LoadingProgressCellStatus, render_flat_hud, render_loading_progress_overlay,
+        render_loading_progress_panel_at,
     };
     use mclone_input::{InputPromptKind, ResolvedFlatInput, TouchControlsMode};
 
@@ -2385,6 +2502,23 @@ mod tests {
             accepts_gamepad: false,
             accepts_xr_controller: false,
         }
+    }
+
+    fn loading_progress_overlay(
+        target_ready_chunks: usize,
+        center_status: LoadingProgressCellStatus,
+    ) -> LoadingProgressOverlay {
+        LoadingProgressOverlay::new(
+            1,
+            target_ready_chunks,
+            9,
+            target_ready_chunks >= 1,
+            [
+                LoadingProgressCell::new(-1, -1, LoadingProgressCellStatus::Terrain),
+                LoadingProgressCell::new(0, 0, center_status).playable(true),
+                LoadingProgressCell::new(1, 1, LoadingProgressCellStatus::TargetReady),
+            ],
+        )
     }
 
     fn touch_input() -> ResolvedFlatInput {
@@ -3074,6 +3208,176 @@ mod tests {
         render_flat_hud(scale, &mut standalone, &hud);
 
         assert_eq!(retained.draw, standalone);
+    }
+
+    #[test]
+    fn game_ui_host_loading_progress_fullscreen_cache_tracks_overlay_state() {
+        let scale = GuiScale::from_pixels(960, 540);
+        let mut host = GameUiHost::new_ingame();
+        let progress = loading_progress_overlay(3, LoadingProgressCellStatus::Features);
+
+        let first = host.render_loading_progress_draw_list(
+            scale,
+            &progress,
+            LoadingProgressOverlayLayer::fullscreen(),
+        );
+        assert_eq!(first.retained_cache, UiDrawCacheStats::rebuild());
+        assert!(!first.draw.commands().is_empty());
+
+        let second = host.render_loading_progress_draw_list(
+            scale,
+            &progress,
+            LoadingProgressOverlayLayer::fullscreen(),
+        );
+        assert_eq!(second.retained_cache, UiDrawCacheStats::cache_hit());
+        assert_eq!(second.draw, first.draw);
+
+        let percent_changed = loading_progress_overlay(4, LoadingProgressCellStatus::Features);
+        let percent_draw = host.render_loading_progress_draw_list(
+            scale,
+            &percent_changed,
+            LoadingProgressOverlayLayer::fullscreen(),
+        );
+        assert_eq!(percent_draw.retained_cache, UiDrawCacheStats::rebuild());
+        assert_ne!(percent_draw.draw, second.draw);
+
+        let cell_changed = loading_progress_overlay(4, LoadingProgressCellStatus::Light);
+        let cell_draw = host.render_loading_progress_draw_list(
+            scale,
+            &cell_changed,
+            LoadingProgressOverlayLayer::fullscreen(),
+        );
+        assert_eq!(cell_draw.retained_cache, UiDrawCacheStats::rebuild());
+        assert_ne!(cell_draw.draw, percent_draw.draw);
+    }
+
+    #[test]
+    fn game_ui_host_loading_progress_panel_cache_tracks_placement_and_variant() {
+        let scale = GuiScale::from_pixels(960, 540);
+        let mut host = GameUiHost::new_ingame();
+        let progress = loading_progress_overlay(3, LoadingProgressCellStatus::Features);
+        let panel = LoadingProgressOverlayLayer::panel(Point { x: 800.0, y: 4.0 }, "VIEW");
+
+        let fullscreen = host.render_loading_progress_draw_list(
+            scale,
+            &progress,
+            LoadingProgressOverlayLayer::fullscreen(),
+        );
+        assert_eq!(fullscreen.retained_cache, UiDrawCacheStats::rebuild());
+
+        let first_panel = host.render_loading_progress_draw_list(scale, &progress, panel.clone());
+        assert_eq!(first_panel.retained_cache, UiDrawCacheStats::rebuild());
+        assert_ne!(first_panel.draw, fullscreen.draw);
+
+        let second_panel = host.render_loading_progress_draw_list(scale, &progress, panel.clone());
+        assert_eq!(second_panel.retained_cache, UiDrawCacheStats::cache_hit());
+        assert_eq!(second_panel.draw, first_panel.draw);
+
+        let moved_panel = host.render_loading_progress_draw_list(
+            scale,
+            &progress,
+            LoadingProgressOverlayLayer::panel(Point { x: 760.0, y: 8.0 }, "VIEW"),
+        );
+        assert_eq!(moved_panel.retained_cache, UiDrawCacheStats::rebuild());
+        assert_ne!(moved_panel.draw, second_panel.draw);
+
+        let fullscreen_again = host.render_loading_progress_draw_list(
+            scale,
+            &progress,
+            LoadingProgressOverlayLayer::fullscreen(),
+        );
+        assert_eq!(
+            fullscreen_again.retained_cache,
+            UiDrawCacheStats::cache_hit()
+        );
+        assert_eq!(fullscreen_again.draw, fullscreen.draw);
+    }
+
+    #[test]
+    fn game_ui_host_loading_progress_draw_matches_standalone_renderers() {
+        let scale = GuiScale::from_pixels(960, 540);
+        let mut host = GameUiHost::new_ingame();
+        let progress = loading_progress_overlay(3, LoadingProgressCellStatus::Features);
+
+        let retained_fullscreen = host.render_loading_progress_draw_list(
+            scale,
+            &progress,
+            LoadingProgressOverlayLayer::fullscreen(),
+        );
+        let mut standalone_fullscreen = GuiDrawList::new();
+        render_loading_progress_overlay(scale, &mut standalone_fullscreen, &progress);
+        assert_eq!(retained_fullscreen.draw, standalone_fullscreen);
+
+        let origin = Point { x: 800.0, y: 4.0 };
+        let retained_panel = host.render_loading_progress_draw_list(
+            scale,
+            &progress,
+            LoadingProgressOverlayLayer::panel(origin, "VIEW"),
+        );
+        let mut standalone_panel = GuiDrawList::new();
+        render_loading_progress_panel_at(scale, &mut standalone_panel, &progress, origin, "VIEW");
+        assert_eq!(retained_panel.draw, standalone_panel);
+    }
+
+    #[test]
+    fn game_ui_host_loading_progress_cache_is_independent_from_menu_and_hud() {
+        let scale = GuiScale::from_pixels(960, 540);
+        let mut host = GameUiHost::new();
+        host.set_scale(scale);
+        let state = GameUiRenderState::default();
+        let first_panel = host
+            .render_v2_panel_draw_list(state)
+            .expect("Title is a v2 panel");
+        assert_eq!(first_panel.cache, UiDrawCacheStats::rebuild());
+
+        let mut hud_host = GameUiHost::new_ingame();
+        let mut hud = FlatHud::new(keyboard_mouse_input());
+        hud.hotbar = FlatHotbarOverlay::selected(2);
+        let first_hud = hud_host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            first_hud.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 2,
+                cache_hit_count: 0,
+            }
+        );
+
+        let progress = loading_progress_overlay(3, LoadingProgressCellStatus::Features);
+        let changed_progress = loading_progress_overlay(4, LoadingProgressCellStatus::Light);
+        assert_eq!(
+            host.render_loading_progress_draw_list(
+                scale,
+                &progress,
+                LoadingProgressOverlayLayer::fullscreen(),
+            )
+            .retained_cache,
+            UiDrawCacheStats::rebuild()
+        );
+        assert_eq!(
+            host.render_loading_progress_draw_list(
+                scale,
+                &changed_progress,
+                LoadingProgressOverlayLayer::fullscreen(),
+            )
+            .retained_cache,
+            UiDrawCacheStats::rebuild()
+        );
+
+        let second_panel = host
+            .render_v2_panel_draw_list(state)
+            .expect("Title is a v2 panel");
+        assert_eq!(second_panel.cache, UiDrawCacheStats::cache_hit());
+        assert_eq!(second_panel.draw, first_panel.draw);
+
+        let second_hud = hud_host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            second_hud.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 0,
+                cache_hit_count: 2,
+            }
+        );
+        assert_eq!(second_hud.draw, first_hud.draw);
     }
 
     #[test]

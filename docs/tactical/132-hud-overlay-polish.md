@@ -1,6 +1,6 @@
 # 132: HUD Overlay Polish
 
-Status: active; Slice A landed.
+Status: active; Slices A-B landed.
 
 Workstream: native Rust, shared `mclone-ui` overlay behavior with desktop
 validation first; web/WASM, flat Android, and XR must keep compatible paths.
@@ -115,6 +115,20 @@ Validation:
 - native screenshot with `--screenshot-debug-pane true` still shows the
   view-readiness mini-panel
 - startup screenshot still shows loading overlay when a startup pump is active
+
+Implementation note, 2026-07-02:
+
+- `GameUiHost` now owns retained `LoadingProgressOverlayLayer` draw caches for
+  fullscreen startup overlays and compact panel overlays.
+- Flat desktop/offscreen composition appends startup progress and debug
+  view-readiness through the shared retained host path instead of drawing them
+  directly in `FlatClientDriver`.
+- Cache tests cover first-render rebuilds, quiet-frame hits, percent/cell
+  invalidation, placement invalidation, fullscreen/panel cache separation, and
+  independence from v2 menu and flat HUD caches.
+- Offscreen `--startup-wait none` / `frames:N` now mirror window-mode
+  nonblocking startup closely enough for validation captures: they start the
+  local startup pump but do not drain it to playable before screenshot frames.
 
 ## Slice C: XR Panel Overlay Split
 

@@ -164,10 +164,11 @@ impl OffscreenFlatClientHost {
         startup_wait: StartupWaitPolicy,
     ) -> Result<()> {
         match startup_wait {
+            StartupWaitPolicy::None | StartupWaitPolicy::Frames(_) => {
+                self.start_scene_nonblocking(device, scene)
+            }
             StartupWaitPolicy::Idle => self.start_scene_idle(device, scene),
-            StartupWaitPolicy::None
-            | StartupWaitPolicy::Playable
-            | StartupWaitPolicy::Frames(_) => self.start_scene_playable(device, scene),
+            StartupWaitPolicy::Playable => self.start_scene_playable(device, scene),
         }
     }
 
@@ -183,6 +184,32 @@ impl OffscreenFlatClientHost {
             })
             .context("failed to start offscreen flat client scene")?;
         self.require_uploaded_sections()?;
+        Ok(())
+    }
+
+    fn start_scene_nonblocking(
+        &mut self,
+        device: &wgpu::Device,
+        scene: SceneOptions,
+    ) -> Result<()> {
+        self.anchor_local_playable_startup_camera(&scene);
+        self.driver.scene = scene;
+        self.driver.request_current_scene_start(false, false);
+
+        let assets = &self.assets;
+        let session_update = self.driver.finish_pending_session_start(
+            Some(device),
+            |scene| WindowSceneRuntime::with_assets(scene, assets),
+            |scene| WindowSceneStartupPump::new_local(scene, assets),
+        );
+        if session_update.mouse_lock_requested.is_some() {
+            self.driver.clear_camera_input();
+        }
+        if self.driver.startup.is_none() && self.driver.runtime.is_none() {
+            bail!(
+                "offscreen flat client nonblocking startup did not create a session or startup pump"
+            );
+        }
         Ok(())
     }
 

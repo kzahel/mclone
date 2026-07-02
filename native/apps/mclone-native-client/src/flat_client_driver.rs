@@ -47,9 +47,8 @@ use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameHelpParent,
     GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameUiAction, GameUiHost,
-    GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, StatusOverlay,
-    UiDebugSnapshot, UiDrawCacheStats, render_loading_progress_overlay,
-    render_loading_progress_panel_at, touch_controls_mode_label,
+    GameUiRenderState, GuiKey, GuiScale, LoadingProgressOverlay, LoadingProgressOverlayLayer,
+    Point, StatusOverlay, UiDebugSnapshot, UiDrawCacheStats, touch_controls_mode_label,
 };
 
 use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
@@ -1929,10 +1928,7 @@ impl FlatClientDriver {
             || debug_view_readiness_overlay.is_some();
         let mut ui_render_state = game_ui_render_state(ui_frame.render_options);
         ui_render_state.block_palette = ui_frame.block_palette;
-        let mut base_ui_draw = self.ui.render_draw_list(ui_render_state);
-        if let Some(progress) = loading_progress_overlay.as_ref() {
-            render_loading_progress_overlay(gui_scale, &mut base_ui_draw, progress);
-        }
+        let base_ui_draw = self.ui.render_draw_list(ui_render_state);
         let gui_state = FullFrameGui::new(
             gui_active,
             ui_covers_world || loading_progress_overlay.is_some(),
@@ -1986,14 +1982,32 @@ impl FlatClientDriver {
                     }
                 }
                 let mut ui_draw = base_ui_draw;
+                if let Some(progress) = loading_progress_overlay.as_ref() {
+                    ui.append_loading_progress_draw(
+                        gui_scale,
+                        &mut ui_draw,
+                        progress,
+                        LoadingProgressOverlayLayer::fullscreen(),
+                    );
+                }
                 if let Some(hud) = hud.as_ref() {
                     flat_hud_retained_cache = ui.append_flat_hud_draw(gui_scale, &mut ui_draw, hud);
                 }
-                render_flat_client_gui_draw(
-                    ui_draw,
-                    gui_scale,
-                    debug_view_readiness_overlay.as_ref(),
-                )
+                if let Some(progress) = debug_view_readiness_overlay.as_ref() {
+                    ui.append_loading_progress_draw(
+                        gui_scale,
+                        &mut ui_draw,
+                        progress,
+                        LoadingProgressOverlayLayer::panel(
+                            Point {
+                                x: (gui_scale.width - 132.0).max(4.0),
+                                y: 4.0,
+                            },
+                            "VIEW",
+                        ),
+                    );
+                }
+                ui_draw
             },
             &mut render_stats,
         )?;
@@ -2240,26 +2254,6 @@ fn session_start_request_for_scene(scene: &SceneOptions) -> SessionStartRequest 
             endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
         },
     )
-}
-
-fn render_flat_client_gui_draw(
-    mut ui_draw: GuiDrawList,
-    gui_scale: GuiScale,
-    debug_view_readiness_overlay: Option<&LoadingProgressOverlay>,
-) -> GuiDrawList {
-    if let Some(progress) = debug_view_readiness_overlay {
-        render_loading_progress_panel_at(
-            gui_scale,
-            &mut ui_draw,
-            progress,
-            Point {
-                x: (gui_scale.width - 132.0).max(4.0),
-                y: 4.0,
-            },
-            "VIEW",
-        );
-    }
-    ui_draw
 }
 
 #[cfg(test)]
