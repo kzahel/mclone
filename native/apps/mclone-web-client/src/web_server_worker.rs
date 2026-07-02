@@ -1457,7 +1457,7 @@ pub struct McloneWebIntegratedServerWorker {
 impl McloneWebIntegratedServerWorker {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: i64) -> Self {
-        let server = IntegratedServer::new(seed);
+        let server = IntegratedServer::local_integrated(seed);
         Self::from_server(seed, server)
     }
 
@@ -1468,7 +1468,7 @@ impl McloneWebIntegratedServerWorker {
         bindgen_js_url: String,
         bindgen_wasm_url: String,
     ) -> Self {
-        let server = IntegratedServer::with_wasm_job_workers(
+        let server = IntegratedServer::local_integrated_with_wasm_job_workers(
             seed,
             WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
         );

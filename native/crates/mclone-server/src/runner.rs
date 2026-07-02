@@ -406,6 +406,7 @@ mod native {
 
     use super::*;
     use crate::INITIAL_DAY_TIME;
+    use crate::player_chunk_tracking::PlayerChunkTrackingPolicy;
 
     const DIAGNOSTICS_DETAIL_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -488,6 +489,7 @@ mod native {
         pub debug_passive_showcase: bool,
         pub tick_interval: Duration,
         pub cadence: SimulationCadenceConfig,
+        player_chunk_tracking_policy: PlayerChunkTrackingPolicy,
     }
 
     impl NativeIntegratedServerRunnerConfig {
@@ -500,6 +502,7 @@ mod native {
                 debug_passive_showcase: true,
                 tick_interval: Duration::from_millis(50),
                 cadence: SimulationCadenceConfig::new(20, 20, 60),
+                player_chunk_tracking_policy: PlayerChunkTrackingPolicy::dedicated_default(),
             }
         }
 
@@ -520,6 +523,11 @@ mod native {
 
         pub const fn with_debug_passive_showcase(mut self, enabled: bool) -> Self {
             self.debug_passive_showcase = enabled;
+            self
+        }
+
+        pub const fn with_local_integrated_chunk_tracking(mut self) -> Self {
+            self.player_chunk_tracking_policy = PlayerChunkTrackingPolicy::java_max();
             self
         }
 
@@ -795,7 +803,10 @@ mod native {
         diagnostics: Arc<Mutex<ServerRunnerDiagnostics>>,
         ready_tx: mpsc::Sender<Result<(), String>>,
     ) -> ServerRunnerResult<()> {
-        let mut server = IntegratedServer::new(config.seed);
+        let mut server = IntegratedServer::with_player_chunk_tracking_policy(
+            config.seed,
+            config.player_chunk_tracking_policy,
+        );
         server.set_lighting_enabled(config.lighting_enabled);
         server.set_day_time_frozen(config.day_time_frozen);
         server.set_debug_passive_showcase_enabled(config.debug_passive_showcase);
@@ -1278,6 +1289,28 @@ mod native {
 
             assert_eq!(config.cadence, cadence);
             assert_eq!(config.tick_interval, Duration::from_nanos(16_666_667));
+        }
+
+        #[test]
+        fn native_runner_config_can_use_local_integrated_chunk_tracking_policy() {
+            let center = ChunkPos::new(0, 0);
+            let requested = ChunkView {
+                center,
+                render_distance: 32,
+                chunk_tracking_radius: 32,
+            };
+            let dedicated = NativeIntegratedServerRunnerConfig::new(0)
+                .player_chunk_tracking_policy
+                .clamp_view(&requested);
+            let local_integrated = NativeIntegratedServerRunnerConfig::new(0)
+                .with_local_integrated_chunk_tracking()
+                .player_chunk_tracking_policy
+                .clamp_view(&requested);
+
+            assert_eq!(dedicated.render_distance, 11);
+            assert_eq!(dedicated.chunk_tracking_radius, 11);
+            assert_eq!(local_integrated.render_distance, 32);
+            assert_eq!(local_integrated.chunk_tracking_radius, 32);
         }
 
         #[test]

@@ -14,7 +14,9 @@ use crate::players::ServerPlayerId;
 
 pub(crate) const JAVA_MIN_VIEW_DISTANCE: u32 = 3;
 pub(crate) const JAVA_MAX_VIEW_DISTANCE: u32 = 33;
-pub(crate) const DEFAULT_SERVER_MAX_VIEW_DISTANCE: u32 = 8;
+pub(crate) const DEFAULT_DEDICATED_SERVER_VIEW_DISTANCE: u32 = 10;
+pub(crate) const DEFAULT_DEDICATED_SERVER_CHUNK_TRACKING_RADIUS: u32 =
+    DEFAULT_DEDICATED_SERVER_VIEW_DISTANCE + 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct PlayerChunkTrackingPolicy {
@@ -24,10 +26,7 @@ pub(crate) struct PlayerChunkTrackingPolicy {
 
 impl Default for PlayerChunkTrackingPolicy {
     fn default() -> Self {
-        Self::new(
-            DEFAULT_SERVER_MAX_VIEW_DISTANCE,
-            DEFAULT_SERVER_MAX_VIEW_DISTANCE,
-        )
+        Self::dedicated_default()
     }
 }
 
@@ -37,6 +36,17 @@ impl PlayerChunkTrackingPolicy {
             max_render_distance,
             max_chunk_tracking_radius,
         }
+    }
+
+    pub(crate) const fn dedicated_default() -> Self {
+        Self::new(
+            DEFAULT_DEDICATED_SERVER_CHUNK_TRACKING_RADIUS,
+            DEFAULT_DEDICATED_SERVER_CHUNK_TRACKING_RADIUS,
+        )
+    }
+
+    pub(crate) const fn java_max() -> Self {
+        Self::new(JAVA_MAX_VIEW_DISTANCE, JAVA_MAX_VIEW_DISTANCE)
     }
 
     pub(crate) fn clamp_view(self, requested: &ChunkView) -> ChunkView {
@@ -367,6 +377,33 @@ mod tests {
         assert_eq!(
             policy.clamp_view(&view(ChunkPos::new(0, 0), 100)),
             view(ChunkPos::new(0, 0), 4)
+        );
+    }
+
+    #[test]
+    fn default_policy_matches_dedicated_server_view_distance() {
+        let policy = PlayerChunkTrackingPolicy::default();
+
+        assert_eq!(
+            policy.clamp_view(&view(ChunkPos::new(0, 0), 32)),
+            view(
+                ChunkPos::new(0, 0),
+                DEFAULT_DEDICATED_SERVER_CHUNK_TRACKING_RADIUS
+            )
+        );
+    }
+
+    #[test]
+    fn java_max_policy_allows_full_client_render_distance_range() {
+        let policy = PlayerChunkTrackingPolicy::java_max();
+
+        assert_eq!(
+            policy.clamp_view(&view(ChunkPos::new(0, 0), 32)),
+            view(ChunkPos::new(0, 0), 32)
+        );
+        assert_eq!(
+            policy.clamp_view(&view(ChunkPos::new(0, 0), 100)),
+            view(ChunkPos::new(0, 0), JAVA_MAX_VIEW_DISTANCE)
         );
     }
 

@@ -523,7 +523,7 @@ struct WebLoopbackHost {
 impl WebLoopbackHost {
     fn new(seed: i64) -> Self {
         Self {
-            server: IntegratedServer::new(seed),
+            server: IntegratedServer::local_integrated(seed),
             transport: LocalTransport::new(),
         }
     }

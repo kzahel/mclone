@@ -1449,6 +1449,7 @@ fn native_runner_config(
         .with_debug_passive_showcase(options.debug_passive_showcase)
         .with_day_time(options.day_time_override)
         .with_day_time_frozen(options.freeze_time)
+        .with_local_integrated_chunk_tracking()
         .with_cadence_derived_tick_interval(options.cadence)
 }
 

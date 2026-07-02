@@ -97,8 +97,23 @@ impl IntegratedServer {
         Self::with_chunk_store(seed, Box::<NullChunkSnapshotStore>::default())
     }
 
+    pub fn local_integrated(seed: i64) -> Self {
+        Self::with_player_chunk_tracking_policy(seed, PlayerChunkTrackingPolicy::java_max())
+    }
+
     pub fn with_chunk_store(seed: i64, store: Box<dyn ChunkSnapshotStore>) -> Self {
         Self::with_scheduler(seed, ChunkScheduler::with_store(seed, store))
+    }
+
+    pub(crate) fn with_player_chunk_tracking_policy(
+        seed: i64,
+        policy: PlayerChunkTrackingPolicy,
+    ) -> Self {
+        Self::with_scheduler_and_player_chunk_tracking_policy(
+            seed,
+            ChunkScheduler::new(seed),
+            policy,
+        )
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -113,8 +128,36 @@ impl IntegratedServer {
         )
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn local_integrated_with_wasm_job_workers(
+        seed: i64,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        Self::with_scheduler_and_player_chunk_tracking_policy(
+            seed,
+            ChunkScheduler::with_wasm_job_workers(
+                seed,
+                Box::<NullChunkSnapshotStore>::default(),
+                config,
+            ),
+            PlayerChunkTrackingPolicy::java_max(),
+        )
+    }
+
     fn with_scheduler(seed: i64, scheduler: ChunkScheduler) -> Self {
-        let mut chunk_tracking = PlayerChunkTracking::new(PlayerChunkTrackingPolicy::default());
+        Self::with_scheduler_and_player_chunk_tracking_policy(
+            seed,
+            scheduler,
+            PlayerChunkTrackingPolicy::default(),
+        )
+    }
+
+    fn with_scheduler_and_player_chunk_tracking_policy(
+        seed: i64,
+        scheduler: ChunkScheduler,
+        policy: PlayerChunkTrackingPolicy,
+    ) -> Self {
+        let mut chunk_tracking = PlayerChunkTracking::new(policy);
         chunk_tracking.add_player(ServerPlayerId::LOCAL);
         let loading_progress = ChunkLoadingProgress::new(runtime_chunk_target_status(&scheduler));
         Self {
