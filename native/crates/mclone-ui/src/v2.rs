@@ -20,6 +20,9 @@ use mclone_input::{
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiScreenId {
+    Title,
+    NewWorld,
+    JoinRemote,
     Pause,
     BlockPalette,
     Options { parent: GameOptionsParent },
@@ -29,6 +32,9 @@ pub enum UiScreenId {
 impl UiScreenId {
     pub fn from_game_screen(screen: Option<GameScreen>) -> Option<Self> {
         match screen {
+            Some(GameScreen::Title) => Some(Self::Title),
+            Some(GameScreen::NewWorld) => Some(Self::NewWorld),
+            Some(GameScreen::JoinRemote) => Some(Self::JoinRemote),
             Some(GameScreen::Pause) => Some(Self::Pause),
             Some(GameScreen::BlockPalette) => Some(Self::BlockPalette),
             Some(GameScreen::Options { parent }) => Some(Self::Options { parent }),
@@ -330,6 +336,8 @@ pub struct UiSurface {
     layout_dirty: bool,
     layout: UiLayout,
     render_state: GameUiRenderState,
+    new_world_seed: i64,
+    join_remote_addr: String,
     pointer: Option<Point>,
     hovered: Option<UiWidgetId>,
     captured: Option<UiWidgetId>,
@@ -357,6 +365,8 @@ impl UiSurface {
             layout_dirty: true,
             layout: UiLayout::new(None, 0),
             render_state: GameUiRenderState::default(),
+            new_world_seed: 0,
+            join_remote_addr: crate::DEFAULT_JOIN_REMOTE_ADDR.to_owned(),
             pointer: None,
             hovered: None,
             captured: None,
@@ -406,6 +416,23 @@ impl UiSurface {
         self.render_state = render_state;
         self.frame_revision = self.frame_revision.wrapping_add(1);
         self.layout_dirty = true;
+    }
+
+    pub fn set_new_world_seed(&mut self, seed: i64) {
+        if self.new_world_seed == seed {
+            return;
+        }
+        self.new_world_seed = seed;
+        self.frame_revision = self.frame_revision.wrapping_add(1);
+    }
+
+    pub fn set_join_remote_addr(&mut self, addr: impl Into<String>) {
+        let addr = addr.into();
+        if self.join_remote_addr == addr {
+            return;
+        }
+        self.join_remote_addr = addr;
+        self.frame_revision = self.frame_revision.wrapping_add(1);
     }
 
     pub fn set_debug_overlay(&mut self, enabled: bool) {
@@ -519,6 +546,21 @@ impl UiSurface {
 
     pub fn key_pressed(&mut self, key: GuiKey) -> (bool, Option<GameUiAction>) {
         match (self.screen, key) {
+            (Some(UiScreenId::Title), GuiKey::Escape) => (true, None),
+            (Some(UiScreenId::Title), GuiKey::F1) => {
+                (true, Some(GameUiAction::OpenHelp(GameHelpParent::Title)))
+            }
+            (Some(UiScreenId::NewWorld), GuiKey::Escape) => (true, Some(GameUiAction::BackToTitle)),
+            (Some(UiScreenId::NewWorld), GuiKey::F1) => {
+                (true, Some(GameUiAction::OpenHelp(GameHelpParent::NewWorld)))
+            }
+            (Some(UiScreenId::JoinRemote), GuiKey::Escape) => {
+                (true, Some(GameUiAction::BackToTitle))
+            }
+            (Some(UiScreenId::JoinRemote), GuiKey::F1) => (
+                true,
+                Some(GameUiAction::OpenHelp(GameHelpParent::JoinRemote)),
+            ),
             (Some(UiScreenId::Pause), GuiKey::Escape) => (true, Some(GameUiAction::Resume)),
             (Some(UiScreenId::Pause), GuiKey::F1) => {
                 (true, Some(GameUiAction::OpenHelp(GameHelpParent::Pause)))
@@ -547,6 +589,9 @@ impl UiSurface {
         self.ensure_layout();
         let mut draw = GuiDrawList::new();
         match self.screen {
+            Some(UiScreenId::Title) => self.render_title(&mut draw),
+            Some(UiScreenId::NewWorld) => self.render_new_world(&mut draw),
+            Some(UiScreenId::JoinRemote) => self.render_join_remote(&mut draw),
             Some(UiScreenId::Pause) => self.render_pause(&mut draw),
             Some(UiScreenId::BlockPalette) => self.render_block_palette(&mut draw),
             Some(UiScreenId::Options { parent }) => self.render_options(&mut draw, parent),
@@ -565,6 +610,9 @@ impl UiSurface {
         }
         self.layout_revision = self.layout_revision.wrapping_add(1);
         self.layout = match self.screen {
+            Some(UiScreenId::Title) => title_layout(self.scale, self.layout_revision),
+            Some(UiScreenId::NewWorld) => new_world_layout(self.scale, self.layout_revision),
+            Some(UiScreenId::JoinRemote) => join_remote_layout(self.scale, self.layout_revision),
             Some(UiScreenId::Pause) => pause_layout(self.scale, self.layout_revision),
             Some(UiScreenId::BlockPalette) => block_palette_layout(
                 self.scale,
@@ -619,6 +667,79 @@ impl UiSurface {
         self.captured = captured;
         if visual_changed {
             self.interaction_revision = self.interaction_revision.wrapping_add(1);
+        }
+    }
+
+    fn render_title(&self, draw: &mut GuiDrawList) {
+        render_title_background(draw, self.scale);
+        self.font.draw_centered_atlas(
+            draw,
+            "MCLONE",
+            self.scale.width * 0.5,
+            34.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        self.font.draw_centered_atlas(
+            draw,
+            "NATIVE RUST CLIENT",
+            self.scale.width * 0.5,
+            48.0,
+            Color::rgba(185, 212, 198, 255),
+        );
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
+        }
+        self.font.draw_shadow_atlas(
+            draw,
+            "MINECRAFT 1.17.1 TARGET",
+            4.0,
+            self.scale.height - 12.0,
+            Color::rgba(160, 176, 170, 255),
+        );
+    }
+
+    fn render_new_world(&self, draw: &mut GuiDrawList) {
+        render_title_background(draw, self.scale);
+        self.font.draw_centered_atlas(
+            draw,
+            "NEW WORLD",
+            self.scale.width * 0.5,
+            self.scale.height * 0.28,
+            Color::rgba(245, 252, 234, 255),
+        );
+        self.font.draw_centered_atlas(
+            draw,
+            &format!("Seed: {}", self.new_world_seed),
+            self.scale.width * 0.5,
+            self.scale.height * 0.28 + 22.0,
+            Color::rgba(185, 212, 198, 255),
+        );
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
+        }
+    }
+
+    fn render_join_remote(&self, draw: &mut GuiDrawList) {
+        render_title_background(draw, self.scale);
+        self.font.draw_centered_atlas(
+            draw,
+            "JOIN REMOTE",
+            self.scale.width * 0.5,
+            self.scale.height * 0.28,
+            Color::rgba(245, 252, 234, 255),
+        );
+        self.font.draw_centered_atlas(
+            draw,
+            &format!("Server: {}", self.join_remote_addr),
+            self.scale.width * 0.5,
+            self.scale.height * 0.28 + 22.0,
+            Color::rgba(185, 212, 198, 255),
+        );
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
         }
     }
 
@@ -898,6 +1019,9 @@ impl UiSurface {
     }
 
     fn action_for_widget(&self, widget: &UiWidget, point: Point) -> Option<GameUiAction> {
+        if widget.id == UI_V2_NEW_WORLD_CREATE {
+            return Some(GameUiAction::CreateWorld(self.new_world_seed));
+        }
         match widget.action? {
             UiWidgetAction::Static(action) => Some(action),
             UiWidgetAction::Slider(action) => {
@@ -1163,6 +1287,8 @@ impl GameUiHost {
     }
 
     pub fn from_game_ui(legacy: GameUi) -> Self {
+        let new_world_seed = legacy.new_world_seed();
+        let join_remote_addr = legacy.join_remote_addr().to_owned();
         let mut host = Self {
             legacy,
             surface: UiSurface::new(),
@@ -1170,6 +1296,8 @@ impl GameUiHost {
             cached_v2_draw: None,
             hud_surface: FlatHudSurface::default(),
         };
+        host.surface.set_new_world_seed(new_world_seed);
+        host.surface.set_join_remote_addr(join_remote_addr);
         host.sync_surface_screen();
         host.surface.set_scale(host.legacy.scale());
         host
@@ -1185,6 +1313,7 @@ impl GameUiHost {
 
     pub fn set_new_world_seed(&mut self, seed: i64) {
         self.legacy.set_new_world_seed(seed);
+        self.surface.set_new_world_seed(seed);
     }
 
     pub fn join_remote_addr(&self) -> &str {
@@ -1192,7 +1321,9 @@ impl GameUiHost {
     }
 
     pub fn set_join_remote_addr(&mut self, addr: impl Into<String>) {
-        self.legacy.set_join_remote_addr(addr);
+        let addr = addr.into();
+        self.legacy.set_join_remote_addr(addr.clone());
+        self.surface.set_join_remote_addr(addr);
     }
 
     pub fn scale(&self) -> GuiScale {
@@ -1377,6 +1508,15 @@ impl GameUiHost {
     }
 }
 
+const UI_V2_TITLE_START: UiWidgetId = UiWidgetId(401);
+const UI_V2_TITLE_JOIN_REMOTE: UiWidgetId = UiWidgetId(402);
+const UI_V2_TITLE_OPTIONS: UiWidgetId = UiWidgetId(403);
+const UI_V2_TITLE_QUIT: UiWidgetId = UiWidgetId(404);
+const UI_V2_NEW_WORLD_REROLL: UiWidgetId = UiWidgetId(501);
+const UI_V2_NEW_WORLD_CREATE: UiWidgetId = UiWidgetId(502);
+const UI_V2_NEW_WORLD_BACK: UiWidgetId = UiWidgetId(503);
+const UI_V2_JOIN_REMOTE_CONNECT: UiWidgetId = UiWidgetId(601);
+const UI_V2_JOIN_REMOTE_BACK: UiWidgetId = UiWidgetId(602);
 const UI_V2_PAUSE_RESUME: UiWidgetId = UiWidgetId(1);
 const UI_V2_PAUSE_OPTIONS: UiWidgetId = UiWidgetId(2);
 const UI_V2_PAUSE_QUIT_TO_TITLE: UiWidgetId = UiWidgetId(3);
@@ -1402,6 +1542,84 @@ const UI_V2_OPTIONS_BACK: UiWidgetId = UiWidgetId(119);
 const UI_V2_OPTIONS_XR_TURN_MODE: UiWidgetId = UiWidgetId(120);
 const UI_V2_HELP_BACK: UiWidgetId = UiWidgetId(201);
 const UI_V2_BLOCK_PALETTE_BASE: u64 = 3000;
+
+fn title_layout(scale: GuiScale, revision: u64) -> UiLayout {
+    let mut layout = UiLayout::new(Some(UiScreenId::Title), revision);
+    let y = scale.height * 0.5 - 34.0;
+    layout.push(
+        UiWidget::button(UI_V2_TITLE_START, menu_button_rect(scale, y), "New World")
+            .action(GameUiAction::OpenNewWorld),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_TITLE_JOIN_REMOTE,
+            menu_button_rect(scale, y + 24.0),
+            "Join Remote",
+        )
+        .action(GameUiAction::OpenJoinRemote),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_TITLE_OPTIONS,
+            menu_button_rect(scale, y + 48.0),
+            "Options",
+        )
+        .action(GameUiAction::OpenOptions(GameOptionsParent::Title)),
+    );
+    layout.push(
+        UiWidget::button(UI_V2_TITLE_QUIT, menu_button_rect(scale, y + 72.0), "Quit")
+            .action(GameUiAction::Quit),
+    );
+    layout
+}
+
+fn new_world_layout(scale: GuiScale, revision: u64) -> UiLayout {
+    let mut layout = UiLayout::new(Some(UiScreenId::NewWorld), revision);
+    let y = scale.height * 0.5 - 4.0;
+    layout.push(
+        UiWidget::button(UI_V2_NEW_WORLD_REROLL, menu_button_rect(scale, y), "Reroll")
+            .action(GameUiAction::RerollSeed),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_NEW_WORLD_CREATE,
+            menu_button_rect(scale, y + 24.0),
+            "Create World",
+        )
+        .action(GameUiAction::CreateWorld(0)),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_NEW_WORLD_BACK,
+            menu_button_rect(scale, y + 48.0),
+            "Back",
+        )
+        .action(GameUiAction::BackToTitle),
+    );
+    layout
+}
+
+fn join_remote_layout(scale: GuiScale, revision: u64) -> UiLayout {
+    let mut layout = UiLayout::new(Some(UiScreenId::JoinRemote), revision);
+    let y = scale.height * 0.5 + 20.0;
+    layout.push(
+        UiWidget::button(
+            UI_V2_JOIN_REMOTE_CONNECT,
+            menu_button_rect(scale, y),
+            "Connect",
+        )
+        .action(GameUiAction::JoinRemote),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_JOIN_REMOTE_BACK,
+            menu_button_rect(scale, y + 24.0),
+            "Back",
+        )
+        .action(GameUiAction::BackToTitle),
+    );
+    layout
+}
 
 fn pause_layout(scale: GuiScale, revision: u64) -> UiLayout {
     let mut layout = UiLayout::new(Some(UiScreenId::Pause), revision);
@@ -1435,6 +1653,18 @@ fn pause_layout(scale: GuiScale, revision: u64) -> UiLayout {
 
 fn menu_button_rect(scale: GuiScale, y: f32) -> Rect {
     Rect::new(scale.width * 0.5 - 90.0, y, 180.0, 20.0)
+}
+
+fn render_title_background(draw: &mut GuiDrawList, scale: GuiScale) {
+    draw.fill_gradient(
+        Rect::new(0.0, 0.0, scale.width, scale.height),
+        Color::rgba(24, 44, 51, 255),
+        Color::rgba(7, 10, 12, 255),
+    );
+    draw.fill(
+        Rect::new(0.0, 0.0, scale.width, scale.height),
+        Color::rgba(0, 0, 0, 55),
+    );
 }
 
 fn block_palette_slot_id(index: usize) -> UiWidgetId {
@@ -2010,14 +2240,89 @@ mod tests {
     }
 
     #[test]
-    fn game_ui_host_v2_panel_draw_cache_ignores_legacy_screens() {
+    fn game_ui_host_v2_panel_draw_cache_ignores_unmigrated_server_settings() {
         let mut host = GameUiHost::new();
-        host.set_screen(Some(GameScreen::Title));
+        host.set_screen(Some(GameScreen::ServerSettings {
+            parent: GameOptionsParent::Pause,
+        }));
 
         assert!(
             host.render_v2_panel_draw_list(GameUiRenderState::default())
                 .is_none()
         );
+    }
+
+    #[test]
+    fn title_flow_screens_route_through_v2_surface() {
+        let mut host = GameUiHost::new();
+        host.set_scale(GuiScale::from_pixels(960, 540));
+
+        let title = host
+            .render_v2_panel_draw_list(GameUiRenderState::default())
+            .expect("Title is a v2 panel");
+        assert_eq!(title.cache, UiDrawCacheStats::rebuild());
+        let snapshot = host.v2_debug_snapshot().expect("Title has debug data");
+        assert_eq!(snapshot.screen, Some(UiScreenId::Title));
+        assert!(
+            snapshot
+                .widgets
+                .iter()
+                .any(|widget| widget.label == "New World")
+        );
+        assert!(
+            snapshot
+                .widgets
+                .iter()
+                .any(|widget| widget.label == "Join Remote")
+        );
+
+        let new_world = snapshot
+            .widgets
+            .iter()
+            .find(|widget| widget.id == UI_V2_TITLE_START)
+            .expect("New World button")
+            .rect;
+        assert!(host.pointer_down(point_in(new_world)));
+        let (_handled, action) = host.pointer_up(point_in(new_world));
+        assert_eq!(action, Some(GameUiAction::OpenNewWorld));
+        host.apply_action(action.unwrap());
+
+        host.set_new_world_seed(12345);
+        let snapshot = host.v2_debug_snapshot().expect("NewWorld has debug data");
+        assert_eq!(snapshot.screen, Some(UiScreenId::NewWorld));
+        let create = snapshot
+            .widgets
+            .iter()
+            .find(|widget| widget.id == UI_V2_NEW_WORLD_CREATE)
+            .expect("Create World button")
+            .rect;
+        assert!(host.pointer_down(point_in(create)));
+        let (_handled, action) = host.pointer_up(point_in(create));
+        assert_eq!(action, Some(GameUiAction::CreateWorld(12345)));
+    }
+
+    #[test]
+    fn join_remote_screen_routes_through_v2_surface() {
+        let mut host = GameUiHost::new();
+        host.set_screen(Some(GameScreen::JoinRemote));
+        host.set_join_remote_addr("10.0.0.5:25565");
+        host.set_scale(GuiScale::from_pixels(960, 540));
+
+        let draw = host
+            .render_v2_panel_draw_list(GameUiRenderState::default())
+            .expect("JoinRemote is a v2 panel");
+        assert!(!draw.draw.commands().is_empty());
+        let snapshot = host.v2_debug_snapshot().expect("JoinRemote has debug data");
+        assert_eq!(snapshot.screen, Some(UiScreenId::JoinRemote));
+        let connect = snapshot
+            .widgets
+            .iter()
+            .find(|widget| widget.id == UI_V2_JOIN_REMOTE_CONNECT)
+            .expect("Connect button")
+            .rect;
+        assert!(host.pointer_down(point_in(connect)));
+        let (_handled, action) = host.pointer_up(point_in(connect));
+        assert_eq!(action, Some(GameUiAction::JoinRemote));
     }
 
     #[test]

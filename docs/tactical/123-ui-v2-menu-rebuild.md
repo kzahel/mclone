@@ -1,7 +1,7 @@
 # 123: UI V2 Menu Rebuild
 
-Status: active; v2 XR panel texture and draw-list cache foundations landed
-2026-07-02.
+Status: active; title flow now routes through v2, and Server Settings is the
+remaining player-facing legacy menu screen as of 2026-07-02.
 
 ## Decision
 
@@ -378,7 +378,8 @@ Validation:
 
 ### Slice I: Legacy UI Deletion
 
-Status: pending.
+Status: pending; after the title-flow migration, Server Settings is the only
+remaining player-facing legacy menu screen route.
 
 Delete the legacy screen helpers once migrated screens have equivalent v2
 coverage.
@@ -1322,14 +1323,60 @@ continued visible compositing:
 - `ui_panel_texture_recreates=0`
 - `ui_panel_composites=2`
 
+## Landed Title Flow V2 Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- moved Title, New World, and Join Remote into `UiScreenId` and `UiSurface`
+- rendered title-flow screens through the atlas-backed v2 draw path
+- kept title-flow button hit testing on committed v2 widget rects
+- synchronized New World seed and Join Remote address from `GameUiHost` into the
+  v2 surface so displayed values and emitted actions use the same state
+- kept Server Settings as the only player-facing menu screen still routed
+  through legacy `GameUi`
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui title_flow_screens_route_through_v2_surface -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui join_remote_screen_routes_through_v2_surface -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+pnpm native:web:build
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-title.png --width 960 --height 540 --startup-wait frames:1 --screenshot-ui title --screenshot-hud false --render-distance 2 --lighting false --fullbright true
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-new-world.png --width 960 --height 540 --startup-wait frames:1 --screenshot-ui new-world --screenshot-hud false --seed 12345 --render-distance 2 --lighting false --fullbright true
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-join-remote.png --width 960 --height 540 --startup-wait frames:1 --screenshot-ui join-remote --screenshot-hud false --render-distance 2 --lighting false --fullbright true
+```
+
+Rendered checks:
+
+- native Title screenshot generated and inspected:
+  `/tmp/mclone-ui-v2-title.png`
+- native New World screenshot generated and inspected:
+  `/tmp/mclone-ui-v2-new-world.png`
+- native Join Remote screenshot generated and inspected:
+  `/tmp/mclone-ui-v2-join-remote.png`
+
+Known limits:
+
+- Server Settings still uses legacy render and hit-test helpers
+- legacy Title/New World/Join Remote helpers still exist until the deletion
+  slice removes fallback code after Server Settings migrates
+
 ## Next Recommended Chunk
 
-Continue with remaining HUD transient-layer work.
+Finish menu migration instead of chasing HUD polish.
 
 Next scope:
 
-- choose the next Slice H retained layer: selected item name fade,
-  touch/gamepad prompt retention, or debug overlay retention
+- migrate Server Settings to v2
+- remove the remaining legacy menu render/hit-test route once Server Settings is
+  covered
+- delete obsolete legacy title-flow and menu helper tests as part of the same
+  cleanup
 
 ## Completed First Recommended Chunk
 
