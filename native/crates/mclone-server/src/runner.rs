@@ -19,9 +19,9 @@ use crate::IntegratedServer;
 use crate::SimulationCadence;
 use crate::{
     ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkSchedulerMetrics,
-    ChunkStoreError, LightStatusMailboxKind, PlayerChunkTrackingDiagnostics,
-    ServerPhysicsTickDiagnostics, ServerSimulationTickReport, ServerSimulationTickTiming,
-    SimulationCadenceConfig, WorldgenMailboxKind,
+    ChunkStoreError, LightStatusMailboxKind, NaturalSpawningDiagnostics,
+    PlayerChunkTrackingDiagnostics, ServerPhysicsTickDiagnostics, ServerSimulationTickReport,
+    ServerSimulationTickTiming, SimulationCadenceConfig, WorldgenMailboxKind,
 };
 
 pub type ServerRunnerResult<T> = Result<T, ServerRunnerError>;
@@ -223,6 +223,7 @@ pub struct ServerRunnerTickDiagnostics {
     pub fluid_snapshot_events: usize,
     pub fluid_event_count: usize,
     pub scheduled_fluid_ticks: usize,
+    pub natural_spawning: NaturalSpawningDiagnostics,
     pub physics: ServerPhysicsTickDiagnostics,
     pub wall_us: u128,
     pub timing: ServerSimulationTickTiming,
@@ -244,6 +245,7 @@ impl ServerRunnerTickDiagnostics {
             fluid_snapshot_events: report.fluid_snapshot_events,
             fluid_event_count: report.fluid_event_count,
             scheduled_fluid_ticks: report.scheduled_fluid_ticks,
+            natural_spawning: report.natural_spawning,
             physics: report.physics,
             wall_us,
             timing: report.timing,
@@ -1492,6 +1494,7 @@ mod native {
                 fluid_event_count,
                 scheduled_fluid_ticks: 0,
                 entity_tick_chunks: 0,
+                natural_spawning: NaturalSpawningDiagnostics::default(),
                 physics: ServerPhysicsTickDiagnostics::default(),
                 pending_unloads_processed,
                 scheduler_event_count,

@@ -8,7 +8,7 @@
 mod item;
 mod metadata;
 mod mob;
-mod spawning;
+pub(crate) mod spawning;
 mod state;
 mod store;
 mod tick_list;

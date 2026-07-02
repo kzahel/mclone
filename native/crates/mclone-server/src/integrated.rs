@@ -18,8 +18,14 @@ use mclone_protocol::{
 use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::{AIR, RawBlockId, generated_block_state_id};
 
+use crate::NaturalSpawningDiagnostics;
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
+use crate::entity::spawning::mob_category::MobCategory;
+use crate::entity::spawning::natural::{
+    NaturalSpawnChunkInputs, NaturalSpawnConfig, NaturalSpawnContext, plan_natural_spawns,
+};
+use crate::entity::spawning::spawn_state::SpawnState;
 use crate::entity::{
     EntityTracking, ItemPickupTarget, MobPlayerTarget, RoutedEntityUpdate, ServerEntityState,
     ServerEntityStore,
@@ -309,6 +315,20 @@ impl IntegratedServer {
         targets
     }
 
+    fn natural_spawn_player_positions(&self) -> Vec<Vec3d> {
+        let mut positions = Vec::with_capacity(self.dedicated_players.len() + 1);
+        if self.player.has_accepted_position() {
+            positions.push(self.player.position());
+        }
+        positions.extend(
+            self.dedicated_players
+                .iter()
+                .filter(|(_, entry)| entry.state.has_accepted_position())
+                .map(|(_, entry)| entry.state.position()),
+        );
+        positions
+    }
+
     fn item_pickup_targets(&self) -> Vec<ItemPickupTarget> {
         let mut targets = Vec::with_capacity(self.dedicated_players.len() + 1);
         if self.player.has_accepted_position() {
@@ -553,6 +573,8 @@ impl IntegratedServer {
 
         let entity_tick_start = simulation_timing_start();
         let entity_tick_chunks = run_noop_simulation_phase(&tick_report.entity_ticking_chunks);
+        let natural_spawning =
+            self.natural_spawning_diagnostics(simulation_tick, &tick_report.entity_ticking_chunks);
         let mob_player_targets = self.mob_player_targets();
         let scheduler = &self.scheduler;
         let mut entity_updates = self.entities.tick_stationary(
@@ -619,6 +641,7 @@ impl IntegratedServer {
             fluid_event_count,
             scheduled_fluid_ticks: fluid_report.scheduled_ticks,
             entity_tick_chunks,
+            natural_spawning,
             physics,
             pending_unloads_processed: tick_report.pending_unloads_processed,
             scheduler_event_count: tick_report.scheduler_event_count,
@@ -715,6 +738,48 @@ impl IntegratedServer {
 
     pub fn chunk_tracking_diagnostics(&self) -> PlayerChunkTrackingDiagnostics {
         self.chunk_tracking.diagnostics()
+    }
+
+    pub fn natural_spawning_diagnostics(
+        &self,
+        game_time: u64,
+        entity_ticking_chunks: &[ChunkPos],
+    ) -> NaturalSpawningDiagnostics {
+        const LIVE_NATURAL_SPAWNING_ENABLED: bool = false;
+
+        let player_positions = self.natural_spawn_player_positions();
+        let chunk_inputs = NaturalSpawnChunkInputs::from_players_and_entity_ticking_chunks(
+            &player_positions,
+            entity_ticking_chunks,
+        );
+        let category_counts = self.entities.natural_spawn_category_counts();
+        let spawnable_chunk_count =
+            u32::try_from(chunk_inputs.player_distance_chunk_count()).unwrap_or(u32::MAX);
+        let context = NaturalSpawnContext::with_live_chunk_and_count_inputs(
+            game_time,
+            spawnable_chunk_count,
+            category_counts,
+        );
+        let plan = plan_natural_spawns(NaturalSpawnConfig::enabled_all_categories(), context);
+        let creature_state = SpawnState::new(spawnable_chunk_count, category_counts)
+            .category_state(MobCategory::Creature);
+        let creature_cadence_ready =
+            MobCategory::Creature.should_run_natural_spawn_at_tick(game_time);
+        let creature_cap_has_room = creature_state.has_room();
+
+        NaturalSpawningDiagnostics {
+            live_attempts_enabled: LIVE_NATURAL_SPAWNING_ENABLED,
+            ready_for_live_attempts: !plan.is_blocked(),
+            blocker_count: plan.blocked_by.len(),
+            player_distance_spawnable_chunks: chunk_inputs.player_distance_chunk_count(),
+            eligible_entity_ticking_spawn_chunks: chunk_inputs
+                .eligible_entity_ticking_chunk_count(),
+            creature_count: creature_state.current_count,
+            creature_cap: creature_state.cap,
+            creature_cadence_ready,
+            creature_cap_has_room,
+            creature_should_attempt_if_enabled: creature_cadence_ready && creature_cap_has_room,
+        }
     }
 
     pub fn pending_job_count(&self) -> usize {
@@ -2245,6 +2310,30 @@ mod tests {
         assert_eq!(update.id, snapshot.id);
         assert!(update.position.is_finite());
         assert!(update.age_ticks > snapshot.age_ticks);
+    }
+
+    #[test]
+    fn natural_spawning_diagnostics_use_live_players_chunks_and_creature_counts() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player = server.add_dedicated_player();
+        set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 2);
+
+        let report = server
+            .try_simulation_tick_report_for_player(player)
+            .expect("tick dedicated player");
+        let spawning = report.natural_spawning;
+
+        assert!(!spawning.live_attempts_enabled);
+        assert!(!spawning.ready_for_live_attempts);
+        assert_eq!(spawning.blocker_count, 7);
+        assert_eq!(spawning.player_distance_spawnable_chunks, 17 * 17);
+        assert!(spawning.eligible_entity_ticking_spawn_chunks > 0);
+        assert_eq!(spawning.creature_count, 2);
+        assert_eq!(spawning.creature_cap, 10);
+        assert!(spawning.creature_cap_has_room);
+        assert!(!spawning.creature_cadence_ready);
+        assert!(!spawning.creature_should_attempt_if_enabled);
     }
 
     #[test]

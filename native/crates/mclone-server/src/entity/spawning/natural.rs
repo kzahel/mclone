@@ -1,5 +1,12 @@
+use std::collections::BTreeSet;
+
+use mclone_core::{BlockPos, ChunkPos, Vec3d};
+
 use super::mob_category::{MobCategory, NATURAL_SPAWNING_CATEGORIES};
 use super::spawn_state::{CategorySpawnState, MobCategoryCounts, SpawnState};
+
+pub(crate) const NATURAL_SPAWN_DISTANCE_CHUNKS: i32 = 8;
+pub(crate) const NATURAL_SPAWN_DISTANCE_BLOCKS: f64 = 128.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct NaturalSpawnConfig {
@@ -22,6 +29,12 @@ pub(crate) struct NaturalSpawnContext {
     pub(crate) gamerules_ready: bool,
     pub(crate) despawn_rules_ready: bool,
     pub(crate) persistence_ready: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct NaturalSpawnChunkInputs {
+    pub(crate) player_distance_chunks: BTreeSet<ChunkPos>,
+    pub(crate) eligible_entity_ticking_chunks: BTreeSet<ChunkPos>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -105,6 +118,26 @@ impl NaturalSpawnConfig {
 }
 
 impl NaturalSpawnContext {
+    pub(crate) const fn with_live_chunk_and_count_inputs(
+        game_time: u64,
+        spawnable_chunk_count: u32,
+        mob_category_counts: MobCategoryCounts,
+    ) -> Self {
+        Self {
+            game_time,
+            spawnable_chunk_count: Some(spawnable_chunk_count),
+            mob_category_counts: Some(mob_category_counts),
+            player_distance_spawnable_chunks_ready: true,
+            biome_spawn_tables_ready: false,
+            placement_predicates_ready: false,
+            brightness_checks_ready: false,
+            collision_checks_ready: false,
+            gamerules_ready: false,
+            despawn_rules_ready: false,
+            persistence_ready: false,
+        }
+    }
+
     pub(crate) const fn with_ready_inputs(
         game_time: u64,
         spawnable_chunk_count: u32,
@@ -155,6 +188,35 @@ impl NaturalSpawnContext {
             blockers.push(NaturalSpawnBlocker::Persistence);
         }
         blockers
+    }
+}
+
+impl NaturalSpawnChunkInputs {
+    pub(crate) fn from_players_and_entity_ticking_chunks(
+        player_positions: &[Vec3d],
+        entity_ticking_chunks: &[ChunkPos],
+    ) -> Self {
+        let player_distance_chunks = natural_spawn_player_distance_chunks(player_positions);
+        let eligible_entity_ticking_chunks = entity_ticking_chunks
+            .iter()
+            .copied()
+            .filter(|chunk| {
+                player_distance_chunks.contains(chunk)
+                    && has_player_close_for_spawning(*chunk, player_positions)
+            })
+            .collect();
+        Self {
+            player_distance_chunks,
+            eligible_entity_ticking_chunks,
+        }
+    }
+
+    pub(crate) fn player_distance_chunk_count(&self) -> usize {
+        self.player_distance_chunks.len()
+    }
+
+    pub(crate) fn eligible_entity_ticking_chunk_count(&self) -> usize {
+        self.eligible_entity_ticking_chunks.len()
     }
 }
 
@@ -222,6 +284,38 @@ pub(crate) fn plan_natural_spawns(
         blocked_by: Vec::new(),
         categories,
     }
+}
+
+fn natural_spawn_player_distance_chunks(player_positions: &[Vec3d]) -> BTreeSet<ChunkPos> {
+    player_positions
+        .iter()
+        .flat_map(|position| {
+            let center = BlockPos::containing(*position).chunk_pos();
+            let min_x = center.x - NATURAL_SPAWN_DISTANCE_CHUNKS;
+            let max_x = center.x + NATURAL_SPAWN_DISTANCE_CHUNKS;
+            let min_z = center.z - NATURAL_SPAWN_DISTANCE_CHUNKS;
+            let max_z = center.z + NATURAL_SPAWN_DISTANCE_CHUNKS;
+            (min_x..=max_x).flat_map(move |x| (min_z..=max_z).map(move |z| ChunkPos::new(x, z)))
+        })
+        .collect()
+}
+
+fn has_player_close_for_spawning(chunk: ChunkPos, player_positions: &[Vec3d]) -> bool {
+    player_positions
+        .iter()
+        .any(|position| player_spawn_distance_squared(chunk, *position) < spawn_distance_sqr())
+}
+
+fn player_spawn_distance_squared(chunk: ChunkPos, player_position: Vec3d) -> f64 {
+    let center_x = f64::from(chunk.x) * 16.0 + 8.0;
+    let center_z = f64::from(chunk.z) * 16.0 + 8.0;
+    let dx = center_x - player_position.x;
+    let dz = center_z - player_position.z;
+    dx * dx + dz * dz
+}
+
+const fn spawn_distance_sqr() -> f64 {
+    NATURAL_SPAWN_DISTANCE_BLOCKS * NATURAL_SPAWN_DISTANCE_BLOCKS
 }
 
 #[cfg(test)]
@@ -324,6 +418,64 @@ mod tests {
             plan.categories
                 .iter()
                 .all(|category| category.category != MobCategory::Creature)
+        );
+    }
+
+    #[test]
+    fn natural_spawn_player_distance_chunks_use_java_fixed_distance_tracker_radius() {
+        let inputs = NaturalSpawnChunkInputs::from_players_and_entity_ticking_chunks(
+            &[Vec3d::new(8.0, 64.0, 8.0)],
+            &[],
+        );
+
+        assert_eq!(inputs.player_distance_chunk_count(), 17 * 17);
+        assert!(
+            inputs
+                .player_distance_chunks
+                .contains(&ChunkPos::new(-8, -8))
+        );
+        assert!(inputs.player_distance_chunks.contains(&ChunkPos::new(8, 8)));
+        assert!(!inputs.player_distance_chunks.contains(&ChunkPos::new(9, 0)));
+    }
+
+    #[test]
+    fn natural_spawn_eligible_chunks_require_entity_ticking_and_close_player_distance() {
+        let inputs = NaturalSpawnChunkInputs::from_players_and_entity_ticking_chunks(
+            &[Vec3d::new(8.0, 64.0, 8.0)],
+            &[
+                ChunkPos::new(0, 0),
+                ChunkPos::new(7, 0),
+                ChunkPos::new(8, 0),
+                ChunkPos::new(7, 7),
+                ChunkPos::new(9, 0),
+            ],
+        );
+
+        assert_eq!(
+            inputs.eligible_entity_ticking_chunks,
+            BTreeSet::from([ChunkPos::new(0, 0), ChunkPos::new(7, 0)])
+        );
+    }
+
+    #[test]
+    fn partial_live_inputs_clear_chunk_and_count_blockers_only() {
+        let context = NaturalSpawnContext::with_live_chunk_and_count_inputs(
+            400,
+            289,
+            MobCategoryCounts::new(),
+        );
+
+        assert_eq!(
+            context.missing_blockers(),
+            vec![
+                NaturalSpawnBlocker::BiomeSpawnTables,
+                NaturalSpawnBlocker::PlacementPredicates,
+                NaturalSpawnBlocker::BrightnessChecks,
+                NaturalSpawnBlocker::CollisionChecks,
+                NaturalSpawnBlocker::GameRules,
+                NaturalSpawnBlocker::DespawnRules,
+                NaturalSpawnBlocker::Persistence,
+            ]
         );
     }
 }

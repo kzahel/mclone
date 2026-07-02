@@ -12,6 +12,8 @@ use super::ServerEntityState;
 use super::item::{ITEM_ENTITY_LIFETIME_TICKS, ItemEntityRuntimeState};
 use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
 use super::mob::{MobPlayerTarget, MobRuntimeState};
+use super::spawning::mob_category::MobCategory;
+use super::spawning::spawn_state::MobCategoryCounts;
 use super::tick_list::ServerEntityTickList;
 
 const PLAYER_PICKUP_WIDTH: f64 = 0.6;
@@ -166,6 +168,25 @@ impl ServerEntityStore {
 
     pub(crate) fn states(&self) -> Vec<ServerEntityState> {
         self.entities.values().copied().collect()
+    }
+
+    pub(crate) fn natural_spawn_category_counts(&self) -> MobCategoryCounts {
+        let mut counts = MobCategoryCounts::new();
+        for entity in self
+            .entities
+            .values()
+            .copied()
+            .filter(|entity| entity.alive)
+        {
+            let Some(metadata) = EntityMetadata::for_kind(entity.kind) else {
+                continue;
+            };
+            let category = MobCategory::from_entity_category(metadata.category);
+            if category.is_natural_spawning() {
+                counts.increment(category);
+            }
+        }
+        counts
     }
 
     pub(crate) fn on_block_changed(&mut self, pos: BlockPos) -> usize {
@@ -675,6 +696,25 @@ mod tests {
 
         assert!(ids.is_empty());
         assert_eq!(store.diagnostics().stored_entities, 0);
+    }
+
+    #[test]
+    fn natural_spawn_category_counts_include_live_passive_mobs_but_not_items_or_misc() {
+        let mut store = ServerEntityStore::default();
+        store.insert_passive_mob_for_test(EntityKind::Cow, Vec3d::new(4.0, 64.0, 4.0), 0.0);
+        store.insert_passive_mob_for_test(EntityKind::Chicken, Vec3d::new(5.0, 64.0, 4.0), 0.0);
+        store.insert_item_entity_for_test(
+            ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            },
+            Vec3d::new(6.0, 64.0, 4.0),
+        );
+
+        let counts = store.natural_spawn_category_counts();
+
+        assert_eq!(counts.get(MobCategory::Creature), 2);
+        assert_eq!(counts.get(MobCategory::Misc), 0);
     }
 
     #[test]

@@ -754,12 +754,57 @@ Landed notes:
   sheep/pig entries so future passive mobs have the correct table shape.
 - Recorded cow/chicken on-ground animal placement facts without implementing
   live placement, brightness, or collision predicates yet.
-- Kept live natural spawning blocked by default. Even if enabled, the planner
-  reports missing blockers until player-distance spawnable chunks, live
-  category counts, biome tables, placement predicates, brightness checks,
-  collision checks, gamerules, despawn, and persistence are supplied.
+- Kept live natural spawning blocked by default. The planner reports missing
+  blockers for required inputs that are not yet supplied by later slices.
 - Verified the scaffold with focused `mclone-server` `entity::spawning` unit
   tests, full `cargo test --manifest-path native/Cargo.toml`, and
+  `pnpm native:web:build`.
+
+## Slice 7 - Natural Spawn Input Diagnostics
+
+Purpose: wire the first real natural-spawn inputs into the server report without
+creating mobs yet.
+
+Status: landed; diagnostics now supply player-distance spawnable chunks and
+live category counts, while live attempts remain disabled.
+
+Implementation sketch:
+
+- Mirror Java's `FixedPlayerDistanceChunkTracker(8)` shape as a `17 * 17`
+  player-distance chunk set around accepted player positions.
+- Track the subset of entity-ticking chunks that are also close enough to a
+  player for natural spawn attempts (`ChunkMap.noPlayersCloseForSpawning`
+  style 128-block center distance).
+- Count live non-`MISC` entity categories from the authoritative entity store.
+- Feed those inputs into the natural-spawn planner and expose a compact
+  `NaturalSpawningDiagnostics` report on simulation ticks and runner
+  diagnostics.
+- Keep live spawning disabled and keep the remaining blockers visible.
+
+Done when:
+
+- A server tick report can show the current player-distance spawnable chunk
+  count and eligible entity-ticking spawn chunks.
+- A server tick report can show current `CREATURE` count, cap, cadence status,
+  and "would attempt if enabled" status.
+- The planner no longer treats player-distance chunks or live category counts
+  as missing, but still blocks on biome/placement/brightness/collision/gamerule,
+  despawn, and persistence inputs.
+
+Landed notes:
+
+- Added Java-shaped natural-spawn chunk diagnostics using the 8-chunk fixed
+  player-distance tracker radius and the 128-block close-player filter.
+- Added entity-store category counting so debug cows/chickens count toward the
+  live `CREATURE` cap and item entities do not.
+- Added `NaturalSpawningDiagnostics` to `ServerSimulationTickReport` and
+  `ServerRunnerTickDiagnostics`.
+- Verified that a dedicated-player simulation tick reports 289
+  player-distance chunks, two debug `CREATURE` entities, cap 10, live attempts
+  disabled, and the remaining blocker count.
+- Verified with `cargo test --manifest-path native/Cargo.toml -p mclone-server
+  natural_spawn`, `cargo test --manifest-path native/Cargo.toml -p
+  mclone-server`, full `cargo test --manifest-path native/Cargo.toml`, and
   `pnpm native:web:build`.
 
 ## Validation
@@ -787,7 +832,8 @@ Suggested visible checks:
 - Full `Entity.move(...)` / `LivingEntity.travel(...)` parity.
 - Real pathfinding over loaded world collision.
 - Live natural spawning for `CREATURE` through the `entity::spawning` planner
-  once all blocker inputs are wired.
+  once biome selection, placement predicates, brightness checks, collision
+  checks, gamerules/server flags, despawn, and persistence are wired.
 - Despawn rules for passive animals and later hostile mobs.
 - Sounds for passive mobs.
 - Data watcher / tracked data equivalent for richer entity presentation.

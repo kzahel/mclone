@@ -79,9 +79,9 @@ pub use scheduler::{
 };
 pub use spawn::initial_spawn_center_for_seed;
 pub use timing::{
-    ChunkSchedulerTickReport, ChunkSchedulerTickTiming, ServerPhysicsStepReport,
-    ServerPhysicsStepTiming, ServerPhysicsTickDiagnostics, ServerSimulationTickReport,
-    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
+    ChunkSchedulerTickReport, ChunkSchedulerTickTiming, NaturalSpawningDiagnostics,
+    ServerPhysicsStepReport, ServerPhysicsStepTiming, ServerPhysicsTickDiagnostics,
+    ServerSimulationTickReport, ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
 };
 #[cfg(target_arch = "wasm32")]
 pub use types::WasmServerJobWorkerConfig;

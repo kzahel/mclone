@@ -12,6 +12,20 @@ use mclone_protocol::ServerUpdate;
 
 use crate::{ChunkSchedulerEvent, PlayerChunkTrackingDiagnostics};
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct NaturalSpawningDiagnostics {
+    pub live_attempts_enabled: bool,
+    pub ready_for_live_attempts: bool,
+    pub blocker_count: usize,
+    pub player_distance_spawnable_chunks: usize,
+    pub eligible_entity_ticking_spawn_chunks: usize,
+    pub creature_count: u32,
+    pub creature_cap: u32,
+    pub creature_cadence_ready: bool,
+    pub creature_cap_has_room: bool,
+    pub creature_should_attempt_if_enabled: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkSchedulerTickReport {
     pub ticket_tick: u64,
@@ -88,6 +102,7 @@ pub struct ServerSimulationTickReport {
     pub fluid_event_count: usize,
     pub scheduled_fluid_ticks: usize,
     pub entity_tick_chunks: usize,
+    pub natural_spawning: NaturalSpawningDiagnostics,
     pub physics: ServerPhysicsTickDiagnostics,
     pub pending_unloads_processed: usize,
     pub scheduler_event_count: usize,
