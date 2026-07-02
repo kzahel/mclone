@@ -109,6 +109,9 @@ public final class VanillaClientLauncher {
             case "--mclone-timeout-seconds":
                options.timeoutSeconds = parsePositiveInt(requireValue(args, ++index, argument), "timeout seconds");
                break;
+            case "--mclone-render-distance":
+               options.renderDistance = parseRenderDistance(requireValue(args, ++index, argument));
+               break;
             case "--mclone-show-gui":
                options.hideGui = false;
                break;
@@ -306,6 +309,7 @@ public final class VanillaClientLauncher {
       System.err.println("  --mclone-day-time <ticks>");
       System.err.println("  --mclone-settle-frames <frames>");
       System.err.println("  --mclone-timeout-seconds <seconds>");
+      System.err.println("  --mclone-render-distance <chunks>");
       System.err.println("  --mclone-show-gui");
       System.err.println("  --mclone-no-structures");
       System.err.println("  --mclone-disable-multiplayer");
@@ -337,6 +341,7 @@ public final class VanillaClientLauncher {
       long dayTime = 6000L;
       int settleFrames = 80;
       int timeoutSeconds = 180;
+      int renderDistance = 12;
       boolean generateStructures = true;
       boolean hideGui = true;
       boolean disableMultiplayer;
@@ -368,9 +373,18 @@ public final class VanillaClientLauncher {
          config.dayTime = dayTime;
          config.settleFrames = settleFrames;
          config.timeoutSeconds = timeoutSeconds;
+         config.renderDistance = renderDistance;
          config.generateStructures = generateStructures;
          config.hideGui = hideGui;
          return config;
       }
+   }
+
+   private static int parseRenderDistance(String value) {
+      int parsed = parsePositiveInt(value, "render distance");
+      if (parsed < 2 || parsed > 16) {
+         throw new IllegalArgumentException("render distance must be between 2 and 16");
+      }
+      return parsed;
    }
 }

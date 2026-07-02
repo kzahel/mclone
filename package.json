@@ -133,7 +133,8 @@
     "texture-lab:sheet": "pnpm --dir ./tools/texture-lab sheet",
     "typecheck": "pnpm native:web:typecheck",
     "oracle:gen": "bash ./oracle/run.sh",
-    "oracle:client": "node ./oracle/vanilla-client-launch.mjs"
+    "oracle:client": "node ./oracle/vanilla-client-launch.mjs",
+    "oracle:visual-compare": "node ./oracle/visual-compare.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

@@ -230,17 +230,21 @@ node oracle/vanilla-client-launch.mjs --hydrate
 node oracle/vanilla-client-launch.mjs --launch
 node oracle/vanilla-client-launch.mjs --macos-arm64-lwjgl prism --launch
 pnpm --silent oracle:client -- --macos-arm64-lwjgl prism --screenshot /tmp/mclone-vanilla-seed-1124.png --seed 1124 --camera 0,96,0,180,20
+pnpm --silent oracle:visual-compare -- --seed 1124 --camera 0,96,0,180,20 --render-distance 8
 ```
 
 The default action only prints the Java command. `--launch` is explicit because
 it can open a real LWJGL window. `--screenshot` implies launch, creates a fresh
 seeded singleplayer world, captures the vanilla main framebuffer to the named
-PNG, and exits. The harness uses the deobfuscated `client-deobf.jar` plus
-Mojang's 1.17.1 libraries/assets and a dummy local session, so Prism Launcher is
-not part of the normal oracle command path. On Apple Silicon macOS,
-`--macos-arm64-lwjgl prism` can use Prism's local arm64 LWJGL jars/natives as a
-narrow compatibility layer while keeping the Minecraft client jar and harness
-under this repo's control.
+PNG, and exits. `oracle:visual-compare` captures vanilla and native screenshots
+for the same seed/camera probe, then writes `vanilla.png`, `native.png`, logs,
+and `metadata.json` under `/tmp/mclone-visual-compare-seed-<seed>` by default.
+This is a visual spot-check path, not a pixel-equality oracle yet. The harness
+uses the deobfuscated `client-deobf.jar` plus Mojang's 1.17.1 libraries/assets
+and a dummy local session, so Prism Launcher is not part of the normal oracle
+command path. On Apple Silicon macOS, `--macos-arm64-lwjgl prism` can use
+Prism's local arm64 LWJGL jars/natives as a narrow compatibility layer while
+keeping the Minecraft client jar and harness under this repo's control.
 - `oracle/build.sh`: hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then compiles `oracle/java/*.java` into `oracle/classes`
 - `oracle/run.sh`: builds if needed, then runs `OracleDumper`
 

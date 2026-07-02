@@ -82,6 +82,7 @@ async function main() {
     dayTime: options.dayTime,
     settleFrames: options.settleFrames,
     timeoutSeconds: options.timeoutSeconds,
+    renderDistance: options.renderDistance,
     showGui: options.showGui,
     generateStructures: options.generateStructures,
   });
@@ -124,6 +125,7 @@ function parseArgs(args) {
     dayTime: "6000",
     settleFrames: "80",
     timeoutSeconds: "180",
+    renderDistance: "12",
     showGui: false,
     generateStructures: true,
     username: "McloneOracle",
@@ -214,6 +216,9 @@ function parseArgs(args) {
       case "--timeout-seconds":
         options.timeoutSeconds = requirePositiveInteger(requireValue(args, ++index, arg), "timeout seconds");
         break;
+      case "--render-distance":
+        options.renderDistance = requireIntegerInRange(requireValue(args, ++index, arg), "render distance", 2, 16);
+        break;
       case "--show-gui":
         options.showGui = true;
         break;
@@ -261,6 +266,7 @@ options:
   --day-time <ticks>     default: 6000
   --settle-frames <n>    default: 80
   --timeout-seconds <n>  default: 180
+  --render-distance <n>  vanilla client chunks; default: 12
   --show-gui             leave HUD visible in screenshots
   --no-structures        disable structure generation
   --username <name>      default: McloneOracle
@@ -478,6 +484,7 @@ function buildJavaCommand({
   dayTime,
   settleFrames,
   timeoutSeconds,
+  renderDistance,
   showGui,
   generateStructures,
 }) {
@@ -514,6 +521,7 @@ function buildJavaCommand({
     command.push("--mclone-day-time", dayTime);
     command.push("--mclone-settle-frames", settleFrames);
     command.push("--mclone-timeout-seconds", timeoutSeconds);
+    command.push("--mclone-render-distance", renderDistance);
     if (showGui) {
       command.push("--mclone-show-gui");
     }
@@ -648,6 +656,15 @@ function requireInteger(value, name) {
     throw new Error(`${name} must be an integer`);
   }
   return value;
+}
+
+function requireIntegerInRange(value, name, min, max) {
+  const integer = requireInteger(value, name);
+  const numeric = Number(integer);
+  if (numeric < min || numeric > max) {
+    throw new Error(`${name} must be between ${min} and ${max}`);
+  }
+  return integer;
 }
 
 function requireCamera(value) {

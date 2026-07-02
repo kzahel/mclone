@@ -81,6 +81,7 @@ public final class VanillaClientScreenshotHarness {
       onGameThread(
          minecraft,
          () -> {
+            minecraft.options.renderDistance = config.renderDistance;
             RegistryAccess.RegistryHolder registry = RegistryAccess.builtin();
             Properties properties = new Properties();
             properties.setProperty("level-seed", Long.toString(config.seed));
@@ -117,6 +118,7 @@ public final class VanillaClientScreenshotHarness {
             minecraft.options.renderDebug = false;
             minecraft.options.renderDebugCharts = false;
             minecraft.options.renderFpsChart = false;
+            minecraft.options.renderDistance = config.renderDistance;
             minecraft.options.framerateLimit = 260;
             minecraft.getWindow().setFramerateLimit(minecraft.options.framerateLimit);
             minecraft.setScreen(null);
@@ -252,6 +254,7 @@ public final class VanillaClientScreenshotHarness {
       long dayTime = 6000L;
       int settleFrames = 80;
       int timeoutSeconds = 180;
+      int renderDistance = 12;
       boolean generateStructures = true;
       boolean hideGui = true;
    }
