@@ -148,6 +148,8 @@ impl RenderSectionCompileQueue {
         state.queued_slots.push_back(slot_index);
         let queue_push_ms = elapsed_ms(queue_push_start.elapsed());
 
+        drop(state);
+
         let notify_start = Instant::now();
         self.work_available.notify_one();
         let notify_ms = elapsed_ms(notify_start.elapsed());

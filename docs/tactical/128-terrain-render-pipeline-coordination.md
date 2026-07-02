@@ -872,6 +872,43 @@ Next implementation implication:
   render frame publishes bounded work and a non-render owner performs worker
   notification.
 
+Wakeup-order experiment result:
+
+- Implemented July 2, 2026. Native slot enqueue now releases the queue mutex
+  before `notify_one`.
+- Validation:
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-android-xr-client`
+  - `pnpm native:web:build`
+  - Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+    workers, 45 seconds.
+- Measurement:
+
+| Frame avg / p95 / p99 / max | Runtime submit split | Submit handoff split | Enqueue split |
+|---|---|---|---|
+| 15.798 / 18.265 / 25.326 / 48.698 ms | submit 16.157 ms; snapshot 0.856; handoff 15.891 | request count 2; compiler submit total 15.808; compiler submit single 15.792; slot enqueue/wakeup total 15.806; slot enqueue/wakeup single 15.791 | lock wait total/single 0.006/0.006 ms; slot select 0.010/0.010; slot write 0.000/0.000; queue push 0.003/0.003; notify 15.804/15.790; post-enqueue 0.005/0.005 |
+
+Interpretation:
+
+- Releasing the mutex before `notify_one` fixed the previous attribution problem:
+  the `post_enqueue_single_ms` residual dropped from `17.958 ms` to `0.005 ms`.
+- The tail did not go away. It moved into `notify_one` itself
+  (`notify_single_ms=15.790`). That means the expensive render-frame-side event
+  is worker wakeup/scheduler behavior, not queue mutation, lock wait, slot
+  storage, or mutex-drop ordering.
+- The handoff tail improved modestly versus the previous instrumentation run
+  (`command_send_single_ms` from `17.981` to `15.791`), but frame-level
+  performance did not materially improve. Treat this patch as a correct
+  low-risk hygiene change, not the final performance fix.
+
+Next implementation implication:
+
+- Stop iterating on the queue data structure itself. The remaining issue is that
+  the render frame performs the worker wakeup.
+- Move wakeup ownership off the render frame. The next useful slice should be a
+  dispatcher pump or worker-poll/mailbox design where the render frame publishes
+  bounded compile requests and another owner wakes or services compile workers.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -901,8 +938,9 @@ record maintenance.
 
 ## Open Questions
 
-1. Can releasing the compile queue mutex before worker notification reduce the
-   post-enqueue tail, or is a dispatcher pump / worker-poll mailbox required?
+1. What is the smallest dispatcher pump or worker-poll/mailbox shape that lets
+   the render frame publish bounded compile work without directly paying worker
+   wakeup cost?
 2. How often do deferred sections exceed thousands on stable render-distance-7
    movement, and how many are reprocessed per frame?
 3. Does slot-backed submit cost scale with snapshot payload size, target-section
@@ -936,11 +974,12 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Run the smallest wakeup-order experiment before a larger structural rewrite:
-drop the compile queue mutex before `notify_one`, then repeat the Quest
-render-distance-7 settled-orbit lane and compare `post_enqueue_single_ms`.
+Move worker wakeup ownership off the render frame. The mutex-before-notify
+experiment showed that queue mutation is cheap and the wakeup call itself can
+absorb nearly a full 72 Hz frame. The next slice should introduce the smallest
+dispatcher pump or worker-poll/mailbox shape that preserves bounded admission
+while making the render frame publish work instead of waking compile workers.
 
-If the post-enqueue tail remains multi-millisecond, stop iterating on queue data
-structures and move wakeup ownership off the render frame with a dispatcher pump
-or worker-poll/mailbox design. Do not repeat a plain `std::sync::mpsc::sync_channel`
-swap; it was already measured worse than the current unbounded channel.
+Do not repeat a plain `std::sync::mpsc::sync_channel` swap; it was already
+measured worse than the current unbounded channel. Do not add another queue data
+structure unless it specifically removes render-frame worker wakeup.
