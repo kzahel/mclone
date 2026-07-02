@@ -1,6 +1,6 @@
 # 123: UI V2 Menu Rebuild
 
-Status: active; UI v2 headless interaction harness landed 2026-07-01.
+Status: active; native flat committed UI frame state landed 2026-07-02.
 
 ## Decision
 
@@ -644,6 +644,58 @@ Known limits:
 - sliders and cycles still need the same edge-point harness coverage
 - atlas text remains the next performance chunk
 
+## Landed Committed UI Frame State Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- made `FlatClientDriver` own the last committed `GameUiRenderState`
+- committed the UI render state once in the native flat full-frame render path
+  before producing the draw list
+- changed native desktop pointer down/up/move handling so platform events no
+  longer rebuild or pass a separate input-time `GameUiRenderState`
+- changed the offscreen UI click harness to commit a frame state before
+  applying the click
+- added a regression test that proves the previous hidden-row divergence would
+  hover `Crosshair`, while the native driver still clicks `First Person Body`
+  from the committed state
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client committed_ui_state -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client headless_ui_click -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-options-committed-state.png --width 960 --height 540 --screenshot-ui options-pause --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true
+```
+
+Rendered checks:
+
+- native Options screenshot inspected:
+  `/tmp/mclone-ui-v2-options-committed-state.png`
+- browser canvas smoke regenerated:
+  `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- this commits the invariant in the native flat driver and offscreen harness;
+  web/WASM and XR still have direct legacy `GameUiRenderState` builders and need
+  the shared host wrapper before the invariant is platform-wide
+- `UiSurface` still accepts `GameUiRenderState` on render and pointer calls as a
+  compatibility adapter; the next shared-host chunk should hide that from all
+  app/platform crates
+- atlas text remains the next major performance chunk after the committed-state
+  host is shared across web and XR
+
 ## Non-Goals
 
 - Spending more effort on legacy Options hit-test fixes than needed to keep the
@@ -658,7 +710,23 @@ Known limits:
 
 ## Next Recommended Chunk
 
-Implement Slice F: atlas-backed text for v2.
+Implement a shared committed-state UI host for native flat, web/WASM, and XR.
+
+Start by moving the driver-local committed-state pattern into a small shared
+owner around `UiSurface`:
+
+- one method commits frame/render state and returns the draw list
+- pointer/key methods consume the last committed state
+- app/platform crates pass converted input facts, not screen layout state
+- web/WASM and XR keep their existing presentation code but stop rebuilding
+  input-time UI state for migrated v2 screens
+- offscreen tests exercise the shared host, not native-driver-only glue
+
+Validation should include native flat tests, web build/smoke, XR compile/tests,
+and at least one Options click regression through the shared host. This is the
+foundation chunk that makes the UI invariant platform-wide.
+
+After that, implement Slice F: atlas-backed text for v2.
 
 Start with the smallest production-shaped text path:
 

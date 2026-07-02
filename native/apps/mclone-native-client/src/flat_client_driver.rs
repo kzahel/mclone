@@ -111,6 +111,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) session: GameSessionCoordinator<FlatClientPendingSessionStart>,
     pub(crate) ui: GameUi,
     ui_v2: UiSurface,
+    committed_ui_render_state: GameUiRenderState,
     pub(crate) spectator: SpectatorCamera,
     pub(crate) camera: EngineCameraController,
     pub(crate) actor_interpolation: ActorInterpolationState,
@@ -294,6 +295,7 @@ impl FlatClientDriver {
             session: GameSessionCoordinator::new(),
             ui,
             ui_v2: UiSurface::new(),
+            committed_ui_render_state: GameUiRenderState::default(),
             spectator,
             camera,
             actor_interpolation: ActorInterpolationState::new(),
@@ -416,29 +418,24 @@ impl FlatClientDriver {
         self.ui.key_pressed(key)
     }
 
-    pub(crate) fn ui_pointer_down(&mut self, point: Point, state: GameUiRenderState) -> bool {
+    pub(crate) fn ui_pointer_down(&mut self, point: Point) -> bool {
+        let state = self.committed_ui_render_state;
         if self.sync_ui_v2_screen() {
             return self.ui_v2.pointer_down(point, state);
         }
         self.ui.pointer_down(point, state)
     }
 
-    pub(crate) fn ui_pointer_up(
-        &mut self,
-        point: Point,
-        state: GameUiRenderState,
-    ) -> (bool, Option<GameUiAction>) {
+    pub(crate) fn ui_pointer_up(&mut self, point: Point) -> (bool, Option<GameUiAction>) {
+        let state = self.committed_ui_render_state;
         if self.sync_ui_v2_screen() {
             return self.ui_v2.pointer_up(point, state);
         }
         self.ui.pointer_up(point, state)
     }
 
-    pub(crate) fn ui_pointer_move(
-        &mut self,
-        point: Point,
-        state: GameUiRenderState,
-    ) -> (bool, Option<GameUiAction>) {
+    pub(crate) fn ui_pointer_move(&mut self, point: Point) -> (bool, Option<GameUiAction>) {
+        let state = self.committed_ui_render_state;
         if self.sync_ui_v2_screen() {
             return self.ui_v2.pointer_move(point, state);
         }
@@ -458,15 +455,20 @@ impl FlatClientDriver {
         self.ui_v2.debug_snapshot()
     }
 
+    pub(crate) fn commit_ui_render_state(&mut self, state: GameUiRenderState) {
+        self.committed_ui_render_state = state;
+        if self.sync_ui_v2_screen() {
+            self.ui_v2.set_render_state(state);
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn ui_v2_debug_snapshot_for_state(
         &mut self,
         state: GameUiRenderState,
     ) -> Option<UiDebugSnapshot> {
-        if !self.sync_ui_v2_screen() {
-            return None;
-        }
-        self.ui_v2.set_render_state(state);
-        self.ui_v2.debug_snapshot()
+        self.commit_ui_render_state(state);
+        self.ui_v2_debug_snapshot()
     }
 
     pub(crate) fn current_ui_render_state(
@@ -496,13 +498,12 @@ impl FlatClientDriver {
     pub(crate) fn apply_ui_pointer_click(
         &mut self,
         point: Point,
-        state: GameUiRenderState,
         context: FlatClientUiActionContext<'_>,
     ) -> FlatClientUiPointerClickReport {
-        let before = self.ui_v2_debug_snapshot_for_state(state);
-        let down_handled = self.ui_pointer_down(point, state);
+        let before = self.ui_v2_debug_snapshot();
+        let down_handled = self.ui_pointer_down(point);
         let after_down = self.ui_v2_debug_snapshot();
-        let (up_handled, action) = self.ui_pointer_up(point, state);
+        let (up_handled, action) = self.ui_pointer_up(point);
         let after_up = self.ui_v2_debug_snapshot();
         let action_result = action.map(|action| self.apply_ui_action(action, context));
 
@@ -1912,11 +1913,11 @@ impl FlatClientDriver {
             || debug_view_readiness_overlay.is_some();
         let mut ui_render_state = game_ui_render_state(ui_frame.render_options);
         ui_render_state.block_palette = ui_frame.block_palette;
-        self.sync_ui_v2_screen();
+        self.commit_ui_render_state(ui_render_state);
         let base_ui_draw = if self.ui_v2.is_active() {
-            self.ui_v2.render_draw_list(ui_render_state)
+            self.ui_v2.render_draw_list(self.committed_ui_render_state)
         } else {
-            self.ui.render_draw_list(ui_render_state)
+            self.ui.render_draw_list(self.committed_ui_render_state)
         };
         let gui_state = FullFrameGui::new(
             gui_active,
@@ -2142,6 +2143,15 @@ mod tests {
             .rect
     }
 
+    fn debug_hovered_label(snapshot: &UiDebugSnapshot) -> Option<&str> {
+        let hovered = snapshot.hovered?;
+        snapshot
+            .widgets
+            .iter()
+            .find(|widget| widget.id == hovered)
+            .map(|widget| widget.label.as_str())
+    }
+
     fn row_probe_points(rect: mclone_ui::Rect) -> [Point; 5] {
         [
             Point {
@@ -2302,7 +2312,8 @@ mod tests {
         for point in row_probe_points(crosshair) {
             let before = driver.crosshair_visible;
             let state = headless_ui_state(&driver);
-            let report = driver.apply_ui_pointer_click(point, state, ui_action_context());
+            driver.commit_ui_render_state(state);
+            let report = driver.apply_ui_pointer_click(point, ui_action_context());
 
             assert!(report.down_handled, "down missed at {point:?}");
             assert!(report.up_handled, "up missed at {point:?}");
@@ -2338,7 +2349,8 @@ mod tests {
         for point in row_probe_points(first_person) {
             let before = driver.camera.first_person_player_visible();
             let state = headless_ui_state(&driver);
-            let report = driver.apply_ui_pointer_click(point, state, ui_action_context());
+            driver.commit_ui_render_state(state);
+            let report = driver.apply_ui_pointer_click(point, ui_action_context());
 
             assert!(report.down_handled, "down missed at {point:?}");
             assert!(report.up_handled, "up missed at {point:?}");
@@ -2351,6 +2363,46 @@ mod tests {
             assert_eq!(driver.camera.first_person_player_visible(), !before);
             assert_eq!(driver.scene.first_person_player_visible, !before);
         }
+    }
+
+    #[test]
+    fn committed_ui_state_controls_pointer_hit_testing() {
+        let scene = SceneOptions::default();
+        let mut driver = FlatClientDriver::new(&scene, TexturedSectionRenderOptions::default());
+        driver.set_ui_screen(Some(GameScreen::Options {
+            parent: mclone_ui::GameOptionsParent::Pause,
+        }));
+        driver.set_ui_scale(GuiScale::from_pixels(960, 540));
+
+        let committed_state = headless_ui_state(&driver);
+        let committed_snapshot = driver
+            .ui_v2_debug_snapshot_for_state(committed_state)
+            .expect("Options is a v2 screen");
+        let first_person = debug_widget_rect(&committed_snapshot, "First Person Body");
+        let point = Point {
+            x: first_person.x + 16.0,
+            y: first_person.bottom() - 2.0,
+        };
+
+        let mut divergent_state = committed_state;
+        divergent_state.touch_controls_mode = Some(TouchControlsMode::Auto);
+        let mut divergent_surface = UiSurface::new();
+        divergent_surface.set_screen(Some(UiScreenId::Options {
+            parent: mclone_ui::GameOptionsParent::Pause,
+        }));
+        divergent_surface.set_scale(GuiScale::from_pixels(960, 540));
+        let (_handled, _action) = divergent_surface.pointer_move(point, divergent_state);
+        let divergent_snapshot = divergent_surface
+            .debug_snapshot()
+            .expect("divergent Options surface should be active");
+
+        assert_eq!(debug_hovered_label(&divergent_snapshot), Some("Crosshair"));
+
+        driver.commit_ui_render_state(committed_state);
+        let report = driver.apply_ui_pointer_click(point, ui_action_context());
+
+        assert_eq!(report.action, Some(GameUiAction::ToggleFirstPersonPlayer));
+        assert!(driver.camera.first_person_player_visible());
     }
 
     #[test]

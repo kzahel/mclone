@@ -15,7 +15,7 @@ use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_ui::{
     DEFAULT_JOIN_REMOTE_ADDR, FlatHotbarOverlay, FlatHud, GameHelpParent, GameScreen, GameUi,
-    GameUiAction, GameUiRenderState, GuiKey, GuiScale, Point, StatusOverlay,
+    GameUiAction, GuiKey, GuiScale, Point, StatusOverlay,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -471,16 +471,6 @@ impl ChunkApp {
             action,
             widgets
         );
-    }
-
-    fn current_ui_render_state(&self) -> GameUiRenderState {
-        self.driver.current_ui_render_state(
-            self.frame_pacing.ui_state(),
-            debug_block_palette_overlay(
-                &self.assets.mesh_assets.catalog,
-                self.driver.interaction.selected_hotbar_slot(),
-            ),
-        )
     }
 
     fn current_flat_hud(&self, status: StatusOverlay, ui_active: bool) -> FlatHud {
@@ -1122,14 +1112,11 @@ impl ApplicationHandler for ChunkApp {
                         {
                             match state {
                                 ElementState::Pressed => {
-                                    let ui_state = self.current_ui_render_state();
-                                    self.driver.ui_pointer_down(point, ui_state);
+                                    self.driver.ui_pointer_down(point);
                                     self.log_ui_v2_pointer_debug("down", (x, y), point, None);
                                 }
                                 ElementState::Released => {
-                                    let ui_state = self.current_ui_render_state();
-                                    let (_handled, action) =
-                                        self.driver.ui_pointer_up(point, ui_state);
+                                    let (_handled, action) = self.driver.ui_pointer_up(point);
                                     self.log_ui_v2_pointer_debug("up", (x, y), point, action);
                                     if let Some(action) = action {
                                         self.apply_ui_action(action, event_loop, true);
@@ -1171,8 +1158,7 @@ impl ApplicationHandler for ChunkApp {
                 if self.driver.ui_is_active() {
                     self.last_cursor = Some(cursor);
                     if let Some(point) = self.gui_point(cursor.0, cursor.1) {
-                        let ui_state = self.current_ui_render_state();
-                        let (_handled, action) = self.driver.ui_pointer_move(point, ui_state);
+                        let (_handled, action) = self.driver.ui_pointer_move(point);
                         self.log_ui_v2_pointer_debug("move", cursor, point, action);
                         if let Some(action) = action {
                             self.apply_ui_action(action, event_loop, true);

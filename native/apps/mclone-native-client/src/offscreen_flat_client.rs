@@ -374,9 +374,9 @@ impl OffscreenFlatClientHost {
                 self.driver.interaction.selected_hotbar_slot(),
             ),
         );
+        self.driver.commit_ui_render_state(state);
         self.driver.apply_ui_pointer_click(
             point,
-            state,
             FlatClientUiActionContext {
                 session_starting: self.driver.session.is_starting(),
                 from_pointer_click: true,
