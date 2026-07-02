@@ -218,6 +218,22 @@ The child JVM is pinned with `-XX:ActiveProcessorCount=2` so vanilla's backgroun
 
 ## Wrappers
 
+### Vanilla client screenshot oracle
+
+The first no-Prism vanilla client launcher scaffold lives in
+`oracle/vanilla-client-launch.mjs`.
+
+```bash
+node oracle/vanilla-client-launch.mjs --print-command
+node oracle/vanilla-client-launch.mjs --print-args
+node oracle/vanilla-client-launch.mjs --hydrate
+node oracle/vanilla-client-launch.mjs --launch
+```
+
+The default action only prints the Java command. `--launch` is explicit because
+it can open a real LWJGL window. The harness uses the deobfuscated
+`client-deobf.jar` plus Mojang's 1.17.1 libraries/assets and a dummy local
+session, so Prism Launcher is not part of the normal oracle command path.
 - `oracle/build.sh`: hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then compiles `oracle/java/*.java` into `oracle/classes`
 - `oracle/run.sh`: builds if needed, then runs `OracleDumper`
 

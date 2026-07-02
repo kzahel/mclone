@@ -132,7 +132,8 @@
     "texture-lab:coverage": "pnpm texture-lab:pack-overlay && cargo run --manifest-path native/Cargo.toml -p mclone-app-runtime --bin terrain_texture_coverage -- --overlay-pack /tmp/mclone-texture-lab/mclone-default-overlay.pbp --output /tmp/mclone-texture-lab/mclone-default-overlay-coverage.md",
     "texture-lab:sheet": "pnpm --dir ./tools/texture-lab sheet",
     "typecheck": "pnpm native:web:typecheck",
-    "oracle:gen": "bash ./oracle/run.sh"
+    "oracle:gen": "bash ./oracle/run.sh",
+    "oracle:client": "node ./oracle/vanilla-client-launch.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
