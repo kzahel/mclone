@@ -18,7 +18,19 @@ const VERSION_JSON_PATH = path.join(REFERENCE_DIR, "1.17.1.json");
 const LIBRARY_DIR = path.join(REFERENCE_DIR, "libraries");
 const DEFAULT_ASSETS_DIR = path.join(REFERENCE_DIR, "assets");
 const DEFAULT_NATIVES_DIR = path.join(REFERENCE_DIR, "natives", minecraftOsName());
+const DEFAULT_PRISM_DIR = path.join(os.homedir(), "Library", "Application Support", "PrismLauncher");
+const PRISM_ARM64_LWJGL_NATIVES_DIR = path.join(REFERENCE_DIR, "natives", "osx-arm64-prism");
 const DEFAULT_GAME_DIR = path.join(os.tmpdir(), "mclone-vanilla-client");
+const PRISM_ARM64_LWJGL_VERSION = "3.3.1-mmachina.1";
+const LWJGL_MODULES = new Set([
+  "lwjgl",
+  "lwjgl-jemalloc",
+  "lwjgl-openal",
+  "lwjgl-opengl",
+  "lwjgl-glfw",
+  "lwjgl-stb",
+  "lwjgl-tinyfd",
+]);
 
 main().catch((error) => {
   console.error(`error: ${error.message}`);
@@ -32,16 +44,21 @@ async function main() {
   if (!assetIndex?.id || !assetIndex?.url) {
     throw new Error(`missing asset index in ${VERSION_JSON_PATH}`);
   }
+  validateLwjglMode(options);
 
   if (!options.noBuild) {
     runBuild();
   }
 
   const libraries = allowedLibraries(version);
-  const classpath = buildClasspath(libraries);
+  const classpath = buildClasspath(libraries, options);
 
   if (options.hydrate || options.launch) {
-    await hydrateNatives(libraries, options);
+    if (usingPrismArm64Lwjgl(options)) {
+      hydratePrismArm64LwjglNatives(options);
+    } else {
+      await hydrateNatives(libraries, options);
+    }
     await hydrateAssets(assetIndex, options);
   }
 
@@ -84,11 +101,13 @@ function parseArgs(args) {
     height: "480",
     hydrate: false,
     launch: false,
+    macosArm64Lwjgl: "vanilla",
     nativesDir: DEFAULT_NATIVES_DIR,
     noBuild: false,
     noDownload: false,
     printArgs: false,
     printCommand: false,
+    prismDir: DEFAULT_PRISM_DIR,
     username: "McloneOracle",
     uuid: null,
     width: "854",
@@ -130,6 +149,15 @@ function parseArgs(args) {
         break;
       case "--natives-dir":
         options.nativesDir = requireValue(args, ++index, arg);
+        break;
+      case "--macos-arm64-lwjgl":
+        options.macosArm64Lwjgl = requireEnum(requireValue(args, ++index, arg), arg, ["vanilla", "prism"]);
+        if (options.macosArm64Lwjgl === "prism" && options.nativesDir === DEFAULT_NATIVES_DIR) {
+          options.nativesDir = PRISM_ARM64_LWJGL_NATIVES_DIR;
+        }
+        break;
+      case "--prism-dir":
+        options.prismDir = requireValue(args, ++index, arg);
         break;
       case "--username":
         options.username = requireValue(args, ++index, arg);
@@ -177,6 +205,9 @@ options:
   --game-dir <path>      default: ${DEFAULT_GAME_DIR}
   --assets-dir <path>    default: ${DEFAULT_ASSETS_DIR}
   --natives-dir <path>   default: ${DEFAULT_NATIVES_DIR}
+  --macos-arm64-lwjgl <vanilla|prism>
+                         default: vanilla; prism uses Prism's arm64 LWJGL jars
+  --prism-dir <path>     default: ${DEFAULT_PRISM_DIR}
   --username <name>      default: McloneOracle
   --uuid <uuid>          default: offline UUID derived from username
   --access-token <tok>   default: 0
@@ -245,10 +276,23 @@ function ruleMatches(rule) {
   return true;
 }
 
-function buildClasspath(libraries) {
+function buildClasspath(libraries, options) {
   const entries = [CLASS_DIR, CLIENT_DEOBF_JAR];
   const seen = new Set(entries);
   for (const library of libraries) {
+    const lwjglModule = parseLwjglModule(library.name);
+    if (usingPrismArm64Lwjgl(options) && lwjglModule) {
+      const jarPath = prismArm64LwjglJar(options.prismDir, lwjglModule);
+      if (!fs.existsSync(jarPath)) {
+        throw new Error(`missing Prism LWJGL jar ${jarPath}`);
+      }
+      if (!seen.has(jarPath)) {
+        entries.push(jarPath);
+        seen.add(jarPath);
+      }
+      continue;
+    }
+
     const artifact = library.downloads?.artifact;
     if (!artifact?.path) {
       continue;
@@ -263,6 +307,29 @@ function buildClasspath(libraries) {
     }
   }
   return entries.join(path.delimiter);
+}
+
+function validateLwjglMode(options) {
+  if (!usingPrismArm64Lwjgl(options)) {
+    return;
+  }
+  if (process.platform !== "darwin" || process.arch !== "arm64") {
+    throw new Error("--macos-arm64-lwjgl prism is only valid on Apple Silicon macOS");
+  }
+  for (const moduleName of LWJGL_MODULES) {
+    const jarPath = prismArm64LwjglJar(options.prismDir, moduleName);
+    const nativeJarPath = prismArm64LwjglNativeJar(options.prismDir, moduleName);
+    if (!fs.existsSync(jarPath)) {
+      throw new Error(`missing Prism LWJGL jar ${jarPath}`);
+    }
+    if (!fs.existsSync(nativeJarPath)) {
+      throw new Error(`missing Prism LWJGL native jar ${nativeJarPath}`);
+    }
+  }
+}
+
+function usingPrismArm64Lwjgl(options) {
+  return options.macosArm64Lwjgl === "prism";
 }
 
 async function hydrateNatives(libraries, options) {
@@ -289,6 +356,13 @@ async function hydrateNatives(libraries, options) {
     const jarPath = path.join(LIBRARY_DIR, download.path);
     await ensureDownload(download.url, jarPath, download.sha1, options);
     extractNativeJar(jarPath, options.nativesDir);
+  }
+}
+
+function hydratePrismArm64LwjglNatives(options) {
+  fs.mkdirSync(options.nativesDir, { recursive: true });
+  for (const moduleName of LWJGL_MODULES) {
+    extractPrismNativeJar(prismArm64LwjglNativeJar(options.prismDir, moduleName), options.nativesDir);
   }
 }
 
@@ -335,6 +409,7 @@ function buildJavaCommand({ classpath, nativesDir, gameDir, assetsDir, assetInde
     command.push("-XstartOnFirstThread");
   }
   command.push(`-Djava.library.path=${nativesDir}`);
+  command.push(`-Dorg.lwjgl.librarypath=${nativesDir}`);
   command.push("-Dminecraft.launcher.brand=mclone-oracle");
   command.push("-Dminecraft.launcher.version=0");
   command.push("-cp", classpath, "VanillaClientLauncher");
@@ -366,6 +441,34 @@ function extractNativeJar(jarPath, nativesDir) {
   });
   if (result.status !== 0) {
     throw new Error(`failed to extract ${jarPath}; install unzip or extract the native jar manually`);
+  }
+}
+
+function extractPrismNativeJar(jarPath, nativesDir) {
+  const list = spawnSync("unzip", ["-Z1", jarPath], {
+    cwd: ROOT_DIR,
+    encoding: "utf8",
+  });
+  if (list.status !== 0) {
+    throw new Error(`failed to list ${jarPath}; install unzip or extract the native jar manually`);
+  }
+
+  const dylibEntries = list.stdout.split(/\r?\n/).filter((entry) => entry.endsWith(".dylib"));
+  if (dylibEntries.length === 0) {
+    throw new Error(`no dylibs found in ${jarPath}`);
+  }
+
+  for (const entry of dylibEntries) {
+    const extracted = spawnSync("unzip", ["-p", jarPath, entry], {
+      cwd: ROOT_DIR,
+      encoding: "buffer",
+    });
+    if (extracted.status !== 0) {
+      throw new Error(`failed to extract ${entry} from ${jarPath}`);
+    }
+    const destination = path.join(nativesDir, path.basename(entry));
+    fs.writeFileSync(destination, extracted.stdout);
+    fs.chmodSync(destination, 0o755);
   }
 }
 
@@ -446,6 +549,48 @@ function requirePositiveInteger(value, name) {
     throw new Error(`${name} must be a positive integer`);
   }
   return value;
+}
+
+function requireEnum(value, option, allowed) {
+  if (!allowed.includes(value)) {
+    throw new Error(`${option} must be one of: ${allowed.join(", ")}`);
+  }
+  return value;
+}
+
+function parseLwjglModule(name) {
+  if (!name) {
+    return null;
+  }
+  const parts = name.split(":");
+  if (parts.length < 2 || parts[0] !== "org.lwjgl") {
+    return null;
+  }
+  return LWJGL_MODULES.has(parts[1]) ? parts[1] : null;
+}
+
+function prismArm64LwjglJar(prismDir, moduleName) {
+  return path.join(
+    prismDir,
+    "libraries",
+    "org",
+    "lwjgl",
+    moduleName,
+    PRISM_ARM64_LWJGL_VERSION,
+    `${moduleName}-${PRISM_ARM64_LWJGL_VERSION}.jar`,
+  );
+}
+
+function prismArm64LwjglNativeJar(prismDir, moduleName) {
+  return path.join(
+    prismDir,
+    "libraries",
+    "org",
+    "lwjgl",
+    moduleName,
+    PRISM_ARM64_LWJGL_VERSION,
+    `${moduleName}-${PRISM_ARM64_LWJGL_VERSION}-natives-osx-arm64.jar`,
+  );
 }
 
 function minecraftOsName() {
