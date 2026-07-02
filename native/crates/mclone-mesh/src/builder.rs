@@ -1409,7 +1409,7 @@ fn grass_color(
     });
     match visual.grass_modifier {
         GrassColorModifier::None => base_color,
-        GrassColorModifier::DarkForest => ((base_color & 0xfe_fe_fe) + 0x28_31_4a) >> 1,
+        GrassColorModifier::DarkForest => ((base_color & 0xfe_fe_fe) + 0x28_34_0a) >> 1,
         GrassColorModifier::Swamp => {
             if coarse_position_noise(world_x, world_z) < 0 {
                 0x4c_76_3c
@@ -1679,5 +1679,12 @@ mod tests {
         assert_eq!(report.sections[0].visibility, VisibilitySet::all_visible());
         assert_eq!(report.visibility_graph.build_count, 1);
         assert_eq!(report.visibility_graph.total_ms, 0.0);
+    }
+
+    #[test]
+    fn dark_forest_grass_modifier_matches_java_constant() {
+        let color = grass_color(&TexturedMeshCatalog::default(), biome_visual(29), -94, 348);
+
+        assert_eq!(color, 0x50_7a_32);
     }
 }
