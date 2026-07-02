@@ -389,6 +389,10 @@ impl WindowSceneRuntime {
         self.scene.sync_all_render_sections(camera_position)
     }
 
+    pub(crate) fn release_render_compile_jobs(&mut self, count: usize) -> usize {
+        self.scene.release_render_compile_jobs(count)
+    }
+
     pub(crate) fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
         self.scene.cached_sections()
     }

@@ -257,6 +257,10 @@ impl NativeRenderSectionCompileDispatcher {
         self.worker.available_pending_job_slots()
     }
 
+    pub fn release_completed_jobs(&mut self, count: usize) -> usize {
+        self.worker.release_completed_jobs(count)
+    }
+
     pub fn queue_health(&self) -> RenderSectionCompileQueueHealth {
         RenderSectionCompileQueueHealth::from_compiler(&self.worker)
     }
@@ -288,6 +292,10 @@ impl RenderSectionCompiler for NativeRenderSectionCompileDispatcher {
 
     fn queued_compile_task_count(&self) -> usize {
         self.worker.queued_compile_task_count()
+    }
+
+    fn release_completed_jobs(&mut self, count: usize) -> usize {
+        self.worker.release_completed_jobs(count)
     }
 }
 
@@ -357,6 +365,12 @@ impl RenderSectionCompileWorker {
     pub fn available_pending_job_slots(&self) -> usize {
         self.max_pending_jobs.saturating_sub(self.pending_jobs)
     }
+
+    pub fn release_completed_jobs(&mut self, count: usize) -> usize {
+        let released = count.min(self.pending_jobs);
+        self.pending_jobs -= released;
+        released
+    }
 }
 
 impl RenderSectionCompiler for RenderSectionCompileWorker {
@@ -409,7 +423,6 @@ impl RenderSectionCompiler for RenderSectionCompileWorker {
         loop {
             match self.receiver.try_recv() {
                 Ok(result) => {
-                    self.pending_jobs = self.pending_jobs.saturating_sub(1);
                     completed.push(result);
                 }
                 Err(mpsc::TryRecvError::Empty) => return Ok(completed),
@@ -888,6 +901,22 @@ mod tests {
         }
     }
 
+    fn wait_for_completed_result(
+        worker: &mut RenderSectionCompileWorker,
+    ) -> Result<Vec<RenderSectionCompileResult>> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let completed = worker.try_recv_completed()?;
+            if !completed.is_empty() {
+                return Ok(completed);
+            }
+            if Instant::now() >= deadline {
+                bail!("timed out waiting for render compile test result");
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     #[test]
     fn render_compile_worker_rejects_zero_slots() {
         let error =
@@ -915,6 +944,22 @@ mod tests {
 
         let error = worker.submit(empty_compile_request()).unwrap_err();
         assert!(error.to_string().contains("no free compile slots"));
+        Ok(())
+    }
+
+    #[test]
+    fn render_compile_worker_holds_capacity_until_release() -> Result<()> {
+        let mut worker =
+            RenderSectionCompileWorker::with_worker_count(TexturedMeshCatalog::default(), 1)?;
+        worker.submit(empty_compile_request())?;
+        let completed = wait_for_completed_result(&mut worker)?;
+        assert_eq!(completed.len(), 1);
+        assert_eq!(worker.pending_job_count(), 1);
+        assert_eq!(worker.available_pending_job_slots(), 0);
+
+        assert_eq!(worker.release_completed_jobs(1), 1);
+        assert_eq!(worker.pending_job_count(), 0);
+        assert_eq!(worker.available_pending_job_slots(), 1);
         Ok(())
     }
 

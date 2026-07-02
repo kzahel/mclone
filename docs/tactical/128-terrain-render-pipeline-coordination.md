@@ -1104,6 +1104,76 @@ Next implementation implication:
   dispatcher shape is corrected, a pacing mechanism that can spend 22 ms just
   selecting budgeted removals is not viable.
 
+Dispatcher-held capacity implementation:
+
+- Implemented July 2, 2026 as the next Java-shaped ownership step.
+- `RenderSectionCompiler` now exposes `release_completed_jobs(count)`.
+- Native render compile capacity is no longer released when the worker result is
+  received from the result channel. The native dispatcher keeps the job counted
+  as pending until a caller explicitly releases it.
+- XR terrain queues compile-release batches beside budgeted section
+  uploads/removals. Accepted compile results release their compile capacity only
+  after their queued drawable lifecycle work is applied or superseded.
+- Pump-to-idle and startup paths that do not have a live GPU upload boundary
+  release accepted results internally to preserve their existing behavior.
+- Flat desktop and flat Android release accepted compile jobs after successful
+  section upload so the shared runtime does not become XR-only.
+
+Validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all`
+- `git diff --check -- native/crates/mclone-render-session/src/lib.rs native/crates/mclone-app-runtime/src/lib.rs native/crates/mclone-app-runtime/src/local_single_view.rs native/crates/mclone-app-runtime/src/render_assets.rs native/crates/mclone-xr-scene/src/lib.rs native/apps/mclone-native-client/src/flat_client_driver.rs native/apps/mclone-native-client/src/perf.rs native/apps/mclone-native-client/src/scene_runtime.rs native/apps/mclone-android-client/src/lib.rs`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-web-client`
+
+Quest measurement:
+
+- Measured July 2, 2026 on Quest 3 using the render-distance-7 settled orbit
+  lane, 2 render compile workers, 45 second sample, per-eye path, render scale
+  `1.000`.
+
+| Policy | Meta dropped frames | Frame avg / p95 / p99 / max | App over period | Upload backlog max | Key tail |
+|---|---:|---|---:|---|---|
+| `1 / 8 / 16` bridge before held capacity | 72 | 15.626 / 18.172 / 23.855 / 50.325 ms | 77.2% | queued uploads 8; queued removals 208; queued completed results 1 | upload apply 20.588 ms; ready sections 21.980 ms |
+| `1 / 8 / 16` held capacity | 80 | 15.851 / 18.145 / 21.549 / 50.590 ms | 81.9% | queued uploads 8; queued removals 208; queued completed results 1 | upload apply 16.885 ms; submit snapshot 11.764 ms; ready publish 9.218 ms |
+| `2 / 16 / 64` bridge before held capacity | 68 | 15.830 / 18.475 / 25.732 / 55.895 ms | 84.6% | queued uploads 16; queued removals 160; queued completed results 0 | upload select 22.347 ms; upload apply 15.560 ms; ready publish 32.058 ms |
+| `2 / 16 / 64` held capacity | 62 | 15.767 / 18.296 / 24.512 / 51.107 ms | 82.7% | queued uploads 16; queued removals 160; queued completed results 0 | submit handoff 12.900 ms; upload apply 11.355 ms; ready publish 17.849 ms |
+
+Interpretation:
+
+- The held-capacity model is worth keeping. The less aggressive `2 / 16 / 64`
+  point improved dropped frames, p99, max frame time, app-over-period rate, and
+  upload/ready tails compared with the bridge-only run.
+- It is not a complete pacing solution. The strict `1 / 8 / 16` point improved
+  p99 and upload apply but increased dropped frames, so budget size still
+  matters and the smaller policy should not become default.
+- The 22 ms upload-selection spike did not reproduce after held capacity
+  (`0.018 ms` in the `2 / 16 / 64` run). Keep the concern open, but the stronger
+  next target is now phase coordination rather than a standalone selection-path
+  fix.
+- The remaining shape is still too XR-local: compile capacity is held until
+  upload, but the release batches live beside XR's frame-side upload queue. Java
+  centralizes this in `ChunkRenderDispatcher` through buffer-pack/upload-future
+  lifetime. We should move the release/admission policy into a shared terrain
+  coordinator rather than accreting more frame-loop bookkeeping.
+
+Next implementation implication:
+
+- Promote held compile capacity from an XR-local release-batch bridge into the
+  shared dispatcher/coordinator. The coordinator should own the dirty/ready,
+  compiling, completed, uploading, and drawable transitions and expose a small
+  per-frame drain/admit API.
+- Avoid releasing capacity and immediately submitting expensive new compile
+  work in a way that can recreate `runtime_submit_*` tails on the same render
+  frame. Java drains uploads first, then admits compile work under its frame
+  deadline; the native coordinator should make that phase boundary explicit.
+- Add release/backlog counters: held completed jobs, pending upload lifecycle
+  items, released jobs this frame, and compile admissions after release. Current
+  counters still make it hard to tell whether a frame was upload-limited,
+  capacity-limited, or submit-limited.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -1168,18 +1238,15 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Do not continue tuning independent frame-side budgets as the main strategy. The
-coordinated bridge reduced upload backlog but did not improve dropped frames or
-p99/max frame time, and it exposed an expensive upload-removal selection tail.
+Promote the held-capacity bridge into a shared terrain coordinator. The current
+slice proves that capacity should stay occupied beyond CPU compile completion,
+but XR now owns too much lifecycle bookkeeping locally. The next slice should
+make the dispatcher/coordinator own section states through dirty, ready,
+compiling, completed, uploading, and drawable, then expose an explicit
+drain-then-admit frame API.
 
-The next architectural step is to move capacity ownership upstream into the
-shared dispatcher/coordinator: compile admission should reserve a drawable/upload
-capacity token, and that token should be released only after the result crosses
-the upload/publication boundary. That is closer to Java's buffer-pack lifetime
-than the current path, where completed work can exist before the render frame
-knows whether it can absorb it.
-
-Before or during that dispatcher slice, inspect the current budgeted
-upload/removal selection path. The `2 / 16 / 64` run hit
-`runtime_upload_select_ms=22.347`, which is too high for any pacing policy and
-may hide a straightforward data-structure or accounting bug.
+Use `2 / 16 / 64` as the current measurement lane, not a default policy. It was
+the best held-capacity result, but it is still over the 72 Hz app budget most of
+the time. The next run should tell us whether shared phase ownership reduces
+submit/ready/upload tails, not whether one more isolated budget number looks
+better.

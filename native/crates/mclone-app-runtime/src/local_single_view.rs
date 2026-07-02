@@ -166,6 +166,8 @@ impl LocalSingleViewStartupPump {
         self.runtime.last_runner_diagnostics_poll_at = Some(Instant::now());
 
         let section_update = self.runtime.sync_render_sections(camera_position)?;
+        self.runtime
+            .release_render_compile_jobs(section_update.accepted_compile_result_count);
         let render_changed = section_update.rebuilt_section_count() > 0
             || section_update.removed_section_count() > 0
             || section_update.submitted_compile_section_count > 0
@@ -314,6 +316,10 @@ impl LocalSingleViewSceneRuntime {
 
     pub fn render_distance(&self) -> u32 {
         self.core.render_distance()
+    }
+
+    pub fn release_render_compile_jobs(&mut self, count: usize) -> usize {
+        self.render_compile_dispatcher.release_completed_jobs(count)
     }
 
     pub const fn simulation_cadence(&self) -> SimulationCadenceConfig {
@@ -731,6 +737,13 @@ where
 
     pub fn render_distance(&self) -> u32 {
         self.core().render_distance()
+    }
+
+    pub fn release_render_compile_jobs(&mut self, count: usize) -> usize {
+        match self {
+            Self::Local(scene) => scene.release_render_compile_jobs(count),
+            Self::RemoteDedicated(scene) => scene.release_render_compile_jobs(count),
+        }
     }
 
     pub const fn simulation_cadence(&self) -> Option<SimulationCadenceConfig> {
@@ -1247,6 +1260,10 @@ where
 
     pub fn render_distance(&self) -> u32 {
         self.core.render_distance()
+    }
+
+    pub fn release_render_compile_jobs(&mut self, count: usize) -> usize {
+        self.render_compile_dispatcher.release_completed_jobs(count)
     }
 
     pub fn loaded_chunk_count(&self) -> usize {

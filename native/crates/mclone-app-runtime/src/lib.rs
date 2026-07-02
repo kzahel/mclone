@@ -1671,7 +1671,11 @@ impl SingleViewRuntime {
                 || update.accepted_compile_result_count > 0
                 || update.completed_compile_section_count > 0
                 || update.stale_compile_section_count > 0;
+            let accepted_compile_result_count = update.accepted_compile_result_count;
             combined.merge(update);
+            if accepted_compile_result_count > 0 {
+                compiler.release_completed_jobs(accepted_compile_result_count);
+            }
             if compiler.pending_job_count() == 0
                 && !self.has_ready_pending_render_work(camera_position)
             {
@@ -1712,7 +1716,11 @@ impl SingleViewRuntime {
                 || update.accepted_compile_result_count > 0
                 || update.completed_compile_section_count > 0
                 || update.stale_compile_section_count > 0;
+            let accepted_compile_result_count = update.accepted_compile_result_count;
             combined.merge(update);
+            if accepted_compile_result_count > 0 {
+                compiler.release_completed_jobs(accepted_compile_result_count);
+            }
             if compiler.pending_job_count() == 0
                 && !self.has_ready_pending_render_work(camera_position)
             {

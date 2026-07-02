@@ -3565,6 +3565,10 @@ pub trait RenderSectionCompiler {
         self.pending_job_count()
     }
 
+    fn release_completed_jobs(&mut self, _count: usize) -> usize {
+        0
+    }
+
     fn has_pending_job_capacity(&self) -> bool {
         self.available_pending_job_slots() > 0
     }

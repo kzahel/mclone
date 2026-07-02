@@ -1730,6 +1730,9 @@ impl FlatClientDriver {
             )
             .context("failed to upload streamed chunk section updates")?;
         let upload_ms = upload_start.elapsed().as_secs_f64() * 1000.0;
+        if let Some(runtime) = self.runtime.as_mut() {
+            runtime.release_render_compile_jobs(sync.section_update.accepted_compile_result_count);
+        }
         let summary = self.record_section_upload(
             &sync.section_update,
             upload_report,

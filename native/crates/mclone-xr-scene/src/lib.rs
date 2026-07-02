@@ -750,6 +750,7 @@ where
     draw: TexturedSectionDrawResources,
     pending_section_uploads: VecDeque<TexturedRenderSectionMesh>,
     pending_section_removals: BTreeSet<RenderSectionKey>,
+    pending_compile_release_batches: VecDeque<XrTerrainCompileReleaseBatch>,
     actors: ActorDrawResources,
     far_lod: FarTerrainLodRenderer,
     selection_outline: SelectionOutlineRenderer,
@@ -796,6 +797,24 @@ where
 struct XrUnderwaterEffectStates {
     midpoint: UnderwaterEffectState,
     eyes: [UnderwaterEffectState; 2],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct XrTerrainCompileReleaseBatch {
+    remaining_lifecycle_items: usize,
+    compile_jobs: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct XrTerrainUploadApplyReport {
+    upload: TexturedSectionUploadReport,
+    release_compile_jobs: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct XrTerrainUploadEnqueueReport {
+    queued_lifecycle_items: usize,
+    superseded_lifecycle_items: usize,
 }
 
 impl XrMcloneTerrainState<XrLocalOnlyRemoteSession> {
@@ -894,6 +913,7 @@ where
             draw,
             pending_section_uploads: VecDeque::new(),
             pending_section_removals: BTreeSet::new(),
+            pending_compile_release_batches: VecDeque::new(),
             actors: ActorDrawResources::new(
                 device,
                 queue,
@@ -998,6 +1018,7 @@ where
             draw: started.draw,
             pending_section_uploads: VecDeque::new(),
             pending_section_removals: BTreeSet::new(),
+            pending_compile_release_batches: VecDeque::new(),
             actors: ActorDrawResources::new(
                 device,
                 queue,
@@ -2816,7 +2837,8 @@ where
                 timing,
             )?;
             timing.runtime_gpu_upload_ms += elapsed_ms(upload_start.elapsed());
-            accumulate_upload_report(&mut upload_report, drained_report);
+            accumulate_upload_report(&mut upload_report, drained_report.upload);
+            self.release_render_compile_jobs(drained_report.release_compile_jobs);
         }
         let upload_backpressure_active =
             budgeted_section_uploads && self.has_pending_section_upload_work();
@@ -2982,7 +3004,7 @@ where
         };
         let completed_compile_section_count = section_update.completed_compile_section_count;
         let stale_compile_section_count = section_update.stale_compile_section_count;
-        let pending_compile_jobs_after_sync = if should_sync_render_sections {
+        let mut pending_compile_jobs_after_sync = if should_sync_render_sections {
             section_update.pending_compile_jobs
         } else {
             self.runtime
@@ -2997,7 +3019,12 @@ where
             let section_update_report =
                 self.apply_section_update_uploads(device, section_update, timing)?;
             timing.runtime_gpu_upload_ms += elapsed_ms(upload_start.elapsed());
-            accumulate_upload_report(&mut upload_report, section_update_report);
+            accumulate_upload_report(&mut upload_report, section_update_report.upload);
+            self.release_render_compile_jobs(section_update_report.release_compile_jobs);
+            pending_compile_jobs_after_sync = self
+                .runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.render_compile_pending_job_count());
         }
         let ready_start = Instant::now();
         let runtime = self
@@ -3082,18 +3109,31 @@ where
     fn enqueue_section_update_uploads(
         &mut self,
         section_update: mclone_render_session::RenderSectionCacheUpdate,
-    ) {
+    ) -> XrTerrainUploadEnqueueReport {
+        let mut report = XrTerrainUploadEnqueueReport::default();
         for key in section_update.removed_section_keys {
+            let before_uploads = self.pending_section_uploads.len();
             self.pending_section_uploads
                 .retain(|section| section.key != key);
-            self.pending_section_removals.insert(key);
+            report.superseded_lifecycle_items +=
+                before_uploads - self.pending_section_uploads.len();
+            if self.pending_section_removals.insert(key) {
+                report.queued_lifecycle_items += 1;
+            }
         }
         for section in section_update.rebuilt_sections {
+            let before_uploads = self.pending_section_uploads.len();
             self.pending_section_uploads
                 .retain(|pending| pending.key != section.key);
-            self.pending_section_removals.remove(&section.key);
+            report.superseded_lifecycle_items +=
+                before_uploads - self.pending_section_uploads.len();
+            if self.pending_section_removals.remove(&section.key) {
+                report.superseded_lifecycle_items += 1;
+            }
             self.pending_section_uploads.push_back(section);
+            report.queued_lifecycle_items += 1;
         }
+        report
     }
 
     fn apply_section_update_uploads(
@@ -3101,11 +3141,12 @@ where
         device: &wgpu::Device,
         section_update: mclone_render_session::RenderSectionCacheUpdate,
         timing: &mut XrTerrainFrameTiming,
-    ) -> Result<TexturedSectionUploadReport> {
+    ) -> Result<XrTerrainUploadApplyReport> {
         if self.render_section_upload_budget.is_none()
             && self.render_section_accept_budget.is_none()
             && !self.has_pending_section_upload_work()
         {
+            let release_compile_jobs = section_update.accepted_compile_result_count;
             let apply_start = Instant::now();
             let report = self
                 .draw
@@ -3116,12 +3157,22 @@ where
                 )
                 .context("upload XR terrain render section updates");
             timing.runtime_upload_apply_ms += elapsed_ms(apply_start.elapsed());
-            return report;
+            return report.map(|upload| XrTerrainUploadApplyReport {
+                upload,
+                release_compile_jobs,
+            });
         }
 
+        let accepted_compile_result_count = section_update.accepted_compile_result_count;
         let enqueue_start = Instant::now();
-        self.enqueue_section_update_uploads(section_update);
+        let enqueue_report = self.enqueue_section_update_uploads(section_update);
         timing.runtime_upload_enqueue_ms += elapsed_ms(enqueue_start.elapsed());
+        let mut release_compile_jobs =
+            self.complete_compile_release_work(enqueue_report.superseded_lifecycle_items);
+        release_compile_jobs += self.queue_compile_release_batch(
+            accepted_compile_result_count,
+            enqueue_report.queued_lifecycle_items,
+        );
         let select_start = Instant::now();
         let accept_budget = self.render_section_accept_budget.unwrap_or(usize::MAX);
         let upload_budget = self.render_section_upload_budget.unwrap_or(usize::MAX);
@@ -3142,7 +3193,10 @@ where
         };
         timing.runtime_upload_select_ms += elapsed_ms(select_start.elapsed());
         if sections.is_empty() && removed.is_empty() {
-            return Ok(TexturedSectionUploadReport::default());
+            return Ok(XrTerrainUploadApplyReport {
+                upload: TexturedSectionUploadReport::default(),
+                release_compile_jobs,
+            });
         }
         let apply_start = Instant::now();
         let report = self
@@ -3150,7 +3204,14 @@ where
             .apply_section_updates(device, &sections, &removed)
             .context("accept budgeted XR terrain render section updates");
         timing.runtime_upload_apply_ms += elapsed_ms(apply_start.elapsed());
-        report
+        report.map(|upload| {
+            release_compile_jobs +=
+                self.complete_compile_release_work(sections.len() + removed.len());
+            XrTerrainUploadApplyReport {
+                upload,
+                release_compile_jobs,
+            }
+        })
     }
 
     fn take_budgeted_section_removals(&mut self, budget: usize) -> BTreeSet<RenderSectionKey> {
@@ -3170,6 +3231,51 @@ where
             self.pending_section_removals.remove(key);
         }
         keys.into_iter().collect()
+    }
+
+    fn queue_compile_release_batch(
+        &mut self,
+        compile_jobs: usize,
+        lifecycle_items: usize,
+    ) -> usize {
+        if compile_jobs == 0 {
+            return 0;
+        }
+        if lifecycle_items == 0 {
+            return compile_jobs;
+        }
+        self.pending_compile_release_batches
+            .push_back(XrTerrainCompileReleaseBatch {
+                remaining_lifecycle_items: lifecycle_items,
+                compile_jobs,
+            });
+        0
+    }
+
+    fn complete_compile_release_work(&mut self, mut lifecycle_items: usize) -> usize {
+        let mut release_compile_jobs = 0;
+        while lifecycle_items > 0 {
+            let Some(front) = self.pending_compile_release_batches.front_mut() else {
+                break;
+            };
+            if lifecycle_items < front.remaining_lifecycle_items {
+                front.remaining_lifecycle_items -= lifecycle_items;
+                break;
+            }
+            lifecycle_items -= front.remaining_lifecycle_items;
+            release_compile_jobs += front.compile_jobs;
+            self.pending_compile_release_batches.pop_front();
+        }
+        release_compile_jobs
+    }
+
+    fn release_render_compile_jobs(&mut self, count: usize) -> usize {
+        if count == 0 {
+            return 0;
+        }
+        self.runtime
+            .as_mut()
+            .map_or(0, |runtime| runtime.release_render_compile_jobs(count))
     }
 
     fn frozen_runtime_upload_summary(&self) -> XrTerrainUploadSummary {
@@ -4271,6 +4377,9 @@ where
         self.last_ui_draw_cache_stats = UiDrawCacheStats::default();
         self.rendered_frames = 0;
         self.prefetched_live_upload = None;
+        self.pending_section_uploads.clear();
+        self.pending_section_removals.clear();
+        self.pending_compile_release_batches.clear();
     }
 
     fn start_replacement_session(

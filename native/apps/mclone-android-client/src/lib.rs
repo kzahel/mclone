@@ -1680,6 +1680,8 @@ mod android {
                 self.render_stats.face_count =
                     quad_face_count_from_indices(self.render_stats.index_count);
             }
+            self.scene
+                .release_render_compile_jobs(section_update.accepted_compile_result_count);
             self.draw.set_traversal_ready_sections(
                 &self
                     .scene

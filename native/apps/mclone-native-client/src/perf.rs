@@ -1241,6 +1241,9 @@ fn probe_sync_upload_sections(
         )
         .context("failed to upload frame-budget probe section updates")?;
     let upload_ms = elapsed_ms(upload_start.elapsed());
+    state
+        .runtime
+        .release_render_compile_jobs(section_update.accepted_compile_result_count);
 
     state.render_stats.section_count = state.draw.section_count();
     state.render_stats.index_count = state.draw.index_count();
