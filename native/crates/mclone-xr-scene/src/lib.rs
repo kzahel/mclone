@@ -429,8 +429,11 @@ pub struct XrTerrainFrameTiming {
     pub runtime_submit_ms: f64,
     pub runtime_submit_snapshot_ms: f64,
     pub runtime_submit_handoff_ms: f64,
+    pub runtime_submit_handoff_worst_ms: f64,
+    pub runtime_submit_request_count: usize,
     pub runtime_submit_request_build_ms: f64,
     pub runtime_submit_compiler_ms: f64,
+    pub runtime_submit_compiler_worst_ms: f64,
     pub runtime_submit_mark_inflight_ms: f64,
     pub runtime_submit_apply_ready_plan_ms: f64,
     pub runtime_submit_ready_update_ms: f64,
@@ -2680,9 +2683,14 @@ where
         timing.runtime_submit_ms = timed_section_update.timing.submit_ms;
         timing.runtime_submit_snapshot_ms = timed_section_update.timing.submit_snapshot_ms;
         timing.runtime_submit_handoff_ms = timed_section_update.timing.submit_handoff_ms;
+        timing.runtime_submit_handoff_worst_ms =
+            timed_section_update.timing.submit_handoff_worst_ms;
+        timing.runtime_submit_request_count = timed_section_update.timing.submit_request_count;
         timing.runtime_submit_request_build_ms =
             timed_section_update.timing.submit_request_build_ms;
         timing.runtime_submit_compiler_ms = timed_section_update.timing.submit_compiler_ms;
+        timing.runtime_submit_compiler_worst_ms =
+            timed_section_update.timing.submit_compiler_worst_ms;
         timing.runtime_submit_mark_inflight_ms =
             timed_section_update.timing.submit_mark_inflight_ms;
         timing.runtime_submit_apply_ready_plan_ms =

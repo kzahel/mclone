@@ -3208,8 +3208,11 @@ mod android {
         terrain_runtime_submit_ms: f64,
         terrain_runtime_submit_snapshot_ms: f64,
         terrain_runtime_submit_handoff_ms: f64,
+        terrain_runtime_submit_handoff_worst_ms: f64,
+        terrain_runtime_submit_request_count: usize,
         terrain_runtime_submit_request_build_ms: f64,
         terrain_runtime_submit_compiler_ms: f64,
+        terrain_runtime_submit_compiler_worst_ms: f64,
         terrain_runtime_submit_mark_inflight_ms: f64,
         terrain_runtime_submit_apply_ready_plan_ms: f64,
         terrain_runtime_submit_ready_update_ms: f64,
@@ -3849,9 +3852,12 @@ mod android {
                 self.max_render.terrain_runtime_ready_publish_ms
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_TERRAIN_SUBMIT_MAX max_request_build_ms={:.3} max_compiler_ms={:.3} max_mark_inflight_ms={:.3} max_apply_ready_plan_ms={:.3} max_ready_update_ms={:.3} ready_sections={} deferred_sections={} dirty_chunks_before={} dirty_chunks_after={} dirty_sections_before={} dirty_sections_after={} inflight_sections_before={} inflight_sections_after={} request_snapshots={} request_revisions={}",
+                "MCLONE_ANDROID_XR_PERF_TERRAIN_SUBMIT_MAX max_handoff_single_ms={:.3} request_count={} max_request_build_ms={:.3} max_compiler_ms={:.3} max_compiler_single_ms={:.3} max_mark_inflight_ms={:.3} max_apply_ready_plan_ms={:.3} max_ready_update_ms={:.3} ready_sections={} deferred_sections={} dirty_chunks_before={} dirty_chunks_after={} dirty_sections_before={} dirty_sections_after={} inflight_sections_before={} inflight_sections_after={} request_snapshots={} request_revisions={}",
+                self.max_render.terrain_runtime_submit_handoff_worst_ms,
+                self.max_render.terrain_runtime_submit_request_count,
                 self.max_render.terrain_runtime_submit_request_build_ms,
                 self.max_render.terrain_runtime_submit_compiler_ms,
+                self.max_render.terrain_runtime_submit_compiler_worst_ms,
                 self.max_render.terrain_runtime_submit_mark_inflight_ms,
                 self.max_render.terrain_runtime_submit_apply_ready_plan_ms,
                 self.max_render.terrain_runtime_submit_ready_update_ms,
@@ -4110,12 +4116,21 @@ mod android {
             terrain_runtime_submit_handoff_ms: a
                 .terrain_runtime_submit_handoff_ms
                 .max(b.terrain_runtime_submit_handoff_ms),
+            terrain_runtime_submit_handoff_worst_ms: a
+                .terrain_runtime_submit_handoff_worst_ms
+                .max(b.terrain_runtime_submit_handoff_worst_ms),
+            terrain_runtime_submit_request_count: a
+                .terrain_runtime_submit_request_count
+                .max(b.terrain_runtime_submit_request_count),
             terrain_runtime_submit_request_build_ms: a
                 .terrain_runtime_submit_request_build_ms
                 .max(b.terrain_runtime_submit_request_build_ms),
             terrain_runtime_submit_compiler_ms: a
                 .terrain_runtime_submit_compiler_ms
                 .max(b.terrain_runtime_submit_compiler_ms),
+            terrain_runtime_submit_compiler_worst_ms: a
+                .terrain_runtime_submit_compiler_worst_ms
+                .max(b.terrain_runtime_submit_compiler_worst_ms),
             terrain_runtime_submit_mark_inflight_ms: a
                 .terrain_runtime_submit_mark_inflight_ms
                 .max(b.terrain_runtime_submit_mark_inflight_ms),
@@ -4744,9 +4759,14 @@ mod android {
         timing.terrain_runtime_submit_ms = scene_timing.runtime_submit_ms;
         timing.terrain_runtime_submit_snapshot_ms = scene_timing.runtime_submit_snapshot_ms;
         timing.terrain_runtime_submit_handoff_ms = scene_timing.runtime_submit_handoff_ms;
+        timing.terrain_runtime_submit_handoff_worst_ms =
+            scene_timing.runtime_submit_handoff_worst_ms;
+        timing.terrain_runtime_submit_request_count = scene_timing.runtime_submit_request_count;
         timing.terrain_runtime_submit_request_build_ms =
             scene_timing.runtime_submit_request_build_ms;
         timing.terrain_runtime_submit_compiler_ms = scene_timing.runtime_submit_compiler_ms;
+        timing.terrain_runtime_submit_compiler_worst_ms =
+            scene_timing.runtime_submit_compiler_worst_ms;
         timing.terrain_runtime_submit_mark_inflight_ms =
             scene_timing.runtime_submit_mark_inflight_ms;
         timing.terrain_runtime_submit_apply_ready_plan_ms =

@@ -361,17 +361,19 @@ compile workers, unbounded completed-result acceptance, 45-second sample:
 
 | Frame avg / p95 / p99 / max | Runtime submit split | Submit handoff split | Read |
 |---|---|---|---|
-| 14.219 / 15.786 / 25.674 / 38.490 ms | submit 16.871 ms; snapshot 1.114; handoff 16.551 | request build 0.045; compiler submit 16.396; mark inflight 0.111; apply ready plan 0.427; ready update 0.006 | 32 ready sections, 3536 deferred sections, 10 request snapshots, 32 revisions |
+| 14.206 / 15.744 / 26.212 / 38.703 ms | submit 15.218 ms; snapshot 0.898; handoff 15.076 | single handoff 15.076; request count 2; request build 0.097; compiler submit total 15.041; compiler submit single 15.041; mark inflight 0.012; apply ready plan 0.310; ready update 0.018 | 32 ready sections, 3536 deferred sections, 10 request snapshots, 32 revisions |
 
 Interpretation:
 
 - Raw compiler handoff is not cheap in the worst frame. It dominates the old
   handoff bucket.
+- The request-count follow-up shows this is not just two admitted requests
+  accumulating: one compiler submit can take essentially the whole 15 ms spike.
 - Ready-plan/deferred-section bookkeeping is not the measured submit spike in
   this run: `apply_ready_plan` is under 0.5 ms even with 3536 deferred sections.
 - The next backpressure slice should focus on native compile dispatcher/request
-  transport: request counts and per-submit worst timing, then a bounded
-  preallocated dispatcher queue or compact resident-worker descriptor.
+  transport: split `RenderSectionCompileWorker::submit` itself, then move toward
+  a bounded preallocated dispatcher queue or compact resident-worker descriptor.
 - In parallel, continue tracking upload-apply, ready publish, prepared-record
   rebuild, and per-eye terrain encode tails because they remain comparable to
   runtime submit in worst frames.

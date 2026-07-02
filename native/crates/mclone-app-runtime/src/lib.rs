@@ -57,8 +57,11 @@ pub struct RenderSectionSyncTiming {
     pub submit_ms: f64,
     pub submit_snapshot_ms: f64,
     pub submit_handoff_ms: f64,
+    pub submit_handoff_worst_ms: f64,
+    pub submit_request_count: usize,
     pub submit_request_build_ms: f64,
     pub submit_compiler_ms: f64,
+    pub submit_compiler_worst_ms: f64,
     pub submit_mark_inflight_ms: f64,
     pub submit_apply_ready_plan_ms: f64,
     pub submit_ready_update_ms: f64,
@@ -82,8 +85,15 @@ impl RenderSectionSyncTiming {
         self.submit_ms += other.submit_ms;
         self.submit_snapshot_ms += other.submit_snapshot_ms;
         self.submit_handoff_ms += other.submit_handoff_ms;
+        self.submit_handoff_worst_ms = self
+            .submit_handoff_worst_ms
+            .max(other.submit_handoff_worst_ms);
+        self.submit_request_count += other.submit_request_count;
         self.submit_request_build_ms += other.submit_request_build_ms;
         self.submit_compiler_ms += other.submit_compiler_ms;
+        self.submit_compiler_worst_ms = self
+            .submit_compiler_worst_ms
+            .max(other.submit_compiler_worst_ms);
         self.submit_mark_inflight_ms += other.submit_mark_inflight_ms;
         self.submit_apply_ready_plan_ms += other.submit_apply_ready_plan_ms;
         self.submit_ready_update_ms += other.submit_ready_update_ms;
@@ -943,12 +953,15 @@ impl SingleViewRuntime {
             });
         };
         timing.submit_request_build_ms += elapsed_ms(request_build_start.elapsed());
+        timing.submit_request_count += 1;
         timing.submit_request_revision_count += request.section_revisions.len();
 
         let submitted_section_count = request.target_sections.len();
         let compiler_start = Instant::now();
         compiler.submit(request)?;
-        timing.submit_compiler_ms += elapsed_ms(compiler_start.elapsed());
+        let compiler_ms = elapsed_ms(compiler_start.elapsed());
+        timing.submit_compiler_ms += compiler_ms;
+        timing.submit_compiler_worst_ms = timing.submit_compiler_worst_ms.max(compiler_ms);
 
         let mark_start = Instant::now();
         self.engine
@@ -1063,7 +1076,9 @@ impl SingleViewRuntime {
         let handoff_start = Instant::now();
         let submission_update =
             self.submit_prepared_sync_plan_timed(compiler, &sync_plan, snapshots, &mut timing)?;
-        timing.submit_handoff_ms = elapsed_ms(handoff_start.elapsed());
+        let handoff_ms = elapsed_ms(handoff_start.elapsed());
+        timing.submit_handoff_ms = handoff_ms;
+        timing.submit_handoff_worst_ms = timing.submit_handoff_worst_ms.max(handoff_ms);
         cache_update.merge(submission_update.cache_update);
         cache_update.pending_compile_jobs = compiler.pending_job_count();
         timing.submit_ms = elapsed_ms(submit_start.elapsed());
@@ -1182,7 +1197,9 @@ impl SingleViewRuntime {
         let handoff_start = Instant::now();
         let submission_update =
             self.submit_prepared_sync_plan_timed(compiler, &sync_plan, snapshots, &mut timing)?;
-        timing.submit_handoff_ms = elapsed_ms(handoff_start.elapsed());
+        let handoff_ms = elapsed_ms(handoff_start.elapsed());
+        timing.submit_handoff_ms = handoff_ms;
+        timing.submit_handoff_worst_ms = timing.submit_handoff_worst_ms.max(handoff_ms);
         cache_update.merge(submission_update.cache_update);
         cache_update.pending_compile_jobs = compiler.pending_job_count();
         timing.submit_ms = elapsed_ms(submit_start.elapsed());
@@ -2209,6 +2226,7 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(snapshot_chunks, required_chunks);
         assert!(!snapshot_chunks.contains(&unrelated));
+        assert_eq!(timed.timing.submit_request_count, 1);
         assert_eq!(timed.timing.submit_ready_section_count, 1);
         assert_eq!(
             timed.timing.submit_request_snapshot_count,

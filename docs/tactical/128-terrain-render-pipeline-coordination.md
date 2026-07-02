@@ -600,21 +600,28 @@ Implementation notes:
   `MCLONE_ANDROID_XR_PERF_TERRAIN_SUBMIT_MAX`.
 - A targeted snapshot unit test checks the new request snapshot/revision counts
   and inflight before/after counters.
+- Follow-up instrumentation adds request count, worst single handoff, and worst
+  single compiler-submit time so accumulated deadline-loop work can be separated
+  from one bad submit.
 
 Measurement, Quest Android XR per-eye settled orbit, render distance 7, 2 render
 compile workers, unbounded completed-result acceptance, 45-second sample:
 
 | Frame avg / p95 / p99 / max | Runtime submit split | Submit handoff split | Read |
 |---|---|---|---|
-| 14.219 / 15.786 / 25.674 / 38.490 ms | submit 16.871 ms; snapshot 1.114; handoff 16.551 | request build 0.045; compiler submit 16.396; mark inflight 0.111; apply ready plan 0.427; ready update 0.006 | 32 ready sections, 3536 deferred sections, 10 request snapshots, 32 revisions |
+| 14.206 / 15.744 / 26.212 / 38.703 ms | submit 15.218 ms; snapshot 0.898; handoff 15.076 | single handoff 15.076; request count 2; request build 0.097; compiler submit total 15.041; compiler submit single 15.041; mark inflight 0.012; apply ready plan 0.310; ready update 0.018 | 32 ready sections, 3536 deferred sections, 10 request snapshots, 32 revisions |
 
 Interpretation:
 
 - The handoff tail is not ready-plan application or request construction in
   this run. Those are sub-millisecond even with thousands of deferred sections.
-- The visible spike is inside native compiler submission. In the current native
-  worker, that means handing the owned `RenderSectionCompileRequest` to the
-  worker channel and waking worker-side compile, not worker mesh build itself.
+- The visible spike is inside native compiler submission. The request-count
+  follow-up shows this is not merely two medium submits added together:
+  `request_count=2`, but `compiler_submit_single=15.041 ms`, effectively the
+  whole compiler-submit total for the worst frame.
+- In the current native worker, that means the next cut is inside
+  `RenderSectionCompileWorker::submit`: capacity check, `std::sync::mpsc`
+  command send, request move/drop behavior, and worker wakeup interaction.
 - This result changes the first extraction target from dirty/deferred set
   ownership to compiler dispatcher/request transport ownership. The set-moving
   model is still a likely architectural cleanup, but it is not the measured
@@ -714,8 +721,8 @@ making `RenderSectionCompileWorker::submit` more Java-dispatcher-like and less
 dependent on moving an owned request through `std::sync::mpsc` on the render
 frame. Good candidate slices:
 
-- add request-count and per-submit worst timing to distinguish one large stall
-  from multiple submits accumulated in one deadline loop,
+- split `RenderSectionCompileWorker::submit` itself into capacity-check, channel
+  send, and pending-count mutation, while logging request payload counts/bytes,
 - replace the unbounded `mpsc` command channel with a bounded/preallocated
   dispatcher queue or ring that has explicit capacity and queue-health counters,
 - move toward resident worker-owned snapshot/request storage so render-frame
