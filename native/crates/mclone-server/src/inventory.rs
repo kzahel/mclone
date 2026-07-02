@@ -1,19 +1,34 @@
 use mclone_core::BlockStateId;
+#[cfg(test)]
+use mclone_protocol::ItemKind;
+use mclone_protocol::ItemStackSnapshot;
 use mclone_protocol::{
     DEFAULT_DEBUG_HOTBAR, HOTBAR_SLOT_COUNT, HOTBAR_SLOT_COUNT_USIZE, SetCarriedItemCommand,
     SetDebugHotbarSlotCommand,
 };
 
+use crate::item_stack::item_max_stack_size;
+
+const PLAYER_MAIN_INVENTORY_SLOT_COUNT: usize = 36;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ServerInventory {
     items: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE],
+    item_stacks: [Option<ItemStackSnapshot>; PLAYER_MAIN_INVENTORY_SLOT_COUNT],
     selected: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ItemStackAddResult {
+    pub(crate) accepted_count: u8,
+    pub(crate) remaining: Option<ItemStackSnapshot>,
 }
 
 impl Default for ServerInventory {
     fn default() -> Self {
         Self {
             items: DEFAULT_DEBUG_HOTBAR,
+            item_stacks: [None; PLAYER_MAIN_INVENTORY_SLOT_COUNT],
             selected: 0,
         }
     }
@@ -43,9 +58,111 @@ impl ServerInventory {
         self.items[self.selected as usize]
     }
 
+    pub(crate) fn add_item_stack(&mut self, stack: ItemStackSnapshot) -> ItemStackAddResult {
+        let original_count = stack.count;
+        let mut remaining_count = stack.count;
+        while remaining_count > 0 {
+            let Some(slot) = self.slot_with_remaining_space(ItemStackSnapshot {
+                count: remaining_count,
+                ..stack
+            }) else {
+                break;
+            };
+            let accepted = self.add_item_stack_to_slot(
+                slot,
+                ItemStackSnapshot {
+                    count: remaining_count,
+                    ..stack
+                },
+            );
+            if accepted == 0 {
+                break;
+            }
+            remaining_count -= accepted;
+        }
+
+        ItemStackAddResult {
+            accepted_count: original_count - remaining_count,
+            remaining: (remaining_count > 0).then_some(ItemStackSnapshot {
+                count: remaining_count,
+                ..stack
+            }),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn item_count(&self, kind: ItemKind) -> u32 {
+        self.item_stacks
+            .iter()
+            .filter_map(|stack| *stack)
+            .filter(|stack| stack.kind == kind)
+            .map(|stack| u32::from(stack.count))
+            .sum()
+    }
+
     #[cfg(test)]
     pub(crate) const fn selected_hotbar_slot(&self) -> u8 {
         self.selected
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn item_stack_in_slot(&self, slot: usize) -> Option<ItemStackSnapshot> {
+        self.item_stacks[slot]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_item_stack_for_test(
+        &mut self,
+        slot: usize,
+        stack: Option<ItemStackSnapshot>,
+    ) {
+        self.item_stacks[slot] = stack;
+    }
+
+    fn slot_with_remaining_space(&self, stack: ItemStackSnapshot) -> Option<usize> {
+        let selected = usize::from(self.selected);
+        if self.slot_has_remaining_space(selected, stack) {
+            return Some(selected);
+        }
+        self.item_stacks
+            .iter()
+            .enumerate()
+            .find_map(|(slot, _)| self.slot_has_remaining_space(slot, stack).then_some(slot))
+            .or_else(|| self.free_item_slot())
+    }
+
+    fn slot_has_remaining_space(&self, slot: usize, stack: ItemStackSnapshot) -> bool {
+        let Some(stored) = self.item_stacks.get(slot).copied().flatten() else {
+            return false;
+        };
+        stored.kind == stack.kind && stored.count < item_max_stack_size(stored.kind)
+    }
+
+    fn free_item_slot(&self) -> Option<usize> {
+        self.item_stacks.iter().position(|stack| stack.is_none())
+    }
+
+    fn add_item_stack_to_slot(&mut self, slot: usize, stack: ItemStackSnapshot) -> u8 {
+        let max_count = item_max_stack_size(stack.kind);
+        let Some(stored) = self.item_stacks.get_mut(slot) else {
+            return 0;
+        };
+        match stored {
+            Some(existing) if existing.kind == stack.kind => {
+                let accepted = stack.count.min(max_count.saturating_sub(existing.count));
+                existing.count += accepted;
+                accepted
+            }
+            Some(_) => 0,
+            empty @ None => {
+                let accepted = stack.count.min(max_count);
+                *empty = Some(ItemStackSnapshot {
+                    count: accepted,
+                    ..stack
+                });
+                accepted
+            }
+        }
     }
 }
 
@@ -117,6 +234,81 @@ mod tests {
         assert_eq!(
             inventory.selected_block_state(),
             Some(generated_block_state_id(SAND))
+        );
+    }
+
+    #[test]
+    fn item_pickup_prefers_selected_stack_then_free_slot() {
+        let mut inventory = ServerInventory::default();
+        assert!(inventory.apply_set_carried_item(SetCarriedItemCommand { slot: 3 }));
+        inventory.set_item_stack_for_test(
+            3,
+            Some(ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 15,
+            }),
+        );
+
+        let result = inventory.add_item_stack(ItemStackSnapshot {
+            kind: ItemKind::Egg,
+            count: 2,
+        });
+
+        assert_eq!(
+            result,
+            ItemStackAddResult {
+                accepted_count: 2,
+                remaining: None,
+            }
+        );
+        assert_eq!(
+            inventory.item_stack_in_slot(3),
+            Some(ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 16,
+            })
+        );
+        assert_eq!(
+            inventory.item_stack_in_slot(0),
+            Some(ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            })
+        );
+        assert_eq!(inventory.item_count(ItemKind::Egg), 17);
+    }
+
+    #[test]
+    fn item_pickup_reports_remaining_when_inventory_is_full() {
+        let mut inventory = ServerInventory::default();
+        for slot in 0..PLAYER_MAIN_INVENTORY_SLOT_COUNT {
+            inventory.set_item_stack_for_test(
+                slot,
+                Some(ItemStackSnapshot {
+                    kind: ItemKind::Egg,
+                    count: 16,
+                }),
+            );
+        }
+
+        let result = inventory.add_item_stack(ItemStackSnapshot {
+            kind: ItemKind::Egg,
+            count: 1,
+        });
+
+        assert_eq!(
+            result,
+            ItemStackAddResult {
+                accepted_count: 0,
+                remaining: Some(ItemStackSnapshot {
+                    kind: ItemKind::Egg,
+                    count: 1,
+                }),
+            }
+        );
+        assert_eq!(
+            inventory.item_count(ItemKind::Egg),
+            PLAYER_MAIN_INVENTORY_SLOT_COUNT as u32 * 16
         );
     }
 }

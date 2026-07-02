@@ -11,6 +11,7 @@ mod game_mode;
 mod holder;
 mod integrated;
 mod inventory;
+mod item_stack;
 mod job_codec;
 mod level_light_bridge;
 mod light_mailbox;

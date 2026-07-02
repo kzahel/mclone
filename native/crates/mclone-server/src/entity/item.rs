@@ -3,6 +3,8 @@ use mclone_core::{BlockPos, BlockStateId, Vec3d};
 use mclone_protocol::{EntityId, ItemStackSnapshot};
 use mclone_worldgen::prng::SimpleRandomSource;
 
+use crate::item_stack::{item_stack_has_room, merged_item_stack};
+
 use super::ServerEntityState;
 
 pub(crate) const ITEM_ENTITY_LIFETIME_TICKS: u64 = 6_000;
@@ -12,6 +14,7 @@ const ITEM_AIR_DRAG: f64 = 0.98;
 const ITEM_GROUND_FRICTION: f64 = 0.6 * ITEM_AIR_DRAG;
 const ITEM_GROUND_BOUNCE: f64 = -0.5;
 const ITEM_DEFAULT_PICKUP_DELAY: i32 = 10;
+const ITEM_INFINITE_PICKUP_DELAY: i32 = 32_767;
 const ITEM_COLLISION_EPSILON: f64 = 1.0e-7;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -39,9 +42,39 @@ impl ItemEntityRuntimeState {
         self.stack
     }
 
+    pub(crate) fn can_pick_up(&self) -> bool {
+        self.pickup_delay == 0
+    }
+
+    pub(crate) fn replace_stack(&mut self, stack: ItemStackSnapshot) {
+        self.stack = stack;
+    }
+
+    pub(crate) fn is_mergeable(&self, entity: ServerEntityState) -> bool {
+        entity.alive
+            && self.pickup_delay != ITEM_INFINITE_PICKUP_DELAY
+            && entity.age_ticks < ITEM_ENTITY_LIFETIME_TICKS
+            && item_stack_has_room(self.stack)
+    }
+
+    pub(crate) fn merged_with(&self, other: &Self) -> Option<(ItemStackSnapshot, i32)> {
+        merged_item_stack(self.stack, other.stack)
+            .map(|stack| (stack, self.pickup_delay.max(other.pickup_delay)))
+    }
+
     #[cfg(test)]
     pub(crate) fn delta_movement(&self) -> Vec3d {
         self.delta_movement
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_pickup_delay_for_test(&mut self, pickup_delay: i32) {
+        self.pickup_delay = pickup_delay;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_pickup_delay(&self) -> bool {
+        self.pickup_delay > 0
     }
 
     #[cfg(test)]
@@ -49,11 +82,15 @@ impl ItemEntityRuntimeState {
         self.pickup_delay
     }
 
+    pub(crate) fn set_pickup_delay(&mut self, pickup_delay: i32) {
+        self.pickup_delay = pickup_delay;
+    }
+
     pub(crate) fn tick_entity<F>(&mut self, entity: &mut ServerEntityState, block_state_at: &F)
     where
         F: Fn(BlockPos) -> Option<BlockStateId>,
     {
-        if self.pickup_delay > 0 {
+        if self.pickup_delay > 0 && self.pickup_delay != ITEM_INFINITE_PICKUP_DELAY {
             self.pickup_delay -= 1;
         }
 
@@ -148,6 +185,8 @@ mod tests {
 
         assert_eq!(item.stack(), stack);
         assert_eq!(item.pickup_delay(), ITEM_DEFAULT_PICKUP_DELAY);
+        assert!(item.has_pickup_delay());
+        assert!(!item.can_pick_up());
         assert!((-0.1..0.1).contains(&item.delta_movement().x));
         assert_eq!(item.delta_movement().y, 0.2);
         assert!((-0.1..0.1).contains(&item.delta_movement().z));
@@ -183,5 +222,65 @@ mod tests {
 
         assert!(entity.on_ground);
         assert!(item.delta_movement().y > 0.0);
+    }
+
+    #[test]
+    fn item_entity_merges_same_stack_when_capacity_allows() {
+        let mut entity = item_state();
+        entity.age_ticks = 12;
+        let mut left = ItemEntityRuntimeState {
+            stack: ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            },
+            delta_movement: Vec3d::ZERO,
+            pickup_delay: 2,
+        };
+        let right = ItemEntityRuntimeState {
+            stack: ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 3,
+            },
+            delta_movement: Vec3d::ZERO,
+            pickup_delay: 7,
+        };
+
+        assert!(left.is_mergeable(entity));
+        let (stack, pickup_delay) = left.merged_with(&right).expect("mergeable egg stacks");
+        left.replace_stack(stack);
+        left.set_pickup_delay(pickup_delay);
+
+        assert_eq!(
+            left.stack(),
+            ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 4,
+            }
+        );
+        assert_eq!(left.pickup_delay(), 7);
+    }
+
+    #[test]
+    fn item_entity_does_not_merge_full_stack() {
+        let mut left = ItemEntityRuntimeState {
+            stack: ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: crate::item_stack::EGG_MAX_STACK_SIZE,
+            },
+            delta_movement: Vec3d::ZERO,
+            pickup_delay: 0,
+        };
+        let right = ItemEntityRuntimeState {
+            stack: ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            },
+            delta_movement: Vec3d::ZERO,
+            pickup_delay: 0,
+        };
+
+        assert_eq!(left.merged_with(&right), None);
+        left.set_pickup_delay_for_test(ITEM_INFINITE_PICKUP_DELAY);
+        assert!(!left.is_mergeable(item_state()));
     }
 }

@@ -1,15 +1,32 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use mclone_core::{BlockPos, BlockStateId, ChunkPos, Vec3d};
+use mclone_blocks::collision_aabb_for_feet_position;
+use mclone_core::{Aabb, BlockPos, BlockStateId, ChunkPos, Vec3d};
 #[cfg(feature = "physics-rapier")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{EntityId, EntityKind, ItemKind, ItemStackSnapshot};
+
+use crate::players::ServerPlayerId;
 
 use super::ServerEntityState;
 use super::item::{ITEM_ENTITY_LIFETIME_TICKS, ItemEntityRuntimeState};
 use super::metadata::{EntityMetadata, PASSIVE_MOB_KINDS};
 use super::mob::{MobPlayerTarget, MobRuntimeState};
 use super::tick_list::ServerEntityTickList;
+
+const PLAYER_PICKUP_WIDTH: f64 = 0.6;
+const PLAYER_PICKUP_HEIGHT: f64 = 1.8;
+const PLAYER_PICKUP_INFLATE_XZ: f64 = 1.0;
+const PLAYER_PICKUP_INFLATE_Y: f64 = 0.5;
+const ITEM_MERGE_INFLATE_XZ: f64 = 0.5;
+const ITEM_STATIONARY_MERGE_INTERVAL_TICKS: u64 = 40;
+const ITEM_MOVED_BLOCK_MERGE_INTERVAL_TICKS: u64 = 2;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ItemPickupTarget {
+    pub(crate) player_id: ServerPlayerId,
+    pub(crate) position: Vec3d,
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct ServerEntityStore {
@@ -195,6 +212,13 @@ impl ServerEntityStore {
         self.items.get(&id)
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_item_pickup_delay_for_test(&mut self, id: EntityId, pickup_delay: i32) {
+        if let Some(item) = self.items.get_mut(&id) {
+            item.set_pickup_delay_for_test(pickup_delay);
+        }
+    }
+
     pub(crate) fn tick_stationary<F>(
         &mut self,
         entity_ticking_chunks: &[ChunkPos],
@@ -216,10 +240,13 @@ impl ServerEntityStore {
                 .filter(|entity| Some(entity.id) != debug_physics_cube_id),
             &entity_ticking_chunks,
         );
+        let ticking_ids = self.tick_list.iteration_ids();
         let mut updated = Vec::new();
         let mut egg_spawns = Vec::new();
+        let mut merge_due_ids = Vec::new();
         let mut removed_ids = Vec::new();
-        for id in self.tick_list.iteration_ids() {
+        for id in &ticking_ids {
+            let id = *id;
             if let Some(entity) = self.entities.get_mut(&id) {
                 if let Some(mob) = self.mobs.get_mut(&id) {
                     mob.tick_entity(entity, nearby_players, &block_state_at);
@@ -227,14 +254,24 @@ impl ServerEntityStore {
                     egg_spawns
                         .extend((0..egg_count).map(|_| (entity.position, entity.y_rot_degrees)));
                 }
+                let mut item_block_changed = false;
+                let mut is_item = false;
                 if let Some(item) = self.items.get_mut(&id) {
+                    is_item = true;
+                    let previous_position = entity.position;
                     item.tick_entity(entity, &block_state_at);
-                    if entity.age_ticks.saturating_add(1) >= ITEM_ENTITY_LIFETIME_TICKS {
+                    item_block_changed = BlockPos::containing(previous_position)
+                        != BlockPos::containing(entity.position);
+                    let next_age = entity.age_ticks.saturating_add(1);
+                    if next_age >= ITEM_ENTITY_LIFETIME_TICKS {
                         entity.alive = false;
                         removed_ids.push(id);
                     }
                 }
                 entity.age_ticks = entity.age_ticks.saturating_add(1);
+                if is_item && entity.alive && item_merge_due(entity.age_ticks, item_block_changed) {
+                    merge_due_ids.push(id);
+                }
                 updated.push(*entity);
             }
         }
@@ -242,6 +279,7 @@ impl ServerEntityStore {
             self.entities.remove(&id);
             self.items.remove(&id);
         }
+        updated.extend(self.merge_item_entities(&merge_due_ids));
         for (position, y_rot_degrees) in egg_spawns {
             updated.push(self.insert_item_entity(
                 ItemStackSnapshot {
@@ -253,6 +291,148 @@ impl ServerEntityStore {
             ));
         }
         updated
+    }
+
+    pub(crate) fn collect_item_entities<F>(
+        &mut self,
+        pickup_targets: &[ItemPickupTarget],
+        mut accept_stack: F,
+    ) -> Vec<ServerEntityState>
+    where
+        F: FnMut(ServerPlayerId, ItemStackSnapshot) -> Option<ItemStackSnapshot>,
+    {
+        let item_ids = self.items.keys().copied().collect::<Vec<_>>();
+        let mut updated = Vec::new();
+        let mut removed_ids = Vec::new();
+        for id in item_ids {
+            let Some(entity) = self.entities.get(&id).copied() else {
+                continue;
+            };
+            let Some(item) = self.items.get(&id) else {
+                continue;
+            };
+            if !entity.alive || !item.can_pick_up() {
+                continue;
+            }
+            let item_box = entity_aabb(entity);
+            for target in pickup_targets {
+                if !player_pickup_box(target.position).intersects(item_box) {
+                    continue;
+                }
+                let Some(item) = self.items.get_mut(&id) else {
+                    break;
+                };
+                let stack = item.stack();
+                let remaining = accept_stack(target.player_id, stack);
+                if remaining == Some(stack) {
+                    continue;
+                }
+                let Some(entity) = self.entities.get_mut(&id) else {
+                    break;
+                };
+                match remaining {
+                    Some(remaining) => {
+                        item.replace_stack(remaining);
+                        entity.item_stack = Some(remaining);
+                        updated.push(*entity);
+                    }
+                    None => {
+                        entity.alive = false;
+                        updated.push(*entity);
+                        removed_ids.push(id);
+                    }
+                }
+                break;
+            }
+        }
+        for id in removed_ids {
+            self.entities.remove(&id);
+            self.items.remove(&id);
+        }
+        updated
+    }
+
+    fn merge_item_entities(&mut self, ticking_ids: &[EntityId]) -> Vec<ServerEntityState> {
+        let mut updated = Vec::new();
+        let mut removed_ids = BTreeSet::new();
+        for id in ticking_ids {
+            if removed_ids.contains(id) {
+                continue;
+            }
+            let Some(entity) = self.entities.get(id).copied() else {
+                continue;
+            };
+            let Some(item) = self.items.get(id) else {
+                continue;
+            };
+            if !item.is_mergeable(entity) {
+                continue;
+            }
+            let merge_box = item_merge_box(entity);
+            let candidates = self.items.keys().copied().collect::<Vec<_>>();
+            for other_id in candidates {
+                if other_id == *id || removed_ids.contains(&other_id) {
+                    continue;
+                }
+                let Some(other_entity) = self.entities.get(&other_id).copied() else {
+                    continue;
+                };
+                if !merge_box.intersects(entity_aabb(other_entity)) {
+                    continue;
+                }
+                if let Some((target, removed, target_update)) = self.merge_item_pair(*id, other_id)
+                {
+                    removed_ids.insert(removed.id);
+                    updated.push(removed);
+                    updated.push(target_update);
+                    if target != *id {
+                        break;
+                    }
+                }
+            }
+        }
+        for id in removed_ids {
+            self.entities.remove(&id);
+            self.items.remove(&id);
+        }
+        updated
+    }
+
+    fn merge_item_pair(
+        &mut self,
+        left_id: EntityId,
+        right_id: EntityId,
+    ) -> Option<(EntityId, ServerEntityState, ServerEntityState)> {
+        let left_entity = self.entities.get(&left_id).copied()?;
+        let right_entity = self.entities.get(&right_id).copied()?;
+        let left_item = self.items.get(&left_id)?.clone();
+        let right_item = self.items.get(&right_id)?.clone();
+        if !left_item.is_mergeable(left_entity) || !right_item.is_mergeable(right_entity) {
+            return None;
+        }
+
+        let (target_id, source_id, target_item, source_item) =
+            if right_item.stack().count < left_item.stack().count {
+                (left_id, right_id, left_item, right_item)
+            } else {
+                (right_id, left_id, right_item, left_item)
+            };
+        let (merged_stack, pickup_delay) = target_item.merged_with(&source_item)?;
+
+        let source_age = self.entities.get(&source_id)?.age_ticks;
+        let target_entity = self.entities.get_mut(&target_id)?;
+        target_entity.age_ticks = target_entity.age_ticks.min(source_age);
+        target_entity.item_stack = Some(merged_stack);
+        let target_update = *target_entity;
+
+        let target_runtime = self.items.get_mut(&target_id)?;
+        target_runtime.replace_stack(merged_stack);
+        target_runtime.set_pickup_delay(pickup_delay);
+
+        let removed = self.entities.get_mut(&source_id)?;
+        removed.alive = false;
+        let removed = *removed;
+        Some((target_id, removed, target_update))
     }
 
     fn allocate_entity_id(&mut self) -> EntityId {
@@ -394,6 +574,48 @@ fn debug_passive_showcase_y_rot(index: usize) -> f32 {
 
 fn offset_within_chunk(value: f64, chunk_min: i32) -> f64 {
     (value + 2.5).clamp(chunk_min as f64 + 1.5, chunk_min as f64 + 14.5)
+}
+
+fn entity_aabb(entity: ServerEntityState) -> Aabb {
+    collision_aabb_for_feet_position(
+        entity.position,
+        f64::from(entity.width),
+        f64::from(entity.height),
+    )
+}
+
+fn item_merge_box(entity: ServerEntityState) -> Aabb {
+    let aabb = entity_aabb(entity);
+    Aabb::new(
+        aabb.min_x - ITEM_MERGE_INFLATE_XZ,
+        aabb.min_y,
+        aabb.min_z - ITEM_MERGE_INFLATE_XZ,
+        aabb.max_x + ITEM_MERGE_INFLATE_XZ,
+        aabb.max_y,
+        aabb.max_z + ITEM_MERGE_INFLATE_XZ,
+    )
+}
+
+fn player_pickup_box(position: Vec3d) -> Aabb {
+    let aabb =
+        collision_aabb_for_feet_position(position, PLAYER_PICKUP_WIDTH, PLAYER_PICKUP_HEIGHT);
+    Aabb::new(
+        aabb.min_x - PLAYER_PICKUP_INFLATE_XZ,
+        aabb.min_y - PLAYER_PICKUP_INFLATE_Y,
+        aabb.min_z - PLAYER_PICKUP_INFLATE_XZ,
+        aabb.max_x + PLAYER_PICKUP_INFLATE_XZ,
+        aabb.max_y + PLAYER_PICKUP_INFLATE_Y,
+        aabb.max_z + PLAYER_PICKUP_INFLATE_XZ,
+    )
+}
+
+fn item_merge_due(age_ticks: u64, block_position_changed: bool) -> bool {
+    let interval = if block_position_changed {
+        ITEM_MOVED_BLOCK_MERGE_INTERVAL_TICKS
+    } else {
+        ITEM_STATIONARY_MERGE_INTERVAL_TICKS
+    };
+    age_ticks % interval == 0
 }
 
 #[cfg(test)]
@@ -546,6 +768,136 @@ mod tests {
         assert!(!removed.alive);
         assert_eq!(store.state(id), None);
         assert_eq!(store.item_state(id), None);
+    }
+
+    #[test]
+    fn item_entity_pickup_waits_for_pickup_delay() {
+        let mut store = ServerEntityStore::default();
+        let id = store.insert_item_entity_for_test(
+            ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            },
+            Vec3d::new(4.0, 64.0, 4.0),
+        );
+        let target = ItemPickupTarget {
+            player_id: ServerPlayerId::LOCAL,
+            position: Vec3d::new(4.0, 64.0, 4.0),
+        };
+
+        let blocked = store.collect_item_entities(&[target], |_player_id, _stack| None);
+        assert!(blocked.is_empty());
+        assert!(store.state(id).unwrap().alive);
+
+        store
+            .items
+            .get_mut(&id)
+            .unwrap()
+            .set_pickup_delay_for_test(0);
+        let mut collected = 0;
+        let picked_up = store.collect_item_entities(&[target], |_player_id, stack| {
+            collected += stack.count;
+            None
+        });
+
+        assert_eq!(collected, 1);
+        assert_eq!(picked_up.len(), 1);
+        assert_eq!(picked_up[0].id, id);
+        assert!(!picked_up[0].alive);
+        assert_eq!(store.state(id), None);
+        assert_eq!(store.item_state(id), None);
+    }
+
+    #[test]
+    fn item_entity_pickup_keeps_remaining_stack_after_partial_acceptance() {
+        let mut store = ServerEntityStore::default();
+        let id = store.insert_item_entity_for_test(
+            ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 4,
+            },
+            Vec3d::new(4.0, 64.0, 4.0),
+        );
+        store
+            .items
+            .get_mut(&id)
+            .unwrap()
+            .set_pickup_delay_for_test(0);
+        let target = ItemPickupTarget {
+            player_id: ServerPlayerId::LOCAL,
+            position: Vec3d::new(4.0, 64.0, 4.0),
+        };
+
+        let updated = store.collect_item_entities(&[target], |_player_id, stack| {
+            Some(ItemStackSnapshot {
+                count: stack.count - 2,
+                ..stack
+            })
+        });
+
+        assert_eq!(updated.len(), 1);
+        assert!(updated[0].alive);
+        assert_eq!(
+            updated[0].item_stack,
+            Some(ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 2,
+            })
+        );
+        assert_eq!(store.state(id), Some(updated[0]));
+        assert_eq!(
+            store.item_state(id).unwrap().stack(),
+            updated[0].item_stack.unwrap()
+        );
+    }
+
+    #[test]
+    fn item_entities_merge_nearby_egg_stacks() {
+        let mut store = ServerEntityStore::default();
+        let first = store.insert_item_entity_for_test(
+            ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            },
+            Vec3d::new(4.0, 64.0, 4.0),
+        );
+        let second = store.insert_item_entity_for_test(
+            ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            },
+            Vec3d::new(4.1, 64.0, 4.0),
+        );
+        store.entities.get_mut(&first).unwrap().age_ticks =
+            ITEM_STATIONARY_MERGE_INTERVAL_TICKS - 1;
+        store.entities.get_mut(&second).unwrap().age_ticks =
+            ITEM_STATIONARY_MERGE_INTERVAL_TICKS - 1;
+
+        let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], no_blocks);
+        let surviving_items = store
+            .states()
+            .into_iter()
+            .filter(|entity| entity.kind == EntityKind::Item)
+            .collect::<Vec<_>>();
+
+        assert_eq!(surviving_items.len(), 1);
+        assert_eq!(
+            surviving_items[0].item_stack,
+            Some(ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 2,
+            })
+        );
+        assert!(updated.iter().any(|entity| {
+            (entity.id == first || entity.id == second)
+                && !entity.alive
+                && entity.kind == EntityKind::Item
+        }));
+        assert!(updated.iter().any(|entity| {
+            entity.id == surviving_items[0].id
+                && entity.alive
+                && entity.item_stack == surviving_items[0].item_stack
+        }));
     }
 
     #[test]

@@ -284,6 +284,9 @@ impl ClientRuntime {
         let Some(snapshot) = self.entities.get_mut(&update.id) else {
             return;
         };
+        if let Some(stack) = update.item_stack {
+            snapshot.item_stack = Some(stack);
+        }
         snapshot.position = update.position;
         snapshot.y_rot_degrees = update.y_rot_degrees;
         snapshot.x_rot_degrees = update.x_rot_degrees;
@@ -611,6 +614,7 @@ mod tests {
         };
         let moved = EntityUpdate {
             id,
+            item_stack: None,
             position: mclone_core::Vec3d::new(3.0, 65.0, 4.0),
             y_rot_degrees: 90.0,
             x_rot_degrees: -10.0,
@@ -821,5 +825,49 @@ mod tests {
         let shift = 4 * (index & 1);
         layer[byte_index] |= (value & 15) << shift;
         layer
+    }
+
+    #[test]
+    fn client_runtime_applies_item_stack_entity_updates() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let id = EntityId(9);
+        runtime.apply_update(ServerUpdate::EntitySnapshot(EntitySnapshot {
+            id,
+            kind: mclone_protocol::EntityKind::Item,
+            item_stack: Some(mclone_protocol::ItemStackSnapshot {
+                kind: mclone_protocol::ItemKind::Egg,
+                count: 1,
+            }),
+            position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: true,
+            width: 0.25,
+            height: 0.25,
+            age_ticks: 1,
+        }));
+
+        runtime.apply_update(ServerUpdate::EntityUpdate(EntityUpdate {
+            id,
+            item_stack: Some(mclone_protocol::ItemStackSnapshot {
+                kind: mclone_protocol::ItemKind::Egg,
+                count: 2,
+            }),
+            position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: true,
+            age_ticks: 2,
+        }));
+
+        assert_eq!(
+            runtime.entity(id).unwrap().item_stack,
+            Some(mclone_protocol::ItemStackSnapshot {
+                kind: mclone_protocol::ItemKind::Egg,
+                count: 2,
+            })
+        );
     }
 }

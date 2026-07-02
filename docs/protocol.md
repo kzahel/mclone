@@ -42,7 +42,7 @@ can report missing collision facts.
 
 ## Protocol Version And Handshake
 
-`PROTOCOL_VERSION` (currently `15`) is exchanged in the transport handshake
+`PROTOCOL_VERSION` (currently `16`) is exchanged in the transport handshake
 before any messages — `MCLONE_NATIVE_TCP` for native TCP, `MCLONE_WS` for
 WebSocket. The server replies accept or reject; a mismatch fails the connection
 with `ProtocolVersionMismatch`.
@@ -88,7 +88,7 @@ commands are intents, not client-owned state mutations.
 | `PlayerPosition` | authoritative local-player position/rotation correction with relative flags and a teleport id |
 | `RemotePlayerAdd` / `RemotePlayerUpdate` / `RemotePlayerRemove` | other players entering / moving in / leaving the client's tracked view |
 | `EntitySnapshot` | entity baseline for a visible chunk; passive mobs are stackless, item entities carry an `ItemStackSnapshot` |
-| `EntityUpdate` | partial entity position/rotation/age update after a baseline |
+| `EntityUpdate` | partial entity position/rotation/age update after a baseline; item entities also carry their current `ItemStackSnapshot` when stack data is present |
 | `EntityRemove` | explicit entity untrack/remove for the replica |
 
 Failures are surfaced through the transport handshake and connection errors, not
@@ -109,9 +109,11 @@ still sees others move — is still to come.
 | `Item` | `ItemStackSnapshot` with `ItemKind` and count; currently `Egg` is the only item kind |
 | `DebugCube` | optional debug rotation |
 
-`EntityUpdate` intentionally carries transform/age data only in the current
-slice. If an item stack mutates later, add that through a general tracked entity
-data path rather than a chicken-specific or item-specific update side channel.
+`EntityUpdate` carries transform/age data and may carry item stack data. Current
+server item updates include the current stack for item entities so stack merges
+and partial pickups do not leave client replicas stale. Future non-item
+metadata should still go through a general tracked entity data shape rather
+than chicken-specific or one-off update messages.
 
 ### Likely future messages (design intent; not implemented)
 

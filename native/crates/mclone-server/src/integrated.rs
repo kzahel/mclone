@@ -21,7 +21,8 @@ use mclone_worldgen::block::{AIR, RawBlockId, generated_block_state_id};
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
 use crate::entity::{
-    EntityTracking, MobPlayerTarget, RoutedEntityUpdate, ServerEntityState, ServerEntityStore,
+    EntityTracking, ItemPickupTarget, MobPlayerTarget, RoutedEntityUpdate, ServerEntityState,
+    ServerEntityStore,
 };
 use crate::falling_block::{
     BlockTickList, BlockTickPhaseReport, basic_falling_block_move,
@@ -265,6 +266,26 @@ impl IntegratedServer {
         targets
     }
 
+    fn item_pickup_targets(&self) -> Vec<ItemPickupTarget> {
+        let mut targets = Vec::with_capacity(self.dedicated_players.len() + 1);
+        if self.player.has_accepted_position() {
+            targets.push(ItemPickupTarget {
+                player_id: ServerPlayerId::LOCAL,
+                position: self.player.position(),
+            });
+        }
+        targets.extend(
+            self.dedicated_players
+                .iter()
+                .filter(|(_, entry)| entry.state.has_accepted_position())
+                .map(|(player_id, entry)| ItemPickupTarget {
+                    player_id,
+                    position: entry.state.position(),
+                }),
+        );
+        targets
+    }
+
     pub fn handle_command(&mut self, command: ClientCommand) -> Vec<ServerUpdate> {
         self.try_handle_command(command)
             .expect("integrated server command failed")
@@ -491,7 +512,7 @@ impl IntegratedServer {
         let entity_tick_chunks = run_noop_simulation_phase(&tick_report.entity_ticking_chunks);
         let mob_player_targets = self.mob_player_targets();
         let scheduler = &self.scheduler;
-        let entity_updates = self.entities.tick_stationary(
+        let mut entity_updates = self.entities.tick_stationary(
             &tick_report.entity_ticking_chunks,
             &mob_player_targets,
             |pos| {
@@ -500,8 +521,21 @@ impl IntegratedServer {
                     .map(|block| BlockStateId(u32::from(block)))
             },
         );
-        #[cfg(feature = "physics-rapier")]
-        let mut entity_updates = entity_updates;
+        let item_pickup_targets = self.item_pickup_targets();
+        let local_inventory = &mut self.inventory;
+        let dedicated_players = &mut self.dedicated_players;
+        entity_updates.extend(self.entities.collect_item_entities(
+            &item_pickup_targets,
+            |player_id, stack| {
+                if player_id == ServerPlayerId::LOCAL {
+                    return local_inventory.add_item_stack(stack).remaining;
+                }
+                dedicated_players
+                    .get_mut(player_id)
+                    .map(|player| player.inventory.add_item_stack(stack).remaining)
+                    .unwrap_or(Some(stack))
+            },
+        ));
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
         let physics_tick_start = simulation_timing_start();
@@ -1492,8 +1526,9 @@ mod tests {
     };
     use mclone_light::LightLayer;
     use mclone_protocol::{
-        AcceptTeleportCommand, EntityId, EntityKind, EntitySnapshot, EntityUpdate,
-        PlayerPositionRelativeFlags, RemotePlayerId, RemotePlayerUpdate, ServerUpdate,
+        AcceptTeleportCommand, EntityId, EntityKind, EntitySnapshot, EntityUpdate, ItemKind,
+        ItemStackSnapshot, PlayerPositionRelativeFlags, RemotePlayerId, RemotePlayerUpdate,
+        ServerUpdate,
     };
     use mclone_worldgen::block::{
         AIR, BRICKS, DIRT, GRASS, OAK_LOG_X, OAK_LOG_Z, SAND, SNOW, STONE, TORCH, WALL_TORCH_EAST,
@@ -2182,6 +2217,40 @@ mod tests {
             set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(8, 0), 0);
 
         assert!(has_entity_remove(&updates, snapshot.id));
+    }
+
+    #[test]
+    fn local_player_picks_up_ready_item_entity_through_server_inventory() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        load_center_chunk(&mut server);
+        let player_position = server.player.position();
+        let item_id = server.entities.insert_item_entity_for_test(
+            ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 1,
+            },
+            player_position,
+        );
+        server.entities.set_item_pickup_delay_for_test(item_id, 0);
+        server.reconcile_entity_subjects(
+            std::iter::once(server.entities.state(item_id).unwrap()),
+            true,
+        );
+        let initial_updates = server
+            .drain_chunk_updates_for_target(CommandTarget::Local)
+            .expect("drain initial item snapshot");
+        assert!(initial_updates.iter().any(|update| {
+            matches!(update, ServerUpdate::EntitySnapshot(snapshot) if snapshot.id == item_id)
+        }));
+
+        let report = server
+            .try_simulation_tick_report()
+            .expect("simulation tick should pick up item");
+
+        assert!(has_entity_remove(&report.updates, item_id));
+        assert_eq!(server.inventory.item_count(ItemKind::Egg), 1);
+        assert_eq!(server.entities.state(item_id), None);
     }
 
     #[test]

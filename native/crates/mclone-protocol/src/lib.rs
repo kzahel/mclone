@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 15;
+pub const PROTOCOL_VERSION: u32 = 16;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
@@ -286,6 +286,7 @@ pub struct EntitySnapshot {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EntityUpdate {
     pub id: EntityId,
+    pub item_stack: Option<ItemStackSnapshot>,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
@@ -670,6 +671,7 @@ fn validate_remote_player_update(update: &RemotePlayerUpdate) -> ProtocolCodecRe
 fn validate_entity_snapshot(snapshot: &EntitySnapshot) -> ProtocolCodecResult<()> {
     validate_entity_update(&EntityUpdate {
         id: snapshot.id,
+        item_stack: snapshot.item_stack,
         position: snapshot.position,
         y_rot_degrees: snapshot.y_rot_degrees,
         x_rot_degrees: snapshot.x_rot_degrees,
@@ -713,6 +715,9 @@ fn validate_item_stack_snapshot(stack: ItemStackSnapshot) -> ProtocolCodecResult
 }
 
 fn validate_entity_update(update: &EntityUpdate) -> ProtocolCodecResult<()> {
+    if let Some(stack) = update.item_stack {
+        validate_item_stack_snapshot(stack)?;
+    }
     if !update.position.is_finite()
         || !update.y_rot_degrees.is_finite()
         || !update.x_rot_degrees.is_finite()
@@ -1043,6 +1048,7 @@ impl ByteWriter {
 
     fn write_entity_update(&mut self, update: &EntityUpdate) {
         self.write_entity_id(update.id);
+        self.write_optional_item_stack_snapshot(update.item_stack);
         self.write_vec3d(update.position);
         self.write_f32(update.y_rot_degrees);
         self.write_f32(update.x_rot_degrees);
@@ -1493,6 +1499,7 @@ impl<'a> ByteReader<'a> {
     fn read_entity_update(&mut self) -> ProtocolCodecResult<EntityUpdate> {
         let update = EntityUpdate {
             id: self.read_entity_id()?,
+            item_stack: self.read_optional_item_stack_snapshot()?,
             position: self.read_vec3d()?,
             y_rot_degrees: self.read_f32()?,
             x_rot_degrees: self.read_f32()?,
@@ -1830,6 +1837,7 @@ mod tests {
         };
         let update = EntityUpdate {
             id: snapshot.id,
+            item_stack: None,
             position: Vec3d::new(13.5, 70.0, -3.25),
             y_rot_degrees: 45.0,
             x_rot_degrees: 0.0,
@@ -1876,6 +1884,23 @@ mod tests {
         let bytes = encode_server_update(&update).unwrap();
 
         assert_eq!(decode_server_update(&bytes).unwrap(), update);
+
+        let update = ServerUpdate::EntityUpdate(EntityUpdate {
+            id: snapshot.id,
+            item_stack: Some(ItemStackSnapshot {
+                kind: ItemKind::Egg,
+                count: 2,
+            }),
+            position: snapshot.position,
+            y_rot_degrees: snapshot.y_rot_degrees,
+            x_rot_degrees: snapshot.x_rot_degrees,
+            rotation: snapshot.rotation,
+            on_ground: true,
+            age_ticks: 1,
+        });
+        let bytes = encode_server_update(&update).unwrap();
+
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
     }
 
     #[test]
@@ -1901,6 +1926,7 @@ mod tests {
     fn entity_update_codec_rejects_invalid_values() {
         let non_finite = ServerUpdate::EntityUpdate(EntityUpdate {
             id: EntityId(42),
+            item_stack: None,
             position: Vec3d::new(f64::NAN, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,
@@ -1980,6 +2006,7 @@ mod tests {
 
         let invalid_rotation = ServerUpdate::EntityUpdate(EntityUpdate {
             id: EntityId(42),
+            item_stack: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
             y_rot_degrees: 90.0,
             x_rot_degrees: -15.0,

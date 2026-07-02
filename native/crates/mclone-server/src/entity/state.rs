@@ -70,6 +70,7 @@ impl ServerEntityState {
     pub(crate) fn update(self) -> EntityUpdate {
         EntityUpdate {
             id: self.id,
+            item_stack: self.item_stack,
             position: self.position,
             y_rot_degrees: self.y_rot_degrees,
             x_rot_degrees: self.x_rot_degrees,

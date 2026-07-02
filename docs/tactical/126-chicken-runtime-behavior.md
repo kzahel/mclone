@@ -27,6 +27,9 @@ first.
   metadata is needed for the current behavior slice.
 - Chunk C landed a first shared item-entity/drop boundary. Mature chickens now
   drain egg-lay events into visible `egg x1` item entities.
+- The item-entity boundary now includes Java-shaped egg stack capacity, nearby
+  item merging, pickup-delay-gated player pickup, and server inventory
+  acceptance. Inventory replication/UI remains a separate system.
 
 ## Reference Shape
 
@@ -42,6 +45,8 @@ Read before implementation:
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/item/ItemEntity.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/EntityType.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/Entity.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/entity/player/Player.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/entity/player/Inventory.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/item/Items.java`
 
 The Java chicken behavior that matters for this phase:
@@ -62,6 +67,9 @@ The Java chicken behavior that matters for this phase:
   position; Java item entities are `0.25 x 0.25`, client tracking range 6,
   spawn with small random horizontal velocity and `0.2` upward velocity, apply
   gravity/drag, and expire at 6000 item-age ticks.
+- Java item entities periodically merge with nearby mergeable stacks, gate
+  pickup on `pickupDelay == 0`, and let player inventory acceptance decide
+  whether the stack is fully removed or left with a remaining count.
 
 ## Chunk A - Supported Goals And Species Tick
 
@@ -193,6 +201,12 @@ Landed notes:
 - Added the egg item actor to the native actor review sheet for screenshot
   validation.
 - Bumped `PROTOCOL_VERSION` to 15 for the entity snapshot payload change.
+- Added Java-shaped egg max stack size (`16`), periodic same-kind item entity
+  merging, pickup-delay-gated player collection using the Java player pickup
+  AABB inflation, and server inventory item-stack acceptance.
+- Extended `EntityUpdate` with optional item stack data and bumped
+  `PROTOCOL_VERSION` to 16 so stack merges and partial pickups replicate
+  through the existing entity update stream.
 - Verified with focused protocol/server/client/render/render-session/native
   tests and the affected crate gate:
   ```bash
@@ -201,11 +215,9 @@ Landed notes:
 
 Remaining item follow-ups:
 
-- Item pickup, stack merging, owner/thrower metadata, damage, persistence, and
-  full item model/texture rendering.
+- Inventory replication/UI, item pickup sounds/stats, owner/thrower metadata,
+  damage, persistence, and full item model/texture rendering.
 - Route `SoundEvents.CHICKEN_EGG` through the future shared sound-event path.
-- Consider item-stack mutation updates through a general tracked entity data
-  path if/when item entities can merge or otherwise change count after spawn.
 
 ## Chunk D - Persistence, Jockey, And Despawn
 
