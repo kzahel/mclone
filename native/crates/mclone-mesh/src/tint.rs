@@ -54,6 +54,50 @@ const COLD_WATER_COLOR: u32 = 0x3d_57_d6;
 const FROZEN_WATER_COLOR: u32 = 0x39_38_c9;
 const WARM_OCEAN_WATER_COLOR: u32 = 0x43_d5_ee;
 const LUKEWARM_OCEAN_WATER_COLOR: u32 = 0x45_ad_f2;
+const SWAMP_GRASS_COLOR_DARK: u32 = 0x4c_76_3c;
+const SWAMP_GRASS_COLOR_LIGHT: u32 = 0x6a_70_39;
+const SWAMP_GRASS_NOISE_SCALE: f64 = 0.0225;
+const SWAMP_GRASS_NOISE_THRESHOLD: f64 = -0.1;
+const SIMPLEX_F2: f64 = 0.366_025_403_784_438_6;
+const SIMPLEX_G2: f64 = 0.211_324_865_405_187_13;
+
+const SIMPLEX_GRADIENTS: [[i32; 3]; 16] = [
+    [1, 1, 0],
+    [-1, 1, 0],
+    [1, -1, 0],
+    [-1, -1, 0],
+    [1, 0, 1],
+    [-1, 0, 1],
+    [1, 0, -1],
+    [-1, 0, -1],
+    [0, 1, 1],
+    [0, -1, 1],
+    [0, 1, -1],
+    [0, -1, -1],
+    [1, 1, 0],
+    [0, -1, 1],
+    [-1, 1, 0],
+    [0, -1, -1],
+];
+
+// Fixed permutation for Biome.BIOME_INFO_NOISE: PerlinSimplexNoise(new
+// WorldgenRandom(2345L), [0]). The constructor consumes SimplexNoise xo/yo/zo,
+// but getValue(..., false) does not use those offsets.
+const BIOME_INFO_NOISE_PERMUTATION: [u8; 256] = [
+    64, 175, 124, 148, 10, 239, 244, 91, 138, 73, 228, 171, 27, 134, 77, 122, 238, 196, 202, 181,
+    211, 7, 49, 173, 48, 165, 120, 217, 129, 56, 153, 8, 140, 141, 21, 130, 71, 100, 132, 23, 176,
+    250, 29, 104, 149, 159, 180, 237, 247, 11, 252, 241, 14, 2, 219, 75, 178, 151, 233, 251, 103,
+    45, 52, 201, 222, 18, 223, 88, 136, 34, 227, 235, 35, 160, 0, 131, 51, 214, 39, 216, 207, 26,
+    137, 185, 41, 13, 249, 54, 112, 5, 66, 242, 157, 158, 28, 89, 86, 192, 172, 17, 69, 204, 38,
+    221, 65, 166, 9, 226, 33, 30, 84, 240, 59, 224, 127, 108, 92, 146, 99, 195, 255, 98, 126, 4,
+    133, 236, 189, 121, 144, 183, 80, 109, 191, 218, 161, 53, 25, 93, 72, 150, 163, 234, 205, 152,
+    61, 37, 197, 78, 81, 32, 85, 70, 187, 63, 96, 115, 117, 184, 139, 79, 74, 46, 188, 182, 76, 31,
+    174, 57, 68, 198, 90, 245, 230, 106, 94, 212, 190, 16, 200, 213, 206, 44, 43, 215, 231, 12,
+    177, 203, 220, 24, 170, 19, 209, 82, 95, 125, 194, 248, 208, 55, 67, 1, 87, 110, 135, 162, 128,
+    3, 60, 225, 15, 186, 232, 145, 119, 142, 113, 154, 102, 164, 42, 156, 210, 22, 253, 147, 169,
+    193, 83, 143, 118, 123, 254, 167, 111, 114, 6, 50, 40, 199, 179, 246, 20, 107, 168, 97, 229,
+    101, 155, 62, 47, 58, 116, 243, 105, 36,
+];
 
 fn biome_visual(biome_id: i32) -> BiomeVisual {
     let plains = BiomeVisual {
@@ -283,13 +327,7 @@ fn grass_color(
     match visual.grass_modifier {
         GrassColorModifier::None => base_color,
         GrassColorModifier::DarkForest => ((base_color & 0xfe_fe_fe) + 0x28_34_0a) >> 1,
-        GrassColorModifier::Swamp => {
-            if coarse_position_noise(world_x, world_z) < 0 {
-                0x4c_76_3c
-            } else {
-                0x6a_70_39
-            }
-        }
+        GrassColorModifier::Swamp => swamp_grass_color(world_x, world_z),
     }
 }
 
@@ -301,11 +339,64 @@ fn foliage_color(catalog: &TexturedMeshCatalog, visual: BiomeVisual) -> u32 {
     })
 }
 
-fn coarse_position_noise(world_x: i32, world_z: i32) -> i32 {
-    let mut value = world_x as i64 * 341_873_128_712 + world_z as i64 * 132_897_987_541;
-    value ^= value >> 13;
-    value = value.wrapping_mul(0x5deece66d);
-    ((value >> 24) & 1) as i32 * 2 - 1
+fn swamp_grass_color(world_x: i32, world_z: i32) -> u32 {
+    if biome_info_noise_value(world_x, world_z) < SWAMP_GRASS_NOISE_THRESHOLD {
+        SWAMP_GRASS_COLOR_DARK
+    } else {
+        SWAMP_GRASS_COLOR_LIGHT
+    }
+}
+
+fn biome_info_noise_value(world_x: i32, world_z: i32) -> f64 {
+    biome_info_simplex_noise_2d(
+        world_x as f64 * SWAMP_GRASS_NOISE_SCALE,
+        world_z as f64 * SWAMP_GRASS_NOISE_SCALE,
+    )
+}
+
+fn biome_info_simplex_noise_2d(x: f64, z: f64) -> f64 {
+    let skew = (x + z) * SIMPLEX_F2;
+    let cell_x = (x + skew).floor() as i32;
+    let cell_z = (z + skew).floor() as i32;
+    let unskew = (cell_x + cell_z) as f64 * SIMPLEX_G2;
+    let cell_origin_x = cell_x as f64 - unskew;
+    let cell_origin_z = cell_z as f64 - unskew;
+    let local_x = x - cell_origin_x;
+    let local_z = z - cell_origin_z;
+    let (offset_x, offset_z) = if local_x > local_z { (1, 0) } else { (0, 1) };
+    let second_corner_x = local_x - offset_x as f64 + SIMPLEX_G2;
+    let second_corner_z = local_z - offset_z as f64 + SIMPLEX_G2;
+    let third_corner_x = local_x - 1.0 + 2.0 * SIMPLEX_G2;
+    let third_corner_z = local_z - 1.0 + 2.0 * SIMPLEX_G2;
+    let perm_x = cell_x & 0xff;
+    let perm_z = cell_z & 0xff;
+    let gradient0 = biome_info_permutation(perm_x + biome_info_permutation(perm_z)) % 12;
+    let gradient1 =
+        biome_info_permutation(perm_x + offset_x + biome_info_permutation(perm_z + offset_z)) % 12;
+    let gradient2 = biome_info_permutation(perm_x + 1 + biome_info_permutation(perm_z + 1)) % 12;
+    let corner0 = simplex_corner_noise(gradient0, local_x, local_z, 0.0, 0.5);
+    let corner1 = simplex_corner_noise(gradient1, second_corner_x, second_corner_z, 0.0, 0.5);
+    let corner2 = simplex_corner_noise(gradient2, third_corner_x, third_corner_z, 0.0, 0.5);
+    70.0 * (corner0 + corner1 + corner2)
+}
+
+fn biome_info_permutation(index: i32) -> i32 {
+    BIOME_INFO_NOISE_PERMUTATION[(index & 0xff) as usize] as i32
+}
+
+fn simplex_corner_noise(gradient_index: i32, x: f64, y: f64, z: f64, offset: f64) -> f64 {
+    let mut value = offset - x * x - y * y - z * z;
+    if value < 0.0 {
+        return 0.0;
+    }
+
+    value *= value;
+    value * value * simplex_dot(gradient_index as usize, x, y, z)
+}
+
+fn simplex_dot(gradient_index: usize, x: f64, y: f64, z: f64) -> f64 {
+    let gradient = SIMPLEX_GRADIENTS[gradient_index & 15];
+    gradient[0] as f64 * x + gradient[1] as f64 * y + gradient[2] as f64 * z
 }
 
 fn rgb8(color: u32) -> [f32; 3] {
@@ -330,6 +421,32 @@ mod tests {
         let color = grass_color(&TexturedMeshCatalog::default(), biome_visual(29), -94, 348);
 
         assert_eq!(color, 0x50_7a_32);
+    }
+
+    #[test]
+    fn swamp_grass_modifier_matches_java_biome_info_noise() {
+        let catalog = TexturedMeshCatalog::default();
+        let visual = biome_visual(6);
+        let cases = [
+            (-100, -100, 0xbfcf_6d0e_e96b_8ad7, SWAMP_GRASS_COLOR_DARK),
+            (-51, 193, 0xbfc3_f7a5_1f45_17b8, SWAMP_GRASS_COLOR_DARK),
+            (0, 0, 0x0000_0000_0000_0000, SWAMP_GRASS_COLOR_LIGHT),
+            (100, 0, 0xbfe0_7e43_e139_0f53, SWAMP_GRASS_COLOR_DARK),
+            (193, 193, 0x3fdf_eeab_0f8e_d6aa, SWAMP_GRASS_COLOR_LIGHT),
+        ];
+
+        for (world_x, world_z, expected_noise_bits, expected_color) in cases {
+            assert_eq!(
+                biome_info_noise_value(world_x, world_z).to_bits(),
+                expected_noise_bits,
+                "Biome.BIOME_INFO_NOISE mismatch at ({world_x}, {world_z})"
+            );
+            assert_eq!(
+                grass_color(&catalog, visual, world_x, world_z),
+                expected_color,
+                "swamp grass color mismatch at ({world_x}, {world_z})"
+            );
+        }
     }
 
     #[test]
