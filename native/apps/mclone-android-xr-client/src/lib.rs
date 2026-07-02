@@ -3244,6 +3244,13 @@ mod android {
     struct AndroidXrRenderFrameTiming {
         locate_views_ms: f64,
         locomotion_ms: f64,
+        locomotion_input_ms: f64,
+        locomotion_camera_apply_ms: f64,
+        locomotion_commit_ms: f64,
+        locomotion_commit_server_command_ms: f64,
+        locomotion_commit_position_updates_ms: f64,
+        locomotion_commit_interest_ms: f64,
+        locomotion_gameplay_interaction_ms: f64,
         acquire_left_ms: f64,
         acquire_right_ms: f64,
         terrain_render_frame_ms: f64,
@@ -3916,6 +3923,16 @@ mod android {
                 self.max_render.end_frame_ms
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_LOCOMOTION max_input_ms={:.3} max_camera_apply_ms={:.3} max_commit_ms={:.3} max_commit_server_command_ms={:.3} max_commit_position_updates_ms={:.3} max_commit_interest_ms={:.3} max_gameplay_interaction_ms={:.3}",
+                self.max_render.locomotion_input_ms,
+                self.max_render.locomotion_camera_apply_ms,
+                self.max_render.locomotion_commit_ms,
+                self.max_render.locomotion_commit_server_command_ms,
+                self.max_render.locomotion_commit_position_updates_ms,
+                self.max_render.locomotion_commit_interest_ms,
+                self.max_render.locomotion_gameplay_interaction_ms
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_render_frame_ms={:.3} max_terrain_render_views_ms={:.3} max_terrain_menu_pointer_ms={:.3} max_terrain_runtime_upload_ms={:.3} max_runtime_poll_ms={:.3} max_runtime_sync_ms={:.3} max_runtime_gpu_upload_ms={:.3} max_runtime_ready_sections_ms={:.3} max_terrain_shared_records_ms={:.3} max_terrain_left_eye_ms={:.3} max_terrain_right_eye_ms={:.3} max_terrain_left_eye_prepare_ms={:.3} max_terrain_left_eye_encode_ms={:.3} max_terrain_left_eye_section_encode_ms={:.3} max_terrain_left_eye_submit_ms={:.3} max_terrain_left_eye_poll_wait_ms={:.3} max_terrain_right_eye_prepare_ms={:.3} max_terrain_right_eye_encode_ms={:.3} max_terrain_right_eye_section_encode_ms={:.3} max_terrain_right_eye_submit_ms={:.3} max_terrain_right_eye_poll_wait_ms={:.3} max_terrain_stereo_finish_ms={:.3} max_terrain_stereo_submit_ms={:.3} max_terrain_stereo_poll_wait_ms={:.3}",
                 self.max_render.terrain_render_frame_ms,
                 self.max_render.terrain_render_views_ms,
@@ -4237,6 +4254,23 @@ mod android {
                 let summary = snapshot.summary;
                 let upload = summary.map(|summary| summary.upload);
                 let headroom_ms = budget_ms - snapshot.app_work_ms;
+                let known_render_ms = render.locate_views_ms
+                    + render.locomotion_ms
+                    + render.acquire_left_ms
+                    + render.acquire_right_ms
+                    + render.terrain_render_frame_ms
+                    + render.release_eyes_ms
+                    + render.end_frame_ms;
+                let render_unattributed_ms =
+                    (timing.render_mclone_frame_ms - known_render_ms).max(0.0);
+                let terrain_poll_wait_ms = render.terrain_stereo_poll_wait_ms;
+                let terrain_before_poll_wait_ms =
+                    (render.terrain_render_frame_ms - terrain_poll_wait_ms).max(0.0);
+                let eye_poll_wait_ms =
+                    render.terrain_left_eye_poll_wait_ms + render.terrain_right_eye_poll_wait_ms;
+                let eye_cpu_ms = (render.terrain_left_eye_ms + render.terrain_right_eye_ms
+                    - eye_poll_wait_ms)
+                    .max(0.0);
                 log::info!(
                     "MCLONE_ANDROID_XR_PERF_WORST_FRAME rank={} sample_frame={} rendered={} frame_wall_ms={:.3} wait_frame_ms={:.3} app_work_ms={:.3} headroom_ms={:.3} over_budget={} over_2x_budget={} wait_begin_ms={:.3} begin_frame_ms={:.3} controller_poll_ms={:.3} render_mclone_frame_ms={:.3} locate_views_ms={:.3} locomotion_ms={:.3} acquire_left_ms={:.3} acquire_right_ms={:.3} release_eyes_ms={:.3} end_frame_ms={:.3}",
                     rank,
@@ -4258,6 +4292,29 @@ mod android {
                     render.acquire_right_ms,
                     render.release_eyes_ms,
                     render.end_frame_ms
+                );
+                log::info!(
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME_LOCOMOTION rank={} sample_frame={} input_ms={:.3} camera_apply_ms={:.3} commit_ms={:.3} commit_server_command_ms={:.3} commit_position_updates_ms={:.3} commit_interest_ms={:.3} gameplay_interaction_ms={:.3}",
+                    rank,
+                    snapshot.sample_frame,
+                    render.locomotion_input_ms,
+                    render.locomotion_camera_apply_ms,
+                    render.locomotion_commit_ms,
+                    render.locomotion_commit_server_command_ms,
+                    render.locomotion_commit_position_updates_ms,
+                    render.locomotion_commit_interest_ms,
+                    render.locomotion_gameplay_interaction_ms
+                );
+                log::info!(
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME_BUDGET rank={} sample_frame={} known_render_ms={:.3} render_unattributed_ms={:.3} terrain_before_poll_wait_ms={:.3} terrain_poll_wait_ms={:.3} eye_cpu_ms={:.3} eye_poll_wait_ms={:.3}",
+                    rank,
+                    snapshot.sample_frame,
+                    known_render_ms,
+                    render_unattributed_ms,
+                    terrain_before_poll_wait_ms,
+                    terrain_poll_wait_ms,
+                    eye_cpu_ms,
+                    eye_poll_wait_ms
                 );
                 log::info!(
                     "MCLONE_ANDROID_XR_PERF_WORST_FRAME_TERRAIN rank={} sample_frame={} terrain_frame_ms={:.3} render_views_ms={:.3} runtime_upload_ms={:.3} shared_records_ms={:.3} left_eye_ms={:.3} right_eye_ms={:.3} left_prepare_ms={:.3} left_encode_ms={:.3} left_submit_ms={:.3} left_poll_wait_ms={:.3} right_prepare_ms={:.3} right_encode_ms={:.3} right_submit_ms={:.3} right_poll_wait_ms={:.3} stereo_submit_ms={:.3} stereo_poll_wait_ms={:.3}",
@@ -4417,6 +4474,23 @@ mod android {
         AndroidXrRenderFrameTiming {
             locate_views_ms: a.locate_views_ms.max(b.locate_views_ms),
             locomotion_ms: a.locomotion_ms.max(b.locomotion_ms),
+            locomotion_input_ms: a.locomotion_input_ms.max(b.locomotion_input_ms),
+            locomotion_camera_apply_ms: a
+                .locomotion_camera_apply_ms
+                .max(b.locomotion_camera_apply_ms),
+            locomotion_commit_ms: a.locomotion_commit_ms.max(b.locomotion_commit_ms),
+            locomotion_commit_server_command_ms: a
+                .locomotion_commit_server_command_ms
+                .max(b.locomotion_commit_server_command_ms),
+            locomotion_commit_position_updates_ms: a
+                .locomotion_commit_position_updates_ms
+                .max(b.locomotion_commit_position_updates_ms),
+            locomotion_commit_interest_ms: a
+                .locomotion_commit_interest_ms
+                .max(b.locomotion_commit_interest_ms),
+            locomotion_gameplay_interaction_ms: a
+                .locomotion_gameplay_interaction_ms
+                .max(b.locomotion_gameplay_interaction_ms),
             acquire_left_ms: a.acquire_left_ms.max(b.acquire_left_ms),
             acquire_right_ms: a.acquire_right_ms.max(b.acquire_right_ms),
             terrain_render_frame_ms: a.terrain_render_frame_ms.max(b.terrain_render_frame_ms),
@@ -4923,6 +4997,19 @@ mod android {
         start.elapsed().as_secs_f64() * 1000.0
     }
 
+    fn copy_locomotion_timing(
+        timing: &mut AndroidXrRenderFrameTiming,
+        locomotion: mclone_xr_scene::XrLocomotionTiming,
+    ) {
+        timing.locomotion_input_ms = locomotion.input_ms;
+        timing.locomotion_camera_apply_ms = locomotion.camera_apply_ms;
+        timing.locomotion_commit_ms = locomotion.commit_ms;
+        timing.locomotion_commit_server_command_ms = locomotion.commit_server_command_ms;
+        timing.locomotion_commit_position_updates_ms = locomotion.commit_position_updates_ms;
+        timing.locomotion_commit_interest_ms = locomotion.commit_interest_ms;
+        timing.locomotion_gameplay_interaction_ms = locomotion.gameplay_interaction_ms;
+    }
+
     fn average_ms(samples: &[f64]) -> f64 {
         if samples.is_empty() {
             0.0
@@ -4974,38 +5061,33 @@ mod android {
         timing.locate_views_ms = elapsed_ms(locate_views_start);
         let locomotion_start = Instant::now();
         let mut frozen_render = false;
-        match automation {
+        let locomotion_timing = match automation {
             Some(AndroidXrPerfAutomation::Flight {
                 speed_blocks_per_second,
-            }) => {
-                terrain
-                    .apply_automated_flight_input(
-                        [stereo_views.left, stereo_views.right],
-                        speed_blocks_per_second,
-                    )
-                    .context("apply Android XR automated flight locomotion")?;
-            }
+            }) => terrain
+                .apply_automated_flight_input(
+                    [stereo_views.left, stereo_views.right],
+                    speed_blocks_per_second,
+                )
+                .context("apply Android XR automated flight locomotion")?,
             Some(AndroidXrPerfAutomation::Orbit {
                 speed_blocks_per_second,
                 elapsed_seconds,
-            }) => {
-                terrain
-                    .apply_automated_orbit_input(speed_blocks_per_second, elapsed_seconds)
-                    .context("apply Android XR automated orbit locomotion")?;
-            }
+            }) => terrain
+                .apply_automated_orbit_input(speed_blocks_per_second, elapsed_seconds)
+                .context("apply Android XR automated orbit locomotion")?,
             Some(AndroidXrPerfAutomation::Stationary {
                 frozen_render: freeze_runtime,
             }) => {
                 frozen_render = freeze_runtime;
-                terrain.apply_automated_stationary_input();
+                terrain.apply_automated_stationary_input()
             }
-            None => {
-                terrain
-                    .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
-                    .context("apply Android XR controller locomotion")?;
-            }
-        }
+            None => terrain
+                .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
+                .context("apply Android XR controller locomotion")?,
+        };
         timing.locomotion_ms = elapsed_ms(locomotion_start);
+        copy_locomotion_timing(&mut timing, locomotion_timing);
 
         let acquire_left_start = Instant::now();
         let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
@@ -5101,38 +5183,33 @@ mod android {
         timing.locate_views_ms = elapsed_ms(locate_views_start);
         let locomotion_start = Instant::now();
         let mut frozen_render = false;
-        match automation {
+        let locomotion_timing = match automation {
             Some(AndroidXrPerfAutomation::Flight {
                 speed_blocks_per_second,
-            }) => {
-                terrain
-                    .apply_automated_flight_input(
-                        [stereo_views.left, stereo_views.right],
-                        speed_blocks_per_second,
-                    )
-                    .context("apply Android XR automated flight locomotion")?;
-            }
+            }) => terrain
+                .apply_automated_flight_input(
+                    [stereo_views.left, stereo_views.right],
+                    speed_blocks_per_second,
+                )
+                .context("apply Android XR automated flight locomotion")?,
             Some(AndroidXrPerfAutomation::Orbit {
                 speed_blocks_per_second,
                 elapsed_seconds,
-            }) => {
-                terrain
-                    .apply_automated_orbit_input(speed_blocks_per_second, elapsed_seconds)
-                    .context("apply Android XR automated orbit locomotion")?;
-            }
+            }) => terrain
+                .apply_automated_orbit_input(speed_blocks_per_second, elapsed_seconds)
+                .context("apply Android XR automated orbit locomotion")?,
             Some(AndroidXrPerfAutomation::Stationary {
                 frozen_render: freeze_runtime,
             }) => {
                 frozen_render = freeze_runtime;
-                terrain.apply_automated_stationary_input();
+                terrain.apply_automated_stationary_input()
             }
-            None => {
-                terrain
-                    .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
-                    .context("apply Android XR controller locomotion")?;
-            }
-        }
+            None => terrain
+                .apply_locomotion_input(controllers, [stereo_views.left, stereo_views.right])
+                .context("apply Android XR controller locomotion")?,
+        };
         timing.locomotion_ms = elapsed_ms(locomotion_start);
+        copy_locomotion_timing(&mut timing, locomotion_timing);
 
         let target_width = stereo_target.width;
         let target_height = stereo_target.height;

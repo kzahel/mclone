@@ -1,6 +1,7 @@
 # 130: Quest Thread Scheduling And Streaming Tail Attribution
 
-Status: active — E2a/E2c landed; E2b and trace readout still pending
+Status: active — E2a/E2c and E8 landed; trace processor readout available;
+next attribution target is per-eye encode and camera-command send tails
 Workstream: Android XR / Quest frame pacing, shared native runtime threading,
 terrain streaming tails
 
@@ -46,10 +47,9 @@ Not landed yet:
 
 - E2b worker/dispatcher niceness. That still needs an explicit shared setting
   and A/B lane, not an implicit behavior change.
-- Full E1 trace readout. A baseline Perfetto trace was captured at
-  `/tmp/mclone-rd7-baseline.pftrace`, but this shell does not currently have
-  `trace_processor`/`trace_processor_shell` available. The trace should still
-  be opened in Perfetto UI or queried once tooling is installed.
+- Perfetto frame markers. Trace processor is installed and usable, but the app
+  still does not emit per-frame trace slices that can align `android_main`
+  scheduler state directly to an app frame index.
 
 Validation:
 
@@ -81,11 +81,9 @@ Interpretation:
   counters: average CPU utilization fell from 71.9% baseline to 63.1%/66.4%
   post-change. Treat that as supporting context, not a primary result.
 
-Current next step: implement E8 coherent worst-frame snapshots first, then
-re-run E3 budget lanes against this cleaner scheduling baseline. Without
-coherent worst-frame snapshots, the remaining 15-25 ms frames are still too
-hard to attribute because the existing summary reports per-field maxima, not a
-single-frame breakdown.
+Current next step: use the coherent worst-frame snapshots to split the
+remaining large terrain eye-encode spans. The latest snapshots show that the
+old submit/ready/publish tails are no longer the top problem.
 
 ## 2026-07-02 Follow-Up: Trace Processor And Worst-Frame Logging
 
@@ -209,6 +207,94 @@ Interpretation after E8 + post-fix trace:
   large CPU peers in the post-fix trace, future "worker niceness" or
   backpressure work should include local server/worldgen/light-store threads,
   not only render compile workers.
+
+## 2026-07-02 Follow-Up: Locomotion And Budget Attribution
+
+Implementation:
+
+- Added `XrLocomotionTiming` in `mclone-xr-scene` and threaded it through the
+  Android XR perf loop.
+- New fields split the broad `locomotion_ms` bucket into input/setup,
+  camera-apply, camera/player-pose commit, pose command send, position-update
+  drain, interest-center update, and gameplay interaction.
+- Worst-frame logs now also include
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_BUDGET`, which derives a coherent
+  per-frame split between known render-frame work, unattributed render time,
+  terrain work before the final poll wait, final terrain poll wait, eye CPU
+  work, and eye poll wait.
+
+Validation:
+
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+  passed.
+- `pnpm native:android-xr:perf:orbit:rd7:metrics` passed and wrote
+  `/tmp/mclone-quest-openxr-perf-orbit-rd7-metrics.txt`.
+- The apples-to-apples budgeted lane passed:
+  `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --skip-build --skip-assets --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --perf-summary /tmp/mclone-quest-openxr-perf-orbit-rd7-attribution-2-16-64.txt --log /tmp/mclone-quest-openxr-perf-orbit-rd7-attribution-2-16-64-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
+
+Measured results:
+
+| Run | Workers / budgets | Meta dropped frames | Frame avg / p95 / p99 / max (ms) | App work avg / p95 / max (ms) | App over period | Notable max buckets |
+| --- | --- | ---: | --- | --- | ---: | --- |
+| Stock RD7 orbit metrics | 1 / unbounded | 9 | 15.414 / 17.672 / 19.622 / 34.540 | 15.265 / 17.594 / 34.513 | 78.4% | `left_eye_encode=20.062`, `stereo_poll_wait=9.593`, `commit_server_command=5.994` |
+| RD7 orbit attribution | 2 / 16 / 64 / completed-accept 2 | 13 | 15.518 / 17.843 / 20.361 / 44.086 | 15.346 / 17.738 / 44.055 | 78.7% | `left_eye_encode=29.429`, `stereo_poll_wait=9.501`, `commit_server_command=5.586` |
+
+Budgeted-lane coherent worst-frame readout:
+
+- Rank 1 (`sample_frame=659`) was not a streaming submit or locomotion frame:
+  `frame_wall_ms=44.086`, `app_work_ms=44.055`,
+  `render_mclone_frame_ms=43.916`, `locomotion_ms=0.040`.
+  The terrain split was `terrain_before_poll_wait_ms=36.204` and
+  `terrain_poll_wait_ms=7.001`; eye CPU was `31.961 ms`.
+  The left eye alone reported `left_eye_ms=33.253` and
+  `left_encode_ms=29.429`, while runtime submit/sync/upload were zero in that
+  frame.
+- Rank 2 was the same shape at lower magnitude:
+  `frame_wall_ms=34.759`, `terrain_before_poll_wait_ms=26.454`,
+  `terrain_poll_wait_ms=7.788`, `left_encode_ms=19.778`, and no runtime
+  submit/sync/upload.
+- Ranks 3-5 are the streaming-transition shape. They combine
+  `locomotion_ms=4.459-5.595`, `terrain_poll_wait_ms=6.784-9.079`, and
+  runtime sync/upload/prepare work. The new locomotion split shows the
+  locomotion spike is almost entirely
+  `commit_server_command_ms=4.452-5.586`, not interest-center math
+  (`commit_interest_ms=0.001`) or camera application (`0.002`).
+- In rank 3, the budgeted pipeline submitted two compile requests:
+  `submitted_sections=32`, `request_target_sections_single=16`,
+  `request_snapshots=10`, `request_snapshot_sections=60`,
+  `request_payload_bytes=552416`, `dispatcher_pending_jobs=2`.
+  Even there, compiler handoff itself was small
+  (`compiler_ms=0.021`, `command_send_ms=0.019`).
+
+Interpretation:
+
+- The remaining RD7 problem is not one single bucket. There are at least two
+  distinct bad-frame families:
+  1. pure eye-encode frames where runtime streaming work is absent and one eye
+     spends 20-30 ms in CPU-side encode;
+  2. streaming-transition frames where runtime work is moderate, the final
+     poll wait is 7-9 ms, and the camera/player-pose command send can burn
+     ~5 ms.
+- The broad `locomotion_ms` suspicion is now narrowed: the expensive part is
+  `send_gameplay_command` during camera/player-pose commit. Interest update is
+  not the cause.
+- Meta performance metrics during both runs still report low app GPU time
+  (`2.923-3.533 ms`) and modest GPU utilization (`23.5-29.0%`). Treat
+  `stereo_poll_wait_ms` as a final submission/fence wait that may include
+  driver/runtime scheduling effects, not as proof that terrain shaders are
+  consuming 7-9 ms of GPU time.
+
+Next implementation target:
+
+- Split per-eye encode in the per-eye path the same way the multiview summary
+  already splits `sky`, `terrain`, `actor`, `screen_effect`, and
+  `world_overlay` work. The current `left_encode_ms` / `right_encode_ms`
+  number is too broad: `left_eye_section_encode_ms` is only ~1.8 ms in the
+  worst frame, so the missing 20-30 ms is outside section command encoding.
+- In parallel or immediately after, add a narrow timer around
+  `runtime.send_gameplay_command(report.command)` in the camera commit path so
+  we know whether the ~5 ms command-send tail is queue contention,
+  downstream server pressure, or another scheduling point.
 
 ## Central Thesis
 

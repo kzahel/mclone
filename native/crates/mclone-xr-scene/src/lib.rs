@@ -536,6 +536,24 @@ pub struct XrTerrainFrameTiming {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
+pub struct XrLocomotionTiming {
+    pub input_ms: f64,
+    pub camera_apply_ms: f64,
+    pub commit_ms: f64,
+    pub commit_server_command_ms: f64,
+    pub commit_position_updates_ms: f64,
+    pub commit_interest_ms: f64,
+    pub gameplay_interaction_ms: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct XrCameraCommitTiming {
+    server_command_ms: f64,
+    position_updates_ms: f64,
+    interest_ms: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
 pub struct XrTerrainEyeRenderTiming {
     pub prepare_ms: f64,
     pub cull_ms: f64,
@@ -2411,7 +2429,9 @@ where
         &mut self,
         controllers: &[XrControllerSnapshot],
         views: [xr::View; 2],
-    ) -> Result<()> {
+    ) -> Result<XrLocomotionTiming> {
+        let mut timing = XrLocomotionTiming::default();
+        let input_start = Instant::now();
         self.latest_controllers.clear();
         self.latest_controllers.extend_from_slice(controllers);
         let now = Instant::now();
@@ -2429,7 +2449,8 @@ where
         if self.runtime.is_none() {
             self.head_comfort.reset();
             self.snap_turn_state.reset();
-            return Ok(());
+            timing.input_ms = elapsed_ms(input_start.elapsed());
+            return Ok(timing);
         }
         let mut transform = self
             .reconcile_room_scale_body_to_headset(&views)
@@ -2438,9 +2459,16 @@ where
             .context("update XR head comfort fade state")?;
         if self.ui.is_active() {
             self.snap_turn_state.reset();
-            self.commit_engine_camera_player_pose()
+            timing.input_ms = elapsed_ms(input_start.elapsed());
+            let commit_start = Instant::now();
+            let (_, commit_timing) = self
+                .commit_engine_camera_player_pose_timed()
                 .context("sync XR room-scale player pose")?;
-            return Ok(());
+            timing.commit_ms = elapsed_ms(commit_start.elapsed());
+            timing.commit_server_command_ms = commit_timing.server_command_ms;
+            timing.commit_position_updates_ms = commit_timing.position_updates_ms;
+            timing.commit_interest_ms = commit_timing.interest_ms;
+            return Ok(timing);
         }
         if let Some(yaw_delta_radians) = self.snap_turn_delta_from_controllers(controllers) {
             transform = self
@@ -2458,25 +2486,39 @@ where
         );
         input.hand_push = xr_hand_push_input_from_controllers(controllers, &views, transform)
             .context("resolve XR hand-push input")?;
+        timing.input_ms = elapsed_ms(input_start.elapsed());
+        let camera_apply_start = Instant::now();
         let runtime = self.runtime.as_ref().expect("runtime presence checked");
         self.camera.apply_movement_input(runtime.client(), input);
+        timing.camera_apply_ms = elapsed_ms(camera_apply_start.elapsed());
         self.play_landing_events();
-        self.commit_engine_camera_player_pose()
+        let commit_start = Instant::now();
+        let (_, commit_timing) = self
+            .commit_engine_camera_player_pose_timed()
             .context("sync XR locomotion player pose")?;
+        timing.commit_ms = elapsed_ms(commit_start.elapsed());
+        timing.commit_server_command_ms = commit_timing.server_command_ms;
+        timing.commit_position_updates_ms = commit_timing.position_updates_ms;
+        timing.commit_interest_ms = commit_timing.interest_ms;
         if !suppress_gameplay_interaction {
+            let interaction_start = Instant::now();
             self.apply_xr_gameplay_interaction_edges(gameplay_interaction_edges)?;
+            timing.gameplay_interaction_ms = elapsed_ms(interaction_start.elapsed());
         }
-        Ok(())
+        Ok(timing)
     }
 
     pub fn apply_automated_flight_input(
         &mut self,
         views: [xr::View; 2],
         speed_blocks_per_second: f64,
-    ) -> Result<()> {
+    ) -> Result<XrLocomotionTiming> {
+        let mut timing = XrLocomotionTiming::default();
+        let input_start = Instant::now();
         self.latest_controllers.clear();
         if self.local_startup.is_some() || self.runtime.is_none() {
-            return Ok(());
+            timing.input_ms = elapsed_ms(input_start.elapsed());
+            return Ok(timing);
         }
         self.ui.close();
         self.ui.clear_input();
@@ -2501,21 +2543,33 @@ where
             .locomotion_movement_yaw_radians(&views)
             .context("resolve XR automated flight locomotion frame")?;
         let input = xr_automated_flight_input(dt_seconds, movement_yaw_radians);
+        timing.input_ms = elapsed_ms(input_start.elapsed());
+        let camera_apply_start = Instant::now();
         let runtime = self.runtime.as_ref().expect("runtime presence checked");
         self.camera.apply_movement_input(runtime.client(), input);
-        self.commit_engine_camera_player_pose()
+        timing.camera_apply_ms = elapsed_ms(camera_apply_start.elapsed());
+        let commit_start = Instant::now();
+        let (_, commit_timing) = self
+            .commit_engine_camera_player_pose_timed()
             .context("sync XR automated flight player pose")?;
-        Ok(())
+        timing.commit_ms = elapsed_ms(commit_start.elapsed());
+        timing.commit_server_command_ms = commit_timing.server_command_ms;
+        timing.commit_position_updates_ms = commit_timing.position_updates_ms;
+        timing.commit_interest_ms = commit_timing.interest_ms;
+        Ok(timing)
     }
 
     pub fn apply_automated_orbit_input(
         &mut self,
         speed_blocks_per_second: f64,
         elapsed_seconds: f64,
-    ) -> Result<()> {
+    ) -> Result<XrLocomotionTiming> {
+        let mut timing = XrLocomotionTiming::default();
+        let input_start = Instant::now();
         self.latest_controllers.clear();
         if self.local_startup.is_some() || self.runtime.is_none() {
-            return Ok(());
+            timing.input_ms = elapsed_ms(input_start.elapsed());
+            return Ok(timing);
         }
         self.ui.close();
         self.ui.clear_input();
@@ -2537,17 +2591,29 @@ where
         self.camera
             .set_speed_blocks_per_second(speed_blocks_per_second);
         let input = xr_automated_orbit_input(dt_seconds, speed_blocks_per_second, elapsed_seconds);
+        timing.input_ms = elapsed_ms(input_start.elapsed());
+        let camera_apply_start = Instant::now();
         let runtime = self.runtime.as_ref().expect("runtime presence checked");
         self.camera.apply_movement_input(runtime.client(), input);
-        self.commit_engine_camera_player_pose()
+        timing.camera_apply_ms = elapsed_ms(camera_apply_start.elapsed());
+        let commit_start = Instant::now();
+        let (_, commit_timing) = self
+            .commit_engine_camera_player_pose_timed()
             .context("sync XR automated orbit player pose")?;
-        Ok(())
+        timing.commit_ms = elapsed_ms(commit_start.elapsed());
+        timing.commit_server_command_ms = commit_timing.server_command_ms;
+        timing.commit_position_updates_ms = commit_timing.position_updates_ms;
+        timing.commit_interest_ms = commit_timing.interest_ms;
+        Ok(timing)
     }
 
-    pub fn apply_automated_stationary_input(&mut self) {
+    pub fn apply_automated_stationary_input(&mut self) -> XrLocomotionTiming {
+        let mut timing = XrLocomotionTiming::default();
+        let input_start = Instant::now();
         self.latest_controllers.clear();
         if self.local_startup.is_some() || self.runtime.is_none() {
-            return;
+            timing.input_ms = elapsed_ms(input_start.elapsed());
+            return timing;
         }
         if self.scene.debug_ui_screen.is_none() {
             self.ui.close();
@@ -2562,6 +2628,8 @@ where
         self.head_comfort.reset();
         self.snap_turn_state.reset();
         self.last_locomotion_update = Some(Instant::now());
+        timing.input_ms = elapsed_ms(input_start.elapsed());
+        timing
     }
 
     pub fn frame_summary(&self) -> XrTerrainFrameSummary {
@@ -3634,11 +3702,11 @@ where
             .poll()
     }
 
-    fn commit_engine_camera_player_pose(&mut self) -> Result<bool> {
+    fn commit_engine_camera_player_pose_timed(&mut self) -> Result<(bool, XrCameraCommitTiming)> {
         let Some(runtime) = self.runtime.as_mut() else {
-            return Ok(false);
+            return Ok((false, XrCameraCommitTiming::default()));
         };
-        commit_engine_camera_player_pose_for_runtime(
+        commit_engine_camera_player_pose_for_runtime_timed(
             runtime,
             &mut self.camera,
             "sync XR terrain player pose",
@@ -4845,19 +4913,35 @@ fn commit_engine_camera_player_pose_for_runtime<S>(
 where
     S: RemoteDedicatedServerSession,
 {
-    let server_changed =
-        sync_engine_camera_player_pose_for_runtime(runtime, camera).context(context)?;
-    let interest_changed = update_interest_from_engine_camera_for_runtime(runtime, camera)?;
-    Ok(server_changed || interest_changed)
+    commit_engine_camera_player_pose_for_runtime_timed(runtime, camera, context)
+        .map(|(changed, _)| changed)
 }
 
-fn sync_engine_camera_player_pose_for_runtime<S>(
+fn commit_engine_camera_player_pose_for_runtime_timed<S>(
     runtime: &mut NativeSingleViewSessionRuntime<S>,
     camera: &mut EngineCameraController,
-) -> Result<bool>
+    context: &'static str,
+) -> Result<(bool, XrCameraCommitTiming)>
 where
     S: RemoteDedicatedServerSession,
 {
+    let (server_changed, mut timing) =
+        sync_engine_camera_player_pose_for_runtime_timed(runtime, camera).context(context)?;
+    let interest_start = Instant::now();
+    let interest_changed = update_interest_from_engine_camera_for_runtime(runtime, camera)?;
+    timing.interest_ms = elapsed_ms(interest_start.elapsed());
+    Ok((server_changed || interest_changed, timing))
+}
+
+fn sync_engine_camera_player_pose_for_runtime_timed<S>(
+    runtime: &mut NativeSingleViewSessionRuntime<S>,
+    camera: &mut EngineCameraController,
+) -> Result<(bool, XrCameraCommitTiming)>
+where
+    S: RemoteDedicatedServerSession,
+{
+    let mut timing = XrCameraCommitTiming::default();
+    let command_start = Instant::now();
     let changed = if let Some(report) = camera.next_pose_sync_command() {
         runtime
             .send_gameplay_command(report.command)
@@ -4865,7 +4949,12 @@ where
     } else {
         false
     };
-    Ok(changed || apply_pending_engine_camera_position_updates_for_runtime(runtime, camera)?)
+    timing.server_command_ms = elapsed_ms(command_start.elapsed());
+    let position_updates_start = Instant::now();
+    let position_updates_changed =
+        apply_pending_engine_camera_position_updates_for_runtime(runtime, camera)?;
+    timing.position_updates_ms = elapsed_ms(position_updates_start.elapsed());
+    Ok((changed || position_updates_changed, timing))
 }
 
 fn apply_pending_engine_camera_position_updates_for_runtime<S>(
