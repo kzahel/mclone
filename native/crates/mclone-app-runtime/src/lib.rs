@@ -71,6 +71,18 @@ pub struct RenderSectionSyncTiming {
     pub submit_compiler_capacity_check_worst_ms: f64,
     pub submit_compiler_command_send_ms: f64,
     pub submit_compiler_command_send_worst_ms: f64,
+    pub submit_compiler_command_lock_wait_ms: f64,
+    pub submit_compiler_command_lock_wait_worst_ms: f64,
+    pub submit_compiler_command_slot_select_ms: f64,
+    pub submit_compiler_command_slot_select_worst_ms: f64,
+    pub submit_compiler_command_slot_write_ms: f64,
+    pub submit_compiler_command_slot_write_worst_ms: f64,
+    pub submit_compiler_command_queue_push_ms: f64,
+    pub submit_compiler_command_queue_push_worst_ms: f64,
+    pub submit_compiler_command_notify_ms: f64,
+    pub submit_compiler_command_notify_worst_ms: f64,
+    pub submit_compiler_command_post_enqueue_ms: f64,
+    pub submit_compiler_command_post_enqueue_worst_ms: f64,
     pub submit_compiler_pending_mark_ms: f64,
     pub submit_compiler_pending_mark_worst_ms: f64,
     pub submit_mark_inflight_ms: f64,
@@ -125,6 +137,30 @@ impl RenderSectionSyncTiming {
         self.submit_compiler_command_send_worst_ms = self
             .submit_compiler_command_send_worst_ms
             .max(timing.command_send_ms);
+        self.submit_compiler_command_lock_wait_ms += timing.command_lock_wait_ms;
+        self.submit_compiler_command_lock_wait_worst_ms = self
+            .submit_compiler_command_lock_wait_worst_ms
+            .max(timing.command_lock_wait_ms);
+        self.submit_compiler_command_slot_select_ms += timing.command_slot_select_ms;
+        self.submit_compiler_command_slot_select_worst_ms = self
+            .submit_compiler_command_slot_select_worst_ms
+            .max(timing.command_slot_select_ms);
+        self.submit_compiler_command_slot_write_ms += timing.command_slot_write_ms;
+        self.submit_compiler_command_slot_write_worst_ms = self
+            .submit_compiler_command_slot_write_worst_ms
+            .max(timing.command_slot_write_ms);
+        self.submit_compiler_command_queue_push_ms += timing.command_queue_push_ms;
+        self.submit_compiler_command_queue_push_worst_ms = self
+            .submit_compiler_command_queue_push_worst_ms
+            .max(timing.command_queue_push_ms);
+        self.submit_compiler_command_notify_ms += timing.command_notify_ms;
+        self.submit_compiler_command_notify_worst_ms = self
+            .submit_compiler_command_notify_worst_ms
+            .max(timing.command_notify_ms);
+        self.submit_compiler_command_post_enqueue_ms += timing.command_post_enqueue_ms;
+        self.submit_compiler_command_post_enqueue_worst_ms = self
+            .submit_compiler_command_post_enqueue_worst_ms
+            .max(timing.command_post_enqueue_ms);
         self.submit_compiler_pending_mark_ms += timing.pending_mark_ms;
         self.submit_compiler_pending_mark_worst_ms = self
             .submit_compiler_pending_mark_worst_ms
@@ -176,6 +212,31 @@ impl RenderSectionSyncTiming {
         self.submit_compiler_command_send_worst_ms = self
             .submit_compiler_command_send_worst_ms
             .max(other.submit_compiler_command_send_worst_ms);
+        self.submit_compiler_command_lock_wait_ms += other.submit_compiler_command_lock_wait_ms;
+        self.submit_compiler_command_lock_wait_worst_ms = self
+            .submit_compiler_command_lock_wait_worst_ms
+            .max(other.submit_compiler_command_lock_wait_worst_ms);
+        self.submit_compiler_command_slot_select_ms += other.submit_compiler_command_slot_select_ms;
+        self.submit_compiler_command_slot_select_worst_ms = self
+            .submit_compiler_command_slot_select_worst_ms
+            .max(other.submit_compiler_command_slot_select_worst_ms);
+        self.submit_compiler_command_slot_write_ms += other.submit_compiler_command_slot_write_ms;
+        self.submit_compiler_command_slot_write_worst_ms = self
+            .submit_compiler_command_slot_write_worst_ms
+            .max(other.submit_compiler_command_slot_write_worst_ms);
+        self.submit_compiler_command_queue_push_ms += other.submit_compiler_command_queue_push_ms;
+        self.submit_compiler_command_queue_push_worst_ms = self
+            .submit_compiler_command_queue_push_worst_ms
+            .max(other.submit_compiler_command_queue_push_worst_ms);
+        self.submit_compiler_command_notify_ms += other.submit_compiler_command_notify_ms;
+        self.submit_compiler_command_notify_worst_ms = self
+            .submit_compiler_command_notify_worst_ms
+            .max(other.submit_compiler_command_notify_worst_ms);
+        self.submit_compiler_command_post_enqueue_ms +=
+            other.submit_compiler_command_post_enqueue_ms;
+        self.submit_compiler_command_post_enqueue_worst_ms = self
+            .submit_compiler_command_post_enqueue_worst_ms
+            .max(other.submit_compiler_command_post_enqueue_worst_ms);
         self.submit_compiler_pending_mark_ms += other.submit_compiler_pending_mark_ms;
         self.submit_compiler_pending_mark_worst_ms = self
             .submit_compiler_pending_mark_worst_ms

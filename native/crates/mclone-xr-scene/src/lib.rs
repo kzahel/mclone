@@ -448,6 +448,18 @@ pub struct XrTerrainFrameTiming {
     pub runtime_submit_compiler_capacity_check_worst_ms: f64,
     pub runtime_submit_compiler_command_send_ms: f64,
     pub runtime_submit_compiler_command_send_worst_ms: f64,
+    pub runtime_submit_compiler_command_lock_wait_ms: f64,
+    pub runtime_submit_compiler_command_lock_wait_worst_ms: f64,
+    pub runtime_submit_compiler_command_slot_select_ms: f64,
+    pub runtime_submit_compiler_command_slot_select_worst_ms: f64,
+    pub runtime_submit_compiler_command_slot_write_ms: f64,
+    pub runtime_submit_compiler_command_slot_write_worst_ms: f64,
+    pub runtime_submit_compiler_command_queue_push_ms: f64,
+    pub runtime_submit_compiler_command_queue_push_worst_ms: f64,
+    pub runtime_submit_compiler_command_notify_ms: f64,
+    pub runtime_submit_compiler_command_notify_worst_ms: f64,
+    pub runtime_submit_compiler_command_post_enqueue_ms: f64,
+    pub runtime_submit_compiler_command_post_enqueue_worst_ms: f64,
     pub runtime_submit_compiler_pending_mark_ms: f64,
     pub runtime_submit_compiler_pending_mark_worst_ms: f64,
     pub runtime_submit_mark_inflight_ms: f64,
@@ -2830,6 +2842,42 @@ where
         timing.runtime_submit_compiler_command_send_worst_ms = timed_section_update
             .timing
             .submit_compiler_command_send_worst_ms;
+        timing.runtime_submit_compiler_command_lock_wait_ms = timed_section_update
+            .timing
+            .submit_compiler_command_lock_wait_ms;
+        timing.runtime_submit_compiler_command_lock_wait_worst_ms = timed_section_update
+            .timing
+            .submit_compiler_command_lock_wait_worst_ms;
+        timing.runtime_submit_compiler_command_slot_select_ms = timed_section_update
+            .timing
+            .submit_compiler_command_slot_select_ms;
+        timing.runtime_submit_compiler_command_slot_select_worst_ms = timed_section_update
+            .timing
+            .submit_compiler_command_slot_select_worst_ms;
+        timing.runtime_submit_compiler_command_slot_write_ms = timed_section_update
+            .timing
+            .submit_compiler_command_slot_write_ms;
+        timing.runtime_submit_compiler_command_slot_write_worst_ms = timed_section_update
+            .timing
+            .submit_compiler_command_slot_write_worst_ms;
+        timing.runtime_submit_compiler_command_queue_push_ms = timed_section_update
+            .timing
+            .submit_compiler_command_queue_push_ms;
+        timing.runtime_submit_compiler_command_queue_push_worst_ms = timed_section_update
+            .timing
+            .submit_compiler_command_queue_push_worst_ms;
+        timing.runtime_submit_compiler_command_notify_ms = timed_section_update
+            .timing
+            .submit_compiler_command_notify_ms;
+        timing.runtime_submit_compiler_command_notify_worst_ms = timed_section_update
+            .timing
+            .submit_compiler_command_notify_worst_ms;
+        timing.runtime_submit_compiler_command_post_enqueue_ms = timed_section_update
+            .timing
+            .submit_compiler_command_post_enqueue_ms;
+        timing.runtime_submit_compiler_command_post_enqueue_worst_ms = timed_section_update
+            .timing
+            .submit_compiler_command_post_enqueue_worst_ms;
         timing.runtime_submit_compiler_pending_mark_ms =
             timed_section_update.timing.submit_compiler_pending_mark_ms;
         timing.runtime_submit_compiler_pending_mark_worst_ms = timed_section_update

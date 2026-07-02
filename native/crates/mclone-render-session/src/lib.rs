@@ -3586,6 +3586,12 @@ impl<T> RenderSectionCompileDispatcher for T where T: RenderSectionCompiler {}
 pub struct RenderSectionCompileSubmitTiming {
     pub capacity_check_ms: f64,
     pub command_send_ms: f64,
+    pub command_lock_wait_ms: f64,
+    pub command_slot_select_ms: f64,
+    pub command_slot_write_ms: f64,
+    pub command_queue_push_ms: f64,
+    pub command_notify_ms: f64,
+    pub command_post_enqueue_ms: f64,
     pub pending_mark_ms: f64,
 }
 

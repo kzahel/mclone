@@ -89,6 +89,25 @@ struct RenderSectionCompileQueueState {
     shutdown: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct RenderSectionCompileQueueEnqueueTiming {
+    lock_wait_ms: f64,
+    slot_select_ms: f64,
+    slot_write_ms: f64,
+    queue_push_ms: f64,
+    notify_ms: f64,
+}
+
+impl RenderSectionCompileQueueEnqueueTiming {
+    fn measured_ms(self) -> f64 {
+        self.lock_wait_ms
+            + self.slot_select_ms
+            + self.slot_write_ms
+            + self.queue_push_ms
+            + self.notify_ms
+    }
+}
+
 impl RenderSectionCompileQueue {
     fn new(slot_count: usize) -> Self {
         Self {
@@ -101,21 +120,45 @@ impl RenderSectionCompileQueue {
         }
     }
 
-    fn enqueue(&self, request: RenderSectionCompileRequest) -> Result<()> {
+    fn enqueue(
+        &self,
+        request: RenderSectionCompileRequest,
+    ) -> Result<RenderSectionCompileQueueEnqueueTiming> {
+        let lock_start = Instant::now();
         let mut state = self
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("render section compile queue lock poisoned"))?;
+        let lock_wait_ms = elapsed_ms(lock_start.elapsed());
         if state.shutdown {
             bail!("render section compile queue is shutting down");
         }
+
+        let slot_select_start = Instant::now();
         let Some(slot_index) = state.request_slots.iter().position(Option::is_none) else {
             bail!("render section compile queue has no free request slots");
         };
+        let slot_select_ms = elapsed_ms(slot_select_start.elapsed());
+
+        let slot_write_start = Instant::now();
         state.request_slots[slot_index] = Some(request);
+        let slot_write_ms = elapsed_ms(slot_write_start.elapsed());
+
+        let queue_push_start = Instant::now();
         state.queued_slots.push_back(slot_index);
+        let queue_push_ms = elapsed_ms(queue_push_start.elapsed());
+
+        let notify_start = Instant::now();
         self.work_available.notify_one();
-        Ok(())
+        let notify_ms = elapsed_ms(notify_start.elapsed());
+
+        Ok(RenderSectionCompileQueueEnqueueTiming {
+            lock_wait_ms,
+            slot_select_ms,
+            slot_write_ms,
+            queue_push_ms,
+            notify_ms,
+        })
     }
 
     fn take_next(&self) -> Option<RenderSectionCompileRequest> {
@@ -304,10 +347,12 @@ impl RenderSectionCompiler for RenderSectionCompileWorker {
         let capacity_check_ms = elapsed_ms(capacity_start.elapsed());
 
         let send_start = Instant::now();
-        self.queue
+        let enqueue_timing = self
+            .queue
             .enqueue(request)
             .context("failed to submit render section compile task")?;
         let command_send_ms = elapsed_ms(send_start.elapsed());
+        let command_post_enqueue_ms = (command_send_ms - enqueue_timing.measured_ms()).max(0.0);
 
         let pending_start = Instant::now();
         self.pending_jobs += 1;
@@ -316,6 +361,12 @@ impl RenderSectionCompiler for RenderSectionCompileWorker {
         Ok(RenderSectionCompileSubmitTiming {
             capacity_check_ms,
             command_send_ms,
+            command_lock_wait_ms: enqueue_timing.lock_wait_ms,
+            command_slot_select_ms: enqueue_timing.slot_select_ms,
+            command_slot_write_ms: enqueue_timing.slot_write_ms,
+            command_queue_push_ms: enqueue_timing.queue_push_ms,
+            command_notify_ms: enqueue_timing.notify_ms,
+            command_post_enqueue_ms,
             pending_mark_ms,
         })
     }

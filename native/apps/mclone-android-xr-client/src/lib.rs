@@ -3218,6 +3218,18 @@ mod android {
         terrain_runtime_submit_compiler_capacity_check_worst_ms: f64,
         terrain_runtime_submit_compiler_command_send_ms: f64,
         terrain_runtime_submit_compiler_command_send_worst_ms: f64,
+        terrain_runtime_submit_compiler_command_lock_wait_ms: f64,
+        terrain_runtime_submit_compiler_command_lock_wait_worst_ms: f64,
+        terrain_runtime_submit_compiler_command_slot_select_ms: f64,
+        terrain_runtime_submit_compiler_command_slot_select_worst_ms: f64,
+        terrain_runtime_submit_compiler_command_slot_write_ms: f64,
+        terrain_runtime_submit_compiler_command_slot_write_worst_ms: f64,
+        terrain_runtime_submit_compiler_command_queue_push_ms: f64,
+        terrain_runtime_submit_compiler_command_queue_push_worst_ms: f64,
+        terrain_runtime_submit_compiler_command_notify_ms: f64,
+        terrain_runtime_submit_compiler_command_notify_worst_ms: f64,
+        terrain_runtime_submit_compiler_command_post_enqueue_ms: f64,
+        terrain_runtime_submit_compiler_command_post_enqueue_worst_ms: f64,
         terrain_runtime_submit_compiler_pending_mark_ms: f64,
         terrain_runtime_submit_compiler_pending_mark_worst_ms: f64,
         terrain_runtime_submit_mark_inflight_ms: f64,
@@ -3935,6 +3947,33 @@ mod android {
                     .terrain_runtime_submit_request_estimated_payload_bytes_worst
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_TERRAIN_ENQUEUE_MAX max_lock_wait_ms={:.3} max_lock_wait_single_ms={:.3} max_slot_select_ms={:.3} max_slot_select_single_ms={:.3} max_slot_write_ms={:.3} max_slot_write_single_ms={:.3} max_queue_push_ms={:.3} max_queue_push_single_ms={:.3} max_notify_ms={:.3} max_notify_single_ms={:.3} max_post_enqueue_ms={:.3} max_post_enqueue_single_ms={:.3}",
+                self.max_render
+                    .terrain_runtime_submit_compiler_command_lock_wait_ms,
+                self.max_render
+                    .terrain_runtime_submit_compiler_command_lock_wait_worst_ms,
+                self.max_render
+                    .terrain_runtime_submit_compiler_command_slot_select_ms,
+                self.max_render
+                    .terrain_runtime_submit_compiler_command_slot_select_worst_ms,
+                self.max_render
+                    .terrain_runtime_submit_compiler_command_slot_write_ms,
+                self.max_render
+                    .terrain_runtime_submit_compiler_command_slot_write_worst_ms,
+                self.max_render
+                    .terrain_runtime_submit_compiler_command_queue_push_ms,
+                self.max_render
+                    .terrain_runtime_submit_compiler_command_queue_push_worst_ms,
+                self.max_render
+                    .terrain_runtime_submit_compiler_command_notify_ms,
+                self.max_render
+                    .terrain_runtime_submit_compiler_command_notify_worst_ms,
+                self.max_render
+                    .terrain_runtime_submit_compiler_command_post_enqueue_ms,
+                self.max_render
+                    .terrain_runtime_submit_compiler_command_post_enqueue_worst_ms
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_TERRAIN_DISPATCHER_MAX pending_jobs={} max_pending_jobs={} available_slots={} queued_compile_tasks={}",
                 self.max_render.terrain_runtime_dispatcher_pending_jobs,
                 self.max_render.terrain_runtime_dispatcher_max_pending_jobs,
@@ -4205,6 +4244,42 @@ mod android {
             terrain_runtime_submit_compiler_command_send_worst_ms: a
                 .terrain_runtime_submit_compiler_command_send_worst_ms
                 .max(b.terrain_runtime_submit_compiler_command_send_worst_ms),
+            terrain_runtime_submit_compiler_command_lock_wait_ms: a
+                .terrain_runtime_submit_compiler_command_lock_wait_ms
+                .max(b.terrain_runtime_submit_compiler_command_lock_wait_ms),
+            terrain_runtime_submit_compiler_command_lock_wait_worst_ms: a
+                .terrain_runtime_submit_compiler_command_lock_wait_worst_ms
+                .max(b.terrain_runtime_submit_compiler_command_lock_wait_worst_ms),
+            terrain_runtime_submit_compiler_command_slot_select_ms: a
+                .terrain_runtime_submit_compiler_command_slot_select_ms
+                .max(b.terrain_runtime_submit_compiler_command_slot_select_ms),
+            terrain_runtime_submit_compiler_command_slot_select_worst_ms: a
+                .terrain_runtime_submit_compiler_command_slot_select_worst_ms
+                .max(b.terrain_runtime_submit_compiler_command_slot_select_worst_ms),
+            terrain_runtime_submit_compiler_command_slot_write_ms: a
+                .terrain_runtime_submit_compiler_command_slot_write_ms
+                .max(b.terrain_runtime_submit_compiler_command_slot_write_ms),
+            terrain_runtime_submit_compiler_command_slot_write_worst_ms: a
+                .terrain_runtime_submit_compiler_command_slot_write_worst_ms
+                .max(b.terrain_runtime_submit_compiler_command_slot_write_worst_ms),
+            terrain_runtime_submit_compiler_command_queue_push_ms: a
+                .terrain_runtime_submit_compiler_command_queue_push_ms
+                .max(b.terrain_runtime_submit_compiler_command_queue_push_ms),
+            terrain_runtime_submit_compiler_command_queue_push_worst_ms: a
+                .terrain_runtime_submit_compiler_command_queue_push_worst_ms
+                .max(b.terrain_runtime_submit_compiler_command_queue_push_worst_ms),
+            terrain_runtime_submit_compiler_command_notify_ms: a
+                .terrain_runtime_submit_compiler_command_notify_ms
+                .max(b.terrain_runtime_submit_compiler_command_notify_ms),
+            terrain_runtime_submit_compiler_command_notify_worst_ms: a
+                .terrain_runtime_submit_compiler_command_notify_worst_ms
+                .max(b.terrain_runtime_submit_compiler_command_notify_worst_ms),
+            terrain_runtime_submit_compiler_command_post_enqueue_ms: a
+                .terrain_runtime_submit_compiler_command_post_enqueue_ms
+                .max(b.terrain_runtime_submit_compiler_command_post_enqueue_ms),
+            terrain_runtime_submit_compiler_command_post_enqueue_worst_ms: a
+                .terrain_runtime_submit_compiler_command_post_enqueue_worst_ms
+                .max(b.terrain_runtime_submit_compiler_command_post_enqueue_worst_ms),
             terrain_runtime_submit_compiler_pending_mark_ms: a
                 .terrain_runtime_submit_compiler_pending_mark_ms
                 .max(b.terrain_runtime_submit_compiler_pending_mark_ms),
@@ -4894,6 +4969,30 @@ mod android {
             scene_timing.runtime_submit_compiler_command_send_ms;
         timing.terrain_runtime_submit_compiler_command_send_worst_ms =
             scene_timing.runtime_submit_compiler_command_send_worst_ms;
+        timing.terrain_runtime_submit_compiler_command_lock_wait_ms =
+            scene_timing.runtime_submit_compiler_command_lock_wait_ms;
+        timing.terrain_runtime_submit_compiler_command_lock_wait_worst_ms =
+            scene_timing.runtime_submit_compiler_command_lock_wait_worst_ms;
+        timing.terrain_runtime_submit_compiler_command_slot_select_ms =
+            scene_timing.runtime_submit_compiler_command_slot_select_ms;
+        timing.terrain_runtime_submit_compiler_command_slot_select_worst_ms =
+            scene_timing.runtime_submit_compiler_command_slot_select_worst_ms;
+        timing.terrain_runtime_submit_compiler_command_slot_write_ms =
+            scene_timing.runtime_submit_compiler_command_slot_write_ms;
+        timing.terrain_runtime_submit_compiler_command_slot_write_worst_ms =
+            scene_timing.runtime_submit_compiler_command_slot_write_worst_ms;
+        timing.terrain_runtime_submit_compiler_command_queue_push_ms =
+            scene_timing.runtime_submit_compiler_command_queue_push_ms;
+        timing.terrain_runtime_submit_compiler_command_queue_push_worst_ms =
+            scene_timing.runtime_submit_compiler_command_queue_push_worst_ms;
+        timing.terrain_runtime_submit_compiler_command_notify_ms =
+            scene_timing.runtime_submit_compiler_command_notify_ms;
+        timing.terrain_runtime_submit_compiler_command_notify_worst_ms =
+            scene_timing.runtime_submit_compiler_command_notify_worst_ms;
+        timing.terrain_runtime_submit_compiler_command_post_enqueue_ms =
+            scene_timing.runtime_submit_compiler_command_post_enqueue_ms;
+        timing.terrain_runtime_submit_compiler_command_post_enqueue_worst_ms =
+            scene_timing.runtime_submit_compiler_command_post_enqueue_worst_ms;
         timing.terrain_runtime_submit_compiler_pending_mark_ms =
             scene_timing.runtime_submit_compiler_pending_mark_ms;
         timing.terrain_runtime_submit_compiler_pending_mark_worst_ms =

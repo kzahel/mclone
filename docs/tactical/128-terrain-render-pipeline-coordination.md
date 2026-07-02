@@ -134,8 +134,8 @@ parent must answer these questions before it lands:
 Defer tempting side quests unless the metrics point there. Greedy meshing,
 multiview, render scale, and draw-record maintenance are still relevant, but
 they should not displace the confirmed dispatcher/request-transport work unless
-the RD7 lane stops showing submit/command-send pressure and starts showing a
-different dominant tail.
+the render-distance-7 lane stops showing submit/command-send pressure and starts
+showing a different dominant tail.
 
 ## Related tacticals
 
@@ -687,7 +687,7 @@ extract first.
 
 ### Slice B: introduce the dispatcher boundary
 
-Status: implemented, host/web validated, and Quest RD7 measured.
+Status: implemented, host/web validated, and Quest render-distance-7 measured.
 
 The confirmed first owner boundary is a terrain compile dispatcher. This slice
 should make the ownership visible before it tries to remove every request clone.
@@ -708,7 +708,7 @@ Target shape:
   remains a temporary inline or worker-backed path.
 
 Success condition: the code now has an obvious owner corresponding to Java's
-`ChunkRenderDispatcher`, and the RD7 lane is no worse. A flat result is
+`ChunkRenderDispatcher`, and the render-distance-7 lane is no worse. A flat result is
 acceptable for this slice if it removes the direct render-frame-to-worker
 channel dependency and prepares the request-slot change.
 
@@ -762,7 +762,7 @@ Interpretation:
 
 ### Slice C: replace owned-request transport with dispatcher-owned slots
 
-Status: implemented and Quest RD7 measured.
+Status: implemented and Quest render-distance-7 measured.
 
 Once Slice B owns the dispatcher boundary, replace the generic owned-request
 handoff with explicit dispatcher-owned request slots or a preallocated request
@@ -777,7 +777,7 @@ Target shape:
 - failed admission leaves dirty/ready state intact for a later frame.
 
 Success condition: `command_send_single_ms` and `compiler_submit_single_ms`
-drop materially in the RD7 settled-orbit lane without increasing upload or
+drop materially in the render-distance-7 settled-orbit lane without increasing upload or
 encode tails enough to lose the gain.
 
 Rollback rule: if slot ownership becomes complex without reducing command-send
@@ -828,6 +828,50 @@ Interpretation:
   remains large, treat it as scheduler/preemption evidence and move to resident
   compile inputs or a worker-poll/mailbox model rather than more channel swaps.
 
+Follow-up instrumentation result:
+
+- Implemented July 2, 2026. `RenderSectionCompileSubmitTiming` now splits the
+  slot enqueue/wakeup bucket into lock wait, slot selection, slot write, queue
+  push, notify, and post-enqueue residual time. Android XR reports the split as
+  `MCLONE_ANDROID_XR_PERF_TERRAIN_ENQUEUE_MAX`.
+- Validation:
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-android-xr-client`
+  - `pnpm native:web:build`
+  - Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+    workers, 45 seconds.
+- Measurement:
+
+| Frame avg / p95 / p99 / max | Runtime submit split | Submit handoff split | Enqueue split |
+|---|---|---|---|
+| 15.636 / 18.455 / 26.422 / 43.314 ms | submit 18.523 ms; snapshot 0.944; handoff 18.058 | request count 2; compiler submit total 17.998; compiler submit single 17.983; slot enqueue/wakeup total 17.996; slot enqueue/wakeup single 17.981 | lock wait total/single 0.001/0.001 ms; slot select 0.002/0.001; slot write 0.000/0.000; queue push 0.001/0.001; notify 0.498/0.488; post-enqueue 17.958/17.958 |
+
+Interpretation:
+
+- The queue data-structure work is not the tail. Lock wait, slot scan, slot
+  write, and queue push are effectively zero at this scale.
+- `notify_one` itself can cost around half a millisecond in the worst sample, but
+  the frame-breaking tail is almost entirely the post-enqueue residual. In this
+  code shape that residual is the time after the worker notification bucket and
+  before the render frame regains control from `enqueue`: lock guard drop,
+  function return overhead, and, most importantly, any scheduler/preemption
+  caused by waking compile workers.
+- This supports the dispatcher/pacing thesis: the render frame should not be on
+  the hot side of worker wakeup behavior. Another generic queue replacement is
+  unlikely to be the right next move unless it explicitly changes wakeup
+  ownership.
+
+Next implementation implication:
+
+- First do the smallest wakeup hygiene experiment: release the queue mutex before
+  `notify_one` and measure the same render-distance-7 lane. This is the
+  idiomatic condvar shape and tests whether waking a worker while the render
+  frame still owns the mutex is amplifying scheduler contention.
+- If `post_enqueue_single_ms` remains multi-millisecond, move to a real wakeup
+  ownership change: a dispatcher pump or worker-poll/mailbox shape where the
+  render frame publishes bounded work and a non-render owner performs worker
+  notification.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -857,12 +901,12 @@ record maintenance.
 
 ## Open Questions
 
-1. How much of the command-send tail remains after dispatcher-owned request
-   slots remove the full owned request from the wakeup path?
+1. Can releasing the compile queue mutex before worker notification reduce the
+   post-enqueue tail, or is a dispatcher pump / worker-poll mailbox required?
 2. How often do deferred sections exceed thousands on stable render-distance-7
    movement, and how many are reprocessed per frame?
 3. Does slot-backed submit cost scale with snapshot payload size, target-section
-   count, revision count, or worker wakeup contention?
+   count, revision count, or only worker wakeup scheduling?
 4. Is upload apply dominated by section count, vertex/index bytes, GPU resource
    creation, or queue submission?
 5. Does local edit coherence require a true synchronous path, or can a
@@ -892,13 +936,11 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Split the remaining slot enqueue/wakeup tail before choosing the next
-structural rewrite. Slice C replaced `mpsc` request transport with
-dispatcher-owned request slots, but the submit tail remained in the same coarse
-bucket. The next commit should expose whether that time is lock wait, slot
-storage, queue push, worker notification, or render-thread preemption around the
-wakeup.
+Run the smallest wakeup-order experiment before a larger structural rewrite:
+drop the compile queue mutex before `notify_one`, then repeat the Quest
+render-distance-7 settled-orbit lane and compare `post_enqueue_single_ms`.
 
-Do not repeat a plain `std::sync::mpsc::sync_channel` swap; it was measured
-worse than the current unbounded channel. Do not add another queue shape until
-the slot enqueue sub-buckets say where the remaining tail actually lives.
+If the post-enqueue tail remains multi-millisecond, stop iterating on queue data
+structures and move wakeup ownership off the render frame with a dispatcher pump
+or worker-poll/mailbox design. Do not repeat a plain `std::sync::mpsc::sync_channel`
+swap; it was already measured worse than the current unbounded channel.
