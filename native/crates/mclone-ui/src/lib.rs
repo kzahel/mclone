@@ -1351,6 +1351,7 @@ impl DebugOverlay {
 pub struct FlatDebugOverlay {
     pub position: [f32; 3],
     pub chunk: [i32; 2],
+    pub seed: Option<i64>,
     pub speed: f32,
     pub movement_mode: String,
     pub on_ground: bool,
@@ -1381,6 +1382,7 @@ impl FlatDebugOverlay {
         Self {
             position,
             chunk,
+            seed: None,
             speed,
             movement_mode: movement_mode.into(),
             on_ground,
@@ -1410,13 +1412,18 @@ impl FlatDebugOverlay {
                 "CHUNK {} {} SPEED {:.1}",
                 self.chunk[0], self.chunk[1], self.speed
             ),
+        ];
+        if let Some(seed) = self.seed {
+            lines.push(format!("SEED {seed}"));
+        }
+        lines.extend([
             format!(
                 "MODE {} GROUND {}",
                 self.movement_mode,
                 if self.on_ground { "Y" } else { "N" }
             ),
             self.view.line(),
-        ];
+        ]);
         if let Some(runner) = &self.runner {
             lines.push(runner.line());
         }
@@ -4769,13 +4776,15 @@ mod tests {
             force_fullbright: false,
             color_profile: "VANILLA",
         });
+        overlay.seed = Some(12345);
 
         let lines = overlay.lines();
         assert_eq!(lines[0], "POS 1.2 64.0 -2.5");
         assert_eq!(lines[1], "CHUNK 3 -4 SPEED 32.0");
-        assert_eq!(lines[2], "MODE WALK GROUND Y");
-        assert_eq!(lines[3], "VIEW R2 CENTER 3 -4");
-        assert_eq!(lines[4], "RUN WEB-WORKER CQ1 UQ2");
+        assert_eq!(lines[2], "SEED 12345");
+        assert_eq!(lines[3], "MODE WALK GROUND Y");
+        assert_eq!(lines[4], "VIEW R2 CENTER 3 -4");
+        assert_eq!(lines[5], "RUN WEB-WORKER CQ1 UQ2");
         assert!(lines.iter().any(|line| line == "CHUNKS L9 V8"));
         assert!(lines.iter().any(|line| line == "DRAW S 10/16 F 120/200"));
         assert!(lines.iter().any(|line| line == "ACTOR R 1/2 I180"));

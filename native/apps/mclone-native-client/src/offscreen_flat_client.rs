@@ -443,6 +443,7 @@ impl OffscreenFlatClientHost {
             speed: self.driver.spectator.speed,
             movement_mode: self.driver.camera.movement_mode().label(),
             on_ground: self.driver.camera.on_ground(),
+            seed: self.driver.scene.seed,
             runtime: runtime.stats(),
             render: self.driver.render_stats,
             frame: self.driver.frame_timing,

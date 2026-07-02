@@ -18,6 +18,7 @@ pub(crate) struct DebugPaneStats {
     pub(crate) speed: f32,
     pub(crate) movement_mode: &'static str,
     pub(crate) on_ground: bool,
+    pub(crate) seed: i64,
     pub(crate) runtime: WindowRuntimeStats,
     pub(crate) render: RenderStreamStats,
     pub(crate) frame: FrameTimingStats,
@@ -64,6 +65,7 @@ impl DebugPaneStats {
                 self.runtime.chunk_tracking_radius as i32,
             ),
         );
+        overlay.seed = Some(self.seed);
         overlay.runner = Some(FlatDebugRunner::new(
             runner,
             self.runtime.server_command_queue_depth,
@@ -222,6 +224,7 @@ mod tests {
             speed: 32.0,
             movement_mode: "WALK",
             on_ground: true,
+            seed: 12345,
             runtime: WindowRuntimeStats {
                 server_runner_kind: Some(mclone_server::ServerRunnerKind::NativeThread),
                 server_command_queue_depth: 1,
@@ -308,10 +311,11 @@ mod tests {
         assert_eq!(lines[0], "DEBUG");
         assert_eq!(lines[1], "POS 1.2 64.0 -2.5");
         assert_eq!(lines[2], "CHUNK 3 -4 SPEED 32.0");
-        assert_eq!(lines[3], "MODE WALK GROUND Y");
-        assert_eq!(lines[4], "VIEW R2 T3");
-        assert_eq!(lines[5], "RUN NATIVE-THREAD CQ1 UQ2");
-        assert_eq!(lines[6], "CHUNKS L9 V8 P1");
+        assert_eq!(lines[3], "SEED 12345");
+        assert_eq!(lines[4], "MODE WALK GROUND Y");
+        assert_eq!(lines[5], "VIEW R2 T3");
+        assert_eq!(lines[6], "RUN NATIVE-THREAD CQ1 UQ2");
+        assert_eq!(lines[7], "CHUNKS L9 V8 P1");
         assert!(lines.iter().any(|line| line == "TRACK P1 V8 A8 Q0"));
         assert!(lines.iter().any(|line| line == "ACTOR R 1/2 I180"));
         assert!(

@@ -849,6 +849,7 @@ impl ChunkApp {
             speed: camera_state.camera.speed_blocks_per_second as f32,
             movement_mode: camera_state.movement_mode_label(),
             on_ground: camera_state.on_ground,
+            seed: self.driver.scene.seed,
             runtime: self
                 .driver
                 .runtime
