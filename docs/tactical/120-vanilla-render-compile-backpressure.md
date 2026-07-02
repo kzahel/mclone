@@ -378,9 +378,12 @@ Interpretation:
   this run: `apply_ready_plan` is still sub-millisecond even with 3552 deferred
   sections.
 - The next backpressure slice should focus on native compile dispatcher/request
-  transport: replace the unbounded `mpsc` command send with a bounded,
-  nonblocking/preallocated queue shape or enqueue a compact resident-worker
-  descriptor instead of an owned request payload.
+  transport. A direct swap from unbounded `mpsc::channel` to bounded
+  `mpsc::sync_channel` plus nonblocking `try_send` was tested and not retained:
+  command-send single worsened to `15.361 ms`, with frame avg / p95 / p99 / max
+  at `14.237 / 15.949 / 25.078 / 48.903 ms`. The next transport attempt needs
+  either a custom/preallocated dispatcher queue with explicit ownership, or a
+  compact resident-worker descriptor instead of an owned request payload.
 - In parallel, continue tracking upload-apply, ready publish, prepared-record
   rebuild, and per-eye terrain encode tails because they remain comparable to
   runtime submit in worst frames.

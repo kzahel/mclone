@@ -628,6 +628,11 @@ Interpretation:
   capacity check and render-thread pending-count mutation round to zero. The
   largest individual request in that max line targets 16 sections and carries
   about 306 KB of estimated owned payload.
+- A direct bounded-std-channel attempt was not retained. Swapping the command
+  channel to `mpsc::sync_channel(worker_count)` and using nonblocking `try_send`
+  kept behavior otherwise unchanged, but the same lane worsened the measured
+  command-send single tail to `15.361 ms` and frame avg / p95 / p99 / max to
+  `14.237 / 15.949 / 25.078 / 48.903 ms`.
 - This result changes the first extraction target from dirty/deferred set
   ownership to compiler dispatcher/request transport ownership. The set-moving
   model is still a likely architectural cleanup, but it is not the measured
@@ -727,10 +732,11 @@ making `RenderSectionCompileWorker::submit` more Java-dispatcher-like and less
 dependent on moving an owned request through `std::sync::mpsc` on the render
 frame. Good candidate slices:
 
-- replace the unbounded `mpsc` command channel with a bounded nonblocking
-  dispatcher queue or ring that has explicit capacity and queue-health counters,
-- measure the same RD7 settled-orbit lane to see whether command-send single
-  spikes disappear or move into upload/encode tails,
-- move toward resident worker-owned snapshot/request storage if the bounded
-  transport still pays too much to move owned request payloads from the render
+- do not repeat a plain `std::sync::mpsc::sync_channel` swap; it was measured
+  worse than the current unbounded channel in this lane,
+- introduce a custom/preallocated dispatcher queue or request-slot ring with
+  explicit render-thread ownership, queue-health counters, and nonblocking
+  admission,
+- move toward resident worker-owned snapshot/request storage if the custom
+  dispatcher still pays too much to move owned request payloads from the render
   frame.
