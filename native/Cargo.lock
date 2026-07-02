@@ -1434,6 +1434,9 @@ dependencies = [
 [[package]]
 name = "mclone-core"
 version = "0.0.0"
+dependencies = [
+ "sha2",
+]
 
 [[package]]
 name = "mclone-dedicated-server"
@@ -1472,7 +1475,6 @@ dependencies = [
  "mclone-core",
  "mclone-light",
  "serde_json",
- "sha2",
 ]
 
 [[package]]
@@ -1630,7 +1632,6 @@ dependencies = [
  "mclone-core",
  "serde",
  "serde_json",
- "sha2",
 ]
 
 [[package]]

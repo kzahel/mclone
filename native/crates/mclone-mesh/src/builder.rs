@@ -1,17 +1,5 @@
 use std::collections::BTreeSet;
 
-use mclone_assets::ModelFaceDirection;
-use mclone_core::{
-    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_WIDTH, DEFAULT_BIOME_ID, PackedLightSection,
-    SECTION_HEIGHT as RENDER_SECTION_HEIGHT, block_to_chunk_coord, block_to_section_coord,
-    chunk_block_index, chunk_min_block_coord, local_block_coord,
-};
-use mclone_light::{
-    FULL_BRIGHT, pack_light, packed_block_light, packed_light_at_local_block_or_fullbright,
-    packed_sky_light,
-};
-use sha2::{Digest, Sha256};
-
 use crate::ambient_occlusion::{
     AmbientOcclusionFace, AmbientOcclusionSampler, AmbientOcclusionShape, BlockPos,
     calculate_ambient_occlusion_face, calculate_ambient_occlusion_shape,
@@ -28,6 +16,16 @@ use crate::data::{
 use crate::tint::{blended_liquid_color, block_tint};
 use crate::visibility::{VisGraph, VisibilityGraphTimer, VisibilitySet};
 use crate::{AIR_BLOCK_ID, CAVE_AIR_BLOCK_ID, CAVE_AIR_BLOCK_STATE_ID};
+use mclone_assets::ModelFaceDirection;
+use mclone_core::{
+    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_WIDTH, DEFAULT_BIOME_ID, PackedLightSection,
+    SECTION_HEIGHT as RENDER_SECTION_HEIGHT, block_to_chunk_coord, block_to_section_coord,
+    chunk_block_index, chunk_min_block_coord, local_block_coord, obfuscate_biome_zoom_seed,
+};
+use mclone_light::{
+    FULL_BRIGHT, pack_light, packed_block_light, packed_light_at_local_block_or_fullbright,
+    packed_sky_light,
+};
 
 const LCG_MULTIPLIER: i64 = 6364136223846793005;
 const LCG_INCREMENT: i64 = 1442695040888963407;
@@ -1397,15 +1395,6 @@ fn biome_id_at_quart_or_default(
         .find(|input| input.chunk_x == chunk_x && input.chunk_z == chunk_z)
         .map(|input| input.biome_id_at_quart_or_default(local_quart_x, quart_y, local_quart_z))
         .unwrap_or(DEFAULT_BIOME_ID)
-}
-
-fn obfuscate_biome_zoom_seed(seed: i64) -> i64 {
-    let digest = Sha256::digest(seed.to_le_bytes());
-    i64::from_le_bytes(
-        digest[..8]
-            .try_into()
-            .expect("sha256 digest has at least eight bytes"),
-    )
 }
 
 fn fuzzy_offset_constant_column_biome_id(

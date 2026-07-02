@@ -58,7 +58,7 @@ use mclone_render_session::{
     RenderSectionCompileResult, RenderSectionCompiler, RenderSectionNeighborReadiness,
     RenderSectionRemovalMode, RenderSectionSyncPlan, RenderSectionViewSync,
     actor_instances_from_presentations, build_client_textured_sections,
-    build_render_sections_from_snapshots_with_world_seed,
+    build_render_sections_from_snapshots_with_biome_zoom_seed,
     decode_textured_render_section_build_report, encode_textured_render_section_build_report,
     render_section_chunk_pos, render_section_neighbor_readiness, snapshot_contains_render_section,
     summarize_textured_render_section_build_report,
@@ -102,7 +102,7 @@ const WEB_OVERVIEW_CAMERA_EYE_Y: f32 = 256.0;
 // followed by that many `[i32 x][i32 z]` chunk positions to drop from the mirror.
 const WEB_RENDER_COMPILE_DELTA_MAGIC: &[u8; 8] = b"MCWRCD1\0";
 const WEB_RENDER_COMPILE_DELTA_FLAG_RESET: u32 = 1;
-const WEB_RENDER_COMPILE_DELTA_FLAG_WORLD_SEED: u32 = 2;
+const WEB_RENDER_COMPILE_DELTA_FLAG_BIOME_ZOOM_SEED: u32 = 2;
 
 // 067 Stage 2 ABI / Stage 5 lock: resident render-compiler shared ring constants.
 // The worker writes the result control word + payload and main wasm reads them back
@@ -374,7 +374,7 @@ pub struct WebRenderCompilerSession {
     // The mirror epoch this session currently holds. A non-reset delta whose generation does
     // not match is a desync (e.g. a worker that silently lost its mirror) and is rejected.
     mirror_generation: u32,
-    world_seed: Option<i64>,
+    biome_zoom_seed: Option<i64>,
     last_delta_upsert_count: usize,
     last_delta_eviction_count: usize,
 }
@@ -393,7 +393,7 @@ impl WebRenderCompilerSession {
             compile_count: 0,
             snapshot_mirror: BTreeMap::new(),
             mirror_generation: 0,
-            world_seed: None,
+            biome_zoom_seed: None,
             last_delta_upsert_count: 0,
             last_delta_eviction_count: 0,
         })
@@ -489,7 +489,7 @@ impl WebRenderCompilerSession {
             &self.mesh_assets.catalog,
             &snapshots,
             &target_sections,
-            self.world_seed,
+            self.biome_zoom_seed,
         )
         .map_err(JsValue::from)?;
         let packed = encode_textured_render_section_build_report(&report);
@@ -535,7 +535,7 @@ impl WebRenderCompilerSession {
         }
         self.last_delta_upsert_count = delta.upserts.len();
         self.last_delta_eviction_count = delta.evictions.len();
-        self.world_seed = delta.world_seed;
+        self.biome_zoom_seed = delta.biome_zoom_seed;
         for pos in &delta.evictions {
             self.snapshot_mirror.remove(pos);
         }
@@ -711,11 +711,11 @@ fn compile_generated_chunk_sections_with_catalog(
             .chunk_snapshots()
             .cloned()
             .collect::<Vec<_>>();
-        build_render_sections_from_snapshots_with_world_seed(
+        build_render_sections_from_snapshots_with_biome_zoom_seed(
             &snapshots,
             catalog,
             target_sections,
-            Some(SMOKE_SEED),
+            runtime.client().biome_zoom_seed(),
         )
         .map_err(|error| format!("failed to compile targeted generated render sections: {error:#}"))
     } else {
@@ -729,13 +729,13 @@ fn compile_snapshot_chunk_sections_with_catalog<S: std::borrow::Borrow<ChunkSnap
     catalog: &TexturedMeshCatalog,
     snapshots: &[S],
     target_sections: &BTreeSet<RenderSectionKey>,
-    world_seed: Option<i64>,
+    biome_zoom_seed: Option<i64>,
 ) -> Result<mclone_mesh::TexturedRenderSectionBuildReport, String> {
-    build_render_sections_from_snapshots_with_world_seed(
+    build_render_sections_from_snapshots_with_biome_zoom_seed(
         snapshots,
         catalog,
         target_sections,
-        world_seed,
+        biome_zoom_seed,
     )
     .map_err(|error| format!("failed to compile snapshot render sections: {error:#}"))
 }
@@ -747,7 +747,7 @@ fn compile_snapshot_chunk_sections_with_catalog<S: std::borrow::Borrow<ChunkSnap
 struct WebRenderCompileDelta {
     generation: u32,
     reset: bool,
-    world_seed: Option<i64>,
+    biome_zoom_seed: Option<i64>,
     upserts: Vec<ChunkSnapshot>,
     evictions: Vec<ChunkPos>,
 }
@@ -755,7 +755,7 @@ struct WebRenderCompileDelta {
 fn encode_web_render_compile_delta(
     generation: u32,
     reset: bool,
-    world_seed: Option<i64>,
+    biome_zoom_seed: Option<i64>,
     upserts: &[ChunkSnapshot],
     evictions: &[ChunkPos],
 ) -> Result<Vec<u8>, String> {
@@ -767,11 +767,11 @@ fn encode_web_render_compile_delta(
     } else {
         0
     };
-    if world_seed.is_some() {
-        flags |= WEB_RENDER_COMPILE_DELTA_FLAG_WORLD_SEED;
+    if biome_zoom_seed.is_some() {
+        flags |= WEB_RENDER_COMPILE_DELTA_FLAG_BIOME_ZOOM_SEED;
     }
     bytes.extend_from_slice(&flags.to_le_bytes());
-    if let Some(seed) = world_seed {
+    if let Some(seed) = biome_zoom_seed {
         bytes.extend_from_slice(&seed.to_le_bytes());
     }
     write_web_compile_input_u32(&mut bytes, upserts.len(), "delta upsert count")?;
@@ -804,8 +804,8 @@ fn decode_web_render_compile_delta(bytes: &[u8]) -> Result<WebRenderCompileDelta
     let generation = reader.read_u32("delta generation")?;
     let flags = reader.read_u32("delta flags")?;
     let reset = flags & WEB_RENDER_COMPILE_DELTA_FLAG_RESET != 0;
-    let world_seed = if flags & WEB_RENDER_COMPILE_DELTA_FLAG_WORLD_SEED != 0 {
-        Some(reader.read_i64("delta world seed")?)
+    let biome_zoom_seed = if flags & WEB_RENDER_COMPILE_DELTA_FLAG_BIOME_ZOOM_SEED != 0 {
+        Some(reader.read_i64("delta biome zoom seed")?)
     } else {
         None
     };
@@ -836,7 +836,7 @@ fn decode_web_render_compile_delta(bytes: &[u8]) -> Result<WebRenderCompileDelta
     Ok(WebRenderCompileDelta {
         generation,
         reset,
-        world_seed,
+        biome_zoom_seed,
         upserts,
         evictions,
     })
@@ -2026,7 +2026,7 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
             target_sections,
             section_revisions,
             snapshots: upserts,
-            world_seed,
+            biome_zoom_seed,
         } = request;
 
         if staged_delta.reset {
@@ -2042,7 +2042,7 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
         let input_bytes = encode_web_render_compile_delta(
             staged_delta.generation,
             staged_delta.reset,
-            world_seed,
+            biome_zoom_seed,
             &upserts,
             &staged_delta.evictions,
         )
@@ -5415,7 +5415,7 @@ mod tests {
         let decoded = decode_web_render_compile_delta(&bytes).unwrap();
         assert_eq!(decoded.generation, 7);
         assert!(decoded.reset);
-        assert_eq!(decoded.world_seed, Some(1124));
+        assert_eq!(decoded.biome_zoom_seed, Some(1124));
         assert_eq!(decoded.upserts, upserts);
         assert_eq!(decoded.evictions, evictions);
 
@@ -5425,7 +5425,7 @@ mod tests {
         let decoded = decode_web_render_compile_delta(&incremental).unwrap();
         assert_eq!(decoded.generation, 8);
         assert!(!decoded.reset);
-        assert_eq!(decoded.world_seed, None);
+        assert_eq!(decoded.biome_zoom_seed, None);
         assert_eq!(decoded.upserts, upserts[..1]);
         assert!(decoded.evictions.is_empty());
 

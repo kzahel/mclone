@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 18;
+pub const PROTOCOL_VERSION: u32 = 19;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
@@ -44,6 +44,7 @@ const SERVER_UPDATE_REMOTE_PLAYER_REMOVE: u8 = 8;
 const SERVER_UPDATE_ENTITY_SNAPSHOT: u8 = 9;
 const SERVER_UPDATE_ENTITY_UPDATE: u8 = 10;
 const SERVER_UPDATE_ENTITY_REMOVE: u8 = 11;
+const SERVER_UPDATE_WORLD_INFO: u8 = 12;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkView {
@@ -189,6 +190,9 @@ pub enum InteractionHand {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServerUpdate {
+    WorldInfo {
+        biome_zoom_seed: i64,
+    },
     ChunkSnapshot(ChunkSnapshot),
     ChunkUnload {
         pos: ChunkPos,
@@ -510,6 +514,10 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
 pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8>> {
     let mut writer = ByteWriter::new();
     match update {
+        ServerUpdate::WorldInfo { biome_zoom_seed } => {
+            writer.write_u8(SERVER_UPDATE_WORLD_INFO);
+            writer.write_i64(*biome_zoom_seed);
+        }
         ServerUpdate::ChunkSnapshot(snapshot) => {
             writer.write_u8(SERVER_UPDATE_CHUNK_SNAPSHOT);
             writer.write_snapshot(snapshot)?;
@@ -582,6 +590,9 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
     let mut reader = ByteReader::new(bytes);
     let tag = reader.read_u8()?;
     let update = match tag {
+        SERVER_UPDATE_WORLD_INFO => ServerUpdate::WorldInfo {
+            biome_zoom_seed: reader.read_i64()?,
+        },
         SERVER_UPDATE_CHUNK_SNAPSHOT => ServerUpdate::ChunkSnapshot(reader.read_snapshot()?),
         SERVER_UPDATE_CHUNK_UNLOAD => ServerUpdate::ChunkUnload {
             pos: reader.read_chunk_pos()?,
@@ -777,6 +788,10 @@ impl ByteWriter {
     }
 
     fn write_i32(&mut self, value: i32) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_i64(&mut self, value: i64) {
         self.bytes.extend_from_slice(&value.to_le_bytes());
     }
 
@@ -1141,6 +1156,10 @@ impl<'a> ByteReader<'a> {
 
     fn read_i32(&mut self) -> ProtocolCodecResult<i32> {
         Ok(i32::from_le_bytes(self.read_exact::<4>()?))
+    }
+
+    fn read_i64(&mut self) -> ProtocolCodecResult<i64> {
+        Ok(i64::from_le_bytes(self.read_exact::<8>()?))
     }
 
     fn read_u32(&mut self) -> ProtocolCodecResult<u32> {
@@ -2062,6 +2081,17 @@ mod tests {
     #[test]
     fn server_update_codec_round_trips_time() {
         let update = ServerUpdate::TimeUpdate { day_time: 1_000 };
+
+        let bytes = encode_server_update(&update).unwrap();
+
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn server_update_codec_round_trips_world_info() {
+        let update = ServerUpdate::WorldInfo {
+            biome_zoom_seed: -1_234_567_890,
+        };
 
         let bytes = encode_server_update(&update).unwrap();
 

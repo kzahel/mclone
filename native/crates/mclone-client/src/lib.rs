@@ -21,6 +21,7 @@ mod block_shapes {
 
 use mclone_core::{
     BlockPos, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT, local_block_coord,
+    obfuscate_biome_zoom_seed,
 };
 use mclone_protocol::{
     ChunkView, ClientCommand, EntityId, EntitySnapshot, EntityUpdate, PlayerPositionUpdate,
@@ -62,7 +63,7 @@ pub enum ClientHost {
 #[derive(Clone, Debug)]
 pub struct ClientRuntime {
     host: ClientHost,
-    world_seed: Option<i64>,
+    biome_zoom_seed: Option<i64>,
     chunk_view: Option<ChunkView>,
     chunks: BTreeMap<ChunkPos, ChunkSnapshot>,
     day_time: u64,
@@ -76,7 +77,7 @@ impl ClientRuntime {
     pub fn new(host: ClientHost) -> Self {
         Self {
             host,
-            world_seed: None,
+            biome_zoom_seed: None,
             chunk_view: None,
             chunks: BTreeMap::new(),
             day_time: 0,
@@ -92,11 +93,11 @@ impl ClientRuntime {
     }
 
     pub fn local_integrated_with_seed(seed: i64) -> Self {
-        Self::new(ClientHost::LocalIntegrated).with_world_seed(seed)
+        Self::new(ClientHost::LocalIntegrated).with_biome_zoom_seed(obfuscate_biome_zoom_seed(seed))
     }
 
-    pub fn with_world_seed(mut self, seed: i64) -> Self {
-        self.world_seed = Some(seed);
+    pub fn with_biome_zoom_seed(mut self, seed: i64) -> Self {
+        self.biome_zoom_seed = Some(seed);
         self
     }
 
@@ -104,8 +105,8 @@ impl ClientRuntime {
         self.host
     }
 
-    pub const fn world_seed(&self) -> Option<i64> {
-        self.world_seed
+    pub const fn biome_zoom_seed(&self) -> Option<i64> {
+        self.biome_zoom_seed
     }
 
     pub fn set_chunk_view(&mut self, view: ChunkView) -> ClientCommand {
@@ -119,6 +120,9 @@ impl ClientRuntime {
 
     pub fn apply_update(&mut self, update: ServerUpdate) {
         match update {
+            ServerUpdate::WorldInfo { biome_zoom_seed } => {
+                self.biome_zoom_seed = Some(biome_zoom_seed);
+            }
             ServerUpdate::ChunkSnapshot(snapshot) => {
                 self.chunks.insert(snapshot.pos, snapshot);
             }
@@ -372,6 +376,28 @@ mod tests {
             ClientCommand::SetChunkView(view.clone())
         );
         assert_eq!(runtime.chunk_view(), Some(&view));
+    }
+
+    #[test]
+    fn client_runtime_tracks_biome_zoom_seed_from_world_info() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        assert_eq!(runtime.biome_zoom_seed(), None);
+
+        runtime.apply_update(ServerUpdate::WorldInfo {
+            biome_zoom_seed: -99,
+        });
+
+        assert_eq!(runtime.biome_zoom_seed(), Some(-99));
+    }
+
+    #[test]
+    fn local_integrated_client_derives_biome_zoom_seed_from_world_seed() {
+        let runtime = ClientRuntime::local_integrated_with_seed(1124);
+
+        assert_eq!(
+            runtime.biome_zoom_seed(),
+            Some(obfuscate_biome_zoom_seed(1124))
+        );
     }
 
     #[test]

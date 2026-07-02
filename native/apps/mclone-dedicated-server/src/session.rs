@@ -401,8 +401,10 @@ mod tests {
 
         assert!(has_snapshot(&updates_a, ChunkPos::new(0, 0)));
         assert!(!has_snapshot(&updates_a, ChunkPos::new(4, 0)));
+        assert!(has_world_info(&updates_a));
         assert!(has_snapshot(&updates_b, ChunkPos::new(4, 0)));
         assert!(!has_snapshot(&updates_b, ChunkPos::new(0, 0)));
+        assert!(has_world_info(&updates_b));
 
         let updates_a = session_a
             .handle_client_command(
@@ -450,16 +452,22 @@ mod tests {
         let mut stream = ScriptedStream::new(request);
         let mut server = IntegratedServer::new(DEFAULT_SEED);
 
-        assert_eq!(serve_connection(&mut stream, &mut server).unwrap(), 2);
+        assert_eq!(serve_connection(&mut stream, &mut server).unwrap(), 3);
 
         let written = stream.written();
         let mut response = std::io::Cursor::new(written);
         let first = read_server_update_batch(&mut response).unwrap();
         let second = read_server_update_batch(&mut response).unwrap();
-        assert!(matches!(
-            first.as_slice(),
-            [ServerUpdate::TimeUpdate { .. }]
-        ));
+        assert!(
+            first
+                .iter()
+                .any(|update| matches!(update, ServerUpdate::WorldInfo { .. }))
+        );
+        assert!(
+            first
+                .iter()
+                .any(|update| matches!(update, ServerUpdate::TimeUpdate { .. }))
+        );
         assert!(matches!(
             second.as_slice(),
             [ServerUpdate::TimeUpdate { .. }]
@@ -476,5 +484,11 @@ mod tests {
         updates
             .iter()
             .any(|update| matches!(update, ServerUpdate::ChunkUnload { pos: unloaded } if *unloaded == pos))
+    }
+
+    fn has_world_info(updates: &[ServerUpdate]) -> bool {
+        updates
+            .iter()
+            .any(|update| matches!(update, ServerUpdate::WorldInfo { .. }))
     }
 }

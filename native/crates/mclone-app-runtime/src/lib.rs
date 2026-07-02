@@ -1122,7 +1122,7 @@ impl SingleViewRuntime {
             .engine
             .render_session()
             .build_ready_plan_compile_request(&sync_plan.ready_plan, snapshots)
-            .map(|request| request.with_world_seed(self.client().world_seed()))
+            .map(|request| request.with_biome_zoom_seed(self.client().biome_zoom_seed()))
         else {
             timing.submit_request_build_ms += elapsed_ms(request_build_start.elapsed());
 

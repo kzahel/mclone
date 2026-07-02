@@ -7,7 +7,6 @@ publish.workspace = true
 
 [dependencies]
 mclone-core.workspace = true
-sha2 = "0.10"
 
 [dev-dependencies]
 serde.workspace = true

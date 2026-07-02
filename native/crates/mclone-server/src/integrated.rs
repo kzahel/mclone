@@ -7,7 +7,9 @@
 
 use std::time::Duration;
 
-use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, Vec3d};
+use mclone_core::{
+    AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, Vec3d, obfuscate_biome_zoom_seed,
+};
 #[cfg(feature = "physics-rapier")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
@@ -315,7 +317,10 @@ impl IntegratedServer {
 
     pub fn add_dedicated_player(&mut self) -> ServerPlayerId {
         let player_id = self.dedicated_players.add();
+        let world_info = self.world_info_update();
         self.chunk_tracking.add_player(player_id);
+        self.chunk_tracking
+            .queue_update_for_player(player_id, world_info);
         self.remote_players.add_player(player_id);
         player_id
     }
@@ -1391,6 +1396,12 @@ impl IntegratedServer {
         Ok(self.chunk_tracking.drain_updates(target.player_id()))
     }
 
+    fn world_info_update(&self) -> ServerUpdate {
+        ServerUpdate::WorldInfo {
+            biome_zoom_seed: obfuscate_biome_zoom_seed(self.seed),
+        }
+    }
+
     fn initial_spawn_update_for_target(
         &mut self,
         target: CommandTarget,
@@ -1712,6 +1723,13 @@ mod tests {
             .expect("simulation tick should emit a TimeUpdate")
     }
 
+    fn first_biome_zoom_seed(updates: &[ServerUpdate]) -> Option<i64> {
+        updates.iter().find_map(|update| match update {
+            ServerUpdate::WorldInfo { biome_zoom_seed } => Some(*biome_zoom_seed),
+            _ => None,
+        })
+    }
+
     fn request_initial_chunk_view(server: &mut IntegratedServer) {
         server.set_lighting_enabled(false);
         let updates = server
@@ -1957,6 +1975,29 @@ mod tests {
                 .expect("accept dedicated player position");
             assert!(ack_updates.is_empty());
         }
+    }
+
+    #[test]
+    fn dedicated_player_receives_world_info_before_chunk_view_snapshots() {
+        let mut server = IntegratedServer::new(1124);
+        server.set_lighting_enabled(false);
+        let player = server.add_dedicated_player();
+
+        let updates =
+            set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 0);
+
+        assert_eq!(
+            first_biome_zoom_seed(&updates),
+            Some(obfuscate_biome_zoom_seed(1124))
+        );
+        assert!(
+            updates
+                .iter()
+                .position(|update| matches!(update, ServerUpdate::WorldInfo { .. }))
+                < updates
+                    .iter()
+                    .position(|update| matches!(update, ServerUpdate::ChunkSnapshot(_)))
+        );
     }
 
     fn snapshot_positions(updates: &[ServerUpdate]) -> BTreeSet<ChunkPos> {

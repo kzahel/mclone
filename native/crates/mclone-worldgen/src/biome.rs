@@ -1,7 +1,8 @@
 use crate::noise::ImprovedNoise;
 use crate::prng::SimpleRandomSource;
-use mclone_core::{ChunkPos, block_to_chunk_coord, chunk_min_block_coord};
-use sha2::{Digest, Sha256};
+use mclone_core::{
+    ChunkPos, block_to_chunk_coord, chunk_min_block_coord, obfuscate_biome_zoom_seed,
+};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
@@ -1920,15 +1921,6 @@ fn is_jungle_compatible(value: i32) -> bool {
 
 fn is_mesa(value: i32) -> bool {
     matches!(value, 37 | 38 | 39 | 165 | 166 | 167)
-}
-
-fn obfuscate_biome_zoom_seed(seed: i64) -> i64 {
-    let digest = Sha256::digest(seed.to_le_bytes());
-    i64::from_le_bytes(
-        digest[..8]
-            .try_into()
-            .expect("sha256 digest has at least eight bytes"),
-    )
 }
 
 fn get_fuzzy_zoomed_biome_id(

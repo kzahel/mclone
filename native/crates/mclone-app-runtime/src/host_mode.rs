@@ -265,9 +265,12 @@ mod tests {
     #[test]
     fn remote_dedicated_client_runtime_loads_initial_chunk_view() {
         let center = ChunkPos::new(0, 0);
-        let mut session = ScriptedRemoteSession::new(vec![Ok(vec![ServerUpdate::ChunkSnapshot(
-            empty_test_snapshot(center),
-        )])]);
+        let mut session = ScriptedRemoteSession::new(vec![Ok(vec![
+            ServerUpdate::WorldInfo {
+                biome_zoom_seed: 1124,
+            },
+            ServerUpdate::ChunkSnapshot(empty_test_snapshot(center)),
+        ])]);
 
         let client = build_remote_dedicated_client_runtime(
             SingleViewHostOptions::new(center, 0),
@@ -276,6 +279,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(client.host(), ClientHost::RemoteDedicated);
+        assert_eq!(client.biome_zoom_seed(), Some(1124));
         assert_eq!(
             client.chunk_view(),
             Some(&ChunkView {

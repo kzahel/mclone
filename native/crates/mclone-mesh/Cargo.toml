@@ -10,7 +10,6 @@ image.workspace = true
 mclone-assets.workspace = true
 mclone-core.workspace = true
 mclone-light.workspace = true
-sha2 = "0.10"
 
 [dev-dependencies]
 serde_json.workspace = true

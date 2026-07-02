@@ -41,7 +41,7 @@ pub fn build_client_textured_sections(
     catalog: &TexturedMeshCatalog,
 ) -> Result<TexturedRenderSectionBuildReport> {
     let chunks = mesh_chunks_from_client(client)?;
-    let inputs = textured_mesh_inputs_with_world_seed(&chunks, client.world_seed());
+    let inputs = textured_mesh_inputs_with_biome_zoom_seed(&chunks, client.biome_zoom_seed());
     build_textured_render_sections_with_stats(&inputs, catalog)
         .context("failed to build textured sections")
 }
@@ -51,16 +51,21 @@ pub fn build_render_sections_from_snapshots<S: std::borrow::Borrow<ChunkSnapshot
     catalog: &TexturedMeshCatalog,
     target_sections: &BTreeSet<RenderSectionKey>,
 ) -> Result<TexturedRenderSectionBuildReport> {
-    build_render_sections_from_snapshots_with_world_seed(snapshots, catalog, target_sections, None)
+    build_render_sections_from_snapshots_with_biome_zoom_seed(
+        snapshots,
+        catalog,
+        target_sections,
+        None,
+    )
 }
 
-pub fn build_render_sections_from_snapshots_with_world_seed<
+pub fn build_render_sections_from_snapshots_with_biome_zoom_seed<
     S: std::borrow::Borrow<ChunkSnapshot>,
 >(
     snapshots: &[S],
     catalog: &TexturedMeshCatalog,
     target_sections: &BTreeSet<RenderSectionKey>,
-    world_seed: Option<i64>,
+    biome_zoom_seed: Option<i64>,
 ) -> Result<TexturedRenderSectionBuildReport> {
     // Generic over `Borrow<ChunkSnapshot>` so a caller holding owned snapshots
     // (`&[ChunkSnapshot]`, desktop + the web full-view helpers) and one holding borrowed
@@ -70,7 +75,7 @@ pub fn build_render_sections_from_snapshots_with_world_seed<
         .iter()
         .map(|snapshot| snapshot_mesh_block_state_ids(snapshot.borrow()))
         .collect::<Result<Vec<_>>>()?;
-    let inputs = textured_mesh_inputs_with_world_seed(&chunks, world_seed);
+    let inputs = textured_mesh_inputs_with_biome_zoom_seed(&chunks, biome_zoom_seed);
     build_textured_render_sections_for_section_set_with_stats(&inputs, catalog, target_sections)
         .context("failed to build queued textured render sections")
 }
@@ -83,12 +88,12 @@ pub fn mesh_chunks_from_client(client: &ClientRuntime) -> Result<Vec<MeshChunkBl
 }
 
 pub fn textured_mesh_inputs(chunks: &[MeshChunkBlocks]) -> Vec<TexturedChunkMeshInput<'_>> {
-    textured_mesh_inputs_with_world_seed(chunks, None)
+    textured_mesh_inputs_with_biome_zoom_seed(chunks, None)
 }
 
-pub fn textured_mesh_inputs_with_world_seed(
+pub fn textured_mesh_inputs_with_biome_zoom_seed(
     chunks: &[MeshChunkBlocks],
-    world_seed: Option<i64>,
+    biome_zoom_seed: Option<i64>,
 ) -> Vec<TexturedChunkMeshInput<'_>> {
     chunks
         .iter()
@@ -102,8 +107,8 @@ pub fn textured_mesh_inputs_with_world_seed(
             )
             .with_biomes(&chunk.biomes)
             .with_light_sections(&chunk.light_sections);
-            if let Some(seed) = world_seed {
-                input.with_world_seed(seed)
+            if let Some(seed) = biome_zoom_seed {
+                input.with_biome_zoom_seed(seed)
             } else {
                 input
             }
@@ -712,7 +717,7 @@ pub struct RenderSectionCompileRequest {
     pub target_sections: BTreeSet<RenderSectionKey>,
     pub section_revisions: BTreeMap<RenderSectionKey, u64>,
     pub snapshots: Vec<ChunkSnapshot>,
-    pub world_seed: Option<i64>,
+    pub biome_zoom_seed: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -726,8 +731,8 @@ pub struct RenderSectionCompileRequestPayloadStats {
 }
 
 impl RenderSectionCompileRequest {
-    pub fn with_world_seed(mut self, world_seed: Option<i64>) -> Self {
-        self.world_seed = world_seed;
+    pub fn with_biome_zoom_seed(mut self, biome_zoom_seed: Option<i64>) -> Self {
+        self.biome_zoom_seed = biome_zoom_seed;
         self
     }
 
@@ -853,7 +858,7 @@ impl RenderSectionDirtyState {
             target_sections,
             section_revisions,
             snapshots,
-            world_seed: None,
+            biome_zoom_seed: None,
         }
     }
 
@@ -2630,7 +2635,8 @@ impl EngineServerUpdateReport {
                 ServerUpdate::PlayerPosition(_) => {
                     report.changed = true;
                 }
-                ServerUpdate::TimeUpdate { .. }
+                ServerUpdate::WorldInfo { .. }
+                | ServerUpdate::TimeUpdate { .. }
                 | ServerUpdate::RemotePlayerAdd(_)
                 | ServerUpdate::RemotePlayerUpdate(_)
                 | ServerUpdate::RemotePlayerRemove { .. }
@@ -2766,6 +2772,7 @@ impl EngineRenderSession {
                         }
                     }
                 }
+                ServerUpdate::WorldInfo { .. } => {}
                 ServerUpdate::TimeUpdate { .. } => {}
                 ServerUpdate::PlayerPosition(_) => {}
                 ServerUpdate::RemotePlayerAdd(_)
@@ -3718,7 +3725,7 @@ impl<C> RenderSectionCompileRequestState<C> {
                 target_sections,
                 section_revisions,
                 snapshots: Vec::new(),
-                world_seed: None,
+                biome_zoom_seed: None,
             },
         )
     }
