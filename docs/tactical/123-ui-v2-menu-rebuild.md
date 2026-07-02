@@ -1128,8 +1128,50 @@ Rendered checks:
 
 Known limits:
 
-- legacy `GameUi` still contains direct BlockPalette render/hit code for
-  compatibility and tests; the player-facing host path now uses v2
+- block picker visual content is retained as GUI commands, not yet as a GPU-side
+  texture/atlas independent of the normal GUI renderer
+- touch-specific hotbar controls, gamepad prompts, status/debug overlays, and
+  selected item name fade are still transient immediate layers
+
+## Landed Block Picker Legacy Route Removal Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- removed the old `GameUi` BlockPalette render path
+- removed the old `GameUi` BlockPalette hit-test/widget-id/action path
+- removed legacy block-picker tests that exercised the deleted route
+- kept `GameScreen::BlockPalette` and `GameUiAction::OpenBlockPalette` as routing
+  state because `GameUiHost` still uses the legacy screen field to select the v2
+  surface
+- kept shared block-palette geometry and rendering helpers used by the v2
+  surface
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-ui
+cargo test --manifest-path native/Cargo.toml -p mclone-ui block_palette -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-xr-scene -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-block-palette-after-legacy-removal.png --width 960 --height 540 --screenshot-ui block-palette --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true
+```
+
+Rendered checks:
+
+- native block-palette screenshot regenerated and inspected:
+  `/tmp/mclone-ui-v2-block-palette-after-legacy-removal.png`
+- browser live-world canvas smoke regenerated and inspected:
+  `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
 - block picker visual content is retained as GUI commands, not yet as a GPU-side
   texture/atlas independent of the normal GUI renderer
 - touch-specific hotbar controls, gamepad prompts, status/debug overlays, and
@@ -1149,20 +1191,15 @@ Known limits:
 
 ## Next Recommended Chunk
 
-Continue with cleanup for the migrated block picker, then resume remaining HUD
-transient layers.
+Continue with remaining HUD transient-layer work and XR idle verification.
 
 Next scope:
 
 - run a real headset/desktop XR idle Controls smoke and confirm
   `ui_draw_rebuilds=0`, `ui_panel_repaints=0`, and no texture recreates on quiet
   frames after the first cached frame
-- remove or quarantine the legacy `GameUi` BlockPalette render/hit path now that
-  `GameUiHost` routes the player-facing screen through v2
-- keep the geometry/render helpers that v2 still shares, but move tests off the
-  legacy `GameUi` path
-- after that cleanup, decide whether the next Slice H item is selected item name
-  fade, touch/gamepad prompt retention, or status/debug overlay retention
+- choose the next Slice H retained layer: selected item name fade,
+  touch/gamepad prompt retention, or status/debug overlay retention
 
 ## Completed First Recommended Chunk
 

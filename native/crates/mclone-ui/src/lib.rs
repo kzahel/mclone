@@ -2296,7 +2296,6 @@ const ID_OPTIONS_CROSSHAIR: WidgetId = WidgetId(34);
 const ID_OPTIONS_FAR_LOD: WidgetId = WidgetId(35);
 const ID_OPTIONS_FAR_LOD_RANGE: WidgetId = WidgetId(36);
 const ID_OPTIONS_XR_TURN_MODE: WidgetId = WidgetId(37);
-const ID_BLOCK_PALETTE_BASE: u64 = 1000;
 
 const BLOCK_PALETTE_COLUMNS: usize = 10;
 const BLOCK_PALETTE_SLOT_SIZE: f32 = 22.0;
@@ -2567,7 +2566,7 @@ impl GameUi {
             Some(GameScreen::JoinRemote) => self.render_join_remote(&mut draw),
             Some(GameScreen::Pause) => self.render_pause(&mut draw),
             Some(GameScreen::Help { parent }) => self.render_help(&mut draw, parent),
-            Some(GameScreen::BlockPalette) => self.render_block_palette(&mut draw, state),
+            Some(GameScreen::BlockPalette) => {}
             Some(GameScreen::Options { parent }) => {
                 self.render_options_screen(&mut draw, state, parent)
             }
@@ -2601,10 +2600,7 @@ impl GameUi {
                 .into_iter()
                 .find(|button| button.contains(point))
                 .map(|button| button.id),
-            GameScreen::BlockPalette => {
-                block_palette_entry_at(self.scale, state.block_palette, point)
-                    .map(|(index, _entry)| block_palette_widget_id(index))
-            }
+            GameScreen::BlockPalette => None,
             GameScreen::Options { .. } => {
                 let rects = option_widgets(self.scale, state);
                 if rects.occlusion.contains(point) {
@@ -2692,18 +2688,6 @@ impl GameUi {
                 Some(GameScreen::Help { parent }) => Some(GameUiAction::CloseHelp(parent)),
                 _ => None,
             },
-            id if block_palette_index_from_widget_id(id).is_some() => {
-                let index = block_palette_index_from_widget_id(id)?;
-                let entry = state
-                    .block_palette
-                    .entries
-                    .get(index)
-                    .and_then(|entry| *entry)?;
-                Some(GameUiAction::AssignHotbarBlock {
-                    slot: state.block_palette.selected_hotbar_slot,
-                    block_state: entry.block_state,
-                })
-            }
             ID_OPTIONS_OCCLUSION => Some(GameUiAction::ToggleSectionOcclusion),
             ID_OPTIONS_FULLBRIGHT => Some(GameUiAction::ToggleFullbright),
             ID_OPTIONS_FAR_LOD => Some(GameUiAction::ToggleFarLod),
@@ -2993,45 +2977,6 @@ impl GameUi {
 
         for button in help_buttons(self.scale) {
             button.render(draw, &self.font, self.interaction());
-        }
-    }
-
-    fn render_block_palette(&self, draw: &mut GuiDrawList, state: GameUiRenderState) {
-        let overlay = state.block_palette;
-        if !overlay.visible {
-            return;
-        }
-
-        let panel = block_palette_panel_rect(self.scale, overlay);
-        draw.fill(panel, Color::rgba(5, 8, 9, 188));
-        draw.outline(panel, Color::rgba(132, 158, 148, 210));
-        self.font.draw_shadow(
-            draw,
-            &format!("SLOT {}", u16::from(overlay.selected_hotbar_slot) + 1),
-            panel.x + BLOCK_PALETTE_PADDING,
-            panel.y + 5.0,
-            Color::rgba(218, 234, 226, 255),
-        );
-
-        for (index, entry) in overlay.entries.into_iter().enumerate() {
-            let Some(entry) = entry else {
-                continue;
-            };
-            let Some(rect) = block_palette_slot_rect(self.scale, overlay, index) else {
-                continue;
-            };
-            let id = block_palette_widget_id(index);
-            render_touch_panel(draw, rect, self.pressed == Some(id));
-            if self.pointer.is_some_and(|point| rect.contains(point)) {
-                draw.outline(rect.inset(-1.0), Color::rgba(245, 250, 255, 205));
-            }
-            render_palette_slot_contents(draw, &self.font, rect, entry.icon);
-        }
-
-        if let Some(pointer) = self.pointer {
-            if let Some((_index, entry)) = block_palette_entry_at(self.scale, overlay, pointer) {
-                render_block_palette_tooltip(draw, &self.font, self.scale, pointer, entry.label);
-            }
         }
     }
 
@@ -3468,16 +3413,6 @@ fn render_controls_shortcut_column(
     }
 }
 
-fn block_palette_widget_id(index: usize) -> WidgetId {
-    WidgetId(ID_BLOCK_PALETTE_BASE + index as u64)
-}
-
-fn block_palette_index_from_widget_id(id: WidgetId) -> Option<usize> {
-    let raw = id.0.checked_sub(ID_BLOCK_PALETTE_BASE)?;
-    let index = usize::try_from(raw).ok()?;
-    (index < BLOCK_PALETTE_ENTRY_CAPACITY).then_some(index)
-}
-
 fn block_palette_occupied_span(overlay: BlockPaletteOverlay) -> usize {
     overlay
         .entries
@@ -3531,28 +3466,6 @@ fn block_palette_slot_rect(
         BLOCK_PALETTE_SLOT_SIZE,
         BLOCK_PALETTE_SLOT_SIZE,
     ))
-}
-
-fn block_palette_entry_at(
-    scale: GuiScale,
-    overlay: BlockPaletteOverlay,
-    point: Point,
-) -> Option<(usize, BlockPaletteEntry)> {
-    if !overlay.visible {
-        return None;
-    }
-    overlay
-        .entries
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, entry)| {
-            Some((
-                index,
-                entry?,
-                block_palette_slot_rect(scale, overlay, index)?,
-            ))
-        })
-        .find_map(|(index, entry, rect)| rect.contains(point).then_some((index, entry)))
 }
 
 fn render_palette_slot_contents(
@@ -5088,67 +5001,6 @@ mod tests {
                 Some(GameUiAction::OpenHelp(GameHelpParent::OptionsTitle))
             )
         );
-    }
-
-    #[test]
-    fn block_palette_click_assigns_entry_to_selected_hotbar_slot() {
-        let mut ui = GameUi::new_ingame();
-        ui.set_scale(GuiScale::from_pixels(960, 540));
-        ui.apply_action(GameUiAction::OpenBlockPalette);
-        assert_eq!(ui.screen(), Some(GameScreen::BlockPalette));
-        assert!(!ui.covers_world());
-
-        let icon = GuiTextureUv::new(0.1, 0.2, 0.3, 0.4);
-        let mut entries = EMPTY_BLOCK_PALETTE_ENTRIES;
-        entries[0] = Some(BlockPaletteEntry::new(91, Some(icon), "Bricks"));
-        let state = GameUiRenderState {
-            block_palette: BlockPaletteOverlay::visible(4, entries),
-            ..GameUiRenderState::default()
-        };
-        let rect = block_palette_slot_rect(ui.scale(), state.block_palette, 0)
-            .expect("first palette entry should have a slot rect");
-        let point = Point {
-            x: rect.center_x(),
-            y: rect.y + rect.height * 0.5,
-        };
-
-        assert!(ui.pointer_down(point, state));
-        let (_handled, action) = ui.pointer_up(point, state);
-        assert_eq!(
-            action,
-            Some(GameUiAction::AssignHotbarBlock {
-                slot: 4,
-                block_state: 91
-            })
-        );
-        ui.apply_action(action.unwrap());
-        assert_eq!(ui.screen(), None);
-    }
-
-    #[test]
-    fn block_palette_render_draws_entry_texture_icons() {
-        let mut ui = GameUi::new_ingame();
-        ui.set_scale(GuiScale::from_pixels(960, 540));
-        ui.apply_action(GameUiAction::OpenBlockPalette);
-
-        let icon = GuiTextureUv::new(0.1, 0.2, 0.3, 0.4);
-        let mut entries = EMPTY_BLOCK_PALETTE_ENTRIES;
-        entries[0] = Some(BlockPaletteEntry::new(91, Some(icon), "Bricks"));
-        entries[1] = Some(BlockPaletteEntry::new(41, Some(icon), "Oak Log"));
-        let state = GameUiRenderState {
-            block_palette: BlockPaletteOverlay::visible(0, entries),
-            ..GameUiRenderState::default()
-        };
-
-        let draw = ui.render_draw_list(state);
-        let texture_rects = draw
-            .commands()
-            .iter()
-            .filter(
-                |command| matches!(command, GuiDrawCommand::TextureRect { uv, .. } if *uv == icon),
-            )
-            .count();
-        assert_eq!(texture_rects, 2);
     }
 
     #[test]
