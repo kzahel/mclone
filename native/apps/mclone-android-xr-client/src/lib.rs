@@ -1150,7 +1150,8 @@ mod android {
         enabled_extensions.khr_android_create_instance = true;
         enabled_extensions.khr_vulkan_enable2 = true;
         log::info!(
-            "OpenXR extensions: android_create_instance=true vulkan_enable2=true fb_passthrough={} fb_alpha_blend={} fb_display_refresh_rate={} fb_swapchain_update_state={} fb_foveation={} fb_foveation_configuration={} fb_foveation_vulkan={} fb_render_model={} ext_hand_tracking={} fb_hand_tracking_mesh={} fb_hand_tracking_aim={} meta_virtual_keyboard={} fb_spatial_entity={} fb_spatial_entity_query={} fb_scene={} fb_scene_capture={} fb_spatial_entity_container={} meta_spatial_entity_mesh={} fb_body_tracking={} meta_body_tracking_full_body={} meta_performance_metrics={} ext_debug_utils={}",
+            "OpenXR extensions: android_create_instance=true vulkan_enable2=true khr_android_thread_settings={} fb_passthrough={} fb_alpha_blend={} fb_display_refresh_rate={} fb_swapchain_update_state={} fb_foveation={} fb_foveation_configuration={} fb_foveation_vulkan={} fb_render_model={} ext_hand_tracking={} fb_hand_tracking_mesh={} fb_hand_tracking_aim={} meta_virtual_keyboard={} fb_spatial_entity={} fb_spatial_entity_query={} fb_scene={} fb_scene_capture={} fb_spatial_entity_container={} meta_spatial_entity_mesh={} fb_body_tracking={} meta_body_tracking_full_body={} meta_performance_metrics={} ext_debug_utils={}",
+            available.khr_android_thread_settings,
             available.fb_passthrough,
             available.fb_composition_layer_alpha_blend,
             available.fb_display_refresh_rate,
@@ -1174,6 +1175,10 @@ mod android {
             available.meta_performance_metrics,
             available.ext_debug_utils,
         );
+        if available.khr_android_thread_settings {
+            enabled_extensions.khr_android_thread_settings = true;
+            log::info!("Enabling XR_KHR_android_thread_settings");
+        }
         if available.fb_passthrough {
             enabled_extensions.fb_passthrough = true;
             log::info!("Enabling XR_FB_passthrough");
@@ -1327,6 +1332,7 @@ mod android {
 
         let mut graphics = graphics_vulkan::create_graphics_session(&instance, system)
             .context("create OpenXR Vulkan graphics session")?;
+        register_android_xr_render_thread(&graphics.session);
         log::info!(
             "OpenXR Vulkan session: physical_device='{}' api={} queue_family={}",
             graphics.physical_device_name,
@@ -1821,6 +1827,38 @@ mod android {
         );
         display_refresh.current_rate = Some(requested_rate);
         Ok(())
+    }
+
+    #[allow(unsafe_code)]
+    fn register_android_xr_render_thread(session: &xr::Session<graphics_vulkan::AppGraphics>) {
+        let Some(thread_settings) = session.instance().exts().khr_android_thread_settings else {
+            log::info!(
+                "OpenXR Android thread settings unavailable; renderer thread not registered"
+            );
+            return;
+        };
+
+        let raw_thread_id = unsafe { libc::syscall(libc::SYS_gettid) };
+        let Ok(thread_id) = u32::try_from(raw_thread_id) else {
+            log::warn!("OpenXR Android thread settings skipped: invalid gettid={raw_thread_id}");
+            return;
+        };
+        let result = unsafe {
+            (thread_settings.set_android_application_thread)(
+                session.as_raw(),
+                xr::sys::AndroidThreadTypeKHR::RENDERER_MAIN,
+                thread_id,
+            )
+        };
+        if result == xr::sys::Result::SUCCESS {
+            log::info!(
+                "OpenXR Android thread settings: registered renderer main thread tid={thread_id}"
+            );
+        } else {
+            log::warn!(
+                "OpenXR Android thread settings failed for renderer main thread tid={thread_id}: {result:?}"
+            );
+        }
     }
 
     #[derive(Debug)]

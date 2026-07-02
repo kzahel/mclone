@@ -9,6 +9,7 @@ publish.workspace = true
 android-activity.workspace = true
 anyhow.workspace = true
 jni.workspace = true
+libc.workspace = true
 log.workspace = true
 mclone-assets.workspace = true
 mclone-audio.workspace = true

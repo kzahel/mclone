@@ -47,6 +47,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 jni = "0.22"
 js-sys = "0.3.102"
 lewton = "0.10"
+libc = "0.2"
 libloading = "0.8"
 log = "0.4"
 mclone-audio = { path = "crates/mclone-audio" }

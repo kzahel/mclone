@@ -3,7 +3,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use mclone_assets::{AssetSource, AssetSourceChain, FilesystemAssetSource, PackedAssetSource};
@@ -29,7 +29,6 @@ pub const DEFAULT_OVERLAY_PACK_FILE: &str = "mclone-default-overlay.pbp";
 pub const DEFAULT_ANDROID_APP_ID: &str = "com.kzahel.mclone";
 pub const DEFAULT_FIRST_PARTY_ASSET_DIR: &str = "assets";
 pub use crate::DEFAULT_RENDER_SECTION_COMPILE_WORKERS;
-const RENDER_SECTION_DISPATCHER_POLL_INTERVAL: Duration = Duration::from_millis(1);
 
 #[derive(Clone, Debug)]
 pub struct SceneTexturedSections {
@@ -81,6 +80,7 @@ impl From<MeshTextureAtlasImage> for TextureAtlasImage {
 #[derive(Debug)]
 struct RenderSectionCompileQueue {
     state: Mutex<RenderSectionCompileQueueState>,
+    dispatch_available: Condvar,
     work_available: Condvar,
 }
 
@@ -120,6 +120,7 @@ impl RenderSectionCompileQueue {
                 queued_slots: VecDeque::new(),
                 shutdown: false,
             }),
+            dispatch_available: Condvar::new(),
             work_available: Condvar::new(),
         }
     }
@@ -151,26 +152,37 @@ impl RenderSectionCompileQueue {
         let queue_push_start = Instant::now();
         state.pending_slots.push_back(slot_index);
         let queue_push_ms = elapsed_ms(queue_push_start.elapsed());
+        drop(state);
+
+        let notify_start = Instant::now();
+        self.dispatch_available.notify_one();
+        let notify_ms = elapsed_ms(notify_start.elapsed());
 
         Ok(RenderSectionCompileQueueEnqueueTiming {
             lock_wait_ms,
             slot_select_ms,
             slot_write_ms,
             queue_push_ms,
-            notify_ms: 0.0,
+            notify_ms,
         })
     }
 
-    fn dispatch_next_ready_slot(&self) -> RenderSectionCompileDispatchStatus {
+    fn dispatch_next_ready_slot_blocking(&self) -> RenderSectionCompileDispatchStatus {
         let mut state = match self.state.lock() {
             Ok(state) => state,
             Err(_) => return RenderSectionCompileDispatchStatus::Shutdown,
         };
+        while state.pending_slots.is_empty() && !state.shutdown {
+            state = match self.dispatch_available.wait(state) {
+                Ok(state) => state,
+                Err(_) => return RenderSectionCompileDispatchStatus::Shutdown,
+            };
+        }
         if state.shutdown {
             return RenderSectionCompileDispatchStatus::Shutdown;
         }
         let Some(slot_index) = state.pending_slots.pop_front() else {
-            return RenderSectionCompileDispatchStatus::Idle;
+            return RenderSectionCompileDispatchStatus::Shutdown;
         };
         state.queued_slots.push_back(slot_index);
         drop(state);
@@ -210,6 +222,7 @@ impl RenderSectionCompileQueue {
                 *slot = None;
             }
         }
+        self.dispatch_available.notify_all();
         self.work_available.notify_all();
     }
 }
@@ -217,7 +230,6 @@ impl RenderSectionCompileQueue {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RenderSectionCompileDispatchStatus {
     Dispatched,
-    Idle,
     Shutdown,
 }
 
@@ -458,11 +470,8 @@ impl Drop for RenderSectionCompileWorker {
 
 fn run_render_section_compile_dispatcher(queue: Arc<RenderSectionCompileQueue>) {
     loop {
-        match queue.dispatch_next_ready_slot() {
+        match queue.dispatch_next_ready_slot_blocking() {
             RenderSectionCompileDispatchStatus::Dispatched => {}
-            RenderSectionCompileDispatchStatus::Idle => {
-                thread::sleep(RENDER_SECTION_DISPATCHER_POLL_INTERVAL);
-            }
             RenderSectionCompileDispatchStatus::Shutdown => break,
         }
     }
@@ -895,6 +904,7 @@ fn repo_root() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
+    use std::time::Duration;
 
     use super::*;
 
