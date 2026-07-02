@@ -24,7 +24,7 @@ use crate::data::{
     TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibilityGraphBuildStats,
     VisibleChunkMesh,
 };
-use crate::tint::{block_tint, liquid_color};
+use crate::tint::{blended_liquid_color, block_tint};
 use crate::visibility::{VisGraph, VisibilityGraphTimer, VisibilitySet};
 use crate::{AIR_BLOCK_ID, CAVE_AIR_BLOCK_ID, CAVE_AIR_BLOCK_STATE_ID};
 
@@ -374,8 +374,6 @@ fn add_textured_chunk_range_to_mesh(
                 let world_x = world_origin_x + local_x;
                 let world_y = input.min_y + local_y;
                 let world_z = world_origin_z + local_z;
-                let biome_id = input.biome_id_at_or_default(local_x, world_y, local_z);
-
                 if let Some(fluid) = block_model.fluid {
                     add_textured_liquid_block_to_mesh(
                         &mut translucent_mesh,
@@ -385,7 +383,6 @@ fn add_textured_chunk_range_to_mesh(
                         world_y,
                         world_z,
                         fluid,
-                        biome_id,
                     );
                     continue;
                 }
@@ -430,18 +427,18 @@ fn add_textured_chunk_range_to_mesh(
                     match block_model.render_layer {
                         TexturedTerrainRenderLayer::Solid => {
                             add_textured_face(
-                                mesh, catalog, world_x, world_y, world_z, biome_id, face, corners,
+                                mesh, area, catalog, world_x, world_y, world_z, face, corners,
                                 lighting,
                             );
                         }
                         TexturedTerrainRenderLayer::Cutout => {
                             add_textured_face(
                                 &mut cutout_mesh,
+                                area,
                                 catalog,
                                 world_x,
                                 world_y,
                                 world_z,
-                                biome_id,
                                 face,
                                 corners,
                                 lighting,
@@ -450,11 +447,11 @@ fn add_textured_chunk_range_to_mesh(
                         TexturedTerrainRenderLayer::Translucent => {
                             add_textured_face(
                                 &mut translucent_mesh,
+                                area,
                                 catalog,
                                 world_x,
                                 world_y,
                                 world_z,
-                                biome_id,
                                 face,
                                 corners,
                                 lighting,
@@ -610,19 +607,28 @@ fn add_face(
 
 fn add_textured_face(
     mesh: &mut TexturedVisibleChunkMesh,
+    area: &[TexturedChunkMeshInput<'_>],
     catalog: &TexturedMeshCatalog,
     world_x: i32,
     world_y: i32,
     world_z: i32,
-    biome_id: i32,
     face: &TexturedBlockFace,
     corners: [[f32; 3]; 4],
     lighting: AmbientOcclusionFace,
 ) {
     let base_index = mesh.vertices.len() as u32;
     let uvs = textured_face_uvs(face);
+    let tint = block_tint(catalog, face.tint, world_x, world_y, world_z, |x, y, z| {
+        biome_id_at_world_or_default(area, x, y, z)
+    });
     for index in 0..4 {
         let corner = corners[index];
+        let color = [
+            tint[0] * lighting.brightness[index],
+            tint[1] * lighting.brightness[index],
+            tint[2] * lighting.brightness[index],
+            1.0,
+        ];
         mesh.vertices.push(TexturedChunkVertex {
             position: [
                 world_x as f32 + corner[0],
@@ -630,14 +636,7 @@ fn add_textured_face(
                 world_z as f32 + corner[2],
             ],
             uv: uvs[index],
-            color: textured_face_color(
-                catalog,
-                face,
-                biome_id,
-                world_x,
-                world_z,
-                lighting.brightness[index],
-            ),
+            color,
             packed_light: lighting.lightmap[index],
         });
     }
@@ -662,7 +661,6 @@ fn add_textured_liquid_block_to_mesh(
     world_y: i32,
     world_z: i32,
     fluid: TexturedFluidModel,
-    biome_id: i32,
 ) {
     let mut h00 = fluid_height_at(area, catalog, world_x, world_y, world_z, fluid.kind);
     let mut h01 = fluid_height_at(area, catalog, world_x, world_y, world_z + 1, fluid.kind);
@@ -758,7 +756,7 @@ fn add_textured_liquid_block_to_mesh(
             fluid.still.map(16.0, 16.0),
             fluid.still.map(16.0, 0.0),
         ];
-        let top_color = liquid_color(fluid.kind, biome_id, 1.0);
+        let top_color = liquid_color_at(area, fluid.kind, world_x, world_y, world_z, 1.0);
         let top_light = liquid_packed_light(area, world_x, world_y, world_z);
         add_textured_liquid_quad(
             mesh,
@@ -803,7 +801,7 @@ fn add_textured_liquid_block_to_mesh(
                 fluid.still.map(16.0, 0.0),
                 fluid.still.map(16.0, 16.0),
             ],
-            liquid_color(fluid.kind, biome_id, 0.5),
+            liquid_color_at(area, fluid.kind, world_x, world_y, world_z, 0.5),
             liquid_packed_light(area, world_x, world_y - 1, world_z),
         );
     }
@@ -827,7 +825,7 @@ fn add_textured_liquid_block_to_mesh(
                 fluid.flow.map(0.0, 8.0),
                 fluid.flow.map(0.0, liquid_side_v(h00)),
             ],
-            liquid_color(fluid.kind, biome_id, 0.72),
+            liquid_color_at(area, fluid.kind, world_x, world_y, world_z, 0.72),
             side_light,
         );
     }
@@ -849,7 +847,7 @@ fn add_textured_liquid_block_to_mesh(
                 fluid.flow.map(8.0, 8.0),
                 fluid.flow.map(8.0, liquid_side_v(h11)),
             ],
-            liquid_color(fluid.kind, biome_id, 0.78),
+            liquid_color_at(area, fluid.kind, world_x, world_y, world_z, 0.78),
             side_light,
         );
     }
@@ -871,7 +869,7 @@ fn add_textured_liquid_block_to_mesh(
                 fluid.flow.map(0.0, 8.0),
                 fluid.flow.map(0.0, liquid_side_v(h01)),
             ],
-            liquid_color(fluid.kind, biome_id, 0.86),
+            liquid_color_at(area, fluid.kind, world_x, world_y, world_z, 0.86),
             side_light,
         );
     }
@@ -893,7 +891,7 @@ fn add_textured_liquid_block_to_mesh(
                 fluid.flow.map(0.0, 8.0),
                 fluid.flow.map(0.0, liquid_side_v(h10)),
             ],
-            liquid_color(fluid.kind, biome_id, 0.86),
+            liquid_color_at(area, fluid.kind, world_x, world_y, world_z, 0.86),
             side_light,
         );
     }
@@ -1200,21 +1198,17 @@ fn textured_face_uvs(face: &TexturedBlockFace) -> [[f32; 2]; 4] {
     })
 }
 
-fn textured_face_color(
-    catalog: &TexturedMeshCatalog,
-    face: &TexturedBlockFace,
-    biome_id: i32,
+fn liquid_color_at(
+    area: &[TexturedChunkMeshInput<'_>],
+    kind: TexturedFluidKind,
     world_x: i32,
+    world_y: i32,
     world_z: i32,
-    brightness: f32,
+    shade: f32,
 ) -> [f32; 4] {
-    let tint = block_tint(catalog, face.tint, biome_id, world_x, world_z);
-    [
-        tint[0] * brightness,
-        tint[1] * brightness,
-        tint[2] * brightness,
-        1.0,
-    ]
+    blended_liquid_color(kind, world_x, world_y, world_z, shade, |x, y, z| {
+        biome_id_at_world_or_default(area, x, y, z)
+    })
 }
 
 fn shaded_color(block_id: u8, shade: f32) -> [f32; 4] {
@@ -1336,6 +1330,23 @@ fn block_state_at_world_or_air(
         .find(|input| input.chunk_x == chunk_x && input.chunk_z == chunk_z)
         .map(|input| input.block_at_or_air(local_x, y - input.min_y, local_z))
         .unwrap_or(AIR_BLOCK_STATE_ID)
+}
+
+fn biome_id_at_world_or_default(
+    inputs: &[TexturedChunkMeshInput<'_>],
+    world_x: i32,
+    y: i32,
+    world_z: i32,
+) -> i32 {
+    let chunk_x = block_to_chunk_coord(world_x);
+    let chunk_z = block_to_chunk_coord(world_z);
+    let local_x = local_block_coord(world_x);
+    let local_z = local_block_coord(world_z);
+    inputs
+        .iter()
+        .find(|input| input.chunk_x == chunk_x && input.chunk_z == chunk_z)
+        .map(|input| input.biome_id_at_or_default(local_x, y, local_z))
+        .unwrap_or(DEFAULT_BIOME_ID)
 }
 
 fn packed_light_at_world_or_fullbright(

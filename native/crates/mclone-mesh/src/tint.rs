@@ -1,8 +1,23 @@
 use crate::catalog::{TexturedBlockTint, TexturedFluidKind, TexturedMeshCatalog};
 
-pub(crate) fn liquid_color(kind: TexturedFluidKind, biome_id: i32, shade: f32) -> [f32; 4] {
+pub(crate) fn blended_liquid_color<F>(
+    kind: TexturedFluidKind,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    shade: f32,
+    biome_id_at: F,
+) -> [f32; 4]
+where
+    F: Fn(i32, i32, i32) -> i32,
+{
     let color = match kind {
-        TexturedFluidKind::Water => rgb8_alpha(biome_visual(biome_id).water_color, 0.72),
+        TexturedFluidKind::Water => rgb8_alpha(
+            blended_biome_color(world_x, world_y, world_z, biome_id_at, |biome_id, _, _| {
+                biome_visual(biome_id).water_color
+            }),
+            0.72,
+        ),
         TexturedFluidKind::Lava => [1.0, 1.0, 1.0, 1.0],
     };
     [
@@ -13,18 +28,35 @@ pub(crate) fn liquid_color(kind: TexturedFluidKind, biome_id: i32, shade: f32) -
     ]
 }
 
-pub(crate) fn block_tint(
+pub(crate) fn block_tint<F>(
     catalog: &TexturedMeshCatalog,
     tint: TexturedBlockTint,
-    biome_id: i32,
     world_x: i32,
+    world_y: i32,
     world_z: i32,
-) -> [f32; 3] {
-    let visual = biome_visual(biome_id);
+    biome_id_at: F,
+) -> [f32; 3]
+where
+    F: Fn(i32, i32, i32) -> i32,
+{
     match tint {
         TexturedBlockTint::None => [1.0, 1.0, 1.0],
-        TexturedBlockTint::Grass => rgb8(grass_color(catalog, visual, world_x, world_z)),
-        TexturedBlockTint::Foliage => rgb8(foliage_color(catalog, visual)),
+        TexturedBlockTint::Grass => rgb8(blended_biome_color(
+            world_x,
+            world_y,
+            world_z,
+            biome_id_at,
+            |biome_id, sample_x, sample_z| {
+                grass_color(catalog, biome_visual(biome_id), sample_x, sample_z)
+            },
+        )),
+        TexturedBlockTint::Foliage => rgb8(blended_biome_color(
+            world_x,
+            world_y,
+            world_z,
+            biome_id_at,
+            |biome_id, _, _| foliage_color(catalog, biome_visual(biome_id)),
+        )),
         TexturedBlockTint::BirchFoliage => rgb8(0x80_a7_55),
         TexturedBlockTint::EvergreenFoliage => rgb8(0x61_99_61),
     }
@@ -54,6 +86,7 @@ const COLD_WATER_COLOR: u32 = 0x3d_57_d6;
 const FROZEN_WATER_COLOR: u32 = 0x39_38_c9;
 const WARM_OCEAN_WATER_COLOR: u32 = 0x43_d5_ee;
 const LUKEWARM_OCEAN_WATER_COLOR: u32 = 0x45_ad_f2;
+const BIOME_BLEND_RADIUS: i32 = 2;
 const SWAMP_GRASS_COLOR_DARK: u32 = 0x4c_76_3c;
 const SWAMP_GRASS_COLOR_LIGHT: u32 = 0x6a_70_39;
 const SWAMP_GRASS_NOISE_SCALE: f64 = 0.0225;
@@ -339,6 +372,40 @@ fn foliage_color(catalog: &TexturedMeshCatalog, visual: BiomeVisual) -> u32 {
     })
 }
 
+fn blended_biome_color<B, C>(
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    biome_id_at: B,
+    color_for_biome: C,
+) -> u32
+where
+    B: Fn(i32, i32, i32) -> i32,
+    C: Fn(i32, i32, i32) -> u32,
+{
+    if BIOME_BLEND_RADIUS == 0 {
+        return color_for_biome(biome_id_at(world_x, world_y, world_z), world_x, world_z);
+    }
+
+    let mut red = 0;
+    let mut green = 0;
+    let mut blue = 0;
+    for sample_x in world_x - BIOME_BLEND_RADIUS..=world_x + BIOME_BLEND_RADIUS {
+        for sample_z in world_z - BIOME_BLEND_RADIUS..=world_z + BIOME_BLEND_RADIUS {
+            let biome_id = biome_id_at(sample_x, world_y, sample_z);
+            let color = color_for_biome(biome_id, sample_x, sample_z);
+            red += (color >> 16) & 0xff;
+            green += (color >> 8) & 0xff;
+            blue += color & 0xff;
+        }
+    }
+
+    let sample_count = ((BIOME_BLEND_RADIUS * 2 + 1) * (BIOME_BLEND_RADIUS * 2 + 1)) as u32;
+    ((red / sample_count) & 0xff) << 16
+        | ((green / sample_count) & 0xff) << 8
+        | ((blue / sample_count) & 0xff)
+}
+
 fn swamp_grass_color(world_x: i32, world_z: i32) -> u32 {
     if biome_info_noise_value(world_x, world_z) < SWAMP_GRASS_NOISE_THRESHOLD {
         SWAMP_GRASS_COLOR_DARK
@@ -450,6 +517,43 @@ mod tests {
     }
 
     #[test]
+    fn biome_blend_averages_default_five_by_five_block_window() {
+        let color = blended_biome_color(
+            0,
+            64,
+            0,
+            |sample_x, sample_y, _sample_z| {
+                assert_eq!(sample_y, 64);
+                if sample_x < 0 { 6 } else { 1 }
+            },
+            |biome_id, _sample_x, _sample_z| {
+                if biome_id == 6 {
+                    0x00_00_00
+                } else {
+                    0x19_32_4b
+                }
+            },
+        );
+
+        assert_eq!(color, 0x0f_1e_2d);
+    }
+
+    #[test]
+    fn water_tint_uses_biome_blend_average() {
+        let color = blended_liquid_color(
+            TexturedFluidKind::Water,
+            0,
+            64,
+            0,
+            1.0,
+            |sample_x, _sample_y, _sample_z| if sample_x < 0 { 6 } else { 1 },
+        );
+        let expected = rgb8_alpha(0x4c_78_b0, 0.72);
+
+        assert_eq!(color, expected);
+    }
+
+    #[test]
     fn biome_visual_water_colors_match_vanilla_special_effects() {
         let cases = [
             (0, DEFAULT_WATER_COLOR),
@@ -534,9 +638,10 @@ mod tests {
             block_tint(
                 &TexturedMeshCatalog::default(),
                 TexturedBlockTint::BirchFoliage,
-                1,
                 0,
-                0
+                64,
+                0,
+                |_, _, _| 1
             ),
             rgb8(0x80_a7_55)
         );
@@ -544,9 +649,10 @@ mod tests {
             block_tint(
                 &TexturedMeshCatalog::default(),
                 TexturedBlockTint::EvergreenFoliage,
-                1,
                 0,
-                0
+                64,
+                0,
+                |_, _, _| 1
             ),
             rgb8(0x61_99_61)
         );
