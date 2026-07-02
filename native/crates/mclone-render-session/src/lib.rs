@@ -3542,6 +3542,38 @@ pub trait RenderSectionCompiler {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RenderSectionCompileQueueHealth {
+    pub pending_jobs: usize,
+    pub max_pending_jobs: usize,
+    pub available_job_slots: usize,
+    pub queued_compile_tasks: usize,
+}
+
+impl RenderSectionCompileQueueHealth {
+    pub fn from_compiler<C>(compiler: &C) -> Self
+    where
+        C: RenderSectionCompiler + ?Sized,
+    {
+        let pending_jobs = compiler.pending_job_count();
+        let max_pending_jobs = compiler.max_pending_job_count();
+        Self {
+            pending_jobs,
+            max_pending_jobs,
+            available_job_slots: max_pending_jobs.saturating_sub(pending_jobs),
+            queued_compile_tasks: pending_jobs,
+        }
+    }
+}
+
+pub trait RenderSectionCompileDispatcher: RenderSectionCompiler {
+    fn queue_health(&self) -> RenderSectionCompileQueueHealth {
+        RenderSectionCompileQueueHealth::from_compiler(self)
+    }
+}
+
+impl<T> RenderSectionCompileDispatcher for T where T: RenderSectionCompiler {}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RenderSectionCompileSubmitTiming {
     pub capacity_check_ms: f64,

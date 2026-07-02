@@ -30,12 +30,16 @@ use mclone_protocol::{
     PlayerPositionUpdate, ServerUpdate, SetPlayerAppearanceCommand,
 };
 use mclone_render_session::{
-    EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompileRequestPayloadStats,
-    RenderSectionCompileSubmission, RenderSectionCompileSubmitTiming, RenderSectionCompiler,
-    RenderSectionReadyWorkSubmission, RenderSectionRemovalMode, RenderSectionSession,
-    RenderSectionSyncPlan, build_client_textured_sections, render_section_chunk_pos,
-    render_section_neighbor_readiness, sort_chunk_positions_by_distance,
+    EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompileDispatcher,
+    RenderSectionRemovalMode, RenderSectionSession, build_client_textured_sections,
+    render_section_chunk_pos, render_section_neighbor_readiness, sort_chunk_positions_by_distance,
     sort_dirty_section_chunks_by_distance,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_render_session::{
+    RenderSectionCompileQueueHealth, RenderSectionCompileRequestPayloadStats,
+    RenderSectionCompileSubmission, RenderSectionCompileSubmitTiming,
+    RenderSectionReadyWorkSubmission, RenderSectionSyncPlan,
 };
 use mclone_server::{
     ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ServerRunnerDiagnostics,
@@ -90,9 +94,28 @@ pub struct RenderSectionSyncTiming {
     pub submit_request_revision_count: usize,
     pub submit_request_estimated_payload_bytes: usize,
     pub submit_request_estimated_payload_bytes_worst: usize,
+    pub dispatcher_pending_jobs: usize,
+    pub dispatcher_max_pending_jobs: usize,
+    pub dispatcher_available_job_slots: usize,
+    pub dispatcher_queued_compile_tasks: usize,
 }
 
 impl RenderSectionSyncTiming {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn record_dispatcher_health(&mut self, health: RenderSectionCompileQueueHealth) {
+        self.dispatcher_pending_jobs = self.dispatcher_pending_jobs.max(health.pending_jobs);
+        self.dispatcher_max_pending_jobs = self
+            .dispatcher_max_pending_jobs
+            .max(health.max_pending_jobs);
+        self.dispatcher_available_job_slots = self
+            .dispatcher_available_job_slots
+            .max(health.available_job_slots);
+        self.dispatcher_queued_compile_tasks = self
+            .dispatcher_queued_compile_tasks
+            .max(health.queued_compile_tasks);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn record_submit_timing(&mut self, timing: RenderSectionCompileSubmitTiming) {
         self.submit_compiler_capacity_check_ms += timing.capacity_check_ms;
         self.submit_compiler_capacity_check_worst_ms = self
@@ -108,6 +131,7 @@ impl RenderSectionSyncTiming {
             .max(timing.pending_mark_ms);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn record_request_payload_stats(&mut self, stats: RenderSectionCompileRequestPayloadStats) {
         self.submit_request_target_section_count += stats.target_section_count;
         self.submit_request_target_section_count_worst = self
@@ -197,6 +221,18 @@ impl RenderSectionSyncTiming {
         self.submit_request_estimated_payload_bytes_worst = self
             .submit_request_estimated_payload_bytes_worst
             .max(other.submit_request_estimated_payload_bytes_worst);
+        self.dispatcher_pending_jobs = self
+            .dispatcher_pending_jobs
+            .max(other.dispatcher_pending_jobs);
+        self.dispatcher_max_pending_jobs = self
+            .dispatcher_max_pending_jobs
+            .max(other.dispatcher_max_pending_jobs);
+        self.dispatcher_available_job_slots = self
+            .dispatcher_available_job_slots
+            .max(other.dispatcher_available_job_slots);
+        self.dispatcher_queued_compile_tasks = self
+            .dispatcher_queued_compile_tasks
+            .max(other.dispatcher_queued_compile_tasks);
     }
 }
 
@@ -914,7 +950,7 @@ impl SingleViewRuntime {
         snapshots_for_submit: Snapshots,
     ) -> Result<RenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
         Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
         self.sync_render_sections_with_budget_and_completed_result_acceptance(
@@ -935,7 +971,7 @@ impl SingleViewRuntime {
         snapshots_for_submit: Snapshots,
     ) -> Result<RenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
         Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
         self.engine
@@ -968,7 +1004,7 @@ impl SingleViewRuntime {
         snapshots_for_submit: Snapshots,
     ) -> Result<RenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
         Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
         self.sync_render_sections_with_budget(
@@ -988,8 +1024,9 @@ impl SingleViewRuntime {
         timing: &mut RenderSectionSyncTiming,
     ) -> Result<RenderSectionReadyWorkSubmission<()>>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
     {
+        timing.record_dispatcher_health(compiler.queue_health());
         let dirty_before = self.engine.render_session().dirty();
         timing.submit_dirty_chunk_count_before = timing
             .submit_dirty_chunk_count_before
@@ -1041,6 +1078,7 @@ impl SingleViewRuntime {
         timing.submit_compiler_ms += compiler_ms;
         timing.submit_compiler_worst_ms = timing.submit_compiler_worst_ms.max(compiler_ms);
         timing.record_submit_timing(submit_timing);
+        timing.record_dispatcher_health(compiler.queue_health());
 
         let mark_start = Instant::now();
         self.engine
@@ -1080,7 +1118,7 @@ impl SingleViewRuntime {
         snapshots_for_submit: Snapshots,
     ) -> Result<TimedRenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
         Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
         let mut timing = RenderSectionSyncTiming::default();
@@ -1177,7 +1215,7 @@ impl SingleViewRuntime {
         completed_result_accept_budget: Option<usize>,
     ) -> Result<RenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
     {
         self.sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots_timed(
             compiler,
@@ -1199,7 +1237,7 @@ impl SingleViewRuntime {
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
     {
         let mut timing = RenderSectionSyncTiming::default();
 
@@ -1298,7 +1336,7 @@ impl SingleViewRuntime {
         snapshots_for_submit: Snapshots,
     ) -> Result<RenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
         Snapshots: FnMut(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
         self.sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
@@ -1321,7 +1359,7 @@ impl SingleViewRuntime {
         snapshots_for_submit: Snapshots,
     ) -> Result<RenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
         Snapshots: FnMut(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
         self.sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
@@ -1347,7 +1385,7 @@ impl SingleViewRuntime {
         mut snapshots_for_submit: Snapshots,
     ) -> Result<TimedRenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
         Snapshots: FnMut(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
         let mut combined = RenderSectionCacheUpdate::default();
@@ -1442,7 +1480,7 @@ impl SingleViewRuntime {
         completed_result_accept_budget: Option<usize>,
     ) -> Result<RenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
     {
         self.sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots_timed(
             compiler,
@@ -1464,7 +1502,7 @@ impl SingleViewRuntime {
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
     {
         let mut combined = RenderSectionCacheUpdate::default();
         let mut combined_timing = RenderSectionSyncTiming::default();
@@ -1554,7 +1592,7 @@ impl SingleViewRuntime {
         mut snapshots_for_submit: Snapshots,
     ) -> Result<RenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
         Snapshots: FnMut(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
         let deadline = Instant::now() + Duration::from_secs(120);
@@ -1595,7 +1633,7 @@ impl SingleViewRuntime {
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate>
     where
-        C: RenderSectionCompiler,
+        C: RenderSectionCompileDispatcher,
     {
         let deadline = Instant::now() + Duration::from_secs(120);
         let mut combined = RenderSectionCacheUpdate::default();
@@ -2005,7 +2043,9 @@ fn timing_elapsed_ms(_start: Option<RuntimeTimingSample>) -> f64 {
 mod tests {
     use super::*;
     use mclone_core::{CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
-    use mclone_render_session::{RenderSectionCompileRequest, RenderSectionCompileResult};
+    use mclone_render_session::{
+        RenderSectionCompileRequest, RenderSectionCompileResult, RenderSectionCompiler,
+    };
     use mclone_server::{ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot};
 
     #[derive(Default)]

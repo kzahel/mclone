@@ -15,8 +15,8 @@ pub use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::load_actor_texture_assets as load_actor_texture_assets_from_source;
 use mclone_render::chunk::ChunkTextureAtlas;
 use mclone_render_session::{
-    RenderSectionCompileRequest, RenderSectionCompileResult, RenderSectionCompileSubmitTiming,
-    RenderSectionCompiler, build_render_sections_from_snapshots,
+    RenderSectionCompileQueueHealth, RenderSectionCompileRequest, RenderSectionCompileResult,
+    RenderSectionCompileSubmitTiming, RenderSectionCompiler, build_render_sections_from_snapshots,
 };
 
 use crate::elapsed_ms;
@@ -88,6 +88,64 @@ pub struct RenderSectionCompileWorker {
     handles: Vec<thread::JoinHandle<()>>,
     pending_jobs: usize,
     max_pending_jobs: usize,
+}
+
+#[derive(Debug)]
+pub struct NativeRenderSectionCompileDispatcher {
+    worker: RenderSectionCompileWorker,
+}
+
+impl NativeRenderSectionCompileDispatcher {
+    pub fn new(catalog: TexturedMeshCatalog) -> Result<Self> {
+        Self::with_worker_count(catalog, DEFAULT_RENDER_SECTION_COMPILE_WORKERS)
+    }
+
+    pub fn with_worker_count(catalog: TexturedMeshCatalog, worker_count: usize) -> Result<Self> {
+        Ok(Self {
+            worker: RenderSectionCompileWorker::with_worker_count(catalog, worker_count)?,
+        })
+    }
+
+    pub fn pending_job_count(&self) -> usize {
+        self.worker.pending_job_count()
+    }
+
+    pub fn max_pending_job_count(&self) -> usize {
+        self.worker.max_pending_job_count()
+    }
+
+    pub fn available_pending_job_slots(&self) -> usize {
+        self.worker.available_pending_job_slots()
+    }
+
+    pub fn queue_health(&self) -> RenderSectionCompileQueueHealth {
+        RenderSectionCompileQueueHealth::from_compiler(&self.worker)
+    }
+}
+
+impl RenderSectionCompiler for NativeRenderSectionCompileDispatcher {
+    fn submit(&mut self, request: RenderSectionCompileRequest) -> Result<()> {
+        self.worker.submit(request)
+    }
+
+    fn submit_with_timing(
+        &mut self,
+        request: RenderSectionCompileRequest,
+    ) -> Result<RenderSectionCompileSubmitTiming> {
+        self.worker.submit_with_timing(request)
+    }
+
+    fn try_recv_completed(&mut self) -> Result<Vec<RenderSectionCompileResult>> {
+        self.worker.try_recv_completed()
+    }
+
+    fn pending_job_count(&self) -> usize {
+        self.worker.pending_job_count()
+    }
+
+    fn max_pending_job_count(&self) -> usize {
+        self.worker.max_pending_job_count()
+    }
 }
 
 impl RenderSectionCompileWorker {
@@ -693,6 +751,25 @@ mod tests {
 
         let error = worker.submit(empty_compile_request()).unwrap_err();
         assert!(error.to_string().contains("no free compile slots"));
+        Ok(())
+    }
+
+    #[test]
+    fn native_render_compile_dispatcher_wraps_worker_capacity() -> Result<()> {
+        let mut dispatcher = NativeRenderSectionCompileDispatcher::with_worker_count(
+            TexturedMeshCatalog::default(),
+            2,
+        )?;
+        assert_eq!(dispatcher.pending_job_count(), 0);
+        assert_eq!(dispatcher.max_pending_job_count(), 2);
+        assert_eq!(dispatcher.available_pending_job_slots(), 2);
+
+        dispatcher.submit(empty_compile_request())?;
+        let health = dispatcher.queue_health();
+        assert_eq!(health.pending_jobs, 1);
+        assert_eq!(health.max_pending_jobs, 2);
+        assert_eq!(health.available_job_slots, 1);
+        assert_eq!(health.queued_compile_tasks, 1);
         Ok(())
     }
 }

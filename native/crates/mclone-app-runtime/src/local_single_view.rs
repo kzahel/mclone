@@ -23,8 +23,8 @@ use crate::host_mode::{
     dispatch_remote_dedicated_command,
 };
 use crate::render_assets::{
-    DEFAULT_RENDER_SECTION_COMPILE_WORKERS, RenderSectionCompileWorker, TexturedMeshAssets,
-    load_textured_mesh_assets,
+    DEFAULT_RENDER_SECTION_COMPILE_WORKERS, NativeRenderSectionCompileDispatcher,
+    TexturedMeshAssets, load_textured_mesh_assets,
 };
 use crate::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, RemoteSessionEndpoint,
@@ -115,7 +115,7 @@ pub struct LocalSingleViewSceneRuntime {
     core: SingleViewRuntime,
     server_runner: NativeIntegratedServerRunner,
     mesh_assets: TexturedMeshAssets,
-    render_compile_worker: RenderSectionCompileWorker,
+    render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
     far_lod_cache: FarTerrainLodCache,
     simulation_cadence: SimulationCadenceConfig,
     last_runner_diagnostics: Option<ServerRunnerDiagnostics>,
@@ -239,7 +239,7 @@ impl LocalSingleViewSceneRuntime {
         options: LocalSingleViewSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
-        let render_compile_worker = RenderSectionCompileWorker::with_worker_count(
+        let render_compile_dispatcher = NativeRenderSectionCompileDispatcher::with_worker_count(
             mesh_assets.catalog.clone(),
             options.render_compile_worker_count,
         )?;
@@ -253,7 +253,7 @@ impl LocalSingleViewSceneRuntime {
             ),
             server_runner,
             mesh_assets,
-            render_compile_worker,
+            render_compile_dispatcher,
             far_lod_cache: FarTerrainLodCache::new(),
             simulation_cadence: options.cadence,
             last_runner_diagnostics: None,
@@ -461,10 +461,10 @@ impl LocalSingleViewSceneRuntime {
         &mut self,
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
-        let render_compile_worker = &mut self.render_compile_worker;
+        let render_compile_dispatcher = &mut self.render_compile_dispatcher;
         self.core
             .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots(
-                render_compile_worker,
+                render_compile_dispatcher,
                 camera_position,
                 DEFAULT_RENDER_CHUNK_MESH_BUDGET,
                 None,
@@ -476,10 +476,10 @@ impl LocalSingleViewSceneRuntime {
         camera_position: Vec3,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<RenderSectionCacheUpdate> {
-        let render_compile_worker = &mut self.render_compile_worker;
+        let render_compile_dispatcher = &mut self.render_compile_dispatcher;
         self.core
             .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots(
-                render_compile_worker,
+                render_compile_dispatcher,
                 camera_position,
                 DEFAULT_RENDER_CHUNK_MESH_BUDGET,
                 completed_result_accept_budget,
@@ -491,10 +491,10 @@ impl LocalSingleViewSceneRuntime {
         camera_position: Vec3,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate> {
-        let render_compile_worker = &mut self.render_compile_worker;
+        let render_compile_dispatcher = &mut self.render_compile_dispatcher;
         self.core
             .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots_timed(
-                render_compile_worker,
+                render_compile_dispatcher,
                 camera_position,
                 DEFAULT_RENDER_CHUNK_MESH_BUDGET,
                 completed_result_accept_budget,
@@ -506,10 +506,10 @@ impl LocalSingleViewSceneRuntime {
         camera_position: Vec3,
         deadline: Instant,
     ) -> Result<RenderSectionCacheUpdate> {
-        let render_compile_worker = &mut self.render_compile_worker;
+        let render_compile_dispatcher = &mut self.render_compile_dispatcher;
         self.core
             .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots(
-                render_compile_worker,
+                render_compile_dispatcher,
                 camera_position,
                 deadline,
                 None,
@@ -522,10 +522,10 @@ impl LocalSingleViewSceneRuntime {
         deadline: Instant,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<RenderSectionCacheUpdate> {
-        let render_compile_worker = &mut self.render_compile_worker;
+        let render_compile_dispatcher = &mut self.render_compile_dispatcher;
         self.core
             .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots(
-                render_compile_worker,
+                render_compile_dispatcher,
                 camera_position,
                 deadline,
                 completed_result_accept_budget,
@@ -538,10 +538,10 @@ impl LocalSingleViewSceneRuntime {
         deadline: Instant,
         completed_result_accept_budget: Option<usize>,
     ) -> Result<TimedRenderSectionCacheUpdate> {
-        let render_compile_worker = &mut self.render_compile_worker;
+        let render_compile_dispatcher = &mut self.render_compile_dispatcher;
         self.core
             .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots_timed(
-                render_compile_worker,
+                render_compile_dispatcher,
                 camera_position,
                 deadline,
                 completed_result_accept_budget,
@@ -553,7 +553,7 @@ impl LocalSingleViewSceneRuntime {
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
         self.core.sync_all_render_sections_targeted_snapshots(
-            &mut self.render_compile_worker,
+            &mut self.render_compile_dispatcher,
             camera_position,
         )
     }
@@ -962,8 +962,8 @@ where
 
     pub fn render_compile_pending_job_count(&self) -> usize {
         match self {
-            Self::Local(scene) => scene.render_compile_worker.pending_job_count(),
-            Self::RemoteDedicated(scene) => scene.render_compile_worker.pending_job_count(),
+            Self::Local(scene) => scene.render_compile_dispatcher.pending_job_count(),
+            Self::RemoteDedicated(scene) => scene.render_compile_dispatcher.pending_job_count(),
         }
     }
 
@@ -973,17 +973,19 @@ where
 
     pub fn render_compile_max_pending_job_count(&self) -> usize {
         match self {
-            Self::Local(scene) => scene.render_compile_worker.max_pending_job_count(),
-            Self::RemoteDedicated(scene) => scene.render_compile_worker.max_pending_job_count(),
+            Self::Local(scene) => scene.render_compile_dispatcher.max_pending_job_count(),
+            Self::RemoteDedicated(scene) => scene.render_compile_dispatcher.max_pending_job_count(),
         }
     }
 
     pub fn render_compile_available_pending_job_slots(&self) -> usize {
         match self {
-            Self::Local(scene) => scene.render_compile_worker.available_pending_job_slots(),
-            Self::RemoteDedicated(scene) => {
-                scene.render_compile_worker.available_pending_job_slots()
-            }
+            Self::Local(scene) => scene
+                .render_compile_dispatcher
+                .available_pending_job_slots(),
+            Self::RemoteDedicated(scene) => scene
+                .render_compile_dispatcher
+                .available_pending_job_slots(),
         }
     }
 
@@ -1157,7 +1159,7 @@ pub struct RemoteDedicatedSingleViewSceneRuntime<S> {
     core: SingleViewRuntime,
     session: S,
     mesh_assets: TexturedMeshAssets,
-    render_compile_worker: RenderSectionCompileWorker,
+    render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
     far_lod_cache: FarTerrainLodCache,
 }
 
@@ -1175,7 +1177,7 @@ where
         mut session: S,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
-        let render_compile_worker = RenderSectionCompileWorker::with_worker_count(
+        let render_compile_dispatcher = NativeRenderSectionCompileDispatcher::with_worker_count(
             mesh_assets.catalog.clone(),
             options.render_compile_worker_count,
         )?;
@@ -1196,7 +1198,7 @@ where
             core,
             session,
             mesh_assets,
-            render_compile_worker,
+            render_compile_dispatcher,
             far_lod_cache: FarTerrainLodCache::new(),
         })
     }
@@ -1269,7 +1271,7 @@ where
     ) -> Result<RenderSectionCacheUpdate> {
         self.core
             .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots(
-                &mut self.render_compile_worker,
+                &mut self.render_compile_dispatcher,
                 camera_position,
                 DEFAULT_RENDER_CHUNK_MESH_BUDGET,
                 None,
@@ -1283,7 +1285,7 @@ where
     ) -> Result<RenderSectionCacheUpdate> {
         self.core
             .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots(
-                &mut self.render_compile_worker,
+                &mut self.render_compile_dispatcher,
                 camera_position,
                 DEFAULT_RENDER_CHUNK_MESH_BUDGET,
                 completed_result_accept_budget,
@@ -1297,7 +1299,7 @@ where
     ) -> Result<TimedRenderSectionCacheUpdate> {
         self.core
             .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots_timed(
-                &mut self.render_compile_worker,
+                &mut self.render_compile_dispatcher,
                 camera_position,
                 DEFAULT_RENDER_CHUNK_MESH_BUDGET,
                 completed_result_accept_budget,
@@ -1311,7 +1313,7 @@ where
     ) -> Result<RenderSectionCacheUpdate> {
         self.core
             .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots(
-                &mut self.render_compile_worker,
+                &mut self.render_compile_dispatcher,
                 camera_position,
                 deadline,
                 None,
@@ -1326,7 +1328,7 @@ where
     ) -> Result<RenderSectionCacheUpdate> {
         self.core
             .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots(
-                &mut self.render_compile_worker,
+                &mut self.render_compile_dispatcher,
                 camera_position,
                 deadline,
                 completed_result_accept_budget,
@@ -1341,7 +1343,7 @@ where
     ) -> Result<TimedRenderSectionCacheUpdate> {
         self.core
             .sync_render_sections_until_deadline_with_completed_result_acceptance_targeted_snapshots_timed(
-                &mut self.render_compile_worker,
+                &mut self.render_compile_dispatcher,
                 camera_position,
                 deadline,
                 completed_result_accept_budget,
@@ -1353,7 +1355,7 @@ where
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
         self.core.sync_all_render_sections_targeted_snapshots(
-            &mut self.render_compile_worker,
+            &mut self.render_compile_dispatcher,
             camera_position,
         )
     }

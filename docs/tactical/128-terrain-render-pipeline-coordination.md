@@ -687,6 +687,9 @@ extract first.
 
 ### Slice B: introduce the dispatcher boundary
 
+Status: implemented, host/web validated, Quest RD7 measurement pending because
+ADB reported no connected devices after an ADB server restart.
+
 The confirmed first owner boundary is a terrain compile dispatcher. This slice
 should make the ownership visible before it tries to remove every request clone.
 The first version may keep the current snapshot-backed request payload, but the
@@ -712,6 +715,36 @@ channel dependency and prepares the request-slot change.
 
 Rollback rule: if the extraction adds new frame spikes or obscures existing
 submit metrics, revert or shrink the API before continuing.
+
+Implementation result:
+
+- `mclone-render-session` now exposes `RenderSectionCompileDispatcher` and
+  `RenderSectionCompileQueueHealth` as the shared dispatcher surface.
+- `SingleViewRuntime` frame-admission paths are typed against the dispatcher
+  boundary instead of the lower-level compiler trait.
+- Native local and remote single-view runtimes now hold
+  `NativeRenderSectionCompileDispatcher`, which wraps the existing
+  `RenderSectionCompileWorker` internally.
+- Android XR terrain submit logging now includes dispatcher health counters:
+  pending jobs, max pending jobs, available slots, and queued compile tasks.
+- Behavior is intentionally preserved: snapshot-backed request construction and
+  the current native worker/channel remain inside the native dispatcher for this
+  extraction.
+
+Validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-android-xr-client`
+- `pnpm native:web:build`
+
+Pending measurement:
+
+- rerun the Quest Android XR per-eye render-distance-7 settled-orbit lane with
+  2 render compile workers once ADB sees the headset again,
+- compare frame avg/p95/p99/max and `command_send_single_ms` against the
+  current baseline,
+- confirm the new dispatcher counters appear on
+  `MCLONE_ANDROID_XR_PERF_TERRAIN_SUBMIT_MAX`.
 
 ### Slice C: replace owned-request transport with dispatcher-owned slots
 
@@ -799,19 +832,9 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Implement Slice B: introduce the terrain compile dispatcher boundary, keeping
-behavior as close as possible to the current measured path. The point of this
-slice is ownership clarity, not yet a heroic performance win.
-
-The next commit should:
-
-- define the shared dispatcher/coordinator surface,
-- move native compile queue capacity, pending count, completed-result drain, and
-  submit timing behind that surface,
-- keep the existing snapshot-backed request payload and current worker
-  internally for the first extraction,
-- expose queue-health counters on Android XR,
-- rerun the RD7 settled-orbit lane and compare against the current baseline.
+First rerun the RD7 settled-orbit lane once the Quest is visible to ADB and
+record the dispatcher-boundary measurement. Slice B is code-complete but not yet
+headset-measured.
 
 Do not repeat a plain `std::sync::mpsc::sync_channel` swap; it was measured
 worse than the current unbounded channel. After Slice B lands, Slice C is the

@@ -468,6 +468,10 @@ pub struct XrTerrainFrameTiming {
     pub runtime_submit_request_revision_count: usize,
     pub runtime_submit_request_estimated_payload_bytes: usize,
     pub runtime_submit_request_estimated_payload_bytes_worst: usize,
+    pub runtime_dispatcher_pending_jobs: usize,
+    pub runtime_dispatcher_max_pending_jobs: usize,
+    pub runtime_dispatcher_available_job_slots: usize,
+    pub runtime_dispatcher_queued_compile_tasks: usize,
     pub runtime_gpu_upload_ms: f64,
     pub runtime_upload_enqueue_ms: f64,
     pub runtime_upload_select_ms: f64,
@@ -2783,6 +2787,14 @@ where
         timing.runtime_submit_request_estimated_payload_bytes_worst = timed_section_update
             .timing
             .submit_request_estimated_payload_bytes_worst;
+        timing.runtime_dispatcher_pending_jobs =
+            timed_section_update.timing.dispatcher_pending_jobs;
+        timing.runtime_dispatcher_max_pending_jobs =
+            timed_section_update.timing.dispatcher_max_pending_jobs;
+        timing.runtime_dispatcher_available_job_slots =
+            timed_section_update.timing.dispatcher_available_job_slots;
+        timing.runtime_dispatcher_queued_compile_tasks =
+            timed_section_update.timing.dispatcher_queued_compile_tasks;
         let section_update = timed_section_update.cache_update;
         let rebuilt_section_count = section_update.rebuilt_section_count();
         let removed_section_count = section_update.removed_section_count();
