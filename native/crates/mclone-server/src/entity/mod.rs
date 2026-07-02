@@ -2,11 +2,13 @@
 //!
 //! This is intentionally narrower than Java's full `ChunkMap.TrackedEntity`
 //! stack. It gives native clients authoritative snapshots for simple passive
-//! actor rendering without adding natural spawning, AI, persistence, or combat.
+//! actor rendering without enabling live natural spawning, persistence, or
+//! combat.
 
 mod item;
 mod metadata;
 mod mob;
+mod spawning;
 mod state;
 mod store;
 mod tick_list;

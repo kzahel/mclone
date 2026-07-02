@@ -718,6 +718,9 @@ Landed notes:
 Purpose: prepare the non-optional spawning boundary without pretending live
 natural spawning is done.
 
+Status: initial scaffold landed; live natural spawn attempts remain disabled
+until the required world/player/chunk inputs are present.
+
 Implementation sketch:
 
 - Add `entity/spawning/` modules:
@@ -740,6 +743,24 @@ Done when:
   player-distance spawnable chunk tracker, live category counts, placement
   predicates, brightness checks, collision checks, gamerules/server flags,
   despawn, and persistence.
+
+Landed notes:
+
+- Added `entity::spawning` modules for mob category facts, biome spawn table
+  facts, placement facts, spawn state/caps, and a natural spawn planner.
+- Ported Java 1.17.1 `MobCategory` constants, the `NaturalSpawner` `17 * 17`
+  mob-cap denominator, and the `CREATURE` 400-tick natural-spawn cadence.
+- Recorded vanilla farm-animal spawn table facts, including unsupported
+  sheep/pig entries so future passive mobs have the correct table shape.
+- Recorded cow/chicken on-ground animal placement facts without implementing
+  live placement, brightness, or collision predicates yet.
+- Kept live natural spawning blocked by default. Even if enabled, the planner
+  reports missing blockers until player-distance spawnable chunks, live
+  category counts, biome tables, placement predicates, brightness checks,
+  collision checks, gamerules, despawn, and persistence are supplied.
+- Verified the scaffold with focused `mclone-server` `entity::spawning` unit
+  tests, full `cargo test --manifest-path native/Cargo.toml`, and
+  `pnpm native:web:build`.
 
 ## Validation
 
@@ -765,9 +786,9 @@ Suggested visible checks:
 - Durable entity persistence adapter and save/unload dirtying.
 - Full `Entity.move(...)` / `LivingEntity.travel(...)` parity.
 - Real pathfinding over loaded world collision.
-- Live natural spawning for `CREATURE`.
+- Live natural spawning for `CREATURE` through the `entity::spawning` planner
+  once all blocker inputs are wired.
 - Despawn rules for passive animals and later hostile mobs.
-- Item entities and chicken egg side effects.
 - Sounds for passive mobs.
 - Data watcher / tracked data equivalent for richer entity presentation.
 - Web/Android/XR screenshot coverage after desktop validation.
