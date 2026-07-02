@@ -30,9 +30,10 @@ use mclone_protocol::{
     PlayerPositionUpdate, ServerUpdate, SetPlayerAppearanceCommand,
 };
 use mclone_render_session::{
-    EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompiler, RenderSectionRemovalMode,
-    RenderSectionSession, build_client_textured_sections, render_section_chunk_pos,
-    render_section_neighbor_readiness, sort_chunk_positions_by_distance,
+    EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompileSubmission,
+    RenderSectionCompiler, RenderSectionReadyWorkSubmission, RenderSectionRemovalMode,
+    RenderSectionSession, RenderSectionSyncPlan, build_client_textured_sections,
+    render_section_chunk_pos, render_section_neighbor_readiness, sort_chunk_positions_by_distance,
     sort_dirty_section_chunks_by_distance,
 };
 use mclone_server::{
@@ -56,6 +57,21 @@ pub struct RenderSectionSyncTiming {
     pub submit_ms: f64,
     pub submit_snapshot_ms: f64,
     pub submit_handoff_ms: f64,
+    pub submit_request_build_ms: f64,
+    pub submit_compiler_ms: f64,
+    pub submit_mark_inflight_ms: f64,
+    pub submit_apply_ready_plan_ms: f64,
+    pub submit_ready_update_ms: f64,
+    pub submit_ready_section_count: usize,
+    pub submit_deferred_section_count: usize,
+    pub submit_dirty_chunk_count_before: usize,
+    pub submit_dirty_chunk_count_after: usize,
+    pub submit_dirty_section_count_before: usize,
+    pub submit_dirty_section_count_after: usize,
+    pub submit_inflight_section_count_before: usize,
+    pub submit_inflight_section_count_after: usize,
+    pub submit_request_snapshot_count: usize,
+    pub submit_request_revision_count: usize,
 }
 
 impl RenderSectionSyncTiming {
@@ -66,6 +82,33 @@ impl RenderSectionSyncTiming {
         self.submit_ms += other.submit_ms;
         self.submit_snapshot_ms += other.submit_snapshot_ms;
         self.submit_handoff_ms += other.submit_handoff_ms;
+        self.submit_request_build_ms += other.submit_request_build_ms;
+        self.submit_compiler_ms += other.submit_compiler_ms;
+        self.submit_mark_inflight_ms += other.submit_mark_inflight_ms;
+        self.submit_apply_ready_plan_ms += other.submit_apply_ready_plan_ms;
+        self.submit_ready_update_ms += other.submit_ready_update_ms;
+        self.submit_ready_section_count += other.submit_ready_section_count;
+        self.submit_deferred_section_count += other.submit_deferred_section_count;
+        self.submit_dirty_chunk_count_before = self
+            .submit_dirty_chunk_count_before
+            .max(other.submit_dirty_chunk_count_before);
+        self.submit_dirty_chunk_count_after = self
+            .submit_dirty_chunk_count_after
+            .max(other.submit_dirty_chunk_count_after);
+        self.submit_dirty_section_count_before = self
+            .submit_dirty_section_count_before
+            .max(other.submit_dirty_section_count_before);
+        self.submit_dirty_section_count_after = self
+            .submit_dirty_section_count_after
+            .max(other.submit_dirty_section_count_after);
+        self.submit_inflight_section_count_before = self
+            .submit_inflight_section_count_before
+            .max(other.submit_inflight_section_count_before);
+        self.submit_inflight_section_count_after = self
+            .submit_inflight_section_count_after
+            .max(other.submit_inflight_section_count_after);
+        self.submit_request_snapshot_count += other.submit_request_snapshot_count;
+        self.submit_request_revision_count += other.submit_request_revision_count;
     }
 }
 
@@ -97,6 +140,23 @@ fn compile_snapshots_for_target_sections(
         .into_iter()
         .filter_map(|pos| client.chunk_snapshot(pos).cloned())
         .collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn record_submit_handoff_after_counts(
+    engine: &EngineRenderSession,
+    timing: &mut RenderSectionSyncTiming,
+) {
+    let dirty_after = engine.render_session().dirty();
+    timing.submit_dirty_chunk_count_after = timing
+        .submit_dirty_chunk_count_after
+        .max(dirty_after.dirty_chunks.len());
+    timing.submit_dirty_section_count_after = timing
+        .submit_dirty_section_count_after
+        .max(dirty_after.dirty_sections.len());
+    timing.submit_inflight_section_count_after = timing
+        .submit_inflight_section_count_after
+        .max(dirty_after.inflight_sections.len());
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -832,6 +892,93 @@ impl SingleViewRuntime {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    fn submit_prepared_sync_plan_timed<C>(
+        &mut self,
+        compiler: &mut C,
+        sync_plan: &RenderSectionSyncPlan,
+        snapshots: Vec<ChunkSnapshot>,
+        timing: &mut RenderSectionSyncTiming,
+    ) -> Result<RenderSectionReadyWorkSubmission<()>>
+    where
+        C: RenderSectionCompiler,
+    {
+        let dirty_before = self.engine.render_session().dirty();
+        timing.submit_dirty_chunk_count_before = timing
+            .submit_dirty_chunk_count_before
+            .max(dirty_before.dirty_chunks.len());
+        timing.submit_dirty_section_count_before = timing
+            .submit_dirty_section_count_before
+            .max(dirty_before.dirty_sections.len());
+        timing.submit_inflight_section_count_before = timing
+            .submit_inflight_section_count_before
+            .max(dirty_before.inflight_sections.len());
+        timing.submit_ready_section_count += sync_plan.ready_plan.ready_section_keys.len();
+        timing.submit_deferred_section_count += sync_plan.ready_plan.deferred_section_count;
+
+        let request_snapshot_count = snapshots.len();
+        timing.submit_request_snapshot_count += request_snapshot_count;
+        let request_build_start = Instant::now();
+        let Some(request) = self
+            .engine
+            .render_session()
+            .build_ready_plan_compile_request(&sync_plan.ready_plan, snapshots)
+        else {
+            timing.submit_request_build_ms += elapsed_ms(request_build_start.elapsed());
+
+            let apply_start = Instant::now();
+            self.engine
+                .render_session_mut()
+                .apply_ready_plan(&sync_plan.ready_plan);
+            timing.submit_apply_ready_plan_ms += elapsed_ms(apply_start.elapsed());
+
+            let ready_update_start = Instant::now();
+            let mut cache_update = RenderSectionCacheUpdate::default();
+            cache_update.merge(sync_plan.ready_update(0));
+            timing.submit_ready_update_ms += elapsed_ms(ready_update_start.elapsed());
+
+            record_submit_handoff_after_counts(&self.engine, timing);
+            return Ok(RenderSectionReadyWorkSubmission {
+                cache_update,
+                submission: None,
+            });
+        };
+        timing.submit_request_build_ms += elapsed_ms(request_build_start.elapsed());
+        timing.submit_request_revision_count += request.section_revisions.len();
+
+        let submitted_section_count = request.target_sections.len();
+        let compiler_start = Instant::now();
+        compiler.submit(request)?;
+        timing.submit_compiler_ms += elapsed_ms(compiler_start.elapsed());
+
+        let mark_start = Instant::now();
+        self.engine
+            .render_session_mut()
+            .dirty_mut()
+            .mark_compile_submitted(&sync_plan.ready_plan.ready_section_keys);
+        timing.submit_mark_inflight_ms += elapsed_ms(mark_start.elapsed());
+
+        let apply_start = Instant::now();
+        self.engine
+            .render_session_mut()
+            .apply_ready_plan(&sync_plan.ready_plan);
+        timing.submit_apply_ready_plan_ms += elapsed_ms(apply_start.elapsed());
+
+        let ready_update_start = Instant::now();
+        let mut cache_update = RenderSectionCacheUpdate::default();
+        cache_update.merge(sync_plan.ready_update(submitted_section_count));
+        timing.submit_ready_update_ms += elapsed_ms(ready_update_start.elapsed());
+        record_submit_handoff_after_counts(&self.engine, timing);
+
+        Ok(RenderSectionReadyWorkSubmission {
+            cache_update,
+            submission: Some(RenderSectionCompileSubmission {
+                submitted_section_count,
+                output: (),
+            }),
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn sync_render_sections_with_budget_and_completed_result_acceptance_timed<C, Snapshots>(
         &mut self,
         compiler: &mut C,
@@ -914,11 +1061,8 @@ impl SingleViewRuntime {
         let snapshots = snapshots_for_submit(self.client(), compiler);
         timing.submit_snapshot_ms = elapsed_ms(snapshot_start.elapsed());
         let handoff_start = Instant::now();
-        let submission_update = self.engine.submit_prepared_sync_plan(
-            &sync_plan,
-            snapshots,
-            |_sync_plan, request| compiler.submit(request),
-        )?;
+        let submission_update =
+            self.submit_prepared_sync_plan_timed(compiler, &sync_plan, snapshots, &mut timing)?;
         timing.submit_handoff_ms = elapsed_ms(handoff_start.elapsed());
         cache_update.merge(submission_update.cache_update);
         cache_update.pending_compile_jobs = compiler.pending_job_count();
@@ -1036,11 +1180,8 @@ impl SingleViewRuntime {
         );
         timing.submit_snapshot_ms = elapsed_ms(snapshot_start.elapsed());
         let handoff_start = Instant::now();
-        let submission_update = self.engine.submit_prepared_sync_plan(
-            &sync_plan,
-            snapshots,
-            |_sync_plan, request| compiler.submit(request),
-        )?;
+        let submission_update =
+            self.submit_prepared_sync_plan_timed(compiler, &sync_plan, snapshots, &mut timing)?;
         timing.submit_handoff_ms = elapsed_ms(handoff_start.elapsed());
         cache_update.merge(submission_update.cache_update);
         cache_update.pending_compile_jobs = compiler.pending_job_count();
@@ -2049,8 +2190,8 @@ mod tests {
         );
         let mut compiler = DeadlineTestCompiler::new(1);
 
-        let update = runtime
-            .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots(
+        let timed = runtime
+            .sync_render_sections_with_budget_and_completed_result_acceptance_targeted_snapshots_timed(
                 &mut compiler,
                 Vec3::new(8.0, 8.0, 8.0),
                 DEFAULT_RENDER_CHUNK_MESH_BUDGET,
@@ -2058,6 +2199,7 @@ mod tests {
             )
             .expect("targeted render sync should succeed");
 
+        let update = timed.cache_update;
         assert_eq!(update.submitted_compile_section_count, 1);
         assert_eq!(compiler.submitted_requests.len(), 1);
         let snapshot_chunks = compiler.submitted_requests[0]
@@ -2067,5 +2209,13 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(snapshot_chunks, required_chunks);
         assert!(!snapshot_chunks.contains(&unrelated));
+        assert_eq!(timed.timing.submit_ready_section_count, 1);
+        assert_eq!(
+            timed.timing.submit_request_snapshot_count,
+            required_chunks.len()
+        );
+        assert_eq!(timed.timing.submit_request_revision_count, 1);
+        assert_eq!(timed.timing.submit_inflight_section_count_before, 0);
+        assert_eq!(timed.timing.submit_inflight_section_count_after, 1);
     }
 }

@@ -351,10 +351,27 @@ a compiler exposes spare capacity and waits when capacity is full.
 
 ## Next Step
 
-Split the `submit_handoff_ms` bucket inside
-`submit_prepared_sync_plan(...)`: request construction, compiler `submit`, and
-ready-plan/dirty-state mutation should be separately visible. If raw compiler
-send is cheap, optimize the ready-plan/deferred-section bookkeeping before
-returning to resident snapshot ownership. In parallel, continue tracking
-upload-apply and per-eye terrain encode tails because they are now comparable to
-runtime submit in the worst frames.
+The `submit_handoff_ms` bucket is now split in the timed native path and exposed
+on Android XR as `MCLONE_ANDROID_XR_PERF_TERRAIN_SUBMIT_MAX`: request build,
+compiler submit, mark inflight, apply ready plan, ready-update generation, and
+the relevant dirty/inflight/request counts are visible.
+
+Measurement, Quest Android XR per-eye settled orbit, render distance 7, 2 render
+compile workers, unbounded completed-result acceptance, 45-second sample:
+
+| Frame avg / p95 / p99 / max | Runtime submit split | Submit handoff split | Read |
+|---|---|---|---|
+| 14.219 / 15.786 / 25.674 / 38.490 ms | submit 16.871 ms; snapshot 1.114; handoff 16.551 | request build 0.045; compiler submit 16.396; mark inflight 0.111; apply ready plan 0.427; ready update 0.006 | 32 ready sections, 3536 deferred sections, 10 request snapshots, 32 revisions |
+
+Interpretation:
+
+- Raw compiler handoff is not cheap in the worst frame. It dominates the old
+  handoff bucket.
+- Ready-plan/deferred-section bookkeeping is not the measured submit spike in
+  this run: `apply_ready_plan` is under 0.5 ms even with 3536 deferred sections.
+- The next backpressure slice should focus on native compile dispatcher/request
+  transport: request counts and per-submit worst timing, then a bounded
+  preallocated dispatcher queue or compact resident-worker descriptor.
+- In parallel, continue tracking upload-apply, ready publish, prepared-record
+  rebuild, and per-eye terrain encode tails because they remain comparable to
+  runtime submit in worst frames.

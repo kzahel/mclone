@@ -429,6 +429,21 @@ pub struct XrTerrainFrameTiming {
     pub runtime_submit_ms: f64,
     pub runtime_submit_snapshot_ms: f64,
     pub runtime_submit_handoff_ms: f64,
+    pub runtime_submit_request_build_ms: f64,
+    pub runtime_submit_compiler_ms: f64,
+    pub runtime_submit_mark_inflight_ms: f64,
+    pub runtime_submit_apply_ready_plan_ms: f64,
+    pub runtime_submit_ready_update_ms: f64,
+    pub runtime_submit_ready_section_count: usize,
+    pub runtime_submit_deferred_section_count: usize,
+    pub runtime_submit_dirty_chunk_count_before: usize,
+    pub runtime_submit_dirty_chunk_count_after: usize,
+    pub runtime_submit_dirty_section_count_before: usize,
+    pub runtime_submit_dirty_section_count_after: usize,
+    pub runtime_submit_inflight_section_count_before: usize,
+    pub runtime_submit_inflight_section_count_after: usize,
+    pub runtime_submit_request_snapshot_count: usize,
+    pub runtime_submit_request_revision_count: usize,
     pub runtime_gpu_upload_ms: f64,
     pub runtime_upload_enqueue_ms: f64,
     pub runtime_upload_select_ms: f64,
@@ -2665,6 +2680,37 @@ where
         timing.runtime_submit_ms = timed_section_update.timing.submit_ms;
         timing.runtime_submit_snapshot_ms = timed_section_update.timing.submit_snapshot_ms;
         timing.runtime_submit_handoff_ms = timed_section_update.timing.submit_handoff_ms;
+        timing.runtime_submit_request_build_ms =
+            timed_section_update.timing.submit_request_build_ms;
+        timing.runtime_submit_compiler_ms = timed_section_update.timing.submit_compiler_ms;
+        timing.runtime_submit_mark_inflight_ms =
+            timed_section_update.timing.submit_mark_inflight_ms;
+        timing.runtime_submit_apply_ready_plan_ms =
+            timed_section_update.timing.submit_apply_ready_plan_ms;
+        timing.runtime_submit_ready_update_ms = timed_section_update.timing.submit_ready_update_ms;
+        timing.runtime_submit_ready_section_count =
+            timed_section_update.timing.submit_ready_section_count;
+        timing.runtime_submit_deferred_section_count =
+            timed_section_update.timing.submit_deferred_section_count;
+        timing.runtime_submit_dirty_chunk_count_before =
+            timed_section_update.timing.submit_dirty_chunk_count_before;
+        timing.runtime_submit_dirty_chunk_count_after =
+            timed_section_update.timing.submit_dirty_chunk_count_after;
+        timing.runtime_submit_dirty_section_count_before = timed_section_update
+            .timing
+            .submit_dirty_section_count_before;
+        timing.runtime_submit_dirty_section_count_after =
+            timed_section_update.timing.submit_dirty_section_count_after;
+        timing.runtime_submit_inflight_section_count_before = timed_section_update
+            .timing
+            .submit_inflight_section_count_before;
+        timing.runtime_submit_inflight_section_count_after = timed_section_update
+            .timing
+            .submit_inflight_section_count_after;
+        timing.runtime_submit_request_snapshot_count =
+            timed_section_update.timing.submit_request_snapshot_count;
+        timing.runtime_submit_request_revision_count =
+            timed_section_update.timing.submit_request_revision_count;
         let section_update = timed_section_update.cache_update;
         let rebuilt_section_count = section_update.rebuilt_section_count();
         let removed_section_count = section_update.removed_section_count();

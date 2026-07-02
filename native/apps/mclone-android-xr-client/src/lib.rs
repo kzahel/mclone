@@ -3208,6 +3208,21 @@ mod android {
         terrain_runtime_submit_ms: f64,
         terrain_runtime_submit_snapshot_ms: f64,
         terrain_runtime_submit_handoff_ms: f64,
+        terrain_runtime_submit_request_build_ms: f64,
+        terrain_runtime_submit_compiler_ms: f64,
+        terrain_runtime_submit_mark_inflight_ms: f64,
+        terrain_runtime_submit_apply_ready_plan_ms: f64,
+        terrain_runtime_submit_ready_update_ms: f64,
+        terrain_runtime_submit_ready_section_count: usize,
+        terrain_runtime_submit_deferred_section_count: usize,
+        terrain_runtime_submit_dirty_chunk_count_before: usize,
+        terrain_runtime_submit_dirty_chunk_count_after: usize,
+        terrain_runtime_submit_dirty_section_count_before: usize,
+        terrain_runtime_submit_dirty_section_count_after: usize,
+        terrain_runtime_submit_inflight_section_count_before: usize,
+        terrain_runtime_submit_inflight_section_count_after: usize,
+        terrain_runtime_submit_request_snapshot_count: usize,
+        terrain_runtime_submit_request_revision_count: usize,
         terrain_runtime_gpu_upload_ms: f64,
         terrain_runtime_upload_enqueue_ms: f64,
         terrain_runtime_upload_select_ms: f64,
@@ -3834,6 +3849,33 @@ mod android {
                 self.max_render.terrain_runtime_ready_publish_ms
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_TERRAIN_SUBMIT_MAX max_request_build_ms={:.3} max_compiler_ms={:.3} max_mark_inflight_ms={:.3} max_apply_ready_plan_ms={:.3} max_ready_update_ms={:.3} ready_sections={} deferred_sections={} dirty_chunks_before={} dirty_chunks_after={} dirty_sections_before={} dirty_sections_after={} inflight_sections_before={} inflight_sections_after={} request_snapshots={} request_revisions={}",
+                self.max_render.terrain_runtime_submit_request_build_ms,
+                self.max_render.terrain_runtime_submit_compiler_ms,
+                self.max_render.terrain_runtime_submit_mark_inflight_ms,
+                self.max_render.terrain_runtime_submit_apply_ready_plan_ms,
+                self.max_render.terrain_runtime_submit_ready_update_ms,
+                self.max_render.terrain_runtime_submit_ready_section_count,
+                self.max_render
+                    .terrain_runtime_submit_deferred_section_count,
+                self.max_render
+                    .terrain_runtime_submit_dirty_chunk_count_before,
+                self.max_render
+                    .terrain_runtime_submit_dirty_chunk_count_after,
+                self.max_render
+                    .terrain_runtime_submit_dirty_section_count_before,
+                self.max_render
+                    .terrain_runtime_submit_dirty_section_count_after,
+                self.max_render
+                    .terrain_runtime_submit_inflight_section_count_before,
+                self.max_render
+                    .terrain_runtime_submit_inflight_section_count_after,
+                self.max_render
+                    .terrain_runtime_submit_request_snapshot_count,
+                self.max_render
+                    .terrain_runtime_submit_request_revision_count
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_TERRAIN_PREP max_terrain_left_eye_cull_ms={:.3} max_terrain_left_eye_uniform_write_ms={:.3} max_terrain_left_eye_translucent_collect_ms={:.3} max_terrain_left_eye_translucent_sort_ms={:.3} max_terrain_right_eye_cull_ms={:.3} max_terrain_right_eye_uniform_write_ms={:.3} max_terrain_right_eye_translucent_collect_ms={:.3} max_terrain_right_eye_translucent_sort_ms={:.3}",
                 self.max_render.terrain_left_eye_cull_ms,
                 self.max_render.terrain_left_eye_uniform_write_ms,
@@ -4068,6 +4110,51 @@ mod android {
             terrain_runtime_submit_handoff_ms: a
                 .terrain_runtime_submit_handoff_ms
                 .max(b.terrain_runtime_submit_handoff_ms),
+            terrain_runtime_submit_request_build_ms: a
+                .terrain_runtime_submit_request_build_ms
+                .max(b.terrain_runtime_submit_request_build_ms),
+            terrain_runtime_submit_compiler_ms: a
+                .terrain_runtime_submit_compiler_ms
+                .max(b.terrain_runtime_submit_compiler_ms),
+            terrain_runtime_submit_mark_inflight_ms: a
+                .terrain_runtime_submit_mark_inflight_ms
+                .max(b.terrain_runtime_submit_mark_inflight_ms),
+            terrain_runtime_submit_apply_ready_plan_ms: a
+                .terrain_runtime_submit_apply_ready_plan_ms
+                .max(b.terrain_runtime_submit_apply_ready_plan_ms),
+            terrain_runtime_submit_ready_update_ms: a
+                .terrain_runtime_submit_ready_update_ms
+                .max(b.terrain_runtime_submit_ready_update_ms),
+            terrain_runtime_submit_ready_section_count: a
+                .terrain_runtime_submit_ready_section_count
+                .max(b.terrain_runtime_submit_ready_section_count),
+            terrain_runtime_submit_deferred_section_count: a
+                .terrain_runtime_submit_deferred_section_count
+                .max(b.terrain_runtime_submit_deferred_section_count),
+            terrain_runtime_submit_dirty_chunk_count_before: a
+                .terrain_runtime_submit_dirty_chunk_count_before
+                .max(b.terrain_runtime_submit_dirty_chunk_count_before),
+            terrain_runtime_submit_dirty_chunk_count_after: a
+                .terrain_runtime_submit_dirty_chunk_count_after
+                .max(b.terrain_runtime_submit_dirty_chunk_count_after),
+            terrain_runtime_submit_dirty_section_count_before: a
+                .terrain_runtime_submit_dirty_section_count_before
+                .max(b.terrain_runtime_submit_dirty_section_count_before),
+            terrain_runtime_submit_dirty_section_count_after: a
+                .terrain_runtime_submit_dirty_section_count_after
+                .max(b.terrain_runtime_submit_dirty_section_count_after),
+            terrain_runtime_submit_inflight_section_count_before: a
+                .terrain_runtime_submit_inflight_section_count_before
+                .max(b.terrain_runtime_submit_inflight_section_count_before),
+            terrain_runtime_submit_inflight_section_count_after: a
+                .terrain_runtime_submit_inflight_section_count_after
+                .max(b.terrain_runtime_submit_inflight_section_count_after),
+            terrain_runtime_submit_request_snapshot_count: a
+                .terrain_runtime_submit_request_snapshot_count
+                .max(b.terrain_runtime_submit_request_snapshot_count),
+            terrain_runtime_submit_request_revision_count: a
+                .terrain_runtime_submit_request_revision_count
+                .max(b.terrain_runtime_submit_request_revision_count),
             terrain_runtime_gpu_upload_ms: a
                 .terrain_runtime_gpu_upload_ms
                 .max(b.terrain_runtime_gpu_upload_ms),
@@ -4657,6 +4744,34 @@ mod android {
         timing.terrain_runtime_submit_ms = scene_timing.runtime_submit_ms;
         timing.terrain_runtime_submit_snapshot_ms = scene_timing.runtime_submit_snapshot_ms;
         timing.terrain_runtime_submit_handoff_ms = scene_timing.runtime_submit_handoff_ms;
+        timing.terrain_runtime_submit_request_build_ms =
+            scene_timing.runtime_submit_request_build_ms;
+        timing.terrain_runtime_submit_compiler_ms = scene_timing.runtime_submit_compiler_ms;
+        timing.terrain_runtime_submit_mark_inflight_ms =
+            scene_timing.runtime_submit_mark_inflight_ms;
+        timing.terrain_runtime_submit_apply_ready_plan_ms =
+            scene_timing.runtime_submit_apply_ready_plan_ms;
+        timing.terrain_runtime_submit_ready_update_ms = scene_timing.runtime_submit_ready_update_ms;
+        timing.terrain_runtime_submit_ready_section_count =
+            scene_timing.runtime_submit_ready_section_count;
+        timing.terrain_runtime_submit_deferred_section_count =
+            scene_timing.runtime_submit_deferred_section_count;
+        timing.terrain_runtime_submit_dirty_chunk_count_before =
+            scene_timing.runtime_submit_dirty_chunk_count_before;
+        timing.terrain_runtime_submit_dirty_chunk_count_after =
+            scene_timing.runtime_submit_dirty_chunk_count_after;
+        timing.terrain_runtime_submit_dirty_section_count_before =
+            scene_timing.runtime_submit_dirty_section_count_before;
+        timing.terrain_runtime_submit_dirty_section_count_after =
+            scene_timing.runtime_submit_dirty_section_count_after;
+        timing.terrain_runtime_submit_inflight_section_count_before =
+            scene_timing.runtime_submit_inflight_section_count_before;
+        timing.terrain_runtime_submit_inflight_section_count_after =
+            scene_timing.runtime_submit_inflight_section_count_after;
+        timing.terrain_runtime_submit_request_snapshot_count =
+            scene_timing.runtime_submit_request_snapshot_count;
+        timing.terrain_runtime_submit_request_revision_count =
+            scene_timing.runtime_submit_request_revision_count;
         timing.terrain_runtime_gpu_upload_ms = scene_timing.runtime_gpu_upload_ms;
         timing.terrain_runtime_upload_enqueue_ms = scene_timing.runtime_upload_enqueue_ms;
         timing.terrain_runtime_upload_select_ms = scene_timing.runtime_upload_select_ms;
