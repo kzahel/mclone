@@ -80,6 +80,7 @@ mod android {
     const ANDROID_XR_PERF_SETTLE_MIN_SECONDS: f64 = 5.0;
     const ANDROID_XR_PERF_SETTLE_QUIET_FRAMES: u64 = 45;
     const ANDROID_XR_PERF_SETTLE_PROGRESS_FRAMES: u64 = 120;
+    const ANDROID_XR_PERF_WORST_FRAME_COUNT: usize = 5;
     const TERRAIN_MULTIVIEW_PERF_WARMUP_FRAMES: usize = 12;
     const TERRAIN_MULTIVIEW_PERF_SAMPLE_FRAMES: usize = 60;
     const ANDROID_XR_DEFAULT_RENDER_SCALE: f32 = 1.0;
@@ -3352,6 +3353,16 @@ mod android {
         end_frame_ms: f64,
     }
 
+    #[derive(Clone, Copy, Debug)]
+    struct AndroidXrWorstFrameSnapshot {
+        sample_frame: u64,
+        frame_wall_ms: f64,
+        wait_frame_ms: f64,
+        app_work_ms: f64,
+        timing: AndroidXrFrameTiming,
+        summary: Option<mclone_xr_scene::XrTerrainFrameSummary>,
+    }
+
     struct AndroidXrPerfProbe {
         requested_seconds: Option<u64>,
         flight: Option<AndroidXrPerfFlight>,
@@ -3573,6 +3584,7 @@ mod android {
                 record_rebuild_frames: 0,
                 record_rebuild_total_ms: 0.0,
                 record_rebuild_max_ms: 0.0,
+                worst_frames: Vec::new(),
                 latest_summary: rendered.summary,
             });
             true
@@ -3695,6 +3707,7 @@ mod android {
         record_rebuild_frames: u64,
         record_rebuild_total_ms: f64,
         record_rebuild_max_ms: f64,
+        worst_frames: Vec<AndroidXrWorstFrameSnapshot>,
         latest_summary: mclone_xr_scene::XrTerrainFrameSummary,
     }
 
@@ -3705,10 +3718,19 @@ mod android {
             rendered: Option<AndroidXrRenderedFrame>,
         ) {
             let budget_ms = perf_budget_ms(self.target_hz);
+            let sample_frame = self.frame_wall_ms.len() as u64 + 1;
             self.frame_wall_ms.push(timing.frame_wall_ms);
             self.wait_frame_ms.push(timing.wait_frame_ms);
             let app_work_ms = (timing.frame_wall_ms - timing.wait_frame_ms).max(0.0);
             self.app_work_ms.push(app_work_ms);
+            self.record_worst_frame(AndroidXrWorstFrameSnapshot {
+                sample_frame,
+                frame_wall_ms: timing.frame_wall_ms,
+                wait_frame_ms: timing.wait_frame_ms,
+                app_work_ms,
+                timing,
+                summary: rendered.map(|rendered| rendered.summary),
+            });
             if app_work_ms > budget_ms {
                 self.app_over_period_frames += 1;
             }
@@ -3878,6 +3900,7 @@ mod android {
                 self.app_over_period_frames,
                 app_over_period_pct
             );
+            self.log_worst_frames(budget_ms);
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_STAGES max_wait_begin_ms={:.3} max_wait_frame_ms={:.3} max_begin_frame_ms={:.3} max_controller_poll_ms={:.3} max_render_mclone_frame_ms={:.3} max_locate_views_ms={:.3} max_locomotion_ms={:.3} max_acquire_left_ms={:.3} max_acquire_right_ms={:.3} max_release_eyes_ms={:.3} max_end_frame_ms={:.3}",
                 self.max_wait_begin_ms,
@@ -4192,6 +4215,143 @@ mod android {
                 self.latest_summary.actor_count,
                 self.latest_summary.drawn_actor_count
             );
+        }
+
+        fn record_worst_frame(&mut self, snapshot: AndroidXrWorstFrameSnapshot) {
+            self.worst_frames.push(snapshot);
+            self.worst_frames.sort_by(|a, b| {
+                b.app_work_ms
+                    .total_cmp(&a.app_work_ms)
+                    .then_with(|| b.frame_wall_ms.total_cmp(&a.frame_wall_ms))
+                    .then_with(|| a.sample_frame.cmp(&b.sample_frame))
+            });
+            self.worst_frames
+                .truncate(ANDROID_XR_PERF_WORST_FRAME_COUNT);
+        }
+
+        fn log_worst_frames(&self, budget_ms: f64) {
+            for (index, snapshot) in self.worst_frames.iter().enumerate() {
+                let rank = index + 1;
+                let timing = snapshot.timing;
+                let render = timing.render;
+                let summary = snapshot.summary;
+                let upload = summary.map(|summary| summary.upload);
+                let headroom_ms = budget_ms - snapshot.app_work_ms;
+                log::info!(
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME rank={} sample_frame={} rendered={} frame_wall_ms={:.3} wait_frame_ms={:.3} app_work_ms={:.3} headroom_ms={:.3} over_budget={} over_2x_budget={} wait_begin_ms={:.3} begin_frame_ms={:.3} controller_poll_ms={:.3} render_mclone_frame_ms={:.3} locate_views_ms={:.3} locomotion_ms={:.3} acquire_left_ms={:.3} acquire_right_ms={:.3} release_eyes_ms={:.3} end_frame_ms={:.3}",
+                    rank,
+                    snapshot.sample_frame,
+                    summary.is_some(),
+                    snapshot.frame_wall_ms,
+                    snapshot.wait_frame_ms,
+                    snapshot.app_work_ms,
+                    headroom_ms,
+                    snapshot.frame_wall_ms > budget_ms,
+                    snapshot.frame_wall_ms > budget_ms * 2.0,
+                    timing.wait_begin_ms,
+                    timing.begin_frame_ms,
+                    timing.controller_poll_ms,
+                    timing.render_mclone_frame_ms,
+                    render.locate_views_ms,
+                    render.locomotion_ms,
+                    render.acquire_left_ms,
+                    render.acquire_right_ms,
+                    render.release_eyes_ms,
+                    render.end_frame_ms
+                );
+                log::info!(
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME_TERRAIN rank={} sample_frame={} terrain_frame_ms={:.3} render_views_ms={:.3} runtime_upload_ms={:.3} shared_records_ms={:.3} left_eye_ms={:.3} right_eye_ms={:.3} left_prepare_ms={:.3} left_encode_ms={:.3} left_submit_ms={:.3} left_poll_wait_ms={:.3} right_prepare_ms={:.3} right_encode_ms={:.3} right_submit_ms={:.3} right_poll_wait_ms={:.3} stereo_submit_ms={:.3} stereo_poll_wait_ms={:.3}",
+                    rank,
+                    snapshot.sample_frame,
+                    render.terrain_render_frame_ms,
+                    render.terrain_render_views_ms,
+                    render.terrain_runtime_upload_ms,
+                    render.terrain_shared_records_ms,
+                    render.terrain_left_eye_ms,
+                    render.terrain_right_eye_ms,
+                    render.terrain_left_eye_prepare_ms,
+                    render.terrain_left_eye_encode_ms,
+                    render.terrain_left_eye_submit_ms,
+                    render.terrain_left_eye_poll_wait_ms,
+                    render.terrain_right_eye_prepare_ms,
+                    render.terrain_right_eye_encode_ms,
+                    render.terrain_right_eye_submit_ms,
+                    render.terrain_right_eye_poll_wait_ms,
+                    render.terrain_stereo_submit_ms,
+                    render.terrain_stereo_poll_wait_ms
+                );
+                log::info!(
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME_RUNTIME rank={} sample_frame={} poll_ms={:.3} sync_ms={:.3} result_accept_ms={:.3} dirty_seed_ms={:.3} prepare_ms={:.3} submit_ms={:.3} submit_snapshot_ms={:.3} submit_handoff_ms={:.3} gpu_upload_ms={:.3} upload_enqueue_ms={:.3} upload_select_ms={:.3} upload_apply_ms={:.3} ready_sections_ms={:.3} ready_publish_ms={:.3} submit_request_count={} submit_request_build_ms={:.3} compiler_ms={:.3} compiler_single_ms={:.3} command_send_ms={:.3} command_send_single_ms={:.3} notify_ms={:.3} notify_single_ms={:.3} mark_inflight_ms={:.3} apply_ready_plan_ms={:.3} ready_update_ms={:.3}",
+                    rank,
+                    snapshot.sample_frame,
+                    render.terrain_runtime_poll_ms,
+                    render.terrain_runtime_sync_ms,
+                    render.terrain_runtime_result_accept_ms,
+                    render.terrain_runtime_dirty_seed_ms,
+                    render.terrain_runtime_prepare_ms,
+                    render.terrain_runtime_submit_ms,
+                    render.terrain_runtime_submit_snapshot_ms,
+                    render.terrain_runtime_submit_handoff_ms,
+                    render.terrain_runtime_gpu_upload_ms,
+                    render.terrain_runtime_upload_enqueue_ms,
+                    render.terrain_runtime_upload_select_ms,
+                    render.terrain_runtime_upload_apply_ms,
+                    render.terrain_runtime_ready_sections_ms,
+                    render.terrain_runtime_ready_publish_ms,
+                    render.terrain_runtime_submit_request_count,
+                    render.terrain_runtime_submit_request_build_ms,
+                    render.terrain_runtime_submit_compiler_ms,
+                    render.terrain_runtime_submit_compiler_worst_ms,
+                    render.terrain_runtime_submit_compiler_command_send_ms,
+                    render.terrain_runtime_submit_compiler_command_send_worst_ms,
+                    render.terrain_runtime_submit_compiler_command_notify_ms,
+                    render.terrain_runtime_submit_compiler_command_notify_worst_ms,
+                    render.terrain_runtime_submit_mark_inflight_ms,
+                    render.terrain_runtime_submit_apply_ready_plan_ms,
+                    render.terrain_runtime_submit_ready_update_ms
+                );
+                log::info!(
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME_UPLOAD rank={} sample_frame={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={} poll_changed={} pending_chunks_after={} pending_jobs_after={} submitted_sections={} accepted_results={} queued_completed_results={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} upload_limited={} accept_limited={} backpressured={} held_lifecycle={} held_jobs={} server_cmd_q={} server_update_q={} scheduler_pending_jobs={} scheduler_completed_jobs={} scheduler_dirty_chunks={} scheduler_loaded_chunks={} scheduler_ticket_chunks={} request_target_sections={} request_target_sections_single={} request_snapshots={} request_snapshot_sections={} request_snapshot_sections_single={} request_payload_bytes={} request_payload_bytes_single={} dispatcher_pending_jobs={} dispatcher_queued_compile_tasks={}",
+                    rank,
+                    snapshot.sample_frame,
+                    summary.map_or(0, |summary| summary.section_count),
+                    summary.map_or(0, |summary| summary.drawn_section_count),
+                    summary.map_or(0, |summary| summary.index_count),
+                    summary.map_or(0, |summary| summary.drawn_index_count),
+                    upload.map_or(0, |upload| upload.traversal_ready_section_count),
+                    upload.map_or(false, |upload| upload.poll_changed),
+                    upload.map_or(0, |upload| upload.pending_render_chunks_after),
+                    upload.map_or(0, |upload| upload.pending_compile_jobs_after),
+                    upload.map_or(0, |upload| upload.submitted_compile_section_count),
+                    upload.map_or(0, |upload| upload.accepted_compile_result_count),
+                    upload.map_or(0, |upload| upload.queued_completed_compile_result_count),
+                    upload.map_or(0, |upload| upload.completed_compile_section_count),
+                    upload.map_or(0, |upload| upload.stale_compile_section_count),
+                    upload.map_or(0, |upload| upload.uploaded_section_count),
+                    upload.map_or(0, |upload| upload.upload_removed_section_count),
+                    upload.map_or(false, |upload| upload.upload_limited),
+                    upload.map_or(false, |upload| upload.upload_accept_limited),
+                    upload.map_or(false, |upload| upload.upload_backpressured),
+                    upload.map_or(0, |upload| upload.upload_held_lifecycle_item_count),
+                    upload.map_or(0, |upload| upload.upload_held_compile_job_count),
+                    upload.map_or(0, |upload| upload.server_command_queue_depth),
+                    upload.map_or(0, |upload| upload.server_update_queue_depth),
+                    upload.map_or(0, |upload| upload.scheduler_pending_jobs),
+                    upload.map_or(0, |upload| upload.scheduler_completed_jobs),
+                    upload.map_or(0, |upload| upload.scheduler_dirty_chunks),
+                    upload.map_or(0, |upload| upload.scheduler_loaded_snapshot_chunks),
+                    upload.map_or(0, |upload| upload.scheduler_active_ticket_chunks),
+                    render.terrain_runtime_submit_request_target_section_count,
+                    render.terrain_runtime_submit_request_target_section_count_worst,
+                    render.terrain_runtime_submit_request_snapshot_count,
+                    render.terrain_runtime_submit_request_snapshot_section_count,
+                    render.terrain_runtime_submit_request_snapshot_section_count_worst,
+                    render.terrain_runtime_submit_request_estimated_payload_bytes,
+                    render.terrain_runtime_submit_request_estimated_payload_bytes_worst,
+                    render.terrain_runtime_dispatcher_pending_jobs,
+                    render.terrain_runtime_dispatcher_queued_compile_tasks
+                );
+            }
         }
     }
 

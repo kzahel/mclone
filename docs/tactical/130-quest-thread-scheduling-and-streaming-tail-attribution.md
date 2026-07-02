@@ -87,6 +87,129 @@ coherent worst-frame snapshots, the remaining 15-25 ms frames are still too
 hard to attribute because the existing summary reports per-field maxima, not a
 single-frame breakdown.
 
+## 2026-07-02 Follow-Up: Trace Processor And Worst-Frame Logging
+
+Trace processor install attempt:
+
+- Installed the official Perfetto wrapper with:
+  `mkdir -p ~/.local/bin && curl -L -o ~/.local/bin/trace_processor https://get.perfetto.dev/trace_processor && chmod +x ~/.local/bin/trace_processor`.
+- First run succeeded and downloaded the native cached binary under
+  `~/.local/share/perfetto/prebuilts/trace_processor_shell-*`.
+- Smoke query succeeded:
+  `~/.local/bin/trace_processor query /tmp/mclone-rd7-baseline.pftrace "select count(*) as thread_count from thread;"`
+  loaded the 17.97 MB trace and returned `thread_count=589`.
+
+Baseline trace readout, first pass:
+
+- App process in the trace: `pid=24244`, process
+  `com.kzahel.mclone.xr`.
+- Important app threads found:
+  `android_main` (`tid=24269`), three truncated `mclone-render-c*`
+  threads (`tid=24345`, `24346`, `24347`), `mclone integrat`
+  (`tid=24348`), `mclone-light-st` (`tid=24350`), plus OVR/runtime/audio
+  helper threads.
+- Running time over the ~20 s trace:
+  `android_main` ~10.790 s, `mclone integrat` ~6.746 s,
+  `mclone-light-st` ~0.219 s, render compile/dispatch threads ~0.153 s,
+  ~0.189 s, and ~0.201 s.
+- `android_main` runnable-not-running time totaled ~177 ms. The largest
+  individual runnable gaps were ~3.035 ms, 2.562 ms, and 2.043 ms.
+
+Interpretation:
+
+- The trace processor path is now usable locally.
+- Baseline trace confirms scheduler pressure exists, but this first readout
+  does not prove the 61 ms bad frame by itself because the app did not emit
+  per-frame trace slices. The new E8 app-side worst-frame snapshots should
+  provide coherent per-frame bucket attribution, and a later trace slice can
+  align scheduler state to those frames if we add trace markers.
+- The baseline also shows `mclone integrat` is a major on-device CPU peer
+  during the trace window, not just the render compile workers. Any future
+  worker-priority or backpressure work should include local server/scheduler
+  threads in the thread inventory.
+
+Worst-frame logging implementation attempt:
+
+- Added a top-5 app-work worst-frame ring in the Android XR perf harness.
+- Ranking key is `app_work_ms = frame_wall_ms - wait_frame_ms`, so legitimate
+  `xrWaitFrame` blocking does not make a frame look expensive.
+- At perf summary time each ranked frame logs four correlated lines with the
+  same `rank` and `sample_frame`:
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME`,
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_TERRAIN`,
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_RUNTIME`, and
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_UPLOAD`.
+- Android target compile passed:
+  `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`.
+- Android XR APK build passed:
+  `node ./scripts/run-native-bash.mjs ./android-xr/build-apk.sh`.
+
+Standard RD7 lane with worst-frame logging:
+
+- Command: standard settled-orbit RD7 lane with 2 render compile workers and
+  `2 / 16 / 64` budgets.
+- Summary path:
+  `/tmp/mclone-quest-openxr-perf-orbit-rd7-worst-frame-snapshots-2-16-64.txt`.
+- Logcat path:
+  `/tmp/mclone-quest-openxr-perf-orbit-rd7-worst-frame-snapshots-2-16-64-logcat.txt`.
+- Result: Meta dropped frames `15`, frame avg/p95/p99/max
+  `15.451 / 17.795 / 20.216 / 28.073 ms`, `over_2x_budget=1`,
+  `app_work_avg_ms=15.325`, `app_over_period_pct=80.6`.
+- Note: this APK was built while unrelated local `mclone-ui` debug-overlay
+  worktree changes were present but inactive in this lane. Do not include
+  those files in this scheduling/perf commit.
+
+Worst-frame snapshot readout, rank 1:
+
+- `sample_frame=1857`, `frame_wall_ms=28.073`, `app_work_ms=28.038`,
+  `headroom_ms=-14.149`, `over_2x_budget=true`.
+- High-level stages: `render_mclone_frame_ms=27.850`,
+  `locomotion_ms=5.080`, `wait_frame_ms=0.035`. This was real app work, not
+  `xrWaitFrame` blocking.
+- Terrain: `terrain_frame_ms=22.431`, `runtime_upload_ms=6.078`,
+  `shared_records_ms=1.143`, `left_eye_ms=5.952`, `right_eye_ms=8.437`,
+  `stereo_poll_wait_ms=9.470`.
+- Runtime: `sync_ms=2.915`, `prepare_ms=1.865`, `submit_ms=0.927`,
+  `submit_snapshot_ms=0.850`, `submit_handoff_ms=0.076`,
+  `ready_sections_ms=0.608`, `ready_publish_ms=0.946`. The previous
+  giant submit/ready/publish tails are not present in this worst frame.
+- Upload/admission state: `submitted_sections=32`,
+  `request_target_sections=32`, `request_target_sections_single=16`,
+  `request_payload_bytes=622304`, `dispatcher_pending_jobs=2`,
+  `dispatcher_queued_compile_tasks=1`, `upload_removed_sections=19`,
+  `accept_limited=true`.
+
+Post-fix Perfetto capture:
+
+- Captured during the run at `/tmp/mclone-rd7-post-scheduling.pftrace`
+  (`16M`, 20 seconds).
+- Post-fix trace app process: `pid=28211`, `android_main tid=28234`.
+- Running time over the trace: `android_main` ~10.933 s,
+  `mclone integrat` ~7.464 s, `mclone-light-st` ~1.390 s,
+  `mclone-worldgen` ~0.665 s, render compile/dispatch threads ~0.002 s,
+  ~0.395 s, and ~0.362 s.
+- `android_main` runnable-not-running time totaled ~50 ms. The largest
+  individual runnable gaps were ~0.563 ms, 0.345 ms, and 0.301 ms.
+  This is much lower than the baseline trace's ~3.035/2.562/2.043 ms top
+  gaps.
+
+Interpretation after E8 + post-fix trace:
+
+- The earlier E2a/E2c scheduling slice seems to have done its job: in the
+  post-fix trace, multi-ms render-thread runnable gaps are no longer the
+  obvious primary problem.
+- The remaining worst frames are coherent now. They show broad app-side work:
+  locomotion, terrain runtime upload/sync/prepare, eye rendering, and
+  `stereo_poll_wait_ms`, while submit/handoff/ready-publish are small.
+- The next likely lever is not another queue transport tweak. It is either
+  reducing/smoothing the real per-frame work visible in the worst-frame
+  snapshots, or adding trace markers so Perfetto can align `android_main`
+  scheduler slices with app frame indices directly.
+- Because `mclone integrat`, `mclone-light-st`, and `mclone-worldgen` are
+  large CPU peers in the post-fix trace, future "worker niceness" or
+  backpressure work should include local server/worldgen/light-store threads,
+  not only render compile workers.
+
 ## Central Thesis
 
 The frame-breaking tails during streaming are not (only) the work inside the
