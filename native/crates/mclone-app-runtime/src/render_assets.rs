@@ -3,7 +3,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use mclone_assets::{AssetSource, AssetSourceChain, FilesystemAssetSource, PackedAssetSource};
@@ -28,6 +28,7 @@ pub const DEFAULT_OVERLAY_PACK_FILE: &str = "mclone-default-overlay.pbp";
 pub const DEFAULT_ANDROID_APP_ID: &str = "com.kzahel.mclone";
 pub const DEFAULT_FIRST_PARTY_ASSET_DIR: &str = "assets";
 pub use crate::DEFAULT_RENDER_SECTION_COMPILE_WORKERS;
+const RENDER_SECTION_DISPATCHER_POLL_INTERVAL: Duration = Duration::from_millis(1);
 
 #[derive(Clone, Debug)]
 pub struct SceneTexturedSections {
@@ -85,6 +86,7 @@ struct RenderSectionCompileQueue {
 #[derive(Debug)]
 struct RenderSectionCompileQueueState {
     request_slots: Vec<Option<RenderSectionCompileRequest>>,
+    pending_slots: VecDeque<usize>,
     queued_slots: VecDeque<usize>,
     shutdown: bool,
 }
@@ -113,6 +115,7 @@ impl RenderSectionCompileQueue {
         Self {
             state: Mutex::new(RenderSectionCompileQueueState {
                 request_slots: vec![None; slot_count],
+                pending_slots: VecDeque::new(),
                 queued_slots: VecDeque::new(),
                 shutdown: false,
             }),
@@ -145,22 +148,33 @@ impl RenderSectionCompileQueue {
         let slot_write_ms = elapsed_ms(slot_write_start.elapsed());
 
         let queue_push_start = Instant::now();
-        state.queued_slots.push_back(slot_index);
+        state.pending_slots.push_back(slot_index);
         let queue_push_ms = elapsed_ms(queue_push_start.elapsed());
-
-        drop(state);
-
-        let notify_start = Instant::now();
-        self.work_available.notify_one();
-        let notify_ms = elapsed_ms(notify_start.elapsed());
 
         Ok(RenderSectionCompileQueueEnqueueTiming {
             lock_wait_ms,
             slot_select_ms,
             slot_write_ms,
             queue_push_ms,
-            notify_ms,
+            notify_ms: 0.0,
         })
+    }
+
+    fn dispatch_next_ready_slot(&self) -> RenderSectionCompileDispatchStatus {
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(_) => return RenderSectionCompileDispatchStatus::Shutdown,
+        };
+        if state.shutdown {
+            return RenderSectionCompileDispatchStatus::Shutdown;
+        }
+        let Some(slot_index) = state.pending_slots.pop_front() else {
+            return RenderSectionCompileDispatchStatus::Idle;
+        };
+        state.queued_slots.push_back(slot_index);
+        drop(state);
+        self.work_available.notify_one();
+        RenderSectionCompileDispatchStatus::Dispatched
     }
 
     fn take_next(&self) -> Option<RenderSectionCompileRequest> {
@@ -182,13 +196,14 @@ impl RenderSectionCompileQueue {
     fn queued_task_count(&self) -> usize {
         self.state
             .lock()
-            .map(|state| state.queued_slots.len())
+            .map(|state| state.pending_slots.len() + state.queued_slots.len())
             .unwrap_or_default()
     }
 
     fn shutdown(&self) {
         if let Ok(mut state) = self.state.lock() {
             state.shutdown = true;
+            state.pending_slots.clear();
             state.queued_slots.clear();
             for slot in &mut state.request_slots {
                 *slot = None;
@@ -196,6 +211,13 @@ impl RenderSectionCompileQueue {
         }
         self.work_available.notify_all();
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RenderSectionCompileDispatchStatus {
+    Dispatched,
+    Idle,
+    Shutdown,
 }
 
 #[derive(Debug)]
@@ -281,7 +303,16 @@ impl RenderSectionCompileWorker {
 
         let queue = Arc::new(RenderSectionCompileQueue::new(worker_count));
         let (result_sender, receiver) = mpsc::channel::<RenderSectionCompileResult>();
-        let mut handles = Vec::with_capacity(worker_count);
+        let mut handles = Vec::with_capacity(worker_count + 1);
+
+        {
+            let queue = Arc::clone(&queue);
+            let handle = thread::Builder::new()
+                .name("mclone-render-compile-dispatch".to_string())
+                .spawn(move || run_render_section_compile_dispatcher(queue))
+                .context("failed to spawn render section compile dispatcher")?;
+            handles.push(handle);
+        }
 
         for worker_index in 0..worker_count {
             let catalog = catalog.clone();
@@ -407,6 +438,18 @@ impl Drop for RenderSectionCompileWorker {
         self.queue.shutdown();
         for handle in self.handles.drain(..) {
             let _ = handle.join();
+        }
+    }
+}
+
+fn run_render_section_compile_dispatcher(queue: Arc<RenderSectionCompileQueue>) {
+    loop {
+        match queue.dispatch_next_ready_slot() {
+            RenderSectionCompileDispatchStatus::Dispatched => {}
+            RenderSectionCompileDispatchStatus::Idle => {
+                thread::sleep(RENDER_SECTION_DISPATCHER_POLL_INTERVAL);
+            }
+            RenderSectionCompileDispatchStatus::Shutdown => break,
         }
     }
 }

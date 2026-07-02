@@ -909,6 +909,59 @@ Next implementation implication:
   dispatcher pump or worker-poll/mailbox design where the render frame publishes
   bounded compile requests and another owner wakes or services compile workers.
 
+Dispatcher-pump experiment result:
+
+- Implemented July 2, 2026. Native compile submission now publishes filled
+  request slots into a dispatcher-pending queue. A dedicated dispatcher pump
+  thread polls that queue, moves slots into the worker-ready queue, and pays the
+  worker `notify_one` cost off the render frame.
+- This is intentionally the smallest Java-shaped ownership step, not a full
+  `ChunkRenderDispatcher` port: it preserves bounded admission and the existing
+  worker/result shape while changing who wakes compile workers.
+- Validation:
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-android-xr-client`
+  - `pnpm native:web:build`
+  - Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+    workers, 45 seconds.
+- Measurement:
+
+| Frame avg / p95 / p99 / max | Runtime submit split | Submit handoff split | Enqueue split |
+|---|---|---|---|
+| 15.924 / 18.634 / 26.912 / 55.557 ms | submit 12.928 ms; snapshot 9.676; handoff 12.500 | request count 3; compiler submit total 0.011; compiler submit single 0.010; slot enqueue/wakeup total 0.003; slot enqueue/wakeup single 0.003 | lock wait total/single 0.001/0.000 ms; slot select 0.001/0.001; slot write 0.001/0.001; queue push 0.001/0.000; notify 0.000/0.000; post-enqueue 0.002/0.002 |
+
+Other tail evidence from the same run:
+
+- `max_apply_ready_plan_ms=12.456`
+- `max_runtime_gpu_upload_ms=20.444`
+- `max_runtime_ready_sections_ms=18.992`
+- `max_terrain_left_eye_encode_ms=39.845`
+- `max_runtime_upload_apply_ms=20.418`
+- `submitted_sections=48`, `accepted_results=3`, `uploaded_sections=15`
+
+Interpretation:
+
+- The dispatcher pump succeeds at the narrow target. Render-frame submit no
+  longer pays worker wakeup: `command_send_single_ms` dropped from `15.791 ms`
+  in the notify-after-unlock run to `0.003 ms`.
+- Overall frame pacing did not materially improve because the burst moved
+  downstream. This run accepted and uploaded more completed terrain work in the
+  worst window, and the max terrain frame was dominated by ready/apply/upload and
+  left-eye encode work rather than compile handoff.
+- This is still a useful parity step: it makes the native ownership shape closer
+  to Java's dispatcher/mailbox split and removes a confirmed render-thread
+  wakeup hazard. It also clarifies that the next bottleneck is completed-result
+  admission/publishing/upload/record maintenance, not compile request transport.
+
+Next implementation implication:
+
+- Keep the dispatcher pump shape.
+- The next slice should pace completed-result acceptance and ready-section
+  publication/upload. A Java-baseline measurement should first drain all pending
+  ready/upload work as today; then compare a bounded policy that caps accepted
+  completed results, uploaded sections/removals, and prepared-record rebuilds per
+  frame.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -938,13 +991,12 @@ record maintenance.
 
 ## Open Questions
 
-1. What is the smallest dispatcher pump or worker-poll/mailbox shape that lets
-   the render frame publish bounded compile work without directly paying worker
-   wakeup cost?
+1. What is the smallest completed-result admission and upload pacing policy that
+   reduces ready/upload/encode bursts without falling behind chunk movement?
 2. How often do deferred sections exceed thousands on stable render-distance-7
    movement, and how many are reprocessed per frame?
-3. Does slot-backed submit cost scale with snapshot payload size, target-section
-   count, revision count, or only worker wakeup scheduling?
+3. Does completed-result publish cost scale with accepted section count, removed
+   section count, prepared-record rebuild count, or GPU upload bytes?
 4. Is upload apply dominated by section count, vertex/index bytes, GPU resource
    creation, or queue submission?
 5. Does local edit coherence require a true synchronous path, or can a
@@ -974,12 +1026,14 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Move worker wakeup ownership off the render frame. The mutex-before-notify
-experiment showed that queue mutation is cheap and the wakeup call itself can
-absorb nearly a full 72 Hz frame. The next slice should introduce the smallest
-dispatcher pump or worker-poll/mailbox shape that preserves bounded admission
-while making the render frame publish work instead of waking compile workers.
+Pace completed-result acceptance and ready-section publication/upload. The
+dispatcher pump removed render-frame worker wakeup from compile submit
+(`command_send_single_ms=0.003`), so the next visible burst is downstream:
+ready-plan application, GPU upload, ready-section publication, and prepared draw
+record/encode work.
 
-Do not repeat a plain `std::sync::mpsc::sync_channel` swap; it was already
-measured worse than the current unbounded channel. Do not add another queue data
-structure unless it specifically removes render-frame worker wakeup.
+Keep Java's drain-all behavior as the baseline measurement, but compare it
+against a bounded policy that limits accepted completed results, uploaded
+sections/removals, and prepared-record rebuilds per frame. Record both frame
+pacing and backlog growth so we can tell whether a smoother frame simply falls
+behind chunk movement.
