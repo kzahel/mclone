@@ -1426,6 +1426,26 @@ impl EngineCameraController {
         self.last_room_scale_reconciliation = None;
     }
 
+    pub fn set_player_feet_pose(
+        &mut self,
+        feet_position: Vec3d,
+        yaw_radians: f64,
+        pitch_radians: f64,
+    ) {
+        let current_pose = self.player.pose();
+        self.player.set_pose(LocalPlayerPose {
+            position: feet_position,
+            y_rot_degrees: -yaw_radians.to_degrees(),
+            x_rot_degrees: -pitch_radians.to_degrees(),
+            eye_height: current_pose.eye_height,
+        });
+        self.player.clear_delta_movement();
+        self.hand_push.reset();
+        self.last_hand_push_input = None;
+        self.last_room_scale_reconciliation = None;
+        self.hand_push_emulation_phase = 0.0;
+    }
+
     pub const fn movement_mode(&self) -> EngineCameraMovementMode {
         self.movement_mode
     }
@@ -4402,6 +4422,27 @@ mod tests {
         assert_eq!(snapshot.chunk_pos, ChunkPos::new(1, -1));
         assert!((snapshot.yaw_radians - 0.25).abs() < 1.0e-12);
         assert!((snapshot.pitch_radians + 0.125).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn engine_camera_controller_sets_explicit_feet_pose() {
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(8.0, 70.0, 8.0), 0.0, 0.0, 24.0);
+        camera
+            .player
+            .set_delta_movement(Vec3d::new(0.25, 0.5, -0.25));
+
+        camera.set_player_feet_pose(Vec3d::new(2.5, 64.0, -3.5), 0.5, -0.25);
+        let snapshot = camera.snapshot();
+
+        assert_eq!(camera.player().pose().position, Vec3d::new(2.5, 64.0, -3.5));
+        assert_eq!(camera.player().delta_movement(), Vec3d::ZERO);
+        assert_eq!(
+            snapshot.eye,
+            Vec3d::new(2.5, 64.0 + LOCAL_PLAYER_STANDING_EYE_HEIGHT, -3.5)
+        );
+        assert!((snapshot.yaw_radians - 0.5).abs() < 1.0e-12);
+        assert!((snapshot.pitch_radians + 0.25).abs() < 1.0e-12);
     }
 
     #[test]

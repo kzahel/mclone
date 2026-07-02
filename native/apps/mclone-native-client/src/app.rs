@@ -28,8 +28,8 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 use crate::MAX_RENDER_DISTANCE;
 use crate::cli::{SceneOptions, StartupWaitPolicy, WindowStartIntent};
 use crate::flat_client_driver::{
-    FlatClientCameraView, FlatClientDebugFrame, FlatClientDriver, FlatClientHostAction,
-    FlatClientUiActionContext, FlatClientUiFrame, FlatClientUiRenderOptions,
+    DesktopBlinkDebugCommitStatus, FlatClientCameraView, FlatClientDebugFrame, FlatClientDriver,
+    FlatClientHostAction, FlatClientUiActionContext, FlatClientUiFrame, FlatClientUiRenderOptions,
     FlatClientWorldActionStatus, game_movement_mode,
 };
 use crate::frame_pacing::{
@@ -42,6 +42,7 @@ use crate::ui::DebugPaneStats;
 use mclone_audio::{AudioEngine, AudioSettings, landing_playback_for_impact};
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
+const DESKTOP_BLINK_DEBUG_KEY: KeyCode = KeyCode::KeyT;
 const DEBUG_PHYSICS_CUBE_SHOOT_KEY: KeyCode = KeyCode::F7;
 const RENDER_RESOURCE_REBUILD_KEY: KeyCode = KeyCode::F8;
 const RENDER_SCALE_REBUILD_KEY: KeyCode = KeyCode::F9;
@@ -318,12 +319,14 @@ impl ChunkApp {
         } else {
             self.play_landing_events();
         }
+        self.driver.update_desktop_blink_debug_preview();
         Ok(())
     }
 
     fn clear_flat_gameplay_input(&mut self) {
         self.flat_input.clear_held();
         self.driver.clear_camera_input();
+        self.driver.clear_desktop_blink_debug();
     }
 
     fn apply_flat_keyboard_frame(
@@ -385,7 +388,9 @@ impl ChunkApp {
     }
 
     fn apply_flat_look_frame(&mut self, frame: FlatInputFrame, event_loop: &ActiveEventLoop) {
-        if self.driver.apply_look_frame(frame) {
+        let changed = self.driver.apply_look_frame(frame);
+        let preview_changed = self.driver.update_desktop_blink_debug_preview();
+        if changed || preview_changed {
             self.schedule_next_redraw(event_loop);
         }
     }
@@ -1038,6 +1043,55 @@ impl ApplicationHandler for ChunkApp {
                                 self.schedule_next_redraw(event_loop);
                             }
                         }
+                        return;
+                    }
+                    if key_code == DESKTOP_BLINK_DEBUG_KEY && !event.repeat {
+                        match event.state {
+                            ElementState::Pressed => {
+                                if self.driver.begin_desktop_blink_debug() {
+                                    log::info!("desktop Blink debug preview armed");
+                                } else {
+                                    log::debug!("desktop Blink debug preview ignored");
+                                }
+                            }
+                            ElementState::Released => {
+                                match self.driver.commit_desktop_blink_debug() {
+                                    Ok(DesktopBlinkDebugCommitStatus::Committed {
+                                        target_feet,
+                                        changed,
+                                    }) => {
+                                        log::info!(
+                                            "desktop Blink debug committed feet=({:.2}, {:.2}, {:.2}) changed={}",
+                                            target_feet.x,
+                                            target_feet.y,
+                                            target_feet.z,
+                                            changed
+                                        );
+                                        self.play_landing_events();
+                                    }
+                                    Ok(DesktopBlinkDebugCommitStatus::NoValidPreview {
+                                        validity,
+                                    }) => {
+                                        log::info!(
+                                            "desktop Blink debug release had no valid preview: {:?}",
+                                            validity
+                                        );
+                                    }
+                                    Ok(status) => {
+                                        log::debug!(
+                                            "desktop Blink debug release ignored: {:?}",
+                                            status
+                                        );
+                                    }
+                                    Err(err) => {
+                                        log::error!("desktop Blink debug commit failed: {err:#}");
+                                        event_loop.exit();
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                        self.schedule_next_redraw(event_loop);
                         return;
                     }
                     if key_code == DEBUG_PHYSICS_CUBE_SHOOT_KEY

@@ -18,7 +18,8 @@ use mclone_app_runtime::set_player_appearance_command_for_ui_model;
 use mclone_assets::{ActorFigureId, AssetSource};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, BlockInteractionTarget,
-    ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+    ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT, TeleportConfig, TeleportIntent,
+    TeleportPreview, TeleportValidityReason, resolve_teleport_preview,
 };
 use mclone_core::{BlockStateId, Vec3d};
 use mclone_input::{
@@ -33,6 +34,7 @@ use mclone_render::chunk::{
 use mclone_render::color_profile::RenderConfig;
 use mclone_render::entity::ActorTextureAtlas;
 use mclone_render::entity::{ActorFigureSet, ActorInstance};
+use mclone_render::gui::WorldGuiLine;
 use mclone_render::screen_effect::{UnderwaterEffectState, UnderwaterOverlay};
 use mclone_render::selection_outline::SelectionOutline;
 use mclone_render_session::{
@@ -65,6 +67,18 @@ use mclone_render_session::{
 
 const PLAYER_SURFACE_FEET_OFFSET: f64 = 1.0;
 const GROUND_PROBE_DISTANCE: f64 = 0.01;
+const DESKTOP_BLINK_DEBUG_MAX_DISTANCE: f64 = 8.0;
+const DESKTOP_BLINK_DEBUG_ARC_HEIGHT: f64 = 1.25;
+const DESKTOP_BLINK_DEBUG_ORIGIN_LEFT_OFFSET: f64 = 0.35;
+const DESKTOP_BLINK_DEBUG_ORIGIN_DOWN_OFFSET: f64 = 0.25;
+const DESKTOP_BLINK_DEBUG_ORIGIN_FORWARD_OFFSET: f64 = 0.2;
+const DESKTOP_BLINK_DEBUG_UPWARD_PITCH_BIAS_RADIANS: f64 = 0.18;
+const DESKTOP_BLINK_DEBUG_VALID_ARC_COLOR: [f32; 4] = [0.1, 0.85, 1.0, 1.0];
+const DESKTOP_BLINK_DEBUG_INVALID_ARC_COLOR: [f32; 4] = [1.0, 0.25, 0.15, 1.0];
+const DESKTOP_BLINK_DEBUG_FEET_COLOR: [f32; 4] = [0.1, 1.0, 0.35, 1.0];
+const DESKTOP_BLINK_DEBUG_DOT_COLOR: [f32; 4] = [1.0, 0.95, 0.2, 1.0];
+const DESKTOP_BLINK_DEBUG_MARKER_RADIUS: f64 = 0.28;
+const DESKTOP_BLINK_DEBUG_DOT_RADIUS: f64 = 0.1;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct FlatClientCameraView {
@@ -120,6 +134,7 @@ pub(crate) struct FlatClientDriver {
     pub(crate) render_resources: Option<FlatRenderResources>,
     pub(crate) render_stats: RenderStreamStats,
     pub(crate) frame_timing: FrameTimingStats,
+    desktop_blink_debug: DesktopBlinkDebugState,
     underwater_effect: UnderwaterEffectState,
     seed_reroll_state: u64,
 }
@@ -163,6 +178,20 @@ pub(crate) struct FlatClientSectionSync {
     pub(crate) section_update: RenderSectionCacheUpdate,
     pub(crate) remesh_ms: f64,
     pub(crate) loaded_chunk_count: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct DesktopBlinkDebugState {
+    active: bool,
+    preview: Option<TeleportPreview>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum DesktopBlinkDebugCommitStatus {
+    Inactive,
+    NoRuntime,
+    NoValidPreview { validity: TeleportValidityReason },
+    Committed { target_feet: Vec3d, changed: bool },
 }
 
 pub(crate) struct FlatClientFullSectionSync {
@@ -301,6 +330,7 @@ impl FlatClientDriver {
             render_resources: None,
             render_stats: RenderStreamStats::default(),
             frame_timing: FrameTimingStats::default(),
+            desktop_blink_debug: DesktopBlinkDebugState::default(),
             underwater_effect: UnderwaterEffectState::new(),
             seed_reroll_state: initial_seed_reroll_state(scene.seed),
         }
@@ -357,6 +387,79 @@ impl FlatClientDriver {
 
     pub(crate) fn clear_camera_input(&mut self) {
         self.camera.clear_keys();
+    }
+
+    pub(crate) fn begin_desktop_blink_debug(&mut self) -> bool {
+        if self.runtime.is_none() {
+            self.desktop_blink_debug = DesktopBlinkDebugState::default();
+            return false;
+        }
+        self.desktop_blink_debug.active = true;
+        self.update_desktop_blink_debug_preview();
+        true
+    }
+
+    pub(crate) fn clear_desktop_blink_debug(&mut self) {
+        self.desktop_blink_debug = DesktopBlinkDebugState::default();
+    }
+
+    pub(crate) fn update_desktop_blink_debug_preview(&mut self) -> bool {
+        if !self.desktop_blink_debug.active {
+            return false;
+        }
+        let before = self.desktop_blink_debug.preview.clone();
+        self.desktop_blink_debug.preview = self.resolve_desktop_blink_debug_preview();
+        self.desktop_blink_debug.preview != before
+    }
+
+    pub(crate) fn commit_desktop_blink_debug(
+        &mut self,
+    ) -> anyhow::Result<DesktopBlinkDebugCommitStatus> {
+        if !self.desktop_blink_debug.active {
+            return Ok(DesktopBlinkDebugCommitStatus::Inactive);
+        }
+        if self.runtime.is_none() {
+            self.clear_desktop_blink_debug();
+            return Ok(DesktopBlinkDebugCommitStatus::NoRuntime);
+        }
+
+        self.update_desktop_blink_debug_preview();
+        self.desktop_blink_debug.active = false;
+        let Some(preview) = self.desktop_blink_debug.preview.take() else {
+            return Ok(DesktopBlinkDebugCommitStatus::NoValidPreview {
+                validity: TeleportValidityReason::NoCandidate,
+            });
+        };
+        let Some(target_feet) = preview.target_feet.filter(|_| preview.is_valid()) else {
+            return Ok(DesktopBlinkDebugCommitStatus::NoValidPreview {
+                validity: preview.validity,
+            });
+        };
+
+        let pitch_radians = self.camera.snapshot().pitch_radians;
+        self.camera.set_player_feet_pose(
+            target_feet,
+            -preview.target_yaw_degrees.to_radians(),
+            pitch_radians,
+        );
+        if let Some(runtime) = self.runtime.as_ref() {
+            self.camera
+                .probe_ground(runtime.client(), GROUND_PROBE_DISTANCE);
+        }
+        let changed = self.commit_player_pose_change()?;
+        Ok(DesktopBlinkDebugCommitStatus::Committed {
+            target_feet,
+            changed,
+        })
+    }
+
+    fn resolve_desktop_blink_debug_preview(&self) -> Option<TeleportPreview> {
+        let runtime = self.runtime.as_ref()?;
+        Some(resolve_teleport_preview(
+            runtime.client(),
+            desktop_blink_debug_intent(&self.camera),
+            desktop_blink_debug_config(),
+        ))
     }
 
     pub(crate) fn ui_is_active(&self) -> bool {
@@ -1810,10 +1913,11 @@ impl FlatClientDriver {
         BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
     {
         let frame_inputs = self.prepare_frame_inputs(fallback_render_distance, ui_active);
-        let world_debug_lines = engine_debug_world_lines(
+        let mut world_debug_lines = engine_debug_world_lines(
             &self.camera,
             EngineDebugVisualOptions::new(self.player_collision_box_visible),
         );
+        world_debug_lines.extend(self.desktop_blink_debug_lines());
         let far_lod_mesh = self.runtime.as_mut().and_then(|runtime| {
             runtime.prepare_far_lod_mesh(
                 self.scene.far_lod,
@@ -1901,6 +2005,13 @@ impl FlatClientDriver {
 
     pub(crate) fn sync_spectator_from_camera(&mut self) {
         sync_spectator_from_camera(&mut self.spectator, &self.camera);
+    }
+
+    fn desktop_blink_debug_lines(&self) -> Vec<WorldGuiLine> {
+        let Some(preview) = self.desktop_blink_debug.preview.as_ref() else {
+            return Vec::new();
+        };
+        desktop_blink_debug_lines(preview)
     }
 
     pub(crate) fn set_spectator_camera(
@@ -2026,6 +2137,103 @@ fn initial_seed_reroll_state(seed: i64) -> u64 {
         .max(1)
 }
 
+fn desktop_blink_debug_config() -> TeleportConfig {
+    TeleportConfig {
+        max_distance: DESKTOP_BLINK_DEBUG_MAX_DISTANCE,
+        arc_height: DESKTOP_BLINK_DEBUG_ARC_HEIGHT,
+        ..TeleportConfig::default()
+    }
+}
+
+fn desktop_blink_debug_intent(camera: &EngineCameraController) -> TeleportIntent {
+    let pose = camera.player().pose();
+    let snapshot = camera.snapshot();
+    let forward = horizontal_forward_from_yaw(snapshot.yaw_radians);
+    let right = horizontal_right_from_yaw(snapshot.yaw_radians);
+    let aim_origin = pose
+        .eye_position()
+        .add(right.scale(-DESKTOP_BLINK_DEBUG_ORIGIN_LEFT_OFFSET))
+        .add(Vec3d::new(
+            0.0,
+            -DESKTOP_BLINK_DEBUG_ORIGIN_DOWN_OFFSET,
+            0.0,
+        ))
+        .add(forward.scale(DESKTOP_BLINK_DEBUG_ORIGIN_FORWARD_OFFSET));
+    let aim_direction = view_forward(
+        snapshot.yaw_radians,
+        (snapshot.pitch_radians + DESKTOP_BLINK_DEBUG_UPWARD_PITCH_BIAS_RADIANS)
+            .clamp(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2),
+    );
+    TeleportIntent::new(pose.position, aim_origin, aim_direction, pose.y_rot_degrees)
+}
+
+fn desktop_blink_debug_lines(preview: &TeleportPreview) -> Vec<WorldGuiLine> {
+    let mut lines = Vec::new();
+    let arc_color = if preview.is_valid() {
+        DESKTOP_BLINK_DEBUG_VALID_ARC_COLOR
+    } else {
+        DESKTOP_BLINK_DEBUG_INVALID_ARC_COLOR
+    };
+    for points in preview.arc_points.windows(2) {
+        lines.push(WorldGuiLine::new(
+            glam_vec3_from_vec3d(points[0]),
+            glam_vec3_from_vec3d(points[1]),
+            arc_color,
+        ));
+    }
+    if let Some(feet) = preview.target_feet {
+        push_debug_cross(
+            &mut lines,
+            feet,
+            DESKTOP_BLINK_DEBUG_MARKER_RADIUS,
+            DESKTOP_BLINK_DEBUG_FEET_COLOR,
+        );
+    }
+    if let (Some(feet), Some(dot)) = (preview.target_feet, preview.marker_dot) {
+        lines.push(WorldGuiLine::new(
+            glam_vec3_from_vec3d(feet),
+            glam_vec3_from_vec3d(dot),
+            DESKTOP_BLINK_DEBUG_DOT_COLOR,
+        ));
+        push_debug_cross(
+            &mut lines,
+            dot,
+            DESKTOP_BLINK_DEBUG_DOT_RADIUS,
+            DESKTOP_BLINK_DEBUG_DOT_COLOR,
+        );
+    }
+    lines
+}
+
+fn push_debug_cross(lines: &mut Vec<WorldGuiLine>, center: Vec3d, radius: f64, color: [f32; 4]) {
+    lines.push(WorldGuiLine::new(
+        glam_vec3_from_vec3d(center.add(Vec3d::new(-radius, 0.0, 0.0))),
+        glam_vec3_from_vec3d(center.add(Vec3d::new(radius, 0.0, 0.0))),
+        color,
+    ));
+    lines.push(WorldGuiLine::new(
+        glam_vec3_from_vec3d(center.add(Vec3d::new(0.0, 0.0, -radius))),
+        glam_vec3_from_vec3d(center.add(Vec3d::new(0.0, 0.0, radius))),
+        color,
+    ));
+}
+
+fn horizontal_forward_from_yaw(yaw_radians: f64) -> Vec3d {
+    Vec3d::new(yaw_radians.sin(), 0.0, yaw_radians.cos())
+}
+
+fn horizontal_right_from_yaw(yaw_radians: f64) -> Vec3d {
+    Vec3d::new(yaw_radians.cos(), 0.0, -yaw_radians.sin())
+}
+
+fn view_forward(yaw_radians: f64, pitch_radians: f64) -> Vec3d {
+    let yaw_sin = yaw_radians.sin();
+    let yaw_cos = yaw_radians.cos();
+    let pitch_sin = pitch_radians.sin();
+    let pitch_cos = pitch_radians.cos();
+    Vec3d::new(yaw_sin * pitch_cos, pitch_sin, yaw_cos * pitch_cos)
+}
+
 fn session_start_request_for_scene(scene: &SceneOptions) -> SessionStartRequest {
     scene.remote_addr.as_ref().map_or(
         SessionStartRequest::NewLocalWorld { seed: scene.seed },
@@ -2102,6 +2310,21 @@ mod tests {
             .iter()
             .find(|widget| widget.id == hovered)
             .map(|widget| widget.label.as_str())
+    }
+
+    #[test]
+    fn desktop_blink_debug_intent_uses_visible_left_hand_offset_and_upward_aim() {
+        let camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(8.0, 70.0, 8.0), 0.0, 0.0, 24.0);
+
+        let intent = desktop_blink_debug_intent(&camera);
+
+        assert_eq!(intent.start_feet, camera.player().pose().position);
+        assert!(intent.aim_origin.x < camera.snapshot().eye.x);
+        assert!(intent.aim_origin.y < camera.snapshot().eye.y);
+        assert!(intent.aim_origin.z > camera.snapshot().eye.z);
+        assert!(intent.aim_direction.y > 0.0);
+        assert!(intent.aim_direction.z > 0.0);
     }
 
     fn row_probe_points(rect: mclone_ui::Rect) -> [Point; 5] {

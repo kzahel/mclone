@@ -732,6 +732,9 @@ fn configure_screenshot_scene(
     }
     host.driver.player_collision_box_visible = options.player_collision_box;
     host.driver.camera.set_view_mode(options.camera_view);
+    if options.blink_debug && !host.driver.begin_desktop_blink_debug() {
+        bail!("offscreen Blink debug preview requires an active runtime");
+    }
     Ok(())
 }
 

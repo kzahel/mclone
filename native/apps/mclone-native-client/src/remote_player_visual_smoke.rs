@@ -78,6 +78,7 @@ pub(crate) fn run_remote_player_visual_smoke(
         ui: HeadlessScreenshotUi::None,
         debug_pane: false,
         player_collision_box: false,
+        blink_debug: false,
         scripted_interaction: false,
         remote_settle_ms: REMOTE_SETTLE_MS,
         eye: None,

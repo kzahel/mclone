@@ -285,7 +285,7 @@ Landed:
   so path search stays off the XR render/frame thread.
 - [x] Add a flat/offscreen test entry point that exercises the same query and
   target validation without requiring XR.
-- [ ] Add the desktop flat debug input adapter: hold-to-preview, mouse-look aim
+- [x] Add the desktop flat debug input adapter: hold-to-preview, mouse-look aim
   updates, release-to-commit, and synthetic left-hand origin/upward-biased aim
   feeding the shared query.
 - [ ] Keep web/WASM XR-worker support documented as intentionally absent while
@@ -305,6 +305,12 @@ Landed:
 - Added deterministic flat/offscreen unit tests for wall stop, too-small
   opening rejection, one-block-up landing, unloaded/no-candidate invalid
   behavior, and off-block-center continuous placement.
+- Added a desktop flat debug adapter on the `T` key: hold to arm/update Blink
+  preview from mouse-look aim, release to commit the latest valid result or
+  no-op, using a synthetic left-hand origin and slight upward pitch bias.
+- Added provisional desktop debug world lines for the preview arc, feet marker,
+  and vertically aligned dot. This validates the shared resolver interactively;
+  the full XR/multiview preview overlay remains part of Slice 3.
 
 ## Slice 3 - Preview Overlay
 
