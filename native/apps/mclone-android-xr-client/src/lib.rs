@@ -42,8 +42,8 @@ mod android {
         XrControllerSnapshot, XrDisplayRefreshSnapshot, XrFrameStats,
     };
     use mclone_xr_scene::{
-        MAX_XR_RENDER_DISTANCE, XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose,
-        XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
+        MAX_XR_RENDER_DISTANCE, XrDebugUiScreen, XrMcloneTerrainState, XrSceneOptions,
+        XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
     };
     use openxr as xr;
 
@@ -405,6 +405,7 @@ mod android {
             TexturedSectionRenderOptions::default(),
         );
         let mut underwater_detection_mode = XrUnderwaterDetectionMode::default();
+        let mut debug_ui_screen = None;
         let mut argv = argv.into_iter();
         while let Some(arg) = argv.next() {
             if shared_args.parse_next_arg(
@@ -426,6 +427,13 @@ mod android {
                         "--xr-underwater-mode",
                         &parse_next_string(&mut argv, "--xr-underwater-mode")?,
                     )?;
+                }
+                "--xr-debug-ui" => {
+                    let value = parse_next_string(&mut argv, "--xr-debug-ui")?;
+                    debug_ui_screen = match value.trim() {
+                        "none" | "off" | "false" => None,
+                        value => Some(XrDebugUiScreen::parse_label("--xr-debug-ui", value)?),
+                    };
                 }
                 "--perf-seconds" => {
                     let seconds = parse_next::<u64>(&mut argv, "--perf-seconds")?;
@@ -557,6 +565,7 @@ mod android {
         options.remote_addr = shared_options.scene.remote_addr.clone();
         let mut scene = android_xr_scene_options_from_startup(shared_options.scene);
         scene.underwater_detection_mode = underwater_detection_mode;
+        scene.debug_ui_screen = debug_ui_screen;
         options.scene = scene.validated()?;
         options.render_options = shared_options.render_options;
         if options.perf_flight.is_some() && options.perf_seconds.is_none() {
@@ -707,6 +716,7 @@ mod android {
             lighting_enabled: scene.lighting_enabled,
             far_lod: Default::default(),
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
+            debug_ui_screen: None,
         }
     }
 

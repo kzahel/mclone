@@ -24,6 +24,9 @@ Script options:
   --xr-underwater-mode midpoint|per-eye
                          Select XR underwater detection. Requires --smoke
                          mclone. Default: midpoint.
+  --xr-debug-ui none|pause|controls
+                         Hold an XR debug UI panel open after startup for
+                         headset UI validation. Requires --smoke mclone.
   --wivrn-usb            Start/reuse the local macOS WiVRn host, install an ADB
                          reverse tunnel, and launch the Quest WiVRn client.
   --frames N             Set the XR smoke frame budget. Default: 120.

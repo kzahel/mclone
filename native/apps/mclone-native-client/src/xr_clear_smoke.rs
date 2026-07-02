@@ -18,13 +18,15 @@ use mclone_xr_host::{
 };
 #[cfg(not(target_os = "android"))]
 use mclone_xr_scene::{
-    XrMcloneTerrainState, XrSceneOptions, XrStartupViewPose, XrTerrainEyeTarget,
-    XrUnderwaterDetectionMode,
+    XrDebugUiScreen as SceneXrDebugUiScreen, XrMcloneTerrainState, XrSceneOptions,
+    XrStartupViewPose, XrTerrainEyeTarget, XrUnderwaterDetectionMode,
 };
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
 
-use crate::cli::{SceneOptions, XrClearSmokeOptions, XrMcloneSmokeOptions};
+use crate::cli::{
+    SceneOptions, XrClearSmokeOptions, XrDebugUiScreen as CliXrDebugUiScreen, XrMcloneSmokeOptions,
+};
 #[cfg(not(target_os = "android"))]
 use crate::remote_session::RemoteServerSession;
 #[cfg(not(target_os = "android"))]
@@ -679,7 +681,11 @@ fn create_mclone_terrain_state(
             None
         }
     };
-    let scene = xr_scene_options_from_desktop_scene(&options.scene, options.underwater_mode)?;
+    let scene = xr_scene_options_from_desktop_scene(
+        &options.scene,
+        options.underwater_mode,
+        options.debug_ui_screen,
+    )?;
     let startup_view_pose = options.view_pose.map(|view_pose| XrStartupViewPose {
         position: view_pose.position,
         yaw_degrees: view_pose.yaw_degrees,
@@ -740,6 +746,7 @@ fn session_start_request_for_desktop_scene(scene: &SceneOptions) -> SessionStart
 fn xr_scene_options_from_desktop_scene(
     scene: &SceneOptions,
     underwater_mode: crate::cli::XrUnderwaterMode,
+    debug_ui_screen: Option<CliXrDebugUiScreen>,
 ) -> Result<XrSceneOptions> {
     XrSceneOptions {
         seed: scene.seed,
@@ -755,8 +762,17 @@ fn xr_scene_options_from_desktop_scene(
         lighting_enabled: scene.lighting_enabled,
         far_lod: scene.far_lod,
         underwater_detection_mode: xr_underwater_mode_from_desktop(underwater_mode),
+        debug_ui_screen: debug_ui_screen.map(xr_debug_ui_screen_from_desktop),
     }
     .validated()
+}
+
+#[cfg(not(target_os = "android"))]
+fn xr_debug_ui_screen_from_desktop(screen: CliXrDebugUiScreen) -> SceneXrDebugUiScreen {
+    match screen {
+        CliXrDebugUiScreen::Pause => SceneXrDebugUiScreen::Pause,
+        CliXrDebugUiScreen::Controls => SceneXrDebugUiScreen::Controls,
+    }
 }
 
 #[cfg(not(target_os = "android"))]

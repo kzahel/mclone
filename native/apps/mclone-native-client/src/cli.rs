@@ -201,12 +201,19 @@ pub(crate) struct XrMcloneSmokeOptions {
     pub(crate) frame_limit: Option<u32>,
     pub(crate) view_pose: Option<XrViewPose>,
     pub(crate) underwater_mode: XrUnderwaterMode,
+    pub(crate) debug_ui_screen: Option<XrDebugUiScreen>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct XrViewPose {
     pub(crate) position: [f32; 3],
     pub(crate) yaw_degrees: f32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum XrDebugUiScreen {
+    Pause,
+    Controls,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -472,6 +479,8 @@ impl Cli {
         let mut xr_view_pose = None;
         let mut xr_underwater_mode_explicit = false;
         let mut xr_underwater_mode = XrUnderwaterMode::default();
+        let mut xr_debug_ui_screen_explicit = false;
+        let mut xr_debug_ui_screen = None;
         let mut rebuild_render_scale = None;
         let mut far_lod = FarTerrainLodConfig::default();
         let mut args = args.into_iter();
@@ -773,6 +782,10 @@ impl Cli {
                     xr_underwater_mode_explicit = true;
                     xr_underwater_mode = parse_xr_underwater_mode_arg(&arg, args.next())?;
                 }
+                "--xr-debug-ui" => {
+                    xr_debug_ui_screen_explicit = true;
+                    xr_debug_ui_screen = parse_xr_debug_ui_arg(&arg, args.next())?;
+                }
                 "--help" | "-h" => {
                     print_help();
                     std::process::exit(0);
@@ -820,6 +833,9 @@ impl Cli {
         }
         if xr_underwater_mode_explicit && !xr_mclone_smoke {
             bail!("--xr-underwater-mode requires --xr-mclone-smoke");
+        }
+        if xr_debug_ui_screen_explicit && !xr_mclone_smoke {
+            bail!("--xr-debug-ui requires --xr-mclone-smoke");
         }
         if rebuild_render_scale.is_some()
             && !matches!(mode, Some(HeadlessMode::RendererRebuildSmoke(_)))
@@ -993,6 +1009,7 @@ impl Cli {
                     frame_limit: xr_frame_limit,
                     view_pose: xr_view_pose,
                     underwater_mode: xr_underwater_mode,
+                    debug_ui_screen: xr_debug_ui_screen,
                 },
             }),
             None => Ok(Self::Window {
@@ -1090,6 +1107,16 @@ fn parse_xr_underwater_mode_arg(flag: &str, value: Option<String>) -> Result<XrU
         "midpoint" | "middle" | "center" | "both" => Ok(XrUnderwaterMode::Midpoint),
         "per-eye" | "per_eye" | "eye" | "eyes" => Ok(XrUnderwaterMode::PerEye),
         value => bail!("{flag} must be midpoint or per-eye, got `{value}`"),
+    }
+}
+
+fn parse_xr_debug_ui_arg(flag: &str, value: Option<String>) -> Result<Option<XrDebugUiScreen>> {
+    let value = value.with_context(|| format!("{flag} requires none, pause, or controls"))?;
+    match value.trim() {
+        "none" | "off" | "false" => Ok(None),
+        "pause" => Ok(Some(XrDebugUiScreen::Pause)),
+        "controls" | "help" => Ok(Some(XrDebugUiScreen::Controls)),
+        value => bail!("{flag} must be none, pause, or controls, got `{value}`"),
     }
 }
 
@@ -1322,7 +1349,7 @@ fn print_help() {
            mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-workers 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
-           mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+           mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--fullbright true|false]\n\n\
          Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }

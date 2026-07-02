@@ -356,7 +356,7 @@ fn run_xr_mclone_smoke(_options: crate::cli::XrMcloneSmokeOptions) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::StartupWaitPolicy;
+    use crate::cli::{StartupWaitPolicy, XrDebugUiScreen};
     use mclone_core::{BlockStateId, ChunkRevision, ChunkStatus};
 
     fn screenshot_cli(
@@ -686,6 +686,7 @@ mod tests {
                         yaw_degrees: 180.0,
                     }),
                     underwater_mode: XrUnderwaterMode::Midpoint,
+                    debug_ui_screen: None,
                 },
             }
         );
@@ -708,6 +709,7 @@ mod tests {
                     frame_limit: Some(120),
                     view_pose: None,
                     underwater_mode: XrUnderwaterMode::Midpoint,
+                    debug_ui_screen: None,
                 },
             }
         );
@@ -731,6 +733,31 @@ mod tests {
                     frame_limit: Some(120),
                     view_pose: None,
                     underwater_mode: XrUnderwaterMode::PerEye,
+                    debug_ui_screen: None,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_xr_debug_ui_screen() {
+        let cli = Cli::parse([
+            "--xr-mclone-smoke".to_owned(),
+            "--xr-debug-ui".to_owned(),
+            "controls".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::XrMcloneSmoke {
+                options: XrMcloneSmokeOptions {
+                    scene: SceneOptions::default(),
+                    render_options: TexturedSectionRenderOptions::default(),
+                    frame_limit: Some(120),
+                    view_pose: None,
+                    underwater_mode: XrUnderwaterMode::Midpoint,
+                    debug_ui_screen: Some(XrDebugUiScreen::Controls),
                 },
             }
         );
@@ -757,6 +784,7 @@ mod tests {
                         yaw_degrees: 180.0,
                     }),
                     underwater_mode: XrUnderwaterMode::Midpoint,
+                    debug_ui_screen: None,
                 },
             }
         );

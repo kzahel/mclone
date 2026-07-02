@@ -325,8 +325,8 @@ Validation:
 
 ### Slice G: XR Panel Texture Cache For V2
 
-Status: automated cache foundations landed 2026-07-02; headset validation still
-pending.
+Status: complete. Automated cache foundations and attached-headset Controls
+validation landed 2026-07-02.
 
 Tie world-space UI panel repainting to v2 surface content revisions.
 
@@ -1290,15 +1290,44 @@ Known limits:
 - A complete inventory/item/crafting system.
 - XR-only menu behavior or desktop-only shortcuts.
 
+## Landed XR Headset Controls Validation Chunk
+
+Landed 2026-07-02.
+
+Implementation:
+
+- added a smoke-only `--xr-debug-ui none|pause|controls` selector for desktop
+  OpenXR and Android XR validation paths
+- kept normal XR behavior unchanged unless the debug selector is explicitly set
+- made stationary Android XR perf automation preserve the explicit debug UI panel
+  so cache validation can hold Controls open while the camera is stationary
+- added Android validation-script passthrough for `--xr-debug-ui`
+
+Validation:
+
+```sh
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene xr_menu_panel_draw -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client xr_debug_ui --features xr -- --nocapture
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+bash ./android-xr/validate-quest-openxr.sh --debug --xr-debug-ui controls --perf-seconds 3 --perf-settled-stationary --wait-seconds 180 --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 1 --day-time 6000 --freeze-time --lighting false --fullbright true --perf-summary /tmp/mclone-android-xr-ui-controls-perf-summary-2.txt --log /tmp/mclone-android-xr-ui-controls-logcat-2.txt
+```
+
+Attached Quest validation produced quiet Controls frames with cached content and
+continued visible compositing:
+
+- `ui_draw_rebuilds=0`
+- `ui_draw_cache_hits=2`
+- `ui_panel_repaints=0`
+- `ui_panel_cache_hits=2`
+- `ui_panel_texture_recreates=0`
+- `ui_panel_composites=2`
+
 ## Next Recommended Chunk
 
-Continue with remaining HUD transient-layer work and XR idle verification.
+Continue with remaining HUD transient-layer work.
 
 Next scope:
 
-- run a real headset/desktop XR idle Controls smoke and confirm
-  `ui_draw_rebuilds=0`, `ui_panel_repaints=0`, and no texture recreates on quiet
-  frames after the first cached frame
 - choose the next Slice H retained layer: selected item name fade,
   touch/gamepad prompt retention, or debug overlay retention
 

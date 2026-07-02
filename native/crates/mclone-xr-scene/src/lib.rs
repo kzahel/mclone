@@ -270,6 +270,22 @@ impl XrUnderwaterDetectionMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XrDebugUiScreen {
+    Pause,
+    Controls,
+}
+
+impl XrDebugUiScreen {
+    pub fn parse_label(flag: &str, value: &str) -> Result<Self> {
+        match value.trim() {
+            "pause" => Ok(Self::Pause),
+            "controls" | "help" => Ok(Self::Controls),
+            value => bail!("{flag} must be pause or controls, got `{value}`"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct XrSceneOptions {
     pub seed: i64,
@@ -284,6 +300,7 @@ pub struct XrSceneOptions {
     pub lighting_enabled: bool,
     pub far_lod: FarTerrainLodConfig,
     pub underwater_detection_mode: XrUnderwaterDetectionMode,
+    pub debug_ui_screen: Option<XrDebugUiScreen>,
 }
 
 impl Default for XrSceneOptions {
@@ -302,6 +319,7 @@ impl Default for XrSceneOptions {
             lighting_enabled: true,
             far_lod: FarTerrainLodConfig::default(),
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
+            debug_ui_screen: None,
         }
     }
 }
@@ -997,7 +1015,7 @@ where
                 started.runtime.mesh_assets().atlas.as_upload(),
             )
             .context("upload XR GUI atlas")?;
-        let state = Self {
+        let mut state = Self {
             scene,
             color_format,
             runtime: Some(started.runtime),
@@ -1068,6 +1086,7 @@ where
             audio: None,
             seed_reroll_state: initial_xr_seed_reroll_state(scene.seed),
         };
+        state.apply_debug_ui_screen();
         Ok(state)
     }
 
@@ -2529,12 +2548,16 @@ where
         if self.local_startup.is_some() || self.runtime.is_none() {
             return;
         }
-        self.ui.close();
-        self.ui.clear_input();
-        self.menu_pointer_down = false;
-        self.menu_panel_pose = None;
-        self.menu_panel_anchor = XrUiPanelAnchor::Head;
-        self.menu_panel_recenter_pending = false;
+        if self.scene.debug_ui_screen.is_none() {
+            self.ui.close();
+            self.ui.clear_input();
+            self.menu_pointer_down = false;
+            self.menu_panel_pose = None;
+            self.menu_panel_anchor = XrUiPanelAnchor::Head;
+            self.menu_panel_recenter_pending = false;
+        } else {
+            self.apply_debug_ui_screen();
+        }
         self.head_comfort.reset();
         self.snap_turn_state.reset();
         self.last_locomotion_update = Some(Instant::now());
@@ -4269,10 +4292,34 @@ where
             }
             ActiveSessionDescriptor::Remote { .. } => {}
         }
+        self.apply_debug_ui_screen();
         if !self.ui.is_active() {
             self.clear_menu_input_state();
         }
         Ok(())
+    }
+
+    fn apply_debug_ui_screen(&mut self) {
+        let Some(screen) = self.scene.debug_ui_screen else {
+            return;
+        };
+        let desired_screen = match screen {
+            XrDebugUiScreen::Pause => GameScreen::Pause,
+            XrDebugUiScreen::Controls => GameScreen::Help {
+                parent: mclone_ui::GameHelpParent::OptionsPause,
+            },
+        };
+        if self.ui.screen() != Some(desired_screen) {
+            self.ui.set_screen(Some(desired_screen));
+            self.ui.clear_input();
+            self.menu_pointer_down = false;
+            self.menu_panel_anchor = XrUiPanelAnchor::Head;
+            self.menu_panel_recenter_pending = true;
+        }
+        if self.menu_panel_pose.is_none() {
+            self.menu_panel_anchor = XrUiPanelAnchor::Head;
+            self.menu_panel_recenter_pending = true;
+        }
     }
 
     fn fail_local_startup(&mut self, startup: XrLocalStartup, error: anyhow::Error) {
