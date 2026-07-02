@@ -25,7 +25,11 @@ Slice 5E landed mob movement attribute facts for navigation and jumping. Slice
 5F landed Minecraft-shaped navigation recompute and timeout state. Slice 5G
 landed block-change path recompute triggers and path-trim hooks. The starter
 passive path is now an explicit debug passive showcase, enabled by default,
-while natural spawning remains future work.
+while natural spawning remains live-disabled. Slice 8 landed a bounded
+farm-animal biome/placement dry run so biome tables, on-ground animal
+predicates, and cow/chicken AABB collision are no longer missing subsystems;
+brightness, gamerules, despawn, persistence, and the live executor remain
+required before natural spawning creates mobs.
 
 Pathfinding direction: preserve the Minecraft layering (`Goal` ->
 `PathNavigation` -> path service -> `PathFinder` / `NodeEvaluator` ->
@@ -807,6 +811,53 @@ Landed notes:
   mclone-server`, full `cargo test --manifest-path native/Cargo.toml`, and
   `pnpm native:web:build`.
 
+## Slice 8 - Farm Animal Biome And Placement Dry Run
+
+Purpose: wire the next non-optional natural-spawn predicates into diagnostics
+without creating mobs yet.
+
+Status: landed; live natural spawn attempts remain disabled.
+
+Implementation sketch:
+
+- Encode the 1.17.1 farm-animal biome membership for layered overworld biomes
+  whose `VanillaBiomes` builder path calls `farmAnimals(...)`, directly or via
+  `plainsSpawns(...)` / `defaultSpawns(...)`.
+- Implement the cow/chicken natural placement predicate behind the existing
+  `placements.rs` boundary:
+  - `ON_GROUND`
+  - `MOTION_BLOCKING_NO_LEAVES`
+  - valid floor and empty feet/head blocks
+  - grass block below
+  - raw brightness greater than 8
+  - entity AABB no-collision using shared block collision shapes
+- Add a bounded dry-run diagnostic over eligible entity-ticking chunks. The
+  diagnostic samples deterministic surface columns and reports candidate,
+  biome-blocked, floor/space/collision-blocked, and missing-brightness counts.
+- Keep brightness honest: until the server exposes a raw-brightness sampler,
+  otherwise-valid candidates report `MissingBrightness` rather than assuming
+  full daylight.
+
+Done when:
+
+- The planner no longer treats biome spawn tables, placement predicates, or
+  collision checks as missing for the farm-animal path.
+- The server tick report exposes dry-run candidate/blocker counts.
+- Live spawning is still blocked by brightness, gamerules/server flags,
+  despawn, and persistence, and no entities are created by this dry-run.
+
+Landed notes:
+
+- Added farm-animal biome membership tests for plains/forest/savanna/taiga
+  positives and desert/jungle/ocean/badlands negatives.
+- Added `check_farm_animal_natural_spawn(...)` with Java-shaped failure
+  reasons and cow/chicken dimensions from shared entity metadata.
+- Added `dry_run_creature_spawn_eligibility(...)` with a fixed per-tick chunk
+  cap and sampled `MOTION_BLOCKING_NO_LEAVES` surface columns.
+- Threaded dry-run counters into `NaturalSpawningDiagnostics`.
+- The integrated diagnostics now clear biome/placement/collision blockers and
+  keep brightness/gamerules/despawn/persistence as the remaining blockers.
+
 ## Validation
 
 Minimum gates for code slices:
@@ -832,8 +883,8 @@ Suggested visible checks:
 - Full `Entity.move(...)` / `LivingEntity.travel(...)` parity.
 - Real pathfinding over loaded world collision.
 - Live natural spawning for `CREATURE` through the `entity::spawning` planner
-  once biome selection, placement predicates, brightness checks, collision
-  checks, gamerules/server flags, despawn, and persistence are wired.
+  once raw brightness checks, gamerules/server flags, despawn, persistence, and
+  the live spawn executor are wired.
 - Despawn rules for passive animals and later hostile mobs.
 - Sounds for passive mobs.
 - Data watcher / tracked data equivalent for richer entity presentation.

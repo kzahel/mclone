@@ -1,4 +1,5 @@
 use mclone_protocol::EntityKind;
+use mclone_worldgen::biome::BiomeDefinition;
 
 use super::mob_category::MobCategory;
 
@@ -61,8 +62,63 @@ pub(crate) fn farm_animal_spawn_for_kind(kind: EntityKind) -> Option<MobSpawnEnt
         .find(|entry| entry.entity.implemented_kind() == Some(kind))
 }
 
+pub(crate) fn farm_animal_spawns_for_biome(biome: BiomeDefinition) -> &'static [MobSpawnEntry] {
+    if biome_has_farm_animal_spawns(biome) {
+        &FARM_ANIMAL_SPAWNS
+    } else {
+        &[]
+    }
+}
+
+pub(crate) fn biome_has_farm_animal_spawns(biome: BiomeDefinition) -> bool {
+    matches!(
+        biome.key(),
+        // plainsSpawns(...)
+        "minecraft:plains" | "minecraft:sunflower_plains"
+            // defaultSpawns(...) forest path
+            | "minecraft:forest"
+            | "minecraft:flower_forest"
+            // birchForestBiome(...)
+            | "minecraft:birch_forest"
+            | "minecraft:birch_forest_hills"
+            | "minecraft:tall_birch_forest"
+            | "minecraft:tall_birch_hills"
+            // darkForestBiome(...)
+            | "minecraft:dark_forest"
+            | "minecraft:dark_forest_hills"
+            // taigaBiome(...)
+            | "minecraft:taiga"
+            | "minecraft:taiga_hills"
+            | "minecraft:taiga_mountains"
+            | "minecraft:snowy_taiga"
+            | "minecraft:snowy_taiga_hills"
+            | "minecraft:snowy_taiga_mountains"
+            // giantTreeTaiga(...)
+            | "minecraft:giant_tree_taiga"
+            | "minecraft:giant_tree_taiga_hills"
+            | "minecraft:giant_spruce_taiga"
+            | "minecraft:giant_spruce_taiga_hills"
+            // mountainBiome(...)
+            | "minecraft:mountains"
+            | "minecraft:mountain_edge"
+            | "minecraft:wooded_mountains"
+            | "minecraft:gravelly_mountains"
+            | "minecraft:modified_gravelly_mountains"
+            // savannaMobs(...)
+            | "minecraft:savanna"
+            | "minecraft:savanna_plateau"
+            | "minecraft:shattered_savanna"
+            | "minecraft:shattered_savanna_plateau"
+            // swampBiome(...)
+            | "minecraft:swamp"
+            | "minecraft:swamp_hills"
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    use mclone_worldgen::biome::get_layered_biome_by_id;
+
     use super::*;
 
     #[test]
@@ -101,5 +157,27 @@ mod tests {
         assert_eq!(VanillaSpawnEntity::Sheep.implemented_kind(), None);
         assert_eq!(VanillaSpawnEntity::Pig.implemented_kind(), None);
         assert_eq!(farm_animal_spawn_for_kind(EntityKind::Item), None);
+    }
+
+    #[test]
+    fn farm_animal_biome_table_keeps_reference_membership_boundaries() {
+        let plains = get_layered_biome_by_id(1);
+        let forest = get_layered_biome_by_id(4);
+        let savanna = get_layered_biome_by_id(35);
+        let snowy_taiga = get_layered_biome_by_id(30);
+        let desert = get_layered_biome_by_id(2);
+        let jungle = get_layered_biome_by_id(21);
+        let ocean = get_layered_biome_by_id(0);
+        let badlands = get_layered_biome_by_id(37);
+
+        for biome in [plains, forest, savanna, snowy_taiga] {
+            assert!(biome_has_farm_animal_spawns(biome), "{}", biome.key());
+            assert_eq!(farm_animal_spawns_for_biome(biome), &FARM_ANIMAL_SPAWNS);
+        }
+
+        for biome in [desert, jungle, ocean, badlands] {
+            assert!(!biome_has_farm_animal_spawns(biome), "{}", biome.key());
+            assert!(farm_animal_spawns_for_biome(biome).is_empty());
+        }
     }
 }

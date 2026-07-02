@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 pub(crate) mod biome_tables;
+pub(crate) mod dry_run;
 pub(crate) mod mob_category;
 pub(crate) mod natural;
 pub(crate) mod placements;

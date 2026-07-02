@@ -24,6 +24,20 @@ pub struct NaturalSpawningDiagnostics {
     pub creature_cadence_ready: bool,
     pub creature_cap_has_room: bool,
     pub creature_should_attempt_if_enabled: bool,
+    pub dry_run_chunks_checked: usize,
+    pub dry_run_chunk_budget_exhausted: bool,
+    pub dry_run_positions_checked: usize,
+    pub dry_run_biome_supported_positions: usize,
+    pub dry_run_implemented_entries_checked: usize,
+    pub dry_run_valid_candidates: usize,
+    pub dry_run_blocked_by_biome: usize,
+    pub dry_run_blocked_missing_block_data: usize,
+    pub dry_run_blocked_missing_brightness: usize,
+    pub dry_run_blocked_invalid_floor: usize,
+    pub dry_run_blocked_space: usize,
+    pub dry_run_blocked_collision: usize,
+    pub dry_run_blocked_too_dark: usize,
+    pub dry_run_blocked_unsupported: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

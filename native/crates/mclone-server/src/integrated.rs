@@ -21,6 +21,7 @@ use mclone_worldgen::block::{AIR, RawBlockId, generated_block_state_id};
 use crate::NaturalSpawningDiagnostics;
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
+use crate::entity::spawning::dry_run::dry_run_creature_spawn_eligibility;
 use crate::entity::spawning::mob_category::MobCategory;
 use crate::entity::spawning::natural::{
     NaturalSpawnChunkInputs, NaturalSpawnConfig, NaturalSpawnContext, plan_natural_spawns,
@@ -67,6 +68,7 @@ const DEFAULT_PHYSICS_STEP_DT_SECONDS: f64 = 1.0 / 60.0;
 #[derive(Debug)]
 pub struct IntegratedServer {
     seed: i64,
+    biome_source: ServerBiomeSource,
     scheduler: ChunkScheduler,
     block_ticks: BlockTickList,
     pub(crate) liquid_ticks: FluidTickList,
@@ -87,6 +89,38 @@ pub struct IntegratedServer {
     #[cfg(feature = "physics-rapier")]
     debug_physics_player_target: Option<CommandTarget>,
     loading_progress: ChunkLoadingProgress,
+}
+
+#[derive(Clone)]
+struct ServerBiomeSource {
+    seed: i64,
+    source: OverworldBiomeSource,
+}
+
+impl ServerBiomeSource {
+    fn new(seed: i64) -> Self {
+        Self {
+            seed,
+            source: OverworldBiomeSource::new(seed, false, false),
+        }
+    }
+
+    fn block_position_biome_definition(
+        &self,
+        block_x: i32,
+        block_z: i32,
+    ) -> mclone_worldgen::biome::BiomeDefinition {
+        self.source
+            .get_block_position_biome_definition(self.seed, block_x, block_z)
+    }
+}
+
+impl std::fmt::Debug for ServerBiomeSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerBiomeSource")
+            .field("seed", &self.seed)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Vanilla overworld spawns at morning (`dayTime` 1000), not midnight.
@@ -168,6 +202,7 @@ impl IntegratedServer {
         let loading_progress = ChunkLoadingProgress::new(runtime_chunk_target_status(&scheduler));
         Self {
             seed,
+            biome_source: ServerBiomeSource::new(seed),
             scheduler,
             block_ticks: BlockTickList::new(),
             liquid_ticks: FluidTickList::new(),
@@ -755,11 +790,21 @@ impl IntegratedServer {
         let category_counts = self.entities.natural_spawn_category_counts();
         let spawnable_chunk_count =
             u32::try_from(chunk_inputs.player_distance_chunk_count()).unwrap_or(u32::MAX);
-        let context = NaturalSpawnContext::with_live_chunk_and_count_inputs(
+        let dry_run = dry_run_creature_spawn_eligibility(
+            &chunk_inputs.eligible_entity_ticking_chunks,
+            |pos| self.scheduler.block_at_world(pos),
+            |x, z| self.biome_source.block_position_biome_definition(x, z),
+            |_pos| None,
+        );
+
+        let mut context = NaturalSpawnContext::with_live_chunk_and_count_inputs(
             game_time,
             spawnable_chunk_count,
             category_counts,
         );
+        context.biome_spawn_tables_ready = true;
+        context.placement_predicates_ready = true;
+        context.collision_checks_ready = true;
         let plan = plan_natural_spawns(NaturalSpawnConfig::enabled_all_categories(), context);
         let creature_state = SpawnState::new(spawnable_chunk_count, category_counts)
             .category_state(MobCategory::Creature);
@@ -779,6 +824,20 @@ impl IntegratedServer {
             creature_cadence_ready,
             creature_cap_has_room,
             creature_should_attempt_if_enabled: creature_cadence_ready && creature_cap_has_room,
+            dry_run_chunks_checked: dry_run.chunks_checked,
+            dry_run_chunk_budget_exhausted: dry_run.chunk_budget_exhausted,
+            dry_run_positions_checked: dry_run.positions_checked,
+            dry_run_biome_supported_positions: dry_run.biome_supported_positions,
+            dry_run_implemented_entries_checked: dry_run.implemented_entries_checked,
+            dry_run_valid_candidates: dry_run.valid_candidates,
+            dry_run_blocked_by_biome: dry_run.blocked_by_biome,
+            dry_run_blocked_missing_block_data: dry_run.blocked_missing_block_data,
+            dry_run_blocked_missing_brightness: dry_run.blocked_missing_brightness,
+            dry_run_blocked_invalid_floor: dry_run.blocked_invalid_floor,
+            dry_run_blocked_space: dry_run.blocked_space,
+            dry_run_blocked_collision: dry_run.blocked_collision,
+            dry_run_blocked_too_dark: dry_run.blocked_too_dark,
+            dry_run_blocked_unsupported: dry_run.blocked_unsupported,
         }
     }
 
@@ -1343,12 +1402,10 @@ impl IntegratedServer {
         let Some(center) = self.initial_spawn_center_for_target(target)? else {
             return Ok(None);
         };
-        let seed = self.seed;
-        let biome_source = OverworldBiomeSource::new(seed, false, false);
         let Some(position) = find_safe_surface_spawn(
             center,
             |pos| self.scheduler.block_at_world(pos),
-            |x, z| biome_source.get_block_position_biome_definition(seed, x, z),
+            |x, z| self.biome_source.block_position_biome_definition(x, z),
             |chunk| self.scheduler.client_visible_snapshot(chunk).is_some(),
         ) else {
             return Ok(None);
@@ -2326,7 +2383,7 @@ mod tests {
 
         assert!(!spawning.live_attempts_enabled);
         assert!(!spawning.ready_for_live_attempts);
-        assert_eq!(spawning.blocker_count, 7);
+        assert_eq!(spawning.blocker_count, 4);
         assert_eq!(spawning.player_distance_spawnable_chunks, 17 * 17);
         assert!(spawning.eligible_entity_ticking_spawn_chunks > 0);
         assert_eq!(spawning.creature_count, 2);
@@ -2334,6 +2391,14 @@ mod tests {
         assert!(spawning.creature_cap_has_room);
         assert!(!spawning.creature_cadence_ready);
         assert!(!spawning.creature_should_attempt_if_enabled);
+        assert!(spawning.dry_run_chunks_checked > 0);
+        assert!(spawning.dry_run_chunks_checked <= 8);
+        assert_eq!(
+            spawning.dry_run_biome_supported_positions + spawning.dry_run_blocked_by_biome,
+            spawning.dry_run_chunks_checked * 4
+        );
+        assert!(spawning.dry_run_positions_checked <= spawning.dry_run_biome_supported_positions);
+        assert_eq!(spawning.dry_run_valid_candidates, 0);
     }
 
     #[test]
