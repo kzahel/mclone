@@ -1,6 +1,6 @@
 # 122: Torch Placement Lighting Demo
 
-Status: active; Slice C2 dark-room probe landed.
+Status: active; Slice C2 mixed-sky probe landed.
 
 ## Purpose
 
@@ -124,11 +124,12 @@ Status: landed 2026-07-02.
 
 Add a deterministic native headless dark-room probe for the torch lighting
 artifact investigation. The probe bypasses runtime placement and generated
-terrain, builds a small stone room with one normal torch and a Java-oracle-shaped
-block-light field, then captures both lit and fullbright frames from the same
-camera. This keeps the visual comparison focused on render sampling/AO/lightmap
-behavior after the Java/native block-light oracle proved source and decay values
-match. Coarse live-light publication remains owned by tactical 113.
+terrain, builds a small stone room with one normal torch and Java-oracle-shaped
+block-light values, then captures block-only, uniform sky+torch, roof-opening
+sky+torch, and fullbright frames from the same camera. This keeps the visual
+comparison focused on render sampling/AO/lightmap behavior after the
+Java/native block-light oracle proved source and decay values match. Coarse
+live-light publication remains owned by tactical 113.
 
 Validation:
 
@@ -143,10 +144,14 @@ Validation:
   --torch-light-probe /tmp/mclone-torch-light-probe --width 1280 --height 720`
   passed outside the sandbox after the sandboxed run could not see a headless
   `wgpu` adapter.
-- inspected `/tmp/mclone-torch-light-probe/lit.png` and
-  `/tmp/mclone-torch-light-probe/fullbright.png`: same synthetic room/torch
-  geometry, with the lit frame showing the expected dark-room block-light
-  falloff and samples `14, 13, 13, 12, 0`.
+- inspected `/tmp/mclone-torch-light-probe/lit.png`,
+  `/tmp/mclone-torch-light-probe/sky_mix.png`,
+  `/tmp/mclone-torch-light-probe/skylight_opening.png`, and
+  `/tmp/mclone-torch-light-probe/skylight_opening_fullbright.png`: mixed
+  sky+torch frames render smoothly from this camera, with printed samples
+  `source=block:14 uniform_sky:6 opening_sky:12`,
+  `two_blocks_out=block:12 uniform_sky:6 opening_sky:11`, and
+  `under_skylight=block:9 uniform_sky:6 opening_sky:15`.
 
 ### Slice D: Web/XR Follow-Up
 

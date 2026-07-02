@@ -194,32 +194,42 @@ fn main() -> Result<()> {
         }
         Cli::TorchLightProbe { options } => {
             let report = run_torch_light_probe(&options)?;
+            let frames = report
+                .frames
+                .iter()
+                .map(|frame| {
+                    format!(
+                        "{}={} ({} bytes, sections={}, vertices={}, indices={})",
+                        frame.label,
+                        frame.path.display(),
+                        frame.byte_len,
+                        frame.section_count,
+                        frame.vertex_count,
+                        frame.index_count
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
             let samples = report
                 .samples
                 .iter()
                 .map(|sample| {
                     format!(
-                        "{}@{},{},{}={}",
+                        "{}@{},{},{}=block:{} uniform_sky:{} opening_sky:{}",
                         sample.label,
                         sample.position[0],
                         sample.position[1],
                         sample.position[2],
-                        sample.block_light
+                        sample.block_light,
+                        sample.uniform_sky_light,
+                        sample.skylight_opening_sky_light
                     )
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
             println!(
-                "torch light probe saved lit={} fullbright={} ({}x{}, {} bytes, sections={}, vertices={}, indices={}, samples=[{}])",
-                report.lit_path.display(),
-                report.fullbright_path.display(),
-                report.width,
-                report.height,
-                report.byte_len,
-                report.section_count,
-                report.vertex_count,
-                report.index_count,
-                samples
+                "torch light probe saved {} ({}x{}, samples=[{}])",
+                frames, report.width, report.height, samples
             );
             Ok(())
         }
