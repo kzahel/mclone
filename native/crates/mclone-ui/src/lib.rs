@@ -227,7 +227,7 @@ impl Default for BlockPaletteOverlay {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum GuiDrawCommand {
     SolidRect {
         rect: Rect,
@@ -244,6 +244,14 @@ pub enum GuiDrawCommand {
         rect: Rect,
         uv: GuiTextureUv,
         color: Color,
+        clip: Option<ClipRect>,
+    },
+    Text {
+        text: String,
+        x: f32,
+        y: f32,
+        color: Color,
+        shadow: bool,
         clip: Option<ClipRect>,
     },
 }
@@ -299,6 +307,20 @@ impl GuiDrawList {
             rect,
             uv,
             color,
+            clip: self.current_clip(),
+        });
+    }
+
+    pub fn text(&mut self, text: &str, x: f32, y: f32, color: Color, shadow: bool) {
+        if text.is_empty() || color.a == 0 {
+            return;
+        }
+        self.commands.push(GuiDrawCommand::Text {
+            text: text.to_owned(),
+            x,
+            y,
+            color,
+            shadow,
             clip: self.current_clip(),
         });
     }
@@ -386,6 +408,18 @@ impl Default for Font {
 }
 
 impl Font {
+    pub const fn glyph_width(&self) -> f32 {
+        self.glyph_width as f32
+    }
+
+    pub const fn glyph_height(&self) -> f32 {
+        self.glyph_height as f32
+    }
+
+    pub const fn advance(&self) -> f32 {
+        self.advance as f32
+    }
+
     pub fn line_height(&self) -> f32 {
         self.line_height as f32
     }
@@ -402,6 +436,21 @@ impl Font {
         self.draw_internal(draw, text, x, y, color, true);
     }
 
+    pub fn draw_atlas(&self, draw: &mut GuiDrawList, text: &str, x: f32, y: f32, color: Color) {
+        draw.text(text, x.floor(), y.floor(), color, false);
+    }
+
+    pub fn draw_shadow_atlas(
+        &self,
+        draw: &mut GuiDrawList,
+        text: &str,
+        x: f32,
+        y: f32,
+        color: Color,
+    ) {
+        draw.text(text, x.floor(), y.floor(), color, true);
+    }
+
     pub fn draw_centered(
         &self,
         draw: &mut GuiDrawList,
@@ -411,6 +460,21 @@ impl Font {
         color: Color,
     ) {
         self.draw_shadow(draw, text, center_x - self.width(text) * 0.5, y, color);
+    }
+
+    pub fn draw_centered_atlas(
+        &self,
+        draw: &mut GuiDrawList,
+        text: &str,
+        center_x: f32,
+        y: f32,
+        color: Color,
+    ) {
+        self.draw_shadow_atlas(draw, text, center_x - self.width(text) * 0.5, y, color);
+    }
+
+    pub fn glyph_rows(ch: char) -> [u8; 7] {
+        glyph_rows(ch)
     }
 
     fn draw_internal(
@@ -494,6 +558,20 @@ impl Button {
     }
 
     pub fn render(&self, draw: &mut GuiDrawList, font: &Font, interaction: Interaction) {
+        self.render_with_text_mode(draw, font, interaction, false);
+    }
+
+    pub fn render_atlas_text(&self, draw: &mut GuiDrawList, font: &Font, interaction: Interaction) {
+        self.render_with_text_mode(draw, font, interaction, true);
+    }
+
+    fn render_with_text_mode(
+        &self,
+        draw: &mut GuiDrawList,
+        font: &Font,
+        interaction: Interaction,
+        atlas_text: bool,
+    ) {
         let visual = self.visual(interaction);
         let (top, bottom, border, text, y_offset) = match visual {
             ButtonVisual::Normal => (
@@ -528,13 +606,13 @@ impl Button {
         draw.fill_gradient(self.rect, top, bottom);
         draw.outline(self.rect, border);
         draw.outline(self.rect.inset(1.0), Color::rgba(8, 10, 12, 180));
-        font.draw_centered(
-            draw,
-            &self.label,
-            self.rect.center_x(),
-            self.rect.y + ((self.rect.height - font.line_height()) * 0.5).floor() + y_offset,
-            text,
-        );
+        let text_y =
+            self.rect.y + ((self.rect.height - font.line_height()) * 0.5).floor() + y_offset;
+        if atlas_text {
+            font.draw_centered_atlas(draw, &self.label, self.rect.center_x(), text_y, text);
+        } else {
+            font.draw_centered(draw, &self.label, self.rect.center_x(), text_y, text);
+        }
     }
 }
 
@@ -563,6 +641,20 @@ impl Checkbox {
     }
 
     pub fn render(&self, draw: &mut GuiDrawList, font: &Font, interaction: Interaction) {
+        self.render_with_text_mode(draw, font, interaction, false);
+    }
+
+    pub fn render_atlas_text(&self, draw: &mut GuiDrawList, font: &Font, interaction: Interaction) {
+        self.render_with_text_mode(draw, font, interaction, true);
+    }
+
+    fn render_with_text_mode(
+        &self,
+        draw: &mut GuiDrawList,
+        font: &Font,
+        interaction: Interaction,
+        atlas_text: bool,
+    ) {
         let hovered = interaction.is_hovered(self.rect);
         let box_rect = Rect::new(self.rect.x, self.rect.y + 2.0, 12.0, 12.0);
         let border = if hovered {
@@ -586,17 +678,28 @@ impl Checkbox {
                 Color::WHITE,
             );
         }
-        font.draw_shadow(
-            draw,
-            &self.label,
-            self.rect.x + 18.0,
-            self.rect.y + 4.0,
-            if self.enabled {
-                Color::rgba(235, 242, 232, 255)
-            } else {
-                Color::rgba(135, 140, 136, 255)
-            },
-        );
+        let text_color = if self.enabled {
+            Color::rgba(235, 242, 232, 255)
+        } else {
+            Color::rgba(135, 140, 136, 255)
+        };
+        if atlas_text {
+            font.draw_shadow_atlas(
+                draw,
+                &self.label,
+                self.rect.x + 18.0,
+                self.rect.y + 4.0,
+                text_color,
+            );
+        } else {
+            font.draw_shadow(
+                draw,
+                &self.label,
+                self.rect.x + 18.0,
+                self.rect.y + 4.0,
+                text_color,
+            );
+        }
     }
 }
 
@@ -634,9 +737,23 @@ impl Slider {
     }
 
     pub fn render(&self, draw: &mut GuiDrawList, font: &Font, interaction: Interaction) {
+        self.render_with_text_mode(draw, font, interaction, false);
+    }
+
+    pub fn render_atlas_text(&self, draw: &mut GuiDrawList, font: &Font, interaction: Interaction) {
+        self.render_with_text_mode(draw, font, interaction, true);
+    }
+
+    fn render_with_text_mode(
+        &self,
+        draw: &mut GuiDrawList,
+        font: &Font,
+        interaction: Interaction,
+        atlas_text: bool,
+    ) {
         Button::new(self.id, self.rect, &self.label)
             .enabled(self.enabled)
-            .render(draw, font, interaction);
+            .render_with_text_mode(draw, font, interaction, atlas_text);
         let track = Rect::new(
             self.rect.x + 8.0,
             self.rect.bottom() - 6.0,
@@ -682,13 +799,27 @@ impl CycleButton {
     }
 
     pub fn render(&self, draw: &mut GuiDrawList, font: &Font, interaction: Interaction) {
+        self.render_with_text_mode(draw, font, interaction, false);
+    }
+
+    pub fn render_atlas_text(&self, draw: &mut GuiDrawList, font: &Font, interaction: Interaction) {
+        self.render_with_text_mode(draw, font, interaction, true);
+    }
+
+    fn render_with_text_mode(
+        &self,
+        draw: &mut GuiDrawList,
+        font: &Font,
+        interaction: Interaction,
+        atlas_text: bool,
+    ) {
         Button::new(
             self.id,
             self.rect,
             format!("{}: {}", self.label, self.value),
         )
         .enabled(self.enabled)
-        .render(draw, font, interaction);
+        .render_with_text_mode(draw, font, interaction, atlas_text);
     }
 }
 
@@ -4210,6 +4341,32 @@ mod tests {
                 height: 7.0
             })
         );
+    }
+
+    #[test]
+    fn font_atlas_draw_emits_one_text_command() {
+        let font = Font::default();
+        let mut draw = GuiDrawList::new();
+
+        font.draw_shadow_atlas(&mut draw, "Controls", 12.5, 18.5, Color::WHITE);
+
+        let [
+            GuiDrawCommand::Text {
+                text,
+                x,
+                y,
+                color,
+                shadow,
+                ..
+            },
+        ] = draw.commands()
+        else {
+            panic!("expected one text command");
+        };
+        assert_eq!(text, "Controls");
+        assert_eq!((*x, *y), (12.0, 18.0));
+        assert_eq!(*color, Color::WHITE);
+        assert_eq!(*shadow, true);
     }
 
     #[test]

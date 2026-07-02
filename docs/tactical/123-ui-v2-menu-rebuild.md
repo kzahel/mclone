@@ -1,6 +1,6 @@
 # 123: UI V2 Menu Rebuild
 
-Status: active; shared committed UI host landed 2026-07-02.
+Status: active; v2 atlas-backed text landed 2026-07-02.
 
 ## Decision
 
@@ -305,7 +305,7 @@ Validation:
 
 ### Slice F: Atlas-Backed Text For V2
 
-Status: pending.
+Status: first pass landed 2026-07-02.
 
 Move v2 text rendering to glyph atlas quads.
 
@@ -749,6 +749,68 @@ Known limits:
   compatibility; app/platform crates should use `GameUiHost`
 - atlas text remains the next major performance chunk
 
+## Landed Atlas-Backed Text Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- added semantic `GuiDrawCommand::Text` commands to `mclone-ui` so v2 screens no
+  longer explode every glyph pixel into a separate rectangle command
+- added atlas text helpers to the existing fixed 5x7 `Font` path while leaving
+  the legacy rectangle-font helpers available for non-migrated screens
+- added a renderer-owned glyph atlas, UV lookup, and `GlyphAtlas` prepared draw
+  path in `mclone-render`
+- routed v2 Pause, Options, and Help/Controls headings, labels, buttons,
+  checkboxes, cycle buttons, sliders, and shortcut rows through atlas text
+- kept world-space/XR and flat presentation on the shared `GuiDrawList` renderer
+  path, so migrated v2 panels inherit the glyph atlas backend
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui font_atlas -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-render prepares_text_command -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-pause-atlas-text.png --width 960 --height 540 --screenshot-ui pause --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-options-atlas-text.png --width 960 --height 540 --screenshot-ui options-pause --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-controls-atlas-text.png --width 960 --height 540 --screenshot-ui controls --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true
+```
+
+Rendered checks:
+
+- native Pause screenshot inspected:
+  `/tmp/mclone-ui-v2-pause-atlas-text.png`
+- native Options screenshot inspected:
+  `/tmp/mclone-ui-v2-options-atlas-text.png`
+- native Controls screenshot inspected:
+  `/tmp/mclone-ui-v2-controls-atlas-text.png`
+- browser canvas smoke regenerated:
+  `/tmp/mclone-native-web-canvas.png`
+
+Command counts from inspected native screenshots:
+
+- Pause: 32 GUI commands
+- Options: 170 GUI commands, down from 7190 with rectangle-font text
+- Controls: 104 GUI commands, down from 21061 with rectangle-font text
+
+Known limits:
+
+- legacy screens still use the old per-pixel rectangle font path
+- this is still the built-in fixed 5x7 debug font, not a Minecraft font-provider
+  or Unicode font atlas implementation
+- glyph atlas text removes command explosion, but it does not yet cache rendered
+  v2 panel textures or skip unchanged UI repaints in XR
+
 ## Non-Goals
 
 - Spending more effort on legacy Options hit-test fixes than needed to keep the
@@ -763,20 +825,23 @@ Known limits:
 
 ## Next Recommended Chunk
 
-Implement Slice F: atlas-backed text for v2.
+Implement Slice G: XR panel texture cache for v2.
 
-Start with the smallest production-shaped text path:
+Start with the smallest measurable dirty-repaint path:
 
-- keep `mclone-ui` responsible for text runs, labels, and measurement requests
-- add a `mclone-render` glyph atlas/batch path for v2 text drawing
-- adapt v2 Pause, Options, and Controls text to glyph quads
-- preserve legacy rectangle-font rendering for non-migrated screens during the
-  transition
-- compare command/vertex counts for Controls before and after atlas text
+- add explicit content revision and interaction revision reporting to
+  `GameUiHost`/`UiSurface`
+- cache the rendered v2 panel texture for world-space/XR UI and repaint it only
+  when content or relevant interaction state changes
+- keep panel compositing every visible frame, because head/controller poses still
+  move the panel in the world
+- add counters that distinguish panel repaint, texture upload, and panel
+  composite
+- prove idle Controls in XR stops repainting unchanged text-heavy content
 
-Controls should be the headline benchmark because it currently emits 21061 GUI
-commands at 960x540, which is the clearest evidence that the old font path is
-the next bottleneck.
+Controls should remain the headline benchmark because atlas text reduced command
+count, but an idle XR Controls panel should still avoid rebuilding and uploading
+the same panel content every frame.
 
 ## Completed First Recommended Chunk
 

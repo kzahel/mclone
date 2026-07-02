@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use anyhow::{Result, bail};
 use glam::{Mat4, Vec3};
-use mclone_ui::{ClipRect, Color, GuiDrawCommand, GuiDrawList, Rect};
+use mclone_ui::{ClipRect, Color, Font, GuiDrawCommand, GuiDrawList, GuiTextureUv, Rect};
 
 use crate::chunk::{ChunkRenderView, ChunkTextureAtlas};
 use crate::target::RenderFrameTarget;
@@ -244,7 +244,8 @@ impl GuiRenderOptions {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum PreparedDrawKind {
     Solid,
-    Textured,
+    TextureAtlas,
+    GlyphAtlas,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -260,6 +261,7 @@ pub struct GuiRenderer {
     textured_pipeline: wgpu::RenderPipeline,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     texture_atlas: Option<GuiTextureAtlas>,
+    glyph_atlas: Option<GuiGlyphAtlas>,
     vertex_buffer: Option<wgpu::Buffer>,
     vertex_buffer_slot_size: wgpu::BufferAddress,
 }
@@ -387,6 +389,7 @@ impl GuiRenderer {
             textured_pipeline,
             texture_bind_group_layout,
             texture_atlas: None,
+            glyph_atlas: None,
             vertex_buffer: None,
             vertex_buffer_slot_size: 0,
         }
@@ -464,6 +467,13 @@ impl GuiRenderer {
             }
             return Ok(());
         }
+        let uses_glyph_atlas = prepared
+            .draws
+            .iter()
+            .any(|draw| draw.kind == PreparedDrawKind::GlyphAtlas);
+        if uses_glyph_atlas {
+            self.ensure_glyph_atlas(device, queue);
+        }
 
         let vertex_range = self.upload_vertices(device, queue, view_slot, &prepared.vertices);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -490,8 +500,15 @@ impl GuiRenderer {
                 PreparedDrawKind::Solid => {
                     pass.set_pipeline(&self.solid_pipeline);
                 }
-                PreparedDrawKind::Textured => {
+                PreparedDrawKind::TextureAtlas => {
                     let Some(atlas) = &self.texture_atlas else {
+                        continue;
+                    };
+                    pass.set_pipeline(&self.textured_pipeline);
+                    pass.set_bind_group(0, &atlas.bind_group, &[]);
+                }
+                PreparedDrawKind::GlyphAtlas => {
+                    let Some(atlas) = &self.glyph_atlas else {
                         continue;
                     };
                     pass.set_pipeline(&self.textured_pipeline);
@@ -504,6 +521,16 @@ impl GuiRenderer {
             );
         }
         Ok(())
+    }
+
+    fn ensure_glyph_atlas(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        if self.glyph_atlas.is_none() {
+            self.glyph_atlas = Some(GuiGlyphAtlas::new(
+                device,
+                queue,
+                &self.texture_bind_group_layout,
+            ));
+        }
     }
 
     fn upload_vertices(
@@ -627,6 +654,83 @@ impl GuiTextureAtlas {
             _sampler: sampler,
             bind_group,
         })
+    }
+}
+
+struct GuiGlyphAtlas {
+    _texture: wgpu::Texture,
+    _view: wgpu::TextureView,
+    _sampler: wgpu::Sampler,
+    bind_group: wgpu::BindGroup,
+}
+
+impl GuiGlyphAtlas {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, layout: &wgpu::BindGroupLayout) -> Self {
+        let image = glyph_atlas_image();
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_gui_glyph_atlas"),
+            size: wgpu::Extent3d {
+                width: image.width,
+                height: image.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: Default::default(),
+                aspect: Default::default(),
+            },
+            &image.rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(image.width * 4),
+                rows_per_image: Some(image.height),
+            },
+            wgpu::Extent3d {
+                width: image.width,
+                height: image.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&Default::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("mclone_gui_glyph_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_gui_glyph_bind_group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        Self {
+            _texture: texture,
+            _view: view,
+            _sampler: sampler,
+            bind_group,
+        }
     }
 }
 
@@ -1575,19 +1679,34 @@ struct PreparedDraws {
     draws: Vec<PreparedDraw>,
 }
 
+struct GlyphAtlasImage {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+const GLYPH_ATLAS_FIRST: u8 = 32;
+const GLYPH_ATLAS_LAST: u8 = 126;
+const GLYPH_ATLAS_COLS: u32 = 16;
+const GLYPH_WIDTH: u32 = 5;
+const GLYPH_HEIGHT: u32 = 7;
+const GLYPH_CELL_WIDTH: u32 = 6;
+const GLYPH_CELL_HEIGHT: u32 = 8;
+const GLYPH_ADVANCE: f32 = 6.0;
+
 fn prepare_draws(commands: &[GuiDrawCommand], gui_size: [f32; 2]) -> PreparedDraws {
     let mut vertices = Vec::new();
     let mut draws = Vec::new();
     for command in commands {
-        match *command {
+        match command {
             GuiDrawCommand::SolidRect { rect, color, clip } => {
                 let first_vertex = (vertices.len() / FLOATS_PER_VERTEX) as u32;
-                push_solid_quad(&mut vertices, gui_size, rect, color, color);
+                push_solid_quad(&mut vertices, gui_size, *rect, *color, *color);
                 draws.push(PreparedDraw {
                     kind: PreparedDrawKind::Solid,
                     first_vertex,
                     vertex_count: QUAD_VERTEX_COUNT,
-                    clip,
+                    clip: *clip,
                 });
             }
             GuiDrawCommand::GradientRect {
@@ -1597,12 +1716,12 @@ fn prepare_draws(commands: &[GuiDrawCommand], gui_size: [f32; 2]) -> PreparedDra
                 clip,
             } => {
                 let first_vertex = (vertices.len() / FLOATS_PER_VERTEX) as u32;
-                push_solid_quad(&mut vertices, gui_size, rect, top, bottom);
+                push_solid_quad(&mut vertices, gui_size, *rect, *top, *bottom);
                 draws.push(PreparedDraw {
                     kind: PreparedDrawKind::Solid,
                     first_vertex,
                     vertex_count: QUAD_VERTEX_COUNT,
-                    clip,
+                    clip: *clip,
                 });
             }
             GuiDrawCommand::TextureRect {
@@ -1612,13 +1731,43 @@ fn prepare_draws(commands: &[GuiDrawCommand], gui_size: [f32; 2]) -> PreparedDra
                 clip,
             } => {
                 let first_vertex = (vertices.len() / FLOATS_PER_VERTEX) as u32;
-                push_textured_quad(&mut vertices, gui_size, rect, uv, color);
+                push_textured_quad(&mut vertices, gui_size, *rect, *uv, *color);
                 draws.push(PreparedDraw {
-                    kind: PreparedDrawKind::Textured,
+                    kind: PreparedDrawKind::TextureAtlas,
                     first_vertex,
                     vertex_count: QUAD_VERTEX_COUNT,
-                    clip,
+                    clip: *clip,
                 });
+            }
+            GuiDrawCommand::Text {
+                text,
+                x,
+                y,
+                color,
+                shadow,
+                clip,
+            } => {
+                let first_vertex = (vertices.len() / FLOATS_PER_VERTEX) as u32;
+                if *shadow {
+                    push_text_run_quads(
+                        &mut vertices,
+                        gui_size,
+                        text,
+                        *x + 1.0,
+                        *y + 1.0,
+                        color.scale_rgb(0.22),
+                    );
+                }
+                push_text_run_quads(&mut vertices, gui_size, text, *x, *y, *color);
+                let vertex_count = (vertices.len() / FLOATS_PER_VERTEX) as u32 - first_vertex;
+                if vertex_count > 0 {
+                    draws.push(PreparedDraw {
+                        kind: PreparedDrawKind::GlyphAtlas,
+                        first_vertex,
+                        vertex_count,
+                        clip: *clip,
+                    });
+                }
             }
         }
     }
@@ -1647,7 +1796,7 @@ fn push_textured_quad(
     vertices: &mut Vec<f32>,
     gui_size: [f32; 2],
     rect: Rect,
-    uv: mclone_ui::GuiTextureUv,
+    uv: GuiTextureUv,
     color: Color,
 ) {
     push_quad(
@@ -1658,6 +1807,98 @@ fn push_textured_quad(
         color,
         color,
     );
+}
+
+fn push_text_run_quads(
+    vertices: &mut Vec<f32>,
+    gui_size: [f32; 2],
+    text: &str,
+    x: f32,
+    y: f32,
+    color: Color,
+) {
+    if color.a == 0 {
+        return;
+    }
+    let mut cursor = x.floor();
+    let y = y.floor();
+    for ch in text.chars() {
+        if ch != ' ' {
+            push_textured_quad(
+                vertices,
+                gui_size,
+                Rect::new(cursor, y, GLYPH_WIDTH as f32, GLYPH_HEIGHT as f32),
+                glyph_uv(ch),
+                color,
+            );
+        }
+        cursor += GLYPH_ADVANCE;
+    }
+}
+
+fn glyph_uv(ch: char) -> GuiTextureUv {
+    let code = glyph_atlas_code(ch);
+    let index = u32::from(code - GLYPH_ATLAS_FIRST);
+    let col = index % GLYPH_ATLAS_COLS;
+    let row = index / GLYPH_ATLAS_COLS;
+    let width = glyph_atlas_width() as f32;
+    let height = glyph_atlas_height() as f32;
+    let x = (col * GLYPH_CELL_WIDTH) as f32;
+    let y = (row * GLYPH_CELL_HEIGHT) as f32;
+    GuiTextureUv::new(
+        x / width,
+        y / height,
+        (x + GLYPH_WIDTH as f32) / width,
+        (y + GLYPH_HEIGHT as f32) / height,
+    )
+}
+
+fn glyph_atlas_code(ch: char) -> u8 {
+    let ch = ch.to_ascii_uppercase();
+    if ch.is_ascii() {
+        let code = ch as u8;
+        if (GLYPH_ATLAS_FIRST..=GLYPH_ATLAS_LAST).contains(&code) {
+            return code;
+        }
+    }
+    b'?'
+}
+
+fn glyph_atlas_width() -> u32 {
+    GLYPH_ATLAS_COLS * GLYPH_CELL_WIDTH
+}
+
+fn glyph_atlas_height() -> u32 {
+    let glyph_count = u32::from(GLYPH_ATLAS_LAST - GLYPH_ATLAS_FIRST + 1);
+    glyph_count.div_ceil(GLYPH_ATLAS_COLS) * GLYPH_CELL_HEIGHT
+}
+
+fn glyph_atlas_image() -> GlyphAtlasImage {
+    let width = glyph_atlas_width();
+    let height = glyph_atlas_height();
+    let mut rgba = vec![0; width as usize * height as usize * 4];
+    for code in GLYPH_ATLAS_FIRST..=GLYPH_ATLAS_LAST {
+        let index = u32::from(code - GLYPH_ATLAS_FIRST);
+        let cell_x = (index % GLYPH_ATLAS_COLS) * GLYPH_CELL_WIDTH;
+        let cell_y = (index / GLYPH_ATLAS_COLS) * GLYPH_CELL_HEIGHT;
+        let rows = Font::glyph_rows(char::from(code));
+        for (row, bits) in rows.iter().enumerate() {
+            for col in 0..GLYPH_WIDTH {
+                let mask = 1u8 << (GLYPH_WIDTH - 1 - col);
+                if bits & mask != 0 {
+                    let x = cell_x + col;
+                    let y = cell_y + row as u32;
+                    let offset = ((y * width + x) * 4) as usize;
+                    rgba[offset..offset + 4].copy_from_slice(&[255, 255, 255, 255]);
+                }
+            }
+        }
+    }
+    GlyphAtlasImage {
+        width,
+        height,
+        rgba,
+    }
 }
 
 fn push_quad(
@@ -1806,7 +2047,7 @@ mod tests {
         let prepared = prepare_draws(draw.commands(), [100.0, 100.0]);
 
         assert_eq!(prepared.draws.len(), 1);
-        assert_eq!(prepared.draws[0].kind, PreparedDrawKind::Textured);
+        assert_eq!(prepared.draws[0].kind, PreparedDrawKind::TextureAtlas);
         assert_eq!(prepared.vertices.len(), 6 * FLOATS_PER_VERTEX);
         assert_eq!(&prepared.vertices[2..4], &[0.25, 0.5]);
         assert_eq!(
@@ -1816,6 +2057,43 @@ mod tests {
         assert_eq!(
             &prepared.vertices[FLOATS_PER_VERTEX * 2 + 2..FLOATS_PER_VERTEX * 2 + 4],
             &[0.75, 1.0]
+        );
+    }
+
+    #[test]
+    fn prepares_text_command_as_one_glyph_atlas_draw() {
+        let mut draw = GuiDrawList::new();
+        draw.text("AB", 2.0, 3.0, Color::WHITE, true);
+
+        let prepared = prepare_draws(draw.commands(), [100.0, 100.0]);
+
+        assert_eq!(prepared.draws.len(), 1);
+        assert_eq!(prepared.draws[0].kind, PreparedDrawKind::GlyphAtlas);
+        assert_eq!(prepared.draws[0].vertex_count, 4 * QUAD_VERTEX_COUNT);
+        assert_eq!(
+            prepared.vertices.len(),
+            4 * QUAD_VERTEX_COUNT as usize * FLOATS_PER_VERTEX
+        );
+    }
+
+    #[test]
+    fn glyph_atlas_contains_fixed_font_pixels() {
+        let image = glyph_atlas_image();
+        assert_eq!(image.width, glyph_atlas_width());
+        assert_eq!(image.height, glyph_atlas_height());
+        assert_eq!(
+            image.rgba.len(),
+            image.width as usize * image.height as usize * 4
+        );
+
+        let a_uv = glyph_uv('A');
+        assert!(a_uv.u0 < a_uv.u1);
+        assert!(a_uv.v0 < a_uv.v1);
+        assert!(
+            image
+                .rgba
+                .chunks_exact(4)
+                .any(|pixel| pixel == [255, 255, 255, 255])
         );
     }
 

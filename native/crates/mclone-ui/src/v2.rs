@@ -518,7 +518,7 @@ impl UiSurface {
             Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
             Color::rgba(0, 0, 0, 135),
         );
-        self.font.draw_centered(
+        self.font.draw_centered_atlas(
             draw,
             "PAUSED",
             self.scale.width * 0.5,
@@ -543,7 +543,7 @@ impl UiSurface {
             Color::rgba(15, 20, 22, 245),
         );
         draw.outline(panel, Color::rgba(130, 166, 154, 255));
-        self.font.draw_centered(
+        self.font.draw_centered_atlas(
             draw,
             "OPTIONS",
             panel.center_x(),
@@ -582,14 +582,14 @@ impl UiSurface {
             Color::rgba(15, 20, 22, 245),
         );
         draw.outline(panel, Color::rgba(130, 166, 154, 255));
-        self.font.draw_centered(
+        self.font.draw_centered_atlas(
             draw,
             "CONTROLS",
             panel.center_x(),
             panel.y + 8.0,
             Color::rgba(245, 252, 234, 255),
         );
-        self.font.draw_centered(
+        self.font.draw_centered_atlas(
             draw,
             "F1 / ESC BACK",
             panel.center_x(),
@@ -608,7 +608,7 @@ impl UiSurface {
     fn render_help_row(&self, draw: &mut GuiDrawList, row: &UiHelpRow) {
         match &row.kind {
             UiHelpRowKind::Group(group) => {
-                self.font.draw_shadow(
+                self.font.draw_shadow_atlas(
                     draw,
                     group.label(),
                     row.x,
@@ -617,14 +617,14 @@ impl UiSurface {
                 );
             }
             UiHelpRowKind::Shortcut(shortcut) => {
-                self.font.draw_shadow(
+                self.font.draw_shadow_atlas(
                     draw,
                     &shortcut.control,
                     row.x,
                     row.y,
                     Color::rgba(185, 212, 198, 255),
                 );
-                self.font.draw_shadow(
+                self.font.draw_shadow_atlas(
                     draw,
                     &shortcut.action,
                     row.x + row.control_width,
@@ -643,7 +643,7 @@ impl UiSurface {
                 widget.label.as_str(),
             )
             .enabled(widget.enabled)
-            .render(draw, &self.font, interaction),
+            .render_atlas_text(draw, &self.font, interaction),
             UiWidgetKind::Checkbox { checked } => {
                 let mut checkbox = Checkbox::new(
                     widget.id.legacy_widget_id(),
@@ -652,7 +652,7 @@ impl UiSurface {
                     *checked,
                 );
                 checkbox.enabled = widget.enabled;
-                checkbox.render(draw, &self.font, interaction);
+                checkbox.render_atlas_text(draw, &self.font, interaction);
             }
             UiWidgetKind::Cycle => {
                 let mut cycle = CycleButton::new(
@@ -662,7 +662,7 @@ impl UiSurface {
                     widget.value.as_deref().unwrap_or(""),
                 );
                 cycle.enabled = widget.enabled;
-                cycle.render(draw, &self.font, interaction);
+                cycle.render_atlas_text(draw, &self.font, interaction);
             }
             UiWidgetKind::Slider { value } => Slider::new(
                 widget.id.legacy_widget_id(),
@@ -671,7 +671,7 @@ impl UiSurface {
                 *value,
             )
             .enabled(widget.enabled)
-            .render(draw, &self.font, interaction),
+            .render_atlas_text(draw, &self.font, interaction),
         }
     }
 
@@ -1325,7 +1325,7 @@ const fn help_parent_for_options(parent: GameOptionsParent) -> GameHelpParent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GameSimulationCadence, GameTouchSettings, GameUi, GameXrTurnMode};
+    use crate::{GameSimulationCadence, GameTouchSettings, GameUi, GameXrTurnMode, GuiDrawCommand};
     use mclone_input::TouchControlsMode;
 
     fn point_in(rect: Rect) -> Point {
@@ -1677,7 +1677,7 @@ mod tests {
     }
 
     #[test]
-    fn help_render_uses_committed_rows_and_matches_legacy_command_scale() {
+    fn help_render_uses_committed_rows_and_atlas_text_commands() {
         let mut surface = UiSurface::new();
         surface.set_screen(Some(UiScreenId::Help {
             parent: GameHelpParent::Game,
@@ -1697,6 +1697,17 @@ mod tests {
         legacy.set_scale(GuiScale::from_pixels(960, 540));
         let legacy_draw = legacy.render_draw_list(GameUiRenderState::default());
 
-        assert_eq!(v2_draw.commands().len(), legacy_draw.commands().len());
+        assert!(
+            v2_draw.commands().len() < legacy_draw.commands().len(),
+            "v2={} legacy={}",
+            v2_draw.commands().len(),
+            legacy_draw.commands().len()
+        );
+        assert!(
+            v2_draw
+                .commands()
+                .iter()
+                .any(|command| matches!(command, GuiDrawCommand::Text { .. }))
+        );
     }
 }
