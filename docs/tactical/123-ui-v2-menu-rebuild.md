@@ -348,10 +348,10 @@ Validation:
 
 ### Slice H: HUD, Hotbar, And Block Picker V2
 
-Status: flat crosshair/hotbar frame, hotbar selection/content retention, block
-picker v2 retained grid, and runtime cache reporting landed 2026-07-02;
-selected item text, debug/status overlays, and touch/gamepad prompts still
-pending.
+Status: flat crosshair/hotbar frame, hotbar selection/content retention, status
+overlay retention, block picker v2 retained grid, and runtime cache reporting
+landed 2026-07-02; selected item text, debug overlays, and touch/gamepad prompts
+still pending.
 
 Move in-game UI surfaces to v2 retained layers:
 
@@ -1174,8 +1174,62 @@ Known limits:
 
 - block picker visual content is retained as GUI commands, not yet as a GPU-side
   texture/atlas independent of the normal GUI renderer
-- touch-specific hotbar controls, gamepad prompts, status/debug overlays, and
-  selected item name fade are still transient immediate layers
+- touch-specific hotbar controls, gamepad prompts, debug overlays, and selected
+  item name fade are still transient immediate layers
+
+## Landed HUD Status Retained-Layer Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- split the flat HUD status overlay out of the transient HUD pass
+- added an optional retained status layer in `GameUiHost`, keyed by GUI scale,
+  visible message, and ok/error style
+- hidden or empty status clears the cached status layer and contributes no cache
+  counters, preserving the existing quiet-frame count when status is hidden
+- kept `render_flat_hud` and `GameUiHost::render_flat_hud_draw_list` visually
+  aligned by composing the same retained, hotbar, status, and transient layers
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml -p mclone-ui
+cargo test --manifest-path native/Cargo.toml -p mclone-ui flat_hud -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-xr-scene -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+```
+
+Automated proof coverage:
+
+- `game_ui_host_flat_hud_status_cache_rebuilds_independently` proves a visible
+  status adds a third retained HUD layer, quiet frames hit all three layers,
+  status message changes rebuild only the status layer, and hiding/restoring
+  status does not dirty crosshair or hotbar layers
+- `game_ui_host_flat_hud_draw_matches_standalone_renderer` continues to prove
+  retained host composition matches the standalone HUD renderer with status
+  visible
+- browser live-world smoke still observed hidden-status quiet frames with
+  `flatHudRetainedRebuilds=0`, `flatHudRetainedCacheHits=2`, and
+  `statusOverlayVisible=false`
+
+Rendered checks:
+
+- browser live-world canvas smoke regenerated and inspected:
+  `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- native desktop live-world status/HUD pixel capture still needs a dedicated
+  diagnostic path because the current offscreen screenshot command does not
+  attach HUD state
+- touch-specific hotbar controls, gamepad prompts, debug overlays, and selected
+  item name fade are still transient immediate layers
 
 ## Non-Goals
 
@@ -1199,7 +1253,7 @@ Next scope:
   `ui_draw_rebuilds=0`, `ui_panel_repaints=0`, and no texture recreates on quiet
   frames after the first cached frame
 - choose the next Slice H retained layer: selected item name fade,
-  touch/gamepad prompt retention, or status/debug overlay retention
+  touch/gamepad prompt retention, or debug overlay retention
 
 ## Completed First Recommended Chunk
 

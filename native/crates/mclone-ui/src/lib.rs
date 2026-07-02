@@ -1951,6 +1951,7 @@ impl FlatHud {
 pub fn render_flat_hud(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
     render_flat_hud_retained_layer(scale, draw, hud);
     render_flat_hud_hotbar_layer(scale, draw, hud);
+    render_flat_hud_status_layer(scale, draw, hud);
     render_flat_hud_transient_layers(scale, draw, hud);
 }
 
@@ -1976,6 +1977,10 @@ pub(crate) fn render_flat_hud_hotbar_layer(scale: GuiScale, draw: &mut GuiDrawLi
     }
 }
 
+pub(crate) fn render_flat_hud_status_layer(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
+    render_status_overlay(scale, draw, &hud.status);
+}
+
 pub(crate) fn render_flat_hud_transient_layers(
     scale: GuiScale,
     draw: &mut GuiDrawList,
@@ -1985,7 +1990,6 @@ pub(crate) fn render_flat_hud_transient_layers(
     let gamepad = hud.effective_gamepad_overlay();
     render_gamepad_hud(scale, draw, gamepad, hud.should_render_flat_hotbar());
     render_touch_overlay(scale, draw, &touch);
-    render_status_overlay(scale, draw, &hud.status);
 }
 
 pub fn render_debug_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &DebugOverlay) {

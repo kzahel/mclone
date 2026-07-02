@@ -9,9 +9,9 @@ use crate::{
     movement_speed_from_slider_value, movement_speed_label, movement_speed_slider_value,
     next_touch_controls_mode, render_block_palette_tooltip, render_distance_from_slider_value,
     render_distance_label, render_distance_slider_value, render_flat_hud_hotbar_layer,
-    render_flat_hud_retained_layer, render_flat_hud_transient_layers, render_palette_slot_contents,
-    render_touch_panel, touch_controls_mode_label, touch_look_from_slider_value, touch_look_label,
-    touch_look_slider_value,
+    render_flat_hud_retained_layer, render_flat_hud_status_layer, render_flat_hud_transient_layers,
+    render_palette_slot_contents, render_touch_panel, touch_controls_mode_label,
+    touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
 };
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, ShortcutHelpGroup, ShortcutHelpRow,
@@ -1017,6 +1017,21 @@ impl FlatHudHotbarState {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct FlatHudStatusState {
+    scale: GuiScale,
+    status: crate::StatusOverlay,
+}
+
+impl FlatHudStatusState {
+    fn from_hud(scale: GuiScale, hud: &FlatHud) -> Option<Self> {
+        (hud.status.visible && !hud.status.message.is_empty()).then(|| Self {
+            scale,
+            status: hud.status.clone(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct CachedFlatHudRetainedLayer {
     state: FlatHudRetainedState,
     draw: GuiDrawList,
@@ -1028,10 +1043,17 @@ struct CachedFlatHudHotbarLayer {
     draw: GuiDrawList,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct CachedFlatHudStatusLayer {
+    state: FlatHudStatusState,
+    draw: GuiDrawList,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 struct FlatHudSurface {
     retained: Option<CachedFlatHudRetainedLayer>,
     hotbar: Option<CachedFlatHudHotbarLayer>,
+    status: Option<CachedFlatHudStatusLayer>,
 }
 
 impl FlatHudSurface {
@@ -1077,6 +1099,35 @@ impl FlatHudSurface {
         let mut draw = GuiDrawList::new();
         render_flat_hud_hotbar_layer(scale, &mut draw, hud);
         self.hotbar = Some(CachedFlatHudHotbarLayer {
+            state,
+            draw: draw.clone(),
+        });
+        FlatHudDrawList {
+            draw,
+            retained_cache: UiDrawCacheStats::rebuild(),
+        }
+    }
+
+    fn render_status_layer(&mut self, scale: GuiScale, hud: &FlatHud) -> FlatHudDrawList {
+        let Some(state) = FlatHudStatusState::from_hud(scale, hud) else {
+            self.status = None;
+            return FlatHudDrawList {
+                draw: GuiDrawList::new(),
+                retained_cache: UiDrawCacheStats::default(),
+            };
+        };
+        if let Some(cached) = &self.status {
+            if cached.state == state {
+                return FlatHudDrawList {
+                    draw: cached.draw.clone(),
+                    retained_cache: UiDrawCacheStats::cache_hit(),
+                };
+            }
+        }
+
+        let mut draw = GuiDrawList::new();
+        render_flat_hud_status_layer(scale, &mut draw, hud);
+        self.status = Some(CachedFlatHudStatusLayer {
             state,
             draw: draw.clone(),
         });
@@ -1281,11 +1332,14 @@ impl GameUiHost {
     pub fn render_flat_hud_draw_list(&mut self, scale: GuiScale, hud: &FlatHud) -> FlatHudDrawList {
         let retained = self.hud_surface.render_retained_layer(scale, hud);
         let hotbar = self.hud_surface.render_hotbar_layer(scale, hud);
+        let status = self.hud_surface.render_status_layer(scale, hud);
         let mut draw = retained.draw.clone();
         draw.append(&hotbar.draw);
+        draw.append(&status.draw);
         render_flat_hud_transient_layers(scale, &mut draw, hud);
         let mut retained_cache = retained.retained_cache;
         retained_cache.add(hotbar.retained_cache);
+        retained_cache.add(status.retained_cache);
         FlatHudDrawList {
             draw,
             retained_cache,
@@ -2160,6 +2214,66 @@ mod tests {
             }
         );
         assert_ne!(selected_changed.draw, icon_changed.draw);
+    }
+
+    #[test]
+    fn game_ui_host_flat_hud_status_cache_rebuilds_independently() {
+        let scale = GuiScale::from_pixels(960, 540);
+        let mut host = GameUiHost::new_ingame();
+        let mut hud = FlatHud::new(keyboard_mouse_input());
+        hud.hotbar = FlatHotbarOverlay::selected(2);
+        hud.status = crate::StatusOverlay::new("ready", true);
+
+        let first = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            first.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 3,
+                cache_hit_count: 0,
+            }
+        );
+
+        let second = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            second.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 0,
+                cache_hit_count: 3,
+            }
+        );
+        assert_eq!(second.draw, first.draw);
+
+        hud.status = crate::StatusOverlay::new("syncing", true);
+        let message_changed = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            message_changed.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 1,
+                cache_hit_count: 2,
+            }
+        );
+        assert_ne!(message_changed.draw, second.draw);
+
+        hud.status = crate::StatusOverlay::hidden();
+        let hidden = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            hidden.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 0,
+                cache_hit_count: 2,
+            }
+        );
+        assert_ne!(hidden.draw, message_changed.draw);
+
+        hud.status = crate::StatusOverlay::new("syncing", true);
+        let restored = host.render_flat_hud_draw_list(scale, &hud);
+        assert_eq!(
+            restored.retained_cache,
+            UiDrawCacheStats {
+                rebuild_count: 1,
+                cache_hit_count: 2,
+            }
+        );
     }
 
     #[test]
