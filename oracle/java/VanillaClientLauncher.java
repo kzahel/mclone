@@ -1,4 +1,5 @@
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -25,6 +26,9 @@ public final class VanillaClientLauncher {
          }
 
          if (options.launch) {
+            if (options.screenshotPath != null) {
+               VanillaClientScreenshotHarness.start(options.screenshotConfig());
+            }
             net.minecraft.client.main.Main.main(minecraftArgs.toArray(new String[0]));
          }
       } catch (IllegalArgumentException error) {
@@ -83,6 +87,34 @@ public final class VanillaClientLauncher {
             case "--mclone-height":
                options.height = parsePositiveInt(requireValue(args, ++index, argument), "height");
                break;
+            case "--mclone-screenshot":
+               options.screenshotPath = requireValue(args, ++index, argument);
+               options.launch = true;
+               break;
+            case "--mclone-seed":
+               options.seed = parseLong(requireValue(args, ++index, argument), "seed");
+               break;
+            case "--mclone-world-name":
+               options.worldName = requireValue(args, ++index, argument);
+               break;
+            case "--mclone-camera":
+               options.setCamera(requireValue(args, ++index, argument));
+               break;
+            case "--mclone-day-time":
+               options.dayTime = parseLong(requireValue(args, ++index, argument), "day time");
+               break;
+            case "--mclone-settle-frames":
+               options.settleFrames = parsePositiveInt(requireValue(args, ++index, argument), "settle frames");
+               break;
+            case "--mclone-timeout-seconds":
+               options.timeoutSeconds = parsePositiveInt(requireValue(args, ++index, argument), "timeout seconds");
+               break;
+            case "--mclone-show-gui":
+               options.hideGui = false;
+               break;
+            case "--mclone-no-structures":
+               options.generateStructures = false;
+               break;
             case "--mclone-disable-multiplayer":
                options.disableMultiplayer = true;
                break;
@@ -120,6 +152,10 @@ public final class VanillaClientLauncher {
       }
       if (options.versionType == null || options.versionType.isEmpty()) {
          options.versionType = DEFAULT_VERSION_TYPE;
+      }
+
+      if (options.screenshotPath != null && options.screenshotPath.isEmpty()) {
+         throw new IllegalArgumentException("--mclone-screenshot requires a value");
       }
 
       return options;
@@ -178,6 +214,22 @@ public final class VanillaClientLauncher {
          return parsed;
       } catch (NumberFormatException error) {
          throw new IllegalArgumentException(name + " must be an integer");
+      }
+   }
+
+   private static long parseLong(String value, String name) {
+      try {
+         return Long.parseLong(value);
+      } catch (NumberFormatException error) {
+         throw new IllegalArgumentException(name + " must be an integer");
+      }
+   }
+
+   private static double parseDouble(String value, String name) {
+      try {
+         return Double.parseDouble(value);
+      } catch (NumberFormatException error) {
+         throw new IllegalArgumentException(name + " must be numeric");
       }
    }
 
@@ -247,6 +299,15 @@ public final class VanillaClientLauncher {
       System.err.println("  --mclone-access-token <token>");
       System.err.println("  --mclone-width <pixels>");
       System.err.println("  --mclone-height <pixels>");
+      System.err.println("  --mclone-screenshot <png>");
+      System.err.println("  --mclone-seed <seed>");
+      System.err.println("  --mclone-world-name <name>");
+      System.err.println("  --mclone-camera <x,y,z,yaw,pitch>");
+      System.err.println("  --mclone-day-time <ticks>");
+      System.err.println("  --mclone-settle-frames <frames>");
+      System.err.println("  --mclone-timeout-seconds <seconds>");
+      System.err.println("  --mclone-show-gui");
+      System.err.println("  --mclone-no-structures");
       System.err.println("  --mclone-disable-multiplayer");
       System.err.println("  --mclone-disable-chat");
    }
@@ -265,7 +326,51 @@ public final class VanillaClientLauncher {
       String versionType;
       int width = DEFAULT_WIDTH;
       int height = DEFAULT_HEIGHT;
+      String screenshotPath;
+      long seed = 12345L;
+      String worldName = "McloneOracleWorld";
+      double cameraX = 0.0;
+      double cameraY = 96.0;
+      double cameraZ = 0.0;
+      float yaw = 180.0F;
+      float pitch = 20.0F;
+      long dayTime = 6000L;
+      int settleFrames = 80;
+      int timeoutSeconds = 180;
+      boolean generateStructures = true;
+      boolean hideGui = true;
       boolean disableMultiplayer;
       boolean disableChat;
+
+      void setCamera(String value) {
+         String[] parts = value.split(",");
+         if (parts.length != 5) {
+            throw new IllegalArgumentException("camera must use x,y,z,yaw,pitch");
+         }
+         cameraX = parseDouble(parts[0], "camera x");
+         cameraY = parseDouble(parts[1], "camera y");
+         cameraZ = parseDouble(parts[2], "camera z");
+         yaw = (float)parseDouble(parts[3], "camera yaw");
+         pitch = (float)parseDouble(parts[4], "camera pitch");
+      }
+
+      VanillaClientScreenshotHarness.Config screenshotConfig() {
+         VanillaClientScreenshotHarness.Config config = new VanillaClientScreenshotHarness.Config();
+         config.gameDir = Paths.get(gameDir);
+         config.output = Paths.get(screenshotPath);
+         config.worldName = worldName;
+         config.seed = seed;
+         config.cameraX = cameraX;
+         config.cameraY = cameraY;
+         config.cameraZ = cameraZ;
+         config.yaw = yaw;
+         config.pitch = pitch;
+         config.dayTime = dayTime;
+         config.settleFrames = settleFrames;
+         config.timeoutSeconds = timeoutSeconds;
+         config.generateStructures = generateStructures;
+         config.hideGui = hideGui;
+         return config;
+      }
    }
 }

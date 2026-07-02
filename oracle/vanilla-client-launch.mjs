@@ -75,6 +75,15 @@ async function main() {
     accessToken: options.accessToken,
     launch: options.launch,
     printArgs: options.printArgs,
+    screenshot: options.screenshot,
+    seed: options.seed,
+    worldName: options.worldName,
+    camera: options.camera,
+    dayTime: options.dayTime,
+    settleFrames: options.settleFrames,
+    timeoutSeconds: options.timeoutSeconds,
+    showGui: options.showGui,
+    generateStructures: options.generateStructures,
   });
 
   if (options.printCommand) {
@@ -108,6 +117,15 @@ function parseArgs(args) {
     printArgs: false,
     printCommand: false,
     prismDir: DEFAULT_PRISM_DIR,
+    screenshot: null,
+    seed: "12345",
+    worldName: "McloneOracleWorld",
+    camera: "0,96,0,180,20",
+    dayTime: "6000",
+    settleFrames: "80",
+    timeoutSeconds: "180",
+    showGui: false,
+    generateStructures: true,
     username: "McloneOracle",
     uuid: null,
     width: "854",
@@ -127,6 +145,10 @@ function parseArgs(args) {
         options.hydrate = true;
         break;
       case "--launch":
+        options.launch = true;
+        break;
+      case "--screenshot":
+        options.screenshot = requireValue(args, ++index, arg);
         options.launch = true;
         break;
       case "--print-args":
@@ -174,6 +196,30 @@ function parseArgs(args) {
       case "--height":
         options.height = requirePositiveInteger(requireValue(args, ++index, arg), "height");
         break;
+      case "--seed":
+        options.seed = requireInteger(requireValue(args, ++index, arg), "seed");
+        break;
+      case "--world-name":
+        options.worldName = requireValue(args, ++index, arg);
+        break;
+      case "--camera":
+        options.camera = requireCamera(requireValue(args, ++index, arg));
+        break;
+      case "--day-time":
+        options.dayTime = requireInteger(requireValue(args, ++index, arg), "day time");
+        break;
+      case "--settle-frames":
+        options.settleFrames = requirePositiveInteger(requireValue(args, ++index, arg), "settle frames");
+        break;
+      case "--timeout-seconds":
+        options.timeoutSeconds = requirePositiveInteger(requireValue(args, ++index, arg), "timeout seconds");
+        break;
+      case "--show-gui":
+        options.showGui = true;
+        break;
+      case "--no-structures":
+        options.generateStructures = false;
+        break;
       default:
         throw new Error(`unsupported option '${arg}'`);
     }
@@ -208,6 +254,15 @@ options:
   --macos-arm64-lwjgl <vanilla|prism>
                          default: vanilla; prism uses Prism's arm64 LWJGL jars
   --prism-dir <path>     default: ${DEFAULT_PRISM_DIR}
+  --screenshot <png>     create a vanilla singleplayer screenshot and exit
+  --seed <seed>          default: 12345
+  --world-name <name>    default: McloneOracleWorld
+  --camera <pose>        x,y,z,yaw,pitch; default: 0,96,0,180,20
+  --day-time <ticks>     default: 6000
+  --settle-frames <n>    default: 80
+  --timeout-seconds <n>  default: 180
+  --show-gui             leave HUD visible in screenshots
+  --no-structures        disable structure generation
   --username <name>      default: McloneOracle
   --uuid <uuid>          default: offline UUID derived from username
   --access-token <tok>   default: 0
@@ -403,7 +458,29 @@ function nativeClassifier(library) {
   return template.replace("${arch}", minecraftArchBits());
 }
 
-function buildJavaCommand({ classpath, nativesDir, gameDir, assetsDir, assetIndex, width, height, username, uuid, accessToken, launch, printArgs }) {
+function buildJavaCommand({
+  classpath,
+  nativesDir,
+  gameDir,
+  assetsDir,
+  assetIndex,
+  width,
+  height,
+  username,
+  uuid,
+  accessToken,
+  launch,
+  printArgs,
+  screenshot,
+  seed,
+  worldName,
+  camera,
+  dayTime,
+  settleFrames,
+  timeoutSeconds,
+  showGui,
+  generateStructures,
+}) {
   const command = ["java"];
   if (minecraftOsName() === "osx") {
     command.push("-XstartOnFirstThread");
@@ -429,6 +506,21 @@ function buildJavaCommand({ classpath, nativesDir, gameDir, assetsDir, assetInde
   command.push("--mclone-access-token", accessToken);
   command.push("--mclone-width", width);
   command.push("--mclone-height", height);
+  if (screenshot) {
+    command.push("--mclone-screenshot", screenshot);
+    command.push("--mclone-seed", seed);
+    command.push("--mclone-world-name", worldName);
+    command.push("--mclone-camera", camera);
+    command.push("--mclone-day-time", dayTime);
+    command.push("--mclone-settle-frames", settleFrames);
+    command.push("--mclone-timeout-seconds", timeoutSeconds);
+    if (showGui) {
+      command.push("--mclone-show-gui");
+    }
+    if (!generateStructures) {
+      command.push("--mclone-no-structures");
+    }
+  }
   command.push("--mclone-disable-multiplayer");
   command.push("--mclone-disable-chat");
   return command;
@@ -547,6 +639,21 @@ function requireValue(args, index, option) {
 function requirePositiveInteger(value, name) {
   if (!/^[1-9][0-9]*$/.test(value)) {
     throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
+function requireInteger(value, name) {
+  if (!/^-?[0-9]+$/.test(value)) {
+    throw new Error(`${name} must be an integer`);
+  }
+  return value;
+}
+
+function requireCamera(value) {
+  const parts = value.split(",");
+  if (parts.length !== 5 || parts.some((part) => part.trim() === "" || Number.isNaN(Number(part)))) {
+    throw new Error("camera must use numeric x,y,z,yaw,pitch");
   }
   return value;
 }

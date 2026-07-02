@@ -1,6 +1,6 @@
 # Vanilla Client Screenshot Oracle
 
-Status: active; first launch scaffold landed, Apple Silicon LWJGL override added.
+Status: active; first automated screenshot slice landed.
 
 Workstream: oracle/reference only.
 
@@ -14,6 +14,7 @@ Read before implementation:
 
 - `reference/minecraft-1.17.1/src/net/minecraft/client/main/Main.java`: vanilla launch arguments and `GameConfig` construction. `--accessToken` and `--version` are syntactically required; local screenshot work can use a dummy offline token because no online service path is needed.
 - `reference/minecraft-1.17.1/src/net/minecraft/client/Screenshot.java`: vanilla framebuffer readback path through `Screenshot.takeScreenshot(...)` / `Screenshot.grab(...)`.
+- `reference/minecraft-1.17.1/src/net/minecraft/client/Minecraft.java`: `Minecraft.createLevel(...)`, render-loop task submission, integrated-server access, and main render target ownership.
 
 ## Constraints
 
@@ -25,12 +26,13 @@ Read before implementation:
 
 ## First Slice
 
-Landed scaffold:
+Landed:
 
 - `oracle/java/VanillaClientLauncher.java` builds vanilla `Main` arguments from `--mclone-*` harness options, can print the exact argument vector, and can explicitly delegate to `net.minecraft.client.main.Main.main(...)`.
+- `oracle/java/VanillaClientScreenshotHarness.java` hooks the vanilla client after startup, creates a fresh seeded singleplayer world, sets time/weather/camera/HUD state, captures `Screenshot.takeScreenshot(minecraft.getMainRenderTarget())`, writes a PNG, and exits.
 - `oracle/vanilla-client-launch.mjs` builds the host-filtered client classpath from Mojang's `1.17.1.json`, downloads/extracts native classifiers and asset objects on `--hydrate` / `--launch`, and prints or runs the Java command.
 - `oracle/vanilla-client-launch.mjs --macos-arm64-lwjgl prism` replaces only the LWJGL jars/natives with the existing Prism arm64 LWJGL `3.3.1-mmachina.1` cache for Apple Silicon launch compatibility.
-- The default command prints the launch command only. `--launch` is intentionally explicit so validation does not open a window by accident.
+- The default command prints the launch command only. `--launch` is intentionally explicit so validation does not open a window by accident. `--screenshot` implies launch because its purpose is automated capture.
 
 Smoke commands:
 
@@ -40,6 +42,7 @@ node oracle/vanilla-client-launch.mjs --print-args
 node oracle/vanilla-client-launch.mjs --hydrate
 node oracle/vanilla-client-launch.mjs --launch
 node oracle/vanilla-client-launch.mjs --macos-arm64-lwjgl prism --launch
+pnpm --silent oracle:client -- --macos-arm64-lwjgl prism --screenshot /tmp/mclone-vanilla-seed-1124.png --seed 1124 --camera 0,96,0,180,20 --no-build --no-download
 ```
 
 ## Mac Risks
@@ -48,7 +51,7 @@ This Mac is `arm64`, while Minecraft 1.17.1's official macOS LWJGL native classi
 
 ## Next Slices
 
-1. Prove a visible vanilla 1.17.1 client launch from the repo command on this Mac with `--macos-arm64-lwjgl prism`.
-2. Add a harness lifecycle hook that creates/loads a fixed singleplayer world, sets seed/time/weather/options, waits for target chunks, captures `Screenshot.takeScreenshot(minecraft.getMainRenderTarget())`, writes a named PNG under `/tmp`, and exits.
-3. Try a hidden or unfocused GLFW window after visible launch works; keep a tiny visible window as fallback if macOS rejects hidden rendering.
-4. Add camera-position arguments matching native `--view-pose` and a paired native/vanilla comparison script for seed/position probes.
+1. Try a hidden or unfocused GLFW window after visible screenshot capture works; keep a tiny visible window as fallback if macOS rejects hidden rendering.
+2. Add richer camera-position arguments matching native `--view-pose`, including optional FOV/render-distance controls if visual diffs need tighter framing.
+3. Add a paired native/vanilla comparison script for seed/position probes that saves both PNGs under `/tmp` and records the command metadata.
+4. Add vanilla screenshot fixtures only after the capture path is deterministic enough to avoid committing brittle pixels.
