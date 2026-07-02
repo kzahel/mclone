@@ -7,7 +7,7 @@ use crate::block::{
 use crate::placement::HeightmapType;
 use mclone_core::{
     BlockStateId, CHUNK_WIDTH, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus, SECTION_HEIGHT,
-    chunk_block_index,
+    chunk_block_index, validate_chunk_biomes,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -245,6 +245,7 @@ pub struct GeneratedChunk {
     pub min_y: i32,
     pub height: i32,
     blocks: Vec<RawBlockId>,
+    biomes: Vec<i32>,
     block_ticks: Vec<ScheduledTick>,
     liquid_ticks: Vec<ScheduledTick>,
 }
@@ -279,13 +280,37 @@ impl GeneratedChunk {
         block_ticks: Vec<ScheduledTick>,
         liquid_ticks: Vec<ScheduledTick>,
     ) -> Self {
+        Self::from_raw_parts_with_ticks_and_biomes(
+            chunk_x,
+            chunk_z,
+            min_y,
+            height,
+            blocks,
+            Vec::new(),
+            block_ticks,
+            liquid_ticks,
+        )
+    }
+
+    pub fn from_raw_parts_with_ticks_and_biomes(
+        chunk_x: i32,
+        chunk_z: i32,
+        min_y: i32,
+        height: i32,
+        blocks: Vec<RawBlockId>,
+        biomes: Vec<i32>,
+        block_ticks: Vec<ScheduledTick>,
+        liquid_ticks: Vec<ScheduledTick>,
+    ) -> Self {
         validate_generated_chunk_shape(height, blocks.len());
+        validate_chunk_biomes(height, &biomes);
         Self {
             chunk_x,
             chunk_z,
             min_y,
             height,
             blocks,
+            biomes,
             block_ticks,
             liquid_ticks,
         }
@@ -303,8 +328,28 @@ impl GeneratedChunk {
         )
     }
 
+    pub fn from_mutable_buffer_with_biomes(
+        buffer: MutableChunkBlockBuffer,
+        biomes: Vec<i32>,
+    ) -> Self {
+        Self::from_raw_parts_with_ticks_and_biomes(
+            buffer.chunk_x,
+            buffer.chunk_z,
+            buffer.min_y,
+            buffer.height,
+            buffer.blocks,
+            biomes,
+            buffer.block_ticks,
+            buffer.liquid_ticks,
+        )
+    }
+
     pub fn blocks(&self) -> &[RawBlockId] {
         &self.blocks
+    }
+
+    pub fn biomes(&self) -> &[i32] {
+        &self.biomes
     }
 
     pub fn block_ticks(&self) -> &[ScheduledTick] {
@@ -352,6 +397,7 @@ impl GeneratedChunk {
             self.height,
             &block_state_ids,
         )
+        .with_biomes(self.biomes.clone())
     }
 
     fn assert_local_position(&self, local_x: i32, local_y: i32, local_z: i32) {

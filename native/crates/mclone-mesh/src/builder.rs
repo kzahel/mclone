@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use mclone_assets::ModelFaceDirection;
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_WIDTH, PackedLightSection,
+    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_WIDTH, DEFAULT_BIOME_ID, PackedLightSection,
     SECTION_HEIGHT as RENDER_SECTION_HEIGHT, block_to_chunk_coord, block_to_section_coord,
     chunk_block_index, chunk_min_block_coord, local_block_coord,
 };
@@ -16,8 +16,8 @@ use crate::ambient_occlusion::{
     calculate_ambient_occlusion_face, calculate_ambient_occlusion_shape,
 };
 use crate::catalog::{
-    TexturedBlockFace, TexturedFluidKind, TexturedFluidModel, TexturedMeshCatalog,
-    TexturedMeshError, TexturedTerrainRenderLayer,
+    TexturedBlockFace, TexturedBlockTint, TexturedFluidKind, TexturedFluidModel,
+    TexturedMeshCatalog, TexturedMeshError, TexturedTerrainRenderLayer,
 };
 use crate::data::{
     ChunkVertex, RenderSectionKey, TexturedChunkVertex, TexturedRenderSectionBuildReport,
@@ -87,6 +87,7 @@ pub struct TexturedChunkMeshInput<'a> {
     pub min_y: i32,
     pub height: i32,
     pub blocks: &'a [BlockStateId],
+    pub biomes: &'a [i32],
     pub light_sections: &'a [PackedLightSection],
 }
 
@@ -114,8 +115,14 @@ impl<'a> TexturedChunkMeshInput<'a> {
             min_y,
             height,
             blocks,
+            biomes: &[],
             light_sections: &[],
         }
+    }
+
+    pub fn with_biomes(mut self, biomes: &'a [i32]) -> Self {
+        self.biomes = biomes;
+        self
     }
 
     pub fn with_light_sections(mut self, light_sections: &'a [PackedLightSection]) -> Self {
@@ -142,6 +149,24 @@ impl<'a> TexturedChunkMeshInput<'a> {
             y,
             local_z,
         )
+    }
+
+    fn biome_id_at_or_default(&self, local_x: i32, world_y: i32, local_z: i32) -> i32 {
+        if self.biomes.is_empty() {
+            return DEFAULT_BIOME_ID;
+        }
+        let quart_height = self.height / 4;
+        let expected_len = (quart_height * 4 * 4) as usize;
+        if quart_height <= 0 || self.biomes.len() != expected_len {
+            return DEFAULT_BIOME_ID;
+        }
+
+        let local_quart_x = local_x.div_euclid(4).clamp(0, 3);
+        let local_quart_z = local_z.div_euclid(4).clamp(0, 3);
+        let local_quart_y =
+            (world_y.div_euclid(4) - self.min_y.div_euclid(4)).clamp(0, quart_height - 1);
+        let index = ((local_quart_y << 4) | (local_quart_z << 2) | local_quart_x) as usize;
+        self.biomes.get(index).copied().unwrap_or(DEFAULT_BIOME_ID)
     }
 }
 
@@ -348,6 +373,7 @@ fn add_textured_chunk_range_to_mesh(
                 let world_x = world_origin_x + local_x;
                 let world_y = input.min_y + local_y;
                 let world_z = world_origin_z + local_z;
+                let biome_id = input.biome_id_at_or_default(local_x, world_y, local_z);
 
                 if let Some(fluid) = block_model.fluid {
                     add_textured_liquid_block_to_mesh(
@@ -358,6 +384,7 @@ fn add_textured_chunk_range_to_mesh(
                         world_y,
                         world_z,
                         fluid,
+                        biome_id,
                     );
                     continue;
                 }
@@ -402,7 +429,7 @@ fn add_textured_chunk_range_to_mesh(
                     match block_model.render_layer {
                         TexturedTerrainRenderLayer::Solid => {
                             add_textured_face(
-                                mesh, world_x, world_y, world_z, face, corners, lighting,
+                                mesh, world_x, world_y, world_z, biome_id, face, corners, lighting,
                             );
                         }
                         TexturedTerrainRenderLayer::Cutout => {
@@ -411,6 +438,7 @@ fn add_textured_chunk_range_to_mesh(
                                 world_x,
                                 world_y,
                                 world_z,
+                                biome_id,
                                 face,
                                 corners,
                                 lighting,
@@ -422,6 +450,7 @@ fn add_textured_chunk_range_to_mesh(
                                 world_x,
                                 world_y,
                                 world_z,
+                                biome_id,
                                 face,
                                 corners,
                                 lighting,
@@ -580,6 +609,7 @@ fn add_textured_face(
     world_x: i32,
     world_y: i32,
     world_z: i32,
+    biome_id: i32,
     face: &TexturedBlockFace,
     corners: [[f32; 3]; 4],
     lighting: AmbientOcclusionFace,
@@ -595,7 +625,13 @@ fn add_textured_face(
                 world_z as f32 + corner[2],
             ],
             uv: uvs[index],
-            color: textured_face_color(face, lighting.brightness[index]),
+            color: textured_face_color(
+                face,
+                biome_id,
+                world_x,
+                world_z,
+                lighting.brightness[index],
+            ),
             packed_light: lighting.lightmap[index],
         });
     }
@@ -620,6 +656,7 @@ fn add_textured_liquid_block_to_mesh(
     world_y: i32,
     world_z: i32,
     fluid: TexturedFluidModel,
+    biome_id: i32,
 ) {
     let mut h00 = fluid_height_at(area, catalog, world_x, world_y, world_z, fluid.kind);
     let mut h01 = fluid_height_at(area, catalog, world_x, world_y, world_z + 1, fluid.kind);
@@ -715,7 +752,7 @@ fn add_textured_liquid_block_to_mesh(
             fluid.still.map(16.0, 16.0),
             fluid.still.map(16.0, 0.0),
         ];
-        let top_color = liquid_color(fluid.kind, 1.0);
+        let top_color = liquid_color(fluid.kind, biome_id, 1.0);
         let top_light = liquid_packed_light(area, world_x, world_y, world_z);
         add_textured_liquid_quad(
             mesh,
@@ -760,7 +797,7 @@ fn add_textured_liquid_block_to_mesh(
                 fluid.still.map(16.0, 0.0),
                 fluid.still.map(16.0, 16.0),
             ],
-            liquid_color(fluid.kind, 0.5),
+            liquid_color(fluid.kind, biome_id, 0.5),
             liquid_packed_light(area, world_x, world_y - 1, world_z),
         );
     }
@@ -784,7 +821,7 @@ fn add_textured_liquid_block_to_mesh(
                 fluid.flow.map(0.0, 8.0),
                 fluid.flow.map(0.0, liquid_side_v(h00)),
             ],
-            liquid_color(fluid.kind, 0.72),
+            liquid_color(fluid.kind, biome_id, 0.72),
             side_light,
         );
     }
@@ -806,7 +843,7 @@ fn add_textured_liquid_block_to_mesh(
                 fluid.flow.map(8.0, 8.0),
                 fluid.flow.map(8.0, liquid_side_v(h11)),
             ],
-            liquid_color(fluid.kind, 0.78),
+            liquid_color(fluid.kind, biome_id, 0.78),
             side_light,
         );
     }
@@ -828,7 +865,7 @@ fn add_textured_liquid_block_to_mesh(
                 fluid.flow.map(0.0, 8.0),
                 fluid.flow.map(0.0, liquid_side_v(h01)),
             ],
-            liquid_color(fluid.kind, 0.86),
+            liquid_color(fluid.kind, biome_id, 0.86),
             side_light,
         );
     }
@@ -850,7 +887,7 @@ fn add_textured_liquid_block_to_mesh(
                 fluid.flow.map(0.0, 8.0),
                 fluid.flow.map(0.0, liquid_side_v(h10)),
             ],
-            liquid_color(fluid.kind, 0.86),
+            liquid_color(fluid.kind, biome_id, 0.86),
             side_light,
         );
     }
@@ -1077,14 +1114,9 @@ fn liquid_side_v(height: f32) -> f32 {
     (1.0 - height.clamp(0.0, 1.0)) * 8.0
 }
 
-fn liquid_color(kind: TexturedFluidKind, shade: f32) -> [f32; 4] {
+fn liquid_color(kind: TexturedFluidKind, biome_id: i32, shade: f32) -> [f32; 4] {
     let color = match kind {
-        TexturedFluidKind::Water => [
-            0x3f as f32 / 255.0,
-            0x76 as f32 / 255.0,
-            0xe4 as f32 / 255.0,
-            0.72,
-        ],
+        TexturedFluidKind::Water => rgb8_alpha(biome_visual(biome_id).water_color, 0.72),
         TexturedFluidKind::Lava => [1.0, 1.0, 1.0, 1.0],
     };
     [
@@ -1175,8 +1207,14 @@ fn textured_face_uvs(face: &TexturedBlockFace) -> [[f32; 2]; 4] {
     })
 }
 
-fn textured_face_color(face: &TexturedBlockFace, brightness: f32) -> [f32; 4] {
-    let tint = block_tint(face.tintindex);
+fn textured_face_color(
+    face: &TexturedBlockFace,
+    biome_id: i32,
+    world_x: i32,
+    world_z: i32,
+    brightness: f32,
+) -> [f32; 4] {
+    let tint = block_tint(face.tint, biome_id, world_x, world_z);
     [
         tint[0] * brightness,
         tint[1] * brightness,
@@ -1185,12 +1223,145 @@ fn textured_face_color(face: &TexturedBlockFace, brightness: f32) -> [f32; 4] {
     ]
 }
 
-fn block_tint(tintindex: i32) -> [f32; 3] {
-    if tintindex >= 0 {
-        [0.46, 0.70, 0.27]
-    } else {
-        [1.0, 1.0, 1.0]
+fn block_tint(tint: TexturedBlockTint, biome_id: i32, world_x: i32, world_z: i32) -> [f32; 3] {
+    let visual = biome_visual(biome_id);
+    match tint {
+        TexturedBlockTint::None => [1.0, 1.0, 1.0],
+        TexturedBlockTint::Grass => rgb8(grass_color(visual, world_x, world_z)),
+        TexturedBlockTint::Foliage => rgb8(visual.foliage_color),
+        TexturedBlockTint::BirchFoliage => rgb8(0x80_a7_55),
+        TexturedBlockTint::EvergreenFoliage => rgb8(0x61_99_61),
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BiomeVisual {
+    grass_color: u32,
+    foliage_color: u32,
+    water_color: u32,
+    grass_modifier: GrassColorModifier,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GrassColorModifier {
+    None,
+    DarkForest,
+    Swamp,
+}
+
+fn biome_visual(biome_id: i32) -> BiomeVisual {
+    let plains = BiomeVisual {
+        grass_color: 0x91_bd_59,
+        foliage_color: 0x77_ab_2f,
+        water_color: 0x3f_76_e4,
+        grass_modifier: GrassColorModifier::None,
+    };
+    match biome_id {
+        0 | 24 | 44 | 45 | 46 | 47 | 48 | 49 | 50 => BiomeVisual {
+            grass_color: 0x8e_b9_71,
+            foliage_color: 0x71_a7_4d,
+            ..plains
+        },
+        1 | 7 | 16 | 129 => plains,
+        2 | 17 | 130 => BiomeVisual {
+            grass_color: 0xb5_b7_55,
+            foliage_color: 0xae_b4_55,
+            ..plains
+        },
+        3 | 13 | 20 | 25 | 26 | 34 | 131 | 162 => BiomeVisual {
+            grass_color: 0x8a_b6_89,
+            foliage_color: 0x6f_a0_78,
+            ..plains
+        },
+        4 | 18 | 132 => BiomeVisual {
+            grass_color: 0x79_c0_5a,
+            foliage_color: 0x59_9b_35,
+            ..plains
+        },
+        5 | 19 | 30 | 31 | 32 | 33 | 133 | 158 | 160 | 161 => BiomeVisual {
+            grass_color: 0x86_b7_83,
+            foliage_color: 0x68_9b_68,
+            ..plains
+        },
+        6 | 134 => BiomeVisual {
+            grass_color: 0x6a_70_39,
+            foliage_color: 0x6a_70_39,
+            water_color: 0x61_7b_64,
+            grass_modifier: GrassColorModifier::Swamp,
+        },
+        10 | 11 | 12 | 140 => BiomeVisual {
+            grass_color: 0x80_b4_97,
+            foliage_color: 0x60_93_80,
+            ..plains
+        },
+        14 | 15 => BiomeVisual {
+            grass_color: 0x55_c9_3f,
+            foliage_color: 0x2f_b2_33,
+            ..plains
+        },
+        21 | 22 | 23 | 149 | 151 | 168 | 169 => BiomeVisual {
+            grass_color: 0x59_c9_3c,
+            foliage_color: 0x30_bb_0b,
+            ..plains
+        },
+        27 | 28 | 155 | 156 => BiomeVisual {
+            grass_color: 0x88_bb_67,
+            foliage_color: 0x80_a7_55,
+            ..plains
+        },
+        29 | 157 => BiomeVisual {
+            grass_color: 0x79_c0_5a,
+            foliage_color: 0x59_9b_35,
+            grass_modifier: GrassColorModifier::DarkForest,
+            ..plains
+        },
+        35 | 36 | 163 | 164 => BiomeVisual {
+            grass_color: 0xb5_b7_55,
+            foliage_color: 0xae_b4_55,
+            ..plains
+        },
+        37 | 38 | 39 | 165 | 166 | 167 => BiomeVisual {
+            grass_color: 0x90_81_4d,
+            foliage_color: 0x9e_81_4d,
+            water_color: 0x3f_76_e4,
+            ..plains
+        },
+        _ => plains,
+    }
+}
+
+fn grass_color(visual: BiomeVisual, world_x: i32, world_z: i32) -> u32 {
+    match visual.grass_modifier {
+        GrassColorModifier::None => visual.grass_color,
+        GrassColorModifier::DarkForest => ((visual.grass_color & 0xfe_fe_fe) + 0x28_31_4a) >> 1,
+        GrassColorModifier::Swamp => {
+            if coarse_position_noise(world_x, world_z) < 0 {
+                0x4c_76_3c
+            } else {
+                0x6a_70_39
+            }
+        }
+    }
+}
+
+fn coarse_position_noise(world_x: i32, world_z: i32) -> i32 {
+    let mut value = world_x as i64 * 341_873_128_712 + world_z as i64 * 132_897_987_541;
+    value ^= value >> 13;
+    value = value.wrapping_mul(0x5deece66d);
+    ((value >> 24) & 1) as i32 * 2 - 1
+}
+
+fn rgb8(color: u32) -> [f32; 3] {
+    [
+        ((color >> 16) & 0xff) as f32 / 255.0,
+        ((color >> 8) & 0xff) as f32 / 255.0,
+        (color & 0xff) as f32 / 255.0,
+    ]
+}
+
+fn rgb8_alpha(color: u32, alpha: f32) -> [f32; 4] {
+    let [r, g, b] = rgb8(color);
+    [r, g, b, alpha]
 }
 
 fn shaded_color(block_id: u8, shade: f32) -> [f32; 4] {

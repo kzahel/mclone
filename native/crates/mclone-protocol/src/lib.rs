@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 17;
+pub const PROTOCOL_VERSION: u32 = 18;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
@@ -956,6 +956,10 @@ impl ByteWriter {
         self.write_u64(snapshot.revision.0);
         self.write_i32(snapshot.min_y);
         self.write_i32(snapshot.height);
+        self.write_len("chunk biomes", snapshot.biomes.len())?;
+        for biome in &snapshot.biomes {
+            self.write_i32(*biome);
+        }
         self.write_len("chunk sections", snapshot.sections.len())?;
         for section in &snapshot.sections {
             self.write_section(section)?;
@@ -1352,6 +1356,9 @@ impl<'a> ByteReader<'a> {
         let revision = ChunkRevision(self.read_u64()?);
         let min_y = self.read_i32()?;
         let height = self.read_i32()?;
+        let biomes = (0..self.read_len()?)
+            .map(|_| self.read_i32())
+            .collect::<ProtocolCodecResult<Vec<_>>>()?;
         let sections = (0..self.read_len()?)
             .map(|_| self.read_section())
             .collect::<ProtocolCodecResult<Vec<_>>>()?;
@@ -1366,6 +1373,7 @@ impl<'a> ByteReader<'a> {
             revision,
             min_y,
             height,
+            biomes,
             sections,
             light_correct,
             light_sections,
@@ -1744,6 +1752,7 @@ mod tests {
             16,
             &blocks,
         )
+        .with_biomes(vec![6; mclone_core::expected_chunk_biome_count(16)])
         .with_light_sections(
             false,
             vec![

@@ -31,7 +31,7 @@ const WORLDGEN_RESPONSE_MAGIC: u32 = 0x5747_4A53;
 const WORLDGEN_DELTA_REQUEST_MAGIC: u32 = 0x5747_4A44;
 const LIGHT_REQUEST_MAGIC: u32 = 0x4C54_4A52;
 const LIGHT_RESPONSE_MAGIC: u32 = 0x4C54_4A53;
-const JOB_FRAME_VERSION: u32 = 1;
+const JOB_FRAME_VERSION: u32 = 2;
 
 pub(crate) fn encode_worldgen_request(
     job_id: ChunkJobId,
@@ -446,6 +446,10 @@ impl FrameWriter {
         self.write_i32(chunk.min_y);
         self.write_i32(chunk.height);
         self.write_bytes("generated chunk blocks", chunk.blocks())?;
+        self.write_len("generated chunk biomes", chunk.biomes().len())?;
+        for biome in chunk.biomes() {
+            self.write_i32(*biome);
+        }
         self.write_ticks("generated chunk block ticks", chunk.block_ticks())?;
         self.write_ticks("generated chunk liquid ticks", chunk.liquid_ticks())?;
         Ok(())
@@ -756,14 +760,16 @@ impl<'a> FrameReader<'a> {
         let min_y = self.read_i32()?;
         let height = self.read_i32()?;
         let blocks = self.read_bytes("generated chunk blocks")?;
+        let biomes = self.read_vec("generated chunk biomes", FrameReader::read_i32)?;
         let block_ticks = self.read_ticks("generated chunk block ticks")?;
         let liquid_ticks = self.read_ticks("generated chunk liquid ticks")?;
-        Ok(GeneratedChunk::from_raw_parts_with_ticks(
+        Ok(GeneratedChunk::from_raw_parts_with_ticks_and_biomes(
             chunk_x,
             chunk_z,
             min_y,
             height,
             blocks,
+            biomes,
             block_ticks,
             liquid_ticks,
         ))

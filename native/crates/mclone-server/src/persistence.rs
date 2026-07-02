@@ -22,7 +22,7 @@ use mclone_core::{
 #[cfg(any(test, not(target_arch = "wasm32")))]
 const SNAPSHOT_MAGIC: &[u8; 12] = b"MCLONESNAP\0\0";
 #[cfg(any(test, not(target_arch = "wasm32")))]
-const SNAPSHOT_FORMAT_VERSION: u32 = 2;
+const SNAPSHOT_FORMAT_VERSION: u32 = 3;
 
 pub type ChunkStoreResult<T> = Result<T, ChunkStoreError>;
 
@@ -129,6 +129,10 @@ fn write_snapshot(writer: &mut impl Write, snapshot: &ChunkSnapshot) -> ChunkSto
     write_u64(writer, snapshot.revision.0)?;
     write_i32(writer, snapshot.min_y)?;
     write_i32(writer, snapshot.height)?;
+    write_len(writer, snapshot.biomes.len(), "biome count")?;
+    for biome in &snapshot.biomes {
+        write_i32(writer, *biome)?;
+    }
     write_len(writer, snapshot.sections.len(), "section count")?;
     for section in &snapshot.sections {
         write_section(writer, section)?;
@@ -164,6 +168,16 @@ fn read_snapshot(reader: &mut impl Read) -> ChunkStoreResult<ChunkSnapshot> {
     let revision = ChunkRevision(read_u64(reader)?);
     let min_y = read_i32(reader)?;
     let height = read_i32(reader)?;
+    let biomes = if version >= 3 {
+        let biome_count = read_len(reader)?;
+        let mut biomes = Vec::with_capacity(biome_count);
+        for _ in 0..biome_count {
+            biomes.push(read_i32(reader)?);
+        }
+        biomes
+    } else {
+        Vec::new()
+    };
     let section_count = read_len(reader)?;
     let mut sections = Vec::with_capacity(section_count);
     for _ in 0..section_count {
@@ -187,6 +201,7 @@ fn read_snapshot(reader: &mut impl Read) -> ChunkStoreResult<ChunkSnapshot> {
         revision,
         min_y,
         height,
+        biomes,
         sections,
         light_correct,
         light_sections,

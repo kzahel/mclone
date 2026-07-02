@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::biome::OverworldBiomeSource;
+use crate::biome::{ChunkBiomeContainer, OverworldBiomeSource};
 use crate::carver::{apply_overworld_air_carvers, apply_overworld_liquid_carvers};
 use crate::feature::{
     FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF, FeatureRegion,
@@ -15,8 +15,14 @@ use super::{
 };
 
 pub fn generate_overworld_surface_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
-    let chunk = generate_overworld_surface_buffer(seed, chunk_x, chunk_z);
-    GeneratedChunk::from_mutable_buffer(chunk)
+    let biome_source = OverworldBiomeSource::new(seed, false, false);
+    let chunk = generate_overworld_surface_buffer_with_biome_source(
+        seed,
+        chunk_x,
+        chunk_z,
+        biome_source.clone(),
+    );
+    generated_chunk_with_biomes(chunk, &biome_source)
 }
 
 pub fn generate_overworld_features_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
@@ -239,13 +245,28 @@ fn generate_overworld_features_chunks_from_plan_timed(
                 target.x, target.z
             )
         });
-        generated.insert(target, GeneratedChunk::from_mutable_buffer(chunk));
+        generated.insert(target, generated_chunk_with_biomes(chunk, biome_source));
     }
     timing.target_extract_us = timing_elapsed_us(target_extract_start);
     FeatureBatchChunkResult {
         chunks: generated,
         timing,
     }
+}
+
+fn generated_chunk_with_biomes(
+    chunk: MutableChunkBlockBuffer,
+    biome_source: &OverworldBiomeSource,
+) -> GeneratedChunk {
+    let biomes = ChunkBiomeContainer::new(
+        chunk.min_y,
+        chunk.height,
+        chunk.chunk_x,
+        chunk.chunk_z,
+        &biome_source,
+    )
+    .write_biomes();
+    GeneratedChunk::from_mutable_buffer_with_biomes(chunk, biomes)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -295,19 +316,6 @@ pub(super) fn sorted_chunk_positions_z_major(
     let mut positions = positions.into_iter().collect::<Vec<_>>();
     positions.sort_by_key(|pos| (pos.z, pos.x));
     positions
-}
-
-fn generate_overworld_surface_buffer(
-    seed: i64,
-    chunk_x: i32,
-    chunk_z: i32,
-) -> MutableChunkBlockBuffer {
-    generate_overworld_surface_buffer_with_biome_source(
-        seed,
-        chunk_x,
-        chunk_z,
-        OverworldBiomeSource::new(seed, false, false),
-    )
 }
 
 fn generate_overworld_surface_buffer_with_biome_source(

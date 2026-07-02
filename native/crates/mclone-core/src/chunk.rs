@@ -7,6 +7,7 @@ pub const SECTION_HEIGHT: i32 = 16;
 pub const CHUNK_SECTION_VOLUME: usize = 4096;
 pub const LIGHT_DATA_LAYER_BYTE_COUNT: usize = 2048;
 pub const AIR_BLOCK_STATE_ID: BlockStateId = BlockStateId(0);
+pub const DEFAULT_BIOME_ID: i32 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct BlockStateId(pub u32);
@@ -184,6 +185,7 @@ pub struct ChunkSnapshot {
     pub revision: ChunkRevision,
     pub min_y: i32,
     pub height: i32,
+    pub biomes: Vec<i32>,
     pub sections: Vec<PackedChunkSection>,
     pub light_correct: bool,
     pub light_sections: Vec<PackedLightSection>,
@@ -239,10 +241,17 @@ impl ChunkSnapshot {
             revision,
             min_y,
             height,
+            biomes: Vec::new(),
             sections,
             light_correct: false,
             light_sections: Vec::new(),
         }
+    }
+
+    pub fn with_biomes(mut self, biomes: Vec<i32>) -> Self {
+        validate_chunk_biomes(self.height, &biomes);
+        self.biomes = biomes;
+        self
     }
 
     pub fn with_light_sections(
@@ -316,6 +325,27 @@ impl ChunkSnapshot {
         }
         true
     }
+}
+
+pub fn expected_chunk_biome_count(height: i32) -> usize {
+    assert!(
+        height > 0 && height % SECTION_HEIGHT == 0,
+        "chunk height {height} must be a positive multiple of {SECTION_HEIGHT}"
+    );
+    (height as usize / 4) * 4 * 4
+}
+
+pub fn validate_chunk_biomes(height: i32, biomes: &[i32]) {
+    if biomes.is_empty() {
+        return;
+    }
+    let expected_len = expected_chunk_biome_count(height);
+    assert_eq!(
+        biomes.len(),
+        expected_len,
+        "chunk biome container had {} entries instead of {expected_len}",
+        biomes.len()
+    );
 }
 
 pub fn chunk_section_index(local_x: i32, local_y: i32, local_z: i32) -> usize {

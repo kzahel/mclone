@@ -37,7 +37,18 @@ pub struct TexturedBlockFace {
     pub uv_rotation: i32,
     pub sprite: AtlasSpriteUv,
     pub tintindex: i32,
+    pub tint: TexturedBlockTint,
     pub shade: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TexturedBlockTint {
+    #[default]
+    None,
+    Grass,
+    Foliage,
+    BirchFoliage,
+    EvergreenFoliage,
 }
 
 impl TexturedBlockFace {
@@ -45,6 +56,7 @@ impl TexturedBlockFace {
         face: &BakedBlockModelFace,
         atlas: &TextureAtlasPlan,
         rotation: BlockStateModelRotation,
+        tint: TexturedBlockTint,
     ) -> Result<Self, TexturedMeshError> {
         let sprite = atlas
             .sprite(&face.texture)
@@ -66,6 +78,7 @@ impl TexturedBlockFace {
                 v1: sprite.v1,
             },
             tintindex: face.tintindex,
+            tint,
             shade: face.shade,
         })
     }
@@ -238,7 +251,14 @@ impl TexturedMeshCatalog {
             let faces = baked
                 .faces
                 .iter()
-                .map(|face| TexturedBlockFace::from_baked(face, atlas, rotation))
+                .map(|face| {
+                    TexturedBlockFace::from_baked(
+                        face,
+                        atlas,
+                        rotation,
+                        textured_block_tint(record.block.path(), face.tintindex),
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             let fluid = textured_fluid_model(record, atlas)?;
             let full_cube_occluder = full_cube_occluder(&faces);
@@ -320,6 +340,23 @@ impl TexturedMeshCatalog {
 
     pub(crate) fn fluid(&self, state_id: BlockStateId) -> Option<TexturedFluidModel> {
         self.blocks.get(&state_id).and_then(|model| model.fluid)
+    }
+}
+
+fn textured_block_tint(block_path: &str, tintindex: i32) -> TexturedBlockTint {
+    if tintindex < 0 {
+        return TexturedBlockTint::None;
+    }
+    match block_path {
+        "grass_block" | "grass" | "fern" | "large_fern" | "potted_fern" | "sugar_cane" => {
+            TexturedBlockTint::Grass
+        }
+        "oak_leaves" | "jungle_leaves" | "acacia_leaves" | "dark_oak_leaves" | "vine" => {
+            TexturedBlockTint::Foliage
+        }
+        "birch_leaves" => TexturedBlockTint::BirchFoliage,
+        "spruce_leaves" => TexturedBlockTint::EvergreenFoliage,
+        _ => TexturedBlockTint::None,
     }
 }
 

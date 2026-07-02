@@ -82,6 +82,7 @@ pub fn textured_mesh_inputs(chunks: &[MeshChunkBlocks]) -> Vec<TexturedChunkMesh
                 chunk.height,
                 &chunk.blocks,
             )
+            .with_biomes(&chunk.biomes)
             .with_light_sections(&chunk.light_sections)
         })
         .collect()
@@ -228,6 +229,7 @@ pub struct MeshChunkBlocks {
     pub min_y: i32,
     pub height: i32,
     pub blocks: Vec<mclone_core::BlockStateId>,
+    pub biomes: Vec<i32>,
     pub light_sections: Vec<PackedLightSection>,
 }
 
@@ -276,6 +278,7 @@ pub fn snapshot_mesh_block_state_ids(snapshot: &ChunkSnapshot) -> Result<MeshChu
         min_y: snapshot.min_y,
         height: snapshot.height,
         blocks,
+        biomes: snapshot.biomes.clone(),
         light_sections: snapshot.light_sections.clone(),
     })
 }
@@ -376,6 +379,7 @@ impl RenderSectionCompileRequest {
                 * (std::mem::size_of::<RenderSectionKey>() + std::mem::size_of::<u64>())
             + self.snapshots.capacity() * std::mem::size_of::<ChunkSnapshot>();
         for snapshot in &self.snapshots {
+            estimated_owned_bytes += snapshot.biomes.capacity() * std::mem::size_of::<i32>();
             estimated_owned_bytes +=
                 snapshot.sections.capacity() * std::mem::size_of::<PackedChunkSection>();
             estimated_owned_bytes +=
