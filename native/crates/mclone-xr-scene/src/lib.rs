@@ -751,44 +751,120 @@ struct XrWorldOverlayStats {
     draw_cache: UiDrawCacheStats,
 }
 
-struct XrMenuPanelDraw {
+#[derive(Clone, Debug, PartialEq)]
+struct XrMenuPanelOverlayState {
+    gui_scale: GuiScale,
+    progress: Option<LoadingProgressOverlay>,
+    status: Option<StatusOverlay>,
+}
+
+impl XrMenuPanelOverlayState {
+    fn new(
+        gui_scale: GuiScale,
+        progress: Option<&LoadingProgressOverlay>,
+        status: &StatusOverlay,
+    ) -> Option<Self> {
+        let progress = progress.cloned();
+        let status = (status.visible && !status.message.is_empty()).then(|| status.clone());
+        if progress.is_none() && status.is_none() {
+            return None;
+        }
+        Some(Self {
+            gui_scale,
+            progress,
+            status,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct XrMenuPanelOverlayDraw {
     draw: GuiDrawList,
     cache_revision: Option<UiPanelRevision>,
     draw_cache: UiDrawCacheStats,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+struct XrMenuPanelOverlayCache {
+    state: Option<XrMenuPanelOverlayState>,
+    draw: GuiDrawList,
+    revision_content: u64,
+}
+
+impl XrMenuPanelOverlayCache {
+    fn render(
+        &mut self,
+        gui_scale: GuiScale,
+        progress: Option<&LoadingProgressOverlay>,
+        status: &StatusOverlay,
+    ) -> XrMenuPanelOverlayDraw {
+        let Some(state) = XrMenuPanelOverlayState::new(gui_scale, progress, status) else {
+            self.state = None;
+            self.draw.clear();
+            return XrMenuPanelOverlayDraw {
+                draw: GuiDrawList::new(),
+                cache_revision: None,
+                draw_cache: UiDrawCacheStats::default(),
+            };
+        };
+
+        if self.state.as_ref() == Some(&state) {
+            return XrMenuPanelOverlayDraw {
+                draw: self.draw.clone(),
+                cache_revision: Some(UiPanelRevision::new(self.revision_content, 0)),
+                draw_cache: UiDrawCacheStats::cache_hit(),
+            };
+        }
+
+        let mut draw = GuiDrawList::new();
+        if let Some(progress) = state.progress.as_ref() {
+            render_loading_progress_overlay(gui_scale, &mut draw, progress);
+        }
+        if let Some(status) = state.status.as_ref() {
+            render_status_overlay(gui_scale, &mut draw, status);
+        }
+        self.revision_content = self.revision_content.wrapping_add(1).max(1);
+        self.state = Some(state);
+        self.draw = draw.clone();
+        XrMenuPanelOverlayDraw {
+            draw,
+            cache_revision: Some(UiPanelRevision::new(self.revision_content, 0)),
+            draw_cache: UiDrawCacheStats::rebuild(),
+        }
+    }
+}
+
+struct XrMenuPanelDraw {
+    panel_draw: GuiDrawList,
+    cache_revision: Option<UiPanelRevision>,
+    overlay_draw: GuiDrawList,
+    overlay_cache_revision: Option<UiPanelRevision>,
+    draw_cache: UiDrawCacheStats,
+}
+
 fn prepare_xr_menu_panel_draw(
     ui: &mut GameUiHost,
+    overlay_cache: &mut XrMenuPanelOverlayCache,
     gui_scale: GuiScale,
     ui_state: GameUiRenderState,
     progress: Option<&LoadingProgressOverlay>,
     status: &StatusOverlay,
 ) -> XrMenuPanelDraw {
     ui.set_scale(gui_scale);
-    if progress.is_none() && !status.visible {
-        if let Some(panel_draw) = ui.render_v2_panel_draw_list(ui_state) {
-            return XrMenuPanelDraw {
-                draw: panel_draw.draw,
-                cache_revision: Some(panel_draw.revision),
-                draw_cache: panel_draw.cache,
-            };
-        }
-    }
-
-    let ui_active = ui.is_active();
-    let mut draw = ui.render_draw_list(ui_state);
-    if let Some(progress) = progress {
-        render_loading_progress_overlay(gui_scale, &mut draw, progress);
-    }
-    render_status_overlay(gui_scale, &mut draw, status);
+    let panel_draw = ui.render_v2_panel_draw_list(ui_state);
+    let overlay_draw = overlay_cache.render(gui_scale, progress, status);
+    let mut draw_cache = panel_draw
+        .as_ref()
+        .map_or_else(UiDrawCacheStats::default, |panel_draw| panel_draw.cache);
+    draw_cache.add(overlay_draw.draw_cache);
     XrMenuPanelDraw {
-        draw,
-        cache_revision: None,
-        draw_cache: if ui_active {
-            UiDrawCacheStats::rebuild()
-        } else {
-            UiDrawCacheStats::default()
-        },
+        panel_draw: panel_draw
+            .as_ref()
+            .map_or_else(GuiDrawList::new, |panel_draw| panel_draw.draw.clone()),
+        cache_revision: panel_draw.map(|panel_draw| panel_draw.revision),
+        overlay_draw: overlay_draw.draw,
+        overlay_cache_revision: overlay_draw.cache_revision,
+        draw_cache,
     }
 }
 
@@ -855,7 +931,9 @@ where
     far_lod: FarTerrainLodRenderer,
     selection_outline: SelectionOutlineRenderer,
     world_gui_renderer: WorldGuiRenderer,
+    world_gui_overlay_renderer: WorldGuiRenderer,
     ui: GameUiHost,
+    menu_overlay_cache: XrMenuPanelOverlayCache,
     session_status: StatusOverlay,
     sky: SkyRenderer,
     screen_effects: ScreenEffectsRenderer,
@@ -1012,7 +1090,9 @@ where
             far_lod: FarTerrainLodRenderer::new(device, color_format),
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
+            world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
             ui,
+            menu_overlay_cache: XrMenuPanelOverlayCache::default(),
             session_status: StatusOverlay::new(request.starting_message(), true),
             sky: SkyRenderer::new_with_color_profile(
                 device,
@@ -1115,7 +1195,9 @@ where
             far_lod: FarTerrainLodRenderer::new(device, color_format),
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
+            world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
             ui,
+            menu_overlay_cache: XrMenuPanelOverlayCache::default(),
             session_status: StatusOverlay::hidden(),
             sky: SkyRenderer::new_with_color_profile(
                 device,
@@ -2370,6 +2452,7 @@ where
             .and_then(|startup| startup.pump.progress_overlay());
         let panel_draw = prepare_xr_menu_panel_draw(
             &mut self.ui,
+            &mut self.menu_overlay_cache,
             gui_scale,
             ui_state,
             progress.as_ref(),
@@ -2378,7 +2461,7 @@ where
         let controller_ray_lines = self
             .xr_menu_controller_ray_lines(panel)
             .context("build XR menu controller ray visuals")?;
-        let panel_stats = if let Some(cache_revision) = panel_draw.cache_revision {
+        let mut panel_stats = if let Some(cache_revision) = panel_draw.cache_revision {
             self.world_gui_renderer.render_panel_cached_multiview(
                 device,
                 queue,
@@ -2387,9 +2470,13 @@ where
                 render_views,
                 XR_MENU_PANEL_PIXELS,
                 [gui_scale.width, gui_scale.height],
-                &panel_draw.draw,
+                &panel_draw.panel_draw,
                 panel,
-                &controller_ray_lines,
+                if panel_draw.overlay_draw.commands().is_empty() {
+                    &controller_ray_lines
+                } else {
+                    &[]
+                },
                 cache_revision,
             )
         } else {
@@ -2401,12 +2488,50 @@ where
                 render_views,
                 XR_MENU_PANEL_PIXELS,
                 [gui_scale.width, gui_scale.height],
-                &panel_draw.draw,
+                &panel_draw.panel_draw,
                 panel,
-                &controller_ray_lines,
+                if panel_draw.overlay_draw.commands().is_empty() {
+                    &controller_ray_lines
+                } else {
+                    &[]
+                },
             )
         }
         .context("render XR menu panel multiview")?;
+        if !panel_draw.overlay_draw.commands().is_empty() {
+            let overlay_stats = if let Some(cache_revision) = panel_draw.overlay_cache_revision {
+                self.world_gui_overlay_renderer
+                    .render_panel_cached_multiview(
+                        device,
+                        queue,
+                        encoder,
+                        overlay_target,
+                        render_views,
+                        XR_MENU_PANEL_PIXELS,
+                        [gui_scale.width, gui_scale.height],
+                        &panel_draw.overlay_draw,
+                        panel,
+                        &controller_ray_lines,
+                        cache_revision,
+                    )
+            } else {
+                self.world_gui_overlay_renderer
+                    .render_panel_multiview_report(
+                        device,
+                        queue,
+                        encoder,
+                        overlay_target,
+                        render_views,
+                        XR_MENU_PANEL_PIXELS,
+                        [gui_scale.width, gui_scale.height],
+                        &panel_draw.overlay_draw,
+                        panel,
+                        &controller_ray_lines,
+                    )
+            }
+            .context("render XR menu panel overlay multiview")?;
+            panel_stats.add(overlay_stats);
+        }
         Ok(XrWorldOverlayStats {
             panel: panel_stats,
             draw_cache: panel_draw.draw_cache,
@@ -3499,13 +3624,15 @@ where
             .and_then(|startup| startup.pump.progress_overlay());
         let panel_draw = prepare_xr_menu_panel_draw(
             &mut self.ui,
+            &mut self.menu_overlay_cache,
             gui_scale,
             ui_state,
             progress.as_ref(),
             &self.session_status,
         );
         let ui_active = self.ui.is_active();
-        let summary_ui_draw = panel_draw.draw.clone();
+        let mut summary_ui_draw = panel_draw.panel_draw.clone();
+        summary_ui_draw.append(&panel_draw.overlay_draw);
         let selection_outline = self.current_xr_selection_outline();
         let mut render_stats = self.render_stats;
         let far_lod_config = self.scene.far_lod;
@@ -3642,9 +3769,13 @@ where
                         render_view,
                         XR_MENU_PANEL_PIXELS,
                         [gui_scale.width, gui_scale.height],
-                        &panel_draw.draw,
+                        &panel_draw.panel_draw,
                         panel,
-                        &controller_ray_lines,
+                        if panel_draw.overlay_draw.commands().is_empty() {
+                            &controller_ray_lines
+                        } else {
+                            &[]
+                        },
                         view_slot,
                         cache_revision,
                     )
@@ -3657,13 +3788,52 @@ where
                         render_view,
                         XR_MENU_PANEL_PIXELS,
                         [gui_scale.width, gui_scale.height],
-                        &panel_draw.draw,
+                        &panel_draw.panel_draw,
                         panel,
-                        &controller_ray_lines,
+                        if panel_draw.overlay_draw.commands().is_empty() {
+                            &controller_ray_lines
+                        } else {
+                            &[]
+                        },
                         view_slot,
                     )
                 }
                 .with_context(|| format!("render XR menu panel for {label} eye"))?;
+                if !panel_draw.overlay_draw.commands().is_empty() {
+                    let overlay_stats =
+                        if let Some(cache_revision) = panel_draw.overlay_cache_revision {
+                            self.world_gui_overlay_renderer.render_panel_cached_in_slot(
+                                device,
+                                queue,
+                                &mut encoder,
+                                RenderFrameTarget::color(target.color_view, target.size),
+                                render_view,
+                                XR_MENU_PANEL_PIXELS,
+                                [gui_scale.width, gui_scale.height],
+                                &panel_draw.overlay_draw,
+                                panel,
+                                &controller_ray_lines,
+                                view_slot,
+                                cache_revision,
+                            )
+                        } else {
+                            self.world_gui_overlay_renderer.render_panel_in_slot_report(
+                                device,
+                                queue,
+                                &mut encoder,
+                                RenderFrameTarget::color(target.color_view, target.size),
+                                render_view,
+                                XR_MENU_PANEL_PIXELS,
+                                [gui_scale.width, gui_scale.height],
+                                &panel_draw.overlay_draw,
+                                panel,
+                                &controller_ray_lines,
+                                view_slot,
+                            )
+                        }
+                        .with_context(|| format!("render XR menu panel overlay for {label} eye"))?;
+                    ui_panel_stats.add(overlay_stats);
+                }
                 xr_world_panel_ms =
                     world_panel_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
             }
@@ -6067,6 +6237,31 @@ mod tests {
         }
     }
 
+    fn test_loading_progress_overlay(
+        ready_chunks: usize,
+        center_status: mclone_ui::LoadingProgressCellStatus,
+    ) -> LoadingProgressOverlay {
+        LoadingProgressOverlay::new(
+            1,
+            ready_chunks,
+            9,
+            ready_chunks > 0,
+            [
+                mclone_ui::LoadingProgressCell::new(
+                    -1,
+                    -1,
+                    mclone_ui::LoadingProgressCellStatus::Terrain,
+                ),
+                mclone_ui::LoadingProgressCell::new(0, 0, center_status).playable(true),
+                mclone_ui::LoadingProgressCell::new(
+                    1,
+                    1,
+                    mclone_ui::LoadingProgressCellStatus::TargetReady,
+                ),
+            ],
+        )
+    }
+
     #[test]
     fn default_scene_options_match_desktop_xr_smoke_defaults() {
         let options = XrSceneOptions::default();
@@ -6248,16 +6443,34 @@ mod tests {
         let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
         let state = GameUiRenderState::default();
         let status = StatusOverlay::hidden();
+        let mut overlay_cache = XrMenuPanelOverlayCache::default();
 
-        let first = prepare_xr_menu_panel_draw(&mut ui, gui_scale, state, None, &status);
+        let first = prepare_xr_menu_panel_draw(
+            &mut ui,
+            &mut overlay_cache,
+            gui_scale,
+            state,
+            None,
+            &status,
+        );
         assert_eq!(first.draw_cache, UiDrawCacheStats::rebuild());
         assert!(first.cache_revision.is_some());
-        assert!(!first.draw.commands().is_empty());
+        assert!(first.overlay_cache_revision.is_none());
+        assert!(!first.panel_draw.commands().is_empty());
+        assert!(first.overlay_draw.commands().is_empty());
 
-        let second = prepare_xr_menu_panel_draw(&mut ui, gui_scale, state, None, &status);
+        let second = prepare_xr_menu_panel_draw(
+            &mut ui,
+            &mut overlay_cache,
+            gui_scale,
+            state,
+            None,
+            &status,
+        );
         assert_eq!(second.draw_cache, UiDrawCacheStats::cache_hit());
         assert_eq!(second.cache_revision, first.cache_revision);
-        assert_eq!(second.draw, first.draw);
+        assert_eq!(second.panel_draw, first.panel_draw);
+        assert!(second.overlay_draw.commands().is_empty());
 
         let snapshot = ui.v2_debug_snapshot().expect("Controls has debug data");
         let back = snapshot
@@ -6268,7 +6481,14 @@ mod tests {
             .rect;
         ui.pointer_move(point_in(back));
 
-        let hovered = prepare_xr_menu_panel_draw(&mut ui, gui_scale, state, None, &status);
+        let hovered = prepare_xr_menu_panel_draw(
+            &mut ui,
+            &mut overlay_cache,
+            gui_scale,
+            state,
+            None,
+            &status,
+        );
         assert_eq!(hovered.draw_cache, UiDrawCacheStats::rebuild());
         assert_ne!(hovered.cache_revision, first.cache_revision);
 
@@ -6276,29 +6496,143 @@ mod tests {
             x: back.x + 2.0,
             y: back.y + 2.0,
         });
-        let jitter = prepare_xr_menu_panel_draw(&mut ui, gui_scale, state, None, &status);
+        let jitter = prepare_xr_menu_panel_draw(
+            &mut ui,
+            &mut overlay_cache,
+            gui_scale,
+            state,
+            None,
+            &status,
+        );
         assert_eq!(jitter.draw_cache, UiDrawCacheStats::cache_hit());
         assert_eq!(jitter.cache_revision, hovered.cache_revision);
-        assert_eq!(jitter.draw, hovered.draw);
+        assert_eq!(jitter.panel_draw, hovered.panel_draw);
+        assert!(jitter.overlay_draw.commands().is_empty());
     }
 
     #[test]
-    fn xr_menu_panel_draw_bypasses_revision_cache_for_transient_overlays() {
+    fn xr_menu_panel_draw_composes_transient_overlays_over_cached_panel() {
         let mut ui = GameUiHost::new_ingame();
         ui.set_screen(Some(GameScreen::Pause));
         let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
         let state = GameUiRenderState::default();
         let visible_status = StatusOverlay::new("starting", true);
+        let mut overlay_cache = XrMenuPanelOverlayCache::default();
 
-        let first = prepare_xr_menu_panel_draw(&mut ui, gui_scale, state, None, &visible_status);
-        let second = prepare_xr_menu_panel_draw(&mut ui, gui_scale, state, None, &visible_status);
+        let first = prepare_xr_menu_panel_draw(
+            &mut ui,
+            &mut overlay_cache,
+            gui_scale,
+            state,
+            None,
+            &visible_status,
+        );
+        let second = prepare_xr_menu_panel_draw(
+            &mut ui,
+            &mut overlay_cache,
+            gui_scale,
+            state,
+            None,
+            &visible_status,
+        );
 
-        assert_eq!(first.draw_cache, UiDrawCacheStats::rebuild());
-        assert_eq!(second.draw_cache, UiDrawCacheStats::rebuild());
-        assert_eq!(first.cache_revision, None);
-        assert_eq!(second.cache_revision, None);
-        assert!(!first.draw.commands().is_empty());
-        assert!(!second.draw.commands().is_empty());
+        assert_eq!(
+            first.draw_cache,
+            UiDrawCacheStats {
+                rebuild_count: 2,
+                cache_hit_count: 0,
+            }
+        );
+        assert_eq!(
+            second.draw_cache,
+            UiDrawCacheStats {
+                rebuild_count: 0,
+                cache_hit_count: 2,
+            }
+        );
+        assert!(first.cache_revision.is_some());
+        assert_eq!(second.cache_revision, first.cache_revision);
+        assert!(first.overlay_cache_revision.is_some());
+        assert_eq!(second.overlay_cache_revision, first.overlay_cache_revision);
+        assert!(!first.panel_draw.commands().is_empty());
+        assert_eq!(second.panel_draw, first.panel_draw);
+        assert!(!first.overlay_draw.commands().is_empty());
+        assert_eq!(second.overlay_draw, first.overlay_draw);
+
+        let changed_status = StatusOverlay::new("loading", true);
+        let changed = prepare_xr_menu_panel_draw(
+            &mut ui,
+            &mut overlay_cache,
+            gui_scale,
+            state,
+            None,
+            &changed_status,
+        );
+        assert_eq!(
+            changed.draw_cache,
+            UiDrawCacheStats {
+                rebuild_count: 1,
+                cache_hit_count: 1,
+            }
+        );
+        assert_eq!(changed.cache_revision, first.cache_revision);
+        assert_ne!(changed.overlay_cache_revision, first.overlay_cache_revision);
+        assert_eq!(changed.panel_draw, first.panel_draw);
+        assert_ne!(changed.overlay_draw, first.overlay_draw);
+    }
+
+    #[test]
+    fn xr_menu_panel_draw_keeps_panel_cache_when_progress_changes() {
+        let mut ui = GameUiHost::new_ingame();
+        ui.set_screen(Some(GameScreen::Pause));
+        let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
+        let state = GameUiRenderState::default();
+        let status = StatusOverlay::hidden();
+        let mut overlay_cache = XrMenuPanelOverlayCache::default();
+        let progress =
+            test_loading_progress_overlay(3, mclone_ui::LoadingProgressCellStatus::Features);
+
+        let first = prepare_xr_menu_panel_draw(
+            &mut ui,
+            &mut overlay_cache,
+            gui_scale,
+            state,
+            Some(&progress),
+            &status,
+        );
+        assert_eq!(
+            first.draw_cache,
+            UiDrawCacheStats {
+                rebuild_count: 2,
+                cache_hit_count: 0,
+            }
+        );
+        assert!(first.cache_revision.is_some());
+        assert!(first.overlay_cache_revision.is_some());
+        assert!(!first.panel_draw.commands().is_empty());
+        assert!(!first.overlay_draw.commands().is_empty());
+
+        let changed_progress =
+            test_loading_progress_overlay(4, mclone_ui::LoadingProgressCellStatus::Light);
+        let changed = prepare_xr_menu_panel_draw(
+            &mut ui,
+            &mut overlay_cache,
+            gui_scale,
+            state,
+            Some(&changed_progress),
+            &status,
+        );
+        assert_eq!(
+            changed.draw_cache,
+            UiDrawCacheStats {
+                rebuild_count: 1,
+                cache_hit_count: 1,
+            }
+        );
+        assert_eq!(changed.cache_revision, first.cache_revision);
+        assert_ne!(changed.overlay_cache_revision, first.overlay_cache_revision);
+        assert_eq!(changed.panel_draw, first.panel_draw);
+        assert_ne!(changed.overlay_draw, first.overlay_draw);
     }
 
     #[test]

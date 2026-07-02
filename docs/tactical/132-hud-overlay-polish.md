@@ -1,6 +1,6 @@
 # 132: HUD Overlay Polish
 
-Status: active; Slices A-B landed.
+Status: active; Slices A-C landed.
 
 Workstream: native Rust, shared `mclone-ui` overlay behavior with desktop
 validation first; web/WASM, flat Android, and XR must keep compatible paths.
@@ -150,6 +150,23 @@ Validation:
 - `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`
 - `cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr`
 - desktop XR debug UI smoke with startup/status panel visible
+
+Implementation note, 2026-07-02:
+
+- XR menu panel rendering now always prepares the cached v2 menu panel draw
+  first, keyed by its normal `UiPanelRevision`.
+- Startup progress and status overlays are prepared as a separate retained draw
+  layer with its own progress/status cache key and independent
+  `UiPanelRevision`.
+- XR scene rendering uses a second `WorldGuiRenderer` for the overlay panel so
+  the transient overlay texture cache does not invalidate the base menu panel
+  texture cache in per-eye or multiview rendering.
+- Controller ray lines are rendered once on the topmost active panel layer, so
+  overlay composition preserves the previous visual ordering.
+- Unit coverage now asserts composition over a cached base panel for both
+  status-message changes and startup-progress changes.
+- Local desktop XR smoke was attempted with `--xr-mclone-smoke --xr-debug-ui
+  pause`, but this machine has no OpenXR loader configured.
 
 ## Slice D: Selected Item Notification Model
 
