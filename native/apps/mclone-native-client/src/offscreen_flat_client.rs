@@ -3,16 +3,21 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
-use mclone_app_runtime::{debug_block_palette_overlay, frame_render::FullFrameRenderSummary};
+use mclone_app_runtime::{
+    debug_block_palette_overlay, debug_hotbar_icons, frame_render::FullFrameRenderSummary,
+};
 use mclone_client::{ActorPresentationId, ClientHost};
 use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId};
-use mclone_input::{FlatInputAction, FlatInputFrame, FlatInputIntent};
+use mclone_input::{
+    FlatInputAction, FlatInputFrame, FlatInputIntent, InputCapabilities, InputCapabilityState,
+    InputPreferences,
+};
 use mclone_protocol::{ClientCommand, MovePlayerCommand};
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
 use mclone_render::target::RenderFrameContext;
 use mclone_server::initial_spawn_center_for_seed;
-use mclone_ui::{GuiScale, Point};
+use mclone_ui::{FlatHotbarOverlay, FlatHud, GameScreen, GuiScale, Point};
 
 use crate::camera::SpectatorCamera;
 use crate::cli::{
@@ -63,6 +68,7 @@ impl Default for OffscreenFlatClientFrameClock {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct OffscreenFlatClientFrameOptions {
     pub(crate) debug_pane: bool,
+    pub(crate) hud: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -276,6 +282,7 @@ impl OffscreenFlatClientHost {
                     .and_then(WindowSceneRuntime::view_readiness_overlay)
             })
             .flatten();
+        let hud = options.hud.then(|| self.current_flat_hud());
         let ui_frame = FlatClientUiFrame {
             render_options: FlatClientUiRenderOptions {
                 render_distance: self
@@ -299,7 +306,7 @@ impl OffscreenFlatClientHost {
                 &self.assets.mesh_assets.catalog,
                 self.driver.interaction.selected_hotbar_slot(),
             ),
-            hud: None,
+            hud,
             loading_progress_overlay: self.driver.startup_progress_overlay(),
             debug: FlatClientDebugFrame {
                 stats: debug_stats,
@@ -319,6 +326,28 @@ impl OffscreenFlatClientHost {
             summary.drawn_section_count
         );
         Ok(summary)
+    }
+
+    fn current_flat_hud(&self) -> FlatHud {
+        let mut capabilities = InputCapabilities::NONE;
+        capabilities.keyboard = true;
+        capabilities.mouse = true;
+        let mut hud =
+            FlatHud::new(InputCapabilityState::new(capabilities).resolve(InputPreferences::AUTO));
+        let ui_active = self.driver.ui_is_active();
+        let palette_active = self.driver.ui_screen() == Some(GameScreen::BlockPalette);
+        hud.world_hud_visible = (!ui_active || palette_active) && self.driver.runtime.is_some();
+        hud.crosshair_visible =
+            self.driver.crosshair_visible && !ui_active && self.driver.runtime.is_some();
+        hud.hotbar = FlatHotbarOverlay::selected_with_icons(
+            self.driver.interaction.selected_hotbar_slot(),
+            debug_hotbar_icons(
+                self.driver.interaction.hotbar_items(),
+                &self.assets.mesh_assets.catalog,
+            ),
+        );
+        hud.status = self.driver.session_status_overlay();
+        hud
     }
 
     pub(crate) fn apply_input_frame(
@@ -646,6 +675,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                 frame,
                 OffscreenFlatClientFrameOptions {
                     debug_pane: options.debug_pane,
+                    hud: options.hud,
                 },
             )?;
             Ok(())

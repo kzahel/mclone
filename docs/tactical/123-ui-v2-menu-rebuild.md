@@ -1225,9 +1225,56 @@ Rendered checks:
 
 Known limits:
 
-- native desktop live-world status/HUD pixel capture still needs a dedicated
-  diagnostic path because the current offscreen screenshot command does not
-  attach HUD state
+- touch-specific hotbar controls, gamepad prompts, debug overlays, and selected
+  item name fade are still transient immediate layers
+
+## Landed Native Headless HUD Screenshot Opt-In Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- added `--screenshot-hud true|false` to native full-frame screenshots
+- kept the default `false` so clean world/menu captures remain stable
+- when enabled, native headless screenshots build the same shared flat HUD shape
+  as live desktop: keyboard/mouse input resolution, crosshair visibility,
+  hotbar icons from the mesh catalog, block-palette world-HUD exception, and
+  session status overlay
+- routed the resulting `FlatHud` through `FlatClientUiFrame`, so headless HUD
+  screenshots exercise the same retained HUD layers and cache counters as live
+  desktop/web/Android
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client cli_parses_full_frame_screenshot_options -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui flat_hud -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-xr-scene -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-headless-hud-off.png --width 960 --height 540 --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true --screenshot-hud false
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-headless-hud-on.png --width 960 --height 540 --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true --screenshot-hud true
+```
+
+Rendered checks:
+
+- native HUD-off screenshot regenerated and inspected:
+  `/tmp/mclone-headless-hud-off.png`
+- native HUD-on screenshot regenerated and inspected:
+  `/tmp/mclone-headless-hud-on.png`
+- browser live-world canvas smoke regenerated and inspected:
+  `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- `--screenshot-hud true` currently uses keyboard/mouse flat input resolution;
+  touch/gamepad prompt screenshot modes should become explicit options when
+  those retained layers land
 - touch-specific hotbar controls, gamepad prompts, debug overlays, and selected
   item name fade are still transient immediate layers
 

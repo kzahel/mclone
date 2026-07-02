@@ -76,6 +76,7 @@ pub(crate) fn run_remote_player_visual_smoke(
         startup_wait: StartupWaitPolicy::OFFSCREEN_SCREENSHOT_DEFAULT,
         camera_view: EngineCameraViewMode::FirstPerson,
         ui: HeadlessScreenshotUi::None,
+        hud: false,
         debug_pane: false,
         player_collision_box: false,
         blink_debug: false,
