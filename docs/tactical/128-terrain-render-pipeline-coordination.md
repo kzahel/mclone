@@ -762,6 +762,8 @@ Interpretation:
 
 ### Slice C: replace owned-request transport with dispatcher-owned slots
 
+Status: implemented and Quest RD7 measured.
+
 Once Slice B owns the dispatcher boundary, replace the generic owned-request
 handoff with explicit dispatcher-owned request slots or a preallocated request
 ring.
@@ -781,6 +783,50 @@ encode tails enough to lose the gain.
 Rollback rule: if slot ownership becomes complex without reducing command-send
 or submit tails, stop and move to resident compile inputs instead of adding
 another queue layer.
+
+Implementation result:
+
+- Native render compile workers no longer receive
+  `RenderSectionCompileRequest` through a `std::sync::mpsc` command channel.
+- The native compile owner now has a fixed request-slot queue backed by
+  `Mutex` + `Condvar`. Submit fills a dispatcher-owned slot and wakes a worker;
+  workers take the slot request and then compile outside the queue lock.
+- The existing result channel is unchanged.
+- The existing Android XR `command_send` timing label is retained for continuity,
+  but now measures slot enqueue plus worker wakeup, not `mpsc` send.
+- Queue health now reports queued slot descriptors separately from pending jobs.
+
+Validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-android-xr-client`
+- `pnpm native:web:build`
+- Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+  workers, 45 seconds.
+
+Measurement:
+
+| Frame avg / p95 / p99 / max | Runtime submit split | Submit handoff split | Dispatcher health |
+|---|---|---|---|
+| 15.558 / 18.392 / 25.175 / 39.715 ms | submit 13.587 ms; snapshot 0.846; handoff 13.160 | request count 2; compiler submit total 13.107; compiler submit single 13.091; slot enqueue/wakeup total 13.105; slot enqueue/wakeup single 13.089; apply ready plan 0.508; ready update 0.004 | pending jobs 2; max pending jobs 2; available slots 2; queued compile tasks 1 |
+
+Interpretation:
+
+- Slice C changed the ownership shape as intended and modestly improved the
+  measured submit tail versus the Slice B dispatcher-boundary run
+  (`command_send_single_ms` from `15.347` to `13.089` in these two runs).
+- It did not solve the problem. The remaining submit tail is still almost
+  entirely inside the "command send" bucket, which now means slot enqueue and
+  worker wakeup rather than `mpsc` payload transfer.
+- The result strongly suggests the tail is not just moving the owned request
+  object through `mpsc`. It may be render-thread preemption around wakeup,
+  mutex/condvar scheduling behavior, or still some request/slot ownership cost
+  hidden inside the coarse enqueue bucket.
+- The next slice should split the slot enqueue path itself before another
+  structural rewrite: lock wait, slot selection/write, queue push, notify, and
+  post-notify timing. If those sub-buckets are tiny while the outer enqueue
+  remains large, treat it as scheduler/preemption evidence and move to resident
+  compile inputs or a worker-poll/mailbox model rather than more channel swaps.
 
 ### Slice D: restore Java-region parity at the input boundary
 
@@ -846,12 +892,13 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Proceed to Slice C: replace owned-request transport with dispatcher-owned
-request slots or a preallocated request ring. Slice B gave us the owner boundary
-needed for that change but did not move the command-send tail.
+Split the remaining slot enqueue/wakeup tail before choosing the next
+structural rewrite. Slice C replaced `mpsc` request transport with
+dispatcher-owned request slots, but the submit tail remained in the same coarse
+bucket. The next commit should expose whether that time is lock wait, slot
+storage, queue push, worker notification, or render-thread preemption around the
+wakeup.
 
 Do not repeat a plain `std::sync::mpsc::sync_channel` swap; it was measured
-worse than the current unbounded channel. After Slice B lands, Slice C is the
-performance-changing step: dispatcher-owned request slots or a preallocated
-request ring so the render frame wakes workers with a compact descriptor instead
-of moving an owned compile request through `std::sync::mpsc`.
+worse than the current unbounded channel. Do not add another queue shape until
+the slot enqueue sub-buckets say where the remaining tail actually lives.

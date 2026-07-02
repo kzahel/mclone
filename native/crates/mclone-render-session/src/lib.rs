@@ -3541,6 +3541,10 @@ pub trait RenderSectionCompiler {
             .saturating_sub(self.pending_job_count())
     }
 
+    fn queued_compile_task_count(&self) -> usize {
+        self.pending_job_count()
+    }
+
     fn has_pending_job_capacity(&self) -> bool {
         self.available_pending_job_slots() > 0
     }
@@ -3565,7 +3569,7 @@ impl RenderSectionCompileQueueHealth {
             pending_jobs,
             max_pending_jobs,
             available_job_slots: max_pending_jobs.saturating_sub(pending_jobs),
-            queued_compile_tasks: pending_jobs,
+            queued_compile_tasks: compiler.queued_compile_task_count(),
         }
     }
 }

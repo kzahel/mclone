@@ -1,7 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::env;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 use std::time::Instant;
 
@@ -76,14 +76,86 @@ impl From<MeshTextureAtlasImage> for TextureAtlasImage {
     }
 }
 
-enum RenderSectionCompileCommand {
-    Build(RenderSectionCompileRequest),
-    Shutdown,
+#[derive(Debug)]
+struct RenderSectionCompileQueue {
+    state: Mutex<RenderSectionCompileQueueState>,
+    work_available: Condvar,
+}
+
+#[derive(Debug)]
+struct RenderSectionCompileQueueState {
+    request_slots: Vec<Option<RenderSectionCompileRequest>>,
+    queued_slots: VecDeque<usize>,
+    shutdown: bool,
+}
+
+impl RenderSectionCompileQueue {
+    fn new(slot_count: usize) -> Self {
+        Self {
+            state: Mutex::new(RenderSectionCompileQueueState {
+                request_slots: vec![None; slot_count],
+                queued_slots: VecDeque::new(),
+                shutdown: false,
+            }),
+            work_available: Condvar::new(),
+        }
+    }
+
+    fn enqueue(&self, request: RenderSectionCompileRequest) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("render section compile queue lock poisoned"))?;
+        if state.shutdown {
+            bail!("render section compile queue is shutting down");
+        }
+        let Some(slot_index) = state.request_slots.iter().position(Option::is_none) else {
+            bail!("render section compile queue has no free request slots");
+        };
+        state.request_slots[slot_index] = Some(request);
+        state.queued_slots.push_back(slot_index);
+        self.work_available.notify_one();
+        Ok(())
+    }
+
+    fn take_next(&self) -> Option<RenderSectionCompileRequest> {
+        let mut state = self.state.lock().ok()?;
+        loop {
+            if state.shutdown {
+                return None;
+            }
+            if let Some(slot_index) = state.queued_slots.pop_front() {
+                if let Some(request) = state.request_slots[slot_index].take() {
+                    return Some(request);
+                }
+                continue;
+            }
+            state = self.work_available.wait(state).ok()?;
+        }
+    }
+
+    fn queued_task_count(&self) -> usize {
+        self.state
+            .lock()
+            .map(|state| state.queued_slots.len())
+            .unwrap_or_default()
+    }
+
+    fn shutdown(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.shutdown = true;
+            state.queued_slots.clear();
+            for slot in &mut state.request_slots {
+                *slot = None;
+            }
+        }
+        self.work_available.notify_all();
+    }
 }
 
 #[derive(Debug)]
 pub struct RenderSectionCompileWorker {
-    sender: mpsc::Sender<RenderSectionCompileCommand>,
+    queue: Arc<RenderSectionCompileQueue>,
     receiver: mpsc::Receiver<RenderSectionCompileResult>,
     handles: Vec<thread::JoinHandle<()>>,
     pending_jobs: usize,
@@ -146,6 +218,10 @@ impl RenderSectionCompiler for NativeRenderSectionCompileDispatcher {
     fn max_pending_job_count(&self) -> usize {
         self.worker.max_pending_job_count()
     }
+
+    fn queued_compile_task_count(&self) -> usize {
+        self.worker.queued_compile_task_count()
+    }
 }
 
 impl RenderSectionCompileWorker {
@@ -158,14 +234,13 @@ impl RenderSectionCompileWorker {
             bail!("render section compile worker count must be greater than zero");
         }
 
-        let (sender, command_receiver) = mpsc::channel::<RenderSectionCompileCommand>();
+        let queue = Arc::new(RenderSectionCompileQueue::new(worker_count));
         let (result_sender, receiver) = mpsc::channel::<RenderSectionCompileResult>();
-        let command_receiver = Arc::new(Mutex::new(command_receiver));
         let mut handles = Vec::with_capacity(worker_count);
 
         for worker_index in 0..worker_count {
             let catalog = catalog.clone();
-            let command_receiver = Arc::clone(&command_receiver);
+            let queue = Arc::clone(&queue);
             let result_sender = result_sender.clone();
             let thread_name = if worker_count == 1 {
                 "mclone-render-compile".to_string()
@@ -175,19 +250,10 @@ impl RenderSectionCompileWorker {
             let handle = thread::Builder::new()
                 .name(thread_name)
                 .spawn(move || {
-                    loop {
-                        let command = match command_receiver.lock() {
-                            Ok(receiver) => receiver.recv(),
-                            Err(_) => break,
-                        };
-                        match command {
-                            Ok(RenderSectionCompileCommand::Build(request)) => {
-                                let result = compile_render_section_request(&catalog, request);
-                                if result_sender.send(result).is_err() {
-                                    break;
-                                }
-                            }
-                            Ok(RenderSectionCompileCommand::Shutdown) | Err(_) => break,
+                    while let Some(request) = queue.take_next() {
+                        let result = compile_render_section_request(&catalog, request);
+                        if result_sender.send(result).is_err() {
+                            break;
                         }
                     }
                 })
@@ -196,7 +262,7 @@ impl RenderSectionCompileWorker {
         }
 
         Ok(Self {
-            sender,
+            queue,
             receiver,
             handles,
             pending_jobs: 0,
@@ -238,8 +304,8 @@ impl RenderSectionCompiler for RenderSectionCompileWorker {
         let capacity_check_ms = elapsed_ms(capacity_start.elapsed());
 
         let send_start = Instant::now();
-        self.sender
-            .send(RenderSectionCompileCommand::Build(request))
+        self.queue
+            .enqueue(request)
             .context("failed to submit render section compile task")?;
         let command_send_ms = elapsed_ms(send_start.elapsed());
 
@@ -277,13 +343,15 @@ impl RenderSectionCompiler for RenderSectionCompileWorker {
     fn max_pending_job_count(&self) -> usize {
         self.max_pending_jobs
     }
+
+    fn queued_compile_task_count(&self) -> usize {
+        self.queue.queued_task_count()
+    }
 }
 
 impl Drop for RenderSectionCompileWorker {
     fn drop(&mut self) {
-        for _ in 0..self.handles.len() {
-            let _ = self.sender.send(RenderSectionCompileCommand::Shutdown);
-        }
+        self.queue.shutdown();
         for handle in self.handles.drain(..) {
             let _ = handle.join();
         }
@@ -769,7 +837,7 @@ mod tests {
         assert_eq!(health.pending_jobs, 1);
         assert_eq!(health.max_pending_jobs, 2);
         assert_eq!(health.available_job_slots, 1);
-        assert_eq!(health.queued_compile_tasks, 1);
+        assert!(health.queued_compile_tasks <= health.pending_jobs);
         Ok(())
     }
 }
