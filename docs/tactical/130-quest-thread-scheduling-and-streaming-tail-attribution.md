@@ -284,17 +284,85 @@ Interpretation:
   driver/runtime scheduling effects, not as proof that terrain shaders are
   consuming 7-9 ms of GPU time.
 
-Next implementation target:
+Follow-up target from this result:
 
 - Split per-eye encode in the per-eye path the same way the multiview summary
   already splits `sky`, `terrain`, `actor`, `screen_effect`, and
   `world_overlay` work. The current `left_encode_ms` / `right_encode_ms`
   number is too broad: `left_eye_section_encode_ms` is only ~1.8 ms in the
   worst frame, so the missing 20-30 ms is outside section command encoding.
+  This was implemented in the next slice below.
 - In parallel or immediately after, add a narrow timer around
   `runtime.send_gameplay_command(report.command)` in the camera commit path so
   we know whether the ~5 ms command-send tail is queue contention,
   downstream server pressure, or another scheduling point.
+
+## 2026-07-02 Follow-Up: Per-Eye Encode Split
+
+Implementation:
+
+- Extended `FullFrameRenderTiming` with coarse pass timings for sky/clear,
+  far LOD, terrain opaque, terrain translucent, actors, screen effects, and
+  GUI.
+- Extended `XrTerrainEyeRenderTiming` and Android XR worst-frame logs with
+  left/right eye splits for the shared full-frame renderer plus XR-only
+  fade, selection, world-line, world-panel, and encoder-finish work.
+- New log lines:
+  `MCLONE_ANDROID_XR_PERF_TERRAIN_EYE_SPLIT` for max buckets and
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_EYE_SPLIT` for coherent worst frames.
+
+Validation:
+
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+  passed.
+- Budgeted RD7 lane passed:
+  `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --perf-summary /tmp/mclone-quest-openxr-perf-orbit-rd7-eye-split-2-16-64.txt --log /tmp/mclone-quest-openxr-perf-orbit-rd7-eye-split-2-16-64-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
+
+Measured result:
+
+| Run | Workers / budgets | Meta dropped frames | Frame avg / p95 / p99 / max (ms) | App work avg / p95 / max (ms) | App over period | Notable max buckets |
+| --- | --- | ---: | --- | --- | ---: | --- |
+| RD7 eye-split attribution | 2 / 16 / 64 / completed-accept 2 | 13 | 14.654 / 16.716 / 19.662 / 37.326 | 14.206 / 16.566 / 35.099 | 57.2% | `right_eye_encode=23.650`, `right_actor=22.117`, `stereo_poll_wait=8.424`, `commit_server_command=8.592` |
+
+Coherent worst-frame readout:
+
+- Rank 1 (`sample_frame=638`) was the same bad-frame family as the previous
+  eye-encode spike, but the split now attributes it:
+  `right_encode_ms=23.650`, `right_full_frame_ms=23.026`, and
+  `right_actor_ms=22.117`. Terrain was not the spike:
+  `right_opaque_ms=0.532`, `right_translucent_ms=0.172`,
+  `right_sky_ms=0.164`, `right_encoder_finish_ms=0.002`.
+  Runtime submit/sync/upload were zero.
+- Rank 2 repeated the same shape:
+  `right_encode_ms=18.876`, `right_full_frame_ms=18.268`,
+  `right_actor_ms=17.444`, with terrain and sky sub-ms.
+- Ranks 3-5 were the streaming-transition family. Their eye splits were
+  ordinary (`left_full_frame_ms=1.347-1.434`,
+  `right_full_frame_ms=1.295-1.703`), while the expensive pieces were
+  `commit_server_command_ms=5.189-8.592`, runtime sync/upload/prepare, and
+  `stereo_poll_wait_ms=6.077-8.025`.
+
+Interpretation:
+
+- The 20-30 ms "eye encode" mystery is now narrowed to actor rendering, not
+  sky, terrain section encoding, overlays, GUI, or encoder finish.
+- Only two actors were present (`actors=2`, `drawn_actors=2`), so
+  `right_actor_ms=22.117` is not normal per-actor CPU volume. It is either a
+  stall/preemption point inside actor rendering or a specific actor-renderer
+  path doing unexpectedly blocking work.
+- The run average improved versus the prior budgeted sample, but the lane is
+  noisy. Treat the attribution as the result, not a proven performance win.
+
+Next implementation target:
+
+- Split `ActorDrawResources::render_in_slot` on the XR per-eye path into its
+  own smaller timings: per-actor preparation, uniform/buffer writes, render
+  pass setup, draw calls, and any texture/material binding work. If the whole
+  actor pass is only a scheduling victim, a Perfetto frame marker around this
+  pass should show `android_main` runnable/not-running during the spike.
+- Add the narrow `send_gameplay_command` timer from the prior section, since
+  the locomotion-command tail is still present and reached
+  `commit_server_command_ms=8.592` in this run.
 
 ## Central Thesis
 

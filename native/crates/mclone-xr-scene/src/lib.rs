@@ -555,6 +555,11 @@ struct XrCameraCommitTiming {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct XrTerrainEyeRenderTiming {
+    pub full_frame_ms: f64,
+    pub sky_ms: f64,
+    pub far_lod_ms: f64,
+    pub terrain_opaque_ms: f64,
+    pub terrain_translucent_ms: f64,
     pub prepare_ms: f64,
     pub cull_ms: f64,
     pub uniform_write_ms: f64,
@@ -562,6 +567,14 @@ pub struct XrTerrainEyeRenderTiming {
     pub translucent_sort_ms: f64,
     pub encode_ms: f64,
     pub section_encode_ms: f64,
+    pub actor_ms: f64,
+    pub screen_effect_ms: f64,
+    pub gui_ms: f64,
+    pub xr_fade_ms: f64,
+    pub xr_selection_ms: f64,
+    pub xr_world_lines_ms: f64,
+    pub xr_world_panel_ms: f64,
+    pub encoder_finish_ms: f64,
     pub submit_ms: f64,
     pub poll_wait_ms: f64,
 }
@@ -3472,6 +3485,7 @@ where
                 render_view.camera_position,
             )
         });
+        let full_frame_start = collect_split_timing.then(Instant::now);
         let (summary, frame_timing) = if collect_split_timing {
             let far_lod = far_lod_mesh.map(|_| &mut self.far_lod);
             render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot(
@@ -3525,7 +3539,10 @@ where
             .map(|summary| (summary, Default::default()))
         }
         .with_context(|| format!("render XR terrain {label} eye"))?;
+        let full_frame_ms = full_frame_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
+        let mut xr_fade_ms = 0.0;
         if let Some(overlay) = self.head_comfort.overlay() {
+            let fade_start = collect_split_timing.then(Instant::now);
             self.screen_effects.render_fade_in_slot(
                 device,
                 queue,
@@ -3534,7 +3551,9 @@ where
                 overlay,
                 view_slot,
             );
+            xr_fade_ms = fade_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         }
+        let selection_start = collect_split_timing.then(Instant::now);
         self.selection_outline.render_in_slot(
             device,
             queue,
@@ -3545,6 +3564,7 @@ where
             selection_outline.as_ref(),
             view_slot,
         );
+        let xr_selection_ms = selection_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         let mut world_lines = engine_debug_world_lines(
             &self.camera,
             EngineDebugVisualOptions::new(self.player_collision_box_visible),
@@ -3555,7 +3575,9 @@ where
         {
             world_lines.push(gameplay_ray);
         }
+        let mut xr_world_lines_ms = 0.0;
         if !world_lines.is_empty() {
+            let world_lines_start = collect_split_timing.then(Instant::now);
             self.world_gui_renderer
                 .render_lines_in_slot(
                     device,
@@ -3567,10 +3589,13 @@ where
                     view_slot,
                 )
                 .with_context(|| format!("render XR world debug lines for {label} eye"))?;
+            xr_world_lines_ms = world_lines_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         }
         let mut ui_panel_stats = WorldGuiPanelRenderStats::default();
+        let mut xr_world_panel_ms = 0.0;
         if ui_active {
             if let Some(panel) = self.menu_panel_pose {
+                let world_panel_start = collect_split_timing.then(Instant::now);
                 let controller_ray_lines = self
                     .xr_menu_controller_ray_lines(panel)
                     .context("build XR menu controller ray visuals")?;
@@ -3605,9 +3630,13 @@ where
                     )
                 }
                 .with_context(|| format!("render XR menu panel for {label} eye"))?;
+                xr_world_panel_ms =
+                    world_panel_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
             }
         }
+        let finish_start = collect_split_timing.then(Instant::now);
         let command_buffer = encoder.finish();
+        let encoder_finish_ms = finish_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         let encode_total_ms = encode_start.map_or(0.0, |start| elapsed_ms(start.elapsed()));
         let submit_start = collect_split_timing.then(Instant::now);
         let submission = queue.submit(Some(command_buffer));
@@ -3633,6 +3662,11 @@ where
         Ok(XrRenderedEye {
             summary,
             timing: XrTerrainEyeRenderTiming {
+                full_frame_ms,
+                sky_ms: frame_timing.sky_ms,
+                far_lod_ms: frame_timing.far_lod_ms,
+                terrain_opaque_ms: frame_timing.terrain_opaque_ms,
+                terrain_translucent_ms: frame_timing.terrain_translucent_ms,
                 prepare_ms,
                 cull_ms: frame_timing.terrain_cull_ms,
                 uniform_write_ms: frame_timing.terrain_uniform_write_ms,
@@ -3640,6 +3674,14 @@ where
                 translucent_sort_ms: frame_timing.terrain_translucent_sort_ms,
                 encode_ms: (encode_total_ms - prepare_ms).max(0.0),
                 section_encode_ms: frame_timing.terrain_encode_ms,
+                actor_ms: frame_timing.actor_ms,
+                screen_effect_ms: frame_timing.screen_effect_ms,
+                gui_ms: frame_timing.gui_ms,
+                xr_fade_ms,
+                xr_selection_ms,
+                xr_world_lines_ms,
+                xr_world_panel_ms,
+                encoder_finish_ms,
                 submit_ms,
                 poll_wait_ms,
             },

@@ -112,6 +112,10 @@ pub struct FullFrameRenderSummary {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FullFrameRenderTiming {
+    pub sky_ms: f64,
+    pub far_lod_ms: f64,
+    pub terrain_opaque_ms: f64,
+    pub terrain_translucent_ms: f64,
     pub terrain_records_ms: f64,
     pub terrain_cull_ms: f64,
     pub terrain_uniform_write_ms: f64,
@@ -119,6 +123,9 @@ pub struct FullFrameRenderTiming {
     pub terrain_translucent_sort_ms: f64,
     pub terrain_prepare_ms: f64,
     pub terrain_encode_ms: f64,
+    pub actor_ms: f64,
+    pub screen_effect_ms: f64,
+    pub gui_ms: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -1322,6 +1329,7 @@ where
     let mut actor_stats = ActorRenderStats::default();
 
     if !gui.covers_world {
+        let sky_start = timing.is_some().then(std::time::Instant::now);
         let background_clear_color = if fog.enabled {
             clear_frame_color(frame.encoder, frame.target.color_view, fog.clear_color());
             fog.clear_color()
@@ -1338,9 +1346,13 @@ where
             );
             sky_clear_color
         };
+        if let (Some(timing), Some(start)) = (timing.as_deref_mut(), sky_start) {
+            timing.sky_ms += start.elapsed().as_secs_f64() * 1000.0;
+        }
         let far_lod_depth_ready =
             far_lod.is_some() && far_lod_mesh.is_some_and(|mesh| !mesh.is_empty());
         if let Some(far_lod) = far_lod {
+            let far_lod_start = timing.is_some().then(std::time::Instant::now);
             let _ = far_lod.render_in_slot(
                 frame.device,
                 frame.queue,
@@ -1351,6 +1363,9 @@ where
                 far_lod_mesh,
                 view_slot,
             );
+            if let (Some(timing), Some(start)) = (timing.as_deref_mut(), far_lod_start) {
+                timing.far_lod_ms += start.elapsed().as_secs_f64() * 1000.0;
+            }
         }
         // The sky/clear pass prepared the background; the chunk pass loads it.
         // When far LOD rendered first, it also prepared depth for real chunks.
@@ -1368,6 +1383,7 @@ where
         } else {
             TexturedSectionRenderPhase::All
         };
+        let terrain_start = timing.is_some().then(std::time::Instant::now);
         let frame_stats = render_terrain_phase(
             draw,
             frame.queue,
@@ -1381,10 +1397,14 @@ where
             terrain_phase,
             timing.as_deref_mut(),
         )?;
+        if let (Some(timing), Some(start)) = (timing.as_deref_mut(), terrain_start) {
+            timing.terrain_opaque_ms += start.elapsed().as_secs_f64() * 1000.0;
+        }
         render_stats.drawn_section_count = frame_stats.drawn_section_count;
         render_stats.drawn_face_count = frame_stats.drawn_face_count();
         render_stats.drawn_index_count = frame_stats.drawn_index_count;
         if !actor_instances.is_empty() {
+            let actor_start = timing.is_some().then(std::time::Instant::now);
             actor_stats = actors
                 .context("actor instances requested without actor draw resources")?
                 .render_in_slot(
@@ -1397,9 +1417,13 @@ where
                     actor_instances,
                     view_slot,
                 )?;
+            if let (Some(timing), Some(start)) = (timing.as_deref_mut(), actor_start) {
+                timing.actor_ms += start.elapsed().as_secs_f64() * 1000.0;
+            }
         }
         if split_translucent_terrain {
             let translucent_target = render_target.with_loaded_color().with_loaded_depth();
+            let translucent_start = timing.is_some().then(std::time::Instant::now);
             let _ = render_terrain_phase(
                 draw,
                 frame.queue,
@@ -1413,8 +1437,12 @@ where
                 TexturedSectionRenderPhase::Translucent,
                 timing.as_deref_mut(),
             )?;
+            if let (Some(timing), Some(start)) = (timing.as_deref_mut(), translucent_start) {
+                timing.terrain_translucent_ms += start.elapsed().as_secs_f64() * 1000.0;
+            }
         }
         if let Some(overlay) = underwater_overlay {
+            let screen_effect_start = timing.is_some().then(std::time::Instant::now);
             screen_effects
                 .context("underwater overlay requested without screen effects renderer")?
                 .render_underwater_in_slot(
@@ -1425,6 +1453,9 @@ where
                     overlay,
                     view_slot,
                 );
+            if let (Some(timing), Some(start)) = (timing.as_deref_mut(), screen_effect_start) {
+                timing.screen_effect_ms += start.elapsed().as_secs_f64() * 1000.0;
+            }
         }
     } else {
         render_stats.drawn_section_count = 0;
@@ -1438,6 +1469,7 @@ where
     let gui_draw = build_gui_draw(render_stats);
     let gui_command_count = gui_draw.commands().len();
     if gui.active {
+        let gui_start = timing.is_some().then(std::time::Instant::now);
         gui_renderer
             .context("active GUI requested without GUI renderer")?
             .render(
@@ -1453,6 +1485,9 @@ where
                     GuiRenderOptions::overlay()
                 },
             )?;
+        if let (Some(timing), Some(start)) = (timing.as_deref_mut(), gui_start) {
+            timing.gui_ms += start.elapsed().as_secs_f64() * 1000.0;
+        }
     }
 
     Ok(FullFrameRenderSummary {
