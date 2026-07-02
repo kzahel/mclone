@@ -1296,6 +1296,62 @@ Next implementation implication:
   until the shared phase can explain whether the frame was upload-limited,
   accept-limited, capacity-limited, or ready/encode-limited.
 
+Shared frame-decision API:
+
+- Implemented July 2, 2026 as a behavior-preserving ownership move.
+- `mclone-render-session` now exposes `RenderSectionUploadFramePolicy`,
+  `RenderSectionUploadFrameDecision`, and `RenderSectionUploadFrameLimit`.
+- XR no longer computes the pre-sync upload-backpressure rule locally. It asks
+  the shared coordinator whether to pre-drain pending upload work, whether
+  runtime section sync may run, and whether a post-sync section update should be
+  applied.
+- The policy remains unchanged: budgeted mode drains one pending upload slice
+  before runtime sync; if upload/removal lifecycle work remains queued, runtime
+  sync is skipped for that frame.
+- Empty enqueue/drain calls no longer inflate upload phase events.
+
+Validation:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render-session upload_`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene -p mclone-native-client -p mclone-android-client -p mclone-android-xr-client -p mclone-web-client`
+- `pnpm native:web:build`
+- `bash -n android-xr/validate-quest-openxr.sh`
+- Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+  workers, `2 / 16 / 64`, 45 seconds.
+
+Measurement:
+
+| Policy | Meta dropped frames | Frame avg / p95 / p99 / max | App over period | Upload phase max | Key tail |
+|---|---:|---|---:|---|---|
+| `2 / 16 / 64` upload phase diagnostics | 75 | 15.623 / 17.960 / 22.534 / 52.100 ms | 79.0% | phase events 4; queued lifecycle 160; held lifecycle 128; held jobs 2; upload limited true; accept limited true; backpressured true | submit snapshot 11.037 ms; upload apply 3.728 ms; ready sections 24.015 ms; right-eye encode 29.623 ms |
+| `2 / 16 / 64` shared frame decision | 64 | 15.735 / 18.248 / 23.384 / 52.201 ms | 80.5% | phase events 3; queued lifecycle 160; held lifecycle 64; held jobs 2; upload limited true; accept limited true; backpressured true | submit snapshot 32.169 ms; upload apply 19.191 ms; ready sections 25.926 ms; left-eye encode 24.578 ms |
+
+Interpretation:
+
+- This slice is not intended to improve performance; it centralizes the frame
+  decision so the next policy change can be made in shared code. The result is
+  in the same noisy band as the previous diagnostic run.
+- The final run still shows both upload and accept limits tripping, queued
+  lifecycle peaking at `160`, and held compile jobs at `2`.
+- The bad tails are now visibly outside the boolean decision itself:
+  ready-section computation/publication, upload apply on some runs, submit
+  snapshot on this run, and eye encode/poll waits. The next implementation
+  should use the shared decision as the place to coordinate those phases rather
+  than adding another XR-local condition.
+
+Next implementation implication:
+
+- Keep the shared frame-decision API.
+- Move the next phase boundary into the same shared model: publish/refresh
+  traversal-ready sections only when the shared decision says the frame should
+  do terrain state work, or add explicit counters proving why ready publication
+  must still run on upload-backpressured frames.
+- Treat ready-section recomputation/publication as a first-class bus phase,
+  because it is repeatedly showing tails in the RD7 lane.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -1360,13 +1416,12 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Use the new upload-phase counters to implement the first shared terrain
-frame-decision API. The current slice reports queue/release/backlog state
-clearly, but XR still makes the "skip runtime sync while upload is backlogged"
-decision locally. The next slice should move that decision into the shared
-coordinator: drain pending upload work, release capacity from applied or
-superseded lifecycle items, report the limiting phase, then return whether new
-compile-result acceptance/submission may run on this frame.
+Use the shared frame-decision API to bring traversal-ready publication into the
+same coordinated terrain phase. The current slice moved the upload-backpressure
+decision into `mclone-render-session`, but XR still recomputes and publishes the
+ready set after that decision. The next slice should either skip ready
+recompute/publish on upload-backpressured frames when the visible ready set is
+known unchanged, or add counters that prove why it must remain per-frame work.
 
 Use `2 / 16 / 64` as the current measurement lane, not a default policy. It was
 the best held-capacity result, but it is still over the 72 Hz app budget most of

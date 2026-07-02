@@ -64,7 +64,8 @@ use mclone_render_session::{
     EngineCameraController, EngineCameraInput, EngineCameraMovementImpulse,
     EngineCameraMovementMode, EngineCameraSnapshot, EngineDebugVisualOptions, EngineHandPushInput,
     EngineRoomScaleReconciliation, RenderSectionCacheUpdate, RenderSectionUploadCoordinator,
-    RenderSectionUploadPhaseReport, actor_instances_from_presentations, engine_debug_world_lines,
+    RenderSectionUploadFramePolicy, RenderSectionUploadPhaseReport,
+    actor_instances_from_presentations, engine_debug_world_lines,
 };
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, GameFramePacingMode, GameMovementMode, GamePlayerModel,
@@ -2854,11 +2855,15 @@ where
                 ..poll_summary
             });
         }
-        let budgeted_section_uploads = self.uses_budgeted_section_uploads();
+        let upload_frame_policy = RenderSectionUploadFramePolicy::new(
+            self.render_section_upload_budget,
+            self.render_section_accept_budget,
+        );
         let mut upload_report = TexturedSectionUploadReport::default();
         let mut upload_phase = RenderSectionUploadPhaseReport::default();
-        let drained_pending_uploads_before_sync =
-            budgeted_section_uploads && self.section_uploads.has_pending_work();
+        let drained_pending_uploads_before_sync = self
+            .section_uploads
+            .should_drain_before_runtime_sync(upload_frame_policy);
         if drained_pending_uploads_before_sync {
             let upload_start = Instant::now();
             let drained_report = self.apply_section_update_uploads(
@@ -2871,10 +2876,13 @@ where
             upload_phase.absorb(drained_report.phase);
             self.release_render_compile_jobs(drained_report.release_compile_jobs);
         }
-        let upload_backpressure_active =
-            budgeted_section_uploads && self.section_uploads.has_pending_work();
-        let should_sync_render_sections =
-            (poll_changed || has_runtime_render_work) && !upload_backpressure_active;
+        let runtime_work_requested = poll_changed || has_runtime_render_work;
+        let upload_frame_decision = self.section_uploads.frame_decision_after_pre_sync_drain(
+            upload_frame_policy,
+            runtime_work_requested,
+            drained_pending_uploads_before_sync,
+        );
+        let should_sync_render_sections = upload_frame_decision.should_sync_render_sections;
         let sync_start = Instant::now();
         let timed_section_update = if should_sync_render_sections {
             if let Some(deadline) = frame_deadline {
@@ -3045,7 +3053,7 @@ where
         let visibility_graph_build_count = section_update.visibility_graph_stats.build_count;
         let visibility_graph_total_ms = section_update.visibility_graph_stats.total_ms;
         let visibility_graph_worst_ms = section_update.visibility_graph_stats.worst_ms;
-        if should_sync_render_sections || !drained_pending_uploads_before_sync {
+        if upload_frame_decision.should_apply_section_update_after_sync {
             let upload_start = Instant::now();
             let section_update_report =
                 self.apply_section_update_uploads(device, section_update, timing)?;
@@ -3134,7 +3142,7 @@ where
             upload_held_compile_job_count: upload_queue.held_compile_jobs,
             upload_limited: upload_phase.upload_limited,
             upload_accept_limited: upload_phase.accept_limited,
-            upload_backpressured: upload_backpressure_active,
+            upload_backpressured: upload_frame_decision.upload_backpressured,
             traversal_ready_section_count,
             record_cache: self.draw.record_cache_stats(),
             visibility_graph_build_count,
@@ -3142,10 +3150,6 @@ where
             visibility_graph_worst_ms,
             ..poll_summary
         })
-    }
-
-    fn uses_budgeted_section_uploads(&self) -> bool {
-        self.render_section_upload_budget.is_some() || self.render_section_accept_budget.is_some()
     }
 
     fn apply_section_update_uploads(

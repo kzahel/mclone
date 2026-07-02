@@ -409,6 +409,44 @@ pub struct RenderSectionUploadQueueStats {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RenderSectionUploadFramePolicy {
+    pub upload_budget: Option<usize>,
+    pub accept_budget: Option<usize>,
+}
+
+impl RenderSectionUploadFramePolicy {
+    pub const fn new(upload_budget: Option<usize>, accept_budget: Option<usize>) -> Self {
+        Self {
+            upload_budget,
+            accept_budget,
+        }
+    }
+
+    pub const fn is_budgeted(self) -> bool {
+        self.upload_budget.is_some() || self.accept_budget.is_some()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum RenderSectionUploadFrameLimit {
+    #[default]
+    None,
+    UploadBacklog,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RenderSectionUploadFrameDecision {
+    pub policy: RenderSectionUploadFramePolicy,
+    pub runtime_work_requested: bool,
+    pub drained_before_sync: bool,
+    pub queue_after_drain: RenderSectionUploadQueueStats,
+    pub upload_backpressured: bool,
+    pub should_sync_render_sections: bool,
+    pub should_apply_section_update_after_sync: bool,
+    pub limit: RenderSectionUploadFrameLimit,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct RenderSectionUploadPhaseReport {
     pub phase_event_count: usize,
     pub accepted_compile_jobs: usize,
@@ -538,6 +576,37 @@ impl RenderSectionUploadCoordinator {
         self.pending_removals.len()
     }
 
+    pub fn should_drain_before_runtime_sync(&self, policy: RenderSectionUploadFramePolicy) -> bool {
+        policy.is_budgeted() && self.has_pending_work()
+    }
+
+    pub fn frame_decision_after_pre_sync_drain(
+        &self,
+        policy: RenderSectionUploadFramePolicy,
+        runtime_work_requested: bool,
+        drained_before_sync: bool,
+    ) -> RenderSectionUploadFrameDecision {
+        let queue_after_drain = self.stats();
+        let upload_backpressured =
+            policy.is_budgeted() && queue_after_drain.queued_lifecycle_items > 0;
+        RenderSectionUploadFrameDecision {
+            policy,
+            runtime_work_requested,
+            drained_before_sync,
+            queue_after_drain,
+            upload_backpressured,
+            should_sync_render_sections: runtime_work_requested && !upload_backpressured,
+            should_apply_section_update_after_sync: (runtime_work_requested
+                && !upload_backpressured)
+                || !drained_before_sync,
+            limit: if upload_backpressured {
+                RenderSectionUploadFrameLimit::UploadBacklog
+            } else {
+                RenderSectionUploadFrameLimit::None
+            },
+        }
+    }
+
     pub fn stats(&self) -> RenderSectionUploadQueueStats {
         RenderSectionUploadQueueStats {
             queued_upload_sections: self.pending_uploads.len(),
@@ -577,6 +646,13 @@ impl RenderSectionUploadCoordinator {
             accepted_compile_result_count,
             enqueue_report.queued_lifecycle_items,
         );
+        if accepted_compile_result_count == 0
+            && enqueue_report.queued_lifecycle_items == 0
+            && enqueue_report.superseded_lifecycle_items == 0
+            && release_compile_jobs == 0
+        {
+            return RenderSectionUploadPhaseReport::default();
+        }
         let mut report = RenderSectionUploadPhaseReport::from_queue_before(queue_before);
         report.accepted_compile_jobs = accepted_compile_result_count;
         report.queued_lifecycle_items = enqueue_report.queued_lifecycle_items;
@@ -625,6 +701,13 @@ impl RenderSectionUploadCoordinator {
         phase_report.upload_limited = upload_limited;
         phase_report.accept_limited = accept_limited;
         phase_report.apply_queue_after(queue_after);
+        if lifecycle_item_count == 0
+            && queue_before.queued_lifecycle_items == 0
+            && !upload_limited
+            && !accept_limited
+        {
+            phase_report = RenderSectionUploadPhaseReport::default();
+        }
         RenderSectionUploadDrain {
             rebuilt_sections,
             removed_section_keys,
@@ -4435,6 +4518,77 @@ mod tests {
             1
         );
         assert!(!coordinator.has_pending_work());
+    }
+
+    #[test]
+    fn upload_frame_decision_unbudgeted_allows_runtime_sync_even_with_pending_work() {
+        let key = RenderSectionKey::new(0, 4, 0);
+        let mut update = RenderSectionCacheUpdate::default();
+        update.removed_section_keys = [key].into_iter().collect();
+        let mut coordinator = RenderSectionUploadCoordinator::default();
+        coordinator.enqueue_cache_update(update);
+        let policy = RenderSectionUploadFramePolicy::default();
+
+        assert!(!coordinator.should_drain_before_runtime_sync(policy));
+        let decision = coordinator.frame_decision_after_pre_sync_drain(policy, true, false);
+
+        assert!(!decision.upload_backpressured);
+        assert!(decision.should_sync_render_sections);
+        assert!(decision.should_apply_section_update_after_sync);
+        assert_eq!(decision.limit, RenderSectionUploadFrameLimit::None);
+    }
+
+    #[test]
+    fn upload_frame_decision_budgeted_backlog_blocks_runtime_sync_after_pre_drain() {
+        let first = RenderSectionKey::new(0, 4, 0);
+        let second = RenderSectionKey::new(1, 4, 0);
+        let mut update = RenderSectionCacheUpdate::default();
+        update.removed_section_keys = [first, second].into_iter().collect();
+        let mut coordinator = RenderSectionUploadCoordinator::default();
+        coordinator.enqueue_cache_update(update);
+        let policy = RenderSectionUploadFramePolicy::new(None, Some(1));
+
+        assert!(coordinator.should_drain_before_runtime_sync(policy));
+        let drain = coordinator.drain_budgeted(policy.upload_budget, policy.accept_budget);
+        assert_eq!(drain.lifecycle_item_count, 1);
+        let decision = coordinator.frame_decision_after_pre_sync_drain(policy, true, true);
+
+        assert!(decision.upload_backpressured);
+        assert!(!decision.should_sync_render_sections);
+        assert!(!decision.should_apply_section_update_after_sync);
+        assert_eq!(decision.limit, RenderSectionUploadFrameLimit::UploadBacklog);
+        assert_eq!(decision.queue_after_drain.queued_lifecycle_items, 1);
+    }
+
+    #[test]
+    fn upload_frame_decision_budgeted_empty_queue_allows_runtime_sync() {
+        let coordinator = RenderSectionUploadCoordinator::default();
+        let policy = RenderSectionUploadFramePolicy::new(Some(16), Some(64));
+
+        assert!(!coordinator.should_drain_before_runtime_sync(policy));
+        let decision = coordinator.frame_decision_after_pre_sync_drain(policy, true, false);
+
+        assert!(!decision.upload_backpressured);
+        assert!(decision.should_sync_render_sections);
+        assert!(decision.should_apply_section_update_after_sync);
+        assert_eq!(decision.limit, RenderSectionUploadFrameLimit::None);
+    }
+
+    #[test]
+    fn upload_phase_reports_ignore_empty_enqueue_and_empty_drain() {
+        let mut coordinator = RenderSectionUploadCoordinator::default();
+
+        assert_eq!(
+            coordinator.enqueue_cache_update(RenderSectionCacheUpdate::default()),
+            RenderSectionUploadPhaseReport::default()
+        );
+        let drain = coordinator.drain_budgeted(Some(16), Some(64));
+
+        assert!(drain.is_empty());
+        assert_eq!(
+            drain.phase_report,
+            RenderSectionUploadPhaseReport::default()
+        );
     }
 
     #[derive(Debug)]
