@@ -55,6 +55,21 @@ impl UiFrameState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+pub struct UiPanelRevision {
+    pub content: u64,
+    pub interaction: u64,
+}
+
+impl UiPanelRevision {
+    pub const fn new(content: u64, interaction: u64) -> Self {
+        Self {
+            content,
+            interaction,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct UiWidgetId(pub u64);
 
@@ -262,6 +277,7 @@ pub struct UiSurface {
     screen: Option<UiScreenId>,
     scale: GuiScale,
     frame_revision: u64,
+    interaction_revision: u64,
     layout_revision: u64,
     layout_dirty: bool,
     layout: UiLayout,
@@ -286,6 +302,7 @@ impl UiSurface {
             screen: None,
             scale,
             frame_revision: 0,
+            interaction_revision: 0,
             layout_revision: 0,
             layout_dirty: true,
             layout: UiLayout::new(None, 0),
@@ -313,9 +330,7 @@ impl UiSurface {
         self.screen = screen;
         self.frame_revision = self.frame_revision.wrapping_add(1);
         self.layout_dirty = true;
-        self.pointer = None;
-        self.hovered = None;
-        self.captured = None;
+        self.set_interaction_state(None, None, None);
     }
 
     pub fn set_scale(&mut self, scale: GuiScale) {
@@ -325,10 +340,11 @@ impl UiSurface {
         self.scale = scale;
         self.frame_revision = self.frame_revision.wrapping_add(1);
         self.layout_dirty = true;
-        self.pointer = self.pointer.map(|point| Point {
+        let pointer = self.pointer.map(|point| Point {
             x: point.x.clamp(0.0, scale.width),
             y: point.y.clamp(0.0, scale.height),
         });
+        self.set_interaction_state(pointer, self.hovered, self.captured);
     }
 
     pub fn set_render_state(&mut self, render_state: GameUiRenderState) {
@@ -341,19 +357,26 @@ impl UiSurface {
     }
 
     pub fn set_debug_overlay(&mut self, enabled: bool) {
+        if self.debug_overlay == enabled {
+            return;
+        }
         self.debug_overlay = enabled;
+        self.frame_revision = self.frame_revision.wrapping_add(1);
     }
 
     pub fn clear_input(&mut self) {
-        self.pointer = None;
-        self.hovered = None;
-        self.captured = None;
+        self.set_interaction_state(None, None, None);
     }
 
     pub fn frame_state(&self) -> Option<UiFrameState> {
         self.screen.map(|screen| {
             UiFrameState::new(screen, self.scale, self.render_state, self.frame_revision)
         })
+    }
+
+    pub fn panel_revision(&self) -> Option<UiPanelRevision> {
+        self.screen
+            .map(|_| UiPanelRevision::new(self.frame_revision, self.interaction_revision))
     }
 
     pub fn layout(&mut self) -> &UiLayout {
@@ -398,8 +421,8 @@ impl UiSurface {
         }
         self.set_render_state(render_state);
         self.ensure_layout();
-        self.pointer = Some(point);
-        self.hovered = self.layout.hit_test(point);
+        let hovered = self.layout.hit_test(point);
+        self.set_interaction_state(Some(point), hovered, self.captured);
         let action = self
             .captured
             .and_then(|id| self.layout.widget(id))
@@ -414,9 +437,8 @@ impl UiSurface {
         }
         self.set_render_state(render_state);
         self.ensure_layout();
-        self.pointer = Some(point);
-        self.hovered = self.layout.hit_test(point);
-        self.captured = self.hovered;
+        let hovered = self.layout.hit_test(point);
+        self.set_interaction_state(Some(point), hovered, hovered);
         true
     }
 
@@ -430,9 +452,9 @@ impl UiSurface {
         }
         self.set_render_state(render_state);
         self.ensure_layout();
-        self.pointer = Some(point);
-        self.hovered = self.layout.hit_test(point);
-        let captured = self.captured.take();
+        let hovered = self.layout.hit_test(point);
+        let captured = self.captured;
+        self.set_interaction_state(Some(point), hovered, None);
         let action = match (captured, self.hovered) {
             (Some(captured), Some(released)) if captured == released => self
                 .layout
@@ -501,15 +523,40 @@ impl UiSurface {
             .captured
             .is_some_and(|captured| self.layout.widget(captured).is_none())
         {
-            self.captured = None;
+            self.set_interaction_state(self.pointer, self.hovered, None);
         }
     }
 
     fn interaction(&self) -> Interaction {
+        let pointer = self
+            .hovered
+            .and_then(|hovered| self.layout.widget(hovered))
+            .map(|widget| Point {
+                x: widget.rect.center_x(),
+                y: widget.rect.y + widget.rect.height * 0.5,
+            });
         Interaction {
-            pointer: self.pointer,
+            pointer,
             pressed: self.captured.map(UiWidgetId::legacy_widget_id),
             focused: None,
+        }
+    }
+
+    fn set_interaction_state(
+        &mut self,
+        pointer: Option<Point>,
+        hovered: Option<UiWidgetId>,
+        captured: Option<UiWidgetId>,
+    ) {
+        let pointer_changed = self.pointer != pointer;
+        let visual_changed = self.hovered != hovered
+            || self.captured != captured
+            || (self.debug_overlay && pointer_changed);
+        self.pointer = pointer;
+        self.hovered = hovered;
+        self.captured = captured;
+        if visual_changed {
+            self.interaction_revision = self.interaction_revision.wrapping_add(1);
         }
     }
 
@@ -866,6 +913,11 @@ impl GameUiHost {
 
     pub fn committed_render_state(&self) -> GameUiRenderState {
         self.committed_render_state
+    }
+
+    pub fn v2_panel_revision(&mut self) -> Option<UiPanelRevision> {
+        self.sync_surface_screen();
+        self.surface.panel_revision()
     }
 
     pub fn render_draw_list(&mut self, state: GameUiRenderState) -> GuiDrawList {
@@ -1393,6 +1445,32 @@ mod tests {
         assert_eq!(action, None);
         assert_eq!(debug.hovered, Some(UI_V2_PAUSE_OPTIONS));
         assert_eq!(debug.captured, None);
+    }
+
+    #[test]
+    fn panel_revision_changes_for_visual_interaction_not_pointer_jitter() {
+        let mut surface = UiSurface::new();
+        surface.set_screen(Some(UiScreenId::Pause));
+        surface.set_scale(GuiScale::from_pixels(960, 540));
+        let options = surface.layout().widgets()[1].rect;
+        let initial = surface.panel_revision().expect("active surface");
+
+        surface.pointer_move(point_in(options), GameUiRenderState::default());
+        let hovered = surface.panel_revision().expect("active surface");
+        assert!(hovered.interaction > initial.interaction);
+
+        surface.pointer_move(
+            Point {
+                x: options.x + 2.0,
+                y: options.y + 2.0,
+            },
+            GameUiRenderState::default(),
+        );
+        assert_eq!(surface.panel_revision(), Some(hovered));
+
+        surface.pointer_move(Point { x: 0.0, y: 0.0 }, GameUiRenderState::default());
+        let unhovered = surface.panel_revision().expect("active surface");
+        assert!(unhovered.interaction > hovered.interaction);
     }
 
     #[test]

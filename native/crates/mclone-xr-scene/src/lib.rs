@@ -47,7 +47,7 @@ use mclone_render::chunk::{
 use mclone_render::entity::{ActorDrawResources, ActorFigureSet, ActorInstance, ActorRenderStats};
 use mclone_render::far_lod::FarTerrainLodRenderer;
 use mclone_render::fog::RenderFog;
-use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiRenderer};
+use mclone_render::gui::{WorldGuiLine, WorldGuiPanel, WorldGuiPanelRenderStats, WorldGuiRenderer};
 use mclone_render::screen_effect::{
     ScreenEffectsRenderer, ScreenFadeOverlay, UnderwaterEffectState, UnderwaterOverlay,
 };
@@ -414,6 +414,7 @@ pub struct XrTerrainFrameSummary {
     pub index_count: u32,
     pub drawn_index_count: u32,
     pub gui_command_count: usize,
+    pub ui_panel: WorldGuiPanelRenderStats,
     pub ui_active: bool,
     pub local_startup_active: bool,
     pub actor_count: usize,
@@ -607,6 +608,7 @@ pub struct XrTerrainMultiviewFrameSummary {
     pub right: TexturedSectionRenderStats,
     pub actor_count: usize,
     pub drawn_actor_count: usize,
+    pub ui_panel: WorldGuiPanelRenderStats,
     pub upload: XrTerrainUploadSummary,
 }
 
@@ -621,6 +623,7 @@ pub struct XrTerrainStereoFrameSummary {
 struct XrRenderedEye {
     summary: FullFrameRenderSummary,
     timing: XrTerrainEyeRenderTiming,
+    ui_panel: WorldGuiPanelRenderStats,
     submission: Option<wgpu::SubmissionIndex>,
 }
 
@@ -719,6 +722,7 @@ where
     menu_panel_recenter_pending: bool,
     latest_controllers: Vec<XrControllerSnapshot>,
     first_eye_summary: Option<FullFrameRenderSummary>,
+    last_ui_panel_stats: WorldGuiPanelRenderStats,
     rendered_frames: u32,
     audio: Option<AudioEngine>,
     seed_reroll_state: u64,
@@ -873,6 +877,7 @@ where
             menu_panel_recenter_pending: true,
             latest_controllers: Vec::new(),
             first_eye_summary: None,
+            last_ui_panel_stats: WorldGuiPanelRenderStats::default(),
             rendered_frames: 0,
             audio: None,
             seed_reroll_state: initial_xr_seed_reroll_state(scene.seed),
@@ -975,6 +980,7 @@ where
             menu_panel_recenter_pending: false,
             latest_controllers: Vec::new(),
             first_eye_summary: None,
+            last_ui_panel_stats: WorldGuiPanelRenderStats::default(),
             rendered_frames: 0,
             audio: None,
             seed_reroll_state: initial_xr_seed_reroll_state(scene.seed),
@@ -1589,6 +1595,9 @@ where
             timing.stereo_poll_wait_ms =
                 timing.left_eye_render.poll_wait_ms + timing.right_eye_render.poll_wait_ms;
         }
+        let mut ui_panel_stats = left_eye.ui_panel;
+        ui_panel_stats.add(right_eye.ui_panel);
+        self.last_ui_panel_stats = ui_panel_stats;
         self.record_eye0_summary(left_eye.summary);
         Ok(self.frame_summary_with_timing(timing, upload))
     }
@@ -2050,6 +2059,7 @@ where
         } else {
             ActorRenderStats::default()
         };
+        let mut ui_panel_stats = WorldGuiPanelRenderStats::default();
         if include_overlays {
             let screen_effect_start = Instant::now();
             self.screen_effects
@@ -2074,14 +2084,15 @@ where
                 timing.multiview_screen_effect_ms = elapsed_ms(screen_effect_start.elapsed());
             }
             let overlays_start = Instant::now();
-            self.render_xr_world_overlays_multiview(
-                device,
-                queue,
-                &mut encoder,
-                target,
-                render_views,
-            )
-            .context("render XR multiview world overlays")?;
+            ui_panel_stats = self
+                .render_xr_world_overlays_multiview(
+                    device,
+                    queue,
+                    &mut encoder,
+                    target,
+                    render_views,
+                )
+                .context("render XR multiview world overlays")?;
             if let Some(timing) = timing.as_deref_mut() {
                 timing.multiview_world_overlays_ms = elapsed_ms(overlays_start.elapsed());
             }
@@ -2107,6 +2118,7 @@ where
         self.render_stats.drawn_section_count = stats[0].drawn_section_count;
         self.render_stats.drawn_face_count = stats[0].drawn_face_count();
         self.render_stats.drawn_index_count = stats[0].drawn_index_count;
+        self.last_ui_panel_stats = ui_panel_stats;
         self.rendered_frames += 1;
         Ok(XrTerrainMultiviewFrameSummary {
             rendered_frames: self.rendered_frames,
@@ -2115,6 +2127,7 @@ where
             right: stats[1],
             actor_count: actor_instances.len(),
             drawn_actor_count: actor_stats.drawn_actor_count,
+            ui_panel: ui_panel_stats,
             upload,
         })
     }
@@ -2126,7 +2139,7 @@ where
         encoder: &mut wgpu::CommandEncoder,
         target: XrTerrainMultiviewTarget<'_>,
         render_views: [ChunkRenderView; 2],
-    ) -> Result<()> {
+    ) -> Result<WorldGuiPanelRenderStats> {
         let overlay_target = RenderFrameTarget::color(target.color_view, target.size);
         let selection_outline = self.current_xr_selection_outline();
         self.selection_outline
@@ -2163,28 +2176,47 @@ where
                 .context("render XR world debug lines multiview")?;
         }
         if !self.ui.is_active() {
-            return Ok(());
+            return Ok(WorldGuiPanelRenderStats::default());
         }
         let Some(panel) = self.menu_panel_pose else {
-            return Ok(());
+            return Ok(WorldGuiPanelRenderStats::default());
         };
         let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
         self.ui.set_scale(gui_scale);
         let ui_state = self.current_ui_render_state();
         let mut ui_draw = self.ui.render_draw_list(ui_state);
-        if let Some(progress) = self
+        let progress = self
             .local_startup
             .as_ref()
-            .and_then(|startup| startup.pump.progress_overlay())
-        {
-            render_loading_progress_overlay(gui_scale, &mut ui_draw, &progress);
+            .and_then(|startup| startup.pump.progress_overlay());
+        if let Some(progress) = &progress {
+            render_loading_progress_overlay(gui_scale, &mut ui_draw, progress);
         }
         render_status_overlay(gui_scale, &mut ui_draw, &self.session_status);
+        let cache_revision = if progress.is_none() && !self.session_status.visible {
+            self.ui.v2_panel_revision()
+        } else {
+            None
+        };
         let controller_ray_lines = self
             .xr_menu_controller_ray_lines(panel)
             .context("build XR menu controller ray visuals")?;
-        self.world_gui_renderer
-            .render_panel_multiview(
+        let stats = if let Some(cache_revision) = cache_revision {
+            self.world_gui_renderer.render_panel_cached_multiview(
+                device,
+                queue,
+                encoder,
+                overlay_target,
+                render_views,
+                XR_MENU_PANEL_PIXELS,
+                [gui_scale.width, gui_scale.height],
+                &ui_draw,
+                panel,
+                &controller_ray_lines,
+                cache_revision,
+            )
+        } else {
+            self.world_gui_renderer.render_panel_multiview_report(
                 device,
                 queue,
                 encoder,
@@ -2196,8 +2228,9 @@ where
                 panel,
                 &controller_ray_lines,
             )
-            .context("render XR menu panel multiview")?;
-        Ok(())
+        }
+        .context("render XR menu panel multiview")?;
+        Ok(stats)
     }
 
     pub fn set_locomotion_mode(&mut self, locomotion_mode: XrLocomotionMode) {
@@ -2437,6 +2470,7 @@ where
                 index_count: summary.index_count,
                 drawn_index_count: summary.drawn_index_count,
                 gui_command_count: summary.gui_command_count,
+                ui_panel: self.last_ui_panel_stats,
                 ui_active: self.ui.is_active(),
                 local_startup_active: self.local_startup.is_some(),
                 actor_count: summary.actor_count,
@@ -2453,6 +2487,7 @@ where
             index_count: self.render_stats.index_count,
             drawn_index_count: self.render_stats.drawn_index_count,
             gui_command_count: 0,
+            ui_panel: self.last_ui_panel_stats,
             ui_active: self.ui.is_active(),
             local_startup_active: self.local_startup.is_some(),
             actor_count: self.render_stats.actor_count,
@@ -2475,6 +2510,7 @@ where
             index_count: self.render_stats.index_count,
             drawn_index_count: summary.left.drawn_index_count,
             gui_command_count: 0,
+            ui_panel: summary.ui_panel,
             ui_active: self.ui.is_active(),
             local_startup_active: self.local_startup.is_some(),
             actor_count: summary.actor_count,
@@ -3132,14 +3168,19 @@ where
         let ui_state = self.current_ui_render_state();
         let ui_active = self.ui.is_active();
         let mut ui_draw = self.ui.render_draw_list(ui_state);
-        if let Some(progress) = self
+        let progress = self
             .local_startup
             .as_ref()
-            .and_then(|startup| startup.pump.progress_overlay())
-        {
-            render_loading_progress_overlay(gui_scale, &mut ui_draw, &progress);
+            .and_then(|startup| startup.pump.progress_overlay());
+        if let Some(progress) = &progress {
+            render_loading_progress_overlay(gui_scale, &mut ui_draw, progress);
         }
         render_status_overlay(gui_scale, &mut ui_draw, &self.session_status);
+        let cache_revision = if progress.is_none() && !self.session_status.visible {
+            self.ui.v2_panel_revision()
+        } else {
+            None
+        };
         let summary_ui_draw = ui_draw.clone();
         let selection_outline = self.current_xr_selection_outline();
         let mut render_stats = self.render_stats;
@@ -3250,13 +3291,29 @@ where
                 )
                 .with_context(|| format!("render XR world debug lines for {label} eye"))?;
         }
+        let mut ui_panel_stats = WorldGuiPanelRenderStats::default();
         if ui_active {
             if let Some(panel) = self.menu_panel_pose {
                 let controller_ray_lines = self
                     .xr_menu_controller_ray_lines(panel)
                     .context("build XR menu controller ray visuals")?;
-                self.world_gui_renderer
-                    .render_panel_in_slot(
+                ui_panel_stats = if let Some(cache_revision) = cache_revision {
+                    self.world_gui_renderer.render_panel_cached_in_slot(
+                        device,
+                        queue,
+                        &mut encoder,
+                        RenderFrameTarget::color(target.color_view, target.size),
+                        render_view,
+                        XR_MENU_PANEL_PIXELS,
+                        [gui_scale.width, gui_scale.height],
+                        &ui_draw,
+                        panel,
+                        &controller_ray_lines,
+                        view_slot,
+                        cache_revision,
+                    )
+                } else {
+                    self.world_gui_renderer.render_panel_in_slot_report(
                         device,
                         queue,
                         &mut encoder,
@@ -3269,7 +3326,8 @@ where
                         &controller_ray_lines,
                         view_slot,
                     )
-                    .with_context(|| format!("render XR menu panel for {label} eye"))?;
+                }
+                .with_context(|| format!("render XR menu panel for {label} eye"))?;
             }
         }
         let command_buffer = encoder.finish();
@@ -3308,6 +3366,7 @@ where
                 submit_ms,
                 poll_wait_ms,
             },
+            ui_panel: ui_panel_stats,
             submission,
         })
     }
@@ -4062,6 +4121,7 @@ where
         self.head_comfort.reset();
         self.latest_controllers.clear();
         self.first_eye_summary = None;
+        self.last_ui_panel_stats = WorldGuiPanelRenderStats::default();
         self.rendered_frames = 0;
         self.prefetched_live_upload = None;
     }

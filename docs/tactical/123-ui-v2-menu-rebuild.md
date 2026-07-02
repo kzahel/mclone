@@ -1,6 +1,6 @@
 # 123: UI V2 Menu Rebuild
 
-Status: active; v2 atlas-backed text landed 2026-07-02.
+Status: active; v2 XR panel cache foundation landed 2026-07-02.
 
 ## Decision
 
@@ -324,7 +324,7 @@ Validation:
 
 ### Slice G: XR Panel Texture Cache For V2
 
-Status: pending.
+Status: first pass landed 2026-07-02; headset validation still pending.
 
 Tie world-space UI panel repainting to v2 surface content revisions.
 
@@ -811,6 +811,65 @@ Known limits:
 - glyph atlas text removes command explosion, but it does not yet cache rendered
   v2 panel textures or skip unchanged UI repaints in XR
 
+## Landed XR Panel Cache Foundation Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- added `UiPanelRevision` reporting from `UiSurface`/`GameUiHost`, split into
+  content and interaction revisions
+- changed v2 widget rendering to derive hover/pressed visuals from committed
+  hovered/captured widget ids instead of raw pointer coordinates
+- kept pointer coordinate changes from dirtying panel interaction revision unless
+  the debug overlay is visible
+- added opt-in cached world-panel rendering APIs in `WorldGuiRenderer`; existing
+  `render_panel*` calls still repaint every time unless a cache revision is
+  supplied
+- cached XR v2 menu panel textures when startup progress and status overlays are
+  hidden, while leaving dynamic overlay frames on the uncached repaint path
+- kept panel compositing and controller ray-line rendering every visible frame
+- added `WorldGuiPanelRenderStats` counters for repaint, cache hit, texture
+  recreation, and composite counts
+- surfaced the counters through `XrTerrainFrameSummary`, desktop XR summary
+  prints, and Android XR perf settle logs/quiet checks
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui panel_revision -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-render panel_cache -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-render gui -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-controls-panel-cache-sanity.png --width 960 --height 540 --screenshot-ui controls --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true
+```
+
+Rendered checks:
+
+- native Controls screenshot inspected:
+  `/tmp/mclone-ui-v2-controls-panel-cache-sanity.png`
+- browser canvas smoke regenerated and inspected:
+  `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- this avoids unchanged XR panel texture repaints, but v2 draw lists are still
+  rebuilt before the renderer decides whether the texture can be reused
+- startup progress and status overlays intentionally bypass the cache until they
+  have their own revision inputs
+- texture recreation is reported separately from panel repaint; panel repaint is
+  a render pass into the cached texture, not a CPU texture upload
+- actual headset visual validation for idle Controls remains pending
+
 ## Non-Goals
 
 - Spending more effort on legacy Options hit-test fixes than needed to keep the
@@ -825,23 +884,22 @@ Known limits:
 
 ## Next Recommended Chunk
 
-Implement Slice G: XR panel texture cache for v2.
+Finish Slice G with a v2 draw-list cache and an explicit XR cache proof.
 
-Start with the smallest measurable dirty-repaint path:
+Next scope:
 
-- add explicit content revision and interaction revision reporting to
-  `GameUiHost`/`UiSurface`
-- cache the rendered v2 panel texture for world-space/XR UI and repaint it only
-  when content or relevant interaction state changes
-- keep panel compositing every visible frame, because head/controller poses still
-  move the panel in the world
-- add counters that distinguish panel repaint, texture upload, and panel
-  composite
-- prove idle Controls in XR stops repainting unchanged text-heavy content
+- cache the v2 `GuiDrawList` in `GameUiHost` by `UiPanelRevision` so idle XR
+  panels skip both draw-list rebuild and panel-texture repaint
+- add a deterministic offscreen/headless XR-style cache proof that renders the
+  same v2 Controls panel twice and asserts first-frame repaint plus second-frame
+  cache hit
+- include hover-change and controller-pose-only cases in that proof
+- include startup/status overlay invalidation cases, or keep them explicitly
+  uncached with tests
+- run headset validation once the automated proof is in place
 
-Controls should remain the headline benchmark because atlas text reduced command
-count, but an idle XR Controls panel should still avoid rebuilding and uploading
-the same panel content every frame.
+After this, Slice H can move the in-game HUD, hotbar, and block picker onto the
+same retained/cached UI surface model.
 
 ## Completed First Recommended Chunk
 

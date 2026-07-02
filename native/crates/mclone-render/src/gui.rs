@@ -4,7 +4,9 @@ use std::ops::Range;
 
 use anyhow::{Result, bail};
 use glam::{Mat4, Vec3};
-use mclone_ui::{ClipRect, Color, Font, GuiDrawCommand, GuiDrawList, GuiTextureUv, Rect};
+use mclone_ui::{
+    ClipRect, Color, Font, GuiDrawCommand, GuiDrawList, GuiTextureUv, Rect, UiPanelRevision,
+};
 
 use crate::chunk::{ChunkRenderView, ChunkTextureAtlas};
 use crate::target::RenderFrameTarget;
@@ -768,6 +770,40 @@ impl WorldGuiLine {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WorldGuiPanelRenderStats {
+    pub repaint_count: u64,
+    pub cache_hit_count: u64,
+    pub texture_recreate_count: u64,
+    pub composite_count: u64,
+}
+
+impl WorldGuiPanelRenderStats {
+    fn repaint(texture_recreated: bool) -> Self {
+        Self {
+            repaint_count: 1,
+            texture_recreate_count: texture_recreated as u64,
+            composite_count: 1,
+            ..Self::default()
+        }
+    }
+
+    fn cache_hit() -> Self {
+        Self {
+            cache_hit_count: 1,
+            composite_count: 1,
+            ..Self::default()
+        }
+    }
+
+    pub fn add(&mut self, other: Self) {
+        self.repaint_count += other.repaint_count;
+        self.cache_hit_count += other.cache_hit_count;
+        self.texture_recreate_count += other.texture_recreate_count;
+        self.composite_count += other.composite_count;
+    }
+}
+
 pub struct WorldGuiRenderer {
     gui_renderer: GuiRenderer,
     texture_bind_group_layout: wgpu::BindGroupLayout,
@@ -1013,13 +1049,116 @@ impl WorldGuiRenderer {
         lines: &[WorldGuiLine],
         view_slot: PerViewSlot,
     ) -> Result<()> {
+        self.render_panel_in_slot_report(
+            device,
+            queue,
+            encoder,
+            target,
+            render_view,
+            panel_pixels,
+            gui_size,
+            gui,
+            panel,
+            lines,
+            view_slot,
+        )
+        .map(|_| ())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_panel_in_slot_report(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_view: ChunkRenderView,
+        panel_pixels: [u32; 2],
+        gui_size: [f32; 2],
+        gui: &GuiDrawList,
+        panel: WorldGuiPanel,
+        lines: &[WorldGuiLine],
+        view_slot: PerViewSlot,
+    ) -> Result<WorldGuiPanelRenderStats> {
+        self.render_panel_in_slot_inner(
+            device,
+            queue,
+            encoder,
+            target,
+            render_view,
+            panel_pixels,
+            gui_size,
+            gui,
+            panel,
+            lines,
+            view_slot,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_panel_cached_in_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_view: ChunkRenderView,
+        panel_pixels: [u32; 2],
+        gui_size: [f32; 2],
+        gui: &GuiDrawList,
+        panel: WorldGuiPanel,
+        lines: &[WorldGuiLine],
+        view_slot: PerViewSlot,
+        cache_revision: UiPanelRevision,
+    ) -> Result<WorldGuiPanelRenderStats> {
+        self.render_panel_in_slot_inner(
+            device,
+            queue,
+            encoder,
+            target,
+            render_view,
+            panel_pixels,
+            gui_size,
+            gui,
+            panel,
+            lines,
+            view_slot,
+            Some(cache_revision),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_panel_in_slot_inner(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_view: ChunkRenderView,
+        panel_pixels: [u32; 2],
+        gui_size: [f32; 2],
+        gui: &GuiDrawList,
+        panel: WorldGuiPanel,
+        lines: &[WorldGuiLine],
+        view_slot: PerViewSlot,
+        cache_revision: Option<UiPanelRevision>,
+    ) -> Result<WorldGuiPanelRenderStats> {
         if gui.commands().is_empty() || panel.width <= 0.0 || panel.height <= 0.0 {
-            return Ok(());
+            return Ok(WorldGuiPanelRenderStats::default());
         }
         let panel_pixels = [panel_pixels[0].max(1), panel_pixels[1].max(1)];
-        self.ensure_panel_texture(device, panel_pixels, view_slot);
+        let texture_recreated = self.ensure_panel_texture(device, panel_pixels, view_slot);
         let panel_texture_index = panel_texture_index(view_slot);
-        {
+        let needs_repaint = {
+            let texture = self
+                .panel_textures
+                .get(panel_texture_index)
+                .and_then(Option::as_ref)
+                .expect("world GUI panel texture exists");
+            panel_texture_needs_repaint(texture.revision, cache_revision)
+        };
+        let mut stats = if needs_repaint {
             let texture = self
                 .panel_textures
                 .get(panel_texture_index)
@@ -1035,7 +1174,17 @@ impl WorldGuiRenderer {
                 GuiRenderOptions::clear(wgpu::Color::TRANSPARENT),
                 view_slot,
             )?;
-        }
+            if let Some(texture) = self
+                .panel_textures
+                .get_mut(panel_texture_index)
+                .and_then(Option::as_mut)
+            {
+                texture.revision = cache_revision;
+            }
+            WorldGuiPanelRenderStats::repaint(texture_recreated)
+        } else {
+            WorldGuiPanelRenderStats::cache_hit()
+        };
 
         let vertices = world_gui_panel_vertices(panel);
         let vertex_range = self.upload_world_vertices(device, queue, view_slot, &vertices);
@@ -1093,7 +1242,8 @@ impl WorldGuiRenderer {
                 0..1,
             );
         }
-        Ok(())
+        stats.composite_count = 1;
+        Ok(stats)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1110,13 +1260,110 @@ impl WorldGuiRenderer {
         panel: WorldGuiPanel,
         lines: &[WorldGuiLine],
     ) -> Result<()> {
+        self.render_panel_multiview_report(
+            device,
+            queue,
+            encoder,
+            target,
+            render_views,
+            panel_pixels,
+            gui_size,
+            gui,
+            panel,
+            lines,
+        )
+        .map(|_| ())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_panel_multiview_report(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_views: [ChunkRenderView; 2],
+        panel_pixels: [u32; 2],
+        gui_size: [f32; 2],
+        gui: &GuiDrawList,
+        panel: WorldGuiPanel,
+        lines: &[WorldGuiLine],
+    ) -> Result<WorldGuiPanelRenderStats> {
+        self.render_panel_multiview_inner(
+            device,
+            queue,
+            encoder,
+            target,
+            render_views,
+            panel_pixels,
+            gui_size,
+            gui,
+            panel,
+            lines,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_panel_cached_multiview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_views: [ChunkRenderView; 2],
+        panel_pixels: [u32; 2],
+        gui_size: [f32; 2],
+        gui: &GuiDrawList,
+        panel: WorldGuiPanel,
+        lines: &[WorldGuiLine],
+        cache_revision: UiPanelRevision,
+    ) -> Result<WorldGuiPanelRenderStats> {
+        self.render_panel_multiview_inner(
+            device,
+            queue,
+            encoder,
+            target,
+            render_views,
+            panel_pixels,
+            gui_size,
+            gui,
+            panel,
+            lines,
+            Some(cache_revision),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_panel_multiview_inner(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_views: [ChunkRenderView; 2],
+        panel_pixels: [u32; 2],
+        gui_size: [f32; 2],
+        gui: &GuiDrawList,
+        panel: WorldGuiPanel,
+        lines: &[WorldGuiLine],
+        cache_revision: Option<UiPanelRevision>,
+    ) -> Result<WorldGuiPanelRenderStats> {
         if gui.commands().is_empty() || panel.width <= 0.0 || panel.height <= 0.0 {
-            return Ok(());
+            return Ok(WorldGuiPanelRenderStats::default());
         }
         let panel_pixels = [panel_pixels[0].max(1), panel_pixels[1].max(1)];
-        self.ensure_panel_texture(device, panel_pixels, SINGLE_VIEW_SLOT);
+        let texture_recreated = self.ensure_panel_texture(device, panel_pixels, SINGLE_VIEW_SLOT);
         let panel_texture_index = panel_texture_index(SINGLE_VIEW_SLOT);
-        {
+        let needs_repaint = {
+            let texture = self
+                .panel_textures
+                .get(panel_texture_index)
+                .and_then(Option::as_ref)
+                .expect("world GUI panel texture exists");
+            panel_texture_needs_repaint(texture.revision, cache_revision)
+        };
+        let mut stats = if needs_repaint {
             let texture = self
                 .panel_textures
                 .get(panel_texture_index)
@@ -1131,7 +1378,17 @@ impl WorldGuiRenderer {
                 gui,
                 GuiRenderOptions::clear(wgpu::Color::TRANSPARENT),
             )?;
-        }
+            if let Some(texture) = self
+                .panel_textures
+                .get_mut(panel_texture_index)
+                .and_then(Option::as_mut)
+            {
+                texture.revision = cache_revision;
+            }
+            WorldGuiPanelRenderStats::repaint(texture_recreated)
+        } else {
+            WorldGuiPanelRenderStats::cache_hit()
+        };
 
         let vertices = world_gui_panel_vertices(panel);
         let vertex_range = self.upload_world_vertices(device, queue, SINGLE_VIEW_SLOT, &vertices);
@@ -1188,7 +1445,8 @@ impl WorldGuiRenderer {
                 0..1,
             );
         }
-        Ok(())
+        stats.composite_count = 1;
+        Ok(stats)
     }
 
     pub fn render_lines_in_slot(
@@ -1314,7 +1572,7 @@ impl WorldGuiRenderer {
         device: &wgpu::Device,
         size: [u32; 2],
         view_slot: PerViewSlot,
-    ) {
+    ) -> bool {
         let index = panel_texture_index(view_slot);
         if self
             .panel_textures
@@ -1322,13 +1580,14 @@ impl WorldGuiRenderer {
             .and_then(Option::as_ref)
             .is_some_and(|texture| texture.size == size)
         {
-            return;
+            return false;
         }
         self.panel_textures[index] = Some(WorldGuiTexture::new(
             device,
             &self.texture_bind_group_layout,
             size,
         ));
+        true
     }
 
     fn upload_world_vertices(
@@ -1399,6 +1658,13 @@ fn panel_texture_index(view_slot: PerViewSlot) -> usize {
         "world GUI panel texture slot {index} is outside slot count {PER_VIEW_UNIFORM_SLOT_COUNT}"
     );
     index as usize
+}
+
+fn panel_texture_needs_repaint(
+    cached: Option<UiPanelRevision>,
+    requested: Option<UiPanelRevision>,
+) -> bool {
+    requested.is_none() || cached != requested
 }
 
 struct WorldGuiMultiviewRenderer {
@@ -1617,6 +1883,7 @@ fn create_world_gui_line_pipeline(
 
 struct WorldGuiTexture {
     size: [u32; 2],
+    revision: Option<UiPanelRevision>,
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
     _sampler: wgpu::Sampler,
@@ -1666,6 +1933,7 @@ impl WorldGuiTexture {
         });
         Self {
             size,
+            revision: None,
             _texture: texture,
             view,
             _sampler: sampler,
@@ -2095,6 +2363,18 @@ mod tests {
                 .chunks_exact(4)
                 .any(|pixel| pixel == [255, 255, 255, 255])
         );
+    }
+
+    #[test]
+    fn panel_cache_repaints_only_for_missing_or_changed_revision() {
+        let first = UiPanelRevision::new(3, 5);
+        let second = UiPanelRevision::new(3, 6);
+
+        assert!(panel_texture_needs_repaint(None, None));
+        assert!(panel_texture_needs_repaint(Some(first), None));
+        assert!(panel_texture_needs_repaint(None, Some(first)));
+        assert!(!panel_texture_needs_repaint(Some(first), Some(first)));
+        assert!(panel_texture_needs_repaint(Some(first), Some(second)));
     }
 
     #[test]
