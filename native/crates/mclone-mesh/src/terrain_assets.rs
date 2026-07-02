@@ -7,7 +7,7 @@ use mclone_assets::{
     BlockStateRegistry, ResourceLocation, TextureAtlasPlan, TextureMaterial,
 };
 
-use crate::{TexturedMeshCatalog, TexturedMeshError};
+use crate::{TexturedColorMap, TexturedColorMaps, TexturedMeshCatalog, TexturedMeshError};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TexturedTerrainAssets {
@@ -126,7 +126,11 @@ pub fn load_textured_terrain_assets(
     let atlas_plan = TextureAtlasPlan::build(source, materials)?;
     let atlas_sprite_count = atlas_plan.len();
     let atlas = stitch_texture_atlas(source, &atlas_plan)?;
-    let catalog = TexturedMeshCatalog::from_assets(&registry, &blockstates, &models, &atlas_plan)?;
+    let mut catalog =
+        TexturedMeshCatalog::from_assets(&registry, &blockstates, &models, &atlas_plan)?;
+    if let Some(color_maps) = load_color_maps(source)? {
+        catalog = catalog.with_color_maps(color_maps);
+    }
 
     Ok(TexturedTerrainAssets {
         catalog,
@@ -190,6 +194,45 @@ fn insert_fluid_materials(materials: &mut BTreeSet<TextureMaterial>) {
             ResourceLocation::parse(texture).expect("fluid texture locations are valid"),
         ));
     }
+}
+
+fn load_color_maps(
+    source: &impl AssetSource,
+) -> Result<Option<TexturedColorMaps>, TexturedTerrainAssetError> {
+    let Some(grass) = load_color_map(source, "grass")? else {
+        return Ok(None);
+    };
+    let Some(foliage) = load_color_map(source, "foliage")? else {
+        return Ok(None);
+    };
+    Ok(Some(TexturedColorMaps { grass, foliage }))
+}
+
+fn load_color_map(
+    source: &impl AssetSource,
+    name: &str,
+) -> Result<Option<TexturedColorMap>, TexturedTerrainAssetError> {
+    let path = AssetPath::new(format!("assets/minecraft/textures/colormap/{name}.png"));
+    let Some(bytes) = source.read(&path)? else {
+        return Ok(None);
+    };
+    let image = image::load_from_memory(&bytes)
+        .map_err(|source| TexturedTerrainAssetError::TextureDecode {
+            path: path.clone(),
+            source,
+        })?
+        .to_rgba8();
+    let (decoded_width, decoded_height) = image.dimensions();
+    if decoded_width != TexturedColorMap::WIDTH || decoded_height != TexturedColorMap::HEIGHT {
+        return Err(TexturedTerrainAssetError::TextureDimensions {
+            path,
+            decoded_width,
+            decoded_height,
+            expected_width: TexturedColorMap::WIDTH,
+            expected_height: TexturedColorMap::HEIGHT,
+        });
+    }
+    Ok(TexturedColorMap::from_rgba(image.as_raw()))
 }
 
 fn stitch_texture_atlas(

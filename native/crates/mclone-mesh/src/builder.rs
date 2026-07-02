@@ -429,12 +429,14 @@ fn add_textured_chunk_range_to_mesh(
                     match block_model.render_layer {
                         TexturedTerrainRenderLayer::Solid => {
                             add_textured_face(
-                                mesh, world_x, world_y, world_z, biome_id, face, corners, lighting,
+                                mesh, catalog, world_x, world_y, world_z, biome_id, face, corners,
+                                lighting,
                             );
                         }
                         TexturedTerrainRenderLayer::Cutout => {
                             add_textured_face(
                                 &mut cutout_mesh,
+                                catalog,
                                 world_x,
                                 world_y,
                                 world_z,
@@ -447,6 +449,7 @@ fn add_textured_chunk_range_to_mesh(
                         TexturedTerrainRenderLayer::Translucent => {
                             add_textured_face(
                                 &mut translucent_mesh,
+                                catalog,
                                 world_x,
                                 world_y,
                                 world_z,
@@ -606,6 +609,7 @@ fn add_face(
 
 fn add_textured_face(
     mesh: &mut TexturedVisibleChunkMesh,
+    catalog: &TexturedMeshCatalog,
     world_x: i32,
     world_y: i32,
     world_z: i32,
@@ -626,6 +630,7 @@ fn add_textured_face(
             ],
             uv: uvs[index],
             color: textured_face_color(
+                catalog,
                 face,
                 biome_id,
                 world_x,
@@ -1208,13 +1213,14 @@ fn textured_face_uvs(face: &TexturedBlockFace) -> [[f32; 2]; 4] {
 }
 
 fn textured_face_color(
+    catalog: &TexturedMeshCatalog,
     face: &TexturedBlockFace,
     biome_id: i32,
     world_x: i32,
     world_z: i32,
     brightness: f32,
 ) -> [f32; 4] {
-    let tint = block_tint(face.tint, biome_id, world_x, world_z);
+    let tint = block_tint(catalog, face.tint, biome_id, world_x, world_z);
     [
         tint[0] * brightness,
         tint[1] * brightness,
@@ -1223,12 +1229,18 @@ fn textured_face_color(
     ]
 }
 
-fn block_tint(tint: TexturedBlockTint, biome_id: i32, world_x: i32, world_z: i32) -> [f32; 3] {
+fn block_tint(
+    catalog: &TexturedMeshCatalog,
+    tint: TexturedBlockTint,
+    biome_id: i32,
+    world_x: i32,
+    world_z: i32,
+) -> [f32; 3] {
     let visual = biome_visual(biome_id);
     match tint {
         TexturedBlockTint::None => [1.0, 1.0, 1.0],
-        TexturedBlockTint::Grass => rgb8(grass_color(visual, world_x, world_z)),
-        TexturedBlockTint::Foliage => rgb8(visual.foliage_color),
+        TexturedBlockTint::Grass => rgb8(grass_color(catalog, visual, world_x, world_z)),
+        TexturedBlockTint::Foliage => rgb8(foliage_color(catalog, visual)),
         TexturedBlockTint::BirchFoliage => rgb8(0x80_a7_55),
         TexturedBlockTint::EvergreenFoliage => rgb8(0x61_99_61),
     }
@@ -1236,8 +1248,12 @@ fn block_tint(tint: TexturedBlockTint, biome_id: i32, world_x: i32, world_z: i32
 
 #[derive(Clone, Copy, Debug)]
 struct BiomeVisual {
+    temperature: f32,
+    downfall: f32,
     grass_color: u32,
+    grass_color_override: Option<u32>,
     foliage_color: u32,
+    foliage_color_override: Option<u32>,
     water_color: u32,
     grass_modifier: GrassColorModifier,
 }
@@ -1251,78 +1267,128 @@ enum GrassColorModifier {
 
 fn biome_visual(biome_id: i32) -> BiomeVisual {
     let plains = BiomeVisual {
+        temperature: 0.8,
+        downfall: 0.4,
         grass_color: 0x91_bd_59,
+        grass_color_override: None,
         foliage_color: 0x77_ab_2f,
+        foliage_color_override: None,
         water_color: 0x3f_76_e4,
         grass_modifier: GrassColorModifier::None,
     };
     match biome_id {
         0 | 24 | 44 | 45 | 46 | 47 | 48 | 49 | 50 => BiomeVisual {
+            temperature: 0.5,
+            downfall: 0.5,
             grass_color: 0x8e_b9_71,
             foliage_color: 0x71_a7_4d,
             ..plains
         },
         1 | 7 | 16 | 129 => plains,
         2 | 17 | 130 => BiomeVisual {
+            temperature: 2.0,
+            downfall: 0.0,
             grass_color: 0xb5_b7_55,
             foliage_color: 0xae_b4_55,
             ..plains
         },
         3 | 13 | 20 | 25 | 26 | 34 | 131 | 162 => BiomeVisual {
+            temperature: 0.2,
+            downfall: 0.3,
             grass_color: 0x8a_b6_89,
             foliage_color: 0x6f_a0_78,
             ..plains
         },
         4 | 18 | 132 => BiomeVisual {
+            temperature: 0.7,
+            downfall: 0.8,
             grass_color: 0x79_c0_5a,
             foliage_color: 0x59_9b_35,
             ..plains
         },
-        5 | 19 | 30 | 31 | 32 | 33 | 133 | 158 | 160 | 161 => BiomeVisual {
+        5 | 19 | 133 => BiomeVisual {
+            temperature: 0.25,
+            downfall: 0.8,
+            grass_color: 0x86_b7_83,
+            foliage_color: 0x68_9b_68,
+            ..plains
+        },
+        30 | 31 | 158 => BiomeVisual {
+            temperature: -0.5,
+            downfall: 0.4,
+            grass_color: 0x86_b7_83,
+            foliage_color: 0x68_9b_68,
+            ..plains
+        },
+        32 | 33 | 160 | 161 => BiomeVisual {
+            temperature: 0.3,
+            downfall: 0.8,
             grass_color: 0x86_b7_83,
             foliage_color: 0x68_9b_68,
             ..plains
         },
         6 | 134 => BiomeVisual {
+            temperature: 0.8,
+            downfall: 0.9,
             grass_color: 0x6a_70_39,
+            grass_color_override: None,
             foliage_color: 0x6a_70_39,
+            foliage_color_override: Some(0x6a_70_39),
             water_color: 0x61_7b_64,
             grass_modifier: GrassColorModifier::Swamp,
+            ..plains
         },
         10 | 11 | 12 | 140 => BiomeVisual {
+            temperature: 0.0,
+            downfall: 0.5,
             grass_color: 0x80_b4_97,
             foliage_color: 0x60_93_80,
+            water_color: 0x39_38_c9,
             ..plains
         },
         14 | 15 => BiomeVisual {
+            temperature: 0.9,
+            downfall: 1.0,
             grass_color: 0x55_c9_3f,
             foliage_color: 0x2f_b2_33,
             ..plains
         },
         21 | 22 | 23 | 149 | 151 | 168 | 169 => BiomeVisual {
+            temperature: 0.95,
+            downfall: 0.9,
             grass_color: 0x59_c9_3c,
             foliage_color: 0x30_bb_0b,
             ..plains
         },
         27 | 28 | 155 | 156 => BiomeVisual {
+            temperature: 0.6,
+            downfall: 0.6,
             grass_color: 0x88_bb_67,
             foliage_color: 0x80_a7_55,
             ..plains
         },
         29 | 157 => BiomeVisual {
+            temperature: 0.7,
+            downfall: 0.8,
             grass_color: 0x79_c0_5a,
             foliage_color: 0x59_9b_35,
             grass_modifier: GrassColorModifier::DarkForest,
             ..plains
         },
         35 | 36 | 163 | 164 => BiomeVisual {
+            temperature: 1.2,
+            downfall: 0.0,
             grass_color: 0xb5_b7_55,
             foliage_color: 0xae_b4_55,
             ..plains
         },
         37 | 38 | 39 | 165 | 166 | 167 => BiomeVisual {
+            temperature: 2.0,
+            downfall: 0.0,
             grass_color: 0x90_81_4d,
+            grass_color_override: Some(0x90_81_4d),
             foliage_color: 0x9e_81_4d,
+            foliage_color_override: Some(0x9e_81_4d),
             water_color: 0x3f_76_e4,
             ..plains
         },
@@ -1330,10 +1396,20 @@ fn biome_visual(biome_id: i32) -> BiomeVisual {
     }
 }
 
-fn grass_color(visual: BiomeVisual, world_x: i32, world_z: i32) -> u32 {
+fn grass_color(
+    catalog: &TexturedMeshCatalog,
+    visual: BiomeVisual,
+    world_x: i32,
+    world_z: i32,
+) -> u32 {
+    let base_color = visual.grass_color_override.unwrap_or_else(|| {
+        catalog
+            .grass_color_from_colormap(visual.temperature, visual.downfall)
+            .unwrap_or(visual.grass_color)
+    });
     match visual.grass_modifier {
-        GrassColorModifier::None => visual.grass_color,
-        GrassColorModifier::DarkForest => ((visual.grass_color & 0xfe_fe_fe) + 0x28_31_4a) >> 1,
+        GrassColorModifier::None => base_color,
+        GrassColorModifier::DarkForest => ((base_color & 0xfe_fe_fe) + 0x28_31_4a) >> 1,
         GrassColorModifier::Swamp => {
             if coarse_position_noise(world_x, world_z) < 0 {
                 0x4c_76_3c
@@ -1342,6 +1418,14 @@ fn grass_color(visual: BiomeVisual, world_x: i32, world_z: i32) -> u32 {
             }
         }
     }
+}
+
+fn foliage_color(catalog: &TexturedMeshCatalog, visual: BiomeVisual) -> u32 {
+    visual.foliage_color_override.unwrap_or_else(|| {
+        catalog
+            .foliage_color_from_colormap(visual.temperature, visual.downfall)
+            .unwrap_or(visual.foliage_color)
+    })
 }
 
 fn coarse_position_noise(world_x: i32, world_z: i32) -> i32 {

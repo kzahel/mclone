@@ -19,8 +19,9 @@ pub use builder::{
     build_textured_visible_chunk_mesh, build_visible_chunk_area_mesh, build_visible_chunk_mesh,
 };
 pub use catalog::{
-    AtlasSpriteUv, TexturedBlockFace, TexturedBlockModel, TexturedFluidKind, TexturedFluidModel,
-    TexturedMeshCatalog, TexturedMeshError, TexturedTerrainRenderLayer,
+    AtlasSpriteUv, TexturedBlockFace, TexturedBlockModel, TexturedColorMap, TexturedColorMaps,
+    TexturedFluidKind, TexturedFluidModel, TexturedMeshCatalog, TexturedMeshError,
+    TexturedTerrainRenderLayer,
 };
 pub use data::{
     ChunkVertex, RenderSectionKey, SectionMeshStats, TexturedChunkVertex,

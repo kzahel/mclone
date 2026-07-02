@@ -200,9 +200,46 @@ pub struct TexturedFluidModel {
     pub flow: AtlasSpriteUv,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TexturedColorMap {
+    pixels: Vec<u32>,
+}
+
+impl TexturedColorMap {
+    pub const WIDTH: u32 = 256;
+    pub const HEIGHT: u32 = 256;
+    const PIXEL_COUNT: usize = (Self::WIDTH * Self::HEIGHT) as usize;
+
+    pub fn from_rgba(rgba: &[u8]) -> Option<Self> {
+        if rgba.len() != Self::PIXEL_COUNT * 4 {
+            return None;
+        }
+        let pixels = rgba
+            .chunks_exact(4)
+            .map(|pixel| ((pixel[0] as u32) << 16) | ((pixel[1] as u32) << 8) | pixel[2] as u32)
+            .collect();
+        Some(Self { pixels })
+    }
+
+    pub(crate) fn sample(&self, temperature: f32, downfall: f32) -> u32 {
+        let temperature = temperature.clamp(0.0, 1.0) as f64;
+        let downfall = (downfall.clamp(0.0, 1.0) as f64) * temperature;
+        let x = ((1.0 - temperature) * 255.0) as usize;
+        let y = ((1.0 - downfall) * 255.0) as usize;
+        self.pixels[y * Self::WIDTH as usize + x]
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TexturedColorMaps {
+    pub grass: TexturedColorMap,
+    pub foliage: TexturedColorMap,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TexturedMeshCatalog {
     blocks: BTreeMap<BlockStateId, TexturedBlockModel>,
+    color_maps: Option<TexturedColorMaps>,
 }
 
 impl TexturedMeshCatalog {
@@ -283,7 +320,15 @@ impl TexturedMeshCatalog {
             );
         }
 
-        Ok(Self { blocks })
+        Ok(Self {
+            blocks,
+            color_maps: None,
+        })
+    }
+
+    pub fn with_color_maps(mut self, color_maps: TexturedColorMaps) -> Self {
+        self.color_maps = Some(color_maps);
+        self
     }
 
     pub fn get(&self, state_id: BlockStateId) -> Option<&TexturedBlockModel> {
@@ -340,6 +385,22 @@ impl TexturedMeshCatalog {
 
     pub(crate) fn fluid(&self, state_id: BlockStateId) -> Option<TexturedFluidModel> {
         self.blocks.get(&state_id).and_then(|model| model.fluid)
+    }
+
+    pub(crate) fn grass_color_from_colormap(&self, temperature: f32, downfall: f32) -> Option<u32> {
+        self.color_maps
+            .as_ref()
+            .map(|maps| maps.grass.sample(temperature, downfall))
+    }
+
+    pub(crate) fn foliage_color_from_colormap(
+        &self,
+        temperature: f32,
+        downfall: f32,
+    ) -> Option<u32> {
+        self.color_maps
+            .as_ref()
+            .map(|maps| maps.foliage.sample(temperature, downfall))
     }
 }
 
@@ -731,6 +792,21 @@ fn face_is_full_cube_side(face: &TexturedBlockFace) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn color_map_samples_java_temperature_downfall_index() {
+        let mut rgba = vec![0; TexturedColorMap::PIXEL_COUNT * 4];
+        let index = 173 * TexturedColorMap::WIDTH as usize + 50;
+        rgba[index * 4..index * 4 + 4].copy_from_slice(&[1, 2, 3, 255]);
+        let map = TexturedColorMap::from_rgba(&rgba).unwrap();
+
+        assert_eq!(map.sample(0.8, 0.4), 0x01_02_03);
+    }
+
+    #[test]
+    fn color_map_rejects_non_vanilla_dimensions() {
+        assert!(TexturedColorMap::from_rgba(&[0; 4]).is_none());
+    }
 
     #[test]
     fn terrain_render_layer_keeps_alpha_test_full_cube_exceptions_out_of_solid() {
