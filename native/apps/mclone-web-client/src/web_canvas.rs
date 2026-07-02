@@ -67,10 +67,10 @@ use mclone_server::ServerRunnerKind;
 use mclone_ui::{
     DebugOverlay, FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts,
     FlatDebugMeshCounts, FlatDebugOverlay, FlatDebugRenderOptions, FlatDebugRunner,
-    FlatDebugTarget, FlatDebugView, FlatHotbarOverlay, FlatHud, GameFramePacingMode,
-    GameHelpParent, GameMovementMode, GameOptionsParent, GamePlayerModel, GameScreen,
-    GameTouchSettings, GameUiAction, GameUiHost, GameUiRenderState, GuiKey, GuiScale, Point,
-    StatusOverlay, TouchJoystickOverlay, TouchOverlay, render_debug_overlay_at,
+    FlatDebugTarget, FlatDebugView, FlatHotbarOverlay, FlatHud, FlatHudDebugOverlay,
+    GameFramePacingMode, GameHelpParent, GameMovementMode, GameOptionsParent, GamePlayerModel,
+    GameScreen, GameTouchSettings, GameUiAction, GameUiHost, GameUiRenderState, GuiKey, GuiScale,
+    Point, StatusOverlay, TouchJoystickOverlay, TouchOverlay,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -4348,9 +4348,9 @@ impl WebChunkRenderSession {
             render_stats
         };
         let mut ui_draw = self.ui.render_draw_list(ui_render_state);
-        if !ui_active {
-            if self.debug_overlay_visible {
-                let overlay = self.debug_overlay(
+        let debug_overlay = (!ui_active && self.debug_overlay_visible).then(|| {
+            FlatHudDebugOverlay::at(
+                self.debug_overlay(
                     center,
                     radius_chunks,
                     day_time,
@@ -4359,15 +4359,10 @@ impl WebChunkRenderSession {
                     actor_instances.len(),
                     actor_stats,
                     &runner_diagnostics,
-                );
-                render_debug_overlay_at(
-                    self.ui.scale(),
-                    &mut ui_draw,
-                    &overlay,
-                    Point { x: 4.0, y: 52.0 },
-                );
-            }
-        }
+                ),
+                Point { x: 4.0, y: 52.0 },
+            )
+        });
         let mut hud = FlatHud::new(self.resolved_flat_input_for_hud());
         hud.world_hud_visible = !ui_active;
         hud.crosshair_visible = self.crosshair_visible && !ui_active;
@@ -4381,6 +4376,7 @@ impl WebChunkRenderSession {
         touch.hotbar_icons = hotbar_icons;
         hud.touch = touch;
         hud.status = self.effective_status_overlay();
+        hud.debug = debug_overlay;
         let flat_hud_retained_cache =
             self.ui
                 .append_flat_hud_draw(self.ui.scale(), &mut ui_draw, &hud);

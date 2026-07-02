@@ -58,7 +58,7 @@ use crate::frame_pacing::{FramePacingMode, FramePacingUiState, FrameTimingStats}
 use crate::scene_runtime::{
     WindowSceneRuntime, WindowSceneStartupPump, poll_window_runtime_until_idle,
 };
-use crate::ui::{DebugPaneStats, render_debug_pane};
+use crate::ui::DebugPaneStats;
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 use mclone_render_session::{
     ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
@@ -1904,17 +1904,41 @@ impl FlatClientDriver {
         }
     }
 
-    pub(crate) fn render_full_frame<BuildGuiDraw>(
+    pub(crate) fn render_full_frame_with_ui(
         &mut self,
         frame: mclone_render::target::RenderFrameContext<'_>,
         fallback_render_distance: i32,
-        ui_active: bool,
-        gui_state: FullFrameGui,
-        build_gui_draw: BuildGuiDraw,
-    ) -> anyhow::Result<FullFrameRenderSummary>
-    where
-        BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
-    {
+        ui_frame: FlatClientUiFrame,
+    ) -> anyhow::Result<FullFrameRenderSummary> {
+        let ui_active = self.ui.is_active();
+        let ui_covers_world = self.ui.covers_world();
+        let gui_scale = self.ui.scale();
+        let debug_stats = (!ui_active).then_some(ui_frame.debug.stats).flatten();
+        let debug_view_readiness_overlay = debug_stats
+            .is_some()
+            .then_some(ui_frame.debug.view_readiness_overlay)
+            .flatten();
+        let mut hud = ui_frame.hud;
+        let loading_progress_overlay = ui_frame.loading_progress_overlay;
+        let gui_active = ui_active
+            || debug_stats.is_some()
+            || hud
+                .as_ref()
+                .is_some_and(mclone_ui::FlatHud::has_visible_commands)
+            || loading_progress_overlay.is_some()
+            || debug_view_readiness_overlay.is_some();
+        let mut ui_render_state = game_ui_render_state(ui_frame.render_options);
+        ui_render_state.block_palette = ui_frame.block_palette;
+        let mut base_ui_draw = self.ui.render_draw_list(ui_render_state);
+        if let Some(progress) = loading_progress_overlay.as_ref() {
+            render_loading_progress_overlay(gui_scale, &mut base_ui_draw, progress);
+        }
+        let gui_state = FullFrameGui::new(
+            gui_active,
+            ui_covers_world || loading_progress_overlay.is_some(),
+            [gui_scale.width, gui_scale.height],
+        );
+
         let frame_inputs = self.prepare_frame_inputs(fallback_render_distance, ui_active);
         let mut world_debug_lines = engine_debug_world_lines(
             &self.camera,
@@ -1936,7 +1960,9 @@ impl FlatClientDriver {
             .draw_mut()
             .set_traversal_ready_sections(&frame_inputs.traversal_ready_sections);
         let mut render_stats = frame_inputs.render_stats;
-        let summary = render_resources.render_full_frame(
+        let mut flat_hud_retained_cache = UiDrawCacheStats::default();
+        let ui = &mut self.ui;
+        let mut summary = render_resources.render_full_frame(
             frame,
             frame_inputs.camera,
             &frame_inputs.actor_instances,
@@ -1949,68 +1975,29 @@ impl FlatClientDriver {
             &world_debug_lines,
             far_lod_mesh,
             gui_state,
-            build_gui_draw,
+            |stats| {
+                if let Some(mut debug_stats) = debug_stats {
+                    debug_stats.render = *stats;
+                    let debug = debug_stats.hud_debug_overlay();
+                    if let Some(hud) = hud.as_mut() {
+                        hud.debug = Some(debug);
+                    } else {
+                        hud = Some(FlatHud::debug_only(debug));
+                    }
+                }
+                let mut ui_draw = base_ui_draw;
+                if let Some(hud) = hud.as_ref() {
+                    flat_hud_retained_cache = ui.append_flat_hud_draw(gui_scale, &mut ui_draw, hud);
+                }
+                render_flat_client_gui_draw(
+                    ui_draw,
+                    gui_scale,
+                    debug_view_readiness_overlay.as_ref(),
+                )
+            },
             &mut render_stats,
         )?;
         self.render_stats = render_stats;
-        Ok(summary)
-    }
-
-    pub(crate) fn render_full_frame_with_ui(
-        &mut self,
-        frame: mclone_render::target::RenderFrameContext<'_>,
-        fallback_render_distance: i32,
-        ui_frame: FlatClientUiFrame,
-    ) -> anyhow::Result<FullFrameRenderSummary> {
-        let ui_active = self.ui.is_active();
-        let ui_covers_world = self.ui.covers_world();
-        let gui_scale = self.ui.scale();
-        let debug_stats = (!ui_active).then_some(ui_frame.debug.stats).flatten();
-        let debug_view_readiness_overlay = debug_stats
-            .is_some()
-            .then_some(ui_frame.debug.view_readiness_overlay)
-            .flatten();
-        let hud = ui_frame.hud;
-        let loading_progress_overlay = ui_frame.loading_progress_overlay;
-        let gui_active = ui_active
-            || debug_stats.is_some()
-            || hud
-                .as_ref()
-                .is_some_and(mclone_ui::FlatHud::has_visible_commands)
-            || loading_progress_overlay.is_some()
-            || debug_view_readiness_overlay.is_some();
-        let mut ui_render_state = game_ui_render_state(ui_frame.render_options);
-        ui_render_state.block_palette = ui_frame.block_palette;
-        let mut base_ui_draw = self.ui.render_draw_list(ui_render_state);
-        if let Some(progress) = loading_progress_overlay.as_ref() {
-            render_loading_progress_overlay(gui_scale, &mut base_ui_draw, progress);
-        }
-        let mut flat_hud_retained_cache = UiDrawCacheStats::default();
-        if let Some(hud) = hud.as_ref() {
-            flat_hud_retained_cache =
-                self.ui
-                    .append_flat_hud_draw(gui_scale, &mut base_ui_draw, hud);
-        }
-        let gui_state = FullFrameGui::new(
-            gui_active,
-            ui_covers_world || loading_progress_overlay.is_some(),
-            [gui_scale.width, gui_scale.height],
-        );
-        let mut summary = self.render_full_frame(
-            frame,
-            fallback_render_distance,
-            ui_active,
-            gui_state,
-            |stats| {
-                render_flat_client_gui_draw(
-                    base_ui_draw,
-                    gui_scale,
-                    debug_stats,
-                    debug_view_readiness_overlay.as_ref(),
-                    stats,
-                )
-            },
-        )?;
         summary.flat_hud_retained_cache = flat_hud_retained_cache;
         Ok(summary)
     }
@@ -2258,14 +2245,8 @@ fn session_start_request_for_scene(scene: &SceneOptions) -> SessionStartRequest 
 fn render_flat_client_gui_draw(
     mut ui_draw: GuiDrawList,
     gui_scale: GuiScale,
-    debug_stats: Option<DebugPaneStats>,
     debug_view_readiness_overlay: Option<&LoadingProgressOverlay>,
-    stats: &RenderStreamStats,
 ) -> GuiDrawList {
-    if let Some(mut debug_stats) = debug_stats {
-        debug_stats.render = *stats;
-        render_debug_pane(gui_scale, &mut ui_draw, &debug_stats);
-    }
     if let Some(progress) = debug_view_readiness_overlay {
         render_loading_progress_panel_at(
             gui_scale,

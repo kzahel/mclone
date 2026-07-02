@@ -1875,6 +1875,7 @@ pub struct FlatHud {
     pub gamepad: GamepadHudOverlay,
     pub touch: TouchOverlay,
     pub status: StatusOverlay,
+    pub debug: Option<FlatHudDebugOverlay>,
 }
 
 impl FlatHud {
@@ -1887,7 +1888,23 @@ impl FlatHud {
             gamepad: GamepadHudOverlay::visible(),
             touch: TouchOverlay::hidden(),
             status: StatusOverlay::hidden(),
+            debug: None,
         }
+    }
+
+    pub fn debug_only(debug: FlatHudDebugOverlay) -> Self {
+        let mut hud = Self::new(ResolvedFlatInput {
+            preferred_prompt: None,
+            touch_controls_visible: false,
+            accepts_keyboard_mouse: false,
+            accepts_touch: false,
+            accepts_gamepad: false,
+            accepts_xr_controller: false,
+        });
+        hud.world_hud_visible = false;
+        hud.crosshair_visible = false;
+        hud.debug = Some(debug);
+        hud
     }
 
     pub fn has_visible_commands(&self) -> bool {
@@ -1896,6 +1913,10 @@ impl FlatHud {
             || self.effective_gamepad_overlay().visible
             || self.effective_touch_overlay().visible
             || self.status.visible
+            || self
+                .debug
+                .as_ref()
+                .is_some_and(FlatHudDebugOverlay::visible)
     }
 
     pub(crate) fn should_render_flat_hotbar(&self) -> bool {
@@ -1918,11 +1939,32 @@ impl FlatHud {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlatHudDebugOverlay {
+    pub overlay: DebugOverlay,
+    pub origin: Point,
+}
+
+impl FlatHudDebugOverlay {
+    pub fn new(overlay: DebugOverlay) -> Self {
+        Self::at(overlay, Point { x: 4.0, y: 4.0 })
+    }
+
+    pub fn at(overlay: DebugOverlay, origin: Point) -> Self {
+        Self { overlay, origin }
+    }
+
+    pub fn visible(&self) -> bool {
+        !self.overlay.is_empty()
+    }
+}
+
 pub fn render_flat_hud(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
     render_flat_hud_retained_layer(scale, draw, hud);
     render_flat_hud_hotbar_layer(scale, draw, hud);
     render_flat_hud_status_layer(scale, draw, hud);
     render_flat_hud_prompt_layer(scale, draw, hud);
+    render_flat_hud_debug_layer(scale, draw, hud);
     render_flat_hud_transient_layers(scale, draw, hud);
 }
 
@@ -1957,6 +1999,13 @@ pub(crate) fn render_flat_hud_prompt_layer(scale: GuiScale, draw: &mut GuiDrawLi
     let gamepad = hud.effective_gamepad_overlay();
     render_gamepad_hud(scale, draw, gamepad, hud.should_render_flat_hotbar());
     render_touch_overlay(scale, draw, &touch);
+}
+
+pub(crate) fn render_flat_hud_debug_layer(scale: GuiScale, draw: &mut GuiDrawList, hud: &FlatHud) {
+    let Some(debug) = hud.debug.as_ref().filter(|debug| debug.visible()) else {
+        return;
+    };
+    render_debug_overlay_at(scale, draw, &debug.overlay, debug.origin);
 }
 
 pub(crate) fn render_flat_hud_transient_layers(

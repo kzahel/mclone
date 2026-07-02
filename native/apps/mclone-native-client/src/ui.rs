@@ -4,8 +4,8 @@ use mclone_app_runtime::frame_render::RenderStreamStats;
 use mclone_core::ChunkPos;
 use mclone_ui::{
     FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts, FlatDebugOverlay,
-    FlatDebugRenderOptions, FlatDebugRunner, FlatDebugView, GameHelpParent, GameOptionsParent,
-    GameScreen, GuiDrawList, GuiScale, render_debug_overlay,
+    FlatDebugRenderOptions, FlatDebugRunner, FlatDebugView, FlatHudDebugOverlay, GameHelpParent,
+    GameOptionsParent, GameScreen,
 };
 
 use crate::cli::HeadlessScreenshotUi;
@@ -181,6 +181,10 @@ impl DebugPaneStats {
         lines.extend(self.overlay().lines());
         lines
     }
+
+    pub(crate) fn hud_debug_overlay(self) -> FlatHudDebugOverlay {
+        FlatHudDebugOverlay::new(self.overlay().to_debug_overlay())
+    }
 }
 
 impl HeadlessScreenshotUi {
@@ -206,11 +210,6 @@ impl HeadlessScreenshotUi {
             }),
         }
     }
-}
-
-pub(crate) fn render_debug_pane(scale: GuiScale, draw: &mut GuiDrawList, stats: &DebugPaneStats) {
-    let overlay = stats.to_owned().overlay().to_debug_overlay();
-    render_debug_overlay(scale, draw, &overlay);
 }
 
 #[cfg(test)]
@@ -327,8 +326,8 @@ mod tests {
         assert!(lines.iter().any(|line| line == "BUDGET 8.3MS FRAME 16.7MS"));
         assert!(lines.iter().any(|line| line == "OVER 3/1/0 WORST 33.4"));
 
-        let mut draw = GuiDrawList::new();
-        render_debug_pane(GuiScale::from_pixels(960, 540), &mut draw, &stats);
-        assert!(!draw.commands().is_empty());
+        let hud_debug = stats.hud_debug_overlay();
+        assert!(hud_debug.visible());
+        assert_eq!(hud_debug.overlay.title, "DEBUG");
     }
 }

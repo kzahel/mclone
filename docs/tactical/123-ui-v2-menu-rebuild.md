@@ -1,8 +1,8 @@
 # 123: UI V2 Menu Rebuild
 
 Status: active; menu render/input routes and the old `GameUi` state wrapper have
-been removed as of 2026-07-02. Remaining work is HUD debug/notification-layer
-retention.
+been removed as of 2026-07-02. Remaining work is selected-item notification
+modeling plus optional loading/view-readiness retained panels.
 
 ## Decision
 
@@ -351,8 +351,9 @@ Validation:
 
 Status: flat crosshair/hotbar frame, hotbar selection/content retention, status
 overlay retention, touch/gamepad prompt retention, block picker v2 retained
-grid, and runtime cache reporting landed 2026-07-02; debug overlays and a
-future selected-item notification/fade model still need retained ownership.
+grid, flat debug overlay retention, and runtime cache reporting landed
+2026-07-02; a future selected-item notification/fade model still needs retained
+ownership.
 
 Move in-game UI surfaces to v2 retained layers:
 
@@ -1489,21 +1490,67 @@ Rendered checks:
 Known limits:
 
 - flat debug overlays are still composed by app-level overlay paths outside
-  `FlatHud`
+  `FlatHud` before the next debug-retention chunk
 - selected item name fade is not currently modeled as a flat HUD retained layer;
   add it only when we define the actual notification/state contract
 
+## Landed HUD Debug Retained-Layer Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- added `FlatHudDebugOverlay` and an optional retained debug overlay field on
+  `FlatHud`
+- added a host-owned retained debug HUD layer keyed by GUI scale, origin, title,
+  and lines
+- moved desktop flat debug pane rendering behind `FlatHud`, while preserving
+  current-frame render stats by assembling the HUD inside the final-stats GUI
+  callback
+- moved browser debug overlay rendering behind the same `FlatHud` debug field,
+  preserving the existing web debug pane origin
+- added a debug-only HUD constructor so offscreen captures can render the debug
+  pane even when normal HUD is disabled
+- kept Android flat behavior unchanged with no debug overlay set
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene
+cargo check --manifest-path native/Cargo.toml --workspace
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-debug-hud-layer.png --width 960 --height 540 --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true --screenshot-hud false --screenshot-debug-pane true
+```
+
+Rendered checks:
+
+- native debug HUD screenshot generated and inspected:
+  `/tmp/mclone-ui-v2-debug-hud-layer.png`
+- web/WASM smoke generated screenshots:
+  `/tmp/mclone-native-web-smoke.png` and `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- loading progress overlays and the debug view-readiness mini-panel still render
+  through app-level immediate overlay calls
+- selected item name fade is not currently modeled as a flat HUD retained layer;
+  add it only when the gameplay/client side has a real event/state source
+
 ## Next Recommended Chunk
 
-Return to the remaining HUD overlay-model work.
+Return to the remaining HUD notification/modeling work.
 
 Next scope:
 
-- define a retained debug/notification overlay contract shared by desktop, web,
-  and Android flat HUD composition
-- move flat debug overlays behind that contract
-- add selected-item notification/fade only if the gameplay/client side has a
-  real event/state source for it
+- define the selected-item notification/fade state source if we actually want
+  that feature now
+- otherwise close this tactical and track loading/view-readiness retained-panel
+  work separately as lower-priority HUD polish
 
 ## Completed First Recommended Chunk
 
