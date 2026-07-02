@@ -1,8 +1,8 @@
 # 130: Quest Thread Scheduling And Streaming Tail Attribution
 
 Status: active — E2a/E2c and E8 landed; trace processor readout available;
-actor spike confirmed by opt-in skip probe; next target is camera-command
-send tails plus terrain poll-wait attribution
+actor spike confirmed by opt-in skip probe; camera-command tail split shows
+immediate server-update drain/apply dirty marking, not queue send
 Workstream: Android XR / Quest frame pacing, shared native runtime threading,
 terrain streaming tails
 
@@ -427,7 +427,7 @@ Interpretation:
   as a gameplay default, but it is useful for quickly separating actor-pass
   spikes from terrain/streaming/frame-pacing spikes.
 
-Current next target:
+Follow-up target, completed in the next section:
 
 - Add a narrow timer around the actual camera/player-pose command send, then
   check whether the 5-8 ms `commit_server_command_ms` tail is a queue send,
@@ -437,6 +437,90 @@ Current next target:
   add Perfetto frame slices around the Android XR frame and terrain final
   submit/poll wait so scheduler state can be aligned to the logged frame
   indices.
+
+## 2026-07-02 Follow-Up: Locomotion Command Split
+
+Implementation:
+
+- Added `GameplayCommandTiming` in `mclone-app-runtime`.
+- The local integrated runtime now exposes
+  `send_gameplay_command_timed`, splitting the pose-command exchange into
+  server-runner command send, immediate update drain, update apply, dirty
+  marking, client update application, and update counts.
+- The existing `send_gameplay_command` behavior is unchanged; it delegates to
+  the timed variant and returns the same boolean.
+- Android XR perf logging now emits
+  `MCLONE_ANDROID_XR_PERF_LOCOMOTION_COMMAND` and
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_LOCOMOTION_COMMAND`.
+
+Validation:
+
+- `rustfmt --edition 2024 native/crates/mclone-app-runtime/src/lib.rs native/crates/mclone-app-runtime/src/local_single_view.rs native/crates/mclone-xr-scene/src/lib.rs native/apps/mclone-android-xr-client/src/lib.rs`
+  passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-app-runtime`
+  passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-xr-scene`
+  passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+  passed.
+- Diagnostic skip-actors RD7 lane passed:
+  `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --xr-skip-actors --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --perf-summary /tmp/mclone-quest-openxr-perf-orbit-rd7-command-split-skip-actors-2-16-64.txt --log /tmp/mclone-quest-openxr-perf-orbit-rd7-command-split-skip-actors-2-16-64-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
+
+Measured comparison:
+
+| Run | Workers / budgets | Meta dropped frames | Frame avg / p95 / p99 / max (ms) | App work avg / p95 / max (ms) | App over period | Locomotion command readout |
+| --- | --- | ---: | --- | --- | ---: | --- |
+| `--xr-skip-actors`, before split | 2 / 16 / 64 / completed-accept 2 | 15 | 14.109 / 15.736 / 18.341 / 26.879 | 13.594 / 15.565 / 25.743 | 36.2% | `commit_server_command_ms=4.774-5.695` in top streaming-transition frames, unsplit |
+| `--xr-skip-actors`, command split | 2 / 16 / 64 / completed-accept 2 | 12 | 14.095 / 15.725 / 18.514 / 26.970 | 13.554 / 15.488 / 25.398 | 35.8% | Top frames: `send_ms=0.004-0.006`, `drain_updates_ms=0.787-2.054`, `apply_updates_ms=3.886-4.248` |
+
+Coherent worst-frame readout:
+
+- Rank 1 (`sample_frame=2896`) had `commit_server_command_ms=5.518`.
+  The split was `send_ms=0.006`, `drain_updates_ms=1.319`,
+  `apply_updates_ms=4.191`, `apply_dirty_mark_ms=3.920`, and
+  `apply_client_updates_ms=0.271`.
+- Ranks 1-5 all had the same update batch shape:
+  `updates=30`, `snapshot_updates=15`, `section_block_updates=0`,
+  `unload_updates=15`.
+- The queue send itself is not the frame tail in these coherent bad frames.
+  It was effectively free (`0.004-0.006 ms`). The max summary did see one
+  larger send sample (`max_send_ms=0.334`), but that is still far below the
+  4-6 ms locomotion-command tail.
+- The expensive part is dirty marking while applying the immediate batch of
+  snapshot/unload server updates. In the top frames,
+  `apply_dirty_mark_ms=3.446-4.106`, while client state application was
+  usually sub-ms.
+- The rest of the bad frame still includes terrain final poll wait
+  (`5.934-7.980 ms`) and ordinary eye CPU (`3.812-4.728 ms`), with actors
+  skipped.
+
+Interpretation:
+
+- The previous `commit_server_command_ms` label was misleading. It was not
+  mostly command enqueue, lock wait, or bounded-channel backpressure.
+- For this local integrated Quest lane, high-frequency camera/player pose sync
+  opportunistically drains and applies a chunk-update batch. That pushes
+  render-dirty marking for 15 snapshot updates plus 15 unload updates into the
+  locomotion phase of a frame.
+- This is actionable because pose sync does not appear to need immediate
+  chunk-update application. The normal runtime poll already owns update
+  draining/apply timing, and the Java-shaped target should keep high-frequency
+  player movement command submission separate from heavyweight chunk update
+  assimilation.
+
+Next implementation target:
+
+- Change the high-frequency camera/player-pose sync path to send the command
+  without opportunistically draining integrated-server updates. Let the normal
+  per-frame runtime poll drain/apply those updates under its existing runtime
+  attribution instead.
+- Keep the immediate drain behavior for commands that need synchronous
+  feedback, or make the drain policy explicit at the runtime API boundary.
+- Re-run the same skip-actors diagnostic lane. Expected effect: the 4-6 ms
+  locomotion-command tail should collapse; the cost may move into
+  `runtime_poll/apply` unless the normal runtime cadence already absorbs it
+  better. If it simply moves unchanged, split `mark_server_update_render_dirty`
+  by update kind and make snapshot/unload dirty marking incremental.
 
 ## Central Thesis
 

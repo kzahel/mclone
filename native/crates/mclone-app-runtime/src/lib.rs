@@ -601,6 +601,20 @@ pub struct RuntimeUpdateApplyReport {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GameplayCommandTiming {
+    pub total_ms: f64,
+    pub send_ms: f64,
+    pub drain_updates_ms: f64,
+    pub apply_updates_ms: f64,
+    pub apply_dirty_mark_ms: f64,
+    pub apply_client_updates_ms: f64,
+    pub updates: usize,
+    pub snapshot_updates: usize,
+    pub section_block_updates: usize,
+    pub unload_updates: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RuntimePollTiming {
     pub total_ms: f64,
     pub drain_updates_ms: f64,

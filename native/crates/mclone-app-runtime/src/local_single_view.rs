@@ -31,8 +31,8 @@ use crate::session::{
     SessionFailure, SessionStartRequest, SessionStartResult, SessionStatus, StartedGameSession,
 };
 use crate::{
-    DEFAULT_RENDER_CHUNK_MESH_BUDGET, RuntimePollDiagnostics, RuntimePollTiming,
-    RuntimeUpdateApplyReport, SingleViewRuntime, SingleViewRuntimeStats,
+    DEFAULT_RENDER_CHUNK_MESH_BUDGET, GameplayCommandTiming, RuntimePollDiagnostics,
+    RuntimePollTiming, RuntimeUpdateApplyReport, SingleViewRuntime, SingleViewRuntimeStats,
     TimedRenderSectionCacheUpdate, chunk_tracking_radius_for_render_distance, elapsed_ms,
     loading_progress_overlay_from_diagnostics, view_readiness_overlay_from_diagnostics,
 };
@@ -366,11 +366,46 @@ impl LocalSingleViewSceneRuntime {
     }
 
     pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
+        self.send_gameplay_command_timed(command)
+            .map(|(changed, _)| changed)
+    }
+
+    pub fn send_gameplay_command_timed(
+        &mut self,
+        command: ClientCommand,
+    ) -> Result<(bool, GameplayCommandTiming)> {
+        let total_start = Instant::now();
+        let send_start = Instant::now();
         self.server_runner
             .send_command(command)
             .context("failed to send local single-view gameplay command")?;
-        let _ = self.drain_runner_updates_report()?;
-        Ok(true)
+        let send_ms = elapsed_ms(send_start.elapsed());
+        let drain_start = Instant::now();
+        let updates = self
+            .server_runner
+            .drain_updates()
+            .context("failed to drain local single-view integrated server updates")?;
+        let drain_updates_ms = elapsed_ms(drain_start.elapsed());
+        let apply_report = if updates.is_empty() {
+            RuntimeUpdateApplyReport::default()
+        } else {
+            self.core.apply_server_updates_report(updates)
+        };
+        Ok((
+            true,
+            GameplayCommandTiming {
+                total_ms: elapsed_ms(total_start.elapsed()),
+                send_ms,
+                drain_updates_ms,
+                apply_updates_ms: apply_report.total_ms,
+                apply_dirty_mark_ms: apply_report.dirty_mark_ms,
+                apply_client_updates_ms: apply_report.client_apply_updates_ms,
+                updates: apply_report.updates,
+                snapshot_updates: apply_report.snapshot_updates,
+                section_block_updates: apply_report.section_block_updates,
+                unload_updates: apply_report.unload_updates,
+            },
+        ))
     }
 
     pub fn poll(&mut self) -> Result<bool> {
@@ -807,6 +842,16 @@ where
         match self {
             Self::Local(scene) => scene.send_gameplay_command(command),
             Self::RemoteDedicated(scene) => scene.send_gameplay_command(command),
+        }
+    }
+
+    pub fn send_gameplay_command_timed(
+        &mut self,
+        command: ClientCommand,
+    ) -> Result<(bool, GameplayCommandTiming)> {
+        match self {
+            Self::Local(scene) => scene.send_gameplay_command_timed(command),
+            Self::RemoteDedicated(scene) => scene.send_gameplay_command_timed(command),
         }
     }
 
@@ -1273,6 +1318,24 @@ where
 
     pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
         dispatch_remote_dedicated_command(&mut self.core, &mut self.session, command)
+    }
+
+    pub fn send_gameplay_command_timed(
+        &mut self,
+        command: ClientCommand,
+    ) -> Result<(bool, GameplayCommandTiming)> {
+        let total_start = Instant::now();
+        let changed =
+            dispatch_remote_dedicated_command(&mut self.core, &mut self.session, command)?;
+        let total_ms = elapsed_ms(total_start.elapsed());
+        Ok((
+            changed,
+            GameplayCommandTiming {
+                total_ms,
+                send_ms: total_ms,
+                ..GameplayCommandTiming::default()
+            },
+        ))
     }
 
     pub fn poll(&mut self) -> Result<bool> {

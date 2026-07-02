@@ -3261,6 +3261,15 @@ mod android {
         locomotion_camera_apply_ms: f64,
         locomotion_commit_ms: f64,
         locomotion_commit_server_command_ms: f64,
+        locomotion_commit_server_command_send_ms: f64,
+        locomotion_commit_server_command_drain_updates_ms: f64,
+        locomotion_commit_server_command_apply_updates_ms: f64,
+        locomotion_commit_server_command_apply_dirty_mark_ms: f64,
+        locomotion_commit_server_command_apply_client_updates_ms: f64,
+        locomotion_commit_server_command_updates: usize,
+        locomotion_commit_server_command_snapshot_updates: usize,
+        locomotion_commit_server_command_section_block_updates: usize,
+        locomotion_commit_server_command_unload_updates: usize,
         locomotion_commit_position_updates_ms: f64,
         locomotion_commit_interest_ms: f64,
         locomotion_gameplay_interaction_ms: f64,
@@ -3979,6 +3988,26 @@ mod android {
                 self.max_render.locomotion_gameplay_interaction_ms
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_LOCOMOTION_COMMAND max_total_ms={:.3} max_send_ms={:.3} max_drain_updates_ms={:.3} max_apply_updates_ms={:.3} max_apply_dirty_mark_ms={:.3} max_apply_client_updates_ms={:.3} max_updates={} max_snapshot_updates={} max_section_block_updates={} max_unload_updates={}",
+                self.max_render.locomotion_commit_server_command_ms,
+                self.max_render.locomotion_commit_server_command_send_ms,
+                self.max_render
+                    .locomotion_commit_server_command_drain_updates_ms,
+                self.max_render
+                    .locomotion_commit_server_command_apply_updates_ms,
+                self.max_render
+                    .locomotion_commit_server_command_apply_dirty_mark_ms,
+                self.max_render
+                    .locomotion_commit_server_command_apply_client_updates_ms,
+                self.max_render.locomotion_commit_server_command_updates,
+                self.max_render
+                    .locomotion_commit_server_command_snapshot_updates,
+                self.max_render
+                    .locomotion_commit_server_command_section_block_updates,
+                self.max_render
+                    .locomotion_commit_server_command_unload_updates
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_TERRAIN max_terrain_render_frame_ms={:.3} max_terrain_render_views_ms={:.3} max_terrain_menu_pointer_ms={:.3} max_terrain_runtime_upload_ms={:.3} max_runtime_poll_ms={:.3} max_runtime_sync_ms={:.3} max_runtime_gpu_upload_ms={:.3} max_runtime_ready_sections_ms={:.3} max_terrain_shared_records_ms={:.3} max_terrain_left_eye_ms={:.3} max_terrain_right_eye_ms={:.3} max_terrain_left_eye_prepare_ms={:.3} max_terrain_left_eye_encode_ms={:.3} max_terrain_left_eye_section_encode_ms={:.3} max_terrain_left_eye_submit_ms={:.3} max_terrain_left_eye_poll_wait_ms={:.3} max_terrain_right_eye_prepare_ms={:.3} max_terrain_right_eye_encode_ms={:.3} max_terrain_right_eye_section_encode_ms={:.3} max_terrain_right_eye_submit_ms={:.3} max_terrain_right_eye_poll_wait_ms={:.3} max_terrain_stereo_finish_ms={:.3} max_terrain_stereo_submit_ms={:.3} max_terrain_stereo_poll_wait_ms={:.3}",
                 self.max_render.terrain_render_frame_ms,
                 self.max_render.terrain_render_views_ms,
@@ -4381,6 +4410,21 @@ mod android {
                     render.locomotion_gameplay_interaction_ms
                 );
                 log::info!(
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME_LOCOMOTION_COMMAND rank={} sample_frame={} total_ms={:.3} send_ms={:.3} drain_updates_ms={:.3} apply_updates_ms={:.3} apply_dirty_mark_ms={:.3} apply_client_updates_ms={:.3} updates={} snapshot_updates={} section_block_updates={} unload_updates={}",
+                    rank,
+                    snapshot.sample_frame,
+                    render.locomotion_commit_server_command_ms,
+                    render.locomotion_commit_server_command_send_ms,
+                    render.locomotion_commit_server_command_drain_updates_ms,
+                    render.locomotion_commit_server_command_apply_updates_ms,
+                    render.locomotion_commit_server_command_apply_dirty_mark_ms,
+                    render.locomotion_commit_server_command_apply_client_updates_ms,
+                    render.locomotion_commit_server_command_updates,
+                    render.locomotion_commit_server_command_snapshot_updates,
+                    render.locomotion_commit_server_command_section_block_updates,
+                    render.locomotion_commit_server_command_unload_updates
+                );
+                log::info!(
                     "MCLONE_ANDROID_XR_PERF_WORST_FRAME_BUDGET rank={} sample_frame={} known_render_ms={:.3} render_unattributed_ms={:.3} terrain_before_poll_wait_ms={:.3} terrain_poll_wait_ms={:.3} eye_cpu_ms={:.3} eye_poll_wait_ms={:.3}",
                     rank,
                     snapshot.sample_frame,
@@ -4588,6 +4632,33 @@ mod android {
             locomotion_commit_server_command_ms: a
                 .locomotion_commit_server_command_ms
                 .max(b.locomotion_commit_server_command_ms),
+            locomotion_commit_server_command_send_ms: a
+                .locomotion_commit_server_command_send_ms
+                .max(b.locomotion_commit_server_command_send_ms),
+            locomotion_commit_server_command_drain_updates_ms: a
+                .locomotion_commit_server_command_drain_updates_ms
+                .max(b.locomotion_commit_server_command_drain_updates_ms),
+            locomotion_commit_server_command_apply_updates_ms: a
+                .locomotion_commit_server_command_apply_updates_ms
+                .max(b.locomotion_commit_server_command_apply_updates_ms),
+            locomotion_commit_server_command_apply_dirty_mark_ms: a
+                .locomotion_commit_server_command_apply_dirty_mark_ms
+                .max(b.locomotion_commit_server_command_apply_dirty_mark_ms),
+            locomotion_commit_server_command_apply_client_updates_ms: a
+                .locomotion_commit_server_command_apply_client_updates_ms
+                .max(b.locomotion_commit_server_command_apply_client_updates_ms),
+            locomotion_commit_server_command_updates: a
+                .locomotion_commit_server_command_updates
+                .max(b.locomotion_commit_server_command_updates),
+            locomotion_commit_server_command_snapshot_updates: a
+                .locomotion_commit_server_command_snapshot_updates
+                .max(b.locomotion_commit_server_command_snapshot_updates),
+            locomotion_commit_server_command_section_block_updates: a
+                .locomotion_commit_server_command_section_block_updates
+                .max(b.locomotion_commit_server_command_section_block_updates),
+            locomotion_commit_server_command_unload_updates: a
+                .locomotion_commit_server_command_unload_updates
+                .max(b.locomotion_commit_server_command_unload_updates),
             locomotion_commit_position_updates_ms: a
                 .locomotion_commit_position_updates_ms
                 .max(b.locomotion_commit_position_updates_ms),
@@ -5179,6 +5250,22 @@ mod android {
         timing.locomotion_camera_apply_ms = locomotion.camera_apply_ms;
         timing.locomotion_commit_ms = locomotion.commit_ms;
         timing.locomotion_commit_server_command_ms = locomotion.commit_server_command_ms;
+        timing.locomotion_commit_server_command_send_ms = locomotion.commit_server_command_send_ms;
+        timing.locomotion_commit_server_command_drain_updates_ms =
+            locomotion.commit_server_command_drain_updates_ms;
+        timing.locomotion_commit_server_command_apply_updates_ms =
+            locomotion.commit_server_command_apply_updates_ms;
+        timing.locomotion_commit_server_command_apply_dirty_mark_ms =
+            locomotion.commit_server_command_apply_dirty_mark_ms;
+        timing.locomotion_commit_server_command_apply_client_updates_ms =
+            locomotion.commit_server_command_apply_client_updates_ms;
+        timing.locomotion_commit_server_command_updates = locomotion.commit_server_command_updates;
+        timing.locomotion_commit_server_command_snapshot_updates =
+            locomotion.commit_server_command_snapshot_updates;
+        timing.locomotion_commit_server_command_section_block_updates =
+            locomotion.commit_server_command_section_block_updates;
+        timing.locomotion_commit_server_command_unload_updates =
+            locomotion.commit_server_command_unload_updates;
         timing.locomotion_commit_position_updates_ms = locomotion.commit_position_updates_ms;
         timing.locomotion_commit_interest_ms = locomotion.commit_interest_ms;
         timing.locomotion_gameplay_interaction_ms = locomotion.gameplay_interaction_ms;

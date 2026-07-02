@@ -543,6 +543,15 @@ pub struct XrLocomotionTiming {
     pub camera_apply_ms: f64,
     pub commit_ms: f64,
     pub commit_server_command_ms: f64,
+    pub commit_server_command_send_ms: f64,
+    pub commit_server_command_drain_updates_ms: f64,
+    pub commit_server_command_apply_updates_ms: f64,
+    pub commit_server_command_apply_dirty_mark_ms: f64,
+    pub commit_server_command_apply_client_updates_ms: f64,
+    pub commit_server_command_updates: usize,
+    pub commit_server_command_snapshot_updates: usize,
+    pub commit_server_command_section_block_updates: usize,
+    pub commit_server_command_unload_updates: usize,
     pub commit_position_updates_ms: f64,
     pub commit_interest_ms: f64,
     pub gameplay_interaction_ms: f64,
@@ -551,8 +560,36 @@ pub struct XrLocomotionTiming {
 #[derive(Clone, Copy, Debug, Default)]
 struct XrCameraCommitTiming {
     server_command_ms: f64,
+    server_command_send_ms: f64,
+    server_command_drain_updates_ms: f64,
+    server_command_apply_updates_ms: f64,
+    server_command_apply_dirty_mark_ms: f64,
+    server_command_apply_client_updates_ms: f64,
+    server_command_updates: usize,
+    server_command_snapshot_updates: usize,
+    server_command_section_block_updates: usize,
+    server_command_unload_updates: usize,
     position_updates_ms: f64,
     interest_ms: f64,
+}
+
+impl XrLocomotionTiming {
+    fn record_commit_timing(&mut self, timing: XrCameraCommitTiming) {
+        self.commit_server_command_ms = timing.server_command_ms;
+        self.commit_server_command_send_ms = timing.server_command_send_ms;
+        self.commit_server_command_drain_updates_ms = timing.server_command_drain_updates_ms;
+        self.commit_server_command_apply_updates_ms = timing.server_command_apply_updates_ms;
+        self.commit_server_command_apply_dirty_mark_ms = timing.server_command_apply_dirty_mark_ms;
+        self.commit_server_command_apply_client_updates_ms =
+            timing.server_command_apply_client_updates_ms;
+        self.commit_server_command_updates = timing.server_command_updates;
+        self.commit_server_command_snapshot_updates = timing.server_command_snapshot_updates;
+        self.commit_server_command_section_block_updates =
+            timing.server_command_section_block_updates;
+        self.commit_server_command_unload_updates = timing.server_command_unload_updates;
+        self.commit_position_updates_ms = timing.position_updates_ms;
+        self.commit_interest_ms = timing.interest_ms;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -2480,9 +2517,7 @@ where
                 .commit_engine_camera_player_pose_timed()
                 .context("sync XR room-scale player pose")?;
             timing.commit_ms = elapsed_ms(commit_start.elapsed());
-            timing.commit_server_command_ms = commit_timing.server_command_ms;
-            timing.commit_position_updates_ms = commit_timing.position_updates_ms;
-            timing.commit_interest_ms = commit_timing.interest_ms;
+            timing.record_commit_timing(commit_timing);
             return Ok(timing);
         }
         if let Some(yaw_delta_radians) = self.snap_turn_delta_from_controllers(controllers) {
@@ -2512,9 +2547,7 @@ where
             .commit_engine_camera_player_pose_timed()
             .context("sync XR locomotion player pose")?;
         timing.commit_ms = elapsed_ms(commit_start.elapsed());
-        timing.commit_server_command_ms = commit_timing.server_command_ms;
-        timing.commit_position_updates_ms = commit_timing.position_updates_ms;
-        timing.commit_interest_ms = commit_timing.interest_ms;
+        timing.record_commit_timing(commit_timing);
         if !suppress_gameplay_interaction {
             let interaction_start = Instant::now();
             self.apply_xr_gameplay_interaction_edges(gameplay_interaction_edges)?;
@@ -2568,9 +2601,7 @@ where
             .commit_engine_camera_player_pose_timed()
             .context("sync XR automated flight player pose")?;
         timing.commit_ms = elapsed_ms(commit_start.elapsed());
-        timing.commit_server_command_ms = commit_timing.server_command_ms;
-        timing.commit_position_updates_ms = commit_timing.position_updates_ms;
-        timing.commit_interest_ms = commit_timing.interest_ms;
+        timing.record_commit_timing(commit_timing);
         Ok(timing)
     }
 
@@ -2616,9 +2647,7 @@ where
             .commit_engine_camera_player_pose_timed()
             .context("sync XR automated orbit player pose")?;
         timing.commit_ms = elapsed_ms(commit_start.elapsed());
-        timing.commit_server_command_ms = commit_timing.server_command_ms;
-        timing.commit_position_updates_ms = commit_timing.position_updates_ms;
-        timing.commit_interest_ms = commit_timing.interest_ms;
+        timing.record_commit_timing(commit_timing);
         Ok(timing)
     }
 
@@ -4990,9 +5019,19 @@ where
     let mut timing = XrCameraCommitTiming::default();
     let command_start = Instant::now();
     let changed = if let Some(report) = camera.next_pose_sync_command() {
-        runtime
-            .send_gameplay_command(report.command)
-            .context("failed to sync XR terrain player pose to server")?
+        let (changed, command_timing) = runtime
+            .send_gameplay_command_timed(report.command)
+            .context("failed to sync XR terrain player pose to server")?;
+        timing.server_command_send_ms = command_timing.send_ms;
+        timing.server_command_drain_updates_ms = command_timing.drain_updates_ms;
+        timing.server_command_apply_updates_ms = command_timing.apply_updates_ms;
+        timing.server_command_apply_dirty_mark_ms = command_timing.apply_dirty_mark_ms;
+        timing.server_command_apply_client_updates_ms = command_timing.apply_client_updates_ms;
+        timing.server_command_updates = command_timing.updates;
+        timing.server_command_snapshot_updates = command_timing.snapshot_updates;
+        timing.server_command_section_block_updates = command_timing.section_block_updates;
+        timing.server_command_unload_updates = command_timing.unload_updates;
+        changed
     } else {
         false
     };
