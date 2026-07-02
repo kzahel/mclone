@@ -1,8 +1,8 @@
 # 123: UI V2 Menu Rebuild
 
-Status: active; menu render/input routes and the old `GameUi` state wrapper have
-been removed as of 2026-07-02. Remaining work is selected-item notification
-modeling plus optional loading/view-readiness retained panels.
+Status: completed 2026-07-02. Menu render/input routes, retained HUD layers,
+and the old `GameUi` state wrapper have been removed. Follow-up HUD overlay
+polish is tracked in [`132-hud-overlay-polish.md`](132-hud-overlay-polish.md).
 
 ## Decision
 
@@ -352,8 +352,8 @@ Validation:
 Status: flat crosshair/hotbar frame, hotbar selection/content retention, status
 overlay retention, touch/gamepad prompt retention, block picker v2 retained
 grid, flat debug overlay retention, and runtime cache reporting landed
-2026-07-02; a future selected-item notification/fade model still needs retained
-ownership.
+2026-07-02. Future selected-item notification/fade modeling is tracked in
+[`132-hud-overlay-polish.md`](132-hud-overlay-polish.md).
 
 Move in-game UI surfaces to v2 retained layers:
 
@@ -1541,16 +1541,19 @@ Known limits:
 - selected item name fade is not currently modeled as a flat HUD retained layer;
   add it only when the gameplay/client side has a real event/state source
 
-## Next Recommended Chunk
+## Closeout
 
-Return to the remaining HUD notification/modeling work.
+This tactical is closed. The legacy menu implementation and `GameUi` state
+wrapper are gone, player-facing menu render/input routes use UI v2, and the
+flat HUD layers that belonged to this refactor are retained through
+`GameUiHost`.
 
-Next scope:
+Remaining HUD overlay polish is intentionally out of scope here and tracked in
+[`132-hud-overlay-polish.md`](132-hud-overlay-polish.md):
 
-- define the selected-item notification/fade state source if we actually want
-  that feature now
-- otherwise close this tactical and track loading/view-readiness retained-panel
-  work separately as lower-priority HUD polish
+- loading progress and debug view-readiness overlay data/caching
+- XR startup/status/progress overlay cache composition
+- selected-item notification/fade modeling, if we decide to add that feature
 
 ## Completed First Recommended Chunk
 
