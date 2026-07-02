@@ -774,11 +774,52 @@ impl UiSurface {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UiDrawCacheStats {
+    pub rebuild_count: u64,
+    pub cache_hit_count: u64,
+}
+
+impl UiDrawCacheStats {
+    pub const fn rebuild() -> Self {
+        Self {
+            rebuild_count: 1,
+            cache_hit_count: 0,
+        }
+    }
+
+    pub const fn cache_hit() -> Self {
+        Self {
+            rebuild_count: 0,
+            cache_hit_count: 1,
+        }
+    }
+
+    pub fn add(&mut self, other: Self) {
+        self.rebuild_count += other.rebuild_count;
+        self.cache_hit_count += other.cache_hit_count;
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiPanelDrawList {
+    pub draw: GuiDrawList,
+    pub revision: UiPanelRevision,
+    pub cache: UiDrawCacheStats,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CachedV2DrawList {
+    revision: UiPanelRevision,
+    draw: GuiDrawList,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameUiHost {
     legacy: GameUi,
     surface: UiSurface,
     committed_render_state: GameUiRenderState,
+    cached_v2_draw: Option<CachedV2DrawList>,
 }
 
 impl Default for GameUiHost {
@@ -801,6 +842,7 @@ impl GameUiHost {
             legacy,
             surface: UiSurface::new(),
             committed_render_state: GameUiRenderState::default(),
+            cached_v2_draw: None,
         };
         host.sync_surface_screen();
         host.surface.set_scale(host.legacy.scale());
@@ -927,6 +969,38 @@ impl GameUiHost {
         } else {
             self.legacy.render_draw_list(self.committed_render_state)
         }
+    }
+
+    pub fn render_v2_panel_draw_list(
+        &mut self,
+        state: GameUiRenderState,
+    ) -> Option<UiPanelDrawList> {
+        self.commit_render_state(state);
+        if !self.surface.is_active() {
+            self.cached_v2_draw = None;
+            return None;
+        }
+        let revision = self.surface.panel_revision()?;
+        if let Some(cached) = &self.cached_v2_draw {
+            if cached.revision == revision {
+                return Some(UiPanelDrawList {
+                    draw: cached.draw.clone(),
+                    revision,
+                    cache: UiDrawCacheStats::cache_hit(),
+                });
+            }
+        }
+        let draw = self.surface.render_draw_list(self.committed_render_state);
+        let revision = self.surface.panel_revision()?;
+        self.cached_v2_draw = Some(CachedV2DrawList {
+            revision,
+            draw: draw.clone(),
+        });
+        Some(UiPanelDrawList {
+            draw,
+            revision,
+            cache: UiDrawCacheStats::rebuild(),
+        })
     }
 
     pub fn set_v2_debug_overlay(&mut self, enabled: bool) {
@@ -1471,6 +1545,70 @@ mod tests {
         surface.pointer_move(Point { x: 0.0, y: 0.0 }, GameUiRenderState::default());
         let unhovered = surface.panel_revision().expect("active surface");
         assert!(unhovered.interaction > hovered.interaction);
+    }
+
+    #[test]
+    fn game_ui_host_v2_panel_draw_cache_tracks_panel_revision() {
+        let mut host = GameUiHost::new_ingame();
+        host.set_screen(Some(GameScreen::Options {
+            parent: GameOptionsParent::Pause,
+        }));
+        host.set_scale(GuiScale::from_pixels(960, 540));
+        let state = GameUiRenderState {
+            xr_turn_mode: Some(GameXrTurnMode::Snap15),
+            server_cadence: Some(GameSimulationCadence::default()),
+            ..GameUiRenderState::default()
+        };
+
+        let first = host
+            .render_v2_panel_draw_list(state)
+            .expect("Options is a v2 panel");
+        assert_eq!(first.cache, UiDrawCacheStats::rebuild());
+        assert!(!first.draw.commands().is_empty());
+
+        let second = host
+            .render_v2_panel_draw_list(state)
+            .expect("Options is a v2 panel");
+        assert_eq!(second.cache, UiDrawCacheStats::cache_hit());
+        assert_eq!(second.revision, first.revision);
+        assert_eq!(second.draw, first.draw);
+
+        let snapshot = host.v2_debug_snapshot().expect("Options has debug data");
+        let crosshair = snapshot
+            .widgets
+            .iter()
+            .find(|widget| widget.id == UI_V2_OPTIONS_CROSSHAIR)
+            .expect("crosshair row")
+            .rect;
+        host.pointer_move(point_in(crosshair));
+
+        let hovered = host
+            .render_v2_panel_draw_list(state)
+            .expect("Options is a v2 panel");
+        assert_eq!(hovered.cache, UiDrawCacheStats::rebuild());
+        assert_ne!(hovered.revision, first.revision);
+
+        host.pointer_move(Point {
+            x: crosshair.x + 2.0,
+            y: crosshair.y + 2.0,
+        });
+        let jitter = host
+            .render_v2_panel_draw_list(state)
+            .expect("Options is a v2 panel");
+        assert_eq!(jitter.cache, UiDrawCacheStats::cache_hit());
+        assert_eq!(jitter.revision, hovered.revision);
+        assert_eq!(jitter.draw, hovered.draw);
+    }
+
+    #[test]
+    fn game_ui_host_v2_panel_draw_cache_ignores_legacy_screens() {
+        let mut host = GameUiHost::new();
+        host.set_screen(Some(GameScreen::Title));
+
+        assert!(
+            host.render_v2_panel_draw_list(GameUiRenderState::default())
+                .is_none()
+        );
     }
 
     #[test]

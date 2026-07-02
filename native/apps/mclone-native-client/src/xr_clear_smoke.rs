@@ -809,7 +809,7 @@ fn desktop_scene_options_for_xr_request(
 fn print_mclone_summary(mclone: &DesktopXrMcloneTerrainState) {
     let summary = mclone.frame_summary();
     println!(
-        "mclone XR frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={} ui_panel_repaints={} ui_panel_cache_hits={} ui_panel_texture_recreates={} ui_panel_composites={} local_startup_active={}",
+        "mclone XR frame summary: frames={} sections={} drawn_sections={} indices={} drawn_indices={} actors={} drawn_actors={} ui_draw_rebuilds={} ui_draw_cache_hits={} ui_panel_repaints={} ui_panel_cache_hits={} ui_panel_texture_recreates={} ui_panel_composites={} local_startup_active={}",
         summary.rendered_frames,
         summary.section_count,
         summary.drawn_section_count,
@@ -817,6 +817,8 @@ fn print_mclone_summary(mclone: &DesktopXrMcloneTerrainState) {
         summary.drawn_index_count,
         summary.actor_count,
         summary.drawn_actor_count,
+        summary.ui_draw_cache.rebuild_count,
+        summary.ui_draw_cache.cache_hit_count,
         summary.ui_panel.repaint_count,
         summary.ui_panel.cache_hit_count,
         summary.ui_panel.texture_recreate_count,

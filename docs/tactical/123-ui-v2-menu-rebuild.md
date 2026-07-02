@@ -1,6 +1,7 @@
 # 123: UI V2 Menu Rebuild
 
-Status: active; v2 XR panel cache foundation landed 2026-07-02.
+Status: active; v2 XR panel texture and draw-list cache foundations landed
+2026-07-02.
 
 ## Decision
 
@@ -324,7 +325,8 @@ Validation:
 
 ### Slice G: XR Panel Texture Cache For V2
 
-Status: first pass landed 2026-07-02; headset validation still pending.
+Status: automated cache foundations landed 2026-07-02; headset validation still
+pending.
 
 Tie world-space UI panel repainting to v2 surface content revisions.
 
@@ -333,12 +335,14 @@ Requirements:
 - head pose changes do not dirty content
 - controller pose/ray changes do not dirty content
 - hover changes dirty only the relevant UI layer
+- unchanged v2 panels skip both `GuiDrawList` rebuild and panel-texture repaint
 - panel composite and panel repaint are separately reported
 
 Validation:
 
 - XR summary shows panel composite every visible frame but panel repaint only on
   content changes
+- XR summary shows draw-list rebuilds only when the v2 panel revision changes
 - Controls idle in XR does not repaint every frame
 - headset visual validation before marking complete
 
@@ -862,13 +866,61 @@ Rendered checks:
 
 Known limits:
 
-- this avoids unchanged XR panel texture repaints, but v2 draw lists are still
-  rebuilt before the renderer decides whether the texture can be reused
 - startup progress and status overlays intentionally bypass the cache until they
   have their own revision inputs
 - texture recreation is reported separately from panel repaint; panel repaint is
   a render pass into the cached texture, not a CPU texture upload
 - actual headset visual validation for idle Controls remains pending
+
+## Landed XR Draw-List Cache Proof Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- added a `GameUiHost` v2 panel draw-list cache keyed by `UiPanelRevision`
+- kept the cache opt-in through `render_v2_panel_draw_list`; existing flat/web
+  callers of `render_draw_list` keep their current behavior
+- added `UiDrawCacheStats` counters for draw-list rebuilds and cache hits
+- routed XR menu panel draw preparation through the cached v2 path when startup
+  progress and status overlays are hidden
+- surfaced draw-list cache counters through `XrTerrainFrameSummary`, desktop XR
+  summary prints, and Android XR perf settle logs/quiet checks
+- kept transient startup/status overlay composition explicitly uncached
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui v2_panel_draw -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene xr_menu_panel_draw -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-xr-scene -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-ui-v2-controls-draw-cache-sanity.png --width 960 --height 540 --screenshot-ui controls --startup-wait frames:1 --render-distance 2 --lighting false --fullbright true
+```
+
+Automated proof coverage:
+
+- `game_ui_host_v2_panel_draw_cache_tracks_panel_revision` proves same-revision
+  v2 panels reuse draw commands, hover changes rebuild, and pointer jitter inside
+  the same widget remains a cache hit
+- `xr_menu_panel_draw_cache_hits_until_panel_revision_changes` proves the XR
+  Controls panel rebuilds on first draw, hits cache on the second unchanged draw,
+  rebuilds on hover change, and hits again for controller-pose-only jitter
+- `xr_menu_panel_draw_bypasses_revision_cache_for_transient_overlays` proves
+  startup/status-style transient overlays stay off the revision cache path
+
+Rendered checks:
+
+- native Controls screenshot inspected:
+  `/tmp/mclone-ui-v2-controls-draw-cache-sanity.png`
+- browser canvas smoke regenerated and inspected:
+  `/tmp/mclone-native-web-canvas.png`
 
 ## Non-Goals
 
@@ -884,22 +936,17 @@ Known limits:
 
 ## Next Recommended Chunk
 
-Finish Slice G with a v2 draw-list cache and an explicit XR cache proof.
+Finish Slice G validation, then start Slice H.
 
 Next scope:
 
-- cache the v2 `GuiDrawList` in `GameUiHost` by `UiPanelRevision` so idle XR
-  panels skip both draw-list rebuild and panel-texture repaint
-- add a deterministic offscreen/headless XR-style cache proof that renders the
-  same v2 Controls panel twice and asserts first-frame repaint plus second-frame
-  cache hit
-- include hover-change and controller-pose-only cases in that proof
-- include startup/status overlay invalidation cases, or keep them explicitly
-  uncached with tests
-- run headset validation once the automated proof is in place
-
-After this, Slice H can move the in-game HUD, hotbar, and block picker onto the
-same retained/cached UI surface model.
+- run a real headset/desktop XR idle Controls smoke and confirm
+  `ui_draw_rebuilds=0`, `ui_panel_repaints=0`, and no texture recreates on quiet
+  frames after the first cached frame
+- start Slice H with the smallest always-visible in-game retained surface:
+  crosshair plus hotbar frame/selected-slot overlay
+- keep block/item icons and the full creative picker as follow-up Slice H steps
+  after the HUD surface ownership and cache behavior are proven
 
 ## Completed First Recommended Chunk
 

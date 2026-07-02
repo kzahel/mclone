@@ -3539,7 +3539,7 @@ mod android {
             {
                 let upload = summary.upload;
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} ui_panel_repaints={} ui_panel_cache_hits={} ui_panel_texture_recreates={} ui_panel_composites={} sections={} drawn_sections={} drawn_indices={}",
+                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} ui_draw_rebuilds={} ui_draw_cache_hits={} ui_panel_repaints={} ui_panel_cache_hits={} ui_panel_texture_recreates={} ui_panel_composites={} sections={} drawn_sections={} drawn_indices={}",
                     mode,
                     settle_seconds,
                     ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
@@ -3559,6 +3559,8 @@ mod android {
                     upload.uploaded_section_count,
                     upload.upload_removed_section_count,
                     upload.traversal_ready_section_count,
+                    summary.ui_draw_cache.rebuild_count,
+                    summary.ui_draw_cache.cache_hit_count,
                     summary.ui_panel.repaint_count,
                     summary.ui_panel.cache_hit_count,
                     summary.ui_panel.texture_recreate_count,
@@ -4424,6 +4426,7 @@ mod android {
             && upload.server_command_queue_depth == 0
             && upload.server_update_queue_depth == 0
             && upload.pending_compile_jobs_after == 0
+            && summary.ui_draw_cache.rebuild_count == 0
             && summary.ui_panel.repaint_count == 0
             && summary.ui_panel.texture_recreate_count == 0
     }

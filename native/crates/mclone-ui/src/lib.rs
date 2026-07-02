@@ -7,8 +7,8 @@ use mclone_input::{
 
 mod v2;
 pub use v2::{
-    GameUiHost, UiDebugSnapshot, UiDebugWidget, UiFrameState, UiLayout, UiPanelRevision,
-    UiScreenId, UiSurface, UiWidget, UiWidgetId, UiWidgetKind,
+    GameUiHost, UiDebugSnapshot, UiDebugWidget, UiDrawCacheStats, UiFrameState, UiLayout,
+    UiPanelDrawList, UiPanelRevision, UiScreenId, UiSurface, UiWidget, UiWidgetId, UiWidgetKind,
 };
 
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = FLAT_HOTBAR_SLOT_COUNT as usize;
