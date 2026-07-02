@@ -763,6 +763,7 @@ fn xr_scene_options_from_desktop_scene(
         far_lod: scene.far_lod,
         underwater_detection_mode: xr_underwater_mode_from_desktop(underwater_mode),
         debug_ui_screen: debug_ui_screen.map(xr_debug_ui_screen_from_desktop),
+        skip_actors: false,
     }
     .validated()
 }

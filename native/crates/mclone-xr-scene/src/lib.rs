@@ -302,6 +302,7 @@ pub struct XrSceneOptions {
     pub far_lod: FarTerrainLodConfig,
     pub underwater_detection_mode: XrUnderwaterDetectionMode,
     pub debug_ui_screen: Option<XrDebugUiScreen>,
+    pub skip_actors: bool,
 }
 
 impl Default for XrSceneOptions {
@@ -321,6 +322,7 @@ impl Default for XrSceneOptions {
             far_lod: FarTerrainLodConfig::default(),
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,
+            skip_actors: false,
         }
     }
 }
@@ -3405,6 +3407,9 @@ where
     }
 
     fn current_actor_instances(&self) -> Vec<ActorInstance> {
+        if self.scene.skip_actors {
+            return Vec::new();
+        }
         self.runtime.as_ref().map_or_else(Vec::new, |runtime| {
             actor_instances_from_presentations(
                 &runtime.client().actor_presentations(),

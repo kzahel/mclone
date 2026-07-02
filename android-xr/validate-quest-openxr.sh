@@ -52,6 +52,7 @@ TERRAIN_MULTIVIEW_PROOF="${MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF:-0}"
 TERRAIN_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PERF:-0}"
 SKY_TERRAIN_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_SKY_TERRAIN_MULTIVIEW_PERF:-0}"
 SKY_TERRAIN_ACTORS_MULTIVIEW_PERF="${MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF:-0}"
+XR_SKIP_ACTORS="${MCLONE_ANDROID_XR_SKIP_ACTORS:-0}"
 XR_FULL_FRAME_MULTIVIEW="${MCLONE_ANDROID_XR_FULL_FRAME_MULTIVIEW:-0}"
 XR_FRAME_OVERLAP="${MCLONE_ANDROID_XR_FRAME_OVERLAP:-0}"
 XR_OVERLAP_EYE_SUBMITS="${MCLONE_ANDROID_XR_OVERLAP_EYE_SUBMITS:-0}"
@@ -186,6 +187,8 @@ Options:
                      Launch the same offscreen A/B microbenchmark with sky,
                      chunk terrain, and actors and wait for
                      MCLONE_ANDROID_XR_SKY_TERRAIN_ACTORS_MULTIVIEW_PERF_SUMMARY.
+  --xr-skip-actors   Debug/perf probe: skip actor collection and rendering in
+                     the normal XR scene.
   --xr-full-frame-multiview
                      Render normal submitted headset frames through the
                      full-frame multiview stack and require
@@ -579,6 +582,10 @@ while [[ $# -gt 0 ]]; do
             SKY_TERRAIN_ACTORS_MULTIVIEW_PERF=1
             shift
             ;;
+        --xr-skip-actors)
+            XR_SKIP_ACTORS=1
+            shift
+            ;;
         --xr-full-frame-multiview)
             XR_FULL_FRAME_MULTIVIEW=1
             shift
@@ -941,6 +948,9 @@ if [[ "$SKY_TERRAIN_MULTIVIEW_PERF" == "1" ]]; then
 fi
 if [[ "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" == "1" ]]; then
     STARTUP_ARGV+=(--sky-terrain-actors-multiview-perf)
+fi
+if [[ "$XR_SKIP_ACTORS" == "1" ]]; then
+    STARTUP_ARGV+=(--xr-skip-actors)
 fi
 if [[ "$XR_FULL_FRAME_MULTIVIEW" == "1" ]]; then
     STARTUP_ARGV+=(--xr-full-frame-multiview)

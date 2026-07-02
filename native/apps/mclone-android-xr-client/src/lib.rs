@@ -244,6 +244,7 @@ mod android {
         terrain_multiview_perf: bool,
         sky_terrain_multiview_perf: bool,
         sky_terrain_actors_multiview_perf: bool,
+        skip_actors: bool,
         full_frame_multiview: bool,
         frame_overlap: bool,
         overlap_eye_submits: bool,
@@ -274,6 +275,7 @@ mod android {
                 terrain_multiview_perf: false,
                 sky_terrain_multiview_perf: false,
                 sky_terrain_actors_multiview_perf: false,
+                skip_actors: false,
                 full_frame_multiview: false,
                 frame_overlap: false,
                 overlap_eye_submits: false,
@@ -502,6 +504,9 @@ mod android {
                 "--sky-terrain-actors-multiview-perf" => {
                     options.sky_terrain_actors_multiview_perf = true;
                 }
+                "--xr-skip-actors" => {
+                    options.skip_actors = true;
+                }
                 "--xr-full-frame-multiview" => {
                     options.full_frame_multiview = true;
                 }
@@ -567,6 +572,7 @@ mod android {
         let mut scene = android_xr_scene_options_from_startup(shared_options.scene);
         scene.underwater_detection_mode = underwater_detection_mode;
         scene.debug_ui_screen = debug_ui_screen;
+        scene.skip_actors = options.skip_actors;
         options.scene = scene.validated()?;
         options.render_options = shared_options.render_options;
         if options.perf_flight.is_some() && options.perf_seconds.is_none() {
@@ -718,6 +724,7 @@ mod android {
             far_lod: Default::default(),
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,
+            skip_actors: false,
         }
     }
 
@@ -1003,6 +1010,7 @@ mod android {
             "Android XR sky terrain actors multiview perf: {}",
             startup_options.sky_terrain_actors_multiview_perf
         );
+        log::info!("Android XR skip actors: {}", startup_options.skip_actors);
         log::info!(
             "Android XR full-frame multiview: {}",
             startup_options.full_frame_multiview
@@ -1040,7 +1048,7 @@ mod android {
             startup_options.xr_render_scale
         );
         log::info!(
-            "Android XR scene options: seed={} center=({}, {}) render_distance={} render_compile_workers={} day_time={:?} freeze_time={} lighting={}",
+            "Android XR scene options: seed={} center=({}, {}) render_distance={} render_compile_workers={} day_time={:?} freeze_time={} lighting={} skip_actors={}",
             scene_options.seed,
             scene_options.chunk_x,
             scene_options.chunk_z,
@@ -1048,7 +1056,8 @@ mod android {
             scene_options.render_compile_worker_count,
             scene_options.day_time_override,
             scene_options.freeze_time,
-            scene_options.lighting_enabled
+            scene_options.lighting_enabled,
+            scene_options.skip_actors
         );
         log::info!(
             "Android XR render options: section_occlusion={} fullbright={} color_profile={}",
@@ -1553,6 +1562,7 @@ mod android {
                 startup_view_pose,
                 scene_options.render_distance,
                 scene_options.render_compile_worker_count,
+                scene_options.skip_actors,
                 display_refresh,
                 render_section_upload_budget,
                 render_section_accept_budget,
@@ -1665,6 +1675,7 @@ mod android {
             startup_view_pose,
             scene_options.render_distance,
             scene_options.render_compile_worker_count,
+            scene_options.skip_actors,
             display_refresh,
             render_section_upload_budget,
             render_section_accept_budget,
@@ -2850,6 +2861,7 @@ mod android {
         fixed_render_view_pose: Option<XrStartupViewPose>,
         render_distance: u32,
         render_compile_worker_count: usize,
+        skip_actors: bool,
         display_refresh: XrDisplayRefreshSnapshot,
         render_section_upload_budget: Option<usize>,
         render_section_accept_budget: Option<usize>,
@@ -2870,6 +2882,7 @@ mod android {
             perf_frozen_render,
             render_distance,
             render_compile_worker_count,
+            skip_actors,
             display_refresh,
             render_path,
             render_section_upload_budget,
@@ -3404,6 +3417,7 @@ mod android {
         frozen_render: bool,
         render_distance: u32,
         render_compile_worker_count: usize,
+        skip_actors: bool,
         display_refresh: XrDisplayRefreshSnapshot,
         render_path: AndroidXrRenderPath,
         render_section_upload_budget: Option<usize>,
@@ -3429,6 +3443,7 @@ mod android {
             frozen_render: bool,
             render_distance: u32,
             render_compile_worker_count: usize,
+            skip_actors: bool,
             display_refresh: XrDisplayRefreshSnapshot,
             render_path: AndroidXrRenderPath,
             render_section_upload_budget: Option<usize>,
@@ -3451,6 +3466,7 @@ mod android {
                 frozen_render,
                 render_distance,
                 render_compile_worker_count,
+                skip_actors,
                 display_refresh,
                 render_path,
                 render_section_upload_budget,
@@ -3538,13 +3554,14 @@ mod android {
                 );
             }
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
+                "MCLONE_ANDROID_XR_PERF_START seconds={} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} submitted={} runtime_frames={} skipped={}",
                 seconds,
                 mode,
                 self.render_path.label(),
                 format_optional_usize(self.render_section_upload_budget),
                 format_optional_usize(self.render_section_accept_budget),
                 format_optional_usize(self.render_completed_result_accept_budget),
+                self.skip_actors,
                 self.render_distance,
                 self.render_compile_worker_count,
                 flight_speed,
@@ -3590,6 +3607,7 @@ mod android {
                 over_4x_budget_frames: 0,
                 render_distance: self.render_distance,
                 render_compile_worker_count: self.render_compile_worker_count,
+                skip_actors: self.skip_actors,
                 display_refresh: self.display_refresh.clone(),
                 target_hz: self.target_hz,
                 render_path: self.render_path,
@@ -3719,6 +3737,7 @@ mod android {
         over_4x_budget_frames: u64,
         render_distance: u32,
         render_compile_worker_count: usize,
+        skip_actors: bool,
         display_refresh: XrDisplayRefreshSnapshot,
         target_hz: f64,
         render_path: AndroidXrRenderPath,
@@ -3857,13 +3876,14 @@ mod android {
                 self.record_rebuild_total_ms / self.record_rebuild_frames as f64
             };
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
+                "MCLONE_ANDROID_XR_PERF_SUMMARY sample_seconds={:.3} mode={} render_path={} render_section_upload_budget={} render_section_accept_budget={} render_completed_result_accept_budget={} skip_actors={} xr_foveation={} xr_render_scale={:.3} xr_eye_size={}x{} render_distance={} render_compile_workers={} flight_speed_blocks_per_second={:.3} flight_distance_blocks={:.3} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} refresh_supported={} current_hz={} supported_hz={} target_hz={:.1} budget_ms={:.3} frames={} submitted_delta={} runtime_delta={} skipped_delta={} frame_avg_ms={:.3} frame_min_ms={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} frame_p99_ms={:.3} frame_max_ms={:.3} over_budget={} over_2x_budget={} over_4x_budget={} app_work_avg_ms={:.3} app_work_p50_ms={:.3} app_work_p95_ms={:.3} headroom_avg_ms={:.3} app_over_period_frames={} app_over_period_pct={:.1}",
                 sample_seconds,
                 self.mode_label,
                 self.render_path.label(),
                 format_optional_usize(self.render_section_upload_budget),
                 format_optional_usize(self.render_section_accept_budget),
                 format_optional_usize(self.render_completed_result_accept_budget),
+                self.skip_actors,
                 self.xr_foveation.label(),
                 self.xr_render_scale,
                 self.xr_eye_size[0],

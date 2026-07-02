@@ -1,7 +1,8 @@
 # 130: Quest Thread Scheduling And Streaming Tail Attribution
 
 Status: active — E2a/E2c and E8 landed; trace processor readout available;
-next attribution target is per-eye encode and camera-command send tails
+actor spike confirmed by opt-in skip probe; next target is camera-command
+send tails plus terrain poll-wait attribution
 Workstream: Android XR / Quest frame pacing, shared native runtime threading,
 terrain streaming tails
 
@@ -363,6 +364,79 @@ Next implementation target:
 - Add the narrow `send_gameplay_command` timer from the prior section, since
   the locomotion-command tail is still present and reached
   `commit_server_command_ms=8.592` in this run.
+
+## 2026-07-02 Follow-Up: Skip Actors Probe
+
+Implementation:
+
+- Added an opt-in Android XR startup flag, `--xr-skip-actors`, also exposed
+  through `android-xr/validate-quest-openxr.sh` and
+  `android-xr/install-quest-openxr.sh`.
+- The flag maps to `XrSceneOptions::skip_actors`. When enabled, the normal
+  XR scene returns an empty actor instance list before actor rendering. This
+  skips rendered game-actor instances in the normal submitted XR scene; it
+  does not skip terrain, sky, runtime streaming, or player/camera movement.
+- Perf start/summary lines now include `skip_actors=true|false`, so logs can
+  be compared without relying on command history.
+
+Validation:
+
+- `bash -n android-xr/validate-quest-openxr.sh android-xr/install-quest-openxr.sh`
+  passed.
+- `rustfmt --edition 2024 native/crates/mclone-xr-scene/src/lib.rs native/apps/mclone-android-xr-client/src/lib.rs native/apps/mclone-native-client/src/xr_clear_smoke.rs`
+  passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+  passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
+  passed.
+- Budgeted RD7 lane passed:
+  `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --xr-skip-actors --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --perf-summary /tmp/mclone-quest-openxr-perf-orbit-rd7-skip-actors-2-16-64.txt --log /tmp/mclone-quest-openxr-perf-orbit-rd7-skip-actors-2-16-64-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
+
+Measured comparison:
+
+| Run | Workers / budgets | Meta dropped frames | Frame avg / p95 / p99 / max (ms) | App work avg / p95 / max (ms) | App over period | Actor / remaining worst-frame shape |
+| --- | --- | ---: | --- | --- | ---: | --- |
+| Actor-enabled eye split | 2 / 16 / 64 / completed-accept 2 | 13 | 14.654 / 16.716 / 19.662 / 37.326 | 14.206 / 16.566 / 35.099 | 57.2% | Rank 1: `right_actor_ms=22.117`, `right_full_frame_ms=23.026`, runtime submit/sync/upload zero |
+| `--xr-skip-actors` | 2 / 16 / 64 / completed-accept 2 | 15 | 14.109 / 15.736 / 18.341 / 26.879 | 13.594 / 15.565 / 25.743 | 36.2% | `actors=0`, `drawn_actors=0`; max actor buckets zero; rank 1: `commit_server_command_ms=5.135`, `terrain_poll_wait_ms=8.380`, eye CPU only `4.172` |
+
+Skip-actors readout:
+
+- The flag worked: the draw summary reported `actors=0`, `drawn_actors=0`,
+  and the max eye-split actor buckets were all zero.
+- The large actor-family spike disappeared. Max frame time fell
+  `37.326 ms -> 26.879 ms`; p95/p99 improved
+  `16.716 / 19.662 ms -> 15.736 / 18.341 ms`; app-over-period improved
+  `57.2% -> 36.2%`.
+- Meta dropped-frame count did not improve in this single run
+  (`13 -> 15`), so do not describe this as a shipped performance win. The
+  standard RD7 lane remains close enough to budget that single 45-second
+  runs still have noise.
+- The remaining top-5 worst frames moved to the streaming-transition shape:
+  `commit_server_command_ms=4.774-5.695`, terrain final poll wait
+  `5.747-8.380 ms`, and moderate terrain/runtime work. The actual eye pass
+  CPU in those frames was about `4.2-4.8 ms`, with actor time zero.
+
+Interpretation:
+
+- Actor rendering was a real source of the previous 20+ ms eye-encode outlier.
+  It was not terrain or encoder finish hiding under the broad eye bucket.
+- Actor rendering is not the only reason RD7 misses 72 Hz. With actors skipped,
+  the lane still has many over-budget frames, now dominated by camera/player
+  command-send stalls plus terrain poll-wait/runtime streaming overlap.
+- Keep `--xr-skip-actors` as an opt-in diagnostic toggle. It is not suitable
+  as a gameplay default, but it is useful for quickly separating actor-pass
+  spikes from terrain/streaming/frame-pacing spikes.
+
+Current next target:
+
+- Add a narrow timer around the actual camera/player-pose command send, then
+  check whether the 5-8 ms `commit_server_command_ms` tail is a queue send,
+  lock/futex wait, server backpressure, or render-thread preemption at that
+  point.
+- If the command-send timer does not explain the remaining rank-1 frames,
+  add Perfetto frame slices around the Android XR frame and terrain final
+  submit/poll wait so scheduler state can be aligned to the logged frame
+  indices.
 
 ## Central Thesis
 
