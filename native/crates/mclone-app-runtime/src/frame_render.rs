@@ -19,7 +19,7 @@ use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_render::uniform::{PerViewSlot, SINGLE_VIEW_SLOT};
 use mclone_render_session::RenderSectionCacheUpdate;
-use mclone_ui::GuiDrawList;
+use mclone_ui::{GuiDrawList, UiDrawCacheStats};
 
 pub const MIN_FLAT_RENDER_SCALE: f32 = 0.25;
 pub const MAX_FLAT_RENDER_SCALE: f32 = 2.0;
@@ -105,6 +105,7 @@ pub struct FullFrameRenderSummary {
     pub index_count: u32,
     pub drawn_index_count: u32,
     pub gui_command_count: usize,
+    pub flat_hud_retained_cache: UiDrawCacheStats,
     pub actor_count: usize,
     pub drawn_actor_count: usize,
 }
@@ -1460,6 +1461,7 @@ where
         index_count: draw.index_count(),
         drawn_index_count: render_stats.drawn_index_count,
         gui_command_count,
+        flat_hud_retained_cache: UiDrawCacheStats::default(),
         actor_count: actor_instances.len(),
         drawn_actor_count: actor_stats.drawn_actor_count,
     })

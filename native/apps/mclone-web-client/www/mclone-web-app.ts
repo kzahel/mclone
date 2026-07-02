@@ -164,6 +164,8 @@ const runtime: AppRuntime = {
     compileTimingCount: 0,
     renderCount: 0,
     guiCommandCount: 0,
+    flatHudRetainedRebuilds: 0,
+    flatHudRetainedCacheHits: 0,
     uiActive: false,
     uiCoversWorld: false,
     nativeUiScreen: "none",
@@ -817,6 +819,8 @@ class WebChunkApp {
     runtime.state.lightStatusJobFrameMetrics = report.lightStatusJobFrameMetrics ?? null;
     runtime.state.renderCount = report.renderCount;
     runtime.state.guiCommandCount = report.guiCommandCount;
+    runtime.state.flatHudRetainedRebuilds = Number(report.flatHudRetainedRebuilds) || 0;
+    runtime.state.flatHudRetainedCacheHits = Number(report.flatHudRetainedCacheHits) || 0;
     runtime.state.uiActive = Boolean(report.uiActive);
     runtime.state.uiCoversWorld = Boolean(report.uiCoversWorld);
     runtime.state.nativeUiScreen = String(report.uiScreen ?? runtime.state.nativeUiScreen ?? "none");

@@ -959,6 +959,8 @@ struct GeneratedChunkRenderReport {
     mesh_upload_count: usize,
     render_count: usize,
     gui_command_count: usize,
+    flat_hud_retained_rebuild_count: u64,
+    flat_hud_retained_cache_hit_count: u64,
     ui_active: bool,
     ui_covers_world: bool,
     ui_screen: &'static str,
@@ -1150,6 +1152,16 @@ impl GeneratedChunkRenderReport {
         set_number(&object, "meshUploadCount", self.mesh_upload_count as f64)?;
         set_number(&object, "renderCount", self.render_count as f64)?;
         set_number(&object, "guiCommandCount", self.gui_command_count as f64)?;
+        set_number(
+            &object,
+            "flatHudRetainedRebuilds",
+            self.flat_hud_retained_rebuild_count as f64,
+        )?;
+        set_number(
+            &object,
+            "flatHudRetainedCacheHits",
+            self.flat_hud_retained_cache_hit_count as f64,
+        )?;
         set_bool(&object, "uiActive", self.ui_active)?;
         set_bool(&object, "uiCoversWorld", self.ui_covers_world)?;
         set_string(&object, "uiScreen", self.ui_screen)?;
@@ -4331,8 +4343,9 @@ impl WebChunkRenderSession {
         touch.hotbar_icons = hotbar_icons;
         hud.touch = touch;
         hud.status = self.effective_status_overlay();
-        self.ui
-            .append_flat_hud_draw(self.ui.scale(), &mut ui_draw, &hud);
+        let flat_hud_retained_cache =
+            self.ui
+                .append_flat_hud_draw(self.ui.scale(), &mut ui_draw, &hud);
         let gui_command_count = ui_draw.commands().len();
         if gui_command_count > 0 {
             self.gui
@@ -4398,6 +4411,8 @@ impl WebChunkRenderSession {
             mesh_upload_count: self.mesh_upload_count,
             render_count: self.render_count,
             gui_command_count,
+            flat_hud_retained_rebuild_count: flat_hud_retained_cache.rebuild_count,
+            flat_hud_retained_cache_hit_count: flat_hud_retained_cache.cache_hit_count,
             ui_active,
             ui_covers_world,
             ui_screen: ui_screen_label(self.ui.screen()),

@@ -348,8 +348,9 @@ Validation:
 
 ### Slice H: HUD, Hotbar, And Block Picker V2
 
-Status: first retained HUD layer landed 2026-07-02; icons, selected item text,
-debug/status overlays, touch/gamepad prompts, and block picker still pending.
+Status: first retained HUD layer and runtime cache reporting landed 2026-07-02;
+icons, selected item text, debug/status overlays, touch/gamepad prompts, and
+block picker still pending.
 
 Move in-game UI surfaces to v2 retained layers:
 
@@ -974,8 +975,52 @@ Known limits:
   rebuilt every frame
 - the native offscreen screenshot lane currently sets `hud: None`, so native
   live-world HUD pixel capture needs a separate diagnostic option
-- runtime frame summaries do not yet surface flat HUD retained-cache counters
 - block picker and block-picker hit testing are still legacy
+
+## Landed HUD Runtime Cache Counters Chunk
+
+Date: 2026-07-02.
+
+Scope:
+
+- added flat HUD retained-cache stats to shared full-frame render summaries
+- reported the HUD retained rebuild/cache-hit counts through desktop headless
+  screenshot reports, web/WASM render reports, and flat Android first-frame logs
+- kept the counters shared-owner first by routing them through
+  `FullFrameRenderSummary` instead of app-local UI state
+- left default native offscreen screenshots compatible with `hud: None`, where
+  the HUD counters are expected to stay zero
+
+Validation run:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all
+cargo test --manifest-path native/Cargo.toml -p mclone-ui flat_hud -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-native-client flat_hud -- --nocapture
+cargo test --manifest-path native/Cargo.toml -p mclone-ui -p mclone-render -p mclone-xr-scene -p mclone-native-client
+cargo check --manifest-path native/Cargo.toml --workspace
+pnpm native:web:build
+pnpm native:web:smoke
+cargo check --manifest-path native/Cargo.toml -p mclone-native-client --features xr
+cargo check --manifest-path native/Cargo.toml -p mclone-android-client --target aarch64-linux-android
+cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android
+```
+
+Runtime proof:
+
+- browser smoke report exposed `flatHudRetainedRebuilds` and
+  `flatHudRetainedCacheHits`; the live-world smoke observed a cached HUD frame
+  with `flatHudRetainedRebuilds=0` and `flatHudRetainedCacheHits=1`
+- browser live-world canvas smoke regenerated and inspected:
+  `/tmp/mclone-native-web-canvas.png`
+
+Known limits:
+
+- native desktop live-world HUD pixel capture still needs a dedicated diagnostic
+  path because the current offscreen screenshot command does not attach HUD
+  state
+- XR was compile-checked for this counter plumbing, but the real headset idle
+  Controls smoke remains the acceptance check for XR panel repaint behavior
 
 ## Non-Goals
 
@@ -991,16 +1036,17 @@ Known limits:
 
 ## Next Recommended Chunk
 
-Continue Slice H with runtime proof and the next retained HUD layer.
+Continue Slice H with the next retained HUD layer.
 
 Next scope:
 
 - run a real headset/desktop XR idle Controls smoke and confirm
   `ui_draw_rebuilds=0`, `ui_panel_repaints=0`, and no texture recreates on quiet
   frames after the first cached frame
-- surface flat HUD retained-cache counters in the flat frame summaries/reports
 - move hotbar icon/slot-label draws onto retained dynamic sublayers keyed by
   selected slot and item/icon revisions
+- add a native live-world HUD screenshot diagnostic if we need desktop pixel
+  proof before or during the hotbar icon/text split
 - keep the full creative picker as the next larger migration after the HUD
   surface has runtime cache visibility
 

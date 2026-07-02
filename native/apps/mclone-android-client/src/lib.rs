@@ -61,8 +61,8 @@ mod android {
         DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, FlatHud,
         GameFramePacingMode, GameHelpParent, GameMovementMode, GamePlayerModel, GameUiAction,
         GameUiHost, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, Point, StatusOverlay,
-        TouchJoystickOverlay, TouchOverlay, touch_action_button_rects, touch_hotbar_slot_rects,
-        touch_menu_button_rect, touch_movement_zone_rect,
+        TouchJoystickOverlay, TouchOverlay, UiDrawCacheStats, touch_action_button_rects,
+        touch_hotbar_slot_rects, touch_menu_button_rect, touch_movement_zone_rect,
     };
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
@@ -1415,15 +1415,15 @@ mod android {
             &mut self,
             gui_scale: GuiScale,
             ui_state: GameUiRenderState,
-        ) -> GuiDrawList {
+        ) -> (GuiDrawList, UiDrawCacheStats) {
             if self.ui.is_active() {
                 let mut draw = self.ui.render_draw_list(ui_state);
                 let mut hud = FlatHud::new(self.input_capabilities.resolve(self.input_preferences));
                 hud.world_hud_visible = false;
                 hud.crosshair_visible = false;
                 hud.status = self.session_status.clone();
-                self.ui.append_flat_hud_draw(gui_scale, &mut draw, &hud);
-                return draw;
+                let retained_cache = self.ui.append_flat_hud_draw(gui_scale, &mut draw, &hud);
+                return (draw, retained_cache);
             }
             let mut draw = GuiDrawList::new();
             let mut touch = self
@@ -1443,8 +1443,8 @@ mod android {
             );
             hud.touch = touch;
             hud.status = self.session_status.clone();
-            self.ui.append_flat_hud_draw(gui_scale, &mut draw, &hud);
-            draw
+            let retained_cache = self.ui.append_flat_hud_draw(gui_scale, &mut draw, &hud);
+            (draw, retained_cache)
         }
 
         fn apply_flat_touch_frame(&mut self, frame: FlatInputFrame) -> Result<()> {
@@ -1694,9 +1694,9 @@ mod android {
             self.ui.set_scale(gui_scale);
             let ui_state = self.current_ui_render_state();
             let ui_covers_world = self.ui.covers_world();
-            let gui_draw = self.gui_draw_list(gui_scale, ui_state);
+            let (gui_draw, flat_hud_retained_cache) = self.gui_draw_list(gui_scale, ui_state);
             let gui_active = !gui_draw.commands().is_empty();
-            let summary = render_full_frame_for_view(
+            let mut summary = render_full_frame_for_view(
                 frame,
                 &self.depth,
                 &self.sky,
@@ -1719,15 +1719,18 @@ mod android {
                 |_| gui_draw,
                 &mut self.render_stats,
             )?;
+            summary.flat_hud_retained_cache = flat_hud_retained_cache;
             if self.frame_index == 0 {
                 log::info!(
-                    "Mclone Android rendered {} frame: sections={}/{} indices={}/{} gui_commands={}",
+                    "Mclone Android rendered {} frame: sections={}/{} indices={}/{} gui_commands={} flat_hud_retained_rebuilds={} flat_hud_retained_cache_hits={}",
                     self.scene.host_label(),
                     summary.drawn_section_count,
                     summary.section_count,
                     summary.drawn_index_count,
                     summary.index_count,
-                    summary.gui_command_count
+                    summary.gui_command_count,
+                    summary.flat_hud_retained_cache.rebuild_count,
+                    summary.flat_hud_retained_cache.cache_hit_count
                 );
             }
             self.frame_index += 1;

@@ -48,7 +48,7 @@ use mclone_ui::{
     BlockPaletteOverlay, DEFAULT_JOIN_REMOTE_ADDR, FlatHud, GameFramePacingMode, GameHelpParent,
     GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameUi, GameUiAction,
     GameUiHost, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point,
-    StatusOverlay, UiDebugSnapshot, render_loading_progress_overlay,
+    StatusOverlay, UiDebugSnapshot, UiDrawCacheStats, render_loading_progress_overlay,
     render_loading_progress_panel_at, touch_controls_mode_label,
 };
 
@@ -1982,16 +1982,18 @@ impl FlatClientDriver {
         if let Some(progress) = loading_progress_overlay.as_ref() {
             render_loading_progress_overlay(gui_scale, &mut base_ui_draw, progress);
         }
+        let mut flat_hud_retained_cache = UiDrawCacheStats::default();
         if let Some(hud) = hud.as_ref() {
-            self.ui
-                .append_flat_hud_draw(gui_scale, &mut base_ui_draw, hud);
+            flat_hud_retained_cache =
+                self.ui
+                    .append_flat_hud_draw(gui_scale, &mut base_ui_draw, hud);
         }
         let gui_state = FullFrameGui::new(
             gui_active,
             ui_covers_world || loading_progress_overlay.is_some(),
             [gui_scale.width, gui_scale.height],
         );
-        self.render_full_frame(
+        let mut summary = self.render_full_frame(
             frame,
             fallback_render_distance,
             ui_active,
@@ -2005,7 +2007,9 @@ impl FlatClientDriver {
                     stats,
                 )
             },
-        )
+        )?;
+        summary.flat_hud_retained_cache = flat_hud_retained_cache;
+        Ok(summary)
     }
 
     pub(crate) fn sync_spectator_from_camera(&mut self) {

@@ -95,7 +95,7 @@ fn main() -> Result<()> {
         Cli::HeadlessScreenshot { options } => {
             let report = run_headless_screenshot(&options)?;
             println!(
-                "headless full-frame screenshot saved to {} ({}x{}, {} bytes, {} sections, {} drawn sections, {} GUI commands, {} remote players, {} entities, {} actors, {} drawn actors, underwater={})",
+                "headless full-frame screenshot saved to {} ({}x{}, {} bytes, {} sections, {} drawn sections, {} GUI commands, {} flat HUD retained rebuilds, {} flat HUD retained cache hits, {} remote players, {} entities, {} actors, {} drawn actors, underwater={})",
                 report.path.display(),
                 report.width,
                 report.height,
@@ -103,6 +103,8 @@ fn main() -> Result<()> {
                 report.section_count,
                 report.drawn_section_count,
                 report.gui_command_count,
+                report.flat_hud_retained_rebuild_count,
+                report.flat_hud_retained_cache_hit_count,
                 report.remote_player_count,
                 report.entity_count,
                 report.actor_count,
