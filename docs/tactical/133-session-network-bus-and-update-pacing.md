@@ -6,7 +6,8 @@ receive-order update application (vanilla parity) with a frame-budget stall,
 replacing the earlier priority-class plan; Slice 2 local integrated ordered
 update pump landed; Slice 3A batched dirty intent and resident cache lookup
 landed; Slice 3B local integrated producer-side decoded update queue landed;
-full resident dirty slots and source pacing remain active
+Slice 3C local integrated chunk-interest unload hysteresis landed; full
+resident dirty slots remain active
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -91,6 +92,11 @@ ordered queue behind a common policy boundary.
   `encoded_len` for diagnostics, but the runtime pump no longer decodes local
   integrated update payloads. `drain_updates` remains as an unlimited
   compatibility helper.
+- Local integrated play uses the shared player-chunk tracking policy with a
+  one-chunk unload hysteresis margin for Java-shaped radii. The first view is
+  exact, tiny debug views stay exact, and chunks just outside the accepted view
+  can remain retained across boundary oscillation to avoid immediate unload /
+  reload churn.
 - `send_gameplay_command*` helpers default to `DrainImmediately`; Slice 1 added
   `SendOnly` and switched pose sync to it.
 - `LocalSingleViewSceneRuntime::set_chunk_view` sends the view command only;
@@ -315,7 +321,7 @@ safety valve.
   encoded byte accounting as producer-side metadata.
 - [ ] Move remote transport update payload decode off the render thread:
   remote transports decode on the session thread (Slice 4).
-- [ ] Interest hysteresis: verify the unload margin is wider than the load margin
+- [x] Interest hysteresis: verify the unload margin is wider than the load margin
   so a path oscillating near a chunk boundary does not thrash full row swaps
   (the measured 15-snapshot + 15-unload bursts). Vanilla keeps chunks resident
   beyond the strict view distance and unloads lazily.
@@ -408,6 +414,63 @@ Validation (Slice 3B):
     `app_work_avg_ms=13.751`, `app_work_p95_ms=15.864`,
     `headroom_avg_ms=0.138`, `app_over_period_pct=41.1`.
 
+Recorded Slice 3C result:
+
+- `PlayerChunkTrackingPolicy` now has an explicit
+  `unload_hysteresis_chunks` knob. The default dedicated policy keeps exact
+  view-diff behavior, while `NativeIntegratedServerRunnerConfig` opts local
+  integrated play into a one-chunk unload margin on top of the Java-max policy.
+- Hysteresis applies only for normal Java-shaped radii
+  (`chunk_tracking_radius >= 3`). Radius 0/1 debug and smoke views still unload
+  exactly, preserving existing narrow tests and capture lanes.
+- The accepted view remains the strict requested/clamped target. The
+  per-player `visible_chunks` set now means "chunks the player may still hold
+  locally"; under hysteresis it can retain chunks just outside the accepted
+  target, so aggregate player tickets keep that trailing ring resident.
+- Added regression coverage:
+  `unload_hysteresis_keeps_tiny_debug_views_exact`,
+  `unload_hysteresis_retains_chunks_inside_unload_margin`, and an integrated
+  runner config assertion that local integrated tracking enables the one-chunk
+  margin.
+
+Validation (Slice 3C):
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server -- --nocapture`
+  passed.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -- --nocapture`
+  passed.
+- `cargo test --manifest-path native/Cargo.toml` passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+  passed.
+- Quest RD7 settled-orbit lane passed with actors enabled:
+  `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
+  Summary artifacts:
+  `/tmp/mclone-quest-openxr-perf-summary.txt` and
+  `/tmp/mclone-quest-openxr-logcat.txt`.
+- Quest result highlights compared with the post-Slice 3B run:
+  - Locomotion command update drain remained collapsed:
+    `max_drain_updates_ms=0.000`, `max_apply_updates_ms=0.000`,
+    `max_updates=0`.
+  - Runtime pump tail improved again:
+    `poll_total_ms=1.722` versus `3.263`,
+    `drain_updates_ms=0.050` versus `0.094`,
+    `apply_updates_ms=1.712` versus `3.253`,
+    `client_apply_ms=1.690` versus `3.232`.
+    `dirty_mark_ms=1.299` remains the resident-slot dirty-marking item.
+  - Queue pressure cleared on this lane:
+    `update_pump_stalled=false`, `server_update_queue_depth=0`,
+    `server_update_queue_bytes=0`,
+    `server_update_oldest_applied_age_ms=22.503`.
+  - Source-side retention is visible in diagnostics:
+    `player_visible_chunks=256` for the RD7 settled-orbit path, while the
+    strict accepted target remains the Java-shaped view radius.
+  - Overall frame pacing is still not solved and was noisier/worse in this
+    run:
+    `app_work_avg_ms=14.816`, `app_work_p95_ms=17.560`,
+    `headroom_avg_ms=-0.927`, `app_over_period_pct=65.6`. The worst frames
+    are now dominated by terrain render/upload/poll-wait work rather than a
+    hidden command-drain path.
+
 Success means a chunk-scale update applies at parse-plus-flag-flip cost (well
 below the current ~0.13 ms), the default budget absorbs a 15+15 burst within a
 frame or two of stalling at most, and boundary oscillation no longer reloads
@@ -462,6 +525,27 @@ Goal: make remote dedicated fully event/update-stream shaped.
 
 This is not required for the first local integrated Quest fix, but the shared
 bus should be designed so this does not require another client-runtime rewrite.
+
+## Closeout Notes / Deferred Valuable Work
+
+Before closing this tactical or moving the local integrated pacing work out to
+another doc, explicitly decide where these remaining valuable items live:
+
+- Full resident-slot dirty marking: replace ordered-set dirty insertion with
+  the vanilla `ViewArea.setDirty` shape (resident slot plus boolean). This is
+  the remaining Slice 3 thin-apply item and likely belongs with `128`'s
+  resident-lifecycle direction.
+- Exact oldest pending update age: current diagnostics expose applied update
+  age and queued bytes/depth, but the mpsc-backed runner still cannot peek the
+  oldest pending update without a transport-side metadata queue.
+- Remote TCP session actor: native remote still needs a real inbound update
+  bus and producer-side decode so `SendOnly` works outside local integrated
+  play.
+- Web bus convergence: browser WebSocket/worker callbacks should feed the same
+  ordered inbound queue behind the shared policy.
+- Correction latency fast-lane: keep this only as the recorded escalation path
+  if measured queue age proves corrections/lifecycle updates need it. Do not
+  introduce chunk-stream priority classes for local play.
 
 ## Measurement Plan
 

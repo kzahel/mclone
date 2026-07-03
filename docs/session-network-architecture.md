@@ -3,9 +3,10 @@
 Status: target architecture; Slice 1 send-only high-frequency command policy
 and Slice 2 local integrated ordered update pump landed; Slice 3A batched dirty
 intent and resident cache lookup landed; Slice 3B local integrated producer-side
-decoded update queue landed; revised 2026-07-03 to adopt the vanilla
-ordered-stream update model (thin apply plus a frame-budget stall) and drop the
-earlier priority-class design; remaining implementation tracked in
+decoded update queue landed; Slice 3C local integrated chunk-interest unload
+hysteresis landed; revised 2026-07-03 to adopt the vanilla ordered-stream
+update model (thin apply plus a frame-budget stall) and drop the earlier
+priority-class design; remaining implementation tracked in
 [`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md)
 
 ## Purpose
@@ -109,6 +110,12 @@ Slice 3B moved local integrated update decode/conversion to the runner side:
 `try_recv_update` now returns already-decoded `ServerUpdate` envelopes with
 encoded byte metadata, so the local runtime pump no longer decodes update
 payloads.
+
+Slice 3C added local integrated source pacing at the shared player-chunk
+tracking boundary. Dedicated/default views remain exact, while local
+integrated Java-shaped views keep a one-chunk unload hysteresis margin so
+boundary oscillation can retain the trailing edge instead of immediately
+unloading and reloading it.
 
 Native remote dedicated is even more request/response-shaped today:
 `NativeClientSession::send_command` writes one command and blocks reading one

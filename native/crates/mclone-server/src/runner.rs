@@ -547,7 +547,8 @@ mod native {
         }
 
         pub const fn with_local_integrated_chunk_tracking(mut self) -> Self {
-            self.player_chunk_tracking_policy = PlayerChunkTrackingPolicy::java_max();
+            self.player_chunk_tracking_policy =
+                PlayerChunkTrackingPolicy::java_max().with_unload_hysteresis_chunks(1);
             self
         }
 
@@ -1365,18 +1366,20 @@ mod native {
                 render_distance: 32,
                 chunk_tracking_radius: 32,
             };
-            let dedicated = NativeIntegratedServerRunnerConfig::new(0)
-                .player_chunk_tracking_policy
-                .clamp_view(&requested);
-            let local_integrated = NativeIntegratedServerRunnerConfig::new(0)
+            let dedicated_policy =
+                NativeIntegratedServerRunnerConfig::new(0).player_chunk_tracking_policy;
+            let local_integrated_policy = NativeIntegratedServerRunnerConfig::new(0)
                 .with_local_integrated_chunk_tracking()
-                .player_chunk_tracking_policy
-                .clamp_view(&requested);
+                .player_chunk_tracking_policy;
+            let dedicated = dedicated_policy.clamp_view(&requested);
+            let local_integrated = local_integrated_policy.clamp_view(&requested);
 
             assert_eq!(dedicated.render_distance, 11);
             assert_eq!(dedicated.chunk_tracking_radius, 11);
+            assert_eq!(dedicated_policy.unload_hysteresis_chunks(), 0);
             assert_eq!(local_integrated.render_distance, 32);
             assert_eq!(local_integrated.chunk_tracking_radius, 32);
+            assert_eq!(local_integrated_policy.unload_hysteresis_chunks(), 1);
         }
 
         #[test]

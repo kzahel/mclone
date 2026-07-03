@@ -22,6 +22,7 @@ pub(crate) const DEFAULT_DEDICATED_SERVER_CHUNK_TRACKING_RADIUS: u32 =
 pub(crate) struct PlayerChunkTrackingPolicy {
     max_render_distance: u32,
     max_chunk_tracking_radius: u32,
+    unload_hysteresis_chunks: u32,
 }
 
 impl Default for PlayerChunkTrackingPolicy {
@@ -35,6 +36,7 @@ impl PlayerChunkTrackingPolicy {
         Self {
             max_render_distance,
             max_chunk_tracking_radius,
+            unload_hysteresis_chunks: 0,
         }
     }
 
@@ -47,6 +49,16 @@ impl PlayerChunkTrackingPolicy {
 
     pub(crate) const fn java_max() -> Self {
         Self::new(JAVA_MAX_VIEW_DISTANCE, JAVA_MAX_VIEW_DISTANCE)
+    }
+
+    pub(crate) const fn with_unload_hysteresis_chunks(mut self, chunks: u32) -> Self {
+        self.unload_hysteresis_chunks = chunks;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn unload_hysteresis_chunks(self) -> u32 {
+        self.unload_hysteresis_chunks
     }
 
     pub(crate) fn clamp_view(self, requested: &ChunkView) -> ChunkView {
@@ -63,12 +75,23 @@ impl PlayerChunkTrackingPolicy {
                 .min(max_chunk_tracking_radius),
         }
     }
+
+    fn unload_radius(self, accepted: &ChunkView) -> u32 {
+        if accepted.chunk_tracking_radius < JAVA_MIN_VIEW_DISTANCE {
+            return accepted.chunk_tracking_radius;
+        }
+        accepted
+            .chunk_tracking_radius
+            .saturating_add(self.unload_hysteresis_chunks)
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct PlayerChunkViewState {
     pub(crate) requested: Option<ChunkView>,
     pub(crate) accepted: Option<ChunkView>,
+    // Chunks the player may still hold locally. Hysteresis policies can retain
+    // chunks just outside the accepted target view to avoid edge churn.
     visible_chunks: BTreeSet<ChunkPos>,
 }
 
@@ -149,12 +172,22 @@ impl PlayerChunkTracking {
         self.add_player(player_id);
         let old_priority_centers = self.aggregate_player_ticket_priority_centers();
         let accepted = self.policy.clamp_view(&requested);
-        let new_visible = chunk_positions_for_view(&accepted);
         let state = self
             .players
             .get_mut(&player_id)
             .expect("player state must exist after add_player");
-        let old_visible = std::mem::replace(&mut state.visible_chunks, new_visible);
+        let old_visible = std::mem::take(&mut state.visible_chunks);
+        let target_visible = chunk_positions_for_view(&accepted);
+        let unload_visible = chunk_positions_for_center_radius(
+            accepted.center,
+            self.policy.unload_radius(&accepted),
+        );
+        let retained_visible = old_visible
+            .intersection(&unload_visible)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let new_visible = target_visible.union(&retained_visible).copied().collect();
+        state.visible_chunks = new_visible;
         state.requested = Some(requested);
         state.accepted = Some(accepted.clone());
 
@@ -339,12 +372,15 @@ impl PlayerChunkTracking {
 }
 
 pub(crate) fn chunk_positions_for_view(view: &ChunkView) -> BTreeSet<ChunkPos> {
-    let radius =
-        i32::try_from(view.chunk_tracking_radius).expect("chunk tracking radius exceeds i32");
-    let min_x = view.center.x - radius;
-    let max_x = view.center.x + radius;
-    let min_z = view.center.z - radius;
-    let max_z = view.center.z + radius;
+    chunk_positions_for_center_radius(view.center, view.chunk_tracking_radius)
+}
+
+fn chunk_positions_for_center_radius(center: ChunkPos, radius: u32) -> BTreeSet<ChunkPos> {
+    let radius = i32::try_from(radius).expect("chunk tracking radius exceeds i32");
+    let min_x = center.x - radius;
+    let max_x = center.x + radius;
+    let min_z = center.z - radius;
+    let max_z = center.z + radius;
     (min_x..=max_x)
         .flat_map(|x| (min_z..=max_z).map(move |z| ChunkPos::new(x, z)))
         .collect()
@@ -360,6 +396,10 @@ mod tests {
             render_distance: radius,
             chunk_tracking_radius: radius,
         }
+    }
+
+    fn row_at_x(x: i32, z_min: i32, z_max: i32) -> Vec<ChunkPos> {
+        (z_min..=z_max).map(|z| ChunkPos::new(x, z)).collect()
     }
 
     #[test]
@@ -445,6 +485,51 @@ mod tests {
         assert_eq!(diagnostics.total_player_visible_chunks, 2);
         assert_eq!(diagnostics.total_outbound_queue_depth, 0);
         assert_eq!(diagnostics.max_player_visible_chunks, 1);
+    }
+
+    #[test]
+    fn unload_hysteresis_keeps_tiny_debug_views_exact() {
+        let mut tracking = PlayerChunkTracking::new(
+            PlayerChunkTrackingPolicy::new(4, 4).with_unload_hysteresis_chunks(1),
+        );
+        let player = ServerPlayerId::LOCAL;
+
+        tracking.set_requested_view(player, view(ChunkPos::new(0, 0), 0));
+        let moved = tracking.set_requested_view(player, view(ChunkPos::new(1, 0), 0));
+
+        assert_eq!(moved.added_chunks, vec![ChunkPos::new(1, 0)]);
+        assert_eq!(moved.removed_chunks, vec![ChunkPos::new(0, 0)]);
+        assert!(!tracking.player_tracks_chunk(player, ChunkPos::new(0, 0)));
+        assert_eq!(tracking.diagnostics().total_player_visible_chunks, 1);
+    }
+
+    #[test]
+    fn unload_hysteresis_retains_chunks_inside_unload_margin() {
+        let mut tracking = PlayerChunkTracking::new(
+            PlayerChunkTrackingPolicy::new(8, 8).with_unload_hysteresis_chunks(1),
+        );
+        let player = ServerPlayerId::LOCAL;
+
+        let first = tracking.set_requested_view(player, view(ChunkPos::new(0, 0), 3));
+        assert_eq!(first.added_chunks.len(), 49);
+        assert!(first.removed_chunks.is_empty());
+        assert_eq!(tracking.diagnostics().total_player_visible_chunks, 49);
+
+        let moved = tracking.set_requested_view(player, view(ChunkPos::new(1, 0), 3));
+        assert_eq!(moved.added_chunks, row_at_x(4, -3, 3));
+        assert!(moved.removed_chunks.is_empty());
+        assert!(tracking.player_tracks_chunk(player, ChunkPos::new(-3, 0)));
+        assert!(tracking.player_tracks_chunk(player, ChunkPos::new(4, 0)));
+        assert_eq!(tracking.diagnostics().aggregate_player_ticket_chunks, 56);
+        assert_eq!(tracking.diagnostics().total_player_visible_chunks, 56);
+
+        let moved_again = tracking.set_requested_view(player, view(ChunkPos::new(2, 0), 3));
+        assert_eq!(moved_again.added_chunks, row_at_x(5, -3, 3));
+        assert_eq!(moved_again.removed_chunks, row_at_x(-3, -3, 3));
+        assert!(tracking.player_tracks_chunk(player, ChunkPos::new(-2, 0)));
+        assert!(!tracking.player_tracks_chunk(player, ChunkPos::new(-3, 0)));
+        assert_eq!(tracking.diagnostics().aggregate_player_ticket_chunks, 56);
+        assert_eq!(tracking.diagnostics().total_player_visible_chunks, 56);
     }
 
     #[test]
