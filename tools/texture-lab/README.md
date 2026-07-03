@@ -41,7 +41,11 @@ pnpm texture-lab:coverage
 `texture-lab:analyze` is the feedback step of the authoring loop: it reports
 objective structural, color, and defect features for each candidate against its
 local vanilla counterpart, and ends with a `biggest gaps vs vanilla` list to
-drive the next revision. The candidate is downsampled to the vanilla grid first,
+drive the next revision. Beyond value/color statistics it measures palette
+concentration (top-8 color share), structure vs speckle (color run length),
+dominant grain direction and strength (catches diagonal streaks the row/column
+banding test cannot see), and internal motif repetition (stamped macro
+noise/masks show as a high repetition peak). The candidate is downsampled to the vanilla grid first,
 so a 32x32 tile and a 16x16 vanilla texture are compared apples-to-apples. The
 numbers are directional guidance, not a pass/fail gate. Scope it to one or a few
 textures with `--texture <name>`, or add `--json` for tool consumption.

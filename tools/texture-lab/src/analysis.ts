@@ -13,10 +13,15 @@ import type { RgbaImage } from "./png";
 // matchResolution in analyze.ts.
 //
 // What each group answers, in plain terms:
-// - palette:   how many tones, how wide the value range, is there a dominant mid
+// - palette:   how many tones, how concentrated they are (top-8 share), whether
+//              tones form connected planes or a speckle field (color run length)
 // - color:     what hue/saturation/temperature the material sits at (not just value)
 // - banding:   is structure horizontal, vertical, or isotropic (the row/col test)
+// - grain:     dominant stroke direction and strength from gradients — catches
+//              the diagonal streaks the axis-aligned banding test cannot see
 // - scale:     is the variation large-scale or fine noise (does it survive shrink)
+// - repeats:   strongest internal self-similarity at a non-trivial offset —
+//              stamped motifs from masks/macro noise show up here
 // - defects:   sparkle pixels and one-way lighting gradients (authoring mistakes)
 // - blobs:     how big are the darkest/lightest clusters (catches oversized pits)
 // - seam:      does the tile wrap cleanly left-right and top-bottom
@@ -39,6 +44,7 @@ export interface TextureFeatures {
   transparentShare: number;
   distinctColors: number;
   quantizedColors: number;
+  top8ColorShare: number;
   distinctLevels: number;
   luminance: LuminanceStats;
   meanHueDeg: number;
@@ -50,11 +56,16 @@ export interface TextureFeatures {
   rowBandStd: number;
   colBandStd: number;
   anisotropy: number;
+  grainDirectionality: number;
+  grainAngleDeg: number;
   stdFull: number;
   stdHalf: number;
   stdQuarter: number;
+  midRetention: number;
   coarseRetention: number;
   localContrast: number;
+  colorRunLength: number;
+  repetitionPeak: number;
   sparklePixels: number;
   lightingBiasLR: number;
   lightingBiasTB: number;
@@ -81,6 +92,20 @@ const SPARKLE_THRESHOLD = 40;
 // after opacity blending and noise; bucketing to 16-level channels collapses the
 // near-duplicates so the number tracks "how many real tones" more honestly.
 const COLOR_QUANTIZE_STEP = 16;
+// Palette concentration is measured as the pixel share covered by this many of
+// the most common quantized colors. Vanilla terrain palettes are tiny (stone
+// uses 4 exact colors; the 16x16 median is 9), so vanilla sits near 1.0 while
+// continuous-tone output leaks share into a long color tail.
+const TOP_COLOR_COVERAGE = 8;
+// Self-correlation at shifts closer than this (torus Chebyshev distance) mostly
+// measures smoothness — any coherent texture correlates with itself one pixel
+// over. From this distance out, a high peak means a repeated motif: the stamped
+// macro-noise/mask artifact the repeat panel shows.
+const REPETITION_MIN_SHIFT = 3;
+// Below this grain directionality the resultant angle is statistical noise (an
+// isotropic 16x16 field lands near 0.055 by random walk alone), so the angle is
+// reported as n/a instead of a random direction.
+const GRAIN_ANGLE_MIN_DIRECTIONALITY = 0.1;
 
 export function analyzeTexture(image: RgbaImage): TextureFeatures {
   const { width, height, data } = image;
@@ -92,7 +117,10 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
   const opaqueAlpha = new Uint8Array(pixelCount);
   const opaqueLum: number[] = [];
   const colorCounts = new Map<string, number>();
-  const quantizedColors = new Set<string>();
+  const quantizedCounts = new Map<string, number>();
+  const quantIds = new Map<string, number>();
+  // Per-pixel quantized-color id (-1 = transparent) for the run-length measure.
+  const quantId = new Int32Array(pixelCount).fill(-1);
   let transparent = 0;
   let sumSaturation = 0;
   let sumWarmCool = 0;
@@ -115,7 +143,14 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
     opaqueLum.push(l);
     const key = `${r},${g},${b},${a}`;
     colorCounts.set(key, (colorCounts.get(key) ?? 0) + 1);
-    quantizedColors.add(`${quantize(r)},${quantize(g)},${quantize(b)}`);
+    const quantKey = `${quantize(r)},${quantize(g)},${quantize(b)}`;
+    quantizedCounts.set(quantKey, (quantizedCounts.get(quantKey) ?? 0) + 1);
+    let id = quantIds.get(quantKey);
+    if (id === undefined) {
+      id = quantIds.size;
+      quantIds.set(quantKey, id);
+    }
+    quantId[i] = id;
 
     const max = Math.max(r, g, b);
     const min = Math.min(r, g, b);
@@ -158,6 +193,7 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
   const light = blobStats(grid, width, height, (l) => l >= lightThreshold);
 
   const bias = lightingBias(grid, width, height);
+  const grain = grainDirection(grid, width, height);
 
   return {
     width,
@@ -165,7 +201,8 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
     opaquePixels: opaqueCount,
     transparentShare: pixelCount > 0 ? transparent / pixelCount : 0,
     distinctColors: colorCounts.size,
-    quantizedColors: quantizedColors.size,
+    quantizedColors: quantizedCounts.size,
+    top8ColorShare: topColorShare(quantizedCounts, opaqueCount),
     distinctLevels: levels.size,
     luminance: {
       min: sorted[0] ?? 0,
@@ -186,11 +223,16 @@ export function analyzeTexture(image: RgbaImage): TextureFeatures {
     rowBandStd,
     colBandStd,
     anisotropy: rowBandStd / Math.max(colBandStd, 0.01),
+    grainDirectionality: grain.directionality,
+    grainAngleDeg: grain.angleDeg,
     stdFull,
     stdHalf,
     stdQuarter,
+    midRetention: stdFull > 0 ? stdHalf / stdFull : 0,
     coarseRetention: stdFull > 0 ? stdQuarter / stdFull : 0,
     localContrast: localContrast(grid, width, height),
+    colorRunLength: colorRunLength(quantId, width, height),
+    repetitionPeak: repetitionPeak(grid, width, height),
     sparklePixels: sparkleCount(grid, opaqueAlpha, width, height),
     lightingBiasLR: bias.leftRight,
     lightingBiasTB: bias.topBottom,
@@ -365,6 +407,149 @@ function localContrast(grid: Float64Array, width: number, height: number): numbe
   return samples > 0 ? sum / samples : 0;
 }
 
+// Pixel share covered by the TOP_COLOR_COVERAGE most common quantized colors.
+// Robust to blending noise (unlike the exact color count) and separates a
+// compact authored palette from continuous-tone output with a long color tail.
+function topColorShare(counts: Map<string, number>, opaqueCount: number): number {
+  if (opaqueCount <= 0) {
+    return 0;
+  }
+  const sorted = [...counts.values()].sort((a, b) => b - a);
+  let covered = 0;
+  for (let i = 0; i < Math.min(TOP_COLOR_COVERAGE, sorted.length); i += 1) {
+    covered += sorted[i]!;
+  }
+  return covered / opaqueCount;
+}
+
+// Mean run length of same-quantized-color pixels along rows and columns, on the
+// torus. Vanilla materials lay their few tones out in connected planes (long
+// runs); a speckle field alternates tone almost every pixel (runs near 1). This
+// is the "structure vs speckle" number for the flat-gray-plus-dots failure mode.
+// Pairs involving transparent pixels are skipped rather than counted as breaks.
+function colorRunLength(quantId: Int32Array, width: number, height: number): number {
+  let pairs = 0;
+  let transitions = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const here = quantId[y * width + x]!;
+      if (here < 0) {
+        continue;
+      }
+      const right = quantId[y * width + ((x + 1) % width)]!;
+      if (right >= 0) {
+        pairs += 1;
+        if (right !== here) {
+          transitions += 1;
+        }
+      }
+      const down = quantId[((y + 1) % height) * width + x]!;
+      if (down >= 0) {
+        pairs += 1;
+        if (down !== here) {
+          transitions += 1;
+        }
+      }
+    }
+  }
+  return pairs > 0 ? pairs / Math.max(1, transitions) : 0;
+}
+
+// Strongest normalized luminance self-correlation over all torus shifts at
+// least REPETITION_MIN_SHIFT away from the origin. A stamped motif (repeated
+// mask, periodic macro noise) correlates strongly with itself at the stamp
+// period; organic vanilla tiles stay low everywhere. 0..1, higher = more
+// visible internal repetition.
+function repetitionPeak(grid: Float64Array, width: number, height: number): number {
+  const pixelCount = width * height;
+  let mean = 0;
+  for (let i = 0; i < pixelCount; i += 1) {
+    mean += grid[i]!;
+  }
+  mean /= Math.max(1, pixelCount);
+  const centered = new Float64Array(pixelCount);
+  let denom = 0;
+  for (let i = 0; i < pixelCount; i += 1) {
+    centered[i] = grid[i]! - mean;
+    denom += centered[i]! * centered[i]!;
+  }
+  if (denom <= 1e-9) {
+    return 0;
+  }
+  let best = 0;
+  for (let shiftY = 0; shiftY < height; shiftY += 1) {
+    const torusY = Math.min(shiftY, height - shiftY);
+    for (let shiftX = 0; shiftX < width; shiftX += 1) {
+      const torusX = Math.min(shiftX, width - shiftX);
+      if (Math.max(torusX, torusY) < REPETITION_MIN_SHIFT) {
+        continue;
+      }
+      let sum = 0;
+      for (let y = 0; y < height; y += 1) {
+        const shiftedRow = ((y + shiftY) % height) * width;
+        const row = y * width;
+        for (let x = 0; x < width; x += 1) {
+          sum += centered[row + x]! * centered[shiftedRow + ((x + shiftX) % width)]!;
+        }
+      }
+      const r = sum / denom;
+      if (r > best) {
+        best = r;
+      }
+    }
+  }
+  return best;
+}
+
+// Dominant stroke/grain direction from Sobel gradients on the torus. Gradient
+// orientations are axial (a stroke at 30° and 210° is the same grain), so they
+// are accumulated as doubled angles weighted by gradient magnitude; the
+// resultant length is the directionality (0 = isotropic, 1 = every edge points
+// one way). The angle is converted from gradient direction to stroke direction
+// (0 = horizontal strokes, 90 = vertical) and reported only when the
+// directionality is strong enough to be meaningful. This is the diagonal-aware
+// complement to the axis-only row/col banding test, and the number to watch for
+// rotation-safety.
+function grainDirection(grid: Float64Array, width: number, height: number): { directionality: number; angleDeg: number } {
+  let sumSin = 0;
+  let sumCos = 0;
+  let sumMagnitude = 0;
+  for (let y = 0; y < height; y += 1) {
+    const up = ((y - 1 + height) % height) * width;
+    const down = ((y + 1) % height) * width;
+    const row = y * width;
+    for (let x = 0; x < width; x += 1) {
+      const left = (x - 1 + width) % width;
+      const right = (x + 1) % width;
+      const gx =
+        2 * grid[row + right]! + grid[up + right]! + grid[down + right]!
+        - 2 * grid[row + left]! - grid[up + left]! - grid[down + left]!;
+      const gy =
+        2 * grid[down + x]! + grid[down + left]! + grid[down + right]!
+        - 2 * grid[up + x]! - grid[up + left]! - grid[up + right]!;
+      const magnitude = Math.sqrt(gx * gx + gy * gy);
+      if (magnitude <= 0) {
+        continue;
+      }
+      const doubled = 2 * Math.atan2(gy, gx);
+      sumSin += magnitude * Math.sin(doubled);
+      sumCos += magnitude * Math.cos(doubled);
+      sumMagnitude += magnitude;
+    }
+  }
+  if (sumMagnitude <= 1e-9) {
+    return { directionality: 0, angleDeg: Number.NaN };
+  }
+  const directionality = Math.sqrt(sumSin * sumSin + sumCos * sumCos) / sumMagnitude;
+  if (directionality < GRAIN_ANGLE_MIN_DIRECTIONALITY) {
+    return { directionality, angleDeg: Number.NaN };
+  }
+  const gradientAngle = ((Math.atan2(sumSin, sumCos) / 2) * 180) / Math.PI;
+  // Strokes run perpendicular to their luminance gradient.
+  const angleDeg = (((gradientAngle + 90) % 180) + 180) % 180;
+  return { directionality, angleDeg };
+}
+
 // Lone high-contrast pixels: opaque cells that sit further than SPARKLE_THRESHOLD
 // from every one of their four neighbours, in the same direction. These are the
 // single pixels that sparkle/twinkle as the texture mips down at distance.
@@ -497,8 +682,9 @@ interface FeatureRow {
   // Used only to draw the ↑/↓/• hint and to rank the biggest gaps. It is NOT a
   // pass/fail threshold — a strong texture can legitimately sit outside it.
   scale?: number;
-  // Hue lives on a circle, so its candidate-vs-reference delta wraps at 360.
-  circular?: boolean;
+  // Period for circular quantities: hue wraps at 360, axial grain angle at 180.
+  // The candidate-vs-reference delta wraps at this period.
+  circularPeriod?: number;
   // Display as a percentage rather than a raw fraction.
   percent?: boolean;
   // Counted/inspected but excluded from the ↑/↓ hint and gap ranking because the
@@ -509,11 +695,14 @@ interface FeatureRow {
 const FEATURE_ROWS: FeatureRow[] = [
   { label: "distinct colors", value: (f) => f.distinctColors, digits: 0, informational: true, hint: "exact RGBA; noisy after blending" },
   { label: "quantized colors", value: (f) => f.quantizedColors, digits: 0, scale: 4, hint: "tones at 16-level buckets" },
+  { label: "top-8 color share", value: (f) => f.top8ColorShare, digits: 0, scale: 0.06, percent: true, hint: "palette concentration; vanilla is compact" },
+  { label: "dominant color share", value: (f) => f.dominantColorShare, digits: 0, percent: true, informational: true, hint: "exact top color; noisy after blending" },
   { label: "distinct levels", value: (f) => f.distinctLevels, digits: 0, informational: true, hint: "exact levels; inflated by resample" },
   { label: "luminance span", value: (f) => f.luminance.span, digits: 0, scale: 15, hint: "value range; narrow = subtle" },
   { label: "luminance mean", value: (f) => f.luminance.mean, digits: 0, scale: 15 },
   { label: "luminance std", value: (f) => f.luminance.std, digits: 1, scale: 4, hint: "overall contrast" },
-  { label: "dominant hue (deg)", value: (f) => f.meanHueDeg, digits: 0, scale: 8, circular: true, hint: "n/a if near-neutral" },
+  { label: "value skew", value: (f) => f.luminance.p90 - f.luminance.p50 - (f.luminance.p50 - f.luminance.p10), digits: 0, scale: 12, hint: ">0 light-tailed, <0 heavy shadows" },
+  { label: "dominant hue (deg)", value: (f) => f.meanHueDeg, digits: 0, scale: 8, circularPeriod: 360, hint: "n/a if near-neutral" },
   { label: "hue spread (deg)", value: (f) => f.hueSpreadDeg, digits: 0, scale: 10, hint: "how varied the hue is" },
   { label: "mean saturation", value: (f) => f.meanSaturation, digits: 3, scale: 0.04, hint: "chroma; rock is low" },
   { label: "warm-cool (R-B)", value: (f) => f.warmCool, digits: 3, scale: 0.05, hint: ">0 warm, <0 cool" },
@@ -521,13 +710,20 @@ const FEATURE_ROWS: FeatureRow[] = [
   { label: "row-band std", value: (f) => f.rowBandStd, digits: 2, scale: 1.5, hint: "horizontal structure" },
   { label: "col-band std", value: (f) => f.colBandStd, digits: 2, scale: 1.5, hint: "vertical structure" },
   { label: "anisotropy (row/col)", value: (f) => f.anisotropy, digits: 2, scale: 0.3, hint: ">1 horizontal, <1 vertical" },
+  { label: "grain strength", value: (f) => f.grainDirectionality, digits: 2, scale: 0.08, hint: "0 isotropic; high = one-way strokes" },
+  { label: "grain angle (deg)", value: (f) => f.grainAngleDeg, digits: 0, scale: 20, circularPeriod: 180, hint: "0 horiz, 90 vert; n/a if isotropic" },
+  { label: "mid retention", value: (f) => f.midRetention, digits: 2, scale: 0.08, hint: "half-scale structure; the mid layer" },
   { label: "coarse retention", value: (f) => f.coarseRetention, digits: 2, scale: 0.08, hint: "high = large-scale, low = fine noise" },
   { label: "local contrast", value: (f) => f.localContrast, digits: 1, scale: 4, hint: "grain busyness" },
+  { label: "color run length", value: (f) => f.colorRunLength, digits: 1, scale: 0.5, hint: "same-tone runs; near 1 = speckle field" },
+  { label: "repetition peak", value: (f) => f.repetitionPeak, digits: 2, scale: 0.08, hint: "internal motif repeats; stamping is high" },
   { label: "sparkle pixels", value: (f) => f.sparklePixels, digits: 0, scale: 2, hint: "lone twinkly pixels; lower is safer" },
   { label: "lighting bias L-R", value: (f) => f.lightingBiasLR, digits: 1, scale: 6, hint: "one-way gradient; near 0 is flat" },
   { label: "lighting bias T-B", value: (f) => f.lightingBiasTB, digits: 1, scale: 6 },
   { label: "dark blob max %", value: (f) => f.darkBlobMaxShare, digits: 2, scale: 0.02, percent: true, hint: "biggest dark cluster (tile %)" },
   { label: "light blob max %", value: (f) => f.lightBlobMaxShare, digits: 2, scale: 0.02, percent: true, hint: "biggest light cluster (tile %)" },
+  { label: "dark blob count", value: (f) => f.darkBlobCount, digits: 0, scale: 4, hint: "scattered pits vs one clump" },
+  { label: "light blob count", value: (f) => f.lightBlobCount, digits: 0, scale: 4 },
   { label: "seam left-right", value: (f) => f.seamLeftRight, digits: 3, scale: 0.04, hint: "0 = perfect wrap" },
   { label: "seam top-bottom", value: (f) => f.seamTopBottom, digits: 3, scale: 0.04 },
 ];
@@ -554,12 +750,12 @@ function deviation(row: FeatureRow, candidate: TextureFeatures, reference: Textu
   if (!Number.isFinite(cand) || !Number.isFinite(ref) || !row.scale) {
     return Number.NaN;
   }
-  const delta = row.circular ? circularDelta(cand, ref) : cand - ref;
+  const delta = row.circularPeriod ? circularDelta(cand, ref, row.circularPeriod) : cand - ref;
   return delta / row.scale;
 }
 
-function circularDelta(a: number, b: number): number {
-  return ((a - b + 540) % 360) - 180;
+function circularDelta(a: number, b: number, period: number): number {
+  return ((((a - b) % period) + period * 1.5) % period) - period / 2;
 }
 
 function readHint(dev: number): string {

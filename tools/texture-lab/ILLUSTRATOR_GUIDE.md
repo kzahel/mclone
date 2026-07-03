@@ -213,9 +213,19 @@ The candidate is area-downsampled to the vanilla grid (usually 16x16) before
 measuring, so every number is apples-to-apples — a 32x32 tile is neither
 rewarded nor punished for simply having four times the pixels. Beyond value and
 structure, the report now also measures **color** (dominant hue, hue spread,
-saturation, warm-cool cast) and common **defects** (sparkle pixels, one-way
-lighting bias). Each report ends with a `biggest gaps vs vanilla` list: the
-features the candidate sits furthest from vanilla on, worst first.
+saturation, warm-cool cast), **structure quality** (grain direction/strength
+for streaks — including the diagonals the row/col banding test misses; color
+run length for connected planes vs speckle; repetition peak for stamped
+motifs; top-8 color share for palette concentration; mid/coarse retention and
+value skew for scale and tone shape), and common **defects** (sparkle pixels,
+one-way lighting bias). Each report ends with a `biggest gaps vs vanilla`
+list: the features the candidate sits furthest from vanilla on, worst first.
+
+Two of those numbers map directly to recurring authoring failures. A `color run
+length` near 1 with low `grain strength` is the "flat field plus dots" texture
+that has not been structurally authored yet — vanilla lays its few tones out in
+connected planes and strokes. A high `repetition peak` is the stamped-motif
+artifact that otherwise only shows up when a human stares at the repeat panel.
 
 The loop:
 
@@ -247,11 +257,13 @@ information to look at, not a failure. There is deliberately no pass/fail
 threshold. The goal is an informed decision, not a number you hit.
 
 Defects are different from taste. A broken seam (`seam left-right` /
-`seam top-bottom` well above 0), `sparkle pixels`, a one-way `lighting bias`, or
-an oversized `dark/light blob max %` are usually authoring mistakes, not style
-choices. Treat those as must-fix-or-justify even when the aesthetic features
-look right. Hue, saturation, contrast, and scale are taste — keep those
-directional and use judgment.
+`seam top-bottom` well above 0), `sparkle pixels`, a one-way `lighting bias`,
+an oversized `dark/light blob max %`, a `repetition peak` well above the
+vanilla counterpart (stamped motif), or a strong `grain strength` on a tile
+that must be rotation-safe are usually authoring mistakes, not style choices.
+Treat those as must-fix-or-justify even when the aesthetic features look
+right. Hue, saturation, contrast, and scale are taste — keep those directional
+and use judgment.
 
 ### Presenting Options
 
