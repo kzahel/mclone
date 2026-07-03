@@ -379,7 +379,20 @@ mod tests {
 
     #[test]
     fn terrain_solids_use_full_cube_collision_shapes() {
-        for id in [1, 3, 7, 40, 42, 49, terrain_id::DRIPSTONE_BLOCK] {
+        for id in [
+            1,
+            3,
+            7,
+            40,
+            42,
+            49,
+            terrain_id::DRIPSTONE_BLOCK,
+            terrain_id::DARK_OAK_LOG,
+            terrain_id::DARK_OAK_LEAVES,
+            terrain_id::BROWN_MUSHROOM_BLOCK,
+            terrain_id::RED_MUSHROOM_BLOCK,
+            terrain_id::MUSHROOM_STEM,
+        ] {
             assert_eq!(
                 block_collision_aabb(state(id), BlockPos::new(1, 2, 3)),
                 Some(Aabb::new(1.0, 2.0, 3.0, 2.0, 3.0, 4.0)),

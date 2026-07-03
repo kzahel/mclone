@@ -1,7 +1,7 @@
 use crate::block::{
-    AIR, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, DANDELION, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS,
-    GRASS_BLOCK, LARGE_FERN_LOWER, LARGE_FERN_UPPER, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY,
-    SPRUCE_LEAVES, SPRUCE_LOG, WATER,
+    AIR, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH,
+    DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER, LARGE_FERN_UPPER, MYCELIUM,
+    OAK_LEAVES, OAK_LOG, PODZOL, POPPY, SPRUCE_LEAVES, SPRUCE_LOG, WATER,
 };
 use crate::placement::BlockPos;
 use crate::prng::RandomSource;
@@ -209,6 +209,9 @@ fn place_trunk<W: FeatureWorld>(
         TrunkPlacerConfiguration::Fancy(_) => {
             place_fancy_trunk(world, random, base, height, config, placement)
         }
+        TrunkPlacerConfiguration::DarkOak(_) => {
+            place_dark_oak_trunk(world, random, base, height, config, placement)
+        }
     }
 }
 
@@ -342,6 +345,98 @@ fn place_fancy_trunk<W: FeatureWorld>(
         .collect()
 }
 
+fn place_dark_oak_trunk<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    base: BlockPos,
+    height: i32,
+    config: TreeConfiguration,
+    placement: &mut TreePlacementBlocks,
+) -> Vec<FoliageAttachment> {
+    let below = BlockPos::new(base.x, base.y - 1, base.z);
+    set_dirt_at(world, random, below);
+    set_dirt_at(world, random, BlockPos::new(below.x + 1, below.y, below.z));
+    set_dirt_at(world, random, BlockPos::new(below.x, below.y, below.z + 1));
+    set_dirt_at(
+        world,
+        random,
+        BlockPos::new(below.x + 1, below.y, below.z + 1),
+    );
+
+    let (step_x, step_z) = random_horizontal_step(random);
+    let bend_start = height - random.next_int_bound(4);
+    let mut bend_steps = 2 - random.next_int_bound(3);
+    let mut trunk_x = base.x;
+    let mut trunk_z = base.z;
+    let top_y = base.y + height - 1;
+
+    for y_offset in 0..height {
+        if y_offset >= bend_start && bend_steps > 0 {
+            trunk_x += step_x;
+            trunk_z += step_z;
+            bend_steps -= 1;
+        }
+
+        let y = base.y + y_offset;
+        let trunk = BlockPos::new(trunk_x, y, trunk_z);
+        if is_air_or_leaves(world, trunk) {
+            place_log(world, random, trunk, config, placement);
+            place_log(
+                world,
+                random,
+                BlockPos::new(trunk.x + 1, trunk.y, trunk.z),
+                config,
+                placement,
+            );
+            place_log(
+                world,
+                random,
+                BlockPos::new(trunk.x, trunk.y, trunk.z + 1),
+                config,
+                placement,
+            );
+            place_log(
+                world,
+                random,
+                BlockPos::new(trunk.x + 1, trunk.y, trunk.z + 1),
+                config,
+                placement,
+            );
+        }
+    }
+
+    let mut attachments = vec![FoliageAttachment::new(
+        BlockPos::new(trunk_x, top_y, trunk_z),
+        0,
+        true,
+    )];
+    for x_offset in -1..=2 {
+        for z_offset in -1..=2 {
+            if (x_offset < 0 || x_offset > 1 || z_offset < 0 || z_offset > 1)
+                && random.next_int_bound(3) <= 0
+            {
+                let branch_height = random.next_int_bound(3) + 2;
+                for y_offset in 0..branch_height {
+                    place_log(
+                        world,
+                        random,
+                        BlockPos::new(base.x + x_offset, top_y - y_offset - 1, base.z + z_offset),
+                        config,
+                        placement,
+                    );
+                }
+                attachments.push(FoliageAttachment::new(
+                    BlockPos::new(trunk_x + x_offset, top_y, trunk_z + z_offset),
+                    0,
+                    false,
+                ));
+            }
+        }
+    }
+
+    attachments
+}
+
 fn create_foliage<W: FeatureWorld>(
     world: &mut W,
     random: &mut impl RandomSource,
@@ -402,6 +497,67 @@ fn create_foliage<W: FeatureWorld>(
                 }
             }
         }
+        FoliagePlacerConfiguration::DarkOak { .. } => {
+            if attachment.double_trunk {
+                place_leaves_row(
+                    world,
+                    random,
+                    config,
+                    attachment,
+                    foliage_radius + 2,
+                    offset - 1,
+                    placement,
+                );
+                place_leaves_row(
+                    world,
+                    random,
+                    config,
+                    attachment,
+                    foliage_radius + 3,
+                    offset,
+                    placement,
+                );
+                place_leaves_row(
+                    world,
+                    random,
+                    config,
+                    attachment,
+                    foliage_radius + 2,
+                    offset + 1,
+                    placement,
+                );
+                if random.next_boolean() {
+                    place_leaves_row(
+                        world,
+                        random,
+                        config,
+                        attachment,
+                        foliage_radius,
+                        offset + 2,
+                        placement,
+                    );
+                }
+            } else {
+                place_leaves_row(
+                    world,
+                    random,
+                    config,
+                    attachment,
+                    foliage_radius + 2,
+                    offset - 1,
+                    placement,
+                );
+                place_leaves_row(
+                    world,
+                    random,
+                    config,
+                    attachment,
+                    foliage_radius + 1,
+                    offset,
+                    placement,
+                );
+            }
+        }
     }
 }
 
@@ -437,6 +593,17 @@ fn place_leaves_row<W: FeatureWorld>(
                 FoliagePlacerConfiguration::Spruce { .. }
                 | FoliagePlacerConfiguration::Pine { .. } => {
                     if should_skip_conifer_leaf(x_offset.abs(), z_offset.abs(), radius) {
+                        continue;
+                    }
+                }
+                FoliagePlacerConfiguration::DarkOak { .. } => {
+                    if should_skip_dark_oak_leaf(
+                        x_offset,
+                        y_offset,
+                        z_offset,
+                        radius,
+                        attachment.double_trunk,
+                    ) {
                         continue;
                     }
                 }
@@ -484,6 +651,39 @@ fn should_skip_fancy_leaf(x_offset: i32, z_offset: i32, radius: i32, double_trun
     let x = abs_x as f32 + 0.5;
     let z = abs_z as f32 + 0.5;
     x * x + z * z > (radius * radius) as f32
+}
+
+fn should_skip_dark_oak_leaf(
+    x_offset: i32,
+    y_offset: i32,
+    z_offset: i32,
+    radius: i32,
+    double_trunk: bool,
+) -> bool {
+    if y_offset == 0
+        && double_trunk
+        && (x_offset == -radius || x_offset >= radius)
+        && (z_offset == -radius || z_offset >= radius)
+    {
+        return true;
+    }
+
+    let abs_x = if double_trunk {
+        x_offset.abs().min((x_offset - 1).abs())
+    } else {
+        x_offset.abs()
+    };
+    let abs_z = if double_trunk {
+        z_offset.abs().min((z_offset - 1).abs())
+    } else {
+        z_offset.abs()
+    };
+
+    if y_offset == -1 && !double_trunk {
+        abs_x == radius && abs_z == radius
+    } else {
+        y_offset == 1 && abs_x + abs_z > radius * 2 - 2
+    }
 }
 
 fn make_limb<W: FeatureWorld>(
@@ -618,6 +818,12 @@ fn is_air_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
     matches!(world.block_at_world(pos), Some(AIR | CAVE_AIR))
 }
 
+fn is_air_or_leaves<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
+    world
+        .block_at_world(pos)
+        .is_some_and(|block| matches!(block, AIR | CAVE_AIR) || is_tree_leaf(block))
+}
+
 fn place_log<W: FeatureWorld>(
     world: &mut W,
     _random: &mut impl RandomSource,
@@ -698,6 +904,14 @@ fn valid_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
             | OAK_LEAVES
             | BIRCH_LEAVES
             | SPRUCE_LEAVES
+            | DARK_OAK_LEAVES
+    )
+}
+
+fn is_tree_leaf(block_id: crate::block::RawBlockId) -> bool {
+    matches!(
+        block_id,
+        OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | DARK_OAK_LEAVES
     )
 }
 
@@ -708,7 +922,7 @@ fn is_free_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
     let Some(block_id) = world.block_at_world(pos) else {
         return false;
     };
-    matches!(block_id, OAK_LOG | BIRCH_LOG | SPRUCE_LOG)
+    matches!(block_id, OAK_LOG | BIRCH_LOG | SPRUCE_LOG | DARK_OAK_LOG)
 }
 
 fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
@@ -733,5 +947,16 @@ fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool
             | BIRCH_LOG
             | SPRUCE_LEAVES
             | SPRUCE_LOG
+            | DARK_OAK_LEAVES
+            | DARK_OAK_LOG
     )
+}
+
+fn random_horizontal_step(random: &mut impl RandomSource) -> (i32, i32) {
+    match random.next_int_bound(4) {
+        0 => (0, -1),
+        1 => (0, 1),
+        2 => (-1, 0),
+        _ => (1, 0),
+    }
 }

@@ -41,10 +41,11 @@ mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
-        BRAIN_CORAL_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CLAY, COARSE_DIRT, DANDELION, DEAD_BUSH,
-        FERN, FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, KELP,
-        KELP_PLANT, LARGE_FERN_LOWER, LARGE_FERN_UPPER, MYCELIUM, OAK_LEAVES, OAK_LOG, PACKED_ICE,
-        PODZOL, POPPY, RED_SAND, RawBlockId, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
+        BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CLAY, COARSE_DIRT,
+        DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS,
+        GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, KELP, KELP_PLANT, LARGE_FERN_LOWER,
+        LARGE_FERN_UPPER, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, PACKED_ICE, PODZOL, POPPY,
+        RED_MUSHROOM_BLOCK, RED_SAND, RawBlockId, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
         SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE,
         TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, WATER, is_air_like,
         is_water,
@@ -134,6 +135,7 @@ mod tests {
         BadlandsDeadBushCactusSugarCane,
         OceanWaterPlants,
         WarmOceanCoralSeaPickles,
+        DarkForestCanopyMushrooms,
     }
 
     impl FeatureFamily {
@@ -151,6 +153,7 @@ mod tests {
                 }
                 Self::OceanWaterPlants => "ocean seagrass/kelp water plants",
                 Self::WarmOceanCoralSeaPickles => "warm ocean coral blocks plus sea pickles",
+                Self::DarkForestCanopyMushrooms => "dark forest dark oak plus huge mushrooms",
             }
         }
 
@@ -188,6 +191,13 @@ mod tests {
                     SEA_PICKLE_3,
                     SEA_PICKLE_4,
                 ],
+                Self::DarkForestCanopyMushrooms => &[
+                    DARK_OAK_LOG,
+                    DARK_OAK_LEAVES,
+                    BROWN_MUSHROOM_BLOCK,
+                    RED_MUSHROOM_BLOCK,
+                    MUSHROOM_STEM,
+                ],
             }
         }
 
@@ -214,6 +224,14 @@ mod tests {
                     .iter()
                     .any(|block| chunk.block_count(*block) > 0)
                         && [SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4]
+                            .iter()
+                            .any(|block| chunk.block_count(*block) > 0)
+                }
+                Self::DarkForestCanopyMushrooms => {
+                    [DARK_OAK_LOG, DARK_OAK_LEAVES]
+                        .iter()
+                        .any(|block| chunk.block_count(*block) > 0)
+                        && [BROWN_MUSHROOM_BLOCK, RED_MUSHROOM_BLOCK, MUSHROOM_STEM]
                             .iter()
                             .any(|block| chunk.block_count(*block) > 0)
                 }
@@ -296,7 +314,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:dark_forest",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::DarkForestCanopyMushrooms),
         },
         PaletteMatrixCase {
             seed: 14,
@@ -680,7 +698,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:dark_forest_hills",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::DarkForestCanopyMushrooms),
         },
         PaletteMatrixCase {
             seed: 12_006,

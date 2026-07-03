@@ -444,6 +444,7 @@ impl WaterDepthThresholdConfiguration {
 pub enum ConfiguredDecorator {
     Nope,
     Square,
+    DarkOakTree,
     Count(CountConfiguration),
     CountNoiseBiased(NoiseCountFactorDecoratorConfiguration),
     CountExtra(FrequencyWithExtraChanceDecoratorConfiguration),
@@ -463,6 +464,10 @@ impl ConfiguredDecorator {
 
     pub const fn square() -> Self {
         Self::Square
+    }
+
+    pub const fn dark_oak_tree() -> Self {
+        Self::DarkOakTree
     }
 
     pub const fn count(count: i32) -> Self {
@@ -526,6 +531,7 @@ impl ConfiguredDecorator {
         match *self {
             Self::Nope => nope_positions(context, random, pos),
             Self::Square => square_positions(context, random, pos),
+            Self::DarkOakTree => dark_oak_tree_positions(random, pos),
             Self::Count(config) => count_positions(context, random, config, pos),
             Self::CountNoiseBiased(config) => count_noise_biased_positions(config, pos),
             Self::CountExtra(config) => count_extra_positions(context, random, config, pos),
@@ -562,6 +568,20 @@ pub fn square_positions(
         pos.y,
         random.next_int_bound(16) + pos.z,
     )]
+}
+
+pub fn dark_oak_tree_positions(random: &mut impl RandomSource, pos: BlockPos) -> Vec<BlockPos> {
+    (0..16)
+        .map(|index| {
+            let cell_x = index / 4;
+            let cell_z = index % 4;
+            BlockPos::new(
+                cell_x * 4 + 1 + random.next_int_bound(3) + pos.x,
+                pos.y,
+                cell_z * 4 + 1 + random.next_int_bound(3) + pos.z,
+            )
+        })
+        .collect()
 }
 
 pub fn count_positions(
@@ -766,6 +786,24 @@ mod tests {
             vec![BlockPos::new(37, 72, -40)]
         );
         assert_eq!(random.get_count(), 2);
+    }
+
+    #[test]
+    fn dark_oak_tree_decorator_samples_sixteen_four_by_four_cells() {
+        let mut random = WorldgenRandom::new(12345);
+
+        let positions =
+            ConfiguredDecorator::dark_oak_tree().get_positions(&CONTEXT, &mut random, POS);
+
+        assert_eq!(positions.len(), 16);
+        assert_eq!(random.get_count(), 32);
+        for (index, position) in positions.iter().enumerate() {
+            let cell_x = index as i32 / 4;
+            let cell_z = index as i32 % 4;
+            assert!((POS.x + cell_x * 4 + 1..=POS.x + cell_x * 4 + 3).contains(&position.x));
+            assert_eq!(position.y, POS.y);
+            assert!((POS.z + cell_z * 4 + 1..=POS.z + cell_z * 4 + 3).contains(&position.z));
+        }
     }
 
     #[test]

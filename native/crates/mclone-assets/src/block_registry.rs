@@ -526,6 +526,11 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (118, "minecraft:sea_pickle", PICKLES_2_WATERLOGGED_TRUE),
     (119, "minecraft:sea_pickle", PICKLES_3_WATERLOGGED_TRUE),
     (120, "minecraft:sea_pickle", PICKLES_4_WATERLOGGED_TRUE),
+    (121, "minecraft:dark_oak_log", AXIS_Y),
+    (122, "minecraft:dark_oak_leaves", EMPTY_PROPS),
+    (123, "minecraft:brown_mushroom_block", EMPTY_PROPS),
+    (124, "minecraft:red_mushroom_block", EMPTY_PROPS),
+    (125, "minecraft:mushroom_stem", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -544,7 +549,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 121);
+        assert_eq!(registry.len(), 126);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -748,6 +753,26 @@ mod tests {
         assert_eq!(
             registry.by_id(BlockStateId(120)).unwrap().canonical_key(),
             "minecraft:sea_pickle[pickles=4,waterlogged=true]"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:dark_oak_log[axis=y]"),
+            Some(BlockStateId(121))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:dark_oak_leaves"),
+            Some(BlockStateId(122))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:brown_mushroom_block"),
+            Some(BlockStateId(123))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:red_mushroom_block"),
+            Some(BlockStateId(124))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(125)).unwrap().canonical_key(),
+            "minecraft:mushroom_stem"
         );
     }
 

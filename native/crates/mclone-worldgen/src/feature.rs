@@ -9,6 +9,7 @@ mod disk;
 mod dripstone;
 mod glow_lichen;
 mod lake;
+mod mushroom;
 mod ocean;
 mod ore;
 mod patch;
@@ -22,11 +23,12 @@ mod tree;
 pub use configured::{
     BasicTreeConfiguration, ConfiguredFeature, CoralShape, DecoratedFeatureConfiguration,
     DiskConfiguration, DripstoneClusterConfiguration, FloatProvider, FoliagePlacerConfiguration,
-    GlowLichenConfiguration, LakeConfiguration, OreConfiguration, OreTarget, OreTargetBlockState,
-    RandomFeatureConfiguration, RandomPatchConfiguration, SeagrassConfiguration,
-    SimpleBlockConfiguration, SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration,
-    SpringConfiguration, StraightTrunkPlacerConfiguration, TreeConfiguration,
-    TrunkPlacerConfiguration, TwoLayersFeatureSize, WeightedBlockState, WeightedConfiguredFeature,
+    GlowLichenConfiguration, HugeMushroomConfiguration, HugeMushroomKind, LakeConfiguration,
+    OreConfiguration, OreTarget, OreTargetBlockState, RandomFeatureConfiguration,
+    RandomPatchConfiguration, SeagrassConfiguration, SimpleBlockConfiguration,
+    SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration, SpringConfiguration,
+    StraightTrunkPlacerConfiguration, TreeConfiguration, TrunkPlacerConfiguration,
+    TwoLayersFeatureSize, WeightedBlockState, WeightedConfiguredFeature,
 };
 pub use context::{DecorationStep, FeatureDecorationTiming, FeatureWorld};
 pub use placed::{
@@ -159,6 +161,9 @@ impl ConfiguredFeature {
             Self::Decorated(config) => {
                 placed::place_configured_decorated_feature(world, biomes, random, origin, config)
             }
+            Self::HugeMushroom(config) => {
+                mushroom::place_huge_mushroom(world, random, origin, *config)
+            }
             Self::Coral(shape) => ocean::place_coral(world, random, origin, *shape),
             Self::SeaPickle(config) => ocean::place_sea_pickle(world, random, origin, *config),
             Self::Seagrass(config) => ocean::place_seagrass(world, random, origin, *config),
@@ -251,15 +256,16 @@ mod tests {
     use super::*;
     use crate::biome::get_layered_biome_by_id;
     use crate::block::{
-        AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, BRAIN_CORAL_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS,
-        CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE,
+        AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK,
+        BUBBLE_CORAL_BLOCK, CACTUS, CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE, DANDELION,
+        DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE,
         DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE,
         DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, FIRE_CORAL_BLOCK,
         GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE,
         IRON_ORE, KELP, KELP_PLANT, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA,
-        OAK_LEAVES, OAK_LOG, POPPY, REDSTONE_ORE, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
-        SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER,
-        TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
+        MUSHROOM_STEM, OAK_LEAVES, OAK_LOG, POPPY, RED_MUSHROOM_BLOCK, REDSTONE_ORE, SAND,
+        SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SPRUCE_LEAVES,
+        STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TUBE_CORAL_BLOCK, TUFF, WATER,
     };
     use crate::placement::{
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
@@ -887,6 +893,36 @@ mod tests {
     }
 
     #[test]
+    fn dark_oak_tree_places_two_by_two_trunk_and_dark_leaves() {
+        let mut chunk = flat_grass_chunk();
+        let mut random = WorldgenRandom::new(2);
+        let feature = ConfiguredFeature::tree(TreeConfiguration::dark_oak());
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
+        assert!(count_blocks(&chunk, DARK_OAK_LOG) >= 4);
+        assert!(count_blocks(&chunk, DARK_OAK_LEAVES) > 0);
+    }
+
+    #[test]
+    fn huge_mushrooms_place_cap_and_stem_blocks() {
+        let mut brown_chunk = flat_grass_chunk();
+        let mut brown_random = WorldgenRandom::new(3);
+        let brown = ConfiguredFeature::huge_mushroom(HugeMushroomConfiguration::brown());
+
+        assert!(brown.place(&mut brown_chunk, &mut brown_random, BlockPos::new(8, 3, 8)));
+        assert!(count_blocks(&brown_chunk, BROWN_MUSHROOM_BLOCK) > 0);
+        assert!(count_blocks(&brown_chunk, MUSHROOM_STEM) > 0);
+
+        let mut red_chunk = flat_grass_chunk();
+        let mut red_random = WorldgenRandom::new(4);
+        let red = ConfiguredFeature::huge_mushroom(HugeMushroomConfiguration::red());
+
+        assert!(red.place(&mut red_chunk, &mut red_random, BlockPos::new(8, 3, 8)));
+        assert!(count_blocks(&red_chunk, RED_MUSHROOM_BLOCK) > 0);
+        assert!(count_blocks(&red_chunk, MUSHROOM_STEM) > 0);
+    }
+
+    #[test]
     fn feature_region_allows_neighbor_tree_to_spill_into_center_chunk() {
         let mut region = FeatureRegion::with_radii(
             -1,
@@ -1037,6 +1073,89 @@ mod tests {
                 ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
             ]
         );
+    }
+
+    #[test]
+    fn dark_forest_feature_table_uses_vanilla_dark_oak_selector() {
+        let dark_forest = overworld_features_for_biome(get_layered_biome_by_id(29));
+        let dark_hills = overworld_features_for_biome(get_layered_biome_by_id(157));
+        let feature = dark_forest
+            .iter()
+            .find(|feature| {
+                feature.step == DecorationStep::VegetalDecoration
+                    && matches!(feature.feature, ConfiguredFeature::RandomSelector(_))
+            })
+            .expect("dark forest vegetation feature");
+
+        assert_eq!(
+            feature.decorators,
+            vec![
+                ConfiguredDecorator::dark_oak_tree(),
+                ConfiguredDecorator::water_depth_threshold(0),
+                ConfiguredDecorator::heightmap(HeightmapType::OceanFloor),
+            ]
+        );
+        match &feature.feature {
+            ConfiguredFeature::RandomSelector(config) => {
+                assert_eq!(
+                    config.features,
+                    vec![
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::huge_mushroom(HugeMushroomConfiguration::brown()),
+                            0.025,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::huge_mushroom(HugeMushroomConfiguration::red()),
+                            0.05,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::dark_oak()),
+                            0.6666667,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::birch()),
+                            0.2,
+                        ),
+                        WeightedConfiguredFeature::new(
+                            ConfiguredFeature::tree(TreeConfiguration::fancy_oak()),
+                            0.1,
+                        ),
+                    ]
+                );
+                assert_eq!(
+                    *config.default_feature,
+                    ConfiguredFeature::tree(TreeConfiguration::oak())
+                );
+            }
+            other => panic!("expected dark forest random selector, got {other:?}"),
+        }
+
+        let hills_feature = dark_hills
+            .iter()
+            .find(|feature| {
+                feature.step == DecorationStep::VegetalDecoration
+                    && matches!(feature.feature, ConfiguredFeature::RandomSelector(_))
+            })
+            .expect("dark forest hills vegetation feature");
+        match &hills_feature.feature {
+            ConfiguredFeature::RandomSelector(config) => {
+                assert_eq!(
+                    config.features[0],
+                    WeightedConfiguredFeature::new(
+                        ConfiguredFeature::huge_mushroom(HugeMushroomConfiguration::red()),
+                        0.025,
+                    )
+                );
+                assert_eq!(
+                    config.features[1],
+                    WeightedConfiguredFeature::new(
+                        ConfiguredFeature::huge_mushroom(HugeMushroomConfiguration::brown()),
+                        0.05,
+                    )
+                );
+            }
+            other => panic!("expected dark forest hills random selector, got {other:?}"),
+        }
     }
 
     fn has_random_patch(features: &[PlacedFeature], state: RawBlockId, count: i32) -> bool {

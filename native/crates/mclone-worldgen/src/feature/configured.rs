@@ -1,6 +1,7 @@
 use crate::block::{
-    ANDESITE, BIRCH_LEAVES, BIRCH_LOG, DEEPSLATE, DIORITE, GRANITE, GRASS_BLOCK, LAVA, OAK_LEAVES,
-    OAK_LOG, RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TUFF, WATER,
+    ANDESITE, BIRCH_LEAVES, BIRCH_LOG, BROWN_MUSHROOM_BLOCK, DARK_OAK_LEAVES, DARK_OAK_LOG,
+    DEEPSLATE, DIORITE, GRANITE, GRASS_BLOCK, LAVA, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG,
+    RED_MUSHROOM_BLOCK, RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TUFF, WATER,
 };
 use crate::placement::{ConfiguredDecorator, CountConfiguration, IntProvider};
 use crate::prng::RandomSource;
@@ -373,6 +374,7 @@ impl StraightTrunkPlacerConfiguration {
 pub enum TrunkPlacerConfiguration {
     Straight(StraightTrunkPlacerConfiguration),
     Fancy(StraightTrunkPlacerConfiguration),
+    DarkOak(StraightTrunkPlacerConfiguration),
 }
 
 impl TrunkPlacerConfiguration {
@@ -392,9 +394,19 @@ impl TrunkPlacerConfiguration {
         ))
     }
 
+    pub const fn dark_oak(base_height: i32, height_rand_a: i32, height_rand_b: i32) -> Self {
+        Self::DarkOak(StraightTrunkPlacerConfiguration::new(
+            base_height,
+            height_rand_a,
+            height_rand_b,
+        ))
+    }
+
     pub(super) fn tree_height(self, random: &mut impl RandomSource) -> i32 {
         match self {
-            Self::Straight(config) | Self::Fancy(config) => config.tree_height(random),
+            Self::Straight(config) | Self::Fancy(config) | Self::DarkOak(config) => {
+                config.tree_height(random)
+            }
         }
     }
 }
@@ -421,6 +433,10 @@ pub enum FoliagePlacerConfiguration {
         offset: IntProvider,
         height: IntProvider,
     },
+    DarkOak {
+        radius: IntProvider,
+        offset: IntProvider,
+    },
 }
 
 impl FoliagePlacerConfiguration {
@@ -435,6 +451,7 @@ impl FoliagePlacerConfiguration {
             Self::Fancy { height, .. } => height,
             Self::Spruce { trunk_height, .. } => (tree_height - trunk_height.sample(random)).max(4),
             Self::Pine { height, .. } => height.sample(random),
+            Self::DarkOak { .. } => 4,
         }
     }
 
@@ -445,6 +462,7 @@ impl FoliagePlacerConfiguration {
             Self::Pine { radius, .. } => {
                 radius.sample(random) + random.next_int_bound((trunk_height + 1).max(1))
             }
+            Self::DarkOak { radius, .. } => radius.sample(random),
         }
     }
 
@@ -453,7 +471,8 @@ impl FoliagePlacerConfiguration {
             Self::Blob { offset, .. }
             | Self::Fancy { offset, .. }
             | Self::Spruce { offset, .. }
-            | Self::Pine { offset, .. } => offset.sample(random),
+            | Self::Pine { offset, .. }
+            | Self::DarkOak { offset, .. } => offset.sample(random),
         }
     }
 }
@@ -606,6 +625,19 @@ impl TreeConfiguration {
             TwoLayersFeatureSize::new(2, 0, 2),
         )
     }
+
+    pub const fn dark_oak() -> Self {
+        Self::new(
+            DARK_OAK_LOG,
+            DARK_OAK_LEAVES,
+            TrunkPlacerConfiguration::dark_oak(6, 2, 1),
+            FoliagePlacerConfiguration::DarkOak {
+                radius: IntProvider::constant(0),
+                offset: IntProvider::constant(0),
+            },
+            TwoLayersFeatureSize::new(1, 0, 2),
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -681,6 +713,49 @@ pub enum CoralShape {
     Tree,
     Claw,
     Mushroom,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HugeMushroomKind {
+    Brown,
+    Red,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HugeMushroomConfiguration {
+    pub kind: HugeMushroomKind,
+    pub cap: RawBlockId,
+    pub stem: RawBlockId,
+    pub foliage_radius: i32,
+}
+
+impl HugeMushroomConfiguration {
+    pub const fn new(
+        kind: HugeMushroomKind,
+        cap: RawBlockId,
+        stem: RawBlockId,
+        foliage_radius: i32,
+    ) -> Self {
+        Self {
+            kind,
+            cap,
+            stem,
+            foliage_radius,
+        }
+    }
+
+    pub const fn brown() -> Self {
+        Self::new(
+            HugeMushroomKind::Brown,
+            BROWN_MUSHROOM_BLOCK,
+            MUSHROOM_STEM,
+            3,
+        )
+    }
+
+    pub const fn red() -> Self {
+        Self::new(HugeMushroomKind::Red, RED_MUSHROOM_BLOCK, MUSHROOM_STEM, 2)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -780,6 +855,7 @@ pub enum ConfiguredFeature {
     RandomSelector(RandomFeatureConfiguration),
     SimpleRandomSelector(SimpleRandomFeatureConfiguration),
     Decorated(DecoratedFeatureConfiguration),
+    HugeMushroom(HugeMushroomConfiguration),
     Coral(CoralShape),
     SeaPickle(CountConfiguration),
     Seagrass(SeagrassConfiguration),
@@ -847,6 +923,10 @@ impl ConfiguredFeature {
 
     pub fn decorated(config: DecoratedFeatureConfiguration) -> Self {
         Self::Decorated(config)
+    }
+
+    pub const fn huge_mushroom(config: HugeMushroomConfiguration) -> Self {
+        Self::HugeMushroom(config)
     }
 
     pub const fn coral(shape: CoralShape) -> Self {

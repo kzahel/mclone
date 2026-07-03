@@ -45,6 +45,11 @@ pub mod terrain_id {
     pub const SEA_PICKLE_2: u32 = 118;
     pub const SEA_PICKLE_3: u32 = 119;
     pub const SEA_PICKLE_4: u32 = 120;
+    pub const DARK_OAK_LOG: u32 = 121;
+    pub const DARK_OAK_LEAVES: u32 = 122;
+    pub const BROWN_MUSHROOM_BLOCK: u32 = 123;
+    pub const RED_MUSHROOM_BLOCK: u32 = 124;
+    pub const MUSHROOM_STEM: u32 = 125;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

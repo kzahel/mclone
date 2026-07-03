@@ -123,6 +123,11 @@ pub const SEA_PICKLE_1: RawBlockId = 117;
 pub const SEA_PICKLE_2: RawBlockId = 118;
 pub const SEA_PICKLE_3: RawBlockId = 119;
 pub const SEA_PICKLE_4: RawBlockId = 120;
+pub const DARK_OAK_LOG: RawBlockId = 121;
+pub const DARK_OAK_LEAVES: RawBlockId = 122;
+pub const BROWN_MUSHROOM_BLOCK: RawBlockId = 123;
+pub const RED_MUSHROOM_BLOCK: RawBlockId = 124;
+pub const MUSHROOM_STEM: RawBlockId = 125;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -173,6 +178,11 @@ impl GeneratedBlockId {
     pub const SEA_PICKLE_2: Self = Self(SEA_PICKLE_2);
     pub const SEA_PICKLE_3: Self = Self(SEA_PICKLE_3);
     pub const SEA_PICKLE_4: Self = Self(SEA_PICKLE_4);
+    pub const DARK_OAK_LOG: Self = Self(DARK_OAK_LOG);
+    pub const DARK_OAK_LEAVES: Self = Self(DARK_OAK_LEAVES);
+    pub const BROWN_MUSHROOM_BLOCK: Self = Self(BROWN_MUSHROOM_BLOCK);
+    pub const RED_MUSHROOM_BLOCK: Self = Self(RED_MUSHROOM_BLOCK);
+    pub const MUSHROOM_STEM: Self = Self(MUSHROOM_STEM);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -351,7 +361,10 @@ pub const fn lava_block_for_level(level: u8) -> Option<RawBlockId> {
 }
 
 pub const fn is_leaves(block_id: RawBlockId) -> bool {
-    matches!(block_id, OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES)
+    matches!(
+        block_id,
+        OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | DARK_OAK_LEAVES
+    )
 }
 
 pub const fn generated_block_state_id(block_id: RawBlockId) -> BlockStateId {
@@ -415,6 +428,11 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         BIRCH_LEAVES => "minecraft:birch_leaves",
         SPRUCE_LOG | SPRUCE_LOG_X | SPRUCE_LOG_Z => "minecraft:spruce_log",
         SPRUCE_LEAVES => "minecraft:spruce_leaves",
+        DARK_OAK_LOG => "minecraft:dark_oak_log",
+        DARK_OAK_LEAVES => "minecraft:dark_oak_leaves",
+        BROWN_MUSHROOM_BLOCK => "minecraft:brown_mushroom_block",
+        RED_MUSHROOM_BLOCK => "minecraft:red_mushroom_block",
+        MUSHROOM_STEM => "minecraft:mushroom_stem",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
@@ -483,6 +501,7 @@ mod tests {
         assert_eq!(block_light_opacity(OAK_LEAVES), 1);
         assert_eq!(block_light_opacity(BIRCH_LEAVES), 1);
         assert_eq!(block_light_opacity(SPRUCE_LEAVES), 1);
+        assert_eq!(block_light_opacity(DARK_OAK_LEAVES), 1);
         assert_eq!(block_light_opacity(AIR), 0);
         assert_eq!(block_light_opacity(CAVE_AIR), 0);
         assert_eq!(block_light_opacity(WATER), 1);
@@ -500,6 +519,8 @@ mod tests {
         assert_eq!(block_light_opacity(KELP_PLANT), 0);
         assert_eq!(block_light_opacity(SEA_PICKLE_1), 0);
         assert_eq!(block_light_opacity(TUBE_CORAL_BLOCK), 15);
+        assert_eq!(block_light_opacity(DARK_OAK_LOG), 15);
+        assert_eq!(block_light_opacity(BROWN_MUSHROOM_BLOCK), 15);
     }
 
     #[test]
@@ -520,5 +541,16 @@ mod tests {
         assert_eq!(block_name(TUBE_CORAL_BLOCK), "minecraft:tube_coral_block");
         assert_eq!(block_name(HORN_CORAL_BLOCK), "minecraft:horn_coral_block");
         assert_eq!(block_name(SEA_PICKLE_4), "minecraft:sea_pickle");
+        assert_eq!(block_name(DARK_OAK_LOG), "minecraft:dark_oak_log");
+        assert_eq!(block_name(DARK_OAK_LEAVES), "minecraft:dark_oak_leaves");
+        assert_eq!(
+            block_name(BROWN_MUSHROOM_BLOCK),
+            "minecraft:brown_mushroom_block"
+        );
+        assert_eq!(
+            block_name(RED_MUSHROOM_BLOCK),
+            "minecraft:red_mushroom_block"
+        );
+        assert_eq!(block_name(MUSHROOM_STEM), "minecraft:mushroom_stem");
     }
 }

@@ -270,7 +270,7 @@ impl TexturedMeshCatalog {
                 )
             } else if variant_key.is_empty() {
                 (
-                    asset.model_refs.iter().next().ok_or_else(|| {
+                    multipart_primary_model(asset, record.block.path()).ok_or_else(|| {
                         TexturedMeshError::MissingBlockStateVariant {
                             block: record.block.clone(),
                             variant_key: variant_key.clone(),
@@ -402,6 +402,18 @@ impl TexturedMeshCatalog {
             .as_ref()
             .map(|maps| maps.foliage.sample(temperature, downfall))
     }
+}
+
+fn multipart_primary_model<'a>(
+    asset: &'a mclone_assets::BlockStateAsset,
+    block_path: &str,
+) -> Option<&'a ResourceLocation> {
+    let preferred = format!("block/{block_path}");
+    asset
+        .model_refs
+        .iter()
+        .find(|model| model.namespace() == asset.block.namespace() && model.path() == preferred)
+        .or_else(|| asset.model_refs.iter().next())
 }
 
 fn textured_block_tint(block_path: &str, tintindex: i32) -> TexturedBlockTint {
@@ -825,6 +837,28 @@ mod tests {
         assert_eq!(
             textured_terrain_render_layer("tinted_glass", false),
             TexturedTerrainRenderLayer::Translucent
+        );
+    }
+
+    #[test]
+    fn multipart_primary_model_prefers_matching_block_model() {
+        let block = ResourceLocation::parse("minecraft:red_mushroom_block").unwrap();
+        let asset = mclone_assets::BlockStateAsset {
+            block: block.clone(),
+            path: mclone_assets::AssetPath::blockstate_json(&block),
+            variants: BTreeMap::new(),
+            variant_keys: BTreeSet::new(),
+            model_refs: [
+                ResourceLocation::parse("minecraft:block/mushroom_block_inside").unwrap(),
+                ResourceLocation::parse("minecraft:block/red_mushroom_block").unwrap(),
+            ]
+            .into_iter()
+            .collect(),
+        };
+
+        assert_eq!(
+            multipart_primary_model(&asset, "red_mushroom_block").map(ResourceLocation::path),
+            Some("block/red_mushroom_block")
         );
     }
 }
