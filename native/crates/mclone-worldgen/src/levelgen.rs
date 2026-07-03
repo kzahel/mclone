@@ -41,14 +41,14 @@ mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
-        BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CLAY, COARSE_DIRT,
-        DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN, FIRE_CORAL_BLOCK, GRASS,
-        GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, KELP, KELP_PLANT, LARGE_FERN_LOWER,
-        LARGE_FERN_UPPER, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG, PACKED_ICE, PODZOL, POPPY,
-        RED_MUSHROOM_BLOCK, RED_SAND, RawBlockId, SAND, SEA_PICKLE_1, SEA_PICKLE_2, SEA_PICKLE_3,
-        SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE, SUGAR_CANE,
-        TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA, TUBE_CORAL_BLOCK, WATER, is_air_like,
-        is_water,
+        ACACIA_LEAVES, ACACIA_LOG, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK,
+        CACTUS, CLAY, COARSE_DIRT, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, FERN,
+        FIRE_CORAL_BLOCK, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE, KELP, KELP_PLANT,
+        LARGE_FERN_LOWER, LARGE_FERN_UPPER, MUSHROOM_STEM, MYCELIUM, OAK_LEAVES, OAK_LOG,
+        PACKED_ICE, PODZOL, POPPY, RED_MUSHROOM_BLOCK, RED_SAND, RawBlockId, SAND, SEA_PICKLE_1,
+        SEA_PICKLE_2, SEA_PICKLE_3, SEA_PICKLE_4, SEAGRASS, SNOW, SNOW_BLOCK, SPRUCE_LEAVES,
+        SPRUCE_LOG, STONE, SUGAR_CANE, TALL_SEAGRASS_LOWER, TALL_SEAGRASS_UPPER, TERRACOTTA,
+        TUBE_CORAL_BLOCK, WATER, is_air_like, is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -136,6 +136,7 @@ mod tests {
         OceanWaterPlants,
         WarmOceanCoralSeaPickles,
         DarkForestCanopyMushrooms,
+        SavannaAcacia,
     }
 
     impl FeatureFamily {
@@ -154,6 +155,7 @@ mod tests {
                 Self::OceanWaterPlants => "ocean seagrass/kelp water plants",
                 Self::WarmOceanCoralSeaPickles => "warm ocean coral blocks plus sea pickles",
                 Self::DarkForestCanopyMushrooms => "dark forest dark oak plus huge mushrooms",
+                Self::SavannaAcacia => "savanna acacia trees",
             }
         }
 
@@ -198,6 +200,7 @@ mod tests {
                     RED_MUSHROOM_BLOCK,
                     MUSHROOM_STEM,
                 ],
+                Self::SavannaAcacia => &[ACACIA_LOG, ACACIA_LEAVES],
             }
         }
 
@@ -234,6 +237,9 @@ mod tests {
                         && [BROWN_MUSHROOM_BLOCK, RED_MUSHROOM_BLOCK, MUSHROOM_STEM]
                             .iter()
                             .any(|block| chunk.block_count(*block) > 0)
+                }
+                Self::SavannaAcacia => {
+                    chunk.block_count(ACACIA_LOG) > 0 && chunk.block_count(ACACIA_LEAVES) > 0
                 }
                 _ => self
                     .blocks()
@@ -450,7 +456,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:savanna",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::SavannaAcacia),
         },
         PaletteMatrixCase {
             seed: 126,
@@ -458,7 +464,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:savanna_plateau",
             surface_family: SurfaceFamily::Grass,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::SavannaAcacia),
         },
         PaletteMatrixCase {
             seed: 68,
@@ -466,7 +472,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:shattered_savanna",
             surface_family: SurfaceFamily::ShatteredSavanna,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::SavannaAcacia),
         },
         PaletteMatrixCase {
             seed: 252,
@@ -725,12 +731,12 @@ mod tests {
             feature_family: None,
         },
         PaletteMatrixCase {
-            seed: 175,
+            seed: 2659,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:shattered_savanna_plateau",
             surface_family: SurfaceFamily::ShatteredSavanna,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::SavannaAcacia),
         },
         PaletteMatrixCase {
             seed: 8464,

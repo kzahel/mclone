@@ -1,9 +1,10 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, nine supported feature-family groups, and 15 F-checked
+overworld tint IDs, ten supported feature-family groups, and 19 F-checked
 matrix rows landed, including cactus/sugar-cane extras, ocean water plants, and
-warm-ocean coral/sea-pickle and dark-forest canopy/mushroom palette coverage
+warm-ocean coral/sea-pickle, dark-forest canopy/mushroom, and savanna acacia
+palette coverage
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -145,8 +146,8 @@ notes.
 | 32 | `minecraft:giant_tree_taiga` | giant-tree-taiga | podzol/coarse dirt surface checked, giant taiga trees/ferns | seed `19`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 33 | `minecraft:giant_tree_taiga_hills` | giant-tree-taiga | giant taiga hill podzol/coarse dirt checked; trees gap | seed `93`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 34 | `minecraft:wooded_mountains` | mountains | mountain surface checked; trees gap | seed `3`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 35 | `minecraft:savanna` | savanna | dry grass tint/surface checked; acacia/tall grass gap | seed `62`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 36 | `minecraft:savanna_plateau` | savanna-plateau | dry plateau tint/surface checked; acacia/grass gap | seed `126`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 35 | `minecraft:savanna` | savanna | dry grass tint/surface and acacia tree family checked; tall grass/warm flowers gap | seed `62`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 36 | `minecraft:savanna_plateau` | savanna-plateau | dry plateau tint/surface and acacia tree family checked; grass/warm flowers gap | seed `126`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 37 | `minecraft:badlands` | badlands | red sand, terracotta bands, dead bush plus cactus/sugar-cane family checked; wooded variants gap | seed `2359`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 38 | `minecraft:wooded_badlands_plateau` | badlands | terracotta/red sand checked; wooded plateau trees gap | seed `86`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 39 | `minecraft:badlands_plateau` | badlands | plateau terracotta/red sand checked | seed `84`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
@@ -173,8 +174,8 @@ notes.
 | 160 | `minecraft:giant_spruce_taiga` | giant-spruce-taiga | podzol/coarse dirt surface checked, giant spruce gap | seed `2923`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 161 | `minecraft:giant_spruce_taiga_hills` | giant-spruce-taiga | giant spruce hill podzol/coarse dirt checked; tree gap | seed `282`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 162 | `minecraft:modified_gravelly_mountains` | mountains | modified gravelly mountain surface checked | seed `83`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 163 | `minecraft:shattered_savanna` | shattered-savanna | shattered grass/coarse-dirt/stone surface checked; acacia gap | seed `68`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 164 | `minecraft:shattered_savanna_plateau` | savanna-plateau | extreme dry plateau surface checked | seed `175`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 163 | `minecraft:shattered_savanna` | shattered-savanna | shattered grass/coarse-dirt/stone surface and acacia tree family checked | seed `68`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
+| 164 | `minecraft:shattered_savanna_plateau` | savanna-plateau | extreme dry plateau surface and acacia tree family checked | seed `2659`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 165 | `minecraft:eroded_badlands` | badlands | eroded terracotta/red-sand surface checked; pillar feature gap | seed `8464`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 166 | `minecraft:modified_wooded_badlands_plateau` | badlands | wooded badlands modified plateau surface checked; trees gap | seed `3823`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 167 | `minecraft:modified_badlands_plateau` | badlands | modified badlands plateau surface checked | seed `18441`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
@@ -214,24 +215,25 @@ Landed:
   top-surface column in the row's expected surface family.
 - The same worldgen probe now asserts currently supported visible feature
   families for plains, desert, swamp, taiga, snowy tundra, badlands, and ocean
-  water plants, warm-ocean coral blocks and sea pickles, plus dark-forest dark
-  oak and huge mushroom block families. Desert and
+  water plants, warm-ocean coral blocks and sea pickles, dark-forest dark oak
+  and huge mushroom block families, plus savanna acacia trees. Desert and
   badlands now require dead bush plus cactus/sugar-cane family coverage; swamp
   requires the native vegetation/clay subset plus sugar cane; generated
   non-frozen ocean rows require the seagrass/tall-seagrass/kelp block family;
   the warm-ocean row requires at least one live coral block and one sea pickle
   state; dark forest rows require both dark oak logs/leaves and huge mushroom
-  cap/stem blocks. The assertions are intentionally broad block-family checks,
-  not exact decorated counts.
+  cap/stem blocks; savanna rows require acacia logs and leaves. The assertions
+  are intentionally broad block-family checks, not exact decorated counts.
 - Native now has cactus, sugar cane, seagrass, tall seagrass, kelp, and kelp
   plant generated block IDs; live coral block IDs; four waterlogged sea-pickle
-  state IDs; dark oak log/leaves IDs; huge mushroom cap/stem IDs; synthetic
-  asset registry mappings; basic shared shape/material/render/light facts;
-  Java-style reduced random-patch column placement; Java-style seagrass, kelp,
-  sea-pickle, and broad coral tree/claw/mushroom placement; broad Java-shaped
-  dark oak tree and huge mushroom placement; the `NoiseBasedDecorator` count
-  path used by kelp/coral; and desert/badlands/swamp/ocean/dark-forest feature
-  table entries.
+  state IDs; dark oak log/leaves IDs; huge mushroom cap/stem IDs; acacia
+  log/leaves IDs; synthetic asset registry mappings; basic shared
+  shape/material/render/light facts; Java-style reduced random-patch column
+  placement; Java-style seagrass, kelp, sea-pickle, and broad coral
+  tree/claw/mushroom placement; broad Java-shaped dark oak tree, huge mushroom,
+  and acacia forking-trunk/flat-canopy placement; the `NoiseBasedDecorator`
+  count path used by kelp/coral; and
+  desert/badlands/swamp/ocean/dark-forest/savanna feature table entries.
 - `mclone-mesh::tint::tests::palette_matrix_tint_groups_match_java_visual_facts`
   asserts every matrix row's grass, foliage, and water tint output through the
   shared tint resolver by tint group, including the two registered rows without
@@ -248,6 +250,10 @@ Documented gaps from this slice:
   reduced `ThreeLayersFeatureSize` free-space approximation, huge mushrooms do
   not yet model directional cap/stem side-state booleans, and small mushroom /
   extra forest vegetation patches remain omitted.
+- Java savanna now has the high-signal acacia selector path represented, but
+  exact decorated parity is still incomplete: warm flower selection, normal vs
+  shattered grass density, default extra vegetation, villages/outposts, and
+  exact tree-count mismatch buckets remain owned by later `103` work.
 - Java normal/cold/lukewarm ocean water-plant tables are represented by broad
   seagrass/kelp checks, and warm ocean now has seagrass, live coral blocks, and
   sea pickles. Native still omits the `SEAGRASS_SIMPLE` carving-mask decorator
@@ -262,11 +268,11 @@ Documented gaps from this slice:
 Move from B/T/S coverage to visible land feature-family breadth:
 
 1. Pick one missing block/feature family with high palette value and port it
-   narrowly from Java. The strongest next row is savanna acacia: acacia
-   logs/leaves and the acacia tree selector would turn the savanna and plateau
-   B/T/S fixtures into visibly distinct dry-forest checks without taking on the
-   larger jungle/vine/bamboo surface area yet. Other good follow-ups are bamboo,
-   jungle vines, lily pads, berry bushes, or mushroom-field mushrooms.
+   narrowly from Java. The strongest next row is a jungle/bamboo starter:
+   jungle log/leaves plus bamboo would unlock the normal jungle and bamboo
+   jungle rows, while vines/cocoa can stay a follow-up if the first slice needs
+   to stay small. Other good follow-ups are lily pads, berry bushes,
+   mushroom-field mushrooms, or a birch/tall-birch F-check sweep.
 2. Add `F` checks to this matrix only when the supporting block IDs/features
    exist in native and the check is a broad deterministic block-family probe.
 3. Move any exact decorated mismatch-bucket work into `103`.

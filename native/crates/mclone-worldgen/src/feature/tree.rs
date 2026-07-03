@@ -1,7 +1,8 @@
 use crate::block::{
-    AIR, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH,
-    DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER, LARGE_FERN_UPPER, MYCELIUM,
-    OAK_LEAVES, OAK_LOG, PODZOL, POPPY, SPRUCE_LEAVES, SPRUCE_LOG, WATER,
+    ACACIA_LEAVES, ACACIA_LOG, AIR, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, DANDELION, DARK_OAK_LEAVES,
+    DARK_OAK_LOG, DEAD_BUSH, DIRT, FERN, GLOW_LICHEN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER,
+    LARGE_FERN_UPPER, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY, SPRUCE_LEAVES, SPRUCE_LOG,
+    WATER,
 };
 use crate::placement::BlockPos;
 use crate::prng::RandomSource;
@@ -209,6 +210,9 @@ fn place_trunk<W: FeatureWorld>(
         TrunkPlacerConfiguration::Fancy(_) => {
             place_fancy_trunk(world, random, base, height, config, placement)
         }
+        TrunkPlacerConfiguration::Forking(_) => {
+            place_forking_trunk(world, random, base, height, config, placement)
+        }
         TrunkPlacerConfiguration::DarkOak(_) => {
             place_dark_oak_trunk(world, random, base, height, config, placement)
         }
@@ -343,6 +347,90 @@ fn place_fancy_trunk<W: FeatureWorld>(
         .filter(|coords| trim_fancy_branches(height_with_crown, coords.branch_base_y - base.y))
         .map(|coords| coords.attachment)
         .collect()
+}
+
+fn place_forking_trunk<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    base: BlockPos,
+    height: i32,
+    config: TreeConfiguration,
+    placement: &mut TreePlacementBlocks,
+) -> Vec<FoliageAttachment> {
+    set_dirt_at(world, random, BlockPos::new(base.x, base.y - 1, base.z));
+
+    let mut attachments = Vec::new();
+    let first_step = random_horizontal_step(random);
+    let bend_start = height - random.next_int_bound(4) - 1;
+    let mut bend_steps = 3 - random.next_int_bound(3);
+    let mut trunk_x = base.x;
+    let mut trunk_z = base.z;
+    let mut foliage_y = 0;
+
+    for y_offset in 0..height {
+        let y = base.y + y_offset;
+        if y_offset >= bend_start && bend_steps > 0 {
+            trunk_x += first_step.0;
+            trunk_z += first_step.1;
+            bend_steps -= 1;
+        }
+
+        if place_log(
+            world,
+            random,
+            BlockPos::new(trunk_x, y, trunk_z),
+            config,
+            placement,
+        ) {
+            foliage_y = y + 1;
+        }
+    }
+
+    attachments.push(FoliageAttachment::new(
+        BlockPos::new(trunk_x, foliage_y, trunk_z),
+        1,
+        false,
+    ));
+
+    let second_step = random_horizontal_step(random);
+    if second_step != first_step {
+        let fork_start = bend_start - random.next_int_bound(2) - 1;
+        let mut fork_steps = 1 + random.next_int_bound(3);
+        let mut fork_x = base.x;
+        let mut fork_z = base.z;
+        foliage_y = 0;
+
+        let mut y_offset = fork_start;
+        while y_offset < height && fork_steps > 0 {
+            if y_offset >= 1 {
+                let y = base.y + y_offset;
+                fork_x += second_step.0;
+                fork_z += second_step.1;
+                if place_log(
+                    world,
+                    random,
+                    BlockPos::new(fork_x, y, fork_z),
+                    config,
+                    placement,
+                ) {
+                    foliage_y = y + 1;
+                }
+            }
+
+            fork_steps -= 1;
+            y_offset += 1;
+        }
+
+        if foliage_y > 1 {
+            attachments.push(FoliageAttachment::new(
+                BlockPos::new(fork_x, foliage_y, fork_z),
+                0,
+                false,
+            ));
+        }
+    }
+
+    attachments
 }
 
 fn place_dark_oak_trunk<W: FeatureWorld>(
@@ -497,6 +585,44 @@ fn create_foliage<W: FeatureWorld>(
                 }
             }
         }
+        FoliagePlacerConfiguration::Acacia { .. } => {
+            let attachment = FoliageAttachment::new(
+                BlockPos::new(
+                    attachment.pos.x,
+                    attachment.pos.y + offset,
+                    attachment.pos.z,
+                ),
+                attachment.radius_offset,
+                attachment.double_trunk,
+            );
+            place_leaves_row(
+                world,
+                random,
+                config,
+                attachment,
+                foliage_radius + attachment.radius_offset,
+                -1 - foliage_height,
+                placement,
+            );
+            place_leaves_row(
+                world,
+                random,
+                config,
+                attachment,
+                foliage_radius - 1,
+                -foliage_height,
+                placement,
+            );
+            place_leaves_row(
+                world,
+                random,
+                config,
+                attachment,
+                foliage_radius + attachment.radius_offset - 1,
+                0,
+                placement,
+            );
+        }
         FoliagePlacerConfiguration::DarkOak { .. } => {
             if attachment.double_trunk {
                 place_leaves_row(
@@ -596,6 +722,17 @@ fn place_leaves_row<W: FeatureWorld>(
                         continue;
                     }
                 }
+                FoliagePlacerConfiguration::Acacia { .. } => {
+                    if should_skip_acacia_leaf(
+                        x_offset,
+                        y_offset,
+                        z_offset,
+                        radius,
+                        attachment.double_trunk,
+                    ) {
+                        continue;
+                    }
+                }
                 FoliagePlacerConfiguration::DarkOak { .. } => {
                     if should_skip_dark_oak_leaf(
                         x_offset,
@@ -623,6 +760,17 @@ fn place_leaves_row<W: FeatureWorld>(
     }
 }
 
+fn signed_leaf_offsets_abs(x_offset: i32, z_offset: i32, double_trunk: bool) -> (i32, i32) {
+    if double_trunk {
+        (
+            x_offset.abs().min((x_offset - 1).abs()),
+            z_offset.abs().min((z_offset - 1).abs()),
+        )
+    } else {
+        (x_offset.abs(), z_offset.abs())
+    }
+}
+
 fn should_skip_conifer_leaf(abs_x: i32, abs_z: i32, radius: i32) -> bool {
     abs_x == radius && abs_z == radius && radius > 0
 }
@@ -638,19 +786,25 @@ fn should_skip_blob_leaf(
 }
 
 fn should_skip_fancy_leaf(x_offset: i32, z_offset: i32, radius: i32, double_trunk: bool) -> bool {
-    let abs_x = if double_trunk {
-        x_offset.abs().min((x_offset - 1).abs())
-    } else {
-        x_offset.abs()
-    };
-    let abs_z = if double_trunk {
-        z_offset.abs().min((z_offset - 1).abs())
-    } else {
-        z_offset.abs()
-    };
+    let (abs_x, abs_z) = signed_leaf_offsets_abs(x_offset, z_offset, double_trunk);
     let x = abs_x as f32 + 0.5;
     let z = abs_z as f32 + 0.5;
     x * x + z * z > (radius * radius) as f32
+}
+
+fn should_skip_acacia_leaf(
+    x_offset: i32,
+    y_offset: i32,
+    z_offset: i32,
+    radius: i32,
+    double_trunk: bool,
+) -> bool {
+    let (abs_x, abs_z) = signed_leaf_offsets_abs(x_offset, z_offset, double_trunk);
+    if y_offset == 0 {
+        (abs_x > 1 || abs_z > 1) && abs_x != 0 && abs_z != 0
+    } else {
+        abs_x == radius && abs_z == radius && radius > 0
+    }
 }
 
 fn should_skip_dark_oak_leaf(
@@ -668,16 +822,7 @@ fn should_skip_dark_oak_leaf(
         return true;
     }
 
-    let abs_x = if double_trunk {
-        x_offset.abs().min((x_offset - 1).abs())
-    } else {
-        x_offset.abs()
-    };
-    let abs_z = if double_trunk {
-        z_offset.abs().min((z_offset - 1).abs())
-    } else {
-        z_offset.abs()
-    };
+    let (abs_x, abs_z) = signed_leaf_offsets_abs(x_offset, z_offset, double_trunk);
 
     if y_offset == -1 && !double_trunk {
         abs_x == radius && abs_z == radius
@@ -905,13 +1050,14 @@ fn valid_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
             | BIRCH_LEAVES
             | SPRUCE_LEAVES
             | DARK_OAK_LEAVES
+            | ACACIA_LEAVES
     )
 }
 
 fn is_tree_leaf(block_id: crate::block::RawBlockId) -> bool {
     matches!(
         block_id,
-        OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | DARK_OAK_LEAVES
+        OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | DARK_OAK_LEAVES | ACACIA_LEAVES
     )
 }
 
@@ -922,7 +1068,10 @@ fn is_free_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
     let Some(block_id) = world.block_at_world(pos) else {
         return false;
     };
-    matches!(block_id, OAK_LOG | BIRCH_LOG | SPRUCE_LOG | DARK_OAK_LOG)
+    matches!(
+        block_id,
+        OAK_LOG | BIRCH_LOG | SPRUCE_LOG | DARK_OAK_LOG | ACACIA_LOG
+    )
 }
 
 fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
@@ -949,6 +1098,8 @@ fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool
             | SPRUCE_LOG
             | DARK_OAK_LEAVES
             | DARK_OAK_LOG
+            | ACACIA_LEAVES
+            | ACACIA_LOG
     )
 }
 

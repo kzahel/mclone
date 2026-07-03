@@ -128,6 +128,8 @@ pub const DARK_OAK_LEAVES: RawBlockId = 122;
 pub const BROWN_MUSHROOM_BLOCK: RawBlockId = 123;
 pub const RED_MUSHROOM_BLOCK: RawBlockId = 124;
 pub const MUSHROOM_STEM: RawBlockId = 125;
+pub const ACACIA_LOG: RawBlockId = 126;
+pub const ACACIA_LEAVES: RawBlockId = 127;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -183,6 +185,8 @@ impl GeneratedBlockId {
     pub const BROWN_MUSHROOM_BLOCK: Self = Self(BROWN_MUSHROOM_BLOCK);
     pub const RED_MUSHROOM_BLOCK: Self = Self(RED_MUSHROOM_BLOCK);
     pub const MUSHROOM_STEM: Self = Self(MUSHROOM_STEM);
+    pub const ACACIA_LOG: Self = Self(ACACIA_LOG);
+    pub const ACACIA_LEAVES: Self = Self(ACACIA_LEAVES);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -363,7 +367,7 @@ pub const fn lava_block_for_level(level: u8) -> Option<RawBlockId> {
 pub const fn is_leaves(block_id: RawBlockId) -> bool {
     matches!(
         block_id,
-        OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | DARK_OAK_LEAVES
+        OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | DARK_OAK_LEAVES | ACACIA_LEAVES
     )
 }
 
@@ -433,6 +437,8 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         BROWN_MUSHROOM_BLOCK => "minecraft:brown_mushroom_block",
         RED_MUSHROOM_BLOCK => "minecraft:red_mushroom_block",
         MUSHROOM_STEM => "minecraft:mushroom_stem",
+        ACACIA_LOG => "minecraft:acacia_log",
+        ACACIA_LEAVES => "minecraft:acacia_leaves",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
@@ -502,6 +508,7 @@ mod tests {
         assert_eq!(block_light_opacity(BIRCH_LEAVES), 1);
         assert_eq!(block_light_opacity(SPRUCE_LEAVES), 1);
         assert_eq!(block_light_opacity(DARK_OAK_LEAVES), 1);
+        assert_eq!(block_light_opacity(ACACIA_LEAVES), 1);
         assert_eq!(block_light_opacity(AIR), 0);
         assert_eq!(block_light_opacity(CAVE_AIR), 0);
         assert_eq!(block_light_opacity(WATER), 1);
@@ -520,6 +527,7 @@ mod tests {
         assert_eq!(block_light_opacity(SEA_PICKLE_1), 0);
         assert_eq!(block_light_opacity(TUBE_CORAL_BLOCK), 15);
         assert_eq!(block_light_opacity(DARK_OAK_LOG), 15);
+        assert_eq!(block_light_opacity(ACACIA_LOG), 15);
         assert_eq!(block_light_opacity(BROWN_MUSHROOM_BLOCK), 15);
     }
 
@@ -552,5 +560,7 @@ mod tests {
             "minecraft:red_mushroom_block"
         );
         assert_eq!(block_name(MUSHROOM_STEM), "minecraft:mushroom_stem");
+        assert_eq!(block_name(ACACIA_LOG), "minecraft:acacia_log");
+        assert_eq!(block_name(ACACIA_LEAVES), "minecraft:acacia_leaves");
     }
 }

@@ -50,6 +50,8 @@ pub mod terrain_id {
     pub const BROWN_MUSHROOM_BLOCK: u32 = 123;
     pub const RED_MUSHROOM_BLOCK: u32 = 124;
     pub const MUSHROOM_STEM: u32 = 125;
+    pub const ACACIA_LOG: u32 = 126;
+    pub const ACACIA_LEAVES: u32 = 127;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

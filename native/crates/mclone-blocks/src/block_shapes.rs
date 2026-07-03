@@ -392,6 +392,8 @@ mod tests {
             terrain_id::BROWN_MUSHROOM_BLOCK,
             terrain_id::RED_MUSHROOM_BLOCK,
             terrain_id::MUSHROOM_STEM,
+            terrain_id::ACACIA_LOG,
+            terrain_id::ACACIA_LEAVES,
         ] {
             assert_eq!(
                 block_collision_aabb(state(id), BlockPos::new(1, 2, 3)),

@@ -256,9 +256,9 @@ mod tests {
     use super::*;
     use crate::biome::get_layered_biome_by_id;
     use crate::block::{
-        AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, BRAIN_CORAL_BLOCK, BROWN_MUSHROOM_BLOCK,
-        BUBBLE_CORAL_BLOCK, CACTUS, CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE, DANDELION,
-        DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE,
+        ACACIA_LEAVES, ACACIA_LOG, AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, BRAIN_CORAL_BLOCK,
+        BROWN_MUSHROOM_BLOCK, BUBBLE_CORAL_BLOCK, CACTUS, CAVE_AIR, CLAY, COAL_ORE, COPPER_ORE,
+        DANDELION, DARK_OAK_LEAVES, DARK_OAK_LOG, DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE,
         DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE,
         DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT, FIRE_CORAL_BLOCK,
         GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, HORN_CORAL_BLOCK, ICE,
@@ -904,6 +904,17 @@ mod tests {
     }
 
     #[test]
+    fn acacia_tree_places_forking_trunk_and_flat_canopy() {
+        let mut chunk = flat_grass_chunk();
+        let mut random = WorldgenRandom::new(5);
+        let feature = ConfiguredFeature::tree(TreeConfiguration::acacia());
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
+        assert!(count_blocks(&chunk, ACACIA_LOG) > 0);
+        assert!(count_blocks(&chunk, ACACIA_LEAVES) > 0);
+    }
+
+    #[test]
     fn huge_mushrooms_place_cap_and_stem_blocks() {
         let mut brown_chunk = flat_grass_chunk();
         let mut brown_random = WorldgenRandom::new(3);
@@ -1072,6 +1083,57 @@ mod tests {
                 ConfiguredDecorator::square(),
                 ConfiguredDecorator::heightmap(HeightmapType::OceanFloorWg),
             ]
+        );
+    }
+
+    #[test]
+    fn savanna_feature_table_uses_vanilla_acacia_selector() {
+        let savanna = overworld_features_for_biome(get_layered_biome_by_id(35));
+        let shattered = overworld_features_for_biome(get_layered_biome_by_id(163));
+        let feature = savanna
+            .iter()
+            .find(|feature| {
+                feature.step == DecorationStep::VegetalDecoration
+                    && matches!(feature.feature, ConfiguredFeature::RandomSelector(_))
+            })
+            .expect("savanna tree selector");
+
+        assert_eq!(
+            feature.decorators,
+            vec![
+                ConfiguredDecorator::count_extra(1, 0.1, 1),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::water_depth_threshold(0),
+                ConfiguredDecorator::heightmap(HeightmapType::OceanFloor),
+            ]
+        );
+        match &feature.feature {
+            ConfiguredFeature::RandomSelector(config) => {
+                assert_eq!(
+                    config.features,
+                    vec![WeightedConfiguredFeature::new(
+                        ConfiguredFeature::tree(TreeConfiguration::acacia()),
+                        0.8,
+                    )]
+                );
+                assert_eq!(
+                    *config.default_feature,
+                    ConfiguredFeature::tree(TreeConfiguration::oak())
+                );
+            }
+            other => panic!("expected savanna random selector, got {other:?}"),
+        }
+
+        let shattered_feature = shattered
+            .iter()
+            .find(|feature| {
+                feature.step == DecorationStep::VegetalDecoration
+                    && matches!(feature.feature, ConfiguredFeature::RandomSelector(_))
+            })
+            .expect("shattered savanna tree selector");
+        assert_eq!(
+            shattered_feature.decorators.first(),
+            Some(&ConfiguredDecorator::count_extra(2, 0.1, 1))
         );
     }
 

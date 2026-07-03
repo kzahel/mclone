@@ -954,6 +954,8 @@ mod tests {
         assert!(assets.catalog.get(mclone_core::BlockStateId(120)).is_some());
         assert!(assets.catalog.get(mclone_core::BlockStateId(121)).is_some());
         assert!(assets.catalog.get(mclone_core::BlockStateId(125)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(126)).is_some());
+        assert!(assets.catalog.get(mclone_core::BlockStateId(127)).is_some());
     }
 
     #[test]

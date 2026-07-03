@@ -1,7 +1,8 @@
 use crate::block::{
-    ANDESITE, BIRCH_LEAVES, BIRCH_LOG, BROWN_MUSHROOM_BLOCK, DARK_OAK_LEAVES, DARK_OAK_LOG,
-    DEEPSLATE, DIORITE, GRANITE, GRASS_BLOCK, LAVA, MUSHROOM_STEM, OAK_LEAVES, OAK_LOG,
-    RED_MUSHROOM_BLOCK, RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TUFF, WATER,
+    ACACIA_LEAVES, ACACIA_LOG, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, BROWN_MUSHROOM_BLOCK,
+    DARK_OAK_LEAVES, DARK_OAK_LOG, DEEPSLATE, DIORITE, GRANITE, GRASS_BLOCK, LAVA, MUSHROOM_STEM,
+    OAK_LEAVES, OAK_LOG, RED_MUSHROOM_BLOCK, RawBlockId, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TUFF,
+    WATER,
 };
 use crate::placement::{ConfiguredDecorator, CountConfiguration, IntProvider};
 use crate::prng::RandomSource;
@@ -374,6 +375,7 @@ impl StraightTrunkPlacerConfiguration {
 pub enum TrunkPlacerConfiguration {
     Straight(StraightTrunkPlacerConfiguration),
     Fancy(StraightTrunkPlacerConfiguration),
+    Forking(StraightTrunkPlacerConfiguration),
     DarkOak(StraightTrunkPlacerConfiguration),
 }
 
@@ -394,6 +396,14 @@ impl TrunkPlacerConfiguration {
         ))
     }
 
+    pub const fn forking(base_height: i32, height_rand_a: i32, height_rand_b: i32) -> Self {
+        Self::Forking(StraightTrunkPlacerConfiguration::new(
+            base_height,
+            height_rand_a,
+            height_rand_b,
+        ))
+    }
+
     pub const fn dark_oak(base_height: i32, height_rand_a: i32, height_rand_b: i32) -> Self {
         Self::DarkOak(StraightTrunkPlacerConfiguration::new(
             base_height,
@@ -404,9 +414,10 @@ impl TrunkPlacerConfiguration {
 
     pub(super) fn tree_height(self, random: &mut impl RandomSource) -> i32 {
         match self {
-            Self::Straight(config) | Self::Fancy(config) | Self::DarkOak(config) => {
-                config.tree_height(random)
-            }
+            Self::Straight(config)
+            | Self::Fancy(config)
+            | Self::Forking(config)
+            | Self::DarkOak(config) => config.tree_height(random),
         }
     }
 }
@@ -433,6 +444,10 @@ pub enum FoliagePlacerConfiguration {
         offset: IntProvider,
         height: IntProvider,
     },
+    Acacia {
+        radius: IntProvider,
+        offset: IntProvider,
+    },
     DarkOak {
         radius: IntProvider,
         offset: IntProvider,
@@ -451,6 +466,7 @@ impl FoliagePlacerConfiguration {
             Self::Fancy { height, .. } => height,
             Self::Spruce { trunk_height, .. } => (tree_height - trunk_height.sample(random)).max(4),
             Self::Pine { height, .. } => height.sample(random),
+            Self::Acacia { .. } => 0,
             Self::DarkOak { .. } => 4,
         }
     }
@@ -462,6 +478,7 @@ impl FoliagePlacerConfiguration {
             Self::Pine { radius, .. } => {
                 radius.sample(random) + random.next_int_bound((trunk_height + 1).max(1))
             }
+            Self::Acacia { radius, .. } => radius.sample(random),
             Self::DarkOak { radius, .. } => radius.sample(random),
         }
     }
@@ -472,6 +489,7 @@ impl FoliagePlacerConfiguration {
             | Self::Fancy { offset, .. }
             | Self::Spruce { offset, .. }
             | Self::Pine { offset, .. }
+            | Self::Acacia { offset, .. }
             | Self::DarkOak { offset, .. } => offset.sample(random),
         }
     }
@@ -633,6 +651,19 @@ impl TreeConfiguration {
             TrunkPlacerConfiguration::dark_oak(6, 2, 1),
             FoliagePlacerConfiguration::DarkOak {
                 radius: IntProvider::constant(0),
+                offset: IntProvider::constant(0),
+            },
+            TwoLayersFeatureSize::new(1, 0, 2),
+        )
+    }
+
+    pub const fn acacia() -> Self {
+        Self::new(
+            ACACIA_LOG,
+            ACACIA_LEAVES,
+            TrunkPlacerConfiguration::forking(5, 2, 2),
+            FoliagePlacerConfiguration::Acacia {
+                radius: IntProvider::constant(2),
                 offset: IntProvider::constant(0),
             },
             TwoLayersFeatureSize::new(1, 0, 2),

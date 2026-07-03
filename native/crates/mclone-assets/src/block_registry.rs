@@ -531,6 +531,8 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (123, "minecraft:brown_mushroom_block", EMPTY_PROPS),
     (124, "minecraft:red_mushroom_block", EMPTY_PROPS),
     (125, "minecraft:mushroom_stem", EMPTY_PROPS),
+    (126, "minecraft:acacia_log", AXIS_Y),
+    (127, "minecraft:acacia_leaves", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -549,7 +551,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 126);
+        assert_eq!(registry.len(), 128);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -773,6 +775,14 @@ mod tests {
         assert_eq!(
             registry.by_id(BlockStateId(125)).unwrap().canonical_key(),
             "minecraft:mushroom_stem"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:acacia_log[axis=y]"),
+            Some(BlockStateId(126))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:acacia_leaves"),
+            Some(BlockStateId(127))
         );
     }
 

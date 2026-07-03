@@ -83,6 +83,10 @@ pub(super) fn overworld_features_for_biome_cached(
         }
         "minecraft:dark_forest" => dark_forest_feature_table(false),
         "minecraft:dark_forest_hills" => dark_forest_feature_table(true),
+        "minecraft:savanna" | "minecraft:savanna_plateau" => savanna_feature_table(false),
+        "minecraft:shattered_savanna" | "minecraft:shattered_savanna_plateau" => {
+            savanna_feature_table(true)
+        }
         "minecraft:ocean" => ocean_feature_table(false),
         "minecraft:deep_ocean" => ocean_feature_table(true),
         "minecraft:cold_ocean" => cold_ocean_feature_table(false),
@@ -197,6 +201,21 @@ fn dark_forest_feature_table(red_mushrooms_first: bool) -> &'static [PlacedFeatu
                 "minecraft:dark_forest",
                 dark_forest_features(red_mushrooms_first),
             )
+        })
+        .as_slice()
+}
+
+fn savanna_feature_table(shattered: bool) -> &'static [PlacedFeature] {
+    static SAVANNA: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    static SHATTERED_SAVANNA: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    let features = if shattered {
+        &SHATTERED_SAVANNA
+    } else {
+        &SAVANNA
+    };
+    features
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:savanna", savanna_features(shattered))
         })
         .as_slice()
 }
@@ -657,6 +676,18 @@ fn dark_forest_features(red_mushrooms_first: bool) -> Vec<PlacedFeature> {
     ]
 }
 
+fn savanna_features(shattered: bool) -> Vec<PlacedFeature> {
+    let tree_count = if shattered { 2 } else { 1 };
+    vec![
+        savanna_tree_feature(tree_count),
+        default_flower_feature(),
+        forest_grass_patch_feature(),
+        omitted_vegetal_feature(),
+        spring_water_feature(),
+        spring_lava_feature(),
+    ]
+}
+
 fn ocean_features(deep: bool) -> Vec<PlacedFeature> {
     vec![
         seagrass_feature(48, if deep { 0.8 } else { 0.3 }),
@@ -798,6 +829,20 @@ fn dark_forest_vegetation_feature(red_mushrooms_first: bool) -> PlacedFeature {
             ConfiguredDecorator::water_depth_threshold(0),
             ConfiguredDecorator::heightmap(HeightmapType::OceanFloor),
         ],
+    )
+}
+
+fn savanna_tree_feature(count: i32) -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
+            [WeightedConfiguredFeature::new(
+                ConfiguredFeature::tree(TreeConfiguration::acacia()),
+                0.8,
+            )],
+            ConfiguredFeature::tree(TreeConfiguration::oak()),
+        )),
+        tree_threshold_decorators(count, 0.1, 1),
     )
 }
 
