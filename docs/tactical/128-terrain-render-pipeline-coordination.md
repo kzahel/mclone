@@ -1705,15 +1705,17 @@ same lane to `3.925` / `3.913` / `3.882 ms`. The remaining max update-apply
 categories were section block client patching (`3.913 ms`) and residual unload
 dirty/client work (`3.614 ms`). A shared packed-section batch patcher has now
 landed so one `SectionBlockUpdates` packet unpacks and repacks the target
-section once instead of once per block update. The local cactus/sugar-cane
-asset-load blocker is cleared, but the Quest churn lane has not yet been
-remeasured after that fix.
+section once instead of once per block update. The follow-up Quest churn run
+confirmed the section-block client tail improved to `1.997 ms`, but the max
+update-pump bucket moved back to unload client apply:
+`max_runtime_poll_ms=6.551`, `apply_updates_ms=6.531`,
+`client_apply_ms=6.158`, `unload_client_ms=6.158`, with `unload_updates=16`.
 
-The next implementation chunk should rerun the Quest chunk-view churn lane,
-then inspect residual unload dirty marking before changing broad pump policy.
-Keep receive order. The count cap is now a guardrail for the normal frame pump,
-not the final fix; after the remaining update-apply costs are thinner, retune
-or remove the cap based on the same Quest chunk-view churn lane.
+The next implementation chunk should inspect unload client snapshot
+removal/drop cost and residual unload dirty marking before changing broad pump
+policy. Keep receive order. The count cap is now a guardrail for the normal
+frame pump, not the final fix; after the remaining update-apply costs are
+thinner, retune or remove the cap based on the same Quest chunk-view churn lane.
 
 Keep upload apply and per-eye encode on the short list. The churn run also
 showed terrain pipeline pressure. After the entity-index slice, update apply no
