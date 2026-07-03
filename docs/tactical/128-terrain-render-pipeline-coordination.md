@@ -1,6 +1,7 @@
 # 128: Terrain Render Pipeline Coordination
 
-Status: active architecture parent
+Status: active architecture parent; resident cached-section dirty flags landed
+via `133` Slice 3D, broader coordinator lifecycle remains
 Workstream: shared native Rust terrain runtime, render session, compiler, upload, and XR frame pacing
 
 ## Impetus
@@ -340,7 +341,10 @@ Primary source files:
 
 `mclone-render-session` owns the core shared terrain cache and dirty state:
 
-- `RenderSectionDirtyState` tracks dirty chunks, dirty sections, inflight
+- Cached resident render-section slots now carry a dirty flag alongside the
+  mesh payload, so update-driven resident dirty marks can stay local to the
+  slot.
+- `RenderSectionDirtyState` tracks fallback dirty chunks/sections, inflight
   sections, and per-section revisions.
 - `RenderSectionDirtyWork` classifies dirty work into stale, loaded, and removal
   buckets.
@@ -352,11 +356,12 @@ Primary source files:
   worker output cannot overwrite newer dirty state.
 
 This is already stronger than a naive worker queue. We have the important
-concepts of dirty, deferred, inflight, completed, stale, removal, and ready.
-The weakness is not that the concepts are missing. The weakness is that they are
-not yet gathered behind a small number of durable owners, so reasoning about one
-section's path from dirty to drawable still requires following several modules
-and several transient set transformations.
+concepts of dirty, deferred, inflight, completed, stale, removal, and ready,
+and the first resident dirty-flag step is now in place. The weakness is not that
+the concepts are missing. The weakness is that they are not yet gathered behind
+a small number of durable owners, so reasoning about one section's path from
+dirty to drawable still requires following several modules and several
+transient set transformations.
 
 ### Shared admission loop
 
@@ -474,10 +479,13 @@ section IDs or a narrower request object.
 
 `RenderSectionDirtyState`, `RenderSectionDirtyWork`, and `RenderSectionReadyPlan`
 use `BTreeSet` and `BTreeMap` heavily. That is simple and deterministic, but
-movement frames can have thousands of deferred sections. The current
-`apply_ready_plan` removes ready work and extends dirty sections with all
-deferred keys. If deferred sets are repeatedly rebuilt and reinserted, a small
-submitted job can still pay a large coordination cost.
+movement frames can have thousands of deferred sections. After `133` Slice 3D,
+resident cached-section dirty marks no longer insert into `dirty_sections`, and
+`apply_ready_plan` clears accepted resident flags while leaving deferred
+resident sections dirty in place. The remaining fallback dirty chunks/sections,
+inflight sections, and deferred-ready materialization are still set-heavy. If
+those sets are repeatedly rebuilt and reinserted, a small submitted job can
+still pay a large coordination cost.
 
 Hypothesis: after the next split, ready-plan application or dirty/deferred set
 maintenance will explain a large part of `submit_handoff_ms`.

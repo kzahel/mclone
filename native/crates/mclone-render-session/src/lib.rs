@@ -311,9 +311,21 @@ pub fn snapshot_mesh_block_state_ids(snapshot: &ChunkSnapshot) -> Result<MeshChu
     })
 }
 
+#[derive(Clone, Debug)]
+struct CachedTexturedRenderSectionSlot {
+    mesh: TexturedRenderSectionMesh,
+    dirty: bool,
+}
+
+impl CachedTexturedRenderSectionSlot {
+    fn new(mesh: TexturedRenderSectionMesh) -> Self {
+        Self { mesh, dirty: false }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CachedTexturedRenderSections {
-    sections: BTreeMap<RenderSectionKey, TexturedRenderSectionMesh>,
+    sections: BTreeMap<RenderSectionKey, CachedTexturedRenderSectionSlot>,
     section_keys_by_chunk: BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
 }
 
@@ -2736,6 +2748,7 @@ impl EngineServerUpdateReport {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct EngineServerUpdateDirtyBatch {
     dirty_chunks: BTreeSet<ChunkPos>,
+    force_dirty_chunks: BTreeSet<ChunkPos>,
     dirty_sections: BTreeSet<RenderSectionKey>,
 }
 
@@ -2746,6 +2759,7 @@ impl EngineServerUpdateDirtyBatch {
             match update {
                 ServerUpdate::ChunkSnapshot(snapshot) => {
                     if policy.dirty_chunk_snapshots {
+                        batch.force_dirty_chunks.insert(snapshot.pos);
                         batch
                             .dirty_chunks
                             .extend(render_dirty_chunk_neighborhood(snapshot.pos));
@@ -2886,15 +2900,17 @@ impl EngineRenderSession {
         let report = EngineServerUpdateReport::classify(updates);
         let dirty_batch = EngineServerUpdateDirtyBatch::collect(updates, policy);
         let client = &self.client;
-        self.render_session.mark_chunks_dirty_with_loaded_sections(
-            dirty_batch.dirty_chunks,
-            |pos| {
-                client
-                    .chunk_snapshot(pos)
-                    .map(render_section_keys_for_snapshot)
-                    .unwrap_or_default()
-            },
-        );
+        self.render_session
+            .mark_chunks_dirty_with_loaded_sections_and_forced(
+                dirty_batch.dirty_chunks,
+                dirty_batch.force_dirty_chunks,
+                |pos| {
+                    client
+                        .chunk_snapshot(pos)
+                        .map(render_section_keys_for_snapshot)
+                        .unwrap_or_default()
+                },
+            );
         for key in dirty_batch.dirty_sections {
             self.mark_section_dirty(key);
         }
@@ -3259,11 +3275,11 @@ impl RenderSectionSession {
     }
 
     pub fn dirty_is_empty(&self) -> bool {
-        self.dirty.is_empty()
+        self.dirty.is_empty() && !self.cache.has_dirty_sections()
     }
 
     pub fn dirty_work_is_empty(&self) -> bool {
-        self.dirty.dirty_work_is_empty()
+        self.dirty.dirty_work_is_empty() && !self.cache.has_dirty_sections()
     }
 
     pub fn dirty(&self) -> &RenderSectionDirtyState {
@@ -3272,6 +3288,14 @@ impl RenderSectionSession {
 
     pub fn dirty_mut(&mut self) -> &mut RenderSectionDirtyState {
         &mut self.dirty
+    }
+
+    pub fn resident_dirty_section_count(&self) -> usize {
+        self.cache.dirty_section_count()
+    }
+
+    pub fn resident_dirty_section_keys(&self) -> impl Iterator<Item = RenderSectionKey> + '_ {
+        self.cache.dirty_section_keys()
     }
 
     /// Whether any dirty chunk/section is ready to make compile progress this frame —
@@ -3312,6 +3336,18 @@ impl RenderSectionSession {
                 .chunk_snapshot(pos)
                 .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
                 && section_readiness(key).is_ready()
+        }) || self.cache.dirty_section_keys().any(|key| {
+            if self.dirty.inflight_sections.contains(&key) {
+                return false;
+            }
+            let pos = render_section_chunk_pos(key);
+            if self.contains_section(key) && client.chunk_snapshot(pos).is_none() {
+                return true;
+            }
+            client
+                .chunk_snapshot(pos)
+                .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
+                && section_readiness(key).is_ready()
         })
     }
 
@@ -3328,8 +3364,49 @@ impl RenderSectionSession {
         pos: ChunkPos,
         loaded_section_keys: impl IntoIterator<Item = RenderSectionKey>,
     ) {
-        let known_section_keys = self.known_section_keys_for_chunk(pos, loaded_section_keys);
-        self.mark_chunk_dirty(pos, known_section_keys);
+        self.mark_chunk_dirty_with_loaded_sections_and_unknown_policy(
+            pos,
+            loaded_section_keys,
+            false,
+        );
+    }
+
+    fn mark_chunk_dirty_with_loaded_sections_and_unknown_policy(
+        &mut self,
+        pos: ChunkPos,
+        loaded_section_keys: impl IntoIterator<Item = RenderSectionKey>,
+        force_dirty_if_unknown: bool,
+    ) {
+        let loaded_section_keys = loaded_section_keys.into_iter().collect::<BTreeSet<_>>();
+        let resident_section_keys = self
+            .cache
+            .section_keys_for_chunk(pos)
+            .collect::<BTreeSet<_>>();
+        let known_section_keys =
+            self.known_section_keys_for_chunk(pos, loaded_section_keys.iter().copied());
+        self.dirty
+            .bump_section_revisions(known_section_keys.iter().copied());
+
+        if !resident_section_keys.is_empty()
+            && !loaded_section_keys.is_empty()
+            && resident_section_keys == loaded_section_keys
+        {
+            for key in resident_section_keys {
+                self.cache.mark_section_dirty(key);
+            }
+            return;
+        }
+
+        if loaded_section_keys.is_empty() && resident_section_keys.is_empty() {
+            if known_section_keys.is_empty() && !force_dirty_if_unknown {
+                return;
+            }
+        }
+
+        for key in resident_section_keys {
+            self.cache.mark_section_dirty(key);
+        }
+        self.dirty.dirty_chunks.insert(pos);
     }
 
     pub fn mark_chunks_dirty_with_loaded_sections<I>(
@@ -3344,6 +3421,28 @@ impl RenderSectionSession {
         let marked_chunk_count = chunks.len();
         for pos in chunks {
             self.mark_chunk_dirty_with_loaded_sections(pos, loaded_section_keys_for_chunk(pos));
+        }
+        marked_chunk_count
+    }
+
+    pub fn mark_chunks_dirty_with_loaded_sections_and_forced<I>(
+        &mut self,
+        chunks: impl IntoIterator<Item = ChunkPos>,
+        force_dirty_chunks: impl IntoIterator<Item = ChunkPos>,
+        mut loaded_section_keys_for_chunk: impl FnMut(ChunkPos) -> I,
+    ) -> usize
+    where
+        I: IntoIterator<Item = RenderSectionKey>,
+    {
+        let force_dirty_chunks = force_dirty_chunks.into_iter().collect::<BTreeSet<_>>();
+        let chunks = chunks.into_iter().collect::<BTreeSet<_>>();
+        let marked_chunk_count = chunks.len();
+        for pos in chunks {
+            self.mark_chunk_dirty_with_loaded_sections_and_unknown_policy(
+                pos,
+                loaded_section_keys_for_chunk(pos),
+                force_dirty_chunks.contains(&pos),
+            );
         }
         marked_chunk_count
     }
@@ -3395,7 +3494,10 @@ impl RenderSectionSession {
     }
 
     pub fn mark_section_dirty(&mut self, key: RenderSectionKey) {
-        self.dirty.mark_section_dirty(key);
+        self.dirty.bump_section_revision(key);
+        if !self.cache.mark_section_dirty(key) {
+            self.dirty.dirty_sections.insert(key);
+        }
     }
 
     pub fn sections(&self) -> Vec<TexturedRenderSectionMesh> {
@@ -3443,16 +3545,27 @@ impl RenderSectionSession {
         &self,
         chunk_is_loaded: impl FnMut(ChunkPos) -> bool,
         chunk_is_cached: impl FnMut(ChunkPos) -> bool,
-        section_is_loaded: impl FnMut(RenderSectionKey) -> bool,
+        mut section_is_loaded: impl FnMut(RenderSectionKey) -> bool,
         section_is_cached: impl FnMut(RenderSectionKey) -> bool,
     ) -> RenderSectionDirtyWork {
-        classify_render_section_dirty_work(
+        let mut work = classify_render_section_dirty_work(
             &self.dirty,
             chunk_is_loaded,
             chunk_is_cached,
-            section_is_loaded,
+            |key| section_is_loaded(key),
             section_is_cached,
-        )
+        );
+        for key in self.cache.dirty_section_keys() {
+            if section_is_loaded(key) {
+                work.loaded_dirty_sections_by_chunk
+                    .entry(render_section_chunk_pos(key))
+                    .or_default()
+                    .insert(key);
+            } else {
+                work.removal_dirty_sections.insert(key);
+            }
+        }
+        work
     }
 
     pub fn prepare_sync_update(
@@ -3466,8 +3579,7 @@ impl RenderSectionSession {
         section_readiness: impl FnMut(RenderSectionKey) -> RenderSectionNeighborReadiness,
         removal_mode: RenderSectionRemovalMode,
     ) -> RenderSectionSyncUpdate {
-        let dirty_work = classify_render_section_dirty_work(
-            &self.dirty,
+        let dirty_work = self.classify_dirty_work(
             chunk_is_loaded,
             |pos| self.cache.contains_chunk(pos),
             section_is_loaded,
@@ -3517,7 +3629,20 @@ impl RenderSectionSession {
     }
 
     pub fn apply_ready_plan(&mut self, plan: &RenderSectionReadyPlan) {
-        self.dirty.apply_ready_plan(plan);
+        for pos in &plan.budgeted_loaded_chunks {
+            self.dirty.dirty_chunks.remove(pos);
+        }
+        for key in &plan.ready_section_keys {
+            self.dirty.dirty_sections.remove(key);
+            self.cache.clear_section_dirty(*key);
+        }
+        for key in &plan.deferred_section_keys {
+            if self.cache.mark_section_dirty(*key) {
+                self.dirty.dirty_sections.remove(key);
+            } else {
+                self.dirty.dirty_sections.insert(*key);
+            }
+        }
     }
 
     pub fn build_ready_plan_compile_request(
@@ -3529,7 +3654,8 @@ impl RenderSectionSession {
     }
 
     pub fn accept_ready_plan_compile_submission(&mut self, plan: &RenderSectionReadyPlan) {
-        self.dirty.accept_ready_plan_compile_submission(plan);
+        self.dirty.mark_compile_submitted(&plan.ready_section_keys);
+        self.apply_ready_plan(plan);
     }
 
     pub fn submit_ready_plan_compile_request<T, E>(
@@ -3687,7 +3813,9 @@ impl RenderSectionSession {
         let mut requeued = 0;
         for key in target_sections {
             if section_is_loaded(key) || self.cache.contains_section(key) {
-                self.dirty.dirty_sections.insert(key);
+                if !self.cache.mark_section_dirty(key) {
+                    self.dirty.dirty_sections.insert(key);
+                }
                 requeued += 1;
             }
         }
@@ -4323,7 +4451,10 @@ impl CachedTexturedRenderSections {
     }
 
     pub fn sections(&self) -> Vec<TexturedRenderSectionMesh> {
-        self.sections.values().cloned().collect()
+        self.sections
+            .values()
+            .map(|slot| slot.mesh.clone())
+            .collect()
     }
 
     pub fn section_keys(&self) -> impl Iterator<Item = RenderSectionKey> + '_ {
@@ -4338,6 +4469,36 @@ impl CachedTexturedRenderSections {
             .get(&pos)
             .into_iter()
             .flat_map(|keys| keys.iter().copied())
+    }
+
+    fn has_dirty_sections(&self) -> bool {
+        self.sections.values().any(|slot| slot.dirty)
+    }
+
+    fn dirty_section_count(&self) -> usize {
+        self.sections.values().filter(|slot| slot.dirty).count()
+    }
+
+    fn dirty_section_keys(&self) -> impl Iterator<Item = RenderSectionKey> + '_ {
+        self.sections
+            .iter()
+            .filter_map(|(key, slot)| slot.dirty.then_some(*key))
+    }
+
+    fn mark_section_dirty(&mut self, key: RenderSectionKey) -> bool {
+        let Some(slot) = self.sections.get_mut(&key) else {
+            return false;
+        };
+        slot.dirty = true;
+        true
+    }
+
+    fn clear_section_dirty(&mut self, key: RenderSectionKey) -> bool {
+        let Some(slot) = self.sections.get_mut(&key) else {
+            return false;
+        };
+        slot.dirty = false;
+        true
     }
 
     pub fn apply_build_report(
@@ -4414,7 +4575,8 @@ impl CachedTexturedRenderSections {
 
     fn insert_section(&mut self, section: TexturedRenderSectionMesh) {
         let key = section.key;
-        self.sections.insert(key, section);
+        self.sections
+            .insert(key, CachedTexturedRenderSectionSlot::new(section));
         self.section_keys_by_chunk
             .entry(render_section_chunk_pos(key))
             .or_default()
@@ -4422,7 +4584,7 @@ impl CachedTexturedRenderSections {
     }
 
     fn remove_section(&mut self, key: RenderSectionKey) -> Option<TexturedRenderSectionMesh> {
-        let section = self.sections.remove(&key)?;
+        let section = self.sections.remove(&key)?.mesh;
         let pos = render_section_chunk_pos(key);
         if let Some(keys) = self.section_keys_by_chunk.get_mut(&pos) {
             keys.remove(&key);
@@ -4776,10 +4938,7 @@ mod tests {
         });
 
         assert_eq!(marked, 5);
-        assert_eq!(
-            session.dirty().dirty_chunks,
-            BTreeSet::from(render_dirty_chunk_neighborhood(center))
-        );
+        assert_eq!(session.dirty().dirty_chunks, BTreeSet::from([center, east]));
         assert_eq!(session.dirty().section_revision(center_key), 1);
         assert_eq!(session.dirty().section_revision(east_key), 1);
     }
@@ -5589,7 +5748,7 @@ mod tests {
         assert!(engine.mark_loaded_chunks_dirty_when_cache_empty());
         assert_eq!(
             engine.render_session().dirty().dirty_chunks,
-            BTreeSet::from(render_dirty_chunk_neighborhood(chunk))
+            BTreeSet::from([chunk])
         );
         assert_eq!(engine.render_session().dirty().section_revision(key), 1);
 
@@ -5887,7 +6046,36 @@ mod tests {
         );
         assert_eq!(
             engine.render_session().dirty().dirty_chunks,
-            BTreeSet::from(render_dirty_chunk_neighborhood(chunk))
+            BTreeSet::from([chunk])
+        );
+        assert_eq!(engine.render_session().dirty().section_revision(key), 1);
+    }
+
+    #[test]
+    fn engine_render_session_marks_resident_snapshot_sections_dirty_without_dirty_chunk_set() {
+        let chunk = ChunkPos::new(0, 0);
+        let key = RenderSectionKey::new(0, 0, 0);
+        let snapshot = empty_test_snapshot(chunk, 0, SECTION_HEIGHT);
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(snapshot.clone()));
+        let mut engine = EngineRenderSession::new(client);
+        engine.render_session_mut().apply_finished_compile_report(
+            &BTreeSet::from([key]),
+            test_build_report([key]),
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        );
+
+        engine.mark_server_update_render_dirty(&[ServerUpdate::ChunkSnapshot(snapshot)]);
+
+        assert!(engine.render_session().dirty().dirty_chunks.is_empty());
+        assert!(engine.render_session().dirty().dirty_sections.is_empty());
+        assert_eq!(
+            engine
+                .render_session()
+                .resident_dirty_section_keys()
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([key])
         );
         assert_eq!(engine.render_session().dirty().section_revision(key), 1);
     }
@@ -5922,6 +6110,42 @@ mod tests {
         );
         assert_eq!(
             engine.render_session().dirty().dirty_sections,
+            BTreeSet::from([key])
+        );
+        assert_eq!(engine.render_session().dirty().section_revision(key), 1);
+    }
+
+    #[test]
+    fn engine_render_session_marks_resident_section_updates_dirty_without_dirty_section_set() {
+        let chunk = ChunkPos::new(0, 0);
+        let key = RenderSectionKey::new(0, 7, 0);
+        let update = SectionBlockUpdate {
+            local_x: 8,
+            local_y: 8,
+            local_z: 8,
+            block_state: AIR_BLOCK_STATE_ID,
+        };
+        let mut engine = EngineRenderSession::new(ClientRuntime::local_integrated());
+        engine.render_session_mut().apply_finished_compile_report(
+            &BTreeSet::from([key]),
+            test_build_report([key]),
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        );
+
+        engine.mark_server_update_render_dirty(&[ServerUpdate::SectionBlockUpdates {
+            pos: chunk,
+            section_y: 7,
+            updates: vec![update],
+        }]);
+
+        assert!(engine.render_session().dirty().dirty_chunks.is_empty());
+        assert!(engine.render_session().dirty().dirty_sections.is_empty());
+        assert_eq!(
+            engine
+                .render_session()
+                .resident_dirty_section_keys()
+                .collect::<BTreeSet<_>>(),
             BTreeSet::from([key])
         );
         assert_eq!(engine.render_session().dirty().section_revision(key), 1);
@@ -6719,7 +6943,13 @@ mod tests {
             });
 
         assert_eq!(requeued, 2);
-        assert!(session.dirty().dirty_sections.contains(&cached));
+        assert_eq!(
+            session
+                .resident_dirty_section_keys()
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([cached])
+        );
+        assert!(!session.dirty().dirty_sections.contains(&cached));
         assert!(session.dirty().dirty_sections.contains(&loaded));
         assert!(!session.dirty().dirty_sections.contains(&stale_unloaded));
     }

@@ -334,13 +334,14 @@ fn record_submit_handoff_after_counts(
     engine: &EngineRenderSession,
     timing: &mut RenderSectionSyncTiming,
 ) {
-    let dirty_after = engine.render_session().dirty();
+    let render_session = engine.render_session();
+    let dirty_after = render_session.dirty();
     timing.submit_dirty_chunk_count_after = timing
         .submit_dirty_chunk_count_after
         .max(dirty_after.dirty_chunks.len());
     timing.submit_dirty_section_count_after = timing
         .submit_dirty_section_count_after
-        .max(dirty_after.dirty_sections.len());
+        .max(dirty_after.dirty_sections.len() + render_session.resident_dirty_section_count());
     timing.submit_inflight_section_count_after = timing
         .submit_inflight_section_count_after
         .max(dirty_after.inflight_sections.len());
@@ -1193,13 +1194,14 @@ impl SingleViewRuntime {
         C: RenderSectionCompileDispatcher,
     {
         timing.record_dispatcher_health(compiler.queue_health());
-        let dirty_before = self.engine.render_session().dirty();
+        let render_session = self.engine.render_session();
+        let dirty_before = render_session.dirty();
         timing.submit_dirty_chunk_count_before = timing
             .submit_dirty_chunk_count_before
             .max(dirty_before.dirty_chunks.len());
         timing.submit_dirty_section_count_before = timing
             .submit_dirty_section_count_before
-            .max(dirty_before.dirty_sections.len());
+            .max(dirty_before.dirty_sections.len() + render_session.resident_dirty_section_count());
         timing.submit_inflight_section_count_before = timing
             .submit_inflight_section_count_before
             .max(dirty_before.inflight_sections.len());
@@ -1907,6 +1909,16 @@ impl SingleViewRuntime {
                 .dirty_sections
                 .iter()
                 .copied()
+                .filter(|key| {
+                    let pos = render_section_chunk_pos(*key);
+                    self.client().chunk_snapshot(pos).is_some()
+                        || self.render_session().contains_section(*key)
+                })
+                .map(render_section_chunk_pos),
+        );
+        pending.extend(
+            self.render_session()
+                .resident_dirty_section_keys()
                 .filter(|key| {
                     let pos = render_section_chunk_pos(*key);
                     self.client().chunk_snapshot(pos).is_some()

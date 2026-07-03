@@ -4,9 +4,10 @@ Status: target architecture; Slice 1 send-only high-frequency command policy
 and Slice 2 local integrated ordered update pump landed; Slice 3A batched dirty
 intent and resident cache lookup landed; Slice 3B local integrated producer-side
 decoded update queue landed; Slice 3C local integrated chunk-interest unload
-hysteresis landed; revised 2026-07-03 to adopt the vanilla ordered-stream
-update model (thin apply plus a frame-budget stall) and drop the earlier
-priority-class design; remaining implementation tracked in
+hysteresis landed; Slice 3D resident cached-section dirty flags landed; revised
+2026-07-03 to adopt the vanilla ordered-stream update model (thin apply plus a
+frame-budget stall) and drop the earlier priority-class design; remaining
+implementation tracked in
 [`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md)
 
 ## Purpose
@@ -97,14 +98,19 @@ integrated play: pose sync and chunk view changes enqueue commands, while
 order under an elapsed-time budget, with unlimited drain paths reserved for
 startup and idle waits.
 
-Compared to the reference shape, local integrated play still has one costly
-gap:
+Compared to the reference shape, local integrated play now has the thin
+resident dirty-marking path for cached render sections:
 
-- Slice 3A now batches server-update dirty intent and uses a resident
+- Slice 3A batches server-update dirty intent and uses a resident
   chunk-to-section-key cache index, so duplicate updates no longer multiply
-  neighborhood fanout or full-cache scans. Render dirty state is still
-  ordered-set backed, where vanilla flips a boolean on a resident
-  render-section slot.
+  neighborhood fanout or full-cache scans.
+- Slice 3D moved cached resident dirty state onto render-section slots.
+  Resident snapshot and section-block updates flip slot-local booleans rather
+  than inserting resident keys into ordered dirty sets.
+- Ordered dirty sets remain as fallback/coordination state for new snapshot
+  chunks before replica install, removals, nonresident/stale sections, and
+  inflight compile tracking. Broader dirty-to-drawable lifecycle ownership is
+  tracked by `tactical/128`.
 
 Slice 3B moved local integrated update decode/conversion to the runner side:
 `try_recv_update` now returns already-decoded `ServerUpdate` envelopes with

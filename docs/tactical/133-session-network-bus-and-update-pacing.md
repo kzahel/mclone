@@ -6,8 +6,9 @@ receive-order update application (vanilla parity) with a frame-budget stall,
 replacing the earlier priority-class plan; Slice 2 local integrated ordered
 update pump landed; Slice 3A batched dirty intent and resident cache lookup
 landed; Slice 3B local integrated producer-side decoded update queue landed;
-Slice 3C local integrated chunk-interest unload hysteresis landed; full
-resident dirty slots remain active
+Slice 3C local integrated chunk-interest unload hysteresis landed; Slice 3D
+resident cached-section dirty flags landed; remote/web bus convergence and
+broader terrain coordinator lifecycle remain active
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -107,11 +108,12 @@ ordered queue behind a common policy boundary.
 - `EngineRenderSession::mark_server_update_render_dirty` now coalesces each
   server-update batch into unique dirty chunk neighborhoods and dirty section
   keys before touching render dirty state. `CachedTexturedRenderSections`
-  also keeps a resident chunk-to-section-key index so dirty marking no longer
-  scans all cached section keys for every dirty chunk.
-- Render dirty state is still `BTreeSet`-backed (`dirty_chunks`,
-  `dirty_sections`, `inflight_sections`). Full resident-slot boolean dirty
-  marking remains Slice 3 work.
+  also keeps a resident chunk-to-section-key index and per-section dirty flags,
+  so resident dirty marking no longer scans all cached section keys or inserts
+  resident keys into `dirty_sections`.
+- Render dirty state still has `BTreeSet` fallback paths for nonresident/new
+  snapshot chunks, removals, stale/nonresident sections, and
+  `inflight_sections`. Resident cached sections use slot-local dirty booleans.
 - `poll_until_idle` treats runner idle plus `update_queue_depth == 0` as done.
   Slice 2 must keep undrained updates observable (leave them in the channel)
   so idle and startup/bootstrap semantics stay correct.
@@ -311,11 +313,11 @@ safety valve.
   `CachedTexturedRenderSections`, and use it when collecting known resident
   keys for a dirty chunk. This removes the per-dirty-chunk full-cache scan
   while preserving the existing compile planner and cache lifecycle.
-- [ ] Full resident-slot dirty marking: flip state on resident render-section slots
-  (vanilla `ViewArea.setDirty` shape — array index plus boolean store) instead
-  of ordered-set insertion per update. This is the `131` Finding 3.3 diagnosis
-  and should land as part of, or aligned with, `128`'s resident-lifecycle
-  direction — not a separate renderer shortcut.
+- [x] Slice 3D: resident-slot dirty marking for cached render sections. Flip
+  state on resident render-section slots (vanilla `ViewArea.setDirty` shape:
+  resident slot plus boolean) instead of inserting resident keys into
+  `dirty_sections` per update. Keep fallback dirty sets for new snapshots before
+  replica install, removals, nonresident/stale sections, and inflight tracking.
 - [x] Slice 3B: move local integrated update payload decode off the render
   thread. The native runner queues decoded `ServerUpdate` envelopes and keeps
   encoded byte accounting as producer-side metadata.
@@ -471,10 +473,65 @@ Validation (Slice 3C):
     are now dominated by terrain render/upload/poll-wait work rather than a
     hidden command-drain path.
 
-Success means a chunk-scale update applies at parse-plus-flag-flip cost (well
-below the current ~0.13 ms), the default budget absorbs a 15+15 burst within a
-frame or two of stalling at most, and boundary oscillation no longer reloads
-and unloads the same chunk row.
+Recorded Slice 3D result:
+
+- `CachedTexturedRenderSections` now stores resident section slots with mesh
+  payload plus a dirty flag. Resident snapshot and section-block-update dirty
+  marks flip that slot flag instead of inserting the section key into
+  `RenderSectionDirtyState::dirty_sections`.
+- Dirty work classification merges resident dirty flags with fallback dirty
+  chunks/sections, and ready-plan application clears accepted resident flags
+  while keeping deferred resident sections dirty in place.
+- Forced dirty chunks preserve new snapshot behavior when a snapshot dirty mark
+  arrives before the client replica installs the chunk. Unknown neighborhood
+  chunks without resident cache entries no longer seed empty dirty work.
+- Runtime diagnostics count resident dirty flags alongside fallback dirty sets
+  so existing pending-work counters remain comparable.
+- Added regression coverage:
+  `engine_render_session_marks_resident_snapshot_sections_dirty_without_dirty_chunk_set`,
+  `engine_render_session_marks_resident_section_updates_dirty_without_dirty_section_set`,
+  and the remote-session reconnect resync path that depends on forced snapshot
+  chunk dirtying.
+
+Validation (Slice 3D):
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render-session -- --nocapture`
+  passed.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client -- --nocapture`
+  passed.
+- `cargo test --manifest-path native/Cargo.toml` passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+  passed.
+- Quest RD7 settled-orbit lane passed with actors enabled:
+  `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
+  Summary artifacts:
+  `/tmp/mclone-quest-openxr-perf-summary.txt` and
+  `/tmp/mclone-quest-openxr-logcat.txt`.
+- Quest result highlights compared with the post-Slice 3C run:
+  - Resident dirty marking collapsed the measured runtime dirty-seed tail:
+    `max_runtime_dirty_seed_ms=0.001`, down from the prior
+    `dirty_mark_ms=1.299` item.
+  - Runtime apply is thinner but not free:
+    `apply_updates_ms=1.998`, `client_apply_ms=1.514`,
+    `poll_total_ms=2.026`, with `updates=31`.
+  - Source/update pressure is mostly controlled but not zero:
+    `update_pump_stalled=true` once, `server_update_queue_depth=9`,
+    `server_update_queue_bytes=483148`,
+    `server_update_oldest_applied_age_ms=34.689`.
+  - Overall frame pacing remains unsolved and is now dominated by terrain
+    render/upload/poll-wait and draw work:
+    `app_work_avg_ms=15.070`, `app_work_p95_ms=17.759`,
+    `headroom_avg_ms=-1.181`, `app_over_period_pct=75.3`,
+    `submitted_fps=65.34`.
+
+Slice 3 conclusion: the local integrated update pump now follows the intended
+thin-apply shape for resident dirty marking: producer-side decode, strict
+receive-order application, resident flag flips, and bounded compile/upload
+pull-work. Remaining frame misses are no longer explained by hidden command
+drain, render-thread decode, full-cache dirty scans, or resident dirty-set
+insertion. The next local Quest work should move back to the terrain
+coordinator/render cost tracks (`128`, `119`, `117`), while this tactical's
+remaining bus work is remote TCP and web convergence.
 
 ### Slice 4 - Native Remote TCP Session Actor
 
@@ -531,10 +588,11 @@ bus should be designed so this does not require another client-runtime rewrite.
 Before closing this tactical or moving the local integrated pacing work out to
 another doc, explicitly decide where these remaining valuable items live:
 
-- Full resident-slot dirty marking: replace ordered-set dirty insertion with
-  the vanilla `ViewArea.setDirty` shape (resident slot plus boolean). This is
-  the remaining Slice 3 thin-apply item and likely belongs with `128`'s
-  resident-lifecycle direction.
+- Terrain coordinator lifecycle follow-up: resident cached-section dirty flags
+  are in place, but fallback dirty sets, `inflight_sections`, deferred
+  ready-plan materialization, compiler handoff, and upload/publication
+  ownership remain valuable `128` work before the dirty-to-drawable pipeline is
+  truly Java-shaped.
 - Exact oldest pending update age: current diagnostics expose applied update
   age and queued bytes/depth, but the mpsc-backed runner still cannot peek the
   oldest pending update without a transport-side metadata queue.

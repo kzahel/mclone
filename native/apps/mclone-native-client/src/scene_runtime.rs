@@ -1325,8 +1325,9 @@ mod tests {
             assert_eq!(runtime.client().loaded_chunk_count(), 1);
             assert!(runtime.client().chunk_snapshot(initial_center).is_none());
             assert!(runtime.client().chunk_snapshot(moved_center).is_some());
+            assert!(!runtime.render_session().contains_chunk(initial_center));
             assert!(
-                runtime
+                !runtime
                     .render_session()
                     .dirty()
                     .dirty_chunks
