@@ -27,6 +27,7 @@ public final class VanillaClientLauncher {
 
          if (options.launch) {
             if (options.screenshotPath != null) {
+               configureOracleFog(options.disableFog);
                VanillaClientScreenshotHarness.start(options.screenshotConfig());
             }
             net.minecraft.client.main.Main.main(minecraftArgs.toArray(new String[0]));
@@ -117,6 +118,9 @@ public final class VanillaClientLauncher {
                break;
             case "--mclone-no-structures":
                options.generateStructures = false;
+               break;
+            case "--mclone-disable-fog":
+               options.disableFog = true;
                break;
             case "--mclone-disable-multiplayer":
                options.disableMultiplayer = true;
@@ -312,8 +316,17 @@ public final class VanillaClientLauncher {
       System.err.println("  --mclone-render-distance <chunks>");
       System.err.println("  --mclone-show-gui");
       System.err.println("  --mclone-no-structures");
+      System.err.println("  --mclone-disable-fog");
       System.err.println("  --mclone-disable-multiplayer");
       System.err.println("  --mclone-disable-chat");
+   }
+
+   private static void configureOracleFog(boolean disableFog) {
+      if (disableFog) {
+         System.setProperty("mclone.oracle.disableFog", "true");
+      } else {
+         System.clearProperty("mclone.oracle.disableFog");
+      }
    }
 
    private static final class Options {
@@ -344,6 +357,7 @@ public final class VanillaClientLauncher {
       int renderDistance = 12;
       boolean generateStructures = true;
       boolean hideGui = true;
+      boolean disableFog;
       boolean disableMultiplayer;
       boolean disableChat;
 

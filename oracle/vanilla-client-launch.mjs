@@ -83,6 +83,7 @@ async function main() {
     settleFrames: options.settleFrames,
     timeoutSeconds: options.timeoutSeconds,
     renderDistance: options.renderDistance,
+    disableFog: options.disableFog,
     showGui: options.showGui,
     generateStructures: options.generateStructures,
   });
@@ -126,6 +127,7 @@ function parseArgs(args) {
     settleFrames: "80",
     timeoutSeconds: "180",
     renderDistance: "12",
+    disableFog: false,
     showGui: false,
     generateStructures: true,
     username: "McloneOracle",
@@ -219,6 +221,9 @@ function parseArgs(args) {
       case "--render-distance":
         options.renderDistance = requireIntegerInRange(requireValue(args, ++index, arg), "render distance", 2, 16);
         break;
+      case "--disable-fog":
+        options.disableFog = true;
+        break;
       case "--show-gui":
         options.showGui = true;
         break;
@@ -267,6 +272,7 @@ options:
   --settle-frames <n>    default: 80
   --timeout-seconds <n>  default: 180
   --render-distance <n>  vanilla client chunks; default: 12
+  --disable-fog          oracle-only screenshot mode: disable distance fog
   --show-gui             leave HUD visible in screenshots
   --no-structures        disable structure generation
   --username <name>      default: McloneOracle
@@ -485,6 +491,7 @@ function buildJavaCommand({
   settleFrames,
   timeoutSeconds,
   renderDistance,
+  disableFog,
   showGui,
   generateStructures,
 }) {
@@ -522,6 +529,9 @@ function buildJavaCommand({
     command.push("--mclone-settle-frames", settleFrames);
     command.push("--mclone-timeout-seconds", timeoutSeconds);
     command.push("--mclone-render-distance", renderDistance);
+    if (disableFog) {
+      command.push("--mclone-disable-fog");
+    }
     if (showGui) {
       command.push("--mclone-show-gui");
     }

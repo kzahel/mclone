@@ -78,6 +78,7 @@ function main() {
       log: paths.vanillaLog,
       windowSize: [Number(options.vanillaWidth), Number(options.vanillaHeight)],
       imageSize: [vanillaDimensions.width, vanillaDimensions.height],
+      fogDisabled: options.disableVanillaFog,
       command: vanillaCommand,
       elapsedMs: vanillaRun.elapsedMs,
     },
@@ -114,6 +115,7 @@ function parseArgs(args) {
     nativeEyeYOffset: DEFAULT_NATIVE_EYE_Y_OFFSET,
     nativeTargetDistance: DEFAULT_NATIVE_TARGET_DISTANCE,
     nativeRelease: false,
+    disableVanillaFog: false,
     noBuild: false,
     noDownload: false,
     outDir: null,
@@ -176,6 +178,10 @@ function parseArgs(args) {
       case "--native-release":
         options.nativeRelease = true;
         break;
+      case "--disable-vanilla-fog":
+      case "--disable-fog":
+        options.disableVanillaFog = true;
+        break;
       case "--no-build":
         options.noBuild = true;
         break;
@@ -212,6 +218,7 @@ options:
   --native-eye-y-offset <n>     default: ${DEFAULT_NATIVE_EYE_Y_OFFSET}
   --native-target-distance <n>  default: ${DEFAULT_NATIVE_TARGET_DISTANCE}
   --native-release              run native capture with cargo run --release
+  --disable-vanilla-fog         oracle-only: disable vanilla distance fog
   --no-build                    skip oracle/build.sh for the vanilla launcher
   --no-download                 fail instead of downloading missing vanilla assets/natives`);
 }
@@ -247,6 +254,9 @@ function vanillaCaptureCommand(options, outputPath) {
   }
   if (options.noDownload) {
     args.push("--no-download");
+  }
+  if (options.disableVanillaFog) {
+    args.push("--disable-fog");
   }
   return ["pnpm", ...args];
 }
