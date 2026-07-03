@@ -2,7 +2,7 @@
 
 Historical note on preserving native host/renderer paths for `mclone`.
 
-This document has been superseded by [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). The committed direction is now native-first Rust with five validated client/platform lanes: desktop flat, desktop OpenXR, Android XR / Quest standalone, flat Android, and web/WASM, plus an emerging offscreen flat client validation host. Use [`platforms.md`](platforms.md) for the current platform matrix and validation policy.
+Archived: this document has been superseded by [`../native-rewrite-roadmap.md`](../native-rewrite-roadmap.md). The committed direction is now native-first Rust with five validated client/platform lanes: desktop flat, desktop OpenXR, Android XR / Quest standalone, flat Android, and web/WASM, plus an emerging offscreen flat client validation host. Use [`../platforms.md`](../platforms.md) for the current platform matrix and validation policy.
 
 ## Current posture
 
@@ -46,7 +46,7 @@ Those are implementation choices to evaluate only if native work becomes real.
 
 ## Why this fits the existing architecture
 
-The runtime split in [`architecture.md`](./architecture.md) already separates simulation, server runtime, client runtime, and renderer. Three parts of that split matter here:
+The runtime split in [`../architecture.md`](../architecture.md) already separates simulation, server runtime, client runtime, and renderer. Three parts of that split matter here:
 
 - **The renderer is a consumer, not the owner of world state.** A native renderer should consume the same chunk snapshots, mesh payloads, and upload inputs as the browser renderer.
 - **Host concerns are adapter-shaped.** Transport, persistence, and runtime bootstrap already want host-specific implementations behind engine-defined contracts.

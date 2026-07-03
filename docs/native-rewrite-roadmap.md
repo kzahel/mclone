@@ -1,6 +1,6 @@
 # Native Rewrite Roadmap
 
-This is the durable plan for the Rust/native engine. It supersedes older TS-first roadmap language in [`strategy.md`](strategy.md) and the exploratory posture in [`native-target.md`](native-target.md).
+This is the durable plan for the Rust/native engine. It supersedes older TS-first roadmap language in [`strategy.md`](strategy.md) and the exploratory posture archived in [`archive/native-target.md`](archive/native-target.md).
 
 The retired browser engine has been removed from the live tree. Retained reference value now lives in the Java oracle harness under [`../oracle/`](../oracle/), shared oracle fixtures under [`../test/fixtures/`](../test/fixtures/), and Git history.
 
