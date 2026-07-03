@@ -2973,6 +2973,7 @@ mod android {
             let wait_frame_start = Instant::now();
             let frame_state = graphics.frame_wait.wait().context("wait OpenXR frame")?;
             frame_timing.wait_frame_ms = elapsed_ms(wait_frame_start);
+            let thread_cpu_start_ms = thread_cpu_time_ms();
             let begin_frame_start = Instant::now();
             graphics
                 .frame_stream
@@ -3133,6 +3134,10 @@ mod android {
                 return Err(error);
             }
             frame_timing.frame_wall_ms = elapsed_ms(frame_wall_start);
+            if let (Some(start_ms), Some(end_ms)) = (thread_cpu_start_ms, thread_cpu_time_ms()) {
+                frame_timing.thread_cpu_ms = (end_ms - start_ms).max(0.0);
+                frame_timing.thread_cpu_valid = true;
+            }
             if !perf_started_after_ready {
                 perf_probe.record_frame(frame_timing, frame_stats, rendered_frame);
             }
@@ -3157,6 +3162,8 @@ mod android {
     struct AndroidXrFrameTiming {
         frame_wall_ms: f64,
         wait_frame_ms: f64,
+        thread_cpu_ms: f64,
+        thread_cpu_valid: bool,
         begin_frame_ms: f64,
         wait_begin_ms: f64,
         controller_poll_ms: f64,
@@ -3414,6 +3421,9 @@ mod android {
         frame_wall_ms: f64,
         wait_frame_ms: f64,
         app_work_ms: f64,
+        thread_cpu_ms: f64,
+        thread_cpu_valid: bool,
+        blocked_ms: f64,
         timing: AndroidXrFrameTiming,
         summary: Option<mclone_xr_scene::XrTerrainFrameSummary>,
     }
@@ -3601,6 +3611,9 @@ mod android {
                 frame_wall_ms: Vec::new(),
                 wait_frame_ms: Vec::new(),
                 app_work_ms: Vec::new(),
+                thread_cpu_ms: Vec::new(),
+                blocked_ms: Vec::new(),
+                thread_cpu_valid_frames: 0,
                 max_wait_begin_ms: 0.0,
                 max_wait_frame_ms: 0.0,
                 max_begin_frame_ms: 0.0,
@@ -3731,6 +3744,9 @@ mod android {
         frame_wall_ms: Vec<f64>,
         wait_frame_ms: Vec<f64>,
         app_work_ms: Vec<f64>,
+        thread_cpu_ms: Vec<f64>,
+        blocked_ms: Vec<f64>,
+        thread_cpu_valid_frames: u64,
         max_wait_begin_ms: f64,
         max_wait_frame_ms: f64,
         max_begin_frame_ms: f64,
@@ -3784,11 +3800,29 @@ mod android {
             self.wait_frame_ms.push(timing.wait_frame_ms);
             let app_work_ms = (timing.frame_wall_ms - timing.wait_frame_ms).max(0.0);
             self.app_work_ms.push(app_work_ms);
+            let thread_cpu_ms = if timing.thread_cpu_valid {
+                timing.thread_cpu_ms
+            } else {
+                0.0
+            };
+            let blocked_ms = if timing.thread_cpu_valid {
+                (app_work_ms - thread_cpu_ms).max(0.0)
+            } else {
+                0.0
+            };
+            if timing.thread_cpu_valid {
+                self.thread_cpu_ms.push(thread_cpu_ms);
+                self.blocked_ms.push(blocked_ms);
+                self.thread_cpu_valid_frames += 1;
+            }
             self.record_worst_frame(AndroidXrWorstFrameSnapshot {
                 sample_frame,
                 frame_wall_ms: timing.frame_wall_ms,
                 wait_frame_ms: timing.wait_frame_ms,
                 app_work_ms,
+                thread_cpu_ms,
+                thread_cpu_valid: timing.thread_cpu_valid,
+                blocked_ms,
                 timing,
                 summary: rendered.map(|rendered| rendered.summary),
             });
@@ -3841,6 +3875,10 @@ mod android {
             sorted_wait_frame.sort_by(|a, b| a.total_cmp(b));
             let mut sorted_app_work = self.app_work_ms.clone();
             sorted_app_work.sort_by(|a, b| a.total_cmp(b));
+            let mut sorted_thread_cpu = self.thread_cpu_ms.clone();
+            sorted_thread_cpu.sort_by(|a, b| a.total_cmp(b));
+            let mut sorted_blocked = self.blocked_ms.clone();
+            sorted_blocked.sort_by(|a, b| a.total_cmp(b));
             let sample_seconds = self.started.elapsed().as_secs_f64();
             let frame_count = self.frame_wall_ms.len() as u64;
             let submitted_delta = frame_stats.submitted_frames - self.start_stats.submitted_frames;
@@ -3857,6 +3895,21 @@ mod android {
             let app_work_p50_ms = percentile(&sorted_app_work, 0.50);
             let app_work_p95_ms = percentile(&sorted_app_work, 0.95);
             let app_work_p99_ms = percentile(&sorted_app_work, 0.99);
+            let average_thread_cpu_ms = average_ms(&self.thread_cpu_ms);
+            let thread_cpu_p50_ms = percentile(&sorted_thread_cpu, 0.50);
+            let thread_cpu_p95_ms = percentile(&sorted_thread_cpu, 0.95);
+            let thread_cpu_p99_ms = percentile(&sorted_thread_cpu, 0.99);
+            let thread_cpu_max_ms = sorted_thread_cpu.last().copied().unwrap_or(0.0);
+            let average_blocked_ms = average_ms(&self.blocked_ms);
+            let blocked_p50_ms = percentile(&sorted_blocked, 0.50);
+            let blocked_p95_ms = percentile(&sorted_blocked, 0.95);
+            let blocked_p99_ms = percentile(&sorted_blocked, 0.99);
+            let blocked_max_ms = sorted_blocked.last().copied().unwrap_or(0.0);
+            let thread_cpu_valid_pct = if self.frame_wall_ms.is_empty() {
+                0.0
+            } else {
+                self.thread_cpu_valid_frames as f64 * 100.0 / self.frame_wall_ms.len() as f64
+            };
             let app_over_period_pct = if self.app_work_ms.is_empty() {
                 0.0
             } else {
@@ -3961,6 +4014,26 @@ mod android {
                 budget_ms - max_app_work_ms,
                 self.app_over_period_frames,
                 app_over_period_pct
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_CPU_BLOCKED sample_seconds={:.3} mode={} render_path={} frames={} valid_frames={} valid_pct={:.1} app_work_avg_ms={:.3} thread_cpu_avg_ms={:.3} thread_cpu_p50_ms={:.3} thread_cpu_p95_ms={:.3} thread_cpu_p99_ms={:.3} thread_cpu_max_ms={:.3} blocked_avg_ms={:.3} blocked_p50_ms={:.3} blocked_p95_ms={:.3} blocked_p99_ms={:.3} blocked_max_ms={:.3}",
+                sample_seconds,
+                self.mode_label,
+                self.render_path.label(),
+                frame_count,
+                self.thread_cpu_valid_frames,
+                thread_cpu_valid_pct,
+                average_app_work_ms,
+                average_thread_cpu_ms,
+                thread_cpu_p50_ms,
+                thread_cpu_p95_ms,
+                thread_cpu_p99_ms,
+                thread_cpu_max_ms,
+                average_blocked_ms,
+                blocked_p50_ms,
+                blocked_p95_ms,
+                blocked_p99_ms,
+                blocked_max_ms
             );
             self.log_worst_frames(budget_ms);
             log::info!(
@@ -4376,13 +4449,16 @@ mod android {
                     - eye_poll_wait_ms)
                     .max(0.0);
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME rank={} sample_frame={} rendered={} frame_wall_ms={:.3} wait_frame_ms={:.3} app_work_ms={:.3} headroom_ms={:.3} over_budget={} over_2x_budget={} wait_begin_ms={:.3} begin_frame_ms={:.3} controller_poll_ms={:.3} render_mclone_frame_ms={:.3} locate_views_ms={:.3} locomotion_ms={:.3} acquire_left_ms={:.3} acquire_right_ms={:.3} release_eyes_ms={:.3} end_frame_ms={:.3}",
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME rank={} sample_frame={} rendered={} frame_wall_ms={:.3} wait_frame_ms={:.3} app_work_ms={:.3} thread_cpu_valid={} thread_cpu_ms={:.3} blocked_ms={:.3} headroom_ms={:.3} over_budget={} over_2x_budget={} wait_begin_ms={:.3} begin_frame_ms={:.3} controller_poll_ms={:.3} render_mclone_frame_ms={:.3} locate_views_ms={:.3} locomotion_ms={:.3} acquire_left_ms={:.3} acquire_right_ms={:.3} release_eyes_ms={:.3} end_frame_ms={:.3}",
                     rank,
                     snapshot.sample_frame,
                     summary.is_some(),
                     snapshot.frame_wall_ms,
                     snapshot.wait_frame_ms,
                     snapshot.app_work_ms,
+                    snapshot.thread_cpu_valid,
+                    snapshot.thread_cpu_ms,
+                    snapshot.blocked_ms,
                     headroom_ms,
                     snapshot.frame_wall_ms > budget_ms,
                     snapshot.frame_wall_ms > budget_ms * 2.0,
@@ -5240,6 +5316,19 @@ mod android {
 
     fn elapsed_ms(start: Instant) -> f64 {
         start.elapsed().as_secs_f64() * 1000.0
+    }
+
+    #[allow(unsafe_code)]
+    fn thread_cpu_time_ms() -> Option<f64> {
+        let mut time = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let result = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) };
+        if result != 0 {
+            return None;
+        }
+        Some(time.tv_sec as f64 * 1000.0 + time.tv_nsec as f64 / 1_000_000.0)
     }
 
     fn copy_locomotion_timing(

@@ -1,7 +1,8 @@
 # 131: Quest CPU-GPU Overlap And Frame Cost Hygiene
 
-Status: active — F1a implemented and measured; redundant device-idle poll
-removed, but no material RD7 win because submission waits still dominate
+Status: active — F1a and render-thread CPU/blocked attribution implemented
+and measured; actor buffer lifetime fix is the next concrete implementation
+slice
 Workstream: Android XR frame pacing, XR scene GPU synchronization, actor
 renderer resource lifetime, server-update application pacing
 
@@ -244,6 +245,64 @@ need:
    runtime, eye CPU, poll waits, locomotion) so the composition of the
    ~14-15 ms typical frame is visible, not only its worst outliers.
 
+### 2026-07-03 Thread CPU-Time Attribution Result
+
+Implementation:
+
+- Added per-frame `CLOCK_THREAD_CPUTIME_ID` sampling on the Android XR render
+  thread. The measurement starts after `xrWaitFrame` returns and ends after
+  the frame's render/app work is complete, matching the existing
+  `app_work_ms = frame_wall_ms - wait_frame_ms` interval.
+- Added `MCLONE_ANDROID_XR_PERF_CPU_BLOCKED` summary output with thread CPU
+  average/p50/p95/p99/max and `blocked_ms = max(app_work_ms - thread_cpu_ms,
+  0)`.
+- Added `thread_cpu_valid`, `thread_cpu_ms`, and `blocked_ms` to
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME`.
+
+Validation:
+
+- `rustfmt --edition 2024 native/apps/mclone-android-xr-client/src/lib.rs`
+  passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+  passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-native-client`
+  passed.
+- Skip-actors RD7 settled-orbit lane passed:
+  `/tmp/mclone-quest-openxr-perf-orbit-rd7-cpu-blocked-skip-actors-2-16-64.txt`
+  and
+  `/tmp/mclone-quest-openxr-perf-orbit-rd7-cpu-blocked-skip-actors-2-16-64-logcat.txt`.
+- Actor-enabled RD7 settled-orbit lane passed:
+  `/tmp/mclone-quest-openxr-perf-orbit-rd7-cpu-blocked-actors-2-16-64.txt`
+  and
+  `/tmp/mclone-quest-openxr-perf-orbit-rd7-cpu-blocked-actors-2-16-64-logcat.txt`.
+
+Measured comparison:
+
+| Run | Actors | Meta dropped frames | Frame avg / p95 / p99 / max (ms) | App work avg / p50 / p95 / max (ms) | Thread CPU avg / p50 / p95 / p99 / max (ms) | Blocked avg / p50 / p95 / p99 / max (ms) | Readout |
+| --- | --- | ---: | --- | --- | --- | --- | --- |
+| RD7 CPU/blocked control | off | 15 | 14.067 / 15.483 / 18.459 / 28.898 | 13.593 / 13.692 / 15.261 / 28.849 | 7.974 / 8.029 / 9.048 / 11.354 / 23.325 | 5.619 / 5.579 / 6.739 / 7.358 / 8.172 | 100% valid CPU samples; rank 1 was a CPU-heavy upload outlier: `thread_cpu_ms=23.325`, `runtime_upload_ms=18.061`, `runtime_gpu_upload_ms=15.559`, `terrain_poll_wait_ms=5.199` |
+| RD7 CPU/blocked standard | on | 17 | 14.677 / 16.746 / 19.249 / 31.074 | 14.311 / 14.191 / 16.626 / 28.029 | 8.387 / 8.460 / 9.718 / 11.847 / 23.232 | 5.924 / 5.832 / 7.375 / 7.856 / 8.283 | 100% valid CPU samples; rank 1 actor spike was mostly render-thread CPU: `thread_cpu_ms=23.232`, `blocked_ms=4.797`, `right_actor_ms=16.766` |
+
+Interpretation:
+
+- RD7 is not blocked-only and not CPU-only. A typical frame is now visible as
+  roughly `8 ms` render-thread CPU plus `5.6-5.9 ms` blocked time. The blocked
+  component is large enough that F1b/no-wait pipelining can still be a major
+  average-headroom lever, but it cannot remove the CPU-heavy actor and update
+  work.
+- The actor-enabled worst-frame family is confirmed as CPU-busy, not merely a
+  GPU/compositor wait. The next concrete implementation slice should be
+  Finding 2: build the actor mesh once per frame and update persistent
+  grow-only buffers instead of doing per-eye `create_buffer_init`.
+- Streaming-transition frames remain mixed: several ms of CPU dirty-mark /
+  command-apply work plus multi-ms blocked submission waits. That keeps
+  Finding 3 and F1b both relevant; one fixes the CPU half, the other fixes the
+  wait half.
+- The skip-actors rank-1 upload outlier was charged to render-thread CPU time,
+  so the upload/apply path is not just an external wait. If similar outliers
+  persist after actor buffers, split upload apply time further before tuning
+  budgets.
+
 ## Finding 5: finish `130` E2b — broadened to all background threads
 
 The post-fix trace shows the compile workers are no longer meaningful CPU
@@ -263,9 +322,11 @@ still live risk, and it will grow at RD10.
 
 1. **F1a** (delete the device-idle poll) — landed and measured; correct
    cleanup, but no material RD7 performance win.
-2. **Finding 4** attribution (thread CPU time + percentiles) — makes
-   everything after it measurable.
-3. **Finding 2** actor buffer lifetime fix — kills bad-frame family 1.
+2. **Finding 4** attribution — thread CPU/blocked split landed and measured;
+   per-stage percentiles remain useful but are no longer the gating next
+   step.
+3. **Finding 2** actor buffer lifetime fix — next slice; kills bad-frame
+   family 1 and removes confirmed CPU-busy actor allocation spikes.
 4. **Finding 3** decoupling + K-per-frame pacing — kills family 2's CPU half.
 5. **F1b** no-wait pipelining — recovers the average headroom; family 2's
    wait half.
@@ -291,7 +352,8 @@ time. Keep `--xr-skip-actors` as the control for step 3.
 
 ## Success criteria
 
-- `cpu_busy_ms` vs blocked split exists in summaries and worst frames.
+- Thread-level CPU-vs-blocked split exists in summaries and worst frames;
+  per-stage percentiles remain open.
 - Average `app_work_ms` in the standard lane drops clearly below the
   13.889 ms budget (target: p95 under budget), driven by measured reductions
   in poll-wait blocked time.
