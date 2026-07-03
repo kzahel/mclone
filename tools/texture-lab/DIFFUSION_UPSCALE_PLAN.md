@@ -344,6 +344,8 @@ Local validation on macOS/M4/MPS:
     `candidate-seed4201-strength0p580` for the quietest natural stone, or
     `candidate-seed4205-strength0p580` if the desired direction is more
     visibly horizontal dressed courses.
+  - User review pick for the first active in-game trial is `H4106S58`
+    (`candidate-seed4106-strength0p580`), from the hewn-horizontal prompt pool.
 - M3c provenance/archive support is implemented:
   - `project-diffusion` accepts `--archive-bundle [dir]`. It writes a durable
     local bundle outside git containing `archive-manifest.json`, the source
@@ -356,6 +358,10 @@ Local validation on macOS/M4/MPS:
     `/tmp/mclone-texture-lab/diffusion-archive/stone-dressed-freeze-candidates-2026-07-03/`.
     It archives `candidate-seed4201-strength0p580` and
     `candidate-seed4205-strength0p580` at 64px.
+  - Active trial bundle:
+    `/tmp/mclone-texture-lab/diffusion-archive/stone-hewn-h4106s58-active-2026-07-03/`.
+    It archives `H4106S58` at 64px with the source provenance comment now used
+    in `tools/texture-lab/packs/mclone-default/block/stone.ts`.
   - Reproducibility position: the bundle is enough to preserve the exact raw
     artifacts and deterministically reproject them. It is not a guarantee that
     another machine can re-run diffusion and produce the same raw PNG bytes;
@@ -408,6 +414,10 @@ macro-correction tuning is speculative work that will be redone.
   runtime-compat pass, macro fidelity metrics unchanged within tolerance,
   and an in-engine screenshot
   (`MCLONE_FIRST_PARTY_ASSET_ROOT=... pnpm native:timedemo:smoke`) reviewed.
+  Status: active trial done for `H4106S58`; `stone`, `coal_ore`, and `iron_ore`
+  now use the selected 64px stone base mask, the generated `stone.png` SHA-256
+  matches the archived projection exactly, and the packed overlay was validated
+  in native offscreen screenshots.
 - **M5 — generalize.** Dirt and grass top (tint-neutral handling), prompt
   library growth, x-only tiling if a directional material lands, and an
   SDXL / ControlNet-Tile quality evaluation only if projected 32x32 output

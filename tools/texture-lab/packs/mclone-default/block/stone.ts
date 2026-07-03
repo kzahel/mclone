@@ -8,10 +8,10 @@ export function defineStoneTextures(api: TextureLabApi): void {
   // mid, a second mid only a hair darker, sparse light, sparse dark pits. The
   // faint cool-green tint is our own; the arrangement below is original.
   palette("stone", {
-    pit: "#646967",
-    mid: "#717672",
-    base: "#7c817c",
-    light: "#8d928b",
+    pit: "#646664",
+    mid: "#717371",
+    base: "#7c7f7c",
+    light: "#8f928d",
     coal: "#303231",
     coal_light: "#4a4b45",
     coal_dark: "#181a19",
@@ -21,7 +21,7 @@ export function defineStoneTextures(api: TextureLabApi): void {
   });
 
   texture("stone", {
-    size: 32,
+    size: 64,
     source: "final-color",
     palette: "stone",
     base: "base",
@@ -34,7 +34,7 @@ export function defineStoneTextures(api: TextureLabApi): void {
   });
 
   texture("coal_ore", {
-    size: 32,
+    size: 64,
     source: "final-color",
     palette: "stone",
     base: "base",
@@ -76,7 +76,7 @@ export function defineStoneTextures(api: TextureLabApi): void {
   });
 
   texture("iron_ore", {
-    size: 32,
+    size: 64,
     source: "final-color",
     palette: "stone",
     base: "base",
@@ -139,14 +139,33 @@ export function defineStoneTextures(api: TextureLabApi): void {
   });
 }
 
-function stoneBaseLayers({ macroNoise, mask, speckles }: TextureLabApi): TextureLayerSpec[] {
+function stoneBaseLayers({ mask }: TextureLabApi): TextureLayerSpec[] {
   return [
-    // The texture's whole identity: an original 16x16 arrangement that obeys
-    // vanilla stone's value rules. Mostly the dominant `base` mid, a second mid
-    // (`mid`) only ~11 luminance darker, short mostly-horizontal `light` runs
-    // (the faint "brick-like" highlight banding), and sparse single-cell `pit`
-    // darks. No large pits, no high-contrast plates. Top/bottom rows match and
-    // all edge cells are mid-tone, so the nearest-upscaled tile wraps cleanly.
+    /*
+     * Diffusion projection provenance:
+     * codename: H4106S58
+     * candidate: candidate-seed4106-strength0p580
+     * raw_candidate_sha256: 4e055ab0f0a5ebe52e1d75d7306d40160d56bc959a80cd32a32c0ae2b1ed9255
+     * diffusion_manifest_sha256: 3f238ed9ee04690b8d0f26c40987f489d8d88a1d560644f27ef6b648c122b1d8
+     * archive_bundle: /tmp/mclone-texture-lab/diffusion-archive/stone-hewn-h4106s58-active-2026-07-03
+     * model_id: stable-diffusion-v1-5/stable-diffusion-v1-5
+     * prompt_preset: stone-hewn-horizontal
+     * prompt: orthographic top-down macro photograph of rough hewn gray stone surface, horizontal chisel marks, primitive hand tooled rock, shallow layered strata, worn chipped granite, uneven matte stone, subtle pitting and mineral grain, flat overcast lighting, seamless square material texture
+     * negative_prompt: perspective, mortar, glossy, colorful, moss, text, watermark
+     * seed: 4106
+     * strength: 0.58
+     * steps: 24
+     * scheduler: PNDMScheduler
+     * guidance_scale: 7.5
+     * input_sha256: 6a28f155576a5fb7e637c1f58c8cb59a1fbc2dc906b763132fc1aecc449e9aab
+     * prepared_input_sha256: 3350269417e13b0fa7888071ca93eb21519095e65a348be5e5b0eaa65e8103b3
+     * preprocess: {"input_grain":0.16,"input_grain_amplitude":18,"input_grain_seed":12345,"pre_blur":12}
+     * projection_resolutions: 64
+     * projection_palette: pit,mid,base,light
+     * projection_symbols: pmbh
+     * projection: area downsample -> Oklab palette quantize -> deterministic macro majority correction
+     * note: exact diffusion regeneration across machines is not guaranteed; the archived raw PNG is the exact proposal artifact.
+     */
     mask({
       colors: {
         p: "pit",
@@ -161,46 +180,71 @@ function stoneBaseLayers({ macroNoise, mask, speckles }: TextureLabApi): Texture
         label: "AUTHOR STRUCTURE MASK",
       },
       pixels: [
-        "bmbbhhbmbbmbbhbm",
-        "mbpbbmbbmbpbbmbb",
-        "bbmbhhhbbmbbhhbm",
-        "bhhbbbmbhhhbbmbb",
-        "mbbmbbbmbbmbbbmb",
-        "bbbbmpbbmbbhhbbm",
-        "bmmbbbmbpbmbbmmb",
-        "bbbmbhbmbbbmpbbb",
-        "bhhhbbmbhhbbmbhb",
-        "mbbmbbbmbbmbbmbb",
-        "bpbbmmbbbmbbhhbm",
-        "mbbmbbpbmmbbbmbb",
-        "bmhhhbbmbbhhbbmb",
-        "bbbmbbmbpbbmbbbm",
-        "mbbmbhbbmbbmpbbb",
-        "bmbbhhbmbbmbbhbm",
+        "mmmmmbbbpppbbhhhhbhhbhhhbbbbbbbbbbbbhhmhmmmmmppbmmmpbbppmmmbbbbb",
+        "pmmmmbmmppbbmbhhhbbhhhhbbmbhbbbbbbmbhmhmmmmmppmmmmmmbpppmmbbhbmb",
+        "pmmmbmmbbpbbmbhhbbbhhbbhhbbbbbbbbbmmmmhmmmmmpmppmbmmbbbpbbbmmmmm",
+        "mmmbbbpbbbpbmbhhbhhhhbbbbbhbbbbbmmpmhhmhbmmbmmppmmmmbbpbmbmmmmmm",
+        "pbbbmmmbmmmbbbhhhbbbhhhbbbbhbbbmmmbmmmbmbbmbmmmmmmmmbbmmpppppppp",
+        "mmbbbmpmbmmbbbbbbbbbbmbmmmbbbbmmmmbbbbbbbmbmbbmmbbmmmbbbbppppppp",
+        "pmbbbbpbbmbmbbbmmbbbmmmmmmmmbmmmmmbbbbbbbbbbbbbbbbbbbbbbbbbppmbm",
+        "mpbbbbbbbbbbmmmmbmmmbmmmmmmbmmmmmbmmmmmmmmmmmbbbbbbbbbmbbbbpbbbb",
+        "mppmmmmmbbbbmmmbbmmmmmmmmmmmbppbbmmmmmmmmmmbppppmbbbpppbbbbbbbbb",
+        "mmmmmmmmbpppmbbbmbbmmmmmmmmbbppbbmmmmmmmbmmmppppmmbmpppbmbbhhhhb",
+        "mmmmmmpmbpmmmbbmmbbbmmbbmmbbbbppmmmmmbbmbbmbpbbbmmbbbbppbbbbbbbb",
+        "mmmmpmpmbpbbmbbbmmmbbbbmbmbbbpppmmmmmmmmbbbbhhbbbbbbbmpbbbbbbbbb",
+        "mmmmmmmmbbbbbbbmmmmmbmbbbbbbbmmbhbhhhhbhhbbbbbbbbbbhbhbhbbbbbbbb",
+        "bbmmbbbbbbbbbbmmmmmmmmmbbbbbmbmmhhbhhhbhbbbhhbbbbbbhbhbbbbbmmmmm",
+        "mmmbbbbbbbbbbmbbmmmbmmmbbbbbbbmmmhhhbmhhbbbbhhhhbhhhhhhhbbmmmmbb",
+        "bbbbhbbbbbbbbbmmmbbbmmbbbbbmbbbbmmbbbbbhbbhhhhhhhhhhbhbhbbbbbmbb",
+        "bbhbbbhbbbhhhbbmbmbbbbbbmmmmbbmmmmmbbbmbbhhbmbbbbmbhhhbbhhhhhhhh",
+        "bbhbhhbbbbbbbbmmmbbbbmmmmmmmbbbmmmmbbmbbbbbbmbbbbhmhhbbbhbhhhhhh",
+        "hhhhhhhbbhbbbbmmmbmmmmmmmmmmmbmmmbbbbbmmmbbbmmmbmmmbbhbbhmmhmmmh",
+        "hhhbhhhbbbbbmmmmmmmmmbmmmmmmmbbbbbbbmmbmmmmmmmmmmmmmhhbmmmmmmmmm",
+        "hhhhbbbmmbbbmmmmmmmmbbbbmmmmmmmbbbmppmmmmmbbbbmmbbbbbhbmmppppbbp",
+        "hhmmmmmmmmmmbmmmmmbbbbbbbhbmbbbbbbbmpmmmbbbbbmbbmmmbbbmmppppppmp",
+        "hhbbmmmmmmmmbbbbmbbbbbbbhhhhbbhhbbmpppppmmbmppmbbmmmpmmmppmmppbp",
+        "bbhmmbbbbbbbbbbbbbbbbbbbhhhhbbbhbbpmmmpmmbbmbbbmbbbmmmmmbmmmmbbp",
+        "bbbbbbbbbbbbbhhhhhhbhhhbbbbhbbbbbmpmmmmmmmbmbbmbmbbmmmmmbmmmbhbb",
+        "bbbbbbmmbbbbhhhhhhhhbbbbhhhhbbbmmmmmmmppppmmbbbbbbbbmmmmmmmbhhhh",
+        "bmmmmmmmpmmbbbhhhbbhhhhhhhhhbmmmmmmmmmpmmmmmmmbbbbbmmbbbbmmmhhhb",
+        "mmppbmbbpppmmbbbbbmbhhbbbbbbmmmbbmppmmmmmmmmmmmmmmmmbbbbmmmmmbhb",
+        "mppmmmmmmmmmmmmbbmmmbbbbbmbmmbbbbmmmbmmmmmppppppppppbbbmppppppmm",
+        "mmpmmmmbbpppppmmbbbmbmmbbmmbbmbbbbbbmmmmmmmmmmmmpppppmmmmppppppm",
+        "bmmppmmmmpppppmmbbbbmpmbmmbbbmbmmmmbmmbbmmmbmmmmmmmpmmbbmmpppppp",
+        "mmmmpmmmmmmmmpmmmbmmmmbbmbbbbmmmmmmmmmbbbbbbbbbmmmmmbbbbmmmmmmmm",
+        "mbmmpmmppppbbbmbmmmmmmmmmhhhhmmmmmbmmbbbbbbbhhhhbmmbbbbmmmmmbbbb",
+        "bbmmmbbmpmmpmmmmmmmbmmmbmmmhmmmhbhbbbbbbbbhbhhhhbmbbhhhbbbbhhhbb",
+        "hbbbbbbbbbbbbmmmbbbbbbbbhhhhhmhhhhhhhhhhhhhbbbbbbmbbbhhhhhhhbhhh",
+        "bbbmbmbbbbbbbbmbbbbbbbbbhmmmhhhhhhhhbbhhbhhbmmbhbbbbbhhhhhhhhhhh",
+        "bbbmmbmbbbmbbhhhbhbbhbhbbbmbhhhhhhhhhhhhbhbbmmbbhhhhhhhbhhhbhhhh",
+        "mmbmmmmbbbmbmhhhbbbbbbbmbmmbhbhhhhhhhhhbbbhbbbbbbhhhhhhbhhhmmmhh",
+        "bbbbbbbmbbmmmhhhbbmmbbmmmmmbbbhhhhhhhhbbbbbmbmmbmmhhhhbhhhbmmhmm",
+        "bmmmbbbmmbmmmbmmmpmmbmmbmbbbbbmbhhhbbbmmmmmmmbmmmmbbbbbbhmbmmhhm",
+        "bmmmbmbbbbmbbbmmbmbbbmpmpbbbmmmmmhhbmbbbpmppmmmmmmbmppbbmmbmmmmm",
+        "bmmmbmmmbmmmmmmbmbmbbbpmppppbmmmmbhbbbmmmmppmmmmmmmmppppmbmmmmmm",
+        "hbmmbbmmmbmmbbmmmmmbbbbmppbpmmmbmmbmbbmmpmmbbbmmmmbbbbppmmmbmbbb",
+        "hhbmbbbmbbbbbbbbbmbbmbbbbbbpmmmbmmmmmmmmpppmbbhbbbbbpbbbbbbbbbbb",
+        "hbbbbbbmmmhhbbbbbbbbbbbbhbhmhhhmpbbbbmmmmmmbbbhbhbbbbbbbbbbbbbbb",
+        "mbbmmbbmmmhhbbbmbmmmmbbbhhmhhhhhmbbbbbbbbbbbhhhhhhhhbbbbbbbbhbbb",
+        "mmbmmbbbmbhhbbmmbmmpmmbbhhhhmmmhmmmbbhhhhhbbhhhhhhbbbbbbhbbbbbbb",
+        "mbbbmbbbbhhhbmmmbbbmmmmmppmmmmmhmmbbbhbbbbhhbhhbhbhbbbbbbbbbbbbm",
+        "bmmbbbbbbbmmmmppmbmmmmmmbbpbpmmbmmmmhhhhbbbbbhbbbbbbbbbbbbbbbbbb",
+        "bbmbbbmbbbmmmmmpmmmmmmmmbppppmmmmmmmbhhhbbbbbhbbbpbbbbbbbbbpbbbb",
+        "bmmmmmmmbbmmmpppmpppmmmmbbppppmmmmmmmbhhbmbbbbmmppppmbmmppppbbbb",
+        "mmmbmmmmmbmmpppmbbmmmmmmbbbmmmppmpmmmmmmmmmbbmmmppppmmmmppppmbbb",
+        "bbbhmmmmmmmmmmmmbbmmmmmbmmmmmmppmmmmhhmhbbbbmmmmpmmmmmmmmmmmmmmm",
+        "hhbbhmmmmmmmmmmbbbbmbmmbbbmbbbmmhhmmmhmmmmbmmmmmmmmmmpppppmppmmp",
+        "bhhhhhbmbbmbhmmbbbmmmbbbbmbmbmbbhhhmhmmmmmbmmmmpmmmpppppmmmmmppp",
+        "bhhhhhhmbbbhhbbhbbbmpbbbbbbbbbbbhhhhhhhhbbbmmbmpmppmmmmmmmmmmmpp",
+        "hhhhhhbbbbbhbbbbbmbmmmbbhhhhhhhhbbbbmbbbbbmmmmmmmmmmpmmbmmpmbbmp",
+        "hhhhbhhbbbbhhhhbbbbmmmbbhhmmmhhhbbmmmmbbbbmmmbmmmbbmmmmmmbmbbbmp",
+        "hhbbhhhbbbbbhhbhbmmmmmmmmhmmmmmhbbbmmmbbbbmmbbbbbbbmbbbbbbbmbbbm",
+        "hhbbhhbbbbhbbbbhbmmmmmmmhhmmhmmmmmmmmmbbbbhbbbbbbbbbbbbbbbbbbmbm",
+        "hbbbbbbbbbbbmhhhbbmpmbbbmmmmbbmmbbmbmmbbbbbbbbbbbbbbbbbmmmmmmmmb",
+        "bbbbbbbbbbbmmmhmmbmmbbbbmmmbbhbmmmmbbbmmbbbbbbbmmbbbbbbbhhhhbpmm",
+        "bbmmmbmmmmmmhmmhmmbbbbbbmmbbhbbmmmmbbbmmmmmbmpmmmmbbmbmbhhhmmbbb",
+        "mmmmmmmmmmmmmhhhbbbbbbbbhhbbbbbbbbbbbmmmmmmmbbmmmppmmmpmmmhhbbbb",
       ],
-    }),
-    // Barely-there low-frequency drift so the tiled field is not a crisp 2x
-    // grid of the mask. Kept very low so total contrast stays vanilla-narrow.
-    macroNoise({
-      seed: "stone-broad-drift",
-      frequency: 2,
-      octaves: 2,
-      colors: ["mid", "base", "light"],
-      opacity: 0.07,
-      contrast: 0.5,
-    }),
-    // A whisper of grain only — never the main form.
-    speckles({
-      seed: "stone-grain-dark",
-      density: 0.04,
-      colors: ["pit", "mid"],
-      opacity: 0.12,
-    }),
-    speckles({
-      seed: "stone-grain-light",
-      density: 0.03,
-      colors: ["light"],
-      opacity: 0.1,
     }),
   ];
 }
