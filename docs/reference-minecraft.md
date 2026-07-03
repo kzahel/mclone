@@ -34,6 +34,30 @@ The MVP worldgen pipeline is:
 
 See [`strategy.md`](strategy.md), [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md), [`worldgen-status.md`](worldgen-status.md), [`carver-status.md`](carver-status.md), and [`structures.md`](structures.md) for current implementation status and parity policy.
 
+## Disabled Caves & Cliffs Part 1 Systems
+
+The decomp under `reference/minecraft-1.17.1/` contains Caves & Cliffs Part 1 systems that are present in the source but disabled by default in 1.17.1 overworld generation. Do not port them for the MVP target. Revisit only if the project target changes to 1.18+ or explicitly enables Caves & Cliffs Part 1 behavior.
+
+`NoiseGeneratorSettings.overworld(...)` passes `false` for all five Caves & Cliffs Part 1 booleans in `reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/NoiseGeneratorSettings.java`.
+
+| Flag | Effect when `false` |
+|---|---|
+| `aquifers_enabled` | `Aquifer.createDisabled` is used; `barrier`/`waterLevel`/`lava` `NormalNoise` fields in `NoiseBasedChunkGenerator` are allocated but never sampled |
+| `noise_caves_enabled` | `Cavifier` is replaced by `NoiseModifier.PASSTHROUGH` |
+| `deepslate_enabled` | `DepthBasedReplacingBaseStoneSource` skips deepslate substitution |
+| `ore_veins_enabled` | `OreVeinifier.fillStream` short-circuits |
+| `noodle_caves_enabled` | all four `NoodleCavifier.fill*NoiseColumn` methods short-circuit |
+
+Transitively, the following classes or paths are never exercised in vanilla 1.17.1 overworld generation:
+
+- `net.minecraft.world.level.levelgen.Aquifer`
+- `net.minecraft.world.level.levelgen.Cavifier`
+- `net.minecraft.world.level.levelgen.NoodleCavifier`
+- `net.minecraft.world.level.levelgen.OreVeinifier`
+- `net.minecraft.world.level.levelgen.synth.NormalNoise`, except post-MVP `GeodeFeature` and non-overworld biome sources
+- `net.minecraft.world.level.levelgen.synth.NoiseUtils`
+- the deepslate path in `DepthBasedReplacingBaseStoneSource`
+
 ## Local Layout
 
 Expected generated layout:

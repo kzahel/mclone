@@ -12,11 +12,19 @@ The `.sh` setup scripts (`scripts/decompile-mc.sh`, `scripts/extract-assets.sh`,
 
 **Do not use the auto-memory system** for this project (the `~/.claude/projects/-home-kgraehl-code-mclone/memory/` directory). Persist project-relevant guidance in this file (`AGENTS.md`) instead.
 
-For the native Rust rewrite, use the sibling engine at `~/code/playbox` as a reference for mature `winit`/`wgpu`, headless capture, diagnostics, Android, and OpenXR patterns. Treat it as a pattern library only; do not depend on it directly, and do not copy its PhysX/VaM-specific runtime shape. When the user mentions "Playbox", inspect that sibling repo directly; useful entry points are `~/code/playbox/Cargo.toml` for debug-profile optimization policy, `~/code/playbox/docs/architecture/rendering.md` for render target/view boundaries, `~/code/playbox/docs/architecture/platforms.md` for desktop/Android/OpenXR platform shape, `~/code/playbox/android/README.md` for flat Android, and `~/code/playbox/android-xr/README.md` for Quest/OpenXR packaging and validation notes.
+Background docs own the long-form project context:
 
-For vanilla gameplay, assets, rendering semantics, and visual correctness, treat `reference/minecraft-1.17.1/src/` as an equally important and often more authoritative reference than Playbox. Use the Java client source first for behavior that exists in Minecraft itself: block/entity model baking, texture atlas stitching, mipmap generation and sampler filtering, UV shrink/bleed rules, light texture math, fog, sky, particles, render layers, transparency/cutout choices, chunk render-section traversal, and any renderer-facing state that affects vanilla appearance. Use Playbox for native `wgpu`/platform mechanics after the Java behavior is understood.
+- [`docs/platforms.md`](docs/platforms.md) owns the current platform posture, Playbox reference entry points, platform boundaries, and validation matrix.
+- [`docs/reference-minecraft.md`](docs/reference-minecraft.md) owns the Minecraft 1.17.1 reference tree, bootstrap/mapping notes, vanilla target, and disabled Caves & Cliffs Part 1 systems.
+- [`docs/native-web.md`](docs/native-web.md) owns Rust/WASM web build, smoke, deploy, and local deploy-hook notes.
 
-Current target posture: five client/platform lanes are validated at the basic gameplay/rendering level: desktop flat, desktop OpenXR, Android XR / Quest standalone, flat Android, and web/WASM. Native desktop flat remains the fastest day-to-day bring-up and validation path, but it is not the default feature target. For any feature request without an explicit platform constraint, phrase and design the work as **shared implementation, desktop validation first**. Do not let shared engine, client, server, mesh, asset, renderer, UI, or runtime contracts become desktop-only. Treat code that heavily jumps into `mclone-native-client` as a cleanup smell unless it is genuinely `winit`, desktop surface, native input, CLI, headless capture, or desktop diagnostics glue. Treat client platform and server host mode as separate axes: every client lane must retain a path to dedicated-server play, and future P2P/session topologies must fit behind the same shared command/update contracts rather than becoming platform forks. Keep `winit`, Android activity glue, browser glue, and OpenXR session/swapchain ownership in app/platform adapters. Keep renderer-facing view/projection and render-target data explicit, and keep headless/offscreen validation available. Desktop XR and Android XR share OpenXR host/graphics/scene boundaries where practical; do not fork gameplay, runtime, meshing, asset, or renderer internals for a single platform.
+Agent guardrails:
+
+- Use `~/code/playbox` as a native `winit`/`wgpu`/headless/Android/OpenXR pattern library only. Do not depend on it directly or copy its PhysX/VaM-specific runtime shape. When the user mentions "Playbox", inspect that sibling repo directly.
+- Use `reference/minecraft-1.17.1/src/` before Playbox for vanilla gameplay, assets, rendering semantics, and visual correctness.
+- For feature requests without an explicit platform constraint, use **shared implementation, desktop validation first**. Keep gameplay, runtime, asset, mesh, UI, renderer, and XR contracts host-neutral.
+- Treat code that heavily grows `mclone-native-client` as a cleanup smell unless it is genuinely `winit`, desktop surface, native input, CLI, headless capture, or desktop diagnostics glue.
+- Keep `winit`, Android activity glue, browser glue, and OpenXR session/swapchain ownership in app/platform adapters.
 
 For web/WASM, keep `wasm32-unknown-unknown` as the browser target unless a tactical explicitly changes it, but do not treat that as permission for a single-threaded or reduced engine architecture. Browser CPU work should converge on the same job/worker lifecycle as desktop: desktop uses native OS threads, while browser/WASM uses Web Workers with shared Wasm memory (`SharedArrayBuffer`/atomics) once that slice is implemented. Inline synchronous WASM paths are acceptable only as temporary smoke/fallback implementations behind the same compiler/session interfaces, not as the target threading model.
 
@@ -108,7 +116,7 @@ Before making an architectural divergence, explicitly determine what the referen
 
 ### Reference tree must be present
 
-Run `./scripts/decompile-mc.sh` if `reference/minecraft-1.17.1/src/` is missing. Do not write a port without the source in hand.
+Reference bootstrap details live in [`docs/reference-minecraft.md`](docs/reference-minecraft.md). Run `./scripts/decompile-mc.sh` if `reference/minecraft-1.17.1/src/` is missing. Do not write a port without the source in hand.
 
 ### Oracle and jar prerequisites
 
@@ -127,46 +135,12 @@ For any native slice that produces pixels, **capture a screenshot and look at it
 
 If a required native headless render/screenshot fails because `wgpu` cannot see a GPU adapter, rerun the same command with elevation before treating GPU validation as blocked.
 
-Use native validation lanes first:
-
-- `cargo test --manifest-path native/Cargo.toml`
-- `pnpm native:worldgen:smoke` for native worldgen smoke coverage
-- `pnpm native:movement:smoke` for native movement/runtime camera paths
-- `pnpm native:timedemo:smoke` for native renderer/camera paths
-- `pnpm native:web:build` and `pnpm native:web:smoke` for Rust WASM/web compatibility gates
+Use the current default and platform-specific validation commands in [`docs/platforms.md`](docs/platforms.md#validation-policy) rather than duplicating the command matrix here.
 
 For rendered-output validation, use native headless captures where available and save debug, smoke, and probe screenshots to `/tmp` (for example `/tmp/mclone-native-debug.png`). Never write screenshots into the repo, into `test-results/`, or anywhere that risks getting committed.
 
 ## Target: Minecraft Java 1.17.1 vanilla overworld
 
-Seed parity against 1.17.1 vanilla overworld is the correctness bar. The decomp under `reference/minecraft-1.17.1/` contains Caves & Cliffs Part 1 systems that are **present in the source but disabled by default in 1.17.1**. Do not port them for MVP. Revisit only if we later commit to 1.18+ or enable C&C Part 1 experimentally — at that point the target has changed and this section should be reviewed.
+Seed parity against 1.17.1 vanilla overworld is the correctness bar. Detailed target notes, active pipeline, and disabled Caves & Cliffs Part 1 systems live in [`docs/reference-minecraft.md`](docs/reference-minecraft.md).
 
-### Disabled flags in `NoiseGeneratorSettings.overworld(...)`
-
-File: `reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/NoiseGeneratorSettings.java:241`. The `overworld(...)` factory passes `false` for all five C&C Part 1 booleans:
-
-| Flag | Effect when `false` |
-|---|---|
-| `aquifers_enabled` | `Aquifer.createDisabled` is used; `barrier`/`waterLevel`/`lava` `NormalNoise` fields in `NoiseBasedChunkGenerator` are allocated but never sampled |
-| `noise_caves_enabled` | `Cavifier` is replaced by `NoiseModifier.PASSTHROUGH` |
-| `deepslate_enabled` | `DepthBasedReplacingBaseStoneSource` skips deepslate substitution |
-| `ore_veins_enabled` | `OreVeinifier.fillStream` short-circuits |
-| `noodle_caves_enabled` | all four `NoodleCavifier.fill*NoiseColumn` methods short-circuit |
-
-### Dead code in our target — do not port
-
-Transitively, the following classes exist in the 1.17.1 decomp but are never exercised in vanilla overworld:
-
-- `net.minecraft.world.level.levelgen.Aquifer`
-- `net.minecraft.world.level.levelgen.Cavifier`
-- `net.minecraft.world.level.levelgen.NoodleCavifier`
-- `net.minecraft.world.level.levelgen.OreVeinifier`
-- `net.minecraft.world.level.levelgen.synth.NormalNoise` — only live consumers are the classes above, plus `GeodeFeature` (post-MVP feature) and `MultiNoiseBiomeSource` (nether/end — overworld uses the layered `OverworldBiomeSource` path)
-- `net.minecraft.world.level.levelgen.synth.NoiseUtils` — only consumers are `Cavifier` / `NoodleCavifier`
-- the deepslate path in `DepthBasedReplacingBaseStoneSource`
-
-If asked to port any of these, push back and confirm the target has changed before writing code.
-
-### Active MVP pipeline
-
-Per [`docs/tactical/README.md`](docs/tactical/README.md): PRNG → octaved noise (`PerlinNoise`, `SimplexNoise`, `BlendedNoise`) → surface-path noise (`PerlinSimplexNoise` + `SurfaceNoise` interface) → `NoiseSampler` (with `NoiseModifier.PASSTHROUGH` since `Cavifier` is disabled) → `NoiseBasedChunkGenerator` (terrain only) → classic carvers (`CaveWorldCarver`, `CanyonWorldCarver`) → surface rules → features. Everything after classic carvers is post-MVP polish.
+Do not port `Aquifer`, `Cavifier`, `NoodleCavifier`, `OreVeinifier`, the disabled deepslate path, or other disabled Caves & Cliffs Part 1 worldgen paths for MVP. If asked to port any of these, push back and confirm the target has changed before writing code.
