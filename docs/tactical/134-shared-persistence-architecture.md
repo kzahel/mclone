@@ -1,7 +1,10 @@
 # 134: Shared Persistence Architecture
 
-Status: active; Slice 6C browser IndexedDB async load-miss bridge landed,
-browser world management and non-chunk records next.
+Status: completed first pass; shared persistence architecture, native SQLite
+world-dir wiring, browser IndexedDB chunk/entity persistence, autosave/reload,
+and async load-miss bridge landed. Follow-up world lifecycle/UI and non-chunk
+record expansion continue in
+[`136-world-catalog-and-crud-ui.md`](136-world-catalog-and-crud-ui.md).
 
 ## Purpose
 
@@ -650,21 +653,20 @@ Reasoning:
 Do not start with app wiring or a physical database. That would lock policy to
 one platform before the shared host contract is clear.
 
-## Next Likely Implementation Chunk
+## Closeout
 
-Proceed with **browser world management and non-chunk persistence expansion**.
+This tactical is closed as the architecture bring-up tracker. The core shared
+host-owned persistence path exists across memory/null, native SQLite, dedicated
+server, desktop local integrated, and browser IndexedDB chunk/entity records.
 
-Reasoning:
+Remaining work is intentionally moved to
+[`136-world-catalog-and-crud-ui.md`](136-world-catalog-and-crud-ui.md):
 
-- The shared contract, threaded native actor, SQLite backend, dedicated
-  world-dir path, and desktop local `--world-dir` path are all wired.
-- Browser singleplayer now persists edited chunks, reloads edited chunks, and
-  services chunk/entity chunk load misses from IndexedDB without whole-world
-  startup preload.
-- The next user-visible persistence gap is world lifecycle management: named
-  browser worlds, create/delete/list UI, and metadata records. The next shared
-  data-model gap is player/world/saved-data records so local worlds can resume
-  more than chunk contents.
+- catalog/world identity and UI lifecycle
+- browser world list/create/delete and metadata records
+- player/world/saved-data persistence
+- Android app-private world roots and lifecycle validation
+- cleanup of the current browser dirty-record response writeback bridge
 
 ## Validation Gates
 
