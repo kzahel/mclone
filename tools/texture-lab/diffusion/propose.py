@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from random import Random
 from typing import Any
 
 DEFAULT_MODEL_ID = "stable-diffusion-v1-5/stable-diffusion-v1-5"
@@ -18,6 +19,38 @@ DEFAULT_NEGATIVE_PROMPT = (
     "blurry, smooth plastic, strong shadows, perspective, moss, colorful, glossy"
 )
 DEFAULT_OUT_ROOT = Path("/tmp/mclone-texture-lab/diffusion")
+PROMPT_PRESETS = {
+    "stone-granite": {
+        "prompt": (
+            "photorealistic top-down macro photograph of rough natural gray granite rock, "
+            "fine mineral speckles, small chips, subtle pitted stone grain, matte dry "
+            "surface, overcast diffuse lighting, seamless square material texture"
+        ),
+        "negative": (
+            "minecraft, pixel art, voxel, square tiles, mosaic, brick wall, slab seams, "
+            "large cracks, grid, checkerboard, marble, cloudy smoke, blurry, smooth "
+            "plastic, strong shadows, perspective, moss, colorful, glossy"
+        ),
+    },
+    "stone-hewn-horizontal": {
+        "prompt": (
+            "orthographic top-down macro photograph of rough hewn gray stone surface, "
+            "horizontal chisel marks, primitive hand tooled rock, shallow layered "
+            "strata, worn chipped granite, uneven matte stone, subtle pitting and "
+            "mineral grain, flat overcast lighting, seamless square material texture"
+        ),
+        "negative": "perspective, mortar, glossy, colorful, moss, text, watermark",
+    },
+    "stone-dressed-courses": {
+        "prompt": (
+            "orthographic top-down macro photograph of rough dressed gray stone face, "
+            "primitive hand hewn stone courses, uneven horizontal seams, chisel scars "
+            "and tool marks, chipped block faces, gritty mineral grain, pitted matte "
+            "granite, flat overcast lighting, seamless square material texture"
+        ),
+        "negative": "perspective, mortar, round pebbles, glossy, colorful, moss, text",
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -34,10 +67,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
+    prompt_settings = resolve_prompt_settings(args)
     seeds = parse_int_values(args.seeds, "--seeds")
     strengths = parse_float_values(args.strengths, "--strengths")
     if args.steps < 1:
         raise SystemExit("--steps must be at least 1")
+    if args.pre_blur < 0:
+        raise SystemExit("--pre-blur must be >= 0")
+    if args.input_grain < 0 or args.input_grain > 1:
+        raise SystemExit("--input-grain must be between 0 and 1")
+    if args.input_grain_amplitude < 0 or args.input_grain_amplitude > 127:
+        raise SystemExit("--input-grain-amplitude must be between 0 and 127")
     for strength in strengths:
         if not 0.0 <= strength <= 1.0:
             raise SystemExit(f"--strengths values must be between 0 and 1, got {strength}")
@@ -52,8 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         out_dir = DEFAULT_OUT_ROOT / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    torch, pipeline_class, pil_image = load_generation_modules()
-    prepared = prepare_input(args.input, pil_image, args.image_size)
+    torch, pipeline_class, pil_image, pil_image_filter = load_generation_modules()
+    prepared = prepare_input(args, pil_image, pil_image_filter)
     prepared_path = out_dir / "input-prepared.png"
     prepared.image.save(prepared_path)
 
@@ -84,8 +124,8 @@ def main(argv: list[str] | None = None) -> int:
             generator = torch.Generator("cpu").manual_seed(seed)
             candidate_id = format_candidate_id(seed, strength)
             image = pipe(
-                prompt=args.prompt,
-                negative_prompt=args.negative,
+                prompt=prompt_settings["prompt"],
+                negative_prompt=prompt_settings["negative"],
                 image=prepared.image,
                 strength=strength,
                 guidance_scale=args.guidance_scale,
@@ -121,8 +161,9 @@ def main(argv: list[str] | None = None) -> int:
         "schema_version": 1,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "model_id": args.model_id,
-        "prompt": args.prompt,
-        "negative_prompt": args.negative,
+        "prompt_preset": args.prompt_preset,
+        "prompt": prompt_settings["prompt"],
+        "negative_prompt": prompt_settings["negative"],
         "steps": args.steps,
         "guidance_scale": args.guidance_scale,
         "scheduler": pipe.scheduler.__class__.__name__,
@@ -140,6 +181,12 @@ def main(argv: list[str] | None = None) -> int:
             "prepared_pixels_sha256": prepared.prepared_sha256,
             "prepared_png_sha256": sha256_file(prepared_path),
             "resized_nearest": prepared.resized_nearest,
+            "preprocess": {
+                "pre_blur": args.pre_blur,
+                "input_grain": args.input_grain,
+                "input_grain_amplitude": args.input_grain_amplitude,
+                "input_grain_seed": args.input_grain_seed,
+            },
         },
         "versions": package_versions(
             [
@@ -176,10 +223,16 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         description="Generate seamless diffusion img2img texture proposals."
     )
     parser.add_argument("--input", type=Path, required=True, help="Owned input PNG.")
-    parser.add_argument("--prompt", required=True, help="Positive img2img prompt.")
+    parser.add_argument(
+        "--prompt-preset",
+        choices=sorted(PROMPT_PRESETS.keys()),
+        default=None,
+        help="Built-in prompt/negative pair. Explicit --prompt or --negative override the preset text.",
+    )
+    parser.add_argument("--prompt", default=None, help="Positive img2img prompt.")
     parser.add_argument(
         "--negative",
-        default=DEFAULT_NEGATIVE_PROMPT,
+        default=None,
         help="Negative prompt.",
     )
     parser.add_argument(
@@ -206,6 +259,30 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         type=int,
         default=512,
         help="Prepared square input size. Non-matching inputs are nearest-resized.",
+    )
+    parser.add_argument(
+        "--pre-blur",
+        type=float,
+        default=0.0,
+        help="Gaussian blur radius applied after nearest resize, before img2img.",
+    )
+    parser.add_argument(
+        "--input-grain",
+        type=float,
+        default=0.0,
+        help="Blend amount for deterministic neutral grain applied after blur. 0 disables.",
+    )
+    parser.add_argument(
+        "--input-grain-amplitude",
+        type=int,
+        default=18,
+        help="Maximum +/- RGB value around 128 for --input-grain noise.",
+    )
+    parser.add_argument(
+        "--input-grain-seed",
+        type=int,
+        default=12345,
+        help="Seed for deterministic --input-grain noise.",
     )
     parser.add_argument(
         "--model-id",
@@ -246,6 +323,15 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def resolve_prompt_settings(args: argparse.Namespace) -> dict[str, str]:
+    preset = PROMPT_PRESETS.get(args.prompt_preset) if args.prompt_preset else None
+    prompt = args.prompt if args.prompt is not None else preset["prompt"] if preset else None
+    if prompt is None:
+        raise SystemExit("Provide --prompt or --prompt-preset")
+    negative = args.negative if args.negative is not None else preset["negative"] if preset else DEFAULT_NEGATIVE_PROMPT
+    return {"prompt": prompt, "negative": negative}
+
+
 def parse_int_values(values: list[str], flag: str) -> list[int]:
     try:
         parsed = [int(part) for part in split_csvish(values)]
@@ -273,19 +359,22 @@ def split_csvish(values: list[str]) -> list[str]:
     return [part for part in parts if part]
 
 
-def load_generation_modules() -> tuple[Any, Any, Any]:
+def load_generation_modules() -> tuple[Any, Any, Any, Any]:
     try:
         import torch
         from diffusers import StableDiffusionImg2ImgPipeline
         from PIL import Image
+        from PIL import ImageFilter
     except ImportError as exc:
         raise SystemExit(
             "Missing diffusion dependencies. Run `uv sync` in tools/texture-lab/diffusion."
         ) from exc
-    return torch, StableDiffusionImg2ImgPipeline, Image
+    return torch, StableDiffusionImg2ImgPipeline, Image, ImageFilter
 
 
-def prepare_input(path: Path, pil_image: Any, image_size: int) -> PreparedInput:
+def prepare_input(args: argparse.Namespace, pil_image: Any, pil_image_filter: Any) -> PreparedInput:
+    path = args.input
+    image_size = args.image_size
     if image_size <= 0:
         raise SystemExit("--image-size must be positive")
     if not path.exists():
@@ -297,6 +386,16 @@ def prepare_input(path: Path, pil_image: Any, image_size: int) -> PreparedInput:
     resized = image.size != target_size
     if resized:
         image = image.resize(target_size, resample=pil_image.Resampling.NEAREST)
+    if args.pre_blur > 0:
+        image = image.filter(pil_image_filter.GaussianBlur(radius=args.pre_blur))
+    if args.input_grain > 0:
+        image = apply_input_grain(
+            image,
+            pil_image,
+            opacity=args.input_grain,
+            amplitude=args.input_grain_amplitude,
+            seed=args.input_grain_seed,
+        )
     prepared_sha256 = sha256_image(image)
     return PreparedInput(
         image=image,
@@ -306,6 +405,21 @@ def prepare_input(path: Path, pil_image: Any, image_size: int) -> PreparedInput:
         prepared_sha256=prepared_sha256,
         resized_nearest=resized,
     )
+
+
+def apply_input_grain(image: Any, pil_image: Any, opacity: float, amplitude: int, seed: int) -> Any:
+    rng = Random(seed)
+    noise = pil_image.new("RGB", image.size)
+    noise.putdata(
+        [
+            (value, value, value)
+            for value in (
+                128 + rng.randrange(-amplitude, amplitude + 1)
+                for _ in range(image.size[0] * image.size[1])
+            )
+        ]
+    )
+    return pil_image.blend(image.convert("RGB"), noise, opacity)
 
 
 def detect_device(torch: Any, requested: str) -> str:

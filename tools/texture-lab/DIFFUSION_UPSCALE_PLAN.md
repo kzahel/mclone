@@ -255,6 +255,27 @@ Local validation on macOS/M4/MPS:
     from 16x16 to 512x512, and max mean wrap errors of horizontal 20.3822 and
     vertical 19.4798 RGB levels. Several candidates are visibly too blocky or
     tile-like, which is expected input for M3 triage rather than an M2 failure.
+- M2b prompt/preprocess experiments changed the recommendation:
+  - The original nearest-resized 16x16 macro over-conditioned SD toward blocky
+    output. Blur plus deterministic neutral grain makes the model propose more
+    natural rock surfaces while still starting from the owned macro plan.
+  - `propose.py` now records first-class preprocessing knobs:
+    `--pre-blur`, `--input-grain`, `--input-grain-amplitude`, and
+    `--input-grain-seed`.
+  - `propose.py` also has prompt presets for `stone-granite`,
+    `stone-hewn-horizontal`, and `stone-dressed-courses`; explicit prompts and
+    negative prompts can still override the preset text.
+  - The M2b sweep ran two 32-candidate groups from the stone structure PNG:
+    `/tmp/mclone-texture-lab/diffusion/stone-m2b-hewn-horizontal/` and
+    `/tmp/mclone-texture-lab/diffusion/stone-m2b-dressed-courses/`.
+  - Both used `--pre-blur 12`, `--input-grain 0.16`,
+    `--input-grain-amplitude 18`, 24 steps, strengths
+    `0.50, 0.58, 0.66, 0.74`, and 8 seeds. Each wrote 32 raw PNGs, 32 3x3
+    sheets, `contact-sheet.png`, and `manifest.json`.
+  - Visual read: hewn-horizontal has useful rough natural-rock candidates but
+    can drift into marble/crack planes; dressed-courses gets closest to the
+    rough-hewn horizontal/course idea but includes over-rectangular failures.
+    This is now the better M3 input pool than the original M2 sweep.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;
@@ -284,6 +305,11 @@ macro-correction tuning is speculative work that will be redone.
   (8 seeds × 3 strengths). Accept: 24 raw candidates plus a simple contact
   sheet under `/tmp/mclone-texture-lab/diffusion/stone/`, each with
   manifest provenance.
+- **M2b — prompt/preprocess sweep.** Done locally: add blur/grain input
+  conditioning and prompt presets, then run hewn-horizontal and dressed-courses
+  sweeps. Accept: 64 additional raw candidates under `/tmp`, grouped by prompt,
+  with contact sheets and manifest provenance. These become the preferred M3
+  projection inputs.
 - **M3 — projection + triage.** New TS lab command that consumes raw
   candidate PNGs and emits, per candidate: 32x32 quantized PNG, ASCII mask,
   and an analyzer report with macro-fidelity and native-detail metrics.
@@ -316,3 +342,8 @@ macro-correction tuning is speculative work that will be redone.
 - Whether SD 1.5's material prior is enough after projection, or whether
   SDXL/ControlNet-Tile measurably improves the *placement* signal that
   survives quantization. Decide with the M4 review sheet, not upfront.
+- Projection resolution: the hewn/dressed proposals look good enough at 512
+  that M3 should project selected candidates to 32, 64, and 128 review outputs
+  before choosing a committed source resolution. Do not jump directly to
+  committed 64/128 masks; first check whether the extra detail survives palette
+  quantization, macro correction, mip review, and in-engine distance views.

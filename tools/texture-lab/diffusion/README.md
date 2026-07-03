@@ -36,7 +36,7 @@ when you explicitly want the diffusers checker enabled.
 cd tools/texture-lab/diffusion
 uv run python propose.py \
   --input /tmp/owned-test-input.png \
-  --prompt "top-down photograph of a rough gray stone surface, chipped granite, matte, flat even lighting, seamless texture, no shadows" \
+  --prompt-preset stone-granite \
   --seeds 1001 \
   --strengths 0.5 \
   --steps 20 \
@@ -50,6 +50,18 @@ hashes, model provenance, device, patched convolution counts, image stats, and
 wrap seam metrics.
 
 Use `--no-seamless` to A/B the circular-padding patch.
+
+Useful conditioning flags:
+
+- `--pre-blur <radius>` blurs the nearest-resized 512x512 input before img2img.
+  This reduces hard 16x16 macro cell edges without losing the broad value plan.
+- `--input-grain <amount>` blends deterministic neutral grain into the prepared
+  input. This gives SD a natural material texture hint instead of only blurred
+  blocks. `--input-grain-amplitude` and `--input-grain-seed` make the grain
+  reproducible.
+- `--prompt-preset stone-hewn-horizontal` and
+  `--prompt-preset stone-dressed-courses` are the current best stone prompt
+  families. Explicit `--prompt` or `--negative` still override preset text.
 
 ## Stone Sweep
 
@@ -75,4 +87,35 @@ uv run python propose.py \
   --steps 20 \
   --dtype fp32 \
   --out-dir /tmp/mclone-texture-lab/diffusion/stone
+```
+
+Run the M2b prompt/preprocess sweep:
+
+```sh
+cd tools/texture-lab/diffusion
+uv run python propose.py \
+  --input /tmp/mclone-texture-lab/diffusion/stone-input/authoring/stone-structure.png \
+  --prompt-preset stone-hewn-horizontal \
+  --seeds 4101 4102 4103 4104 4105 4106 4107 4108 \
+  --strengths 0.50 0.58 0.66 0.74 \
+  --steps 24 \
+  --dtype fp32 \
+  --pre-blur 12 \
+  --input-grain 0.16 \
+  --input-grain-amplitude 18 \
+  --input-grain-seed 12345 \
+  --out-dir /tmp/mclone-texture-lab/diffusion/stone-m2b-hewn-horizontal
+
+uv run python propose.py \
+  --input /tmp/mclone-texture-lab/diffusion/stone-input/authoring/stone-structure.png \
+  --prompt-preset stone-dressed-courses \
+  --seeds 4201 4202 4203 4204 4205 4206 4207 4208 \
+  --strengths 0.50 0.58 0.66 0.74 \
+  --steps 24 \
+  --dtype fp32 \
+  --pre-blur 12 \
+  --input-grain 0.16 \
+  --input-grain-amplitude 18 \
+  --input-grain-seed 12345 \
+  --out-dir /tmp/mclone-texture-lab/diffusion/stone-m2b-dressed-courses
 ```
