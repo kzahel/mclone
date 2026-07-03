@@ -314,6 +314,7 @@ pub fn snapshot_mesh_block_state_ids(snapshot: &ChunkSnapshot) -> Result<MeshChu
 #[derive(Clone, Debug, Default)]
 pub struct CachedTexturedRenderSections {
     sections: BTreeMap<RenderSectionKey, TexturedRenderSectionMesh>,
+    section_keys_by_chunk: BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -2732,6 +2733,61 @@ impl EngineServerUpdateReport {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct EngineServerUpdateDirtyBatch {
+    dirty_chunks: BTreeSet<ChunkPos>,
+    dirty_sections: BTreeSet<RenderSectionKey>,
+}
+
+impl EngineServerUpdateDirtyBatch {
+    fn collect(updates: &[ServerUpdate], policy: EngineServerUpdateDirtyPolicy) -> Self {
+        let mut batch = Self::default();
+        for update in updates {
+            match update {
+                ServerUpdate::ChunkSnapshot(snapshot) => {
+                    if policy.dirty_chunk_snapshots {
+                        batch
+                            .dirty_chunks
+                            .extend(render_dirty_chunk_neighborhood(snapshot.pos));
+                    }
+                }
+                ServerUpdate::ChunkUnload { pos } => {
+                    if policy.dirty_chunk_unloads {
+                        batch
+                            .dirty_chunks
+                            .extend(render_dirty_chunk_neighborhood(*pos));
+                    }
+                }
+                ServerUpdate::SectionBlockUpdates {
+                    pos,
+                    section_y,
+                    updates,
+                } => {
+                    if policy.dirty_section_block_updates {
+                        for update in updates {
+                            batch.dirty_sections.extend(
+                                render_dirty_section_keys_for_block_update(
+                                    *pos, *section_y, update,
+                                ),
+                            );
+                        }
+                    }
+                }
+                ServerUpdate::WorldInfo { .. } => {}
+                ServerUpdate::TimeUpdate { .. } => {}
+                ServerUpdate::PlayerPosition(_) => {}
+                ServerUpdate::RemotePlayerAdd(_)
+                | ServerUpdate::RemotePlayerUpdate(_)
+                | ServerUpdate::RemotePlayerRemove { .. }
+                | ServerUpdate::EntitySnapshot(_)
+                | ServerUpdate::EntityUpdate(_)
+                | ServerUpdate::EntityRemove { .. } => {}
+            }
+        }
+        batch
+    }
+}
+
 pub fn render_dirty_section_keys_for_block_update(
     pos: ChunkPos,
     section_y: i32,
@@ -2828,43 +2884,19 @@ impl EngineRenderSession {
         policy: EngineServerUpdateDirtyPolicy,
     ) -> EngineServerUpdateReport {
         let report = EngineServerUpdateReport::classify(updates);
-        for update in updates {
-            match update {
-                ServerUpdate::ChunkSnapshot(snapshot) => {
-                    if policy.dirty_chunk_snapshots {
-                        self.mark_chunk_neighborhood_dirty(snapshot.pos);
-                    }
-                }
-                ServerUpdate::ChunkUnload { pos } => {
-                    if policy.dirty_chunk_unloads {
-                        self.mark_chunk_neighborhood_dirty(*pos);
-                    }
-                }
-                ServerUpdate::SectionBlockUpdates {
-                    pos,
-                    section_y,
-                    updates,
-                } => {
-                    if policy.dirty_section_block_updates {
-                        for update in updates {
-                            for key in
-                                render_dirty_section_keys_for_block_update(*pos, *section_y, update)
-                            {
-                                self.mark_section_dirty(key);
-                            }
-                        }
-                    }
-                }
-                ServerUpdate::WorldInfo { .. } => {}
-                ServerUpdate::TimeUpdate { .. } => {}
-                ServerUpdate::PlayerPosition(_) => {}
-                ServerUpdate::RemotePlayerAdd(_)
-                | ServerUpdate::RemotePlayerUpdate(_)
-                | ServerUpdate::RemotePlayerRemove { .. }
-                | ServerUpdate::EntitySnapshot(_)
-                | ServerUpdate::EntityUpdate(_)
-                | ServerUpdate::EntityRemove { .. } => {}
-            }
+        let dirty_batch = EngineServerUpdateDirtyBatch::collect(updates, policy);
+        let client = &self.client;
+        self.render_session.mark_chunks_dirty_with_loaded_sections(
+            dirty_batch.dirty_chunks,
+            |pos| {
+                client
+                    .chunk_snapshot(pos)
+                    .map(render_section_keys_for_snapshot)
+                    .unwrap_or_default()
+            },
+        );
+        for key in dirty_batch.dirty_sections {
+            self.mark_section_dirty(key);
         }
         report
     }
@@ -3389,11 +3421,7 @@ impl RenderSectionSession {
     ) -> BTreeSet<RenderSectionKey> {
         let mut keys = BTreeSet::new();
         keys.extend(loaded_section_keys);
-        keys.extend(
-            self.cache
-                .section_keys()
-                .filter(|key| render_section_chunk_pos(*key) == pos),
-        );
+        keys.extend(self.cache.section_keys_for_chunk(pos));
         keys.extend(
             self.dirty
                 .dirty_sections
@@ -4287,9 +4315,7 @@ impl CachedTexturedRenderSections {
     }
 
     pub fn contains_chunk(&self, pos: ChunkPos) -> bool {
-        self.sections
-            .keys()
-            .any(|key| key.chunk_x == pos.x && key.chunk_z == pos.z)
+        self.section_keys_by_chunk.contains_key(&pos)
     }
 
     pub fn contains_section(&self, key: RenderSectionKey) -> bool {
@@ -4302,6 +4328,16 @@ impl CachedTexturedRenderSections {
 
     pub fn section_keys(&self) -> impl Iterator<Item = RenderSectionKey> + '_ {
         self.sections.keys().copied()
+    }
+
+    pub fn section_keys_for_chunk(
+        &self,
+        pos: ChunkPos,
+    ) -> impl Iterator<Item = RenderSectionKey> + '_ {
+        self.section_keys_by_chunk
+            .get(&pos)
+            .into_iter()
+            .flat_map(|keys| keys.iter().copied())
     }
 
     pub fn apply_build_report(
@@ -4341,7 +4377,7 @@ impl CachedTexturedRenderSections {
         removed_section_keys.extend(removal_section_keys.iter().copied());
 
         for key in &removed_section_keys {
-            self.sections.remove(key);
+            self.remove_section(*key);
         }
 
         let mut report = RenderSectionCacheUpdate {
@@ -4358,7 +4394,7 @@ impl CachedTexturedRenderSections {
             let stats = section.stats();
             report.rebuilt_vertex_count += stats.vertex_count;
             report.rebuilt_index_count += stats.index_count;
-            self.sections.insert(section.key, section.clone());
+            self.insert_section(section.clone());
         }
         report
     }
@@ -4374,6 +4410,27 @@ impl CachedTexturedRenderSections {
             removal_chunks,
             removal_section_keys,
         )
+    }
+
+    fn insert_section(&mut self, section: TexturedRenderSectionMesh) {
+        let key = section.key;
+        self.sections.insert(key, section);
+        self.section_keys_by_chunk
+            .entry(render_section_chunk_pos(key))
+            .or_default()
+            .insert(key);
+    }
+
+    fn remove_section(&mut self, key: RenderSectionKey) -> Option<TexturedRenderSectionMesh> {
+        let section = self.sections.remove(&key)?;
+        let pos = render_section_chunk_pos(key);
+        if let Some(keys) = self.section_keys_by_chunk.get_mut(&pos) {
+            keys.remove(&key);
+            if keys.is_empty() {
+                self.section_keys_by_chunk.remove(&pos);
+            }
+        }
+        Some(section)
     }
 }
 
@@ -5805,6 +5862,72 @@ mod tests {
     }
 
     #[test]
+    fn engine_render_session_coalesces_duplicate_snapshot_dirtying_before_revision_bump() {
+        let chunk = ChunkPos::new(0, 0);
+        let key = RenderSectionKey::new(0, 0, 0);
+        let snapshot = empty_test_snapshot(chunk, 0, SECTION_HEIGHT);
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(snapshot.clone()));
+        let mut engine = EngineRenderSession::new(client);
+
+        let report = engine.mark_server_update_render_dirty(&[
+            ServerUpdate::ChunkSnapshot(snapshot.clone()),
+            ServerUpdate::ChunkSnapshot(snapshot),
+        ]);
+
+        assert_eq!(
+            report,
+            EngineServerUpdateReport {
+                changed: true,
+                updates: 2,
+                snapshot_updates: 2,
+                section_block_updates: 0,
+                unload_updates: 0,
+            }
+        );
+        assert_eq!(
+            engine.render_session().dirty().dirty_chunks,
+            BTreeSet::from(render_dirty_chunk_neighborhood(chunk))
+        );
+        assert_eq!(engine.render_session().dirty().section_revision(key), 1);
+    }
+
+    #[test]
+    fn engine_render_session_coalesces_duplicate_section_dirtying_before_revision_bump() {
+        let chunk = ChunkPos::new(0, 0);
+        let key = RenderSectionKey::new(0, 7, 0);
+        let update = SectionBlockUpdate {
+            local_x: 8,
+            local_y: 8,
+            local_z: 8,
+            block_state: AIR_BLOCK_STATE_ID,
+        };
+        let mut engine = EngineRenderSession::new(ClientRuntime::local_integrated());
+
+        let report = engine.mark_server_update_render_dirty(&[ServerUpdate::SectionBlockUpdates {
+            pos: chunk,
+            section_y: 7,
+            updates: vec![update, update],
+        }]);
+
+        assert_eq!(
+            report,
+            EngineServerUpdateReport {
+                changed: true,
+                updates: 1,
+                snapshot_updates: 0,
+                section_block_updates: 1,
+                unload_updates: 0,
+            }
+        );
+        assert_eq!(
+            engine.render_session().dirty().dirty_sections,
+            BTreeSet::from([key])
+        );
+        assert_eq!(engine.render_session().dirty().section_revision(key), 1);
+    }
+
+    #[test]
     fn render_section_session_applies_loaded_view_sync_dirty_marks() {
         let removed_chunk = ChunkPos::new(0, 0);
         let edge_chunk = ChunkPos::new(1, 0);
@@ -6438,32 +6561,43 @@ mod tests {
     fn cached_sections_apply_build_report_and_remove_unloaded_chunks() {
         let mut cache = CachedTexturedRenderSections::default();
         let key = RenderSectionKey::new(2, 4, -1);
-        let report = TexturedRenderSectionBuildReport {
-            sections: vec![TexturedRenderSectionMesh {
-                key,
-                mesh: TexturedVisibleChunkMesh::default(),
-                visibility: VisibilitySet::all_visible(),
-            }],
-            visibility_graph: VisibilityGraphBuildStats::default(),
-        };
+        let second_key = RenderSectionKey::new(2, 5, -1);
+        let chunk = ChunkPos::new(2, -1);
+        let report = test_build_report([key, second_key]);
 
         let update = cache.apply_build_report(
-            &BTreeSet::from([key]),
+            &BTreeSet::from([key, second_key]),
             report,
             &BTreeSet::new(),
             &BTreeSet::new(),
         );
 
-        assert_eq!(update.rebuilt_section_count(), 1);
+        assert_eq!(update.rebuilt_section_count(), 2);
         assert!(cache.contains_section(key));
-        assert!(cache.contains_chunk(ChunkPos::new(2, -1)));
+        assert!(cache.contains_section(second_key));
+        assert!(cache.contains_chunk(chunk));
+        assert_eq!(
+            cache.section_keys_for_chunk(chunk).collect::<BTreeSet<_>>(),
+            BTreeSet::from([key, second_key])
+        );
 
-        let removal =
-            cache.remove_sections(&BTreeSet::from([ChunkPos::new(2, -1)]), &BTreeSet::new());
+        let section_removal = cache.remove_sections(&BTreeSet::new(), &BTreeSet::from([key]));
+
+        assert_eq!(section_removal.removed_section_count(), 1);
+        assert!(!cache.contains_section(key));
+        assert!(cache.contains_section(second_key));
+        assert!(cache.contains_chunk(chunk));
+        assert_eq!(
+            cache.section_keys_for_chunk(chunk).collect::<BTreeSet<_>>(),
+            BTreeSet::from([second_key])
+        );
+
+        let removal = cache.remove_sections(&BTreeSet::from([chunk]), &BTreeSet::new());
 
         assert_eq!(removal.removed_section_count(), 1);
-        assert!(!cache.contains_section(key));
-        assert!(!cache.contains_chunk(ChunkPos::new(2, -1)));
+        assert!(!cache.contains_section(second_key));
+        assert!(!cache.contains_chunk(chunk));
+        assert!(cache.section_keys_for_chunk(chunk).next().is_none());
     }
 
     #[test]

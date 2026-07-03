@@ -1,10 +1,10 @@
 # Session Network Architecture
 
 Status: target architecture; Slice 1 send-only high-frequency command policy
-and Slice 2 local integrated ordered update pump landed; revised 2026-07-03 to
-adopt the vanilla ordered-stream update model (thin apply plus a frame-budget
-stall) and drop the earlier priority-class design; remaining implementation
-tracked in
+and Slice 2 local integrated ordered update pump landed; Slice 3A batched dirty
+intent and resident cache lookup landed; revised 2026-07-03 to adopt the
+vanilla ordered-stream update model (thin apply plus a frame-budget stall) and
+drop the earlier priority-class design; remaining implementation tracked in
 [`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md)
 
 ## Purpose
@@ -100,9 +100,11 @@ gaps:
 
 - The new `try_recv_update` path still decodes update frames on the
   app/render thread at receive time, where vanilla decodes on the IO side.
-- Render dirty marking is ordered-set insertion churn per update (~0.13 ms per
-  chunk-scale update measured in `130`), where vanilla flips a boolean on a
-  resident render-section slot.
+- Slice 3A now batches server-update dirty intent and uses a resident
+  chunk-to-section-key cache index, so duplicate updates no longer multiply
+  neighborhood fanout or full-cache scans. Render dirty state is still
+  ordered-set backed, where vanilla flips a boolean on a resident
+  render-section slot.
 
 Native remote dedicated is even more request/response-shaped today:
 `NativeClientSession::send_command` writes one command and blocks reading one

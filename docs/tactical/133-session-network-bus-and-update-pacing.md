@@ -4,7 +4,8 @@ Status: active tracking doc; Slice 1 send-only high-frequency command policy
 landed for local integrated play; direction revised 2026-07-03 to strict
 receive-order update application (vanilla parity) with a frame-budget stall,
 replacing the earlier priority-class plan; Slice 2 local integrated ordered
-update pump landed; Slice 3 thin apply and source pacing is next
+update pump landed; Slice 3A batched dirty intent and resident cache lookup
+landed; full thin apply and source pacing remain active
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -94,6 +95,14 @@ ordered queue behind a common policy boundary.
 - `LocalSingleViewSceneRuntime::poll` applies updates in strict receive order
   under the default elapsed-time budget, while startup and `poll_until_idle`
   use an explicit unlimited pump.
+- `EngineRenderSession::mark_server_update_render_dirty` now coalesces each
+  server-update batch into unique dirty chunk neighborhoods and dirty section
+  keys before touching render dirty state. `CachedTexturedRenderSections`
+  also keeps a resident chunk-to-section-key index so dirty marking no longer
+  scans all cached section keys for every dirty chunk.
+- Render dirty state is still `BTreeSet`-backed (`dirty_chunks`,
+  `dirty_sections`, `inflight_sections`). Full resident-slot boolean dirty
+  marking remains Slice 3 work.
 - `poll_until_idle` treats runner idle plus `update_queue_depth == 0` as done.
   Slice 2 must keep undrained updates observable (leave them in the channel)
   so idle and startup/bootstrap semantics stay correct.
@@ -284,20 +293,69 @@ Goal: make the apply step vanilla-thin so the budget rarely stalls, and stop
 burst churn at the source. This is the actual fix; the Slice 2 budget is the
 safety valve.
 
-- Resident-slot dirty marking: flip state on resident render-section slots
+- [x] Slice 3A: batch server-update dirty intent before marking render state.
+  Chunk snapshots/unloads expand to unique dirty chunk neighborhoods once per
+  update frame, and section-block updates expand to unique dirty section keys
+  once per update frame. Duplicate updates no longer multiply neighborhood
+  fanout or section-revision bumps inside one pump application.
+- [x] Slice 3A: maintain a resident chunk-to-section-key index in
+  `CachedTexturedRenderSections`, and use it when collecting known resident
+  keys for a dirty chunk. This removes the per-dirty-chunk full-cache scan
+  while preserving the existing compile planner and cache lifecycle.
+- [ ] Full resident-slot dirty marking: flip state on resident render-section slots
   (vanilla `ViewArea.setDirty` shape — array index plus boolean store) instead
   of ordered-set insertion per update. This is the `131` Finding 3.3 diagnosis
   and should land as part of, or aligned with, `128`'s resident-lifecycle
   direction — not a separate renderer shortcut.
-- Move update payload decode off the render thread: the integrated runner
+- [ ] Move update payload decode off the render thread: the integrated runner
   publishes decoded updates; remote transports decode on the session thread
   (Slice 4).
-- Interest hysteresis: verify the unload margin is wider than the load margin
+- [ ] Interest hysteresis: verify the unload margin is wider than the load margin
   so a path oscillating near a chunk boundary does not thrash full row swaps
   (the measured 15-snapshot + 15-unload bursts). Vanilla keeps chunks resident
   beyond the strict view distance and unloads lazily.
-- Keep apply attribution split by update kind (chunk snapshot, section
+- [ ] Keep apply attribution split by update kind (chunk snapshot, section
   mutation, unload) so per-update cost stays measurable.
+
+Recorded Slice 3A result:
+
+- Added `EngineServerUpdateDirtyBatch` so `mark_server_update_render_dirty`
+  classifies a received update frame once, then applies unique dirty chunk and
+  section marks through the existing render-session dirty contract.
+- Added `CachedTexturedRenderSections::section_keys_by_chunk` plus indexed
+  `contains_chunk` / `section_keys_for_chunk` resident lookups. Cache updates
+  keep the index in sync during rebuild insertion and section/chunk removal.
+- Added regression coverage for duplicate snapshot dirtying, duplicate
+  section-update dirtying, and resident cache index removal.
+
+Validation:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render-session -- --nocapture`
+  passed.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -- --nocapture`
+  passed.
+- `cargo test --manifest-path native/Cargo.toml` passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-android-xr-client --target aarch64-linux-android`
+  passed.
+- Quest RD7 settled-orbit lane passed with actors enabled:
+  `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-settled-orbit --perf-orbit-speed 4.3 --perf-metrics --wait-seconds 270 --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
+  Summary artifacts:
+  `/tmp/mclone-quest-openxr-perf-summary.txt` and
+  `/tmp/mclone-quest-openxr-logcat.txt`.
+- Quest result highlights compared with the post-Slice 2 run:
+  - Locomotion command update drain remained collapsed:
+    `max_drain_updates_ms=0.000`, `max_apply_updates_ms=0.000`,
+    `max_updates=0`.
+  - Runtime dirty marking improved but the pump is still too fat:
+    `dirty_mark_ms=1.237` versus `1.963`, `client_apply_ms=3.184`
+    versus `3.402`, with `updates=36`.
+  - Runtime queue pressure improved:
+    `server_update_queue_depth=13` versus `27`,
+    `server_update_queue_bytes=319782` versus `893140`,
+    `server_update_oldest_applied_age_ms=32.234` versus `54.119`.
+  - Overall frame pacing improved but remains marginal:
+    `app_work_avg_ms=13.788`, `app_work_p95_ms=15.803`,
+    `headroom_avg_ms=0.101`, `app_over_period_pct=42.4`.
 
 Success means a chunk-scale update applies at parse-plus-flag-flip cost (well
 below the current ~0.13 ms), the default budget absorbs a 15+15 burst within a
