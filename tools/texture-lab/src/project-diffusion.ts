@@ -789,6 +789,9 @@ function candidateCodenameFrom(candidate: DiffusionCandidate, promptPreset: stri
 }
 
 function promptPresetPrefix(promptPreset: string | undefined): string {
+  if (promptPreset?.includes("grass")) {
+    return "G";
+  }
   if (promptPreset?.includes("dressed")) {
     return "D";
   }

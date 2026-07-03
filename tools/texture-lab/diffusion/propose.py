@@ -50,6 +50,31 @@ PROMPT_PRESETS = {
         ),
         "negative": "perspective, mortar, round pebbles, glossy, colorful, moss, text",
     },
+    "grass-top-tufts": {
+        "prompt": (
+            "orthographic top-down macro photograph of dense short turf grass, clipped "
+            "meadow grass blades, small uneven tufts, fine leafy fibers, natural lawn "
+            "surface, matte organic texture, flat overcast lighting, seamless square "
+            "material texture"
+        ),
+        "negative": (
+            "dirt, soil, flowers, clover, broad leaves, long grass, stems, side view, "
+            "perspective, strong shadows, dew, insects, paths, moss, text, watermark"
+        ),
+    },
+    "grass-top-fine-turf": {
+        "prompt": (
+            "orthographic top-down macro photograph of dense fine turf grass texture, "
+            "very short clipped lawn, tiny interwoven grass fibers, subtle mottled "
+            "organic variation, soft natural thatch, even matte surface, flat overcast "
+            "lighting, seamless square material texture"
+        ),
+        "negative": (
+            "dirt, soil, flowers, clover, broad leaves, long grass, large individual "
+            "blades, stems, cracks, cells, pebbles, scales, side view, perspective, "
+            "strong shadows, dew, insects, paths, moss, text, watermark"
+        ),
+    },
 }
 
 

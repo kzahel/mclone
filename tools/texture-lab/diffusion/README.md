@@ -62,6 +62,11 @@ Useful conditioning flags:
 - `--prompt-preset stone-hewn-horizontal` and
   `--prompt-preset stone-dressed-courses` are the current best stone prompt
   families. Explicit `--prompt` or `--negative` still override preset text.
+- `--prompt-preset grass-top-tufts` and
+  `--prompt-preset grass-top-fine-turf` are first-pass grass top prompt
+  families. Grass is more sensitive than stone: broad leaves, cracks, cells,
+  and long-blade structure should be treated as prompt failures unless they
+  project into convincing small turf.
 
 ## Stone Sweep
 
@@ -119,6 +124,84 @@ uv run python propose.py \
   --input-grain-seed 12345 \
   --out-dir /tmp/mclone-texture-lab/diffusion/stone-m2b-dressed-courses
 ```
+
+## Grass Top Sweep
+
+Grass top uses a tint-neutral authoring mask. The `grass_block_top` structure
+mask in the pack source has `opacity: 0`, so it is only conditioning input for
+diffusion and does not change the active exported grass texture.
+
+Export the owned 16x16 grass top macro mask from the TypeScript lab:
+
+```sh
+pnpm --dir tools/texture-lab export -- \
+  --texture grass_block_top \
+  --authoring-role structure \
+  --authoring-only \
+  --out /tmp/mclone-texture-lab/diffusion/grass-top-input
+```
+
+Run the first two grass proposal sweeps:
+
+```sh
+cd tools/texture-lab/diffusion
+uv run python propose.py \
+  --input /tmp/mclone-texture-lab/diffusion/grass-top-input/authoring/grass_block_top-structure.png \
+  --prompt-preset grass-top-tufts \
+  --seeds 5101 5102 5103 5104 \
+  --strengths 0.50 0.62 0.74 \
+  --steps 24 \
+  --dtype fp32 \
+  --pre-blur 10 \
+  --input-grain 0.18 \
+  --input-grain-amplitude 18 \
+  --input-grain-seed 24680 \
+  --out-dir /tmp/mclone-texture-lab/diffusion/grass-top-m1-tufts
+
+uv run python propose.py \
+  --input /tmp/mclone-texture-lab/diffusion/grass-top-input/authoring/grass_block_top-structure.png \
+  --prompt-preset grass-top-fine-turf \
+  --seeds 5201 5202 5203 5204 \
+  --strengths 0.40 0.52 0.64 \
+  --steps 24 \
+  --dtype fp32 \
+  --pre-blur 16 \
+  --input-grain 0.20 \
+  --input-grain-amplitude 16 \
+  --input-grain-seed 24681 \
+  --out-dir /tmp/mclone-texture-lab/diffusion/grass-top-m1-fine-turf
+```
+
+Project both sweeps at 64px for review:
+
+```sh
+pnpm --dir tools/texture-lab project-diffusion -- \
+  --manifest /tmp/mclone-texture-lab/diffusion/grass-top-m1-tufts/manifest.json \
+  --texture grass_block_top \
+  --palette-colors dark,shadow,base,blade,light \
+  --symbols dsmbh \
+  --resolutions 64 \
+  --review-sheet /tmp/mclone-texture-lab/diffusion-projection/grass-top-m1-64/projection-review-all-64.png \
+  --review-top 12 \
+  --review-resolution 64 \
+  --out /tmp/mclone-texture-lab/diffusion-projection/grass-top-m1-64
+
+pnpm --dir tools/texture-lab project-diffusion -- \
+  --manifest /tmp/mclone-texture-lab/diffusion/grass-top-m1-fine-turf/manifest.json \
+  --texture grass_block_top \
+  --palette-colors dark,shadow,base,blade,light \
+  --symbols dsmbh \
+  --resolutions 64 \
+  --review-sheet /tmp/mclone-texture-lab/diffusion-projection/grass-top-fine-m1-64/projection-review-all-64.png \
+  --review-top 12 \
+  --review-resolution 64 \
+  --out /tmp/mclone-texture-lab/diffusion-projection/grass-top-fine-m1-64
+```
+
+Current read: `G5101S50`, `G5101S62`, and `G5203S40` are the most useful
+directions, but no grass candidate has been frozen into source yet. The main
+failure mode is raw diffusion inventing cracks, cell boundaries, or oversized
+leaf/blade shapes that survive projection too visibly.
 
 ## Project Candidates
 

@@ -368,6 +368,29 @@ Local validation on macOS/M4/MPS:
     seeds, prompts, versions, model id, input hashes, and preprocessing knobs
     are recorded, but device kernels and model-cache revisions can still
     diverge.
+- M5 grass top experiment is started:
+  - `grass_block_top` now has an authoring-only `structure` mask in
+    `packs/mclone-default/block/grass-block.ts`. The layer has `opacity: 0`,
+    so it is diffusion conditioning input only and does not change the active
+    exported grass texture.
+  - `propose.py` now has prompt presets for `grass-top-tufts` and
+    `grass-top-fine-turf`.
+  - The grass structure input exported to
+    `/tmp/mclone-texture-lab/diffusion/grass-top-input/authoring/grass_block_top-structure.png`.
+  - Two 12-candidate grass sweeps ran locally:
+    `/tmp/mclone-texture-lab/diffusion/grass-top-m1-tufts/` and
+    `/tmp/mclone-texture-lab/diffusion/grass-top-m1-fine-turf/`.
+  - Both sweeps were projected at 64px with the tint-neutral grass ramp
+    `dark,shadow,base,blade,light` and codename prefix `G`:
+    `/tmp/mclone-texture-lab/diffusion-projection/grass-top-m1-64/projection-review-all-64.png`
+    and
+    `/tmp/mclone-texture-lab/diffusion-projection/grass-top-fine-m1-64/projection-review-all-64.png`.
+  - Visual read: `G5101S50`, `G5101S62`, and `G5203S40` are useful directions,
+    but no grass top candidate should be frozen yet. The first-pass failure
+    mode is SD inventing cracks, cell boundaries, or oversized blades/leaves
+    that remain legible after projection. Next grass pass should either soften
+    and de-contrast the 16x16 structure input or use a more constrained fine
+    turf prompt/model before another freeze review.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;
@@ -421,7 +444,9 @@ macro-correction tuning is speculative work that will be redone.
 - **M5 — generalize.** Dirt and grass top (tint-neutral handling), prompt
   library growth, x-only tiling if a directional material lands, and an
   SDXL / ControlNet-Tile quality evaluation only if projected 32x32 output
-  is visibly limited by the base model.
+  is visibly limited by the base model. Status: started for grass top with an
+  authoring-only structure mask, first-pass prompt presets, and two projected
+  review sheets; not frozen into source yet.
 
 ## Open questions and knobs
 
