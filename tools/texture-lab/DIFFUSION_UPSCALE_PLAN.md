@@ -314,15 +314,22 @@ Local validation on macOS/M4/MPS:
 - M3b review sheets are implemented:
   - `project-diffusion` accepts `--review-sheet`, `--review-top <n>`, and
     `--review-resolution <n>`. The sheet sorts projected candidates by triage
-    score and shows each row with metrics, the owned 16x16 macro baseline, the
-    current authored texture baseline, source pixels, a 3x3 tile preview, a
-    16x16 distance preview, and 64/32/16/8 mip views.
+    score and shows each row with a compact codename, metrics, the owned 16x16
+    macro baseline, the current authored texture baseline, source pixels, a 3x3
+    tile preview, a 16x16 distance preview, and 64/32/16/8 mip views.
+    Codenames are prompt family + seed + strength, e.g. `D4201S58` for
+    dressed-courses seed 4201 strength 0.58 and `H4107S66` for hewn-horizontal
+    seed 4107 strength 0.66.
   - Review outputs:
     `/tmp/mclone-texture-lab/diffusion-projection/stone-dressed-m2b-64/projection-review-64.png`,
     `/tmp/mclone-texture-lab/diffusion-projection/stone-hewn-m2b-64/projection-review-64.png`,
     `/tmp/mclone-texture-lab/diffusion-projection/stone-dressed-shortlist-128/projection-review-128.png`,
     and
     `/tmp/mclone-texture-lab/diffusion-projection/stone-hewn-shortlist-128/projection-review-128.png`.
+  - Full 64px candidate review sheets were regenerated with row codenames:
+    `/tmp/mclone-texture-lab/diffusion-projection/stone-dressed-m2b-64/projection-review-all-64.png`
+    and
+    `/tmp/mclone-texture-lab/diffusion-projection/stone-hewn-m2b-64/projection-review-all-64.png`.
   - Visual read: dressed-courses is still the better prompt family. Its top
     64px candidates read as rough natural stone with some broad clouding and
     horizontal course hints. Hewn-horizontal remains useful prompt evidence but

@@ -165,10 +165,13 @@ Outputs are written under the selected `--out` directory:
 - `projection-review-<resolution>.png` when `--review-sheet` is passed
 
 The review sheet sorts projected candidates by triage score and shows each
-candidate against the owned 16x16 macro mask, the current authored texture,
-the projected source pixels, a 3x3 tile preview, a 16x16 distance preview, and
-64/32/16/8 mip views. For 128px projections the 3x3 tile panel uses a 64px
-view so 64px and 128px candidates can be judged on the same distance read.
+candidate with a compact codename against the owned 16x16 macro mask, the
+current authored texture, the projected source pixels, a 3x3 tile preview, a
+16x16 distance preview, and 64/32/16/8 mip views. Codenames use the prompt
+family prefix, seed, and strength, for example `D4201S58` means dressed-courses
+seed 4201 at strength 0.58 and `H4107S66` means hewn-horizontal seed 4107 at
+strength 0.66. For 128px projections the 3x3 tile panel uses a 64px view so
+64px and 128px candidates can be judged on the same distance read.
 
 ## Archive Freeze Candidates
 

@@ -159,6 +159,7 @@ interface MacroCorrectionMetrics {
 
 interface CandidateReport {
   candidate: Pick<DiffusionCandidate, "id" | "png" | "seed" | "sha256" | "strength" | "tile3x3_png">;
+  codename: string;
   sourceManifest: string;
   diffusion: {
     createdAt?: string;
@@ -224,6 +225,7 @@ async function run(args: ProjectArgs): Promise<void> {
     paletteColors: entries.map((entry) => entry.name),
     candidates: reports.map((report) => ({
       id: report.candidate.id,
+      codename: report.codename,
       reports: report.resolutions.map((resolution) => ({
         resolution: resolution.resolution,
         status: resolution.triage.status,
@@ -319,19 +321,21 @@ async function projectCandidate(candidate: DiffusionCandidate, context: ProjectC
     console.log(`Wrote ${maskPath}`);
   }
 
+  const diffusion = {
+    ...(context.manifest.created_at ? { createdAt: context.manifest.created_at } : {}),
+    ...(context.manifest.input ? { input: context.manifest.input } : {}),
+    ...(context.manifest.model_id ? { modelId: context.manifest.model_id } : {}),
+    ...(context.manifest.negative_prompt ? { negativePrompt: context.manifest.negative_prompt } : {}),
+    ...(context.manifest.prompt ? { prompt: context.manifest.prompt } : {}),
+    ...(context.manifest.prompt_preset ? { promptPreset: context.manifest.prompt_preset } : {}),
+    ...(context.manifest.scheduler ? { scheduler: context.manifest.scheduler } : {}),
+    ...(context.manifest.steps !== undefined ? { steps: context.manifest.steps } : {}),
+  };
   const report: CandidateReport = {
     candidate: pickCandidateProvenance(candidate),
+    codename: candidateCodenameFrom(candidate, diffusion.promptPreset),
     sourceManifest: context.args.manifestPath,
-    diffusion: {
-      ...(context.manifest.created_at ? { createdAt: context.manifest.created_at } : {}),
-      ...(context.manifest.input ? { input: context.manifest.input } : {}),
-      ...(context.manifest.model_id ? { modelId: context.manifest.model_id } : {}),
-      ...(context.manifest.negative_prompt ? { negativePrompt: context.manifest.negative_prompt } : {}),
-      ...(context.manifest.prompt ? { prompt: context.manifest.prompt } : {}),
-      ...(context.manifest.prompt_preset ? { promptPreset: context.manifest.prompt_preset } : {}),
-      ...(context.manifest.scheduler ? { scheduler: context.manifest.scheduler } : {}),
-      ...(context.manifest.steps !== undefined ? { steps: context.manifest.steps } : {}),
-    },
+    diffusion,
     texture: context.args.texture,
     palette: {
       colors: context.entries.map((entry) => entry.name),
@@ -476,8 +480,9 @@ function drawMetricText(sheet: RgbaImage, row: ProjectionReviewRow, x: number, y
     ["ISO", pad3(isolated)],
     ["QERR", pad3(qerr)],
   ];
+  drawPixelText(sheet, row.report.codename, x, y, 2, text);
   for (const [index, [label, value]] of lines.entries()) {
-    const lineY = y + index * 30;
+    const lineY = y + 36 + index * 26;
     drawPixelText(sheet, label, x, lineY, 1, dimText);
     drawPixelText(sheet, value, x + 108, lineY, 2, text);
   }
@@ -619,6 +624,7 @@ async function writeArchiveBundle(reports: CandidateReport[], context: ArchiveCo
 
     candidates.push({
       id: report.candidate.id,
+      codename: report.codename,
       seed: report.candidate.seed,
       strength: report.candidate.strength,
       raw: rawFile,
@@ -745,6 +751,7 @@ function makeSourceProvenanceComment(
   const lines = [
     "/*",
     " * Diffusion projection provenance:",
+    ` * codename: ${report.codename}`,
     ` * candidate: ${report.candidate.id}`,
     ` * raw_candidate_sha256: ${context.rawFile.sha256}`,
     ` * diffusion_manifest_sha256: ${context.manifestFile.sha256}`,
@@ -770,6 +777,40 @@ function makeSourceProvenanceComment(
     "",
   ];
   return lines.join("\n");
+}
+
+function candidateCodenameFrom(candidate: DiffusionCandidate, promptPreset: string | undefined): string {
+  const prefix = promptPresetPrefix(promptPreset);
+  const seed = candidate.seed?.toString() ?? seedFromCandidateId(candidate.id) ?? "0000";
+  const strength = Math.round((candidate.strength ?? strengthFromCandidateId(candidate.id) ?? 0) * 100)
+    .toString()
+    .padStart(2, "0");
+  return `${prefix}${seed}S${strength}`;
+}
+
+function promptPresetPrefix(promptPreset: string | undefined): string {
+  if (promptPreset?.includes("dressed")) {
+    return "D";
+  }
+  if (promptPreset?.includes("hewn")) {
+    return "H";
+  }
+  if (promptPreset?.includes("stone")) {
+    return "S";
+  }
+  return "X";
+}
+
+function seedFromCandidateId(id: string): string | undefined {
+  return /seed(\d+)/.exec(id)?.[1];
+}
+
+function strengthFromCandidateId(id: string): number | undefined {
+  const match = /strength(\d+)p(\d+)/.exec(id);
+  if (!match) {
+    return undefined;
+  }
+  return Number.parseFloat(`${match[1]}.${match[2]}`);
 }
 
 function makeArchiveReadme(archiveManifest: {
