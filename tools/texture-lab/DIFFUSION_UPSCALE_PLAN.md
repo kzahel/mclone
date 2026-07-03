@@ -276,6 +276,41 @@ Local validation on macOS/M4/MPS:
     can drift into marble/crack planes; dressed-courses gets closest to the
     rough-hewn horizontal/course idea but includes over-rectangular failures.
     This is now the better M3 input pool than the original M2 sweep.
+- Initial M3 projection is implemented in `src/project-diffusion.ts`:
+  - `pnpm --dir tools/texture-lab project-diffusion -- ...` consumes a
+    diffusion `manifest.json`, one or more candidate ids, a target texture, a
+    restricted palette color list, ASCII symbols, and one or more output
+    resolutions.
+  - Projection currently performs area downsample, Oklab nearest-palette
+    quantization, deterministic macro majority correction against the
+    manifest's owned 16x16 input mask, wrap-seam metrics, macro-fidelity
+    metrics, detail metrics, triage scoring, per-candidate reports, and a run
+    summary. Raw diffusion PNGs still stay under `/tmp`; the projected masks
+    are review artifacts, not committed source.
+  - Focused dressed candidate run:
+    `/tmp/mclone-texture-lab/diffusion-projection/stone-dressed-4204-066/`
+    projected `candidate-seed4204-strength0p660` at 32, 64, and 128. Macro
+    majority mismatch was pinned to zero at every resolution. Correction cost
+    dropped as resolution increased: 32px corrected 41.2109% of pixels, 64px
+    corrected 24.7803%, and 128px corrected 20.4529%. All three remain
+    `review` because the projected wrap seam still needs visual judgment.
+  - 64px batch ranking was run for both M2b prompt pools:
+    `/tmp/mclone-texture-lab/diffusion-projection/stone-dressed-m2b-64/` and
+    `/tmp/mclone-texture-lab/diffusion-projection/stone-hewn-m2b-64/`.
+    Dressed-courses ranked slightly better and looked quieter on visual
+    inspection; hewn-horizontal remains interesting but tends toward
+    veiny/marble structure.
+  - Best 64px dressed review candidates by current score:
+    `candidate-seed4201-strength0p500` (1.549082),
+    `candidate-seed4201-strength0p580` (1.563073),
+    `candidate-seed4205-strength0p580` (1.610107), and
+    `candidate-seed4205-strength0p500` (1.61236).
+  - Best 64px hewn review candidate by current score:
+    `candidate-seed4107-strength0p660` (1.623365).
+  - M3 is not done enough to freeze source yet. Next slice should build a
+    review sheet for the top dressed/hewn projections with 3x3 tiling,
+    baselines, and mip/distance previews, then decide whether 64px or 128px is
+    worth carrying into `stone.ts`.
 
 Implementation order: **M0 and M1 are one chunk — build them together.**
 The circular-padding patch is ~10 lines and must be exercised from day one;

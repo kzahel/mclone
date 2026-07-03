@@ -8,6 +8,7 @@
     "export": "tsx src/export.ts packs/mclone-default/texture.ts",
     "analyze": "tsx src/analyze.ts packs/mclone-default/texture.ts",
     "catalog": "tsx src/catalog.ts packs/mclone-default/texture.ts",
+    "project-diffusion": "tsx src/project-diffusion.ts packs/mclone-default/texture.ts",
     "runtime-compat": "tsx src/export.ts packs/mclone-default/texture.ts --runtime-compat",
     "sheet": "tsx src/export.ts packs/mclone-default/texture.ts --sheet-only"
   },

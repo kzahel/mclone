@@ -119,3 +119,43 @@ uv run python propose.py \
   --input-grain-seed 12345 \
   --out-dir /tmp/mclone-texture-lab/diffusion/stone-m2b-dressed-courses
 ```
+
+## Project Candidates
+
+Projection is handled by the TypeScript lab, not the Python runner. It consumes
+a diffusion `manifest.json`, area-downsamples raw candidates to the requested
+source resolution, quantizes into the pack palette in Oklab space, pins each
+16x16 macro cell back to the owned input mask by deterministic majority
+correction, then emits PNGs, ASCII masks, and per-candidate reports.
+
+Project one candidate at 32/64/128:
+
+```sh
+pnpm --dir tools/texture-lab project-diffusion -- \
+  --manifest /tmp/mclone-texture-lab/diffusion/stone-m2b-dressed-courses/manifest.json \
+  --candidate candidate-seed4204-strength0p660 \
+  --texture stone \
+  --palette-colors pit,mid,base,light \
+  --symbols pmbh \
+  --resolutions 32,64,128 \
+  --out /tmp/mclone-texture-lab/diffusion-projection/stone-dressed-4204-066
+```
+
+Batch-project a sweep at 64px for ranking:
+
+```sh
+pnpm --dir tools/texture-lab project-diffusion -- \
+  --manifest /tmp/mclone-texture-lab/diffusion/stone-m2b-dressed-courses/manifest.json \
+  --texture stone \
+  --palette-colors pit,mid,base,light \
+  --symbols pmbh \
+  --resolutions 64 \
+  --out /tmp/mclone-texture-lab/diffusion-projection/stone-dressed-m2b-64
+```
+
+Outputs are written under the selected `--out` directory:
+
+- `<candidate>/<candidate>-<resolution>.png`
+- `<candidate>/<candidate>-<resolution>.mask.txt`
+- `<candidate>/<candidate>-projection-report.json`
+- `projection-summary.json`
