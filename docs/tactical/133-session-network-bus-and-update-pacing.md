@@ -11,8 +11,9 @@ resident cached-section dirty flags landed; Slice 3E local chunk-view churn
 validation landed; Slice 3F Quest-controlled chunk-view churn validation
 landed and reproduced the unload client-apply tail; Slice 3G default
 unload-count pump cap landed and reduced the Quest unload tail but did not
-eliminate it; remote/web bus convergence and broader terrain coordinator
-lifecycle remain active
+eliminate it; Slice 3H client entity-by-chunk unload index landed and cut the
+Quest update-pump tail below 4 ms; remote/web bus convergence and broader
+terrain coordinator lifecycle remain active
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -657,6 +658,57 @@ Validation (Slice 3G):
 - Quest validation command passed:
   `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-chunk-view-churn --perf-churn-interval-seconds 3 --perf-churn-offset-chunks 16 --perf-metrics --wait-seconds 270 --perf-summary /tmp/mclone-quest-openxr-churn-unload-cap-summary.txt --log /tmp/mclone-quest-openxr-churn-unload-cap-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
 
+### Slice 3H - Client Entity-By-Chunk Unload Index
+
+Goal: remove the obvious per-unload client-replica scan while preserving the
+same `ServerUpdate::ChunkUnload` semantics.
+
+- [x] Add a `ClientRuntime` entity chunk index (`EntityId -> ChunkPos` and
+  `ChunkPos -> EntityId set`) so chunk unload removes only entities in the
+  unloaded chunk instead of retaining/scanning the entire entity map for every
+  unload update.
+- [x] Keep the index synchronized on entity snapshot insert/replace, entity
+  movement updates, explicit entity removal, and replica clear.
+- [x] Extend the client lifecycle test so an entity moved across a chunk
+  boundary survives unloading the old chunk and is removed by unloading the new
+  chunk.
+
+Recorded Slice 3H result:
+
+- Quest chunk-view churn lane passed again with the same command shape, writing
+  `/tmp/mclone-quest-openxr-churn-entity-index-summary.txt` and
+  `/tmp/mclone-quest-openxr-churn-entity-index-logcat.txt`.
+- The capped update-pump max improved from Slice 3G's
+  `max_runtime_poll_ms=8.694`, `apply_updates_ms=8.676`,
+  `client_apply_ms=8.325` to `3.925`, `3.913`, and `3.882 ms`.
+- The unload category improved but is not zero:
+  `unload_ms=3.614`, `unload_dirty_ms=1.580`,
+  `unload_client_ms=3.208`, with `unload_updates=16`.
+- The max update category moved to section block updates:
+  `section_ms=3.913`, `section_dirty_ms=0.068`,
+  `section_client_ms=3.882`, with `section_updates=13`.
+- Queue age remained high because the cap still spreads the churn burst across
+  frames: `server_update_queue_depth=406`,
+  `server_update_oldest_applied_age_ms=227.549`.
+- Worst-frame attribution no longer points at update apply. The top sampled
+  frames had zero update-apply work and were dominated by terrain poll wait,
+  eye encode/submit, and upload apply.
+- Terrain upload/ready pressure remained active but less extreme than Slice 3G:
+  `upload_limited=true`, `accept_limited=true`, `backpressured=true`,
+  `deferred_sections=3008`, `queued_upload_removed_sections=1408`,
+  `max_runtime_upload_apply_ms=5.080`.
+
+Validation (Slice 3H):
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-client -- --nocapture`
+  passed.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -- --nocapture`
+  passed.
+- `cargo ndk -t arm64-v8a --platform 28 check --package mclone-android-xr-client --lib`
+  passed.
+- Quest validation command passed:
+  `node ./scripts/run-native-bash.mjs ./android-xr/validate-quest-openxr.sh --render-compile-workers 2 --xr-render-completed-result-accept-budget 2 --xr-render-section-upload-budget 16 --xr-render-section-accept-budget 64 --perf-seconds 45 --perf-chunk-view-churn --perf-churn-interval-seconds 3 --perf-churn-offset-chunks 16 --perf-metrics --wait-seconds 270 --perf-summary /tmp/mclone-quest-openxr-churn-entity-index-summary.txt --log /tmp/mclone-quest-openxr-churn-entity-index-logcat.txt --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 7 --day-time 6000 --freeze-time`.
+
 Slice 3 conclusion: the local integrated update pump now follows the intended
 thin-apply shape for resident dirty marking: producer-side decode, strict
 receive-order application, resident flag flips, and bounded compile/upload
@@ -666,13 +718,16 @@ insertion. The local deterministic churn test did not reproduce a multi-ms
 client unload tail on desktop/shared runtime, but the Quest-controlled churn
 lane did reproduce it: the worst update-pump frame was dominated by chunk
 unload client apply. The default unload-count cap now bounds the number of
-unloads applied in one normal frame and cuts the measured tail, but the capped
-tail is still too high and increases queued update age. The next local Quest
-work should inspect and reduce per-unload client/runtime cost, then retune or
-remove the count cap if the thin-apply target is recovered. Keep receive order;
-any additional divergence should stop between ordered update records or make
-oversized lifecycle batches splittable instead of reordering them. This
-tactical's remaining bus work is still remote TCP and web convergence.
+unloads applied in one normal frame, and the client entity-by-chunk index
+removed the worst O(unloads * live entities) client-replica scan. The measured
+Quest update-pump max is now below 4 ms in the churn lane, and the worst sampled
+frames are no longer update-apply frames. Remaining valuable local work before
+closing this slice is to inspect the section-block client patch tail and
+residual unload dirty marking, then retune or remove the unload-count cap if the
+thin-apply target holds. Keep receive order; any additional divergence should
+stop between ordered update records or make oversized lifecycle batches
+splittable instead of reordering them. This tactical's remaining bus work is
+still remote TCP and web convergence.
 
 ### Slice 4 - Native Remote TCP Session Actor
 
@@ -740,10 +795,11 @@ another doc, explicitly decide where these remaining valuable items live:
 - Oversized lifecycle/update batches: Quest churn reproduced a single
   update-pump frame with `204` unload updates and `19.323 ms` unload
   client-apply. A default count cap now limits the normal frame pump to `16`
-  unload updates, but the capped Quest tail is still `8.325 ms` of unload
-  client-apply. Before closing this tactical, inspect/reduce per-unload client
-  cost or explicitly move the remaining work to the terrain/client-runtime
-  coordinator track.
+  unload updates, and the client entity-by-chunk index cut the capped Quest
+  update-pump max to `3.913 ms` apply / `3.882 ms` client apply. Before closing
+  this tactical, either inspect the remaining section-block client patch tail
+  plus residual unload dirty marking, or explicitly move that work to the
+  terrain/client-runtime coordinator track.
 - Remote TCP session actor: native remote still needs a real inbound update
   bus and producer-side decode so `SendOnly` works outside local integrated
   play.

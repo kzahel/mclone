@@ -1699,19 +1699,22 @@ unload tail: `max_runtime_poll_ms=20.654`, `apply_updates_ms=20.605`,
 normal frame pump to `16` unload updates. The same Quest churn lane improved
 `max_runtime_poll_ms` / `apply_updates_ms` / `client_apply_ms` to
 `8.694` / `8.676` / `8.325 ms`, but that is still too high and increased oldest
-applied update age to `235.992 ms`.
+applied update age to `235.992 ms`. A follow-up client entity-by-chunk index
+removed the O(unloads * live entities) unload cleanup scan and improved the
+same lane to `3.925` / `3.913` / `3.882 ms`. The remaining max update-apply
+categories were section block client patching (`3.913 ms`) and residual unload
+dirty/client work (`3.614 ms`).
 
-The next implementation chunk should inspect and reduce per-unload
-`ClientRuntime` / runtime dirty lifecycle cost before changing broad pump
-policy. Keep receive order. The count cap is now a guardrail for the normal
-frame pump, not the final fix; after per-unload cost is thinner, retune or
+The next implementation chunk should inspect the section-block client patch
+tail and residual unload dirty marking before changing broad pump policy. Keep
+receive order. The count cap is now a guardrail for the normal frame pump, not
+the final fix; after the remaining update-apply costs are thinner, retune or
 remove the cap based on the same Quest chunk-view churn lane.
 
 Keep upload apply and per-eye encode on the short list. The churn run also
-showed terrain pipeline pressure (`upload_limited=true`, `accept_limited=true`,
-`backpressured=true`, `deferred_sections=3328`, `ready_sections=2432`), and when
-update apply is quiet the recurring tails are still upload apply, stereo poll
-wait, and eye encode.
+showed terrain pipeline pressure. After the entity-index slice, update apply no
+longer appeared in the worst sampled frames; the recurring tails were terrain
+poll wait, upload apply, and eye encode/submit.
 
 Use `2 / 16 / 64` as the current render/compile/upload measurement lane, not a
 default policy. It was the best held-capacity result, but the controlled churn

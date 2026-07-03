@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 mod actor;
 mod interaction;
@@ -77,6 +77,8 @@ pub struct ClientRuntime {
     remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
     remote_player_walk_distances: BTreeMap<RemotePlayerId, f32>,
     entities: BTreeMap<EntityId, EntitySnapshot>,
+    entity_chunks: BTreeMap<EntityId, ChunkPos>,
+    entities_by_chunk: BTreeMap<ChunkPos, BTreeSet<EntityId>>,
 }
 
 impl ClientRuntime {
@@ -91,6 +93,8 @@ impl ClientRuntime {
             remote_players: BTreeMap::new(),
             remote_player_walk_distances: BTreeMap::new(),
             entities: BTreeMap::new(),
+            entity_chunks: BTreeMap::new(),
+            entities_by_chunk: BTreeMap::new(),
         }
     }
 
@@ -170,13 +174,13 @@ impl ClientRuntime {
                 self.remote_player_walk_distances.remove(&id);
             }
             ServerUpdate::EntitySnapshot(snapshot) => {
-                self.entities.insert(snapshot.id, snapshot);
+                self.insert_entity_snapshot(snapshot);
             }
             ServerUpdate::EntityUpdate(update) => {
                 self.apply_entity_update(update);
             }
             ServerUpdate::EntityRemove { id } => {
-                self.entities.remove(&id);
+                self.remove_entity(id);
             }
         }
     }
@@ -216,6 +220,8 @@ impl ClientRuntime {
         self.remote_players.clear();
         self.remote_player_walk_distances.clear();
         self.entities.clear();
+        self.entity_chunks.clear();
+        self.entities_by_chunk.clear();
     }
 
     pub fn remote_player(&self, id: RemotePlayerId) -> Option<&RemotePlayerUpdate> {
@@ -311,24 +317,74 @@ impl ClientRuntime {
     }
 
     fn apply_entity_update(&mut self, update: EntityUpdate) {
-        let Some(snapshot) = self.entities.get_mut(&update.id) else {
-            return;
+        let new_chunk = {
+            let Some(snapshot) = self.entities.get_mut(&update.id) else {
+                return;
+            };
+            if let Some(stack) = update.item_stack {
+                snapshot.item_stack = Some(stack);
+            }
+            snapshot.position = update.position;
+            snapshot.y_rot_degrees = update.y_rot_degrees;
+            snapshot.x_rot_degrees = update.x_rot_degrees;
+            snapshot.rotation = update.rotation;
+            snapshot.on_ground = update.on_ground;
+            snapshot.age_ticks = update.age_ticks;
+            entity_chunk_pos(snapshot)
         };
-        if let Some(stack) = update.item_stack {
-            snapshot.item_stack = Some(stack);
-        }
-        snapshot.position = update.position;
-        snapshot.y_rot_degrees = update.y_rot_degrees;
-        snapshot.x_rot_degrees = update.x_rot_degrees;
-        snapshot.rotation = update.rotation;
-        snapshot.on_ground = update.on_ground;
-        snapshot.age_ticks = update.age_ticks;
+        self.set_entity_chunk(update.id, new_chunk);
     }
 
     fn remove_entities_in_chunk(&mut self, pos: ChunkPos) {
-        self.entities
-            .retain(|_, snapshot| BlockPos::containing(snapshot.position).chunk_pos() != pos);
+        let Some(ids) = self.entities_by_chunk.remove(&pos) else {
+            return;
+        };
+        for id in ids {
+            self.entities.remove(&id);
+            self.entity_chunks.remove(&id);
+        }
     }
+
+    fn insert_entity_snapshot(&mut self, snapshot: EntitySnapshot) {
+        let id = snapshot.id;
+        let chunk = entity_chunk_pos(&snapshot);
+        self.entities.insert(id, snapshot);
+        self.set_entity_chunk(id, chunk);
+    }
+
+    fn remove_entity(&mut self, id: EntityId) {
+        self.entities.remove(&id);
+        self.remove_entity_chunk_index(id);
+    }
+
+    fn set_entity_chunk(&mut self, id: EntityId, chunk: ChunkPos) {
+        if self.entity_chunks.get(&id) == Some(&chunk) {
+            self.entities_by_chunk.entry(chunk).or_default().insert(id);
+            return;
+        }
+
+        self.remove_entity_chunk_index(id);
+        self.entity_chunks.insert(id, chunk);
+        self.entities_by_chunk.entry(chunk).or_default().insert(id);
+    }
+
+    fn remove_entity_chunk_index(&mut self, id: EntityId) {
+        let Some(chunk) = self.entity_chunks.remove(&id) else {
+            return;
+        };
+        let mut remove_chunk_entry = false;
+        if let Some(ids) = self.entities_by_chunk.get_mut(&chunk) {
+            ids.remove(&id);
+            remove_chunk_entry = ids.is_empty();
+        }
+        if remove_chunk_entry {
+            self.entities_by_chunk.remove(&chunk);
+        }
+    }
+}
+
+fn entity_chunk_pos(snapshot: &EntitySnapshot) -> ChunkPos {
+    BlockPos::containing(snapshot.position).chunk_pos()
 }
 
 fn remote_player_horizontal_distance(
@@ -667,7 +723,7 @@ mod tests {
         let moved = EntityUpdate {
             id,
             item_stack: None,
-            position: mclone_core::Vec3d::new(3.0, 65.0, 4.0),
+            position: mclone_core::Vec3d::new(17.0, 65.0, 4.0),
             y_rot_degrees: 90.0,
             x_rot_degrees: -10.0,
             rotation: Some(mclone_protocol::EntityRotation {
@@ -700,6 +756,15 @@ mod tests {
 
         runtime.apply_update(ServerUpdate::ChunkUnload {
             pos: ChunkPos::new(0, 0),
+        });
+        assert_eq!(runtime.entity_count(), 1);
+        assert_eq!(
+            runtime.entity(id).map(|snapshot| snapshot.position),
+            Some(moved.position)
+        );
+
+        runtime.apply_update(ServerUpdate::ChunkUnload {
+            pos: ChunkPos::new(1, 0),
         });
         assert_eq!(runtime.entity_count(), 0);
         assert_eq!(runtime.entity(id), None);
