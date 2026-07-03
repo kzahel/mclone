@@ -344,7 +344,9 @@ not advertise entity chunk support.
 Native `SqliteWorldStore` is the first durable block/entity chunk backend behind
 the same logical contract. The dedicated server can now open it through
 `--world-dir`, `--world-root` / `--world-name`, or explicit `--transient`; the
-desktop local-integrated app path still starts transient worlds.
+desktop native local-integrated startup path can open it through
+`mclone-native-client --world-dir PATH` or stay explicitly transient with
+`--transient`.
 
 Current durable native backend:
 
@@ -354,8 +356,8 @@ Current durable native backend:
 - metadata and schema tables with `PRAGMA user_version`
 - WAL mode where supported
 - checkpoint on flush/close
-- dedicated server clean shutdown drains dirty writes and closes the
-  persistence actor
+- dedicated server and desktop local-integrated runner shutdown drain dirty
+  writes and close the persistence actor
 
 SQLite is a pragmatic starting point because it gives indexing, transactions,
 schema migration, and fewer small-file problems. `rusqlite` with the bundled
@@ -487,5 +489,8 @@ actor boundary:
    rejection
 5. keep app wiring transient until the actor contract is proven
 
-After that, the next high-value slice is entity chunk persistence for generated
-passive mobs, because it unblocks clean spawning semantics.
+That early direction has landed through the shared contract, entity chunk
+records, threaded native mailbox, SQLite backend, dedicated world-dir, and
+desktop local `--world-dir` wiring. The current next high-value slice is the
+browser IndexedDB backend, because browser singleplayer still needs durable
+local storage behind the same request/completion contract.

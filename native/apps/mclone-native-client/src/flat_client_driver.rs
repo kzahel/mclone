@@ -1202,6 +1202,7 @@ impl FlatClientDriver {
     fn remote_session_scene(&self, remote_addr: String) -> SceneOptions {
         let mut scene = self.scene.clone();
         scene.remote_addr = Some(remote_addr);
+        scene.world_dir = None;
         scene
     }
 

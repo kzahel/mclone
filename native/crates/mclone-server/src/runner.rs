@@ -419,6 +419,7 @@ pub struct ServerUpdateEnvelope {
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, mpsc};
     use std::thread::{self, JoinHandle};
@@ -500,7 +501,19 @@ mod native {
             || report.fluid_event_count > 0
     }
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub enum NativeIntegratedServerWorldStorage {
+        Transient,
+        Persistent { dir: PathBuf },
+    }
+
+    impl Default for NativeIntegratedServerWorldStorage {
+        fn default() -> Self {
+            Self::Transient
+        }
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct NativeIntegratedServerRunnerConfig {
         pub seed: i64,
         pub lighting_enabled: bool,
@@ -509,11 +522,12 @@ mod native {
         pub debug_passive_showcase: bool,
         pub tick_interval: Duration,
         pub cadence: SimulationCadenceConfig,
+        pub world_storage: NativeIntegratedServerWorldStorage,
         player_chunk_tracking_policy: PlayerChunkTrackingPolicy,
     }
 
     impl NativeIntegratedServerRunnerConfig {
-        pub const fn new(seed: i64) -> Self {
+        pub fn new(seed: i64) -> Self {
             Self {
                 seed,
                 lighting_enabled: true,
@@ -522,43 +536,57 @@ mod native {
                 debug_passive_showcase: true,
                 tick_interval: Duration::from_millis(50),
                 cadence: SimulationCadenceConfig::new(20, 20, 60),
+                world_storage: NativeIntegratedServerWorldStorage::Transient,
                 player_chunk_tracking_policy: PlayerChunkTrackingPolicy::dedicated_default(),
             }
         }
 
-        pub const fn with_lighting_enabled(mut self, enabled: bool) -> Self {
+        pub fn with_lighting_enabled(mut self, enabled: bool) -> Self {
             self.lighting_enabled = enabled;
             self
         }
 
-        pub const fn with_day_time(mut self, day_time: Option<u64>) -> Self {
+        pub fn with_day_time(mut self, day_time: Option<u64>) -> Self {
             self.day_time = day_time;
             self
         }
 
-        pub const fn with_day_time_frozen(mut self, frozen: bool) -> Self {
+        pub fn with_day_time_frozen(mut self, frozen: bool) -> Self {
             self.day_time_frozen = frozen;
             self
         }
 
-        pub const fn with_debug_passive_showcase(mut self, enabled: bool) -> Self {
+        pub fn with_debug_passive_showcase(mut self, enabled: bool) -> Self {
             self.debug_passive_showcase = enabled;
             self
         }
 
-        pub const fn with_local_integrated_chunk_tracking(mut self) -> Self {
+        pub fn with_local_integrated_chunk_tracking(mut self) -> Self {
             self.player_chunk_tracking_policy =
                 PlayerChunkTrackingPolicy::java_max().with_unload_hysteresis_chunks(1);
             self
         }
 
-        pub const fn with_tick_interval(mut self, tick_interval: Duration) -> Self {
+        pub fn with_tick_interval(mut self, tick_interval: Duration) -> Self {
             self.tick_interval = tick_interval;
             self
         }
 
-        pub const fn with_cadence(mut self, cadence: SimulationCadenceConfig) -> Self {
+        pub fn with_cadence(mut self, cadence: SimulationCadenceConfig) -> Self {
             self.cadence = cadence;
+            self
+        }
+
+        pub fn with_world_storage(
+            mut self,
+            world_storage: NativeIntegratedServerWorldStorage,
+        ) -> Self {
+            self.world_storage = world_storage;
+            self
+        }
+
+        pub fn with_persistent_world_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+            self.world_storage = NativeIntegratedServerWorldStorage::Persistent { dir: dir.into() };
             self
         }
 
@@ -571,7 +599,7 @@ mod native {
             self
         }
 
-        const fn initial_day_time(self) -> u64 {
+        fn initial_day_time(&self) -> u64 {
             match self.day_time {
                 Some(day_time) => day_time,
                 None => INITIAL_DAY_TIME,
@@ -839,21 +867,38 @@ mod native {
         diagnostics: Arc<Mutex<ServerRunnerDiagnostics>>,
         ready_tx: mpsc::Sender<Result<(), String>>,
     ) -> ServerRunnerResult<()> {
-        let mut server = IntegratedServer::with_player_chunk_tracking_policy(
-            config.seed,
-            config.player_chunk_tracking_policy,
-        );
+        let Some(timing_state) = NativeRunnerTimingState::new(config.tick_interval, config.cadence)
+        else {
+            let _ = ready_tx.send(Err("invalid native server cadence config".to_owned()));
+            return Ok(());
+        };
+        let mut server = match &config.world_storage {
+            NativeIntegratedServerWorldStorage::Transient => {
+                IntegratedServer::with_player_chunk_tracking_policy(
+                    config.seed,
+                    config.player_chunk_tracking_policy,
+                )
+            }
+            NativeIntegratedServerWorldStorage::Persistent { dir } => {
+                match IntegratedServer::try_with_threaded_sqlite_world_dir_and_player_chunk_tracking_policy(
+                    config.seed,
+                    dir,
+                    config.player_chunk_tracking_policy,
+                ) {
+                    Ok(server) => server,
+                    Err(error) => {
+                        let _ = ready_tx.send(Err(error.to_string()));
+                        return Ok(());
+                    }
+                }
+            }
+        };
         server.set_lighting_enabled(config.lighting_enabled);
         server.set_day_time_frozen(config.day_time_frozen);
         server.set_debug_passive_showcase_enabled(config.debug_passive_showcase);
         if let Some(day_time) = config.day_time {
             server.set_day_time(day_time);
         }
-        let Some(timing_state) = NativeRunnerTimingState::new(config.tick_interval, config.cadence)
-        else {
-            let _ = ready_tx.send(Err("invalid native server cadence config".to_owned()));
-            return Ok(());
-        };
         let mut diagnostics_detail_sampler = DiagnosticsDetailSampler::default();
         refresh_diagnostics(
             &diagnostics,
@@ -1281,10 +1326,18 @@ mod native {
 
     #[cfg(test)]
     mod tests {
+        use std::fs;
         use std::time::{Duration, Instant};
 
-        use mclone_core::ChunkPos;
-        use mclone_protocol::{ChunkView, ServerUpdate};
+        use mclone_core::{
+            AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, Direction, Vec3d,
+            block_to_section_coord, chunk_section_index, local_block_coord,
+            local_section_block_coord,
+        };
+        use mclone_protocol::{
+            AcceptTeleportCommand, ChunkView, MovePlayerCommand, PlayerActionCommand,
+            PlayerActionKind, ServerUpdate,
+        };
 
         use super::*;
 
@@ -1542,6 +1595,40 @@ mod native {
         }
 
         #[test]
+        fn native_runner_persistent_world_dir_survives_restart() {
+            let root = unique_temp_dir("native-runner-persistent-world-restart");
+            let seed = 12_345;
+
+            let mut runner = NativeIntegratedServerRunner::new(
+                test_runner_config(seed).with_persistent_world_dir(root.clone()),
+            )
+            .unwrap();
+            let (snapshot, mut updates) = load_chunk_snapshot(&mut runner, ChunkPos::new(0, 0));
+            acknowledge_initial_teleport(&mut runner, &updates);
+            let target = first_non_air_block(&snapshot).expect("generated chunk contains blocks");
+            move_player_near_block(&mut runner, target);
+            break_block(&mut runner, target);
+            updates = drain_until(&mut runner, |updates| {
+                has_block_delta_for_block(updates, target, AIR_BLOCK_STATE_ID)
+            });
+            assert!(has_block_delta_for_block(
+                &updates,
+                target,
+                AIR_BLOCK_STATE_ID
+            ));
+            runner.join_shutdown().unwrap();
+
+            let mut runner = NativeIntegratedServerRunner::new(
+                test_runner_config(seed).with_persistent_world_dir(root.clone()),
+            )
+            .unwrap();
+            let (snapshot, _updates) = load_chunk_snapshot(&mut runner, target.chunk_pos());
+            assert_eq!(snapshot_block_state(&snapshot, target), AIR_BLOCK_STATE_ID);
+            runner.join_shutdown().unwrap();
+            let _ = fs::remove_dir_all(root);
+        }
+
+        #[test]
         fn diagnostics_detail_refresh_predicate_tracks_scheduler_visible_activity() {
             assert!(!should_force_detail_after_tick(
                 &tick_report_for_detail_refresh(0, 0, 0)
@@ -1573,6 +1660,149 @@ mod native {
             NativeIntegratedServerRunnerConfig::new(seed)
                 .with_lighting_enabled(false)
                 .with_tick_interval(Duration::from_millis(1))
+        }
+
+        fn load_chunk_snapshot(
+            runner: &mut NativeIntegratedServerRunner,
+            center: ChunkPos,
+        ) -> (mclone_core::ChunkSnapshot, Vec<ServerUpdate>) {
+            runner
+                .send_command(ClientCommand::SetChunkView(ChunkView {
+                    center,
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                }))
+                .unwrap();
+            let updates = drain_until(runner, |updates| {
+                updates.iter().any(|update| {
+                    matches!(update, ServerUpdate::ChunkSnapshot(snapshot) if snapshot.pos == center)
+                })
+            });
+            let snapshot = updates
+                .iter()
+                .find_map(|update| match update {
+                    ServerUpdate::ChunkSnapshot(snapshot) if snapshot.pos == center => {
+                        Some(snapshot.clone())
+                    }
+                    _ => None,
+                })
+                .expect("chunk snapshot update");
+            (snapshot, updates)
+        }
+
+        fn acknowledge_initial_teleport(
+            runner: &mut NativeIntegratedServerRunner,
+            updates: &[ServerUpdate],
+        ) {
+            if let Some(id) = updates.iter().find_map(|update| match update {
+                ServerUpdate::PlayerPosition(update) => Some(update.teleport_id),
+                _ => None,
+            }) {
+                runner
+                    .send_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand { id }))
+                    .unwrap();
+                let mut updates = Vec::new();
+                drain_runner_until_idle(runner, &mut updates);
+            }
+        }
+
+        fn first_non_air_block(snapshot: &mclone_core::ChunkSnapshot) -> Option<BlockPos> {
+            for section in snapshot.sections.iter().rev() {
+                let section_blocks = section.unpack_block_state_ids();
+                for local_y in (0..16).rev() {
+                    for local_z in 0..16 {
+                        for local_x in 0..16 {
+                            if section_blocks[chunk_section_index(local_x, local_y, local_z)]
+                                != AIR_BLOCK_STATE_ID
+                            {
+                                return Some(BlockPos::new(
+                                    snapshot.pos.min_block_x() + local_x,
+                                    section.section_y * 16 + local_y,
+                                    snapshot.pos.min_block_z() + local_z,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
+
+        fn move_player_near_block(runner: &mut NativeIntegratedServerRunner, pos: BlockPos) {
+            runner
+                .send_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                    position: Vec3d::new(pos.x as f64 + 0.5, pos.y as f64, pos.z as f64 + 0.5),
+                    y_rot_degrees: 0.0,
+                    x_rot_degrees: 0.0,
+                    on_ground: true,
+                }))
+                .unwrap();
+            let mut updates = Vec::new();
+            drain_runner_until_idle(runner, &mut updates);
+        }
+
+        fn break_block(runner: &mut NativeIntegratedServerRunner, pos: BlockPos) {
+            runner
+                .send_command(ClientCommand::PlayerAction(PlayerActionCommand {
+                    pos,
+                    direction: Direction::Up,
+                    kind: PlayerActionKind::DebugInstantBreak,
+                }))
+                .unwrap();
+        }
+
+        fn snapshot_block_state(
+            snapshot: &mclone_core::ChunkSnapshot,
+            pos: BlockPos,
+        ) -> BlockStateId {
+            let section_y = block_to_section_coord(pos.y);
+            let Some(section) = snapshot
+                .sections
+                .iter()
+                .find(|section| section.section_y == section_y)
+            else {
+                return AIR_BLOCK_STATE_ID;
+            };
+            let blocks = section.unpack_block_state_ids();
+            blocks[chunk_section_index(
+                local_block_coord(pos.x),
+                local_section_block_coord(pos.y),
+                local_block_coord(pos.z),
+            )]
+        }
+
+        fn has_block_delta_for_block(
+            updates: &[ServerUpdate],
+            pos: BlockPos,
+            block_state: BlockStateId,
+        ) -> bool {
+            updates.iter().any(|update| match update {
+                ServerUpdate::SectionBlockUpdates {
+                    pos: chunk_pos,
+                    section_y,
+                    updates,
+                } => {
+                    *chunk_pos == pos.chunk_pos()
+                        && *section_y == block_to_section_coord(pos.y)
+                        && updates.iter().any(|update| {
+                            update.local_x == local_block_coord(pos.x) as u8
+                                && update.local_y == local_section_block_coord(pos.y) as u8
+                                && update.local_z == local_block_coord(pos.z) as u8
+                                && update.block_state == block_state
+                        })
+                }
+                _ => false,
+            })
+        }
+
+        fn unique_temp_dir(name: &str) -> PathBuf {
+            let mut path = std::env::temp_dir();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            path.push(format!("mclone-{name}-{}-{nanos}", std::process::id()));
+            path
         }
 
         fn tick_report_for_detail_refresh(
@@ -1653,5 +1883,5 @@ mod native {
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{
     NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
-    host_tick_interval_for_rate_hz,
+    NativeIntegratedServerWorldStorage, host_tick_interval_for_rate_hz,
 };

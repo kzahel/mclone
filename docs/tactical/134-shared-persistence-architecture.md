@@ -1,7 +1,7 @@
 # 134: Shared Persistence Architecture
 
-Status: active; Slice 5 dedicated world-dir wiring landed, desktop local
-world-dir wiring next.
+Status: active; Slice 5B desktop local world-dir wiring landed, browser
+IndexedDB backend next.
 
 ## Purpose
 
@@ -35,7 +35,7 @@ Read before implementation:
 
 ## Current Native State
 
-Live Rust after Slice 5 has:
+Live Rust after Slice 5B has:
 
 - `native/crates/mclone-server/src/persistence.rs`
 - `ChunkSnapshotStore`
@@ -67,11 +67,15 @@ Live Rust after Slice 5 has:
   for clean host shutdown
 - dedicated-server `--world-dir`, `--world-root` / `--world-name`, and
   `--transient` startup modes backed by threaded SQLite persistence
+- native local-integrated runner storage selection through
+  `NativeIntegratedServerWorldStorage`
+- desktop native-client `--world-dir PATH` and explicit `--transient` startup
+  modes for local integrated worlds
 
 This is useful but still too narrow:
 
-- the durable native backend is wired into the dedicated server path but not
-  desktop local-integrated app world-open paths
+- desktop local persistence is startup/CLI-wired but does not yet have an
+  in-game world browser or named-world UI
 - no player/world/saved-data records
 - no web IndexedDB adapter
 - no Android app-private world-dir wiring
@@ -338,7 +342,8 @@ thread in the same slice. Landing real disk IO without the offload would
 reintroduce exactly the blocking this design exists to avoid.
 
 Status: Slice 4A native threaded mailbox landed 2026-07-03; Slice 4B SQLite
-world-store foundation landed 2026-07-03. App/dedicated world-dir wiring still
+world-store foundation landed 2026-07-03. Dedicated and desktop local
+world-dir wiring landed in Slices 5 and 5B; browser/Android adapters remain
 pending.
 
 Deliverables beyond the backend:
@@ -403,9 +408,10 @@ Validation:
   chunk writes
 - dedicated server wiring creates a named world dir/db
 - chunk edit persists across dedicated server process restart
-- desktop native app wiring creates a named world dir/db after local-integrated
-  world selection lands
-- chunk edit persists across desktop app process restart after app wiring
+- desktop native local-integrated runner wiring creates a world dir/db through
+  `--world-dir`
+- chunk edit persists across desktop local-integrated restart through the
+  runner path
 - generated animal persists across process restart after generated-original
   entity persistence lands
 - killed generated animal remains gone across process restart after tombstone
@@ -452,6 +458,49 @@ Landed shape:
 - A dedicated restart test breaks a block through the native TCP client path,
   closes the server, reopens the same world directory, and verifies the block
   edit from the reloaded snapshot.
+
+### Slice 5B: Desktop Native Local World Dir
+
+Wire durable persistence into desktop local-integrated startup without moving
+storage policy into the desktop app crate.
+
+Status: landed 2026-07-03.
+
+Deliverables:
+
+- storage selection on `NativeIntegratedServerRunnerConfig`
+- shared app-runtime local scene option for transient vs persistent storage
+- desktop native-client `--world-dir PATH` and explicit `--transient`
+- reject `--world-dir` with `--remote-addr`
+- clean runner shutdown keeps draining dirty writes through
+  `IntegratedServer::shutdown_persistence`
+
+Landed shape:
+
+- `NativeIntegratedServerWorldStorage::{Transient, Persistent { dir }}`
+  selects runner storage.
+- Persistent local worlds open `SqliteWorldStore::open_world_dir` through the
+  same native threaded persistence actor as the dedicated path.
+- `LocalSingleViewSceneOptions` carries the storage choice, so window,
+  screenshot, perf, and other desktop local scene startup paths share the same
+  runner wiring.
+- `mclone-native-client --world-dir PATH` opens a SQLite-backed local
+  integrated world; no world argument, or `--transient`, keeps the existing
+  transient behavior.
+- Remote dedicated scenes clear local `world_dir` state and the CLI rejects
+  direct `--world-dir` / `--remote-addr` combinations.
+
+Validation:
+
+- native runner restart test breaks a generated block, shuts down, reopens the
+  same world directory, and verifies the block remains air from the reloaded
+  snapshot
+- desktop CLI tests cover `--world-dir`, `--transient` conflict, and
+  `--world-dir` with remote rejection
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server
+  runner::native::tests::native_runner_persistent_world_dir_survives_restart`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client`
 
 ### Slice 6: Browser IndexedDB Backend
 
@@ -528,18 +577,17 @@ one platform before the shared host contract is clear.
 
 ## Next Likely Implementation Chunk
 
-Proceed with **Slice 5B: Desktop Native Local World Dir**.
+Proceed with **Slice 6: Browser IndexedDB Backend**.
 
 Reasoning:
 
-- Slice 5 proved the world-dir/open/shutdown path through the renderer-free
-  dedicated app and native TCP client.
-- Desktop local-integrated still starts transient worlds through
-  `NativeIntegratedServerRunnerConfig`, so normal native app sessions cannot
-  yet use the durable backend.
-- The next native risk is routing a selected local world directory through the
-  shared app-runtime runner config without moving persistence policy into the
-  desktop app crate.
+- The shared contract, threaded native actor, SQLite backend, dedicated
+  world-dir path, and desktop local `--world-dir` path are all wired.
+- Browser singleplayer still lacks a durable backend behind the same
+  request/completion contract.
+- IndexedDB is the next platform-specific adapter risk: it must preserve the
+  same world lifetime, pending-write visibility, flush/close semantics, and
+  local/remote separation without introducing main-thread storage policy.
 
 ## Validation Gates
 

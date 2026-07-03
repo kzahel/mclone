@@ -208,9 +208,11 @@ compatibility stores remain chunk-only.
 Native `SqliteWorldStore` persists block and entity chunk records in one
 SQLite database and can run through the threaded mailbox. Dedicated native
 servers can open it through world-dir startup arguments and close it through the
-shared shutdown path. Native local-integrated app startup, browser
-singleplayer IndexedDB, and Android app-private world roots are still pending.
-Unit tests generally use memory storage.
+shared shutdown path. Desktop native local-integrated startup can open the same
+backend through `mclone-native-client --world-dir PATH`, with `--transient` as
+the explicit memoryless mode. Browser singleplayer IndexedDB and Android
+app-private world roots are still pending. Unit tests generally use memory
+storage.
 
 ### Save Identity And Compatibility
 
@@ -374,7 +376,7 @@ Fresh Playwright contexts reduce leakage, but the explicit query is the determin
 | Structures | Stored starts/references | Not persisted | Structures are post-MVP | Defer |
 | Entities/block entities | Persisted and loaded | Entity chunk records persist Cow, Chicken, and Item state through `WorldStore` backends that opt in; block entities are not modeled yet | Generated-original entity placement and tombstone suppression still need follow-up slices | Tactical 134 |
 | Postprocessing/carving masks | Persisted for proto chunks | Not modeled in storage | Relevant to full vanilla status pipeline | Defer |
-| Save on unload/close | Dirty chunks saved before unload/flush/close | Dirty block and entity chunk records save before holder unload through actor acknowledgements; dedicated shutdown drains dirty writes and closes the actor; desktop local-integrated app close wiring is still pending | Safe for the dedicated SQLite path; unsafe for future native app durable worlds until runner config owns close wiring | Add local app close/flush lifecycle with durable backend |
+| Save on unload/close | Dirty chunks saved before unload/flush/close | Dirty block and entity chunk records save before holder unload through actor acknowledgements; dedicated shutdown and desktop local-integrated runner shutdown drain dirty writes and close the actor | Safe for current native SQLite paths; browser and Android durable lifecycle wiring still pending | Add IndexedDB and Android lifecycle close/flush paths behind the same contract |
 | Client chunk visibility | Server filters packets per player interest | Remote service filters snapshots per session | Close enough for current multiplayer | Keep until ticket model grows |
 | Progress UI | Status listener reports status changes | UI reports saved-chunk lookup, missing generation, decoration, lighting, and publish phases | Coarse lighting progress only | Keep improving with future status work |
 | Test storage isolation | N/A | Worker probes can request `clearWorldStorage=1`; dev profile still persists unless requested | Manual dev refreshes can still intentionally reuse local saves | Keep explicit reset path |

@@ -204,6 +204,20 @@ impl IntegratedServer {
         Self::try_with_threaded_world_store(seed, Box::new(store))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn try_with_threaded_sqlite_world_dir_and_player_chunk_tracking_policy(
+        seed: i64,
+        world_dir: impl AsRef<Path>,
+        policy: PlayerChunkTrackingPolicy,
+    ) -> ChunkStoreResult<Self> {
+        let store = crate::persistence::SqliteWorldStore::open_world_dir(world_dir)?;
+        Ok(Self::with_scheduler_and_player_chunk_tracking_policy(
+            seed,
+            ChunkScheduler::try_with_threaded_world_store(seed, Box::new(store))?,
+            policy,
+        ))
+    }
+
     pub(crate) fn with_player_chunk_tracking_policy(
         seed: i64,
         policy: PlayerChunkTrackingPolicy,

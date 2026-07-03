@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -13,8 +14,8 @@ use mclone_render::far_lod::FarTerrainLodMesh;
 use mclone_render_session::RenderSectionCacheUpdate;
 use mclone_server::{
     IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
-    ServerRunnerDiagnostics, SimulationCadenceConfig, host_tick_interval_for_rate_hz,
-    initial_spawn_center_for_seed,
+    NativeIntegratedServerWorldStorage, ServerRunnerDiagnostics, SimulationCadenceConfig,
+    host_tick_interval_for_rate_hz, initial_spawn_center_for_seed,
 };
 use mclone_ui::LoadingProgressOverlay;
 
@@ -52,6 +53,7 @@ pub struct LocalSingleViewSceneOptions {
     pub freeze_time: bool,
     pub debug_passive_showcase: bool,
     pub lighting_enabled: bool,
+    pub world_storage: NativeIntegratedServerWorldStorage,
     pub render_compile_worker_count: usize,
 }
 
@@ -66,6 +68,7 @@ impl LocalSingleViewSceneOptions {
             freeze_time: false,
             debug_passive_showcase: true,
             lighting_enabled: true,
+            world_storage: NativeIntegratedServerWorldStorage::Transient,
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
         }
     }
@@ -97,6 +100,16 @@ impl LocalSingleViewSceneOptions {
 
     pub const fn with_lighting_enabled(mut self, lighting_enabled: bool) -> Self {
         self.lighting_enabled = lighting_enabled;
+        self
+    }
+
+    pub fn with_world_storage(mut self, world_storage: NativeIntegratedServerWorldStorage) -> Self {
+        self.world_storage = world_storage;
+        self
+    }
+
+    pub fn with_persistent_world_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.world_storage = NativeIntegratedServerWorldStorage::Persistent { dir: dir.into() };
         self
     }
 
@@ -1637,6 +1650,7 @@ fn native_runner_config(
         .with_day_time(options.day_time_override)
         .with_day_time_frozen(options.freeze_time)
         .with_local_integrated_chunk_tracking()
+        .with_world_storage(options.world_storage.clone())
         .with_cadence_derived_tick_interval(options.cadence)
 }
 

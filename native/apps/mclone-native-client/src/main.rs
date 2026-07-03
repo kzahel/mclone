@@ -476,6 +476,46 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_local_world_dir() {
+        let cli = Cli::parse(["--world-dir".to_owned(), "/tmp/mclone-world".to_owned()]).unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::Window {
+                scene: SceneOptions {
+                    world_dir: Some(PathBuf::from("/tmp/mclone-world")),
+                    ..SceneOptions::default()
+                },
+                render_options: TexturedSectionRenderOptions::default(),
+                start_intent: WindowStartIntent::InWorld,
+                startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
+            }
+        );
+    }
+
+    #[test]
+    fn cli_rejects_conflicting_world_storage_args() {
+        let err = Cli::parse([
+            "--transient".to_owned(),
+            "--world-dir".to_owned(),
+            "/tmp/mclone-world".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("--transient cannot be combined with --world-dir"));
+
+        let err = Cli::parse([
+            "--world-dir".to_owned(),
+            "/tmp/mclone-world".to_owned(),
+            "--remote-addr".to_owned(),
+            "127.0.0.1:25565".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("--world-dir applies only to local integrated worlds"));
+    }
+
+    #[test]
     fn cli_parses_headless_dual_view_scene_options() {
         let cli = Cli::parse([
             "--headless-dual-view".to_owned(),
@@ -1159,6 +1199,7 @@ mod tests {
                     render_compile_worker_count:
                         mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
                     remote_addr: None,
+                    world_dir: None,
                     day_time_override: None,
                     freeze_time: false,
                     movement_speed_multiplier: 1.0,

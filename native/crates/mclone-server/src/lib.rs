@@ -128,7 +128,7 @@ pub use persistence::FilesystemChunkSnapshotStore;
 #[cfg(not(target_arch = "wasm32"))]
 pub use runner::{
     NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
-    host_tick_interval_for_rate_hz,
+    NativeIntegratedServerWorldStorage, host_tick_interval_for_rate_hz,
 };
 
 pub(crate) fn mutable_buffer_from_snapshot(snapshot: &ChunkSnapshot) -> MutableChunkBlockBuffer {
