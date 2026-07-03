@@ -55,6 +55,9 @@ use mclone_ui::{
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
 pub const DEFAULT_RUNTIME_UPDATE_PUMP_BUDGET: Duration = Duration::from_millis(2);
+// Count-cap unload bursts so many small ordered records cannot fit under the
+// elapsed frame budget and still create a large client-apply tail.
+pub const DEFAULT_RUNTIME_UPDATE_PUMP_UNLOAD_UPDATE_BUDGET: usize = 16;
 pub const JAVA_MIN_TRACKING_RENDER_DISTANCE: u32 = 2;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -739,21 +742,39 @@ impl RuntimeUpdateApplyReport {
 pub enum RuntimeUpdatePumpBudget {
     Unlimited,
     MaxElapsed(Duration),
+    Frame {
+        max_elapsed: Duration,
+        max_unload_updates: usize,
+    },
 }
 
 impl RuntimeUpdatePumpBudget {
     pub const fn default_frame() -> Self {
-        Self::MaxElapsed(DEFAULT_RUNTIME_UPDATE_PUMP_BUDGET)
+        Self::Frame {
+            max_elapsed: DEFAULT_RUNTIME_UPDATE_PUMP_BUDGET,
+            max_unload_updates: DEFAULT_RUNTIME_UPDATE_PUMP_UNLOAD_UPDATE_BUDGET,
+        }
     }
 
     pub const fn unlimited() -> Self {
         Self::Unlimited
     }
 
-    pub fn exhausted_after_update(self, elapsed: Duration, applied_updates: usize) -> bool {
+    pub fn exhausted_after_update(
+        self,
+        elapsed: Duration,
+        apply_report: &RuntimeUpdateApplyReport,
+    ) -> bool {
+        if apply_report.updates == 0 {
+            return false;
+        }
         match self {
             Self::Unlimited => false,
-            Self::MaxElapsed(max_elapsed) => applied_updates > 0 && elapsed >= max_elapsed,
+            Self::MaxElapsed(max_elapsed) => elapsed >= max_elapsed,
+            Self::Frame {
+                max_elapsed,
+                max_unload_updates,
+            } => elapsed >= max_elapsed || apply_report.unload_updates >= max_unload_updates,
         }
     }
 }
@@ -2588,6 +2609,31 @@ mod tests {
         assert_eq!(accumulated.other_update_timing.total_ms, 22.0);
         assert_eq!(accumulated.mixed_update_timing.total_ms, 26.0);
         assert_eq!(accumulated.mixed_update_timing.updates, 4);
+    }
+
+    #[test]
+    fn default_runtime_update_pump_budget_caps_unload_updates() {
+        let budget = RuntimeUpdatePumpBudget::default_frame();
+        let mut report = RuntimeUpdateApplyReport {
+            updates: DEFAULT_RUNTIME_UPDATE_PUMP_UNLOAD_UPDATE_BUDGET - 1,
+            unload_updates: DEFAULT_RUNTIME_UPDATE_PUMP_UNLOAD_UPDATE_BUDGET - 1,
+            ..RuntimeUpdateApplyReport::default()
+        };
+
+        assert!(!budget.exhausted_after_update(Duration::ZERO, &report));
+
+        report.updates += 1;
+        report.unload_updates += 1;
+        assert!(budget.exhausted_after_update(Duration::ZERO, &report));
+
+        let non_unload_report = RuntimeUpdateApplyReport {
+            updates: 1,
+            ..RuntimeUpdateApplyReport::default()
+        };
+        assert!(!budget.exhausted_after_update(Duration::ZERO, &non_unload_report));
+        assert!(
+            budget.exhausted_after_update(DEFAULT_RUNTIME_UPDATE_PUMP_BUDGET, &non_unload_report)
+        );
     }
 
     #[test]

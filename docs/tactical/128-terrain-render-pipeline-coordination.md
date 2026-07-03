@@ -1695,14 +1695,17 @@ focused run). The Quest-controlled repro then settled RD7, toggled chunk
 interest between `(0, 0)` and `(16, 0)` every 3 seconds, and reproduced the
 unload tail: `max_runtime_poll_ms=20.654`, `apply_updates_ms=20.605`,
 `client_apply_ms=19.323`, `unload_updates=204`, and
-`server_update_queue_depth=418`.
+`server_update_queue_depth=418`. A first default unload-count cap now limits the
+normal frame pump to `16` unload updates. The same Quest churn lane improved
+`max_runtime_poll_ms` / `apply_updates_ms` / `client_apply_ms` to
+`8.694` / `8.676` / `8.325 ms`, but that is still too high and increased oldest
+applied update age to `235.992 ms`.
 
-The next implementation chunk should target oversized ordered update/lifecycle
-batches and `ClientRuntime` unload bookkeeping. Keep receive order, but make the
-budget boundary meaningful for unload bursts: either split large chunk-lifecycle
-records before the client pump sees them, or stage/budget client chunk removal
-between ordered records. Validate with the same Quest chunk-view churn lane
-before chasing unrelated render optimizations.
+The next implementation chunk should inspect and reduce per-unload
+`ClientRuntime` / runtime dirty lifecycle cost before changing broad pump
+policy. Keep receive order. The count cap is now a guardrail for the normal
+frame pump, not the final fix; after per-unload cost is thinner, retune or
+remove the cap based on the same Quest chunk-view churn lane.
 
 Keep upload apply and per-eye encode on the short list. The churn run also
 showed terrain pipeline pressure (`upload_limited=true`, `accept_limited=true`,
@@ -1710,6 +1713,7 @@ showed terrain pipeline pressure (`upload_limited=true`, `accept_limited=true`,
 update apply is quiet the recurring tails are still upload apply, stereo poll
 wait, and eye encode.
 
-Use `2 / 16 / 64` as the current measurement lane, not a default policy. It was
-the best held-capacity result, but the controlled churn run proves the remaining
-unload/update-pump issue is not solved by those caps alone.
+Use `2 / 16 / 64` as the current render/compile/upload measurement lane, not a
+default policy. It was the best held-capacity result, but the controlled churn
+run proves the remaining unload/update-pump issue is not solved by those caps
+alone.

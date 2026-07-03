@@ -507,7 +507,7 @@ impl LocalSingleViewSceneRuntime {
             let apply_report = self.core.apply_server_updates_report(vec![envelope.update]);
             report.apply_report.accumulate(apply_report);
 
-            if budget.exhausted_after_update(pump_start.elapsed(), report.apply_report.updates) {
+            if budget.exhausted_after_update(pump_start.elapsed(), &report.apply_report) {
                 let diagnostics = self.server_runner_diagnostics()?;
                 report.remaining_queue_depth = diagnostics.update_queue_depth;
                 report.remaining_queue_bytes = diagnostics.update_queue_bytes;
