@@ -4369,6 +4369,29 @@ mod android {
                 self.max_upload.poll_unload_updates
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_UPDATE_APPLY_MAX snapshot_ms={:.3} snapshot_dirty_ms={:.3} snapshot_client_ms={:.3} section_ms={:.3} section_dirty_ms={:.3} section_client_ms={:.3} unload_ms={:.3} unload_dirty_ms={:.3} unload_client_ms={:.3} other_ms={:.3} other_dirty_ms={:.3} other_client_ms={:.3} mixed_ms={:.3} mixed_dirty_ms={:.3} mixed_client_ms={:.3} snapshot_updates={} section_updates={} unload_updates={} other_updates={} mixed_updates={}",
+                self.max_upload.poll_snapshot_update_apply_ms,
+                self.max_upload.poll_snapshot_update_dirty_mark_ms,
+                self.max_upload.poll_snapshot_update_client_apply_ms,
+                self.max_upload.poll_section_block_update_apply_ms,
+                self.max_upload.poll_section_block_update_dirty_mark_ms,
+                self.max_upload.poll_section_block_update_client_apply_ms,
+                self.max_upload.poll_unload_update_apply_ms,
+                self.max_upload.poll_unload_update_dirty_mark_ms,
+                self.max_upload.poll_unload_update_client_apply_ms,
+                self.max_upload.poll_other_update_apply_ms,
+                self.max_upload.poll_other_update_dirty_mark_ms,
+                self.max_upload.poll_other_update_client_apply_ms,
+                self.max_upload.poll_mixed_update_apply_ms,
+                self.max_upload.poll_mixed_update_dirty_mark_ms,
+                self.max_upload.poll_mixed_update_client_apply_ms,
+                self.max_upload.poll_snapshot_updates,
+                self.max_upload.poll_section_block_updates,
+                self.max_upload.poll_unload_updates,
+                self.max_upload.poll_other_updates,
+                self.max_upload.poll_mixed_updates
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_QUEUE_MAX server_cmd_q={} server_update_q={} server_pending_jobs={} server_pending_publications={} scheduler_pending_jobs={} scheduler_completed_jobs={} scheduler_dirty_chunks={} scheduler_loaded_chunks={} scheduler_visible_chunks={} scheduler_ticket_chunks={} player_visible_chunks={} player_outbound_q={}",
                 self.max_upload.server_command_queue_depth,
                 self.max_upload.server_update_queue_depth,
@@ -4617,6 +4640,32 @@ mod android {
                     render.terrain_runtime_submit_mark_inflight_ms,
                     render.terrain_runtime_submit_apply_ready_plan_ms,
                     render.terrain_runtime_submit_ready_update_ms
+                );
+                log::info!(
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME_UPDATE_APPLY rank={} sample_frame={} snapshot_ms={:.3} snapshot_dirty_ms={:.3} snapshot_client_ms={:.3} section_ms={:.3} section_dirty_ms={:.3} section_client_ms={:.3} unload_ms={:.3} unload_dirty_ms={:.3} unload_client_ms={:.3} other_ms={:.3} other_dirty_ms={:.3} other_client_ms={:.3} mixed_ms={:.3} mixed_dirty_ms={:.3} mixed_client_ms={:.3} snapshot_updates={} section_updates={} unload_updates={} other_updates={} mixed_updates={}",
+                    rank,
+                    snapshot.sample_frame,
+                    upload.map_or(0.0, |upload| upload.poll_snapshot_update_apply_ms),
+                    upload.map_or(0.0, |upload| upload.poll_snapshot_update_dirty_mark_ms),
+                    upload.map_or(0.0, |upload| upload.poll_snapshot_update_client_apply_ms),
+                    upload.map_or(0.0, |upload| upload.poll_section_block_update_apply_ms),
+                    upload.map_or(0.0, |upload| upload.poll_section_block_update_dirty_mark_ms),
+                    upload.map_or(0.0, |upload| upload
+                        .poll_section_block_update_client_apply_ms),
+                    upload.map_or(0.0, |upload| upload.poll_unload_update_apply_ms),
+                    upload.map_or(0.0, |upload| upload.poll_unload_update_dirty_mark_ms),
+                    upload.map_or(0.0, |upload| upload.poll_unload_update_client_apply_ms),
+                    upload.map_or(0.0, |upload| upload.poll_other_update_apply_ms),
+                    upload.map_or(0.0, |upload| upload.poll_other_update_dirty_mark_ms),
+                    upload.map_or(0.0, |upload| upload.poll_other_update_client_apply_ms),
+                    upload.map_or(0.0, |upload| upload.poll_mixed_update_apply_ms),
+                    upload.map_or(0.0, |upload| upload.poll_mixed_update_dirty_mark_ms),
+                    upload.map_or(0.0, |upload| upload.poll_mixed_update_client_apply_ms),
+                    upload.map_or(0, |upload| upload.poll_snapshot_updates),
+                    upload.map_or(0, |upload| upload.poll_section_block_updates),
+                    upload.map_or(0, |upload| upload.poll_unload_updates),
+                    upload.map_or(0, |upload| upload.poll_other_updates),
+                    upload.map_or(0, |upload| upload.poll_mixed_updates)
                 );
                 log::info!(
                     "MCLONE_ANDROID_XR_PERF_WORST_FRAME_UPLOAD rank={} sample_frame={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={} poll_changed={} pending_chunks_after={} pending_jobs_after={} submitted_sections={} accepted_results={} queued_completed_results={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} upload_limited={} accept_limited={} backpressured={} held_lifecycle={} held_jobs={} server_cmd_q={} server_update_q={} scheduler_pending_jobs={} scheduler_completed_jobs={} scheduler_dirty_chunks={} scheduler_loaded_chunks={} scheduler_ticket_chunks={} request_target_sections={} request_target_sections_single={} request_snapshots={} request_snapshot_sections={} request_snapshot_sections_single={} request_payload_bytes={} request_payload_bytes_single={} dispatcher_pending_jobs={} dispatcher_queued_compile_tasks={}",
@@ -5211,6 +5260,51 @@ mod android {
             poll_client_apply_updates_ms: a
                 .poll_client_apply_updates_ms
                 .max(b.poll_client_apply_updates_ms),
+            poll_snapshot_update_apply_ms: a
+                .poll_snapshot_update_apply_ms
+                .max(b.poll_snapshot_update_apply_ms),
+            poll_snapshot_update_dirty_mark_ms: a
+                .poll_snapshot_update_dirty_mark_ms
+                .max(b.poll_snapshot_update_dirty_mark_ms),
+            poll_snapshot_update_client_apply_ms: a
+                .poll_snapshot_update_client_apply_ms
+                .max(b.poll_snapshot_update_client_apply_ms),
+            poll_section_block_update_apply_ms: a
+                .poll_section_block_update_apply_ms
+                .max(b.poll_section_block_update_apply_ms),
+            poll_section_block_update_dirty_mark_ms: a
+                .poll_section_block_update_dirty_mark_ms
+                .max(b.poll_section_block_update_dirty_mark_ms),
+            poll_section_block_update_client_apply_ms: a
+                .poll_section_block_update_client_apply_ms
+                .max(b.poll_section_block_update_client_apply_ms),
+            poll_unload_update_apply_ms: a
+                .poll_unload_update_apply_ms
+                .max(b.poll_unload_update_apply_ms),
+            poll_unload_update_dirty_mark_ms: a
+                .poll_unload_update_dirty_mark_ms
+                .max(b.poll_unload_update_dirty_mark_ms),
+            poll_unload_update_client_apply_ms: a
+                .poll_unload_update_client_apply_ms
+                .max(b.poll_unload_update_client_apply_ms),
+            poll_other_update_apply_ms: a
+                .poll_other_update_apply_ms
+                .max(b.poll_other_update_apply_ms),
+            poll_other_update_dirty_mark_ms: a
+                .poll_other_update_dirty_mark_ms
+                .max(b.poll_other_update_dirty_mark_ms),
+            poll_other_update_client_apply_ms: a
+                .poll_other_update_client_apply_ms
+                .max(b.poll_other_update_client_apply_ms),
+            poll_mixed_update_apply_ms: a
+                .poll_mixed_update_apply_ms
+                .max(b.poll_mixed_update_apply_ms),
+            poll_mixed_update_dirty_mark_ms: a
+                .poll_mixed_update_dirty_mark_ms
+                .max(b.poll_mixed_update_dirty_mark_ms),
+            poll_mixed_update_client_apply_ms: a
+                .poll_mixed_update_client_apply_ms
+                .max(b.poll_mixed_update_client_apply_ms),
             update_pump_stalled: a.update_pump_stalled || b.update_pump_stalled,
             update_pump_stall_count: a.update_pump_stall_count.max(b.update_pump_stall_count),
             server_update_applied_bytes: a
@@ -5242,6 +5336,8 @@ mod android {
                 .poll_section_block_updates
                 .max(b.poll_section_block_updates),
             poll_unload_updates: a.poll_unload_updates.max(b.poll_unload_updates),
+            poll_other_updates: a.poll_other_updates.max(b.poll_other_updates),
+            poll_mixed_updates: a.poll_mixed_updates.max(b.poll_mixed_updates),
             server_command_queue_depth: a
                 .server_command_queue_depth
                 .max(b.server_command_queue_depth),

@@ -647,6 +647,23 @@ pub struct RuntimeStepReport {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RuntimeUpdateApplyCategoryTiming {
+    pub total_ms: f64,
+    pub dirty_mark_ms: f64,
+    pub client_apply_updates_ms: f64,
+    pub updates: usize,
+}
+
+impl RuntimeUpdateApplyCategoryTiming {
+    pub fn accumulate(&mut self, other: Self) {
+        self.total_ms += other.total_ms;
+        self.dirty_mark_ms += other.dirty_mark_ms;
+        self.client_apply_updates_ms += other.client_apply_updates_ms;
+        self.updates += other.updates;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RuntimeUpdateApplyReport {
     pub changed: bool,
     pub total_ms: f64,
@@ -656,6 +673,11 @@ pub struct RuntimeUpdateApplyReport {
     pub snapshot_updates: usize,
     pub section_block_updates: usize,
     pub unload_updates: usize,
+    pub snapshot_update_timing: RuntimeUpdateApplyCategoryTiming,
+    pub section_block_update_timing: RuntimeUpdateApplyCategoryTiming,
+    pub unload_update_timing: RuntimeUpdateApplyCategoryTiming,
+    pub other_update_timing: RuntimeUpdateApplyCategoryTiming,
+    pub mixed_update_timing: RuntimeUpdateApplyCategoryTiming,
 }
 
 impl RuntimeUpdateApplyReport {
@@ -668,6 +690,48 @@ impl RuntimeUpdateApplyReport {
         self.snapshot_updates += other.snapshot_updates;
         self.section_block_updates += other.section_block_updates;
         self.unload_updates += other.unload_updates;
+        self.snapshot_update_timing
+            .accumulate(other.snapshot_update_timing);
+        self.section_block_update_timing
+            .accumulate(other.section_block_update_timing);
+        self.unload_update_timing
+            .accumulate(other.unload_update_timing);
+        self.other_update_timing
+            .accumulate(other.other_update_timing);
+        self.mixed_update_timing
+            .accumulate(other.mixed_update_timing);
+    }
+
+    fn record_category_timing(
+        &mut self,
+        update_report: &mclone_render_session::EngineServerUpdateReport,
+        total_ms: f64,
+        dirty_mark_ms: f64,
+        client_apply_updates_ms: f64,
+    ) {
+        if update_report.updates == 0 {
+            return;
+        }
+        let timing = RuntimeUpdateApplyCategoryTiming {
+            total_ms,
+            dirty_mark_ms,
+            client_apply_updates_ms,
+            updates: update_report.updates,
+        };
+        let terrain_updates = update_report.snapshot_updates
+            + update_report.section_block_updates
+            + update_report.unload_updates;
+        if update_report.snapshot_updates == update_report.updates {
+            self.snapshot_update_timing.accumulate(timing);
+        } else if update_report.section_block_updates == update_report.updates {
+            self.section_block_update_timing.accumulate(timing);
+        } else if update_report.unload_updates == update_report.updates {
+            self.unload_update_timing.accumulate(timing);
+        } else if terrain_updates == 0 {
+            self.other_update_timing.accumulate(timing);
+        } else {
+            self.mixed_update_timing.accumulate(timing);
+        }
     }
 }
 
@@ -792,6 +856,23 @@ pub struct RuntimePollDiagnostics {
     pub apply_updates_ms: f64,
     pub dirty_mark_ms: f64,
     pub client_apply_updates_ms: f64,
+    pub snapshot_update_apply_ms: f64,
+    pub snapshot_update_dirty_mark_ms: f64,
+    pub snapshot_update_client_apply_ms: f64,
+    pub section_block_update_apply_ms: f64,
+    pub section_block_update_dirty_mark_ms: f64,
+    pub section_block_update_client_apply_ms: f64,
+    pub unload_update_apply_ms: f64,
+    pub unload_update_dirty_mark_ms: f64,
+    pub unload_update_client_apply_ms: f64,
+    pub other_update_apply_ms: f64,
+    pub other_update_dirty_mark_ms: f64,
+    pub other_update_client_apply_ms: f64,
+    pub mixed_update_apply_ms: f64,
+    pub mixed_update_dirty_mark_ms: f64,
+    pub mixed_update_client_apply_ms: f64,
+    pub other_updates: usize,
+    pub mixed_updates: usize,
     pub scheduler_pending_jobs: usize,
     pub scheduler_completed_jobs: usize,
     pub scheduler_dirty_chunks: usize,
@@ -1111,7 +1192,7 @@ impl SingleViewRuntime {
         let client_apply_start = timing_start();
         self.client_mut().apply_updates(updates);
         let client_apply_updates_ms = timing_elapsed_ms(client_apply_start);
-        RuntimeUpdateApplyReport {
+        let mut report = RuntimeUpdateApplyReport {
             changed: update_report.changed,
             total_ms: timing_elapsed_ms(total_start),
             dirty_mark_ms,
@@ -1120,7 +1201,15 @@ impl SingleViewRuntime {
             snapshot_updates: update_report.snapshot_updates,
             section_block_updates: update_report.section_block_updates,
             unload_updates: update_report.unload_updates,
-        }
+            ..RuntimeUpdateApplyReport::default()
+        };
+        report.record_category_timing(
+            &update_report,
+            report.total_ms,
+            dirty_mark_ms,
+            client_apply_updates_ms,
+        );
+        report
     }
 
     pub fn clear_client_replica_and_mark_render_dirty(&mut self) -> Vec<ChunkPos> {
@@ -1151,6 +1240,31 @@ impl SingleViewRuntime {
             apply_updates_ms: apply_report.total_ms,
             dirty_mark_ms: apply_report.dirty_mark_ms,
             client_apply_updates_ms: apply_report.client_apply_updates_ms,
+            snapshot_update_apply_ms: apply_report.snapshot_update_timing.total_ms,
+            snapshot_update_dirty_mark_ms: apply_report.snapshot_update_timing.dirty_mark_ms,
+            snapshot_update_client_apply_ms: apply_report
+                .snapshot_update_timing
+                .client_apply_updates_ms,
+            section_block_update_apply_ms: apply_report.section_block_update_timing.total_ms,
+            section_block_update_dirty_mark_ms: apply_report
+                .section_block_update_timing
+                .dirty_mark_ms,
+            section_block_update_client_apply_ms: apply_report
+                .section_block_update_timing
+                .client_apply_updates_ms,
+            unload_update_apply_ms: apply_report.unload_update_timing.total_ms,
+            unload_update_dirty_mark_ms: apply_report.unload_update_timing.dirty_mark_ms,
+            unload_update_client_apply_ms: apply_report
+                .unload_update_timing
+                .client_apply_updates_ms,
+            other_update_apply_ms: apply_report.other_update_timing.total_ms,
+            other_update_dirty_mark_ms: apply_report.other_update_timing.dirty_mark_ms,
+            other_update_client_apply_ms: apply_report.other_update_timing.client_apply_updates_ms,
+            mixed_update_apply_ms: apply_report.mixed_update_timing.total_ms,
+            mixed_update_dirty_mark_ms: apply_report.mixed_update_timing.dirty_mark_ms,
+            mixed_update_client_apply_ms: apply_report.mixed_update_timing.client_apply_updates_ms,
+            other_updates: apply_report.other_update_timing.updates,
+            mixed_updates: apply_report.mixed_update_timing.updates,
             updates: apply_report.updates,
             snapshot_updates: apply_report.snapshot_updates,
             section_block_updates: apply_report.section_block_updates,
@@ -2387,6 +2501,93 @@ mod tests {
         cache.clear();
         let after_clear = cache.refresh(&runtime, Vec3::new(64.0, 64.0, 0.0), 1);
         assert!(after_clear.refreshed);
+    }
+
+    #[test]
+    fn runtime_update_apply_report_tracks_category_timings() {
+        let mut report = RuntimeUpdateApplyReport::default();
+        report.record_category_timing(
+            &mclone_render_session::EngineServerUpdateReport {
+                changed: true,
+                updates: 1,
+                snapshot_updates: 1,
+                section_block_updates: 0,
+                unload_updates: 0,
+            },
+            3.0,
+            1.0,
+            2.0,
+        );
+        report.record_category_timing(
+            &mclone_render_session::EngineServerUpdateReport {
+                changed: true,
+                updates: 1,
+                snapshot_updates: 0,
+                section_block_updates: 1,
+                unload_updates: 0,
+            },
+            5.0,
+            2.0,
+            3.0,
+        );
+        report.record_category_timing(
+            &mclone_render_session::EngineServerUpdateReport {
+                changed: true,
+                updates: 1,
+                snapshot_updates: 0,
+                section_block_updates: 0,
+                unload_updates: 1,
+            },
+            7.0,
+            3.0,
+            4.0,
+        );
+        report.record_category_timing(
+            &mclone_render_session::EngineServerUpdateReport {
+                changed: false,
+                updates: 1,
+                snapshot_updates: 0,
+                section_block_updates: 0,
+                unload_updates: 0,
+            },
+            11.0,
+            5.0,
+            6.0,
+        );
+        report.record_category_timing(
+            &mclone_render_session::EngineServerUpdateReport {
+                changed: true,
+                updates: 2,
+                snapshot_updates: 1,
+                section_block_updates: 1,
+                unload_updates: 0,
+            },
+            13.0,
+            6.0,
+            7.0,
+        );
+
+        assert_eq!(report.snapshot_update_timing.total_ms, 3.0);
+        assert_eq!(report.snapshot_update_timing.dirty_mark_ms, 1.0);
+        assert_eq!(report.snapshot_update_timing.client_apply_updates_ms, 2.0);
+        assert_eq!(report.snapshot_update_timing.updates, 1);
+        assert_eq!(report.section_block_update_timing.total_ms, 5.0);
+        assert_eq!(report.unload_update_timing.total_ms, 7.0);
+        assert_eq!(report.other_update_timing.total_ms, 11.0);
+        assert_eq!(report.other_update_timing.updates, 1);
+        assert_eq!(report.mixed_update_timing.total_ms, 13.0);
+        assert_eq!(report.mixed_update_timing.updates, 2);
+
+        let mut accumulated = RuntimeUpdateApplyReport::default();
+        accumulated.accumulate(report);
+        accumulated.accumulate(report);
+
+        assert_eq!(accumulated.snapshot_update_timing.total_ms, 6.0);
+        assert_eq!(accumulated.section_block_update_timing.total_ms, 10.0);
+        assert_eq!(accumulated.unload_update_timing.total_ms, 14.0);
+        assert_eq!(accumulated.other_update_timing.total_ms, 22.0);
+        assert_eq!(accumulated.mixed_update_timing.total_ms, 26.0);
+        assert_eq!(accumulated.mixed_update_timing.updates, 4);
     }
 
     #[test]

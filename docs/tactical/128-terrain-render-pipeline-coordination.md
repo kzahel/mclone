@@ -1548,6 +1548,66 @@ Closeout notes:
   `ready_set_backpressured > 0` run; the versioned ready path has not yet
   proven behavior under that exact condition.
 
+Runtime update-apply attribution:
+
+- Implemented July 3, 2026 as an instrumentation slice, without changing update
+  behavior or pump policy.
+- `RuntimeUpdateApplyReport` now accumulates category timing for runtime update
+  application: chunk snapshot, section block updates, chunk unload, other
+  non-terrain updates, and mixed batches.
+- Category timing keeps total apply, render-dirty marking, client-replica apply,
+  and update count. The normal integrated-server pump already applies one
+  queued update envelope at a time, so poll-path category totals are precise;
+  mixed command-drain batches are deliberately kept in a mixed bucket.
+- XR copies the category timings into `XrTerrainUploadSummary`.
+- Android XR logs aggregate maxima on `MCLONE_ANDROID_XR_PERF_UPDATE_APPLY_MAX`
+  and per-worst-frame category timing on
+  `MCLONE_ANDROID_XR_PERF_WORST_FRAME_UPDATE_APPLY`.
+- `validate-quest-openxr.sh` now requires and extracts
+  `MCLONE_ANDROID_XR_PERF_UPDATE_APPLY_MAX` into the perf summary.
+
+Validation so far:
+
+- `cargo fmt --manifest-path native/Cargo.toml --all`
+- `cargo test --manifest-path native/Cargo.toml`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime runtime_update_apply_report_tracks_category_timings -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -- --nocapture`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-xr-scene -- --nocapture`
+- `cd native && cargo ndk -t arm64-v8a --platform 28 check --package mclone-android-xr-client --lib`
+- `bash -n android-xr/validate-quest-openxr.sh`
+- Quest Android XR per-eye render-distance-7 settled orbit, 2 render compile
+  workers, `2 / 16 / 64`, 45 seconds.
+
+Measurement:
+
+| Policy | Frame avg / p95 / p99 / max | App over period | Runtime/update max | Category attribution | Key tail |
+|---|---|---:|---|---|---|
+| `2 / 16 / 64` update-apply attribution, run A | 14.960 / 17.418 / 21.221 / 28.440 ms | 60.4% | poll 12.430 ms; apply 12.406 ms; client apply 12.091 ms | worst frame unload_ms 12.406; unload_client_ms 12.091; snapshot/section 0 on that frame | runtime upload 16.839 ms; upload apply 5.208 ms; left/right eye encode 4.833/3.492 ms |
+| `2 / 16 / 64` update-apply attribution, run B | 14.898 / 17.448 / 20.748 / 31.573 ms | 61.0% | poll 1.702 ms; apply 1.662 ms; client apply 1.557 ms | max snapshot/section/unload/other 0.811/1.572/0.950/0.133 ms; counts 15/5/16/15 | upload apply 5.016 ms; shared records 2.102 ms; left/right eye encode 3.595/4.577 ms; stereo poll wait 9.611 ms |
+
+Interpretation:
+
+- The attribution line is now durable in the perf summary and worst-frame log.
+- Run A showed the suspected update-apply tail clearly: a worst frame dominated
+  by chunk unload client-replica application, not dirty marking, snapshots, or
+  section block updates.
+- Run B did not reproduce the unload spike and had no update-pump stall
+  (`server_update_queue_depth=0`, `update_pump_stalled=false`), which confirms
+  the tail is intermittent. Do not tune the pump solely from one RD7 orbit.
+- Upload apply and eye encode remain recurring tails even when poll/update
+  application is quiet.
+
+Closeout notes:
+
+- Keep `MCLONE_ANDROID_XR_PERF_UPDATE_APPLY_MAX` in every RD7 summary.
+- Add a controlled unload-burst or chunk-view-churn validation before changing
+  update pump policy. The target case should reproduce many chunk unload updates
+  in one frame and report whether the client-replica unload cost is freeing
+  chunk snapshots, scanning entities, render dirtying, or queue drain policy.
+- Keep the older deferred note to force or construct a
+  `ready_set_backpressured > 0` run; the versioned ready path has not yet
+  proven behavior under that exact condition.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -1612,25 +1672,22 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Use the prepared-record attribution run as the new baseline and move back to the
-runtime update/upload side before optimizing prepared records. The July 3 RD7
-attribution run showed prepared rebuilds are mostly upload dirty (`114 / 124`),
-but prepared/shared records peaked at only `1.939 ms`; the bigger tails were
-runtime upload (`12.168 ms`), poll/update application (`8.528 ms` poll with
-`8.509 ms` update apply on the worst frame), upload apply (`5.145 ms`), and XR
-poll wait.
+Use the runtime update-apply attribution as the new baseline and make the next
+chunk a controlled unload-burst investigation before changing pump policy. The
+new counters caught one RD7 run where the worst poll/update frame was almost all
+chunk-unload client apply (`12.091 ms` client apply), but the immediate rerun did
+not reproduce it (`unload_ms=0.950 ms` max). A deterministic unload/chunk-view
+churn validation should decide whether to budget unload count per frame, stage
+client chunk removal, or optimize `ClientRuntime` unload bookkeeping.
 
-The next safe chunk is to attribute and pace runtime update application during
-XR terrain frames: split poll/update application into server-update categories,
-tie upload-apply spikes to accepted/uploaded section counts, and decide whether
-the update pump needs a frame budget or staging boundary. Keep per-eye encode
-attribution as the follow-up if the update/upload side is not the dominant tail
-in the next RD7 run.
+Keep upload apply and per-eye encode on the short list. When update apply is
+quiet, the recurring tails are still upload apply around `5 ms`, stereo poll
+wait around `9.6 ms`, and eye encode around `3.6-4.6 ms`.
 
 Use `2 / 16 / 64` as the current measurement lane, not a default policy. It was
 the best held-capacity result, but it is still over the 72 Hz app budget most of
-the time. The next run should tell us whether update/upload pacing reduces the
-remaining terrain-runtime tails, not whether one more isolated budget number
-looks better. Keep the deferred closeout note to force a
+the time. The next run should tell us whether a controlled unload/update-pump
+case reproduces the intermittent poll tail, not whether one more isolated budget
+number looks better. Keep the deferred closeout note to force a
 `ready_set_backpressured > 0` run, because neither July 3 RD7 orbit hit that
 condition.
