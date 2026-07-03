@@ -777,6 +777,21 @@ impl SimpleRandomFeatureConfiguration {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RandomBooleanFeatureConfiguration {
+    pub feature_true: Box<ConfiguredFeature>,
+    pub feature_false: Box<ConfiguredFeature>,
+}
+
+impl RandomBooleanFeatureConfiguration {
+    pub fn new(feature_true: ConfiguredFeature, feature_false: ConfiguredFeature) -> Self {
+        Self {
+            feature_true: Box::new(feature_true),
+            feature_false: Box::new(feature_false),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecoratedFeatureConfiguration {
     pub feature: Box<ConfiguredFeature>,
     pub decorators: Vec<ConfiguredDecorator>,
@@ -940,6 +955,7 @@ pub enum ConfiguredFeature {
     Tree(TreeConfiguration),
     RandomSelector(RandomFeatureConfiguration),
     SimpleRandomSelector(SimpleRandomFeatureConfiguration),
+    RandomBooleanSelector(RandomBooleanFeatureConfiguration),
     Decorated(DecoratedFeatureConfiguration),
     HugeMushroom(HugeMushroomConfiguration),
     Coral(CoralShape),
@@ -1006,6 +1022,10 @@ impl ConfiguredFeature {
 
     pub fn simple_random_selector(config: SimpleRandomFeatureConfiguration) -> Self {
         Self::SimpleRandomSelector(config)
+    }
+
+    pub fn random_boolean_selector(config: RandomBooleanFeatureConfiguration) -> Self {
+        Self::RandomBooleanSelector(config)
     }
 
     pub fn decorated(config: DecoratedFeatureConfiguration) -> Self {

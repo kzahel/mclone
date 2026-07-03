@@ -18,9 +18,9 @@ use super::{
     BambooConfiguration, BasicTreeConfiguration, ConfiguredFeature, CoralShape, DecorationStep,
     DiskConfiguration, DripstoneClusterConfiguration, FloatProvider, GlowLichenConfiguration,
     HugeMushroomConfiguration, LakeConfiguration, OreConfiguration, PlacedFeature,
-    RandomFeatureConfiguration, RandomPatchConfiguration, SeagrassConfiguration,
-    SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration, SpringConfiguration,
-    TreeConfiguration, WeightedBlockState, WeightedConfiguredFeature,
+    RandomBooleanFeatureConfiguration, RandomFeatureConfiguration, RandomPatchConfiguration,
+    SeagrassConfiguration, SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration,
+    SpringConfiguration, TreeConfiguration, WeightedBlockState, WeightedConfiguredFeature,
 };
 
 pub(super) const TAIGA_GRASS_STATES: [WeightedBlockState; 2] = [
@@ -700,7 +700,7 @@ fn swamp_features() -> Vec<PlacedFeature> {
 }
 
 fn mushroom_field_features() -> Vec<PlacedFeature> {
-    vec![grass_patch(GRASS, 1)]
+    vec![mushroom_field_vegetation_feature(), grass_patch(GRASS, 1)]
 }
 
 fn dark_forest_features(red_mushrooms_first: bool) -> Vec<PlacedFeature> {
@@ -944,6 +944,20 @@ fn bamboo_vegetation_feature() -> PlacedFeature {
             ConfiguredFeature::random_patch(jungle_grass_patch_config()),
         )),
         tree_threshold_decorators(30, 0.1, 1),
+    )
+}
+
+fn mushroom_field_vegetation_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_boolean_selector(RandomBooleanFeatureConfiguration::new(
+            ConfiguredFeature::huge_mushroom(HugeMushroomConfiguration::red()),
+            ConfiguredFeature::huge_mushroom(HugeMushroomConfiguration::brown()),
+        )),
+        vec![
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+        ],
     )
 }
 

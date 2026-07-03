@@ -1,10 +1,11 @@
 # 135: Overworld Biome Palette Matrix
 
 Status: active parent; 67 generated biome/tint/visible-surface probes, all
-overworld tint IDs, twelve supported feature-family groups, and 26 F-checked
+overworld tint IDs, thirteen supported feature-family groups, and 27 F-checked
 matrix rows landed, including cactus/sugar-cane extras, swamp lily pads, ocean
-water plants, warm-ocean coral/sea-pickle, dark-forest canopy/mushroom, savanna
-acacia, jungle tree, and bamboo-jungle palette coverage
+water plants, warm-ocean coral/sea-pickle, dark-forest canopy/mushroom,
+mushroom-field huge mushrooms, savanna acacia, jungle tree, and bamboo-jungle
+palette coverage
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -125,7 +126,7 @@ notes.
 | 11 | `minecraft:frozen_river` | frozen-water | frozen river water/ice checked | seed `252`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 12 | `minecraft:snowy_tundra` | frozen-land | snow over grass, native snowy spruce/fern subset | seed `42`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 13 | `minecraft:snowy_mountains` | frozen-land | snowy mountain surface checked | seed `326`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 14 | `minecraft:mushroom_fields` | mushroom | mycelium checked; mushrooms/no-normal-hostile palette gap | seed `978`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 14 | `minecraft:mushroom_fields` | mushroom | mycelium and huge mushroom family checked; small mushrooms/default extras/spawn-table gap | seed `978`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 15 | `minecraft:mushroom_field_shore` | mushroom | mycelium shore transition checked | seed `1554`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 16 | `minecraft:beach` | plains | sand beach checked, buried-treasure/shipwreck surface context | seed `45`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 17 | `minecraft:desert_hills` | desert | sand/sandstone hills checked; extra vegetation unprobed | seed `120`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
@@ -216,31 +217,34 @@ Landed:
 - The same worldgen probe now asserts currently supported visible feature
   families for plains, desert, swamp, taiga, snowy tundra, badlands, and ocean
   water plants, warm-ocean coral blocks and sea pickles, dark-forest dark oak
-  and huge mushroom block families, savanna acacia trees, jungle log/leaves
-  trees, and bamboo-jungle bamboo plus jungle log/leaves vegetation. Desert and
-  badlands now require dead bush plus cactus/sugar-cane family coverage; swamp
-  requires the native vegetation/clay subset plus sugar cane and lily pads; generated
+  and huge mushroom block families, mushroom-field huge mushrooms, savanna
+  acacia trees, jungle log/leaves trees, and bamboo-jungle bamboo plus jungle
+  log/leaves vegetation. Desert and badlands now require dead bush plus
+  cactus/sugar-cane family coverage; swamp requires the native vegetation/clay
+  subset plus sugar cane and lily pads; generated
   non-frozen ocean rows require the seagrass/tall-seagrass/kelp block family;
   the warm-ocean row requires at least one live coral block and one sea pickle
   state; dark forest rows require both dark oak logs/leaves and huge mushroom
-  cap/stem blocks; savanna rows require acacia logs and leaves; jungle rows
-  require jungle logs and leaves; bamboo jungle rows require bamboo plus jungle
-  logs and leaves. The assertions are intentionally broad block-family checks,
-  not exact decorated counts.
+  cap/stem blocks; mushroom fields require a huge mushroom cap plus stem;
+  savanna rows require acacia logs and leaves; jungle rows require jungle logs
+  and leaves; bamboo jungle rows require bamboo plus jungle logs and leaves. The
+  assertions are intentionally broad block-family checks, not exact decorated
+  counts.
 - Native now has cactus, sugar cane, seagrass, tall seagrass, kelp, and kelp
   plant generated block IDs; live coral block IDs; four waterlogged sea-pickle
   state IDs; lily-pad ID with Java `BlockColors` hardcoded tint; dark oak
   log/leaves IDs; huge mushroom cap/stem IDs; acacia log/leaves IDs; jungle
   log/leaves IDs; bamboo trunk ID; synthetic asset registry mappings; basic shared
   shape/material/render/light facts; Java-style reduced random-patch column
-  placement; Java-style waterlily random-patch placement; Java-style seagrass,
-  kelp, sea-pickle, and broad coral
-  tree/claw/mushroom placement; broad Java-shaped dark oak tree, huge mushroom,
-  acacia forking-trunk/flat-canopy placement, jungle tree/bush/mega-jungle
-  selector placement, and bamboo column/podzol-disk placement; the
+  placement; Java-style waterlily random-patch placement; Java-style
+  `nextBoolean` random-boolean selector placement for mushroom fields;
+  Java-style seagrass, kelp, sea-pickle, and broad coral tree/claw/mushroom
+  placement; broad Java-shaped dark oak tree, huge mushroom, acacia
+  forking-trunk/flat-canopy placement, jungle tree/bush/mega-jungle selector
+  placement, and bamboo column/podzol-disk placement; the
   `NoiseBasedDecorator` count path used by kelp/coral/bamboo; and
   desert/badlands/swamp/ocean/dark-forest/savanna/jungle/bamboo-jungle feature
-  table entries.
+  table entries, plus the mushroom-field huge mushroom table entry.
 - `mclone-mesh::tint::tests::palette_matrix_tint_groups_match_java_visual_facts`
   asserts every matrix row's grass, foliage, and water tint output through the
   shared tint resolver by tint group, including the two registered rows without
@@ -277,16 +281,21 @@ Documented gaps from this slice:
 - Java swamp now has high-signal water-lily coverage. Exact parity is still
   incomplete: brown/red mushroom patches, swamp seagrass/extras, pumpkin, and
   exact decorated counts remain later `103` work.
+- Java mushroom fields now have high-signal huge mushroom coverage. Exact
+  parity is still incomplete: small brown/red mushroom patches, default mushroom
+  patches, default extra vegetation, exact huge mushroom side-state booleans,
+  mushroom-field shore feature coverage, and spawn-table/no-normal-hostile
+  behavior remain later `103` or entity-runtime work.
 
 ## Suggested Next Slice
 
 Move from B/T/S coverage to visible land feature-family breadth:
 
 1. Pick one missing block/feature family with high palette value and port it
-   narrowly from Java. The strongest next row is mushroom-field huge mushrooms:
-   the block IDs and huge-mushroom feature support already exist, and it would
-   turn a distinct mycelium biome from B/T/S-only into visible F coverage. Other
-   good follow-ups are berry bushes or a birch/tall-birch F-check sweep.
+   narrowly from Java. The strongest next row is now a birch/tall-birch F-check
+   sweep because birch log/leaves support already exists and several birch rows
+   remain B/T/S-only. Berry bushes are another good visible-variety follow-up
+   for taiga if the next slice should add a new block family instead.
 2. Add `F` checks to this matrix only when the supporting block IDs/features
    exist in native and the check is a broad deterministic block-family probe.
 3. Move any exact decorated mismatch-bucket work into `103`.

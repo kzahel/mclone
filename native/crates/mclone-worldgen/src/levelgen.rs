@@ -137,6 +137,7 @@ mod tests {
         OceanWaterPlants,
         WarmOceanCoralSeaPickles,
         DarkForestCanopyMushrooms,
+        MushroomFieldHugeMushrooms,
         SavannaAcacia,
         JungleTrees,
         BambooJungle,
@@ -158,6 +159,7 @@ mod tests {
                 Self::OceanWaterPlants => "ocean seagrass/kelp water plants",
                 Self::WarmOceanCoralSeaPickles => "warm ocean coral blocks plus sea pickles",
                 Self::DarkForestCanopyMushrooms => "dark forest dark oak plus huge mushrooms",
+                Self::MushroomFieldHugeMushrooms => "mushroom field huge mushrooms",
                 Self::SavannaAcacia => "savanna acacia trees",
                 Self::JungleTrees => "jungle log/leaves trees",
                 Self::BambooJungle => "bamboo plus jungle log/leaves vegetation",
@@ -205,6 +207,9 @@ mod tests {
                     RED_MUSHROOM_BLOCK,
                     MUSHROOM_STEM,
                 ],
+                Self::MushroomFieldHugeMushrooms => {
+                    &[BROWN_MUSHROOM_BLOCK, RED_MUSHROOM_BLOCK, MUSHROOM_STEM]
+                }
                 Self::SavannaAcacia => &[ACACIA_LOG, ACACIA_LEAVES],
                 Self::JungleTrees => &[JUNGLE_LOG, JUNGLE_LEAVES],
                 Self::BambooJungle => &[BAMBOO, JUNGLE_LOG, JUNGLE_LEAVES],
@@ -245,6 +250,12 @@ mod tests {
                         && [BROWN_MUSHROOM_BLOCK, RED_MUSHROOM_BLOCK, MUSHROOM_STEM]
                             .iter()
                             .any(|block| chunk.block_count(*block) > 0)
+                }
+                Self::MushroomFieldHugeMushrooms => {
+                    chunk.block_count(MUSHROOM_STEM) > 0
+                        && (chunk.block_count(BROWN_MUSHROOM_BLOCK)
+                            + chunk.block_count(RED_MUSHROOM_BLOCK))
+                            > 0
                 }
                 Self::SavannaAcacia => {
                     chunk.block_count(ACACIA_LOG) > 0 && chunk.block_count(ACACIA_LEAVES) > 0
@@ -360,7 +371,7 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:mushroom_fields",
             surface_family: SurfaceFamily::Mycelium,
-            feature_family: None,
+            feature_family: Some(FeatureFamily::MushroomFieldHugeMushrooms),
         },
         PaletteMatrixCase {
             seed: 45,

@@ -26,10 +26,11 @@ pub use configured::{
     DecoratedFeatureConfiguration, DiskConfiguration, DripstoneClusterConfiguration, FloatProvider,
     FoliagePlacerConfiguration, GlowLichenConfiguration, HugeMushroomConfiguration,
     HugeMushroomKind, LakeConfiguration, OreConfiguration, OreTarget, OreTargetBlockState,
-    RandomFeatureConfiguration, RandomPatchConfiguration, SeagrassConfiguration,
-    SimpleBlockConfiguration, SimpleRandomFeatureConfiguration, SmallDripstoneConfiguration,
-    SpringConfiguration, StraightTrunkPlacerConfiguration, TreeConfiguration,
-    TrunkPlacerConfiguration, TwoLayersFeatureSize, WeightedBlockState, WeightedConfiguredFeature,
+    RandomBooleanFeatureConfiguration, RandomFeatureConfiguration, RandomPatchConfiguration,
+    SeagrassConfiguration, SimpleBlockConfiguration, SimpleRandomFeatureConfiguration,
+    SmallDripstoneConfiguration, SpringConfiguration, StraightTrunkPlacerConfiguration,
+    TreeConfiguration, TrunkPlacerConfiguration, TwoLayersFeatureSize, WeightedBlockState,
+    WeightedConfiguredFeature,
 };
 pub use context::{DecorationStep, FeatureDecorationTiming, FeatureWorld};
 pub use placed::{
@@ -159,6 +160,9 @@ impl ConfiguredFeature {
             Self::SimpleRandomSelector(config) => {
                 place_simple_random_selector(world, biomes, random, origin, config)
             }
+            Self::RandomBooleanSelector(config) => {
+                place_random_boolean_selector(world, biomes, random, origin, config)
+            }
             Self::Decorated(config) => {
                 placed::place_configured_decorated_feature(world, biomes, random, origin, config)
             }
@@ -214,6 +218,24 @@ fn place_simple_random_selector<W: FeatureWorld, B: FeatureBiomeResolver>(
 
     let index = random.next_int_bound(config.features.len() as i32) as usize;
     config.features[index].place_with_biomes(world, biomes, random, origin)
+}
+
+fn place_random_boolean_selector<W: FeatureWorld, B: FeatureBiomeResolver>(
+    world: &mut W,
+    biomes: &B,
+    random: &mut impl RandomSource,
+    origin: BlockPos,
+    config: &RandomBooleanFeatureConfiguration,
+) -> bool {
+    if random.next_boolean() {
+        config
+            .feature_true
+            .place_with_biomes(world, biomes, random, origin)
+    } else {
+        config
+            .feature_false
+            .place_with_biomes(world, biomes, random, origin)
+    }
 }
 
 fn project_to_surface<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> Option<BlockPos> {
@@ -274,7 +296,7 @@ mod tests {
         ConfiguredDecorator, CountConfiguration, DecorationContext, HeightProvider, IntProvider,
         VerticalAnchor,
     };
-    use crate::prng::WorldgenRandom;
+    use crate::prng::{RandomSource, WorldgenRandom};
     use mclone_core::CHUNK_WIDTH;
 
     fn flat_grass_chunk() -> MutableChunkBlockBuffer {
@@ -325,6 +347,48 @@ mod tests {
             .iter()
             .filter(|current| **current == block_id)
             .count()
+    }
+
+    struct BooleanRandom {
+        value: bool,
+    }
+
+    impl BooleanRandom {
+        const fn new(value: bool) -> Self {
+            Self { value }
+        }
+    }
+
+    impl RandomSource for BooleanRandom {
+        fn set_seed(&mut self, _seed: i64) {}
+
+        fn next_int(&mut self) -> i32 {
+            panic!("next_int should not be used by this test random")
+        }
+
+        fn next_int_bound(&mut self, _bound: i32) -> i32 {
+            panic!("next_int_bound should not be used by this test random")
+        }
+
+        fn next_long(&mut self) -> i64 {
+            panic!("next_long should not be used by this test random")
+        }
+
+        fn next_boolean(&mut self) -> bool {
+            self.value
+        }
+
+        fn next_float(&mut self) -> f32 {
+            panic!("next_float should not be used by this test random")
+        }
+
+        fn next_double(&mut self) -> f64 {
+            panic!("next_double should not be used by this test random")
+        }
+
+        fn next_gaussian(&mut self) -> f64 {
+            panic!("next_gaussian should not be used by this test random")
+        }
     }
 
     #[derive(Default)]
@@ -399,6 +463,31 @@ mod tests {
 
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(4, 3, 5)));
         assert_eq!(chunk.get_block_at_y(4, 3, 5), DANDELION);
+    }
+
+    #[test]
+    fn random_boolean_selector_uses_java_next_boolean_branching() {
+        let feature =
+            ConfiguredFeature::random_boolean_selector(RandomBooleanFeatureConfiguration::new(
+                ConfiguredFeature::simple_block(SimpleBlockConfiguration::new(POPPY)),
+                ConfiguredFeature::simple_block(SimpleBlockConfiguration::new(DANDELION)),
+            ));
+
+        let mut true_chunk = flat_grass_chunk();
+        assert!(feature.place(
+            &mut true_chunk,
+            &mut BooleanRandom::new(true),
+            BlockPos::new(8, 3, 8)
+        ));
+        assert_eq!(true_chunk.get_block_at_y(8, 3, 8), POPPY);
+
+        let mut false_chunk = flat_grass_chunk();
+        assert!(feature.place(
+            &mut false_chunk,
+            &mut BooleanRandom::new(false),
+            BlockPos::new(8, 3, 8)
+        ));
+        assert_eq!(false_chunk.get_block_at_y(8, 3, 8), DANDELION);
     }
 
     #[test]
@@ -1473,6 +1562,39 @@ mod tests {
                 );
             }
             other => panic!("expected dark forest hills random selector, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mushroom_field_feature_table_includes_java_huge_mushroom_selector() {
+        let mushroom_fields = overworld_features_for_biome(get_layered_biome_by_id(14));
+        let feature = mushroom_fields
+            .iter()
+            .find(|feature| {
+                feature.step == DecorationStep::VegetalDecoration
+                    && matches!(feature.feature, ConfiguredFeature::RandomBooleanSelector(_))
+            })
+            .expect("mushroom field vegetation feature");
+
+        assert_eq!(
+            feature.decorators,
+            vec![
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+            ]
+        );
+        match &feature.feature {
+            ConfiguredFeature::RandomBooleanSelector(config) => {
+                assert_eq!(
+                    *config.feature_true,
+                    ConfiguredFeature::huge_mushroom(HugeMushroomConfiguration::red())
+                );
+                assert_eq!(
+                    *config.feature_false,
+                    ConfiguredFeature::huge_mushroom(HugeMushroomConfiguration::brown())
+                );
+            }
+            other => panic!("expected random boolean selector, got {other:?}"),
         }
     }
 
