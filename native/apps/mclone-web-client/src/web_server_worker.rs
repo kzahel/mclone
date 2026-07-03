@@ -1671,6 +1671,7 @@ impl McloneWebIntegratedServerWorker {
                     .try_handle_command(command)
                     .map_err(|error| error.to_string())?;
                 updates.extend(self.server.try_poll().map_err(|error| error.to_string())?);
+                self.autosave_indexed_db_dirty_chunks(&mut updates)?;
                 Ok(updates)
             });
         self.command_queue_depth = self.command_queue_depth.saturating_sub(1);
@@ -1680,7 +1681,7 @@ impl McloneWebIntegratedServerWorker {
                 self.diagnostics
                     .runner_frame_metrics
                     .record_request_time_us(elapsed_us_since(request_start));
-                worker_response(updates, &mut self.diagnostics).map_err(JsValue::from)
+                self.worker_response(updates).map_err(JsValue::from)
             }
             Err(error) => {
                 self.diagnostics
@@ -1697,7 +1698,7 @@ impl McloneWebIntegratedServerWorker {
         match self.server.try_poll() {
             Ok(updates) => {
                 self.refresh_diagnostics(None, false, None);
-                worker_response(updates, &mut self.diagnostics).map_err(JsValue::from)
+                self.worker_response(updates).map_err(JsValue::from)
             }
             Err(error) => {
                 let error = error.to_string();
@@ -1710,19 +1711,23 @@ impl McloneWebIntegratedServerWorker {
     #[wasm_bindgen(js_name = tick)]
     pub fn tick(&mut self) -> Result<JsValue, JsValue> {
         if !self.running {
-            return worker_response(Vec::new(), &mut self.diagnostics).map_err(JsValue::from);
+            return self.worker_response(Vec::new()).map_err(JsValue::from);
         }
         let wall_start = js_sys::Date::now();
         match self.server.try_simulation_tick_report() {
             Ok(report) => {
                 let wall_us = ((js_sys::Date::now() - wall_start).max(0.0) * 1000.0) as u128;
-                let updates = report.updates.clone();
+                let mut updates = report.updates.clone();
+                if let Err(error) = self.autosave_indexed_db_dirty_chunks(&mut updates) {
+                    self.refresh_diagnostics(None, false, Some(error.clone()));
+                    return Err(JsValue::from_str(&error));
+                }
                 self.refresh_diagnostics(
                     Some(ServerRunnerTickDiagnostics::from_report(&report, wall_us)),
                     false,
                     None,
                 );
-                worker_response(updates, &mut self.diagnostics).map_err(JsValue::from)
+                self.worker_response(updates).map_err(JsValue::from)
             }
             Err(error) => {
                 let error = error.to_string();
@@ -1746,11 +1751,7 @@ impl McloneWebIntegratedServerWorker {
             return Err(JsValue::from_str(&error));
         }
         self.refresh_diagnostics(None, false, None);
-        let response = worker_response(Vec::new(), &mut self.diagnostics).map_err(JsValue::from)?;
-        if let Some(state) = &self.indexed_db_state {
-            attach_indexed_db_dirty_records(&response, &state.borrow()).map_err(JsValue::from)?;
-        }
-        Ok(response)
+        self.worker_response(Vec::new()).map_err(JsValue::from)
     }
 }
 
@@ -1773,6 +1774,33 @@ impl McloneWebIntegratedServerWorker {
         };
         worker.refresh_diagnostics(None, false, None);
         worker
+    }
+
+    fn worker_response(&mut self, updates: Vec<ServerUpdate>) -> Result<JsValue, String> {
+        let response = worker_response(updates, &mut self.diagnostics)?;
+        if let Some(state) = &self.indexed_db_state {
+            attach_indexed_db_dirty_records(&response, &mut state.borrow_mut())?;
+        }
+        Ok(response)
+    }
+
+    fn autosave_indexed_db_dirty_chunks(
+        &mut self,
+        updates: &mut Vec<ServerUpdate>,
+    ) -> Result<(), String> {
+        if self.indexed_db_state.is_none() {
+            return Ok(());
+        }
+        self.server
+            .save_dirty_chunks()
+            .map_err(|error| error.to_string())?;
+        for _ in 0..256 {
+            if self.server.scheduler().pending_persistence_save_count() == 0 {
+                return Ok(());
+            }
+            updates.extend(self.server.try_poll().map_err(|error| error.to_string())?);
+        }
+        Err("timed out waiting for IndexedDB autosave persistence writes".to_owned())
     }
 
     fn refresh_diagnostics(
@@ -1885,7 +1913,7 @@ fn js_record_bytes(value: &JsValue) -> Result<Vec<u8>, String> {
 
 fn attach_indexed_db_dirty_records(
     response: &JsValue,
-    state: &WebIndexedDbWorldStoreState,
+    state: &mut WebIndexedDbWorldStoreState,
 ) -> Result<(), String> {
     let chunks = chunk_records_to_js(&state.dirty_chunks)?;
     let entity_chunks = entity_chunk_records_to_js(&state.dirty_entity_chunks)?;
@@ -1897,6 +1925,8 @@ fn attach_indexed_db_dirty_records(
         &entity_chunks,
     )
     .map_err(|error| format!("failed to attach indexedDB entity chunks: {error:?}"))?;
+    state.dirty_chunks.clear();
+    state.dirty_entity_chunks.clear();
     Ok(())
 }
 

@@ -80,6 +80,7 @@ let wasmModule: WasmModule | null = null;
 let server: McloneWebIntegratedServerWorker | null = null;
 let indexedDbWorldId: string | null = null;
 let tickTimer: ReturnType<typeof setInterval> | 0 = 0;
+let tickInFlight = false;
 let runnerTransportKind: "shared-memory" | "message-transfer" = "message-transfer";
 let nextRunnerSharedBufferId = 1;
 const runnerSharedPool: RunnerSharedSlot[] = [];
@@ -178,7 +179,9 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
     ? "shared-memory"
     : "message-transfer";
   const intervalMs = Math.max(1, Number(message.tickIntervalMs) || 50);
-  tickTimer = setInterval(tickServer, intervalMs);
+  tickTimer = setInterval(() => {
+    void tickServer();
+  }, intervalMs);
   if (!server) {
     throw new Error("integrated server worker did not start");
   }
@@ -199,11 +202,13 @@ async function handleCommand(message: IntegratedServerWorkerMessage): Promise<vo
   }
   const frame = commandFrame(message);
   const result = server.handleCommandFrame(frame);
+  await saveIndexedDbDirtyRecordsForCurrentWorld(result);
   const updates = Array.isArray(result.updates) ? [...result.updates] : [];
   let diagnostics = result.diagnostics;
   for (let attempt = 0; hasPendingServerJobs(diagnostics) && attempt < 60000; attempt += 1) {
     await waitForJobTurn();
     const poll = server.poll();
+    await saveIndexedDbDirtyRecordsForCurrentWorld(poll);
     if (Array.isArray(poll.updates)) {
       updates.push(...poll.updates);
     }
@@ -222,10 +227,12 @@ async function handleCommand(message: IntegratedServerWorkerMessage): Promise<vo
   }, message);
 }
 
-function tickServer(): void {
-  if (!server) return;
+async function tickServer(): Promise<void> {
+  if (!server || tickInFlight) return;
+  tickInFlight = true;
   try {
     const result = server.tick();
+    await saveIndexedDbDirtyRecordsForCurrentWorld(result);
     if (Number(result.updateCount) > 0) {
       postUpdates({
         ok: true,
@@ -237,6 +244,8 @@ function tickServer(): void {
     }
   } catch (error) {
     postFailure(0, stringifyError(error));
+  } finally {
+    tickInFlight = false;
   }
 }
 
@@ -247,10 +256,8 @@ async function shutdown(message: IntegratedServerWorkerMessage): Promise<void> {
   }
   const result = server?.shutdown?.() ?? { updates: [], diagnostics: null };
   server = null;
-  if (indexedDbWorldId) {
-    await saveIndexedDbDirtyRecords(indexedDbWorldId, result);
-    indexedDbWorldId = null;
-  }
+  await saveIndexedDbDirtyRecordsForCurrentWorld(result);
+  indexedDbWorldId = null;
   workerSelf.postMessage({
     ok: true,
     kind: "shutdown-complete",
@@ -372,6 +379,13 @@ async function saveIndexedDbDirtyRecords(worldId: string, result: Record<string,
   } finally {
     db.close();
   }
+}
+
+async function saveIndexedDbDirtyRecordsForCurrentWorld(result: Record<string, any>): Promise<void> {
+  if (!indexedDbWorldId) {
+    return;
+  }
+  await saveIndexedDbDirtyRecords(indexedDbWorldId, result);
 }
 
 async function putIndexedDbRecords(

@@ -26,8 +26,8 @@ use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkStatus, chunk_section_index,
 };
 use mclone_core::{
-    BlockHitResult, BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, Direction, HitResultType,
-    Vec3d, chunk_middle_block_coord,
+    BlockHitResult, BlockPos, BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, Direction,
+    HitResultType, Vec3d, chunk_middle_block_coord,
 };
 use mclone_input::{
     InputCapabilities, InputCapabilityState, InputDeviceKind, InputPreferences, TouchControlsMode,
@@ -2889,6 +2889,23 @@ impl WebChunkRenderSession {
         }
         canvas_size_to_js_value(self.context.width, self.context.height, changed)
             .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = blockStateAt)]
+    pub fn block_state_at(&self, x: i32, y: i32, z: i32) -> Result<JsValue, JsValue> {
+        let object = js_sys::Object::new();
+        let state = self
+            .runtime
+            .client()
+            .block_state_at_block_pos(BlockPos::new(x, y, z));
+        set_bool(&object, "ok", true).map_err(JsValue::from)?;
+        set_bool(&object, "loaded", state.is_some()).map_err(JsValue::from)?;
+        set_number(&object, "blockX", f64::from(x)).map_err(JsValue::from)?;
+        set_number(&object, "blockY", f64::from(y)).map_err(JsValue::from)?;
+        set_number(&object, "blockZ", f64::from(z)).map_err(JsValue::from)?;
+        set_number(&object, "blockStateId", optional_block_state_id(state))
+            .map_err(JsValue::from)?;
+        Ok(object.into())
     }
 
     #[wasm_bindgen(js_name = shutdown)]

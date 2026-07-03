@@ -1,7 +1,7 @@
 # 134: Shared Persistence Architecture
 
-Status: active; Slice 6A browser IndexedDB preload/writeback bridge landed,
-true streaming/load-miss IndexedDB adapter next.
+Status: active; Slice 6B browser IndexedDB autosave/reload smoke landed, true
+streaming/load-miss IndexedDB adapter next.
 
 ## Purpose
 
@@ -35,7 +35,7 @@ Read before implementation:
 
 ## Current Native State
 
-Live Rust after Slice 6A has:
+Live Rust after Slice 6B has:
 
 - `native/crates/mclone-server/src/persistence.rs`
 - `ChunkSnapshotStore`
@@ -77,14 +77,18 @@ Live Rust after Slice 6A has:
 - wasm `WorldStore` adapter over preloaded IndexedDB records with dirty-record
   writeback on graceful shutdown
 - `WebChunkRenderSession.shutdownAsync()` for IndexedDB writeback completion
+- browser IndexedDB dirty chunk/entity chunk autosave on command/tick responses
+- page-level browser block edit, IndexedDB write, reload, and exact block-state
+  verification smoke coverage
 
 This is useful but still too narrow:
 
 - desktop local persistence is startup/CLI-wired but does not yet have an
   in-game world browser or named-world UI
 - no player/world/saved-data records
-- browser IndexedDB is preload/writeback only; it does not yet service async
-  load misses directly from IndexedDB during the session
+- browser IndexedDB preloads records at startup and writes dirty records during
+  the session, but it does not yet service async load misses directly from
+  IndexedDB
 - no Android app-private world-dir wiring
 
 `docs/loading-persistence.md` contains richer target vocabulary than the live
@@ -513,7 +517,8 @@ Validation:
 
 Add browser singleplayer storage behind the same logical contract.
 
-Status: Slice 6A preload/writeback bridge landed 2026-07-03.
+Status: Slice 6A preload/writeback bridge landed 2026-07-03; Slice 6B
+autosave/reload validation landed 2026-07-03.
 
 Deliverables:
 
@@ -546,6 +551,14 @@ Landed shape:
   writes them back to IndexedDB before resolving.
 - `worldStorage=indexeddb`, `worldId=...`, and `clearWorldStorage=1` are parsed
   from the browser query string and passed through the shared web runner config.
+- The web worker now asks the shared server to save dirty chunks after command
+  handling and ticks, drains pending persistence save completions, attaches the
+  resulting dirty IndexedDB records to normal worker responses, and clears the
+  wasm dirty-record mirrors after attaching them to the response.
+- The TypeScript integrated-server worker writes dirty IndexedDB records after
+  command, poll, tick, and shutdown responses for the current browser world.
+- `WebChunkRenderSession.blockStateAt()` exposes a narrow diagnostic read path
+  so browser smoke tests can verify exact world state across page reloads.
 
 Validation:
 
@@ -553,14 +566,17 @@ Validation:
   browser world, clears existing records, streams a small view, awaits
   `shutdownAsync()`, verifies chunk records exist in IndexedDB, restarts the
   same world, and streams from the preloaded/decoded records
+- `pnpm native:web:smoke -- --indexeddb-reload-probe` places a dirt block in an
+  IndexedDB-backed browser world, waits for browser chunk records, reloads the
+  page without clearing storage, and verifies the same block position is still
+  dirt through the shared client state
 - `cargo test --manifest-path native/Cargo.toml -p mclone-web-client`
 - `pnpm native:web:build`
 
-Deferred beyond Slice 6A:
+Deferred beyond Slice 6B:
 
 - true async/load-miss IndexedDB adapter instead of startup preload of every
   record in the selected world
-- block-edit/reload page-level browser smoke
 - metadata/player/saved-data object stores wired to live record families
 - in-app browser world list / create / delete UI
 - generated animal survives page reload
@@ -622,17 +638,18 @@ one platform before the shared host contract is clear.
 
 ## Next Likely Implementation Chunk
 
-Proceed with **Slice 6: Browser IndexedDB Backend**.
+Proceed with the **true async/load-miss IndexedDB adapter** inside Slice 6.
 
 Reasoning:
 
 - The shared contract, threaded native actor, SQLite backend, dedicated
   world-dir path, and desktop local `--world-dir` path are all wired.
-- Browser singleplayer still lacks a durable backend behind the same
-  request/completion contract.
-- IndexedDB is the next platform-specific adapter risk: it must preserve the
-  same world lifetime, pending-write visibility, flush/close semantics, and
-  local/remote separation without introducing main-thread storage policy.
+- Browser singleplayer now persists and reloads edited chunks, but it still
+  preloads every record for the selected world at startup.
+- The remaining adapter risk is serving chunk/entity chunk load misses from
+  IndexedDB through the same request/completion contract while preserving world
+  lifetime, pending-write visibility, flush/close semantics, and local/remote
+  separation without introducing main-thread storage policy.
 
 ## Validation Gates
 
@@ -653,6 +670,7 @@ For browser persistence slices:
 ```text
 pnpm native:web:build
 pnpm native:web:smoke
+pnpm native:web:smoke -- --indexeddb-reload-probe
 ```
 
 For durable native backend slices, add process-restart tests or smokes rather

@@ -80,6 +80,7 @@ interface AppRuntime {
   setInputKey?: (name: string, down: boolean) => boolean;
   adjustCameraSpeed?: (amount: number) => WasmReport | null;
   previewBlockTarget?: () => WasmReport | null;
+  blockStateAt?: (x: number, y: number, z: number) => WasmReport | null;
   openNativeTitleUi?: () => WasmReport | null;
   openNativePauseUi?: () => WasmReport | null;
   openNativeHelpUi?: () => WasmReport | null;
@@ -235,6 +236,7 @@ async function boot(): Promise<WasmReport> {
   runtime.setInputKey = (name: string, down: boolean) => app.setInputKey(name, down);
   runtime.adjustCameraSpeed = (amount: number) => app.adjustCameraSpeed(amount);
   runtime.previewBlockTarget = () => runtime.state.currentTarget;
+  runtime.blockStateAt = (x: number, y: number, z: number) => app.blockStateAt(x, y, z);
   runtime.openNativeTitleUi = () => app.openNativeTitleUi();
   runtime.openNativePauseUi = () => app.openNativePauseUi();
   runtime.openNativeHelpUi = () => app.openNativeHelpUi();
@@ -434,6 +436,7 @@ class WebChunkApp {
       "toggleMovementMode",
       "selectHotbarSlot",
       "previewBlockTarget",
+      "blockStateAt",
       "interactBlock",
       "openTitleUi",
       "openPauseUi",
@@ -857,6 +860,13 @@ class WebChunkApp {
     }
     runtime.state.currentTarget = target;
     applyHotbarState(target, runtime.state);
+  }
+
+  blockStateAt(x: number, y: number, z: number): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    return this.session.blockStateAt(Math.trunc(x), Math.trunc(y), Math.trunc(z));
   }
 
   async interactBlock(action: string): Promise<WasmReport | null> {

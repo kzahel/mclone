@@ -39,10 +39,13 @@ const movementPerf = process.argv.includes("--movement-perf")
   || process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF === "1";
 const blockEditProbe = process.argv.includes("--block-edit-probe")
   || process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE === "1";
+const indexedDbReloadProbe = process.argv.includes("--indexeddb-reload-probe")
+  || process.env.MCLONE_NATIVE_WEB_INDEXEDDB_RELOAD_PROBE === "1";
 const remoteWebSocket = process.argv.includes("--remote-websocket")
   || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
 const appLoop = movementPerf
   || blockEditProbe
+  || indexedDbReloadProbe
   || remoteWebSocket
   || process.argv.includes("--app-loop")
   || process.argv.includes("--mobile-app-loop")
@@ -57,6 +60,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-movement-perf.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe.png"
+    : indexedDbReloadProbe
+    ? "/tmp/mclone-native-web-indexeddb-reload-probe.png"
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app.png"
     : appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
@@ -65,6 +70,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-movement-perf-canvas.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe-canvas.png"
+    : indexedDbReloadProbe
+    ? "/tmp/mclone-native-web-indexeddb-reload-probe-canvas.png"
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app-canvas.png"
     : appLoop ? "/tmp/mclone-native-web-app-canvas.png" : "/tmp/mclone-native-web-canvas.png");
@@ -78,6 +85,8 @@ const movementPerfReportPath = process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_REPOR
   ?? "/tmp/mclone-native-web-movement-perf.json";
 const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_REPORT
   ?? "/tmp/mclone-native-web-block-edit-probe.json";
+const indexedDbReloadProbeReportPath = process.env.MCLONE_NATIVE_WEB_INDEXEDDB_RELOAD_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-indexeddb-reload-probe.json";
 const movementPerfChunkBoundaries = Math.max(
   1,
   Number.parseInt(process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_CHUNKS ?? "3", 10) || 3,
@@ -155,9 +164,15 @@ async function run() {
     });
 
     if (appLoop) {
+      const indexedDbReloadWorldId = indexedDbReloadProbe
+        ? `reload-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`
+        : "";
+      const indexedDbReloadQuery = indexedDbReloadProbe
+        ? `?worldStorage=indexeddb&worldId=${encodeURIComponent(indexedDbReloadWorldId)}&clearWorldStorage=1`
+        : "";
       const appUrl = remoteServer
         ? `${baseUrl}/app.html?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
-        : `${baseUrl}/app.html`;
+        : `${baseUrl}/app.html${indexedDbReloadQuery}`;
       await page.goto(appUrl, { waitUntil: "load" });
       await page.waitForFunction(
         () => typeof globalThis.__mcloneWebApp !== "undefined",
@@ -182,6 +197,44 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (indexedDbReloadProbe) {
+        const indexedDbReloadProbeResult = await runIndexedDbReloadProbe(
+          page,
+          canvas,
+          baseUrl,
+          indexedDbReloadWorldId,
+        );
+        const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        let pageScreenshotCaptured = false;
+        try {
+          await page.screenshot({ path: screenshotPath, fullPage: false, timeout: 5_000 });
+          pageScreenshotCaptured = true;
+        } catch (error) {
+          console.warn(`page screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
+        const canvasPixels = analyzePng(canvasPng);
+        const report = {
+          url: appUrl,
+          reloadUrl: `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(indexedDbReloadWorldId)}`,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          indexedDbReloadProbeReportPath,
+          appLoop,
+          indexedDbReloadProbe,
+          indexedDbReloadWorldId,
+          remoteWebSocket,
+          remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
+          canvasPixels,
+          indexedDbReloadProbeResult,
+          result,
+        };
+        await writeFile(indexedDbReloadProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
+        assertIndexedDbReloadProbeResult(report, pageErrors, canvasPixels);
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (blockEditProbe) {
         const blockEditProbeResult = await runBlockEditProbe(page, canvas);
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
@@ -769,6 +822,217 @@ async function runBlockEditProbe(page, canvas) {
     frameCountDelta: end.frameCount - start.frameCount,
     renderCountDelta: end.renderCount - start.renderCount,
   };
+}
+
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {string} baseUrl
+ * @param {string} worldId
+ */
+async function runIndexedDbReloadProbe(page, canvas, baseUrl, worldId) {
+  await canvas.evaluate((element) => element.focus());
+  await canvas.click({ position: { x: 640, y: 360 } });
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.ok === true
+        && state.ready === true
+        && state.streamingSettled === true
+        && state.currentTarget?.ok === true
+        && state.currentTarget.hit === true
+        && typeof globalThis.__mcloneWebApp?.blockStateAt === "function"
+        && state.pendingCompileJobCount === 0;
+    },
+    undefined,
+    { timeout: 60_000 },
+  );
+  await installIndexedDbCountHelper(page);
+
+  await page.keyboard.press("2");
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 1,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const placement = await clickBlockInteraction(page, canvas, "right", "place", {
+    expectedSelectedHotbarSlot: 1,
+    expectedResultBlockStateId: DIRT_BLOCK_STATE_ID,
+    expectedCarriedItemSynced: true,
+  });
+  const placedCandidates = placedBlockCandidates(placement?.interaction);
+  const beforeReloadCandidates = [];
+  for (const candidate of placedCandidates) {
+    beforeReloadCandidates.push(await blockStateAt(page, candidate));
+  }
+  const placedBlock = beforeReloadCandidates.find(
+    (candidate) => candidate?.blockStateId === DIRT_BLOCK_STATE_ID,
+  ) ?? beforeReloadCandidates[0];
+  await waitForBrowserIndexedDbChunkRecords(page, worldId, 1);
+
+  const reloadUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}`;
+  await page.goto(reloadUrl, { waitUntil: "load" });
+  await waitForWebAppReady(page);
+  await installIndexedDbCountHelper(page);
+  await waitForWebAppStreamingSettled(page, 60_000);
+  const afterReload = await waitForBlockStateAt(page, placedBlock, DIRT_BLOCK_STATE_ID);
+  const afterReloadRecordCounts = await browserIndexedDbWorldRecordCounts(page, worldId);
+  return {
+    ok: placement?.ok === true
+      && placedBlock?.blockStateId === DIRT_BLOCK_STATE_ID
+      && afterReload?.blockStateId === DIRT_BLOCK_STATE_ID
+      && afterReloadRecordCounts.chunks > 0,
+    worldId,
+    reloadUrl,
+    placement,
+    placedCandidates,
+    beforeReloadCandidates,
+    placedBlock,
+    afterReload,
+    afterReloadRecordCounts,
+  };
+}
+
+/** @param {Page} page */
+async function waitForWebAppReady(page) {
+  await page.waitForFunction(
+    () => typeof globalThis.__mcloneWebApp !== "undefined",
+    undefined,
+    { timeout: 20_000 },
+  );
+  await page.waitForFunction(
+    () => {
+      const app = globalThis.__mcloneWebApp;
+      return app?.ready === true || app?.state?.failed === true;
+    },
+    undefined,
+    { timeout: 60_000 },
+  );
+  const state = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+  if (!state?.ready || !state?.ok) {
+    throw new Error(`native web app failed to boot after reload:\n${JSON.stringify(state, null, 2)}`);
+  }
+}
+
+function placedBlockCandidates(interaction) {
+  if (!interaction) {
+    return [];
+  }
+  const hit = {
+    x: Math.trunc(Number(interaction.blockX) || 0),
+    y: Math.trunc(Number(interaction.blockY) || 0),
+    z: Math.trunc(Number(interaction.blockZ) || 0),
+  };
+  const offset = directionOffset(String(interaction.direction ?? ""));
+  return [
+    {
+      x: hit.x + offset.x,
+      y: hit.y + offset.y,
+      z: hit.z + offset.z,
+      source: "adjacent",
+    },
+    {
+      ...hit,
+      source: "hit",
+    },
+  ];
+}
+
+function directionOffset(direction) {
+  switch (direction) {
+    case "down":
+      return { x: 0, y: -1, z: 0 };
+    case "up":
+      return { x: 0, y: 1, z: 0 };
+    case "north":
+      return { x: 0, y: 0, z: -1 };
+    case "south":
+      return { x: 0, y: 0, z: 1 };
+    case "west":
+      return { x: -1, y: 0, z: 0 };
+    case "east":
+      return { x: 1, y: 0, z: 0 };
+    default:
+      return { x: 0, y: 0, z: 0 };
+  }
+}
+
+/** @param {Page} page */
+function blockStateAt(page, pos) {
+  return page.evaluate((pos) => {
+    const report = globalThis.__mcloneWebApp?.blockStateAt?.(pos.x, pos.y, pos.z) ?? null;
+    return {
+      ...pos,
+      ok: report?.ok === true,
+      loaded: report?.loaded === true,
+      blockStateId: Number(report?.blockStateId),
+      report,
+    };
+  }, pos);
+}
+
+async function waitForBlockStateAt(page, pos, expectedBlockStateId) {
+  await page.waitForFunction(
+    ({ pos, expectedBlockStateId }) => {
+      const report = globalThis.__mcloneWebApp?.blockStateAt?.(pos.x, pos.y, pos.z);
+      return report?.ok === true
+        && report.loaded === true
+        && Number(report.blockStateId) === expectedBlockStateId;
+    },
+    { pos, expectedBlockStateId },
+    { timeout: 60_000 },
+  );
+  return blockStateAt(page, pos);
+}
+
+async function waitForBrowserIndexedDbChunkRecords(page, worldId, minChunks) {
+  await page.waitForFunction(
+    async ({ worldId, minChunks }) => {
+      const counts = await globalThis.__mcloneBrowserSmokeIndexedDbCounts(worldId);
+      return counts.chunks >= minChunks;
+    },
+    { worldId, minChunks },
+    { timeout: 30_000 },
+  );
+  return browserIndexedDbWorldRecordCounts(page, worldId);
+}
+
+function browserIndexedDbWorldRecordCounts(page, worldId) {
+  return page.evaluate((worldId) => globalThis.__mcloneBrowserSmokeIndexedDbCounts(worldId), worldId);
+}
+
+async function installIndexedDbCountHelper(page) {
+  await page.evaluate(() => {
+    globalThis.__mcloneBrowserSmokeIndexedDbCounts = async (worldId) => {
+      const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open("mclone-web-worlds");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error ?? new Error("failed to open IndexedDB"));
+      });
+      try {
+        const countStore = (storeName) => new Promise((resolve, reject) => {
+          if (!db.objectStoreNames.contains(storeName)) {
+            resolve(0);
+            return;
+          }
+          const transaction = db.transaction(storeName, "readonly");
+          const request = transaction
+            .objectStore(storeName)
+            .index("worldId")
+            .count(IDBKeyRange.only(worldId));
+          request.onsuccess = () => resolve(Number(request.result) || 0);
+          request.onerror = () => reject(request.error ?? new Error(`failed to count ${storeName}`));
+        });
+        const [chunks, entityChunks] = await Promise.all([
+          countStore("chunks"),
+          countStore("entityChunks"),
+        ]);
+        return { chunks, entityChunks, total: chunks + entityChunks };
+      } finally {
+        db.close();
+      }
+    };
+  });
 }
 
 /** @param {Page} page */
@@ -2293,6 +2557,37 @@ function assertBlockEditProbeResult(report, pageErrors, canvasPixels) {
   }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
     throw new Error(`block edit probe canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+/**
+ * @param {any} report
+ * @param {string[]} pageErrors
+ * @param {any} canvasPixels
+ */
+function assertIndexedDbReloadProbeResult(report, pageErrors, canvasPixels) {
+  if (pageErrors.length > 0) {
+    throw new Error(`browser IndexedDB reload probe page errors:\n${pageErrors.join("\n")}`);
+  }
+  const probe = report?.indexedDbReloadProbeResult;
+  if (!probe?.ok) {
+    throw new Error(`native web IndexedDB reload probe failed:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (
+    probe.placement?.ok !== true
+    || probe.placedBlock?.blockStateId !== DIRT_BLOCK_STATE_ID
+    || probe.afterReload?.blockStateId !== DIRT_BLOCK_STATE_ID
+  ) {
+    throw new Error(`native web IndexedDB reload probe did not preserve the placed dirt block:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (Number(probe.afterReloadRecordCounts?.chunks) <= 0) {
+    throw new Error(`native web IndexedDB reload probe did not write chunk records:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (!report.result?.ok || !report.result?.ready) {
+    throw new Error(`native web IndexedDB reload probe ended with an unhealthy app state:\n${JSON.stringify(report.result, null, 2)}`);
+  }
+  if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
+    throw new Error(`IndexedDB reload probe canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
 }
 
