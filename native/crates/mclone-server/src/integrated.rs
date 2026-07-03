@@ -182,6 +182,17 @@ impl IntegratedServer {
         Self::with_scheduler(seed, ChunkScheduler::with_world_store(seed, store))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn try_with_threaded_world_store(
+        seed: i64,
+        store: Box<dyn WorldStore + Send>,
+    ) -> ChunkStoreResult<Self> {
+        Ok(Self::with_scheduler(
+            seed,
+            ChunkScheduler::try_with_threaded_world_store(seed, store)?,
+        ))
+    }
+
     pub(crate) fn with_player_chunk_tracking_policy(
         seed: i64,
         policy: PlayerChunkTrackingPolicy,

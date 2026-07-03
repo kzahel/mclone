@@ -1,7 +1,7 @@
 # 134: Shared Persistence Architecture
 
-Status: active; Slice 3B entity scheduler/host integration landed, native
-durable backend and IO-thread work next.
+Status: active; Slice 4A native threaded mailbox landed, native durable backend
+next.
 
 ## Purpose
 
@@ -45,6 +45,7 @@ Live Rust after Slice 3B has:
 - `ChunkRecord`
 - `EntityChunkRecord` / `EntitySaveRecord`
 - `PersistenceActor` / `PersistenceMailbox`
+- optional native-thread `PersistenceMailbox` backend for `Send` stores
 - `NullWorldStore` / `MemoryWorldStore`
 - `ChunkSnapshotWorldStore`
 - `SynchronousPersistenceFacade`
@@ -62,7 +63,7 @@ Live Rust after Slice 3B has:
 
 This is useful but still too narrow:
 
-- actor execution is still same-thread/in-process
+- no physical durable native backend for block and entity records
 - no player/world/saved-data records
 - no web IndexedDB adapter
 - no Android or dedicated-server world-dir wiring
@@ -328,11 +329,32 @@ Add the first real durable native backend, and move the actor off the server
 thread in the same slice. Landing real disk IO without the offload would
 reintroduce exactly the blocking this design exists to avoid.
 
+Status: Slice 4A native threaded mailbox landed 2026-07-03; physical durable
+backend still pending.
+
 Deliverables beyond the backend:
 
-- persistence actor runs on its own native thread behind the same
-  request/completion contract
+- persistence actor can run on its own native thread behind the same
+  request/completion contract; this has landed as
+  `PersistenceMailbox::threaded` for native `Send` stores
 - host tick integrates completions without blocking on storage
+
+Landed shape:
+
+- `PersistenceMailbox` now has inline and native-thread backends; the inline
+  backend remains the default so existing non-`Send` test stores and WASM paths
+  are unchanged.
+- Native callers can opt into the threaded backend through
+  `PersistenceMailbox::threaded`,
+  `ChunkScheduler::try_with_threaded_world_store`, and
+  `IntegratedServer::try_with_threaded_world_store`.
+- The threaded backend forwards the same `WorldStoreRequest` values to a worker
+  actor and returns the same `WorldStoreCompletion` values to the host poll
+  path.
+- Same-key pending-write visibility, durable/cache ordering, flush, close, and
+  entity chunk support stay owned by the shared actor.
+- A blocked or slow native store write no longer blocks host-side mailbox
+  polling.
 
 Recommended first backend:
 
@@ -359,7 +381,8 @@ Validation:
 - generated animal persists across process restart
 - killed generated animal remains gone across process restart
 - explicit transient world still discards all state
-- a deliberately slow store fake does not inflate host tick time
+- a deliberately slow store fake does not inflate host tick time; this is
+  covered for the threaded mailbox foundation
 
 ### Slice 5: Dedicated Server World Dir
 
@@ -455,15 +478,17 @@ one platform before the shared host contract is clear.
 
 ## Next Likely Implementation Chunk
 
-Proceed with **Slice 4: Native Durable Backend And IO Thread**.
+Proceed with **Slice 4B: Native Durable Backend**.
 
 Reasoning:
 
 - Slice 3B moved block chunks and entity chunks behind the same shared
   scheduler/mailbox lifecycle for world-store-backed hosts.
-- The remaining persistence risk is physical durability and host blocking:
-  real native IO needs a backend with transactional writes and an actor that no
-  longer performs storage work on the server thread.
+- Slice 4A moved native `Send` stores behind an optional worker-thread mailbox,
+  so real native IO no longer needs to run on the server thread.
+- The remaining persistence risk is physical durability: block and entity
+  records need a transactional world backend instead of memory or snapshot-only
+  compatibility storage.
 - Landing the native durable backend before IndexedDB/Android keeps platform
   adapters behind the same `WorldStore` contract instead of forcing browser or
   app-local policy into gameplay code.

@@ -459,6 +459,17 @@ impl ChunkScheduler {
         Self::with_persistence(seed, PersistenceMailbox::new(store))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn try_with_threaded_world_store(
+        seed: i64,
+        store: Box<dyn WorldStore + Send>,
+    ) -> ChunkStoreResult<Self> {
+        Ok(Self::with_persistence(
+            seed,
+            PersistenceMailbox::threaded(store)?,
+        ))
+    }
+
     pub fn with_persistence(seed: i64, store: PersistenceMailbox) -> Self {
         Self {
             seed,

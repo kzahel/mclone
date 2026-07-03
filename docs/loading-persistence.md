@@ -197,9 +197,12 @@ ChunkScheduler actor integration
 ```
 
 The synchronous facade remains only as compatibility/testing glue around the
-same mailbox. Entity chunks have a shared record/mailbox foundation and are
-wired through scheduler/integrated-host load, dirty-save, and unload handling
-for `WorldStore` backends that opt into entity chunks. Snapshot-only
+same mailbox. On native targets, `PersistenceMailbox` can also run a `Send`
+world store on its own worker thread behind the same request/completion
+contract; the inline backend remains the default for tests, compatibility
+stores, and WASM paths. Entity chunks have a shared record/mailbox foundation
+and are wired through scheduler/integrated-host load, dirty-save, and unload
+handling for `WorldStore` backends that opt into entity chunks. Snapshot-only
 compatibility stores remain chunk-only.
 
 Browser singleplayer uses IndexedDB inside the authoritative worker. Dedicated/remote host uses file-backed JSON records under a save root. Unit tests generally use memory storage.
@@ -358,15 +361,15 @@ Fresh Playwright contexts reduce leakage, but the explicit query is the determin
 | Partial proto save/resume | `chunkToSave` tracks latest `ProtoChunk`/`LevelChunk`; unsaved partials can save on unload | Holder `chunkToSave` records save/load metadata-only and sectioned partial records; section payload still reuses packed snapshots | Future vanilla fields are not represented yet | Tactical 58 continue proto payload expansion |
 | Pending unload race safety | `pendingUnloads` holds a holder until `chunkToSave` is saved; returning tickets resurrect that holder; `IOWorker.pendingWrites` makes queued stores visible to loads | Generated host queues holder drops with a vanilla-sized 200-holder pass budget, holds pruned holders with queued generated-record saves, resurrects them before storage has the record, and reads host pending writes before adapter loads | Residency has player and generation ticket sources but still needs lighting/entity/forced tickets and real ticket levels | Tactical 60 |
 | Load before generate | Disk load at `EMPTY`, then generate missing statuses | Storage lookup before terrain generation | Match in principle | Keep |
-| Generated clean persistence | Dirty/save policy; not every publish writes | Published generated-clean chunks now queue lazy discardable cache writes; stale queued cache writes skip if a dirty save supersedes them | Still lacks a full flush/close protocol and adapter-level priority split | Tactical 59 |
+| Generated clean persistence | Dirty/save policy; not every publish writes | Published generated-clean chunks now queue lazy discardable cache writes through the shared actor; stale queued cache writes skip if a dirty save supersedes them | Still lacks a native durable backend | Tactical 134 |
 | Dirty tracking | `isUnsaved` gates save | Host block mutations mark durable dirty chunks; future gameplay domains still need to join that policy | Entity/block-entity/player state could bypass dirty saving until implemented | Extend with each gameplay domain |
 | Light persistence | Saved and hydrated only through `isLightOn`/light-correct trust path | Sent to clients but omitted from storage; recomputed on reload | Cannot benefit from trusted saved light yet | Keep until trusted-light hydration exists |
 | Tick persistence | Proto/full tick lists preserved; unpacked into server tick lists when accessible | Block/liquid tick snapshots restored into chunks; liquid host hydrates published chunk ticks | Reasonable partial match for liquid work | Continue parity work |
 | Heightmaps | Stored and primed if missing | Not stored in snapshots | Current systems recompute or avoid persisted heightmaps | Defer until needed |
 | Structures | Stored starts/references | Not persisted | Structures are post-MVP | Defer |
-| Entities/block entities | Persisted and loaded | Not persisted | Gameplay persistence missing | Defer until entity/block-entity slices |
+| Entities/block entities | Persisted and loaded | Entity chunk records persist Cow, Chicken, and Item state through `WorldStore` backends that opt in; block entities are not modeled yet | Generated-original entity placement and tombstone suppression still need follow-up slices | Tactical 134 |
 | Postprocessing/carving masks | Persisted for proto chunks | Not modeled in storage | Relevant to full vanilla status pipeline | Defer |
-| Save on unload/close | Dirty chunks saved before unload/flush/close | Dirty chunks save before unload/flush; close is still a no-op because there is no host close command | Unsafe once gameplay state can mutate outside chunk-view/tick paths | Add host close/flush lifecycle when needed |
+| Save on unload/close | Dirty chunks saved before unload/flush/close | Dirty block and entity chunk records save before holder unload through actor acknowledgements; mailbox flush/close exists, but app-level clean shutdown wiring is still pending | Unsafe once dedicated/native app worlds use real durable storage without close wiring | Add host close/flush lifecycle with durable backend |
 | Client chunk visibility | Server filters packets per player interest | Remote service filters snapshots per session | Close enough for current multiplayer | Keep until ticket model grows |
 | Progress UI | Status listener reports status changes | UI reports saved-chunk lookup, missing generation, decoration, lighting, and publish phases | Coarse lighting progress only | Keep improving with future status work |
 | Test storage isolation | N/A | Worker probes can request `clearWorldStorage=1`; dev profile still persists unless requested | Manual dev refreshes can still intentionally reuse local saves | Keep explicit reset path |

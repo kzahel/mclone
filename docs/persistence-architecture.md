@@ -100,10 +100,12 @@ The persistence actor may run as:
 - a browser worker or host-worker-owned async adapter on web
 - an in-process deterministic fake for unit tests
 
-The first contract slice may run the actor same-thread and poll-driven behind
-the identical completion contract. Moving it onto its own native thread lands
-with the first durable backend, not later: real disk IO on the server thread
-would reintroduce exactly the blocking this design exists to avoid.
+The first contract slice ran the actor same-thread and poll-driven behind the
+identical completion contract. Native targets now also have an opt-in threaded
+mailbox for `Send` stores; tests, compatibility stores, and WASM can keep the
+inline backend. The first durable native backend should use the threaded path by
+default, because real disk IO on the server thread would reintroduce exactly
+the blocking this design exists to avoid.
 
 The host should integrate completed loads and save acknowledgements during its
 normal tick/poll path. It should not synchronously wait for disk or IndexedDB
@@ -356,8 +358,9 @@ feature cross-compiles cleanly to Android and Quest, and web uses IndexedDB,
 so no wasm SQLite build is needed. A custom region-file backend can still be
 added later if measurements justify it.
 
-The durable backend and the native IO thread land together: real disk IO runs
-on the actor's own thread behind the same request/completion contract, never
+The native IO-thread foundation exists as `PersistenceMailbox::threaded`. The
+durable backend should run through that worker-thread mailbox by default so
+real disk IO stays behind the same request/completion contract and never runs
 inline on the server thread.
 
 If a plain filesystem-records fallback is ever used instead, writes must be

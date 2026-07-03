@@ -10,6 +10,9 @@ use std::{
     fs::{self, File},
     io::{BufReader, BufWriter},
     path::{Path, PathBuf},
+    sync::mpsc,
+    thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, Vec3d};
@@ -280,6 +283,69 @@ pub enum WorldStoreRequest {
     Close {
         request_id: PersistenceRequestId,
     },
+}
+
+impl WorldStoreRequest {
+    pub const fn request_id(&self) -> PersistenceRequestId {
+        match self {
+            Self::LoadChunk { request_id, .. }
+            | Self::SaveChunk { request_id, .. }
+            | Self::LoadEntityChunk { request_id, .. }
+            | Self::SaveEntityChunk { request_id, .. }
+            | Self::LoadPlayer { request_id, .. }
+            | Self::LoadSavedData { request_id, .. }
+            | Self::Flush { request_id }
+            | Self::Close { request_id } => *request_id,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn into_closed_completion(self) -> WorldStoreCompletion {
+        match self {
+            Self::LoadChunk { request_id, pos } => WorldStoreCompletion::ChunkLoaded {
+                request_id,
+                pos,
+                result: Err(closed_error()),
+            },
+            Self::SaveChunk {
+                request_id, record, ..
+            } => WorldStoreCompletion::ChunkSaved {
+                request_id,
+                pos: record.pos(),
+                result: Err(closed_error()),
+            },
+            Self::LoadEntityChunk { request_id, pos } => WorldStoreCompletion::EntityChunkLoaded {
+                request_id,
+                pos,
+                result: Err(closed_error()),
+            },
+            Self::SaveEntityChunk {
+                request_id, record, ..
+            } => WorldStoreCompletion::EntityChunkSaved {
+                request_id,
+                pos: record.pos,
+                result: Err(closed_error()),
+            },
+            Self::LoadPlayer { request_id, player } => WorldStoreCompletion::RequestFailed {
+                request_id,
+                key: WorldRecordKey::Player(player),
+                result: Err(closed_error()),
+            },
+            Self::LoadSavedData { request_id, key } => WorldStoreCompletion::RequestFailed {
+                request_id,
+                key: WorldRecordKey::SavedData(key),
+                result: Err(closed_error()),
+            },
+            Self::Flush { request_id } => WorldStoreCompletion::FlushComplete {
+                request_id,
+                result: Err(closed_error()),
+            },
+            Self::Close { request_id } => WorldStoreCompletion::CloseComplete {
+                request_id,
+                result: Err(closed_error()),
+            },
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -801,6 +867,11 @@ impl PersistenceActor {
         true
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn has_pending_background_write(&self) -> bool {
+        self.next_pending_write_key(true).is_some()
+    }
+
     pub fn drain_completions(&mut self) -> Vec<WorldStoreCompletion> {
         self.completions.drain(..).collect()
     }
@@ -908,18 +979,337 @@ impl PersistenceActor {
     }
 }
 
+fn handle_world_store_request(actor: &mut PersistenceActor, request: WorldStoreRequest) {
+    match request {
+        WorldStoreRequest::LoadChunk { request_id, pos } => {
+            actor.load_chunk(request_id, pos);
+        }
+        WorldStoreRequest::SaveChunk {
+            request_id,
+            record,
+            durability,
+        } => {
+            actor.save_chunk(request_id, record, durability);
+        }
+        WorldStoreRequest::LoadEntityChunk { request_id, pos } => {
+            actor.load_entity_chunk(request_id, pos);
+        }
+        WorldStoreRequest::SaveEntityChunk {
+            request_id,
+            record,
+            durability,
+        } => {
+            actor.save_entity_chunk(request_id, record, durability);
+        }
+        WorldStoreRequest::LoadPlayer { request_id, player } => {
+            actor.fail_reserved_request(request_id, WorldRecordKey::Player(player));
+        }
+        WorldStoreRequest::LoadSavedData { request_id, key } => {
+            actor.fail_reserved_request(request_id, WorldRecordKey::SavedData(key));
+        }
+        WorldStoreRequest::Flush { request_id } => {
+            actor.flush(request_id);
+        }
+        WorldStoreRequest::Close { request_id } => {
+            actor.close(request_id);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ThreadedPersistenceActor {
+    sender: Option<mpsc::Sender<WorldStoreRequest>>,
+    completion_receiver: mpsc::Receiver<WorldStoreCompletion>,
+    completion_buffer: VecDeque<WorldStoreCompletion>,
+    worker: Option<JoinHandle<()>>,
+    entity_chunks_supported: bool,
+    pending_requests: usize,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl fmt::Debug for ThreadedPersistenceActor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ThreadedPersistenceActor")
+            .field("entity_chunks_supported", &self.entity_chunks_supported)
+            .field("pending_requests", &self.pending_requests)
+            .field("completion_buffer_len", &self.completion_buffer.len())
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ThreadedPersistenceActor {
+    fn new(store: Box<dyn WorldStore + Send>) -> ChunkStoreResult<Self> {
+        let entity_chunks_supported = store.supports_entity_chunks();
+        let (sender, receiver) = mpsc::channel::<WorldStoreRequest>();
+        let (completion_sender, completion_receiver) = mpsc::channel::<WorldStoreCompletion>();
+        let worker = thread::Builder::new()
+            .name("mclone-persistence".to_owned())
+            .spawn(move || {
+                let store: Box<dyn WorldStore> = store;
+                let mut actor = PersistenceActor::new(store);
+                threaded_persistence_actor_loop(receiver, completion_sender, &mut actor);
+            })?;
+
+        Ok(Self {
+            sender: Some(sender),
+            completion_receiver,
+            completion_buffer: VecDeque::new(),
+            worker: Some(worker),
+            entity_chunks_supported,
+            pending_requests: 0,
+        })
+    }
+
+    const fn entity_chunks_supported(&self) -> bool {
+        self.entity_chunks_supported
+    }
+
+    fn send_request(&mut self, request: WorldStoreRequest) {
+        let Some(sender) = &self.sender else {
+            self.completion_buffer
+                .push_back(request.into_closed_completion());
+            return;
+        };
+        match sender.send(request) {
+            Ok(()) => {
+                self.pending_requests = self.pending_requests.saturating_add(1);
+            }
+            Err(error) => {
+                self.completion_buffer
+                    .push_back(error.0.into_closed_completion());
+            }
+        }
+    }
+
+    fn close(&mut self, request_id: PersistenceRequestId) {
+        self.send_request(WorldStoreRequest::Close { request_id });
+        self.sender = None;
+    }
+
+    fn process_one_background_write(&mut self) -> bool {
+        if self.drain_available_completions() {
+            return true;
+        }
+        if self.pending_requests == 0 {
+            return false;
+        }
+        match self
+            .completion_receiver
+            .recv_timeout(Duration::from_millis(1))
+        {
+            Ok(completion) => {
+                self.push_worker_completion(completion);
+                true
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => true,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                self.pending_requests = 0;
+                false
+            }
+        }
+    }
+
+    fn drain_completions(&mut self) -> Vec<WorldStoreCompletion> {
+        self.drain_available_completions();
+        self.completion_buffer.drain(..).collect()
+    }
+
+    fn take_completion(
+        &mut self,
+        request_id: PersistenceRequestId,
+    ) -> Option<WorldStoreCompletion> {
+        self.drain_available_completions();
+        let index = self
+            .completion_buffer
+            .iter()
+            .position(|completion| completion.request_id() == request_id)?;
+        self.completion_buffer.remove(index)
+    }
+
+    fn drain_available_completions(&mut self) -> bool {
+        let mut received = false;
+        loop {
+            match self.completion_receiver.try_recv() {
+                Ok(completion) => {
+                    self.push_worker_completion(completion);
+                    received = true;
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.pending_requests = 0;
+                    break;
+                }
+            }
+        }
+        received
+    }
+
+    fn push_worker_completion(&mut self, completion: WorldStoreCompletion) {
+        self.pending_requests = self.pending_requests.saturating_sub(1);
+        self.completion_buffer.push_back(completion);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for ThreadedPersistenceActor {
+    fn drop(&mut self) {
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(WorldStoreRequest::Close { request_id: 0 });
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn threaded_persistence_actor_loop(
+    receiver: mpsc::Receiver<WorldStoreRequest>,
+    completion_sender: mpsc::Sender<WorldStoreCompletion>,
+    actor: &mut PersistenceActor,
+) {
+    loop {
+        if actor.has_pending_background_write() {
+            match receiver.recv_timeout(Duration::from_millis(1)) {
+                Ok(request) => {
+                    let should_close = matches!(request, WorldStoreRequest::Close { .. });
+                    handle_world_store_request(actor, request);
+                    if !forward_actor_completions(actor, &completion_sender) || should_close {
+                        break;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if actor.process_one_background_write()
+                        && !forward_actor_completions(actor, &completion_sender)
+                    {
+                        break;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    actor.close(0);
+                    let _ = forward_actor_completions(actor, &completion_sender);
+                    break;
+                }
+            }
+        } else {
+            match receiver.recv() {
+                Ok(request) => {
+                    let should_close = matches!(request, WorldStoreRequest::Close { .. });
+                    handle_world_store_request(actor, request);
+                    if !forward_actor_completions(actor, &completion_sender) || should_close {
+                        break;
+                    }
+                }
+                Err(_) => {
+                    actor.close(0);
+                    let _ = forward_actor_completions(actor, &completion_sender);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn forward_actor_completions(
+    actor: &mut PersistenceActor,
+    completion_sender: &mpsc::Sender<WorldStoreCompletion>,
+) -> bool {
+    for completion in actor.drain_completions() {
+        if completion_sender.send(completion).is_err() {
+            return false;
+        }
+    }
+    true
+}
+
+#[derive(Debug)]
+enum PersistenceBackend {
+    Inline(PersistenceActor),
+    #[cfg(not(target_arch = "wasm32"))]
+    Threaded(ThreadedPersistenceActor),
+}
+
+impl PersistenceBackend {
+    fn entity_chunks_supported(&self) -> bool {
+        match self {
+            Self::Inline(actor) => actor.entity_chunks_supported(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(actor) => actor.entity_chunks_supported(),
+        }
+    }
+
+    fn send_request(&mut self, request: WorldStoreRequest) {
+        match self {
+            Self::Inline(actor) => handle_world_store_request(actor, request),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(actor) => actor.send_request(request),
+        }
+    }
+
+    fn close(&mut self, request_id: PersistenceRequestId) {
+        match self {
+            Self::Inline(actor) => actor.close(request_id),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(actor) => actor.close(request_id),
+        }
+    }
+
+    fn process_one_background_write(&mut self) -> bool {
+        match self {
+            Self::Inline(actor) => actor.process_one_background_write(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(actor) => actor.process_one_background_write(),
+        }
+    }
+
+    fn drain_completions(&mut self) -> Vec<WorldStoreCompletion> {
+        match self {
+            Self::Inline(actor) => actor.drain_completions(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(actor) => actor.drain_completions(),
+        }
+    }
+
+    fn take_completion(
+        &mut self,
+        request_id: PersistenceRequestId,
+    ) -> Option<WorldStoreCompletion> {
+        match self {
+            Self::Inline(actor) => {
+                let index = actor
+                    .completions
+                    .iter()
+                    .position(|completion| completion.request_id() == request_id)?;
+                actor.completions.remove(index)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(actor) => actor.take_completion(request_id),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct PersistenceMailbox {
-    actor: PersistenceActor,
+    backend: PersistenceBackend,
     next_request_id: PersistenceRequestId,
 }
 
 impl PersistenceMailbox {
     pub fn new(store: Box<dyn WorldStore>) -> Self {
         Self {
-            actor: PersistenceActor::new(store),
+            backend: PersistenceBackend::Inline(PersistenceActor::new(store)),
             next_request_id: 1,
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn threaded(store: Box<dyn WorldStore + Send>) -> ChunkStoreResult<Self> {
+        Ok(Self {
+            backend: PersistenceBackend::Threaded(ThreadedPersistenceActor::new(store)?),
+            next_request_id: 1,
+        })
     }
 
     pub fn transient() -> Self {
@@ -931,12 +1321,13 @@ impl PersistenceMailbox {
     }
 
     pub fn entity_chunks_supported(&self) -> bool {
-        self.actor.entity_chunks_supported()
+        self.backend.entity_chunks_supported()
     }
 
     pub fn load_chunk(&mut self, pos: ChunkPos) -> PersistenceRequestId {
         let request_id = self.next_request_id();
-        self.actor.load_chunk(request_id, pos);
+        self.backend
+            .send_request(WorldStoreRequest::LoadChunk { request_id, pos });
         request_id
     }
 
@@ -946,13 +1337,18 @@ impl PersistenceMailbox {
         durability: SaveDurability,
     ) -> PersistenceRequestId {
         let request_id = self.next_request_id();
-        self.actor.save_chunk(request_id, record, durability);
+        self.backend.send_request(WorldStoreRequest::SaveChunk {
+            request_id,
+            record,
+            durability,
+        });
         request_id
     }
 
     pub fn load_entity_chunk(&mut self, pos: ChunkPos) -> PersistenceRequestId {
         let request_id = self.next_request_id();
-        self.actor.load_entity_chunk(request_id, pos);
+        self.backend
+            .send_request(WorldStoreRequest::LoadEntityChunk { request_id, pos });
         request_id
     }
 
@@ -962,38 +1358,44 @@ impl PersistenceMailbox {
         durability: SaveDurability,
     ) -> PersistenceRequestId {
         let request_id = self.next_request_id();
-        self.actor.save_entity_chunk(request_id, record, durability);
+        self.backend
+            .send_request(WorldStoreRequest::SaveEntityChunk {
+                request_id,
+                record,
+                durability,
+            });
         request_id
     }
 
     pub fn load_player(&mut self, player: PlayerRecordKey) -> PersistenceRequestId {
         let request_id = self.next_request_id();
-        self.actor
-            .fail_reserved_request(request_id, WorldRecordKey::Player(player));
+        self.backend
+            .send_request(WorldStoreRequest::LoadPlayer { request_id, player });
         request_id
     }
 
     pub fn load_saved_data(&mut self, key: String) -> PersistenceRequestId {
         let request_id = self.next_request_id();
-        self.actor
-            .fail_reserved_request(request_id, WorldRecordKey::SavedData(key));
+        self.backend
+            .send_request(WorldStoreRequest::LoadSavedData { request_id, key });
         request_id
     }
 
     pub fn flush(&mut self) -> PersistenceRequestId {
         let request_id = self.next_request_id();
-        self.actor.flush(request_id);
+        self.backend
+            .send_request(WorldStoreRequest::Flush { request_id });
         request_id
     }
 
     pub fn close(&mut self) -> PersistenceRequestId {
         let request_id = self.next_request_id();
-        self.actor.close(request_id);
+        self.backend.close(request_id);
         request_id
     }
 
     pub fn process_one_background_write(&mut self) -> bool {
-        self.actor.process_one_background_write()
+        self.backend.process_one_background_write()
     }
 
     pub fn process_all_background_writes(&mut self) {
@@ -1001,19 +1403,14 @@ impl PersistenceMailbox {
     }
 
     pub fn drain_completions(&mut self) -> Vec<WorldStoreCompletion> {
-        self.actor.drain_completions()
+        self.backend.drain_completions()
     }
 
     pub fn take_completion(
         &mut self,
         request_id: PersistenceRequestId,
     ) -> Option<WorldStoreCompletion> {
-        let index = self
-            .actor
-            .completions
-            .iter()
-            .position(|completion| completion.request_id() == request_id)?;
-        self.actor.completions.remove(index)
+        self.backend.take_completion(request_id)
     }
 
     pub fn load_chunk_blocking(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
@@ -1991,6 +2388,73 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
+    fn threaded_mailbox_load_sees_prior_pending_write() {
+        let mut mailbox = PersistenceMailbox::threaded(Box::<MemoryWorldStore>::default()).unwrap();
+        let pos = ChunkPos::new(18, 0);
+        let record = test_record(pos, 4);
+        let save_id = mailbox.save_chunk(record.clone(), SaveDurability::Durable);
+        let load_id = mailbox.load_chunk(pos);
+
+        assert_eq!(take_loaded_chunk_wait(&mut mailbox, load_id), Some(record));
+        assert_eq!(
+            take_saved_chunk_wait(&mut mailbox, save_id),
+            StoreWriteOutcome::Written
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn threaded_mailbox_does_not_block_host_on_slow_store_write() {
+        let (save_started_sender, save_started_receiver) = mpsc::channel();
+        let (save_release_sender, save_release_receiver) = mpsc::channel();
+        let store = ReleasableWorldStore::new(save_started_sender, save_release_receiver);
+        let mut mailbox = PersistenceMailbox::threaded(Box::new(store)).unwrap();
+        let save_id = mailbox.save_chunk(
+            test_record(ChunkPos::new(19, 0), 5),
+            SaveDurability::Durable,
+        );
+
+        save_started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("background store write should start");
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            save_release_sender
+                .send(())
+                .expect("test should release the store write");
+        });
+        let started = std::time::Instant::now();
+
+        assert!(mailbox.process_one_background_write());
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "host-side persistence polling should not wait for the store write to finish"
+        );
+
+        release.join().unwrap();
+        assert_eq!(
+            take_saved_chunk_wait(&mut mailbox, save_id),
+            StoreWriteOutcome::Written
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn threaded_mailbox_close_drains_durable_writes() {
+        let mut mailbox = PersistenceMailbox::threaded(Box::<MemoryWorldStore>::default()).unwrap();
+        let pos = ChunkPos::new(20, 0);
+        let save_id = mailbox.save_chunk(test_record(pos, 6), SaveDurability::Durable);
+        let close_id = mailbox.close();
+
+        assert_eq!(
+            take_saved_chunk_wait(&mut mailbox, save_id),
+            StoreWriteOutcome::Written
+        );
+        take_close_complete_wait(&mut mailbox, close_id);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
     fn filesystem_chunk_store_roundtrips_snapshot() {
         let root = unique_temp_dir("filesystem_chunk_store_roundtrips_snapshot");
         let mut store = FilesystemChunkSnapshotStore::new(&root);
@@ -2142,6 +2606,120 @@ mod tests {
         {
             WorldStoreCompletion::CloseComplete { result, .. } => result.unwrap(),
             completion => panic!("unexpected completion: {completion:?}"),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn take_loaded_chunk_wait(
+        mailbox: &mut PersistenceMailbox,
+        request_id: PersistenceRequestId,
+    ) -> Option<ChunkRecord> {
+        match take_completion_wait(mailbox, request_id) {
+            WorldStoreCompletion::ChunkLoaded { result, .. } => result.unwrap(),
+            completion => panic!("unexpected completion: {completion:?}"),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn take_saved_chunk_wait(
+        mailbox: &mut PersistenceMailbox,
+        request_id: PersistenceRequestId,
+    ) -> StoreWriteOutcome {
+        match take_completion_wait(mailbox, request_id) {
+            WorldStoreCompletion::ChunkSaved { result, .. } => result.unwrap(),
+            completion => panic!("unexpected completion: {completion:?}"),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn take_close_complete_wait(
+        mailbox: &mut PersistenceMailbox,
+        request_id: PersistenceRequestId,
+    ) {
+        match take_completion_wait(mailbox, request_id) {
+            WorldStoreCompletion::CloseComplete { result, .. } => result.unwrap(),
+            completion => panic!("unexpected completion: {completion:?}"),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn take_completion_wait(
+        mailbox: &mut PersistenceMailbox,
+        request_id: PersistenceRequestId,
+    ) -> WorldStoreCompletion {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(completion) = mailbox.take_completion(request_id) {
+                return completion;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for persistence request {request_id}"
+            );
+            let _ = mailbox.process_one_background_write();
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    struct ReleasableWorldStore {
+        inner: MemoryWorldStore,
+        save_started_sender: mpsc::Sender<()>,
+        save_release_receiver: mpsc::Receiver<()>,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl ReleasableWorldStore {
+        fn new(
+            save_started_sender: mpsc::Sender<()>,
+            save_release_receiver: mpsc::Receiver<()>,
+        ) -> Self {
+            Self {
+                inner: MemoryWorldStore::new(),
+                save_started_sender,
+                save_release_receiver,
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl fmt::Debug for ReleasableWorldStore {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("ReleasableWorldStore")
+                .finish_non_exhaustive()
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl WorldStore for ReleasableWorldStore {
+        fn supports_entity_chunks(&self) -> bool {
+            self.inner.supports_entity_chunks()
+        }
+
+        fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
+            self.inner.load_chunk(pos)
+        }
+
+        fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
+            let _ = self.save_started_sender.send(());
+            self.save_release_receiver
+                .recv_timeout(Duration::from_secs(1))
+                .map_err(|error| {
+                    ChunkStoreError::InvalidData(format!(
+                        "test store write was not released: {error}"
+                    ))
+                })?;
+            self.inner.save_chunk(record)
+        }
+
+        fn load_entity_chunk(
+            &mut self,
+            pos: ChunkPos,
+        ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+            self.inner.load_entity_chunk(pos)
+        }
+
+        fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+            self.inner.save_entity_chunk(record)
         }
     }
 
