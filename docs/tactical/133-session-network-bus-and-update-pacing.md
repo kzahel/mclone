@@ -7,8 +7,9 @@ replacing the earlier priority-class plan; Slice 2 local integrated ordered
 update pump landed; Slice 3A batched dirty intent and resident cache lookup
 landed; Slice 3B local integrated producer-side decoded update queue landed;
 Slice 3C local integrated chunk-interest unload hysteresis landed; Slice 3D
-resident cached-section dirty flags landed; remote/web bus convergence and
-broader terrain coordinator lifecycle remain active
+resident cached-section dirty flags landed; Slice 3E local chunk-view churn
+validation landed; remote/web bus convergence and broader terrain coordinator
+lifecycle remain active
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -327,7 +328,7 @@ safety valve.
   so a path oscillating near a chunk boundary does not thrash full row swaps
   (the measured 15-snapshot + 15-unload bursts). Vanilla keeps chunks resident
   beyond the strict view distance and unloads lazily.
-- [ ] Keep apply attribution split by update kind (chunk snapshot, section
+- [x] Keep apply attribution split by update kind (chunk snapshot, section
   mutation, unload) so per-update cost stays measurable.
 
 Recorded Slice 3A result:
@@ -524,14 +525,42 @@ Validation (Slice 3D):
     `headroom_avg_ms=-1.181`, `app_over_period_pct=75.3`,
     `submitted_fps=65.34`.
 
+Recorded Slice 3E result:
+
+- Added deterministic local chunk-view churn validation:
+  `local_chunk_view_churn_attributes_unload_apply`.
+- The test uses the real local integrated server runner and runtime update pump:
+  start with a render-distance-1 chunk window, jump the chunk view far enough to
+  eliminate overlap, pump until the runner is idle, and aggregate the normal
+  per-poll update-apply diagnostics.
+- The validation asserts that the old 3x3 chunk window is fully unloaded, the
+  new center is loaded, unload updates are counted, mixed update batches are not
+  produced, and the unload timing category is populated.
+- The churn path also produced section block updates in the focused run, so the
+  useful invariant is not "unload-only"; it is "unloads stay separately
+  attributed while other ordered updates may coexist."
+
+Validation (Slice 3E):
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime local_chunk_view_churn_attributes_unload_apply -- --nocapture`
+  passed.
+- Focused local result:
+  `polls=1085`, `changed_polls=17`, `snapshots=9`,
+  `section_updates=21`, `unloads=9`, `other=35`,
+  `unload_apply_ms=0.125`, `unload_dirty_ms=0.073`,
+  `unload_client_ms=0.051`, `max_queue_depth_before_poll=11`.
+
 Slice 3 conclusion: the local integrated update pump now follows the intended
 thin-apply shape for resident dirty marking: producer-side decode, strict
 receive-order application, resident flag flips, and bounded compile/upload
 pull-work. Remaining frame misses are no longer explained by hidden command
 drain, render-thread decode, full-cache dirty scans, or resident dirty-set
-insertion. The next local Quest work should move back to the terrain
-coordinator/render cost tracks (`128`, `119`, `117`), while this tactical's
-remaining bus work is remote TCP and web convergence.
+insertion. The local deterministic churn test did not reproduce a multi-ms
+client unload tail on desktop/shared runtime, so do not change pump policy from
+that path alone. The next local Quest work should move to a Quest-controlled
+chunk-view churn lane under the terrain coordinator/render cost tracks (`128`,
+`119`, `117`), while this tactical's remaining bus work is remote TCP and web
+convergence.
 
 ### Slice 4 - Native Remote TCP Session Actor
 

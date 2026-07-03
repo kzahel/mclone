@@ -1608,6 +1608,21 @@ Closeout notes:
   `ready_set_backpressured > 0` run; the versioned ready path has not yet
   proven behavior under that exact condition.
 
+Local chunk-view churn validation:
+
+- Implemented July 3, 2026 under `133` as
+  `local_chunk_view_churn_attributes_unload_apply`.
+- The test drives the real local integrated server runner and runtime pump:
+  load a render-distance-1 3x3 chunk window, jump the view to a non-overlapping
+  center, pump until idle, and aggregate the normal update-apply diagnostics.
+- Focused local result: `snapshots=9`, `section_updates=21`, `unloads=9`,
+  `other=35`, `unload_apply_ms=0.125`, `unload_dirty_ms=0.073`,
+  `unload_client_ms=0.051`, `max_queue_depth_before_poll=11`.
+- Interpretation: desktop/shared local churn proves the attribution path and
+  does not reproduce the Quest run A `12.091 ms` unload client-apply tail. That
+  makes a Quest-controlled churn lane the next decision point before any unload
+  budget or staged client-removal policy.
+
 ### Slice D: restore Java-region parity at the input boundary
 
 Once handoff cost is understood, introduce a shared compile-region contract:
@@ -1672,13 +1687,16 @@ This parent tactical is successful when:
 
 ## Current Recommended Next Step
 
-Use the runtime update-apply attribution as the new baseline and make the next
-chunk a controlled unload-burst investigation before changing pump policy. The
-new counters caught one RD7 run where the worst poll/update frame was almost all
+Use the runtime update-apply attribution and local churn validation as the new
+baseline. The local deterministic view jump proved unloads remain separately
+attributed and cheap on desktop/shared runtime (`9` unloads, `0.051 ms`
+client-apply total in the focused run), so the next decision point is a
+Quest-controlled unload/chunk-view churn lane before changing pump policy. The
+RD7 counters caught one run where the worst poll/update frame was almost all
 chunk-unload client apply (`12.091 ms` client apply), but the immediate rerun did
-not reproduce it (`unload_ms=0.950 ms` max). A deterministic unload/chunk-view
-churn validation should decide whether to budget unload count per frame, stage
-client chunk removal, or optimize `ClientRuntime` unload bookkeeping.
+not reproduce it (`unload_ms=0.950 ms` max). The Quest-controlled case should
+decide whether to budget unload count per frame, stage client chunk removal, or
+optimize `ClientRuntime` unload bookkeeping.
 
 Keep upload apply and per-eye encode on the short list. When update apply is
 quiet, the recurring tails are still upload apply around `5 ms`, stereo poll
@@ -1686,8 +1704,8 @@ wait around `9.6 ms`, and eye encode around `3.6-4.6 ms`.
 
 Use `2 / 16 / 64` as the current measurement lane, not a default policy. It was
 the best held-capacity result, but it is still over the 72 Hz app budget most of
-the time. The next run should tell us whether a controlled unload/update-pump
-case reproduces the intermittent poll tail, not whether one more isolated budget
-number looks better. Keep the deferred closeout note to force a
-`ready_set_backpressured > 0` run, because neither July 3 RD7 orbit hit that
-condition.
+the time. The next run should tell us whether a Quest-controlled
+unload/update-pump case reproduces the intermittent poll tail, not whether one
+more isolated budget number looks better. Keep the deferred closeout note to
+force a `ready_set_backpressured > 0` run, because neither July 3 RD7 orbit hit
+that condition.

@@ -1879,6 +1879,121 @@ mod tests {
     }
 
     #[test]
+    fn local_chunk_view_churn_attributes_unload_apply() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let render_distance = 1;
+        let tracking_radius = chunk_tracking_radius_for_render_distance(render_distance);
+        let mut runtime = LocalSingleViewSceneRuntime::new(
+            LocalSingleViewSceneOptions::new(12345, ChunkPos::new(0, 0), render_distance)
+                .with_lighting_enabled(false),
+        )
+        .unwrap();
+        runtime.poll_until_idle().unwrap();
+        let old_positions = runtime
+            .client()
+            .loaded_chunk_positions()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            old_positions.len(),
+            9,
+            "render-distance-1 initial view should load a 3x3 chunk window"
+        );
+
+        let next_center = ChunkPos::new(16, 0);
+        assert!(
+            runtime
+                .set_chunk_view(next_center, render_distance, tracking_radius)
+                .unwrap()
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut polls = 0_usize;
+        let mut changed_polls = 0_usize;
+        let mut snapshot_updates = 0_usize;
+        let mut section_block_updates = 0_usize;
+        let mut unload_updates = 0_usize;
+        let mut other_updates = 0_usize;
+        let mut mixed_updates = 0_usize;
+        let mut unload_apply_ms = 0.0_f64;
+        let mut unload_dirty_mark_ms = 0.0_f64;
+        let mut unload_client_apply_ms = 0.0_f64;
+        let mut max_unload_apply_ms = 0.0_f64;
+        let mut max_unload_client_apply_ms = 0.0_f64;
+        let mut max_queue_depth_before_poll = 0_usize;
+
+        loop {
+            let runner_diagnostics_before = runtime.server_runner_diagnostics().unwrap();
+            max_queue_depth_before_poll =
+                max_queue_depth_before_poll.max(runner_diagnostics_before.update_queue_depth);
+            if polls > 0 && runner_idle(&runner_diagnostics_before) {
+                break;
+            }
+
+            let changed = runtime
+                .poll_with_update_budget(RuntimeUpdatePumpBudget::unlimited())
+                .unwrap();
+            polls += 1;
+            if changed {
+                changed_polls += 1;
+            }
+            let diagnostics = runtime.core().last_poll_diagnostics();
+            snapshot_updates += diagnostics.snapshot_updates;
+            section_block_updates += diagnostics.section_block_updates;
+            unload_updates += diagnostics.unload_updates;
+            other_updates += diagnostics.other_updates;
+            mixed_updates += diagnostics.mixed_updates;
+            unload_apply_ms += diagnostics.unload_update_apply_ms;
+            unload_dirty_mark_ms += diagnostics.unload_update_dirty_mark_ms;
+            unload_client_apply_ms += diagnostics.unload_update_client_apply_ms;
+            max_unload_apply_ms = max_unload_apply_ms.max(diagnostics.unload_update_apply_ms);
+            max_unload_client_apply_ms =
+                max_unload_client_apply_ms.max(diagnostics.unload_update_client_apply_ms);
+
+            let runner_diagnostics = runtime.server_runner_diagnostics().unwrap();
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for churned chunk view to settle; runner={runner_diagnostics:?}"
+            );
+            if runner_diagnostics.update_queue_depth == 0 {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        assert!(changed_polls > 0, "view churn should apply visible updates");
+        assert!(
+            snapshot_updates >= old_positions.len(),
+            "far view jump should queue at least one new snapshot per old visible chunk"
+        );
+        assert!(
+            unload_updates >= old_positions.len(),
+            "far view jump should queue at least one unload per old visible chunk"
+        );
+        assert_eq!(mixed_updates, 0);
+        assert_eq!(runtime.loaded_chunk_count(), old_positions.len());
+        assert!(runtime.client().chunk_snapshot(next_center).is_some());
+        assert!(
+            old_positions
+                .iter()
+                .all(|pos| runtime.client().chunk_snapshot(*pos).is_none()),
+            "far view jump should fully unload the old chunk window"
+        );
+        assert!(
+            unload_apply_ms > 0.0,
+            "unload updates should populate the unload apply timing category"
+        );
+        assert!(
+            unload_client_apply_ms > 0.0,
+            "unload updates should populate client-replica apply timing"
+        );
+        eprintln!(
+            "local_chunk_view_churn_attributes_unload_apply polls={polls} changed_polls={changed_polls} snapshots={snapshot_updates} section_updates={section_block_updates} unloads={unload_updates} other={other_updates} unload_apply_ms={unload_apply_ms:.3} unload_dirty_ms={unload_dirty_mark_ms:.3} unload_client_ms={unload_client_apply_ms:.3} max_unload_apply_ms={max_unload_apply_ms:.3} max_unload_client_ms={max_unload_client_apply_ms:.3} max_queue_depth_before_poll={max_queue_depth_before_poll}"
+        );
+    }
+
+    #[test]
     fn local_single_view_runtime_applies_simulation_cadence_control() {
         if !extracted_asset_root().exists() {
             return;
