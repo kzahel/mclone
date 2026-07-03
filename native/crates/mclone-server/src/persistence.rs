@@ -346,6 +346,10 @@ pub trait ChunkSnapshotStore: fmt::Debug {
 }
 
 pub trait WorldStore: fmt::Debug {
+    fn supports_entity_chunks(&self) -> bool {
+        false
+    }
+
     fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>>;
     fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()>;
 
@@ -427,6 +431,10 @@ impl MemoryWorldStore {
 }
 
 impl WorldStore for MemoryWorldStore {
+    fn supports_entity_chunks(&self) -> bool {
+        true
+    }
+
     fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
         Ok(self.chunks.get(&pos).cloned())
     }
@@ -535,6 +543,10 @@ impl PersistenceActor {
             completions: VecDeque::new(),
             closed: false,
         }
+    }
+
+    pub fn entity_chunks_supported(&self) -> bool {
+        self.store.supports_entity_chunks()
     }
 
     pub fn load_chunk(&mut self, request_id: PersistenceRequestId, pos: ChunkPos) {
@@ -916,6 +928,10 @@ impl PersistenceMailbox {
 
     pub fn memory() -> Self {
         Self::new(Box::<MemoryWorldStore>::default())
+    }
+
+    pub fn entity_chunks_supported(&self) -> bool {
+        self.actor.entity_chunks_supported()
     }
 
     pub fn load_chunk(&mut self, pos: ChunkPos) -> PersistenceRequestId {

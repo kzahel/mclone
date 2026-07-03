@@ -178,7 +178,6 @@ impl ServerEntityStore {
         self.entities.values().copied().collect()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn entity_chunk_record(&self, pos: ChunkPos, revision: u64) -> EntityChunkRecord {
         let entities = self
             .entities
@@ -191,7 +190,6 @@ impl ServerEntityStore {
         EntityChunkRecord::new(pos, revision, entities)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn hydrate_entity_chunk_record(
         &mut self,
         record: &EntityChunkRecord,
@@ -237,6 +235,28 @@ impl ServerEntityStore {
             states.push(state);
         }
         Ok(states)
+    }
+
+    pub(crate) fn persistent_entity_chunk_positions(
+        &self,
+    ) -> BTreeMap<EntityPersistentId, ChunkPos> {
+        self.persistent_ids
+            .iter()
+            .filter_map(|(id, persistent_id)| {
+                self.entities
+                    .get(id)
+                    .filter(|entity| entity.alive)
+                    .map(|entity| (*persistent_id, entity.chunk_pos()))
+            })
+            .collect()
+    }
+
+    pub(crate) fn has_persistent_entities_in_chunk(&self, pos: ChunkPos) -> bool {
+        self.persistent_ids.keys().any(|id| {
+            self.entities
+                .get(id)
+                .is_some_and(|entity| entity.alive && entity.chunk_pos() == pos)
+        })
     }
 
     pub(crate) fn natural_spawn_category_counts(&self) -> MobCategoryCounts {
@@ -289,6 +309,23 @@ impl ServerEntityStore {
             .collect()
     }
 
+    pub(crate) fn remove_entities_in_chunk(&mut self, pos: ChunkPos) -> Vec<ServerEntityState> {
+        let ids = self
+            .entities
+            .values()
+            .copied()
+            .filter(|entity| entity.chunk_pos() == pos)
+            .map(|entity| entity.id)
+            .collect::<Vec<_>>();
+        ids.into_iter()
+            .filter_map(|id| self.remove_entity(id))
+            .collect()
+    }
+
+    pub(crate) fn is_persistent_entity(&self, id: EntityId) -> bool {
+        self.persistent_ids.contains_key(&id)
+    }
+
     pub(crate) fn on_block_changed(&mut self, pos: BlockPos) -> usize {
         let mut affected_mobs = 0;
         for (id, mob) in &mut self.mobs {
@@ -318,7 +355,6 @@ impl ServerEntityStore {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn state(&self, id: EntityId) -> Option<ServerEntityState> {
         self.entities.get(&id).copied()
     }
@@ -639,7 +675,6 @@ impl ServerEntityStore {
         state
     }
 
-    #[allow(dead_code)]
     fn insert_saved_entity(
         &mut self,
         saved: &EntitySaveRecord,
@@ -690,7 +725,6 @@ impl ServerEntityStore {
         Ok(state)
     }
 
-    #[allow(dead_code)]
     fn insert_saved_passive_mob(
         &mut self,
         id: EntityId,
@@ -724,7 +758,6 @@ impl ServerEntityStore {
         Ok(state)
     }
 
-    #[allow(dead_code)]
     fn insert_saved_item_entity(
         &mut self,
         id: EntityId,
@@ -751,7 +784,6 @@ impl ServerEntityStore {
         Ok(state)
     }
 
-    #[allow(dead_code)]
     fn entity_save_record(&self, entity: ServerEntityState) -> Option<EntitySaveRecord> {
         let kind = entity_kind_code(entity.kind)?;
         let persistent_id = self
@@ -925,7 +957,6 @@ fn item_merge_due(age_ticks: u64, block_position_changed: bool) -> bool {
     age_ticks % interval == 0
 }
 
-#[allow(dead_code)]
 fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
     match kind {
         EntityKind::Cow => Some("minecraft:cow"),
@@ -935,7 +966,6 @@ fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
     }
 }
 
-#[allow(dead_code)]
 fn item_stack_snapshot_from_save(
     stack: &ItemStackSaveRecord,
 ) -> ChunkStoreResult<ItemStackSnapshot> {
@@ -953,7 +983,6 @@ fn item_stack_snapshot_from_save(
     })
 }
 
-#[allow(dead_code)]
 fn fallback_persistent_id(id: EntityId) -> EntityPersistentId {
     EntityPersistentId::new(ENTITY_PERSISTENT_ID_MOST, id.0)
 }

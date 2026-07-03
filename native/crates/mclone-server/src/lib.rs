@@ -179,6 +179,11 @@ pub(crate) fn full_chunk_status_for_ticket_level(ticket_level: i32) -> FullChunk
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persistence::{
+        EntityChunkRecord, EntityPersistentId, EntitySavePayload, EntitySaveRecord,
+        ItemStackSaveRecord,
+    };
+    use mclone_core::Vec3d;
     use mclone_worldgen::block::{
         AIR, LAVA_LEVEL_2, LAVA_LEVEL_8, OBSIDIAN, STONE, TORCH, WATER_LEVEL_1, WATER_LEVEL_2,
         WATER_LEVEL_8, lava_block_for_level, water_block_for_level,
@@ -188,6 +193,7 @@ mod tests {
     #[derive(Clone, Debug, Default)]
     struct SharedMemoryWorldStore {
         chunks: Rc<RefCell<BTreeMap<ChunkPos, ChunkRecord>>>,
+        entity_chunks: Rc<RefCell<BTreeMap<ChunkPos, EntityChunkRecord>>>,
     }
 
     impl SharedMemoryWorldStore {
@@ -197,6 +203,10 @@ mod tests {
     }
 
     impl WorldStore for SharedMemoryWorldStore {
+        fn supports_entity_chunks(&self) -> bool {
+            true
+        }
+
         fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
             Ok(self.chunks.borrow().get(&pos).cloned())
         }
@@ -205,6 +215,20 @@ mod tests {
             self.chunks
                 .borrow_mut()
                 .insert(record.pos(), record.clone());
+            Ok(())
+        }
+
+        fn load_entity_chunk(
+            &mut self,
+            pos: ChunkPos,
+        ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+            Ok(self.entity_chunks.borrow().get(&pos).cloned())
+        }
+
+        fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+            self.entity_chunks
+                .borrow_mut()
+                .insert(record.pos, record.clone());
             Ok(())
         }
     }
@@ -1734,6 +1758,46 @@ mod tests {
         })
     }
 
+    fn entity_snapshot_for(
+        updates: &[ServerUpdate],
+        kind: mclone_protocol::EntityKind,
+    ) -> Option<&mclone_protocol::EntitySnapshot> {
+        updates.iter().rev().find_map(|update| match update {
+            ServerUpdate::EntitySnapshot(snapshot) if snapshot.kind == kind => Some(snapshot),
+            _ => None,
+        })
+    }
+
+    fn stored_egg_item_entity_record(
+        pos: ChunkPos,
+        revision: u64,
+        persistent_id_least: u64,
+    ) -> EntityChunkRecord {
+        EntityChunkRecord::new(
+            pos,
+            revision,
+            vec![EntitySaveRecord {
+                persistent_id: EntityPersistentId::new(0x100, persistent_id_least),
+                kind: "minecraft:item".to_owned(),
+                position: Vec3d::new(
+                    f64::from(pos.min_block_x()) + 8.0,
+                    65.0,
+                    f64::from(pos.min_block_z()) + 8.0,
+                ),
+                delta_movement: Vec3d::ZERO,
+                y_rot_degrees: 0.0,
+                x_rot_degrees: 0.0,
+                rotation: None,
+                on_ground: true,
+                age_ticks: 37,
+                payload: EntitySavePayload::Item {
+                    stack: ItemStackSaveRecord::new("minecraft:egg", 3),
+                    pickup_delay: 20,
+                },
+            }],
+        )
+    }
+
     fn apply_section_updates_to_snapshot(
         snapshot: &mut ChunkSnapshot,
         updates: &[ServerUpdate],
@@ -2804,6 +2868,135 @@ mod tests {
             server.scheduled_block_tick_count(),
             1,
             "stored scheduled block tick should hydrate into the host tick queue"
+        );
+    }
+
+    #[test]
+    fn loaded_entity_chunk_record_hydrates_entities() {
+        let store = SharedMemoryWorldStore::new();
+        let pos = ChunkPos::new(0, 0);
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            pos,
+            ChunkStatus::Light,
+            ChunkRevision(9),
+            0,
+            16,
+            &vec![mclone_core::AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        )
+        .with_light_sections(true, Vec::new());
+        store
+            .chunks
+            .borrow_mut()
+            .insert(pos, ChunkRecord::from_snapshot(snapshot));
+        store
+            .entity_chunks
+            .borrow_mut()
+            .insert(pos, stored_egg_item_entity_record(pos, 3, 1));
+        let mut server = IntegratedServer::with_world_store(12_345, Box::new(store));
+        server.set_debug_passive_showcase_enabled(false);
+
+        let updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkView(ChunkView {
+                center: pos,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }),
+        );
+
+        assert!(snapshot_update_for(&updates, pos).is_some());
+        let entity = entity_snapshot_for(&updates, mclone_protocol::EntityKind::Item)
+            .expect("stored item entity should publish to the tracking player");
+        assert_eq!(
+            entity.item_stack,
+            Some(mclone_protocol::ItemStackSnapshot {
+                kind: mclone_protocol::ItemKind::Egg,
+                count: 3,
+            })
+        );
+        assert_eq!(entity.age_ticks, 37);
+    }
+
+    #[test]
+    fn entity_chunk_record_survives_holder_unload_and_reload() {
+        let store = SharedMemoryWorldStore::new();
+        let entity_chunks = store.entity_chunks.clone();
+        let pos = ChunkPos::new(0, 0);
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            pos,
+            ChunkStatus::Light,
+            ChunkRevision(10),
+            0,
+            16,
+            &vec![mclone_core::AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        )
+        .with_light_sections(true, Vec::new());
+        store
+            .chunks
+            .borrow_mut()
+            .insert(pos, ChunkRecord::from_snapshot(snapshot));
+        store
+            .entity_chunks
+            .borrow_mut()
+            .insert(pos, stored_egg_item_entity_record(pos, 4, 2));
+        let mut server = IntegratedServer::with_world_store(12_345, Box::new(store));
+        server.set_debug_passive_showcase_enabled(false);
+
+        let initial_updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkView(ChunkView {
+                center: pos,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }),
+        );
+        assert!(
+            entity_snapshot_for(&initial_updates, mclone_protocol::EntityKind::Item).is_some(),
+            "preloaded entity should be visible before unload"
+        );
+
+        handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(100, 100),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }),
+        );
+        for _ in 0..200 {
+            let _ = server.try_tick_report().unwrap();
+            try_poll_server_until_persistence_idle(&mut server).unwrap();
+            if server.scheduler().holder(pos).is_none() {
+                break;
+            }
+        }
+        assert!(
+            server.scheduler().holder(pos).is_none(),
+            "old holder should be fully unloaded after entity save completes"
+        );
+        let saved = entity_chunks
+            .borrow()
+            .get(&pos)
+            .cloned()
+            .expect("unload should durably save the entity chunk");
+        assert_eq!(saved.entities.len(), 1);
+
+        let reloaded_updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkView(ChunkView {
+                center: pos,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }),
+        );
+        let reloaded = entity_snapshot_for(&reloaded_updates, mclone_protocol::EntityKind::Item)
+            .expect("saved entity should hydrate after returning to the chunk");
+        assert_eq!(
+            reloaded.item_stack,
+            Some(mclone_protocol::ItemStackSnapshot {
+                kind: mclone_protocol::ItemKind::Egg,
+                count: 3,
+            })
         );
     }
 

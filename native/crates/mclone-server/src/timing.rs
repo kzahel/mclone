@@ -51,7 +51,7 @@ pub struct NaturalSpawningDiagnostics {
     pub dry_run_blocked_unsupported: usize,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ChunkSchedulerTickReport {
     pub ticket_tick: u64,
     pub block_ticking_chunks: Vec<ChunkPos>,

@@ -5,6 +5,7 @@
 //! protocol `ServerUpdate`s. Roughly mirrors Java's integrated-server glue over
 //! `ServerChunkCache`; the heavy chunk-management logic lives in the scheduler.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use mclone_core::{
@@ -47,6 +48,7 @@ use crate::falling_block::{
 };
 use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
+use crate::persistence::{EntityChunkRecord, EntityPersistentId};
 #[cfg(feature = "physics-rapier")]
 use crate::physics_runtime::ServerPhysicsRuntime;
 use crate::placement::DebugBlockItem;
@@ -97,6 +99,7 @@ pub struct IntegratedServer {
     remote_players: RemotePlayerTracking,
     entities: ServerEntityStore,
     entity_tracking: EntityTracking,
+    dirty_entity_chunks: BTreeSet<ChunkPos>,
     #[cfg(feature = "physics-rapier")]
     physics: ServerPhysicsRuntime,
     #[cfg(feature = "physics-rapier")]
@@ -253,6 +256,7 @@ impl IntegratedServer {
             remote_players: RemotePlayerTracking::default(),
             entities: ServerEntityStore::default(),
             entity_tracking: EntityTracking::default(),
+            dirty_entity_chunks: BTreeSet::new(),
             #[cfg(feature = "physics-rapier")]
             physics: ServerPhysicsRuntime::new(),
             #[cfg(feature = "physics-rapier")]
@@ -531,9 +535,18 @@ impl IntegratedServer {
         let simulation_tick = self.simulation_tick;
         let block_ticks = &self.block_ticks;
         let liquid_ticks = &self.liquid_ticks;
-        let report = self.scheduler.tick_report_with_record_builder(|snapshot| {
+        let entities = &self.entities;
+        let dirty_entity_chunks = &self.dirty_entity_chunks;
+        let mut chunk_record_builder = |snapshot: &ChunkSnapshot| {
             chunk_record_with_live_ticks(snapshot, block_ticks, liquid_ticks, simulation_tick)
-        })?;
+        };
+        let mut entity_record_builder = |pos: ChunkPos, revision: u64| {
+            entity_chunk_record_for_persistence(entities, dirty_entity_chunks, pos, revision)
+        };
+        let report = self.scheduler.tick_report_with_record_builders(
+            &mut chunk_record_builder,
+            &mut entity_record_builder,
+        )?;
         let scheduler_report_us = simulation_timing_elapsed_us(scheduler_start);
         let scheduler_event_count = report.events.len();
         let scheduler_apply_start = simulation_timing_start();
@@ -653,6 +666,7 @@ impl IntegratedServer {
         fluid_events.extend(self.scheduler.drain_pending_block_delta_events());
         let fluid_event_count = fluid_events.len();
 
+        let entity_chunks_before_tick = self.entities.persistent_entity_chunk_positions();
         let entity_tick_start = simulation_timing_start();
         let entity_tick_chunks = run_noop_simulation_phase(&tick_report.entity_ticking_chunks);
         let natural_spawning_tick =
@@ -701,13 +715,16 @@ impl IntegratedServer {
             physics
         };
         let physics_tick_us = simulation_timing_elapsed_us(physics_tick_start);
+        let entity_chunks_after_tick = self.entities.persistent_entity_chunk_positions();
+        self.mark_entity_chunk_index_changes(entity_chunks_before_tick, entity_chunks_after_tick);
+        self.mark_entity_updates_dirty(&entity_updates);
 
         let mut updates = tick_report.updates;
         updates.push(ServerUpdate::TimeUpdate {
             day_time: self.day_time,
         });
         let fluid_event_apply_start = simulation_timing_start();
-        self.route_scheduler_events(fluid_events);
+        self.route_scheduler_events(fluid_events)?;
         self.reconcile_entity_subjects(entity_updates, true);
         updates.extend(self.drain_chunk_updates_for_target(target)?);
         let fluid_event_apply_us = simulation_timing_elapsed_us(fluid_event_apply_start);
@@ -1036,10 +1053,20 @@ impl IntegratedServer {
         let simulation_tick = self.simulation_tick;
         let block_ticks = &self.block_ticks;
         let liquid_ticks = &self.liquid_ticks;
-        self.scheduler
-            .save_dirty_chunks_with_record_builder(|snapshot| {
-                chunk_record_with_live_ticks(snapshot, block_ticks, liquid_ticks, simulation_tick)
-            })
+        let entities = &self.entities;
+        let dirty_entity_chunks = &self.dirty_entity_chunks;
+        let mut chunk_record_builder = |snapshot: &ChunkSnapshot| {
+            chunk_record_with_live_ticks(snapshot, block_ticks, liquid_ticks, simulation_tick)
+        };
+        let mut entity_record_builder = |pos: ChunkPos, revision: u64| {
+            entity_chunk_record_for_persistence(entities, dirty_entity_chunks, pos, revision)
+        };
+        let queued = self.scheduler.save_dirty_chunks_with_record_builders(
+            &mut chunk_record_builder,
+            &mut entity_record_builder,
+        )?;
+        self.dirty_entity_chunks.clear();
+        Ok(queued)
     }
 
     fn set_chunk_view_for_target(
@@ -1337,7 +1364,7 @@ impl IntegratedServer {
         events: Vec<ChunkSchedulerEvent>,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         self.ensure_target_exists(target)?;
-        self.route_scheduler_events(events);
+        self.route_scheduler_events(events)?;
         self.reconcile_remote_players_for_target_observer(target);
         let initial_spawn_update = self.initial_spawn_update_for_target(target)?;
         self.reconcile_entities_for_target_observer(target);
@@ -1348,7 +1375,7 @@ impl IntegratedServer {
         Ok(updates)
     }
 
-    fn route_scheduler_events(&mut self, events: Vec<ChunkSchedulerEvent>) {
+    fn route_scheduler_events(&mut self, events: Vec<ChunkSchedulerEvent>) -> ChunkStoreResult<()> {
         for event in events {
             match event {
                 ChunkSchedulerEvent::SnapshotReady(snapshot) => {
@@ -1362,8 +1389,20 @@ impl IntegratedServer {
                 ChunkSchedulerEvent::HolderUnloaded { pos } => {
                     self.block_ticks.remove_chunk_ticks(pos);
                     self.liquid_ticks.remove_chunk_ticks(pos);
-                    let removed = self.entities.discard_volatile_entities_in_chunk(pos);
+                    let removed = if self.scheduler.entity_chunks_supported() {
+                        self.entities.remove_entities_in_chunk(pos)
+                    } else {
+                        self.entities.discard_volatile_entities_in_chunk(pos)
+                    };
+                    self.dirty_entity_chunks.remove(&pos);
                     self.reconcile_entity_subjects(removed, true);
+                }
+                ChunkSchedulerEvent::EntityChunkLoaded { pos, record } => {
+                    self.dirty_entity_chunks.remove(&pos);
+                    if let Some(record) = record {
+                        let loaded = self.entities.hydrate_entity_chunk_record(&record)?;
+                        self.reconcile_entity_subjects(loaded, true);
+                    }
                 }
                 ChunkSchedulerEvent::SectionBlockUpdates {
                     pos,
@@ -1387,6 +1426,7 @@ impl IntegratedServer {
                 }
             }
         }
+        Ok(())
     }
 
     fn route_remote_player_updates(&mut self, routes: Vec<RoutedRemotePlayerUpdate>) {
@@ -1497,6 +1537,38 @@ impl IntegratedServer {
         self.route_entity_updates(routes);
     }
 
+    fn mark_entity_updates_dirty(&mut self, subjects: &[ServerEntityState]) {
+        for subject in subjects {
+            if self.entities.is_persistent_entity(subject.id) {
+                self.dirty_entity_chunks.insert(subject.chunk_pos());
+            }
+        }
+    }
+
+    fn mark_entity_chunk_index_changes(
+        &mut self,
+        before: BTreeMap<EntityPersistentId, ChunkPos>,
+        after: BTreeMap<EntityPersistentId, ChunkPos>,
+    ) {
+        for (persistent_id, old_pos) in &before {
+            match after.get(persistent_id) {
+                Some(new_pos) if new_pos == old_pos => {}
+                Some(new_pos) => {
+                    self.dirty_entity_chunks.insert(*old_pos);
+                    self.dirty_entity_chunks.insert(*new_pos);
+                }
+                None => {
+                    self.dirty_entity_chunks.insert(*old_pos);
+                }
+            }
+        }
+        for (persistent_id, new_pos) in after {
+            if !before.contains_key(&persistent_id) {
+                self.dirty_entity_chunks.insert(new_pos);
+            }
+        }
+    }
+
     #[cfg(feature = "physics-rapier")]
     fn spawn_debug_physics_cube_entity(
         &mut self,
@@ -1590,10 +1662,15 @@ impl IntegratedServer {
         ) else {
             return Ok(None);
         };
-        self.entities.ensure_debug_passive_showcase_near_spawn(
+        let showcase_ids = self.entities.ensure_debug_passive_showcase_near_spawn(
             position,
             self.debug_passive_showcase_enabled,
         );
+        let showcase_states = showcase_ids
+            .into_iter()
+            .filter_map(|id| self.entities.state(id))
+            .collect::<Vec<_>>();
+        self.mark_entity_updates_dirty(&showcase_states);
         let simulation_tick = self.simulation_tick;
         Ok(Some(
             self.player_mut_for_target(target)?.initial_position_update(
@@ -1727,7 +1804,8 @@ impl IntegratedServer {
                     .aggregate_player_ticket_priority_centers(),
             )
             .expect("failed to reconcile chunk tracking after dedicated player disconnect");
-        self.route_scheduler_events(events);
+        self.route_scheduler_events(events)
+            .expect("failed to route scheduler events after dedicated player disconnect");
     }
 }
 
@@ -1867,6 +1945,19 @@ fn chunk_record_with_live_ticks(
         .with_scheduled_fluid_ticks(
             liquid_ticks.scheduled_chunk_tick_records(snapshot.pos, simulation_tick),
         )
+}
+
+fn entity_chunk_record_for_persistence(
+    entities: &ServerEntityStore,
+    dirty_entity_chunks: &BTreeSet<ChunkPos>,
+    pos: ChunkPos,
+    revision: u64,
+) -> Option<EntityChunkRecord> {
+    if dirty_entity_chunks.contains(&pos) || entities.has_persistent_entities_in_chunk(pos) {
+        Some(entities.entity_chunk_record(pos, revision))
+    } else {
+        None
+    }
 }
 
 fn natural_spawn_tick_seed(world_seed: i64, game_time: u64) -> i64 {

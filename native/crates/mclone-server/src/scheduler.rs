@@ -50,8 +50,8 @@ use crate::loading_progress::{
 };
 use crate::persistence::{
     ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore, ChunkStoreError, ChunkStoreResult,
-    PersistenceMailbox, PersistenceRequestId, SaveDurability, ScheduledTickRecord,
-    StoreWriteOutcome, WorldStore, WorldStoreCompletion,
+    EntityChunkRecord, PersistenceMailbox, PersistenceRequestId, SaveDurability,
+    ScheduledTickRecord, StoreWriteOutcome, WorldStore, WorldStoreCompletion,
 };
 use crate::player_chunk_tracking::chunk_positions_for_view;
 use crate::timing::{
@@ -337,7 +337,7 @@ impl FluidTickList {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ChunkSchedulerEvent {
     StatusChanged {
         pos: ChunkPos,
@@ -350,6 +350,10 @@ pub enum ChunkSchedulerEvent {
     },
     HolderUnloaded {
         pos: ChunkPos,
+    },
+    EntityChunkLoaded {
+        pos: ChunkPos,
+        record: Option<EntityChunkRecord>,
     },
     SectionBlockUpdates {
         pos: ChunkPos,
@@ -368,7 +372,7 @@ pub enum ChunkSchedulerEvent {
     },
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct FluidMutationReport {
     events: Vec<ChunkSchedulerEvent>,
     mutated_positions: Vec<WorldBlockPos>,
@@ -397,6 +401,13 @@ struct PendingChunkSave {
     durability: SaveDurability,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PendingEntityChunkSave {
+    pos: ChunkPos,
+    revision: u64,
+    durability: SaveDurability,
+}
+
 #[derive(Debug)]
 pub struct ChunkScheduler {
     seed: i64,
@@ -408,6 +419,12 @@ pub struct ChunkScheduler {
     stored_chunk_misses: BTreeSet<ChunkPos>,
     pending_chunk_saves: BTreeMap<PersistenceRequestId, PendingChunkSave>,
     pending_chunk_save_by_pos: BTreeMap<ChunkPos, PersistenceRequestId>,
+    pending_entity_chunk_loads: BTreeMap<PersistenceRequestId, ChunkPos>,
+    pending_entity_chunk_load_by_pos: BTreeMap<ChunkPos, PersistenceRequestId>,
+    loaded_entity_chunks: BTreeSet<ChunkPos>,
+    pending_entity_chunk_saves: BTreeMap<PersistenceRequestId, PendingEntityChunkSave>,
+    pending_entity_chunk_save_by_pos: BTreeMap<ChunkPos, PersistenceRequestId>,
+    entity_unload_saves: BTreeSet<ChunkPos>,
     pub(crate) distance_manager: ChunkDistanceManager,
     jobs: BTreeMap<ChunkJobId, ChunkStatusJob>,
     job_timings: BTreeMap<ChunkJobId, OverworldFeatureBatchTiming>,
@@ -453,6 +470,12 @@ impl ChunkScheduler {
             stored_chunk_misses: BTreeSet::new(),
             pending_chunk_saves: BTreeMap::new(),
             pending_chunk_save_by_pos: BTreeMap::new(),
+            pending_entity_chunk_loads: BTreeMap::new(),
+            pending_entity_chunk_load_by_pos: BTreeMap::new(),
+            loaded_entity_chunks: BTreeSet::new(),
+            pending_entity_chunk_saves: BTreeMap::new(),
+            pending_entity_chunk_save_by_pos: BTreeMap::new(),
+            entity_unload_saves: BTreeSet::new(),
             distance_manager: ChunkDistanceManager::new(),
             jobs: BTreeMap::new(),
             job_timings: BTreeMap::new(),
@@ -491,6 +514,12 @@ impl ChunkScheduler {
             stored_chunk_misses: BTreeSet::new(),
             pending_chunk_saves: BTreeMap::new(),
             pending_chunk_save_by_pos: BTreeMap::new(),
+            pending_entity_chunk_loads: BTreeMap::new(),
+            pending_entity_chunk_load_by_pos: BTreeMap::new(),
+            loaded_entity_chunks: BTreeSet::new(),
+            pending_entity_chunk_saves: BTreeMap::new(),
+            pending_entity_chunk_save_by_pos: BTreeMap::new(),
+            entity_unload_saves: BTreeSet::new(),
             distance_manager: ChunkDistanceManager::new(),
             jobs: BTreeMap::new(),
             job_timings: BTreeMap::new(),
@@ -577,6 +606,14 @@ impl ChunkScheduler {
         &mut self,
         mut record_builder: impl FnMut(&ChunkSnapshot) -> ChunkRecord,
     ) -> ChunkStoreResult<ChunkSchedulerTickReport> {
+        self.tick_report_with_record_builders(&mut record_builder, &mut |_, _| None)
+    }
+
+    pub(crate) fn tick_report_with_record_builders(
+        &mut self,
+        record_builder: &mut impl FnMut(&ChunkSnapshot) -> ChunkRecord,
+        entity_record_builder: &mut impl FnMut(ChunkPos, u64) -> Option<EntityChunkRecord>,
+    ) -> ChunkStoreResult<ChunkSchedulerTickReport> {
         let total_start = simulation_timing_start();
         let purge_start = simulation_timing_start();
         self.distance_manager.purge_stale_tickets();
@@ -594,7 +631,8 @@ impl ChunkScheduler {
         let (pending_unloads_processed, unload_events) = self
             .process_pending_unloads_with_events_and_record_builder(
                 DEFAULT_PENDING_UNLOAD_BUDGET,
-                &mut record_builder,
+                record_builder,
+                entity_record_builder,
             )?;
         events.extend(unload_events);
         let pending_unload_us = simulation_timing_elapsed_us(pending_unload_start);
@@ -741,11 +779,15 @@ impl ChunkScheduler {
     }
 
     pub fn pending_persistence_load_count(&self) -> usize {
-        self.pending_chunk_loads.len()
+        self.pending_chunk_loads.len() + self.pending_entity_chunk_loads.len()
     }
 
     pub fn pending_persistence_save_count(&self) -> usize {
-        self.pending_chunk_saves.len()
+        self.pending_chunk_saves.len() + self.pending_entity_chunk_saves.len()
+    }
+
+    pub fn entity_chunks_supported(&self) -> bool {
+        self.store.entity_chunks_supported()
     }
 
     pub fn is_pending_unload(&self, pos: ChunkPos) -> bool {
@@ -1767,6 +1809,14 @@ impl ChunkScheduler {
         &mut self,
         mut record_builder: impl FnMut(&ChunkSnapshot) -> ChunkRecord,
     ) -> ChunkStoreResult<usize> {
+        self.save_dirty_chunks_with_record_builders(&mut record_builder, &mut |_, _| None)
+    }
+
+    pub(crate) fn save_dirty_chunks_with_record_builders(
+        &mut self,
+        record_builder: &mut impl FnMut(&ChunkSnapshot) -> ChunkRecord,
+        entity_record_builder: &mut impl FnMut(ChunkPos, u64) -> Option<EntityChunkRecord>,
+    ) -> ChunkStoreResult<usize> {
         let dirty_chunks = self.dirty_chunks.iter().copied().collect::<Vec<_>>();
         let mut queued = 0;
         for pos in dirty_chunks {
@@ -1778,12 +1828,30 @@ impl ChunkScheduler {
                 if self.queue_holder_save_with_record_builder(
                     &holder,
                     SaveDurability::Durable,
-                    &mut record_builder,
+                    record_builder,
                 ) {
                     queued += 1;
                 }
             } else {
                 self.dirty_chunks.remove(&pos);
+            }
+        }
+        if self.entity_chunks_supported() {
+            for pos in self
+                .loaded_entity_chunks
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+            {
+                if self.pending_entity_chunk_save_by_pos.contains_key(&pos) {
+                    continue;
+                }
+                let revision = self.next_entity_revision();
+                if let Some(record) = entity_record_builder(pos, revision)
+                    && self.queue_entity_record_save(record, SaveDurability::Durable)
+                {
+                    queued += 1;
+                }
             }
         }
         self.flush_durable_persistence()?;
@@ -1800,13 +1868,18 @@ impl ChunkScheduler {
     ) -> ChunkStoreResult<(usize, Vec<ChunkSchedulerEvent>)> {
         let mut record_builder =
             |snapshot: &ChunkSnapshot| ChunkRecord::from_snapshot(snapshot.clone());
-        self.process_pending_unloads_with_events_and_record_builder(max_chunks, &mut record_builder)
+        self.process_pending_unloads_with_events_and_record_builder(
+            max_chunks,
+            &mut record_builder,
+            &mut |_, _| None,
+        )
     }
 
     fn process_pending_unloads_with_events_and_record_builder(
         &mut self,
         max_chunks: usize,
         record_builder: &mut impl FnMut(&ChunkSnapshot) -> ChunkRecord,
+        entity_record_builder: &mut impl FnMut(ChunkPos, u64) -> Option<EntityChunkRecord>,
     ) -> ChunkStoreResult<(usize, Vec<ChunkSchedulerEvent>)> {
         if max_chunks == 0 || self.pending_unloads.is_empty() {
             return Ok((0, Vec::new()));
@@ -1825,12 +1898,14 @@ impl ChunkScheduler {
         for pos in candidates {
             if active_levels.contains_key(&pos) {
                 self.pending_unloads.remove(&pos);
+                self.entity_unload_saves.remove(&pos);
                 continue;
             }
 
             let Some(holder) = self.holders.get(&pos).cloned() else {
                 self.pending_unloads.remove(&pos);
                 self.dirty_chunks.remove(&pos);
+                self.entity_unload_saves.remove(&pos);
                 continue;
             };
 
@@ -1843,8 +1918,25 @@ impl ChunkScheduler {
                 continue;
             }
 
+            if self.pending_entity_chunk_save_by_pos.contains_key(&pos) {
+                continue;
+            }
+
+            if self.entity_chunks_supported() && !self.entity_unload_saves.contains(&pos) {
+                let revision = self.next_entity_revision();
+                if let Some(record) = entity_record_builder(pos, revision)
+                    && self.queue_entity_record_save(record, SaveDurability::Durable)
+                {
+                    self.entity_unload_saves.insert(pos);
+                    continue;
+                }
+            }
+
             self.clear_pending_chunk_load(pos);
+            self.clear_pending_entity_chunk_load(pos);
             self.stored_chunk_misses.remove(&pos);
+            self.loaded_entity_chunks.remove(&pos);
+            self.entity_unload_saves.remove(&pos);
             self.holders.remove(&pos);
             self.pending_unloads.remove(&pos);
             processed += 1;
@@ -1957,6 +2049,7 @@ impl ChunkScheduler {
                 .entry(pos)
                 .or_insert_with(|| ChunkHolder::new(pos))
                 .target_status = Some(target_status);
+            self.schedule_entity_chunk_load(pos);
 
             for status in status_path_to(target_status) {
                 if let Some(slot) = self
@@ -2311,6 +2404,12 @@ impl ChunkScheduler {
         }
     }
 
+    fn next_entity_revision(&mut self) -> u64 {
+        let revision = self.next_revision;
+        self.next_revision = self.next_revision.saturating_add(1);
+        revision
+    }
+
     fn snapshot_is_client_ready(&self, snapshot: &ChunkSnapshot) -> bool {
         snapshot_is_client_ready_for_lighting_mode(snapshot, self.lighting_enabled)
     }
@@ -2344,9 +2443,28 @@ impl ChunkScheduler {
         self.pending_chunk_load_by_pos.insert(pos, request_id);
     }
 
+    fn schedule_entity_chunk_load(&mut self, pos: ChunkPos) {
+        if !self.entity_chunks_supported()
+            || self.loaded_entity_chunks.contains(&pos)
+            || self.pending_entity_chunk_load_by_pos.contains_key(&pos)
+        {
+            return;
+        }
+        let request_id = self.store.load_entity_chunk(pos);
+        self.pending_entity_chunk_loads.insert(request_id, pos);
+        self.pending_entity_chunk_load_by_pos
+            .insert(pos, request_id);
+    }
+
     fn clear_pending_chunk_load(&mut self, pos: ChunkPos) {
         if let Some(request_id) = self.pending_chunk_load_by_pos.remove(&pos) {
             self.pending_chunk_loads.remove(&request_id);
+        }
+    }
+
+    fn clear_pending_entity_chunk_load(&mut self, pos: ChunkPos) {
+        if let Some(request_id) = self.pending_entity_chunk_load_by_pos.remove(&pos) {
+            self.pending_entity_chunk_loads.remove(&request_id);
         }
     }
 
@@ -2380,12 +2498,17 @@ impl ChunkScheduler {
                 self.handle_chunk_save_completion(request_id, pos, result)?;
                 Ok(Vec::new())
             }
-            WorldStoreCompletion::EntityChunkLoaded { result, .. } => {
-                result.map(|_| ())?;
-                Ok(Vec::new())
-            }
-            WorldStoreCompletion::EntityChunkSaved { result, .. } => {
-                result.map(|_| ())?;
+            WorldStoreCompletion::EntityChunkLoaded {
+                request_id,
+                pos,
+                result,
+            } => self.handle_entity_chunk_load_completion(request_id, pos, result),
+            WorldStoreCompletion::EntityChunkSaved {
+                request_id,
+                pos,
+                result,
+            } => {
+                self.handle_entity_chunk_save_completion(request_id, pos, result)?;
                 Ok(Vec::new())
             }
             WorldStoreCompletion::RequestFailed { result, .. }
@@ -2435,6 +2558,47 @@ impl ChunkScheduler {
         }
 
         self.publish_loaded_record(pos, record, pending.target_status)
+    }
+
+    fn handle_entity_chunk_load_completion(
+        &mut self,
+        request_id: PersistenceRequestId,
+        pos: ChunkPos,
+        result: ChunkStoreResult<Option<EntityChunkRecord>>,
+    ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let Some(pending_pos) = self.pending_entity_chunk_loads.remove(&request_id) else {
+            return Ok(Vec::new());
+        };
+        if self
+            .pending_entity_chunk_load_by_pos
+            .get(&pos)
+            .is_some_and(|pending_request_id| *pending_request_id == request_id)
+        {
+            self.pending_entity_chunk_load_by_pos.remove(&pos);
+        }
+        if pending_pos != pos {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "entity chunk load request {request_id} completed for ({}, {}) but was pending for ({}, {})",
+                pos.x, pos.z, pending_pos.x, pending_pos.z
+            )));
+        }
+
+        let record = result?;
+        if !self.distance_manager.active_levels().contains_key(&pos)
+            || !self.holders.contains_key(&pos)
+        {
+            return Ok(Vec::new());
+        }
+        if let Some(record) = &record
+            && record.pos != pos
+        {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "entity chunk load request {request_id} returned ({}, {}) for requested ({}, {})",
+                record.pos.x, record.pos.z, pos.x, pos.z
+            )));
+        }
+        self.loaded_entity_chunks.insert(pos);
+        Ok(vec![ChunkSchedulerEvent::EntityChunkLoaded { pos, record }])
     }
 
     fn mark_stored_chunk_miss(
@@ -2573,6 +2737,37 @@ impl ChunkScheduler {
         true
     }
 
+    fn queue_entity_record_save(
+        &mut self,
+        record: EntityChunkRecord,
+        durability: SaveDurability,
+    ) -> bool {
+        if !self.entity_chunks_supported() {
+            return false;
+        }
+        let pos = record.pos;
+        let revision = record.revision;
+        if let Some(existing_id) = self.pending_entity_chunk_save_by_pos.get(&pos).copied()
+            && let Some(existing) = self.pending_entity_chunk_saves.get(&existing_id)
+            && !pending_entity_save_should_replace(revision, durability, existing)
+        {
+            return false;
+        }
+
+        let request_id = self.store.save_entity_chunk(record, durability);
+        self.pending_entity_chunk_saves.insert(
+            request_id,
+            PendingEntityChunkSave {
+                pos,
+                revision,
+                durability,
+            },
+        );
+        self.pending_entity_chunk_save_by_pos
+            .insert(pos, request_id);
+        true
+    }
+
     fn handle_chunk_save_completion(
         &mut self,
         request_id: PersistenceRequestId,
@@ -2611,6 +2806,34 @@ impl ChunkScheduler {
             }
         } else {
             self.dirty_chunks.remove(&pos);
+        }
+        Ok(())
+    }
+
+    fn handle_entity_chunk_save_completion(
+        &mut self,
+        request_id: PersistenceRequestId,
+        pos: ChunkPos,
+        result: ChunkStoreResult<StoreWriteOutcome>,
+    ) -> ChunkStoreResult<()> {
+        let pending = self.pending_entity_chunk_saves.remove(&request_id);
+        if self
+            .pending_entity_chunk_save_by_pos
+            .get(&pos)
+            .is_some_and(|pending_request_id| *pending_request_id == request_id)
+        {
+            self.pending_entity_chunk_save_by_pos.remove(&pos);
+        }
+
+        let _outcome = result?;
+        let Some(pending) = pending else {
+            return Ok(());
+        };
+        if pending.pos != pos {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "entity chunk save request {request_id} completed for ({}, {}) but was pending for ({}, {})",
+                pos.x, pos.z, pending.pos.x, pending.pos.z
+            )));
         }
         Ok(())
     }
@@ -2700,6 +2923,21 @@ fn pending_save_should_replace(
     revision: ChunkRevision,
     durability: SaveDurability,
     existing: &PendingChunkSave,
+) -> bool {
+    if revision != existing.revision {
+        return revision > existing.revision;
+    }
+    match (durability, existing.durability) {
+        (SaveDurability::Durable, SaveDurability::Cache) => true,
+        (SaveDurability::Cache, SaveDurability::Durable) => false,
+        _ => true,
+    }
+}
+
+fn pending_entity_save_should_replace(
+    revision: u64,
+    durability: SaveDurability,
+    existing: &PendingEntityChunkSave,
 ) -> bool {
     if revision != existing.revision {
         return revision > existing.revision;

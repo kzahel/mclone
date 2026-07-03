@@ -180,6 +180,7 @@ actor mailbox directly:
 ```text
 WorldStore requests/completions
   load/save chunk records
+  load/save entity chunk records for stores that advertise support
   pending same-key write visibility
   cache/durable write lanes
   flush/close
@@ -191,12 +192,15 @@ ChunkScheduler actor integration
   queue generated-clean cache writes separately from durable dirty writes
   flush durable dirty saves through the actor lane
   pack/hydrate scheduled block/fluid ticks through chunk records
+  route entity chunk load completions and save entity records before holder
+  unload
 ```
 
 The synchronous facade remains only as compatibility/testing glue around the
-same mailbox. Entity chunks now have a shared record/mailbox foundation; their
-dirty tracking, hydration, and save-before-unload acknowledgements still need
-concrete scheduler host integration.
+same mailbox. Entity chunks have a shared record/mailbox foundation and are
+wired through scheduler/integrated-host load, dirty-save, and unload handling
+for `WorldStore` backends that opt into entity chunks. Snapshot-only
+compatibility stores remain chunk-only.
 
 Browser singleplayer uses IndexedDB inside the authoritative worker. Dedicated/remote host uses file-backed JSON records under a save root. Unit tests generally use memory storage.
 

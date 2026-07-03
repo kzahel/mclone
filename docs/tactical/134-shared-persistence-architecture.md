@@ -1,7 +1,7 @@
 # 134: Shared Persistence Architecture
 
-Status: active; Slice 3A entity record foundation landed, scheduler entity
-host integration next.
+Status: active; Slice 3B entity scheduler/host integration landed, native
+durable backend and IO-thread work next.
 
 ## Purpose
 
@@ -35,7 +35,7 @@ Read before implementation:
 
 ## Current Native State
 
-Live Rust after Slice 3A has:
+Live Rust after Slice 3B has:
 
 - `native/crates/mclone-server/src/persistence.rs`
 - `ChunkSnapshotStore`
@@ -53,11 +53,16 @@ Live Rust after Slice 3A has:
   mutations
 - entity chunk load/save request and completion types in the shared mailbox
 - entity-store pack/hydrate helpers for Cow, Chicken, and Item records
+- `WorldStore::supports_entity_chunks()` so shared world stores can opt into
+  entity records while snapshot-only compatibility stores remain chunk-only
+- scheduler entity chunk load completions, dirty entity chunk saves, and
+  save-before-holder-unload acknowledgement handling
+- integrated-host entity record hydration, dirty entity chunk tracking, and
+  chunk-local entity removal after holder unload
 
 This is useful but still too narrow:
 
 - actor execution is still same-thread/in-process
-- entity chunk storage is not yet wired into scheduler load/unload holder state
 - no player/world/saved-data records
 - no web IndexedDB adapter
 - no Android or dedicated-server world-dir wiring
@@ -243,16 +248,16 @@ Validation landed:
   server tests
 - `cargo test --manifest-path native/Cargo.toml -p mclone-server`
 
-Deferred to the next chunk:
-
-- entity chunk load/save remains to be wired into scheduler holder lifecycle.
+Entity chunk load/save has moved into the scheduler holder lifecycle in Slice
+3B; generated-original entity placement and tombstone suppression remain future
+work because the current live natural spawning path is intentionally volatile.
 
 ### Slice 3: Entity Chunk Record Foundation
 
 Add logical entity persistence while keeping physical storage in memory first.
 
 Status: Slice 3A foundation landed 2026-07-03; Slice 3B scheduler/host
-integration remains.
+integration landed 2026-07-03.
 
 Landed shape:
 
@@ -262,22 +267,33 @@ Landed shape:
 - stable UUID identity in saved records; runtime `EntityId` stays session-local
 - chunk-addressed save/load API separate from block chunks
 - empty entity chunk records
-- `MemoryWorldStore` stores entity chunks; `NullWorldStore` treats them as
-  transient; snapshot-only backends fail explicitly for entity chunks
+- `MemoryWorldStore` stores entity chunks; snapshot-only compatibility
+  backends do not advertise entity chunk support, so existing snapshot-only
+  worlds stay chunk-only instead of receiving entity record requests
 - `PersistenceActor` applies pending-write visibility, revision replacement,
   durable priority, flush, and close semantics to entity chunk writes
 - `ServerEntityStore` can pack/hydrate Cow, Chicken, and Item records with
   stable kind/item codes; Chicken saves egg time, Item saves stack and pickup
   delay, and fresh runtime ids preserve saved persistent ids
+- `ChunkScheduler` schedules entity chunk loads for stores that advertise
+  support, emits entity load completions, and includes entity record work in
+  persistence pending counts
+- `IntegratedServer` hydrates loaded entity records into the live entity store
+  and tracking system
+- persistent entity chunks are marked dirty when persistent entities spawn,
+  move between chunks, update in place, or disappear
+- pending-unload holders can queue one durable entity chunk save and remain
+  resident until that save is acknowledged; holder unload then removes live
+  chunk-local entities
 
-Still deferred to Slice 3B:
+Still deferred beyond Slice 3:
 
-- dirty entity chunk tracking
-- save-on-unload semantics
 - generated original mobs enter the persistent entity path
-- invariant: an existing entity chunk record (including empty) suppresses
-  generation-time entity placement, even when the block chunk record was
-  discarded as incompatible cache and the terrain regenerated
+- invariant: an existing entity chunk record, including empty, suppresses
+  generation-time entity placement when generated-original entity placement
+  exists
+- regenerating a discarded cache block chunk must not resurrect killed generated
+  animals when an entity chunk record exists
 
 Validation landed:
 
@@ -290,9 +306,13 @@ Validation landed:
   fresh runtime ids
 - empty entity chunk hydration removes existing persistent entities in that
   chunk
+- loaded entity chunk records hydrate through `IntegratedServer` into entity
+  snapshots for tracking players
+- entity chunk records survive holder unload/reload through the shared memory
+  world store path
 - `cargo test --manifest-path native/Cargo.toml -p mclone-server`
 
-Validation still needed with Slice 3B:
+Validation still needed in later entity/generation slices:
 
 - generated passive animal survives chunk unload/reload
 - killed generated passive animal does not reappear from seed-time generation
@@ -435,18 +455,18 @@ one platform before the shared host contract is clear.
 
 ## Next Likely Implementation Chunk
 
-Proceed with **Slice 3B: Entity Chunk Host Integration**.
+Proceed with **Slice 4: Native Durable Backend And IO Thread**.
 
 Reasoning:
 
-- Slice 3A has the shared entity record shape, memory/null backend behavior,
-  actor semantics, and entity-store pack/hydrate helpers.
-- The remaining entity persistence risk is scheduler residency: entity chunk
-  load completions, dirty entity chunk tracking, and save-before-unload
-  acknowledgements need to follow the same non-blocking host lifecycle as block
-  chunk records.
-- This should land before SQLite/IndexedDB so durable backends do not inherit a
-  missing or platform-local entity lifecycle.
+- Slice 3B moved block chunks and entity chunks behind the same shared
+  scheduler/mailbox lifecycle for world-store-backed hosts.
+- The remaining persistence risk is physical durability and host blocking:
+  real native IO needs a backend with transactional writes and an actor that no
+  longer performs storage work on the server thread.
+- Landing the native durable backend before IndexedDB/Android keeps platform
+  adapters behind the same `WorldStore` contract instead of forcing browser or
+  app-local policy into gameplay code.
 
 ## Validation Gates
 

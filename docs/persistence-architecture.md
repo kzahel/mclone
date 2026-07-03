@@ -328,7 +328,7 @@ Keep both:
 - `NullWorldStore`: explicit transient mode, always misses loads and accepts
   no-op saves
 - `MemoryWorldStore`: deterministic in-memory backend for unit tests and actor
-  semantics
+  semantics, including entity chunk records
 
 The difference matters. `Null` is "throw everything away"; `Memory` is "test a
 real persistence lifecycle without disk/browser IO."
@@ -337,6 +337,8 @@ real persistence lifecycle without disk/browser IO."
 
 The current `FilesystemChunkSnapshotStore` is a useful compatibility scaffold
 and now implements `WorldStore`, but it remains chunk-only and synchronous.
+Likewise, `ChunkSnapshotWorldStore` is snapshot-only compatibility glue and does
+not advertise entity chunk support.
 Future native backends should keep the same logical contract while replacing
 the physical format and moving real IO off the server thread.
 
