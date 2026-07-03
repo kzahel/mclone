@@ -4,7 +4,6 @@ use std::num::{NonZeroU32, NonZeroU64};
 use anyhow::{Context, Result, bail};
 use glam::{EulerRot, Mat4, Quat, Vec3};
 use mclone_assets::{ActorFigureId, default_player_figure_id};
-use wgpu::util::DeviceExt;
 
 use crate::asset_lab_figure::{CompiledFigureClip, CompiledFigureTransform};
 use crate::chunk::{ChunkRenderView, DEPTH_FORMAT, TexturedSectionRenderOptions};
@@ -27,6 +26,12 @@ const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = UNIFORM_BYTE_LEN as wgpu::BufferA
 const MULTIVIEW_UNIFORM_BYTE_LEN: usize = UNIFORM_BYTE_LEN * 2;
 const MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
     MULTIVIEW_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
+const ACTOR_MESH_MIN_VERTEX_CAPACITY: usize = 8192;
+const ACTOR_MESH_MIN_INDEX_CAPACITY: usize = 12_288;
+const ACTOR_VERTEX_BUFFER_MIN_BYTE_SIZE: wgpu::BufferAddress =
+    (ACTOR_MESH_MIN_VERTEX_CAPACITY * ACTOR_VERTEX_BYTE_LEN) as wgpu::BufferAddress;
+const ACTOR_INDEX_BUFFER_MIN_BYTE_SIZE: wgpu::BufferAddress =
+    (ACTOR_MESH_MIN_INDEX_CAPACITY * std::mem::size_of::<u32>()) as wgpu::BufferAddress;
 const MODEL_PIXEL_SCALE: f32 = 1.0 / 16.0;
 const MODEL_FEET_Y_PIXELS: f32 = 24.0;
 
@@ -308,6 +313,7 @@ pub struct ActorDrawResources {
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
     actor_figures: ActorFigureSet,
+    mesh_cache: ActorMeshCache,
 }
 
 impl ActorDrawResources {
@@ -327,6 +333,7 @@ impl ActorDrawResources {
             texture_layout: atlas.layout,
             atlas_size: [atlas.width.max(1), atlas.height.max(1)],
             actor_figures: actor_figures.cloned().unwrap_or_default(),
+            mesh_cache: ActorMeshCache::new(device),
         })
     }
 
@@ -370,34 +377,26 @@ impl ActorDrawResources {
         let depth_view = target
             .depth_view
             .context("actor render pass requires a depth attachment")?;
-        let mesh = actor_mesh(
+        let prepared = self.mesh_cache.prepare(
+            device,
+            queue,
             actors,
             self.texture_layout,
             self.atlas_size,
             &self.actor_figures,
         );
-        if mesh.vertices.is_empty() || mesh.indices.is_empty() {
+        let Some(prepared) = prepared else {
             return Ok(ActorRenderStats {
                 submitted_actor_count: actors.len(),
                 ..ActorRenderStats::default()
             });
-        }
+        };
 
         let uniform_offset = self.renderer.uniforms.write_slot(
             queue,
             view_slot,
             &uniform_bytes(render_view, render_options),
         );
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mclone_actor_vertices"),
-            contents: &actor_vertex_bytes(&mesh.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mclone_actor_indices"),
-            contents: &index_bytes(&mesh.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_actor_render_pass"),
@@ -422,15 +421,18 @@ impl ActorDrawResources {
         pass.set_pipeline(&self.renderer.pipeline);
         pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
         pass.set_bind_group(1, &self.atlas.bind_group, &[]);
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..mesh.indices.len() as u32, 0, 0..1);
+        pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
+        pass.set_index_buffer(
+            prepared.index_buffer.slice(..prepared.index_byte_len),
+            wgpu::IndexFormat::Uint32,
+        );
+        pass.draw_indexed(0..prepared.index_count, 0, 0..1);
 
         Ok(ActorRenderStats {
             submitted_actor_count: actors.len(),
             drawn_actor_count: actors.len(),
-            vertex_count: mesh.vertices.len() as u32,
-            index_count: mesh.indices.len() as u32,
+            vertex_count: prepared.vertex_count,
+            index_count: prepared.index_count,
         })
     }
 
@@ -451,31 +453,23 @@ impl ActorDrawResources {
         let depth_view = target
             .depth_view
             .context("actor multiview render pass requires a depth attachment")?;
-        let mesh = actor_mesh(
+        let prepared = self.mesh_cache.prepare(
+            device,
+            queue,
             actors,
             self.texture_layout,
             self.atlas_size,
             &self.actor_figures,
         );
-        if mesh.vertices.is_empty() || mesh.indices.is_empty() {
+        let Some(prepared) = prepared else {
             return Ok(ActorRenderStats {
                 submitted_actor_count: actors.len(),
                 ..ActorRenderStats::default()
             });
-        }
+        };
 
         let renderer = self.renderer.multiview_renderer(device)?;
         renderer.write_uniforms(queue, render_views, render_options);
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mclone_actor_multiview_vertices"),
-            contents: &actor_vertex_bytes(&mesh.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mclone_actor_multiview_indices"),
-            contents: &index_bytes(&mesh.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_actor_multiview_render_pass"),
@@ -500,15 +494,18 @@ impl ActorDrawResources {
         pass.set_pipeline(&renderer.pipeline);
         pass.set_bind_group(0, &renderer.bind_group, &[]);
         pass.set_bind_group(1, &self.atlas.bind_group, &[]);
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..mesh.indices.len() as u32, 0, 0..1);
+        pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
+        pass.set_index_buffer(
+            prepared.index_buffer.slice(..prepared.index_byte_len),
+            wgpu::IndexFormat::Uint32,
+        );
+        pass.draw_indexed(0..prepared.index_count, 0, 0..1);
 
         Ok(ActorRenderStats {
             submitted_actor_count: actors.len(),
             drawn_actor_count: actors.len(),
-            vertex_count: mesh.vertices.len() as u32,
-            index_count: mesh.indices.len() as u32,
+            vertex_count: prepared.vertex_count,
+            index_count: prepared.index_count,
         })
     }
 }
@@ -862,6 +859,184 @@ struct ActorMesh {
     indices: Vec<u32>,
 }
 
+#[derive(Default)]
+struct ActorMeshBuildScratch {
+    sampled_transforms: Vec<CompiledFigureTransform>,
+    content_cache: Vec<Option<Mat4>>,
+    content_matrices: Vec<Mat4>,
+}
+
+struct ActorMeshCache {
+    actors: Vec<ActorInstance>,
+    mesh: ActorMesh,
+    scratch: ActorMeshBuildScratch,
+    vertex_bytes: Vec<u8>,
+    index_bytes: Vec<u8>,
+    vertex_buffer: Option<wgpu::Buffer>,
+    index_buffer: Option<wgpu::Buffer>,
+    vertex_buffer_size: wgpu::BufferAddress,
+    index_buffer_size: wgpu::BufferAddress,
+    uploaded: bool,
+}
+
+struct PreparedActorBuffers<'a> {
+    vertex_buffer: &'a wgpu::Buffer,
+    index_buffer: &'a wgpu::Buffer,
+    vertex_byte_len: wgpu::BufferAddress,
+    index_byte_len: wgpu::BufferAddress,
+    vertex_count: u32,
+    index_count: u32,
+}
+
+impl ActorMeshCache {
+    fn new(device: &wgpu::Device) -> Self {
+        Self {
+            actors: Vec::new(),
+            mesh: ActorMesh {
+                vertices: Vec::with_capacity(ACTOR_MESH_MIN_VERTEX_CAPACITY),
+                indices: Vec::with_capacity(ACTOR_MESH_MIN_INDEX_CAPACITY),
+            },
+            scratch: ActorMeshBuildScratch::default(),
+            vertex_bytes: Vec::with_capacity(ACTOR_VERTEX_BUFFER_MIN_BYTE_SIZE as usize),
+            index_bytes: Vec::with_capacity(ACTOR_INDEX_BUFFER_MIN_BYTE_SIZE as usize),
+            vertex_buffer: Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mclone_actor_vertices"),
+                size: actor_buffer_capacity(ACTOR_VERTEX_BUFFER_MIN_BYTE_SIZE, 0),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })),
+            index_buffer: Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mclone_actor_indices"),
+                size: actor_buffer_capacity(ACTOR_INDEX_BUFFER_MIN_BYTE_SIZE, 0),
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })),
+            vertex_buffer_size: actor_buffer_capacity(ACTOR_VERTEX_BUFFER_MIN_BYTE_SIZE, 0),
+            index_buffer_size: actor_buffer_capacity(ACTOR_INDEX_BUFFER_MIN_BYTE_SIZE, 0),
+            uploaded: false,
+        }
+    }
+
+    fn prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        actors: &[ActorInstance],
+        texture_layout: ActorTextureLayout,
+        atlas_size: [u32; 2],
+        actor_figures: &ActorFigureSet,
+    ) -> Option<PreparedActorBuffers<'_>> {
+        if self.actors.as_slice() != actors {
+            self.actors.clear();
+            self.actors.extend_from_slice(actors);
+            rebuild_actor_mesh(
+                &mut self.mesh,
+                actors,
+                texture_layout,
+                atlas_size,
+                actor_figures,
+                &mut self.scratch,
+            );
+            self.uploaded = false;
+        }
+        if self.mesh.vertices.is_empty() || self.mesh.indices.is_empty() {
+            return None;
+        }
+
+        let vertex_byte_len =
+            (self.mesh.vertices.len() * ACTOR_VERTEX_BYTE_LEN) as wgpu::BufferAddress;
+        let index_byte_len =
+            (self.mesh.indices.len() * std::mem::size_of::<u32>()) as wgpu::BufferAddress;
+        self.ensure_buffer_capacity(
+            device,
+            vertex_byte_len,
+            index_byte_len,
+            "mclone_actor_vertices",
+            "mclone_actor_indices",
+        );
+        if !self.uploaded {
+            write_actor_vertex_bytes(&self.mesh.vertices, &mut self.vertex_bytes);
+            write_index_bytes(&self.mesh.indices, &mut self.index_bytes);
+            if let Some(buffer) = &self.vertex_buffer {
+                queue.write_buffer(buffer, 0, &self.vertex_bytes);
+            }
+            if let Some(buffer) = &self.index_buffer {
+                queue.write_buffer(buffer, 0, &self.index_bytes);
+            }
+            self.uploaded = true;
+        }
+
+        Some(PreparedActorBuffers {
+            vertex_buffer: self
+                .vertex_buffer
+                .as_ref()
+                .expect("actor vertex buffer exists after prepare"),
+            index_buffer: self
+                .index_buffer
+                .as_ref()
+                .expect("actor index buffer exists after prepare"),
+            vertex_byte_len,
+            index_byte_len,
+            vertex_count: self.mesh.vertices.len() as u32,
+            index_count: self.mesh.indices.len() as u32,
+        })
+    }
+
+    fn ensure_buffer_capacity(
+        &mut self,
+        device: &wgpu::Device,
+        vertex_byte_len: wgpu::BufferAddress,
+        index_byte_len: wgpu::BufferAddress,
+        vertex_label: &'static str,
+        index_label: &'static str,
+    ) {
+        let required_vertex_size =
+            actor_buffer_capacity(vertex_byte_len, ACTOR_VERTEX_BUFFER_MIN_BYTE_SIZE);
+        if self
+            .vertex_buffer
+            .as_ref()
+            .is_none_or(|_| self.vertex_buffer_size < required_vertex_size)
+        {
+            self.vertex_buffer_size = required_vertex_size;
+            self.vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(vertex_label),
+                size: self.vertex_buffer_size,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.uploaded = false;
+        }
+
+        let required_index_size =
+            actor_buffer_capacity(index_byte_len, ACTOR_INDEX_BUFFER_MIN_BYTE_SIZE);
+        if self
+            .index_buffer
+            .as_ref()
+            .is_none_or(|_| self.index_buffer_size < required_index_size)
+        {
+            self.index_buffer_size = required_index_size;
+            self.index_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(index_label),
+                size: self.index_buffer_size,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.uploaded = false;
+        }
+    }
+}
+
+fn actor_buffer_capacity(
+    byte_len: wgpu::BufferAddress,
+    minimum: wgpu::BufferAddress,
+) -> wgpu::BufferAddress {
+    byte_len
+        .max(4)
+        .max(minimum)
+        .checked_next_power_of_two()
+        .unwrap_or_else(|| byte_len.max(4).max(minimum))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ActorVertex {
     position: [f32; 3],
@@ -870,6 +1045,7 @@ struct ActorVertex {
     packed_light: u32,
 }
 
+#[cfg(test)]
 fn actor_mesh(
     actors: &[ActorInstance],
     texture_layout: ActorTextureLayout,
@@ -877,10 +1053,46 @@ fn actor_mesh(
     actor_figures: &ActorFigureSet,
 ) -> ActorMesh {
     let mut mesh = ActorMesh::default();
-    for actor in actors {
-        append_actor(&mut mesh, *actor, texture_layout, atlas_size, actor_figures);
-    }
+    let mut scratch = ActorMeshBuildScratch::default();
+    rebuild_actor_mesh(
+        &mut mesh,
+        actors,
+        texture_layout,
+        atlas_size,
+        actor_figures,
+        &mut scratch,
+    );
     mesh
+}
+
+fn rebuild_actor_mesh(
+    mesh: &mut ActorMesh,
+    actors: &[ActorInstance],
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
+    actor_figures: &ActorFigureSet,
+    scratch: &mut ActorMeshBuildScratch,
+) {
+    mesh.vertices.clear();
+    mesh.indices.clear();
+    if mesh.vertices.capacity() < ACTOR_MESH_MIN_VERTEX_CAPACITY {
+        mesh.vertices
+            .reserve(ACTOR_MESH_MIN_VERTEX_CAPACITY - mesh.vertices.capacity());
+    }
+    if mesh.indices.capacity() < ACTOR_MESH_MIN_INDEX_CAPACITY {
+        mesh.indices
+            .reserve(ACTOR_MESH_MIN_INDEX_CAPACITY - mesh.indices.capacity());
+    }
+    for actor in actors {
+        append_actor(
+            mesh,
+            *actor,
+            texture_layout,
+            atlas_size,
+            actor_figures,
+            scratch,
+        );
+    }
 }
 
 fn append_actor(
@@ -889,6 +1101,7 @@ fn append_actor(
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
     actor_figures: &ActorFigureSet,
+    scratch: &mut ActorMeshBuildScratch,
 ) {
     match actor.shape {
         ActorInstanceShape::Figure(figure) => append_asset_lab_figure_model(
@@ -897,6 +1110,7 @@ fn append_actor(
             texture_layout,
             atlas_size,
             actor_figures.get(figure),
+            scratch,
         ),
         ActorInstanceShape::Humanoid => {
             append_humanoid_model(mesh, actor, texture_layout, atlas_size)
@@ -916,6 +1130,7 @@ fn append_asset_lab_figure_model(
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
     figure: Option<&ActorFigure>,
+    scratch: &mut ActorMeshBuildScratch,
 ) {
     let Some(figure) = figure else {
         append_humanoid_model(mesh, actor, texture_layout, atlas_size);
@@ -924,11 +1139,20 @@ fn append_asset_lab_figure_model(
 
     let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
     let model_scale = actor.height.max(0.1);
-    let sampled_transforms =
-        sampled_figure_part_transforms(figure, actor.animation, actor.chicken_wing_flap_radians);
-    let content_matrices = figure_content_matrices(figure, &sampled_transforms);
+    sample_figure_part_transforms_into(
+        figure,
+        actor.animation,
+        actor.chicken_wing_flap_radians,
+        &mut scratch.sampled_transforms,
+    );
+    figure_content_matrices_into(
+        figure,
+        &scratch.sampled_transforms,
+        &mut scratch.content_cache,
+        &mut scratch.content_matrices,
+    );
     for (part_index, part) in figure.parts.iter().enumerate() {
-        let content_matrix = content_matrices[part_index];
+        let content_matrix = scratch.content_matrices[part_index];
         for cuboid in &part.cuboids {
             if actor.first_person_body_only && !cuboid.first_person_visible {
                 continue;
@@ -964,12 +1188,14 @@ fn append_asset_lab_figure_model(
     }
 }
 
-fn sampled_figure_part_transforms(
+fn sample_figure_part_transforms_into(
     figure: &ActorFigure,
     animation: Option<ActorAnimation>,
     chicken_wing_flap_radians: Option<f32>,
-) -> Vec<CompiledFigureTransform> {
-    let mut transforms = vec![CompiledFigureTransform::default(); figure.parts.len()];
+    transforms: &mut Vec<CompiledFigureTransform>,
+) {
+    transforms.clear();
+    transforms.resize(figure.parts.len(), CompiledFigureTransform::default());
     if let Some(animation) = animation {
         let clip = match animation.clip {
             ActorAnimationClip::Walk => figure.clips.get("walk"),
@@ -984,9 +1210,8 @@ fn sampled_figure_part_transforms(
         }
     }
     if let Some(wing_flap) = chicken_wing_flap_radians {
-        apply_chicken_wing_flap(figure, &mut transforms, wing_flap);
+        apply_chicken_wing_flap(figure, transforms, wing_flap);
     }
-    transforms
 }
 
 fn apply_chicken_wing_flap(
@@ -1070,18 +1295,19 @@ fn mix_optional_vec3(left: Option<Vec3>, right: Option<Vec3>, alpha: f32) -> Opt
     }
 }
 
-fn figure_content_matrices(
+fn figure_content_matrices_into(
     figure: &ActorFigure,
     transforms: &[CompiledFigureTransform],
-) -> Vec<Mat4> {
-    let mut cache = vec![None; figure.parts.len()];
+    cache: &mut Vec<Option<Mat4>>,
+    content_matrices: &mut Vec<Mat4>,
+) {
+    cache.clear();
+    cache.resize(figure.parts.len(), None);
+    content_matrices.clear();
+    content_matrices.resize(figure.parts.len(), Mat4::IDENTITY);
     for index in 0..figure.parts.len() {
-        let _ = figure_content_matrix(index, figure, transforms, &mut cache);
+        content_matrices[index] = figure_content_matrix(index, figure, transforms, cache);
     }
-    cache
-        .into_iter()
-        .map(|matrix| matrix.unwrap_or(Mat4::IDENTITY))
-        .collect()
 }
 
 fn figure_content_matrix(
@@ -1883,8 +2109,12 @@ fn scale_color(color: [f32; 4], factor: f32) -> [f32; 4] {
     ]
 }
 
-fn actor_vertex_bytes(vertices: &[ActorVertex]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(vertices.len() * ACTOR_VERTEX_BYTE_LEN);
+fn write_actor_vertex_bytes(vertices: &[ActorVertex], bytes: &mut Vec<u8>) {
+    let required_len = vertices.len() * ACTOR_VERTEX_BYTE_LEN;
+    bytes.clear();
+    if bytes.capacity() < required_len {
+        bytes.reserve(required_len - bytes.capacity());
+    }
     for vertex in vertices {
         for value in vertex
             .position
@@ -1896,15 +2126,17 @@ fn actor_vertex_bytes(vertices: &[ActorVertex]) -> Vec<u8> {
         }
         bytes.extend_from_slice(&vertex.packed_light.to_ne_bytes());
     }
-    bytes
 }
 
-fn index_bytes(indices: &[u32]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(std::mem::size_of_val(indices));
+fn write_index_bytes(indices: &[u32], bytes: &mut Vec<u8>) {
+    let required_len = std::mem::size_of_val(indices);
+    bytes.clear();
+    if bytes.capacity() < required_len {
+        bytes.reserve(required_len - bytes.capacity());
+    }
     for index in indices {
         bytes.extend_from_slice(&index.to_ne_bytes());
     }
-    bytes
 }
 
 fn uniform_bytes(

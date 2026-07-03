@@ -1,8 +1,8 @@
 # 131: Quest CPU-GPU Overlap And Frame Cost Hygiene
 
-Status: active — F1a and render-thread CPU/blocked attribution implemented
-and measured; actor buffer lifetime fix is the next concrete implementation
-slice
+Status: active — F1a, render-thread CPU/blocked attribution, and actor
+resource/scratch lifetime fixes implemented and measured; update pacing is the
+next concrete slice
 Workstream: Android XR frame pacing, XR scene GPU synchronization, actor
 renderer resource lifetime, server-update application pacing
 
@@ -197,6 +197,68 @@ This also generalizes: audit other per-frame `create_buffer_init` /
 overlays) for the same churn. Per-frame GPU resource creation on the render
 thread should be treated as a defect class, not a style choice.
 
+### 2026-07-03 Actor Resource Lifetime Result
+
+Implementation:
+
+- Added `ActorMeshCache` inside `ActorDrawResources`.
+- Removed per-eye/per-frame `device.create_buffer_init` for actor vertex and
+  index buffers in both per-eye and multiview paths.
+- Actor geometry is now retained as:
+  - cached last actor slice,
+  - retained CPU mesh vectors,
+  - retained CPU staging byte vectors,
+  - pre-created grow-only `VERTEX | COPY_DST` and `INDEX | COPY_DST` GPU
+    buffers.
+- The first eye prepares/uploads changed actor geometry; the second eye reuses
+  the same mesh and GPU buffers while writing only its own per-view uniform.
+- A buffer-only version still showed occasional first-eye actor spikes
+  (`7.959 ms` and `32.834 ms`) because animated figure rebuilds were still
+  allocating temporary transform/matrix vectors. The final version also keeps
+  reusable actor-mesh scratch for sampled figure transforms, content-matrix
+  cache, and content matrices.
+
+Validation:
+
+- `rustfmt --edition 2024 native/crates/mclone-render/src/entity.rs` passed.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-render` passed.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render entity::tests::actor_mesh -- --nocapture`
+  passed.
+- Native actor review screenshot passed and was inspected:
+  `/tmp/mclone-actor-review-buffer-cache-scratch.png` rendered 12/12 actors
+  with `259136` non-clear RGB pixels.
+- Final Android XR RD7 settled-orbit lane was run three times with the exact
+  scratch version:
+  `/tmp/mclone-quest-openxr-perf-orbit-rd7-actor-buffer-cache-scratch-*.txt`
+  and matching `*-logcat.txt` logs.
+
+Measured comparison:
+
+| Run | Meta dropped frames | Frame avg / p95 / p99 / max (ms) | App work avg / p95 (ms) | Thread CPU avg / p95 / max (ms) | Blocked avg / p95 / max (ms) | Actor max L/R (ms) | Worst-frame actor max L/R (ms) |
+| --- | ---: | --- | --- | --- | --- | --- | --- |
+| Baseline actor-enabled CPU/blocked | 17 | 14.677 / 16.746 / 19.249 / 31.074 | 14.311 / 16.626 | 8.387 / 9.718 / 23.232 | 5.924 / 7.375 / 8.283 | 10.943 / 16.766 | 0.225 / 16.766 |
+| Final scratch run 1 | 15 | 14.546 / 16.576 / 19.220 / 35.631 | 14.023 / 16.468 | 8.212 / 9.708 / 28.677 | 5.811 / 7.345 / 8.474 | 1.056 / 0.790 | 0.500 / 0.089 |
+| Final scratch run 2 | 14 | 14.555 / 16.622 / 19.446 / 26.760 | 14.095 / 16.486 | 8.261 / 9.670 / 18.739 | 5.834 / 7.412 / 8.376 | 0.714 / 0.603 | 0.487 / 0.093 |
+| Final scratch run 3 | 17 | 14.550 / 16.535 / 18.789 / 28.287 | 14.105 / 16.452 | 8.222 / 9.512 / 19.962 | 5.883 / 7.330 / 11.662 | 0.991 / 0.614 | 0.449 / 0.087 |
+| Final scratch median | 15 | 14.550 / 16.576 / 19.220 / 28.287 | 14.095 / 16.468 | 8.222 / 9.670 / 19.962 | 5.834 / 7.345 / 8.474 | 0.991 / 0.614 | 0.487 / 0.089 |
+
+Interpretation:
+
+- Finding 2's actor resource-lifetime defect is fixed. The old right-eye
+  actor spike (`16.766 ms`) disappeared, and all final runs kept max actor
+  pass time below `1.1 ms`.
+- The overall lane improved modestly, not decisively: final median app work
+  dropped `14.311 → 14.095 ms`, app-over-period `60.6% → 54.7%`, and dropped
+  frames `17 → 15`. The lane still rides the 72 Hz budget.
+- The remaining worst-frame family is no longer actor work. The top final
+  outlier was `commit_server_command_ms=20.015`, with
+  `apply_client_updates_ms=16.361` for 15 snapshot + 15 unload updates. Other
+  tails still combine multi-ms dirty/update application with 6-8 ms
+  submission waits.
+- This makes Finding 3 the next implementation slice: move opportunistic
+  server-update application out of pose command/locomotion and apply a
+  K-per-frame update budget in the normal runtime pump.
+
 ## Finding 3: endorse the dirty-mark decoupling, add pacing and a resident-slot endgame
 
 `130`'s locomotion-command split correctly showed the ~5 ms
@@ -325,9 +387,10 @@ still live risk, and it will grow at RD10.
 2. **Finding 4** attribution — thread CPU/blocked split landed and measured;
    per-stage percentiles remain useful but are no longer the gating next
    step.
-3. **Finding 2** actor buffer lifetime fix — next slice; kills bad-frame
-   family 1 and removes confirmed CPU-busy actor allocation spikes.
-4. **Finding 3** decoupling + K-per-frame pacing — kills family 2's CPU half.
+3. **Finding 2** actor resource/scratch lifetime fix — landed and measured;
+   actor pass max is now below `1.1 ms` across the final three RD7 samples.
+4. **Finding 3** decoupling + K-per-frame pacing — next slice; kills family
+   2's CPU half.
 5. **F1b** no-wait pipelining — recovers the average headroom; family 2's
    wait half.
 6. **Finding 5** background-thread policy, then re-run `130` E3/E4
@@ -358,7 +421,7 @@ time. Keep `--xr-skip-actors` as the control for step 3.
   13.889 ms budget (target: p95 under budget), driven by measured reductions
   in poll-wait blocked time.
 - With actors enabled, no worst-frame snapshot attributes >2 ms to the actor
-  pass across three runs.
+  pass across three runs. Achieved by the final Finding 2 scratch version.
 - Streaming-transition worst frames no longer contain multi-ms
   `apply_dirty_mark` or opportunistic update application inside the
   locomotion phase, and chunk-update application cost appears as bounded
