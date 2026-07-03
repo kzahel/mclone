@@ -1930,6 +1930,7 @@ mod tests {
             }
             if server.pending_publication_count() == 0 {
                 server.wait_for_worldgen_completion(Duration::from_secs(1));
+                server.wait_for_light_completion(Duration::from_secs(1));
             }
         }
         panic!("timed out loading center chunk");
@@ -2243,7 +2244,6 @@ mod tests {
         })
     }
 
-    #[cfg(feature = "physics-rapier")]
     fn first_entity_snapshot_of_kind(
         updates: &[ServerUpdate],
         kind: EntityKind,
@@ -2583,6 +2583,59 @@ mod tests {
         );
         assert!(spawning.dry_run_positions_checked <= spawning.dry_run_biome_supported_positions);
         assert_eq!(spawning.dry_run_valid_candidates, 0);
+    }
+
+    #[test]
+    fn volatile_natural_spawning_creates_entities_from_ticket_loaded_chunks() {
+        let seed = 12_345;
+        let mut server = IntegratedServer::new(seed);
+        server.set_debug_passive_showcase_enabled(false);
+        server.set_lighting_enabled(true);
+        let player = server.add_dedicated_player();
+        let center = crate::spawn::initial_spawn_center_for_seed(seed);
+        set_dedicated_chunk_view_and_poll(&mut server, player, center, 4);
+
+        for _ in 0..400 {
+            let report = server
+                .try_simulation_tick_report_for_player(player)
+                .expect("tick dedicated player");
+            let spawning = report.natural_spawning;
+            if !spawning.creature_cadence_ready {
+                continue;
+            }
+
+            assert!(spawning.live_attempts_enabled);
+            assert!(spawning.live_spawns_are_volatile);
+            assert!(spawning.ready_for_live_attempts);
+            assert_eq!(spawning.blocker_count, 0);
+            assert_eq!(spawning.creature_count, 0);
+            assert_eq!(spawning.creature_cap, 10);
+            assert!(spawning.creature_cap_has_room);
+            assert!(spawning.creature_should_attempt_if_enabled);
+            assert!(spawning.live_attempts > 0);
+            assert!(spawning.live_spawned > 0);
+
+            let cow = first_entity_snapshot_of_kind(&report.updates, EntityKind::Cow);
+            let chicken = first_entity_snapshot_of_kind(&report.updates, EntityKind::Chicken);
+            let snapshot = cow
+                .or(chicken)
+                .expect("spawned passive mob should be visible to tracking player");
+            assert!(matches!(
+                snapshot.kind,
+                EntityKind::Cow | EntityKind::Chicken
+            ));
+
+            let next_report = server
+                .try_simulation_tick_report_for_player(player)
+                .expect("tick after volatile spawn");
+            assert!(
+                next_report.natural_spawning.creature_count >= spawning.live_spawned as u32,
+                "spawned passive mobs should count toward the next creature cap"
+            );
+            return;
+        }
+
+        panic!("volatile natural spawning did not reach a creature cadence tick");
     }
 
     #[test]
