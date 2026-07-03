@@ -492,7 +492,14 @@ mod tests {
         water: u32,
     }
 
-    const FIRST_PALETTE_TINT_CASES: &[PaletteTintCase] = &[
+    const PALETTE_TINT_CASES: &[PaletteTintCase] = &[
+        PaletteTintCase {
+            biome_id: 0,
+            biome_key: "minecraft:ocean",
+            grass: 0x8e_b9_71,
+            foliage: 0x71_a7_4d,
+            water: DEFAULT_WATER_COLOR,
+        },
         PaletteTintCase {
             biome_id: 1,
             biome_key: "minecraft:plains",
@@ -508,16 +515,16 @@ mod tests {
             water: DEFAULT_WATER_COLOR,
         },
         PaletteTintCase {
-            biome_id: 6,
-            biome_key: "minecraft:swamp",
-            grass: 0x64_71_39,
-            foliage: SWAMP_GRASS_COLOR_LIGHT,
-            water: 0x61_7b_64,
+            biome_id: 3,
+            biome_key: "minecraft:mountains",
+            grass: 0x8a_b6_89,
+            foliage: 0x6f_a0_78,
+            water: DEFAULT_WATER_COLOR,
         },
         PaletteTintCase {
-            biome_id: 29,
-            biome_key: "minecraft:dark_forest",
-            grass: 0x50_7a_32,
+            biome_id: 4,
+            biome_key: "minecraft:forest",
+            grass: 0x79_c0_5a,
             foliage: 0x59_9b_35,
             water: DEFAULT_WATER_COLOR,
         },
@@ -529,10 +536,108 @@ mod tests {
             water: DEFAULT_WATER_COLOR,
         },
         PaletteTintCase {
+            biome_id: 6,
+            biome_key: "minecraft:swamp",
+            grass: 0x64_71_39,
+            foliage: SWAMP_GRASS_COLOR_LIGHT,
+            water: 0x61_7b_64,
+        },
+        PaletteTintCase {
+            biome_id: 7,
+            biome_key: "minecraft:river",
+            grass: 0x8e_b9_71,
+            foliage: 0x71_a7_4d,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 10,
+            biome_key: "minecraft:frozen_ocean",
+            grass: 0x80_b4_97,
+            foliage: 0x60_93_80,
+            water: FROZEN_WATER_COLOR,
+        },
+        PaletteTintCase {
             biome_id: 12,
             biome_key: "minecraft:snowy_tundra",
             grass: 0x80_b4_97,
             foliage: 0x60_93_80,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 14,
+            biome_key: "minecraft:mushroom_fields",
+            grass: 0x55_c9_3f,
+            foliage: 0x2f_b2_33,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 16,
+            biome_key: "minecraft:beach",
+            grass: 0x91_bd_59,
+            foliage: 0x77_ab_2f,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 21,
+            biome_key: "minecraft:jungle",
+            grass: 0x59_c9_3c,
+            foliage: 0x30_bb_0b,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 23,
+            biome_key: "minecraft:jungle_edge",
+            grass: 0x59_c9_3c,
+            foliage: 0x30_bb_0b,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 26,
+            biome_key: "minecraft:snowy_beach",
+            grass: 0x8a_b6_89,
+            foliage: 0x6f_a0_78,
+            water: COLD_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 27,
+            biome_key: "minecraft:birch_forest",
+            grass: 0x88_bb_67,
+            foliage: 0x80_a7_55,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 29,
+            biome_key: "minecraft:dark_forest",
+            grass: 0x50_7a_32,
+            foliage: 0x59_9b_35,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 30,
+            biome_key: "minecraft:snowy_taiga",
+            grass: 0x86_b7_83,
+            foliage: 0x68_9b_68,
+            water: COLD_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 32,
+            biome_key: "minecraft:giant_tree_taiga",
+            grass: 0x86_b7_83,
+            foliage: 0x68_9b_68,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 35,
+            biome_key: "minecraft:savanna",
+            grass: 0xb5_b7_55,
+            foliage: 0xae_b4_55,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 36,
+            biome_key: "minecraft:savanna_plateau",
+            grass: 0xb5_b7_55,
+            foliage: 0xae_b4_55,
             water: DEFAULT_WATER_COLOR,
         },
         PaletteTintCase {
@@ -549,13 +654,48 @@ mod tests {
             foliage: 0x71_a7_4d,
             water: WARM_OCEAN_WATER_COLOR,
         },
+        PaletteTintCase {
+            biome_id: 45,
+            biome_key: "minecraft:lukewarm_ocean",
+            grass: 0x8e_b9_71,
+            foliage: 0x71_a7_4d,
+            water: LUKEWARM_OCEAN_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 46,
+            biome_key: "minecraft:cold_ocean",
+            grass: 0x8e_b9_71,
+            foliage: 0x71_a7_4d,
+            water: COLD_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 50,
+            biome_key: "minecraft:deep_frozen_ocean",
+            grass: 0x8e_b9_71,
+            foliage: 0x71_a7_4d,
+            water: FROZEN_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 160,
+            biome_key: "minecraft:giant_spruce_taiga",
+            grass: 0x86_b7_83,
+            foliage: 0x68_9b_68,
+            water: DEFAULT_WATER_COLOR,
+        },
+        PaletteTintCase {
+            biome_id: 163,
+            biome_key: "minecraft:shattered_savanna",
+            grass: 0xb5_b7_55,
+            foliage: 0xae_b4_55,
+            water: DEFAULT_WATER_COLOR,
+        },
     ];
 
     #[test]
-    fn first_palette_matrix_tint_groups_match_java_visual_facts() {
+    fn palette_matrix_tint_groups_match_java_visual_facts() {
         let catalog = TexturedMeshCatalog::default();
 
-        for case in FIRST_PALETTE_TINT_CASES {
+        for case in PALETTE_TINT_CASES {
             assert_eq!(
                 block_tint(&catalog, TexturedBlockTint::Grass, 0, 64, 0, |_, _, _| case
                     .biome_id),

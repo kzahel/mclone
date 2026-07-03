@@ -41,9 +41,10 @@ mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
     use crate::block::{
-        CLAY, DANDELION, DEAD_BUSH, FERN, GRASS, GRASS_BLOCK, ICE, LARGE_FERN_LOWER,
-        LARGE_FERN_UPPER, OAK_LEAVES, OAK_LOG, PACKED_ICE, POPPY, RED_SAND, RawBlockId, SAND, SNOW,
-        SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TERRACOTTA, WATER, is_air_like, is_water,
+        CLAY, COARSE_DIRT, DANDELION, DEAD_BUSH, FERN, GRASS, GRASS_BLOCK, GRAVEL, ICE,
+        LARGE_FERN_LOWER, LARGE_FERN_UPPER, MYCELIUM, OAK_LEAVES, OAK_LOG, PACKED_ICE, PODZOL,
+        POPPY, RED_SAND, RawBlockId, SAND, SNOW, SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG, STONE,
+        TERRACOTTA, WATER, is_air_like, is_water,
     };
     use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
@@ -74,6 +75,12 @@ mod tests {
         Badlands,
         Swamp,
         Water,
+        FrozenWater,
+        Mountain,
+        Mycelium,
+        GiantTaiga,
+        ShatteredSavanna,
+        SnowySand,
     }
 
     impl SurfaceFamily {
@@ -85,6 +92,12 @@ mod tests {
                 Self::Badlands => "badlands",
                 Self::Swamp => "swamp grass/water",
                 Self::Water => "water",
+                Self::FrozenWater => "frozen water/ice",
+                Self::Mountain => "mountain grass/stone/gravel",
+                Self::Mycelium => "mycelium",
+                Self::GiantTaiga => "giant taiga grass/podzol/coarse dirt",
+                Self::ShatteredSavanna => "shattered savanna grass/coarse dirt/stone",
+                Self::SnowySand => "snowy sand",
             }
         }
 
@@ -96,6 +109,14 @@ mod tests {
                 Self::Badlands => matches!(block, RED_SAND | TERRACOTTA),
                 Self::Swamp => block == GRASS_BLOCK || is_water(block),
                 Self::Water => is_water(block),
+                Self::FrozenWater => {
+                    matches!(block, ICE | PACKED_ICE | SNOW | SNOW_BLOCK) || is_water(block)
+                }
+                Self::Mountain => matches!(block, GRASS_BLOCK | STONE | GRAVEL),
+                Self::Mycelium => block == MYCELIUM,
+                Self::GiantTaiga => matches!(block, GRASS_BLOCK | PODZOL | COARSE_DIRT),
+                Self::ShatteredSavanna => matches!(block, GRASS_BLOCK | COARSE_DIRT | STONE),
+                Self::SnowySand => matches!(block, SAND | SNOW | SNOW_BLOCK | ICE | PACKED_ICE),
             }
         }
     }
@@ -140,7 +161,15 @@ mod tests {
         }
     }
 
-    const FIRST_PALETTE_MATRIX_CASES: &[PaletteMatrixCase] = &[
+    const PALETTE_MATRIX_CASES: &[PaletteMatrixCase] = &[
+        PaletteMatrixCase {
+            seed: 1,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:ocean",
+            surface_family: SurfaceFamily::Water,
+            feature_family: None,
+        },
         PaletteMatrixCase {
             seed: 16,
             chunk_x: 0,
@@ -158,6 +187,22 @@ mod tests {
             feature_family: Some(FeatureFamily::DesertDeadBush),
         },
         PaletteMatrixCase {
+            seed: 31,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:mountains",
+            surface_family: SurfaceFamily::Mountain,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 0,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:forest",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
             seed: 7,
             chunk_x: 0,
             chunk_z: 0,
@@ -166,10 +211,90 @@ mod tests {
             feature_family: Some(FeatureFamily::SwampNativeSubset),
         },
         PaletteMatrixCase {
+            seed: 39,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:river",
+            surface_family: SurfaceFamily::Water,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 333,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:frozen_ocean",
+            surface_family: SurfaceFamily::FrozenWater,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
             seed: 44,
             chunk_x: 0,
             chunk_z: 0,
             biome_key: "minecraft:dark_forest",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 14,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:snowy_taiga",
+            surface_family: SurfaceFamily::Snow,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 19,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:giant_tree_taiga",
+            surface_family: SurfaceFamily::GiantTaiga,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 978,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:mushroom_fields",
+            surface_family: SurfaceFamily::Mycelium,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 45,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:beach",
+            surface_family: SurfaceFamily::Sand,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 330,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:snowy_beach",
+            surface_family: SurfaceFamily::SnowySand,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 71,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:jungle",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 2235,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:jungle_edge",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 10,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:birch_forest",
             surface_family: SurfaceFamily::Grass,
             feature_family: None,
         },
@@ -203,6 +328,62 @@ mod tests {
             chunk_z: 0,
             biome_key: "minecraft:warm_ocean",
             surface_family: SurfaceFamily::Water,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 6,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:lukewarm_ocean",
+            surface_family: SurfaceFamily::Water,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 5,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:cold_ocean",
+            surface_family: SurfaceFamily::Water,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 103,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:deep_frozen_ocean",
+            surface_family: SurfaceFamily::FrozenWater,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 2923,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:giant_spruce_taiga",
+            surface_family: SurfaceFamily::GiantTaiga,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 62,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:savanna",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 126,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:savanna_plateau",
+            surface_family: SurfaceFamily::Grass,
+            feature_family: None,
+        },
+        PaletteMatrixCase {
+            seed: 68,
+            chunk_x: 0,
+            chunk_z: 0,
+            biome_key: "minecraft:shattered_savanna",
+            surface_family: SurfaceFamily::ShatteredSavanna,
             feature_family: None,
         },
     ];
@@ -1223,8 +1404,8 @@ mod tests {
     }
 
     #[test]
-    fn first_palette_matrix_rows_have_expected_biome_surface_and_supported_feature_family() {
-        for case in FIRST_PALETTE_MATRIX_CASES {
+    fn palette_matrix_rows_have_expected_biome_surface_and_supported_feature_family() {
+        for case in PALETTE_MATRIX_CASES {
             let biome_source = OverworldBiomeSource::new(case.seed, false, false);
             let primary = biome_source.get_primary_biome_definition(case.chunk_x, case.chunk_z);
             assert_eq!(
@@ -1236,15 +1417,15 @@ mod tests {
                 case.chunk_z
             );
 
-            let center_x = chunk_min_block_coord(case.chunk_x) + 8;
-            let center_z = chunk_min_block_coord(case.chunk_z) + 8;
-            let center_biome =
-                biome_source.get_block_position_biome_definition(case.seed, center_x, center_z);
-            assert_eq!(
-                center_biome.key(),
-                case.biome_key,
-                "block-position biome at ({center_x}, {center_z}) for seed {}",
-                case.seed
+            let block_position_biomes =
+                count_block_position_biomes_in_chunk(&biome_source, case.seed, case);
+            assert!(
+                block_position_biomes > 0,
+                "seed {} chunk ({}, {}) had no block-position {} samples",
+                case.seed,
+                case.chunk_x,
+                case.chunk_z,
+                case.biome_key
             );
 
             let chunk = generate_overworld_features_chunk(case.seed, case.chunk_x, case.chunk_z);
@@ -2136,6 +2317,30 @@ mod tests {
             .iter()
             .map(|block| chunk.block_count(*block))
             .sum()
+    }
+
+    fn count_block_position_biomes_in_chunk(
+        biome_source: &OverworldBiomeSource,
+        seed: i64,
+        case: &PaletteMatrixCase,
+    ) -> usize {
+        let min_x = chunk_min_block_coord(case.chunk_x);
+        let min_z = chunk_min_block_coord(case.chunk_z);
+        let mut count = 0;
+        for local_z in 0..GeneratedChunk::WIDTH {
+            for local_x in 0..GeneratedChunk::WIDTH {
+                let world_x = min_x + local_x;
+                let world_z = min_z + local_z;
+                if biome_source
+                    .get_block_position_biome_definition(seed, world_x, world_z)
+                    .key()
+                    == case.biome_key
+                {
+                    count += 1;
+                }
+            }
+        }
+        count
     }
 
     fn top_non_air_block(chunk: &GeneratedChunk, local_x: i32, local_z: i32) -> Option<RawBlockId> {

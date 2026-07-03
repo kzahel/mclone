@@ -1,7 +1,7 @@
 # 135: Overworld Biome Palette Matrix
 
-Status: active parent; first eight biome/tint/visible-surface probes and six
-supported feature-family probes landed
+Status: active parent; 28 biome/tint/visible-surface probes and six supported
+feature-family probes landed
 Workstream: shared native Rust worldgen, mesh tint, and deterministic vanilla visual parity
 
 ## Purpose
@@ -50,7 +50,8 @@ For each biome row:
    ```
 
 2. Commit deterministic probes before relying on screenshots:
-   - biome identity: block-position biome lookup resolves the expected key,
+   - biome identity: primary biome lookup resolves the expected key and at
+     least one block-position biome sample in the chunk resolves that key,
    - tint: grass, foliage, and water RGB match the expected radius-2 rule,
    - visible surface: representative `FEATURES` columns have the expected top
      material family,
@@ -109,51 +110,51 @@ notes.
 
 | ID | Biome | Tint group | Surface / palette focus | Fixture | Checks |
 |---:|---|---|---|---|---|
-| 0 | `minecraft:ocean` | ocean-default | water, default ocean seafloor, kelp/seagrass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 0 | `minecraft:ocean` | ocean-default | water checked; default ocean seafloor, kelp/seagrass gap | seed `1`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 1 | `minecraft:plains` | plains | grass surface, grass/flower patches, oak vegetation | seed `16`, chunk `(0,0)`; seeds `16`, `17` exist in `103` | `[x] B [x] T [x] S [x] F` |
 | 2 | `minecraft:desert` | desert | sand/sandstone, dead bush checked; cactus/desert extras gap | seed `38`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 3 | `minecraft:mountains` | mountains | grass/stone mountain surface, sparse trees | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 4 | `minecraft:forest` | forest | forest grass, oak/birch trees, flowers | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 3 | `minecraft:mountains` | mountains | grass/stone/gravel mountain surface checked, sparse trees | seed `31`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 4 | `minecraft:forest` | forest | forest grass tint/surface checked, oak/birch trees/flowers | seed `0`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 5 | `minecraft:taiga` | taiga | spruce trees, ferns; berries gap | seed `125`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 6 | `minecraft:swamp` | swamp | swamp grass/water, native oak/grass/dead-bush/clay subset; lily pads/seagrass gap | seed `7`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
-| 7 | `minecraft:river` | river | river water, banks, seagrass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 10 | `minecraft:frozen_ocean` | frozen-water | frozen water, icebergs, blue ice | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 7 | `minecraft:river` | river | river water checked, banks/seagrass gap | seed `39`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 10 | `minecraft:frozen_ocean` | frozen-water | frozen water/ice checked, icebergs/blue ice gap | seed `333`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 11 | `minecraft:frozen_river` | frozen-water | frozen river water/ice | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 12 | `minecraft:snowy_tundra` | frozen-land | snow over grass, native snowy spruce/fern subset | seed `42`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 13 | `minecraft:snowy_mountains` | frozen-land | snowy mountain surface | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 14 | `minecraft:mushroom_fields` | mushroom | mycelium, mushrooms, no normal hostile palette | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 14 | `minecraft:mushroom_fields` | mushroom | mycelium checked; mushrooms/no-normal-hostile palette gap | seed `978`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 15 | `minecraft:mushroom_field_shore` | mushroom | mycelium shore transition | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 16 | `minecraft:beach` | plains | sand beach, buried-treasure/shipwreck surface context | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 16 | `minecraft:beach` | plains | sand beach checked, buried-treasure/shipwreck surface context | seed `45`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 17 | `minecraft:desert_hills` | desert | sand/sandstone hills, cactus/dead bush | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 18 | `minecraft:wooded_hills` | forest | forest hill trees and grass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 19 | `minecraft:taiga_hills` | taiga | spruce/fern hill variant | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 20 | `minecraft:mountain_edge` | mountains | mountain-edge grass/stone transition | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 21 | `minecraft:jungle` | jungle | jungle trees, vines, bamboo-light vegetation | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 21 | `minecraft:jungle` | jungle | grass tint/surface checked; jungle trees, vines, bamboo-light vegetation gap | seed `71`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 22 | `minecraft:jungle_hills` | jungle | jungle hill trees/vines | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 23 | `minecraft:jungle_edge` | jungle-edge | jungle-edge lower-density trees | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 23 | `minecraft:jungle_edge` | jungle-edge | grass tint/surface checked; jungle-edge lower-density trees gap | seed `2235`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 24 | `minecraft:deep_ocean` | ocean-default | deep water, kelp/seagrass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 25 | `minecraft:stone_shore` | mountains | stone shore, steep coast | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 26 | `minecraft:snowy_beach` | snowy-beach | snowy sand beach, cold water | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 27 | `minecraft:birch_forest` | birch | birch leaves/trunks, forest grass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 26 | `minecraft:snowy_beach` | snowy-beach | snowy sand beach/cold water checked | seed `330`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 27 | `minecraft:birch_forest` | birch | birch tint/grass surface checked, birch leaves/trunks | seed `10`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 28 | `minecraft:birch_forest_hills` | birch | birch hill trees | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 29 | `minecraft:dark_forest` | dark-forest | dark grass modifier checked; dark oak/mushroom gap | seed `44`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 30 | `minecraft:snowy_taiga` | snowy-taiga | snowy spruce, ferns, berries | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 30 | `minecraft:snowy_taiga` | snowy-taiga | snowy surface/tint checked, spruce/ferns/berries | seed `14`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 31 | `minecraft:snowy_taiga_hills` | snowy-taiga | snowy spruce hill variant | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 32 | `minecraft:giant_tree_taiga` | giant-tree-taiga | podzol/coarse dirt feel, giant taiga trees, ferns | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 32 | `minecraft:giant_tree_taiga` | giant-tree-taiga | podzol/coarse dirt surface checked, giant taiga trees/ferns | seed `19`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 33 | `minecraft:giant_tree_taiga_hills` | giant-tree-taiga | giant taiga hill trees | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 34 | `minecraft:wooded_mountains` | mountains | mountain surface with trees | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 35 | `minecraft:savanna` | savanna | dry grass tint, acacia trees, tall grass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 36 | `minecraft:savanna_plateau` | savanna-plateau | dry plateau, acacia/grass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 35 | `minecraft:savanna` | savanna | dry grass tint/surface checked; acacia/tall grass gap | seed `62`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 36 | `minecraft:savanna_plateau` | savanna-plateau | dry plateau tint/surface checked; acacia/grass gap | seed `126`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 37 | `minecraft:badlands` | badlands | red sand, terracotta bands, dead bush checked; cactus/sugar-cane gap | seed `147`, chunk `(0,0)` | `[x] B [x] T [x] S [x] F` |
 | 38 | `minecraft:wooded_badlands_plateau` | badlands | terracotta/red sand, wooded plateau trees | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 39 | `minecraft:badlands_plateau` | badlands | plateau terracotta/red sand | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 44 | `minecraft:warm_ocean` | ocean-warm | turquoise water/sand checked; coral/sea-pickle/seagrass gap | seed `26`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
-| 45 | `minecraft:lukewarm_ocean` | ocean-lukewarm | bright water, sand, seagrass/kelp | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 46 | `minecraft:cold_ocean` | ocean-cold | cold water, gravel/grass seafloor, kelp | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 45 | `minecraft:lukewarm_ocean` | ocean-lukewarm | bright water checked; sand, seagrass/kelp gap | seed `6`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
+| 46 | `minecraft:cold_ocean` | ocean-cold | cold water checked; gravel/grass seafloor, kelp gap | seed `5`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 47 | `minecraft:deep_warm_ocean` | ocean-warm | deep turquoise water, sand | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 48 | `minecraft:deep_lukewarm_ocean` | ocean-lukewarm | deep bright water, kelp | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 49 | `minecraft:deep_cold_ocean` | ocean-cold | deep cold water, kelp | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 50 | `minecraft:deep_frozen_ocean` | ocean-frozen-deep | deep frozen water, icebergs | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 50 | `minecraft:deep_frozen_ocean` | ocean-frozen-deep | deep frozen water/ice checked, icebergs gap | seed `103`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 129 | `minecraft:sunflower_plains` | plains | plains tint, sunflower patches | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 130 | `minecraft:desert_lakes` | desert | desert surface plus lake/fossil variants | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 131 | `minecraft:gravelly_mountains` | mountains | gravelly mountain surface | TBD | `[ ] B [ ] T [ ] S [ ] F` |
@@ -167,10 +168,10 @@ notes.
 | 156 | `minecraft:tall_birch_hills` | birch | tall birch hill trees | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 157 | `minecraft:dark_forest_hills` | dark-forest | dark forest hills, canopy/mushrooms | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 158 | `minecraft:snowy_taiga_mountains` | snowy-taiga | snowy spruce mountain taiga | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 160 | `minecraft:giant_spruce_taiga` | giant-spruce-taiga | giant spruce, podzol/coarse dirt feel | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 160 | `minecraft:giant_spruce_taiga` | giant-spruce-taiga | podzol/coarse dirt surface checked, giant spruce gap | seed `2923`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 161 | `minecraft:giant_spruce_taiga_hills` | giant-spruce-taiga | giant spruce hill variant | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 162 | `minecraft:modified_gravelly_mountains` | mountains | modified gravelly mountain surface | TBD | `[ ] B [ ] T [ ] S [ ] F` |
-| 163 | `minecraft:shattered_savanna` | shattered-savanna | extreme dry terrain, acacia, dry grass | TBD | `[ ] B [ ] T [ ] S [ ] F` |
+| 163 | `minecraft:shattered_savanna` | shattered-savanna | shattered grass/coarse-dirt/stone surface checked; acacia gap | seed `68`, chunk `(0,0)` | `[x] B [x] T [x] S [ ] F` |
 | 164 | `minecraft:shattered_savanna_plateau` | savanna-plateau | extreme dry plateau terrain | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 165 | `minecraft:eroded_badlands` | badlands | eroded terracotta pillars/red sand | TBD | `[ ] B [ ] T [ ] S [ ] F` |
 | 166 | `minecraft:modified_wooded_badlands_plateau` | badlands | wooded badlands modified plateau | TBD | `[ ] B [ ] T [ ] S [ ] F` |
@@ -198,20 +199,20 @@ notes.
 
 Landed:
 
-- `mclone-worldgen::levelgen::tests::first_palette_matrix_rows_have_expected_biome_surface_and_supported_feature_family`
-  records representative `(0,0)` seeds for plains, desert, swamp, dark forest,
-  taiga, snowy tundra, badlands, and warm ocean.
+- `mclone-worldgen::levelgen::tests::palette_matrix_rows_have_expected_biome_surface_and_supported_feature_family`
+  records representative `(0,0)` seeds for 28 rows covering every current tint
+  group at least once.
 - The worldgen probe asserts primary biome identity, block-position biome
-  identity at the chunk center, and at least one visible `FEATURES` top-surface
-  column in the row's expected surface family.
+  identity somewhere in the chunk, and at least one visible `FEATURES`
+  top-surface column in the row's expected surface family.
 - The same worldgen probe now asserts currently supported visible feature
   families for plains, desert, swamp, taiga, snowy tundra, and badlands. The
   assertions are intentionally broad block-family checks, not exact decorated
   counts.
-- `mclone-mesh::tint::tests::first_palette_matrix_tint_groups_match_java_visual_facts`
-  asserts the first eight rows' grass, foliage, and water tint outputs through
-  the shared tint resolver. The swamp grass value is the default radius-2 blend
-  at the origin, `#647139`, not the direct light swamp color.
+- `mclone-mesh::tint::tests::palette_matrix_tint_groups_match_java_visual_facts`
+  asserts the covered rows' grass, foliage, and water tint outputs through the
+  shared tint resolver. The swamp grass value is the default radius-2 blend at
+  the origin, `#647139`, not the direct light swamp color.
 
 Documented gaps from this slice:
 
@@ -227,11 +228,13 @@ Documented gaps from this slice:
 
 ## Suggested Next Slice
 
-Expand deterministic palette coverage before screenshot-led validation:
+Finish deterministic matrix coverage before screenshot-led validation:
 
-1. Add B/T/S fixtures for the remaining tint groups with easy seed/chunk
-   representatives: ocean-default, river, forest, birch, mountains, savanna,
-   mushroom, lukewarm/cold/frozen ocean, beach, and snowy beach.
+1. Add B/T/S fixtures for the remaining unchecked biome rows, prioritizing
+   variant rows that exercise different surfaces: deep ocean variants, frozen
+   river, snowy mountains, mushroom shore, stone shore, hill/plateau variants,
+   ice spikes, flower forest, tall birch, modified jungle, and badlands
+   variants.
 2. Keep `F` checks to currently supported block families, and document missing
    vanilla families in this matrix.
 3. Move rows that need exact decorated mismatch buckets into `103`; move rows
